@@ -4,7 +4,8 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { LocaleContext, t as translate, type Locale } from "../../lib/i18n";
-import type { DraftDocument, DraftEntry } from "../../lib/types";
+import type { DraftDocument, DraftEntry, VaultEntry } from "../../lib/types";
+import type { DraftGraphFocusRequest } from "../../lib/draftGraphRelations";
 import { DraftsPane } from "./DraftsPane";
 
 vi.mock("../../lib/api", () => ({
@@ -73,7 +74,11 @@ function localeValue(locale: Locale) {
 let root: Root | null = null;
 let container: HTMLElement | null = null;
 
-async function render(): Promise<HTMLElement> {
+async function render(options: {
+  entries?: VaultEntry[];
+  onOpenInGraph?: (request: DraftGraphFocusRequest) => void;
+  onExitReferenceFocus?: () => void;
+} = {}): Promise<HTMLElement> {
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
@@ -82,6 +87,7 @@ async function render(): Promise<HTMLElement> {
       <LocaleContext.Provider value={localeValue("ko")}>
         <DraftsPane
           workPath="/w"
+          entries={options.entries}
           skills={[]}
           defaultRuntime="claude"
           agents={[]}
@@ -97,6 +103,8 @@ async function render(): Promise<HTMLElement> {
           onTaskIngestMinImportanceChange={() => {}}
           onConfirmApproval={async () => "approval-1"}
           onOpenAgents={() => {}}
+          onOpenInGraph={options.onOpenInGraph}
+          onExitReferenceFocus={options.onExitReferenceFocus}
         />
       </LocaleContext.Provider>,
     );
@@ -333,6 +341,115 @@ const IDEA_ENTRY = {
 };
 
 const IDEA_DOC = { ...IDEA_ENTRY, content: "# Idea\n\nOriginal body" };
+
+const GRAPH_ENTRIES: VaultEntry[] = [
+  {
+    path: "/w/high.md",
+    relPath: "high.md",
+    title: "High relation",
+    frontmatter: {},
+    updatedAt: null,
+    wordCount: 1,
+    snippet: "",
+    fileKind: "md",
+    versionCount: 0,
+    links: ["hub.md", "low.md"],
+  },
+  {
+    path: "/w/low.md",
+    relPath: "low.md",
+    title: "Low relation",
+    frontmatter: {},
+    updatedAt: null,
+    wordCount: 1,
+    snippet: "",
+    fileKind: "md",
+    versionCount: 0,
+    links: ["high.md"],
+  },
+  {
+    path: "/w/hub.md",
+    relPath: "hub.md",
+    title: "Hub relation",
+    frontmatter: {},
+    updatedAt: null,
+    wordCount: 1,
+    snippet: "",
+    fileKind: "md",
+    versionCount: 0,
+    links: ["high.md", "low.md"],
+  },
+];
+
+const MANY_GRAPH_ENTRIES: VaultEntry[] = Array.from({ length: 10 }, (_, index) => ({
+  ...GRAPH_ENTRIES[0],
+  path: `/w/note-${index}.md`,
+  relPath: `note-${index}.md`,
+  title: `Note ${index}`,
+  links: [],
+}));
+
+describe("DraftsPane graph relationships", () => {
+  it("renders resolved relationship chips from primary workspace entries", async () => {
+    vi.mocked(readDraft).mockResolvedValue({
+      ...DOC,
+      originRefs: ["high.md"],
+      promotedTo: "low.md",
+      content: "Draft body [[hub]]",
+    });
+    const onOpenInGraph = vi.fn();
+    const host = await render({ entries: GRAPH_ENTRIES, onOpenInGraph });
+
+    await clickByText(host, "예산 검토 준비");
+
+    const relations = host.querySelector('[data-testid="drafts-graph-relations"]');
+    expect(relations).not.toBeNull();
+    expect(relations?.querySelectorAll(".drafts-related-chip")).toHaveLength(3);
+    expect(relations?.textContent).toContain("High relation");
+    expect(relations?.textContent).toContain("Low relation");
+    expect(relations?.textContent).toContain("Hub relation");
+
+    await clickByText(host, translate("ko", "drafts.openInGraph"));
+    expect(onOpenInGraph).toHaveBeenCalledWith({
+      docPath: DOC.bodyPath,
+      nodePaths: expect.arrayContaining(["high.md", "low.md", "hub.md"]),
+    });
+  });
+
+  it("does not render relationship chips when entries are absent", async () => {
+    vi.mocked(readDraft).mockResolvedValue({
+      ...DOC,
+      originRefs: ["high.md"],
+      promotedTo: "low.md",
+      content: "Draft body [[hub]]",
+    });
+    const host = await render();
+
+    await clickByText(host, "예산 검토 준비");
+
+    expect(host.querySelector('[data-testid="drafts-graph-relations"]')).toBeNull();
+  });
+
+  it("caps chips at eight but sends every resolved node to graph focus", async () => {
+    const body = MANY_GRAPH_ENTRIES.map((entry) => `[[${entry.relPath.replace(/\.md$/, "")}]]`).join(
+      " ",
+    );
+    vi.mocked(readDraft).mockResolvedValue({ ...DOC, originRefs: [], content: body });
+    const onOpenInGraph = vi.fn();
+    const host = await render({ entries: MANY_GRAPH_ENTRIES, onOpenInGraph });
+
+    await clickByText(host, "예산 검토 준비");
+
+    const relations = host.querySelector('[data-testid="drafts-graph-relations"]');
+    expect(relations?.querySelectorAll(".drafts-related-chip")).toHaveLength(8);
+    await clickByText(host, translate("ko", "drafts.openInGraph"));
+
+    expect(onOpenInGraph).toHaveBeenCalledWith({
+      docPath: DOC.bodyPath,
+      nodePaths: MANY_GRAPH_ENTRIES.map((entry) => entry.relPath),
+    });
+  });
+});
 
 describe("DraftsPane Ideation hub", () => {
   it("edits and saves an idea with its read revision, then transitions its stage", async () => {

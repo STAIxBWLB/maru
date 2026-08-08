@@ -152,6 +152,124 @@ test("visualize trigger opens the graph split in reference-focus mode", async ({
   await expect(page.getByTestId("graph-ref-focus-bar")).toHaveCount(0);
 });
 
+test("a late editor reference response cannot replace a newer gap overlay", async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    const handlers = (
+      window as unknown as {
+        __MARU_E2E_INVOKE__: Record<string, (args: Record<string, unknown>) => unknown>;
+        __MARU_RELEASE_KG_EDITOR__?: () => void;
+      }
+    ).__MARU_E2E_INVOKE__;
+    const gapReport = {
+      draftId: "d-gap-race",
+      draftTitle: "Gap race",
+      promotedTo: "references/maru-glossary.md",
+      baselineHash: "race-hash",
+      analyzedAt: "2026-07-30T01:00:00Z",
+      hunks: [],
+      summary: {
+        totalHunks: 0,
+        addedLines: 0,
+        removedLines: 0,
+        byType: { externalInfo: 0, directEdit: 0, crossDocReference: 0, formatting: 0 },
+      },
+    };
+    handlers.gap_reports_list = () => [
+      {
+        draftId: "d-gap-race",
+        title: "Gap race",
+        promotedTo: "references/maru-glossary.md",
+        promotedAt: "2026-07-30T00:00:00Z",
+        hasBaseline: true,
+        hasDocument: true,
+      },
+    ];
+    handlers.gap_log_list = () => [];
+    handlers.gap_analyze = () => gapReport;
+    handlers.drafts_list = () => [
+      {
+        id: "d-gap-race",
+        kind: "task",
+        title: "Gap race",
+        status: "accepted",
+        source: "claude",
+        originRefs: ["references/maru-glossary.md"],
+        bodyPath: ".maru/drafts/d-gap-race/body.md",
+        promotedTo: "references/maru-glossary.md",
+        createdAt: "2026-07-30T00:00:00Z",
+        updatedAt: "2026-07-30T00:00:00Z",
+      },
+    ];
+    handlers.drafts_read = () => ({
+      id: "d-gap-race",
+      kind: "task",
+      title: "Gap race",
+      status: "accepted",
+      source: "claude",
+      originRefs: ["references/maru-glossary.md"],
+      bodyPath: ".maru/drafts/d-gap-race/body.md",
+      promotedTo: "references/maru-glossary.md",
+      createdAt: "2026-07-30T00:00:00Z",
+      updatedAt: "2026-07-30T00:00:00Z",
+      content: "# Gap race\n\n[[Maru 용어집]]",
+    });
+    handlers.scratchpad_list = () => [];
+    handlers.kg_document_refs = (args) =>
+      new Promise((resolve) => {
+        (
+          window as unknown as {
+            __MARU_RELEASE_KG_EDITOR__?: () => void;
+          }
+        ).__MARU_RELEASE_KG_EDITOR__ = () =>
+          resolve({
+            docPath: args.docPath,
+            docHash: "late-editor-hash",
+            vaultStamp: "late-editor-stamp",
+            refs: [
+              {
+                nodePath: "references/maru-glossary.md",
+                nodeTitle: "Maru 용어집",
+                matchKind: "wikilink",
+                spans: [],
+              },
+              {
+                nodePath: "maru-weekly-meeting.md",
+                nodeTitle: "Maru 사업 주간 점검 회의",
+                matchKind: "wikilink",
+                spans: [],
+              },
+            ],
+            computedAt: "2026-07-30T01:00:00Z",
+          });
+      });
+  });
+
+  await openMeetingDoc(page);
+  await page.getByTestId("kg-visualize-refs").click();
+
+  await page
+    .locator(".activity-rail")
+    .getByRole("button", { name: "갭 분석", exact: true })
+    .click();
+  const gapPane = page.locator(".gap-pane");
+  await expect(gapPane).toBeVisible();
+  await gapPane.locator(".gap-list-item", { hasText: "Gap race" }).click();
+  await expect(gapPane.getByRole("button", { name: "그래프에 관계 표시", exact: true })).toBeVisible();
+  await gapPane.getByRole("button", { name: "그래프에 관계 표시", exact: true }).click();
+  await expect(page.getByTestId("graph-ref-focus-bar")).toContainText("참조 노드 1개");
+
+  await page.evaluate(() => {
+    (
+      window as unknown as { __MARU_RELEASE_KG_EDITOR__?: () => void }
+    ).__MARU_RELEASE_KG_EDITOR__?.();
+  });
+  // The editor response resolves to two nodes, but the newer gap owner must
+  // remain in control and keep its one-node overlay.
+  await expect(page.getByTestId("graph-ref-focus-bar")).toContainText("참조 노드 1개");
+});
+
 test("highlight toggle decorates source mode and clears on toggle off", async ({
   page,
 }) => {

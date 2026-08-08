@@ -178,7 +178,11 @@ function seedBackend(page: import("@playwright/test").Page) {
         record("drafts_read", args);
         const entry = drafts.find((candidate) => candidate.id === args.id);
         if (!entry) throw new Error("drafts_not_found");
-        return { ...entry, content: "# Draft body" };
+        return {
+          ...entry,
+          originRefs: ["references/maru-glossary.md"],
+          content: "# Draft body\n\n[[Maru 용어집]]",
+        };
       },
       scratchpad_list: () => [],
       scheduler_list: () => [],
@@ -383,4 +387,14 @@ test("navigates from the drafts pane to gap mode with the draft preselected", as
       (await gapCalls(page, "gap_analyze")).some((call) => call.args.draftId === "d-weekly"),
     )
     .toBe(true);
+});
+
+test("overlays a selected report's resolved relations on the graph", async ({ page }) => {
+  const pane = await openGapMode(page);
+  await pane.locator(".gap-list-item", { hasText: "주간 보고서 검토" }).click();
+
+  await pane.getByRole("button", { name: "그래프에 관계 표시", exact: true }).click();
+
+  await expect(page.getByTestId("panel-graph-surface")).toBeVisible();
+  await expect(page.getByTestId("graph-ref-focus-bar")).toContainText("참조 노드 1개");
 });

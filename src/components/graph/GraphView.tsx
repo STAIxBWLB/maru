@@ -97,6 +97,8 @@ interface GraphViewProps {
   /** KG reference-focus mode (kg_refs Phase 4): vault-relative node paths the
    *  active document references + a nonce re-arming the animation. */
   referenceFocus?: {
+    /** Owner controls which selection changes clear the focus. */
+    source: "editor" | "drafts" | "gap";
     docPath: string;
     /** Root the nodePaths are relative to — the document's workspace, which is
      *  not necessarily the graph's data path. */

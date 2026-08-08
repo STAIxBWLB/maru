@@ -6,7 +6,12 @@ import {
   gapAppendLog,
   gapLogList,
   gapReportsList,
+  readDraft,
 } from "../../lib/api";
+import {
+  resolveDraftGraphRelationEntries,
+  type DraftGraphFocusRequest,
+} from "../../lib/draftGraphRelations";
 import { formatRelativeDate } from "../../lib/document";
 import {
   filterGapHunks,
@@ -16,7 +21,14 @@ import {
 } from "../../lib/gapAnalysis";
 import { setError } from "../../lib/errorStore";
 import { useTranslation } from "../../lib/i18n";
-import type { GapHunkType, GapLogEntry, GapReport, GapReportSummary } from "../../lib/types";
+import type {
+  DraftDocument,
+  GapHunkType,
+  GapLogEntry,
+  GapReport,
+  GapReportSummary,
+  VaultEntry,
+} from "../../lib/types";
 import { Button, IconButton } from "../ui/Button";
 import { EmptyState, ModeHeader, StatusBanner } from "../ui/ModeChrome";
 import { GapDiffViewer } from "./GapDiffViewer";
@@ -24,20 +36,31 @@ import { GapLogPanel } from "./GapLogPanel";
 
 interface GapPaneProps {
   workPath: string | null;
+  /** Primary-workspace entries used for the selected report's graph overlay. */
+  entries?: VaultEntry[];
   /** Draft to preselect (set when arriving from the Drafts pane). */
   initialDraftId: string | null;
   /** Called once the initial selection has been consumed. */
   onConsumeInitialDraftId?: () => void;
+  /** Opens the existing graph panel in reference-focus mode. */
+  onOpenInGraph?: (request: DraftGraphFocusRequest) => void;
+  /** Clears a gap-owned graph focus when the selected report changes. */
+  onExitReferenceFocus?: () => void;
 }
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+type DraftLoadState = "idle" | "loading" | "loaded" | "error";
+
 export function GapPane({
   workPath,
+  entries = [],
   initialDraftId,
   onConsumeInitialDraftId,
+  onOpenInGraph,
+  onExitReferenceFocus,
 }: GapPaneProps) {
   const { t, locale } = useTranslation();
   const [reports, setReports] = useState<GapReportSummary[]>([]);
@@ -57,11 +80,42 @@ export function GapPane({
   const [relinkTarget, setRelinkTarget] = useState("");
   const [relinking, setRelinking] = useState(false);
   const [relinkSaved, setRelinkSaved] = useState(false);
+  const [selectedDraft, setSelectedDraft] = useState<DraftDocument | null>(null);
+  const [selectedDraftLoadState, setSelectedDraftLoadState] =
+    useState<DraftLoadState>("idle");
   const initialConsumedRef = useRef(false);
+  const draftLoadRequestRef = useRef(0);
+  const analysisRequestRef = useRef(0);
+  const selectedIdRef = useRef<string | null>(initialDraftId);
 
   const selectedEntry = useMemo(
     () => reports.find((entry) => entry.draftId === selectedId) ?? null,
     [reports, selectedId],
+  );
+  const selectedReport = report?.draftId === selectedId ? report : null;
+
+  const loadSelectedDraft = useCallback(
+    (draftId: string) => {
+      const request = ++draftLoadRequestRef.current;
+      setSelectedDraft(null);
+      if (!workPath) {
+        setSelectedDraftLoadState("error");
+        return;
+      }
+      setSelectedDraftLoadState("loading");
+      void readDraft(workPath, draftId)
+        .then((draft) => {
+          if (request !== draftLoadRequestRef.current) return;
+          setSelectedDraft(draft);
+          setSelectedDraftLoadState("loaded");
+        })
+        .catch(() => {
+          if (request === draftLoadRequestRef.current) {
+            setSelectedDraftLoadState("error");
+          }
+        });
+    },
+    [workPath],
   );
 
   const refreshReports = useCallback(async () => {
@@ -101,19 +155,33 @@ export function GapPane({
   const analyze = useCallback(
     async (draftId: string) => {
       if (!workPath) return;
+      const request = ++analysisRequestRef.current;
       setAnalyzing(true);
       setReport(null);
       setLogSaved(false);
       setLocalError(null);
       setExpandedEqual(new Set());
       try {
-        setReport(await gapAnalyze(workPath, draftId));
+        const nextReport = await gapAnalyze(workPath, draftId);
+        if (
+          request !== analysisRequestRef.current ||
+          selectedIdRef.current !== draftId ||
+          nextReport.draftId !== draftId
+        ) {
+          return;
+        }
+        setReport(nextReport);
       } catch (error) {
+        if (request !== analysisRequestRef.current || selectedIdRef.current !== draftId) {
+          return;
+        }
         const message = translateGapError(errorMessage(error), t);
         setLocalError(message);
         setError(message);
       } finally {
-        setAnalyzing(false);
+        if (request === analysisRequestRef.current && selectedIdRef.current === draftId) {
+          setAnalyzing(false);
+        }
       }
     },
     [t, workPath],
@@ -121,10 +189,15 @@ export function GapPane({
 
   const selectReport = useCallback((draftId: string) => {
     const entry = reports.find((candidate) => candidate.draftId === draftId);
+    ++analysisRequestRef.current;
+    selectedIdRef.current = draftId;
+    onExitReferenceFocus?.();
     setSelectedId(draftId);
+    loadSelectedDraft(draftId);
     setRelinkTarget(entry?.promotedTo ?? "");
     setRelinkSaved(false);
     setReport(null);
+    setAnalyzing(false);
     setLogSaved(false);
     setLocalError(null);
     setExpandedEqual(new Set());
@@ -133,15 +206,22 @@ export function GapPane({
       return;
     }
     void analyze(draftId);
-  }, [analyze, reports]);
+  }, [analyze, loadSelectedDraft, onExitReferenceFocus, reports]);
 
   useEffect(() => {
+    onExitReferenceFocus?.();
+    draftLoadRequestRef.current += 1;
+    analysisRequestRef.current += 1;
+    selectedIdRef.current = null;
+    setSelectedDraft(null);
+    setSelectedDraftLoadState("idle");
     setSelectedId(null);
     setReport(null);
+    setAnalyzing(false);
     setLocalError(null);
     void refreshReports();
     void refreshLog();
-  }, [refreshReports, refreshLog]);
+  }, [onExitReferenceFocus, refreshReports, refreshLog]);
 
   // Consume the initial selection handed over from the Drafts pane after the
   // summary list is available. Missing promoted documents intentionally stop
@@ -175,11 +255,11 @@ export function GapPane({
   };
 
   const saveToLog = async () => {
-    if (!workPath || !report) return;
+    if (!workPath || !selectedReport) return;
     setSavingLog(true);
     setLocalError(null);
     try {
-      await gapAppendLog(workPath, report.draftId);
+      await gapAppendLog(workPath, selectedReport.draftId);
       setLogSaved(true);
       await refreshLog();
     } catch (error) {
@@ -215,9 +295,46 @@ export function GapPane({
   };
 
   const visibleHunks = useMemo(
-    () => (report ? filterGapHunks(report.hunks, activeTypes) : []),
-    [report, activeTypes],
+    () => (selectedReport ? filterGapHunks(selectedReport.hunks, activeTypes) : []),
+    [activeTypes, selectedReport],
   );
+
+  const graphRelations = useMemo(
+    () =>
+      selectedEntry && selectedDraftLoadState === "loaded" && selectedDraft
+        ? resolveDraftGraphRelationEntries(
+            entries,
+            selectedDraft?.originRefs ?? [],
+            selectedEntry.promotedTo,
+            selectedDraft?.content ?? "",
+          )
+        : [],
+    [entries, selectedDraft, selectedDraftLoadState, selectedEntry],
+  );
+  const canOpenSelectedInGraph = Boolean(
+    selectedReport &&
+      selectedDraftLoadState === "loaded" &&
+      selectedDraft &&
+      onOpenInGraph &&
+      graphRelations.length > 0,
+  );
+
+  const openSelectedInGraph = () => {
+    if (
+      !selectedReport ||
+      !selectedEntry ||
+      selectedDraftLoadState !== "loaded" ||
+      !selectedDraft ||
+      !onOpenInGraph ||
+      graphRelations.length === 0
+    ) {
+      return;
+    }
+    onOpenInGraph({
+      docPath: selectedDraft.bodyPath,
+      nodePaths: graphRelations.map((relation) => relation.entry.relPath),
+    });
+  };
 
   return (
     <section className="gap-pane" aria-label={t("mode.gap")}>
@@ -325,12 +442,17 @@ export function GapPane({
               >
                 {relinking ? t("gap.relink.relinking") : t("gap.relink.confirm")}
               </Button>
+              {canOpenSelectedInGraph ? (
+                <Button type="button" size="sm" onClick={openSelectedInGraph}>
+                  {t("gap.openInGraph")}
+                </Button>
+              ) : null}
             </div>
           ) : analyzing ? (
             <div className="gap-diff-empty" role="status">
               {t("gap.diff.loading")}
             </div>
-          ) : report ? (
+          ) : selectedReport ? (
             <>
               <div className="gap-diff-toolbar">
                 <div
@@ -348,15 +470,15 @@ export function GapPane({
                       aria-pressed={activeTypes.has(type)}
                       onClick={() => toggleType(type)}
                     >
-                      {t(`gap.type.${type}`)} {report.summary.byType[gapTypeCountKey(type)]}
+                      {t(`gap.type.${type}`)} {selectedReport.summary.byType[gapTypeCountKey(type)]}
                     </button>
                   ))}
                 </div>
                 <span className="gap-summary" role="status">
                   {t("gap.summary", {
-                    total: report.summary.totalHunks,
-                    added: report.summary.addedLines,
-                    removed: report.summary.removedLines,
+                    total: selectedReport.summary.totalHunks,
+                    added: selectedReport.summary.addedLines,
+                    removed: selectedReport.summary.removedLines,
                   })}
                 </span>
                 <Button
@@ -368,6 +490,11 @@ export function GapPane({
                 >
                   {savingLog ? t("gap.log.saving") : t("gap.log.save")}
                 </Button>
+                {canOpenSelectedInGraph ? (
+                  <Button type="button" size="sm" onClick={openSelectedInGraph}>
+                    {t("gap.openInGraph")}
+                  </Button>
+                ) : null}
               </div>
               {visibleHunks.length === 0 ? (
                 <EmptyState

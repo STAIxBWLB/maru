@@ -35,6 +35,11 @@ import {
 } from "../../lib/drafts";
 import type { AgentRecord } from "../../lib/agents";
 import { setError } from "../../lib/errorStore";
+import {
+  MAX_DRAFT_GRAPH_RELATIONS,
+  resolveDraftGraphRelationEntries,
+  type DraftGraphFocusRequest,
+} from "../../lib/draftGraphRelations";
 import { useTranslation } from "../../lib/i18n";
 import { renderMarkdown } from "../../lib/markdown";
 import type { AiRuntime, AiSettings, AiTaskIngestMinImportance } from "../../lib/settings";
@@ -49,6 +54,7 @@ import type {
   ScratchpadChangedEvent,
   ScratchpadDocument,
   ScratchpadEntry,
+  VaultEntry,
 } from "../../lib/types";
 import { Button, IconButton } from "../ui/Button";
 import { CompactSelect, EmptyState, ModeHeader, StatusBanner } from "../ui/ModeChrome";
@@ -59,6 +65,8 @@ import { useTaskCandidateIngestion } from "./useTaskCandidateIngestion";
 
 interface DraftsPaneProps {
   workPath: string | null;
+  /** Primary-workspace entries used for relationship chips and graph focus. */
+  entries?: VaultEntry[];
   skills: SkillRecord[];
   defaultRuntime: AiRuntime;
   agents: AgentRecord[];
@@ -70,6 +78,10 @@ interface DraftsPaneProps {
   onOpenAgents: () => void;
   /** Switches to gap-analysis mode with this draft preselected. */
   onOpenGapAnalysis?: (draftId: string) => void;
+  /** Opens the existing graph panel in reference-focus mode. */
+  onOpenInGraph?: (request: DraftGraphFocusRequest) => void;
+  /** Clears a drafts-owned graph focus when the selected item changes. */
+  onExitReferenceFocus?: () => void;
 }
 
 const KIND_FILTERS: DraftKindFilter[] = ["all", "task", "idea", "implementation"];
@@ -97,6 +109,7 @@ function errorMessage(error: unknown): string {
 
 export function DraftsPane({
   workPath,
+  entries = [],
   skills,
   defaultRuntime,
   agents,
@@ -106,6 +119,8 @@ export function DraftsPane({
   onConfirmApproval,
   onOpenAgents,
   onOpenGapAnalysis,
+  onOpenInGraph,
+  onExitReferenceFocus,
 }: DraftsPaneProps) {
   const { t, locale } = useTranslation();
   const [drafts, setDrafts] = useState<DraftEntry[]>([]);
@@ -167,13 +182,14 @@ export function DraftsPane({
   }, [workPath]);
 
   useEffect(() => {
+    onExitReferenceFocus?.();
     setSelectedId(null);
     setDetail(null);
     setIdeaDetail(null);
     setIdeaEditContent("");
     setIdeaEditing(false);
     void refresh();
-  }, [refresh]);
+  }, [onExitReferenceFocus, refresh]);
 
   useEffect(() => {
     if (!workPath || !isTauri()) return;
@@ -210,6 +226,7 @@ export function DraftsPane({
   const openDraft = useCallback(
     async (draft: DraftEntry) => {
       if (!workPath || !confirmDiscardEdits()) return;
+      onExitReferenceFocus?.();
       setSelectedId(draftItemId({ itemKind: "draft", draft }));
       setIdeaDetail(null);
       setIdeaEditing(false);
@@ -237,7 +254,7 @@ export function DraftsPane({
         setDetailLoading(false);
       }
     },
-    [confirmDiscardEdits, workPath],
+    [confirmDiscardEdits, onExitReferenceFocus, workPath],
   );
 
   const handleOpenDraft = useCallback((draft: DraftEntry) => void openDraft(draft), [openDraft]);
@@ -266,6 +283,7 @@ export function DraftsPane({
   const openIdea = useCallback(
     async (entry: ScratchpadEntry) => {
       if (!workPath || !confirmDiscardEdits()) return;
+      onExitReferenceFocus?.();
       setSelectedId(draftItemId({ itemKind: "idea", entry }));
       setDetail(null);
       setIdeaDetail(null);
@@ -289,7 +307,7 @@ export function DraftsPane({
         setDetailLoading(false);
       }
     },
-    [confirmDiscardEdits, workPath],
+    [confirmDiscardEdits, onExitReferenceFocus, workPath],
   );
 
   const openItem = (item: DraftListItem) => {
@@ -384,6 +402,7 @@ export function DraftsPane({
     try {
       const created = await createScratchpadIdea(workPath, title);
       await refresh();
+      onExitReferenceFocus?.();
       setSelectedId(`idea:${created.relativePath}`);
       setDetail(null);
       setIdeaDetail(created);
@@ -423,6 +442,7 @@ export function DraftsPane({
     setLocalError(null);
     try {
       await discardDraft(workPath, detail.id);
+      onExitReferenceFocus?.();
       setDetail(null);
       setSelectedId(null);
       void refresh();
@@ -461,6 +481,43 @@ export function DraftsPane({
     () => (detail && !editing ? renderMarkdown(editContent) : ""),
     [detail, editing, editContent],
   );
+
+  const detailGraphRelations = useMemo(
+    () =>
+      detail
+        ? resolveDraftGraphRelationEntries(
+            entries,
+            detail.originRefs,
+            detail.promotedTo,
+            editContent,
+          )
+        : [],
+    [detail, editContent, entries],
+  );
+  const detailRelations = detailGraphRelations.slice(0, MAX_DRAFT_GRAPH_RELATIONS);
+  const ideaGraphRelations = useMemo(
+    () =>
+      ideaDetail
+        ? resolveDraftGraphRelationEntries(entries, [], null, ideaEditContent)
+        : [],
+    [entries, ideaDetail, ideaEditContent],
+  );
+  const ideaRelations = ideaGraphRelations.slice(0, MAX_DRAFT_GRAPH_RELATIONS);
+
+  const openDetailInGraph = () => {
+    if (!detail || !onOpenInGraph || detailGraphRelations.length === 0) return;
+    onOpenInGraph({
+      docPath: detail.bodyPath,
+      nodePaths: detailGraphRelations.map((relation) => relation.entry.relPath),
+    });
+  };
+  const openIdeaInGraph = () => {
+    if (!ideaDetail || !onOpenInGraph || ideaGraphRelations.length === 0) return;
+    onOpenInGraph({
+      docPath: ideaDetail.relativePath,
+      nodePaths: ideaGraphRelations.map((relation) => relation.entry.relPath),
+    });
+  };
 
   const kindLabel = (kind: DraftKind | "all") =>
     kind === "all" ? t("drafts.filter.all") : t(`drafts.kind.${kind}`);
@@ -732,6 +789,32 @@ export function DraftsPane({
                 </div>
               ) : null}
 
+              {detailRelations.length > 0 ? (
+                <div className="drafts-related" data-testid="drafts-graph-relations">
+                  <strong>{t("drafts.detail.relationships")}</strong>
+                  <ul className="drafts-related-list">
+                    {detailRelations.map((relation) => (
+                      <li
+                        key={relation.entry.path}
+                        className="drafts-related-chip"
+                        title={relation.entry.relPath}
+                      >
+                        {relation.entry.title}
+                      </li>
+                    ))}
+                  </ul>
+                  {onOpenInGraph ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      onClick={openDetailInGraph}
+                    >
+                      {t("drafts.openInGraph")}
+                    </Button>
+                  ) : null}
+                </div>
+              ) : null}
+
               <div className="drafts-detail-toolbar">
                 <button
                   type="button"
@@ -842,6 +925,27 @@ export function DraftsPane({
                   dangerouslySetInnerHTML={{ __html: renderMarkdown(ideaEditContent) }}
                 />
               )}
+              {ideaRelations.length > 0 ? (
+                <div className="drafts-related" data-testid="drafts-graph-relations">
+                  <strong>{t("drafts.detail.relationships")}</strong>
+                  <ul className="drafts-related-list">
+                    {ideaRelations.map((relation) => (
+                      <li
+                        key={relation.entry.path}
+                        className="drafts-related-chip"
+                        title={relation.entry.relPath}
+                      >
+                        {relation.entry.title}
+                      </li>
+                    ))}
+                  </ul>
+                  {onOpenInGraph ? (
+                    <Button type="button" size="sm" onClick={openIdeaInGraph}>
+                      {t("drafts.openInGraph")}
+                    </Button>
+                  ) : null}
+                </div>
+              ) : null}
               <div className="drafts-idea-actions">
                 {selectedIdeaPending ? (
                   <Button type="button" size="sm" icon={<Sparkles size={13} />} disabled>

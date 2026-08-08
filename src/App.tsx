@@ -179,6 +179,7 @@ import { documentDisplayName } from "./lib/document";
 import { isHtmlFileKind } from "./lib/htmlDocument";
 import { refStepsByParagraph, uniqueRefNodePaths } from "./lib/kgRefs";
 import type { KgRefStep } from "./lib/kgRefs";
+import type { DraftGraphFocusRequest } from "./lib/draftGraphRelations";
 import { isDiagramEnabled } from "./lib/diagramFlag";
 import { isE2EFlowEnabled } from "./lib/e2eFlow";
 import {
@@ -598,6 +599,12 @@ interface InboxCarry {
 // with settle re-fit disabled, stays wrong (graph.spec.ts:342 flake, and
 // visible graph churn during a workspace scan).
 const NO_ENTRIES: VaultEntry[] = [];
+type KgReferenceSource = "editor" | "drafts" | "gap";
+
+interface KgEditorTabContext {
+  workspacePath: string;
+  docPath: string;
+}
 
 function tabIdForEntry(entry: VaultEntry): string {
   return entry.path;
@@ -913,6 +920,7 @@ function MainApp() {
   // KG reference visualization (kg_refs Phase 4). Session-local, on-demand:
   // nothing is computed until the user clicks the per-document triggers.
   const [kgRefFocus, setKgRefFocus] = useState<{
+    source: "editor" | "drafts" | "gap";
     docPath: string;
     /** nodePaths are relative to this root, which is the document's workspace —
      *  the graph may be reading a nested vault/ instead. */
@@ -923,6 +931,14 @@ function MainApp() {
     steps: KgRefStep[];
     nonce: number;
   } | null>(null);
+  // Reference-focus requests are session-local but can outlive the editor
+  // action that started them. Every new owner invalidates older requests so a
+  // late editor response cannot overwrite a drafts/gap overlay or reopen the
+  // graph panel after the user moved on.
+  const kgRefRequestRef = useRef(0);
+  const kgRefOwnerRef = useRef<KgReferenceSource | null>(null);
+  const kgEditorTabsRef = useRef(new Map<string, KgEditorTabContext>());
+  const kgActiveEditorRef = useRef<KgEditorTabContext | null>(null);
   const [kgHighlight, setKgHighlight] = useState<{
     docPath: string;
     refs: KgNodeRef[];
@@ -1244,6 +1260,15 @@ function MainApp() {
   const activeDocTab = isBinaryTab(activeTab) ? null : (activeTab as EditorTab | null);
   const selectedEntry = activeDocTab?.entry ?? null;
   const document = activeDocTab?.document ?? null;
+  kgEditorTabsRef.current = new Map(
+    tabs.map((tab) => [
+      tab.id,
+      { workspacePath: tab.workspacePath, docPath: tab.document.relPath },
+    ]),
+  );
+  kgActiveEditorRef.current = activeDocTab
+    ? { workspacePath: activeDocTab.workspacePath, docPath: activeDocTab.document.relPath }
+    : null;
   const evidenceBinderDocId = useMemo(
     () => (document ? studioDocIdFromDocument(document) : null),
     [document],
@@ -1311,6 +1336,9 @@ function MainApp() {
     workspaceRegistry.activeByVisibility.public ??
     publicWorkspaces[0]?.path ??
     null;
+  const primaryWorkspaceEntries = primaryWorkspacePath
+    ? workspaceStates[primaryWorkspacePath]?.entries ?? NO_ENTRIES
+    : NO_ENTRIES;
   const inboxWorkspacePath = activeTab?.workspacePath ?? explorerWorkspacePath ?? primaryWorkspacePath;
   // Workspace root used by the Shared Outbox tab — the active document's
   // workspace in Docs, the inbox workspace otherwise.
@@ -6223,20 +6251,46 @@ function MainApp() {
   // split (graph in the tool panel) in reference-focus mode.
   const visualizeDocRefs = useCallback(
     (tab: EditorTab) => {
+      const request = ++kgRefRequestRef.current;
+      kgRefOwnerRef.current = "editor";
+      const tabContext: KgEditorTabContext = {
+        workspacePath: tab.workspacePath,
+        docPath: tab.document.relPath,
+      };
+      const activeEditorAtRequest = kgActiveEditorRef.current;
+      const isCurrentRequest = () => {
+        const currentTab = kgEditorTabsRef.current.get(tab.id);
+        const currentActiveEditor = kgActiveEditorRef.current;
+        return (
+          request === kgRefRequestRef.current &&
+          kgRefOwnerRef.current === "editor" &&
+          currentTab?.workspacePath === tabContext.workspacePath &&
+          currentTab?.docPath === tabContext.docPath &&
+          currentActiveEditor?.workspacePath === activeEditorAtRequest?.workspacePath &&
+          currentActiveEditor?.docPath === activeEditorAtRequest?.docPath
+        );
+      };
       void kgDocumentRefs(tab.workspacePath, tab.document.relPath)
         .then((map) => {
+          if (!isCurrentRequest()) return;
           setKgRefFocus({
+            source: "editor",
             docPath: map.docPath,
             docRoot: tab.workspacePath,
             nodePaths: uniqueRefNodePaths(map.refs),
             steps: refStepsByParagraph(map.refs),
             nonce: Date.now(),
           });
+          // The ownership/request checks above also guard the panel opener:
+          // a late editor result must not resurrect the graph after drafts or
+          // gap analysis became the active reference-focus owner.
           openGraphPanel();
         })
-        .catch((err: unknown) =>
-          setError(err instanceof Error ? err.message : String(err)),
-        );
+        .catch((err: unknown) => {
+          if (isCurrentRequest()) {
+            setError(err instanceof Error ? err.message : String(err));
+          }
+        });
     },
     [openGraphPanel],
   );
@@ -6262,9 +6316,51 @@ function MainApp() {
   const kgActiveDocPath = document?.relPath ?? null;
   useEffect(() => {
     if (kgHighlight && kgHighlight.docPath !== kgActiveDocPath) setKgHighlight(null);
-    if (kgRefFocus && kgRefFocus.docPath !== kgActiveDocPath) setKgRefFocus(null);
+    if (kgRefOwnerRef.current === "editor") {
+      kgRefRequestRef.current += 1;
+      kgRefOwnerRef.current = null;
+    }
+    if (
+      kgRefFocus?.source === "editor" &&
+      kgRefFocus.docPath !== kgActiveDocPath
+    ) {
+      setKgRefFocus(null);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [kgActiveDocPath]);
+  }, [activeDocumentWorkspacePath, kgActiveDocPath]);
+
+  const exitKgReferenceFocus = useCallback(() => {
+    kgRefRequestRef.current += 1;
+    kgRefOwnerRef.current = null;
+    setKgRefFocus(null);
+  }, []);
+  const openDraftGraphFocus = useCallback(
+    (request: DraftGraphFocusRequest, source: "drafts" | "gap") => {
+      if (!primaryWorkspacePath || request.nodePaths.length === 0) return;
+      kgRefRequestRef.current += 1;
+      kgRefOwnerRef.current = source;
+      setKgRefFocus({
+        source,
+        docPath: request.docPath,
+        docRoot: primaryWorkspacePath,
+        nodePaths: request.nodePaths,
+        steps: [{ paragraph: 0, nodePaths: request.nodePaths }],
+        nonce: Date.now(),
+      });
+      // Keep graph/workbench mutual exclusion and panel placement in the one
+      // existing opener used by editor reference visualization.
+      openGraphPanel();
+    },
+    [openGraphPanel, primaryWorkspacePath],
+  );
+  const openDraftsGraphFocus = useCallback(
+    (request: DraftGraphFocusRequest) => openDraftGraphFocus(request, "drafts"),
+    [openDraftGraphFocus],
+  );
+  const openGapGraphFocus = useCallback(
+    (request: DraftGraphFocusRequest) => openDraftGraphFocus(request, "gap"),
+    [openDraftGraphFocus],
+  );
 
   const openGraphWorkspace = useCallback(() => {
     setPersistedAppMode("graph");
@@ -7399,7 +7495,7 @@ function MainApp() {
         isFavorite={isFavorite}
         onToggleFavorite={toggleFavorite}
         referenceFocus={kgRefFocus}
-        onExitReferenceFocus={() => setKgRefFocus(null)}
+        onExitReferenceFocus={exitKgReferenceFocus}
         onGraphChanged={() => {
           if (!graphDataPath) return;
           void rescanWorkspaceEntries(graphDataPath, scanOptions);
@@ -7412,6 +7508,7 @@ function MainApp() {
       graphEntries,
       graphOpenTarget,
       kgRefFocus,
+      exitKgReferenceFocus,
       selectEntry,
       handleWikilinkClick,
       isFavorite,
@@ -8381,6 +8478,7 @@ function MainApp() {
         ) : surfaceMode === "drafts" ? (
           <LazyDraftsPane
             workPath={primaryWorkspacePath}
+            entries={primaryWorkspaceEntries}
             skills={skills}
             defaultRuntime={maruSettings.ai.defaultRuntime}
             agents={agents}
@@ -8395,12 +8493,17 @@ function MainApp() {
             onConfirmApproval={approvalGate.confirmApproval}
             onOpenAgents={() => setPersistedAppMode("agents")}
             onOpenGapAnalysis={openGapAnalysis}
+            onOpenInGraph={openDraftsGraphFocus}
+            onExitReferenceFocus={exitKgReferenceFocus}
           />
         ) : surfaceMode === "gap" ? (
           <LazyGapPane
             workPath={primaryWorkspacePath}
+            entries={primaryWorkspaceEntries}
             initialDraftId={gapDraftId}
             onConsumeInitialDraftId={() => setGapDraftId(null)}
+            onOpenInGraph={openGapGraphFocus}
+            onExitReferenceFocus={exitKgReferenceFocus}
               />
         ) : surfaceMode === "agents" ? (
           <LazyAgentsPane
