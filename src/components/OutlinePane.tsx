@@ -49,6 +49,7 @@ import {
   writeFileQueueDragPayload,
 } from "../lib/fileDrag";
 import { extractOutline } from "../lib/markdown";
+import { setError } from "../lib/errorStore";
 import { useTranslation } from "../lib/i18n";
 import { useContextMenuKeyboard } from "../lib/useContextMenuKeyboard";
 import type {
@@ -93,7 +94,6 @@ interface OutlinePaneProps {
   activeLine?: number | null;
   onJumpToLine: (line: number) => void;
   onClose: () => void;
-  onError: (message: string | null) => void;
   onRefreshWorkspace: () => void;
   onUpdateField: (
     key: string,
@@ -235,7 +235,6 @@ export function OutlinePane({
   activeLine = null,
   onJumpToLine,
   onClose,
-  onError,
   onRefreshWorkspace,
   onUpdateField,
   onSelectEntry,
@@ -544,7 +543,6 @@ export function OutlinePane({
                 queue={fileQueue}
                 canApplyFileQueue={canApplyFileQueue}
                 selectedIds={selectedFileQueueItemIds}
-                onError={onError}
                 onUpdateItem={onUpdateFileQueueItem}
                 onSelectItem={onSelectFileQueueItem}
                 onQueueExternalFiles={onQueueExternalFiles}
@@ -563,7 +561,6 @@ export function OutlinePane({
               workPath={scratchpadWorkPath}
               sortKey={scratchpadSortKey}
               listHeight={scratchpadListHeight}
-              onError={onError}
               onRefreshWorkspace={onRefreshWorkspace}
               onSortKeyChange={onScratchpadSortKeyChange}
               onListHeightChange={onScratchpadListHeightChange}
@@ -581,7 +578,6 @@ export function OutlinePane({
               }
               selectedFileEntries={selectedWorkspaceFileEntries}
               inboxShareablePaths={inboxShareablePaths}
-              onError={onError}
               onRevealFileInFinder={onRevealFileInFinder}
             />
           ) : null}
@@ -742,7 +738,6 @@ function FilesQueuePane({
   queue,
   canApplyFileQueue,
   selectedIds,
-  onError,
   onUpdateItem,
   onSelectItem,
   onQueueExternalFiles,
@@ -755,7 +750,6 @@ function FilesQueuePane({
   queue: FileQueueItem[];
   canApplyFileQueue: boolean;
   selectedIds: string[];
-  onError: (message: string | null) => void;
   onUpdateItem: (
     id: string,
     patch: Partial<Pick<FileQueueItem, "targetDir" | "operation">>,
@@ -849,11 +843,11 @@ function FilesQueuePane({
 
   const apply = async () => {
     setWorking(true);
-    onError(null);
+    setError(null);
     try {
       await onApply();
     } catch (err) {
-      onError(err instanceof Error ? err.message : String(err));
+      setError(err instanceof Error ? err.message : String(err));
     } finally {
       setWorking(false);
     }

@@ -20,6 +20,7 @@ import type {
   SkillRecord,
   TerminalDispatchSpec,
 } from "../../lib/skills";
+import { setError } from "../../lib/errorStore";
 import { useTranslation } from "../../lib/i18n";
 import {
   agentRunStructuredLoop,
@@ -87,7 +88,6 @@ interface ComposeDialogProps {
   meetingsWorkspacePath?: string | null;
   /** Switch the app to the Meetings transcript workbench (nudge action). */
   onOpenMeetingsWorkbench?: () => void;
-  onError: (message: string | null) => void;
 }
 
 export function ComposeDialog({
@@ -103,7 +103,6 @@ export function ComposeDialog({
   permissionMode,
   meetingsWorkspacePath,
   onOpenMeetingsWorkbench,
-  onError,
 }: ComposeDialogProps) {
   const { t } = useTranslation();
   const [skillId, setSkillId] = useState("");
@@ -161,7 +160,7 @@ export function ComposeDialog({
         });
       })
       .catch((err) => {
-        if (!cancelled) onError(err instanceof Error ? err.message : String(err));
+        if (!cancelled) setError(err instanceof Error ? err.message : String(err));
       })
       .finally(() => {
         if (!cancelled) setRuntimeStatusLoading(false);
@@ -169,7 +168,7 @@ export function ComposeDialog({
     return () => {
       cancelled = true;
     };
-  }, [open, onError, runtimeStatusCommands]);
+  }, [open, runtimeStatusCommands]);
 
   const selectedSkill = useMemo(
     () => skills.find((skill) => skill.id === skillId) ?? null,
@@ -243,12 +242,12 @@ export function ComposeDialog({
   async function run() {
     if (!selectedSkill || !effectivePrompt.trim() || !runtimeReady) return;
     setBusy(true);
-    onError(null);
+    setError(null);
     try {
       let dispatchEvent: ComposeDialogDispatchEvent;
       if (mode === "structured") {
         if (!seed?.cwd) {
-          onError(t("skills.compose.structuredNeedsCwd"));
+          setError(t("skills.compose.structuredNeedsCwd"));
           setBusy(false);
           return;
         }
@@ -290,7 +289,7 @@ export function ComposeDialog({
           ? meetingsWorkspacePath ?? seed?.cwd ?? null
           : seed?.cwd ?? null;
         if (isMeetingNotes && !backgroundCwd) {
-          onError(t("skills.compose.meetingNeedsWorkspace"));
+          setError(t("skills.compose.meetingNeedsWorkspace"));
           setBusy(false);
           return;
         }
@@ -327,11 +326,11 @@ export function ComposeDialog({
       try {
         await seed?.onDispatched?.(dispatchEvent);
       } catch (err) {
-        onError(err instanceof Error ? err.message : String(err));
+        setError(err instanceof Error ? err.message : String(err));
       }
       onClose();
     } catch (err) {
-      onError(err instanceof Error ? err.message : String(err));
+      setError(err instanceof Error ? err.message : String(err));
     } finally {
       setBusy(false);
     }

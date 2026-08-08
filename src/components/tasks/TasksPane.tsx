@@ -29,6 +29,7 @@ import {
   runAgentDetailed,
   type AgentRecord,
 } from "../../lib/agents";
+import { setError } from "../../lib/errorStore";
 import { useTranslation } from "../../lib/i18n";
 import type { AiSettings, DocumentLabelMode, LayoutSettings, TasksSettings } from "../../lib/settings";
 import { TODAY_LAYOUT_LIMITS } from "../../lib/todayLayout";
@@ -101,7 +102,6 @@ export interface TasksPaneProps {
     payloadPreview?: string | null;
   }) => Promise<string | null>;
   onRevealPath?: (path: string) => void;
-  onError: (message: string | null) => void;
   layout?: Pick<
     LayoutSettings,
     "tasksSidebarWidth" | "calendarAgendaWidth" | "taskDetailsWidth"
@@ -136,7 +136,6 @@ export function TasksPane({
   onStopMission,
   onConfirmApproval,
   onRevealPath,
-  onError,
   layout,
   onLayoutChange,
   logicalDay,
@@ -299,12 +298,12 @@ export function TasksPane({
         if (!cancelled) setBodyHits(new Set(paths));
       })
       .catch((err) => {
-        if (!cancelled) onError(err instanceof Error ? err.message : String(err));
+        if (!cancelled) setError(err instanceof Error ? err.message : String(err));
       });
     return () => {
       cancelled = true;
     };
-  }, [debouncedQuery, workPath, effectiveSettings.root, onError]);
+  }, [debouncedQuery, workPath, effectiveSettings.root]);
 
   const load = useCallback(async () => {
     if (!workPath || !effectiveSettings.enabled) {
@@ -312,15 +311,15 @@ export function TasksPane({
       return;
     }
     setLoading(true);
-    onError(null);
+    setError(null);
     try {
       setRows(await scanTaskNotes(workPath, effectiveSettings.root));
     } catch (err) {
-      onError(err instanceof Error ? err.message : String(err));
+      setError(err instanceof Error ? err.message : String(err));
     } finally {
       setLoading(false);
     }
-  }, [effectiveSettings.enabled, effectiveSettings.root, onError, workPath]);
+  }, [effectiveSettings.enabled, effectiveSettings.root, workPath]);
 
   useEffect(() => {
     void load();
@@ -351,7 +350,7 @@ export function TasksPane({
           if (!cancelled) setMetadata(next);
         })
         .catch((err) => {
-          if (!cancelled) onError(err instanceof Error ? err.message : String(err));
+          if (!cancelled) setError(err instanceof Error ? err.message : String(err));
         })
         .finally(() => {
           if (!cancelled) setMetadataLoading(false);
@@ -360,7 +359,7 @@ export function TasksPane({
     return () => {
       cancelled = true;
     };
-  }, [onError, selectedEntry, workPath]);
+  }, [selectedEntry, workPath]);
 
   const createTask = async (draft: CreateTaskDraft) => {
     if (!workPath) return;
@@ -380,7 +379,7 @@ export function TasksPane({
       setRows((current) => current.map((row) => (row.relPath === entry.relPath ? updated : row)));
       setSelectedRelPath(updated.relPath);
     } catch (err) {
-      onError(err instanceof Error ? err.message : String(err));
+      setError(err instanceof Error ? err.message : String(err));
     }
   };
 
@@ -398,7 +397,7 @@ export function TasksPane({
       setMetadata(null);
       setDetailDirty(false);
     } catch (err) {
-      onError(err instanceof Error ? err.message : String(err));
+      setError(err instanceof Error ? err.message : String(err));
       throw err;
     }
   };
@@ -424,7 +423,7 @@ export function TasksPane({
   const dispatchTaskSkill = useCallback(
     async (mode: "schedule" | "sync", prompt: string, contextPaths: string[]) => {
       if (!workPath) return;
-      onError(null);
+      setError(null);
       try {
         const origin = mode === "sync" ? "taskManagementSync" : "taskManagementSchedule";
         // The runtime is whichever fallback actually answered, which is what
@@ -456,7 +455,7 @@ export function TasksPane({
           ).catch(() => {});
         }
       } catch (err) {
-        onError(agentErrorMessage(err, t));
+        setError(agentErrorMessage(err, t));
       }
     },
     [
@@ -467,7 +466,6 @@ export function TasksPane({
       onMissionStarted,
       onRefreshMissions,
       effectiveSettings.hooks.appendVaultLog,
-      onError,
       t,
     ],
   );
@@ -625,7 +623,6 @@ export function TasksPane({
               onRefreshMissions={onRefreshMissions}
               onConfirmApproval={onConfirmApproval}
               onApplied={() => void load()}
-              onError={onError}
             />
           </div>
         ) : (

@@ -101,7 +101,6 @@ interface InboxPaneProps {
     payloadPreview?: string | null;
   }) => Promise<string | null>;
   onProcessApplied: () => void;
-  onProcessError: (message: string | null) => void;
   /** Reports the absolute paths of shareable selected rows (drop files /
    *  dropFile entries) for the Shared Outbox tab. */
   onShareSelectionChange?: (paths: string[]) => void;
@@ -158,7 +157,6 @@ export const InboxPane = memo(function InboxPane({
   workPath,
   onConfirmApproval,
   onProcessApplied,
-  onProcessError,
   onShareSelectionChange,
 }: InboxPaneProps) {
   const { t, locale } = useTranslation();
@@ -757,7 +755,6 @@ export const InboxPane = memo(function InboxPane({
             onRefreshMissions={onRefresh}
             onConfirmApproval={onConfirmApproval}
             onApplied={onProcessApplied}
-            onError={onProcessError}
           />
         </InboxSection>
 

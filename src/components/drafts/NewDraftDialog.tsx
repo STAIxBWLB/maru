@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { createDraft } from "../../lib/api";
+import { setError } from "../../lib/errorStore";
 import { useTranslation } from "../../lib/i18n";
 import type { DraftEntry, DraftImportance, DraftKind } from "../../lib/types";
 import { Button } from "../ui/Button";
@@ -13,11 +14,10 @@ interface NewDraftDialogProps {
   open: boolean;
   workPath: string | null;
   onClose: () => void;
-  onError: (message: string | null) => void;
   onCreated: (entry: DraftEntry) => void;
 }
 
-export function NewDraftDialog({ open, workPath, onClose, onError, onCreated }: NewDraftDialogProps) {
+export function NewDraftDialog({ open, workPath, onClose, onCreated }: NewDraftDialogProps) {
   const { t } = useTranslation();
   const [kind, setKind] = useState<DraftKind>("task");
   const [title, setTitle] = useState("");
@@ -38,7 +38,7 @@ export function NewDraftDialog({ open, workPath, onClose, onError, onCreated }: 
   const submit = async () => {
     if (!workPath || busy || !title.trim()) return;
     setBusy(true);
-    onError(null);
+    setError(null);
     try {
       const created = await createDraft({
         workPath,
@@ -52,7 +52,7 @@ export function NewDraftDialog({ open, workPath, onClose, onError, onCreated }: 
       });
       onCreated(created);
     } catch (error) {
-      onError(error instanceof Error ? error.message : String(error));
+      setError(error instanceof Error ? error.message : String(error));
     } finally {
       setBusy(false);
     }

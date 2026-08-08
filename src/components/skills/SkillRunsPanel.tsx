@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { chooseSaveFile } from "../../lib/api";
+import { setError } from "../../lib/errorStore";
 import { useTranslation } from "../../lib/i18n";
 import {
   SKILL_PROPOSAL_APPLY_APPROVAL_KIND,
@@ -51,7 +52,6 @@ interface SkillRunsPanelProps {
     target?: string | null;
     payloadPreview?: string | null;
   }) => Promise<string | null>;
-  onError: (message: string | null) => void;
 }
 
 export function SkillRunsPanel({
@@ -64,7 +64,6 @@ export function SkillRunsPanel({
   onStopMission,
   onMissionStarted,
   onConfirmApproval,
-  onError,
 }: SkillRunsPanelProps) {
   const { t } = useTranslation();
   const storageKey = useMemo(
@@ -117,7 +116,7 @@ export function SkillRunsPanel({
     setReviewLoading(true);
     setActiveRunId(mission.id);
     setReviewProposal(null);
-    onError(null);
+    setError(null);
     try {
       const events = await agentReadRunEvents(cwd, mission.id);
       const raw = extractProviderOutput(events, logLines[mission.id] ?? []);
@@ -127,7 +126,7 @@ export function SkillRunsPanel({
     } catch (err) {
       if (reviewRequestSeq.current !== requestId) return;
       setReviewProposal(null);
-      onError(err instanceof Error ? err.message : t("skillRuns.noProposal"));
+      setError(err instanceof Error ? err.message : t("skillRuns.noProposal"));
     } finally {
       if (reviewRequestSeq.current === requestId) setReviewLoading(false);
     }
@@ -147,7 +146,7 @@ export function SkillRunsPanel({
     });
     if (!approvalId) return;
     setApplyBusy(true);
-    onError(null);
+    setError(null);
     try {
       await agentApplySkillProposal({
         cwd,
@@ -158,7 +157,7 @@ export function SkillRunsPanel({
       setAppliedIds((current) => new Set([...current, mission.id]));
       onRefresh();
     } catch (err) {
-      onError(err instanceof Error ? err.message : String(err));
+      setError(err instanceof Error ? err.message : String(err));
     } finally {
       setApplyBusy(false);
     }
@@ -168,12 +167,12 @@ export function SkillRunsPanel({
     const cwd = workspacePathFromMission(mission) ?? workPath;
     if (!cwd) return;
     setRetryBusyId(mission.id);
-    onError(null);
+    setError(null);
     try {
       const events = await agentReadRunEvents(cwd, mission.id);
       const retry = extractSkillRunRetryRequest(events);
       if (!retry) {
-        onError(t("skillRuns.retryUnavailable"));
+        setError(t("skillRuns.retryUnavailable"));
         return;
       }
       const invocationId = await skillsDispatchBackground({
@@ -196,7 +195,7 @@ export function SkillRunsPanel({
       onMissionStarted(invocationId);
       onRefresh();
     } catch (err) {
-      onError(err instanceof Error ? err.message : String(err));
+      setError(err instanceof Error ? err.message : String(err));
     } finally {
       setRetryBusyId(null);
     }
@@ -206,12 +205,12 @@ export function SkillRunsPanel({
     const cwd = workspacePathFromMission(mission) ?? workPath;
     if (!cwd) return;
     setSummaryBusyId(mission.id);
-    onError(null);
+    setError(null);
     try {
       const summary = await agentReplayRunSummary(cwd, mission.id);
       setSummaries((current) => ({ ...current, [mission.id]: summary }));
     } catch (err) {
-      onError(err instanceof Error ? err.message : String(err));
+      setError(err instanceof Error ? err.message : String(err));
     } finally {
       setSummaryBusyId(null);
     }
@@ -221,7 +220,7 @@ export function SkillRunsPanel({
     const cwd = workspacePathFromMission(mission) ?? workPath;
     if (!cwd) return;
     setExportBusyId(mission.id);
-    onError(null);
+    setError(null);
     try {
       const target = await chooseSaveFile(
         t("skillRuns.export.title"),
@@ -243,7 +242,7 @@ export function SkillRunsPanel({
         }));
       }
     } catch (err) {
-      onError(err instanceof Error ? err.message : String(err));
+      setError(err instanceof Error ? err.message : String(err));
     } finally {
       setExportBusyId(null);
     }

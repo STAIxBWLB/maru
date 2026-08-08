@@ -35,6 +35,7 @@ import {
 } from "../../lib/agentChat";
 import { createTaskNote, saveScratchpadDocument } from "../../lib/api";
 import { clipboardWriteText } from "../../lib/clipboard";
+import { setError } from "../../lib/errorStore";
 import { useTranslation } from "../../lib/i18n";
 import type { AiSettings } from "../../lib/settings";
 import {
@@ -58,7 +59,6 @@ interface AgentChatTabProps {
   resolvedRuntime: SkillDispatchRuntime;
   permissionMode: string;
   onConfirmApproval: (input: ApprovalInput) => Promise<string | null>;
-  onError: (message: string | null) => void;
 }
 
 function errorMessage(error: unknown): string {
@@ -84,7 +84,6 @@ export function AgentChatTab({
   resolvedRuntime,
   permissionMode,
   onConfirmApproval,
-  onError,
 }: AgentChatTabProps) {
   const { t } = useTranslation();
   const [turns, setTurns] = useState<ChatTurn[]>([]);
@@ -221,7 +220,7 @@ export function AgentChatTab({
     setBusy(true);
     setTail([]);
     setNotice(null);
-    onError(null);
+    setError(null);
     const startedAt = Date.now();
     const abortController = new AbortController();
     sendAbortRef.current = abortController;
@@ -256,9 +255,9 @@ export function AgentChatTab({
       const discardError = discardUserTurn(userTurnAt);
       const expectedStop = stopRequestedRef.current === abortController;
       if (discardError) {
-        onError(discardError);
+        setError(discardError);
       } else if (!expectedStop && !(error instanceof Error && error.name === "AbortError")) {
-        onError(errorMessage(error));
+        setError(errorMessage(error));
       }
     } finally {
       if (sendAbortRef.current === abortController) {
@@ -278,7 +277,6 @@ export function AgentChatTab({
     busy,
     discardUserTurn,
     input,
-    onError,
     runtimeSelection,
     turns,
     workPath,
@@ -300,12 +298,12 @@ export function AgentChatTab({
         if (stopRequestedRef.current === controller) {
           stopRequestedRef.current = null;
         }
-        onError(errorMessage(error));
+        setError(errorMessage(error));
       }
       return;
     }
     if (controller && !controller.signal.aborted) controller.abort();
-  }, [onError]);
+  }, []);
 
   const clear = useCallback(() => {
     try {
@@ -313,9 +311,9 @@ export function AgentChatTab({
       setTurns([]);
       setNotice(null);
     } catch (error) {
-      onError(errorMessage(error));
+      setError(errorMessage(error));
     }
-  }, [agent.id, onError, workPath]);
+  }, [agent.id, workPath]);
 
   const toTask = useCallback(
     async (text: string) => {
@@ -335,10 +333,10 @@ export function AgentChatTab({
         );
         setNotice(t("agents.chat.saved", { path: row.relPath ?? title }));
       } catch (error) {
-        onError(errorMessage(error));
+        setError(errorMessage(error));
       }
     },
-    [agent, onError, t, tasksRoot, workPath],
+    [agent, t, tasksRoot, workPath],
   );
 
   const toMemo = useCallback(
@@ -356,10 +354,10 @@ export function AgentChatTab({
         );
         setNotice(t("agents.chat.saved", { path: doc.relativePath }));
       } catch (error) {
-        onError(errorMessage(error));
+        setError(errorMessage(error));
       }
     },
-    [agent.id, onError, t, workPath],
+    [agent.id, t, workPath],
   );
 
   const applyProposal = useCallback(
@@ -388,12 +386,12 @@ export function AgentChatTab({
           proposalAppliedAt,
         );
       } catch (error) {
-        onError(errorMessage(error));
+        setError(errorMessage(error));
       } finally {
         finishChatProposalApply(workPath, agent.id, turnAt);
       }
     },
-    [agent.id, onConfirmApproval, onError, t, workPath],
+    [agent.id, onConfirmApproval, t, workPath],
   );
 
   const activeRuntime = runtimeSelection?.runtime ?? resolvedRuntime;

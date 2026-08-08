@@ -15,6 +15,7 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { readSites, saveSites } from "../../lib/maruDir";
 import { clipboardWriteText } from "../../lib/clipboard";
+import { setError } from "../../lib/errorStore";
 import { useTranslation } from "../../lib/i18n";
 import {
   browserPasskeyRequestAuthorization,
@@ -87,7 +88,6 @@ interface SitesPaneProps {
    *  (command palette, dialogs, approval gate). The native webview cannot
    *  stack under DOM modals, so we hide it for the duration. */
   overlayOpen: boolean;
-  onError: (message: string | null) => void;
   onEmptyClose?: () => void;
   openedUrls?: readonly SiteViewOpenRequest[];
   onOpenedUrlsHandled?: (ids: readonly number[]) => void;
@@ -95,7 +95,6 @@ interface SitesPaneProps {
 
 export function SitesPane({
   overlayOpen,
-  onError,
   onEmptyClose,
   openedUrls = EMPTY_OPENED_URLS,
   onOpenedUrlsHandled,
@@ -150,8 +149,8 @@ export function SitesPane({
   desiredVisibleRef.current = showView;
 
   const reportError = useCallback(
-    (err: unknown) => onError(err instanceof Error ? err.message : String(err)),
-    [onError],
+    (err: unknown) => setError(err instanceof Error ? err.message : String(err)),
+    [],
   );
 
   // Status inspection is safe on mount. Authorization is intentionally never
@@ -311,7 +310,7 @@ export function SitesPane({
   const openInNewTab = useCallback(
     (url: string, siteId: string | null): boolean => {
       if (tabs.length >= MAX_BROWSER_TABS) {
-        onError(t("sites.tabs.limit"));
+        setError(t("sites.tabs.limit"));
         return false;
       }
       setTabs((current) => {
@@ -324,7 +323,7 @@ export function SitesPane({
           siteId,
         });
         if (!result.opened) {
-          onError(t("sites.tabs.limit"));
+          setError(t("sites.tabs.limit"));
           return current;
         }
         setActiveTabId(id);
@@ -334,7 +333,7 @@ export function SitesPane({
       });
       return true;
     },
-    [loadInTab, onError, t, tabs.length, tauri],
+    [loadInTab, t, tabs.length, tauri],
   );
 
   // App owns the launch/open-event queue. Each accepted URL becomes a new
@@ -427,10 +426,10 @@ export function SitesPane({
   const submitAddress = useCallback(() => {
     const normalized = normalizeSiteUrl(addressDraft);
     if (!normalized) {
-      onError(t("sites.address.invalid"));
+      setError(t("sites.address.invalid"));
       return;
     }
-    onError(null);
+    setError(null);
     if (activeTab) {
       setTabs((current) =>
         updateBrowserTab(current, activeTab.id, {
@@ -443,7 +442,7 @@ export function SitesPane({
     } else {
       openInNewTab(normalized, null);
     }
-  }, [activeTab, addressDraft, loadInTab, onError, openInNewTab, t, tauri]);
+  }, [activeTab, addressDraft, loadInTab, openInNewTab, t, tauri]);
 
   const deleteSite = useCallback(
     (site: SiteEntry) => {

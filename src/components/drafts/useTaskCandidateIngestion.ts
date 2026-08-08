@@ -13,6 +13,7 @@
 
 import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useState } from "react";
+import { setError } from "../../lib/errorStore";
 import { isTauri, listAiMissions } from "../../lib/api";
 import type { AiTaskIngestMinImportance } from "../../lib/settings";
 import {
@@ -26,14 +27,12 @@ export interface UseTaskCandidateIngestionParams {
   workPath: string | null;
   minImportance: AiTaskIngestMinImportance;
   onDraftsIngested: () => void;
-  onError: (message: string) => void;
 }
 
 export function useTaskCandidateIngestion({
   workPath,
   minImportance,
   onDraftsIngested,
-  onError,
 }: UseTaskCandidateIngestionParams): {
   ingesting: boolean;
   lastIngest: TaskIngestResult | null;
@@ -51,12 +50,12 @@ export function useTaskCandidateIngestion({
         setLastIngest(result);
         if (result.created > 0) onDraftsIngested();
       } catch (error) {
-        onError(error instanceof Error ? error.message : String(error));
+        setError(error instanceof Error ? error.message : String(error));
       } finally {
         setIngesting(false);
       }
     },
-    [minImportance, onDraftsIngested, onError, workPath],
+    [minImportance, onDraftsIngested, workPath],
   );
 
   // Runs that finished while the pane was unmounted.
