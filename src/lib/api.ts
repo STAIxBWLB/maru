@@ -3046,6 +3046,15 @@ export async function listDrafts(workPath: string): Promise<DraftEntry[]> {
   return invoke<DraftEntry[]>("drafts_list", { workPath });
 }
 
+export async function getDraftsPromoteDefaultDir(workPath: string): Promise<string> {
+  if (!isTauri()) {
+    const override = await invokeE2EOverride<string>("drafts_promote_default_dir", { workPath });
+    if (override) return override;
+    throw new Error("drafts_promote_default_dir_unavailable");
+  }
+  return invoke<string>("drafts_promote_default_dir", { workPath });
+}
+
 export async function readDraft(workPath: string, id: string): Promise<DraftDocument> {
   if (!isTauri()) {
     const override = await invokeE2EOverride<DraftDocument>("drafts_read", { workPath, id });

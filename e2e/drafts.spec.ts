@@ -77,6 +77,10 @@ function seedBackend(page: import("@playwright/test").Page) {
         record("drafts_list", args);
         return drafts.map((entry) => ({ ...entry }));
       },
+      drafts_promote_default_dir: (args) => {
+        record("drafts_promote_default_dir", args);
+        return "configured/incoming";
+      },
       drafts_read: (args) => {
         record("drafts_read", args);
         const entry = drafts.find((candidate) => candidate.id === args.id);
@@ -96,6 +100,15 @@ function seedBackend(page: import("@playwright/test").Page) {
         const entry = drafts.find((candidate) => candidate.id === args.id);
         if (!entry) throw new Error("drafts_not_found");
         entry.status = "discarded";
+        entry.updatedAt = "2026-07-29T00:00:00Z";
+        return { ...entry };
+      },
+      drafts_promote: (args) => {
+        record("drafts_promote", args);
+        const entry = drafts.find((candidate) => candidate.id === args.id);
+        if (!entry) throw new Error("drafts_not_found");
+        entry.status = "accepted";
+        entry.promotedTo = (args.targetPath as string | null) ?? null;
         entry.updatedAt = "2026-07-29T00:00:00Z";
         return { ...entry };
       },
@@ -254,6 +267,32 @@ test("opens a draft detail and moves it to in-review", async ({ page }) => {
               __MARU_DRAFTS_CALLS__?: Array<{ command: string }>;
             }).__MARU_DRAFTS_CALLS__ ?? []
           ).some((call) => call.command === "drafts_set_status"),
+      ),
+    )
+    .toBe(true);
+});
+
+test("uses the configured promote directory for the document suggestion", async ({ page }) => {
+  const pane = await openDraftsMode(page);
+
+  await pane.locator(".drafts-list-item", { hasText: "Review weekly report" }).click();
+  await pane.getByRole("button", { name: "수락 (승격)", exact: true }).click();
+
+  const dialog = page.locator(".drafts-promote-dialog");
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole("radio", { name: "문서" }).check();
+  await expect(dialog.getByRole("textbox")).toHaveValue(
+    "configured/incoming/review-weekly-report.md",
+  );
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          (
+            (window as unknown as {
+              __MARU_DRAFTS_CALLS__?: Array<{ command: string }>;
+            }).__MARU_DRAFTS_CALLS__ ?? []
+          ).some((call) => call.command === "drafts_promote_default_dir"),
       ),
     )
     .toBe(true);

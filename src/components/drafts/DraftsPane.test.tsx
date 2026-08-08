@@ -9,6 +9,7 @@ import { DraftsPane } from "./DraftsPane";
 
 vi.mock("../../lib/api", () => ({
   createScratchpadIdea: vi.fn(),
+  getDraftsPromoteDefaultDir: vi.fn(),
   isTauri: () => false,
   listDrafts: vi.fn(),
   listScratchpad: vi.fn(),
@@ -34,6 +35,7 @@ vi.mock("./useIdeationDrafts", () => ({
 import {
   createDraft,
   createScratchpadIdea,
+  getDraftsPromoteDefaultDir,
   listDrafts,
   listScratchpad,
   readDraft,
@@ -148,6 +150,7 @@ beforeEach(() => {
   vi.mocked(saveScratchpadDocument).mockReset();
   vi.mocked(transitionScratchpadIdea).mockReset();
   vi.mocked(createScratchpadIdea).mockReset();
+  vi.mocked(getDraftsPromoteDefaultDir).mockResolvedValue("_incoming");
 });
 
 afterEach(() => {

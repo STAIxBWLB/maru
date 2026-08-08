@@ -108,8 +108,8 @@ use document::{
 };
 use dot_sync::{dot_sync_overview, dot_sync_run};
 use drafts::{
-    drafts_create, drafts_discard, drafts_list, drafts_promote, drafts_read, drafts_relink_promoted,
-    drafts_save, drafts_set_status,
+    drafts_create, drafts_discard, drafts_list, drafts_promote, drafts_promote_default_dir,
+    drafts_read, drafts_relink_promoted, drafts_save, drafts_set_status,
 };
 use e2e_flow::{maru_e2e_read, maru_e2e_run};
 use evidence_binder::{evidence_binder_mutate, evidence_binder_read};
@@ -430,6 +430,7 @@ pub fn run() {
             drafts_set_status,
             drafts_discard,
             drafts_promote,
+            drafts_promote_default_dir,
             drafts_relink_promoted,
             gap_analyze,
             gap_append_log,

@@ -639,8 +639,11 @@ memos and temporary results.
 
 `workspace.config.yaml` may set `paths.scratchpad` and the
 `scratchpad.{ideation_subdir,memos_subdir,temp_subdir,drafts_subdir,editable_extensions,temp_stale_days,ideation_review_days,editable_max_bytes}`
-policy. `drafts_subdir` defaults to `drafts`, must be a safe relative path, and
-cannot overlap another collection. Maru exposes the resolved root as `MARU_SCRATCHPAD`, its disposable
+policy, plus `drafts.promote_dir` for the document-promotion suggestion
+(default: `_incoming`). The promote directory must be a safe relative path
+outside `scratchpad` and `.maru`; it does not restrict an explicit target path
+entered in the promote dialog. `drafts_subdir` defaults to `drafts`, must be a
+safe relative path, and cannot overlap another collection. Maru exposes the resolved root as `MARU_SCRATCHPAD`, its disposable
 subdirectory as `MARU_TEMP`, and places Claude runtime files below
 `$MARU_TEMP/runtime/claude` through `CLAUDE_CODE_TMPDIR`.
 
