@@ -483,12 +483,21 @@ export function applyVaultDelta(
 }
 
 /** The watcher delta path: scan just the touched rel paths, then apply the
- *  delta behind the shared per-path seq guard. */
+ *  delta behind the shared per-path seq guard. Before the first full scan
+ *  lands (startupIoReady), a delta would diff against the empty baseline and
+ *  publish just the touched files as the whole workspace — and its seq bump
+ *  would discard that in-flight full scan — so it upgrades to a full rescan
+ *  instead. */
 export async function scanAndApplyVaultDelta(
   path: string,
   touchedRelPaths: readonly string[],
   scanOptions?: ScanOptions,
 ): Promise<void> {
+  if (touchedRelPaths.length === 0) return;
+  if (!workspaceStoreState.states[path]?.startupIoReady) {
+    await rescanWorkspaceEntries(path, scanOptions);
+    return;
+  }
   const seq = nextWorkspaceScanSeq(path);
   const freshEntries = await scanVaultPaths(path, touchedRelPaths, scanOptions);
   if (!isCurrentWorkspaceScan(path, seq)) return;
