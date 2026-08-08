@@ -8,12 +8,16 @@ import type { DraftDocument, DraftEntry } from "../../lib/types";
 import { DraftsPane } from "./DraftsPane";
 
 vi.mock("../../lib/api", () => ({
+  createScratchpadIdea: vi.fn(),
   isTauri: () => false,
   listDrafts: vi.fn(),
   listScratchpad: vi.fn(),
   readDraft: vi.fn(),
+  readScratchpadDocument: vi.fn(),
   saveDraft: vi.fn(),
+  saveScratchpadDocument: vi.fn(),
   setDraftStatus: vi.fn(),
+  transitionScratchpadIdea: vi.fn(),
   discardDraft: vi.fn(),
   createDraft: vi.fn(),
   listAiMissions: vi.fn().mockResolvedValue([]),
@@ -27,7 +31,18 @@ vi.mock("./useIdeationDrafts", () => ({
   useIdeationDrafts: () => ({ pendingIdeaPaths: new Set<string>(), generate: vi.fn() }),
 }));
 
-import { listDrafts, listScratchpad, readDraft, saveDraft, setDraftStatus, createDraft } from "../../lib/api";
+import {
+  createDraft,
+  createScratchpadIdea,
+  listDrafts,
+  listScratchpad,
+  readDraft,
+  readScratchpadDocument,
+  saveDraft,
+  saveScratchpadDocument,
+  setDraftStatus,
+  transitionScratchpadIdea,
+} from "../../lib/api";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -81,7 +96,6 @@ async function render(): Promise<HTMLElement> {
           taskIngestMinImportance="low"
           onTaskIngestMinImportanceChange={() => {}}
           onConfirmApproval={async () => "approval-1"}
-          onOpenScratchpad={() => {}}
           onOpenAgents={() => {}}
         />
       </LocaleContext.Provider>,
@@ -130,6 +144,10 @@ beforeEach(() => {
     updatedAt: "2026-07-30T01:00:00Z",
   }));
   vi.mocked(setDraftStatus).mockResolvedValue(DRAFT);
+  vi.mocked(readScratchpadDocument).mockReset();
+  vi.mocked(saveScratchpadDocument).mockReset();
+  vi.mocked(transitionScratchpadIdea).mockReset();
+  vi.mocked(createScratchpadIdea).mockReset();
 });
 
 afterEach(() => {
@@ -296,5 +314,85 @@ describe("DraftsPane manual draft creation", () => {
     if (!titleInput) throw new Error("title input not found");
     await typeIntoInput(titleInput, "제목");
     expect(submit.disabled).toBe(false);
+  });
+});
+
+const IDEA_ENTRY = {
+  collection: "ideation" as const,
+  relativePath: "seeds/idea.md",
+  name: "idea.md",
+  source: "manual" as const,
+  ideationStage: "seed" as const,
+  format: "markdown" as const,
+  updatedAt: "2026-07-30T00:00:00Z",
+  sizeBytes: 20,
+  preview: "Idea body",
+  revision: "idea-rev-1",
+  stale: false,
+  editable: true,
+};
+
+const IDEA_DOC = { ...IDEA_ENTRY, content: "# Idea\n\nOriginal body" };
+
+describe("DraftsPane Ideation hub", () => {
+  it("edits and saves an idea with its read revision, then transitions its stage", async () => {
+    vi.mocked(listScratchpad).mockResolvedValue([IDEA_ENTRY]);
+    vi.mocked(readScratchpadDocument).mockResolvedValue(IDEA_DOC);
+    vi.mocked(saveScratchpadDocument).mockResolvedValue({
+      ...IDEA_DOC,
+      content: "Updated body",
+      revision: "idea-rev-2",
+    });
+    vi.mocked(transitionScratchpadIdea).mockResolvedValue({
+      ...IDEA_DOC,
+      relativePath: "developing/idea.md",
+      ideationStage: "developing",
+      revision: "idea-rev-3",
+      content: "Updated body",
+    });
+    const host = await render();
+
+    await clickByText(host, "idea.md");
+    await clickByText(host, translate("ko", "drafts.detail.edit"));
+    await typeInEditor(host, "Updated body");
+    await clickByText(host, translate("ko", "drafts.detail.save"));
+
+    expect(vi.mocked(readScratchpadDocument)).toHaveBeenCalledWith(
+      "/w",
+      "ideation",
+      "seeds/idea.md",
+    );
+    expect(vi.mocked(saveScratchpadDocument)).toHaveBeenCalledWith(
+      "/w",
+      "ideation",
+      "seeds/idea.md",
+      "markdown",
+      "Updated body",
+      "idea-rev-1",
+    );
+
+    await clickByText(host, translate("ko", "rightPane.scratchpad.stage.developing"));
+    expect(vi.mocked(transitionScratchpadIdea)).toHaveBeenCalledWith(
+      "/w",
+      "seeds/idea.md",
+      "developing",
+      "idea-rev-2",
+    );
+  });
+
+  it("creates a new idea from the Ideation header and refreshes the list", async () => {
+    vi.mocked(listScratchpad).mockResolvedValue([]);
+    vi.mocked(createScratchpadIdea).mockResolvedValue(IDEA_DOC);
+    vi.stubGlobal("prompt", vi.fn().mockReturnValue("New hub idea"));
+    const host = await render();
+
+    const create = host.querySelector<HTMLButtonElement>(
+      `[aria-label="${translate("ko", "drafts.idea.create")}"]`,
+    );
+    if (!create) throw new Error("idea create button not found");
+    await act(async () => create.click());
+
+    expect(vi.mocked(createScratchpadIdea)).toHaveBeenCalledWith("/w", "New hub idea");
+    expect(vi.mocked(listScratchpad).mock.calls.length).toBeGreaterThan(1);
   });
 });

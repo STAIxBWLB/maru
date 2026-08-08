@@ -140,6 +140,8 @@ struct ScratchpadConfigFile {
     memos_subdir: String,
     #[serde(default = "default_temp_subdir")]
     temp_subdir: String,
+    #[serde(default = "default_drafts_subdir")]
+    drafts_subdir: String,
     #[serde(default = "default_editable_extensions", alias = "allowed_extensions")]
     editable_extensions: Vec<String>,
     #[serde(default = "default_temp_stale_days", alias = "stale_days")]
@@ -156,6 +158,7 @@ impl Default for ScratchpadConfigFile {
             ideation_subdir: default_ideation_subdir(),
             memos_subdir: default_memos_subdir(),
             temp_subdir: default_temp_subdir(),
+            drafts_subdir: default_drafts_subdir(),
             editable_extensions: default_editable_extensions(),
             temp_stale_days: default_temp_stale_days(),
             ideation_review_days: default_ideation_review_days(),
@@ -174,6 +177,10 @@ fn default_memos_subdir() -> String {
 
 fn default_temp_subdir() -> String {
     "temp".to_string()
+}
+
+fn default_drafts_subdir() -> String {
+    "drafts".to_string()
 }
 
 fn default_editable_extensions() -> Vec<String> {
@@ -370,14 +377,13 @@ fn collection_roots(root: &Path, config: &ScratchpadConfigFile) -> Result<[PathB
     ])
 }
 
-/// The drafts collection lives at a fixed `<root>/drafts` subdir (not
-/// user-configurable) alongside the three configurable collections.
 fn all_collection_roots(
     root: &Path,
     config: &ScratchpadConfigFile,
 ) -> Result<[PathBuf; 4], String> {
     let [ideation, memos, temp] = collection_roots(root, config)?;
-    Ok([ideation, memos, temp, root.join("drafts")])
+    let drafts = root.join(safe_config_subdir(&config.drafts_subdir, "drafts_subdir")?);
+    Ok([ideation, memos, temp, drafts])
 }
 
 fn comparable_collection_path(path: &Path) -> String {
@@ -1615,6 +1621,59 @@ mod tests {
         assert!(resolve_scratchpad_root(Path::new(&work))
             .unwrap_err()
             .contains("absolute"));
+    }
+
+    #[test]
+    fn configured_drafts_subdir_resolves_the_drafts_collection() {
+        let (temp, work) = workspace();
+        let scratchpad = temp.path().join("scratchpad");
+        fs::write(
+            temp.path().join("workspace.config.yaml"),
+            format!(
+                "paths:\n  scratchpad: {}\nscratchpad:\n  drafts_subdir: generated-drafts\n",
+                scratchpad.display()
+            ),
+        )
+        .unwrap();
+
+        assert_eq!(
+            resolve_scratchpad_drafts_root(Path::new(&work)).unwrap(),
+            scratchpad.join("generated-drafts")
+        );
+    }
+
+    #[test]
+    fn drafts_subdir_must_be_safe_relative() {
+        let (temp, work) = workspace();
+        let scratchpad = temp.path().join("scratchpad");
+        fs::write(
+            temp.path().join("workspace.config.yaml"),
+            format!(
+                "paths:\n  scratchpad: {}\nscratchpad:\n  drafts_subdir: ../outside\n",
+                scratchpad.display()
+            ),
+        )
+        .unwrap();
+
+        let error = resolve_scratchpad_drafts_root(Path::new(&work)).unwrap_err();
+        assert!(error.contains("scratchpad.drafts_subdir must be a safe relative path"));
+    }
+
+    #[test]
+    fn drafts_subdir_overlap_with_ideation_is_rejected() {
+        let (temp, work) = workspace();
+        let scratchpad = temp.path().join("scratchpad");
+        fs::write(
+            temp.path().join("workspace.config.yaml"),
+            format!(
+                "paths:\n  scratchpad: {}\nscratchpad:\n  ideation_subdir: ideation\n  drafts_subdir: ideation\n",
+                scratchpad.display()
+            ),
+        )
+        .unwrap();
+
+        let error = validate_scratchpad_layout(Path::new(&work)).unwrap_err();
+        assert!(error.contains("collection roots overlap"));
     }
 
     #[test]

@@ -216,11 +216,11 @@ makes something real sits behind a gate that already existed (inbox routing's
 | Extraction | `inbox-process extract-tasks` (read-only) | ✅ |
 | Drafting | `draft-writer write-drafts` → `scratchpad/drafts/` | ✅ unreleased |
 | Driver | work repo `_meta/scripts/desk_pipeline.sh`, launchd 04:30 | ✅ |
-| Review | Drafts pane → promote | ✅ v0.4.33 |
+| Review | Ideation hub → promote | ✅ v0.4.33 |
 
 Maru-side pieces, all shipped in v0.4.33 unless noted:
 
-- **Drafts** (`src-tauri/src/drafts.rs`, `src/components/drafts/`) — one
+- **Ideation hub** (`src-tauri/src/drafts.rs`, `src/components/drafts/`) — one
   first-class unconfirmed concept for AI task drafts and ideation, promoted
   through an approval gate into a document or a task note. `drafts_list` adopts
   loose markdown in the collection, which is how the headless pipeline's output
@@ -239,7 +239,6 @@ Maru-side pieces, all shipped in v0.4.33 unless noted:
   animation paragraph by paragraph, which is what the per-span paragraph index
   was computed for.
 
-Remaining: manual draft creation and voice intake were scoped out. There is no
-typed draft-create path today (`drafts_create` has only the two ingestion
-callers), so a create UI comes before audio, and audio needs a transcriber the
-workspace does not have.
+The Ideation hub now supports manual idea creation, revision-checked editing,
+and the allowed lifecycle transitions. Voice intake remains future work: it
+needs a transcriber the workspace does not have.

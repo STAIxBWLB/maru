@@ -2100,18 +2100,6 @@ function MainApp() {
     [updateSettings],
   );
 
-  const openScratchpadSurface = useCallback(() => {
-    setPersistedAppMode("pkm");
-    setPersistedRightWorkbenchSurface("editor");
-    setPersistedRightPaneTab("memo");
-    updateLayoutSettings({ outlineOpen: true, editorSplitOpen: false });
-  }, [
-    setPersistedAppMode,
-    setPersistedRightPaneTab,
-    setPersistedRightWorkbenchSurface,
-    updateLayoutSettings,
-  ]);
-
   // Draft handoff into gap mode: the pane consumes it once on mount, so a
   // later rail-button revisit does not reselect the same draft.
   const [gapDraftId, setGapDraftId] = useState<string | null>(null);
@@ -6712,7 +6700,6 @@ function MainApp() {
           break;
         case "open-scratchpad":
         case "new-scratchpad-memo":
-        case "new-scratchpad-idea":
         case "review-scratchpad-temp": {
           setPersistedAppMode("pkm");
           if (!outlineOpen) updateLayoutSettings({ outlineOpen: true });
@@ -6720,11 +6707,9 @@ function MainApp() {
           const action =
             id === "new-scratchpad-memo"
               ? "new-memo"
-              : id === "new-scratchpad-idea"
-                ? "new-idea"
-                : id === "review-scratchpad-temp"
-                  ? "review-temp"
-                  : null;
+              : id === "review-scratchpad-temp"
+                ? "review-temp"
+                : null;
           if (action) {
             window.setTimeout(() => {
               window.dispatchEvent(new CustomEvent(`maru:scratchpad:${action}`));
@@ -6732,6 +6717,12 @@ function MainApp() {
           }
           break;
         }
+        case "new-scratchpad-idea":
+          setPersistedAppMode("drafts");
+          window.setTimeout(() => {
+            window.dispatchEvent(new CustomEvent("maru:drafts:new-idea"));
+          }, 0);
+          break;
         case "export-bundle":
           void exportActiveDocumentBundle();
           break;
@@ -8402,7 +8393,6 @@ function MainApp() {
               }))
             }
             onConfirmApproval={approvalGate.confirmApproval}
-                onOpenScratchpad={openScratchpadSurface}
             onOpenAgents={() => setPersistedAppMode("agents")}
             onOpenGapAnalysis={openGapAnalysis}
           />
