@@ -8,16 +8,30 @@ because releases cut frequently during active development. Versions before
 Dates are the release-tag dates. Only `feat`/`fix`-level changes are listed;
 `chore(release)` version bumps and merge commits are omitted.
 
-## Unreleased
+## v0.4.47 - 2026-08-08 - Measured Performance, Safer Drafts, Connected Graphs
 
-- **Drafts is now the Ideation hub.** Ideas can be created, edited, and
-  revision-checked through their lifecycle; the Scratchpad pane stays focused
-  on memos and temporary results, and `scratchpad.drafts_subdir` now honors a
-  safe, non-overlapping configured collection root.
-- **Draft document suggestions land in `_incoming/`.** Configure
-  `drafts.promote_dir` in `workspace.config.yaml` to choose another safe,
-  workspace-relative suggestion directory; explicit promotion targets remain
-  available.
+- **Skills state tracks bundle rotation (#194).** Builtin rescans rebaseline
+  their saved hashes against the active pristine bundle, so clean skills no
+  longer appear dirty after an OTA rotation while local edits remain visible
+  and discard restores the active bundle.
+- **The performance program is verified end to end (#201).** Low-risk polling,
+  IPC, watcher, render, and App.tsx store changes are complete, with measured
+  browser-startup and bundle improvements documented. The native scan benchmark
+  now records a stable ~11.45 MB payload for 10,701 entries, while median scan
+  time is effectively unchanged.
+- **Missing promoted documents can be recovered (#202).** Gap Analysis now
+  surfaces missing targets, supports validated relinking without rewriting the
+  frozen baseline, and protects promoted targets from Trash.
+- **Drafts is now the Ideation hub (#203).** Ideas can be created, edited, and
+  moved through their revision-checked lifecycle; Scratchpad focuses on memos
+  and temporary results, and `scratchpad.drafts_subdir` is configurable.
+- **Promotion suggestions are configurable (#204).** `drafts.promote_dir`
+  defaults to `_incoming`, accepts only safe workspace-relative paths outside
+  managed roots, and falls back safely; explicit promotion targets remain
+  supported.
+- **Draft and gap relationships can overlay the graph (#205).** Existing
+  workspace nodes gain source-owned relation chips and graph focus without
+  promoting draft or idea files into graph nodes.
 
 ## v0.4.46 - 2026-08-08 - Faster Paint, Calmer Idle
 
