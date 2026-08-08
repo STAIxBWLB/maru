@@ -149,6 +149,7 @@ pub struct GapReportSummary {
     /// Draft `updatedAt` — `drafts_promote` bumps it, so it is the promote time.
     pub promoted_at: String,
     pub has_baseline: bool,
+    pub has_document: bool,
 }
 
 fn baseline_path(work: &Path, draft_id: &str) -> PathBuf {
@@ -706,12 +707,20 @@ pub fn gap_reports_list(work_path: String) -> Result<Vec<GapReportSummary>, Stri
     Ok(entries
         .into_iter()
         .filter(|entry| entry.status == DraftStatus::Accepted && entry.promoted_to.is_some())
-        .map(|entry| GapReportSummary {
-            has_baseline: baseline_path(&work, &entry.id).is_file(),
-            promoted_at: entry.updated_at.clone(),
-            draft_id: entry.id,
-            title: entry.title,
-            promoted_to: entry.promoted_to.unwrap_or_default(),
+        .map(|entry| {
+            let has_document = entry
+                .promoted_to
+                .as_deref()
+                .map(|path| promoted_doc_path(&work_path, path).is_ok())
+                .unwrap_or(false);
+            GapReportSummary {
+                has_baseline: baseline_path(&work, &entry.id).is_file(),
+                has_document,
+                promoted_at: entry.updated_at.clone(),
+                draft_id: entry.id,
+                title: entry.title,
+                promoted_to: entry.promoted_to.unwrap_or_default(),
+            }
         })
         .collect())
 }
@@ -1242,6 +1251,14 @@ mod tests {
         assert_eq!(first.promoted_at, "2026-07-02T00:00:00Z");
         let second = rows.iter().find(|row| row.draft_id == "draft-rep-2").unwrap();
         assert!(!second.has_baseline);
+
+        // The baseline can survive a moved/trashed promoted document. The row
+        // stays visible so the UI can offer a guarded relink instead of
+        // attempting analysis and surfacing a raw backend error.
+        fs::remove_file(temp.path().join("notes/a.md")).unwrap();
+        let rows = gap_reports_list(work).unwrap();
+        let first = rows.iter().find(|row| row.draft_id == "draft-rep-1").unwrap();
+        assert!(!first.has_document);
     }
 
     // === Feedback digest (mirrors src/__tests__/gapAnalysis.test.ts) ===

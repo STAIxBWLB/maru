@@ -1076,6 +1076,7 @@ export interface GapReportSummary {
   promotedTo: string;
   promotedAt: string;
   hasBaseline: boolean;
+  hasDocument: boolean;
 }
 
 // === Knowledge-graph reference mapping (kg_refs) ===

@@ -8389,7 +8389,7 @@ function MainApp() {
           />
         ) : surfaceMode === "drafts" ? (
           <LazyDraftsPane
-            workPath={inboxWorkspacePath}
+            workPath={primaryWorkspacePath}
             skills={skills}
             defaultRuntime={maruSettings.ai.defaultRuntime}
             agents={agents}
@@ -8408,7 +8408,7 @@ function MainApp() {
           />
         ) : surfaceMode === "gap" ? (
           <LazyGapPane
-            workPath={inboxWorkspacePath}
+            workPath={primaryWorkspacePath}
             initialDraftId={gapDraftId}
             onConsumeInitialDraftId={() => setGapDraftId(null)}
               />

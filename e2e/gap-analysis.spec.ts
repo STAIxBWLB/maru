@@ -12,6 +12,7 @@ function seedBackend(page: import("@playwright/test").Page) {
         promotedTo: "docs/weekly.md",
         promotedAt: "2026-07-28T09:00:00Z",
         hasBaseline: true,
+        hasDocument: true,
       },
       {
         draftId: "d-parser",
@@ -19,6 +20,7 @@ function seedBackend(page: import("@playwright/test").Page) {
         promotedTo: "docs/parser.md",
         promotedAt: "2026-07-20T09:00:00Z",
         hasBaseline: false,
+        hasDocument: false,
       },
     ];
     const report = {
@@ -124,8 +126,31 @@ function seedBackend(page: import("@playwright/test").Page) {
       },
       gap_analyze: (args) => {
         record("gap_analyze", args);
-        if (args.draftId !== report.draftId) throw new Error("gap_not_promoted");
-        return JSON.parse(JSON.stringify(report));
+        if (args.draftId !== report.draftId && args.draftId !== "d-parser") {
+          throw new Error("gap_not_promoted");
+        }
+        return {
+          ...JSON.parse(JSON.stringify(report)),
+          draftId: String(args.draftId),
+          draftTitle: args.draftId === "d-parser" ? "파서 리팩터링" : report.draftTitle,
+          promotedTo:
+            args.draftId === "d-parser"
+              ? String(reports.find((entry) => entry.draftId === "d-parser")?.promotedTo)
+              : report.promotedTo,
+        };
+      },
+      drafts_relink_promoted: (args) => {
+        record("drafts_relink_promoted", args);
+        const entry = reports.find((candidate) => candidate.draftId === args.id);
+        if (!entry || !args.targetPath) throw new Error("drafts_relink_target_missing");
+        entry.promotedTo = String(args.targetPath);
+        entry.hasDocument = true;
+        const draft = drafts.find((candidate) => candidate.id === args.id);
+        return {
+          ...(draft ?? {}),
+          promotedTo: entry.promotedTo,
+          updatedAt: "2026-07-30T03:00:00Z",
+        };
       },
       gap_append_log: (args) => {
         record("gap_append_log", args);
@@ -207,7 +232,10 @@ test("lists analyzable documents and renders the diff with type badges", async (
   await expect(list.getByText("주간 보고서 검토")).toBeVisible();
   await expect(list.getByText("파서 리팩터링")).toBeVisible();
   await expect(list.locator(".gap-baseline-chip.ok")).toHaveCount(1);
-  await expect(list.locator(".gap-baseline-chip.missing")).toHaveCount(1);
+  // The parser row has both a missing baseline and a missing promoted
+  // document, so both missing-state chips are visible.
+  await expect(list.locator(".gap-baseline-chip.missing")).toHaveCount(2);
+  await expect(list.getByText("문서 없음")).toBeVisible();
 
   await pane.locator(".gap-list-item", { hasText: "주간 보고서 검토" }).click();
 
@@ -265,6 +293,28 @@ test("filters hunks by type with the toggle chips", async ({ page }) => {
     .getByRole("button", { name: /직접 수정/ })
     .click();
   await expect(diff.locator(".gap-type-direct-edit")).toHaveCount(1);
+});
+
+test("offers a relink flow for a missing promoted document", async ({ page }) => {
+  const pane = await openGapMode(page);
+  const missing = pane.locator(".gap-list-item", { hasText: "파서 리팩터링" });
+  await missing.click();
+
+  await expect(pane.locator('[data-testid="gap-relink-panel"]')).toBeVisible();
+  await expect(pane.getByText("문서 없음")).toBeVisible();
+  expect(await gapCalls(page, "gap_analyze")).toHaveLength(0);
+
+  await pane.locator('[data-testid="gap-relink-target"]').fill("docs/parser-recovered.md");
+  await pane.getByRole("button", { name: "다시 연결", exact: true }).click();
+
+  const relinkCalls = await gapCalls(page, "drafts_relink_promoted");
+  expect(relinkCalls).toHaveLength(1);
+  expect(relinkCalls[0].args).toMatchObject({
+    id: "d-parser",
+    targetPath: "docs/parser-recovered.md",
+  });
+  await expect(pane.locator(".gap-diff-table")).toBeVisible();
+  expect(await gapCalls(page, "gap_analyze")).toHaveLength(1);
 });
 
 test("shows distribution, trend, and day-grouped log entries", async ({ page }) => {

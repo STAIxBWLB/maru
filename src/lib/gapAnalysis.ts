@@ -9,6 +9,37 @@ import type {
   GapTypeCounts,
 } from "./types";
 
+/** Convert stable backend error codes into localized, user-facing guidance.
+ * Unknown errors remain visible to preserve diagnostics for newly introduced
+ * or environment-specific failures. */
+export function translateGapError(
+  message: string,
+  translate: (key: string) => string,
+): string {
+  const keys: Record<string, string> = {
+    gap_promoted_doc_missing: "gap.error.promotedDocMissing",
+    gap_baseline_missing: "gap.error.baselineMissing",
+    gap_not_promoted: "gap.error.notPromoted",
+    drafts_relink_not_promoted: "gap.error.relinkNotPromoted",
+    drafts_relink_target_missing: "gap.error.relinkTargetMissing",
+    drafts_promote_target_required: "gap.error.relinkTargetRequired",
+    drafts_promote_target_must_be_relative: "gap.error.relinkTargetRelative",
+    drafts_promote_target_managed: "gap.error.relinkTargetManaged",
+    drafts_promote_target_must_be_markdown: "gap.error.relinkTargetMarkdown",
+    drafts_not_found: "gap.error.draftNotFound",
+  };
+  const normalized = message.trim();
+  const code = normalized.split(":", 1)[0];
+  const key = keys[normalized] ?? keys[code];
+  if (normalized.startsWith("Document path escapes")) {
+    return translate("gap.error.relinkTargetContainment");
+  }
+  if (normalized.startsWith("Document belongs to registered workspace")) {
+    return translate("gap.error.relinkTargetOwner");
+  }
+  return key ? translate(key) : message;
+}
+
 export const GAP_HUNK_TYPES: GapHunkType[] = [
   "external-info",
   "direct-edit",

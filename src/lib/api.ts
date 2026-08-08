@@ -3118,6 +3118,24 @@ export async function promoteDraft(params: {
   return invoke<DraftEntry>("drafts_promote", args);
 }
 
+export async function draftsRelinkPromoted(params: {
+  workPath: string;
+  id: string;
+  targetPath: string;
+}): Promise<DraftEntry> {
+  const args = {
+    workPath: params.workPath,
+    id: params.id,
+    targetPath: params.targetPath,
+  };
+  if (!isTauri()) {
+    const override = await invokeE2EOverride<DraftEntry>("drafts_relink_promoted", args);
+    if (override) return override;
+    throw new Error("drafts_relink_not_found");
+  }
+  return invoke<DraftEntry>("drafts_relink_promoted", args);
+}
+
 // === Gap analysis ===
 
 export async function gapAnalyze(workPath: string, draftId: string): Promise<GapReport> {

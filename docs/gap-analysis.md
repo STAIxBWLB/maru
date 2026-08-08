@@ -7,6 +7,10 @@ in the AI's draft?" — and feeds the answer back into future draft prompts.
 Backend: `src-tauri/src/gap.rs`. Frontend: `src/components/gap/` (GapPane,
 GapLogPanel), `src/lib/gapAnalysis.ts` (pure helpers).
 
+Drafts and Gap Analysis always use the primary private workspace, even when a
+different workspace tab is focused. This keeps the scratchpad and its draft
+index in the workspace that owns them.
+
 ## Baseline
 
 `drafts_promote` freezes the draft body, byte for byte, to
@@ -16,9 +20,19 @@ GapLogPanel), `src/lib/gapAnalysis.ts` (pure helpers).
 through `resolve_inside_vault`, so a hand-edited index cannot redirect the
 read outside the workspace.
 
-`gap_reports_list` returns the analyzable set: accepted drafts with a
-`promotedTo`, each flagged `hasBaseline` so the UI can mark rows whose
-baseline was deleted.
+`gap_reports_list` returns the accepted drafts with a `promotedTo`, each flagged
+with both `hasBaseline` and `hasDocument`. A missing promoted document remains
+visible so Gap Analysis can offer recovery instead of attempting a diff that
+cannot succeed.
+
+When a promoted document has moved, choose the row marked **Document missing**
+and enter its current workspace-relative Markdown path in the relink panel.
+`drafts_relink_promoted` validates containment, ownership, and file type before
+updating only the index metadata. The frozen baseline is never rewritten, so
+the next analysis still measures edits against the original promoted bytes.
+Files also refuses to move a promoted target, or a directory containing one,
+to Trash until the draft is relinked or discarded. Other entries in the same
+Trash batch continue independently and return per-entry error outcomes.
 
 ## Diff
 
