@@ -14,6 +14,7 @@ import {
   gapTrend,
   gapTypeCountKey,
   groupGapLogByDay,
+  translateGapError,
 } from "../lib/gapAnalysis";
 import type { GapHunk, GapLogEntry } from "../lib/types";
 
@@ -276,5 +277,33 @@ describe("appendGapFeedbackDigest", () => {
   it("produces just the section for an empty prompt", () => {
     const result = appendGapFeedbackDigest("", "digest body");
     expect(result).toBe(`${GAP_FEEDBACK_SECTION_HEADER}\n\ndigest body`);
+  });
+});
+
+describe("translateGapError", () => {
+  const translate = (key: string) => `translated:${key}`;
+
+  it("localizes stable gap and relink error codes", () => {
+    expect(translateGapError("gap_promoted_doc_missing", translate)).toBe(
+      "translated:gap.error.promotedDocMissing",
+    );
+    expect(translateGapError("drafts_relink_target_missing", translate)).toBe(
+      "translated:gap.error.relinkTargetMissing",
+    );
+    expect(
+      translateGapError(
+        "drafts_promote_target_managed: target must be a vault document",
+        translate,
+      ),
+    ).toBe("translated:gap.error.relinkTargetManaged");
+    expect(
+      translateGapError("Document path escapes the selected workspace", translate),
+    ).toBe("translated:gap.error.relinkTargetContainment");
+  });
+
+  it("keeps unknown errors visible for diagnostics", () => {
+    expect(translateGapError("filesystem unavailable", translate)).toBe(
+      "filesystem unavailable",
+    );
   });
 });

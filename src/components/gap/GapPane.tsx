@@ -1,11 +1,18 @@
 import { FileDiff, RefreshCcw, Save } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { gapAnalyze, gapAppendLog, gapLogList, gapReportsList } from "../../lib/api";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  draftsRelinkPromoted,
+  gapAnalyze,
+  gapAppendLog,
+  gapLogList,
+  gapReportsList,
+} from "../../lib/api";
 import { formatRelativeDate } from "../../lib/document";
 import {
   filterGapHunks,
   GAP_HUNK_TYPES,
   gapTypeCountKey,
+  translateGapError,
 } from "../../lib/gapAnalysis";
 import { setError } from "../../lib/errorStore";
 import { useTranslation } from "../../lib/i18n";
@@ -47,6 +54,15 @@ export function GapPane({
   const [expandedEqual, setExpandedEqual] = useState<ReadonlySet<number>>(new Set());
   const [savingLog, setSavingLog] = useState(false);
   const [logSaved, setLogSaved] = useState(false);
+  const [relinkTarget, setRelinkTarget] = useState("");
+  const [relinking, setRelinking] = useState(false);
+  const [relinkSaved, setRelinkSaved] = useState(false);
+  const initialConsumedRef = useRef(false);
+
+  const selectedEntry = useMemo(
+    () => reports.find((entry) => entry.draftId === selectedId) ?? null,
+    [reports, selectedId],
+  );
 
   const refreshReports = useCallback(async () => {
     if (!workPath) {
@@ -57,13 +73,13 @@ export function GapPane({
     try {
       setReports(await gapReportsList(workPath));
     } catch (error) {
-      const message = errorMessage(error);
+      const message = translateGapError(errorMessage(error), t);
       setLocalError(message);
       setError(message);
     } finally {
       setReportsLoading(false);
     }
-  }, [workPath]);
+  }, [t, workPath]);
 
   const refreshLog = useCallback(async () => {
     if (!workPath) {
@@ -74,13 +90,13 @@ export function GapPane({
     try {
       setLogEntries(await gapLogList(workPath, 200));
     } catch (error) {
-      const message = errorMessage(error);
+      const message = translateGapError(errorMessage(error), t);
       setLocalError(message);
       setError(message);
     } finally {
       setLogLoading(false);
     }
-  }, [workPath]);
+  }, [t, workPath]);
 
   const analyze = useCallback(
     async (draftId: string) => {
@@ -93,15 +109,31 @@ export function GapPane({
       try {
         setReport(await gapAnalyze(workPath, draftId));
       } catch (error) {
-        const message = errorMessage(error);
+        const message = translateGapError(errorMessage(error), t);
         setLocalError(message);
         setError(message);
       } finally {
         setAnalyzing(false);
       }
     },
-    [workPath],
+    [t, workPath],
   );
+
+  const selectReport = useCallback((draftId: string) => {
+    const entry = reports.find((candidate) => candidate.draftId === draftId);
+    setSelectedId(draftId);
+    setRelinkTarget(entry?.promotedTo ?? "");
+    setRelinkSaved(false);
+    setReport(null);
+    setLogSaved(false);
+    setLocalError(null);
+    setExpandedEqual(new Set());
+    if (!entry || !entry.hasDocument) {
+      setAnalyzing(false);
+      return;
+    }
+    void analyze(draftId);
+  }, [analyze, reports]);
 
   useEffect(() => {
     setSelectedId(null);
@@ -111,22 +143,15 @@ export function GapPane({
     void refreshLog();
   }, [refreshReports, refreshLog]);
 
-  // Consume the initial selection handed over from the Drafts pane exactly
-  // once per mount (the pane remounts whenever gap mode is re-entered). The
-  // refresh effect above clears the selection first, so re-apply it here —
-  // state updates flush in effect order, leaving the handoff id selected.
+  // Consume the initial selection handed over from the Drafts pane after the
+  // summary list is available. Missing promoted documents intentionally stop
+  // at the relink panel and never invoke gap_analyze.
   useEffect(() => {
-    if (!initialDraftId) return;
+    if (!initialDraftId || initialConsumedRef.current || reports.length === 0) return;
+    initialConsumedRef.current = true;
     onConsumeInitialDraftId?.();
-    setSelectedId(initialDraftId);
-    void analyze(initialDraftId);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const selectReport = (draftId: string) => {
-    setSelectedId(draftId);
-    void analyze(draftId);
-  };
+    selectReport(initialDraftId);
+  }, [initialDraftId, onConsumeInitialDraftId, reports.length, selectReport]);
 
   const toggleType = (type: GapHunkType) => {
     // Expansion indexes track the filtered list, so a filter change would
@@ -158,11 +183,34 @@ export function GapPane({
       setLogSaved(true);
       await refreshLog();
     } catch (error) {
-      const message = errorMessage(error);
+      const message = translateGapError(errorMessage(error), t);
       setLocalError(message);
       setError(message);
     } finally {
       setSavingLog(false);
+    }
+  };
+
+  const relinkSelected = async () => {
+    if (!workPath || !selectedEntry || selectedEntry.hasDocument || !relinkTarget.trim()) return;
+    setRelinking(true);
+    setRelinkSaved(false);
+    setLocalError(null);
+    try {
+      await draftsRelinkPromoted({
+        workPath,
+        id: selectedEntry.draftId,
+        targetPath: relinkTarget,
+      });
+      setRelinkSaved(true);
+      await refreshReports();
+      await analyze(selectedEntry.draftId);
+    } catch (error) {
+      const message = translateGapError(errorMessage(error), t);
+      setLocalError(message);
+      setError(message);
+    } finally {
+      setRelinking(false);
     }
   };
 
@@ -200,6 +248,11 @@ export function GapPane({
           <span>{t("gap.log.saved")}</span>
         </StatusBanner>
       ) : null}
+      {relinkSaved ? (
+        <StatusBanner tone="success">
+          <span>{t("gap.relink.success")}</span>
+        </StatusBanner>
+      ) : null}
 
       <div className="gap-body">
         <div className="gap-list-col">
@@ -235,6 +288,11 @@ export function GapPane({
                   >
                     {entry.hasBaseline ? t("gap.list.baseline") : t("gap.list.noBaseline")}
                   </span>
+                  {!entry.hasDocument ? (
+                    <span className="gap-baseline-chip missing">
+                      {t("gap.list.missingDoc")}
+                    </span>
+                  ) : null}
                   <span className="gap-list-updated">
                     {formatRelativeDate(entry.promotedAt, locale)}
                   </span>
@@ -245,7 +303,30 @@ export function GapPane({
         </div>
 
         <div className="gap-diff-col">
-          {analyzing ? (
+          {selectedEntry && !selectedEntry.hasDocument ? (
+            <div className="gap-relink-panel" data-testid="gap-relink-panel">
+              <h3>{t("gap.relink.title")}</h3>
+              <p>{t("gap.relink.hint")}</p>
+              <label>
+                <span>{t("gap.relink.target")}</span>
+                <input
+                  data-testid="gap-relink-target"
+                  type="text"
+                  value={relinkTarget}
+                  placeholder={selectedEntry.promotedTo}
+                  onChange={(event) => setRelinkTarget(event.target.value)}
+                />
+              </label>
+              <Button
+                type="button"
+                size="sm"
+                disabled={relinking || !relinkTarget.trim()}
+                onClick={() => void relinkSelected()}
+              >
+                {relinking ? t("gap.relink.relinking") : t("gap.relink.confirm")}
+              </Button>
+            </div>
+          ) : analyzing ? (
             <div className="gap-diff-empty" role="status">
               {t("gap.diff.loading")}
             </div>

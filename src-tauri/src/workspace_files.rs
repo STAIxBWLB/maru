@@ -340,22 +340,44 @@ pub fn trash_workspace_entries(
     vault_path: String,
     target_paths: Vec<String>,
 ) -> Result<Vec<WorkspaceMutationOutcome>, String> {
-    let vault = normalize_existing_dir(&vault_path)?;
+    trash_workspace_entries_with(&vault_path, target_paths, move_path_to_system_trash)
+}
+
+fn trash_workspace_entries_with<F>(
+    vault_path: &str,
+    target_paths: Vec<String>,
+    mut trasher: F,
+) -> Result<Vec<WorkspaceMutationOutcome>, String>
+where
+    F: FnMut(&Path) -> Result<(), String>,
+{
+    let vault = normalize_existing_dir(vault_path)?;
     assert_files_mutation_allowed(&vault, WorkspaceWriteAction::Delete)?;
+    // Fail closed: if draft ownership metadata cannot be read or validated,
+    // do not risk deleting a document that may still back an accepted draft.
+    let promoted_targets = crate::drafts::promoted_doc_targets(&vault)?;
     let mut outcomes = Vec::with_capacity(target_paths.len());
     for raw_target in target_paths {
         let outcome = match resolve_workspace_entry(&vault, &raw_target) {
             Ok(target) if target != vault => {
                 let name = entry_name(&target).unwrap_or_else(|_| raw_target.clone());
-                match move_path_to_system_trash(&target) {
-                    Ok(()) => WorkspaceMutationOutcome {
-                        source_path: Some(target.to_string_lossy().to_string()),
-                        target_path: None,
+                if promoted_target_is_protected(&target, &promoted_targets) {
+                    error_outcome(
+                        Some(&target),
                         name,
-                        status: WorkspaceMutationStatus::Done,
-                        error: None,
-                    },
-                    Err(err) => error_outcome(Some(&target), name, err),
+                        "promoted draft target - relink or discard the draft first".to_string(),
+                    )
+                } else {
+                    match trasher(&target) {
+                        Ok(()) => WorkspaceMutationOutcome {
+                            source_path: Some(target.to_string_lossy().to_string()),
+                            target_path: None,
+                            name,
+                            status: WorkspaceMutationStatus::Done,
+                            error: None,
+                        },
+                        Err(err) => error_outcome(Some(&target), name, err),
+                    }
                 }
             }
             Ok(_) => error_outcome(
@@ -368,6 +390,12 @@ pub fn trash_workspace_entries(
         outcomes.push(outcome);
     }
     Ok(outcomes)
+}
+
+fn promoted_target_is_protected(target: &Path, promoted_targets: &[PathBuf]) -> bool {
+    promoted_targets
+        .iter()
+        .any(|protected| protected == target || protected.starts_with(target))
 }
 
 #[tauri::command]
@@ -1550,5 +1578,82 @@ mod tests {
             fs::read(target_dir.path().join("bundle/a.txt")).unwrap(),
             b"a"
         );
+    }
+
+    #[test]
+    fn trash_guard_protects_promoted_target_and_parent_but_keeps_batch_partial() {
+        let workspace = TempDir::new().unwrap();
+        write_file(workspace.path(), "notes/protected.md", b"promoted");
+        write_file(workspace.path(), "notes/other.md", b"unrelated");
+        let index = workspace.path().join(".maru/drafts/index.json");
+        fs::create_dir_all(index.parent().unwrap()).unwrap();
+        fs::write(
+            &index,
+            serde_json::to_vec(&vec![serde_json::json!({
+                "id": "draft-protected",
+                "kind": "task",
+                "title": "Protected",
+                "status": "accepted",
+                "source": "kimi",
+                "originRefs": [],
+                "bodyPath": "draft-protected.md",
+                "promotedTo": "notes/protected.md",
+                "createdAt": "2026-08-08T00:00:00Z",
+                "updatedAt": "2026-08-08T00:00:00Z"
+            })])
+            .unwrap(),
+        )
+        .unwrap();
+
+        let mut trashed = Vec::new();
+        let outcomes = trash_workspace_entries_with(
+            &workspace.path().to_string_lossy(),
+            vec![
+                "notes/protected.md".to_string(),
+                "notes".to_string(),
+                "notes/other.md".to_string(),
+            ],
+            |path| {
+                trashed.push(path.to_path_buf());
+                fs::remove_file(path).map_err(|err| err.to_string())
+            },
+        )
+        .unwrap();
+
+        assert_eq!(outcomes.len(), 3);
+        assert_eq!(outcomes[0].status, WorkspaceMutationStatus::Error);
+        assert!(outcomes[0]
+            .error
+            .as_deref()
+            .unwrap()
+            .contains("promoted draft target"));
+        assert_eq!(outcomes[1].status, WorkspaceMutationStatus::Error);
+        assert_eq!(outcomes[2].status, WorkspaceMutationStatus::Done);
+        let canonical_workspace = workspace.path().canonicalize().unwrap();
+        assert_eq!(trashed, vec![canonical_workspace.join("notes/other.md")]);
+        assert!(canonical_workspace.join("notes/protected.md").is_file());
+    }
+
+    #[test]
+    fn trash_guard_fails_closed_when_draft_index_is_invalid() {
+        let workspace = TempDir::new().unwrap();
+        write_file(workspace.path(), "notes/protected.md", b"promoted");
+        let index = workspace.path().join(".maru/drafts/index.json");
+        fs::create_dir_all(index.parent().unwrap()).unwrap();
+        fs::write(&index, b"{not-json").unwrap();
+
+        let mut trashed = Vec::new();
+        let result = trash_workspace_entries_with(
+            &workspace.path().to_string_lossy(),
+            vec!["notes/protected.md".to_string()],
+            |path| {
+                trashed.push(path.to_path_buf());
+                Ok(())
+            },
+        );
+
+        assert!(result.is_err());
+        assert!(trashed.is_empty());
+        assert!(workspace.path().join("notes/protected.md").is_file());
     }
 }

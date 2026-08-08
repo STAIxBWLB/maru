@@ -12,10 +12,10 @@ use crate::atomic_file::{write_atomic, write_atomic_create};
 use crate::approval::{require_approval, ApprovalState};
 use crate::scratchpad::{
     assert_no_symlink_components, assert_scratchpad_workspace_access, move_to_system_trash,
-    resolve_scratchpad_drafts_root, ScratchpadSource,
+    resolve_scratchpad_drafts_root, resolve_scratchpad_root, ScratchpadSource,
 };
 use crate::tasks::{CreateTaskDraft, TaskBucket};
-use crate::vault::{is_document_extension, resolve_inside_vault, slugify};
+use crate::vault::{is_document_extension, lexical_normalize, resolve_inside_vault, slugify};
 use crate::vault_list::{assert_document_owner, assert_maru_can_write, WorkspaceWriteAction};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
@@ -496,10 +496,13 @@ fn discard_impl(work_path: &str, id: &str) -> Result<DraftEntry, String> {
     Ok(entries[index].clone())
 }
 
-/// Resolve and validate the promote target for a vault document. The target
-/// must be a relative markdown path inside the workspace, outside the
-/// scratchpad and .maru managed areas, and must not already exist.
-fn resolve_document_target(work_path: &str, target_path: &str) -> Result<(PathBuf, String), String> {
+/// Validate a vault document target without requiring it to exist. This shared
+/// boundary is used by both promotion (where the target must be new) and
+/// relinking (where the target must already be a regular file).
+fn validate_document_target(
+    work_path: &str,
+    target_path: &str,
+) -> Result<(PathBuf, String), String> {
     let trimmed = target_path.trim();
     if trimmed.is_empty() {
         return Err("drafts_promote_target_required".to_string());
@@ -508,14 +511,20 @@ fn resolve_document_target(work_path: &str, target_path: &str) -> Result<(PathBu
     if raw.is_absolute() {
         return Err("drafts_promote_target_must_be_relative".to_string());
     }
-    let relative = crate::vault::lexical_normalize(raw);
-    let first = relative.components().next().and_then(|component| match component {
-        Component::Normal(value) => value.to_str().map(str::to_string),
-        _ => None,
-    });
-    match first.as_deref() {
+    let relative = lexical_normalize(raw);
+    let first = relative
+        .components()
+        .next()
+        .and_then(|component| match component {
+            Component::Normal(value) => value.to_str().map(str::to_string),
+            _ => None,
+        });
+    let first_normalized = first.as_deref().map(str::to_ascii_lowercase);
+    match first_normalized.as_deref() {
         Some("scratchpad") | Some(".maru") => {
-            return Err("drafts_promote_target_managed: target must be a vault document".to_string())
+            return Err(
+                "drafts_promote_target_managed: target must be a vault document".to_string(),
+            )
         }
         None => return Err("drafts_promote_target_required".to_string()),
         _ => {}
@@ -524,15 +533,130 @@ fn resolve_document_target(work_path: &str, target_path: &str) -> Result<(PathBu
         .extension()
         .and_then(|value| value.to_str())
         .unwrap_or("");
-    if !is_document_extension(extension) || matches!(extension.to_ascii_lowercase().as_str(), "html" | "htm") {
+    if !is_document_extension(extension)
+        || matches!(extension.to_ascii_lowercase().as_str(), "html" | "htm")
+    {
         return Err("drafts_promote_target_must_be_markdown".to_string());
     }
     let dest = resolve_inside_vault(work_path, &path_slashes(&relative))?;
+    reject_managed_target_alias(Path::new(work_path), &dest)?;
     assert_document_owner(work_path, &dest)?;
+    Ok((dest, path_slashes(&relative)))
+}
+
+/// Resolve the nearest existing ancestor so a symlink alias to a managed root
+/// cannot bypass the lexical `scratchpad` / `.maru` prefix check. Unrelated
+/// workspace symlinks remain valid document locations.
+fn canonicalize_from_existing_ancestor(path: &Path) -> Option<PathBuf> {
+    let mut ancestor = path;
+    let mut suffix = Vec::new();
+    while !ancestor.exists() {
+        suffix.push(ancestor.file_name()?.to_os_string());
+        ancestor = ancestor.parent()?;
+    }
+    let mut resolved = ancestor.canonicalize().ok()?;
+    for component in suffix.iter().rev() {
+        resolved.push(component);
+    }
+    Some(resolved)
+}
+
+fn comparable_managed_path(path: &Path) -> String {
+    let value = path_slashes(path);
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
+    {
+        value.to_ascii_lowercase()
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        value
+    }
+}
+
+fn path_is_same_or_descendant(path: &Path, root: &Path) -> bool {
+    let path = comparable_managed_path(path);
+    let root = comparable_managed_path(root);
+    path == root || path.starts_with(&format!("{root}/"))
+}
+
+fn reject_managed_target_alias(work: &Path, target: &Path) -> Result<(), String> {
+    let managed_roots = [work.join(".maru"), resolve_scratchpad_root(work)?];
+    if managed_roots
+        .iter()
+        .any(|managed| path_is_same_or_descendant(target, managed))
+    {
+        return Err("drafts_promote_target_managed: target must be a vault document".to_string());
+    }
+    let Some(resolved_target) = canonicalize_from_existing_ancestor(target) else {
+        return Ok(());
+    };
+    for managed in managed_roots {
+        let Ok(resolved_managed) = managed.canonicalize() else {
+            continue;
+        };
+        if resolved_target.starts_with(resolved_managed) {
+            return Err(
+                "drafts_promote_target_managed: target must be a vault document".to_string(),
+            );
+        }
+    }
+    Ok(())
+}
+
+/// Resolve and validate the promote target for a vault document. The target
+/// must be a relative markdown path inside the workspace, outside the
+/// scratchpad and .maru managed areas, and must not already exist.
+fn resolve_document_target(
+    work_path: &str,
+    target_path: &str,
+) -> Result<(PathBuf, String), String> {
+    let (dest, relative) = validate_document_target(work_path, target_path)?;
     if dest.exists() {
         return Err("drafts_promote_target_exists".to_string());
     }
-    Ok((dest, path_slashes(&relative)))
+    Ok((dest, relative))
+}
+
+/// Return the confirmed-vault paths owned by accepted drafts. A stale target
+/// remains protected even after it is moved to Trash: the user must relink or
+/// discard the draft before reusing its path or containing directory.
+pub(crate) fn promoted_doc_targets(work: &Path) -> Result<Vec<PathBuf>, String> {
+    let work_path = work.to_string_lossy();
+    let path = index_path(work);
+    let raw = match fs::read_to_string(&path) {
+        Ok(raw) => Some(raw),
+        Err(read_err) if read_err.kind() == std::io::ErrorKind::NotFound => {
+            match fs::symlink_metadata(&path) {
+                Err(metadata_err) if metadata_err.kind() == std::io::ErrorKind::NotFound => None,
+                Err(metadata_err) => {
+                    return Err(format!("Cannot inspect {}: {metadata_err}", path.display()))
+                }
+                Ok(_) => return Err(format!("Cannot read {}: {read_err}", path.display())),
+            }
+        }
+        Err(err) => return Err(format!("Cannot read {}: {err}", path.display())),
+    };
+    let entries: Vec<DraftEntry> = if let Some(raw) = raw {
+        serde_json::from_str(&raw).map_err(|err| {
+            format!(
+                "Cannot parse protected draft index {}: {err}",
+                path.display()
+            )
+        })?
+    } else {
+        Vec::new()
+    };
+    entries
+        .into_iter()
+        .filter(|entry| entry.status == DraftStatus::Accepted && entry.promoted_to.is_some())
+        .map(|entry| {
+            let target = entry
+                .promoted_to
+                .as_deref()
+                .ok_or_else(|| "drafts_promoted_target_missing".to_string())?;
+            validate_document_target(&work_path, target).map(|(path, _)| path)
+        })
+        .collect()
 }
 
 fn promote_impl(
@@ -710,6 +834,43 @@ pub fn drafts_promote(
 ) -> Result<DraftEntry, String> {
     require_approval(&approvals, approval_id, DRAFTS_PROMOTE_KIND)?;
     let entry = promote_impl(&work_path, &id, target, target_path.as_deref().unwrap_or(""))?;
+    emit_drafts_changed(&app, &work_path, Some(id));
+    Ok(entry)
+}
+
+fn relink_promoted_impl(
+    work_path: &str,
+    id: &str,
+    target_path: &str,
+) -> Result<DraftEntry, String> {
+    assert_scratchpad_workspace_access(Path::new(&work_path))?;
+    assert_maru_can_write(&work_path, WorkspaceWriteAction::Modify)?;
+    validate_draft_id(id)?;
+    let work = crate::vault::normalize_existing_dir(&work_path)?;
+    let mut entries = load_index(&work)?;
+    let index = find_entry(&entries, id).ok_or_else(|| "drafts_not_found".to_string())?;
+    let entry = &entries[index];
+    if entry.status != DraftStatus::Accepted || entry.promoted_to.is_none() {
+        return Err("drafts_relink_not_promoted".to_string());
+    }
+    let (target, relative) = validate_document_target(work_path, target_path)?;
+    if !target.is_file() {
+        return Err("drafts_relink_target_missing".to_string());
+    }
+    entries[index].promoted_to = Some(relative);
+    entries[index].updated_at = Utc::now().to_rfc3339();
+    save_index(&work, &entries)?;
+    Ok(entries[index].clone())
+}
+
+#[tauri::command(async)]
+pub fn drafts_relink_promoted(
+    app: AppHandle,
+    work_path: String,
+    id: String,
+    target_path: String,
+) -> Result<DraftEntry, String> {
+    let entry = relink_promoted_impl(&work_path, &id, &target_path)?;
     emit_drafts_changed(&app, &work_path, Some(id));
     Ok(entry)
 }
@@ -944,7 +1105,9 @@ mod tests {
         let (_temp, work) = workspace();
         for bad in [
             "scratchpad/drafts/x.md",
+            "SCRATCHPAD/drafts/x.md",
             ".maru/x.md",
+            ".MARU/x.md",
             "../escape.md",
             "/abs/path.md",
             "notes/page.html",
@@ -955,6 +1118,150 @@ mod tests {
                 "target {bad} must be rejected"
             );
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn promote_document_rejects_symlink_alias_to_managed_root() {
+        use std::os::unix::fs::symlink;
+
+        let (temp, work) = workspace();
+        let alias = temp.path().join("managed-alias");
+        symlink(temp.path().join(".maru"), &alias).unwrap();
+        let entry = create_task_draft(&work, "Managed alias guard");
+        let error = promote_impl(
+            &work,
+            &entry.id,
+            DraftPromoteTarget::Document,
+            "managed-alias/nested/x.md",
+        )
+        .unwrap_err();
+        assert!(error.starts_with("drafts_promote_target_managed"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn promote_document_keeps_unrelated_workspace_symlink_mounts() {
+        use std::os::unix::fs::symlink;
+
+        let (temp, work) = workspace();
+        let mounted = TempDir::new().unwrap();
+        symlink(mounted.path(), temp.path().join("mounted")).unwrap();
+        let entry = create_task_draft(&work, "Mounted vault document");
+        let promoted = promote_impl(
+            &work,
+            &entry.id,
+            DraftPromoteTarget::Document,
+            "mounted/document.md",
+        )
+        .unwrap();
+
+        assert_eq!(promoted.promoted_to.as_deref(), Some("mounted/document.md"));
+        assert!(mounted.path().join("document.md").is_file());
+    }
+
+    #[test]
+    fn promote_document_rejects_configured_scratchpad_root() {
+        let (temp, work) = workspace();
+        let custom_root = temp.path().join("private-notes");
+        fs::create_dir_all(&custom_root).unwrap();
+        fs::write(
+            temp.path().join("workspace.config.yaml"),
+            format!("paths:\n  scratchpad: {}\n", custom_root.display()),
+        )
+        .unwrap();
+        let entry = create_task_draft(&work, "Configured root guard");
+        let error = promote_impl(
+            &work,
+            &entry.id,
+            DraftPromoteTarget::Document,
+            "private-notes/document.md",
+        )
+        .unwrap_err();
+
+        assert!(error.starts_with("drafts_promote_target_managed"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn promote_document_rejects_alias_to_configured_scratchpad_root() {
+        use std::os::unix::fs::symlink;
+
+        let (temp, work) = workspace();
+        let custom_root = temp.path().join("private-notes");
+        fs::create_dir_all(&custom_root).unwrap();
+        fs::write(
+            temp.path().join("workspace.config.yaml"),
+            format!("paths:\n  scratchpad: {}\n", custom_root.display()),
+        )
+        .unwrap();
+        symlink(&custom_root, temp.path().join("private-alias")).unwrap();
+        let entry = create_task_draft(&work, "Configured alias guard");
+        let error = promote_impl(
+            &work,
+            &entry.id,
+            DraftPromoteTarget::Document,
+            "private-alias/document.md",
+        )
+        .unwrap_err();
+
+        assert!(error.starts_with("drafts_promote_target_managed"));
+    }
+
+    #[test]
+    fn relink_promoted_document_preserves_baseline_and_restores_analysis() {
+        let (temp, work) = workspace();
+        let entry = create_task_draft(&work, "Relink me");
+        let promoted = promote_impl(
+            &work,
+            &entry.id,
+            DraftPromoteTarget::Document,
+            "notes/promoted.md",
+        )
+        .unwrap();
+        let baseline_path = temp
+            .path()
+            .join(".maru/drafts")
+            .join(&entry.id)
+            .join("baseline.md");
+        let baseline = fs::read(&baseline_path).unwrap();
+        fs::rename(
+            temp.path().join(promoted.promoted_to.as_deref().unwrap()),
+            temp.path().join("notes/recovered.md"),
+        )
+        .unwrap();
+
+        let relinked = relink_promoted_impl(&work, &entry.id, "notes/recovered.md").unwrap();
+        assert_eq!(relinked.promoted_to.as_deref(), Some("notes/recovered.md"));
+        assert_eq!(fs::read(&baseline_path).unwrap(), baseline);
+        let report = crate::gap::gap_analyze(work, entry.id).unwrap();
+        assert_eq!(report.promoted_to, "notes/recovered.md");
+        assert_eq!(report.summary.total_hunks, 0);
+    }
+
+    #[test]
+    fn relink_promoted_document_requires_existing_markdown_file() {
+        let (_temp, work) = workspace();
+        let entry = create_task_draft(&work, "Relink target validation");
+        assert_eq!(
+            relink_promoted_impl(&work, &entry.id, "notes/missing.md").unwrap_err(),
+            "drafts_relink_not_promoted"
+        );
+        let promoted = promote_impl(
+            &work,
+            &entry.id,
+            DraftPromoteTarget::Document,
+            "notes/promoted.md",
+        )
+        .unwrap();
+        assert_eq!(
+            relink_promoted_impl(&work, &promoted.id, "notes/missing.md").unwrap_err(),
+            "drafts_relink_target_missing"
+        );
+        assert!(
+            relink_promoted_impl(&work, &promoted.id, "notes/recovered.txt").is_err(),
+            "non-Markdown targets must be rejected"
+        );
     }
 
     #[test]
