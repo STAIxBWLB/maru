@@ -131,7 +131,6 @@ import {
   scanInboxProcessedItems,
   scanInboxProcessedSnapshot,
   scanWorkspaceEntries,
-  scanVault,
   setActiveWorkspaceRoot,
   stageGmailItems,
   stageInboxDropFiles,
@@ -139,11 +138,9 @@ import {
   stageOutlookItems,
   stageTelegramItems,
   startInboxWatcher,
-  startVaultWatcher,
   startTelegramPolling,
   stopAiMission,
   stopInboxWatcher,
-  stopVaultWatcher,
   stopTelegramPolling,
   telegramPollingStatus,
   vaultGraphRoot,
@@ -228,7 +225,6 @@ import {
   type StoredTabs,
 } from "./lib/editorTabsStore";
 import {
-  ALL_DOCUMENTS_FILTER,
   buildDocumentIndex,
   countDocumentFilter,
   documentFilterDefaultDocType,
@@ -336,7 +332,6 @@ import type {
   ProviderAuthStatus,
   VaultEntry,
   WorkspaceFileEntry,
-  WorkspaceEntryNode,
   WorkspaceMutationOutcome,
   WorkspaceRegistry,
   WorkspaceRootEntry,
@@ -423,8 +418,40 @@ import {
   shouldLazyScanWorkspaceFiles,
   workspaceFileScanPaneMode,
   workspaceFilesScanStatusAfterFailure,
-  type WorkspaceFilesScanStatus,
 } from "./lib/vaultStartup";
+// Workspace system: external store (src/lib/workspaceStore.ts). Slices
+// subscribe via useSyncExternalStore; orchestrators read the current state at
+// call time with getWorkspaceStoreState() instead of capturing it in deps.
+import {
+  EMPTY_WORKSPACE_FILES_STATE,
+  EMPTY_WORKSPACE_STATE,
+  activateWorkspace,
+  getWorkspaceStoreState,
+  pruneCustomDocumentFilters,
+  removeWorkspaceState,
+  rescanWorkspaceEntries,
+  setCollapsedFileFoldersByVisibility,
+  setCollapsedTreeFoldersByVisibility,
+  setDocumentFilterByVisibility,
+  setExplorerVisibility,
+  setFileQueryByVisibility,
+  setQueryByVisibility,
+  setSelectedFilePathsByWorkspace,
+  setWorkspaceRegistry,
+  updateWorkspaceFileState,
+  updateWorkspaceState,
+  useCollapsedFileFoldersByVisibility,
+  useCollapsedTreeFoldersByVisibility,
+  useDocumentFilterByVisibility,
+  useExplorerVisibility,
+  useFileQueryByVisibility,
+  useQueryByVisibility,
+  useSelectedFilePathsByWorkspace,
+  useVaultWatcherSync,
+  useWorkspaceFileStates,
+  useWorkspaceRegistry,
+  useWorkspaceStates,
+} from "./lib/workspaceStore";
 import {
   providerLabel,
   workspaceCan,
@@ -532,36 +559,6 @@ function favoriteLabelFromRelPath(relPath: string): string {
 function joinWorkspaceRelPath(workspacePath: string, relPath: string): string {
   return `${workspacePath.replace(/\/+$/, "")}/${relPath.replace(/^\/+/, "")}`;
 }
-
-interface WorkspaceEntriesState {
-  entries: VaultEntry[];
-  loading: boolean;
-  refreshing: boolean;
-  startupIoReady: boolean;
-}
-
-const EMPTY_WORKSPACE_STATE: WorkspaceEntriesState = {
-  entries: [],
-  loading: false,
-  refreshing: false,
-  startupIoReady: false,
-};
-
-interface WorkspaceFilesState {
-  entries: WorkspaceFileEntry[];
-  nodes: WorkspaceEntryNode[];
-  scanStatus: WorkspaceFilesScanStatus;
-  loading: boolean;
-  refreshing: boolean;
-}
-
-const EMPTY_WORKSPACE_FILES_STATE: WorkspaceFilesState = {
-  entries: [],
-  nodes: [],
-  scanStatus: "unscanned",
-  loading: false,
-  refreshing: false,
-};
 
 type AppMode = MaruAppMode;
 
@@ -838,19 +835,11 @@ function MainApp() {
     markStartup("app:mounted");
   }, []);
 
-  const [workspaceRegistry, setWorkspaceRegistry] = useState<WorkspaceRegistry>({
-    workspaces: [],
-    activeByVisibility: {
-      private: null,
-      public: null,
-    },
-    hiddenDefaults: [],
-  });
-  const [workspaceStates, setWorkspaceStates] = useState<Record<string, WorkspaceEntriesState>>({});
-  const [workspaceFileStates, setWorkspaceFileStates] = useState<Record<string, WorkspaceFilesState>>({});
+  const workspaceRegistry = useWorkspaceRegistry();
+  const workspaceStates = useWorkspaceStates();
+  const workspaceFileStates = useWorkspaceFileStates();
   const workspaceFileRequestSeqRef = useRef<Record<string, number>>({});
-  const [explorerVisibility, setExplorerVisibility] =
-    useState<WorkspaceVisibility>("private");
+  const explorerVisibility = useExplorerVisibility();
   // Editor tab system: external store (src/lib/editorTabsStore.ts). Slices
   // subscribe via useSyncExternalStore; orchestrators read the current state
   // at call time with getEditorTabsState() instead of capturing it in deps.
@@ -865,37 +854,12 @@ function MainApp() {
   const { activeTabId, leftActiveTabId, rightActiveTabId } = useActiveTabIds();
   const focusedEditorGroup = useFocusedEditorGroup();
   const [focusedWorkbenchSide, setFocusedWorkbenchSide] = useState<EditorGroupId>("left");
-  const [queryByVisibility, setQueryByVisibility] = useState<Record<WorkspaceVisibility, string>>({
-    private: "",
-    public: "",
-  });
-  const [fileQueryByVisibility, setFileQueryByVisibility] = useState<
-    Record<WorkspaceVisibility, string>
-  >({
-    private: "",
-    public: "",
-  });
-  const [documentFilterByVisibility, setDocumentFilterByVisibility] = useState<
-    Record<WorkspaceVisibility, DocumentFilter>
-  >({
-    private: ALL_DOCUMENTS_FILTER,
-    public: ALL_DOCUMENTS_FILTER,
-  });
-  const [collapsedTreeFoldersByVisibility, setCollapsedTreeFoldersByVisibility] = useState<
-    Record<WorkspaceVisibility, string[]>
-  >({
-    private: [],
-    public: [],
-  });
-  const [collapsedFileFoldersByVisibility, setCollapsedFileFoldersByVisibility] = useState<
-    Record<WorkspaceVisibility, string[]>
-  >({
-    private: [],
-    public: [],
-  });
-  const [selectedFilePathsByWorkspace, setSelectedFilePathsByWorkspace] = useState<
-    Record<string, string[]>
-  >({});
+  const queryByVisibility = useQueryByVisibility();
+  const fileQueryByVisibility = useFileQueryByVisibility();
+  const documentFilterByVisibility = useDocumentFilterByVisibility();
+  const collapsedTreeFoldersByVisibility = useCollapsedTreeFoldersByVisibility();
+  const collapsedFileFoldersByVisibility = useCollapsedFileFoldersByVisibility();
+  const selectedFilePathsByWorkspace = useSelectedFilePathsByWorkspace();
   const [fileQueue, setFileQueue] = useState<FileQueueItem[]>([]);
   const [selectedFileQueueItemIds, setSelectedFileQueueItemIds] = useState<string[]>([]);
   const [filesPaneFilters, setFilesPaneFilters] = useState<WorkspaceFilesPaneFilters>(
@@ -1301,18 +1265,7 @@ function MainApp() {
 
   useEffect(() => {
     const viewIds = new Set(maruSettings.ui.documentViews.map((view) => view.id));
-    setDocumentFilterByVisibility((current) => {
-      let changed = false;
-      const next = { ...current };
-      for (const visibility of ["private", "public"] as const) {
-        const filter = next[visibility];
-        if (filter.kind === "custom" && !viewIds.has(filter.viewId)) {
-          next[visibility] = { kind: "all" };
-          changed = true;
-        }
-      }
-      return changed ? next : current;
-    });
+    pruneCustomDocumentFilters(viewIds);
   }, [maruSettings.ui.documentViews]);
   const selectedFilePaths = useMemo(
     () =>
@@ -1726,32 +1679,6 @@ function MainApp() {
       }
     },
     [openTabsKeyForWorkspace],
-  );
-
-  const updateWorkspaceState = useCallback(
-    (path: string, patch: Partial<WorkspaceEntriesState>) => {
-      setWorkspaceStates((current) => ({
-        ...current,
-        [path]: {
-          ...(current[path] ?? EMPTY_WORKSPACE_STATE),
-          ...patch,
-        },
-      }));
-    },
-    [],
-  );
-
-  const updateWorkspaceFileState = useCallback(
-    (path: string, patch: Partial<WorkspaceFilesState>) => {
-      setWorkspaceFileStates((current) => ({
-        ...current,
-        [path]: {
-          ...(current[path] ?? EMPTY_WORKSPACE_FILES_STATE),
-          ...patch,
-        },
-      }));
-    },
-    [],
   );
 
   // Flush the live HTML WYSIWYG editor showing `tabId` (if any) so pending
@@ -2439,12 +2366,9 @@ function MainApp() {
   useEffect(() => {
     if (!settingsLoaded || collapsedTreeHydratedRef.current) return;
     collapsedTreeHydratedRef.current = true;
-    setCollapsedTreeFoldersByVisibility((current) => ({
-      ...current,
-      private: maruSettings.ui.documentTreeStateInitialized
-        ? maruSettings.ui.collapsedTreeFolders
-        : current.private,
-    }));
+    if (maruSettings.ui.documentTreeStateInitialized) {
+      setCollapsedTreeFoldersByVisibility("private", maruSettings.ui.collapsedTreeFolders);
+    }
   }, [
     maruSettings.ui.collapsedTreeFolders,
     maruSettings.ui.documentTreeStateInitialized,
@@ -2472,12 +2396,9 @@ function MainApp() {
   useEffect(() => {
     if (!settingsLoaded || collapsedFileHydratedRef.current) return;
     collapsedFileHydratedRef.current = true;
-    setCollapsedFileFoldersByVisibility((current) => ({
-      ...current,
-      private: maruSettings.ui.fileTreeStateInitialized
-        ? maruSettings.ui.collapsedFileFolders
-        : current.private,
-    }));
+    if (maruSettings.ui.fileTreeStateInitialized) {
+      setCollapsedFileFoldersByVisibility("private", maruSettings.ui.collapsedFileFolders);
+    }
   }, [
     maruSettings.ui.collapsedFileFolders,
     maruSettings.ui.fileTreeStateInitialized,
@@ -2493,10 +2414,7 @@ function MainApp() {
     if (!settingsLoaded || maruSettings.ui.documentTreeStateInitialized) return;
     if (!privateWorkspacePath || !privateWorkspaceState.startupIoReady) return;
     const collapsedFolders: string[] = [];
-    setCollapsedTreeFoldersByVisibility((current) => ({
-      ...current,
-      private: collapsedFolders,
-    }));
+    setCollapsedTreeFoldersByVisibility("private", collapsedFolders);
     updateSettings((current) => ({
       ...current,
       ui: {
@@ -2518,10 +2436,7 @@ function MainApp() {
     if (!privateWorkspacePath || explorerVisibility !== "private") return;
     if (explorerWorkspaceFilesState.scanStatus !== "ready") return;
     const collapsedFolders: string[] = [];
-    setCollapsedFileFoldersByVisibility((current) => ({
-      ...current,
-      private: collapsedFolders,
-    }));
+    setCollapsedFileFoldersByVisibility("private", collapsedFolders);
     updateSettings((current) => ({
       ...current,
       ui: {
@@ -2624,10 +2539,7 @@ function MainApp() {
 
   const setCollapsedTreeFolders = useCallback(
     (paths: string[]) => {
-      setCollapsedTreeFoldersByVisibility((current) => ({
-        ...current,
-        [explorerVisibility]: paths,
-      }));
+      setCollapsedTreeFoldersByVisibility(explorerVisibility, paths);
       if (explorerVisibility === "private") {
         updateSettings((current) => ({
           ...current,
@@ -2644,10 +2556,7 @@ function MainApp() {
 
   const setCollapsedFileFolders = useCallback(
     (paths: string[]) => {
-      setCollapsedFileFoldersByVisibility((current) => ({
-        ...current,
-        [explorerVisibility]: paths,
-      }));
+      setCollapsedFileFoldersByVisibility(explorerVisibility, paths);
       if (explorerVisibility === "private") {
         updateSettings((current) => ({
           ...current,
@@ -2664,36 +2573,21 @@ function MainApp() {
 
   const setExplorerQuery = useCallback(
     (next: string) => {
-      startExplorerTransition(() =>
-        setQueryByVisibility((current) => ({
-          ...current,
-          [explorerVisibility]: next,
-        })),
-      );
+      startExplorerTransition(() => setQueryByVisibility(explorerVisibility, next));
     },
     [explorerVisibility, startExplorerTransition],
   );
 
   const setWorkspaceFileQuery = useCallback(
     (next: string) => {
-      startExplorerTransition(() =>
-        setFileQueryByVisibility((current) => ({
-          ...current,
-          [explorerVisibility]: next,
-        })),
-      );
+      startExplorerTransition(() => setFileQueryByVisibility(explorerVisibility, next));
     },
     [explorerVisibility, startExplorerTransition],
   );
 
   const setExplorerDocumentFilter = useCallback(
     (next: DocumentFilter) => {
-      startExplorerTransition(() =>
-        setDocumentFilterByVisibility((current) => ({
-          ...current,
-          [explorerVisibility]: next,
-        })),
-      );
+      startExplorerTransition(() => setDocumentFilterByVisibility(explorerVisibility, next));
     },
     [explorerVisibility, startExplorerTransition],
   );
@@ -4359,21 +4253,15 @@ function MainApp() {
           return;
         }
         setError(err instanceof Error ? err.message : String(err));
-        setWorkspaceFileStates((current) => {
-          const previous = current[path] ?? EMPTY_WORKSPACE_FILES_STATE;
-          return {
-            ...current,
-            [path]: {
-              ...previous,
-              scanStatus: workspaceFilesScanStatusAfterFailure(previous.scanStatus),
-              loading: false,
-              refreshing: false,
-            },
-          };
+        const previous = getWorkspaceStoreState().fileStates[path] ?? EMPTY_WORKSPACE_FILES_STATE;
+        updateWorkspaceFileState(path, {
+          scanStatus: workspaceFilesScanStatusAfterFailure(previous.scanStatus),
+          loading: false,
+          refreshing: false,
         });
       }
     },
-    [scanOptions, updateWorkspaceFileState],
+    [scanOptions],
   );
 
   useEffect(() => {
@@ -4491,20 +4379,25 @@ function MainApp() {
         return true;
       };
 
+      // The rescan already published the entries; this only merges them into
+      // the open tabs of this workspace.
       const mergeFreshEntries = (fresh: VaultEntry[]) => {
-        updateWorkspaceState(path, { entries: fresh });
         mapDocTabs((tab) => (tab.workspacePath === path ? mergeFreshEntry(tab, fresh) : tab));
       };
 
       const runAuthoritativeScan = async (paintAfterScan: boolean) => {
         if (!paintAfterScan) updateWorkspaceState(path, { refreshing: true });
         try {
-          const fresh = await measureStartup(
+          const scanned = await measureStartup(
             "vault:authoritative-scan",
-            () => scanVault(path, scanOptions),
+            () => rescanWorkspaceEntries(path, scanOptions),
             { path, paintAfterScan },
           );
           if (requestId !== loadWorkspaceRequestRef.current) return;
+          // A watcher delta (or a newer rescan) superseded this response; the
+          // store already holds the freshest entries for this path, so keep
+          // the load lifecycle moving with those.
+          const fresh = scanned ?? getWorkspaceStoreState().states[path]?.entries ?? [];
           if (paintAfterScan) {
             await restorePrimaryTab(fresh, "scan");
             markStartup("vault:authoritative-scan-done", {
@@ -4553,8 +4446,7 @@ function MainApp() {
     async (path: string, visibility: WorkspaceVisibility) => {
       try {
         const registry = await setActiveWorkspaceRoot(path, visibility);
-        setWorkspaceRegistry(registry);
-        setExplorerVisibility(visibility);
+        activateWorkspace(registry, visibility);
         const lastRel =
           typeof window !== "undefined"
             ? window.localStorage.getItem(lastOpenKeyForWorkspace(path))
@@ -4590,7 +4482,7 @@ function MainApp() {
           });
           setWorkspaceRegistry(seeded);
           if (seeded.activeByVisibility.private) {
-            setExplorerVisibility("private");
+            activateWorkspace(seeded, "private");
             await loadWorkspace(seeded.activeByVisibility.private, "private");
             setBooting(false);
             markStartup("boot:end", {
@@ -4630,7 +4522,7 @@ function MainApp() {
           }
         }
         const initialVisibility = initialStartupVisibility(registry, bootSettings);
-        setExplorerVisibility(initialVisibility);
+        activateWorkspace(registry, initialVisibility);
         const initialPath =
           registry.activeByVisibility[initialVisibility] ??
           registry.workspaces.find((workspace) => workspace.visibility === initialVisibility)?.path ??
@@ -4722,8 +4614,7 @@ function MainApp() {
   const handleAddWorkspace = useCallback(
     async (entry: WorkspaceRootEntry) => {
       const registry = await addWorkspaceRoot(entry);
-      setWorkspaceRegistry(registry);
-      setExplorerVisibility(entry.visibility);
+      activateWorkspace(registry, entry.visibility);
       await loadWorkspace(entry.path, entry.visibility);
     },
     [loadWorkspace],
@@ -4732,8 +4623,7 @@ function MainApp() {
   const handleRegisterWorkspace = useCallback(
     async (workPath: string) => {
       const outcome = await registerWorkspaceRoots(workPath);
-      setWorkspaceRegistry(outcome.workspaceRegistry);
-      setExplorerVisibility("private");
+      activateWorkspace(outcome.workspaceRegistry, "private");
       await loadWorkspace(outcome.privateWorkspacePath, "private");
     },
     [loadWorkspace],
@@ -4770,11 +4660,7 @@ function MainApp() {
       if (!confirmation) return;
       const registry = await removeWorkspaceRoot(path);
       setWorkspaceRegistry(registry);
-      setWorkspaceStates((current) => {
-        const next = { ...current };
-        delete next[path];
-        return next;
-      });
+      removeWorkspaceState(path);
       removeWorkspaceDocTabs(path);
       const nextPath =
         registry.activeByVisibility[explorerVisibility] ??
@@ -4942,10 +4828,7 @@ function MainApp() {
   const setWorkspaceFileSelection = useCallback(
     (paths: string[]) => {
       if (!explorerWorkspacePath) return;
-      setSelectedFilePathsByWorkspace((current) => ({
-        ...current,
-        [explorerWorkspacePath]: paths,
-      }));
+      setSelectedFilePathsByWorkspace(explorerWorkspacePath, paths);
     },
     [explorerWorkspacePath],
   );
@@ -5103,14 +4986,13 @@ function MainApp() {
         setPersistedAppMode("files");
         setExplorerVisibility(visibility);
         try {
-          if (workspaceFileStates[workspacePath]?.scanStatus !== "ready") {
+          // Read at call time: the scan may have completed while the async
+          // gap above was in flight.
+          if (getWorkspaceStoreState().fileStates[workspacePath]?.scanStatus !== "ready") {
             await refreshWorkspaceFiles(workspacePath, true);
           }
           setWorkspaceFileFilter("all");
-          setFileQueryByVisibility((current) => ({
-            ...current,
-            [visibility]: "",
-          }));
+          setFileQueryByVisibility(visibility, "");
           setFilesPaneFilters(EMPTY_WORKSPACE_FILES_PANE_FILTERS);
           setPendingExplorerReveal({ pane: "files", targetPath });
         } catch (err) {
@@ -5125,7 +5007,6 @@ function MainApp() {
       setPersistedAppMode,
       setWorkspaceFileFilter,
       settingsWorkPath,
-      workspaceFileStates,
       workspaceRegistry.workspaces,
     ],
   );
@@ -5361,8 +5242,7 @@ function MainApp() {
       }
       for (const workspacePath of groups.keys()) {
         await refreshWorkspaceFiles(workspacePath);
-        const fresh = await scanVault(workspacePath, scanOptions);
-        updateWorkspaceState(workspacePath, { entries: fresh });
+        await rescanWorkspaceEntries(workspacePath, scanOptions);
       }
       return outcomes;
     } catch (err) {
@@ -5495,12 +5375,11 @@ function MainApp() {
         draft,
         target.document.revision ?? null,
       );
-      const fresh = await scanVault(target.workspacePath, scanOptions);
-      updateWorkspaceState(target.workspacePath, { entries: fresh });
+      const fresh = await rescanWorkspaceEntries(target.workspacePath, scanOptions);
       void refreshWorkspaceFiles(target.workspacePath);
       mapDocTabs((tab) => {
         if (tab.id !== target.id) return tab;
-        const freshEntry = fresh.find((entry) => entry.path === tab.entry.path) ?? tab.entry;
+        const freshEntry = fresh?.find((entry) => entry.path === tab.entry.path) ?? tab.entry;
         return { ...tab, entry: freshEntry, document: saved, draftContent: saved.content };
       });
       setGitRefreshTick((n) => n + 1);
@@ -5514,7 +5393,6 @@ function MainApp() {
     flushHtmlDraft,
     refreshWorkspaceFiles,
     scanOptions,
-    updateWorkspaceState,
     workspaceRegistry.workspaces,
   ]);
 
@@ -5546,12 +5424,11 @@ function MainApp() {
         flushed ?? target.draftContent,
         t("snapshot.summary"),
       );
-      const fresh = await scanVault(target.workspacePath, scanOptions);
-      updateWorkspaceState(target.workspacePath, { entries: fresh });
+      const fresh = await rescanWorkspaceEntries(target.workspacePath, scanOptions);
       void refreshWorkspaceFiles(target.workspacePath);
       mapDocTabs((tab) => {
         if (tab.id !== target.id) return tab;
-        const freshEntry = fresh.find((entry) => entry.path === tab.entry.path) ?? tab.entry;
+        const freshEntry = fresh?.find((entry) => entry.path === tab.entry.path) ?? tab.entry;
         return { ...tab, entry: freshEntry };
       });
       setError(t("snapshot.success", { path: snapshot.relPath }));
@@ -5563,7 +5440,6 @@ function MainApp() {
     flushHtmlDraft,
     refreshWorkspaceFiles,
     scanOptions,
-    updateWorkspaceState,
     workspaceRegistry.workspaces,
   ]);
 
@@ -5600,11 +5476,10 @@ function MainApp() {
             }
           : undefined,
       );
-      const fresh = await scanVault(activeDocumentWorkspacePath, scanOptions);
-      updateWorkspaceState(activeDocumentWorkspacePath, { entries: fresh });
+      const fresh = await rescanWorkspaceEntries(activeDocumentWorkspacePath, scanOptions);
       void refreshWorkspaceFiles(activeDocumentWorkspacePath);
       const entry =
-        fresh.find((item) => item.relPath === created.relPath || item.path === created.path) ??
+        fresh?.find((item) => item.relPath === created.relPath || item.path === created.path) ??
         ({
           path: created.path,
           relPath: created.relPath,
@@ -5638,7 +5513,6 @@ function MainApp() {
       blockWorkspaceWrite,
       refreshWorkspaceFiles,
       scanOptions,
-      updateWorkspaceState,
     ],
   );
 
@@ -5657,12 +5531,11 @@ function MainApp() {
 
   const refreshStudioDocumentMutation = useCallback(
     async (workspacePath: string, payload: DocumentPayload): Promise<DocumentPayload> => {
-      const fresh = await scanVault(workspacePath, scanOptions);
-      updateWorkspaceState(workspacePath, { entries: fresh });
+      const fresh = await rescanWorkspaceEntries(workspacePath, scanOptions);
       void refreshWorkspaceFiles(workspacePath);
       mapDocTabs((tab) => {
         if (tab.document.path !== payload.path) return tab;
-        const entry = fresh.find((item) => item.path === payload.path) ?? tab.entry;
+        const entry = fresh?.find((item) => item.path === payload.path) ?? tab.entry;
         return {
           ...tab,
           entry,
@@ -5672,7 +5545,7 @@ function MainApp() {
       });
       return payload;
     },
-    [refreshWorkspaceFiles, scanOptions, updateWorkspaceState],
+    [refreshWorkspaceFiles, scanOptions],
   );
 
   const applyStudioBody = useCallback(
@@ -5764,12 +5637,11 @@ function MainApp() {
         );
         // Refresh draft only when there are no unsaved body edits — never
         // clobber the textarea with an inspector-driven write.
-        const fresh = await scanVault(activeDocumentWorkspacePath, scanOptions);
-        updateWorkspaceState(activeDocumentWorkspacePath, { entries: fresh });
+        const fresh = await rescanWorkspaceEntries(activeDocumentWorkspacePath, scanOptions);
         void refreshWorkspaceFiles(activeDocumentWorkspacePath);
         mapDocTabs((tab) => {
           if (tab.id !== resolvedActiveTabId) return tab;
-          const freshEntry = fresh.find((entry) => entry.path === tab.entry.path) ?? tab.entry;
+          const freshEntry = fresh?.find((entry) => entry.path === tab.entry.path) ?? tab.entry;
           return {
             ...tab,
             entry: freshEntry,
@@ -5788,7 +5660,7 @@ function MainApp() {
       resolvedActiveTabId,
       blockWorkspaceWrite,
       refreshWorkspaceFiles,
-      updateWorkspaceState,
+      scanOptions,
     ],
   );
 
@@ -6412,23 +6284,22 @@ function MainApp() {
   }, []);
 
   const refreshAfterDocumentMutation = useCallback(
-    async (workspacePath: string) => {
-      const fresh = await scanVault(workspacePath, scanOptions);
-      updateWorkspaceState(workspacePath, { entries: fresh });
+    async (workspacePath: string): Promise<VaultEntry[] | null> => {
+      const fresh = await rescanWorkspaceEntries(workspacePath, scanOptions);
       await refreshWorkspaceFiles(workspacePath);
       setGitRefreshTick((n) => n + 1);
       return fresh;
     },
-    [refreshWorkspaceFiles, scanOptions, updateWorkspaceState],
+    [refreshWorkspaceFiles, scanOptions],
   );
 
   const entryFromPayload = useCallback(
     (
       payload: DocumentPayload,
-      freshEntries: VaultEntry[],
+      freshEntries: VaultEntry[] | null,
       fallback: VaultEntry,
     ): VaultEntry =>
-      freshEntries.find((entry) => entry.path === payload.path || entry.relPath === payload.relPath) ??
+      (freshEntries ?? []).find((entry) => entry.path === payload.path || entry.relPath === payload.relPath) ??
       {
         ...fallback,
         path: payload.path,
@@ -6758,8 +6629,7 @@ function MainApp() {
       void (async () => {
         await refreshWorkspaceFiles(explorerWorkspacePath);
         try {
-          const fresh = await scanVault(explorerWorkspacePath, scanOptions);
-          updateWorkspaceState(explorerWorkspacePath, { entries: fresh });
+          await rescanWorkspaceEntries(explorerWorkspacePath, scanOptions);
         } catch (err) {
           setError(err instanceof Error ? err.message : String(err));
         }
@@ -6770,7 +6640,6 @@ function MainApp() {
       explorerWorkspacePath,
       refreshWorkspaceFiles,
       scanOptions,
-      updateWorkspaceState,
     ],
   );
 
@@ -6994,15 +6863,9 @@ function MainApp() {
       setPersistedAppMode("files");
       setExplorerVisibility(visibility);
       setWorkspaceFileFilter("all");
-      setFileQueryByVisibility((current) => ({
-        ...current,
-        [visibility]: "",
-      }));
+      setFileQueryByVisibility(visibility, "");
       setFilesPaneFilters(EMPTY_WORKSPACE_FILES_PANE_FILTERS);
-      setSelectedFilePathsByWorkspace((current) => ({
-        ...current,
-        [workspacePath]: [targetPath],
-      }));
+      setSelectedFilePathsByWorkspace(workspacePath, [targetPath]);
       setPendingExplorerReveal({ pane: "files", targetPath });
       void refreshWorkspaceFiles(workspacePath);
     },
@@ -7030,13 +6893,12 @@ function MainApp() {
         setDocumentBrowserMode("tree");
         setExplorerQuery("");
         setExplorerDocumentFilter({ kind: "all" });
-        setCollapsedTreeFoldersByVisibility((current) => {
-          const existing = current[visibility] ?? [];
-          return {
-            ...current,
-            [visibility]: expandDocumentAncestors(existing, relPath),
-          };
-        });
+        const existing =
+          getWorkspaceStoreState().collapsedTreeFoldersByVisibility[visibility] ?? [];
+        setCollapsedTreeFoldersByVisibility(
+          visibility,
+          expandDocumentAncestors(existing, relPath),
+        );
       } else {
         revealPathInFiles(workspacePath, visibility, targetPath);
       }
@@ -8133,16 +7995,14 @@ function MainApp() {
   const graphSurfaceVisible =
     visibleAppMode === "graph" || rightWorkbenchMode === "graph" || panelGraphOpen;
   const vaultWatchPath = graphSurfaceVisible ? graphDataPath : activeDocumentWorkspacePath;
-  // Read the current state through a ref: the first thing this effect does is
-  // patch workspaceStates, so depending on it would re-run the effect, cancel
-  // the scan it just started, and then bail on its own `loading: true` — the
-  // entries would never land for a path nothing else populates (e.g. the vault
-  // submodule, which only the graph scans).
-  const workspaceStatesRef = useRef(workspaceStates);
-  workspaceStatesRef.current = workspaceStates;
+  // Read the current state from the store: the first thing this effect does is
+  // patch the workspace state, so depending on it would re-run the effect,
+  // cancel the scan it just started, and then bail on its own `loading: true`
+  // — the entries would never land for a path nothing else populates (e.g.
+  // the vault submodule, which only the graph scans).
   useEffect(() => {
     if (!graphSurfaceVisible || !graphDataPath) return;
-    const current = workspaceStatesRef.current[graphDataPath];
+    const current = getWorkspaceStoreState().states[graphDataPath];
     if (current?.startupIoReady || current?.loading || current?.refreshing) return;
     // Land every result, cancelled or not: the writes are keyed by path, so a
     // late one is still correct for that key. Skipping them was the bug — any
@@ -8157,8 +8017,14 @@ function MainApp() {
       try {
         const cached = await readVaultCache(path);
         if (cached) updateWorkspaceState(path, { entries: cached, loading: false, refreshing: true });
-        const fresh = await scanVault(path, scanOptions);
-        updateWorkspaceState(path, { entries: fresh, loading: false, refreshing: false, startupIoReady: true });
+        const fresh = await rescanWorkspaceEntries(path, scanOptions);
+        if (fresh) {
+          updateWorkspaceState(path, { startupIoReady: true });
+        } else {
+          // A newer rescan or watcher delta superseded this scan and owns the
+          // entries now; just don't leave this effect's loading flags stuck.
+          updateWorkspaceState(path, { loading: false, refreshing: false });
+        }
       } catch (err) {
         updateWorkspaceState(path, { loading: false, refreshing: false });
         if (!cancelled) setError(err instanceof Error ? err.message : String(err));
@@ -8167,42 +8033,14 @@ function MainApp() {
     return () => {
       cancelled = true;
     };
-  }, [graphDataPath, graphSurfaceVisible, scanOptions, updateWorkspaceState]);
-  useEffect(() => {
-    if (!graphSurfaceVisible || !graphDataPath || !vaultWatchPath) return;
-    let disposed = false;
-    let unlisten: (() => void) | null = null;
-    let refreshTimer: ReturnType<typeof setTimeout> | null = null;
-    // Sequence guard: deltas arriving while a full scan is in flight
-    // reschedule another one, and only the latest scan may publish — a slow
-    // earlier scan can no longer win the write race.
-    let scanSeq = 0;
-    void startVaultWatcher(vaultWatchPath).catch(() => undefined);
-    void import("@tauri-apps/api/event")
-      .then(({ listen }) =>
-        listen<{ workspacePath: string; paths: string[] }>("vault://index-delta", (event) => {
-          if (event.payload.workspacePath !== vaultWatchPath) return;
-          if (refreshTimer) clearTimeout(refreshTimer);
-          refreshTimer = setTimeout(() => {
-            const seq = ++scanSeq;
-            void scanVault(vaultWatchPath, scanOptions).then((fresh) => {
-              if (!disposed && seq === scanSeq) updateWorkspaceState(vaultWatchPath, { entries: fresh });
-            });
-          }, 150);
-        }),
-      )
-      .then((off) => {
-        if (disposed) off();
-        else unlisten = off;
-      })
-      .catch(() => undefined);
-    return () => {
-      disposed = true;
-      if (refreshTimer) clearTimeout(refreshTimer);
-      unlisten?.();
-      void stopVaultWatcher().catch(() => undefined);
-    };
-  }, [graphDataPath, graphSurfaceVisible, scanOptions, updateWorkspaceState, vaultWatchPath]);
+  }, [graphDataPath, graphSurfaceVisible, scanOptions]);
+  // Watcher lifecycle + `vault://index-delta` incremental apply live in the
+  // workspace store now (same enabled condition as the old effect).
+  useVaultWatcherSync(
+    vaultWatchPath,
+    Boolean(graphSurfaceVisible && graphDataPath && vaultWatchPath),
+    scanOptions,
+  );
   const lastAppModeRef = useRef<AppMode>(visibleAppMode);
   useEffect(() => {
     const previous = lastAppModeRef.current;
@@ -8448,9 +8286,7 @@ function MainApp() {
         onExitReferenceFocus={() => setKgRefFocus(null)}
         onGraphChanged={() => {
           if (!graphDataPath) return;
-          void scanVault(graphDataPath, scanOptions).then((fresh) =>
-            updateWorkspaceState(graphDataPath, { entries: fresh }),
-          );
+          void rescanWorkspaceEntries(graphDataPath, scanOptions);
         }}
       />
     ),

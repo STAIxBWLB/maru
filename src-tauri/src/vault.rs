@@ -419,6 +419,93 @@ pub fn scan_vault(
     Ok(entries)
 }
 
+/// Delta-targeted companion to `scan_vault`: the vault watcher already knows
+/// which rel paths changed, so the frontend asks for just those entries
+/// instead of paying for a full-tree walk on every keystroke-adjacent save.
+/// `#[tauri::command(async)]` + sync body like `scan_vault` — Tauri runs it
+/// off the main thread, and a delta batch is a handful of files, so rayon
+/// adds nothing here.
+///
+/// A touched path that is excluded (`.maruignore`, a nested registered
+/// workspace, the scratchpad root, dot folders / generated dirs), missing, or
+/// unreadable is simply ABSENT from the result — the frontend treats absence
+/// as removal, which is exactly the watcher Remove case. The nested-root
+/// check is what stops a watcher on the outer workspace from double-applying
+/// changes that the inner workspace's own scan will pick up.
+#[tauri::command(async)]
+pub fn scan_vault_paths(
+    vault_path: String,
+    rel_paths: Vec<String>,
+    scan_options: Option<ScanOptions>,
+) -> Result<Vec<VaultEntry>, String> {
+    let vault = normalize_existing_dir(&vault_path)?;
+    let scan_filter = ScanFilter::from_options(scan_options)?;
+    let ignore_patterns = load_maruignore(&vault);
+    // Collected once per call (not per file) so `version_count` is as fresh as
+    // a full scan would report.
+    let version_names = collect_version_names(&vault);
+    let nested_roots = registered_nested_roots(&vault);
+    let scratchpad_root = excluded_scratchpad_root(&vault);
+    let mut entries = Vec::new();
+    for rel in rel_paths {
+        let normalized = rel.replace('\\', "/");
+        let normalized = normalized.trim_matches('/');
+        if normalized.is_empty() {
+            continue;
+        }
+        let rel_path = Path::new(normalized);
+        // Caller-supplied paths must stay inside the vault.
+        if rel_path.is_absolute()
+            || rel_path
+                .components()
+                .any(|component| matches!(component, Component::ParentDir))
+        {
+            continue;
+        }
+        let path = vault.join(rel_path);
+        // The same exclusions as the scan_vault walk. The walk only has to
+        // skip the nested/scratchpad ROOT because walkdir then never descends;
+        // a single-file lookup must test containment itself.
+        if nested_roots
+            .iter()
+            .any(|root| path == *root || path.starts_with(root))
+        {
+            continue;
+        }
+        if scratchpad_root
+            .as_deref()
+            .is_some_and(|root| path.starts_with(root))
+        {
+            continue;
+        }
+        if scan_filter.is_excluded_path(&path, &vault, GENERATED_DIRS) {
+            continue;
+        }
+        if matches_maruignore(rel_path, &ignore_patterns) {
+            continue;
+        }
+        let Some(ext) = path.extension().and_then(|e| e.to_str()) else {
+            continue;
+        };
+        if !is_document_extension(ext) {
+            continue;
+        }
+        // symlink_metadata matches the walk's follow_links(false): a symlink
+        // to a file is not a document candidate in either path.
+        if !path
+            .symlink_metadata()
+            .map(|metadata| metadata.file_type().is_file())
+            .unwrap_or(false)
+        {
+            continue;
+        }
+        if let Ok(entry) = read_entry(&path, &vault, &version_names) {
+            entries.push(entry);
+        }
+    }
+    Ok(entries)
+}
+
 #[tauri::command(async)]
 pub fn read_vault_cache(vault_path: String) -> Result<Option<Vec<VaultEntry>>, String> {
     let vault = normalize_existing_dir(&vault_path)?;
@@ -1249,6 +1336,123 @@ mod tests {
         assert!(read_vault_cache(root.to_string_lossy().to_string())
             .unwrap()
             .is_none());
+    }
+
+    #[test]
+    fn scan_vault_paths_reads_existing_files() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        write_file(root, "top.md", "# Top\n");
+        write_file(root, "sub/nested.md", "# Nested\nbody words here\n");
+        let entries = scan_vault_paths(
+            root.to_string_lossy().to_string(),
+            vec!["top.md".to_string(), "sub/nested.md".to_string()],
+            None,
+        )
+        .unwrap();
+        let by_rel: HashMap<&str, &VaultEntry> = entries
+            .iter()
+            .map(|entry| (entry.rel_path.as_str(), entry))
+            .collect();
+        assert_eq!(by_rel.len(), 2);
+        assert_eq!(by_rel["top.md"].title, "Top");
+        assert_eq!(by_rel["sub/nested.md"].title, "Nested");
+        assert_eq!(by_rel["sub/nested.md"].word_count, 5);
+    }
+
+    #[test]
+    fn scan_vault_paths_treats_missing_and_traversal_as_absent() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        write_file(root, "kept.md", "# Kept\n");
+        let entries = scan_vault_paths(
+            root.to_string_lossy().to_string(),
+            vec![
+                "kept.md".to_string(),
+                "deleted.md".to_string(),
+                "../escaped.md".to_string(),
+            ],
+            None,
+        )
+        .unwrap();
+        let rels: Vec<&str> = entries.iter().map(|entry| entry.rel_path.as_str()).collect();
+        assert_eq!(
+            rels,
+            vec!["kept.md"],
+            "deleted files (watcher Remove) and `..` escapes must be absent"
+        );
+    }
+
+    #[test]
+    fn scan_vault_paths_respects_maruignore() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        write_file(root, ".maruignore", "skipme\n");
+        write_file(root, "keep.md", "# Keep\n");
+        write_file(root, "skipme/inside.md", "# Inside\n");
+        let entries = scan_vault_paths(
+            root.to_string_lossy().to_string(),
+            vec!["keep.md".to_string(), "skipme/inside.md".to_string()],
+            None,
+        )
+        .unwrap();
+        let rels: Vec<&str> = entries.iter().map(|entry| entry.rel_path.as_str()).collect();
+        assert_eq!(rels, vec!["keep.md"], "maruignored paths must be absent");
+    }
+
+    #[test]
+    fn scan_vault_paths_skips_nested_registered_workspace() {
+        use crate::skill_host::fs::test_home_for_bundle_tests;
+        use crate::vault_list::{add_workspace_root, WorkspaceRootEntry};
+
+        let _home = test_home_for_bundle_tests();
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        write_file(root, "top.md", "# Top\n");
+        write_file(root, "nested/note.md", "# Nested\n");
+        add_workspace_root(WorkspaceRootEntry {
+            label: "Nested".to_string(),
+            path: root.join("nested").to_string_lossy().to_string(),
+            visibility: "private".to_string(),
+            provider: "local".to_string(),
+            provider_id: None,
+            external_writer: None,
+            write_policy: "direct".to_string(),
+            permission_summary: None,
+        })
+        .unwrap();
+        let entries = scan_vault_paths(
+            root.to_string_lossy().to_string(),
+            vec!["top.md".to_string(), "nested/note.md".to_string()],
+            None,
+        )
+        .unwrap();
+        let rels: Vec<&str> = entries.iter().map(|entry| entry.rel_path.as_str()).collect();
+        assert_eq!(
+            rels,
+            vec!["top.md"],
+            "a watcher on the outer workspace must not double-apply the nested workspace"
+        );
+    }
+
+    #[test]
+    fn scan_vault_paths_reports_fresh_version_count() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        write_file(root, "report.md", "# Report\n");
+        let ask = || {
+            scan_vault_paths(
+                root.to_string_lossy().to_string(),
+                vec!["report.md".to_string()],
+                None,
+            )
+            .unwrap()
+        };
+        assert_eq!(ask()[0].version_count, 0);
+        // The version file appears AFTER the first lookup: collect_version_names
+        // runs once per call, so the next delta reflects it.
+        write_file(root, ".maru/versions/report-20260808.md", "# Old\n");
+        assert_eq!(ask()[0].version_count, 1);
     }
 
     /// Bench harness for ad-hoc perf measurement on a real workspace. Ignored by

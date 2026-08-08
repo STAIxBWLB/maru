@@ -247,7 +247,7 @@ use today_outbox::{read_task_integrations, task_integrations_drain, task_integra
 use today_store::{
     read_task_events, today_finalize_setup, today_mutate, today_open, today_rollover,
 };
-use vault::{read_vault_cache, sample_workspace_path, scan_vault};
+use vault::{read_vault_cache, sample_workspace_path, scan_vault, scan_vault_paths};
 use vault_graph::{
     vault_graph_layout_read, vault_graph_layout_save, vault_graph_read, vault_graph_root,
 };
@@ -307,6 +307,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             sample_workspace_path,
             scan_vault,
+            scan_vault_paths,
             read_vault_cache,
             start_vault_watcher,
             stop_vault_watcher,
