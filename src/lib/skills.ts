@@ -120,13 +120,25 @@ export interface SkillContextItem {
   kind?: "file" | "directory" | "document" | "folder" | string | null;
 }
 
+/** Maru-owned environment injected into every work-scoped skill run. */
+export interface MaruRuntimeEnvironment {
+  MARU_SCRATCHPAD: string;
+  MARU_DRAFTS: string;
+  MARU_TEMP: string;
+  CLAUDE_CODE_TMPDIR: string;
+}
+
+/** Provider-specific entries may be added, while Maru's keys stay typed. */
+export type SkillRuntimeEnvironment = Record<string, string> &
+  Partial<MaruRuntimeEnvironment>;
+
 export interface DispatchComposition {
   skillId: string;
   skillName: string;
   cwd: string;
   prompt: string;
   context: SkillContextItem[];
-  extraEnv: Record<string, string>;
+  extraEnv: SkillRuntimeEnvironment;
 }
 
 export interface TerminalDispatchSpec {
@@ -134,7 +146,7 @@ export interface TerminalDispatchSpec {
   cwd: string;
   command?: string | null;
   extraArgs: string[];
-  extraEnv: Record<string, string>;
+  extraEnv: SkillRuntimeEnvironment;
   title: string;
 }
 

@@ -23,6 +23,11 @@ MissionRecord                                   ← live status, stop, log tail
 `metadata.agentId` is the single join key: it is what the pane groups runs by,
 and what a schedule uses to pick up its agent's current configuration.
 
+Every work-scoped skill run receives Maru's resolved scratchpad environment:
+`MARU_SCRATCHPAD`, `MARU_DRAFTS`, `MARU_TEMP`, and `CLAUDE_CODE_TMPDIR`.
+`MARU_DRAFTS` is the configured `scratchpad.drafts_subdir` root; bundled and
+headless producers must use it instead of assuming `scratchpad/drafts/`.
+
 | Field | Meaning |
 |---|---|
 | `id` | `^[a-z0-9][a-z0-9-]{0,47}$`. Builtin ids are reserved. |

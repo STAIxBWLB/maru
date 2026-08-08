@@ -1,11 +1,11 @@
 // Drafts unify AI-generated task drafts and ideation into a first-class,
 // unconfirmed concept. Bodies live in the `drafts` scratchpad collection
-// (<workspace>/scratchpad/drafts/*.md); metadata lives in a JSON index at
+// (<workspace>/scratchpad/<drafts_subdir>/*.md); metadata lives in a JSON index at
 // <work>/.maru/drafts/index.json. Vault scanning already excludes the
 // scratchpad root, so drafts never leak into confirmed vault data.
 //
 // Isolation invariant: nothing in this module writes outside
-// <workspace>/scratchpad/drafts/, <work>/.maru/drafts/, and the explicit,
+// the configured drafts collection, <work>/.maru/drafts/, and the explicit,
 // approval-gated promote target.
 
 use crate::atomic_file::{write_atomic, write_atomic_create};
@@ -19,11 +19,19 @@ use crate::vault::{is_document_extension, lexical_normalize, resolve_inside_vaul
 use crate::vault_list::{assert_document_owner, assert_maru_can_write, WorkspaceWriteAction};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+#[cfg(test)]
+use std::cell::Cell;
+use std::collections::{BTreeMap, HashSet};
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 use tauri::{AppHandle, Emitter};
 use uuid::Uuid;
+
+#[cfg(test)]
+thread_local! {
+    static FAIL_NEXT_INDEX_READ: Cell<bool> = const { Cell::new(false) };
+    static FAIL_NEXT_INDEX_WRITE: Cell<bool> = const { Cell::new(false) };
+}
 
 const DRAFT_MAX_BYTES: u64 = 2 * 1024 * 1024;
 const DRAFTS_PROMOTE_KIND: &str = "drafts.promote";
@@ -115,6 +123,10 @@ fn index_path(work: &Path) -> PathBuf {
 /// `save_index` rewrites the whole array, so a single unreadable record must
 /// lose only itself instead of every other draft's metadata.
 pub(crate) fn load_index(work: &Path) -> Result<Vec<DraftEntry>, String> {
+    #[cfg(test)]
+    if FAIL_NEXT_INDEX_READ.with(|failure| failure.replace(false)) {
+        return Err("drafts_index_read_injected_failure".to_string());
+    }
     let path = index_path(work);
     if !path.is_file() {
         return Ok(Vec::new());
@@ -129,9 +141,59 @@ pub(crate) fn load_index(work: &Path) -> Result<Vec<DraftEntry>, String> {
 }
 
 fn save_index(work: &Path, entries: &[DraftEntry]) -> Result<(), String> {
+    #[cfg(test)]
+    if FAIL_NEXT_INDEX_WRITE.with(|failure| failure.replace(false)) {
+        return Err("drafts_index_write_injected_failure".to_string());
+    }
     let bytes = serde_json::to_vec_pretty(entries)
         .map_err(|err| format!("Cannot serialize drafts index: {err}"))?;
     write_atomic(&index_path(work), &bytes)
+}
+
+#[cfg(test)]
+pub(crate) fn fail_next_index_read() {
+    FAIL_NEXT_INDEX_READ.with(|failure| failure.set(true));
+}
+
+#[cfg(test)]
+pub(crate) fn fail_next_index_write() {
+    FAIL_NEXT_INDEX_WRITE.with(|failure| failure.set(true));
+}
+
+/// Move lineage references together with an ideation file's lifecycle path.
+/// The index write is atomic, so a successful stage transition never leaves
+/// implementation drafts pointing only at the old idea path. Duplicate refs
+/// are collapsed while touching the entry, which also keeps duplicate guards
+/// deterministic for hand-edited indexes.
+pub(crate) fn update_idea_origin_refs(
+    work: &Path,
+    old_path: &str,
+    new_path: &str,
+) -> Result<(), String> {
+    if old_path == new_path {
+        return Ok(());
+    }
+    let mut entries = load_index(work)?;
+    let mut changed = false;
+    for entry in &mut entries {
+        let before = entry.origin_refs.clone();
+        for reference in &mut entry.origin_refs {
+            if reference == old_path {
+                *reference = new_path.to_string();
+            }
+        }
+        let mut seen = HashSet::new();
+        entry
+            .origin_refs
+            .retain(|reference| seen.insert(reference.clone()));
+        if entry.origin_refs != before {
+            changed = true;
+        }
+    }
+    if changed {
+        save_index(work, &entries)?;
+    }
+    Ok(())
 }
 
 /// Draft ids are server-generated (`draft-<uuid>`). Validate before using one
@@ -359,7 +421,8 @@ fn adopt_entry_for(file_name: &str, content: &str, modified: String) -> DraftEnt
 
 /// Adopt body files that exist on disk but no index entry points at.
 ///
-/// The headless pipeline writes drafts into `scratchpad/drafts/` directly, and
+/// The headless pipeline writes drafts into the configured drafts collection
+/// directly (the resolved path is exposed as `$MARU_DRAFTS`), and
 /// `drafts_list` reads only the index, so without this those files are invisible
 /// to the app. Everything degrades rather than fails: an unreadable or oversized
 /// file is skipped, missing frontmatter falls back to the body's own heading, and
@@ -1038,6 +1101,29 @@ mod tests {
         assert_ne!(saved.entry.updated_at, entry.updated_at);
         let reread = read_impl(&work, &entry.id).unwrap();
         assert_eq!(reread.content, "updated body");
+    }
+
+    #[test]
+    fn create_uses_the_configured_drafts_collection() {
+        let (temp, work) = workspace();
+        let scratchpad = temp.path().join("scratchpad");
+        fs::write(
+            temp.path().join("workspace.config.yaml"),
+            format!(
+                "paths:\n  scratchpad: {}\nscratchpad:\n  drafts_subdir: generated-drafts\n",
+                scratchpad.display()
+            ),
+        )
+        .unwrap();
+
+        let entry = create_task_draft(&work, "Configured root");
+        assert!(
+            scratchpad
+                .join("generated-drafts")
+                .join(&entry.body_path)
+                .is_file()
+        );
+        assert!(!scratchpad.join("drafts").join(&entry.body_path).exists());
     }
 
     #[test]

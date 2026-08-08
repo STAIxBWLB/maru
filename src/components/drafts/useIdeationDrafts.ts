@@ -72,10 +72,18 @@ export function useIdeationDrafts({
   const clearPending = useCallback((runId: string) => {
     setPendingRuns((current) => {
       if (!Object.values(current).includes(runId)) return current;
-      return Object.fromEntries(
+      const next = Object.fromEntries(
         Object.entries(current).filter(([, pendingRunId]) => pendingRunId !== runId),
       );
+      pendingRunsRef.current = next;
+      return next;
     });
+  }, []);
+
+  const markPending = useCallback((ideaPath: string, runId: string) => {
+    const next = { ...pendingRunsRef.current, [ideaPath]: runId };
+    pendingRunsRef.current = next;
+    setPendingRuns(next);
   }, []);
 
   // Once-per-run and mutual exclusion live in ingestImplementationDraftRun, not
@@ -92,9 +100,13 @@ export function useIdeationDrafts({
         if (autoOpen) onOpenDraft(result.created);
       } catch (error) {
         setError(errorMessage(error));
+      } finally {
+        // Keep the idea locked through artifact read/list/create bookkeeping;
+        // stage and save mutations must not race the lineage write here.
+        clearPending(runId);
       }
     },
-    [onDraftsChanged, onOpenDraft, workPath],
+    [clearPending, onDraftsChanged, onOpenDraft, workPath],
   );
 
   // Mount scan: pick up missions that started or finished while the pane was
@@ -114,17 +126,22 @@ export function useIdeationDrafts({
             running[ideaPath] = mission.id;
           }
         }
-        setPendingRuns((current) => {
-          const next = { ...running, ...current };
-          const keys = Object.keys(next);
-          const unchanged =
-            keys.length === Object.keys(current).length &&
-            keys.every((key) => next[key] === current[key]);
-          return unchanged ? current : next;
-        });
         const completed = missions
           .filter(isCompletedImplementationDraftMission)
           .sort((left, right) => left.startedAt.localeCompare(right.startedAt));
+        const nextPending = { ...pendingRunsRef.current, ...running };
+        for (const mission of completed) {
+          const ideaPath = implementationDraftMissionIdeaPath(mission);
+          if (ideaPath) nextPending[ideaPath] = mission.id;
+        }
+        pendingRunsRef.current = nextPending;
+        setPendingRuns((current) => {
+          const keys = Object.keys(nextPending);
+          const unchanged =
+            keys.length === Object.keys(current).length &&
+            keys.every((key) => nextPending[key] === current[key]);
+          return unchanged ? current : nextPending;
+        });
         for (const mission of completed) {
           const ideaPath = implementationDraftMissionIdeaPath(mission);
           if (ideaPath) void ingestRun(mission.id, ideaPath, false);
@@ -149,7 +166,6 @@ export function useIdeationDrafts({
       if (!ideaPath) return;
       if (mission.status === "done") {
         const initiatedHere = Object.values(pendingRunsRef.current).includes(mission.id);
-        clearPending(mission.id);
         void ingestRun(mission.id, ideaPath, initiatedHere);
       } else if (mission.status === "failed" || mission.status === "stopped") {
         clearPending(mission.id);
@@ -199,12 +215,12 @@ export function useIdeationDrafts({
             ideaName: idea.name,
           },
         });
-        setPendingRuns((current) => ({ ...current, [ideaPath]: runId }));
+        markPending(ideaPath, runId);
       } catch (error) {
         setError(agentErrorMessage(error, t));
       }
     },
-    [agents, ai, drafts, onOpenDraft, skills, t, workPath],
+    [agents, ai, drafts, markPending, onOpenDraft, skills, t, workPath],
   );
 
   return { pendingIdeaPaths: new Set(Object.keys(pendingRuns)), generate };

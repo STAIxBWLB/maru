@@ -2862,6 +2862,12 @@ export async function readScratchpadDocument(
   relativePath: string,
 ): Promise<ScratchpadDocument> {
   if (!isTauri()) {
+    const override = await invokeE2EOverride<ScratchpadDocument>("scratchpad_read", {
+      workPath,
+      collection,
+      relativePath,
+    });
+    if (override) return override;
     const name = relativePath.split("/").pop() ?? "scratchpad.md";
     return {
       collection,
@@ -2896,6 +2902,16 @@ export async function saveScratchpadDocument(
   force = false,
 ): Promise<ScratchpadDocument> {
   if (!isTauri()) {
+    const override = await invokeE2EOverride<ScratchpadDocument>("scratchpad_save", {
+      workPath,
+      collection,
+      relativePath,
+      format,
+      content,
+      expectedRevision: expectedRevision ?? null,
+      force,
+    });
+    if (override) return override;
     const name = relativePath.split("/").pop() ?? `scratchpad.${format === "plain" ? "txt" : "md"}`;
     return {
       collection,
@@ -2954,6 +2970,13 @@ export async function createScratchpadIdea(
   workPath: string,
   title: string,
 ): Promise<ScratchpadDocument> {
+  if (!isTauri()) {
+    const override = await invokeE2EOverride<ScratchpadDocument>("scratchpad_create_idea", {
+      workPath,
+      title,
+    });
+    if (override) return override;
+  }
   return invoke<ScratchpadDocument>("scratchpad_create_idea", { workPath, title });
 }
 
@@ -2963,6 +2986,15 @@ export async function transitionScratchpadIdea(
   stage: IdeationStage,
   expectedRevision: string,
 ): Promise<ScratchpadDocument> {
+  if (!isTauri()) {
+    const override = await invokeE2EOverride<ScratchpadDocument>("scratchpad_transition_idea", {
+      workPath,
+      relativePath,
+      stage,
+      expectedRevision,
+    });
+    if (override) return override;
+  }
   return invoke<ScratchpadDocument>("scratchpad_transition_idea", {
     workPath,
     relativePath,
