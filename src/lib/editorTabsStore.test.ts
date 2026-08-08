@@ -502,14 +502,17 @@ describe("workspace-scoped state transitions", () => {
     expect(capped.tabs.some((tab) => tab.id === "overflow")).toBe(false);
   });
 
-  it("applyRestoredIdsInState falls back to the left id without a right id", () => {
-    const next = applyRestoredIdsInState(stateOf(), {
+  it("applyRestoredIdsInState keeps live ids and filters dangling ones", () => {
+    const state = stateOf({ tabs: [docTab("a")] });
+    const next = applyRestoredIdsInState(state, {
       leftActiveTabId: "a",
-      rightActiveTabId: null,
+      rightActiveTabId: "ghost",
       focusedEditorGroup: "right",
     });
     expect(next.activeTabId).toBe("a");
-    expect(next.focusedEditorGroup).toBe("right");
+    expect(next.leftActiveTabId).toBe("a");
+    expect(next.rightActiveTabId).toBeNull();
+    expect(next.focusedEditorGroup).toBe("left");
   });
 
   it("replaceAllDocTabsInState keeps exactly the given tabs and resets the session", () => {
