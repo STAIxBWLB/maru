@@ -113,7 +113,13 @@ export function useDestructiveActionGuard({
             closeConfirmedRef.current = false;
             return;
           }
-          if (closing) return;
+          if (closing) {
+            // A repeat close request while the flush is in flight must not
+            // fall through to the default close — the confirmed replay
+            // (closeConfirmedRef) is the only path allowed to proceed.
+            event.preventDefault();
+            return;
+          }
           event.preventDefault();
           if (hasDirtyDrafts()) {
             setPendingDestructiveAction("close");

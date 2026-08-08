@@ -88,6 +88,7 @@ describe("compose helpers", () => {
     const seed = { prompt: "hi" };
     const opened = openComposeInState(stateOf(), seed);
     expect(opened.composeSeed).toBe(seed);
+    expect(openComposeInState(opened, seed)).toBe(opened);
     const closed = closeComposeInState(opened);
     expect(closed.composeSeed).toBeNull();
     expect(closeComposeInState(closed)).toBe(closed);
@@ -99,6 +100,7 @@ describe("new-document dialog helpers", () => {
     const seed = { title: "Note", relPath: "notes/note.md" };
     const opened = openNewDocumentDialogInState(stateOf(), seed);
     expect(opened.newDocument).toEqual({ seed });
+    expect(openNewDocumentDialogInState(opened, seed)).toBe(opened);
     const closed = closeNewDocumentDialogInState(opened);
     expect(closed.newDocument).toBeNull();
     expect(closeNewDocumentDialogInState(closed)).toBe(closed);
@@ -129,6 +131,7 @@ describe("commit dialog helpers", () => {
   it("stores path+status and clears once", () => {
     const opened = openCommitDialogInState(stateOf(), "/ws", GIT_STATUS);
     expect(opened.commitDialog).toEqual({ path: "/ws", status: GIT_STATUS });
+    expect(openCommitDialogInState(opened, "/ws", GIT_STATUS)).toBe(opened);
     const closed = closeCommitDialogInState(opened);
     expect(closed.commitDialog).toBeNull();
     expect(closeCommitDialogInState(closed)).toBe(closed);

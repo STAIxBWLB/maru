@@ -90,7 +90,7 @@ export function openComposeInState(
   state: AppOverlayStoreState,
   seed: ComposeDialogSeed,
 ): AppOverlayStoreState {
-  return { ...state, composeSeed: seed };
+  return state.composeSeed === seed ? state : { ...state, composeSeed: seed };
 }
 
 export function closeComposeInState(state: AppOverlayStoreState): AppOverlayStoreState {
@@ -101,7 +101,9 @@ export function openNewDocumentDialogInState(
   state: AppOverlayStoreState,
   seed: NewDocumentDialogSeed | null = null,
 ): AppOverlayStoreState {
-  return { ...state, newDocument: { seed } };
+  return state.newDocument !== null && state.newDocument.seed === seed
+    ? state
+    : { ...state, newDocument: { seed } };
 }
 
 /** Closing clears the seed, matching the old onOpenChange(false) handler. */
@@ -129,7 +131,11 @@ export function openCommitDialogInState(
   path: string,
   status: GitStatus,
 ): AppOverlayStoreState {
-  return { ...state, commitDialog: { path, status } };
+  return state.commitDialog !== null &&
+    state.commitDialog.path === path &&
+    state.commitDialog.status === status
+    ? state
+    : { ...state, commitDialog: { path, status } };
 }
 
 export function closeCommitDialogInState(state: AppOverlayStoreState): AppOverlayStoreState {
