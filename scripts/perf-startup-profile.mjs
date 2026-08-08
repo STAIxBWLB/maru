@@ -10,7 +10,12 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { chromium } from "@playwright/test";
 
-const root = path.resolve(import.meta.dirname, "..");
+// Set MARU_PERF_ROOT to profile a detached checkout with this harness. This
+// keeps before/after measurements on the same runner without copying the
+// script into the historical worktree.
+const root = path.resolve(
+  process.env.MARU_PERF_ROOT ?? path.resolve(import.meta.dirname, ".."),
+);
 const port = Number(process.env.MARU_PERF_PORT ?? 5319);
 const outPath = process.argv[2] ?? null;
 

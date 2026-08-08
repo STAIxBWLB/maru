@@ -1469,9 +1469,12 @@ mod tests {
         let entries = scan_vault(path.clone(), None).expect("scan failed");
         let dt = t0.elapsed();
         let total_bytes: usize = entries.iter().map(|e| e.snippet.len()).sum();
+        let payload_bytes = serde_json::to_vec(&entries)
+            .expect("serialize scan payload")
+            .len();
         eprintln!(
-            "scan_vault({path}) → {} entries in {dt:?} (snippet bytes: {total_bytes})",
-            entries.len()
+            "scan_vault({path}) → {} entries in {dt:?} (snippet bytes: {total_bytes}, serialized payload bytes: {payload_bytes})",
+            entries.len(),
         );
     }
 
