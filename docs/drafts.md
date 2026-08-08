@@ -172,6 +172,14 @@ skipped as a duplicate.
 `drafts_promote` (approval kind `drafts.promote`) moves a draft into confirmed
 state:
 
+For a document promotion, the dialog suggests
+`<promote_dir>/<slug>.md`. Set `drafts.promote_dir` in `workspace.config.yaml`
+to change that suggestion; it defaults to `_incoming`. The value must be a safe
+workspace-relative directory and cannot use `scratchpad` or `.maru` as its
+first path component.
+This is a suggestion only: an explicitly entered, valid target path remains
+supported.
+
 1. Rejects discarded and already-accepted drafts.
 2. Reads the body, then writes it to the chosen target:
    - **Document** — `write_atomic_create` at a vault-relative path resolved

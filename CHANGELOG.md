@@ -14,6 +14,10 @@ Dates are the release-tag dates. Only `feat`/`fix`-level changes are listed;
   revision-checked through their lifecycle; the Scratchpad pane stays focused
   on memos and temporary results, and `scratchpad.drafts_subdir` now honors a
   safe, non-overlapping configured collection root.
+- **Draft document suggestions land in `_incoming/`.** Configure
+  `drafts.promote_dir` in `workspace.config.yaml` to choose another safe,
+  workspace-relative suggestion directory; explicit promotion targets remain
+  available.
 
 ## v0.4.46 - 2026-08-08 - Faster Paint, Calmer Idle
 
