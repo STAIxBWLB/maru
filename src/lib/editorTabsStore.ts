@@ -232,20 +232,16 @@ export function insertTabInState(
   let next: EditorTabsState;
   if (isBinaryTabLike(tab)) {
     const exists = state.binaryTabs.some((item) => item.id === tab.id);
-    next = {
-      ...state,
-      binaryTabs: exists
-        ? state.binaryTabs.map((item) => (item.id === tab.id ? tab : item))
-        : [...state.binaryTabs, tab],
-    };
+    const binaryTabs = exists
+      ? mapPreservingIdentity(state.binaryTabs, (item) => (item.id === tab.id ? tab : item))
+      : [...state.binaryTabs, tab];
+    next = binaryTabs === state.binaryTabs ? state : { ...state, binaryTabs };
   } else {
     const exists = state.tabs.some((item) => item.id === tab.id);
-    next = {
-      ...state,
-      tabs: exists
-        ? state.tabs.map((item) => (item.id === tab.id ? tab : item))
-        : [...state.tabs, tab],
-    };
+    const tabs = exists
+      ? mapPreservingIdentity(state.tabs, (item) => (item.id === tab.id ? tab : item))
+      : [...state.tabs, tab];
+    next = tabs === state.tabs ? state : { ...state, tabs };
   }
   next = syncTabOrderInState(next);
   if (options.activate) {
@@ -254,13 +250,13 @@ export function insertTabInState(
   return next;
 }
 
-/** Merges `patch` into the doc tab with `tabId`. Callers must not change the
- *  id — remap flows go through transformTabs so tabOrder/active ids stay
+/** Merges `patch` into the doc tab with `tabId`. The patch type excludes
+ *  `id` — remap flows go through transformTabs so tabOrder/active ids stay
  *  consistent. */
 export function patchTabInState(
   state: EditorTabsState,
   tabId: string,
-  patch: Partial<EditorTab>,
+  patch: Partial<Omit<EditorTab, "id">>,
 ): EditorTabsState {
   if (!state.tabs.some((tab) => tab.id === tabId)) return state;
   return {
@@ -424,20 +420,30 @@ export function removeWorkspaceDocTabsInState(
   return syncTabOrderInState({ ...state, tabs });
 }
 
-/** Applies the persisted split/focus choice after a workspace restore. */
+/** Applies the persisted split/focus choice after a workspace restore.
+ *  Ids are filtered against the tabs actually in state (same keepId rule as
+ *  resetWorkspaceTabsInState) so a capped/failed restore cannot leave the
+ *  active ids pointing at tabs that were never inserted. */
 export function applyRestoredIdsInState(
   state: EditorTabsState,
   ids: RestoredEditorTabIds,
 ): EditorTabsState {
+  const keepId = (id: string | null) =>
+    id && (state.tabs.some((tab) => tab.id === id) || state.binaryTabs.some((tab) => tab.id === id))
+      ? id
+      : null;
+  const leftActiveTabId = keepId(ids.leftActiveTabId);
+  const rightActiveTabId = keepId(ids.rightActiveTabId);
+  const focusedEditorGroup = rightActiveTabId ? ids.focusedEditorGroup : "left";
   return {
     ...state,
-    leftActiveTabId: ids.leftActiveTabId,
-    rightActiveTabId: ids.rightActiveTabId,
-    focusedEditorGroup: ids.focusedEditorGroup,
+    leftActiveTabId,
+    rightActiveTabId,
+    focusedEditorGroup,
     activeTabId:
-      ids.focusedEditorGroup === "right" && ids.rightActiveTabId
-        ? ids.rightActiveTabId
-        : ids.leftActiveTabId,
+      focusedEditorGroup === "right" && rightActiveTabId
+        ? rightActiveTabId
+        : leftActiveTabId,
   };
 }
 
@@ -559,7 +565,7 @@ export function closeTabs(
   return result;
 }
 
-export function patchTab(tabId: string, patch: Partial<EditorTab>): void {
+export function patchTab(tabId: string, patch: Partial<Omit<EditorTab, "id">>): void {
   publish(patchTabInState(editorTabsState, tabId, patch));
 }
 
