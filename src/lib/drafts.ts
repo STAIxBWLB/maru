@@ -6,7 +6,7 @@ import type {
 } from "./types";
 
 /** One row in the Drafts pane list: a real draft from the drafts index, or a
- *  read-only scratchpad ideation entry surfaced as an "idea". */
+ *  scratchpad ideation entry surfaced as an "idea" in the Ideation hub. */
 export type DraftListItem =
   | { itemKind: "draft"; draft: DraftEntry }
   | { itemKind: "idea"; entry: ScratchpadEntry };

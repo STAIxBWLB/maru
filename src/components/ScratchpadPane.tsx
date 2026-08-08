@@ -1,8 +1,6 @@
 import { listen } from "@tauri-apps/api/event";
 import {
   AlertTriangle,
-  Archive,
-  ArrowRight,
   CheckSquare,
   Copy,
   FilePlus2,
@@ -30,7 +28,6 @@ import {
 import {
   applyScratchpadTempCleanup,
   chooseSaveFile,
-  createScratchpadIdea,
   isTauri,
   listScratchpad,
   migrateLegacyMemos,
@@ -41,7 +38,6 @@ import {
   saveScratchpadDocument,
   startScratchpadWatcher,
   stopScratchpadWatcher,
-  transitionScratchpadIdea,
   trashScratchpadDocument,
 } from "../lib/api";
 import {
@@ -64,7 +60,6 @@ import { SCRATCHPAD_LIST_HEIGHT, type SortKey } from "../lib/settings";
 import { PaneResizeHandle } from "./ui/PaneResizeHandle";
 import { SortModeToggle } from "./ui/SortModeToggle";
 import type {
-  IdeationStage,
   MemoFormat,
   ScratchpadChangedEvent,
   ScratchpadDocument,
@@ -85,13 +80,6 @@ interface ScratchpadPaneProps {
   onListHeightChange: (height: number) => void;
   t: Translate;
 }
-
-const IDEATION_STAGE_TRANSITIONS: Record<IdeationStage, IdeationStage[]> = {
-  seed: ["developing", "archive"],
-  developing: ["proposal", "archive"],
-  proposal: ["archive"],
-  archive: ["seed"],
-};
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -120,11 +108,6 @@ function collectionLabel(collection: ScratchpadEntry["collection"], t: Translate
 }
 
 function groupLabel(collection: ScratchpadEntry["collection"], id: string, t: Translate): string {
-  if (collection === "ideation") {
-    return id === "ungrouped"
-      ? t("rightPane.scratchpad.group.ungrouped")
-      : t(`rightPane.scratchpad.stage.${id}`);
-  }
   if (collection === "memos") return t("rightPane.scratchpad.group.personal");
   return id;
 }
@@ -217,11 +200,21 @@ export function ScratchpadPane({
       try {
         const nextEntries = await listScratchpad(workPath);
         if (refreshSerialRef.current !== refreshSerial) return;
-        // The "drafts" collection is owned by the Drafts pane; keep it out of
-        // the memo/ideation surface so entries do not appear in two places.
-        setEntries(nextEntries.filter((entry) => entry.collection !== "drafts"));
+        // Ideation and AI drafts are owned by the Ideation hub; Scratchpad keeps
+        // only the memo and disposable-temp collections visible here.
+        setEntries(
+          nextEntries.filter(
+            (entry) => entry.collection !== "drafts" && entry.collection !== "ideation",
+          ),
+        );
         const current = editorRef.current;
         if (!checkActive || !current || !current.revision) return;
+        if (current.collection === "ideation" || current.collection === "drafts") {
+          // A pane that was already open across a mode/config refresh must not
+          // keep an editor for a collection it no longer owns.
+          loadEditor(null);
+          return;
+        }
         const fresh = nextEntries.find(
           (entry) => scratchpadEntryKey(entry) === scratchpadEntryKey(current),
         );
@@ -480,22 +473,6 @@ export function ScratchpadPane({
     });
   };
 
-  const newIdea = async () => {
-    if (!workPath || !(await flushCurrent())) return;
-    const title = window.prompt(t("rightPane.scratchpad.ideaPrompt"))?.trim();
-    if (!title) return;
-    setLocalError(null);
-    try {
-      const created = await createScratchpadIdea(workPath, title);
-      loadEditor(created);
-      await refresh(false);
-    } catch (error) {
-      const message = errorMessage(error);
-      setLocalError(message);
-      setError(message);
-    }
-  };
-
   const changeNewMemoFormat = (format: MemoFormat) => {
     const current = editorRef.current;
     if (!current || current.revision || current.collection !== "memos") return;
@@ -577,28 +554,6 @@ export function ScratchpadPane({
     const current = editorRef.current;
     if (!current) return;
     await flushCurrent({ copyPath: scratchpadCopyPath(current.relativePath) });
-  };
-
-  const transitionIdea = async (stage: IdeationStage) => {
-    const current = editorRef.current;
-    if (!workPath || !current || current.collection !== "ideation" || !current.revision) return;
-    if (!(await flushCurrent())) return;
-    try {
-      const transitioned = await transitionScratchpadIdea(
-        workPath,
-        current.relativePath,
-        stage,
-        editorRef.current?.revision ?? current.revision,
-      );
-      loadEditor(transitioned);
-      await refresh(false);
-      onRefreshWorkspace();
-    } catch (error) {
-      const message = errorMessage(error);
-      if (isRevisionConflict(error)) setConflict(true);
-      setLocalError(message);
-      setError(message);
-    }
   };
 
   const trashCurrent = async () => {
@@ -774,14 +729,11 @@ export function ScratchpadPane({
 
   useEffect(() => {
     const handleNewMemo = () => void newMemo();
-    const handleNewIdea = () => void newIdea();
     const handleReviewTemp = () => void reviewTempCleanup();
     window.addEventListener("maru:scratchpad:new-memo", handleNewMemo);
-    window.addEventListener("maru:scratchpad:new-idea", handleNewIdea);
     window.addEventListener("maru:scratchpad:review-temp", handleReviewTemp);
     return () => {
       window.removeEventListener("maru:scratchpad:new-memo", handleNewMemo);
-      window.removeEventListener("maru:scratchpad:new-idea", handleNewIdea);
       window.removeEventListener("maru:scratchpad:review-temp", handleReviewTemp);
     };
   });
@@ -828,11 +780,7 @@ export function ScratchpadPane({
       <span className="scratchpad-list-title">
         <strong>{entry.name}</strong>
         {entry.stale ? (
-          <em>
-            {entry.collection === "ideation"
-              ? t("rightPane.scratchpad.reviewDue")
-              : t("rightPane.scratchpad.cleanupEligible")}
-          </em>
+          <em>{t("rightPane.scratchpad.cleanupEligible")}</em>
         ) : null}
       </span>
       <span className="scratchpad-list-preview">
@@ -844,10 +792,6 @@ export function ScratchpadPane({
       </span>
     </button>
   );
-  const transitions = editor?.ideationStage
-    ? IDEATION_STAGE_TRANSITIONS[editor.ideationStage]
-    : [];
-
   const autoSaveLabel =
     saveState === "saving"
       ? t("rightPane.memo.autoSaving")
@@ -883,10 +827,6 @@ export function ScratchpadPane({
         <button type="button" onClick={() => void newMemo()} disabled={!workPath}>
           <FilePlus2 size={13} />
           <span>{t("rightPane.scratchpad.newMemo")}</span>
-        </button>
-        <button type="button" onClick={() => void newIdea()} disabled={!workPath}>
-          <Lightbulb size={13} />
-          <span>{t("rightPane.scratchpad.newIdea")}</span>
         </button>
         <button
           ref={reviewTempTriggerRef}
@@ -1095,19 +1035,7 @@ export function ScratchpadPane({
           )}
 
           <div className="scratchpad-editor-footer">
-            {editor.collection === "ideation" && editor.ideationStage ? (
-              <div className="scratchpad-stage-actions">
-                <span>{t(`rightPane.scratchpad.stage.${editor.ideationStage}`)}</span>
-                {transitions.map((stage) => (
-                  <button key={stage} type="button" onClick={() => void transitionIdea(stage)}>
-                    {stage === "archive" ? <Archive size={12} /> : <ArrowRight size={12} />}
-                    {t(`rightPane.scratchpad.stage.${stage}`)}
-                  </button>
-                ))}
-              </div>
-            ) : (
-              <span />
-            )}
+            <span />
             <span
               className={`memo-autosave-status ${saveState}`}
               role="status"

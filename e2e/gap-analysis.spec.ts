@@ -364,7 +364,7 @@ test("navigates from the drafts pane to gap mode with the draft preselected", as
   await page.goto("/");
   await page
     .locator(".activity-rail")
-    .getByRole("button", { name: "초안", exact: true })
+    .getByRole("button", { name: "아이디어", exact: true })
     .click();
   const draftsPane = page.locator(".drafts-pane");
   await expect(draftsPane).toBeVisible();

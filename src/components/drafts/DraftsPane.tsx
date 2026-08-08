@@ -3,13 +3,17 @@ import { Check, FileDiff, Lightbulb, PenLine, RefreshCcw, Sparkles, Trash2 } fro
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ApprovalInput } from "../../approval/ApprovalDialog";
 import {
+  createScratchpadIdea,
   discardDraft,
   isTauri,
   listDrafts,
   listScratchpad,
   readDraft,
+  readScratchpadDocument,
   saveDraft,
+  saveScratchpadDocument,
   setDraftStatus,
+  transitionScratchpadIdea,
 } from "../../lib/api";
 import { formatRelativeDate } from "../../lib/document";
 import {
@@ -41,7 +45,9 @@ import type {
   DraftKind,
   DraftStatus,
   DraftsChangedEvent,
+  IdeationStage,
   ScratchpadChangedEvent,
+  ScratchpadDocument,
   ScratchpadEntry,
 } from "../../lib/types";
 import { Button, IconButton } from "../ui/Button";
@@ -60,8 +66,6 @@ interface DraftsPaneProps {
   taskIngestMinImportance: AiTaskIngestMinImportance;
   onTaskIngestMinImportanceChange: (value: AiTaskIngestMinImportance) => void;
   onConfirmApproval: (input: ApprovalInput) => Promise<string | null>;
-  /** Switches to the scratchpad (memo) surface that owns ideation entries. */
-  onOpenScratchpad: () => void;
   /** Switches to the Agents mode, which now owns schedules. */
   onOpenAgents: () => void;
   /** Switches to gap-analysis mode with this draft preselected. */
@@ -78,6 +82,13 @@ const STATUS_FILTERS: DraftStatusFilter[] = [
   "all",
 ];
 
+const IDEATION_STAGE_TRANSITIONS: Record<IdeationStage, IdeationStage[]> = {
+  seed: ["developing", "archive"],
+  developing: ["proposal", "archive"],
+  proposal: ["archive"],
+  archive: ["seed"],
+};
+
 type SaveState = "idle" | "saving" | "saved" | "error";
 
 function errorMessage(error: unknown): string {
@@ -93,7 +104,6 @@ export function DraftsPane({
   taskIngestMinImportance,
   onTaskIngestMinImportanceChange,
   onConfirmApproval,
-  onOpenScratchpad,
   onOpenAgents,
   onOpenGapAnalysis,
 }: DraftsPaneProps) {
@@ -110,21 +120,42 @@ export function DraftsPane({
   const [editContent, setEditContent] = useState("");
   const [editing, setEditing] = useState(false);
   const [saveState, setSaveState] = useState<SaveState>("idle");
+  const [ideaDetail, setIdeaDetail] = useState<ScratchpadDocument | null>(null);
+  const [ideaEditContent, setIdeaEditContent] = useState("");
+  const [ideaEditing, setIdeaEditing] = useState(false);
+  const [ideaSaveState, setIdeaSaveState] = useState<SaveState>("idle");
+  const [ideaMutationBusy, setIdeaMutationBusy] = useState(false);
   const [promoteTarget, setPromoteTarget] = useState<DraftEntry | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
+  const detailReadSequenceRef = useRef(0);
+  const ideaMutationRef = useRef(false);
 
   // Held in a ref, not read from state, so the open/promote callbacks keep a
   // stable identity while the user types — onOpenDraft feeds useIdeationDrafts'
   // effects, and a per-keystroke identity change would re-run its mount scan.
   const dirtyRef = useRef(false);
   useEffect(() => {
-    dirtyRef.current = editing && detail !== null && editContent !== detail.content;
-  }, [detail, editContent, editing]);
+    dirtyRef.current =
+      (editing && detail !== null && editContent !== detail.content) ||
+      (ideaEditing && ideaDetail !== null && ideaEditContent !== ideaDetail.content);
+  }, [detail, editContent, editing, ideaDetail, ideaEditContent, ideaEditing]);
 
   const confirmDiscardEdits = useCallback(
     () => !dirtyRef.current || window.confirm(t("drafts.discardEdits")),
     [t],
   );
+
+  const beginIdeaMutation = useCallback(() => {
+    if (ideaMutationRef.current) return false;
+    ideaMutationRef.current = true;
+    setIdeaMutationBusy(true);
+    return true;
+  }, []);
+
+  const endIdeaMutation = useCallback(() => {
+    ideaMutationRef.current = false;
+    setIdeaMutationBusy(false);
+  }, []);
 
   const refresh = useCallback(async () => {
     if (!workPath) {
@@ -151,8 +182,12 @@ export function DraftsPane({
   }, [workPath]);
 
   useEffect(() => {
+    detailReadSequenceRef.current += 1;
     setSelectedId(null);
     setDetail(null);
+    setIdeaDetail(null);
+    setIdeaEditContent("");
+    setIdeaEditing(false);
     void refresh();
   }, [refresh]);
 
@@ -191,29 +226,36 @@ export function DraftsPane({
   const openDraft = useCallback(
     async (draft: DraftEntry) => {
       if (!workPath || !confirmDiscardEdits()) return;
+      const requestId = ++detailReadSequenceRef.current;
       setSelectedId(draftItemId({ itemKind: "draft", draft }));
+      setIdeaDetail(null);
+      setIdeaEditing(false);
       setDetailLoading(true);
       setLocalError(null);
       try {
         let doc = await readDraft(workPath, draft.id);
+        if (detailReadSequenceRef.current !== requestId) return;
         // Opening a fresh draft moves it into review.
         if (doc.status === "new") {
           const updated = await setDraftStatus(workPath, doc.id, "in-review");
+          if (detailReadSequenceRef.current !== requestId) return;
           doc = { ...doc, status: updated.status, updatedAt: updated.updatedAt };
           setDrafts((current) =>
             current.map((entry) => (entry.id === updated.id ? updated : entry)),
           );
         }
+        if (detailReadSequenceRef.current !== requestId) return;
         setDetail(doc);
         setEditContent(doc.content);
         setEditing(false);
         setSaveState("idle");
       } catch (error) {
+        if (detailReadSequenceRef.current !== requestId) return;
         const message = errorMessage(error);
         setLocalError(message);
         setError(message);
       } finally {
-        setDetailLoading(false);
+        if (detailReadSequenceRef.current === requestId) setDetailLoading(false);
       }
     },
     [confirmDiscardEdits, workPath],
@@ -230,7 +272,7 @@ export function DraftsPane({
     onDraftsIngested: handleDraftsChanged,
   });
 
-  const { pendingIdeaPaths, generate } = useIdeationDrafts({
+  const { pendingIdeaPaths, generate: generateIdea } = useIdeationDrafts({
     workPath,
     skills,
     agents,
@@ -240,17 +282,56 @@ export function DraftsPane({
     onDraftsChanged: handleDraftsChanged,
   });
 
+  const generate = useCallback(
+    async (idea: ScratchpadEntry) => {
+      if (!beginIdeaMutation()) return;
+      try {
+        await generateIdea(idea);
+      } finally {
+        endIdeaMutation();
+      }
+    },
+    [beginIdeaMutation, endIdeaMutation, generateIdea],
+  );
+
   const ideaDraftCounts = useMemo(() => countImplementationDraftsByIdea(drafts), [drafts]);
 
-  const openIdea = (entry: ScratchpadEntry) => {
-    if (!confirmDiscardEdits()) return;
-    setSelectedId(draftItemId({ itemKind: "idea", entry }));
-    setDetail(null);
-  };
+  const openIdea = useCallback(
+    async (entry: ScratchpadEntry) => {
+      if (!workPath || !confirmDiscardEdits()) return;
+      const requestId = ++detailReadSequenceRef.current;
+      const selectionId = draftItemId({ itemKind: "idea", entry });
+      setSelectedId(selectionId);
+      setDetail(null);
+      setIdeaDetail(null);
+      setIdeaEditing(false);
+      setDetailLoading(true);
+      setLocalError(null);
+      try {
+        const document = await readScratchpadDocument(
+          workPath,
+          "ideation",
+          entry.relativePath,
+        );
+        if (detailReadSequenceRef.current !== requestId) return;
+        setIdeaDetail(document);
+        setIdeaEditContent(document.content);
+        setIdeaSaveState("idle");
+      } catch (error) {
+        if (detailReadSequenceRef.current !== requestId) return;
+        const message = errorMessage(error);
+        setLocalError(message);
+        setError(message);
+      } finally {
+        if (detailReadSequenceRef.current === requestId) setDetailLoading(false);
+      }
+    },
+    [confirmDiscardEdits, workPath],
+  );
 
   const openItem = (item: DraftListItem) => {
     if (item.itemKind === "draft") void openDraft(item.draft);
-    else openIdea(item.entry);
+    else void openIdea(item.entry);
   };
 
   /** Returns the saved document, or null when there was nothing to save or the
@@ -274,6 +355,115 @@ export function DraftsPane({
       return null;
     }
   };
+
+  const saveIdeaDetail = async (
+    sharedMutation = false,
+  ): Promise<ScratchpadDocument | null> => {
+    if (
+      !workPath ||
+      !ideaDetail ||
+      !ideaDetail.editable ||
+      pendingIdeaPaths.has(ideaDetail.relativePath)
+    ) {
+      return null;
+    }
+    if (!sharedMutation && !beginIdeaMutation()) return null;
+    setIdeaSaveState("saving");
+    setLocalError(null);
+    try {
+      const saved = await saveScratchpadDocument(
+        workPath,
+        "ideation",
+        ideaDetail.relativePath,
+        ideaDetail.format,
+        ideaEditContent,
+        ideaDetail.revision,
+      );
+      setIdeaDetail(saved);
+      setIdeaEditContent(saved.content);
+      setIdeaSaveState("saved");
+      setIdeaEditing(false);
+      void refresh();
+      return saved;
+    } catch (error) {
+      const message = errorMessage(error);
+      setIdeaSaveState("error");
+      setLocalError(message);
+      setError(message);
+      return null;
+    } finally {
+      if (!sharedMutation) endIdeaMutation();
+    }
+  };
+
+  const transitionIdea = async (stage: IdeationStage) => {
+    if (
+      !workPath ||
+      !ideaDetail ||
+      !ideaDetail.revision ||
+      pendingIdeaPaths.has(ideaDetail.relativePath) ||
+      !beginIdeaMutation()
+    ) {
+      return;
+    }
+    try {
+      let current = ideaDetail;
+      if (ideaEditing && ideaEditContent !== ideaDetail.content) {
+        const saved = await saveIdeaDetail(true);
+        if (!saved) return;
+        current = saved;
+      }
+      setLocalError(null);
+      const transitioned = await transitionScratchpadIdea(
+        workPath,
+        current.relativePath,
+        stage,
+        current.revision,
+      );
+      setSelectedId(`idea:${transitioned.relativePath}`);
+      setIdeaDetail(transitioned);
+      setIdeaEditContent(transitioned.content);
+      setIdeaEditing(false);
+      setIdeaSaveState("saved");
+      await refresh();
+    } catch (error) {
+      const message = errorMessage(error);
+      setLocalError(message);
+      setError(message);
+    } finally {
+      endIdeaMutation();
+    }
+  };
+
+  const createIdea = async () => {
+    if (!workPath || !beginIdeaMutation()) return;
+    try {
+      if (!confirmDiscardEdits()) return;
+      const title = window.prompt(t("drafts.idea.prompt"))?.trim();
+      if (!title) return;
+      setLocalError(null);
+      const created = await createScratchpadIdea(workPath, title);
+      await refresh();
+      setSelectedId(`idea:${created.relativePath}`);
+      setDetail(null);
+      setIdeaDetail(created);
+      setIdeaEditContent(created.content);
+      setIdeaEditing(false);
+      setIdeaSaveState("saved");
+    } catch (error) {
+      const message = errorMessage(error);
+      setLocalError(message);
+      setError(message);
+    } finally {
+      endIdeaMutation();
+    }
+  };
+
+  useEffect(() => {
+    const handleNewIdea = () => void createIdea();
+    window.addEventListener("maru:drafts:new-idea", handleNewIdea);
+    return () => window.removeEventListener("maru:drafts:new-idea", handleNewIdea);
+  });
 
   // Promotion reads the body from disk, so an unsaved buffer would be published
   // as the pre-edit text AND frozen as the gap baseline. Flush first, and abort
@@ -305,19 +495,28 @@ export function DraftsPane({
     }
   };
 
+  const openIdeaFromPath = useCallback(
+    (relativePath: string) => {
+      const entry = ideas.find((candidate) => candidate.relativePath === relativePath);
+      if (entry) void openIdea(entry);
+    },
+    [ideas, openIdea],
+  );
+
   const selectedIdea =
     selectedId?.startsWith("idea:")
       ? (ideas.find((entry) => draftItemId({ itemKind: "idea", entry }) === selectedId) ?? null)
       : null;
+  const activeIdea = selectedIdea ?? ideaDetail;
 
   const selectedIdeaDrafts = useMemo(
-    () => (selectedIdea ? implementationDraftsForIdea(drafts, selectedIdea.relativePath) : []),
-    [drafts, selectedIdea],
+    () => (activeIdea ? implementationDraftsForIdea(drafts, activeIdea.relativePath) : []),
+    [activeIdea, drafts],
   );
   const selectedIdeaActiveDraft =
     selectedIdeaDrafts.find((draft) => draft.status !== "discarded") ?? null;
-  const selectedIdeaPending = selectedIdea
-    ? pendingIdeaPaths.has(selectedIdea.relativePath)
+  const selectedIdeaPending = activeIdea
+    ? pendingIdeaPaths.has(activeIdea.relativePath)
     : false;
 
   const previewHtml = useMemo(
@@ -338,6 +537,13 @@ export function DraftsPane({
         subtitle={t("drafts.header.subtitle")}
         actions={
           <>
+            <IconButton
+              label={t("drafts.idea.create")}
+              onClick={() => void createIdea()}
+              disabled={ideaMutationBusy}
+            >
+              <Lightbulb size={15} />
+            </IconButton>
             <IconButton label={t("drafts.create.open")} onClick={() => setCreateOpen(true)}>
               <PenLine size={15} />
             </IconButton>
@@ -440,6 +646,7 @@ export function DraftsPane({
                   type="button"
                   className={selectedId === id ? "drafts-list-item active" : "drafts-list-item"}
                   onClick={() => openItem(item)}
+                  disabled={ideaMutationBusy}
                 >
                   <span className="drafts-list-title">
                     <strong>{draftItemTitle(item)}</strong>
@@ -563,7 +770,7 @@ export function DraftsPane({
                       type="button"
                       className="drafts-lineage-link"
                       title={detail.originRefs[0]}
-                      onClick={onOpenScratchpad}
+                      onClick={() => openIdeaFromPath(detail.originRefs[0])}
                     >
                       {detail.originRefs[0].split("/").pop() ?? detail.originRefs[0]}
                     </button>
@@ -641,25 +848,70 @@ export function DraftsPane({
                 />
               )}
             </div>
-          ) : selectedIdea ? (
+          ) : ideaDetail ? (
             <div className="drafts-detail">
               <header className="drafts-detail-header">
                 <div>
-                  <h3>{selectedIdea.name}</h3>
+                  <h3>{ideaDetail.name}</h3>
                   <span className="drafts-list-meta">
                     <span className="drafts-kind-chip kind-idea">{t("drafts.kind.idea")}</span>
-                    <span className="drafts-source">{selectedIdea.source}</span>
+                    <span className="drafts-source">{ideaDetail.source}</span>
                     <span className="drafts-updated">
-                      {formatRelativeDate(selectedIdea.updatedAt ?? null, locale)}
+                      {formatRelativeDate(ideaDetail.updatedAt ?? null, locale)}
                     </span>
                   </span>
                 </div>
               </header>
-              <StatusBanner tone="info">
-                <Lightbulb size={14} />
-                <span>{t("drafts.idea.readOnly")}</span>
-              </StatusBanner>
-              <p className="drafts-idea-preview">{selectedIdea.preview}</p>
+              <div className="drafts-detail-toolbar">
+                <button
+                  type="button"
+                  className={!ideaEditing ? "active" : ""}
+                  onClick={() => setIdeaEditing(false)}
+                  disabled={ideaMutationBusy || selectedIdeaPending}
+                >
+                  {t("drafts.detail.preview")}
+                </button>
+                <button
+                  type="button"
+                  className={ideaEditing ? "active" : ""}
+                  onClick={() => setIdeaEditing(true)}
+                  disabled={ideaMutationBusy || selectedIdeaPending || !ideaDetail.editable}
+                >
+                  {t("drafts.detail.edit")}
+                </button>
+                {ideaEditing ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    onClick={() => void saveIdeaDetail()}
+                    disabled={
+                      ideaMutationBusy || selectedIdeaPending || ideaSaveState === "saving"
+                    }
+                  >
+                    {ideaSaveState === "saving"
+                      ? t("drafts.detail.saving")
+                      : t("drafts.detail.save")}
+                  </Button>
+                ) : null}
+                <span className={`memo-autosave-status ${ideaSaveState}`} role="status">
+                  {ideaSaveState === "saved" ? t("drafts.detail.saved") : ""}
+                </span>
+              </div>
+              {ideaEditing ? (
+                <textarea
+                  className="drafts-editor"
+                  value={ideaEditContent}
+                  onChange={(event) => {
+                    setIdeaEditContent(event.target.value);
+                    setIdeaSaveState("idle");
+                  }}
+                />
+              ) : (
+                <article
+                  className="drafts-preview markdown-preview"
+                  dangerouslySetInnerHTML={{ __html: renderMarkdown(ideaEditContent) }}
+                />
+              )}
               <div className="drafts-idea-actions">
                 {selectedIdeaPending ? (
                   <Button type="button" size="sm" icon={<Sparkles size={13} />} disabled>
@@ -671,6 +923,7 @@ export function DraftsPane({
                     size="sm"
                     icon={<PenLine size={13} />}
                     onClick={() => void openDraft(selectedIdeaActiveDraft)}
+                    disabled={ideaMutationBusy || selectedIdeaPending}
                   >
                     {t("drafts.idea.openExistingDraft")}
                   </Button>
@@ -680,13 +933,42 @@ export function DraftsPane({
                     size="sm"
                     variant="primary"
                     icon={<Sparkles size={13} />}
-                    onClick={() => void generate(selectedIdea)}
+                    onClick={() => {
+                      if (activeIdea) void generate(activeIdea);
+                    }}
+                    disabled={ideaMutationBusy || selectedIdeaPending}
                   >
                     {t("drafts.idea.generateDraft")}
                   </Button>
                 )}
-                <Button type="button" size="sm" onClick={onOpenScratchpad}>
-                  {t("drafts.idea.openInScratchpad")}
+              </div>
+              {ideaDetail.ideationStage ? (
+                <div className="drafts-idea-actions">
+                  <span>{t(`rightPane.scratchpad.stage.${ideaDetail.ideationStage}`)}</span>
+                  {IDEATION_STAGE_TRANSITIONS[ideaDetail.ideationStage].map((stage) => (
+                    <Button
+                      key={stage}
+                      type="button"
+                      size="sm"
+                      onClick={() => void transitionIdea(stage)}
+                      disabled={ideaMutationBusy || selectedIdeaPending}
+                    >
+                      {t(`rightPane.scratchpad.stage.${stage}`)}
+                    </Button>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          ) : selectedIdea ? (
+            <div className="drafts-detail">
+              <header className="drafts-detail-header">
+                <div>
+                  <h3>{selectedIdea.name}</h3>
+                </div>
+              </header>
+              <div className="drafts-idea-actions">
+                <Button type="button" size="sm" onClick={() => void openIdea(selectedIdea)}>
+                  {t("drafts.idea.open")}
                 </Button>
               </div>
             </div>

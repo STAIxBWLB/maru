@@ -1,106 +1,127 @@
-# Performance baseline
+# Performance verification
 
-Baseline measurements for the issue #201 performance program (steps 1–6 +
-verification; App.tsx decomposition steps 7–9 are separate PRs). The "after"
-column is filled in at the verification step on the same branch.
+This document records the reproducible measurements for issue #201. The
+comparison uses product source from `252b65a` (`v0.4.45`) versus product source
+from `976fa63` (`v0.4.46`) on the same machine. The latter contains steps 1-9;
+this verification is step 10. Both trees received the same measurement-only
+instrumentation described below; those probes are not part of the historical
+baseline commit.
 
-## Environment
+## Environment and method
 
-- Machine: Apple M3 Max, 36 GB, macOS 26.6.1
-- Tree: `main@252b65a` + partial step-3 WIP (uncommitted `useElapsed`
-  shared-store, GitStatusBadge single-call, visibility-gated focus reloads).
-  The WIP does not affect bundle size and barely affects idle timers, so the
-  numbers below are treated as the pre-change baseline.
+- Machine: Apple Mac15,10, Apple silicon, 36 GB RAM, macOS 26.6.1 (25G76)
+- Toolchain: Node v25.9.0, pnpm 9.15.0, Rust 1.96.0
 - Date: 2026-08-08
+- Workspace: the real `/Users/yj.lee/workspace/work`; only entry counts,
+  byte totals, and timings are recorded below
+- Baseline product source: detached worktree at `252b65a`
+- After product source: worktree at `976fa63`
 
-## Bundle (automated, `pnpm build`)
+The browser measurements use the same `scripts/perf-startup-profile.mjs`
+harness and Vite dev shell for both trees. `MARU_PERF_ROOT` lets the current
+harness profile a detached historical checkout without copying the script:
 
-| Metric | Baseline | After |
-|---|---|---|
-| Initial JS `index-*.js` | 1,328.61 kB raw / 379.2 KiB gzip (budget 500) | 961.15 kB raw / 285.1 KiB gzip (-25%, budget now 320) |
-| Initial CSS `index-*.css` | 59.0 KiB gzip (budget 70) | 59.0 KiB gzip (budget 70) |
-| i18n dict chunks | — (bundled in entry) | `ko-*.js` 51.8 KiB gzip, `en-*.js` 45.4 KiB gzip, both lazy |
+```bash
+MARU_PERF_ROOT=/tmp/maru-201-baseline \
+  MARU_PERF_PORT=5334 \
+  pnpm exec node scripts/perf-startup-profile.mjs /tmp/profile.json
+```
 
-Baseline recorded in the issue at HEAD 252b65a (1.33 MB raw / 378 KiB gzip)
-matches this re-measurement.
+The shell uses mocked Tauri IPC. It therefore measures module loading, React
+mount, and the mocked boot path, not native IPC or a production WebView.
 
-## Startup profile (browser dev shell, mocked IPC)
+## Bundle (`pnpm build`)
 
-Captured with `node scripts/perf-startup-profile.mjs` — a Playwright run of
-the Vite dev shell at `?startupProfile=1`, read from
-`window.__MARU_STARTUP_PROFILE__`. IPC is mocked in the browser shell, so
-these numbers cover module parse, React mount and first render only. Dev-mode
-StrictMode double-mounts, so `app:mounted`/`boot:*` fire twice; the table
-uses the later of each pair.
+The gzip values in the table are from `scripts/check-bundle-budget.mjs`, the
+same gate used by the build. Raw sizes are the Vite reporter's initial
+`index-*.js` output.
 
-| Mark | Run 1 (ms) | Run 2 (ms) | After (ms) |
-|---|---|---|---|
-| `app:entry` | 968 | 1789 | 1102 |
-| `app:mounted` | 1097 | 1931 | 1127 |
-| `boot:end` | 1153 | 1992 | 1131 |
-| `workspace:first-usable` | 1152 | 1992 | 1131 |
-| entry → mounted | ~125 | ~142 | ~25 |
-| boot:start → boot:end | ~60 | ~60 | ~29 |
+| Metric | Baseline `252b65a` | After `976fa63` | Change |
+|---|---:|---:|---:|
+| Initial JS entry | 1,328.83 kB raw / 379.3 KiB gzip (budget 500) | 966.97 kB raw / 286.5 KiB gzip (budget 320) | -27.2% raw / -24.5% gzip |
+| Initial CSS entry | 408.59 kB raw / 59.0 KiB gzip (budget 70) | 408.59 kB raw / 59.0 KiB gzip (budget 70) | unchanged |
+| i18n chunks | dictionaries bundled in entry | `ko` 51.78 KiB gzip, `en` 45.38 KiB gzip, both lazy | moved out of entry |
 
-The entry→mounted drop (~130 → ~25 ms) is the i18n split: the entry chunk
-no longer parses ~400 KB of dictionary literals at startup. Dev-mode vite
-variance dominates the absolute entry mark.
+Both builds passed the bundle budgets. The Vite reporter's gzip values were
+388.35 KiB (baseline) and 293.38 KiB (after); the table intentionally uses the
+budget script's values for like-for-like gate reporting.
 
-`vault:cache-read`, `document:primary-read` and `vault:authoritative-scan`
-measure <1 ms each against the mocked sample workspace — not meaningful for
-IPC cost; see the native protocol below.
+## Browser startup profile (three runs, mocked IPC)
 
-## Native app idle (real measurement, `pnpm tauri dev`)
+Each run used `?startupProfile=1`. Dev StrictMode emits duplicate mount/boot
+marks; for each run the later mark was used. Absolute `app:entry` timestamps
+include Vite/browser startup variance, so the comparison uses elapsed time
+from `app:entry`.
 
-Sampled `ps` every 10 s for 60 s after the window settled, default workspace,
-no interaction:
+| Measure (ms) | Baseline runs 1 / 2 / 3 | Baseline median | After runs 1 / 2 / 3 | After median |
+|---|---:|---:|---:|---:|
+| `app:entry` -> `app:mounted` | 182.4 / 256.4 / 189.2 | 189.2 | 64.4 / 40.8 / 42.7 | 42.7 |
+| `app:entry` -> `workspace:first-usable` | 278.3 / 372.0 / 283.2 | 283.2 | 81.3 / 55.6 / 55.8 | 55.8 |
+| `app:entry` -> `vault:authoritative-scan-done` | 278.6 / 372.3 / 283.6 | 283.6 | 87.3 / 61.3 / 60.7 | 61.3 |
+| `boot:start` -> `boot:end` | 95.6 / 115.5 / 93.7 | 95.6 | 21.4 / 18.3 / 16.6 | 18.3 |
 
-| Metric | Baseline | After |
-|---|---|---|
-| Idle CPU | 0.9–1.5 % | 0.0–0.1 % |
-| RSS | settles ~105 MB (peak 138 MB during settle) | settles ~141–150 MB (peak 278 MB during settle) |
+The median elapsed time from entry to first usable fell from 283.2 ms to
+55.8 ms in this mocked browser shell. This is evidence for the frontend
+startup path only; it is not a native launch-time claim.
 
-The idle-CPU drop matches the polling work (shared 1 Hz elapsed clock,
-visibility-gated intervals, single git-status invoke). RSS is dev-build
-noise territory (unminified code + source maps); treat the ~35 MB settle
-difference as unexplained but not alarming — re-check on a release build
-if it matters.
+## Native `scan_vault` (three release-test runs)
 
-## Manual protocol (native app, not yet automated)
+The ignored Rust benchmark was extended to serialize the returned
+`Vec<VaultEntry>` and report its byte length. For provenance, the exact same
+measurement-only `vault.rs` probe was temporarily applied to the baseline
+worktree and is present in the after branch; it does not alter scan behavior.
+The same real workspace and command were used for both trees:
 
-Cells stay `[manual]` until measured; do not fabricate numbers.
+```bash
+MARU_BENCH_WORKSPACE=/Users/yj.lee/workspace/work \
+  cargo test --release bench_scan_real_workspace -- \
+  --ignored --nocapture --test-threads=1
+```
 
-- **Native startup profile**: enable `localStorage["maru:startup:profile"] =
-  "1"` in the WKWebView (or add `?startupProfile=1` to the loaded URL), cold
-  start the app, read `window.__MARU_STARTUP_PROFILE__`. Key marks:
-  `app:entry` → `workspace:first-usable` → `vault:authoritative-scan-done`.
-- **`scan_vault` time + payload**: on a real large workspace, time
-  `measureStartup("vault:authoritative-scan")` and log the serialized IPC
-  payload size (entries count × frontmatter/snippet/links per entry).
-- **React Profiler**: document select, typing burst, tab switch, mode switch
-  (Docs ↔ Inbox ↔ Meetings ↔ Today). Record render count and total ms for
-  `MainApp` and the target pane.
-- **Poll/timer audit**: with a few running missions, count active
-  `setInterval` timers (`vi`-style audit or Performance panel) — pre-change
-  expectation: 1 Hz per mission row + 60 s usage bar + 30 s dot-sync +
-  60 s new-day tick.
+| Metric | Baseline runs 1 / 2 / 3 | Baseline median | After runs 1 / 2 / 3 | After median |
+|---|---:|---:|---:|---:|
+| Entries | 10,701 / 10,701 / 10,701 | 10,701 | 10,701 / 10,701 / 10,701 | 10,701 |
+| Snippet bytes | 4,277,483 each | 4,277,483 | 4,277,483 each | 4,277,483 |
+| Serialized payload bytes | 11,452,111 each | 11,452,111 | 11,452,111 each | 11,452,111 |
+| `scan_vault` time | 720.159 / 566.224 / 475.223 ms | 566.224 ms | 1,242.280 / 499.672 / 563.589 ms | 563.589 ms |
 
-## Verification gates for the "after" column
+The measured medians are effectively unchanged (0.5% lower after). The
+benchmark includes the existing cache read/write path, and the real workspace
+cache state can affect individual runs; this result should not be read as a
+statistically controlled native speedup. The important step-10 result is that
+the current native scan payload is measured and stable at about 11.45 MB for
+10,701 entries, rather than left as a manual placeholder.
 
-`pnpm typecheck`, `pnpm test`, `make lint-i18n`, `cargo test` (src-tauri),
-`pnpm build` (includes the bundle-budget check), Playwright smoke subset.
+## Measurements intentionally not claimed
 
-Results on `perf/201-low-risk` (2026-08-08):
+- Native app cold startup marks were not captured. The existing startup marks
+  are exposed in the browser harness, but there is no automated native
+  WebView capture in this checkout.
+- React Profiler interaction scenarios (document selection, typing, tab
+  switching, and mode switching) were not assigned numbers. The browser shell
+  uses mocked IPC and the app has no stable production Profiler scenario
+  harness; inventing render counts or durations would make the comparison
+  misleading.
+- Native idle CPU and RSS were not remeasured in this verification. Older
+  development-build samples are not comparable to this clean baseline/after
+  pair and are intentionally excluded from the result.
 
-- `pnpm typecheck` — clean
-- `pnpm test` — 172 files / 1640 tests passed
-- `make lint-i18n` — 3583 keys in parity, no hardcoded UI strings
-- `cargo test` — 1101 passed, 0 failed
-- `pnpm build` — budget green (285.1 KiB ≤ 320 KiB, CSS 59.0 ≤ 70)
-- Playwright smoke — `smoke.spec.ts` (43), `startup.spec.ts` +
-  `graph-shell.spec.ts` (9), all passed
+These are explicit measurement limits, not estimated values.
 
-Caught during verification: the lazy-dictionary gate exposed a stale-memo
-bug (`useLocaleState().t` identity survived the dictionary load, so memoized
-translations cached raw keys) and two race-prone smoke helpers; all three
-fixed in `a059620`.
+## Verification
+
+The clean after tree was checked with:
+
+- `pnpm build` - passed; TypeScript build and bundle budgets passed
+- `pnpm typecheck` - passed
+- `pnpm lint:i18n` - passed; 3,583 keys in parity, no hardcoded UI strings
+- `pnpm test` - passed; 179 files / 1,717 tests
+- `scripts/perf-startup-profile.mjs` - three baseline and three after runs passed
+- `cargo test --release bench_scan_real_workspace -- --ignored --nocapture --test-threads=1` - three baseline and three after runs passed
+- Targeted Rust vault tests - passed; 16 tests
+- Playwright smoke (`smoke.spec.ts`, `startup.spec.ts`, `graph-shell.spec.ts`) - passed; 52 tests
+- `git diff --check` - passed
+
+`cargo fmt --check` still reports pre-existing formatting differences across
+unrelated Rust files in the clean after tree. The benchmark addition itself is
+rustfmt-shaped; no unrelated formatting was changed for this verification.

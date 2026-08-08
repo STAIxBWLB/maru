@@ -5312,12 +5312,25 @@ mod tests {
         let work = home._dir.path().join("work");
         fs::create_dir_all(&work).unwrap();
         let scratchpad = crate::scratchpad::resolve_scratchpad_root(&work).unwrap();
+        fs::write(
+            work.join("workspace.config.yaml"),
+            format!(
+                "version: 1\npaths:\n  scratchpad: {}\nscratchpad:\n  drafts_subdir: generated-drafts\n",
+                scratchpad.display()
+            ),
+        )
+        .unwrap();
+        let drafts = crate::scratchpad::resolve_scratchpad_drafts_root(&work).unwrap();
 
         let vars = env_vars_for_runs(Some(&work)).unwrap();
 
         assert_eq!(
             vars.get("MARU_SCRATCHPAD"),
             Some(&scratchpad.to_string_lossy().into_owned())
+        );
+        assert_eq!(
+            vars.get("MARU_DRAFTS"),
+            Some(&drafts.to_string_lossy().into_owned())
         );
         assert_eq!(
             vars.get("MARU_TEMP"),

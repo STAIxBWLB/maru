@@ -245,7 +245,7 @@ dead wiki-link, orphan note, 스키마 위반, 명명규칙 위반, stale seed, 
         label_key: "agents.builtin.dailyDigest",
         skill_name: "draft-writer",
         prompt: "어제 처리한 inbox 항목, 오늘·내일 마감 task, 미결 승인 건을 개조식으로 요약해 \
-scratchpad/drafts/ 아래 하루 브리핑 초안으로 작성. 확정 트리 수정 금지.",
+$MARU_DRAFTS 아래 하루 브리핑 초안으로 작성. 확정 트리 수정 금지.",
         kind: "background",
         permission_mode: "inherit",
         enabled: false,

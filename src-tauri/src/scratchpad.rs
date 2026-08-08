@@ -140,6 +140,8 @@ struct ScratchpadConfigFile {
     memos_subdir: String,
     #[serde(default = "default_temp_subdir")]
     temp_subdir: String,
+    #[serde(default = "default_drafts_subdir")]
+    drafts_subdir: String,
     #[serde(default = "default_editable_extensions", alias = "allowed_extensions")]
     editable_extensions: Vec<String>,
     #[serde(default = "default_temp_stale_days", alias = "stale_days")]
@@ -156,6 +158,7 @@ impl Default for ScratchpadConfigFile {
             ideation_subdir: default_ideation_subdir(),
             memos_subdir: default_memos_subdir(),
             temp_subdir: default_temp_subdir(),
+            drafts_subdir: default_drafts_subdir(),
             editable_extensions: default_editable_extensions(),
             temp_stale_days: default_temp_stale_days(),
             ideation_review_days: default_ideation_review_days(),
@@ -174,6 +177,10 @@ fn default_memos_subdir() -> String {
 
 fn default_temp_subdir() -> String {
     "temp".to_string()
+}
+
+fn default_drafts_subdir() -> String {
+    "drafts".to_string()
 }
 
 fn default_editable_extensions() -> Vec<String> {
@@ -339,7 +346,18 @@ fn safe_config_subdir(raw: &str, key: &str) -> Result<PathBuf, String> {
     {
         return Err(format!("scratchpad.{key} must be a safe relative path"));
     }
-    Ok(path.to_path_buf())
+    // Rebuild from normal components so spelling aliases such as `foo/bar`
+    // and `foo//bar` resolve to one collection root before overlap checks.
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        if let Component::Normal(value) = component {
+            normalized.push(value);
+        }
+    }
+    if normalized.as_os_str().is_empty() {
+        return Err(format!("scratchpad.{key} must be a safe relative path"));
+    }
+    Ok(normalized)
 }
 
 fn resolve_collection_root(
@@ -370,14 +388,13 @@ fn collection_roots(root: &Path, config: &ScratchpadConfigFile) -> Result<[PathB
     ])
 }
 
-/// The drafts collection lives at a fixed `<root>/drafts` subdir (not
-/// user-configurable) alongside the three configurable collections.
 fn all_collection_roots(
     root: &Path,
     config: &ScratchpadConfigFile,
 ) -> Result<[PathBuf; 4], String> {
     let [ideation, memos, temp] = collection_roots(root, config)?;
-    Ok([ideation, memos, temp, root.join("drafts")])
+    let drafts = root.join(safe_config_subdir(&config.drafts_subdir, "drafts_subdir")?);
+    Ok([ideation, memos, temp, drafts])
 }
 
 fn comparable_collection_path(path: &Path) -> String {
@@ -1203,6 +1220,17 @@ fn move_idea_directory_noreplace(
     Ok(())
 }
 
+fn lineage_update_failed(error: String, rollback: Result<(), String>) -> String {
+    match rollback {
+        Ok(()) => format!(
+            "scratchpad_transition_lineage_failed: {error}; filesystem move rolled back"
+        ),
+        Err(rollback_error) => format!(
+            "scratchpad_transition_lineage_failed: {error}; filesystem rollback failed: {rollback_error}"
+        ),
+    }
+}
+
 #[tauri::command(async)]
 pub fn scratchpad_transition_idea(
     work_path: String,
@@ -1234,6 +1262,8 @@ pub fn scratchpad_transition_idea(
         return Err("Idea path is missing a file name".to_string());
     }
     let target = Path::new(stage_dir(stage)).join(&remainder);
+    let old_relative = path_slashes(&relative);
+    let new_relative = path_slashes(&target);
     let remainder_path = target
         .strip_prefix(stage_dir(stage))
         .map_err(|_| "Cannot resolve idea transition target".to_string())?;
@@ -1276,19 +1306,42 @@ pub fn scratchpad_transition_idea(
             &selected_source,
             &expected_revision,
         )?;
-        return scratchpad_read(
-            work_path,
-            ScratchpadCollection::Ideation,
-            path_slashes(&target),
-        );
+        if let Err(error) =
+            crate::drafts::update_idea_origin_refs(&work, &old_relative, &new_relative)
+        {
+            let moved_source = root.join(&new_relative);
+            let rollback = move_idea_directory_noreplace(
+                &root,
+                &target_slug,
+                &source_slug,
+                &moved_source,
+                &expected_revision,
+            );
+            return Err(lineage_update_failed(error, rollback));
+        }
+        return scratchpad_read(work_path, ScratchpadCollection::Ideation, new_relative);
     }
-    scratchpad_rename(
-        work_path,
+    let document = scratchpad_rename(
+        work_path.clone(),
         ScratchpadCollection::Ideation,
-        relative_path,
-        path_slashes(&target),
-        expected_revision,
-    )
+        relative_path.clone(),
+        new_relative.clone(),
+        expected_revision.clone(),
+    )?;
+    if let Err(error) =
+        crate::drafts::update_idea_origin_refs(Path::new(&work_path), &old_relative, &new_relative)
+    {
+        let rollback = scratchpad_rename(
+            work_path.clone(),
+            ScratchpadCollection::Ideation,
+            new_relative.clone(),
+            old_relative.clone(),
+            expected_revision,
+        )
+        .map(|_| ());
+        return Err(lineage_update_failed(error, rollback));
+    }
+    Ok(document)
 }
 
 #[tauri::command(async)]
@@ -1618,6 +1671,76 @@ mod tests {
     }
 
     #[test]
+    fn configured_drafts_subdir_resolves_the_drafts_collection() {
+        let (temp, work) = workspace();
+        let scratchpad = temp.path().join("scratchpad");
+        fs::write(
+            temp.path().join("workspace.config.yaml"),
+            format!(
+                "paths:\n  scratchpad: {}\nscratchpad:\n  drafts_subdir: generated-drafts\n",
+                scratchpad.display()
+            ),
+        )
+        .unwrap();
+
+        assert_eq!(
+            resolve_scratchpad_drafts_root(Path::new(&work)).unwrap(),
+            scratchpad.join("generated-drafts")
+        );
+    }
+
+    #[test]
+    fn drafts_subdir_must_be_safe_relative() {
+        let (temp, work) = workspace();
+        let scratchpad = temp.path().join("scratchpad");
+        fs::write(
+            temp.path().join("workspace.config.yaml"),
+            format!(
+                "paths:\n  scratchpad: {}\nscratchpad:\n  drafts_subdir: ../outside\n",
+                scratchpad.display()
+            ),
+        )
+        .unwrap();
+
+        let error = resolve_scratchpad_drafts_root(Path::new(&work)).unwrap_err();
+        assert!(error.contains("scratchpad.drafts_subdir must be a safe relative path"));
+    }
+
+    #[test]
+    fn drafts_subdir_overlap_with_ideation_is_rejected() {
+        let (temp, work) = workspace();
+        let scratchpad = temp.path().join("scratchpad");
+        fs::write(
+            temp.path().join("workspace.config.yaml"),
+            format!(
+                "paths:\n  scratchpad: {}\nscratchpad:\n  ideation_subdir: ideation\n  drafts_subdir: ideation\n",
+                scratchpad.display()
+            ),
+        )
+        .unwrap();
+
+        let error = validate_scratchpad_layout(Path::new(&work)).unwrap_err();
+        assert!(error.contains("collection roots overlap"));
+    }
+
+    #[test]
+    fn drafts_subdir_spelling_aliases_cannot_bypass_overlap_validation() {
+        let (temp, work) = workspace();
+        let scratchpad = temp.path().join("scratchpad");
+        fs::write(
+            temp.path().join("workspace.config.yaml"),
+            format!(
+                "paths:\n  scratchpad: {}\nscratchpad:\n  ideation_subdir: foo/bar\n  drafts_subdir: foo//bar\n",
+                scratchpad.display()
+            ),
+        )
+        .unwrap();
+
+        let error = validate_scratchpad_layout(Path::new(&work)).unwrap_err();
+        assert!(error.contains("collection roots overlap"));
+    }
+
+    #[test]
     fn list_is_recursive_and_classifies_sources_and_stages() {
         let (temp, work) = workspace();
         fs::create_dir_all(temp.path().join("scratchpad/temp/runtime/claude/run")).unwrap();
@@ -1820,6 +1943,175 @@ mod tests {
     }
 
     #[test]
+    fn idea_transition_updates_linked_implementation_lineage() {
+        let (temp, work) = workspace();
+        let idea = scratchpad_create_idea(work.clone(), "Lineage update".to_string()).unwrap();
+        let old_path = idea.entry.relative_path.clone();
+        let new_path = old_path.replacen("seeds/", "developing/", 1);
+        let index = temp.path().join(".maru/drafts/index.json");
+        fs::create_dir_all(index.parent().unwrap()).unwrap();
+        fs::write(
+            &index,
+            serde_json::to_vec_pretty(&[serde_json::json!({
+                "id": "draft-lineage",
+                "kind": "implementation",
+                "title": "Lineage draft",
+                "status": "new",
+                "source": "manual",
+                "originRefs": [old_path.clone(), new_path.clone(), old_path.clone()],
+                "bodyPath": "lineage.md",
+                "createdAt": "2026-08-08T00:00:00Z",
+                "updatedAt": "2026-08-08T00:00:00Z"
+            })])
+            .unwrap(),
+        )
+        .unwrap();
+
+        let moved = scratchpad_transition_idea(
+            work.clone(),
+            idea.entry.relative_path,
+            IdeationStage::Developing,
+            idea.entry.revision,
+        )
+        .unwrap();
+        assert_eq!(moved.entry.relative_path, new_path);
+
+        let entries = crate::drafts::load_index(Path::new(&work)).unwrap();
+        assert_eq!(entries[0].origin_refs, vec![new_path.clone()]);
+    }
+
+    #[test]
+    fn file_idea_transition_rolls_back_when_lineage_index_read_fails() {
+        let (temp, work) = workspace();
+        let idea = scratchpad_create_idea(work.clone(), "Read rollback".to_string()).unwrap();
+        let old_path = idea.entry.relative_path.clone();
+        let new_path = old_path.replacen("seeds/", "developing/", 1);
+        let index = temp.path().join(".maru/drafts/index.json");
+        fs::create_dir_all(index.parent().unwrap()).unwrap();
+        fs::write(
+            &index,
+            serde_json::to_vec_pretty(&[serde_json::json!({
+                "id": "draft-read-rollback",
+                "kind": "implementation",
+                "title": "Read rollback draft",
+                "status": "new",
+                "source": "manual",
+                "originRefs": [old_path.clone()],
+                "bodyPath": "read-rollback.md",
+                "createdAt": "2026-08-08T00:00:00Z",
+                "updatedAt": "2026-08-08T00:00:00Z"
+            })])
+            .unwrap(),
+        )
+        .unwrap();
+
+        crate::drafts::fail_next_index_read();
+        let error = scratchpad_transition_idea(
+            work.clone(),
+            old_path.clone(),
+            IdeationStage::Developing,
+            idea.entry.revision,
+        )
+        .unwrap_err();
+        assert!(error.contains("filesystem move rolled back"));
+
+        let root = temp.path().join("scratchpad/ideation");
+        assert!(root.join(&old_path).is_file());
+        assert!(!root.join(&new_path).exists());
+        let entries = crate::drafts::load_index(Path::new(&work)).unwrap();
+        assert_eq!(entries[0].origin_refs, vec![old_path]);
+    }
+
+    #[test]
+    fn file_idea_transition_rolls_back_when_lineage_index_write_fails() {
+        let (temp, work) = workspace();
+        let idea = scratchpad_create_idea(work.clone(), "File rollback".to_string()).unwrap();
+        let old_path = idea.entry.relative_path.clone();
+        let new_path = old_path.replacen("seeds/", "developing/", 1);
+        let index = temp.path().join(".maru/drafts/index.json");
+        fs::create_dir_all(index.parent().unwrap()).unwrap();
+        fs::write(
+            &index,
+            serde_json::to_vec_pretty(&[serde_json::json!({
+                "id": "draft-file-rollback",
+                "kind": "implementation",
+                "title": "File rollback draft",
+                "status": "new",
+                "source": "manual",
+                "originRefs": [old_path.clone()],
+                "bodyPath": "file-rollback.md",
+                "createdAt": "2026-08-08T00:00:00Z",
+                "updatedAt": "2026-08-08T00:00:00Z"
+            })])
+            .unwrap(),
+        )
+        .unwrap();
+
+        crate::drafts::fail_next_index_write();
+        let error = scratchpad_transition_idea(
+            work.clone(),
+            old_path.clone(),
+            IdeationStage::Developing,
+            idea.entry.revision,
+        )
+        .unwrap_err();
+        assert!(error.contains("filesystem move rolled back"));
+
+        let root = temp.path().join("scratchpad/ideation");
+        assert!(root.join(&old_path).is_file());
+        assert!(!root.join(&new_path).exists());
+        let entries = crate::drafts::load_index(Path::new(&work)).unwrap();
+        assert_eq!(entries[0].origin_refs, vec![old_path]);
+    }
+
+    #[test]
+    fn directory_idea_transition_rolls_back_when_lineage_index_write_fails() {
+        let (temp, work) = workspace();
+        let root = temp.path().join("scratchpad/ideation");
+        fs::create_dir_all(root.join("seeds/rollback/assets")).unwrap();
+        fs::write(root.join("seeds/rollback/main.md"), "main").unwrap();
+        fs::write(root.join("seeds/rollback/evidence.md"), "evidence").unwrap();
+        fs::write(root.join("seeds/rollback/assets/image.bin"), b"image").unwrap();
+        let old_path = "seeds/rollback/main.md".to_string();
+        let index = temp.path().join(".maru/drafts/index.json");
+        fs::create_dir_all(index.parent().unwrap()).unwrap();
+        fs::write(
+            &index,
+            serde_json::to_vec_pretty(&[serde_json::json!({
+                "id": "draft-directory-rollback",
+                "kind": "implementation",
+                "title": "Directory rollback draft",
+                "status": "new",
+                "source": "manual",
+                "originRefs": [old_path.clone()],
+                "bodyPath": "directory-rollback.md",
+                "createdAt": "2026-08-08T00:00:00Z",
+                "updatedAt": "2026-08-08T00:00:00Z"
+            })])
+            .unwrap(),
+        )
+        .unwrap();
+        let revision = revision_for_file(&root.join(&old_path)).unwrap();
+
+        crate::drafts::fail_next_index_write();
+        let error = scratchpad_transition_idea(
+            work.clone(),
+            old_path.clone(),
+            IdeationStage::Developing,
+            revision,
+        )
+        .unwrap_err();
+        assert!(error.contains("filesystem move rolled back"));
+
+        assert!(root.join("seeds/rollback/main.md").is_file());
+        assert!(root.join("seeds/rollback/evidence.md").is_file());
+        assert!(root.join("seeds/rollback/assets/image.bin").is_file());
+        assert!(!root.join("developing/rollback").exists());
+        let entries = crate::drafts::load_index(Path::new(&work)).unwrap();
+        assert_eq!(entries[0].origin_refs, vec![old_path]);
+    }
+
+    #[test]
     fn ideation_transition_matrix_matches_ui() {
         assert!(transition_allowed(
             IdeationStage::Seed,
@@ -1871,6 +2163,24 @@ mod tests {
         fs::write(root.join("seeds/slug/main.md"), "main").unwrap();
         fs::write(root.join("seeds/slug/evidence.md"), "evidence").unwrap();
         fs::write(root.join("seeds/slug/assets/image.bin"), b"image").unwrap();
+        let index = temp.path().join(".maru/drafts/index.json");
+        fs::create_dir_all(index.parent().unwrap()).unwrap();
+        fs::write(
+            &index,
+            serde_json::to_vec_pretty(&[serde_json::json!({
+                "id": "draft-directory-lineage",
+                "kind": "implementation",
+                "title": "Directory lineage draft",
+                "status": "new",
+                "source": "manual",
+                "originRefs": ["seeds/slug/main.md"],
+                "bodyPath": "directory-lineage.md",
+                "createdAt": "2026-08-08T00:00:00Z",
+                "updatedAt": "2026-08-08T00:00:00Z"
+            })])
+            .unwrap(),
+        )
+        .unwrap();
         let revision = revision_for_file(&root.join("seeds/slug/main.md")).unwrap();
 
         let image_revision = revision_for_file(&root.join("seeds/slug/assets/image.bin")).unwrap();
@@ -1928,6 +2238,8 @@ mod tests {
             fs::read(root.join("developing/slug/assets/image.bin")).unwrap(),
             b"image"
         );
+        let entries = crate::drafts::load_index(&temp.path().to_path_buf()).unwrap();
+        assert_eq!(entries[0].origin_refs, vec!["developing/slug/main.md"]);
     }
 
     #[test]

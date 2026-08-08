@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 const SCRATCHPAD_ENV: &str = "MARU_SCRATCHPAD";
+const DRAFTS_ENV: &str = "MARU_DRAFTS";
 const TEMP_ENV: &str = "MARU_TEMP";
 const CLAUDE_TMP_ENV: &str = "CLAUDE_CODE_TMPDIR";
 
@@ -74,6 +75,11 @@ pub(crate) fn reserved_runtime_env(work_path: &Path) -> Result<BTreeMap<String, 
         SCRATCHPAD_ENV.to_string(),
         scratchpad.to_string_lossy().into_owned(),
     );
+    let drafts = crate::scratchpad::resolve_scratchpad_drafts_root(&work_root)?;
+    env.insert(
+        DRAFTS_ENV.to_string(),
+        drafts.to_string_lossy().into_owned(),
+    );
     env.insert(TEMP_ENV.to_string(), temp.to_string_lossy().into_owned());
     env.insert(
         CLAUDE_TMP_ENV.to_string(),
@@ -134,7 +140,7 @@ mod tests {
         fs::write(
             work.path().join("workspace.config.yaml"),
             format!(
-                "version: 1\npaths:\n  primary: {}\n  scratchpad: {}\nscratchpad:\n  temp_subdir: temp\n",
+                "version: 1\npaths:\n  primary: {}\n  scratchpad: {}\nscratchpad:\n  temp_subdir: temp\n  drafts_subdir: generated-drafts\n",
                 work.path().display(),
                 scratchpad.display()
             ),
@@ -147,6 +153,8 @@ mod tests {
     fn nested_runs_use_the_configured_work_scratchpad() {
         let work = configured_work();
         let expected_scratchpad = crate::scratchpad::resolve_scratchpad_root(work.path()).unwrap();
+        let expected_drafts =
+            crate::scratchpad::resolve_scratchpad_drafts_root(work.path()).unwrap();
         let nested = work.path().join("dev").join("project");
         fs::create_dir_all(&nested).unwrap();
 
@@ -155,6 +163,10 @@ mod tests {
         assert_eq!(
             env.get(SCRATCHPAD_ENV).map(String::as_str),
             Some(expected_scratchpad.to_string_lossy().as_ref())
+        );
+        assert_eq!(
+            env.get(DRAFTS_ENV).map(String::as_str),
+            Some(expected_drafts.to_string_lossy().as_ref())
         );
         assert_eq!(
             env.get(TEMP_ENV).map(String::as_str),
@@ -166,8 +178,11 @@ mod tests {
     fn reserved_values_replace_caller_values() {
         let work = configured_work();
         let expected_scratchpad = crate::scratchpad::resolve_scratchpad_root(work.path()).unwrap();
+        let expected_drafts =
+            crate::scratchpad::resolve_scratchpad_drafts_root(work.path()).unwrap();
         let mut env = HashMap::from([
             (SCRATCHPAD_ENV.to_string(), "/tmp/override".to_string()),
+            (DRAFTS_ENV.to_string(), "/tmp/override/drafts".to_string()),
             (TEMP_ENV.to_string(), "/tmp/override/temp".to_string()),
             (
                 CLAUDE_TMP_ENV.to_string(),
@@ -180,6 +195,10 @@ mod tests {
         assert_eq!(
             env.get(SCRATCHPAD_ENV),
             Some(&expected_scratchpad.to_string_lossy().into_owned())
+        );
+        assert_eq!(
+            env.get(DRAFTS_ENV),
+            Some(&expected_drafts.to_string_lossy().into_owned())
         );
         assert_eq!(
             env.get(CLAUDE_TMP_ENV),

@@ -701,7 +701,16 @@ mod tests {
     #[test]
     fn build_cli_command_carries_structured_run_scratchpad_contract() {
         let work = tempfile::tempdir().unwrap();
-        let scratchpad = crate::scratchpad::resolve_scratchpad_root(work.path()).unwrap();
+        let scratchpad = work.path().join("scratchpad");
+        std::fs::write(
+            work.path().join("workspace.config.yaml"),
+            format!(
+                "version: 1\npaths:\n  scratchpad: {}\nscratchpad:\n  drafts_subdir: generated-drafts\n",
+                scratchpad.display()
+            ),
+        )
+        .unwrap();
+        let drafts = crate::scratchpad::resolve_scratchpad_drafts_root(work.path()).unwrap();
         let cli = write_fake_cli(work.path().join("fake-claude"), "#!/bin/sh\nexit 0\n");
 
         let (cmd, _stdin) = build_cli_command(
@@ -727,6 +736,10 @@ mod tests {
         assert_eq!(
             explicit_env.get("MARU_SCRATCHPAD"),
             Some(&scratchpad.to_string_lossy().into_owned())
+        );
+        assert_eq!(
+            explicit_env.get("MARU_DRAFTS"),
+            Some(&drafts.to_string_lossy().into_owned())
         );
         assert_eq!(
             explicit_env.get("MARU_TEMP"),

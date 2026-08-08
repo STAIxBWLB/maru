@@ -178,7 +178,11 @@ test("highlight toggle decorates preview and mark click focuses the graph", asyn
   await page.locator(".tab-trigger", { hasText: "미리보기" }).click();
   await expect(page.locator(".preview-surface")).toContainText("Maru 사업 주간 점검 회의");
 
-  await page.getByTestId("kg-highlight-toggle").click();
+  const toggle = page.getByTestId("kg-highlight-toggle");
+  await toggle.click();
+  // The request is asynchronous; synchronize on the app state that owns the
+  // preview effect before asserting its derived mark DOM.
+  await expect(toggle).toHaveAttribute("aria-pressed", "true");
   // Frontmatter is stripped from the preview, so only the body entity maps.
   const marks = page.locator(".preview-surface mark.kg-ref-mark");
   await expect(marks).toHaveCount(1);

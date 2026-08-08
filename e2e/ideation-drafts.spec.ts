@@ -28,6 +28,35 @@ function seedBackend(page: import("@playwright/test").Page) {
         editable: true,
       },
     ];
+    const scratchpad = [
+      ...ideation,
+      {
+        collection: "memos",
+        relativePath: "daily.md",
+        name: "daily.md",
+        source: "maru",
+        format: "markdown",
+        updatedAt: "2026-07-29T00:00:00Z",
+        sizeBytes: 12,
+        preview: "Daily memo",
+        revision: "memo-r1",
+        stale: false,
+        editable: true,
+      },
+      {
+        collection: "temp",
+        relativePath: "codex/result.md",
+        name: "result.md",
+        source: "codex",
+        format: "markdown",
+        updatedAt: "2026-07-29T00:00:00Z",
+        sizeBytes: 13,
+        preview: "Temporary result",
+        revision: "temp-r1",
+        stale: false,
+        editable: true,
+      },
+    ];
     const created: Array<Record<string, unknown>> = [];
     const calls: Array<{ command: string; args: Record<string, unknown> }> = [];
     const record = (command: string, args: Record<string, unknown>) => {
@@ -73,7 +102,16 @@ function seedBackend(page: import("@playwright/test").Page) {
       },
       scratchpad_list: (args) => {
         record("scratchpad_list", args);
-        return ideation.map((entry) => ({ ...entry }));
+        return scratchpad.map((entry) => ({ ...entry }));
+      },
+      scratchpad_read: (args) => {
+        record("scratchpad_read", args);
+        const entry = scratchpad.find(
+          (candidate) =>
+            candidate.collection === args.collection && candidate.relativePath === args.relativePath,
+        );
+        if (!entry) throw new Error("scratchpad_not_found");
+        return { ...entry, content: "# 볼트 그래프 뷰\n\n## 개요\n\n내용" };
       },
       scheduler_list: () => [],
       list_ai_missions: () => [],
@@ -161,7 +199,7 @@ async function openDraftsMode(page: import("@playwright/test").Page) {
   await page.goto("/");
   await page
     .locator(".activity-rail")
-    .getByRole("button", { name: "초안", exact: true })
+    .getByRole("button", { name: "아이디어", exact: true })
     .click();
   const pane = page.locator(".drafts-pane");
   await expect(pane).toBeVisible();
@@ -259,6 +297,32 @@ test("offers the existing draft instead of generating a duplicate", async ({ pag
       ),
     )
     .toBe(1);
+});
+
+async function openScratchpad(page: import("@playwright/test").Page) {
+  await page.locator(".topbar-command-action").click();
+  const input = page.locator(".cmdk-input input");
+  await expect(input).toBeVisible();
+  await input.fill("스크래치패드 열기");
+  await page.locator(".cmdk-item", { hasText: "스크래치패드 열기" }).click();
+  const pane = page.locator(".scratchpad-pane");
+  await expect(pane).toBeVisible();
+  return pane;
+}
+
+test("keeps ideation in the hub while Scratchpad preserves memos and temp results", async ({
+  page,
+}) => {
+  await openDraftsMode(page);
+  const pane = await openScratchpad(page);
+
+  await expect(pane.getByText("maru-vault-graph.md")).toHaveCount(0);
+  await expect(pane.locator(".scratchpad-list-item", { hasText: "daily.md" })).toBeVisible();
+  await expect(pane.locator(".scratchpad-list-item", { hasText: "result.md" })).toBeVisible();
+  await expect(pane.getByRole("button", { name: "새 메모" })).toBeVisible();
+  await expect(pane.getByRole("button", { name: "임시 파일 정리" })).toBeVisible();
+  await expect(pane.getByRole("button", { name: "새 아이디어" })).toHaveCount(0);
+  await expect(pane.getByText("발전 중")).toHaveCount(0);
 });
 
 test("dispatches an ideate-to-draft mission and shows the in-progress state", async ({

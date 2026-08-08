@@ -22,7 +22,7 @@ const PRIMARY_MODES = [
   ["메시지", ".comms-pane"],
   ["회의록", ".meetings-pane"],
   ["오늘", ".today-pane"],
-  ["초안", ".drafts-pane"],
+  ["아이디어", ".drafts-pane"],
   ["갭 분석", ".gap-pane"],
   ["에이전트", ".agents-pane"],
   ["카탈로그", ".catalog-pane"],

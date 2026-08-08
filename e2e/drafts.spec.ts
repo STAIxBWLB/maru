@@ -1,5 +1,7 @@
 import { expect, test } from "@playwright/test";
 
+const IDEA_PATH = "ideas/maru-vault-graph.md";
+
 // Seeds the drafts/scheduler backend through the browser e2e seam
 // (`window.__MARU_E2E_INVOKE__`, see src/lib/e2eInvoke.ts). State lives in the
 // init-script closure so command handlers behave like a tiny in-memory backend.
@@ -101,6 +103,55 @@ function seedBackend(page: import("@playwright/test").Page) {
         record("scratchpad_list", args);
         return ideation.map((entry) => ({ ...entry }));
       },
+      scratchpad_read: (args) => {
+        record("scratchpad_read", args);
+        const entry = ideation.find((candidate) => candidate.relativePath === args.relativePath);
+        if (!entry) throw new Error("scratchpad_not_found");
+        return { ...entry, content: "# Graph idea\n\nOriginal body" };
+      },
+      scratchpad_save: (args) => {
+        record("scratchpad_save", args);
+        const entry = ideation.find((candidate) => candidate.relativePath === args.relativePath);
+        if (!entry) throw new Error("scratchpad_not_found");
+        entry.revision = "r2";
+        entry.preview = String(args.content).slice(0, 160);
+        return { ...entry, content: args.content as string };
+      },
+      scratchpad_transition_idea: (args) => {
+        record("scratchpad_transition_idea", args);
+        const entry = ideation.find((candidate) => candidate.relativePath === args.relativePath);
+        if (!entry) throw new Error("scratchpad_not_found");
+        const remainder = entry.relativePath.split("/").slice(1).join("/");
+        const stageDirs: Record<string, string> = {
+          seed: "seeds",
+          developing: "developing",
+          proposal: "proposals",
+          archive: "_archive",
+        };
+        entry.relativePath = `${stageDirs[String(args.stage)]}/${remainder}`;
+        entry.ideationStage = args.stage as string;
+        entry.revision = "r3";
+        return { ...entry, content: "# Graph idea\n\nUpdated body" };
+      },
+      scratchpad_create_idea: (args) => {
+        record("scratchpad_create_idea", args);
+        const entry = {
+          collection: "ideation",
+          relativePath: "seeds/new-hub-idea.md",
+          name: "new-hub-idea.md",
+          source: "manual",
+          ideationStage: "seed",
+          format: "markdown",
+          updatedAt: "2026-07-30T00:00:00Z",
+          sizeBytes: 42,
+          preview: String(args.title),
+          revision: "new-r1",
+          stale: false,
+          editable: true,
+        };
+        ideation.push(entry);
+        return { ...entry, content: `# ${String(args.title)}\n` };
+      },
       drafts_create: (args) => {
         record("drafts_create", args);
         const entry = {
@@ -140,7 +191,7 @@ async function openDraftsMode(page: import("@playwright/test").Page) {
   await page.goto("/");
   await page
     .locator(".activity-rail")
-    .getByRole("button", { name: "초안", exact: true })
+    .getByRole("button", { name: "아이디어", exact: true })
     .click();
   const pane = page.locator(".drafts-pane");
   await expect(pane).toBeVisible();
@@ -233,6 +284,102 @@ test("discards a draft after confirmation", async ({ page }) => {
       ),
     )
     .toBe(true);
+});
+
+test("edits and transitions an idea in the Ideation hub with optimistic revisions", async ({
+  page,
+}) => {
+  const pane = await openDraftsMode(page);
+  await pane.locator(".drafts-list-item", { hasText: "maru-vault-graph.md" }).click();
+
+  const detail = pane.locator(".drafts-detail");
+  await expect(detail.getByRole("heading", { name: "maru-vault-graph.md" })).toBeVisible();
+  await detail.getByRole("button", { name: "편집", exact: true }).click();
+  await detail.locator("textarea.drafts-editor").fill("Updated idea body");
+  await detail.getByRole("button", { name: "저장", exact: true }).click();
+
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          (
+            (window as unknown as {
+              __MARU_DRAFTS_CALLS__?: Array<{ command: string }>;
+            }).__MARU_DRAFTS_CALLS__ ?? []
+          ).some((call) => call.command === "scratchpad_save"),
+      ),
+    )
+    .toBe(true);
+  const saveArgs = await page.evaluate(
+    () =>
+      (
+        (window as unknown as {
+          __MARU_DRAFTS_CALLS__?: Array<{
+            command: string;
+            args: Record<string, unknown>;
+          }>;
+        }).__MARU_DRAFTS_CALLS__ ?? []
+      ).find((call) => call.command === "scratchpad_save")?.args,
+  );
+  expect(saveArgs).toMatchObject({
+    collection: "ideation",
+    relativePath: IDEA_PATH,
+    content: "Updated idea body",
+    expectedRevision: "r1",
+  });
+
+  await detail.getByRole("button", { name: "발전 중", exact: true }).click();
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          (
+            (window as unknown as {
+              __MARU_DRAFTS_CALLS__?: Array<{ command: string }>;
+            }).__MARU_DRAFTS_CALLS__ ?? []
+          ).some((call) => call.command === "scratchpad_transition_idea"),
+      ),
+    )
+    .toBe(true);
+  const transitionArgs = await page.evaluate(
+    () =>
+      (
+        (window as unknown as {
+          __MARU_DRAFTS_CALLS__?: Array<{
+            command: string;
+            args: Record<string, unknown>;
+          }>;
+        }).__MARU_DRAFTS_CALLS__ ?? []
+      ).find((call) => call.command === "scratchpad_transition_idea")?.args,
+  );
+  expect(transitionArgs).toMatchObject({
+    relativePath: IDEA_PATH,
+    stage: "developing",
+    expectedRevision: "r2",
+  });
+});
+
+test("creates a new idea from the Ideation hub", async ({ page }) => {
+  const pane = await openDraftsMode(page);
+  page.once("dialog", (dialog) => void dialog.accept("New hub idea"));
+  await pane.getByRole("button", { name: "새 아이디어", exact: true }).click();
+
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          (
+            (window as unknown as {
+              __MARU_DRAFTS_CALLS__?: Array<{
+                command: string;
+                args: Record<string, unknown>;
+              }>;
+            }).__MARU_DRAFTS_CALLS__ ?? []
+          ).find((call) => call.command === "scratchpad_create_idea")?.args ?? null,
+      ),
+    )
+    .toMatchObject({ title: "New hub idea" });
+  await expect(pane.locator(".drafts-list").getByText("new-hub-idea.md")).toBeVisible();
 });
 
 // Ingestion e2e: a completed scheduler skill mission exposes its run events
