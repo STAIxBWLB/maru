@@ -8,6 +8,32 @@ because releases cut frequently during active development. Versions before
 Dates are the release-tag dates. Only `feat`/`fix`-level changes are listed;
 `chore(release)` version bumps and merge commits are omitted.
 
+## v0.4.46 - 2026-08-08 - Faster Paint, Calmer Idle
+
+- **Startup and idle are measurably lighter.** The ko/en dictionaries (~400 KB
+  raw, the largest entry-bundle item) load as lazy chunks, cutting entry JS 25%
+  (379 -> 285 KiB gzip, budget tightened 500 -> 320) and entry-to-mounted from
+  ~130 ms to ~25 ms in the browser shell. Native idle CPU fell from 0.9-1.5%
+  to 0.0-0.1%: mission rows share one 1 Hz elapsed clock, hidden panels skip
+  their polls, 58 heavy-IO commands moved off the WebView main thread, and the
+  inbox watcher coalesces fs events into one batched emit per 150 ms window.
+- **App.tsx is decomposing into external stores.** Editor tabs, workspace
+  entries, and overlay/dialog state now live in their own unit-tested stores
+  with identity-preserving transitions; vault watcher deltas apply
+  incrementally against the workspace store instead of forcing a full rescan
+  per change.
+- **Adversarial-review hardening along the way.** A watcher delta arriving
+  during the first full scan can no longer cancel it and publish a partial
+  index; a failed locale-chunk load is retryable instead of leaving the window
+  blank; rapid locale toggles settle on the last choice; an inbox refresh
+  tracks workspace switches mid-scan instead of replaying stale results; a
+  webview reload no longer replays mission-completion side effects for the
+  whole tracked list; repeat window-close requests cannot slip past the
+  dirty-draft guard.
+- **The bundled skills env pins graphifyy >=0.9.31**, so re-provisioning can
+  no longer silently downgrade the workspace runtime below the version the
+  Graphify integration was verified against.
+
 ## v0.4.45 - 2026-08-05 - Visible Status, Quieter Lists
 
 - **The status bar is visible again.** `grid-area: status` was cancelled by two
