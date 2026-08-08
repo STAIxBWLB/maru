@@ -300,6 +300,28 @@ export async function scanVault(vaultPath: string, scanOptions?: ScanOptions): P
   return invoke<VaultEntry[]>("scan_vault", { vaultPath, scanOptions: scanOptions ?? null });
 }
 
+/** Delta-targeted scan: only the touched rel paths (from the vault watcher).
+ *  Missing/excluded paths come back absent — the caller treats absence as
+ *  removal when merging the delta into the workspace entries. */
+export async function scanVaultPaths(
+  vaultPath: string,
+  relPaths: readonly string[],
+  scanOptions?: ScanOptions,
+): Promise<VaultEntry[]> {
+  if (!isTauri()) {
+    // Web/e2e mode has no real watcher; mirror the mock scan, filtered down
+    // to the touched rel paths.
+    const touched = new Set(relPaths);
+    const all = await scanVault(vaultPath, scanOptions);
+    return all.filter((entry) => touched.has(entry.relPath));
+  }
+  return invoke<VaultEntry[]>("scan_vault_paths", {
+    vaultPath,
+    relPaths,
+    scanOptions: scanOptions ?? null,
+  });
+}
+
 export async function startVaultWatcher(workspacePath: string): Promise<void> {
   if (!isTauri()) return;
   await invoke("start_vault_watcher", { workspacePath });
