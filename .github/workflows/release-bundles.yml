@@ -15,51 +15,28 @@ permissions:
 
 concurrency:
   group: release-bundles-${{ github.event.release.tag_name || inputs.tag }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 env:
   CARGO_TERM_COLOR: always
   APPLE_SIGNING_IDENTITY: "-"
-  HAS_APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE != '' }}
 
 jobs:
-  build:
-    name: Build ${{ matrix.platform }} ${{ matrix.args }}
-    runs-on: ${{ matrix.platform }}
-    timeout-minutes: 90
-    # App releases only (v* tags). The skills-channel prerelease publishes
-    # from STAIxBWLB/skills and must not trigger app/CLI/Homebrew builds.
+  prepare:
+    name: Validate release inputs
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
     if: ${{ startsWith(github.event.release.tag_name || inputs.tag, 'v') }}
-
-    strategy:
-      fail-fast: false
-      # Serialize matrix legs: all legs update the shared release asset
-      # `latest.json` (updater manifest) via tauri-action. Running them
-      # concurrently raced the update-release-asset call (one leg's PATCH 404s
-      # when another recreated the asset), failing a leg and skipping the
-      # gated homebrew-tap job. Sequential legs each merge their platform into
-      # latest.json with no race.
-      max-parallel: 1
-      matrix:
-        include:
-          - platform: macos-latest
-            args: --target aarch64-apple-darwin --bundles app
-          - platform: macos-latest
-            args: --target x86_64-apple-darwin --bundles app
-          - platform: ubuntu-22.04
-            args: ""
-          # Intentionally tracks latest. The Visual Studio 2026 migration of
-          # windows-latest (rollout 2026-06-08 → 2026-06-15) is accepted; the
-          # runner migration notice is informational and clears after migration.
-          - platform: windows-latest
-            args: ""
+    outputs:
+      tag: ${{ steps.release.outputs.tag }}
+      id: ${{ steps.release.outputs.id }}
 
     steps:
       - name: Resolve release
         id: release
         shell: bash
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
           EVENT_TAG: ${{ github.event.release.tag_name }}
           EVENT_ID: ${{ github.event.release.id }}
           INPUT_TAG: ${{ inputs.tag }}
@@ -76,10 +53,104 @@ jobs:
           echo "id=$id" >> "$GITHUB_OUTPUT"
           echo "Resolved release: tag=$tag id=$id"
 
-      - name: Checkout
+      - name: Checkout release tag
         uses: actions/checkout@v5
         with:
           ref: ${{ steps.release.outputs.tag }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22.22.3
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Validate tag and version surfaces
+        env:
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+        run: node scripts/check-release-version.mjs --tag "$RELEASE_TAG"
+
+      - name: Validate release secrets
+        shell: bash
+        env:
+          HAS_APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE != '' }}
+          HAS_APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD != '' }}
+          HAS_KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD != '' }}
+          HAS_APPLE_ID: ${{ secrets.APPLE_ID != '' }}
+          HAS_APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD != '' }}
+          HAS_APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID != '' }}
+          HAS_TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY != '' }}
+          HAS_TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD != '' }}
+          HAS_HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN != '' }}
+        run: |
+          set -euo pipefail
+          missing=()
+          check_secret() {
+            if [ "$2" != "true" ]; then
+              missing+=("$1")
+            fi
+          }
+
+          check_secret APPLE_CERTIFICATE "$HAS_APPLE_CERTIFICATE"
+          check_secret APPLE_CERTIFICATE_PASSWORD "$HAS_APPLE_CERTIFICATE_PASSWORD"
+          check_secret KEYCHAIN_PASSWORD "$HAS_KEYCHAIN_PASSWORD"
+          check_secret APPLE_ID "$HAS_APPLE_ID"
+          check_secret APPLE_PASSWORD "$HAS_APPLE_PASSWORD"
+          check_secret APPLE_TEAM_ID "$HAS_APPLE_TEAM_ID"
+          check_secret TAURI_SIGNING_PRIVATE_KEY "$HAS_TAURI_SIGNING_PRIVATE_KEY"
+          check_secret TAURI_SIGNING_PRIVATE_KEY_PASSWORD "$HAS_TAURI_SIGNING_PRIVATE_KEY_PASSWORD"
+          check_secret HOMEBREW_TAP_TOKEN "$HAS_HOMEBREW_TAP_TOKEN"
+
+          if [ "${#missing[@]}" -gt 0 ]; then
+            printf '::error::Missing release secret(s): %s\n' "${missing[*]}"
+            exit 1
+          fi
+          echo "All required release secrets are present."
+
+  build:
+    name: Build ${{ matrix.platform }} ${{ matrix.args }}
+    needs: prepare
+    runs-on: ${{ matrix.platform }}
+    timeout-minutes: 90
+
+    strategy:
+      fail-fast: true
+      max-parallel: 4
+      matrix:
+        include:
+          - platform: macos-latest
+            args: --target aarch64-apple-darwin --bundles app
+            cache_key: macos-aarch64
+            cli_target: aarch64-apple-darwin
+            cli_arch: aarch64
+            dmg_arch: aarch64
+          - platform: macos-latest
+            args: --target x86_64-apple-darwin --bundles app
+            cache_key: macos-x86_64
+            cli_target: x86_64-apple-darwin
+            cli_arch: x86_64
+            dmg_arch: x64
+          - platform: ubuntu-22.04
+            args: ""
+            cache_key: ubuntu-22.04
+            cli_target: ""
+            cli_arch: ""
+            dmg_arch: ""
+          # Intentionally tracks latest. The Visual Studio 2026 migration of
+          # windows-latest is accepted and covered by the release matrix.
+          - platform: windows-latest
+            args: ""
+            cache_key: windows-latest
+            cli_target: ""
+            cli_arch: ""
+            dmg_arch: ""
+
+    steps:
+      - name: Checkout release tag
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.prepare.outputs.tag }}
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
@@ -101,7 +172,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri -> target
-          key: ${{ matrix.platform }}-${{ matrix.args }}
+          key: release-${{ matrix.cache_key }}
 
       - name: Install Linux bundle dependencies
         if: matrix.platform == 'ubuntu-22.04'
@@ -120,62 +191,14 @@ jobs:
       - name: Install frontend dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Validate macOS signing secrets
-        if: matrix.platform == 'macos-latest'
-        env:
-          HAS_APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE != '' }}
-          HAS_APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD != '' }}
-          HAS_KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD != '' }}
-          HAS_APPLE_ID: ${{ secrets.APPLE_ID != '' }}
-          HAS_APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD != '' }}
-          HAS_APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID != '' }}
-        run: |
-          set -euo pipefail
-          # Developer ID signing prerequisites. Notarization (re-enabled) runs
-          # later inside tauri-action via APPLE_ID/PASSWORD/TEAM_ID; it requires
-          # a Developer ID-signed bundle, so the cert config below must be complete.
-          present=0
-          missing=()
-          check_secret() {
-            local name="$1"
-            local value="$2"
-            if [ "$value" = "true" ]; then
-              present=1
-            else
-              missing+=("$name")
-            fi
-          }
-
-          check_secret APPLE_CERTIFICATE "$HAS_APPLE_CERTIFICATE"
-          check_secret APPLE_CERTIFICATE_PASSWORD "$HAS_APPLE_CERTIFICATE_PASSWORD"
-          check_secret KEYCHAIN_PASSWORD "$HAS_KEYCHAIN_PASSWORD"
-          check_secret APPLE_ID "$HAS_APPLE_ID"
-          check_secret APPLE_PASSWORD "$HAS_APPLE_PASSWORD"
-          check_secret APPLE_TEAM_ID "$HAS_APPLE_TEAM_ID"
-
-          if [ "$present" -eq 1 ] && [ "${#missing[@]}" -gt 0 ]; then
-            printf '::error::Partial Apple signing configuration. Missing: %s\n' "${missing[*]}"
-            exit 1
-          fi
-
-          if [ "$present" -eq 0 ]; then
-            echo "::error::Apple Developer ID signing and notarization secrets are required for macOS releases."
-            exit 1
-          fi
-          echo "Apple Developer ID secrets present; macOS bundles will be signed and notarized."
-
       - name: Prepare macOS signing
-        if: matrix.platform == 'macos-latest' && env.HAS_APPLE_CERTIFICATE == 'true'
+        if: matrix.platform == 'macos-latest'
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
           KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
         run: |
-          if [ -z "$APPLE_CERTIFICATE_PASSWORD" ] || [ -z "$KEYCHAIN_PASSWORD" ]; then
-            echo "::error::APPLE_CERTIFICATE requires APPLE_CERTIFICATE_PASSWORD and KEYCHAIN_PASSWORD."
-            exit 1
-          fi
-
+          set -euo pipefail
           echo "$APPLE_CERTIFICATE" | base64 --decode > certificate.p12
           security create-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
           security list-keychains -d user -s build.keychain
@@ -193,16 +216,12 @@ jobs:
           fi
           echo "APPLE_SIGNING_IDENTITY=$CERT_ID" >> "$GITHUB_ENV"
 
-      # Notarization re-enabled (2026-06): Apple notary now accepts signed
-      # Maru bundles again (verified locally — submission Accepted in ~1 min).
-      # tauri-action notarizes macOS bundles when APPLE_ID + APPLE_PASSWORD
-      # (app-specific) + APPLE_TEAM_ID are present; non-macOS legs ignore them.
-      # The macOS validation step above requires the complete secret set so a
-      # release cannot silently fall back to an unnotarized public artifact.
+      # Each leg uploads only its unique bundles and signatures. The finalizer
+      # writes latest.json once after every platform succeeds.
       - name: Build and upload Tauri bundles
         uses: tauri-apps/tauri-action@action-v0.6.2
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ github.token }}
           APPIMAGE_EXTRACT_AND_RUN: ${{ matrix.platform == 'ubuntu-22.04' && '1' || '' }}
           APPLE_SIGNING_IDENTITY: ${{ env.APPLE_SIGNING_IDENTITY }}
           APPLE_ID: ${{ matrix.platform == 'macos-latest' && secrets.APPLE_ID || '' }}
@@ -211,47 +230,54 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
-          releaseId: ${{ steps.release.outputs.id }}
+          releaseId: ${{ needs.prepare.outputs.id }}
           tauriScript: pnpm tauri
           args: ${{ matrix.args }}
-          includeUpdaterJson: true
+          includeUpdaterJson: false
           assetNamePattern: Maru_[version]_[platform]_[arch]_[bundle][ext]
 
-      # The macOS matrix args above intentionally limit tauri-action to the app
-      # bundle, so no unnotarized DMG reaches the public release. Bundle the DMG
-      # from the existing build here, then upload it only after its own Apple
-      # ticket and Gatekeeper-facing checks succeed.
-      - name: Build, notarize, staple, and upload macOS disk image
-        if: matrix.platform == 'macos-latest' && env.HAS_APPLE_CERTIFICATE == 'true'
+      - name: Build and upload standalone macOS CLI
+        if: matrix.cli_target != ''
         shell: bash
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+          TARGET: ${{ matrix.cli_target }}
+          ASSET_ARCH: ${{ matrix.cli_arch }}
+        run: |
+          set -euo pipefail
+          version="${RELEASE_TAG#v}"
+          cargo build --manifest-path src-tauri/Cargo.toml --release -p maru-cli --bin maru-cli --target "$TARGET"
+          staging="$RUNNER_TEMP/maru-cli-$ASSET_ARCH"
+          mkdir -p "$staging"
+          install -m 0755 "src-tauri/target/$TARGET/release/maru-cli" "$staging/maru"
+          asset="maru-cli_${version}_darwin_${ASSET_ARCH}.tar.gz"
+          tar -czf "$asset" -C "$staging" maru
+          shasum -a 256 "$asset" | awk '{print $1}' > "$asset.sha256"
+          gh release upload "$RELEASE_TAG" "$asset" "$asset.sha256" \
+            --repo "$GITHUB_REPOSITORY" \
+            --clobber
+
+      # tauri-action intentionally builds only the app updater archive on
+      # macOS. Create and publish a DMG only after independent notarization,
+      # stapling, and Gatekeeper-facing validation.
+      - name: Build, notarize, staple, and upload macOS disk image
+        if: matrix.cli_target != ''
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           APPLE_SIGNING_IDENTITY: ${{ env.APPLE_SIGNING_IDENTITY }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          RELEASE_TAG: ${{ steps.release.outputs.tag }}
-          TARGET_ARGS: ${{ matrix.args }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+          TARGET: ${{ matrix.cli_target }}
+          ASSET_ARCH: ${{ matrix.dmg_arch }}
         run: |
           set -euo pipefail
-          case "$TARGET_ARGS" in
-            *aarch64-apple-darwin*)
-              target=aarch64-apple-darwin
-              asset_arch=aarch64
-              ;;
-            *x86_64-apple-darwin*)
-              target=x86_64-apple-darwin
-              asset_arch=x64
-              ;;
-            *)
-              echo "::error::Unsupported macOS target: $TARGET_ARGS"
-              exit 1
-              ;;
-          esac
-
-          pnpm tauri bundle --target "$target" --bundles dmg --ci
+          pnpm tauri bundle --target "$TARGET" --bundles dmg --ci
           shopt -s nullglob
           dmgs=(src-tauri/target/*/release/bundle/dmg/*.dmg)
           shopt -u nullglob
@@ -270,135 +296,43 @@ jobs:
           xcrun stapler validate "$dmg"
           spctl -a -vv -t open --context context:primary-signature "$dmg"
 
-          version=$(node -p "require('./package.json').version")
-          asset="$RUNNER_TEMP/Maru_${version}_darwin_${asset_arch}_dmg.dmg"
+          version="${RELEASE_TAG#v}"
+          asset="$RUNNER_TEMP/Maru_${version}_darwin_${ASSET_ARCH}_dmg.dmg"
           cp "$dmg" "$asset"
           gh release upload "$RELEASE_TAG" "$asset" \
             --repo "$GITHUB_REPOSITORY" \
             --clobber
 
-  cli-macos:
-    name: Build CLI macOS ${{ matrix.asset_arch }}
-    runs-on: macos-latest
-    timeout-minutes: 45
-    if: ${{ startsWith(github.event.release.tag_name || inputs.tag, 'v') }}
-
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - target: aarch64-apple-darwin
-            asset_arch: aarch64
-          - target: x86_64-apple-darwin
-            asset_arch: x86_64
-
-    steps:
-      - name: Resolve release
-        id: release
-        shell: bash
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          EVENT_TAG: ${{ github.event.release.tag_name }}
-          EVENT_ID: ${{ github.event.release.id }}
-          INPUT_TAG: ${{ inputs.tag }}
-        run: |
-          set -euo pipefail
-          if [ -n "$EVENT_ID" ]; then
-            tag="$EVENT_TAG"
-            id="$EVENT_ID"
-          else
-            tag="$INPUT_TAG"
-            id=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$tag" --jq .id)
-          fi
-          echo "tag=$tag" >> "$GITHUB_OUTPUT"
-          echo "id=$id" >> "$GITHUB_OUTPUT"
-          echo "Resolved release: tag=$tag id=$id"
-
-      - name: Checkout
-        uses: actions/checkout@v5
-        with:
-          ref: ${{ steps.release.outputs.tag }}
-
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: aarch64-apple-darwin,x86_64-apple-darwin
-
-      - name: Cache Rust build
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: src-tauri -> target
-          key: cli-${{ matrix.target }}
-
-      - name: Build CLI
-        env:
-          RELEASE_TAG: ${{ steps.release.outputs.tag }}
-          TARGET: ${{ matrix.target }}
-          ASSET_ARCH: ${{ matrix.asset_arch }}
-        run: |
-          set -euo pipefail
-          version="${RELEASE_TAG#v}"
-          cargo build --manifest-path src-tauri/Cargo.toml --release -p maru-cli --bin maru-cli --target "$TARGET"
-          rm -rf dist-cli
-          mkdir -p dist-cli
-          install -m 0755 "src-tauri/target/$TARGET/release/maru-cli" dist-cli/maru
-          asset="maru-cli_${version}_darwin_${ASSET_ARCH}.tar.gz"
-          tar -czf "$asset" -C dist-cli maru
-          shasum -a 256 "$asset" | awk '{print $1}' > "$asset.sha256"
-          echo "ASSET=$asset" >> "$GITHUB_ENV"
-
-      - name: Upload CLI release asset
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RELEASE_TAG: ${{ steps.release.outputs.tag }}
-        run: gh release upload "$RELEASE_TAG" "$ASSET" "$ASSET.sha256" --clobber
-
-  homebrew-tap:
-    name: Update Homebrew tap
-    needs: [build, cli-macos]
+  finalize:
+    name: Publish updater manifest and Homebrew tap
+    needs: [prepare, build]
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    if: ${{ startsWith(github.event.release.tag_name || inputs.tag, 'v') }}
 
     steps:
-      - name: Resolve release
-        id: release
-        shell: bash
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          EVENT_TAG: ${{ github.event.release.tag_name }}
-          EVENT_ID: ${{ github.event.release.id }}
-          INPUT_TAG: ${{ inputs.tag }}
-        run: |
-          set -euo pipefail
-          if [ -n "$EVENT_ID" ]; then
-            tag="$EVENT_TAG"
-            id="$EVENT_ID"
-          else
-            tag="$INPUT_TAG"
-            id=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$tag" --jq .id)
-          fi
-          echo "tag=$tag" >> "$GITHUB_OUTPUT"
-          echo "id=$id" >> "$GITHUB_OUTPUT"
-          echo "Resolved release: tag=$tag id=$id"
-
-      - name: Checkout maru
+      - name: Checkout Maru release tag
         uses: actions/checkout@v5
         with:
-          ref: ${{ steps.release.outputs.tag }}
-
-      - name: Checkout tap
-        uses: actions/checkout@v5
-        with:
-          repository: STAIxBWLB/homebrew-cask
-          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-          path: tap
+          ref: ${{ needs.prepare.outputs.tag }}
 
       - name: Setup Node
         uses: actions/setup-node@v5
         with:
           node-version: 22.22.3
-          package-manager-cache: false
+
+      - name: Publish updater manifest
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MARU_RELEASE_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+        run: node scripts/publish-updater-manifest.mjs "$RELEASE_TAG"
+
+      - name: Checkout Homebrew tap
+        uses: actions/checkout@v5
+        with:
+          repository: STAIxBWLB/homebrew-cask
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: tap
 
       - name: Configure git identity
         working-directory: tap
@@ -408,6 +342,6 @@ jobs:
 
       - name: Render and push tap update
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ steps.release.outputs.tag }}
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.prepare.outputs.tag }}
         run: node scripts/update-homebrew-tap.mjs "$TAG" tap --commit --push

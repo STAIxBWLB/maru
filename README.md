@@ -386,8 +386,11 @@ pnpm lint:i18n
 # Production build:
 pnpm build
 
-# Full verification (typecheck + vitest + cargo test --lib + build):
+# Full verification (typecheck + release-version sync + tests + frontend build):
 make verify
+
+# Full verify plus release-only CLI and debug Tauri checks:
+make release-checks
 
 # Smoke the real installed AI CLIs. Every provider unit test drives a fake
 # shell script, so this is the only check that touches the actual integration:
@@ -440,11 +443,19 @@ Codex skill sync writes to `$CODEX_HOME/skills` when `CODEX_HOME` is set, as
 it is for isolated Orca account profiles. Without that variable, it uses the
 standard `~/.codex/skills` directory.
 
-CI runs `make verify` (typecheck + vitest + cargo test --lib + build) and
-`make test-e2e` on every pull request and push to `main` via
-`.github/workflows/ci.yml`. The heavier
-`release-preflight` repeats both and adds diff checks, CLI tests/smoke, and a
-debug Tauri build on version tags.
+CI runs `make verify` (typecheck + release-version sync + guards + unit tests +
+frontend build) and `make test-e2e` on pull requests via
+`.github/workflows/ci.yml`. Documentation-only changes do not start CI. A push
+to `main` first compares the pushed tree with its associated PR head and checks
+that the latest CI run for that exact head succeeded. Only that exact-tree case
+skips the expensive steps; direct pushes, stale merge bases, missing checks,
+and API failures run the full suite. Version-changing PRs run
+`make release-checks` instead of `make verify`, adding CLI and debug Tauri
+checks without repeating verify, frontend build, or E2E.
+
+`.github/workflows/release-preflight.yml` is a manual recovery gate. It keeps
+the intentionally exhaustive `make release-preflight` path but no longer
+duplicates PR verification automatically when a version tag is pushed.
 
 ## Skills Bundle Channel (OTA)
 
@@ -465,14 +476,21 @@ cutting an app release.
 
 Publishing a GitHub Release (a `v*` tag; the skills channel is excluded)
 triggers `.github/workflows/release-bundles.yml`.
-The workflow builds native Tauri bundles on macOS, Ubuntu, and Windows, then
-uploads the generated `.app` / `.dmg`, `.deb` / `.rpm` / `.AppImage`, `.exe`,
-and `.msi` assets to that same release. It also uploads signed updater
-metadata consumed by the startup auto-updater and native `Check for Updates...`
-menu action. A separate macOS CLI job builds `maru-cli`, packages it as a
-tarball containing an `maru` executable, and uploads
-`maru-cli_<version>_darwin_{aarch64,x86_64}.tar.gz` plus SHA256 files to the
-same release.
+The workflow validates the tag, synchronized version surfaces, locked Cargo
+metadata, and required secrets once before starting platform runners. It then
+builds native Tauri bundles concurrently on macOS ARM, macOS Intel, Ubuntu,
+and Windows and uploads the generated `.app` / `.dmg`, `.deb` / `.rpm` /
+`.AppImage`, `.exe`, and `.msi` assets to that same release. Each macOS app job
+also builds `maru-cli` from the populated target cache, packages a tarball
+containing a `maru` executable, and uploads
+`maru-cli_<version>_darwin_{aarch64,x86_64}.tar.gz` plus SHA256 files.
+
+Platform jobs never update `latest.json`. After all four jobs succeed, one
+finalizer validates the complete 20-asset pre-manifest set, reads the seven
+updater signatures, and publishes a single 11-platform `latest.json` consumed
+by startup auto-update and the native `Check for Updates...` action. The same
+finalizer updates Homebrew only after the manifest succeeds. This single-writer
+design removes the release-asset race that previously required serial builds.
 
 For Developer ID builds, Tauri first notarizes, staples and uploads the app
 updater artifact without creating a DMG. The workflow then builds each DMG in a
@@ -591,16 +609,14 @@ unsupported.
 
 Release asset versions come from `package.json`, `src-tauri/tauri.conf.json`,
 the root and CLI Cargo manifests, and their package entries in
-`src-tauri/Cargo.lock`; keep them in sync before tagging or publishing a
-release. `make macos-distribution-check` asserts the four manifests agree but
-does not read the lock file, and nothing checks the tag against the manifests: if the
-tag names a version the manifests do not, the bundle jobs still succeed with the
-old asset names and `latest.json` advertises the old version, so no installed
-client is ever offered the update.
+`src-tauri/Cargo.lock`. `make release-version-check` validates all of them with
+locked Cargo metadata. The release preparation job additionally requires the
+published tag to equal `v<package version>` and stops before any platform build
+if the versions or tag disagree.
 
-The `homebrew-tap` job in `release-bundles.yml` pushes the tap update
-automatically once the bundle and CLI jobs finish. The `make homebrew-*` targets
-below are for verifying that result, or for recovering by hand if that job
+The finalizer in `release-bundles.yml` pushes the tap update automatically once
+the platform builds and updater manifest finish. The `make homebrew-*` targets
+below are for verifying that result, or for recovering by hand if finalization
 failed:
 
 ```bash

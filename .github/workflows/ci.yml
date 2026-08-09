@@ -2,12 +2,25 @@ name: CI
 
 on:
   pull_request:
+    paths-ignore:
+      - README.md
+      - CHANGELOG.md
+      - docs/**
+      - .github/**/*.md
   push:
     branches:
       - main
+    paths-ignore:
+      - README.md
+      - CHANGELOG.md
+      - docs/**
+      - .github/**/*.md
+  workflow_dispatch:
 
 permissions:
+  actions: read
   contents: read
+  pull-requests: read
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -23,30 +36,117 @@ jobs:
     timeout-minutes: 60
 
     steps:
+      - name: Deduplicate an already verified main tree
+        id: dedupe
+        if: github.event_name == 'push'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -uo pipefail
+          run_full=true
+          reason="no exact successful pull request validation was found"
+
+          if ! pulls=$(gh api \
+            -H "Accept: application/vnd.github+json" \
+            "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/pulls?per_page=100"); then
+            echo "::warning::Could not resolve associated pull requests; running full CI."
+          else
+            pr=$(jq -c --arg sha "$GITHUB_SHA" \
+              '[.[] | select(.merged_at != null and .merge_commit_sha == $sha)] | sort_by(.number) | last // empty' \
+              <<<"$pulls")
+
+            if [ -n "$pr" ]; then
+              pr_number=$(jq -r .number <<<"$pr")
+              head_sha=$(jq -r .head.sha <<<"$pr")
+
+              if push_tree=$(gh api "repos/$GITHUB_REPOSITORY/git/commits/$GITHUB_SHA" --jq .tree.sha) \
+                && head_tree=$(gh api "repos/$GITHUB_REPOSITORY/git/commits/$head_sha" --jq .tree.sha) \
+                && runs=$(gh api \
+                  "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?event=pull_request&head_sha=$head_sha&status=completed&per_page=20"); then
+                latest_conclusion=$(jq -r --argjson pr_number "$pr_number" \
+                  '[.workflow_runs[] | select(any(.pull_requests[]?; .number == $pr_number))] | sort_by(.run_started_at) | last | .conclusion // ""' \
+                  <<<"$runs")
+
+                if [ "$push_tree" = "$head_tree" ] && [ "$latest_conclusion" = "success" ]; then
+                  run_full=false
+                  reason="PR #$pr_number successfully validated the exact tree $push_tree"
+                elif [ "$push_tree" != "$head_tree" ]; then
+                  reason="the merged tree differs from PR #$pr_number head"
+                else
+                  reason="the latest CI run for PR #$pr_number is not successful"
+                fi
+              else
+                echo "::warning::Could not verify the associated PR tree and run; running full CI."
+              fi
+            fi
+          fi
+
+          echo "run_full=$run_full" >> "$GITHUB_OUTPUT"
+          echo "CI decision: $reason"
+          if [ "$run_full" = "false" ]; then
+            echo "### CI deduplicated" >> "$GITHUB_STEP_SUMMARY"
+            echo "$reason. Expensive validation is skipped for this main push." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
       - name: Checkout
+        if: steps.dedupe.outputs.run_full != 'false'
         uses: actions/checkout@v5
 
+      - name: Check patch and detect a release version change
+        id: changes
+        if: steps.dedupe.outputs.run_full != 'false'
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          set -euo pipefail
+          echo "release=false" >> "$GITHUB_OUTPUT"
+
+          if [ -z "$BASE_SHA" ] || [[ "$BASE_SHA" =~ ^0+$ ]]; then
+            git diff --check
+            exit 0
+          fi
+
+          if ! git cat-file -e "$BASE_SHA^{commit}" 2>/dev/null; then
+            git fetch --no-tags --depth=1 origin "$BASE_SHA"
+          fi
+          git diff --check "$BASE_SHA" "$GITHUB_SHA"
+
+          base_version=$(git show "$BASE_SHA:package.json" \
+            | node -e 'let data=""; process.stdin.on("data", chunk => data += chunk); process.stdin.on("end", () => console.log(JSON.parse(data).version));')
+          current_version=$(node -p "require('./package.json').version")
+          if [ "$base_version" != "$current_version" ]; then
+            echo "release=true" >> "$GITHUB_OUTPUT"
+            echo "Release version changed: $base_version -> $current_version"
+          fi
+
       - name: Setup pnpm
+        if: steps.dedupe.outputs.run_full != 'false'
         uses: pnpm/action-setup@v6
         with:
           version: 9.15.0
 
       - name: Setup Node
+        if: steps.dedupe.outputs.run_full != 'false'
         uses: actions/setup-node@v5
         with:
           node-version: 22.22.3
           cache: pnpm
 
       - name: Setup Rust
+        if: steps.dedupe.outputs.run_full != 'false'
         uses: dtolnay/rust-toolchain@stable
 
       - name: Cache Rust build
+        if: steps.dedupe.outputs.run_full != 'false'
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri -> target
           key: ci-ubuntu-22.04
 
       - name: Install Linux Tauri dependencies
+        if: steps.dedupe.outputs.run_full != 'false'
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -57,21 +157,29 @@ jobs:
             librsvg2-dev
 
       - name: Install frontend dependencies
+        if: steps.dedupe.outputs.run_full != 'false'
         run: pnpm install --frozen-lockfile
 
-      - name: Run verify (typecheck + i18n lint + vitest + cargo test --lib + build)
+      - name: Run verify (typecheck + version checks + guards + tests + frontend build)
+        if: steps.dedupe.outputs.run_full != 'false' && steps.changes.outputs.release != 'true'
         run: make verify
+
+      - name: Run verify and release-only checks
+        if: steps.dedupe.outputs.run_full != 'false' && steps.changes.outputs.release == 'true'
+        run: make release-checks
 
       # e2e used to run only in release-preflight, so a broken or flaky spec
       # first surfaced on the release tag instead of on the PR that caused it.
       - name: Install Playwright browsers
+        if: steps.dedupe.outputs.run_full != 'false'
         run: pnpm exec playwright install --with-deps chromium
 
       - name: Run e2e
+        if: steps.dedupe.outputs.run_full != 'false'
         run: make test-e2e
 
       - name: Upload e2e artifacts on failure
-        if: failure()
+        if: steps.dedupe.outputs.run_full != 'false' && failure()
         uses: actions/upload-artifact@v4
         with:
           name: playwright-report
