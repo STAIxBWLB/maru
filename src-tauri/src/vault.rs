@@ -1405,7 +1405,26 @@ mod tests {
         use crate::skill_host::fs::test_home_for_bundle_tests;
         use crate::vault_list::{add_workspace_root, WorkspaceRootEntry};
 
+        // Restores MARU_TEST_CONFIG_DIR on drop, even when an assert panics.
+        struct ConfigDirGuard(Option<std::ffi::OsString>);
+        impl Drop for ConfigDirGuard {
+            fn drop(&mut self) {
+                match self.0.take() {
+                    Some(previous) => std::env::set_var("MARU_TEST_CONFIG_DIR", previous),
+                    None => std::env::remove_var("MARU_TEST_CONFIG_DIR"),
+                }
+            }
+        }
+
         let _home = test_home_for_bundle_tests();
+        // Sandbox the workspace registry: add_workspace_root must write to a
+        // throwaway config dir, never the developer's real workspaces.json.
+        let config_dir = TempDir::new().unwrap();
+        let _config_guard = {
+            let previous = std::env::var_os("MARU_TEST_CONFIG_DIR");
+            std::env::set_var("MARU_TEST_CONFIG_DIR", config_dir.path());
+            ConfigDirGuard(previous)
+        };
         let tmp = TempDir::new().unwrap();
         let root = tmp.path();
         write_file(root, "top.md", "# Top\n");

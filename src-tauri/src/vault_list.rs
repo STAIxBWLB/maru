@@ -167,7 +167,24 @@ struct LegacyVaultRegistryEntry {
     role: Option<String>,
 }
 
+/// Test-only sandbox for the registry location: unit tests that exercise
+/// `add_workspace_root` / `upsert_workspace_root` must never write to the
+/// developer's real `workspaces.json`. Mirrors the `MARU_TEST_HOME`
+/// override in skill_host/fs.rs; compiled out of production builds.
+#[cfg(test)]
+fn test_config_dir_override() -> Option<PathBuf> {
+    std::env::var_os("MARU_TEST_CONFIG_DIR").map(PathBuf::from)
+}
+
+#[cfg(not(test))]
+fn test_config_dir_override() -> Option<PathBuf> {
+    None
+}
+
 fn app_config_dir() -> Result<PathBuf, String> {
+    if let Some(dir) = test_config_dir_override() {
+        return Ok(dir);
+    }
     dirs::config_dir().ok_or_else(|| "Could not determine config directory".to_string())
 }
 
@@ -875,6 +892,51 @@ mod tests {
         let legacy_path = dir.path().join("vaults.json");
         save_registry_at(&path, registry).unwrap();
         load_registry_at(&path, &legacy_path).unwrap()
+    }
+
+    #[test]
+    fn add_workspace_root_respects_test_config_dir_override() {
+        use crate::skill_host::fs::test_maru_home_lock;
+
+        // Restores MARU_TEST_CONFIG_DIR on drop, even when an assert panics.
+        struct ConfigDirGuard(Option<std::ffi::OsString>);
+        impl Drop for ConfigDirGuard {
+            fn drop(&mut self) {
+                match self.0.take() {
+                    Some(previous) => std::env::set_var("MARU_TEST_CONFIG_DIR", previous),
+                    None => std::env::remove_var("MARU_TEST_CONFIG_DIR"),
+                }
+            }
+        }
+
+        let _lock = test_maru_home_lock();
+        let config_dir = tempfile::TempDir::new().unwrap();
+        let _guard = {
+            let previous = std::env::var_os("MARU_TEST_CONFIG_DIR");
+            std::env::set_var("MARU_TEST_CONFIG_DIR", config_dir.path());
+            ConfigDirGuard(previous)
+        };
+        let root = tempfile::TempDir::new().unwrap();
+        let nested = root.path().join("nested");
+        fs::create_dir_all(&nested).unwrap();
+
+        let registry = add_workspace_root(entry(
+            "Nested",
+            &nested.to_string_lossy(),
+            "private",
+        ))
+        .unwrap();
+
+        let sandboxed = config_dir
+            .path()
+            .join(APP_CONFIG_DIR)
+            .join(WORKSPACE_REGISTRY_FILE);
+        assert!(
+            sandboxed.exists(),
+            "registry writes must land under MARU_TEST_CONFIG_DIR"
+        );
+        assert_eq!(registry.workspaces.len(), 1);
+        assert_eq!(registry.workspaces[0].label, "Nested");
     }
 
     #[test]
