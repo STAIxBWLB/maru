@@ -4,6 +4,7 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { evaluateProvisioningProfile } from "./lib/provisioningProfile.mjs";
+import { parseCargoPackage, validateReleaseVersions } from "./lib/releaseVersion.mjs";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const releaseRepo = process.env.MARU_RELEASE_REPO ?? "STAIxBWLB/maru";
@@ -68,12 +69,6 @@ function readText(relativePath) {
   return readFileSync(path, "utf8");
 }
 
-function firstCargoPackageVersion(cargoToml) {
-  const packageSection = cargoToml.split(/\n\[/)[0];
-  const match = packageSection.match(/^version\s*=\s*"([^"]+)"/m);
-  return match?.[1] ?? null;
-}
-
 const packageJson = readJson("package.json");
 const tauriConfig = readJson("src-tauri/tauri.conf.json");
 const passkeyConfig = requirePasskeys ? readJson("src-tauri/tauri.passkeys.conf.json") : null;
@@ -82,18 +77,27 @@ const cliCargoToml = readText("src-tauri/maru-cli/Cargo.toml");
 const workflow = readText(".github/workflows/release-bundles.yml");
 
 if (packageJson && tauriConfig) {
-  const cargoVersion = firstCargoPackageVersion(cargoToml);
-  const versions = [
-    ["package.json", packageJson.version],
-    ["src-tauri/tauri.conf.json", tauriConfig.version],
-    ["src-tauri/Cargo.toml", cargoVersion],
-    ["src-tauri/maru-cli/Cargo.toml", firstCargoPackageVersion(cliCargoToml)],
-  ];
-  const uniqueVersions = new Set(versions.map(([, version]) => version).filter(Boolean));
-  if (uniqueVersions.size === 1 && uniqueVersions.has(packageJson.version)) {
-    ok(`version surfaces are synced at ${packageJson.version}`);
-  } else {
-    fail(`version surfaces are not synced: ${versions.map(([name, version]) => `${name}=${version ?? "missing"}`).join(", ")}`);
+  let cargoMetadata = null;
+  try {
+    cargoMetadata = JSON.parse(execFileSync(
+      "cargo",
+      ["metadata", "--manifest-path", "src-tauri/Cargo.toml", "--locked", "--no-deps", "--format-version", "1"],
+      { cwd: repoRoot, encoding: "utf8" },
+    ));
+  } catch (error) {
+    fail(`cargo metadata failed: ${error.message}`);
+  }
+
+  if (cargoMetadata) {
+    const versionResult = validateReleaseVersions({
+      packageJson,
+      tauriConfig,
+      rootCargoPackage: parseCargoPackage(cargoToml),
+      maruCliCargoPackage: parseCargoPackage(cliCargoToml),
+      cargoMetadata,
+    });
+    versionResult.successes.forEach(ok);
+    versionResult.errors.forEach(fail);
   }
 
   if (tauriConfig.identifier === expectedBundleId) {
@@ -321,6 +325,9 @@ for (const needle of [
   "Prepare macOS signing",
   "Developer ID Application",
   "Build and upload Tauri bundles",
+  "includeUpdaterJson: false",
+  "max-parallel: 4",
+  "scripts/publish-updater-manifest.mjs",
   "APPLE_SIGNING_IDENTITY",
   "APPLE_ID",
   "APPLE_PASSWORD",
@@ -331,6 +338,13 @@ for (const needle of [
   } else {
     fail(`release workflow does not contain ${needle}`);
   }
+}
+
+const manifestPublishers = workflow.match(/node scripts\/publish-updater-manifest\.mjs/g) ?? [];
+if (manifestPublishers.length === 1 && !workflow.includes("includeUpdaterJson: true")) {
+  ok("release workflow has exactly one updater-manifest writer");
+} else {
+  fail(`release workflow must have one updater-manifest writer; found ${manifestPublishers.length}`);
 }
 
 const tauriUploadStep = workflow.indexOf("- name: Build and upload Tauri bundles");
@@ -344,7 +358,7 @@ if (tauriUploadStep >= 0 && dmgNotarizationStep > tauriUploadStep) {
 for (const [description, needle] of [
   ["keep macOS DMGs out of tauri-action uploads", "--target aarch64-apple-darwin --bundles app"],
   ["keep Intel DMGs out of tauri-action uploads", "--target x86_64-apple-darwin --bundles app"],
-  ["build the DMG without uploading it", "pnpm tauri bundle --target \"$target\" --bundles dmg --ci"],
+  ["build the DMG without uploading it", "pnpm tauri bundle --target \"$TARGET\" --bundles dmg --ci"],
   ["submit the DMG to Apple notary service", "notarytool submit \"$dmg\""],
   ["staple the DMG ticket", "stapler staple \"$dmg\""],
   ["validate the stapled DMG ticket", "stapler validate \"$dmg\""],

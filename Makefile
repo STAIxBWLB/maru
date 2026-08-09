@@ -22,6 +22,7 @@ BENCH_WORKSPACE ?= $(HOME)/workspace/work
 CLI_INSTALL_DIR ?= $(HOME)/.local/bin
 CLI_BIN_NAME ?= maru
 CLI_RELEASE_BIN := $(TAURI_DIR)/target/release/maru-cli
+CLI_DEBUG_BIN := $(TAURI_DIR)/target/debug/maru-cli
 CLI_INSTALL_BIN := $(CLI_INSTALL_DIR)/$(CLI_BIN_NAME)
 CLI_SMOKE_HOME ?= .context/cli-smoke-home
 HOMEBREW_TAP_DIR ?= ../homebrew-cask
@@ -82,6 +83,10 @@ tauri-dev: install ## Start native Tauri dev shell (Rust + React)
 build: node_modules ## Frontend production build (vite)
 	$(PNPM) build
 
+.PHONY: build-frontend
+build-frontend: node_modules ## Frontend bundle after a separate typecheck
+	$(PNPM) build:frontend
+
 .PHONY: tauri-build
 tauri-build: install ## Native Tauri production build (cargo + bundle)
 	@set -euo pipefail; \
@@ -132,6 +137,17 @@ cli-smoke: cli-build ## Smoke test standalone Maru CLI with an isolated HOME und
 	HOME="$$smoke_home" "$(CLI_RELEASE_BIN)" --version; \
 	HOME="$$smoke_home" "$(CLI_RELEASE_BIN)" doctor --quiet; \
 	HOME="$$smoke_home" "$(CLI_RELEASE_BIN)" skills dirty --json
+
+.PHONY: cli-smoke-debug
+cli-smoke-debug: $(ICON_PATH) ## Smoke a debug CLI after test compilation, avoiding a second release build in CI
+	cd $(TAURI_DIR) && $(CARGO) build -p maru-cli --bin maru-cli
+	@set -euo pipefail; \
+	rm -rf "$(CLI_SMOKE_HOME)"; \
+	mkdir -p "$(CLI_SMOKE_HOME)"; \
+	smoke_home="$$(cd "$(CLI_SMOKE_HOME)" && pwd)"; \
+	HOME="$$smoke_home" "$(CLI_DEBUG_BIN)" --version; \
+	HOME="$$smoke_home" "$(CLI_DEBUG_BIN)" doctor --quiet; \
+	HOME="$$smoke_home" "$(CLI_DEBUG_BIN)" skills dirty --json
 
 # ---------------------------------------------------------------------------
 # Test / quality
@@ -219,15 +235,21 @@ skills-bootstrap-refresh: ## Replace src-tauri/skills-bootstrap with the newest 
 diff-check: ## Check working tree diff for whitespace errors
 	git diff --check
 
+.PHONY: release-version-check
+release-version-check: ## Check every release version surface and optional RELEASE_TAG
+	$(NODE) scripts/check-release-version.mjs $(if $(RELEASE_TAG),--tag "$(RELEASE_TAG)")
+
+.PHONY: release-checks
+release-checks: verify test-cli cli-smoke-debug ## Full verify plus release-only CLI and debug Tauri checks
+	$(PNPM) tauri build --debug --no-bundle --config '{"build":{"beforeBuildCommand":null}}'
+	$(PNPM) clean:tauri-debug -- --force
+
 .PHONY: release-preflight
 release-preflight: ## Release preflight: diff, verify, CLI smoke, e2e, and debug no-bundle Tauri build
 	$(MAKE) diff-check
-	$(MAKE) verify
-	$(MAKE) test-cli
+	$(MAKE) release-checks
 	$(MAKE) cli-smoke
 	$(MAKE) test-e2e
-	$(PNPM) tauri build --debug --no-bundle
-	$(PNPM) clean:tauri-debug -- --force
 
 .PHONY: macos-distribution-check
 macos-distribution-check: ## Check repo config and GitHub secrets for notarized macOS direct distribution
@@ -281,7 +303,7 @@ homebrew-fetch: ## Fetch Maru Homebrew cask and CLI formula in HOMEBREW_TAP_DIR
 # ---------------------------------------------------------------------------
 
 .PHONY: verify
-verify: typecheck lint-i18n check-select-chrome check-type-tokens test-ts test-rust build ## Full verification: typecheck + i18n lint + select chrome guard + type token guard + ts tests + rust tests + frontend build
+verify: typecheck release-version-check lint-i18n check-select-chrome check-type-tokens test-ts test-rust build-frontend ## Full verification: typecheck + release versions + guards + tests + frontend build
 
 # ---------------------------------------------------------------------------
 # Clean

@@ -10,7 +10,8 @@
   },
   "scripts": {
     "dev": "vite --host 127.0.0.1 --port 5307",
-    "build": "tsc -b && vite build && node scripts/check-bundle-budget.mjs",
+    "build": "pnpm typecheck && pnpm build:frontend",
+    "build:frontend": "vite build && node scripts/check-bundle-budget.mjs",
     "check:bundle-budget": "node scripts/check-bundle-budget.mjs",
     "check:select-chrome": "node scripts/check-select-chrome.mjs",
     "lint:i18n": "node scripts/lint-i18n.mjs",
