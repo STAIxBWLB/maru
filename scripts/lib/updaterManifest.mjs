@@ -239,28 +239,16 @@ function repositoryParts(repo) {
 }
 
 function downloadUrl(asset, { tag, repo }) {
-  const candidate = asset?.url ?? asset?.browser_download_url;
-  if (candidate !== undefined) {
-    if (typeof candidate !== "string" || candidate.length === 0) {
-      throw new Error(`release asset has an invalid download URL: ${asset?.name ?? "unknown"}`);
-    }
-    let parsed;
-    try {
-      parsed = new URL(candidate);
-    } catch {
-      throw new Error(`release asset has an invalid download URL: ${asset?.name ?? "unknown"}`);
-    }
-    if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
-      throw new Error(`release asset has an invalid download URL: ${asset.name}`);
-    }
-    return candidate;
-  }
-
   const [owner, name] = repositoryParts(repo);
-  return (
+  const deterministicUrl =
     `https://github.com/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/releases/download/` +
-    `${encodeURIComponent(tag)}/${encodeURIComponent(asset.name)}`
-  );
+    `${encodeURIComponent(tag)}/${encodeURIComponent(asset.name)}`;
+  const candidate = asset?.browser_download_url ?? asset?.url;
+
+  // gh and the REST API expose different asset URL fields. Only preserve a
+  // candidate when it is the expected public download URL; API endpoints such
+  // as api.github.com/repos/.../releases/assets/... are not updater payloads.
+  return candidate === deterministicUrl ? candidate : deterministicUrl;
 }
 
 function releaseMetadataFrom(input) {

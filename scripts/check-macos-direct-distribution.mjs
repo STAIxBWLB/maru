@@ -82,10 +82,11 @@ if (packageJson && tauriConfig) {
     cargoMetadata = JSON.parse(execFileSync(
       "cargo",
       ["metadata", "--manifest-path", "src-tauri/Cargo.toml", "--locked", "--no-deps", "--format-version", "1"],
-      { cwd: repoRoot, encoding: "utf8" },
+      { cwd: repoRoot, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
     ));
   } catch (error) {
-    fail(`cargo metadata failed: ${error.message}`);
+    const stderr = error?.stderr?.toString().trim();
+    fail(`cargo metadata failed: ${stderr || error.message}`);
   }
 
   if (cargoMetadata) {

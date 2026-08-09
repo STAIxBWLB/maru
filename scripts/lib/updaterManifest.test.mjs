@@ -104,6 +104,18 @@ describe("buildUpdaterManifest", () => {
     expect(Object.keys(manifest.platforms)).toHaveLength(11);
   });
 
+  it("replaces GitHub API asset URLs with deterministic browser download URLs", () => {
+    const assets = releaseAssets().map((asset, index) => ({
+      ...asset,
+      url: `https://api.github.com/repos/STAIxBWLB/maru/releases/assets/${index + 1}`,
+    }));
+    const manifest = buildUpdaterManifest(fixture({ release: { assets } }));
+
+    expect(manifest.platforms["darwin-aarch64"].url).toBe(
+      `https://github.com/STAIxBWLB/maru/releases/download/${TAG}/Maru_0.4.47_darwin_aarch64_app.app.tar.gz`,
+    );
+  });
+
   it("fails closed when a pre-manifest asset is missing", () => {
     const assets = releaseAssets().slice(1);
     expect(() => buildUpdaterManifest(fixture({ release: { assets } }))).toThrow(
