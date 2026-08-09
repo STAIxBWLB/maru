@@ -447,9 +447,11 @@ CI runs `make verify` (typecheck + release-version sync + guards + unit tests +
 frontend build) and `make test-e2e` on pull requests via
 `.github/workflows/ci.yml`. Documentation-only changes do not start CI. A push
 to `main` first compares the pushed tree with its associated PR head and checks
-that the latest CI run for that exact head succeeded. Only that exact-tree case
-skips the expensive steps; direct pushes, stale merge bases, missing checks,
-and API failures run the full suite. Version-changing PRs run
+that the latest `CI PR #<number>` run for that exact head succeeded. The stable
+run name keeps the check PR-specific even when GitHub's workflow-run API omits
+its `pull_requests` association. Only that exact-tree case skips the expensive
+steps; direct pushes, stale merge bases, missing checks, and API failures run
+the full suite. Version-changing PRs run
 `make release-checks` instead of `make verify`, adding CLI and debug Tauri
 checks without repeating verify, frontend build, or E2E.
 

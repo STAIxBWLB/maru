@@ -8,6 +8,18 @@ because releases cut frequently during active development. Versions before
 Dates are the release-tag dates. Only `feat`/`fix`-level changes are listed;
 `chore(release)` version bumps and merge commits are omitted.
 
+## v0.4.48 - 2026-08-09 - Lean Builds, Safer Releases
+
+- **CI validates each source tree once (#222).** Documentation-only changes do
+  not start CI, exact PR trees skip repeated validation after squash merge, and
+  version-changing PRs run the additional CLI and native release checks before
+  merge. Stable per-PR run names keep that deduplication correct even when the
+  GitHub Actions API omits pull-request associations.
+- **Release publishing is parallel and race-free (#222).** macOS ARM, macOS
+  Intel, Linux, and Windows build concurrently; each platform uploads only its
+  own assets, then one finalizer verifies the complete 20-asset set, publishes
+  the signed 11-platform updater manifest, and updates Homebrew.
+
 ## v0.4.47 - 2026-08-08 - Measured Performance, Safer Drafts, Connected Graphs
 
 - **Skills state tracks bundle rotation (#194).** Builtin rescans rebaseline
