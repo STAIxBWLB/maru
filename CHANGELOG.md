@@ -8,6 +8,18 @@ because releases cut frequently during active development. Versions before
 Dates are the release-tag dates. Only `feat`/`fix`-level changes are listed;
 `chore(release)` version bumps and merge commits are omitted.
 
+## v0.4.49 - 2026-08-09 - Sandboxed Tests, Quieter Builds
+
+- **Unit tests keep out of the real workspace registry (#225).** The vault scan
+  test resolved the registry through the production config directory, so every
+  `cargo test` run appended a temp-path "Nested" workspace to
+  `workspaces.json` and made it the active one. Registry path resolution now
+  honors a test-only config directory override, and the test sandboxes itself
+  with a guard that restores prior state even on panic.
+- **Release builds skip unused Node cache discovery (#224).** The bundle and
+  manifest jobs set `package-manager-cache: false`, so `setup-node` no longer
+  probes for a lockfile it never restores.
+
 ## v0.4.48 - 2026-08-09 - Lean Builds, Safer Releases
 
 - **CI validates each source tree once (#222).** Documentation-only changes do
