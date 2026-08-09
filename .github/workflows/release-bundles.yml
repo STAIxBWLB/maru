@@ -62,6 +62,7 @@ jobs:
         uses: actions/setup-node@v5
         with:
           node-version: 22.22.3
+          package-manager-cache: false
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
@@ -319,6 +320,7 @@ jobs:
         uses: actions/setup-node@v5
         with:
           node-version: 22.22.3
+          package-manager-cache: false
 
       - name: Publish updater manifest
         env:

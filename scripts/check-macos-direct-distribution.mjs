@@ -348,6 +348,15 @@ if (manifestPublishers.length === 1 && !workflow.includes("includeUpdaterJson: t
   fail(`release workflow must have one updater-manifest writer; found ${manifestPublishers.length}`);
 }
 
+const disabledAutomaticNodeCaches = workflow.match(/package-manager-cache: false/g) ?? [];
+if (disabledAutomaticNodeCaches.length === 2) {
+  ok("release workflow disables automatic package-manager caching in non-pnpm jobs");
+} else {
+  fail(
+    `release workflow must disable automatic package-manager caching in two non-pnpm jobs; found ${disabledAutomaticNodeCaches.length}`,
+  );
+}
+
 const tauriUploadStep = workflow.indexOf("- name: Build and upload Tauri bundles");
 const dmgNotarizationStep = workflow.indexOf("- name: Build, notarize, staple, and upload macOS disk image");
 if (tauriUploadStep >= 0 && dmgNotarizationStep > tauriUploadStep) {
