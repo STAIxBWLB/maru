@@ -293,14 +293,19 @@ test("highlight toggle decorates preview and mark click focuses the graph", asyn
   page,
 }) => {
   await openMeetingDoc(page);
-  await page.locator(".tab-trigger", { hasText: "미리보기" }).click();
-  await expect(page.locator(".preview-surface")).toContainText("Maru 사업 주간 점검 회의");
+  await page.locator(".tab-trigger", { hasText: "원문" }).click();
+  await expect(page.locator("textarea.source-editor")).toHaveValue(/# Maru 사업 주간 점검 회의/);
 
   const toggle = page.getByTestId("kg-highlight-toggle");
   await toggle.click();
-  // The request is asynchronous; synchronize on the app state that owns the
-  // preview effect before asserting its derived mark DOM.
+  // Resolve the asynchronous reference map on the declarative source surface
+  // before mounting the imperatively decorated preview. This avoids racing the
+  // initial Markdown render without hiding latency behind a fixed sleep.
   await expect(toggle).toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator(".kg-source-backdrop .kg-ref-mark")).toHaveCount(2);
+
+  await page.locator(".tab-trigger", { hasText: "미리보기" }).click();
+  await expect(page.locator(".preview-surface")).toContainText("Maru 사업 주간 점검 회의");
   // Frontmatter is stripped from the preview, so only the body entity maps.
   const marks = page.locator(".preview-surface mark.kg-ref-mark");
   await expect(marks).toHaveCount(1);
