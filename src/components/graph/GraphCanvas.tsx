@@ -569,6 +569,19 @@ export function GraphCanvas({
   const layoutRef = useRef<FA2LayoutSupervisor<SigmaNodeAttributes, SigmaEdgeAttributes> | null>(null);
   const layoutIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const layoutTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const centerAppliedRef = useRef<{
+    id: string;
+    nonce: number;
+    renderer: Sigma<SigmaNodeAttributes, SigmaEdgeAttributes>;
+  } | null>(null);
+  // A topology-identical rebuild can apply a pending center before the
+  // visible-node auto-fit effect runs. Keep that fit from cancelling the
+  // just-issued center, then discard the guard after this effect flush.
+  const centerFitGuardRef = useRef<{
+    id: string;
+    nonce: number;
+    renderer: Sigma<SigmaNodeAttributes, SigmaEdgeAttributes>;
+  } | null>(null);
   const startLayoutRef = useRef<((clearPins: boolean) => void) | null>(null);
   const fitToVisibleRef = useRef<((animate: boolean) => void) | null>(null);
   const [rendererState, setRendererState] = useState<GraphRendererState>("loading");
@@ -657,6 +670,46 @@ export function GraphCanvas({
   };
   const callbacksRef = useRef({ onSelect, onOpen, onPathTarget, onNodeDrag, onNodeUnpin, onNodeContextMenu });
   callbacksRef.current = { onSelect, onOpen, onPathTarget, onNodeDrag, onNodeUnpin, onNodeContextMenu };
+  const centerSignalRef = useRef(centerSignal);
+  centerSignalRef.current = centerSignal;
+
+  // Centering is a request against the current graph, not a one-shot camera
+  // animation. A renderer rebuild or a running FA2 pass can otherwise replace
+  // the coordinates used by the animation before it lands. Re-apply the
+  // latest request when this renderer is actually ready.
+  // The return value is true only when this call schedules a new animation;
+  // callers use false to preserve a pending whole-graph fit for old requests.
+  const centerNode = (signal: { id: string; nonce: number } | null): boolean => {
+    if (!signal) return false;
+    const renderer = rendererRef.current;
+    const graph = graphRef.current;
+    if (!renderer || !graph?.hasNode(signal.id) || layoutRef.current?.isRunning()) return false;
+    const applied = centerAppliedRef.current;
+    if (
+      applied &&
+      applied.id === signal.id &&
+      applied.nonce === signal.nonce &&
+      applied.renderer === renderer
+    ) {
+      return false;
+    }
+    const attrs = graph.getNodeAttributes(signal.id);
+    if (!Number.isFinite(attrs.x) || !Number.isFinite(attrs.y)) return false;
+    manualCameraRef.current = true;
+    fitOnSettleRef.current = false;
+    const viewport = renderer.graphToViewport(attrs);
+    const target = renderer.viewportToFramedGraph(viewport);
+    centerAppliedRef.current = {
+      id: signal.id,
+      nonce: signal.nonce,
+      renderer,
+    };
+    void renderer.getCamera().animate(
+      { x: target.x, y: target.y },
+      { duration: animDuration(180) },
+    );
+    return true;
+  };
 
   useEffect(() => {
     pinnedIdsRef.current = new Set(initialPinnedIds);
@@ -976,9 +1029,10 @@ export function GraphCanvas({
         }
         if (graph.order < 2 || graph.size < 1) {
           snapshotPositions();
+          const centered = centerNode(centerSignalRef.current);
           if (fitOnSettleRef.current) {
             fitOnSettleRef.current = false;
-            fitToVisible(false);
+            if (!centered) fitToVisible(false);
           }
           return;
         }
@@ -1000,7 +1054,8 @@ export function GraphCanvas({
           snapshotPositions();
           applyRendererState("ready");
           fitOnSettleRef.current = false;
-          fitToVisible(false);
+          const centered = centerNode(centerSignalRef.current);
+          if (!centered) fitToVisible(false);
           onLayoutErrorRef.current?.(t("graph.error.layout"));
           return;
         }
@@ -1015,6 +1070,7 @@ export function GraphCanvas({
           stopLayout();
           snapshotPositions();
           applyRendererState("ready");
+          centerNode(centerSignalRef.current);
           onLayoutErrorRef.current?.(t("graph.error.layout"));
         };
         worker?.addEventListener("error", onWorkerError);
@@ -1022,9 +1078,10 @@ export function GraphCanvas({
           stopLayout();
           snapshotPositions();
           applyRendererState("ready");
+          const centered = centerNode(centerSignalRef.current);
           if (fitOnSettleRef.current) {
             fitOnSettleRef.current = false;
-            fitToVisible(true);
+            if (!centered) fitToVisible(true);
           }
         };
         const sampleIds = nodes.slice(0, 256).map((node) => node.id);
@@ -1232,7 +1289,8 @@ export function GraphCanvas({
       renderer.once("afterRender", () => {
         applyRendererState(layoutRef.current ? "layout-running" : "ready");
         // First render after creation: fit the finite visible bounds once.
-        if (!manualCameraRef.current) fitToVisible(false);
+        const centered = centerNode(centerSignalRef.current);
+        if (!manualCameraRef.current && !centered) fitToVisible(false);
       });
       // Re-run the force layout only when node ids or edge topology changed.
       // Metadata-only rescans and enrichment swaps keep the viewport stable.
@@ -1243,6 +1301,14 @@ export function GraphCanvas({
       if (prevTopoSigRef.current === topoSig && positionsValid) {
         snapshotPositions();
         applyRendererState("ready");
+        const signal = centerSignalRef.current;
+        if (centerNode(signal) && signal) {
+          const guard = { id: signal.id, nonce: signal.nonce, renderer };
+          centerFitGuardRef.current = guard;
+          queueMicrotask(() => {
+            if (centerFitGuardRef.current === guard) centerFitGuardRef.current = null;
+          });
+        }
       } else {
         fitOnSettleRef.current = true;
         startLayout(false);
@@ -1614,9 +1680,19 @@ export function GraphCanvas({
   // (e.g. focusing a cluster far from the current camera): re-fit once.
   // Ordinary filter changes and pane resizes never touch the camera.
   useEffect(() => {
+    const centerGuard = centerFitGuardRef.current;
+    centerFitGuardRef.current = null;
     const renderer = rendererRef.current;
     const graph = graphRef.current;
     if (!renderer || !graph || !visibleNodeIds || visibleNodeIds.size === 0) return;
+    const signal = centerSignalRef.current;
+    if (
+      centerGuard &&
+      centerGuard.renderer === renderer &&
+      signal &&
+      centerGuard.id === signal.id &&
+      centerGuard.nonce === signal.nonce
+    ) return;
     const { width, height } = renderer.getDimensions();
     if (width <= 0 || height <= 0) return;
     let anyFinite = false;
@@ -1672,24 +1748,8 @@ export function GraphCanvas({
   }, [zoomSignal]);
 
   useEffect(() => {
-    if (!centerSignal) return;
-    const renderer = rendererRef.current;
-    const graph = graphRef.current;
-    if (!renderer || !graph?.hasNode(centerSignal.id)) return;
-    const attrs = graph.getNodeAttributes(centerSignal.id);
-    if (!Number.isFinite(attrs.x) || !Number.isFinite(attrs.y)) return;
-    manualCameraRef.current = true;
-    fitOnSettleRef.current = false;
-    // Display-data coordinates are a transient renderer cache and can belong
-    // to the preceding camera frame. Convert the canonical graph coordinates
-    // through the current viewport to obtain a stable framed-camera target.
-    const viewport = renderer.graphToViewport(attrs);
-    const target = renderer.viewportToFramedGraph(viewport);
-    void renderer.getCamera().animate(
-      { x: target.x, y: target.y },
-      { duration: animDuration(180) },
-    );
-  }, [centerSignal]);
+    centerNode(centerSignal);
+  }, [centerSignal, rendererState]);
 
   // Keyboard access on the focused canvas: arrows nudge the camera (~40px,
   // shift for larger), Enter opens the current selection.

@@ -200,6 +200,12 @@ async function waitForCameraSettled(page: Page) {
   );
 }
 
+async function waitForLayoutSettled(page: Page) {
+  await page.waitForFunction(
+    () => !(window as unknown as { __maruGraph: Bridge }).__maruGraph.layoutRunning(),
+  );
+}
+
 async function dblclickNode(page: Page, id: string, options?: { fit?: boolean }) {
   // Wait for the current camera transition and its render before resolving a
   // pixel coordinate. Only fit when the caller revealed a potentially
@@ -362,6 +368,7 @@ test("type filter narrows nodes; click selects, double-click opens the note", as
   // Centered: settle the camera first, then poll. The wait alone is not a
   // guarantee - it can run before the animation has started and report idle -
   // so the poll still does the asserting.
+  await waitForLayoutSettled(page);
   await waitForCameraSettled(page);
   await expect
     .poll(async () => {
@@ -377,6 +384,58 @@ test("type filter narrows nodes; click selects, double-click opens the note", as
   await dblclickNode(page, "maru-glossary");
   await expect(page.getByTestId("graph-mode")).toHaveCount(0);
   await expect(page.getByText("Maru 용어집").first()).toBeVisible();
+
+  expect(forbidden).toEqual([]);
+});
+
+test("centering during layout settles once; re-layout does not replay the old center", async ({ page }) => {
+  const forbidden = watchForbiddenRequests(page);
+  await enterGraph(page);
+
+  // Centering can be requested while FA2 is still moving the graph. The
+  // camera must follow the settled coordinates, not the request-time frame.
+  await page.evaluate(() => {
+    (window as unknown as { __maruGraph: Bridge }).__maruGraph.resumeLayout();
+  });
+  await expect
+    .poll(() => page.evaluate(() => (window as unknown as { __maruGraph: Bridge }).__maruGraph.layoutRunning()))
+    .toBe(true);
+  await (await openSearch(page)).fill("용어집");
+  await expect(page.getByTestId("graph-search-results")).toBeVisible();
+  await page.getByTestId("graph-search").press("Enter");
+  await openSelectionDetails(page);
+  await expect(activeInspector(page)).toContainText("Maru 용어집");
+  await waitForLayoutSettled(page);
+  await waitForCameraSettled(page);
+  await expect
+    .poll(async () => {
+      const [point, rect] = await Promise.all([nodePoint(page, "maru-glossary"), containerRect(page)]);
+      return Math.max(
+        Math.abs(point.x - (rect.x + rect.width / 2)) / rect.width,
+        Math.abs(point.y - (rect.y + rect.height / 2)) / rect.height,
+      );
+    })
+    .toBeLessThan(0.25);
+
+  // A later explicit re-layout is a new user action. It resets the camera to
+  // the whole-graph view and must not replay the already-consumed search center.
+  await openMore(page);
+  await page.getByTestId("graph-relayout").click();
+  await waitForLayoutSettled(page);
+  await waitForCameraSettled(page);
+  const camera = await cameraState(page);
+  expect(camera.x).toBeCloseTo(0.5, 2);
+  expect(camera.y).toBeCloseTo(0.5, 2);
+  expect(camera.ratio).toBeCloseTo(1, 2);
+  await expect
+    .poll(async () => {
+      const [point, rect] = await Promise.all([nodePoint(page, "maru-glossary"), containerRect(page)]);
+      return Math.max(
+        Math.abs(point.x - (rect.x + rect.width / 2)) / rect.width,
+        Math.abs(point.y - (rect.y + rect.height / 2)) / rect.height,
+      );
+    })
+    .toBeGreaterThan(0.25);
 
   expect(forbidden).toEqual([]);
 });
