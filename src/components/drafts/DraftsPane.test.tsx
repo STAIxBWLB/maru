@@ -85,6 +85,8 @@ async function render(options: {
   entries?: VaultEntry[];
   onOpenInGraph?: (request: DraftGraphFocusRequest) => void;
   onExitReferenceFocus?: () => void;
+  layout?: { draftsListWidth: number };
+  onLayoutChange?: (patch: { draftsListWidth?: number }) => void;
 } = {}): Promise<HTMLElement> {
   container = document.createElement("div");
   document.body.appendChild(container);
@@ -112,6 +114,8 @@ async function render(options: {
           onOpenAgents={() => {}}
           onOpenInGraph={options.onOpenInGraph}
           onExitReferenceFocus={options.onExitReferenceFocus}
+          layout={options.layout}
+          onLayoutChange={options.onLayoutChange}
         />
       </LocaleContext.Provider>,
     );
@@ -253,6 +257,50 @@ describe("DraftsPane unsaved-edit guards", () => {
 
     expect(host.textContent).toContain("두 번째 초안 본문");
     expect(host.textContent).not.toContain("원래 본문");
+  });
+});
+
+describe("DraftsPane list resize", () => {
+  it("restores the saved width and commits keyboard changes", async () => {
+    const onLayoutChange = vi.fn();
+    const host = await render({
+      layout: { draftsListWidth: 420 },
+      onLayoutChange,
+    });
+    const handle = host.querySelector<HTMLElement>('[role="separator"]');
+    if (!handle) throw new Error("drafts list resize handle not found");
+
+    expect(handle.getAttribute("aria-label")).toBe(
+      translate("ko", "drafts.layout.resizeList"),
+    );
+    expect(handle.getAttribute("aria-valuemin")).toBe("260");
+    expect(handle.getAttribute("aria-valuemax")).toBe("560");
+    expect(handle.getAttribute("aria-valuenow")).toBe("420");
+    expect(host.querySelector<HTMLElement>(".drafts-pane")?.style.getPropertyValue(
+      "--drafts-list-width",
+    )).toBe("420px");
+
+    await act(async () => {
+      handle.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "ArrowRight",
+          shiftKey: true,
+          bubbles: true,
+        }),
+      );
+    });
+
+    expect(handle.getAttribute("aria-valuenow")).toBe("468");
+    expect(onLayoutChange).toHaveBeenLastCalledWith({ draftsListWidth: 468 });
+    expect(host.querySelector<HTMLElement>(".drafts-pane")?.style.getPropertyValue(
+      "--drafts-list-width",
+    )).toBe("468px");
+
+    await act(async () => {
+      handle.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+    });
+    expect(handle.getAttribute("aria-valuenow")).toBe("340");
+    expect(onLayoutChange).toHaveBeenLastCalledWith({ draftsListWidth: 340 });
   });
 });
 

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  DRAFTS_LIST_WIDTH,
   DEFAULT_MARU_SETTINGS,
   SCRATCHPAD_LIST_HEIGHT,
   applyWorkspaceCommsOverrides,
@@ -181,6 +182,7 @@ describe("normalizeMaruSettings", () => {
           documentsPaneWidth: 999,
           outlinePaneWidth: 100,
           scratchpadListHeight: 9999,
+          draftsListWidth: 999,
           editorSplitOpen: true,
           editorSplitSurface: "graph",
           editorSplitRatio: 0.9,
@@ -259,6 +261,7 @@ describe("normalizeMaruSettings", () => {
     expect(settings.ui.layout.documentsPaneWidth).toBe(560);
     expect(settings.ui.layout.outlinePaneWidth).toBe(240);
     expect(settings.ui.layout.scratchpadListHeight).toBe(SCRATCHPAD_LIST_HEIGHT.max);
+    expect(settings.ui.layout.draftsListWidth).toBe(DRAFTS_LIST_WIDTH.max);
     expect(settings.ui.layout.editorSplitRatio).toBe(0.7);
     expect(settings.ui.layout.terminalDock).toBe("right");
     expect(settings.ui.layout.terminalWidth).toBe(2048);
@@ -1295,6 +1298,7 @@ describe("normalizeMaruSettings", () => {
       tasksSidebarWidth: 240,
       calendarAgendaWidth: 280,
       taskDetailsWidth: 400,
+      draftsListWidth: DRAFTS_LIST_WIDTH.defaultValue,
     });
 
     const clamped = normalizeMaruSettings({
@@ -1304,6 +1308,7 @@ describe("normalizeMaruSettings", () => {
           tasksSidebarWidth: 999,
           calendarAgendaWidth: 40,
           taskDetailsWidth: 999,
+          draftsListWidth: 100,
         },
       },
     });
@@ -1312,6 +1317,7 @@ describe("normalizeMaruSettings", () => {
       tasksSidebarWidth: 360,
       calendarAgendaWidth: 200,
       taskDetailsWidth: 520,
+      draftsListWidth: DRAFTS_LIST_WIDTH.min,
     });
   });
 

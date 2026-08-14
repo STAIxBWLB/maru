@@ -1079,6 +1079,7 @@ export const en: Record<string, string> = {
   "drafts.header.eyebrow": "Ideation hub",
   "drafts.header.title": "Ideation",
   "drafts.header.subtitle": "Move ideas through implementation drafts, promotion, and gap analysis.",
+  "drafts.layout.resizeList": "Resize Ideation list",
   "drafts.refresh": "Refresh Ideation",
   "drafts.filter.kind.label": "Kind filter",
   "drafts.filter.status.label": "Status filter",

@@ -1032,6 +1032,7 @@ export const ko: Record<string, string> = {
   "drafts.header.eyebrow": "아이디어 허브",
   "drafts.header.title": "아이디어",
   "drafts.header.subtitle": "아이디어를 구현 초안으로 발전시키고 승격·갭 분석까지 관리합니다.",
+  "drafts.layout.resizeList": "아이디어 목록 영역 크기 조절",
   "drafts.refresh": "아이디어 허브 새로고침",
   "drafts.filter.kind.label": "종류 필터",
   "drafts.filter.status.label": "상태 필터",

@@ -337,6 +337,7 @@ fn default_settings_json() -> JsonValue {
         "filesPreviewOpen": true,
         "filesPreviewWidth": 440,
         "scratchpadListHeight": 218,
+        "draftsListWidth": 340,
         "outlineOpen": true,
         "outlinePaneWidth": 280,
         "terminalOpen": false,
@@ -545,6 +546,59 @@ fn split_settings_json(value: &JsonValue) -> (JsonValue, JsonValue) {
     (global, workspace_state)
 }
 
+fn apply_changed_value(target: &mut JsonValue, incoming: &JsonValue, base: &JsonValue) -> bool {
+    if let (JsonValue::Object(incoming_map), JsonValue::Object(base_map)) = (incoming, base) {
+        if !target.is_object() {
+            *target = json!({});
+        }
+        let target_map = target.as_object_mut().expect("target is object");
+        let mut changed = false;
+
+        for (key, incoming_value) in incoming_map {
+            if let Some(base_value) = base_map.get(key) {
+                if incoming_value == base_value {
+                    continue;
+                }
+                let target_value = target_map
+                    .entry(key.clone())
+                    .or_insert_with(|| JsonValue::Null);
+                changed |= apply_changed_value(target_value, incoming_value, base_value);
+            } else if target_map.get(key) != Some(incoming_value) {
+                target_map.insert(key.clone(), incoming_value.clone());
+                changed = true;
+            }
+        }
+
+        for key in base_map.keys() {
+            if !incoming_map.contains_key(key) && target_map.remove(key).is_some() {
+                changed = true;
+            }
+        }
+
+        changed
+    } else if target != incoming {
+        *target = incoming.clone();
+        true
+    } else {
+        false
+    }
+}
+
+fn ensure_path<'a>(target: &'a mut JsonValue, path: &[&str]) -> &'a mut JsonValue {
+    let mut current = target;
+    for key in path {
+        if !current.is_object() {
+            *current = json!({});
+        }
+        current = current
+            .as_object_mut()
+            .expect("current is object")
+            .entry((*key).to_string())
+            .or_insert_with(|| json!({}));
+    }
+    current
+}
+
 fn apply_changed_paths(
     target: &mut JsonValue,
     incoming: &JsonValue,
@@ -559,8 +613,18 @@ fn apply_changed_paths(
             continue;
         }
         if let Some(value) = incoming_value {
-            insert_path(target, path, value.clone());
-            changed = true;
+            let target_value = ensure_path(target, path);
+            let base_value = base.pointer(&pointer);
+            changed |= base_value
+                .map(|base_value| apply_changed_value(target_value, value, base_value))
+                .unwrap_or_else(|| {
+                    if target_value != value {
+                        *target_value = value.clone();
+                        true
+                    } else {
+                        false
+                    }
+                });
         }
     }
     changed
@@ -1529,6 +1593,16 @@ mod tests {
     }
 
     #[test]
+    fn default_layout_includes_drafts_list_width() {
+        assert_eq!(
+            default_settings_json()
+                .pointer("/ui/layout/draftsListWidth")
+                .and_then(JsonValue::as_i64),
+            Some(340)
+        );
+    }
+
+    #[test]
     fn settings_split_round_trips_pretty() {
         let tmp = fresh_work();
         let home = fresh_work();
@@ -1557,6 +1631,12 @@ mod tests {
                 .pointer("/ui/layout/terminalOpen")
                 .and_then(JsonValue::as_bool),
             Some(false)
+        );
+        assert_eq!(
+            initial
+                .pointer("/ui/layout/draftsListWidth")
+                .and_then(JsonValue::as_i64),
+            Some(340)
         );
 
         let next = json!({
@@ -1700,6 +1780,131 @@ mod tests {
                 .pointer("/ui/collapsedTreeFolders/0")
                 .and_then(JsonValue::as_str),
             Some("workspace-b-only")
+        );
+    }
+
+    #[test]
+    fn stale_drafts_width_save_preserves_concurrent_documents_width() {
+        let work_a = fresh_work();
+        let work_b = fresh_work();
+        let home = fresh_work();
+        let global = home.path().join(".maru/settings.json");
+
+        let base_a = read_maru_settings_internal(work_a.path(), &global).unwrap();
+        let stale_base_b = read_maru_settings_internal(work_b.path(), &global).unwrap();
+        let mut documents_save = base_a.clone();
+        insert_path(
+            &mut documents_save,
+            &["ui", "layout", "documentsPaneWidth"],
+            json!(520),
+        );
+        save_maru_settings_internal_with_base(work_a.path(), &global, documents_save, Some(base_a))
+            .unwrap();
+
+        let mut stale_drafts_save = stale_base_b.clone();
+        insert_path(
+            &mut stale_drafts_save,
+            &["ui", "layout", "draftsListWidth"],
+            json!(460),
+        );
+        save_maru_settings_internal_with_base(
+            work_b.path(),
+            &global,
+            stale_drafts_save,
+            Some(stale_base_b),
+        )
+        .unwrap();
+
+        let effective = read_maru_settings_internal(work_b.path(), &global).unwrap();
+        assert_eq!(
+            effective.pointer("/ui/layout/documentsPaneWidth"),
+            Some(&json!(520))
+        );
+        assert_eq!(
+            effective.pointer("/ui/layout/draftsListWidth"),
+            Some(&json!(460))
+        );
+    }
+
+    #[test]
+    fn stale_documents_width_save_preserves_concurrent_drafts_width() {
+        let work_a = fresh_work();
+        let work_b = fresh_work();
+        let home = fresh_work();
+        let global = home.path().join(".maru/settings.json");
+
+        let base_a = read_maru_settings_internal(work_a.path(), &global).unwrap();
+        let stale_base_b = read_maru_settings_internal(work_b.path(), &global).unwrap();
+        let mut drafts_save = base_a.clone();
+        insert_path(
+            &mut drafts_save,
+            &["ui", "layout", "draftsListWidth"],
+            json!(460),
+        );
+        save_maru_settings_internal_with_base(work_a.path(), &global, drafts_save, Some(base_a))
+            .unwrap();
+
+        let mut stale_documents_save = stale_base_b.clone();
+        insert_path(
+            &mut stale_documents_save,
+            &["ui", "layout", "documentsPaneWidth"],
+            json!(520),
+        );
+        save_maru_settings_internal_with_base(
+            work_b.path(),
+            &global,
+            stale_documents_save,
+            Some(stale_base_b),
+        )
+        .unwrap();
+
+        let effective = read_maru_settings_internal(work_b.path(), &global).unwrap();
+        assert_eq!(
+            effective.pointer("/ui/layout/documentsPaneWidth"),
+            Some(&json!(520))
+        );
+        assert_eq!(
+            effective.pointer("/ui/layout/draftsListWidth"),
+            Some(&json!(460))
+        );
+    }
+
+    #[test]
+    fn later_save_wins_for_the_same_layout_field() {
+        let work_a = fresh_work();
+        let work_b = fresh_work();
+        let home = fresh_work();
+        let global = home.path().join(".maru/settings.json");
+
+        let base_a = read_maru_settings_internal(work_a.path(), &global).unwrap();
+        let stale_base_b = read_maru_settings_internal(work_b.path(), &global).unwrap();
+        let mut first_save = base_a.clone();
+        insert_path(
+            &mut first_save,
+            &["ui", "layout", "draftsListWidth"],
+            json!(460),
+        );
+        save_maru_settings_internal_with_base(work_a.path(), &global, first_save, Some(base_a))
+            .unwrap();
+
+        let mut later_save = stale_base_b.clone();
+        insert_path(
+            &mut later_save,
+            &["ui", "layout", "draftsListWidth"],
+            json!(500),
+        );
+        save_maru_settings_internal_with_base(
+            work_b.path(),
+            &global,
+            later_save,
+            Some(stale_base_b),
+        )
+        .unwrap();
+
+        let effective = read_maru_settings_internal(work_b.path(), &global).unwrap();
+        assert_eq!(
+            effective.pointer("/ui/layout/draftsListWidth"),
+            Some(&json!(500))
         );
     }
 
@@ -1915,5 +2120,4 @@ mod tests {
         let result = save_maru_rule(work, "../escape".to_string(), "x".to_string());
         assert!(result.is_err());
     }
-
 }
