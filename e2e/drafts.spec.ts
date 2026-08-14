@@ -211,6 +211,17 @@ async function openDraftsMode(page: import("@playwright/test").Page) {
   return pane;
 }
 
+async function readPersistedDraftsListWidth(page: import("@playwright/test").Page) {
+  return page.evaluate(() => {
+    const raw = window.localStorage.getItem(
+      "maru:settings:fallback:v1:mock://maru-sample-workspace",
+    );
+    if (!raw) return null;
+    return (JSON.parse(raw) as { ui?: { layout?: { draftsListWidth?: number } } }).ui?.layout
+      ?.draftsListWidth ?? null;
+  });
+}
+
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
     if (window.sessionStorage.getItem("maru:e2e:storage-cleared") === "true") return;
@@ -243,6 +254,50 @@ test("lists drafts and ideas, hiding discarded drafts by default", async ({ page
     .click();
   await expect(list.getByText("maru-vault-graph.md")).toBeVisible();
   await expect(list.getByText("Review weekly report")).toHaveCount(0);
+});
+
+test("persists the Ideation list width and restores it after reload", async ({ page }) => {
+  const pane = await openDraftsMode(page);
+  const resizeHandle = pane.getByRole("separator", { name: "아이디어 목록 영역 크기 조절" });
+
+  await expect(resizeHandle).toHaveAttribute("aria-valuenow", "340");
+  const handleBox = await resizeHandle.boundingBox();
+  expect(handleBox).not.toBeNull();
+  if (!handleBox) return;
+  const centerY = handleBox.y + handleBox.height / 2;
+  await page.mouse.move(handleBox.x + handleBox.width / 2, centerY);
+  await page.mouse.down();
+  await page.mouse.move(handleBox.x + handleBox.width / 2 + 48, centerY, { steps: 2 });
+  await page.mouse.up();
+  await expect(resizeHandle).toHaveAttribute("aria-valuenow", "388");
+  await expect.poll(() => readPersistedDraftsListWidth(page)).toBe(388);
+
+  await page.reload();
+  const reloadedPane = await openDraftsMode(page);
+  await expect(
+    reloadedPane.getByRole("separator", { name: "아이디어 목록 영역 크기 조절" }),
+  ).toHaveAttribute("aria-valuenow", "388");
+});
+
+test("hides the resize handle at 720px and restores it at 721px", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  const pane = await openDraftsMode(page);
+  const workbench = page.locator(".app-workbench");
+  const resizeHandle = pane.locator(".drafts-body > .pane-resize-handle");
+
+  await workbench.evaluate((element) => {
+    (element as HTMLElement).style.width = "720px";
+  });
+  await expect.poll(() => resizeHandle.evaluate((element) => getComputedStyle(element).display)).toBe(
+    "none",
+  );
+
+  await workbench.evaluate((element) => {
+    (element as HTMLElement).style.width = "721px";
+  });
+  await expect
+    .poll(() => resizeHandle.evaluate((element) => getComputedStyle(element).display))
+    .not.toBe("none");
 });
 
 test("opens a draft detail and moves it to in-review", async ({ page }) => {

@@ -133,6 +133,9 @@ export const DEFAULT_FILES_LIST_ATTRIBUTES: FilesListAttribute[] = [
  *  flex basis `.scratchpad-list` used before the split became resizable. */
 export const SCRATCHPAD_LIST_HEIGHT = { defaultValue: 218, min: 120, max: 600 } as const;
 
+/** Drag limits for the Ideation drafts list/detail split. */
+export const DRAFTS_LIST_WIDTH = { defaultValue: 340, min: 260, max: 560 } as const;
+
 export interface WindowBoundsSettings {
   x: number;
   y: number;
@@ -152,6 +155,7 @@ export interface LayoutSettings {
   calendarAgendaWidth: number;
   taskDetailsWidth: number;
   scratchpadListHeight: number;
+  draftsListWidth: number;
   outlineOpen: boolean;
   outlinePaneWidth: number;
   terminalOpen: boolean;
@@ -511,6 +515,7 @@ export const DEFAULT_MARU_SETTINGS: MaruSettings = {
       calendarAgendaWidth: TODAY_LAYOUT_LIMITS.calendarAgendaWidth.defaultValue,
       taskDetailsWidth: TODAY_LAYOUT_LIMITS.taskDetailsWidth.defaultValue,
       scratchpadListHeight: SCRATCHPAD_LIST_HEIGHT.defaultValue,
+      draftsListWidth: DRAFTS_LIST_WIDTH.defaultValue,
       outlineOpen: true,
       outlinePaneWidth: 280,
       terminalOpen: false,
@@ -2195,6 +2200,12 @@ function normalizeLayout(value: unknown, legacyTerminal: Record<string, unknown>
       SCRATCHPAD_LIST_HEIGHT.defaultValue,
       SCRATCHPAD_LIST_HEIGHT.min,
       SCRATCHPAD_LIST_HEIGHT.max,
+    ),
+    draftsListWidth: normalizePaneWidth(
+      layout.draftsListWidth,
+      DRAFTS_LIST_WIDTH.defaultValue,
+      DRAFTS_LIST_WIDTH.min,
+      DRAFTS_LIST_WIDTH.max,
     ),
     outlineOpen:
       typeof layout.outlineOpen === "boolean"

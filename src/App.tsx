@@ -174,7 +174,13 @@ import {
   updateMaruWorkspace,
 } from "./lib/maruDir";
 import { classifyInboxItem } from "./lib/aiInvoke";
-import { createDebouncedSaver, type DebouncedSaver } from "./lib/debouncedSave";
+import {
+  createContextualDebouncedSaver,
+  createSaveQueue,
+  type ContextualDebouncedSaver,
+  type DebouncedSaver,
+  type SaveQueue,
+} from "./lib/debouncedSave";
 import { documentDisplayName } from "./lib/document";
 import { isHtmlFileKind } from "./lib/htmlDocument";
 import { refStepsByParagraph, uniqueRefNodePaths } from "./lib/kgRefs";
@@ -606,6 +612,11 @@ interface KgEditorTabContext {
   docPath: string;
 }
 
+type SettingsSaveContext = {
+  workPath: string;
+  base: MaruSettings;
+};
+
 function tabIdForEntry(entry: VaultEntry): string {
   return entry.path;
 }
@@ -839,7 +850,10 @@ function MainApp() {
   const editorTextareaRef = useRef<HTMLTextAreaElement>(null);
   const rightEditorTextareaRef = useRef<HTMLTextAreaElement>(null);
   const settingsSaverRef = useRef<DebouncedSaver<MaruSettings> | null>(null);
-  const settingsSaveBaseRef = useRef<MaruSettings | null>(null);
+  const settingsContextualSaverRef = useRef<
+    ContextualDebouncedSaver<MaruSettings, SettingsSaveContext> | null
+  >(null);
+  const settingsSaveQueueRef = useRef<SaveQueue>(createSaveQueue());
   const collapsedTreeHydratedRef = useRef(false);
   const collapsedFileHydratedRef = useRef(false);
   const processedRequestSeqRef = useRef(0);
@@ -1702,22 +1716,25 @@ function MainApp() {
   useEffect(() => {
     if (!settingsWritable || !settingsWorkPath) {
       settingsSaverRef.current = null;
-      settingsSaveBaseRef.current = null;
+      settingsContextualSaverRef.current = null;
       return;
     }
-    const saver = createDebouncedSaver<MaruSettings>(
-      async (settings) => {
-        const base = settingsSaveBaseRef.current ?? undefined;
-        settingsSaveBaseRef.current = null;
-        await saveMaruSettings(settingsWorkPath, settings, base);
+    const saver = createContextualDebouncedSaver<MaruSettings, SettingsSaveContext>(
+      async (settings, context) => {
+        await saveMaruSettings(context.workPath, settings, context.base);
       },
       250,
       (err) => {
         setError(err instanceof Error ? err.message : String(err));
       },
+      settingsSaveQueueRef.current,
     );
+    settingsContextualSaverRef.current = saver;
     settingsSaverRef.current = saver;
     return () => {
+      if (settingsContextualSaverRef.current === saver) {
+        settingsContextualSaverRef.current = null;
+      }
       if (settingsSaverRef.current === saver) {
         settingsSaverRef.current = null;
       }
@@ -1766,19 +1783,23 @@ function MainApp() {
           typeof updater === "function" ? updater(current) : updater,
         );
         if (settingsWritable && settingsWorkPath) {
-          const saver = settingsSaverRef.current;
+          const saver = settingsContextualSaverRef.current;
           if (saver) {
-            if (!settingsSaveBaseRef.current) {
-              settingsSaveBaseRef.current = current;
-            }
-            saver.schedule(next);
+            saver.schedule(next, {
+              workPath: settingsWorkPath,
+              base: current,
+            });
             if (options?.flush) {
               void saver.flush();
             }
           } else {
-            void saveMaruSettings(settingsWorkPath, next, current).catch((err) => {
-              setError(err instanceof Error ? err.message : String(err));
-            });
+            const workPath = settingsWorkPath;
+            const base = current;
+            void settingsSaveQueueRef.current
+              .enqueue(() => saveMaruSettings(workPath, next, base))
+              .catch((err) => {
+                setError(err instanceof Error ? err.message : String(err));
+              });
           }
         }
         return next;
@@ -8495,6 +8516,8 @@ function MainApp() {
             onOpenGapAnalysis={openGapAnalysis}
             onOpenInGraph={openDraftsGraphFocus}
             onExitReferenceFocus={exitKgReferenceFocus}
+            layout={layoutSettings}
+            onLayoutChange={updateLayoutSettings}
           />
         ) : surfaceMode === "gap" ? (
           <LazyGapPane

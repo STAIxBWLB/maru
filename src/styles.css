@@ -23326,10 +23326,14 @@ select:focus-visible,
 .drafts-list-col {
   display: flex;
   flex-direction: column;
-  width: 340px;
-  flex-shrink: 0;
+  width: var(--drafts-list-width, 340px);
+  flex: 0 0 var(--drafts-list-width, 340px);
   border-right: 1px solid var(--line-soft);
   min-height: 0;
+}
+
+.drafts-body > .pane-resize-handle {
+  flex: 0 0 9px;
 }
 
 .drafts-filters {
@@ -25111,10 +25115,32 @@ select:focus-visible,
     border-bottom: 1px solid var(--line-soft);
   }
 
+  .drafts-body > .pane-resize-handle {
+    display: none;
+  }
+
   .studio-step-rail {
     max-height: 150px;
     border-right: 0;
     border-bottom: 1px solid var(--line-soft);
+  }
+}
+
+@container appworkbench (max-width: 720px) {
+  .drafts-body {
+    flex-direction: column;
+  }
+
+  .drafts-list-col {
+    width: 100%;
+    max-height: 40%;
+    flex-basis: auto;
+    border-right: 0;
+    border-bottom: 1px solid var(--line-soft);
+  }
+
+  .drafts-body > .pane-resize-handle {
+    display: none;
   }
 }
 

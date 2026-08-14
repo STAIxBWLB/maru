@@ -1,6 +1,6 @@
 import { listen } from "@tauri-apps/api/event";
 import { Check, FileDiff, Lightbulb, PenLine, RefreshCcw, Sparkles, Trash2 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import type { ApprovalInput } from "../../approval/ApprovalDialog";
 import {
   createScratchpadIdea,
@@ -42,7 +42,13 @@ import {
 } from "../../lib/draftGraphRelations";
 import { useTranslation } from "../../lib/i18n";
 import { renderMarkdown } from "../../lib/markdown";
-import type { AiRuntime, AiSettings, AiTaskIngestMinImportance } from "../../lib/settings";
+import {
+  DRAFTS_LIST_WIDTH,
+  type AiRuntime,
+  type AiSettings,
+  type AiTaskIngestMinImportance,
+  type LayoutSettings,
+} from "../../lib/settings";
 import type { SkillRecord } from "../../lib/skills";
 import type {
   DraftDocument,
@@ -58,6 +64,7 @@ import type {
 } from "../../lib/types";
 import { Button, IconButton } from "../ui/Button";
 import { CompactSelect, EmptyState, ModeHeader, StatusBanner } from "../ui/ModeChrome";
+import { PaneResizeHandle } from "../ui/PaneResizeHandle";
 import { NewDraftDialog } from "./NewDraftDialog";
 import { PromoteDraftDialog } from "./PromoteDraftDialog";
 import { useIdeationDrafts } from "./useIdeationDrafts";
@@ -82,6 +89,10 @@ interface DraftsPaneProps {
   onOpenInGraph?: (request: DraftGraphFocusRequest) => void;
   /** Clears a drafts-owned graph focus when the selected item changes. */
   onExitReferenceFocus?: () => void;
+  layout?: Pick<LayoutSettings, "draftsListWidth">;
+  onLayoutChange?: (
+    patch: Partial<Pick<LayoutSettings, "draftsListWidth">>,
+  ) => void;
 }
 
 const KIND_FILTERS: DraftKindFilter[] = ["all", "task", "idea", "implementation"];
@@ -121,8 +132,13 @@ export function DraftsPane({
   onOpenGapAnalysis,
   onOpenInGraph,
   onExitReferenceFocus,
+  layout,
+  onLayoutChange,
 }: DraftsPaneProps) {
   const { t, locale } = useTranslation();
+  const resolvedDraftsListWidth =
+    layout?.draftsListWidth ?? DRAFTS_LIST_WIDTH.defaultValue;
+  const [draftsListWidth, setDraftsListWidth] = useState(resolvedDraftsListWidth);
   const [drafts, setDrafts] = useState<DraftEntry[]>([]);
   const [ideas, setIdeas] = useState<ScratchpadEntry[]>([]);
   const [loading, setLoading] = useState(false);
@@ -144,6 +160,12 @@ export function DraftsPane({
   const [createOpen, setCreateOpen] = useState(false);
   const detailReadSequenceRef = useRef(0);
   const ideaMutationRef = useRef(false);
+
+  useEffect(() => {
+    if (layout?.draftsListWidth !== undefined) {
+      setDraftsListWidth(layout.draftsListWidth);
+    }
+  }, [layout?.draftsListWidth]);
 
   // Held in a ref, not read from state, so the open/promote callbacks keep a
   // stable identity while the user types — onOpenDraft feeds useIdeationDrafts'
@@ -587,7 +609,15 @@ export function DraftsPane({
     status === "all" ? t("drafts.filter.all") : t(`drafts.status.${status}`);
 
   return (
-    <section className="drafts-pane" aria-label={t("mode.drafts")}>
+    <section
+      className="drafts-pane"
+      aria-label={t("mode.drafts")}
+      style={
+        {
+          "--drafts-list-width": `${draftsListWidth}px`,
+        } as CSSProperties & Record<"--drafts-list-width", string>
+      }
+    >
       <ModeHeader
         eyebrow={t("drafts.header.eyebrow")}
         title={t("drafts.header.title")}
@@ -754,6 +784,16 @@ export function DraftsPane({
             })}
           </div>
         </div>
+
+        <PaneResizeHandle
+          label={t("drafts.layout.resizeList")}
+          value={draftsListWidth}
+          min={DRAFTS_LIST_WIDTH.min}
+          max={DRAFTS_LIST_WIDTH.max}
+          defaultValue={DRAFTS_LIST_WIDTH.defaultValue}
+          onChange={setDraftsListWidth}
+          onCommit={(value) => onLayoutChange?.({ draftsListWidth: value })}
+        />
 
         <div className="drafts-detail-col">
           {detailLoading ? (
