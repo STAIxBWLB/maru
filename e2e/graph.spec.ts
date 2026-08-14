@@ -193,6 +193,44 @@ async function nodeCenterDistance(page: Page, id: string): Promise<number> {
   );
 }
 
+async function ensureNodeInViewport(page: Page, id: string) {
+  const inset = 8;
+  const readPosition = async () => {
+    const [point, rect] = await Promise.all([nodePoint(page, id), containerRect(page)]);
+    if (rect.width <= 0 || rect.height <= 0) {
+      throw new Error(`graph canvas has no hittable bounds (${rect.width}x${rect.height})`);
+    }
+    return { point, rect };
+  };
+  const inside = (point: { x: number; y: number }, rect: { x: number; y: number; width: number; height: number }) =>
+    point.x >= rect.x + inset
+    && point.x <= rect.x + rect.width - inset
+    && point.y >= rect.y + inset
+    && point.y <= rect.y + rect.height - inset;
+
+  let position = await readPosition();
+  if (inside(position.point, position.rect)) return;
+
+  await page.evaluate(() => {
+    (window as unknown as { __maruGraph: Bridge }).__maruGraph.fitView();
+  });
+  await waitForCameraSettled(page);
+  const frame = await page.evaluate(() => {
+    const bridge = (window as unknown as { __maruGraph: Bridge }).__maruGraph;
+    const current = bridge.frames();
+    bridge.requestRender();
+    return current;
+  });
+  await page.waitForFunction(
+    (previousFrame) => (window as unknown as { __maruGraph: Bridge }).__maruGraph.frames() > previousFrame,
+    frame,
+  );
+  position = await readPosition();
+  if (!inside(position.point, position.rect)) {
+    throw new Error(`node "${id}" remains outside the graph canvas after fit`);
+  }
+}
+
 async function clickNode(page: Page, id: string, options?: { button?: "left" | "right"; modifiers?: ("Alt" | "Shift")[] }) {
   // Warm Sigma's GPU picking buffer through the same real pointer path users
   // take before clicking. Resolve the coordinate again after hover so the
@@ -273,6 +311,7 @@ async function dblclickNode(page: Page, id: string, options?: { fit?: boolean })
 }
 
 async function hoverNode(page: Page, id: string) {
+  await ensureNodeInViewport(page, id);
   // Sigma resolves hover against its most recent GPU picking buffer. Filters
   // can change visible nodes before that buffer has caught up. Refresh it,
   // then sweep a few CSS pixels around the reported center: software WebGL
