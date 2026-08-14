@@ -67,6 +67,8 @@ interface Bridge {
     favorite: boolean;
   };
   hoveredId(): string | null;
+  nodePinned(id: string): boolean;
+  nodeClickReady(id: string): boolean;
   layoutRunning(): boolean;
   freezeLayout(): void;
   resumeLayout(): void;
@@ -87,6 +89,10 @@ const containerRect = (page: Page) =>
   page.evaluate(() => (window as unknown as { __maruGraph: Bridge }).__maruGraph.containerRect());
 const hoveredId = (page: Page) =>
   page.evaluate(() => (window as unknown as { __maruGraph: Bridge }).__maruGraph.hoveredId());
+const nodePinned = (page: Page, id: string) =>
+  page.evaluate((nodeId) => (window as unknown as { __maruGraph: Bridge }).__maruGraph.nodePinned(nodeId), id);
+const nodeClickReady = (page: Page, id: string) =>
+  page.evaluate((nodeId) => (window as unknown as { __maruGraph: Bridge }).__maruGraph.nodeClickReady(nodeId), id);
 
 /** Enter graph mode at the wide tier, wait for the real renderer's first
  * frame, then freeze FA2 for determinism. Panels are canvas-first and open
@@ -153,10 +159,6 @@ async function openSelectionDetails(page: Page) {
 }
 
 async function openSelectedNode(page: Page, id: string) {
-  // A filter change can publish viewport coordinates one frame before
-  // Sigma's GPU picking buffer catches up. Warm the real hover path first so
-  // this navigation click stays deterministic under the full E2E load.
-  await hoverNode(page, id);
   await clickNode(page, id);
   const shelf = page.getByTestId("graph-selection-shelf");
   await expect(shelf).toBeVisible();
@@ -183,7 +185,59 @@ async function nodePoint(page: Page, id: string): Promise<{ x: number; y: number
   return point;
 }
 
+async function nodeCenterDistance(page: Page, id: string): Promise<number> {
+  const [point, rect] = await Promise.all([nodePoint(page, id), containerRect(page)]);
+  return Math.max(
+    Math.abs(point.x - (rect.x + rect.width / 2)) / rect.width,
+    Math.abs(point.y - (rect.y + rect.height / 2)) / rect.height,
+  );
+}
+
+async function ensureNodeInViewport(page: Page, id: string) {
+  const inset = 8;
+  const readPosition = async () => {
+    const [point, rect] = await Promise.all([nodePoint(page, id), containerRect(page)]);
+    if (rect.width <= 0 || rect.height <= 0) {
+      throw new Error(`graph canvas has no hittable bounds (${rect.width}x${rect.height})`);
+    }
+    return { point, rect };
+  };
+  const inside = (point: { x: number; y: number }, rect: { x: number; y: number; width: number; height: number }) =>
+    point.x >= rect.x + inset
+    && point.x <= rect.x + rect.width - inset
+    && point.y >= rect.y + inset
+    && point.y <= rect.y + rect.height - inset;
+
+  let position = await readPosition();
+  if (inside(position.point, position.rect)) return;
+
+  await page.evaluate(() => {
+    (window as unknown as { __maruGraph: Bridge }).__maruGraph.fitView();
+  });
+  await waitForCameraSettled(page);
+  const frame = await page.evaluate(() => {
+    const bridge = (window as unknown as { __maruGraph: Bridge }).__maruGraph;
+    const current = bridge.frames();
+    bridge.requestRender();
+    return current;
+  });
+  await page.waitForFunction(
+    (previousFrame) => (window as unknown as { __maruGraph: Bridge }).__maruGraph.frames() > previousFrame,
+    frame,
+  );
+  position = await readPosition();
+  if (!inside(position.point, position.rect)) {
+    throw new Error(`node "${id}" remains outside the graph canvas after fit`);
+  }
+}
+
 async function clickNode(page: Page, id: string, options?: { button?: "left" | "right"; modifiers?: ("Alt" | "Shift")[] }) {
+  // Warm Sigma's GPU picking buffer through the same real pointer path users
+  // take before clicking. Resolve the coordinate again after hover so the
+  // click uses a fresh point even when a render updated the viewport.
+  await waitForLayoutSettled(page);
+  await waitForCameraSettled(page);
+  await hoverNode(page, id);
   const point = await nodePoint(page, id);
   if (options?.modifiers) {
     for (const modifier of options.modifiers) await page.keyboard.down(modifier);
@@ -197,6 +251,12 @@ async function clickNode(page: Page, id: string, options?: { button?: "left" | "
 async function waitForCameraSettled(page: Page) {
   await page.waitForFunction(
     () => !(window as unknown as { __maruGraph: Bridge }).__maruGraph.cameraAnimating(),
+  );
+}
+
+async function waitForLayoutSettled(page: Page) {
+  await page.waitForFunction(
+    () => !(window as unknown as { __maruGraph: Bridge }).__maruGraph.layoutRunning(),
   );
 }
 
@@ -251,6 +311,7 @@ async function dblclickNode(page: Page, id: string, options?: { fit?: boolean })
 }
 
 async function hoverNode(page: Page, id: string) {
+  await ensureNodeInViewport(page, id);
   // Sigma resolves hover against its most recent GPU picking buffer. Filters
   // can change visible nodes before that buffer has caught up. Refresh it,
   // then sweep a few CSS pixels around the reported center: software WebGL
@@ -362,6 +423,7 @@ test("type filter narrows nodes; click selects, double-click opens the note", as
   // Centered: settle the camera first, then poll. The wait alone is not a
   // guarantee - it can run before the animation has started and report idle -
   // so the poll still does the asserting.
+  await waitForLayoutSettled(page);
   await waitForCameraSettled(page);
   await expect
     .poll(async () => {
@@ -377,6 +439,122 @@ test("type filter narrows nodes; click selects, double-click opens the note", as
   await dblclickNode(page, "maru-glossary");
   await expect(page.getByTestId("graph-mode")).toHaveCount(0);
   await expect(page.getByText("Maru 용어집").first()).toBeVisible();
+
+  expect(forbidden).toEqual([]);
+});
+
+test("centering during layout settles once; re-layout does not replay the old center", async ({ page }) => {
+  const forbidden = watchForbiddenRequests(page);
+  await enterGraph(page);
+
+  // Centering can be requested while FA2 is still moving the graph. The
+  // camera must follow the settled coordinates, not the request-time frame.
+  await page.evaluate(() => {
+    (window as unknown as { __maruGraph: Bridge }).__maruGraph.resumeLayout();
+  });
+  await expect
+    .poll(() => page.evaluate(() => (window as unknown as { __maruGraph: Bridge }).__maruGraph.layoutRunning()))
+    .toBe(true);
+  await (await openSearch(page)).fill("용어집");
+  await expect(page.getByTestId("graph-search-results")).toBeVisible();
+  await page.getByTestId("graph-search").press("Enter");
+  await openSelectionDetails(page);
+  await expect(activeInspector(page)).toContainText("Maru 용어집");
+  await waitForLayoutSettled(page);
+  await waitForCameraSettled(page);
+  await expect
+    .poll(async () => {
+      const [point, rect] = await Promise.all([nodePoint(page, "maru-glossary"), containerRect(page)]);
+      return Math.max(
+        Math.abs(point.x - (rect.x + rect.width / 2)) / rect.width,
+        Math.abs(point.y - (rect.y + rect.height / 2)) / rect.height,
+      );
+    })
+    .toBeLessThan(0.25);
+
+  // A later explicit re-layout is a new user action. It resets the camera to
+  // the whole-graph view and must not replay the already-consumed search center.
+  await openMore(page);
+  await page.getByTestId("graph-relayout").click();
+  await waitForLayoutSettled(page);
+  await waitForCameraSettled(page);
+  const camera = await cameraState(page);
+  expect(camera.x).toBeCloseTo(0.5, 2);
+  expect(camera.y).toBeCloseTo(0.5, 2);
+  expect(camera.ratio).toBeCloseTo(1, 2);
+  await expect
+    .poll(async () => {
+      const [point, rect] = await Promise.all([nodePoint(page, "maru-glossary"), containerRect(page)]);
+      return Math.max(
+        Math.abs(point.x - (rect.x + rect.width / 2)) / rect.width,
+        Math.abs(point.y - (rect.y + rect.height / 2)) / rect.height,
+      );
+    })
+    .toBeGreaterThan(0.25);
+
+  expect(forbidden).toEqual([]);
+});
+
+test("manual camera intent supersedes a stale center across renderer rebuild", async ({ page }) => {
+  const forbidden = watchForbiddenRequests(page);
+  await enterGraph(page);
+
+  await page.evaluate(() => {
+    (window as unknown as { __maruGraph: Bridge }).__maruGraph.resumeLayout();
+  });
+  await expect
+    .poll(() => page.evaluate(() => (window as unknown as { __maruGraph: Bridge }).__maruGraph.layoutRunning()))
+    .toBe(true);
+  await (await openSearch(page)).fill("용어집");
+  await expect(page.getByTestId("graph-search-results")).toBeVisible();
+  await page.getByTestId("graph-search").press("Enter");
+
+  await waitForLayoutSettled(page);
+  await waitForCameraSettled(page);
+  await expect.poll(() => nodeCenterDistance(page, "maru-glossary")).toBeLessThan(0.25);
+  const centered = await cameraState(page);
+  const canvas = page.getByTestId("graph-canvas");
+  await canvas.focus();
+  await canvas.press("ArrowRight");
+  await waitForCameraSettled(page);
+  const panned = await cameraState(page);
+  expect(Math.hypot(panned.x - centered.x, panned.y - centered.y)).toBeGreaterThan(0.01);
+  await openSelectionDetails(page);
+  await expect(activeInspector(page)).toContainText("Maru 용어집");
+  await page.getByRole("button", { name: "포커스 해제", exact: true }).click();
+  await page.getByRole("button", { name: "확대", exact: true }).click();
+  await waitForCameraSettled(page);
+  const manual = await cameraState(page);
+  expect(manual.ratio).toBeLessThan(panned.ratio);
+
+  await page.evaluate(() => {
+    const w = window as unknown as {
+      __maruGraph: Bridge;
+      __maruGraphBeforeRebuild?: Bridge;
+    };
+    w.__maruGraphBeforeRebuild = w.__maruGraph;
+    const root = document.documentElement;
+    root.setAttribute("data-theme", root.getAttribute("data-theme") === "dark" ? "light" : "dark");
+  });
+  await page.waitForFunction(() => {
+    const w = window as unknown as {
+      __maruGraph?: Bridge;
+      __maruGraphBeforeRebuild?: Bridge;
+    };
+    return w.__maruGraph != null && w.__maruGraph !== w.__maruGraphBeforeRebuild;
+  });
+  await waitForLayoutSettled(page);
+  await waitForCameraSettled(page);
+  await expect.poll(() => nodeCenterDistance(page, "maru-glossary")).toBeGreaterThan(0.25);
+
+  const search = await openSearch(page);
+  await search.fill("");
+  await search.fill("용어집");
+  await expect(page.getByTestId("graph-search-results")).toBeVisible();
+  await search.press("Enter");
+  await waitForLayoutSettled(page);
+  await waitForCameraSettled(page);
+  await expect.poll(() => nodeCenterDistance(page, "maru-glossary")).toBeLessThan(0.25);
 
   expect(forbidden).toEqual([]);
 });
@@ -452,7 +630,9 @@ test("dragging a node moves it (pin) without selecting; alt-click unpins", async
   const before = await nodePoint(page, "maru-glossary");
   await page.mouse.move(before.x, before.y);
   await page.mouse.down();
-  await page.mouse.move(before.x + 90, before.y + 40, { steps: 6 });
+  // Keep the dragged node inside the canvas so the follow-up real-picking
+  // Alt-click remains a valid pointer interaction near the lower edge.
+  await page.mouse.move(before.x + 90, before.y + 20, { steps: 6 });
   await page.mouse.up();
 
   // Moved > 3px ⇒ a drag, not a click: the node relocates, camera untouched,
@@ -460,9 +640,12 @@ test("dragging a node moves it (pin) without selecting; alt-click unpins", async
   const after = await nodePoint(page, "maru-glossary");
   expect(Math.hypot(after.x - before.x, after.y - before.y)).toBeGreaterThan(20);
   await expect(activeInspector(page)).toHaveCount(0);
+  await expect.poll(() => nodePinned(page, "maru-glossary")).toBe(true);
+  await expect.poll(() => nodeClickReady(page, "maru-glossary")).toBe(true);
 
   // Alt-click unpins (releases the fixed flag) — smoke: no crash, no select.
   await clickNode(page, "maru-glossary", { modifiers: ["Alt"] });
+  await expect.poll(() => nodePinned(page, "maru-glossary")).toBe(false);
   await expect(activeInspector(page)).toHaveCount(0);
 
   expect(forbidden).toEqual([]);
