@@ -8,6 +8,17 @@ because releases cut frequently during active development. Versions before
 Dates are the release-tag dates. Only `feat`/`fix`-level changes are listed;
 `chore(release)` version bumps and merge commits are omitted.
 
+## v0.4.50 - 2026-08-14 - Window Lifecycle
+
+- **macOS reduces the risk of a blank WebView after inactivity.** The main
+  WebView uses `backgroundThrottling: "throttle"` to avoid WebKit's full
+  suspend/unload path for an inactive view.
+- **Ideation left-list sizing is persistent and responsive.** Drag or use the
+  keyboard resize controls to adjust its width; narrow layouts stack cleanly.
+- **Settings saves and splitters are hardened.** A queued saver merges
+  leaf-level changes from concurrent updates, while resize lifecycle cleanup
+  handles interrupted or unmounted interactions safely.
+
 ## v0.4.49 - 2026-08-09 - Sandboxed Tests, Quieter Builds
 
 - **Unit tests keep out of the real workspace registry (#225).** The vault scan
