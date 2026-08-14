@@ -582,6 +582,10 @@ export function GraphCanvas({
     nonce: number;
     renderer: Sigma<SigmaNodeAttributes, SigmaEdgeAttributes>;
   } | null>(null);
+  // A user camera action supersedes the current center request. The signal
+  // remains in props for selection state, so keep the supersession identity
+  // separately from the renderer-scoped applied ledger.
+  const centerSupersededRef = useRef<{ id: string; nonce: number } | null>(null);
   const startLayoutRef = useRef<((clearPins: boolean) => void) | null>(null);
   const fitToVisibleRef = useRef<((animate: boolean) => void) | null>(null);
   const [rendererState, setRendererState] = useState<GraphRendererState>("loading");
@@ -673,6 +677,11 @@ export function GraphCanvas({
   const centerSignalRef = useRef(centerSignal);
   centerSignalRef.current = centerSignal;
 
+  const supersedeCenterRequest = () => {
+    const signal = centerSignalRef.current;
+    if (signal) centerSupersededRef.current = { id: signal.id, nonce: signal.nonce };
+  };
+
   // Centering is a request against the current graph, not a one-shot camera
   // animation. A renderer rebuild or a running FA2 pass can otherwise replace
   // the coordinates used by the animation before it lands. Re-apply the
@@ -681,6 +690,8 @@ export function GraphCanvas({
   // callers use false to preserve a pending whole-graph fit for old requests.
   const centerNode = (signal: { id: string; nonce: number } | null): boolean => {
     if (!signal) return false;
+    const superseded = centerSupersededRef.current;
+    if (superseded && superseded.id === signal.id && superseded.nonce === signal.nonce) return false;
     const renderer = rendererRef.current;
     const graph = graphRef.current;
     if (!renderer || !graph?.hasNode(signal.id) || layoutRef.current?.isRunning()) return false;
@@ -710,6 +721,17 @@ export function GraphCanvas({
     );
     return true;
   };
+
+  useEffect(() => {
+    const superseded = centerSupersededRef.current;
+    if (
+      centerSignal &&
+      superseded &&
+      (superseded.id !== centerSignal.id || superseded.nonce !== centerSignal.nonce)
+    ) {
+      centerSupersededRef.current = null;
+    }
+  }, [centerSignal]);
 
   useEffect(() => {
     pinnedIdsRef.current = new Set(initialPinnedIds);
@@ -1286,6 +1308,7 @@ export function GraphCanvas({
       mouse.on("mousemovebody", onMove);
       mouse.on("mouseup", onUp);
       const markManualCamera = () => {
+        supersedeCenterRequest();
         manualCameraRef.current = true;
         fitOnSettleRef.current = false;
       };
@@ -1713,11 +1736,20 @@ export function GraphCanvas({
         break;
       }
     }
-    if (anyFinite && !anyInside) fitToVisibleRef.current?.(true);
+    if (anyFinite && !anyInside) {
+      const applied = centerAppliedRef.current;
+      const centerIsFresh = Boolean(
+        signal &&
+        (!applied || applied.renderer !== renderer || applied.id !== signal.id || applied.nonce !== signal.nonce),
+      );
+      if (!centerIsFresh) supersedeCenterRequest();
+      fitToVisibleRef.current?.(true);
+    }
   }, [visibleNodeIds]);
 
   useEffect(() => {
     if (layoutEpoch <= 0 || fittedEpochRef.current === layoutEpoch) return;
+    supersedeCenterRequest();
     fittedEpochRef.current = layoutEpoch;
     manualCameraRef.current = false;
     // Whole-graph re-layout: clear pins and the visible-fit bbox, reset camera.
@@ -1737,6 +1769,7 @@ export function GraphCanvas({
 
   useEffect(() => {
     if (fitSignal <= 0) return;
+    supersedeCenterRequest();
     manualCameraRef.current = true;
     fitOnSettleRef.current = false;
     fitToVisibleRef.current?.(true);
@@ -1744,6 +1777,7 @@ export function GraphCanvas({
 
   useEffect(() => {
     if (!zoomSignal) return;
+    supersedeCenterRequest();
     const camera = rendererRef.current?.getCamera();
     if (!camera) return;
     manualCameraRef.current = true;
@@ -1779,6 +1813,7 @@ export function GraphCanvas({
     else if (event.key === "ArrowDown") dy = step;
     else return;
     event.preventDefault();
+    supersedeCenterRequest();
     manualCameraRef.current = true;
     fitOnSettleRef.current = false;
     const origin = renderer.viewportToFramedGraph({ x: 0, y: 0 });

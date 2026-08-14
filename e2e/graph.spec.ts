@@ -185,6 +185,14 @@ async function nodePoint(page: Page, id: string): Promise<{ x: number; y: number
   return point;
 }
 
+async function nodeCenterDistance(page: Page, id: string): Promise<number> {
+  const [point, rect] = await Promise.all([nodePoint(page, id), containerRect(page)]);
+  return Math.max(
+    Math.abs(point.x - (rect.x + rect.width / 2)) / rect.width,
+    Math.abs(point.y - (rect.y + rect.height / 2)) / rect.height,
+  );
+}
+
 async function clickNode(page: Page, id: string, options?: { button?: "left" | "right"; modifiers?: ("Alt" | "Shift")[] }) {
   // Warm Sigma's GPU picking buffer through the same real pointer path users
   // take before clicking. Resolve the coordinate again after hover so the
@@ -444,6 +452,70 @@ test("centering during layout settles once; re-layout does not replay the old ce
       );
     })
     .toBeGreaterThan(0.25);
+
+  expect(forbidden).toEqual([]);
+});
+
+test("manual camera intent supersedes a stale center across renderer rebuild", async ({ page }) => {
+  const forbidden = watchForbiddenRequests(page);
+  await enterGraph(page);
+
+  await page.evaluate(() => {
+    (window as unknown as { __maruGraph: Bridge }).__maruGraph.resumeLayout();
+  });
+  await expect
+    .poll(() => page.evaluate(() => (window as unknown as { __maruGraph: Bridge }).__maruGraph.layoutRunning()))
+    .toBe(true);
+  await (await openSearch(page)).fill("용어집");
+  await expect(page.getByTestId("graph-search-results")).toBeVisible();
+  await page.getByTestId("graph-search").press("Enter");
+
+  await waitForLayoutSettled(page);
+  await waitForCameraSettled(page);
+  await expect.poll(() => nodeCenterDistance(page, "maru-glossary")).toBeLessThan(0.25);
+  const centered = await cameraState(page);
+  const canvas = page.getByTestId("graph-canvas");
+  await canvas.focus();
+  await canvas.press("ArrowRight");
+  await waitForCameraSettled(page);
+  const panned = await cameraState(page);
+  expect(Math.hypot(panned.x - centered.x, panned.y - centered.y)).toBeGreaterThan(0.01);
+  await openSelectionDetails(page);
+  await expect(activeInspector(page)).toContainText("Maru 용어집");
+  await page.getByRole("button", { name: "포커스 해제", exact: true }).click();
+  await page.getByRole("button", { name: "확대", exact: true }).click();
+  await waitForCameraSettled(page);
+  const manual = await cameraState(page);
+  expect(manual.ratio).toBeLessThan(panned.ratio);
+
+  await page.evaluate(() => {
+    const w = window as unknown as {
+      __maruGraph: Bridge;
+      __maruGraphBeforeRebuild?: Bridge;
+    };
+    w.__maruGraphBeforeRebuild = w.__maruGraph;
+    const root = document.documentElement;
+    root.setAttribute("data-theme", root.getAttribute("data-theme") === "dark" ? "light" : "dark");
+  });
+  await page.waitForFunction(() => {
+    const w = window as unknown as {
+      __maruGraph?: Bridge;
+      __maruGraphBeforeRebuild?: Bridge;
+    };
+    return w.__maruGraph != null && w.__maruGraph !== w.__maruGraphBeforeRebuild;
+  });
+  await waitForLayoutSettled(page);
+  await waitForCameraSettled(page);
+  await expect.poll(() => nodeCenterDistance(page, "maru-glossary")).toBeGreaterThan(0.25);
+
+  const search = await openSearch(page);
+  await search.fill("");
+  await search.fill("용어집");
+  await expect(page.getByTestId("graph-search-results")).toBeVisible();
+  await search.press("Enter");
+  await waitForLayoutSettled(page);
+  await waitForCameraSettled(page);
+  await expect.poll(() => nodeCenterDistance(page, "maru-glossary")).toBeLessThan(0.25);
 
   expect(forbidden).toEqual([]);
 });
