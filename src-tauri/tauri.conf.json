@@ -25,6 +25,7 @@
         "hiddenTitle": true,
         "acceptFirstMouse": true,
         "backgroundColor": "#F5F5F7",
+        "backgroundThrottling": "throttle",
         "dragDropEnabled": true
       }
     ],

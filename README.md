@@ -272,6 +272,18 @@ make homebrew-update RELEASE_TAG=v$(node -p "require('./package.json').version")
   order. Normal key/text/paste delivery reads mirrored terminal modes without
   contending with the output parser's screen-model lock.
 
+### macOS window lifecycle policy
+
+- The main Tauri window explicitly uses `backgroundThrottling: "throttle"`.
+  On macOS 14+, this prevents WebKit's default full suspend/unload behavior for
+  an inactive hidden or minimized main view while retaining rate limiting.
+  It does not guarantee continuity across system sleep, Spaces, app switching,
+  or compositor transitions.
+- This is a configuration contract in `src-tauri/tauri.conf.json`, protected by
+  `scripts/tauri-window-policy.test.mjs`, and the test is static configuration
+  validation rather than runtime proof. Keep the policy when changing the main
+  window; a native macOS sleep/wake or hide/show smoke test remains required.
+
 ### AI agent runtimes
 
 Maru treats Claude Code, Codex, Kimi, and Kiro as first-class AI runtimes
