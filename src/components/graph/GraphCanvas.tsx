@@ -1169,6 +1169,11 @@ export function GraphCanvas({
             };
           },
           hoveredId: () => interactionRef.current.hoverId,
+          nodePinned: (id) => pinnedIdsRef.current.has(id),
+          nodeClickReady: (id) => {
+            const suppressed = suppressClickRef.current;
+            return !suppressed || suppressed.id !== id || performance.now() > suppressed.until;
+          },
           layoutRunning: () => layoutRef.current?.isRunning() ?? false,
           freezeLayout: () => {
             stopLayout();

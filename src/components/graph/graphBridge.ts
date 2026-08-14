@@ -32,6 +32,10 @@ export interface MaruGraphBridge {
     y: number | null;
   };
   hoveredId(): string | null;
+  /** Whether the node is currently fixed by the graph interaction state. */
+  nodePinned(id: string): boolean;
+  /** Whether a synthetic click on this node is no longer suppressed. */
+  nodeClickReady(id: string): boolean;
   layoutRunning(): boolean;
   /** Stop the FA2 supervisor (deterministic tests). */
   freezeLayout(): void;

@@ -67,6 +67,8 @@ interface Bridge {
     favorite: boolean;
   };
   hoveredId(): string | null;
+  nodePinned(id: string): boolean;
+  nodeClickReady(id: string): boolean;
   layoutRunning(): boolean;
   freezeLayout(): void;
   resumeLayout(): void;
@@ -87,6 +89,10 @@ const containerRect = (page: Page) =>
   page.evaluate(() => (window as unknown as { __maruGraph: Bridge }).__maruGraph.containerRect());
 const hoveredId = (page: Page) =>
   page.evaluate(() => (window as unknown as { __maruGraph: Bridge }).__maruGraph.hoveredId());
+const nodePinned = (page: Page, id: string) =>
+  page.evaluate((nodeId) => (window as unknown as { __maruGraph: Bridge }).__maruGraph.nodePinned(nodeId), id);
+const nodeClickReady = (page: Page, id: string) =>
+  page.evaluate((nodeId) => (window as unknown as { __maruGraph: Bridge }).__maruGraph.nodeClickReady(nodeId), id);
 
 /** Enter graph mode at the wide tier, wait for the real renderer's first
  * frame, then freeze FA2 for determinism. Panels are canvas-first and open
@@ -153,10 +159,6 @@ async function openSelectionDetails(page: Page) {
 }
 
 async function openSelectedNode(page: Page, id: string) {
-  // A filter change can publish viewport coordinates one frame before
-  // Sigma's GPU picking buffer catches up. Warm the real hover path first so
-  // this navigation click stays deterministic under the full E2E load.
-  await hoverNode(page, id);
   await clickNode(page, id);
   const shelf = page.getByTestId("graph-selection-shelf");
   await expect(shelf).toBeVisible();
@@ -184,6 +186,12 @@ async function nodePoint(page: Page, id: string): Promise<{ x: number; y: number
 }
 
 async function clickNode(page: Page, id: string, options?: { button?: "left" | "right"; modifiers?: ("Alt" | "Shift")[] }) {
+  // Warm Sigma's GPU picking buffer through the same real pointer path users
+  // take before clicking. Resolve the coordinate again after hover so the
+  // click uses a fresh point even when a render updated the viewport.
+  await waitForLayoutSettled(page);
+  await waitForCameraSettled(page);
+  await hoverNode(page, id);
   const point = await nodePoint(page, id);
   if (options?.modifiers) {
     for (const modifier of options.modifiers) await page.keyboard.down(modifier);
@@ -511,7 +519,9 @@ test("dragging a node moves it (pin) without selecting; alt-click unpins", async
   const before = await nodePoint(page, "maru-glossary");
   await page.mouse.move(before.x, before.y);
   await page.mouse.down();
-  await page.mouse.move(before.x + 90, before.y + 40, { steps: 6 });
+  // Keep the dragged node inside the canvas so the follow-up real-picking
+  // Alt-click remains a valid pointer interaction near the lower edge.
+  await page.mouse.move(before.x + 90, before.y + 20, { steps: 6 });
   await page.mouse.up();
 
   // Moved > 3px ⇒ a drag, not a click: the node relocates, camera untouched,
@@ -519,9 +529,12 @@ test("dragging a node moves it (pin) without selecting; alt-click unpins", async
   const after = await nodePoint(page, "maru-glossary");
   expect(Math.hypot(after.x - before.x, after.y - before.y)).toBeGreaterThan(20);
   await expect(activeInspector(page)).toHaveCount(0);
+  await expect.poll(() => nodePinned(page, "maru-glossary")).toBe(true);
+  await expect.poll(() => nodeClickReady(page, "maru-glossary")).toBe(true);
 
   // Alt-click unpins (releases the fixed flag) — smoke: no crash, no select.
   await clickNode(page, "maru-glossary", { modifiers: ["Alt"] });
+  await expect.poll(() => nodePinned(page, "maru-glossary")).toBe(false);
   await expect(activeInspector(page)).toHaveCount(0);
 
   expect(forbidden).toEqual([]);
