@@ -62,6 +62,9 @@
   --shadow-sm: 0 1px 2px rgba(34, 30, 21, 0.06);
   --shadow: 0 8px 24px -16px rgba(34, 30, 21, 0.18);
   --shadow-lg: 0 24px 60px -36px rgba(34, 30, 21, 0.28);
+  --material-popover: rgba(252, 250, 243, 0.9);
+  --material-sheet: rgba(252, 250, 243, 0.94);
+  --material-modal: rgba(252, 250, 243, 0.96);
   --radius: 8px;
   --radius-sm: 6px;
   --radius-lg: 12px;
@@ -76,6 +79,9 @@
   :root {
     color-scheme: dark;
     --bg: #181510;
+    --material-popover: rgba(35, 31, 23, 0.9);
+    --material-sheet: rgba(35, 31, 23, 0.94);
+    --material-modal: rgba(35, 31, 23, 0.96);
     --bg-tint: #1f1b14;
     --panel: #231f17;
     --panel-2: #282319;
@@ -166,11 +172,17 @@
   --shadow-sm: 0 1px 2px rgba(34, 30, 21, 0.06);
   --shadow: 0 8px 24px -16px rgba(34, 30, 21, 0.18);
   --shadow-lg: 0 24px 60px -36px rgba(34, 30, 21, 0.28);
+  --material-popover: rgba(252, 250, 243, 0.9);
+  --material-sheet: rgba(252, 250, 243, 0.94);
+  --material-modal: rgba(252, 250, 243, 0.96);
 }
 
 :root[data-theme="dark"] {
   color-scheme: dark;
   --bg: #181510;
+  --material-popover: rgba(35, 31, 23, 0.9);
+  --material-sheet: rgba(35, 31, 23, 0.94);
+  --material-modal: rgba(35, 31, 23, 0.96);
   --bg-tint: #1f1b14;
   --panel: #231f17;
   --panel-2: #282319;
@@ -3936,6 +3948,7 @@ a {
 
 .tab-trigger[data-state="active"] {
   color: var(--ink);
+  background: var(--accent-tint);
   border-bottom-color: var(--accent);
 }
 
@@ -4099,6 +4112,13 @@ a {
     sans-serif;
   font-size: var(--read-body-size);
   line-height: 1.72;
+}
+
+/* Rich editor headings mirror the preview surface's editorial serif. */
+.rich-editor-surface .bn-editor h1,
+.rich-editor-surface .bn-editor h2 {
+  font-family: var(--font-display);
+  font-weight: 700;
 }
 
 /* --- HTML visual editor --- */
@@ -4276,14 +4296,16 @@ a {
 
 .preview-surface h1 {
   margin: 0 0 24px;
+  font-family: var(--font-display);
   font-size: var(--read-h1-size);
-  font-weight: 750;
+  font-weight: 700;
   border-bottom: 1px solid var(--line-soft);
   padding-bottom: 14px;
 }
 
 .preview-surface h2 {
   margin: 32px 0 12px;
+  font-family: var(--font-display);
   font-size: var(--read-h2-size);
   font-weight: 700;
 }
@@ -4347,8 +4369,10 @@ a {
 
 .preview-surface blockquote {
   margin: 16px 0;
-  padding: 4px 16px;
-  border-left: 3px solid var(--accent);
+  padding: 8px 16px;
+  border-left: 2px solid var(--accent);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  background: var(--panel-2);
   color: var(--muted);
   font-style: italic;
 }
@@ -22614,40 +22638,10 @@ button.git-badge:hover {
    macOS-neutral design foundation bridge
    ======================================================================== */
 
-:root,
-:root[data-theme="light"],
-:root[data-theme="dark"] {
-  --bg: var(--foundation-bg);
-  --bg-tint: var(--foundation-bg-tint);
-  --panel: var(--foundation-panel);
-  --panel-2: var(--foundation-panel-2);
-  --panel-3: var(--foundation-panel-3);
-  --panel-raised: var(--foundation-panel-raised);
-  --line: var(--foundation-line);
-  --line-strong: var(--foundation-line-strong);
-  --line-soft: var(--foundation-line-soft);
-  --ink: var(--foundation-ink);
-  --ink-2: var(--foundation-ink-2);
-  --muted: var(--foundation-muted);
-  --faint: var(--foundation-faint);
-  --accent: var(--foundation-accent);
-  --accent-soft: var(--foundation-accent-soft);
-  --accent-tint: var(--foundation-accent-tint);
-  --active-surface: var(--foundation-active);
-  --focus-ring: var(--foundation-focus-ring);
-  --overlay: var(--foundation-overlay);
-  --on-accent: var(--foundation-on-accent);
-  --rail-bg: var(--foundation-rail-bg);
-  --rail-fg: var(--foundation-rail-fg);
-  --rail-fg-strong: var(--foundation-rail-fg-strong);
-  --rail-hover: var(--foundation-rail-hover);
-  --rail-active: var(--foundation-rail-active);
-  --rail-indicator: var(--foundation-rail-indicator);
-  --button-primary-hover: var(--foundation-button-hover);
-  --shadow-sm: var(--foundation-shadow-sm);
-  --shadow: var(--foundation-shadow);
-  --shadow-lg: var(--foundation-shadow-lg);
-  /* Compatibility aliases used by binary viewers and imported subsystems. */
+/* Compatibility aliases used by binary viewers and imported subsystems.
+   The unprefixed tokens above are the single color definition site; the old
+   --foundation-* palette was removed in the hanji-ink-seal consolidation. */
+:root {
   --text: var(--ink);
   --rule: var(--line);
 }
@@ -22926,7 +22920,7 @@ button.git-badge:hover {
 .dialog-content,
 .cmdk-shell {
   border: 1px solid color-mix(in srgb, var(--line) 82%, transparent);
-  background: var(--foundation-material-modal);
+  background: var(--material-modal);
   backdrop-filter: blur(18px) saturate(150%);
   box-shadow: var(--shadow-lg);
 }
@@ -22952,7 +22946,7 @@ button.git-badge:hover {
   max-height: calc(100dvh - 40px);
   overflow: auto;
   transform: translate(-50%, -50%);
-  background: var(--foundation-material-modal);
+  background: var(--material-modal);
   backdrop-filter: blur(18px) saturate(150%);
   animation: dialog-in var(--motion-enter) var(--ease-out) forwards;
 }
@@ -22977,12 +22971,12 @@ button.git-badge:hover {
 
 .workspace-menu,
 .context-menu {
-  background: var(--foundation-material-popover);
+  background: var(--material-popover);
   backdrop-filter: blur(16px) saturate(150%);
 }
 
 .task-sheet {
-  background: var(--foundation-material-sheet);
+  background: var(--material-sheet);
   backdrop-filter: blur(22px) saturate(150%);
 }
 

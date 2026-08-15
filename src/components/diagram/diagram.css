@@ -17,15 +17,16 @@
   color: var(--maru-fg, #1f2937);
   overflow: hidden;
   position: relative;
-  /* Status-chip tokens; .is-dark overrides them below. */
-  --maru-ok-bg: #ecfdf5;
-  --maru-ok-fg: #047857;
-  --maru-ok-border: #a7f3d0;
-  --maru-warn-bg: #fef3c7;
-  --maru-warn-fg: #92400e;
-  --maru-warn-border: #fcd34d;
-  --maru-danger-bg: #fee2e2;
-  --maru-danger-fg: #991b1b;
+  /* Status-chip tokens, warm-harmonized with the app palette (celadon /
+     ochre / oxblood); .is-dark overrides them below. */
+  --maru-ok-bg: #d8e2de;
+  --maru-ok-fg: #33565c;
+  --maru-ok-border: #aec6bf;
+  --maru-warn-bg: #f1e3c2;
+  --maru-warn-fg: #7a5520;
+  --maru-warn-border: #dcc389;
+  --maru-danger-bg: #f3d9d2;
+  --maru-danger-fg: #96382a;
 }
 
 .maru-diagram-header {
@@ -144,19 +145,19 @@
 }
 
 .maru-diagram-toolbar-primary {
-  background: #2563eb !important;
-  color: #ffffff !important;
-  border-color: #1d4ed8 !important;
+  background: var(--accent) !important;
+  color: var(--on-accent) !important;
+  border-color: var(--accent) !important;
   font-weight: 600;
 }
 
 .maru-diagram-toolbar-primary:hover:not(:disabled) {
-  background: #1d4ed8 !important;
+  background: var(--button-primary-hover) !important;
 }
 
 .maru-diagram-toolbar-primary:disabled {
-  background: #93c5fd !important;
-  border-color: #93c5fd !important;
+  background: var(--accent-soft) !important;
+  border-color: var(--accent-soft) !important;
 }
 
 .maru-diagram-sep {
@@ -190,9 +191,9 @@
 }
 
 .maru-diagram-toolbar button.is-toggle-on {
-  background: #dbeafe;
-  border-color: #93c5fd;
-  color: #1d4ed8;
+  background: var(--accent-tint);
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
+  color: var(--accent);
 }
 
 .maru-diagram-snap-input {
@@ -311,7 +312,7 @@
 
 .maru-diagram-panel-resizer:hover::after,
 .maru-diagram-panel-resizer.is-dragging::after {
-  background: #2563eb;
+  background: var(--accent);
 }
 
 .maru-diagram-side-panel h2 {
@@ -364,9 +365,9 @@
 }
 
 .maru-diagram-layer.is-selected {
-  background: #dbeafe;
-  border-color: #93c5fd;
-  color: #1d4ed8;
+  background: var(--accent-tint);
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
+  color: var(--accent);
 }
 
 .maru-diagram-layer.is-dragging {
@@ -374,11 +375,11 @@
 }
 
 .maru-diagram-layer.is-drop-above {
-  box-shadow: inset 0 2px 0 0 #4f46e5;
+  box-shadow: inset 0 2px 0 0 var(--accent);
 }
 
 .maru-diagram-layer.is-drop-below {
-  box-shadow: inset 0 -2px 0 0 #4f46e5;
+  box-shadow: inset 0 -2px 0 0 var(--accent);
 }
 
 .maru-diagram-layer-grip {
@@ -515,7 +516,7 @@
 }
 
 .maru-diagram-ribbon-tab.is-active {
-  color: #1d4ed8;
+  color: var(--accent);
   background: var(--maru-soft, #f3f4f6);
   border-color: var(--maru-border, #e5e7eb);
   position: relative;
@@ -595,20 +596,20 @@
 }
 
 .maru-diagram-ribbon-button.is-active {
-  background: #dbeafe;
-  border-color: #93c5fd;
-  color: #1d4ed8;
+  background: var(--accent-tint);
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
+  color: var(--accent);
 }
 
 .maru-diagram-ribbon-button.is-primary {
-  background: #2563eb;
-  color: #ffffff;
-  border-color: #1d4ed8;
+  background: var(--accent);
+  color: var(--on-accent);
+  border-color: var(--accent);
   font-weight: 600;
 }
 
 .maru-diagram-ribbon-button.is-primary:hover:not(:disabled) {
-  background: #1d4ed8;
+  background: var(--button-primary-hover);
 }
 
 .maru-diagram-ribbon-button:disabled {
@@ -773,12 +774,12 @@
 }
 
 .maru-diagram-template-card:hover {
-  border-color: #93c5fd;
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
 }
 
 .maru-diagram-template-card.is-selected {
-  border-color: #2563eb;
-  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.15);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 15%, transparent);
 }
 
 .maru-diagram-template-preview {
@@ -975,8 +976,8 @@
 }
 
 .maru-diagram-mapping-warnings {
-  border: 1px solid #fbbf24;
-  background: #fffbeb;
+  border: 1px solid var(--maru-warn-border);
+  background: var(--maru-warn-bg);
   border-radius: 6px;
   padding: 8px 12px;
   margin: 4px 0;
@@ -986,7 +987,7 @@
   font-size: 11px;
   font-weight: 700;
   margin: 0 0 4px;
-  color: #92400e;
+  color: var(--maru-warn-fg);
 }
 
 .maru-diagram-mapping-warnings ul {
@@ -1034,7 +1035,7 @@
 
 .maru-diagram-export-grid button:hover:not(:disabled) {
   background: var(--maru-soft, #f3f4f6);
-  border-color: #93c5fd;
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
 }
 
 .maru-diagram-export-status {
@@ -1078,8 +1079,8 @@
 }
 
 .maru-diagram-ie-direction button.is-active {
-  border-color: #3b82f6;
-  background: var(--maru-soft, #eff6ff);
+  border-color: var(--accent);
+  background: var(--accent-tint);
   font-weight: 600;
 }
 
@@ -1118,8 +1119,8 @@
 }
 
 .maru-diagram-ie-badge.is-structural {
-  background: #fef3c7;
-  color: #92400e;
+  background: var(--maru-warn-bg);
+  color: var(--maru-warn-fg);
 }
 
 .maru-diagram-ie-badge.is-visual {
@@ -1131,7 +1132,7 @@
   margin: 6px 0 0;
   padding-left: 18px;
   font-size: 11.5px;
-  color: #92400e;
+  color: var(--maru-warn-fg);
 }
 
 .maru-diagram-ie-ignored,
@@ -1257,8 +1258,8 @@
   top: 10px;
   right: 12px;
   z-index: 60;
-  background: rgba(15, 23, 42, 0.85);
-  color: #ffffff;
+  background: rgba(34, 30, 21, 0.85);
+  color: #f4efe2;
   border: none;
   border-radius: 6px;
   font-size: 11px;
@@ -1268,7 +1269,7 @@
 }
 
 .maru-diagram-focus-exit:hover {
-  background: rgba(15, 23, 42, 0.95);
+  background: rgba(34, 30, 21, 0.95);
 }
 
 .maru-diagram-focus-btn {
@@ -1287,29 +1288,26 @@
 }
 
 .maru-diagram.is-dark {
-  --maru-bg: #0f172a;
-  --maru-fg: #e2e8f0;
-  --maru-surface: #1e293b;
-  --maru-border: #334155;
-  --maru-soft: #1f2937;
-  --maru-muted: #94a3b8;
-  --maru-ok-bg: rgba(16, 185, 129, 0.15);
-  --maru-ok-fg: #34d399;
-  --maru-ok-border: rgba(16, 185, 129, 0.4);
-  --maru-warn-bg: rgba(245, 158, 11, 0.15);
-  --maru-warn-fg: #fbbf24;
-  --maru-warn-border: rgba(245, 158, 11, 0.4);
-  --maru-danger-bg: rgba(239, 68, 68, 0.15);
-  --maru-danger-fg: #f87171;
+  /* Core surface tokens come from the app-palette bridge in styles.css
+     (.maru-diagram.is-dark maps --maru-bg/fg/surface/border/soft/muted to the
+     warm ink family); only the status chips are overridden here. */
+  --maru-ok-bg: #22302e;
+  --maru-ok-fg: #86ada6;
+  --maru-ok-border: rgba(134, 173, 166, 0.4);
+  --maru-warn-bg: #3a2f1c;
+  --maru-warn-fg: #d6b070;
+  --maru-warn-border: rgba(214, 176, 112, 0.4);
+  --maru-danger-bg: #3d2723;
+  --maru-danger-fg: #d18074;
 }
 
 /* Canvas surface always stays light per the source rule, regardless of theme. */
 .maru-diagram .maru-diagram-viewport {
   background:
-    linear-gradient(rgba(99, 102, 241, 0.07) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(99, 102, 241, 0.07) 1px, transparent 1px);
+    linear-gradient(rgba(34, 30, 21, 0.06) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(34, 30, 21, 0.06) 1px, transparent 1px);
   background-size: 40px 40px;
-  background-color: #fafafa;
+  background-color: #faf7f0;
 }
 
 /* ── Phase 5: find bar ──────────────────────────────────────────────────── */
@@ -1425,9 +1423,9 @@
 }
 
 .maru-diagram-memo-actions .maru-diagram-memo-delete {
-  background: #fee2e2;
-  color: #991b1b;
-  border-color: #fca5a5;
+  background: var(--maru-danger-bg);
+  color: var(--maru-danger-fg);
+  border-color: color-mix(in srgb, var(--maru-danger-fg) 40%, transparent);
 }
 
 .maru-diagram-memo-actions .maru-diagram-memo-delete:disabled {
@@ -1500,7 +1498,7 @@
 
 .maru-diagram-specialchars-grid button:hover {
   background: var(--maru-soft, #f3f4f6);
-  border-color: #93c5fd;
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
 }
 
 /* ── Phase 5: a11y focus rings ─────────────────────────────────────────── */
@@ -1515,12 +1513,12 @@
 .maru-diagram-prop textarea:focus-visible,
 .maru-diagram-template-card:focus-visible,
 .maru-diagram-color-preset:focus-visible {
-  outline: 2px solid #2563eb;
+  outline: 2px solid var(--accent);
   outline-offset: 1px;
 }
 
 .maru-diagram-port:focus-visible {
-  outline: 2px solid #2563eb;
+  outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
 
@@ -1571,8 +1569,8 @@
   position: relative;
   overflow: hidden;
   background:
-    linear-gradient(rgba(99, 102, 241, 0.07) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(99, 102, 241, 0.07) 1px, transparent 1px);
+    linear-gradient(rgba(34, 30, 21, 0.06) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(34, 30, 21, 0.06) 1px, transparent 1px);
   background-size: 40px 40px;
 }
 
@@ -1630,15 +1628,15 @@
   box-sizing: border-box;
   resize: none;
   overflow: hidden;
-  border: 1.5px solid #2563eb;
+  border: 1.5px solid var(--accent);
   border-radius: 4px;
-  background: #ffffff;
-  color: #111827;
+  background: var(--panel);
+  color: var(--ink);
   font-family: inherit;
   font-weight: 600;
   line-height: 1.35;
   outline: none;
-  box-shadow: 0 4px 16px rgba(15, 23, 42, 0.18);
+  box-shadow: 0 4px 16px rgba(34, 30, 21, 0.18);
 }
 
 .maru-diagram-node-header {
@@ -1661,7 +1659,7 @@
 
 .maru-diagram-port:hover {
   r: 8;
-  fill: #2563eb;
+  fill: var(--accent);
 }
 
 .maru-diagram-edge {
@@ -1669,7 +1667,7 @@
 }
 
 .maru-diagram-edge.is-selected {
-  filter: drop-shadow(0 0 2px rgba(37, 99, 235, 0.4));
+  filter: drop-shadow(0 0 2px color-mix(in srgb, var(--accent) 40%, transparent));
 }
 
 .maru-diagram-empty {
@@ -1784,8 +1782,8 @@
 }
 
 .maru-diagram-list-delete:hover {
-  background: #fee2e2;
-  color: #991b1b;
+  background: var(--maru-danger-bg);
+  color: var(--maru-danger-fg);
 }
 
 .maru-diagram-list-empty {
