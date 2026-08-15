@@ -10,7 +10,7 @@ import { SettingsRow } from "../SettingsRow";
 
 const ACCENT_PRESETS = [
   { value: "#b23a26", labelKey: "system.preferences.accentPreset.seal" },
-  { value: "#3d392e", labelKey: "system.preferences.accentPreset.ink" },
+  { value: "#7a7261", labelKey: "system.preferences.accentPreset.ink" },
   { value: "#33565c", labelKey: "system.preferences.accentPreset.celadon" },
   { value: "#8a5a2c", labelKey: "system.preferences.accentPreset.ochre" },
 ] as const;
