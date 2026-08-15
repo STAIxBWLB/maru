@@ -374,7 +374,7 @@ export interface GraphDisplaySettings {
   colorMode: "neutral" | "domain" | "community" | "origin";
   relationColors: boolean;
   theme: "dark" | "light" | "app";
-  accent: "violet" | "green";
+  accent: "seal" | "violet" | "green";
   nodeScale: number;
   edgeScale: number;
 }
@@ -453,7 +453,7 @@ export function defaultGraphDisplay(): GraphDisplaySettings {
     colorMode: "origin",
     relationColors: false,
     theme: "dark",
-    accent: "violet",
+    accent: "seal",
     nodeScale: 1,
     edgeScale: 0.8,
   };
@@ -502,7 +502,7 @@ export const DEFAULT_MARU_SETTINGS: MaruSettings = {
     fileTreeStateInitialized: false,
     fileQueueDefaultOperation: "copy",
     themeMode: "system",
-    accentColor: "#0071e3",
+    accentColor: "#b23a26",
     layout: {
       documentsPaneOpen: true,
       documentsPaneWidth: 340,
@@ -1248,7 +1248,10 @@ function normalizeGraphDisplay(value: unknown): GraphDisplaySettings {
         : defaults.relationColors,
     theme:
       display.theme === "light" || display.theme === "app" ? display.theme : defaults.theme,
-    accent: display.accent === "green" ? "green" : defaults.accent,
+    accent:
+      display.accent === "seal" || display.accent === "green" || display.accent === "violet"
+        ? display.accent
+        : defaults.accent,
     nodeScale: clampNumber(display.nodeScale, GRAPH_SCALE_MIN, GRAPH_SCALE_MAX, 1),
     edgeScale: clampNumber(
       display.edgeScale,

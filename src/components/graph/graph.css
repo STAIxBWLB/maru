@@ -1704,7 +1704,7 @@
   --graph-edge: color-mix(in srgb, var(--ink) 7%, transparent);
   --graph-label: color-mix(in srgb, var(--ink) 30%, transparent);
   --graph-label-strong: var(--ink);
-  --graph-accent: #8b5cf6;
+  --graph-accent: #d96a4e;
   position: relative;
   isolation: isolate;
   background: var(--graph-canvas);
@@ -1715,59 +1715,63 @@
    app variables, and inheriting them from a light app under a dark graph
    rendered unreadable text (and vice versa). Values mirror styles.css. */
 .graph-view[data-graph-theme="dark"] {
-  --graph-canvas: #1c1c1e;
-  --graph-surface: rgba(44, 44, 46, 0.94);
-  --graph-ink: #f5f5f7;
-  --graph-muted: #aeaeb2;
-  --graph-line: rgba(245, 245, 247, 0.1);
-  --graph-edge: #343436;
-  --graph-label: rgba(245, 245, 247, 0.34);
-  --graph-label-strong: #f5f5f7;
-  --bg: #1c1c1e;
-  --panel: #2c2c2e;
-  --panel-2: #242426;
-  --line: #48484a;
-  --line-strong: #636366;
-  --ink: #f5f5f7;
-  --ink-2: #e5e5ea;
-  --muted: #aeaeb2;
-  --faint: #98989d;
-  --accent: #0a84ff;
-  --accent-soft: #173a5e;
-  --accent-tint: #162d46;
+  --graph-canvas: #181510;
+  --graph-surface: rgba(35, 31, 23, 0.94);
+  --graph-ink: #f0ead9;
+  --graph-muted: #a29881;
+  --graph-line: rgba(240, 234, 217, 0.1);
+  --graph-edge: #2e2a1f;
+  --graph-label: rgba(240, 234, 217, 0.34);
+  --graph-label-strong: #f0ead9;
+  --bg: #181510;
+  --panel: #231f17;
+  --panel-2: #1d1912;
+  --line: #3d3729;
+  --line-strong: #585041;
+  --ink: #f0ead9;
+  --ink-2: #ddd5c0;
+  --muted: #a29881;
+  --faint: #7a705c;
+  --accent: #d96a4e;
+  --accent-soft: #5d3729;
+  --accent-tint: #472e22;
   --warn: #d6b070;
-  --on-accent: #ffffff;
+  --on-accent: #221e15;
   color-scheme: dark;
 }
 
 .graph-view[data-graph-theme="light"] {
-  --graph-canvas: #f5f5f7;
-  --graph-surface: rgba(255, 255, 255, 0.95);
-  --graph-ink: #1d1d1f;
-  --graph-muted: #636366;
-  --graph-line: rgba(29, 29, 31, 0.1);
-  --graph-edge: #d1d1d6;
-  --graph-label: rgba(29, 29, 31, 0.4);
-  --graph-label-strong: #1d1d1f;
-  --bg: #f5f5f7;
-  --panel: #ffffff;
-  --panel-2: #f9f9fb;
-  --line: #d1d1d6;
-  --line-strong: #aeaeb2;
-  --ink: #1d1d1f;
-  --ink-2: #3a3a3c;
-  --muted: #636366;
-  --faint: #6e6e73;
-  --accent: #0071e3;
-  --accent-soft: #d9ecff;
-  --accent-tint: #edf6ff;
+  --graph-canvas: #f5f1e6;
+  --graph-surface: rgba(252, 250, 243, 0.95);
+  --graph-ink: #221e15;
+  --graph-muted: #6c6353;
+  --graph-line: rgba(34, 30, 21, 0.1);
+  --graph-edge: #dcd3bf;
+  --graph-label: rgba(34, 30, 21, 0.4);
+  --graph-label-strong: #221e15;
+  --bg: #f5f1e6;
+  --panel: #fcfaf3;
+  --panel-2: #f7f3e9;
+  --line: #dcd3bf;
+  --line-strong: #b7ab8f;
+  --ink: #221e15;
+  --ink-2: #403a2c;
+  --muted: #6c6353;
+  --faint: #968b76;
+  --accent: #b23a26;
+  --accent-soft: #ecd0c6;
+  --accent-tint: #f5e7df;
   --warn: #7a5520;
-  --on-accent: #ffffff;
+  --on-accent: #fdf8f2;
   color-scheme: light;
 }
 
 .graph-view:focus {
   outline: none;
+}
+
+.graph-view[data-graph-accent="seal"] {
+  --graph-accent: #d96a4e;
 }
 
 .graph-view[data-graph-accent="green"] {

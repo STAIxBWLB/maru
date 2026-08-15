@@ -367,6 +367,7 @@ export const ko: Record<string, string> = {
   "graph.display.theme.light": "라이트",
   "graph.display.theme.app": "앱 설정 따름",
   "graph.display.accent": "강조색",
+  "graph.display.accent.seal": "도장 주홍",
   "graph.display.accent.violet": "바이올렛",
   "graph.display.accent.green": "Maru 그린",
   "graph.display.colors": "색상 기준",
