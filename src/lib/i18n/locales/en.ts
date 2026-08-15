@@ -368,6 +368,7 @@ export const en: Record<string, string> = {
   "graph.display.theme.light": "Light",
   "graph.display.theme.app": "Follow app",
   "graph.display.accent": "Accent",
+  "graph.display.accent.seal": "Seal vermilion",
   "graph.display.accent.violet": "Violet",
   "graph.display.accent.green": "Maru green",
   "graph.display.colors": "Color by",

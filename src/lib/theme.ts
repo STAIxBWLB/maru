@@ -7,13 +7,15 @@ export type ResolvedThemeMode = "light" | "dark";
 export function buildThemeVars(settings: MaruSettings): ThemeVars {
   const accent = settings.ui.accentColor;
   const dark = resolveThemeMode(settings.ui.themeMode) === "dark";
-  const base = dark ? "#2c2c2e" : "#ffffff";
+  // Tints mix toward the warm paper/ink base (not pure white/black) so any
+  // user-picked accent stays in the hanji/ink palette family.
+  const base = dark ? "#231f17" : "#fcfaf3";
   return {
     "--accent": accent,
     "--accent-soft": mixHex(accent, base, dark ? 0.68 : 0.78),
     "--accent-tint": mixHex(accent, base, dark ? 0.8 : 0.9),
     "--active-surface": mixHex(accent, base, dark ? 0.78 : 0.9),
-    "--button-primary-hover": mixHex(accent, dark ? "#ffffff" : "#000000", 0.14),
+    "--button-primary-hover": mixHex(accent, dark ? "#f0ead9" : "#221e15", 0.14),
     "--focus-ring": accent,
     "--on-accent": contrastText(accent),
     "--rail-indicator": accent,

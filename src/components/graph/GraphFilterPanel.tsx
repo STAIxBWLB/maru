@@ -334,6 +334,7 @@ export function GraphFilterPanel({
               })
             }
           >
+            <option value="seal">{t("graph.display.accent.seal")}</option>
             <option value="violet">{t("graph.display.accent.violet")}</option>
             <option value="green">{t("graph.display.accent.green")}</option>
           </select>
