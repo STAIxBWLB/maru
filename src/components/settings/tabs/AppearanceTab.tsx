@@ -8,6 +8,13 @@ import { ModeHeader, SegmentedControl } from "../../ui/ModeChrome";
 import { SettingsSection } from "../SettingsSection";
 import { SettingsRow } from "../SettingsRow";
 
+const ACCENT_PRESETS = [
+  { value: "#b23a26", labelKey: "system.preferences.accentPreset.seal" },
+  { value: "#3d392e", labelKey: "system.preferences.accentPreset.ink" },
+  { value: "#33565c", labelKey: "system.preferences.accentPreset.celadon" },
+  { value: "#8a5a2c", labelKey: "system.preferences.accentPreset.ochre" },
+] as const;
+
 export function AppearanceTab({
   settings,
   onSettingsChange,
@@ -52,16 +59,34 @@ export function AppearanceTab({
           label={t("system.preferences.accentColor")}
           htmlFor="appearance-accent-color"
           control={
-            <input
-              id="appearance-accent-color"
-              type="color"
-              value={settings.ui.accentColor}
-              onChange={(event) =>
-                updateUi({
-                  accentColor: normalizeAccentInput(event.target.value, settings.ui.accentColor),
-                })
-              }
-            />
+            <div className="accent-control">
+              <input
+                id="appearance-accent-color"
+                type="color"
+                value={settings.ui.accentColor}
+                onChange={(event) =>
+                  updateUi({
+                    accentColor: normalizeAccentInput(event.target.value, settings.ui.accentColor),
+                  })
+                }
+              />
+              {ACCENT_PRESETS.map((preset) => (
+                <button
+                  key={preset.value}
+                  type="button"
+                  className={
+                    settings.ui.accentColor === preset.value
+                      ? "accent-preset-swatch is-active"
+                      : "accent-preset-swatch"
+                  }
+                  style={{ background: preset.value }}
+                  title={t(preset.labelKey)}
+                  aria-label={t(preset.labelKey)}
+                  aria-pressed={settings.ui.accentColor === preset.value}
+                  onClick={() => updateUi({ accentColor: preset.value })}
+                />
+              ))}
+            </div>
           }
         />
       </SettingsSection>
