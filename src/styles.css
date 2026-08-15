@@ -1639,7 +1639,7 @@ a {
     inset 0 0 0 1px rgba(255, 255, 255, 0.14),
     var(--shadow-sm);
   font-family: var(--font-display);
-  font-size: 11px;
+  font-size: var(--type-meta-size);
   font-weight: 700;
   letter-spacing: 0;
   line-height: 1;
