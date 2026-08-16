@@ -8,6 +8,23 @@ because releases cut frequently during active development. Versions before
 Dates are the release-tag dates. Only `feat`/`fix`-level changes are listed;
 `chore(release)` version bumps and merge commits are omitted.
 
+## v0.4.51 - 2026-08-16 - Hanji, Ink, Seal
+
+- **Maru now has a Korean editorial identity.** Warm hanji-paper surfaces,
+  ink-black neutrals, and seal-vermilion accents replace the previous
+  Apple-like palette across the shell, graph, and Diagram mode. Color tokens
+  now have one source of truth, preventing older blue and slate values from
+  leaking into otherwise themed surfaces.
+- **Reading and display surfaces use a bundled Korean serif.** Noto Serif KR
+  loads as a split asset for headings, pane titles, empty states, and editorial
+  quotations while keeping the initial CSS bundle within budget. Diagram
+  chrome, canvas, selection states, and status chips follow the same warm
+  palette without changing node-kind semantics.
+- **Accent choices are easier to apply and remain accessible.** Appearance
+  settings include seal, ink, celadon, and ochre presets; the ink preset was
+  raised to remain visible in dark mode. Existing saved accent choices remain
+  unchanged, while new settings default to seal vermilion.
+
 ## v0.4.50 - 2026-08-14 - Window Lifecycle
 
 - **macOS reduces the risk of a blank WebView after inactivity.** The main
