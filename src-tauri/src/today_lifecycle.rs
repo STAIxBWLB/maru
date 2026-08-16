@@ -56,6 +56,7 @@ pub(crate) fn prepare_complete_op(
     rel_path: &str,
     google_task_id: &str,
     google_task_list_id: Option<String>,
+    web_action_id: Option<String>,
     now_iso: &str,
 ) -> Result<OutboxRecord, String> {
     today_outbox::enqueue_record(
@@ -65,6 +66,7 @@ pub(crate) fn prepare_complete_op(
         google_task_id,
         google_task_list_id,
         OutboxStatus::Prepared,
+        web_action_id,
         now_iso,
     )
 }
@@ -162,6 +164,7 @@ fn run_complete(
             &ctx.rel_path,
             google_task_id,
             ctx.google_task_list_id.clone(),
+            request.web_action_id.clone(),
             &ctx.now_iso,
         )?),
         None => None,
@@ -239,6 +242,7 @@ fn run_reopen(ctx: TransitionContext, task_id: &str) -> Result<TaskTransitionOut
                 google_task_id,
                 ctx.google_task_list_id.clone(),
                 OutboxStatus::Prepared,
+                None,
                 &ctx.now_iso,
             )?)
         }
@@ -401,7 +405,9 @@ fn unique_task_trash_path(work: &Path, source: &Path) -> Result<PathBuf, String>
     Err("Cannot allocate trash path".to_string())
 }
 
-fn move_file(source: &Path, target: &Path) -> Result<(), String> {
+/// Rename with a copy+remove fallback (cross-device moves, some network
+/// mounts). Shared with `web_actions.rs` for the pending -> applied move.
+pub(crate) fn move_file(source: &Path, target: &Path) -> Result<(), String> {
     match fs::rename(source, target) {
         Ok(()) => Ok(()),
         Err(rename_err) => {
@@ -443,6 +449,7 @@ pub fn task_trash(
                 google_task_id,
                 ctx.google_task_list_id.clone(),
                 OutboxStatus::Ready,
+                None,
                 &ctx.now_iso,
             )?;
         }
@@ -497,6 +504,7 @@ mod tests {
             defer_date: None,
             date: Some(DAY.to_string()),
             now_iso: Some(NOW.to_string()),
+            web_action_id: None,
             payload: json!({}),
         }
     }
@@ -590,7 +598,7 @@ mod tests {
         // is done at the RECORDED (pre-move) path, so recovery must promote
         // the record, not drop it.
         let (tmp, _hash, rel) = setup_task("---\nstatus: active\ngoogleTaskId: g-9\n---\n# Body\n");
-        let record = prepare_complete_op(tmp.path(), &rel, "g-9", None, NOW).unwrap();
+        let record = prepare_complete_op(tmp.path(), &rel, "g-9", None, None, NOW).unwrap();
         let note = tmp.path().join(&rel);
         let patched = update_frontmatter_content(
             &fs::read_to_string(&note).unwrap(),
@@ -613,7 +621,7 @@ mod tests {
         // Simulates a crash immediately after step 1: the prepared record
         // exists while the note is still active, and recovery drops it.
         let (tmp, _hash, rel) = setup_task("---\nstatus: active\n---\n# Body\n");
-        let record = prepare_complete_op(tmp.path(), &rel, "g-9", None, NOW).unwrap();
+        let record = prepare_complete_op(tmp.path(), &rel, "g-9", None, None, NOW).unwrap();
         assert_eq!(record.status, OutboxStatus::Prepared);
         assert!(tmp
             .path()
@@ -636,7 +644,7 @@ mod tests {
         )
         .unwrap();
         // A complete op already drained to the provider.
-        let mut synced = prepare_complete_op(tmp.path(), "tasks/archive/task.md", "g-1", None, NOW)
+        let mut synced = prepare_complete_op(tmp.path(), "tasks/archive/task.md", "g-1", None, None, NOW)
             .unwrap();
         today_outbox::set_record_status(tmp.path(), &mut synced, OutboxStatus::Synced, NOW).unwrap();
 

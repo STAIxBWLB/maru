@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { LocaleContext, t as translate } from "../../lib/i18n";
 import "../../lib/i18n/testing";
 import { DEFAULT_MARU_SETTINGS } from "../../lib/settings";
-import type { OutboxRecord } from "../../lib/today";
+import type { OutboxRecord, WebActionSummary } from "../../lib/today";
 import type { TodayContextValue } from "./todayContext";
 import { TodayContext } from "./todayContext";
 import { TodaySyncStatus } from "./TodaySyncStatus";
@@ -18,6 +18,8 @@ vi.mock("../../lib/today", async (importOriginal) => {
     readTaskIntegrations: vi.fn(),
     taskIntegrationsRetry: vi.fn(),
     taskIntegrationsDrain: vi.fn(),
+    webActionsScan: vi.fn(),
+    webActionsApply: vi.fn(),
   };
 });
 
@@ -25,6 +27,8 @@ import {
   readTaskIntegrations,
   taskIntegrationsDrain,
   taskIntegrationsRetry,
+  webActionsApply,
+  webActionsScan,
 } from "../../lib/today";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -46,8 +50,26 @@ function record(overrides: Partial<OutboxRecord>): OutboxRecord {
   };
 }
 
-async function renderSection(records: OutboxRecord[]): Promise<HTMLElement> {
+function webAction(overrides: Partial<WebActionSummary> = {}): WebActionSummary {
+  return {
+    receiptPath: "shared/web/task-actions/pending/2026-08/wa-1.yaml",
+    id: "wa-1",
+    operation: "complete",
+    taskPath: "tasks/active/alpha.md",
+    requestedAt: "2026-08-16T00:00:00Z",
+    requestedBy: "web:owner@example.com",
+    state: "pending",
+    reason: null,
+    ...overrides,
+  };
+}
+
+async function renderSection(
+  records: OutboxRecord[],
+  pending: WebActionSummary[] = [],
+): Promise<HTMLElement> {
   vi.mocked(readTaskIntegrations).mockResolvedValue(records);
+  vi.mocked(webActionsScan).mockResolvedValue(pending);
   const contextValue: TodayContextValue = {
     workPath: "/tmp/work",
     settings: { ...DEFAULT_MARU_SETTINGS.tasks.today, autoPlan: false },
@@ -84,9 +106,44 @@ describe("TodaySyncStatus", () => {
     document.body.innerHTML = "";
   });
 
-  it("renders nothing when the outbox is empty", async () => {
+  it("renders nothing when the outbox and the web receipts are both empty", async () => {
     const container = await renderSection([]);
     expect(container.querySelector(".today-sync-status")).toBeNull();
+  });
+
+  it("surfaces pending web receipts even with an empty outbox", async () => {
+    const container = await renderSection([], [webAction()]);
+    expect(container.querySelector(".today-sync-status")).not.toBeNull();
+    expect(container.querySelector(".today-sync-status-count.neutral")?.textContent).toContain("1");
+  });
+
+  it("applying web actions drains and reloads, and never commits", async () => {
+    const container = await renderSection([], [webAction(), webAction({ id: "wa-2" })]);
+    vi.mocked(webActionsApply).mockResolvedValue({
+      applied: 1,
+      skipped: 0,
+      stale: 1,
+      invalid: 0,
+      items: [],
+    });
+    vi.mocked(taskIntegrationsDrain).mockResolvedValue({ drained: 1, failed: 0, blocked: 0 });
+    await act(async () => {
+      headerButton(container).click();
+    });
+    expect(container.querySelector(".today-sync-web-summary")?.textContent).toContain("2");
+    const apply = container.querySelector<HTMLButtonElement>(".today-sync-web .today-panel-link")!;
+    const loadsBefore = vi.mocked(readTaskIntegrations).mock.calls.length;
+    await act(async () => {
+      apply.click();
+    });
+    expect(webActionsApply).toHaveBeenCalledWith("/tmp/work", expect.any(String));
+    // The provider ops the receipts queued go out in the same click.
+    expect(taskIntegrationsDrain).toHaveBeenCalledWith("/tmp/work", expect.any(String));
+    expect(vi.mocked(readTaskIntegrations).mock.calls.length).toBe(loadsBefore + 1);
+    // Result line reports every bucket, and points at Git Sync for the push.
+    const result = container.querySelector(".today-sync-web-result")?.textContent ?? "";
+    expect(result).toContain("Git Sync");
+    expect(result).toContain("재시도 필요 1건");
   });
 
   it("renders rows with op and status badges once expanded", async () => {

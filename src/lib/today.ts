@@ -335,11 +335,37 @@ export interface OutboxRecord {
   googleTaskId: string;
   googleTaskListId?: string | null;
   status: OutboxStatus;
+  /** Set when the op came from a web-action receipt (see WebActionSummary). */
+  webActionId?: string | null;
   attempts: number;
   nextRetryAt?: string | null;
   lastError?: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+export type WebActionOperation = "upsert" | "complete";
+
+export type WebActionState = "pending" | "applied" | "skipped" | "stale" | "invalid";
+
+/** One `maru.web-task-action.v1` receipt committed by the Maru web app. */
+export interface WebActionSummary {
+  receiptPath: string;
+  id: string;
+  operation: WebActionOperation | null;
+  taskPath: string;
+  requestedAt: string;
+  requestedBy: string;
+  state: WebActionState;
+  reason?: string | null;
+}
+
+export interface WebActionsOutcome {
+  applied: number;
+  skipped: number;
+  stale: number;
+  invalid: number;
+  items: WebActionSummary[];
 }
 
 export interface DrainOutcome {
@@ -482,6 +508,22 @@ export async function taskIntegrationsRetry(
 
 export async function readTaskIntegrations(workPath: string): Promise<OutboxRecord[]> {
   return todayInvoke<OutboxRecord[]>("read_task_integrations", { workPath });
+}
+
+export async function webActionsScan(workPath: string): Promise<WebActionSummary[]> {
+  return todayInvoke<WebActionSummary[]>("web_actions_scan", { workPath });
+}
+
+/**
+ * Applies pending web-action receipts. Explicit and local-only: it never
+ * stages, commits, or pushes — the pending -> applied move rides the user's
+ * normal Git Sync cadence.
+ */
+export async function webActionsApply(
+  workPath: string,
+  nowIso: string,
+): Promise<WebActionsOutcome> {
+  return todayInvoke<WebActionsOutcome>("web_actions_apply", { workPath, nowIso });
 }
 
 export async function todayNotifyNewDay(

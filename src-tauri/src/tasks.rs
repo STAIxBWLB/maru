@@ -43,7 +43,7 @@ impl TaskBucket {
         }
     }
 
-    fn parse(value: &str) -> Option<Self> {
+    pub(crate) fn parse(value: &str) -> Option<Self> {
         match value {
             "active" => Some(TaskBucket::Active),
             "backlog" => Some(TaskBucket::Backlog),
@@ -1443,9 +1443,15 @@ mod tests {
         assert_eq!(parse_task_status("open"), Some(TaskStatus::Active));
         assert_eq!(parse_task_status("Open"), Some(TaskStatus::Active));
         assert_eq!(parse_task_status("OPEN"), Some(TaskStatus::Active));
-        // Canonical values unchanged.
+        // Canonical values unchanged. These five are exactly what the Maru
+        // web app writes (issue #232 work item 6), so no alias work is owed
+        // for web-originated task notes.
         assert_eq!(parse_task_status("active"), Some(TaskStatus::Active));
         assert_eq!(parse_task_status("In_Progress"), Some(TaskStatus::InProgress));
+        assert_eq!(parse_task_status("in-progress"), Some(TaskStatus::InProgress));
+        assert_eq!(parse_task_status("done"), Some(TaskStatus::Done));
+        assert_eq!(parse_task_status("cancelled"), Some(TaskStatus::Cancelled));
+        assert_eq!(parse_task_status("backlog"), Some(TaskStatus::Backlog));
         assert_eq!(parse_task_status("bogus"), None);
     }
 

@@ -1,26 +1,37 @@
-// Maru Today — Execute panel section: Google Tasks integration outbox.
+// Maru Today — Execute panel section: Google Tasks integration outbox, plus
+// the web-action receipts the Maru web app commits for the desktop to apply.
 // Lists outbox records with per-row op + status badges (icon + text, never
 // color-only), attempts, and last-error tooltips. Recovery actions: per-row
 // retry (requeue + drain) for retryNeeded/authBlocked rows, and a section-
-// level "refresh all" (requeue failed + drain). Renders nothing when the
-// outbox is empty; problem rows surface as a count badge on the collapsed
-// header.
+// level "refresh all" (requeue failed + drain). Applying web actions is a
+// deliberate, separate button: it never commits or pushes, so the resulting
+// working-tree changes ride the user's normal Git Sync. Renders nothing when
+// both the outbox and the pending receipts are empty; problem rows and
+// pending receipts surface as count badges on the collapsed header.
 
 import {
   Check,
   ChevronDown,
   ChevronUp,
+  CloudDownload,
   Loader2,
   RefreshCw,
   TriangleAlert,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "../../lib/i18n";
-import type { OutboxRecord, OutboxStatus } from "../../lib/today";
+import type {
+  OutboxRecord,
+  OutboxStatus,
+  WebActionSummary,
+  WebActionsOutcome,
+} from "../../lib/today";
 import {
   readTaskIntegrations,
   taskIntegrationsDrain,
   taskIntegrationsRetry,
+  webActionsApply,
+  webActionsScan,
 } from "../../lib/today";
 import { useToday } from "./todayContext";
 
@@ -69,6 +80,8 @@ export function TodaySyncStatus() {
   const { workPath } = useToday();
 
   const [records, setRecords] = useState<OutboxRecord[]>([]);
+  const [webActions, setWebActions] = useState<WebActionSummary[]>([]);
+  const [webOutcome, setWebOutcome] = useState<WebActionsOutcome | null>(null);
   const [expanded, setExpanded] = useState(false);
   const [busy, setBusy] = useState(false);
 
@@ -78,6 +91,11 @@ export function TodaySyncStatus() {
       setRecords(await readTaskIntegrations(workPath));
     } catch {
       // Keep the last known list; the next action retries the load.
+    }
+    try {
+      setWebActions(await webActionsScan(workPath));
+    } catch {
+      // Same: a failed scan keeps the last known receipts.
     }
   }, [workPath]);
 
@@ -118,7 +136,24 @@ export function TodaySyncStatus() {
     setBusy(false);
   };
 
-  if (records.length === 0) return null;
+  /**
+   * Apply the web app's pending action receipts, then drain so any provider
+   * op they queued goes out in the same click. Never commits or pushes.
+   */
+  const applyWebActions = async () => {
+    if (!workPath || busy) return;
+    setBusy(true);
+    try {
+      setWebOutcome(await webActionsApply(workPath, new Date().toISOString()));
+      await taskIntegrationsDrain(workPath, new Date().toISOString());
+    } catch {
+      // The reload below surfaces the real state either way.
+    }
+    await load();
+    setBusy(false);
+  };
+
+  if (records.length === 0 && webActions.length === 0) return null;
 
   return (
     <section className="today-sync-status" aria-label={t("today.sync.title")}>
@@ -129,6 +164,12 @@ export function TodaySyncStatus() {
         onClick={() => setExpanded((prev) => !prev)}
       >
         <span className="today-sync-status-title">{t("today.sync.title")}</span>
+        {webActions.length > 0 ? (
+          <span className="today-sync-status-count neutral">
+            <CloudDownload size={11} strokeWidth={1.9} aria-hidden="true" />
+            {t("today.sync.web.pendingCount", { count: webActions.length })}
+          </span>
+        ) : null}
         {problemCount > 0 ? (
           <span className="today-sync-status-count">
             <TriangleAlert size={11} strokeWidth={1.9} aria-hidden="true" />
@@ -143,6 +184,32 @@ export function TodaySyncStatus() {
       </button>
       {expanded ? (
         <div className="today-sync-status-body">
+          {webActions.length > 0 ? (
+            <div className="today-sync-web">
+              <span className="today-sync-web-summary">
+                {t("today.sync.web.pending", { count: webActions.length })}
+              </span>
+              <button
+                type="button"
+                className="today-panel-link"
+                disabled={busy}
+                onClick={() => void applyWebActions()}
+              >
+                <CloudDownload size={12} strokeWidth={1.9} aria-hidden="true" />
+                {t("today.sync.web.apply")}
+              </button>
+            </div>
+          ) : null}
+          {webOutcome ? (
+            <p className="today-sync-web-result" role="status">
+              {t("today.sync.web.result", {
+                applied: webOutcome.applied,
+                skipped: webOutcome.skipped,
+                stale: webOutcome.stale,
+                invalid: webOutcome.invalid,
+              })}
+            </p>
+          ) : null}
           <div className="today-sync-status-toolbar">
             <button
               type="button"

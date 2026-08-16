@@ -10049,6 +10049,36 @@ button.git-badge:hover {
   font-weight: 600;
 }
 
+.today-sync-status-count.neutral {
+  background: var(--panel-3);
+  color: var(--muted);
+}
+
+/* Web-action receipts: a separate, deliberate action above the outbox list. */
+.today-sync-web {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 4px;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.today-sync-web-summary {
+  flex: 1;
+  min-width: 0;
+  color: var(--ink);
+  font-size: var(--type-label-size);
+}
+
+.today-sync-web-result {
+  margin: 6px 0 0;
+  padding: 0 4px;
+  color: var(--muted);
+  font-size: var(--type-meta-size);
+}
+
 .today-sync-status-toolbar {
   display: flex;
   justify-content: flex-end;
