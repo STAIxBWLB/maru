@@ -77,7 +77,7 @@ function StatusBadge({ status }: { status: OutboxStatus }) {
 
 export function TodaySyncStatus() {
   const { t } = useTranslation();
-  const { workPath } = useToday();
+  const { workPath, gwsBinary, defaultTaskList } = useToday();
 
   const [records, setRecords] = useState<OutboxRecord[]>([]);
   const [webActions, setWebActions] = useState<WebActionSummary[]>([]);
@@ -114,7 +114,7 @@ export function TodaySyncStatus() {
     setBusy(true);
     try {
       await taskIntegrationsRetry(workPath, [id], new Date().toISOString());
-      await taskIntegrationsDrain(workPath, new Date().toISOString());
+      await taskIntegrationsDrain(workPath, new Date().toISOString(), gwsBinary);
     } catch {
       // The reload below surfaces the real state either way.
     }
@@ -128,7 +128,7 @@ export function TodaySyncStatus() {
     setBusy(true);
     try {
       await taskIntegrationsRetry(workPath, null, new Date().toISOString());
-      await taskIntegrationsDrain(workPath, new Date().toISOString());
+      await taskIntegrationsDrain(workPath, new Date().toISOString(), gwsBinary);
     } catch {
       // The reload below surfaces the real state either way.
     }
@@ -144,8 +144,10 @@ export function TodaySyncStatus() {
     if (!workPath || busy) return;
     setBusy(true);
     try {
-      setWebOutcome(await webActionsApply(workPath, new Date().toISOString()));
-      await taskIntegrationsDrain(workPath, new Date().toISOString());
+      setWebOutcome(
+        await webActionsApply(workPath, new Date().toISOString(), defaultTaskList),
+      );
+      await taskIntegrationsDrain(workPath, new Date().toISOString(), gwsBinary);
     } catch {
       // The reload below surfaces the real state either way.
     }

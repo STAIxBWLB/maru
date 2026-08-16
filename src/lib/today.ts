@@ -318,7 +318,7 @@ export interface TaskTrashOutcome {
   trashedPath: string;
 }
 
-export type OutboxOp = "complete" | "reopen" | "delete";
+export type OutboxOp = "complete" | "reopen" | "delete" | "upsert";
 
 export type OutboxStatus =
   | "prepared"
@@ -328,12 +328,20 @@ export type OutboxStatus =
   | "retryNeeded"
   | "authBlocked";
 
+export interface UpsertPayload {
+  title: string;
+  notes: string;
+  due?: string | null;
+}
+
 export interface OutboxRecord {
   id: string;
   op: OutboxOp;
   taskPath: string;
   googleTaskId: string;
   googleTaskListId?: string | null;
+  /** `upsert` only: the fields sent to Google Tasks. */
+  payload?: UpsertPayload | null;
   status: OutboxStatus;
   /** Set when the op came from a web-action receipt (see WebActionSummary). */
   webActionId?: string | null;
@@ -522,8 +530,13 @@ export async function webActionsScan(workPath: string): Promise<WebActionSummary
 export async function webActionsApply(
   workPath: string,
   nowIso: string,
+  defaultTaskListId?: string | null,
 ): Promise<WebActionsOutcome> {
-  return todayInvoke<WebActionsOutcome>("web_actions_apply", { workPath, nowIso });
+  return todayInvoke<WebActionsOutcome>("web_actions_apply", {
+    workPath,
+    nowIso,
+    defaultTaskListId: defaultTaskListId ?? null,
+  });
 }
 
 export async function todayNotifyNewDay(

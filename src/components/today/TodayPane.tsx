@@ -327,6 +327,7 @@ export const TodayPane = memo(function TodayPane({
       timezone,
       defaultCalendar: effectiveSettings.defaultCalendar,
       gwsBinary: effectiveSettings.gwsBinary,
+      defaultTaskList: effectiveSettings.defaultTaskList,
       snapshot,
       loading,
       refreshing,

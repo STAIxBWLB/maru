@@ -2097,6 +2097,7 @@ export const ko: Record<string, string> = {
   "today.sync.op.complete": "완료",
   "today.sync.op.reopen": "다시 열기",
   "today.sync.op.delete": "삭제",
+  "today.sync.op.upsert": "생성·갱신",
   "today.sync.status.syncing": "동기화 중",
   "today.sync.status.synced": "동기화됨",
   "today.sync.status.retryNeeded": "재시도 필요",
