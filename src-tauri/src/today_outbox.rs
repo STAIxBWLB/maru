@@ -20,6 +20,7 @@
 
 use crate::atomic_file::write_atomic;
 use crate::cli_path::{augmented_path, is_executable, resolve_program};
+use crate::frontmatter::{update_frontmatter_content, FrontmatterValue};
 use crate::gmail_gws::classify_gws_auth_state;
 use crate::today_store::today_dir;
 use crate::vault::{normalize_existing_dir, parse_frontmatter};
@@ -38,6 +39,21 @@ pub enum OutboxOp {
     Complete,
     Reopen,
     Delete,
+    /// Create-or-update the provider task from the note (web-originated).
+    /// Unlike the other ops it carries a `payload` and, on creation, writes
+    /// the returned id back into the note's frontmatter.
+    Upsert,
+}
+
+/// Provider-task fields for an `Upsert`, snapshotted from the note when the
+/// record is enqueued so the drain never has to re-read the file.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct UpsertPayload {
+    pub title: String,
+    pub notes: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub due: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -57,9 +73,15 @@ pub struct OutboxRecord {
     pub id: String,
     pub op: OutboxOp,
     pub task_path: String,
+    /// Provider task id. Empty only for an `Upsert` that has not created the
+    /// task yet — the drain then inserts and fills this in before marking the
+    /// record synced, so a retry patches instead of inserting twice.
     pub google_task_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub google_task_list_id: Option<String>,
+    /// `Upsert` only: the fields to send to the provider.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub payload: Option<UpsertPayload>,
     pub status: OutboxStatus,
     /// Id of the `maru.web-task-action.v1` receipt this record was created
     /// from (`web_actions.rs`). Present only for web-originated ops; it is
@@ -143,6 +165,7 @@ pub(crate) fn enqueue_record(
     task_path: &str,
     google_task_id: &str,
     google_task_list_id: Option<String>,
+    payload: Option<UpsertPayload>,
     status: OutboxStatus,
     web_action_id: Option<String>,
     now_iso: &str,
@@ -155,6 +178,7 @@ pub(crate) fn enqueue_record(
         task_path: task_path.to_string(),
         google_task_id: google_task_id.to_string(),
         google_task_list_id,
+        payload,
         status,
         web_action_id,
         attempts: 0,
@@ -244,6 +268,10 @@ fn local_mutation_landed(work: &Path, record: &OutboxRecord) -> bool {
             Some(status) if !status.eq_ignore_ascii_case("done")
         ),
         OutboxOp::Delete => !work.join(&record.task_path).exists(),
+        // Upsert records are enqueued `ready` (the web already committed the
+        // note), so they never reach recovery as `prepared`; the note simply
+        // has to still be there for the op to mean anything.
+        OutboxOp::Upsert => work.join(&record.task_path).exists(),
     }
 }
 
@@ -273,6 +301,27 @@ pub(crate) fn resolve_gws(override_path: Option<&str>) -> Result<PathBuf, String
     })
 }
 
+/// Request body for an `Upsert`: the note's title, a pointer back to the
+/// note, and the due date. Same shape the `task-management` skill sends, so
+/// the two producers converge on one provider task.
+///
+/// `due` is the one field that differs between the two verbs. `tasks.patch`
+/// leaves an omitted field unchanged, so a note whose due date was cleared
+/// would keep its old remote deadline forever; a patch therefore sends an
+/// explicit `null`. An insert omits it, because there is nothing to clear.
+fn upsert_body(record: &OutboxRecord, clear_missing_due: bool) -> String {
+    let Some(payload) = &record.payload else {
+        return json!({}).to_string();
+    };
+    let mut body = json!({ "title": payload.title, "notes": payload.notes });
+    match &payload.due {
+        Some(due) => body["due"] = json!(due),
+        None if clear_missing_due => body["due"] = json!(null),
+        None => {}
+    }
+    body.to_string()
+}
+
 fn gws_args(record: &OutboxRecord) -> Vec<String> {
     let list = record
         .google_task_list_id
@@ -280,6 +329,30 @@ fn gws_args(record: &OutboxRecord) -> Vec<String> {
         .unwrap_or("@default");
     let params = json!({ "tasklist": list, "task": record.google_task_id }).to_string();
     match record.op {
+        // No provider id yet: create. Otherwise patch in place, so a retry
+        // after a crashed insert converges instead of duplicating.
+        OutboxOp::Upsert if record.google_task_id.is_empty() => vec![
+            "tasks".to_string(),
+            "tasks".to_string(),
+            "insert".to_string(),
+            "--params".to_string(),
+            json!({ "tasklist": list }).to_string(),
+            "--json".to_string(),
+            upsert_body(record, false),
+            "--format".to_string(),
+            "json".to_string(),
+        ],
+        OutboxOp::Upsert => vec![
+            "tasks".to_string(),
+            "tasks".to_string(),
+            "patch".to_string(),
+            "--params".to_string(),
+            params,
+            "--json".to_string(),
+            upsert_body(record, true),
+            "--format".to_string(),
+            "json".to_string(),
+        ],
         OutboxOp::Complete => vec![
             "tasks".to_string(),
             "tasks".to_string(),
@@ -312,6 +385,45 @@ fn gws_args(record: &OutboxRecord) -> Vec<String> {
             "json".to_string(),
         ],
     }
+}
+
+/// Provider task id from a successful insert response (`{"id": ...}`).
+fn task_id_from_stdout(stdout: &[u8]) -> Option<String> {
+    let parsed: serde_json::Value = serde_json::from_slice(stdout).ok()?;
+    parsed
+        .get("id")
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
+}
+
+/// Write the provider ids back into the note so later completes/reopens can
+/// find the task. Unknown keys, comments, and the body are preserved by the
+/// frontmatter editor.
+fn write_back_provider_ids(work: &Path, record: &OutboxRecord) -> Result<(), String> {
+    let path = work.join(&record.task_path);
+    let raw = fs::read_to_string(&path).map_err(|err| format!("Cannot read task note: {err}"))?;
+    let mut updated = update_frontmatter_content(
+        &raw,
+        "googleTaskId",
+        Some(FrontmatterValue::String(record.google_task_id.clone())),
+    )?;
+    if let Some(list) = &record.google_task_list_id {
+        updated = update_frontmatter_content(
+            &updated,
+            "googleTaskListId",
+            Some(FrontmatterValue::String(list.clone())),
+        )?;
+    }
+    write_atomic(&path, updated.as_bytes())
+}
+
+/// True when a terminal provider failure should recreate the task rather than
+/// discharge the record: an `Upsert` that was patching a `googleTaskId` the
+/// provider no longer knows.
+fn upsert_needs_recreate(record: &OutboxRecord) -> bool {
+    record.op == OutboxOp::Upsert && !record.google_task_id.is_empty()
 }
 
 /// Retry backoff in minutes after the n-th failed attempt: 1, 5, 15, 60,
@@ -383,6 +495,32 @@ fn drain_record(
             record.attempts = 0;
             record.next_retry_at = None;
             record.last_error = None;
+            if record.op == OutboxOp::Upsert && record.google_task_id.is_empty() {
+                let Some(created) = task_id_from_stdout(&output.stdout) else {
+                    // A success exit with no id in the body: treat it like any
+                    // other failure so it backs off and stays visible.
+                    record.attempts = record.attempts.saturating_add(1);
+                    let retry_at = now + Duration::minutes(backoff_minutes(record.attempts));
+                    record.next_retry_at =
+                        Some(retry_at.to_rfc3339_opts(SecondsFormat::Secs, true));
+                    record.last_error = Some(format!(
+                        "upsert_response_missing_id: {}",
+                        String::from_utf8_lossy(&output.stdout).trim()
+                    ));
+                    set_record_status(work, &mut record, OutboxStatus::RetryNeeded, now_iso)?;
+                    return Ok(OutboxStatus::RetryNeeded);
+                };
+                // Persist the id BEFORE marking synced: a crash here leaves a
+                // record whose retry patches rather than inserting again.
+                record.google_task_id = created;
+                write_record(work, &record)?;
+                if let Err(err) = write_back_provider_ids(work, &record) {
+                    // The provider task exists and the record holds its id, so
+                    // the op is done; an unwritable note is reported, not
+                    // retried (a retry would only re-patch the same task).
+                    record.last_error = Some(format!("write_back_failed: {err}"));
+                }
+            }
             OutboxStatus::Synced
         }
         Ok(output) => {
@@ -395,6 +533,20 @@ fn drain_record(
             if is_auth_error(&detail) {
                 record.last_error = Some(detail);
                 OutboxStatus::AuthBlocked
+            } else if is_terminal_error(&detail) && upsert_needs_recreate(&record) {
+                // The remote task behind a stale googleTaskId is gone, but an
+                // upsert is not satisfied by its absence the way a complete or
+                // a delete is: the requested update still has to land. Clear
+                // the id so the retry inserts instead of patching. If the
+                // tasklist itself is what 404s, the insert 404s too and falls
+                // through to the discharge below, so this converges.
+                record.google_task_id = String::new();
+                record.attempts = record.attempts.saturating_add(1);
+                let retry_at = now + Duration::minutes(backoff_minutes(record.attempts));
+                record.next_retry_at = Some(retry_at.to_rfc3339_opts(SecondsFormat::Secs, true));
+                record.last_error = Some(format!("upsert_task_missing_recreating: {detail}"));
+                set_record_status(work, &mut record, OutboxStatus::RetryNeeded, now_iso)?;
+                return Ok(OutboxStatus::RetryNeeded);
             } else if is_terminal_error(&detail) {
                 // Remote task/list is gone: the op is moot. Discharge the
                 // record (delete + event) instead of retrying forever; count
@@ -530,6 +682,7 @@ mod tests {
             op,
             "tasks/active/task.md",
             "gtask-1",
+            None,
             None,
             status,
             None,
@@ -777,6 +930,7 @@ mod tests {
             "tasks/archive/done.md",
             "gtask-2",
             None,
+            None,
             OutboxStatus::Prepared,
             None,
             NOW,
@@ -821,6 +975,248 @@ mod tests {
         let by_id = |id: &str| records.iter().find(|record| record.id == id).unwrap();
         assert_eq!(by_id(&first.id).status, OutboxStatus::Ready);
         assert_eq!(by_id(&second.id).status, OutboxStatus::RetryNeeded);
+    }
+
+    fn upsert_record(work: &Path, google_task_id: &str) -> OutboxRecord {
+        let note = work.join("tasks/active/task.md");
+        fs::create_dir_all(note.parent().unwrap()).unwrap();
+        fs::write(&note, "---\nstatus: active\nowner: Luca\n---\n# Ship it\n").unwrap();
+        enqueue_record(
+            work,
+            OutboxOp::Upsert,
+            "tasks/active/task.md",
+            google_task_id,
+            Some("list-7".to_string()),
+            Some(UpsertPayload {
+                title: "Ship it".to_string(),
+                notes: "File: tasks/active/task.md".to_string(),
+                due: Some("2026-08-31T00:00:00.000Z".to_string()),
+            }),
+            OutboxStatus::Ready,
+            Some("wa-1".to_string()),
+            NOW,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn upsert_args_insert_without_an_id_and_patch_with_one() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut record = upsert_record(tmp.path(), "");
+        let args = gws_args(&record);
+        assert_eq!(
+            args,
+            vec![
+                "tasks",
+                "tasks",
+                "insert",
+                "--params",
+                r#"{"tasklist":"list-7"}"#,
+                "--json",
+                r#"{"due":"2026-08-31T00:00:00.000Z","notes":"File: tasks/active/task.md","title":"Ship it"}"#,
+                "--format",
+                "json"
+            ]
+        );
+        // Once the task exists, converge with patch — never a second insert.
+        record.google_task_id = "g-new".to_string();
+        let args = gws_args(&record);
+        assert_eq!(args[2], "patch");
+        assert!(args.contains(&r#"{"task":"g-new","tasklist":"list-7"}"#.to_string()));
+    }
+
+    #[test]
+    fn a_cleared_due_is_sent_as_null_on_patch_but_omitted_on_insert() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut record = upsert_record(tmp.path(), "");
+        record.payload.as_mut().unwrap().due = None;
+        // Insert: nothing to clear, so `due` stays out of the body.
+        assert_eq!(
+            upsert_body(&record, false),
+            r#"{"notes":"File: tasks/active/task.md","title":"Ship it"}"#
+        );
+        // Patch: tasks.patch leaves an omitted field unchanged, so a due date
+        // the note no longer has must be cleared explicitly.
+        record.google_task_id = "g-new".to_string();
+        assert_eq!(
+            upsert_body(&record, true),
+            r#"{"due":null,"notes":"File: tasks/active/task.md","title":"Ship it"}"#
+        );
+        assert!(gws_args(&record).contains(&r#"{"due":null,"notes":"File: tasks/active/task.md","title":"Ship it"}"#.to_string()));
+    }
+
+    #[test]
+    fn upsert_patch_against_a_missing_task_recreates_instead_of_discharging() {
+        let tmp = tempfile::tempdir().unwrap();
+        let work_path = tmp.path().to_string_lossy().to_string();
+        let log = tmp.path().join("gws-args.log");
+        // 404 on patch, success on insert — the two calls this test drives.
+        let fake = write_fake_gws(
+            tmp.path(),
+            "gws-404-then-ok",
+            &format!(
+                "#!/bin/sh\necho \"$@\" >> {log}\nif echo \"$@\" | grep -q patch; then echo 'Error 404: task not found' >&2; exit 1; fi\necho '{{\"id\":\"g-recreated\"}}'\nexit 0\n",
+                log = log.display()
+            ),
+        );
+        upsert_record(tmp.path(), "g-stale");
+
+        // First drain: the patch 404s. The op is NOT satisfied by the task
+        // being gone, so the record survives with the stale id cleared.
+        let outcome = task_integrations_drain(
+            work_path.clone(),
+            NOW.to_string(),
+            Some(fake.to_string_lossy().to_string()),
+        )
+        .unwrap();
+        assert_eq!(outcome.failed, 1);
+        assert_eq!(outcome.drained, 0);
+        let record = &read_task_integrations(work_path.clone()).unwrap()[0];
+        assert_eq!(record.status, OutboxStatus::RetryNeeded);
+        assert_eq!(record.google_task_id, "");
+        assert!(record
+            .last_error
+            .as_deref()
+            .unwrap()
+            .starts_with("upsert_task_missing_recreating"));
+
+        // Second drain, once the backoff elapses: it inserts and writes the
+        // new id back into the note.
+        let outcome = task_integrations_drain(
+            work_path.clone(),
+            "2026-07-21T09:05:00+09:00".to_string(),
+            Some(fake.to_string_lossy().to_string()),
+        )
+        .unwrap();
+        assert_eq!(outcome.drained, 1);
+        let record = &read_task_integrations(work_path).unwrap()[0];
+        assert_eq!(record.status, OutboxStatus::Synced);
+        assert_eq!(record.google_task_id, "g-recreated");
+        assert!(fs::read_to_string(tmp.path().join("tasks/active/task.md"))
+            .unwrap()
+            .contains("googleTaskId: g-recreated"));
+        let logged = fs::read_to_string(&log).unwrap();
+        assert!(logged.contains("tasks tasks patch"));
+        assert!(logged.contains("tasks tasks insert"));
+    }
+
+    #[test]
+    fn a_404_on_the_recreated_insert_still_discharges_the_record() {
+        // The tasklist itself is gone: clearing the id cannot help, so the
+        // record must not retry forever.
+        let tmp = tempfile::tempdir().unwrap();
+        let work_path = tmp.path().to_string_lossy().to_string();
+        let fake = write_fake_gws(
+            tmp.path(),
+            "gws-404",
+            "#!/bin/sh\necho 'Error 404: tasklist not found' >&2\nexit 1\n",
+        );
+        upsert_record(tmp.path(), "");
+
+        let outcome = task_integrations_drain(
+            work_path.clone(),
+            NOW.to_string(),
+            Some(fake.to_string_lossy().to_string()),
+        )
+        .unwrap();
+        assert_eq!(outcome.drained, 1);
+        assert!(list_records(tmp.path()).unwrap().is_empty());
+    }
+
+    #[test]
+    fn upsert_create_writes_the_returned_id_back_into_the_note() {
+        let tmp = tempfile::tempdir().unwrap();
+        let work_path = tmp.path().to_string_lossy().to_string();
+        let fake = write_fake_gws(
+            tmp.path(),
+            "gws-insert",
+            "#!/bin/sh\necho '{\"id\":\"g-new\",\"title\":\"Ship it\"}'\nexit 0\n",
+        );
+        upsert_record(tmp.path(), "");
+
+        let outcome = task_integrations_drain(
+            work_path.clone(),
+            NOW.to_string(),
+            Some(fake.to_string_lossy().to_string()),
+        )
+        .unwrap();
+        assert_eq!(outcome.drained, 1);
+
+        let record = &read_task_integrations(work_path.clone()).unwrap()[0];
+        assert_eq!(record.status, OutboxStatus::Synced);
+        assert_eq!(record.google_task_id, "g-new");
+        // The note now carries both provider ids, unknown keys intact.
+        let raw = fs::read_to_string(tmp.path().join("tasks/active/task.md")).unwrap();
+        assert!(raw.contains("googleTaskId: g-new"));
+        assert!(raw.contains("googleTaskListId: list-7"));
+        assert!(raw.contains("owner: Luca"));
+        assert!(raw.contains("# Ship it"));
+
+        // Idempotent: nothing is due, so no second insert.
+        let second = task_integrations_drain(
+            work_path,
+            NOW.to_string(),
+            Some(fake.to_string_lossy().to_string()),
+        )
+        .unwrap();
+        assert_eq!(second.drained, 0);
+    }
+
+    #[test]
+    fn upsert_success_without_an_id_backs_off_instead_of_reporting_synced() {
+        let tmp = tempfile::tempdir().unwrap();
+        let work_path = tmp.path().to_string_lossy().to_string();
+        let fake = write_fake_gws(tmp.path(), "gws-empty", "#!/bin/sh\necho '{}'\nexit 0\n");
+        upsert_record(tmp.path(), "");
+
+        let outcome = task_integrations_drain(
+            work_path.clone(),
+            NOW.to_string(),
+            Some(fake.to_string_lossy().to_string()),
+        )
+        .unwrap();
+        assert_eq!(outcome.failed, 1);
+        assert_eq!(outcome.drained, 0);
+        let record = &read_task_integrations(work_path).unwrap()[0];
+        assert_eq!(record.status, OutboxStatus::RetryNeeded);
+        assert_eq!(record.google_task_id, "");
+        assert!(record
+            .last_error
+            .as_deref()
+            .unwrap()
+            .starts_with("upsert_response_missing_id"));
+    }
+
+    #[test]
+    fn upsert_update_leaves_an_existing_id_and_note_alone() {
+        let tmp = tempfile::tempdir().unwrap();
+        let work_path = tmp.path().to_string_lossy().to_string();
+        let log = tmp.path().join("gws-args.log");
+        let fake = write_fake_gws(
+            tmp.path(),
+            "gws-patch",
+            &format!(
+                "#!/bin/sh\necho \"$@\" >> {}\necho '{{\"id\":\"g-old\"}}'\nexit 0\n",
+                log.display()
+            ),
+        );
+        upsert_record(tmp.path(), "g-old");
+        let before = fs::read_to_string(tmp.path().join("tasks/active/task.md")).unwrap();
+
+        task_integrations_drain(
+            work_path.clone(),
+            NOW.to_string(),
+            Some(fake.to_string_lossy().to_string()),
+        )
+        .unwrap();
+
+        assert!(fs::read_to_string(&log).unwrap().contains("tasks tasks patch"));
+        assert_eq!(read_task_integrations(work_path).unwrap()[0].google_task_id, "g-old");
+        // An update never rewrites the note: the ids were already there.
+        assert_eq!(
+            fs::read_to_string(tmp.path().join("tasks/active/task.md")).unwrap(),
+            before
+        );
     }
 
     #[test]

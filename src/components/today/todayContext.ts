@@ -18,8 +18,11 @@ export interface TodayContextValue {
   /** TasksSettings.defaultCalendar — the target when
    *  `settings.calendarDestination === "defaultCalendar"`. */
   defaultCalendar?: string | null;
-  /** TasksSettings.gwsBinary override for the publish shell-out. */
+  /** TasksSettings.gwsBinary override for the gws shell-outs. */
   gwsBinary?: string | null;
+  /** TasksSettings.defaultTaskList — the Google Tasks list a web `upsert`
+   *  creates into when the note names none. */
+  defaultTaskList?: string | null;
   /** Loaded day snapshot. Null = degraded read-only mode (backend
    *  unavailable or `today.enabled` off); the shell still renders. */
   snapshot: TodaySnapshot | null;

@@ -74,6 +74,8 @@ async function renderSection(
     workPath: "/tmp/work",
     settings: { ...DEFAULT_MARU_SETTINGS.tasks.today, autoPlan: false },
     timezone: "Asia/Seoul",
+    gwsBinary: "/opt/gws",
+    defaultTaskList: "list-default",
     snapshot: null,
     loading: false,
     mutate: vi.fn(async () => null),
@@ -159,9 +161,17 @@ describe("TodaySyncStatus", () => {
     await act(async () => {
       apply.click();
     });
-    expect(webActionsApply).toHaveBeenCalledWith("/tmp/work", expect.any(String));
+    expect(webActionsApply).toHaveBeenCalledWith(
+      "/tmp/work",
+      expect.any(String),
+      "list-default",
+    );
     // The provider ops the receipts queued go out in the same click.
-    expect(taskIntegrationsDrain).toHaveBeenCalledWith("/tmp/work", expect.any(String));
+    expect(taskIntegrationsDrain).toHaveBeenCalledWith(
+      "/tmp/work",
+      expect.any(String),
+      "/opt/gws",
+    );
     expect(vi.mocked(readTaskIntegrations).mock.calls.length).toBe(loadsBefore + 1);
     // Result line reports every bucket, and points at Git Sync for the push.
     const result = container.querySelector(".today-sync-web-result")?.textContent ?? "";
@@ -216,7 +226,12 @@ describe("TodaySyncStatus", () => {
       retry.click();
     });
     expect(taskIntegrationsRetry).toHaveBeenCalledWith("/tmp/work", ["ob-9"], expect.any(String));
-    expect(taskIntegrationsDrain).toHaveBeenCalledWith("/tmp/work", expect.any(String));
+    // The configured gws binary reaches the drain; PATH lookup is a fallback.
+    expect(taskIntegrationsDrain).toHaveBeenCalledWith(
+      "/tmp/work",
+      expect.any(String),
+      "/opt/gws",
+    );
     expect(vi.mocked(readTaskIntegrations).mock.calls.length).toBe(loadsBefore + 1);
   });
 
