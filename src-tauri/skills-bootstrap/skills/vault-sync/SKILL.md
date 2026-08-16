@@ -40,7 +40,7 @@ SINCE_DATE=$(echo $LAST_SYNC | sed 's/\(....\)\(..\)\(..\)\(..\)\(..\)/\1-\2-\3 
 git log --oneline --since="$SINCE_DATE" --name-only -- . \
   ':!.omc' ':!.claude' ':!.obsidian' ':!meetings' ':!tasks' \
   | grep -v '^\w\{7\} ' | grep -v '^$' | grep -v '\.json$' \
-  | grep -v '_sys/' | grep -v 'uv.lock' | grep -v 'pyproject.toml' \
+  | grep -v '_meta/' | grep -v 'uv.lock' | grep -v 'pyproject.toml' \
   | sort -u
 
 # Submodule changes: detect which submodules have new commits
@@ -66,14 +66,14 @@ git submodule status --recursive | grep '^+' | awk '{print $2}'
 | meetings/ | meetings | (별도 스캐너) |
 | personal/ | personal (+STAIxBWLB, +assets, +me) | LOW |
 | dev/ | dev (+hwp-toolkit, +dotfiles, +rootfiles) | LOW |
-| _sys/ | skills, skills-private, service submodules | SKIP |
+| _meta/ | rules, registry, templates, scripts, reports, migrations | SKIP |
 
 Converted regular directories (`projects/rise/`, `projects/rise-research/`, `projects/oda-*`, `projects/ai-disaster/`, `teaching/courses/`) are covered by the root git diff scan, not submodule scan.
 
 ### Step 1.5: Filter & Classify
 
 **Filter rules** (reduce noise):
-- Skip: `_sys/`, `.json`, `uv.lock`, `pyproject.toml`, `*.css`, `*.js`, `*.html`
+- Skip: `_meta/`, `.json`, `uv.lock`, `pyproject.toml`, `*.css`, `*.js`, `*.html`
 - Skip: draft versions if final exists (e.g., `drafts/260331-v2-*` if `final/260402-v4-*` exists)
 - Skip: personal/, dev/ submodules unless explicitly requested
 - Include: `README.md`, `*-plan-*.md`, `*-report-*.md`, `*-summary-*.md`, `*-strategy-*.md`
@@ -86,9 +86,9 @@ Converted regular directories (`projects/rise/`, `projects/rise-research/`, `pro
 4. top score >= 3 → attach project name + `vault_note` to proposal
 5. Ambiguous → mark as "project: TBD (user confirm)"
 
-> **Entity resolution**: people/orgs/projects 해소는 `<workspace-root>/_sys/rules/context-enrichment.md` §2 절차 사용 (fast cache → registry → vault MOC, 충돌 시 vault 우선).
+> **Entity resolution**: people/orgs/projects 해소는 `<workspace-root>/_meta/rules/context-enrichment.md` §2 절차 사용 (fast cache → registry → vault MOC, 충돌 시 vault 우선).
 >
-> **Registry fallback**: score < 3 → content-based domain analysis → if still ambiguous, prompt user via disambiguation field. SSOT: `<workspace-root>/_sys/rules/project-registry-scoring.md`
+> **Registry fallback**: score < 3 → content-based domain analysis → if still ambiguous, prompt user via disambiguation field. SSOT: `<workspace-root>/_meta/rules/project-registry-scoring.md`
 
 **Deduplication** (multi-signal, 2026-04-16 revision):
 

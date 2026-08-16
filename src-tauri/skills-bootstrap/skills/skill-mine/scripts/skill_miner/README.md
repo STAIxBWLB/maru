@@ -31,7 +31,7 @@ skill_miner/
    - 합격: prompt 멤버 ≥ 3 AND novelty ≥ 0.3
    - novelty = 1 − Jaccard(후보 triggers, 기존 스킬 카탈로그)
    - rank = `log₂(size) × (unique_days/day_span) × cohesion × novelty`
-   - 출력: `_sys/reports/skill-candidates-YYMMDD.md`
+   - 출력: `_meta/reports/skill-candidates-YYMMDD.md`
 
 ## 사용법
 
@@ -63,15 +63,15 @@ cd <workspace-root>
 
 ## 출력
 
-- `_sys/reports/.cache/prompts-YYMMDD.jsonl` — Extract 단계
-- `_sys/reports/.cache/virtual-vault-YYMMDD/notes/*.md` — Materialize 단계 (프롬프트 + 사전 stub)
-- `_sys/reports/.cache/prompts-graph-YYMMDD.json` — Graph (NetworkX node_link + 커뮤니티 + god nodes)
-- `_sys/reports/skill-candidates-YYMMDD.md` — 최종 리포트
+- `_meta/reports/.cache/prompts-YYMMDD.jsonl` — Extract 단계
+- `_meta/reports/.cache/virtual-vault-YYMMDD/notes/*.md` — Materialize 단계 (프롬프트 + 사전 stub)
+- `_meta/reports/.cache/prompts-graph-YYMMDD.json` — Graph (NetworkX node_link + 커뮤니티 + god nodes)
+- `_meta/reports/skill-candidates-YYMMDD.md` — 최종 리포트
 
 ## 의존성
 
 이미 설치됨 (`~/.maru/skills/_builtin/envs/default/pyproject.toml`):
-- `graphifyy>=0.9.31` — tree-sitter 기반 AST (code mode 전용; 이 스킬은 wiki mode라 직접 사용 안 함)
+- `graphifyy>=0.4.18` — tree-sitter 기반 AST (code mode 전용; 이 스킬은 wiki mode라 직접 사용 안 함)
 - `networkx` — 그래프 구조 + Leiden/Louvain 커뮤니티
 - `graspologic` (try-except optional) — Leiden 구현
 - `pyyaml` — 사전·레지스트리 로딩

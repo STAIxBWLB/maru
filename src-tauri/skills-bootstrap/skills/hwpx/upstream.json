@@ -1,0 +1,6 @@
+{
+  "repo": "STAIxBWLB/hwp-cli",
+  "verified_release": "v0.7.1",
+  "cli_reference": "docs/manual/cli-reference.md",
+  "feature_gaps": "docs/design/12-feature-gaps.md"
+}

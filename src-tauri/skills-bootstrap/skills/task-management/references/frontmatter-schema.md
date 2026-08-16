@@ -50,7 +50,7 @@ packet. Actual vault writes require an explicit vault skill invocation.
 
 ## Cross-link / Backref Fields (create-path only)
 
-Set by context enrichment (`_sys/rules/context-enrichment.md` §4) when a task is
+Set by context enrichment (`_meta/rules/context-enrichment.md` §4) when a task is
 created, linking it back to its origin and related work:
 
 ```yaml

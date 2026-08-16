@@ -46,6 +46,7 @@
 
 ## 변경 이력
 
+- **2026-08-04 (경로 정정)**: 카탈로그는 워크스페이스가 아니라 **스킬 번들**에 산다. 현재 위치는 번들 루트의 `docs/slide-decks/`(배포 시 `~/.maru/skills/_builtin/docs/slide-decks/`). 아래 2026-04-30 항목의 `_sys/` 경로는 당시 기록이며 현재 유효하지 않음
 - **2026-04-30 (gpt-images-deck)**: ChatGPT Images 2.0 / Codex native image generation을 대상으로 하는 `gpt-images-deck` 스킬 추가. 카탈로그를 `DESIGN.md`·`slide_plan.json`·`slide_prompts.json`·페이지 이미지 생성 흐름으로 재사용
 - **2026-04-30 (rename)**: `_sys/docs/notebooklm/` → `_sys/docs/slide-decks/` 폴더명 변경. 플랫폼 무관 카탈로그 성격 명료화. `canva-deck` 스킬 추가에 따라 단일 소스를 두 스킬이 공유
 - **2026-04-30 (init)**: 14종 스타일 카탈로그 초기 작성 (Anti-Gravity, Refined Minimal Portfolio, Blood Orange Agency, Comic Story, Neo-Retro Dev, Yellow Fashion Mag, Red Accent Editorial, Royal Watercolor, Premium Mockup, Sports Energy, Sculpture Pop, Constructivism Tech, Vitamin Pop, Flat Illustration)

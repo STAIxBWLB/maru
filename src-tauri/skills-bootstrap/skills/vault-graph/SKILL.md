@@ -21,7 +21,7 @@ Knowledge graph build, query, report, and Graphify MCP setup for vault notes and
 | Python | `~/.maru/env/.venv/bin/python` |
 | Builder | `~/.maru/skills/_builtin/lib/build-graph.py` |
 | Skill runner | `~/.maru/skills/vault-graph/scripts/run.sh` |
-| graphifyignore template | `<workspace-root>/_sys/templates/graphifyignore` |
+| graphifyignore template | `<workspace-root>/_meta/templates/graphifyignore` |
 
 ## Commands
 
@@ -58,7 +58,7 @@ Options:
    - `--code <path>` → `<path>`, `--mode code`
    - `--workspace` → `<vault.path>` (target) + `--work-root <workspace-root>`, `--mode wiki`
    - no option → current directory, `--mode auto`
-2. For code mode, ensure `.graphifyignore` exists. If missing, offer to copy `<workspace-root>/_sys/templates/graphifyignore`.
+2. For code mode, ensure `.graphifyignore` exists. If missing, offer to copy `<workspace-root>/_meta/templates/graphifyignore`.
 3. Execute:
    ```bash
    ~/.maru/skills/vault-graph/scripts/run.sh \
@@ -121,7 +121,7 @@ Options:
 1. Resolve target path, default current directory.
 2. If `.graphifyignore` is missing, copy:
    ```bash
-   cp <workspace-root>/_sys/templates/graphifyignore <target>/.graphifyignore
+   cp <workspace-root>/_meta/templates/graphifyignore <target>/.graphifyignore
    ```
 3. Run `/vault-graph build --code <target>`.
 4. For large projects, optionally add project graph MCP config.

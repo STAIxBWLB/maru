@@ -1,6 +1,6 @@
 """Build a NetworkX graph from the materialized virtual wiki-vault.
 
-Reuses primitives from ~/.maru/skills/_builtin/lib/build-graph.py so vault graph and
+Reuses primitives from the bundle's own lib/build-graph.py so vault graph and
 skill mining stay on the same graph pipeline.
 """
 from __future__ import annotations
@@ -13,15 +13,22 @@ import networkx as nx
 from networkx.readwrite import json_graph
 
 
-def _find_workspace_root() -> Path:
+def find_bundle_root() -> Path:
+    """Root of the skills bundle this package was installed into.
+
+    `lib/build-graph.py` and the `skills/` catalog are bundle assets, not
+    workspace assets: in-repo the bundle root is the repo root, deployed it is
+    e.g. ~/.maru/skills/_builtin. Anchor on `lib/build-graph.py` so both
+    layouts resolve without a config lookup.
+    """
     for path in Path(__file__).resolve().parents:
-        if (path / "workspace.config.yaml").is_file():
+        if (path / "lib" / "build-graph.py").is_file():
             return path
-    raise RuntimeError("Cannot find workspace.config.yaml from skill-mine location")
+    raise RuntimeError("Cannot find the skills bundle root from skill-mine location")
 
 
-WORK_ROOT = _find_workspace_root()
-BUILD_GRAPH_PATH = WORK_ROOT / "_sys" / "skills" / "lib" / "build-graph.py"
+BUNDLE_ROOT = find_bundle_root()
+BUILD_GRAPH_PATH = BUNDLE_ROOT / "lib" / "build-graph.py"
 
 
 def _load_build_graph_module():

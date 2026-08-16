@@ -31,8 +31,9 @@
 | `hwpx` `hwp` | ✓ | hwp5→hwp5 무손실 왕복(바이트 동일) |
 | `pdf` | ✓ | 텍스트 선택가능(권장: `to-pdf`) |
 | `md` `html` `json` `odt` | ✓ / ~ | 링크 URL·이미지·각주 마커·병합셀·중첩셀·리스트 평탄화 손실 있음(GH-1~7). markdown-HTML은 `to-html` |
-| `docx` | ✗ | 미지원 (수요 최상위지만 부재, GJ-1) |
-| `hml`(HWPML), HWP 3.x, RTF, CSV, txt | ✗ | (GJ-2~6) |
+| `docx` | ✓ / ~ | 출력 전용(GJ-1, hwp-cli v0.7.0+). 수식은 스크립트 텍스트로 대체, 페이지 레이아웃 재현 없음. **읽기는 미지원** |
+| `txt` `csv` | ✓ | 텍스트 추출 |
+| `hml`(HWPML), HWP 3.x, RTF | ✗ | (GJ-2~6) |
 
 ## 필드·템플릿·편집
 
@@ -42,7 +43,8 @@
 | 필드(누름틀) 나열(`fields`), 값 채우기(`edit --set-field`) | ✓ | 기존 필드 값만(GF-3) |
 | 책갈피 나열(`bookmarks`) | ✓ | |
 | 12종 필드 파싱 | ✓ | 미지 필드는 %unk, 색인/루비/겹침은 미파싱(GF-1/2) |
-| 셀 병합·분할, 열 추가/삭제, 표 삽입, 개체 삭제 | ✗ | edit 미지원(GK-1~3,8) |
+| 셀 병합·분할, 행/열 추가·삭제 | ✓ | `edit --merge-cells/--split-cell/--add-row/--add-col/--delete-row/--delete-col` |
+| 표 삽입, 개체 삭제 | ✗ | edit 미지원(GK-3,8) |
 | 머리말/꼬리말 편집, 페이지 설정, 명명 스타일 | ✗ | (GK-5~7) |
 | 수식 저작·편집 | ✗ | 읽기·렌더 전용(`equation-syntax.md`) |
 

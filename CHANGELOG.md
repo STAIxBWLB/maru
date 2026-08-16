@@ -8,6 +8,17 @@ because releases cut frequently during active development. Versions before
 Dates are the release-tag dates. Only `feat`/`fix`-level changes are listed;
 `chore(release)` version bumps and merge commits are omitted.
 
+## v0.4.53 - 2026-08-16 - Geometric Maru Seal
+
+- **Maru now carries a modern Korean seal across every surface (#243).** The
+  selected diagonal `마루` composition uses larger, heavier, modular letter
+  geometry for a fuller seal impression while preserving even breathing room
+  at favicon scale. One canonical vector system now supplies micro, maskable,
+  monochrome, web, macOS, Windows, Linux, iOS, and Android variants;
+  deterministic generation and CI checks prevent platform icons from drifting.
+  The in-app top bar and browser metadata use the same mark, with responsive
+  regression coverage for the restored Tasks calendar layouts.
+
 ## v0.4.52 - 2026-08-16 - Task Sync and Responsive Calendar Hotfix
 
 - **Web task action receipts now complete the desktop sync loop (#236).** Maru

@@ -1,7 +1,7 @@
 ---
 name: notebooklm-deck
 description: |
-  NotebookLM Slide Deck / Visual Overview용 디자인 시스템 프롬프트를 쉽게 선택·조립·복사할 수 있게 돕는 스킬. _sys/docs/slide-decks/에 보관된 14종 스타일 카탈로그(Anti-Gravity, Refined Minimal Portfolio, Blood Orange Agency, Comic Story, Neo-Retro Dev, Yellow Fashion Mag, Red Accent Editorial, Royal Watercolor, Premium Mockup, Sports Energy, Sculpture Pop, Constructivism Tech, Vitamin Pop, Flat Illustration)에서 발표 맥락에 맞는 스타일을 추천하고, Master Prompt + Topic/Source + 스타일별 추가 파라미터(Palette, Protagonist 등)를 한 블록으로 조립하여 사용자가 NotebookLM Studio에 통째로 붙여넣을 수 있게 한다.
+  NotebookLM Slide Deck / Visual Overview용 디자인 시스템 프롬프트를 쉽게 선택·조립·복사할 수 있게 돕는 스킬. <skills-bundle>/docs/slide-decks/에 보관된 14종 스타일 카탈로그(Anti-Gravity, Refined Minimal Portfolio, Blood Orange Agency, Comic Story, Neo-Retro Dev, Yellow Fashion Mag, Red Accent Editorial, Royal Watercolor, Premium Mockup, Sports Energy, Sculpture Pop, Constructivism Tech, Vitamin Pop, Flat Illustration)에서 발표 맥락에 맞는 스타일을 추천하고, Master Prompt + Topic/Source + 스타일별 추가 파라미터(Palette, Protagonist 등)를 한 블록으로 조립하여 사용자가 NotebookLM Studio에 통째로 붙여넣을 수 있게 한다.
   트리거: notebooklm, NotebookLM 슬라이드, 슬라이드 덱 프롬프트, 발표 스타일, slide deck style, slide style, presentation prompt, visual overview, /notebooklm-deck, 슬라이드 스타일 추천, 발표 디자인 시스템, deck prompt, 슬라이드 디자인 프롬프트, 마스터 프롬프트, NotebookLM 프롬프트, deck style picker
 ---
 
@@ -9,7 +9,8 @@ description: |
 
 NotebookLM Studio의 Slide Deck / Visual Overview 생성 시 일관된 디자인 시스템을 강제하기 위한 14종 마스터 프롬프트 카탈로그를 쉽게 선택·조립한다.
 
-- 카탈로그 위치: `_sys/docs/slide-decks/`
+- 카탈로그 위치: `<skills-bundle>/docs/slide-decks/`
+- `<skills-bundle>`: 이 스킬이 설치된 스킬 번들 루트. 배포 시 `~/.maru/skills/_builtin/`, 개발 중에는 skills repo 루트. 워크스페이스(`~/workspace/work/`) 경로가 아니다.
 - 단일 진입점: 본 스킬 (`notebooklm-deck`)
 - 출력: NotebookLM에 통째로 붙여넣을 수 있는 완성된 프롬프트 블록 1개
 
@@ -38,7 +39,7 @@ NotebookLM Studio의 Slide Deck / Visual Overview 생성 시 일관된 디자인
 | 커뮤니티·청년 강의 (organic SNS pop) | **Vitamin Pop** | `vitamin-pop.md` |
 | 안내 매뉴얼·가이드·리터러시 (picture-book) | **Flat Illustration** | `flat-illustration.md` |
 
-전체 카탈로그 인덱스: `_sys/docs/slide-decks/README.md`
+전체 카탈로그 인덱스: `<skills-bundle>/docs/slide-decks/README.md`
 스타일 결정 트리: [`references/style-decision-tree.md`](references/style-decision-tree.md)
 
 ## 워크플로우
@@ -62,7 +63,7 @@ NotebookLM Studio의 Slide Deck / Visual Overview 생성 시 일관된 디자인
 
 ### 3단계 — Master Prompt 로드
 
-선택된 스타일의 파일을 `_sys/docs/slide-decks/{slug}.md`에서 Read.
+선택된 스타일의 파일을 `<skills-bundle>/docs/slide-decks/{slug}.md`에서 Read.
 파일 안의 `📋 Master Prompt` 섹션의 코드 블록(``` ``` 사이)만 추출해 사용한다.
 
 ### 4단계 — 추가 파라미터 수집 (스타일별)
@@ -111,7 +112,7 @@ Topic / Source: {사용자가 입력한 주제}
 ### 예시 1 — 사용자가 스타일 직접 지정
 > "regional innovation 2년차 결과 보고를 Refined Minimal Portfolio 스타일로 NotebookLM 프롬프트 만들어줘."
 
-→ 1·2단계 스킵 → 3단계: `_sys/docs/slide-decks/refined-minimal-portfolio.md` Read → 4단계: Topic만 추가 → 5단계 출력. 추천 패턴 조합: "Text + Data Emphasis → Vertical Timeline → Chart → Two Columns(Problem vs Solution)"
+→ 1·2단계 스킵 → 3단계: `<skills-bundle>/docs/slide-decks/refined-minimal-portfolio.md` Read → 4단계: Topic만 추가 → 5단계 출력. 추천 패턴 조합: "Text + Data Emphasis → Vertical Timeline → Chart → Two Columns(Problem vs Solution)"
 
 ### 예시 2 — vibe만 제공
 > "AI 윤리 강의용 슬라이드 만들 건데 학생들이 어렵게 느끼지 않게 하고 싶어. NotebookLM 프롬프트 줘."
@@ -125,9 +126,9 @@ Topic / Source: {사용자가 입력한 주제}
 
 ## 운영 원칙
 
-- **카탈로그 단일 소스**: `_sys/docs/slide-decks/`만 참조. 다른 곳에 동일 프롬프트 복제 금지
+- **카탈로그 단일 소스**: `<skills-bundle>/docs/slide-decks/`만 참조. 다른 곳에 동일 프롬프트 복제 금지
 - **언어 정책 보존**: Master Prompt 안의 *"the language should be what users said in the prompt"* 문구는 NotebookLM이 입력 언어를 자동 감지하므로 절대 삭제하지 말 것
-- **사용자 입력 우선**: 사용자가 14종에 없는 새 스타일을 원하면, 우선 가까운 스타일을 추천하되, 정착할 가치가 있으면 새 파일 추가를 제안 (`_sys/docs/slide-decks/{kebab-case}.md` + README 업데이트)
+- **사용자 입력 우선**: 사용자가 14종에 없는 새 스타일을 원하면, 우선 가까운 스타일을 추천하되, 정착할 가치가 있으면 새 파일 추가를 제안 (`<skills-bundle>/docs/slide-decks/{kebab-case}.md` + README 업데이트)
 - **vault 연동 금지**: 본 스킬은 work/ 내부 자원만 다룸. vault 노트 추출이 필요하면 별도로 `/extract` 호출
 - **출력 안정성**: 항상 코드 블록(```)으로 감싸 출력. 사용자가 raw text로 복사할 수 있도록 유지
 

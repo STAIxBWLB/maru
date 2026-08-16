@@ -76,13 +76,13 @@ If any check fails:
    - **Note**: `keywords` field is NOT carried forward to vault notes — it exists only for route scoring reproducibility
 9. **Append EXTRACT event to vault/log** (ingest chain audit trail)
 
-> **Registry fallback**: when project registry scoring < 3 → content-based domain analysis → if still ambiguous, prompt user. SSOT: `<workspace-root>/_sys/rules/project-registry-scoring.md`
+> **Registry fallback**: when project registry scoring < 3 → content-based domain analysis → if still ambiguous, prompt user. SSOT: `<workspace-root>/_meta/rules/project-registry-scoring.md`
 
 ## Log Append (Step 9 — REQUIRED)
 
 Every note created or updated by /vault-extract must produce one `log` line. `vault/log` is a plain logfile (no extension): append via direct fs write (`>>`), the sole exception to MCP-only vault writes.
 
-**Format** (see `<workspace-root>/_sys/rules/ingest-chain.md` §"vault/log 포맷"):
+**Format** (see `<workspace-root>/_meta/rules/ingest-chain.md` §"vault/log 포맷"):
 
 ```
 YYYY-MM-DD HH:MM  EXTRACT  <project>  <source> → <vault/notes/x.md>  — <type>

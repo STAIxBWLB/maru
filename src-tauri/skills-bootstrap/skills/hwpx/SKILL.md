@@ -12,7 +12,9 @@ description: >
   회의록, 한글 문서 작성, .hwpx 생성/수정, 수식, 필드, 누름틀, 책갈피, 하이퍼링크, 이미지 삽입,
   표 행 추가, 표 열 추가, 표 행 삭제, 표 열 삭제, 셀 병합, 셀 분할, 문단 정렬, 글자 서식,
   공문 써줘, 기안문 만들어줘, 한컴 문서
-  사용하지 않음: 바이너리 .hwp 직접 파싱 (→ hwp-cli; read는 자동 위임), .docx (→ docx 스킬), .pdf
+  docx 출력(convert --to docx, hwp-cli v0.7.0+).
+  사용하지 않음: 바이너리 .hwp 직접 파싱 (→ hwp-cli; read는 자동 위임),
+  .docx 읽기·편집 (→ docx 스킬; 이 스킬은 docx 출력만), .pdf
 ---
 
 # hwpx — HWPX 공문서/기안문 authoring toolkit
@@ -569,7 +571,8 @@ hwp-cli 표면을 그대로 위임하는 얇은 커맨드. `.hwp`·`.hwpx` 모�
 ./hwpx fields doc.hwpx                   # 누름틀(필드) 이름·종류·값 (--json)
 ./hwpx bookmarks doc.hwpx                # 책갈피 목록 (--json)
 ./hwpx render doc.hwpx -o page.png       # 페이지 이미지 (--pages 1-3 --dpi 150 --format png|svg)
-./hwpx convert doc.hwpx --to md -o d.md  # 범용 변환 (hwp|hwpx|md|json|html|pdf|odt; --strict). md는 이미지 추출(--media-dir 지정 가능)
+./hwpx convert doc.hwpx --to md -o d.md  # 범용 변환 (hwp|hwpx|md|json|html|pdf|odt|txt|csv|docx; --strict). md는 이미지 추출(--media-dir 지정 가능)
+./hwpx convert doc.hwpx --to docx -o d.docx  # Word 출력 (hwp-cli v0.7.0+, 출력 전용 — .docx 입력은 불가)
 ```
 
 **JSON IR 재생성(regen)** — 기존 문서를 편집이 아니라 처음부터 똑같이 신규 생성할 수 있다:
@@ -663,6 +666,11 @@ v0.3.0에서 `<hp:equation>` + `hp:sz`/`hp:pos`/`hp:script` 방출로 스크립�
   **CLI 표면 정본**: `~/workspace/work/dev/hwp-cli/docs/manual/cli-reference.md`
   (clap 정의에서 자동 생성, CI가 코드-문서 동기화를 강제). 플래그가 이 SKILL.md와 어긋나면
   그쪽이 맞다.
+
+  **업스트림 동기화**: 이 스킬이 검증된 hwp-cli 릴리스는 `upstream.json`의
+  `verified_release`에 기록한다. `.github/workflows/upstream-hwp-cli.yml`이 매일 최신 릴리스와
+  비교해 어긋나면 `upstream` 라벨로 이슈를 연다(알림만 하고 CI는 막지 않는다). 스킬을 새 릴리스에
+  맞춘 PR에서 `verified_release`를 함께 올려야 알림이 멎는다.
 - **선택**: LibreOffice + H2Orestart 확장 (`to-pdf --engine soffice` 벡터 PDF용; 기본 hwp-cli 경로엔 불필요)
 - **선택**: Hancom Office 한/글 (템플릿 편집/검수용)
 

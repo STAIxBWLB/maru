@@ -95,5 +95,5 @@ YYYY-MM-DD HH:MM  LEARN  <project>  <source> → <vault/notes/x.md>  — <note>
 ## Related
 
 - `<workspace-root>/CLAUDE.md` §"Query→Wiki 환원 루프" — the policy
-- `<workspace-root>/_sys/rules/ingest-chain.md` §"vault/log 포맷" — log line format
+- `<workspace-root>/_meta/rules/ingest-chain.md` §"vault/log 포맷" — log line format
 - `/vault-extract`, `/vault-connect` — downstream skills invoked in steps 4-5
