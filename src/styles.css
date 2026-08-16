@@ -18881,120 +18881,6 @@ button.git-badge:hover {
   }
 }
 
-@container taskmain (max-width: 899px) {
-  .tasks-header {
-    grid-template-columns: minmax(0, 1fr) auto;
-    gap: 10px 12px;
-  }
-
-  .tasks-header-actions {
-    grid-column: 1 / -1;
-    justify-content: flex-start;
-  }
-
-  .tasks-toolbar {
-    flex-wrap: wrap;
-  }
-
-  .tasks-search {
-    min-width: min(220px, 100%);
-  }
-
-  .cal-toolbar {
-    grid-template-columns: minmax(0, 1fr) auto;
-  }
-
-  .cal-toolbar-right {
-    grid-column: 1 / -1;
-    justify-content: flex-start;
-    flex-wrap: wrap;
-  }
-}
-
-@container taskmain (max-width: 729px) {
-  .unified-calendar,
-  .unified-calendar.resizable-agenda {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .cal-agenda-resizer {
-    display: none;
-  }
-
-  .cal-agenda-pane {
-    display: none;
-    position: absolute;
-    z-index: 15;
-    inset: 0 auto 0 0;
-    width: min(var(--calendar-agenda-width, 280px), calc(100% - 40px));
-    border-right: 1px solid var(--cal-line);
-    box-shadow: 12px 0 28px color-mix(in srgb, var(--ink) 16%, transparent);
-  }
-
-  .unified-calendar.agenda-open .cal-agenda-pane {
-    display: block;
-  }
-
-  .cal-agenda-toggle {
-    display: inline-flex;
-    position: absolute;
-    z-index: 14;
-    top: 14px;
-    left: 12px;
-    align-items: center;
-    justify-content: center;
-    width: 28px;
-    height: 28px;
-    border: 1px solid var(--cal-line);
-    border-radius: 7px;
-    background: var(--cal-cell-bg);
-    color: var(--cal-ink);
-  }
-
-  .unified-calendar.agenda-open .cal-agenda-toggle {
-    z-index: 17;
-    left: min(calc(var(--calendar-agenda-width, 280px) - 38px), calc(100% - 78px));
-  }
-
-  .unified-calendar.agenda-open .cal-agenda-backdrop {
-    display: block;
-    position: absolute;
-    z-index: 13;
-    inset: 0;
-    border: 0;
-    background: color-mix(in srgb, var(--ink) 18%, transparent);
-  }
-
-  .cal-toolbar {
-    padding-left: 50px;
-  }
-}
-
-@container taskmain (max-width: 559px) {
-  .tasks-header {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .tasks-view-switcher,
-  .tasks-header-actions {
-    justify-self: start;
-  }
-
-  .cal-toolbar {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .cal-toolbar-center,
-  .cal-toolbar-right {
-    grid-column: 1;
-    justify-content: flex-start;
-  }
-
-  .cal-search {
-    min-width: 0;
-  }
-}
-
 @media (max-width: 980px) {
   .meetings-pane,
   .meetings-content-grid {
@@ -20045,6 +19931,120 @@ button.git-badge:hover {
 .cat-meeting-type-3 { --cal-cat: var(--cal-cat-meeting-3); }
 .cat-meeting-type-4 { --cal-cat: var(--cal-cat-meeting-4); }
 .cat-meeting-type-5 { --cal-cat: var(--cal-cat-meeting-5); }
+
+@container taskmain (max-width: 899px) {
+  .tasks-header {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 10px 12px;
+  }
+
+  .tasks-header-actions {
+    grid-column: 1 / -1;
+    justify-content: flex-start;
+  }
+
+  .tasks-toolbar {
+    flex-wrap: wrap;
+  }
+
+  .tasks-search {
+    min-width: min(220px, 100%);
+  }
+
+  .cal-toolbar {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .cal-toolbar-right {
+    grid-column: 1 / -1;
+    justify-content: flex-start;
+    flex-wrap: wrap;
+  }
+}
+
+@container taskmain (max-width: 729px) {
+  .unified-calendar,
+  .unified-calendar.resizable-agenda {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .cal-agenda-resizer {
+    display: none;
+  }
+
+  .cal-agenda-pane {
+    display: none;
+    position: absolute;
+    z-index: 15;
+    inset: 0 auto 0 0;
+    width: min(var(--calendar-agenda-width, 280px), calc(100% - 40px));
+    border-right: 1px solid var(--cal-line);
+    box-shadow: 12px 0 28px color-mix(in srgb, var(--ink) 16%, transparent);
+  }
+
+  .unified-calendar.agenda-open .cal-agenda-pane {
+    display: block;
+  }
+
+  .cal-agenda-toggle {
+    display: inline-flex;
+    position: absolute;
+    z-index: 14;
+    top: 14px;
+    left: 12px;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    border: 1px solid var(--cal-line);
+    border-radius: 7px;
+    background: var(--cal-cell-bg);
+    color: var(--cal-ink);
+  }
+
+  .unified-calendar.agenda-open .cal-agenda-toggle {
+    z-index: 17;
+    left: min(calc(var(--calendar-agenda-width, 280px) - 38px), calc(100% - 78px));
+  }
+
+  .unified-calendar.agenda-open .cal-agenda-backdrop {
+    display: block;
+    position: absolute;
+    z-index: 13;
+    inset: 0;
+    border: 0;
+    background: color-mix(in srgb, var(--ink) 18%, transparent);
+  }
+
+  .cal-toolbar {
+    padding-left: 50px;
+  }
+}
+
+@container taskmain (max-width: 559px) {
+  .tasks-header {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .tasks-view-switcher,
+  .tasks-header-actions {
+    justify-self: start;
+  }
+
+  .cal-toolbar {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .cal-toolbar-center,
+  .cal-toolbar-right {
+    grid-column: 1;
+    justify-content: flex-start;
+  }
+
+  .cal-search {
+    min-width: 0;
+  }
+}
 
 /* ─── Maru E2E flow pane ─────────────────────────────────────────── */
 

@@ -1,5 +1,5 @@
 import { Loader2, PanelLeft } from "lucide-react";
-import { useState, type CSSProperties, type ReactNode } from "react";
+import { useId, useState, type CSSProperties, type ReactNode } from "react";
 import { MonthGrid } from "./MonthGrid";
 import { WeekGrid } from "./WeekGrid";
 import { DayAgenda } from "./DayAgenda";
@@ -66,6 +66,7 @@ export function UnifiedCalendarView<T>({
 }: UnifiedCalendarViewProps<T>) {
   const todayDate = today ?? new Date();
   const [agendaOpen, setAgendaOpen] = useState(false);
+  const agendaPaneId = `calendar-agenda-${useId().replace(/:/g, "")}`;
   const resizableAgenda = Boolean(onAgendaWidthChange && onAgendaWidthCommit);
   return (
     <section
@@ -87,13 +88,14 @@ export function UnifiedCalendarView<T>({
       <button
         type="button"
         className="cal-agenda-toggle"
-        aria-label={t(locale, "calendar.agenda.open")}
+        aria-label={t(locale, agendaOpen ? "calendar.agenda.close" : "calendar.agenda.open")}
         aria-expanded={agendaOpen}
+        aria-controls={agendaPaneId}
         onClick={() => setAgendaOpen((open) => !open)}
       >
         <PanelLeft size={15} />
       </button>
-      <div className="cal-agenda-pane">
+      <div id={agendaPaneId} className="cal-agenda-pane">
         <UpcomingEventsSidebar
           events={events}
           view={view}
