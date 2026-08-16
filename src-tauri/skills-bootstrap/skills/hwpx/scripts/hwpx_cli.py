@@ -385,6 +385,30 @@ def _supports_new_preset(binary: str) -> bool:
     return proc.returncode == 0 and "--preset" in help_text
 
 
+@functools.lru_cache(maxsize=None)
+def _supports_convert_format(binary: str, fmt: str) -> bool:
+    """해당 hwp-cli의 `convert --to`가 이 포맷을 실제로 받는지 확인한다.
+
+    `_supports_new_preset`과 같은 이유로 버전 번호가 아니라 능력을 직접 묻는다.
+
+    help 안의 **모든** `possible values` 목록을 합쳐서 본다. `--to` 것만 집으려 들면
+    앞서 나오는 `--lang`의 `[en, ko]`를 잡아 멀쩡한 바이너리를 막는다. 오탐(막지 않고
+    통과)은 hwp-cli가 어차피 거부하므로 무해하지만, 미탐(동작하는 바이너리를 막음)은
+    사용자를 막다른 길로 보낸다.
+    """
+    try:
+        proc = subprocess.run([binary, "convert", "--help"], capture_output=True, timeout=5)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    if proc.returncode != 0:
+        return False
+    help_text = proc.stdout.decode("utf-8", "ignore") + "\n" + proc.stderr.decode("utf-8", "ignore")
+    lists = re.findall(r"possible values:\s*([^\]]+)\]", help_text)
+    if not lists:  # 목록을 못 읽으면 막지 않는다 — 시도해 보고 hwp-cli가 판정하게 둔다
+        return True
+    return any(fmt in {t.strip() for t in group.split(",")} for group in lists)
+
+
 @functools.lru_cache(maxsize=1)
 def _find_hwp_cli_with_new_preset() -> str | None:
     """`new --preset`을 제공하는 hwp-cli 중 가장 높은 버전을 선택한다.
@@ -1162,11 +1186,22 @@ def cmd_render(args) -> int:
 
 
 def cmd_convert(args) -> int:
-    """범용 포맷 변환 — hwp-cli `convert` 위임 (hwpx/md/json/odt 등).
+    """범용 포맷 변환 — hwp-cli `convert` 위임 (hwpx/md/json/odt/docx 등).
 
     PDF는 `to-pdf`(soffice 폴백 포함), markdown-HTML은 `to-html`이 더 편리하다.
+    docx는 출력 전용(hwp-cli v0.7.0+) — .docx를 입력으로 넣을 수는 없다.
     """
     src = _ensure_file(args.file)
+    # 구버전 바이너리에서 `--to docx`는 clap이 알 수 없는 값으로 거부하며, 그 메시지만
+    # 봐서는 업그레이드가 필요하다는 걸 알기 어렵다. 능력을 먼저 물어 안내한다.
+    tool = _hwp_cli_or_die()
+    if not _supports_convert_format(tool, args.to):
+        _die(
+            1,
+            f"{tool} 의 convert가 `--to {args.to}`를 지원하지 않음"
+            + (" (docx 출력은 hwp-cli v0.7.0 이상)" if args.to == "docx" else "")
+            + ". `brew update && brew upgrade hwp` 또는 HWP_CLI로 신버전 지정할 것",
+        )
     out = Path(args.output) if args.output else src.with_suffix(f".{args.to}")
     cmd = ["convert", str(src), "--to", args.to, "-o", str(out)]
     if getattr(args, "media_dir", None):
@@ -1545,7 +1580,8 @@ def _build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("convert", help="범용 변환 (hwpx/md/json/odt 등) — hwp-cli convert. pdf→to-pdf, html→to-html 권장")
     s.add_argument("file")
     s.add_argument("--to", required=True,
-                   choices=["hwp", "hwpx", "md", "json", "html", "odt", "pdf"], help="출력 포맷")
+                   choices=["hwp", "hwpx", "md", "json", "html", "odt", "pdf", "txt", "csv", "docx"],
+                   help="출력 포맷 (docx는 출력 전용 — 읽기는 불가)")
     s.add_argument("-o", "--output", help="출력 (생략 시 <in>.<to>)")
     s.add_argument("--media-dir", dest="media_dir", default=None,
                    help="(md) 이미지 추출 디렉터리 — 기본 <출력스템>.media, 상대경로는 출력 파일 기준")

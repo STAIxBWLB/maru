@@ -10,7 +10,7 @@ description: Run seed/register -> extract -> connect -> lint pipeline for vault 
 
 Batch process inbox items or specified work targets through the full pipeline. This skill owns the old seed/batch orchestration surface; there is no separate seed or ralph skill.
 
-> **Registry fallback**: when project registry scoring < 3 → content-based domain analysis → prompt user. SSOT: `<workspace-root>/_sys/rules/project-registry-scoring.md`
+> **Registry fallback**: when project registry scoring < 3 → content-based domain analysis → prompt user. SSOT: `<workspace-root>/_meta/rules/project-registry-scoring.md`
 
 ## Input
 - target: `inbox`, a specific vault inbox item, a work file, or a work directory

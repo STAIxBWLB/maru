@@ -2,11 +2,10 @@
 name: draft-writer
 description: >
   Public-safe draft-writing skill. Use when turning task candidates into
-  reviewable document drafts written directly into the configured drafts
-  scratchpad collection, typically from a scheduled headless run. Writes only
-  under `$MARU_DRAFTS` (the Maru-resolved absolute collection root): it never
-  routes inbox items, never touches confirmed workspace trees, and never sends
-  anything.
+  reviewable document drafts written directly into the drafts scratchpad
+  collection, typically from a scheduled headless run. Writes only under the
+  configured scratchpad drafts collection: it never routes inbox items, never
+  touches confirmed workspace trees, and never sends anything.
 ---
 
 # Draft Writer
@@ -41,19 +40,20 @@ Maru to ingest. Maru adopts any markdown in the collection on the next listing.
 {
   "schemaVersion": "maru_draft_writer_v1",
   "summary": "short batch summary",
-  "written": ["$MARU_DRAFTS/260801-reply-koica-budget.md"],
+  "written": ["scratchpad/drafts/260801-reply-koica-budget.md"],
   "skipped": [{ "title": "...", "reason": "below threshold | already exists | no context" }]
 }
 ```
 
 ## Output file
 
-Path: `$MARU_DRAFTS/<YYMMDD>-<type>-<slug>.md`, where `$MARU_DRAFTS` is injected
-by Maru for the owning workspace and `<type>` comes from the workspace
-document-type vocabulary (`reply`, `report`, `plan`, `memo`, ...). `<slug>` is a
-short description. Follow the workspace naming rule: no spaces, lowercase
-ASCII or Hangul, hyphen-separated. Never substitute the default
-`scratchpad/drafts/` spelling when `$MARU_DRAFTS` points elsewhere.
+Path: `<drafts>/<YYMMDD>-<type>-<slug>.md`.
+
+`<drafts>` is `<paths.scratchpad>/<scratchpad.drafts_subdir>`, resolved per
+`~/.maru/skills/_builtin/lib/scratchpad_adapter.md` (default `scratchpad/drafts`).
+`<type>` comes from the workspace document-type vocabulary (`reply`, `report`,
+`plan`, `memo`, ...) and `<slug>` is a short description. Follow the workspace
+naming rule: no spaces, lowercase ASCII or Hangul, hyphen-separated.
 
 **Never overwrite an existing file.** If the path is taken, the candidate was
 already drafted; skip it and record it in `skipped`.
@@ -123,9 +123,10 @@ and figures, or pre-link related documents). Do not echo the section back.
 
 ## Run contract
 
-- Write **only** under `$MARU_DRAFTS`. Nothing else, ever. If the variable is
-  unset, stop and report the missing Maru runtime contract instead of guessing
-  a default path.
+- Write **only** under the resolved drafts collection
+  (`<paths.scratchpad>/<scratchpad.drafts_subdir>`). Nothing else, ever. If the
+  scratchpad config cannot be read, stop rather than falling back to a guessed
+  path: this is the skill's write boundary, not a convenience default.
 - Never move, delete, or re-route inbox items; routing stays behind Maru's
   confirmation gate.
 - Never write to `tasks/`, `vault/`, `meetings/`, `shared/`, or any project

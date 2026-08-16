@@ -16,18 +16,10 @@ import networkx as nx
 
 import graph_build
 
-def _find_workspace_root() -> Path:
-    for path in Path(__file__).resolve().parents:
-        if (path / "workspace.config.yaml").is_file():
-            return path
-    return Path.cwd()
-
-
-WORK_ROOT = _find_workspace_root()
 HOME = Path.home()
 SKILL_DIRS = [
     HOME / ".claude" / "skills",
-    WORK_ROOT / "_sys" / "skills" / "skills",
+    graph_build.BUNDLE_ROOT / "skills",
 ]
 
 FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n", re.DOTALL)

@@ -42,6 +42,13 @@ inbox:
     digest_output: _state/digests
 ```
 
+`ideation` handoff destinations are not configured here. The scratchpad already
+declares its own root and collection names under `paths.scratchpad` and
+`scratchpad.*_subdir`; resolve them through `~/.maru/skills/_builtin/lib/scratchpad_adapter.md`
+rather than adding an `inbox`-side key that names the same directory twice.
+Those destinations are proposed to the user for confirmation, never written by
+this skill.
+
 Project classification must read the paths configured under `ssot`.
 
 Processing must use `inbox.naming` for generated artifact names. Read manifests

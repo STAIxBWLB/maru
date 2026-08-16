@@ -1,14 +1,15 @@
 ---
 name: gpt-images-deck
 description: |
-  ChatGPT Images 2.0 / Codex native image generation 기반 슬라이드 덱 제작 스킬. Use when the user wants to turn source files, notes, or a prompt into a page-numbered slide image deck using the local _sys/docs/slide-decks style catalog. Orchestrates DESIGN.md, slide_plan.json, slide_prompts.json, sequential page_N.png generation, and visual QA. Triggers: gpt-images-deck, ChatGPT Images slide deck, slide images, 슬라이드 이미지 생성, PPT 이미지 덱, 디자인 카탈로그 슬라이드, _sys/docs/slide-decks 스타일로 덱 만들기.
+  ChatGPT Images 2.0 / Codex native image generation 기반 슬라이드 덱 제작 스킬. Use when the user wants to turn source files, notes, or a prompt into a page-numbered slide image deck using the local <skills-bundle>/docs/slide-decks style catalog. Orchestrates DESIGN.md, slide_plan.json, slide_prompts.json, sequential page_N.png generation, and visual QA. Triggers: gpt-images-deck, ChatGPT Images slide deck, slide images, 슬라이드 이미지 생성, PPT 이미지 덱, 디자인 카탈로그 슬라이드, <skills-bundle>/docs/slide-decks 스타일로 덱 만들기.
 ---
 
 # GPT Images Deck
 
-`gpt-images-deck`은 `_sys/docs/slide-decks/`의 스타일 카탈로그를 디자인 권위로 삼아, 사용자 콘텐츠를 ChatGPT Images 2.0용 슬라이드 이미지 덱으로 변환한다.
+`gpt-images-deck`은 `<skills-bundle>/docs/slide-decks/`의 스타일 카탈로그를 디자인 권위로 삼아, 사용자 콘텐츠를 ChatGPT Images 2.0용 슬라이드 이미지 덱으로 변환한다.
 
-- 스타일 카탈로그: `_sys/docs/slide-decks/`
+- 스타일 카탈로그: `<skills-bundle>/docs/slide-decks/`
+- `<skills-bundle>`: 이 스킬이 설치된 스킬 번들 루트. 배포 시 `~/.maru/skills/_builtin/`, 개발 중에는 skills repo 루트. 워크스페이스(`~/workspace/work/`) 경로가 아니다.
 - 스타일 선택 보조: `~/.maru/skills/notebooklm-deck/references/style-decision-tree.md`
 - 긴 산출물 스키마: [`references/output-schemas.md`](references/output-schemas.md)
 - 최종 산출물: `DESIGN.md`, `slide_plan.json`, `slide_prompts.json`, `page_1.png` ... `page_N.png`
@@ -22,7 +23,7 @@ description: |
 
 ## 카탈로그 스타일
 
-전체 설명은 `_sys/docs/slide-decks/README.md`를 읽는다. 빠른 매칭은 아래 기준을 사용한다.
+전체 설명은 `<skills-bundle>/docs/slide-decks/README.md`를 읽는다. 빠른 매칭은 아래 기준을 사용한다.
 
 | 맥락 | 우선 스타일 |
 |------|-------------|
@@ -54,7 +55,7 @@ description: |
 
 ### 2단계 - DESIGN.md 작성
 
-선택된 스타일 파일 `_sys/docs/slide-decks/{style-slug}.md`를 읽고 `DESIGN.md`를 작성한다.
+선택된 스타일 파일 `<skills-bundle>/docs/slide-decks/{style-slug}.md`를 읽고 `DESIGN.md`를 작성한다.
 
 - 스타일 파일과 카탈로그 README를 디자인 권위로 사용한다.
 - 사용자가 별도 reference slide image를 제공하면, 이미지에서 관찰한 디자인을 우선 반영하되 카탈로그 스타일과 충돌하는 부분은 명시한다.
@@ -120,7 +121,7 @@ Codex built-in `image_gen` 기반 native generation을 사용한다. API 키, Op
 ## 금지
 
 - source evidence 없이 숫자, 차트, legend 만들기
-- `_sys/docs/slide-decks/` 내용을 다른 스킬이나 프로젝트 폴더에 복제하기
+- `<skills-bundle>/docs/slide-decks/` 내용을 다른 스킬이나 프로젝트 폴더에 복제하기
 - NotebookLM/Canva용 prompt를 그대로 ChatGPT Images prompt로 사용하기
 - 모든 body slide를 "제목 + 4개 카드"로 획일화하기
 - 페이지별로 테마, 아이콘 스타일, 차트 스타일을 임의 변경하기

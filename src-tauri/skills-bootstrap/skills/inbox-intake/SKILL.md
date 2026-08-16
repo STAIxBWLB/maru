@@ -50,7 +50,7 @@ skill does not summarize, route, extract tasks, or write to a vault.
    default to copy. When an inbound attachment filename is Korean, write the
    Korean filename to manifest `source.original_name` (the raw copy MAY keep
    the Korean name because `inbox/items/**` is exempt per
-   `_sys/rules/naming-policy.md` L63).
+   `_meta/rules/naming-and-placement.md` §A4).
 8. Append one JSONL receipt to `_state/index.jsonl`.
 
 ## Rules

@@ -28,7 +28,7 @@ Find relationships between a note and existing vault notes, create wiki links.
    - Same domain or cross-domain relevance
    - Project affinity via registry: if source is from work/, read `<workspace-root>/project-registry.yaml` to identify project, then prioritize sibling notes sharing the same `vault_note` topic as connection candidates
 
-> **Registry fallback**: when project registry scoring < 3 → content-based similarity → prompt user. SSOT: `<workspace-root>/_sys/rules/project-registry-scoring.md`
+> **Registry fallback**: when project registry scoring < 3 → content-based similarity → prompt user. SSOT: `<workspace-root>/_meta/rules/project-registry-scoring.md`
 3. For each discovered relationship:
    - Determine relationship type (supports, contradicts, extends, applies-to, context-for)
    - Add wiki link to both notes (bidirectional)
@@ -41,7 +41,7 @@ Find relationships between a note and existing vault notes, create wiki links.
 
 Every /vault-connect invocation that creates ≥1 wiki link must produce one `log` line. `vault/log` is a plain logfile (no extension): append via direct fs write (`>>`), the sole exception to MCP-only vault writes.
 
-**Format** (see `<workspace-root>/_sys/rules/ingest-chain.md` §"vault/log 포맷"):
+**Format** (see `<workspace-root>/_meta/rules/ingest-chain.md` §"vault/log 포맷"):
 
 ```
 YYYY-MM-DD HH:MM  CONNECT  <project>  <vault/notes/x.md>  — linked `[[a]]`, `[[b]]`, `[[c]]`

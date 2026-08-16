@@ -5,7 +5,7 @@ description: >
   networkx + Leiden)로 변환하여 반복되는 워크플로우 패턴을 감지하고 스킬 후보를
   추출한다. 전통 NLP·LLM API 호출 없음 — 사전 기반 엔티티 매칭 + 그래프 커뮤니티
   탐지로 전면 로컬·결정론적·비용 0 동작. 출력은
-  `_sys/reports/skill-candidates-YYMMDD.md` 마크다운 리포트.
+  `_meta/reports/skill-candidates-YYMMDD.md` 마크다운 리포트.
   트리거: skill mine, 스킬 채굴, 스킬 마이닝, 반복 패턴 감지, 프롬프트 스킬화,
   /skill-mine, skill miner, 패턴 감지, 지식그래프 스킬, graph skill mining
 ---
@@ -54,7 +54,7 @@ PII 마스킹: 사람명 → `[PERSON]`, 이메일 → `[EMAIL]`, 절대경로 �
 - novelty = 1 − 기존 스킬 카탈로그 trigger Jaccard 최대값
 - rank = `log₂(size) × (unique_days/day_span) × cohesion × novelty`
 
-출력: `_sys/reports/skill-candidates-YYMMDD.md`
+출력: `_meta/reports/skill-candidates-YYMMDD.md`
 
 ## 실행 커맨드
 
@@ -89,10 +89,10 @@ cd <workspace-root>
 ```
 
 출력:
-- `_sys/reports/.cache/prompts-YYMMDD.jsonl`
-- `_sys/reports/.cache/virtual-vault-YYMMDD/notes/*.md`
-- `_sys/reports/.cache/prompts-graph-YYMMDD.json`
-- `_sys/reports/skill-candidates-YYMMDD.md` ← 최종 리포트
+- `_meta/reports/.cache/prompts-YYMMDD.jsonl`
+- `_meta/reports/.cache/virtual-vault-YYMMDD/notes/*.md`
+- `_meta/reports/.cache/prompts-graph-YYMMDD.json`
+- `_meta/reports/skill-candidates-YYMMDD.md` ← 최종 리포트
 
 ## 결과 해석 가이드
 

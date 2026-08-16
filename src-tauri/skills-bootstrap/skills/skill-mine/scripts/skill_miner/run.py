@@ -18,7 +18,7 @@ def _find_workspace_root() -> Path:
 
 
 ROOT = _find_workspace_root()
-REPORTS = ROOT / "_sys" / "reports"
+REPORTS = ROOT / "_meta" / "reports"
 CACHE = REPORTS / ".cache"
 DEFAULT_PROJECT_DIR = Path.home() / ".claude" / "projects"
 REGISTRY = ROOT / "project-registry.yaml"

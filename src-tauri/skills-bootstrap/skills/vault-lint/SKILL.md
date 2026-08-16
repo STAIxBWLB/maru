@@ -39,12 +39,17 @@ work/ + vault/ 정합성 검증 리포트 생성기. Karpathy "LLM Wiki Method"�
 
 ## 체크셋 (12개)
 
+`<ideation>` = `<paths.scratchpad>/<scratchpad.ideation_subdir>` (기본
+`work/scratchpad/ideation`). 해석 절차는 `~/.maru/skills/_builtin/lib/scratchpad_adapter.md`.
+임계값도 설정에서 읽는다 (`scratchpad.ideation_review_days`,
+`scratchpad.temp_stale_days`).
+
 | ID | 대상 | 내용 | 심각도 |
 |----|------|------|--------|
 | L01 | `vault/notes/` 본문 + frontmatter `topics:` | dead wiki-link (`[[x]]` 대상 부재). frontmatter는 `topics`/`project`/`projects` 등 wiki-link 값 필드 모두 포함 | **error** |
 | L02 | `vault/notes/` | 필수 frontmatter 누락 (`type`, `topics`) | **error** |
 | L03 | `vault/notes/` | orphan (in-link 0, topics 0) | warn |
-| L04 | `work/scratchpad/ideation/seeds/`, `vault/` ideation | 90일 이상 미갱신 seed | warn |
+| L04 | `<ideation>/seeds/`, `vault/` ideation | `scratchpad.ideation_review_days` 초과 미갱신 seed | warn |
 | L05 | `inbox/INDEX.md` | destination 파일 부재 (라우팅 후 사라짐) | **error** |
 | L06 | `work/**/*-summary.md` (frontmatter 보유분) | 신 스키마 필수 필드 누락 (marker-based scope) | warn |
 | L07 | `work/**/*` | `YYMMDD-type-desc.ext` 명명 위반 | warn |
@@ -78,7 +83,7 @@ work/ + vault/ 정합성 검증 리포트 생성기. Karpathy "LLM Wiki Method"�
 
 scope별 추가:
 - work: `Glob work/**/*-summary.md` (L06), `Glob work/**/*` (L07, L08)
-- ideation: `Glob work/scratchpad/ideation/seeds/*.md` (L04)
+- ideation: `Glob <ideation>/seeds/*.md` (L04)
 
 ### 3단계: 체크 실행
 
@@ -108,9 +113,9 @@ scope별 추가:
 3. topics 0개 AND in-link 0 → orphan
 
 **L04 — stale seed**
-1. `Glob work/scratchpad/ideation/seeds/*.md` + vault 쪽 ideation 노트 (있으면)
+1. `Glob <ideation>/seeds/*.md` + vault 쪽 ideation 노트 (있으면)
 2. 각 파일 mtime 확인 (work은 Bash stat, vault은 MCP `get_notes_info`)
-3. 현재 - mtime > 90일 → 위반
+3. 현재 - mtime > `scratchpad.ideation_review_days`(기본 90) → 위반
 
 **L05 — destination 부재**
 1. `inbox/INDEX.md` 파싱 → (status, destination) 추출
@@ -141,7 +146,7 @@ scope별 추가:
 1. `Glob work/**/*` 결과에서 파일명 또는 경로에 `[가-힣]` 포함 여부
 2. 있으면 → 위반
 3. 예외 (§Legacy Exemptions 참조): `trips/**`, legacy 계약/MOU/연구 과제 경로
-4. `meetings/**` 는 **무조건 면제하지 않는다**. 날짜 게이트 적용 (`_sys/rules/naming-policy.md` L66/L67 권위):
+4. `meetings/**` 는 **무조건 면제하지 않는다**. 날짜 게이트 적용 (`_meta/rules/naming-and-placement.md` §A4 권위):
    legacy 회의록(mtime/파일명 날짜가 2026-05-26 이전, 또는 신규 `YYMMDD-meeting-<slug>.md` 패턴에 맞지 않는 한글 파일)만 면제하고,
    영문화 대상(2026-05-26 이후 신규 생성 또는 마이그레이션 대상)인 한글 회의록 파일명은 여전히 위반으로 플래그한다.
 
@@ -345,8 +350,9 @@ append는 fs 직접 append(`>>`)로 수행. `vault/log`는 plain logfile(확장�
 
 ## 관련 문서
 
-- `_sys/rules/ingest-chain.md` — 체인 전체 그림과 log 포맷
+- `_meta/rules/ingest-chain.md` — 체인 전체 그림과 log 포맷
 - `~/.maru/skills/_builtin/lib/vault_adapter.md` — vault 접근·스키마 정책
+- `~/.maru/skills/_builtin/lib/scratchpad_adapter.md` — scratchpad 경로·임계값 해석
 - `~/.maru/skills/inbox-process/SKILL.md` — inbox processing skill
 - `work/project-registry.yaml` — 프로젝트 id 단일 소스
 - `~/.maru/skills/inbox-process/references/summary-schema.md` — 요약 스키마

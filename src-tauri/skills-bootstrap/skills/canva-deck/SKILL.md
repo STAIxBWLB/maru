@@ -1,7 +1,7 @@
 ---
 name: canva-deck
 description: |
-  Canva 슬라이드 덱(Magic Design for Presentations / AI 프레젠테이션 / Docs to Decks)용 디자인 시스템 프롬프트 조립 스킬. _sys/docs/slide-decks/에 보관된 14종 스타일 카탈로그(Anti-Gravity, Refined Minimal Portfolio, Blood Orange Agency, Comic Story, Neo-Retro Dev, Yellow Fashion Mag, Red Accent Editorial, Royal Watercolor, Premium Mockup, Sports Energy, Sculpture Pop, Constructivism Tech, Vitamin Pop, Flat Illustration)에서 발표 맥락에 맞는 스타일을 선택하고, Canva의 짧은 프롬프트 입력 박스에 맞춰 압축된 1-2문단 프롬프트를 조립한다. 또한 Canva의 템플릿 검색 키워드(예: "minimal architectural deck", "comic style presentation")와 폰트·컬러 추천도 함께 제시.
+  Canva 슬라이드 덱(Magic Design for Presentations / AI 프레젠테이션 / Docs to Decks)용 디자인 시스템 프롬프트 조립 스킬. <skills-bundle>/docs/slide-decks/에 보관된 14종 스타일 카탈로그(Anti-Gravity, Refined Minimal Portfolio, Blood Orange Agency, Comic Story, Neo-Retro Dev, Yellow Fashion Mag, Red Accent Editorial, Royal Watercolor, Premium Mockup, Sports Energy, Sculpture Pop, Constructivism Tech, Vitamin Pop, Flat Illustration)에서 발표 맥락에 맞는 스타일을 선택하고, Canva의 짧은 프롬프트 입력 박스에 맞춰 압축된 1-2문단 프롬프트를 조립한다. 또한 Canva의 템플릿 검색 키워드(예: "minimal architectural deck", "comic style presentation")와 폰트·컬러 추천도 함께 제시.
   트리거: canva, Canva 슬라이드, Canva 발표, Canva AI, Magic Design, Magic Write, Docs to Decks, Canva 프롬프트, Canva 템플릿, /canva-deck, 캔바 슬라이드, 캔바 프레젠테이션, 캔바 AI, Canva presentation prompt
 ---
 
@@ -9,7 +9,8 @@ description: |
 
 Canva의 AI 프레젠테이션 도구(Magic Design for Presentations / AI 프레젠테이션 / Docs to Decks)에 입력할 디자인 시스템 프롬프트를 14종 카탈로그에서 압축·조립한다.
 
-- 카탈로그 위치: `_sys/docs/slide-decks/` (NotebookLM·Canva 공유 단일 소스)
+- 카탈로그 위치: `<skills-bundle>/docs/slide-decks/` (NotebookLM·Canva 공유 단일 소스)
+- `<skills-bundle>`: 이 스킬이 설치된 스킬 번들 루트. 배포 시 `~/.maru/skills/_builtin/`, 개발 중에는 skills repo 루트. 워크스페이스(`~/workspace/work/`) 경로가 아니다.
 - 단일 진입점: 본 스킬 (`canva-deck`)
 - 출력: Canva의 짧은 프롬프트 입력에 맞춘 1-2문단 + 템플릿 검색 키워드 + 폰트·컬러 명세
 
@@ -44,7 +45,7 @@ Canva의 AI 프레젠테이션 도구(Magic Design for Presentations / AI 프레
 | Vitamin Pop | `vitamin-pop.md` | `colorful pop deck`, `friendly community presentation` |
 | Flat Illustration | `flat-illustration.md` | `flat illustration presentation`, `picture book slides` |
 
-전체 카탈로그 인덱스: `_sys/docs/slide-decks/README.md`
+전체 카탈로그 인덱스: `<skills-bundle>/docs/slide-decks/README.md`
 스타일 결정 트리: 동일 폴더의 `notebooklm-deck` 스킬 references/style-decision-tree.md 재사용
 
 ## 워크플로우
@@ -66,7 +67,7 @@ Canva의 AI 프레젠테이션 도구(Magic Design for Presentations / AI 프레
 
 ### 3단계 — Canva-friendly 프롬프트 조립
 
-선택된 스타일의 `_sys/docs/slide-decks/{slug}.md`를 Read. Master Prompt에서 **핵심 형용사·컬러·레이아웃 키워드**만 추출해 다음 형식으로 압축:
+선택된 스타일의 `<skills-bundle>/docs/slide-decks/{slug}.md`를 Read. Master Prompt에서 **핵심 형용사·컬러·레이아웃 키워드**만 추출해 다음 형식으로 압축:
 
 ```
 [Topic] presentation for [Audience], [N] slides.
@@ -141,7 +142,7 @@ Brand Kit Spec:
 
 ## 운영 원칙
 
-- **카탈로그 단일 소스**: `_sys/docs/slide-decks/`만 참조. 새 스타일 추가 시 거기에 파일 추가하면 본 스킬과 `notebooklm-deck` 둘 다 자동 인식
+- **카탈로그 단일 소스**: `<skills-bundle>/docs/slide-decks/`만 참조. 새 스타일 추가 시 거기에 파일 추가하면 본 스킬과 `notebooklm-deck` 둘 다 자동 인식
 - **압축 우선**: NotebookLM master prompt 통째로 붙이지 말 것. Canva가 길면 무시함
 - **영문 키워드 + 한국어 본문**: Canva의 디자인 어휘는 영문이 더 정확. 톤 설명만 입력 언어로
 - **Brand Kit 권장**: 동일 스타일을 반복 사용하면 Brand Hub에 등록해 일관성 자동화
