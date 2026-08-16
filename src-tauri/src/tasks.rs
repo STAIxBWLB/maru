@@ -614,7 +614,10 @@ fn task_row_for_path(work: &Path, path: &Path, bucket: TaskBucket) -> Result<Tas
     })
 }
 
-fn task_display_title(frontmatter: &JsonValue, body: &str, file_name: &str) -> String {
+/// Human title for a task note: `title`, then `name`, then the first H1,
+/// then the file stem. Shared with `web_actions.rs` so a Google Task created
+/// from a note is named the same way Maru names it everywhere else.
+pub(crate) fn task_display_title(frontmatter: &JsonValue, body: &str, file_name: &str) -> String {
     string_field(frontmatter, "title")
         .or_else(|| string_field(frontmatter, "name"))
         .or_else(|| {

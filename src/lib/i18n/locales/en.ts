@@ -2097,6 +2097,7 @@ export const en: Record<string, string> = {
   "today.sync.op.complete": "Complete",
   "today.sync.op.reopen": "Reopen",
   "today.sync.op.delete": "Delete",
+  "today.sync.op.upsert": "Create or update",
   "today.sync.status.syncing": "Syncing",
   "today.sync.status.synced": "Synced",
   "today.sync.status.retryNeeded": "Retry needed",

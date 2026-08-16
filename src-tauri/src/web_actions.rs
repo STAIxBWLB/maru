@@ -24,11 +24,13 @@
 use crate::atomic_file::write_atomic;
 use crate::document::revision_for;
 use crate::tasks::{
-    normalize_task_frontmatter_aliases, string_field, yaml_to_json, TaskBucket,
+    normalize_task_frontmatter_aliases, string_field, task_display_title, yaml_to_json, TaskBucket,
 };
 use crate::today::{TaskTransitionKind, TaskTransitionRequest};
 use crate::today_lifecycle::{move_file, task_transition};
-use crate::today_outbox::has_web_action;
+use crate::today_outbox::{
+    enqueue_record, has_web_action, OutboxOp, OutboxStatus, UpsertPayload,
+};
 use crate::vault::{normalize_existing_dir, parse_frontmatter, resolve_inside_vault};
 use crate::vault_list::{assert_maru_can_write, WorkspaceWriteAction};
 use crate::win_process::NoWindow;
@@ -420,6 +422,71 @@ fn load_receipt(work: &Path, path: &Path) -> Result<Receipt, WebActionSummary> {
     validate_receipt(&parsed).map_err(|reason| invalid_summary(work, path, Some(&parsed), reason))
 }
 
+/// Google Tasks wants an RFC3339 timestamp; task notes carry a plain
+/// `YYYY-MM-DD`. A value that already looks like a timestamp is passed
+/// through, so a hand-edited note is never mangled.
+fn provider_due(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    if trimmed.contains('T') {
+        return Some(trimmed.to_string());
+    }
+    chrono::NaiveDate::parse_from_str(trimmed, "%Y-%m-%d")
+        .ok()
+        .map(|date| format!("{date}T00:00:00.000Z"))
+}
+
+/// Queue the provider create-or-update for a web `upsert`. The payload is
+/// snapshotted here, so the drain never re-reads the note, and the list id is
+/// resolved once: note frontmatter, then the caller's configured default,
+/// then the outbox's `@default` fallback.
+fn queue_upsert(
+    work: &Path,
+    note: &Path,
+    receipt: &Receipt,
+    default_task_list_id: Option<&str>,
+    now_iso: &str,
+) -> Result<(), String> {
+    let raw = fs::read_to_string(note).map_err(|err| format!("Cannot read task note: {err}"))?;
+    let parts = parse_frontmatter(&raw);
+    let frontmatter = normalize_task_frontmatter_aliases(yaml_to_json(&parts.meta));
+    let file_name = note
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or(&receipt.task_path);
+    let payload = UpsertPayload {
+        title: task_display_title(&frontmatter, &parts.body, file_name),
+        // Same `File:` pointer the task-management skill writes, so both
+        // producers converge on one provider task shape.
+        notes: format!("File: {}", receipt.task_path),
+        due: string_field(&frontmatter, "due").and_then(|value| provider_due(&value)),
+    };
+    let list_id = string_field(&frontmatter, "googleTaskListId").or_else(|| {
+        default_task_list_id
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToString::to_string)
+    });
+    enqueue_record(
+        work,
+        OutboxOp::Upsert,
+        &receipt.task_path,
+        // Empty on first sight of the task: the drain inserts, then writes
+        // the returned id back into the note.
+        &string_field(&frontmatter, "googleTaskId").unwrap_or_default(),
+        list_id,
+        Some(payload),
+        // Ready, not Prepared: the web already committed the note, so there
+        // is no local mutation for recovery to reconcile against.
+        OutboxStatus::Ready,
+        Some(receipt.id.clone()),
+        now_iso,
+    )?;
+    Ok(())
+}
+
 /// Apply one validated receipt. Returns the state to report.
 ///
 /// Replay safety uses two checks because they cover different crash windows:
@@ -431,6 +498,7 @@ fn apply_receipt(
     work_path: &str,
     work: &Path,
     receipt: &Receipt,
+    default_task_list_id: Option<&str>,
     now_iso: &str,
 ) -> Result<WebActionState, String> {
     if ledger_has(work, &receipt.id) || has_web_action(work, &receipt.id)? {
@@ -485,10 +553,11 @@ fn apply_receipt(
             ledger_append(work, receipt, now_iso)?;
             Ok(WebActionState::Applied)
         }
-        // ponytail: upsert is the next slice (issue #232 work item 4); until
-        // it lands the receipt stays pending rather than being silently
-        // discharged.
-        WebActionOperation::Upsert => Err("upsert is not implemented yet".to_string()),
+        WebActionOperation::Upsert => {
+            queue_upsert(work, &note, receipt, default_task_list_id, now_iso)?;
+            ledger_append(work, receipt, now_iso)?;
+            Ok(WebActionState::Applied)
+        }
     }
 }
 
@@ -515,6 +584,7 @@ pub fn web_actions_scan(work_path: String) -> Result<Vec<WebActionSummary>, Stri
 pub fn web_actions_apply(
     work_path: String,
     now_iso: String,
+    default_task_list_id: Option<String>,
 ) -> Result<WebActionsOutcome, String> {
     assert_maru_can_write(&work_path, WorkspaceWriteAction::Modify)?;
     assert_maru_can_write(&work_path, WorkspaceWriteAction::RenameMove)?;
@@ -532,7 +602,13 @@ pub fn web_actions_apply(
         };
         // Each receipt is applied independently: `task_transition` takes the
         // workspace lock itself, so this loop must never hold it.
-        match apply_receipt(&work_path, &work, &receipt, &now_iso) {
+        match apply_receipt(
+            &work_path,
+            &work,
+            &receipt,
+            default_task_list_id.as_deref(),
+            &now_iso,
+        ) {
             Ok(state) => {
                 move_to_applied(&work, &path)?;
                 match state {
@@ -597,7 +673,11 @@ mod tests {
     }
 
     fn apply(tmp: &tempfile::TempDir) -> WebActionsOutcome {
-        web_actions_apply(work_path(tmp), NOW.to_string()).unwrap()
+        web_actions_apply(work_path(tmp), NOW.to_string(), None).unwrap()
+    }
+
+    fn apply_with_list(tmp: &tempfile::TempDir, list: &str) -> WebActionsOutcome {
+        web_actions_apply(work_path(tmp), NOW.to_string(), Some(list.to_string())).unwrap()
     }
 
     // --- Validation ---------------------------------------------------------
@@ -884,14 +964,72 @@ mod tests {
         assert!(note.exists());
     }
 
+    // --- upsert -------------------------------------------------------------
+
     #[test]
-    fn upsert_is_not_discharged_before_it_is_implemented() {
-        let (tmp, receipt) = setup("upsert", "tasks/active/task.md", "---\nstatus: active\n---\n");
-        let outcome = apply(&tmp);
-        assert_eq!(outcome.applied, 0);
-        assert_eq!(outcome.stale, 1);
-        assert!(receipt.exists(), "an unimplemented op must not be acknowledged");
-        assert!(list_records(tmp.path()).unwrap().is_empty());
+    fn upsert_queues_a_create_with_the_note_title_due_and_default_list() {
+        let (tmp, receipt) = setup(
+            "upsert",
+            "tasks/active/task.md",
+            "---\ntitle: 보고서 제출\nstatus: active\ndue: 2026-08-31\n---\n# Body\n",
+        );
+        let outcome = apply_with_list(&tmp, "list-default");
+
+        assert_eq!(outcome.applied, 1);
+        let records = list_records(tmp.path()).unwrap();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].op, OutboxOp::Upsert);
+        assert_eq!(records[0].status, OutboxStatus::Ready);
+        // No provider id yet: the drain inserts and fills it in.
+        assert_eq!(records[0].google_task_id, "");
+        assert_eq!(records[0].google_task_list_id.as_deref(), Some("list-default"));
+        assert_eq!(records[0].web_action_id.as_deref(), Some(ID));
+        let payload = records[0].payload.as_ref().unwrap();
+        assert_eq!(payload.title, "보고서 제출");
+        assert_eq!(payload.notes, "File: tasks/active/task.md");
+        assert_eq!(payload.due.as_deref(), Some("2026-08-31T00:00:00.000Z"));
+        assert!(!receipt.exists());
+    }
+
+    #[test]
+    fn upsert_prefers_the_notes_own_list_and_id_over_the_default() {
+        let (tmp, _) = setup(
+            "upsert",
+            "tasks/active/task.md",
+            "---\nstatus: active\ngoogleTaskId: g-existing\ngoogleTaskListId: list-note\n---\n# Fallback title\n",
+        );
+        apply_with_list(&tmp, "list-default");
+        let records = list_records(tmp.path()).unwrap();
+        assert_eq!(records[0].google_task_id, "g-existing");
+        assert_eq!(records[0].google_task_list_id.as_deref(), Some("list-note"));
+        // No frontmatter title: the H1 is the display title.
+        assert_eq!(records[0].payload.as_ref().unwrap().title, "Fallback title");
+        // No due in frontmatter: nothing invented.
+        assert!(records[0].payload.as_ref().unwrap().due.is_none());
+    }
+
+    #[test]
+    fn upsert_without_a_configured_list_defers_to_the_outbox_fallback() {
+        let (tmp, _) = setup("upsert", "tasks/active/task.md", "---\nstatus: active\n---\n# T\n");
+        apply(&tmp);
+        assert!(list_records(tmp.path()).unwrap()[0]
+            .google_task_list_id
+            .is_none());
+    }
+
+    #[test]
+    fn provider_due_normalizes_dates_and_passes_timestamps_through() {
+        assert_eq!(
+            provider_due("2026-08-31").as_deref(),
+            Some("2026-08-31T00:00:00.000Z")
+        );
+        assert_eq!(
+            provider_due("2026-08-31T09:00:00+09:00").as_deref(),
+            Some("2026-08-31T09:00:00+09:00")
+        );
+        assert!(provider_due("").is_none());
+        assert!(provider_due("   ").is_none());
+        assert!(provider_due("someday").is_none());
     }
 
     #[test]
