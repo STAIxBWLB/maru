@@ -8,6 +8,33 @@ because releases cut frequently during active development. Versions before
 Dates are the release-tag dates. Only `feat`/`fix`-level changes are listed;
 `chore(release)` version bumps and merge commits are omitted.
 
+## v0.4.52 - 2026-08-16 - Task Sync and Responsive Calendar Hotfix
+
+- **Web task action receipts now complete the desktop sync loop (#236).** Maru
+  consumes validated `maru.web-task-action.v1` receipts, applies task
+  transitions safely, records application state for replay recovery, and keeps
+  the result visible until normal Git sync carries the working-tree changes.
+- **Web upsert receipts now create or update provider tasks through the outbox
+  (#240).** Upsert payloads snapshot the task title, notes, and due date, use
+  the configured task list and `gws` binary, write returned provider IDs back to
+  note frontmatter before marking records synced, and converge after retries.
+- **The Tasks calendar responsive layout is restored (#239).** Agenda overlay
+  mode fills the available pane with a right-docked Graph and detail view;
+  accessible agenda toggle state plus regression coverage protect compact
+  sizing, overflow, Graph, and detail interactions.
+- **Web-selected Top 3 changes now import into the day snapshot (#238).** The
+  sync panel surfaces Top-only changes even without action receipts, and its
+  explicit apply action reconciles the web-updated `## Top` lane through the
+  snapshot's optimistic revision check. Existing plan metadata is preserved,
+  displaced items move to Flexible, and invalid, duplicate, or conflicting
+  changes are skipped instead of overwriting the local plan.
+- **Upsert recovery remains visible until provider IDs reach the note (#241).**
+  A provider success followed by a failed local write-back stays retryable with
+  the normal backoff, while the stored provider ID makes the retry patch rather
+  than insert a duplicate. Successful patches also fill a missing resolved list
+  ID, and a relinked note is reported as a conflict without clobbering its newer
+  linkage.
+
 ## v0.4.51 - 2026-08-16 - Hanji, Ink, Seal
 
 - **Maru now has a Korean editorial identity.** Warm hanji-paper surfaces,
