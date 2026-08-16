@@ -35,6 +35,14 @@ async function gotoTodayPrepare(page: Page) {
   await expect(page.locator(".today-panel-braindump")).toBeVisible();
 }
 
+async function runCommandPaletteAction(page: Page, label: string) {
+  await page.locator(".topbar-command-action").click();
+  const input = page.locator(".cmdk-input input");
+  await expect(input).toBeVisible();
+  await input.fill(label);
+  await page.locator(".cmdk-item", { hasText: label }).click();
+}
+
 // First-launch seed: marker absent, persisted mode left at the "pkm"
 // default. The auto-open decision must win over the settings-load effect
 // re-applying the persisted mode (App keeps the boot auto-open via
@@ -607,4 +615,136 @@ test("layout smoke at 1024x720: compact one-column layout, no horizontal scroll"
   expect(mainBox).not.toBeNull();
   if (!mainBox) return;
   expect(mainBox.width).toBeGreaterThan(700);
+});
+
+test("tasks calendar fills the compact pane with a right-docked graph and keeps the agenda as an overlay", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 920 });
+  await installTodayMocks(page, buildTodaySeed(AUTO_OPEN_SEED));
+  await gotoTodayPrepare(page);
+
+  // The Graph surface intentionally returns the primary app mode to Docs
+  // when it is activated. Open it there first, then return to Tasks; this is
+  // the supported way to keep a primary workbench beside the shared panel.
+  await page
+    .locator(".activity-rail")
+    .getByRole("button", { name: "문서", exact: true })
+    .click();
+  await expect(page.locator(".document-list")).toBeVisible();
+
+  const calendar = page.locator(".unified-calendar");
+  const tasksMain = page.locator(".tasks-main");
+  const main = calendar.locator(".cal-main");
+
+  // Keep Tasks mounted while opening the shared panel, as in the graph
+  // workbench regression: dock first, expand the panel, then switch its
+  // surface to Graph. The command "패널에서 그래프 열기" intentionally
+  // navigates away from Tasks, so it is not the right path for this layout.
+  await runCommandPaletteAction(page, "패널을 오른쪽에 배치");
+  const terminalPanel = page.locator(".terminal-panel");
+  await expect(page.locator(".app-shell")).toHaveClass(/terminal-dock-right/);
+  await terminalPanel.locator(".terminal-title").click();
+  await expect(terminalPanel).not.toHaveClass(/collapsed/);
+  const graphTab = terminalPanel.getByTestId("panel-graph-tab");
+  await graphTab.click();
+  await expect(graphTab).toHaveAttribute("aria-selected", "true");
+  await expect(terminalPanel.locator(".graph-view")).toBeVisible();
+
+  await page
+    .locator(".activity-rail")
+    .getByRole("button", { name: "오늘", exact: true })
+    .click();
+  await expect(page.locator(".today-pane")).toBeVisible();
+  await page.locator(".today-sidebar").getByRole("button", { name: "전체 태스크" }).click();
+  await expect(calendar).toBeVisible();
+  await expect(tasksMain).toBeVisible();
+  await expect(main).toBeVisible();
+
+  const calendarBox = await calendar.boundingBox();
+  const tasksMainBox = await tasksMain.boundingBox();
+  const mainBox = await main.boundingBox();
+  expect(calendarBox).not.toBeNull();
+  expect(tasksMainBox).not.toBeNull();
+  expect(mainBox).not.toBeNull();
+  if (!calendarBox || !tasksMainBox || !mainBox) return;
+  expect(calendarBox.width).toBeGreaterThan(0);
+  expect(tasksMainBox.width).toBeGreaterThan(0);
+  const tasksMainContentWidth = await tasksMain.evaluate((element) => element.clientWidth);
+  const calendarContentWidth = await calendar.evaluate((element) => element.clientWidth);
+  expect(Math.abs(tasksMainContentWidth - calendarContentWidth)).toBeLessThanOrEqual(1);
+  expect(Math.abs(mainBox.width - calendarBox.width)).toBeLessThanOrEqual(1);
+
+  await expect(calendar.locator(".cal-agenda-pane")).toBeHidden();
+  await expect(calendar.locator(".cal-agenda-resizer")).toBeHidden();
+
+  const agendaToggle = calendar.locator(".cal-agenda-toggle");
+  await expect(agendaToggle).toBeVisible();
+  const agendaPaneId = await agendaToggle.getAttribute("aria-controls");
+  expect(agendaPaneId).toBeTruthy();
+  if (!agendaPaneId) return;
+  const agendaPane = calendar.locator(`[id="${agendaPaneId}"]`);
+  await expect(agendaPane).toHaveClass(/cal-agenda-pane/);
+  await expect(agendaPane).toBeHidden();
+  await expect(agendaToggle).toHaveAccessibleName("일정 목록 열기");
+  await expect(agendaToggle).toHaveAttribute("aria-expanded", "false");
+  await agendaToggle.click();
+  await expect(agendaToggle).toHaveAttribute("aria-expanded", "true");
+  await expect(agendaToggle).toHaveAccessibleName("일정 목록 닫기");
+  await expect(agendaToggle).toHaveAttribute("aria-controls", agendaPaneId);
+  await expect(agendaPane).toBeVisible();
+  await agendaToggle.click();
+  await expect(agendaToggle).toHaveAttribute("aria-expanded", "false");
+  await expect(agendaToggle).toHaveAccessibleName("일정 목록 열기");
+  await expect(agendaPane).toBeHidden();
+
+  // Keep the selected-task detail overlay in the same compact layout covered.
+  await expect(calendar.locator(".cal-bar").first()).toBeVisible();
+  await calendar.locator(".cal-bar").first().click();
+  await expect(page.locator(".task-detail-drawer")).toBeVisible();
+
+  const metrics = await page.evaluate(() => {
+    const selectors = [
+      ".unified-calendar",
+      ".cal-toolbar",
+      ".cal-week-body",
+      ".cal-week-columns",
+      ".cal-body",
+    ];
+    const widths = Object.fromEntries(
+      selectors.map((selector) => {
+        const element = document.querySelector<HTMLElement>(selector);
+        return [
+          selector,
+          element
+            ? { scrollWidth: element.scrollWidth, clientWidth: element.clientWidth }
+            : null,
+        ];
+      }),
+    ) as Record<string, { scrollWidth: number; clientWidth: number } | null>;
+    return {
+      documentScrollWidth: document.documentElement.scrollWidth,
+      documentClientWidth: document.documentElement.clientWidth,
+      calendarPresent: Boolean(document.querySelector<HTMLElement>(".unified-calendar")),
+      widths,
+    };
+  });
+  expect(metrics.documentScrollWidth).toBeLessThanOrEqual(metrics.documentClientWidth + 1);
+  expect(metrics.calendarPresent).toBe(true);
+  for (const selector of [
+    ".unified-calendar",
+    ".cal-toolbar",
+    ".cal-week-body",
+    ".cal-week-columns",
+    ".cal-body",
+  ]) {
+    const widths = metrics.widths[selector];
+    expect(widths, `${selector} should be present`).not.toBeNull();
+    if (widths) {
+      expect(
+        widths.scrollWidth,
+        `${selector} should not overflow horizontally`,
+      ).toBeLessThanOrEqual(widths.clientWidth + 1);
+    }
+  }
 });
