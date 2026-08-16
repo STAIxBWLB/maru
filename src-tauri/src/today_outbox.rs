@@ -302,15 +302,22 @@ pub(crate) fn resolve_gws(override_path: Option<&str>) -> Result<PathBuf, String
 }
 
 /// Request body for an `Upsert`: the note's title, a pointer back to the
-/// note, and the due date when it has one. Same shape the `task-management`
-/// skill sends, so the two producers converge on one provider task.
-fn upsert_body(record: &OutboxRecord) -> String {
+/// note, and the due date. Same shape the `task-management` skill sends, so
+/// the two producers converge on one provider task.
+///
+/// `due` is the one field that differs between the two verbs. `tasks.patch`
+/// leaves an omitted field unchanged, so a note whose due date was cleared
+/// would keep its old remote deadline forever; a patch therefore sends an
+/// explicit `null`. An insert omits it, because there is nothing to clear.
+fn upsert_body(record: &OutboxRecord, clear_missing_due: bool) -> String {
     let Some(payload) = &record.payload else {
         return json!({}).to_string();
     };
     let mut body = json!({ "title": payload.title, "notes": payload.notes });
-    if let Some(due) = &payload.due {
-        body["due"] = json!(due);
+    match &payload.due {
+        Some(due) => body["due"] = json!(due),
+        None if clear_missing_due => body["due"] = json!(null),
+        None => {}
     }
     body.to_string()
 }
@@ -331,7 +338,7 @@ fn gws_args(record: &OutboxRecord) -> Vec<String> {
             "--params".to_string(),
             json!({ "tasklist": list }).to_string(),
             "--json".to_string(),
-            upsert_body(record),
+            upsert_body(record, false),
             "--format".to_string(),
             "json".to_string(),
         ],
@@ -342,7 +349,7 @@ fn gws_args(record: &OutboxRecord) -> Vec<String> {
             "--params".to_string(),
             params,
             "--json".to_string(),
-            upsert_body(record),
+            upsert_body(record, true),
             "--format".to_string(),
             "json".to_string(),
         ],
@@ -410,6 +417,13 @@ fn write_back_provider_ids(work: &Path, record: &OutboxRecord) -> Result<(), Str
         )?;
     }
     write_atomic(&path, updated.as_bytes())
+}
+
+/// True when a terminal provider failure should recreate the task rather than
+/// discharge the record: an `Upsert` that was patching a `googleTaskId` the
+/// provider no longer knows.
+fn upsert_needs_recreate(record: &OutboxRecord) -> bool {
+    record.op == OutboxOp::Upsert && !record.google_task_id.is_empty()
 }
 
 /// Retry backoff in minutes after the n-th failed attempt: 1, 5, 15, 60,
@@ -519,6 +533,20 @@ fn drain_record(
             if is_auth_error(&detail) {
                 record.last_error = Some(detail);
                 OutboxStatus::AuthBlocked
+            } else if is_terminal_error(&detail) && upsert_needs_recreate(&record) {
+                // The remote task behind a stale googleTaskId is gone, but an
+                // upsert is not satisfied by its absence the way a complete or
+                // a delete is: the requested update still has to land. Clear
+                // the id so the retry inserts instead of patching. If the
+                // tasklist itself is what 404s, the insert 404s too and falls
+                // through to the discharge below, so this converges.
+                record.google_task_id = String::new();
+                record.attempts = record.attempts.saturating_add(1);
+                let retry_at = now + Duration::minutes(backoff_minutes(record.attempts));
+                record.next_retry_at = Some(retry_at.to_rfc3339_opts(SecondsFormat::Secs, true));
+                record.last_error = Some(format!("upsert_task_missing_recreating: {detail}"));
+                set_record_status(work, &mut record, OutboxStatus::RetryNeeded, now_iso)?;
+                return Ok(OutboxStatus::RetryNeeded);
             } else if is_terminal_error(&detail) {
                 // Remote task/list is gone: the op is moot. Discharge the
                 // record (delete + event) instead of retrying forever; count
@@ -995,6 +1023,104 @@ mod tests {
         let args = gws_args(&record);
         assert_eq!(args[2], "patch");
         assert!(args.contains(&r#"{"task":"g-new","tasklist":"list-7"}"#.to_string()));
+    }
+
+    #[test]
+    fn a_cleared_due_is_sent_as_null_on_patch_but_omitted_on_insert() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut record = upsert_record(tmp.path(), "");
+        record.payload.as_mut().unwrap().due = None;
+        // Insert: nothing to clear, so `due` stays out of the body.
+        assert_eq!(
+            upsert_body(&record, false),
+            r#"{"notes":"File: tasks/active/task.md","title":"Ship it"}"#
+        );
+        // Patch: tasks.patch leaves an omitted field unchanged, so a due date
+        // the note no longer has must be cleared explicitly.
+        record.google_task_id = "g-new".to_string();
+        assert_eq!(
+            upsert_body(&record, true),
+            r#"{"due":null,"notes":"File: tasks/active/task.md","title":"Ship it"}"#
+        );
+        assert!(gws_args(&record).contains(&r#"{"due":null,"notes":"File: tasks/active/task.md","title":"Ship it"}"#.to_string()));
+    }
+
+    #[test]
+    fn upsert_patch_against_a_missing_task_recreates_instead_of_discharging() {
+        let tmp = tempfile::tempdir().unwrap();
+        let work_path = tmp.path().to_string_lossy().to_string();
+        let log = tmp.path().join("gws-args.log");
+        // 404 on patch, success on insert — the two calls this test drives.
+        let fake = write_fake_gws(
+            tmp.path(),
+            "gws-404-then-ok",
+            &format!(
+                "#!/bin/sh\necho \"$@\" >> {log}\nif echo \"$@\" | grep -q patch; then echo 'Error 404: task not found' >&2; exit 1; fi\necho '{{\"id\":\"g-recreated\"}}'\nexit 0\n",
+                log = log.display()
+            ),
+        );
+        upsert_record(tmp.path(), "g-stale");
+
+        // First drain: the patch 404s. The op is NOT satisfied by the task
+        // being gone, so the record survives with the stale id cleared.
+        let outcome = task_integrations_drain(
+            work_path.clone(),
+            NOW.to_string(),
+            Some(fake.to_string_lossy().to_string()),
+        )
+        .unwrap();
+        assert_eq!(outcome.failed, 1);
+        assert_eq!(outcome.drained, 0);
+        let record = &read_task_integrations(work_path.clone()).unwrap()[0];
+        assert_eq!(record.status, OutboxStatus::RetryNeeded);
+        assert_eq!(record.google_task_id, "");
+        assert!(record
+            .last_error
+            .as_deref()
+            .unwrap()
+            .starts_with("upsert_task_missing_recreating"));
+
+        // Second drain, once the backoff elapses: it inserts and writes the
+        // new id back into the note.
+        let outcome = task_integrations_drain(
+            work_path.clone(),
+            "2026-07-21T09:05:00+09:00".to_string(),
+            Some(fake.to_string_lossy().to_string()),
+        )
+        .unwrap();
+        assert_eq!(outcome.drained, 1);
+        let record = &read_task_integrations(work_path).unwrap()[0];
+        assert_eq!(record.status, OutboxStatus::Synced);
+        assert_eq!(record.google_task_id, "g-recreated");
+        assert!(fs::read_to_string(tmp.path().join("tasks/active/task.md"))
+            .unwrap()
+            .contains("googleTaskId: g-recreated"));
+        let logged = fs::read_to_string(&log).unwrap();
+        assert!(logged.contains("tasks tasks patch"));
+        assert!(logged.contains("tasks tasks insert"));
+    }
+
+    #[test]
+    fn a_404_on_the_recreated_insert_still_discharges_the_record() {
+        // The tasklist itself is gone: clearing the id cannot help, so the
+        // record must not retry forever.
+        let tmp = tempfile::tempdir().unwrap();
+        let work_path = tmp.path().to_string_lossy().to_string();
+        let fake = write_fake_gws(
+            tmp.path(),
+            "gws-404",
+            "#!/bin/sh\necho 'Error 404: tasklist not found' >&2\nexit 1\n",
+        );
+        upsert_record(tmp.path(), "");
+
+        let outcome = task_integrations_drain(
+            work_path.clone(),
+            NOW.to_string(),
+            Some(fake.to_string_lossy().to_string()),
+        )
+        .unwrap();
+        assert_eq!(outcome.drained, 1);
+        assert!(list_records(tmp.path()).unwrap().is_empty());
     }
 
     #[test]
