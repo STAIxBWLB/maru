@@ -3,6 +3,8 @@
 Icon?
 !src-tauri/icons/
 !src-tauri/icons/icon.png
+!public/icons/
+!public/icons/**
 ~$*
 .vscode/
 .idea/

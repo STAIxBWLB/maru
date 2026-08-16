@@ -5,7 +5,7 @@
 # remember which lives in pnpm scripts vs cargo.
 #
 # Quick start:
-#   make install   # one-time setup (pnpm install + tauri icon stub)
+#   make install   # one-time setup (pnpm install + generated platform icons)
 #   make dev       # browser dev (mocked Tauri)
 #   make tauri-dev # native dev shell
 #   make verify    # what CI runs: typecheck + i18n lint + ts test + rust test + build
@@ -18,6 +18,7 @@ CARGO      ?= cargo
 NODE       ?= node
 TAURI_DIR  := src-tauri
 ICON_PATH  := $(TAURI_DIR)/icons/icon.png
+BRAND_ICON_SOURCES := $(wildcard src/assets/brand/*.svg) src/assets/brand/icon-manifest.json scripts/generate-icons.mjs
 BENCH_WORKSPACE ?= $(HOME)/workspace/work
 CLI_INSTALL_DIR ?= $(HOME)/.local/bin
 CLI_BIN_NAME ?= maru
@@ -48,20 +49,22 @@ help: ## Show this help
 # ---------------------------------------------------------------------------
 
 .PHONY: install
-install: node_modules $(ICON_PATH) ## Install pnpm deps + ensure tauri icon stub
+install: node_modules $(ICON_PATH) ## Install pnpm deps + ensure generated platform icons
 
 node_modules: package.json pnpm-lock.yaml
 	$(PNPM) install
 	@touch node_modules
 
-$(ICON_PATH): ## Tauri requires icons/icon.png even with bundle.active=false; stub a 1x1 PNG so cargo build works locally
-	@mkdir -p $(TAURI_DIR)/icons
-	@python3 -c "import struct, zlib, sys; d=b'\x89PNG\r\n\x1a\n'; \
-		c=lambda t,b: struct.pack('>I',len(b))+t+b+struct.pack('>I',zlib.crc32(t+b)&0xffffffff); \
-		d+=c(b'IHDR', struct.pack('>IIBBBBB',1,1,8,6,0,0,0)); \
-		d+=c(b'IDAT', zlib.compress(b'\x00'+b'\x00\x00\x00\x00')); \
-		d+=c(b'IEND', b''); sys.stdout.buffer.write(d)" > $(ICON_PATH)
-	@echo "wrote stub $(ICON_PATH) (replace with a real 1024x1024 PNG before bundling for release)"
+$(ICON_PATH): $(BRAND_ICON_SOURCES) ## Generate the canonical Maru icon set when sources change
+	$(PNPM) icons:generate
+
+.PHONY: icons
+icons: node_modules ## Regenerate web, desktop, iOS, and Android icon assets
+	$(PNPM) icons:generate
+
+.PHONY: icons-check
+icons-check: node_modules ## Fail when generated icon assets are missing or stale
+	$(PNPM) icons:check
 
 # ---------------------------------------------------------------------------
 # Dev
@@ -303,7 +306,7 @@ homebrew-fetch: ## Fetch Maru Homebrew cask and CLI formula in HOMEBREW_TAP_DIR
 # ---------------------------------------------------------------------------
 
 .PHONY: verify
-verify: typecheck release-version-check lint-i18n check-select-chrome check-type-tokens test-ts test-rust build-frontend ## Full verification: typecheck + release versions + guards + tests + frontend build
+verify: typecheck release-version-check icons-check lint-i18n check-select-chrome check-type-tokens test-ts test-rust build-frontend ## Full verification: typecheck + release versions + generated assets + guards + tests + frontend build
 
 # ---------------------------------------------------------------------------
 # Clean

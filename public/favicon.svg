@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-labelledby="title desc">
+  <title id="title">Maru modern geometric micro seal</title>
+  <desc id="desc">A broad-stroke Maru seal simplified for favicon and toolbar sizes.</desc>
+  <path
+    fill="#B23A26"
+    d="M180 40H844Q861 40 873 52L972 151Q984 163 984 180V844Q984 861 972 873L873 972Q861 984 844 984H180Q163 984 151 972L52 873Q40 861 40 844V180Q40 163 52 151L151 52Q163 40 180 40Z"
+  />
+  <g fill="#FDF8F2">
+    <path fill-rule="evenodd" d="M124 117H384L400 133V445L384 461H124L108 445V133ZM202 211V367L214 379H310L322 367V211L310 199H214Z" />
+    <path d="M416 117H506V250H538L550 262V330L538 342H506V461H416Z" />
+  </g>
+  <g fill="none" stroke="#FDF8F2" stroke-width="82" stroke-linecap="square" stroke-linejoin="miter">
+    <path d="M544 493H848V604H580V711H875" />
+    <path d="M536 758H875M705 758V869" />
+  </g>
+</svg>

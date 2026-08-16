@@ -13,6 +13,8 @@
     "build": "pnpm typecheck && pnpm build:frontend",
     "build:frontend": "vite build && node scripts/check-bundle-budget.mjs",
     "check:bundle-budget": "node scripts/check-bundle-budget.mjs",
+    "icons:generate": "node scripts/generate-icons.mjs",
+    "icons:check": "node scripts/generate-icons.mjs --check",
     "check:select-chrome": "node scripts/check-select-chrome.mjs",
     "lint:i18n": "node scripts/lint-i18n.mjs",
     "preview": "vite preview --host 127.0.0.1 --port 5308",
