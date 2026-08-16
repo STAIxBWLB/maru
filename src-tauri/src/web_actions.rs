@@ -23,16 +23,19 @@
 
 use crate::atomic_file::write_atomic;
 use crate::document::revision_for;
-use crate::tasks::TaskBucket;
+use crate::tasks::{
+    normalize_task_frontmatter_aliases, string_field, yaml_to_json, TaskBucket,
+};
 use crate::today::{TaskTransitionKind, TaskTransitionRequest};
 use crate::today_lifecycle::{move_file, task_transition};
 use crate::today_outbox::has_web_action;
-use crate::vault::{normalize_existing_dir, resolve_inside_vault};
+use crate::vault::{normalize_existing_dir, parse_frontmatter, resolve_inside_vault};
 use crate::vault_list::{assert_maru_can_write, WorkspaceWriteAction};
 use crate::win_process::NoWindow;
 use chrono::DateTime;
 use serde::{Deserialize, Serialize};
-use std::fs;
+use std::fs::{self, OpenOptions};
+use std::io::Write;
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 
@@ -295,6 +298,58 @@ fn move_to_applied(work: &Path, receipt_path: &Path) -> Result<String, String> {
     Ok(rel_path_for(work, &dest))
 }
 
+// --- Applied ledger -----------------------------------------------------------
+
+/// Durable, local (untracked) acknowledgement of applied receipts, appended
+/// after the side effect lands and before the pending -> applied move.
+///
+/// Without it, a `complete` on a note carrying no `googleTaskId` leaves no
+/// trace at all: it creates no outbox record, so a crash before the move would
+/// strand the receipt in `pending/` forever — every later run would report it
+/// stale, because its note has already been archived.
+fn applied_ledger_path(work: &Path) -> PathBuf {
+    crate::today_store::today_dir(work)
+        .join("web-actions")
+        .join("applied.jsonl")
+}
+
+fn ledger_has(work: &Path, id: &str) -> bool {
+    let Ok(raw) = fs::read_to_string(applied_ledger_path(work)) else {
+        return false;
+    };
+    raw.lines().any(|line| {
+        serde_json::from_str::<serde_json::Value>(line)
+            .ok()
+            .and_then(|entry| {
+                entry
+                    .get("id")
+                    .and_then(|value| value.as_str())
+                    .map(|value| value == id)
+            })
+            .unwrap_or(false)
+    })
+}
+
+fn ledger_append(work: &Path, receipt: &Receipt, now_iso: &str) -> Result<(), String> {
+    let path = applied_ledger_path(work);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|err| format!("Cannot create web-actions directory: {err}"))?;
+    }
+    let line = serde_json::json!({
+        "id": receipt.id,
+        "operation": receipt.operation,
+        "taskPath": receipt.task_path,
+        "appliedAt": now_iso,
+    });
+    let mut file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+        .map_err(|err| format!("Cannot open applied ledger: {err}"))?;
+    writeln!(file, "{line}").map_err(|err| format!("Cannot append applied ledger: {err}"))
+}
+
 // --- Blob sha -----------------------------------------------------------------
 
 /// Git blob sha of the working-tree file, computed by git itself so it always
@@ -367,19 +422,18 @@ fn load_receipt(work: &Path, path: &Path) -> Result<Receipt, WebActionSummary> {
 
 /// Apply one validated receipt. Returns the state to report.
 ///
-/// Replay safety: a receipt whose provider op is already in the outbox is
-/// recognized by `web_action_id` and only moved. The one uncovered window is a
-/// `complete` on a note with no `googleTaskId` — no outbox record is created,
-/// so nothing carries the id. A replay of that then fails the task-hash check
-/// (the note already moved to `archive/`) and reports `Stale`, which is the
-/// safe outcome: no duplicate side effect.
+/// Replay safety uses two checks because they cover different crash windows:
+/// the applied ledger is written for every receipt but only after the side
+/// effect, while an outbox record carrying `web_action_id` exists from the
+/// moment the provider op is queued. Together they mean a replay never
+/// duplicates a side effect and never strands an already-applied receipt.
 fn apply_receipt(
     work_path: &str,
     work: &Path,
     receipt: &Receipt,
     now_iso: &str,
 ) -> Result<WebActionState, String> {
-    if has_web_action(work, &receipt.id)? {
+    if ledger_has(work, &receipt.id) || has_web_action(work, &receipt.id)? {
         return Ok(WebActionState::Skipped);
     }
     let note = resolve_inside_vault(work_path, &receipt.task_path)?;
@@ -397,9 +451,23 @@ fn apply_receipt(
         WebActionOperation::Complete => {
             let raw =
                 fs::read_to_string(&note).map_err(|err| format!("Cannot read task note: {err}"))?;
-            // The web already wrote status/done/completedAt in place; the
-            // transition re-patches them idempotently and owns the durable
-            // outbox ordering plus the archive move.
+            // The web already recorded WHEN the task was completed, and the
+            // blob check just proved those values are the current ones. The
+            // desktop is only mirroring the completion, so the transition is
+            // driven by the note's own timestamps — restamping with the
+            // desktop's apply time would silently move the task to a
+            // different completion day (the UI passes a UTC `now`, which is
+            // yesterday's date for a Korean morning).
+            let parts = parse_frontmatter(&raw);
+            let frontmatter = normalize_task_frontmatter_aliases(yaml_to_json(&parts.meta));
+            let completed_at = string_field(&frontmatter, "completedAt")
+                .unwrap_or_else(|| receipt.requested_at.clone());
+            let done = string_field(&frontmatter, "done").unwrap_or_else(|| {
+                completed_at
+                    .get(..10)
+                    .unwrap_or(&completed_at)
+                    .to_string()
+            });
             task_transition(
                 work_path.to_string(),
                 TaskTransitionRequest {
@@ -408,12 +476,13 @@ fn apply_receipt(
                     kind: TaskTransitionKind::Complete,
                     expected_task_hash: revision_for(&raw),
                     defer_date: None,
-                    date: now_iso.get(..10).map(ToString::to_string),
-                    now_iso: Some(now_iso.to_string()),
+                    date: Some(done),
+                    now_iso: Some(completed_at),
                     web_action_id: Some(receipt.id.clone()),
                     payload: serde_json::json!({}),
                 },
             )?;
+            ledger_append(work, receipt, now_iso)?;
             Ok(WebActionState::Applied)
         }
         // ponytail: upsert is the next slice (issue #232 work item 4); until
@@ -689,10 +758,12 @@ mod tests {
 
     #[test]
     fn complete_archives_the_note_queues_one_op_and_acknowledges_the_receipt() {
+        // Deliberately a different day from NOW: the desktop must mirror the
+        // web's recorded completion time, never restamp with its apply time.
         let (tmp, receipt) = setup(
             "complete",
             "tasks/active/task.md",
-            "---\nstatus: done\ndone: 2026-08-16\ncompletedAt: \"2026-08-16T00:10:00+09:00\"\ngoogleTaskId: g-1\ngoogleTaskListId: list-1\nowner: Luca\n---\n# Body\n",
+            "---\nstatus: done\ndone: 2026-08-14\ncompletedAt: \"2026-08-14T23:40:00+09:00\"\ngoogleTaskId: g-1\ngoogleTaskListId: list-1\nowner: Luca\n---\n# Body\n",
         );
         let outcome = apply(&tmp);
 
@@ -703,10 +774,13 @@ mod tests {
         // Active -> Archive.
         assert!(!tmp.path().join("tasks/active/task.md").exists());
         let archived = fs::read_to_string(tmp.path().join("tasks/archive/task.md")).unwrap();
-        // The web-set completion triple survives, as do unknown keys.
+        // The web-set completion triple survives byte-for-byte, as do unknown keys.
         assert!(archived.contains("status: done"));
-        assert!(archived.contains("done: 2026-08-16"));
-        assert!(archived.contains("completedAt:"));
+        assert!(archived.contains("done: 2026-08-14"), "{archived}");
+        assert!(
+            archived.contains("completedAt: \"2026-08-14T23:40:00+09:00\""),
+            "{archived}"
+        );
         assert!(archived.contains("owner: Luca"));
 
         // Exactly one provider op, stamped with the receipt id.
@@ -723,6 +797,60 @@ mod tests {
         let raw = fs::read_to_string(&applied).unwrap();
         assert!(!raw.contains("status:"));
         assert!(raw.contains("operation: complete"));
+    }
+
+    #[test]
+    fn complete_falls_back_to_the_receipt_time_not_the_apply_time() {
+        // Defensive: a web complete always writes the triple, but if the note
+        // somehow lacks it the receipt's own timestamp is still closer to the
+        // truth than the desktop's apply clock.
+        let (tmp, _) = setup(
+            "complete",
+            "tasks/active/task.md",
+            "---\nstatus: done\ngoogleTaskId: g-1\n---\n# Body\n",
+        );
+        apply(&tmp);
+        let archived = fs::read_to_string(tmp.path().join("tasks/archive/task.md")).unwrap();
+        // NOW is the receipt's requestedAt in this fixture.
+        assert!(archived.contains(&format!("completedAt: \"{NOW}\"")), "{archived}");
+        assert!(archived.contains("done: 2026-08-16"), "{archived}");
+    }
+
+    #[test]
+    fn a_completed_receipt_with_no_provider_id_is_still_acknowledged_durably() {
+        // No googleTaskId means no outbox record, so the applied ledger is the
+        // only thing that stops a replay from reporting the receipt stale
+        // forever once its note has been archived.
+        let (tmp, receipt) = setup(
+            "complete",
+            "tasks/active/task.md",
+            "---\nstatus: done\ndone: 2026-08-16\n---\n# Body\n",
+        );
+        assert_eq!(apply(&tmp).applied, 1);
+        assert!(list_records(tmp.path()).unwrap().is_empty());
+        let ledger = fs::read_to_string(
+            tmp.path().join(".maru/today/web-actions/applied.jsonl"),
+        )
+        .unwrap();
+        assert!(ledger.contains(ID));
+        assert!(ledger.contains("tasks/active/task.md"));
+
+        // Simulate a crash after the transition but before the move: the
+        // receipt is back in pending/ while the note is already archived.
+        fs::create_dir_all(receipt.parent().unwrap()).unwrap();
+        fs::write(
+            &receipt,
+            format!(
+                "schemaVersion: {WEB_ACTION_SCHEMA_VERSION}\nid: {ID}\noperation: complete\ntaskPath: tasks/active/task.md\nexpectedTaskBlobSha: deadbeef\nrequestedAt: \"{NOW}\"\nrequestedBy: web:owner\n"
+            ),
+        )
+        .unwrap();
+
+        // Recovery finishes the move instead of reporting it stale forever.
+        let outcome = apply(&tmp);
+        assert_eq!(outcome.skipped, 1);
+        assert_eq!(outcome.stale, 0);
+        assert!(!receipt.exists());
     }
 
     #[test]

@@ -153,7 +153,10 @@ export function TodaySyncStatus() {
     setBusy(false);
   };
 
-  if (records.length === 0 && webActions.length === 0) return null;
+  // Keep rendering while a result is on screen: applying the last receipt can
+  // empty both lists, and the outcome is the only confirmation the user gets
+  // that the working tree changed and still needs Git Sync.
+  if (records.length === 0 && webActions.length === 0 && webOutcome === null) return null;
 
   return (
     <section className="today-sync-status" aria-label={t("today.sync.title")}>

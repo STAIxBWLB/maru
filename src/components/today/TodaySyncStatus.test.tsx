@@ -117,6 +117,29 @@ describe("TodaySyncStatus", () => {
     expect(container.querySelector(".today-sync-status-count.neutral")?.textContent).toContain("1");
   });
 
+  it("keeps the result visible after the last receipt is applied", async () => {
+    const container = await renderSection([], [webAction()]);
+    vi.mocked(webActionsApply).mockResolvedValue({
+      applied: 1,
+      skipped: 0,
+      stale: 0,
+      invalid: 0,
+      items: [],
+    });
+    vi.mocked(taskIntegrationsDrain).mockResolvedValue({ drained: 0, failed: 0, blocked: 0 });
+    await act(async () => {
+      headerButton(container).click();
+    });
+    const apply = container.querySelector<HTMLButtonElement>(".today-sync-web .today-panel-link")!;
+    // The receipt clears and queued no outbox row, so both lists go empty.
+    vi.mocked(webActionsScan).mockResolvedValue([]);
+    await act(async () => {
+      apply.click();
+    });
+    expect(container.querySelector(".today-sync-status")).not.toBeNull();
+    expect(container.querySelector(".today-sync-web-result")?.textContent).toContain("Git Sync");
+  });
+
   it("applying web actions drains and reloads, and never commits", async () => {
     const container = await renderSection([], [webAction(), webAction({ id: "wa-2" })]);
     vi.mocked(webActionsApply).mockResolvedValue({
