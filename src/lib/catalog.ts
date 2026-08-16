@@ -2,6 +2,7 @@
 // Phase 3 scaffold — Rust commands ship in W1, UI consumes here.
 
 import { invoke } from "@tauri-apps/api/core";
+import { invokeE2EOverride } from "./e2eInvoke";
 
 export type DocCategory =
   | "formal-report"
@@ -48,9 +49,12 @@ export async function catalogScan(
   workspaceRoot: string,
   forceRefresh = false,
 ): Promise<CatalogScanReport> {
-  return invoke<CatalogScanReport>("catalog_scan", {
-    req: { workspace_root: workspaceRoot, force_refresh: forceRefresh },
-  });
+  const req = { workspace_root: workspaceRoot, force_refresh: forceRefresh };
+  // Browser e2e seam (null in the Tauri shell or without a registered
+  // handler) — same pattern as the api.ts command wrappers.
+  const override = await invokeE2EOverride<CatalogScanReport>("catalog_scan", { req });
+  if (override) return override;
+  return invoke<CatalogScanReport>("catalog_scan", { req });
 }
 
 export interface CatalogQueryParams {
@@ -62,15 +66,16 @@ export interface CatalogQueryParams {
 }
 
 export async function catalogQuery(params: CatalogQueryParams): Promise<CatalogEntry[]> {
-  return invoke<CatalogEntry[]>("catalog_query", {
-    req: {
-      workspace_root: params.workspaceRoot,
-      business_unit: params.businessUnit,
-      category: params.category,
-      kinds: params.kinds,
-      limit: params.limit,
-    },
-  });
+  const req = {
+    workspace_root: params.workspaceRoot,
+    business_unit: params.businessUnit,
+    category: params.category,
+    kinds: params.kinds,
+    limit: params.limit,
+  };
+  const override = await invokeE2EOverride<CatalogEntry[]>("catalog_query", { req });
+  if (override) return override;
+  return invoke<CatalogEntry[]>("catalog_query", { req });
 }
 
 export async function catalogDrilldown(

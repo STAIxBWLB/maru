@@ -22,6 +22,8 @@ const PRIMARY_MODES = [
   ["메시지", ".comms-pane"],
   ["회의록", ".meetings-pane"],
   ["오늘", ".today-pane"],
+  ["태스크", ".tasks-pane"],
+  ["대시보드", ".dashboard-pane"],
   ["아이디어", ".drafts-pane"],
   ["갭 분석", ".gap-pane"],
   ["에이전트", ".agents-pane"],

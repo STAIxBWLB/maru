@@ -1,13 +1,11 @@
-// Maru Today — root pane for the "tasks" app mode. Owns the day snapshot
+// Maru Today — root pane for the "today" app mode. Owns the day snapshot
 // (best-effort load; the shell renders in a degraded read-only mode when
 // the backend is unavailable), persists route changes into the snapshot,
-// and routes internally between the stage screens, the secondary panels,
-// and the existing Tasks experience (route "all").
+// and routes internally between the stage screens and the calendar sync
+// panel. The standalone task manager lives in the separate "tasks" mode.
 
 import {
-  lazy,
   memo,
-  Suspense,
   useCallback,
   useEffect,
   useMemo,
@@ -24,12 +22,12 @@ import {
   todayFinalizeSetup,
   todayMutate,
   todayOpen,
+  type DayState,
   type TodayFinalizeSetupRequest,
   type TodayMutation,
   type TodayRoute,
   type TodaySnapshot,
 } from "../../lib/today";
-import type { TasksPaneProps } from "../tasks/TasksPane";
 import { PaneResizeHandle } from "../ui/PaneResizeHandle";
 import { TodayContext, type TodayContextValue } from "./todayContext";
 import { TodayCalendarSyncPanel } from "./TodayCalendarSyncPanel";
@@ -38,12 +36,14 @@ import { TodayPrepare } from "./TodayPrepare";
 import { TodayReview } from "./TodayReview";
 import { TodaySidebar } from "./TodaySidebar";
 
-const LazyTasksPane = lazy(() =>
-  import("../tasks/TasksPane").then((module) => ({ default: module.TasksPane })),
-);
+const PLANNER_ROUTES: readonly TodayRoute[] = ["prepare", "execute", "review", "calendar"];
 
-function availableTodayRoute(route: TodayRoute): TodayRoute {
-  return route === "capture" || route === "upcoming" || route === "log" ? "all" : route;
+function availableTodayRoute(route: TodayRoute, dayState: DayState | null): TodayRoute {
+  if (PLANNER_ROUTES.includes(route)) return route;
+  // Retired routes (capture/upcoming/log) and the former "all" task list land
+  // on the stage matching the current day; without a snapshot, Prepare is the
+  // safest degraded default.
+  return dayState ? resolveRouteForDayState(dayState) : "prepare";
 }
 
 interface TodayPaneProps {
@@ -65,8 +65,8 @@ interface TodayPaneProps {
   ) => void;
   rolloverEpoch?: number;
   refreshRequestEpoch?: number;
-  /** Props bundle for the existing TasksPane (route "all"), computed by App. */
-  tasksProps: TasksPaneProps;
+  /** Opens the standalone Tasks mode (the former route "all"). */
+  onOpenTasksMode: () => void;
   /** Optional sidebar counts — rendered only when provided. */
   calendarCount?: number;
   inboxCount?: number;
@@ -82,7 +82,7 @@ export const TodayPane = memo(function TodayPane({
   onLayoutChange,
   rolloverEpoch = 0,
   refreshRequestEpoch = 0,
-  tasksProps,
+  onOpenTasksMode,
   calendarCount,
   inboxCount,
   upcomingCount,
@@ -90,7 +90,6 @@ export const TodayPane = memo(function TodayPane({
   const { t } = useTranslation();
   const timezone = effectiveSettings.timezone ?? "Asia/Seoul";
   const todaySettings = effectiveSettings.today;
-  const availableRoute = availableTodayRoute(route);
   const resolvedLayout = {
     todaySidebarWidth:
       layout?.todaySidebarWidth ?? TODAY_LAYOUT_LIMITS.todaySidebarWidth.defaultValue,
@@ -128,6 +127,8 @@ export const TodayPane = memo(function TodayPane({
     snapshotRef.current = next;
     setSnapshot(next);
   }, []);
+
+  const availableRoute = availableTodayRoute(route, snapshot?.dayState ?? null);
 
   useEffect(() => {
     paneIdentityRef.current += 1;
@@ -305,7 +306,7 @@ export const TodayPane = memo(function TodayPane({
   // mutation queue as autosave and plan edits.
   const handleRouteChange = useCallback(
     (next: TodayRoute) => {
-      const available = availableTodayRoute(next);
+      const available = availableTodayRoute(next, snapshotRef.current?.dayState ?? null);
       onRouteChange(available);
       void mutate({ type: "setRoute", route: available });
     },
@@ -355,19 +356,6 @@ export const TodayPane = memo(function TodayPane({
 
   const content = (() => {
     switch (availableRoute) {
-      case "all":
-        return (
-          <div className="today-main-all">
-            <Suspense fallback={null}>
-              <LazyTasksPane
-                {...tasksProps}
-                layout={resolvedLayout}
-                onLayoutChange={onLayoutChange}
-                logicalDay={snapshot?.logicalDay ?? null}
-              />
-            </Suspense>
-          </div>
-        );
       case "prepare":
         return <TodayPrepare onNavigate={handleRouteChange} />;
       case "execute":
@@ -376,9 +364,8 @@ export const TodayPane = memo(function TodayPane({
         return <TodayReview onNavigate={handleRouteChange} />;
       case "calendar":
         return <TodayCalendarSyncPanel />;
-      case "capture":
-      case "upcoming":
-      case "log":
+      default:
+        // Unreachable: availableTodayRoute only yields planner routes.
         return null;
     }
   })();
@@ -396,6 +383,7 @@ export const TodayPane = memo(function TodayPane({
         <TodaySidebar
           route={availableRoute}
           onRouteChange={handleRouteChange}
+          onOpenTasksMode={onOpenTasksMode}
           calendarCount={calendarCount}
           inboxCount={inboxCount}
           upcomingCount={upcomingCount}

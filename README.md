@@ -34,9 +34,9 @@ The deeper "what's next + how to continue" reference is [ROADMAP.md](ROADMAP.md)
 
 ## Modes
 
-The activity rail exposes fifteen top-level modes (Settings opens as an in-app
-overlay, so it is not an app mode). Diagram and Graph default on; E2E Flow is
-flag-gated.
+The activity rail exposes seventeen top-level modes (Settings opens as an
+in-app overlay, so it is not an app mode). Diagram and Graph default on; E2E
+Flow is flag-gated.
 
 | Mode | Label (ko / en) | What it does |
 |------|-----------------|--------------|
@@ -45,7 +45,9 @@ flag-gated.
 | `inbox` | 인박스 / Inbox | Configured drop / pending / processed / Files / Gmail sections with classify + `a`/`r`/`p`. |
 | `comms` | 메시지 / Messages | Multichannel comms settings (Telegram auth/mapping, source config, macOS migration). |
 | `meetings` | 회의록 / Meetings | Transcript + auto-summary intake and the meeting-notes review workbench. |
-| `tasks` | 태스크 / Tasks | Today planner (`src/components/today/`) over file-backed tasks with Google Tasks/Calendar links. Routes: prepare / execute / review stages, calendar, capture, upcoming, log, and the full task list with detail editing and a month/week/day calendar. |
+| `today` | 오늘 / Today | Today planner (`src/components/today/`) over file-backed tasks with Google Tasks/Calendar links: prepare / execute / review stages plus calendar sync. |
+| `tasks` | 태스크 / Tasks | Standalone task & schedule management: full task list, month/week/day calendar, detail editing, and AI runs. |
+| `dashboard` | 대시보드 / Dashboard | At-a-glance workspace overview: today summary, tasks, schedule, catalog signals, inbox, agents, drafts, git, recents, and sync, with in-mode drilldowns and deep links into the owning modes. |
 | `drafts` | 아이디어 / Ideation | Ideation hub for durable ideas, implementation drafts, promotion, gap analysis, and the recurring-skill Automation scheduler. See [docs/drafts.md](docs/drafts.md). |
 | `gap` | 갭 분석 / Gap Analysis | Diffs promoted drafts against their frozen baselines, classifies the human edits, and feeds the tendencies back into draft prompts. See [docs/gap-analysis.md](docs/gap-analysis.md). |
 | `agents` | 에이전트 / Agents | Every AI job Maru can run: status, chat, run, stop, backend, permission mode, prompt, schedule, plus user-created agents. The 대화 tab talks to the agent's backend in-app instead of through a PTY, and routes a turn into a task, a memo, or an approved proposal. See [docs/agents.md](docs/agents.md). |
@@ -208,10 +210,10 @@ make homebrew-update RELEASE_TAG=v$(node -p "require('./package.json').version")
 │   React 19 + Radix UI + BlockNote + marked + DOMPurify       │
 │   Sigma WebGL + Graphology · CodeMirror · alacritty canvas    │
 │                                                               │
-│   Activity rail (14 modes):                                  │
-│     Docs / Files / Inbox / Messages / Meetings / Tasks /     │
-│     Drafts / Gap / Catalog / Studio / Diagram / Graph /      │
-│     Sites / E2E                                              │
+│   Activity rail (17 modes):                                  │
+│     Dashboard / Docs / Files / Inbox / Messages / Meetings / │
+│     Today / Tasks / Drafts / Gap / Agents / Catalog /        │
+│     Studio / Diagram / Graph / Sites / E2E                   │
 │   Files tree/list/preview + editor tabs + Terminal/Graph Panel│
 └──────────────────────────────┬──────────────────────────────┘
                                │ Tauri IPC

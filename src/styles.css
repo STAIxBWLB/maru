@@ -9324,7 +9324,10 @@ button.git-badge:hover {
 
 /* ─── Maru Today pane ──────────────────────────────────────────────── */
 
-.today-pane .pane-resize-handle {
+/* The standalone tasks mode is no longer nested inside .today-pane, so the
+   resize-handle rules below cover both panes (the calendar agenda handle
+   inside TasksPane included — otherwise it collapses to zero height). */
+:is(.today-pane, .tasks-pane) .pane-resize-handle {
   position: relative;
   z-index: 3;
   width: 9px;
@@ -9335,7 +9338,7 @@ button.git-badge:hover {
   background: transparent;
 }
 
-.today-pane .pane-resize-handle > span {
+:is(.today-pane, .tasks-pane) .pane-resize-handle > span {
   position: absolute;
   inset: 0 4px;
   background: var(--line-soft);
@@ -9344,18 +9347,18 @@ button.git-badge:hover {
     background-color var(--motion-fast) ease;
 }
 
-.today-pane .pane-resize-handle:hover > span,
-.today-pane .pane-resize-handle:focus-visible > span {
+:is(.today-pane, .tasks-pane) .pane-resize-handle:hover > span,
+:is(.today-pane, .tasks-pane) .pane-resize-handle:focus-visible > span {
   inset: 0 3px;
   background: color-mix(in srgb, var(--accent) 72%, var(--line));
 }
 
-.today-pane .pane-resize-handle:focus-visible {
+:is(.today-pane, .tasks-pane) .pane-resize-handle:focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: -2px;
 }
 
-.today-pane .pane-resize-handle[aria-disabled="true"] {
+:is(.today-pane, .tasks-pane) .pane-resize-handle[aria-disabled="true"] {
   cursor: default;
   opacity: 0.45;
 }
@@ -9492,19 +9495,9 @@ button.git-badge:hover {
   overflow: hidden;
 }
 
-.today-main-all {
-  flex: 1;
-  min-width: 0;
-  min-height: 0;
-  display: flex;
-  container-type: inline-size;
-  container-name: todaytasks;
-}
-
-.today-main-all > .tasks-pane {
-  flex: 1;
-  min-width: 0;
-}
+/* The retired Today "all" route wrapped TasksPane in .today-main-all, which
+   established the "todaytasks" container. The standalone tasks mode gets it
+   from .app-workbench / .workbench-secondary-surface instead. */
 
 .today-stage {
   display: flex;
@@ -9863,6 +9856,393 @@ button.git-badge:hover {
 
 .today-panel-header-link {
   margin-left: auto;
+}
+
+/* ─── Dashboard ────────────────────────────────────────────────────── */
+
+.dashboard-pane {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--panel-2) 72%, var(--bg)) 0, var(--bg) 260px);
+  color: var(--ink);
+  font-size: var(--type-body-size);
+}
+
+.dashboard-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 20px 22px 14px;
+}
+
+.dashboard-title {
+  margin: 0;
+  color: var(--ink);
+  font-size: var(--type-title-size);
+  font-weight: 750;
+}
+
+.dashboard-subtitle {
+  margin: 4px 0 0;
+  font-size: var(--type-label-size);
+}
+
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 14px;
+  padding: 0 22px 22px;
+}
+
+.dashboard-widget {
+  display: flex;
+  min-width: 0;
+  min-height: 160px;
+  flex-direction: column;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-lg);
+  background: var(--panel);
+  padding: 16px 18px;
+}
+
+.dashboard-widget-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.dashboard-widget-title {
+  margin: 0;
+  color: var(--ink);
+  font-size: var(--type-heading-size);
+  font-weight: 750;
+}
+
+.dashboard-widget-count {
+  display: inline-flex;
+  align-items: center;
+  min-height: 20px;
+  border-radius: 999px;
+  padding: 0 8px;
+  background: var(--accent-tint);
+  color: var(--ink);
+  font-size: var(--type-meta-size);
+  font-weight: 700;
+}
+
+.dashboard-widget-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  border: 0;
+  background: none;
+  padding: 2px 0;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: var(--type-label-size);
+}
+
+.dashboard-widget-action:hover {
+  color: var(--ink);
+  text-decoration: underline;
+}
+
+.dashboard-widget-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.dashboard-widget-empty {
+  margin: auto;
+  color: var(--faint);
+  font-size: var(--type-label-size);
+}
+
+.dashboard-widget-error {
+  margin: auto 0;
+  color: var(--danger);
+  font-size: var(--type-label-size);
+}
+
+.dashboard-widget-error p {
+  margin: 0 0 6px;
+}
+
+.dashboard-widget-retry {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-md, 8px);
+  background: var(--panel-2);
+  padding: 4px 10px;
+  color: var(--ink);
+  cursor: pointer;
+  font-size: var(--type-label-size);
+}
+
+.dashboard-widget-skeleton {
+  display: grid;
+  gap: 8px;
+}
+
+.dashboard-widget-skeleton span {
+  display: block;
+  height: 14px;
+  border-radius: 6px;
+  background: var(--panel-2);
+  animation: dashboard-skeleton-pulse 1.4s ease-in-out infinite;
+}
+
+.dashboard-widget-skeleton span:nth-child(2) {
+  width: 82%;
+}
+
+.dashboard-widget-skeleton span:nth-child(3) {
+  width: 64%;
+}
+
+@keyframes dashboard-skeleton-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0.45;
+  }
+}
+
+.dashboard-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  border: 1px solid var(--line-soft);
+  border-radius: 999px;
+  padding: 0 8px;
+  background: var(--panel-2);
+  color: var(--muted);
+  font-size: var(--type-meta-size);
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.dashboard-sync-attention {
+  border-color: var(--warn);
+  color: var(--warn);
+}
+
+.dashboard-today-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.dashboard-lanes {
+  font-size: var(--type-label-size);
+}
+
+.dashboard-section-label {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--type-meta-size);
+  font-weight: 750;
+  text-transform: uppercase;
+}
+
+.dashboard-list {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding-left: 18px;
+  font-size: var(--type-label-size);
+}
+
+.dashboard-list-meta {
+  margin-right: 6px;
+  color: var(--faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.dashboard-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.dashboard-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 24px;
+  border: 1px solid var(--line-soft);
+  border-radius: 999px;
+  padding: 0 10px;
+  background: var(--panel-2);
+  color: var(--muted);
+  cursor: pointer;
+  font-size: var(--type-meta-size);
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.dashboard-chip:hover {
+  color: var(--ink);
+  border-color: var(--line-strong, var(--line-soft));
+}
+
+.dashboard-chip.active {
+  border-color: var(--accent);
+  color: var(--ink);
+  background: var(--accent-tint);
+}
+
+.dashboard-chip-static {
+  cursor: default;
+}
+
+.dashboard-chip-count {
+  color: var(--faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.dashboard-chip.active .dashboard-chip-count {
+  color: var(--muted);
+}
+
+.dashboard-kv {
+  display: grid;
+  gap: 4px;
+  font-size: var(--type-label-size);
+}
+
+.dashboard-kv p {
+  margin: 0;
+}
+
+.dashboard-git-branch {
+  font-weight: 700;
+}
+
+.dashboard-link {
+  border: 0;
+  background: none;
+  padding: 0;
+  color: var(--ink);
+  cursor: pointer;
+  font-size: var(--type-label-size);
+  text-align: left;
+}
+
+.dashboard-link:hover {
+  text-decoration: underline;
+}
+
+.dashboard-drilldown {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 0 22px 22px;
+}
+
+.dashboard-drilldown-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.dashboard-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-md, 8px);
+  background: var(--panel);
+  padding: 5px 10px;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: var(--type-label-size);
+}
+
+.dashboard-back:hover {
+  color: var(--ink);
+}
+
+.dashboard-drilldown-title {
+  margin: 0;
+  color: var(--ink);
+  font-size: var(--type-heading-size);
+  font-weight: 750;
+}
+
+.dashboard-rows {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.dashboard-row {
+  display: flex;
+  width: 100%;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-md, 8px);
+  background: var(--panel);
+  padding: 8px 12px;
+  color: var(--ink);
+  cursor: pointer;
+  font-size: var(--type-label-size);
+  text-align: left;
+}
+
+.dashboard-row:hover {
+  border-color: var(--accent);
+}
+
+.dashboard-row-static {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-md, 8px);
+  background: var(--panel);
+  padding: 8px 12px;
+  font-size: var(--type-label-size);
+}
+
+.dashboard-row-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dashboard-row-meta {
+  flex: 0 0 auto;
+  color: var(--faint);
+  font-size: var(--type-meta-size);
+}
+
+@media (max-width: 720px) {
+  .dashboard-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 /* ─── Today: Execute / Review ──────────────────────────────────────── */
@@ -24868,7 +25248,7 @@ select:focus-visible,
     minmax(0, var(--outline-visual-col));
   grid-template-rows: minmax(0, 1fr);
   grid-template-areas: "list editor outline";
-  container-name: appworkbench;
+  container-name: appworkbench todaytasks;
   container-type: inline-size;
 }
 
@@ -24945,7 +25325,7 @@ select:focus-visible,
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   grid-template-rows: 34px minmax(0, 1fr);
-  container-name: secondaryworkbench;
+  container-name: secondaryworkbench todaytasks;
   container-type: inline-size;
 }
 

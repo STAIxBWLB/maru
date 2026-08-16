@@ -37,7 +37,7 @@ export function resolveLaunchRoute(input: LaunchRouteInput): LaunchRouteDecision
   if (input.explicitMode) return null;
   if (input.lastAutoOpenDay === input.logicalDay) return null;
   return {
-    mode: "tasks",
+    mode: "today",
     route: resolveRouteForDayState(input.dayState),
     markAutoOpen: true,
   };

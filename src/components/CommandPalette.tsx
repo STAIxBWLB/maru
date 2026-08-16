@@ -85,12 +85,14 @@ export const CommandPalette = memo(function CommandPalette({
         group: "navigate",
       },
       { id: "open-meetings", label: t("cmdk.action.openMeetings"), group: "navigate" },
+      { id: "open-today", label: t("cmdk.action.openToday"), group: "navigate" },
       {
         id: "open-tasks",
         label: t("cmdk.action.openTasks"),
         shortcut: "⌘ ⇧ T",
         group: "navigate",
       },
+      { id: "open-dashboard", label: t("cmdk.action.openDashboard"), group: "navigate" },
       {
         id: "open-sites",
         label: t("cmdk.action.openSites"),

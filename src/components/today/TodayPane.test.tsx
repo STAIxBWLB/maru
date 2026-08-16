@@ -6,7 +6,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { LocaleContext, t as translate } from "../../lib/i18n";
 import { DEFAULT_MARU_SETTINGS } from "../../lib/settings";
 import type { TodayRoute, TodaySnapshot } from "../../lib/today";
-import type { TasksPaneProps } from "../tasks/TasksPane";
 import { TodayPane } from "./TodayPane";
 
 vi.mock("../../lib/today", async (importOriginal) => {
@@ -17,10 +16,6 @@ vi.mock("../../lib/today", async (importOriginal) => {
     todayMutate: vi.fn(),
   };
 });
-
-vi.mock("../tasks/TasksPane", () => ({
-  TasksPane: () => <div data-testid="tasks-pane-stub" />,
-}));
 
 import { todayMutate, todayOpen } from "../../lib/today";
 
@@ -76,7 +71,7 @@ async function renderPane({
           workPath={workPath}
           effectiveSettings={DEFAULT_MARU_SETTINGS.tasks}
           rolloverEpoch={rolloverEpoch}
-          tasksProps={{} as unknown as TasksPaneProps}
+          onOpenTasksMode={() => {}}
         />
       </LocaleContext.Provider>,
     );
@@ -103,7 +98,7 @@ async function renderManagedPane() {
           onRouteChange={setRoute}
           workPath="/tmp/work"
           effectiveSettings={DEFAULT_MARU_SETTINGS.tasks}
-          tasksProps={{} as unknown as TasksPaneProps}
+          onOpenTasksMode={() => {}}
         />
       </LocaleContext.Provider>
     );
@@ -126,9 +121,12 @@ describe("TodayPane", () => {
     document.body.innerHTML = "";
   });
 
-  it("renders the existing tasks experience on route 'all'", async () => {
+  it("redirects the retired route 'all' to the day-state stage", async () => {
+    // The standalone task list now lives in the separate "tasks" app mode;
+    // the planner normalizes "all" to prepare/execute based on the snapshot.
     const { container } = await renderPane({ route: "all" });
-    expect(container.querySelector('[data-testid="tasks-pane-stub"]')).not.toBeNull();
+    expect(container.querySelector('[data-today-section="braindump"]')).not.toBeNull();
+    expect(container.querySelector(".today-pane")).not.toBeNull();
   });
 
   it("renders a real Calendar Sync surface instead of the placeholder", async () => {
@@ -140,9 +138,9 @@ describe("TodayPane", () => {
     );
   });
 
-  it("normalizes retired placeholder routes to All Tasks", async () => {
+  it("normalizes retired placeholder routes to a planner stage", async () => {
     const { container } = await renderPane({ route: "capture" });
-    expect(container.querySelector('[data-testid="tasks-pane-stub"]')).not.toBeNull();
+    expect(container.querySelector('[data-today-section="braindump"]')).not.toBeNull();
     expect(
       Array.from(container.querySelectorAll(".today-sidebar .today-nav-item")).some(
         (item) => item.getAttribute("aria-label") === translate("ko", "today.nav.inbox"),
@@ -296,7 +294,7 @@ describe("TodayPane", () => {
             onRouteChange={onRouteChange}
             workPath="/tmp/work"
             effectiveSettings={DEFAULT_MARU_SETTINGS.tasks}
-            tasksProps={{} as unknown as TasksPaneProps}
+            onOpenTasksMode={() => {}}
             rolloverEpoch={1}
           />
         </LocaleContext.Provider>,
