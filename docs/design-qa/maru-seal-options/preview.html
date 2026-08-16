@@ -1,0 +1,433 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Maru Seal Directions</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        font-family: Inter, Pretendard, "Apple SD Gothic Neo", system-ui, sans-serif;
+        background: #17140f;
+        color: #f5efe2;
+      }
+
+      * { box-sizing: border-box; }
+
+      body {
+        margin: 0;
+        min-width: 1800px;
+        background:
+          radial-gradient(circle at 8% 0%, rgba(178, 58, 38, 0.13), transparent 26%),
+          #17140f;
+      }
+
+      .board {
+        width: 1800px;
+        margin: 0 auto;
+        padding: 66px 70px 76px;
+      }
+
+      .eyebrow,
+      .option-kicker,
+      .section-label,
+      .size-label,
+      .footer {
+        color: #a99e88;
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.13em;
+        text-transform: uppercase;
+      }
+
+      header {
+        display: flex;
+        align-items: end;
+        justify-content: space-between;
+        padding-bottom: 34px;
+        border-bottom: 1px solid #3a3328;
+      }
+
+      h1 {
+        margin: 12px 0 0;
+        max-width: 900px;
+        color: #f8f2e5;
+        font-family: "Noto Serif KR", "AppleMyungjo", serif;
+        font-size: 52px;
+        font-weight: 600;
+        letter-spacing: -0.045em;
+        line-height: 1.08;
+      }
+
+      .header-note {
+        width: 390px;
+        margin: 0;
+        color: #bdb29e;
+        font-size: 16px;
+        line-height: 1.65;
+      }
+
+      .options {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 22px;
+        padding-top: 22px;
+      }
+
+      .option {
+        min-width: 0;
+        overflow: hidden;
+        border: 1px solid #3a3328;
+        border-radius: 22px;
+        background: #211d16;
+      }
+
+      .option-head {
+        display: grid;
+        grid-template-columns: 208px 1fr;
+        align-items: center;
+        min-height: 270px;
+        padding: 26px;
+        background: #f5f1e6;
+        color: #221e15;
+      }
+
+      .hero-mark {
+        width: 188px;
+        height: 188px;
+        filter: drop-shadow(0 14px 22px rgba(58, 32, 20, 0.16));
+      }
+
+      .option-kicker { color: #9d3928; }
+
+      h2 {
+        margin: 10px 0 9px;
+        font-family: "Noto Serif KR", "AppleMyungjo", serif;
+        font-size: 29px;
+        font-weight: 700;
+        letter-spacing: -0.04em;
+      }
+
+      .option-copy {
+        margin: 0;
+        color: #665d4d;
+        font-size: 15px;
+        line-height: 1.55;
+      }
+
+      .section {
+        padding: 24px 26px;
+        border-top: 1px solid #3a3328;
+      }
+
+      .sizes {
+        display: flex;
+        align-items: end;
+        justify-content: space-between;
+        height: 112px;
+        margin-top: 18px;
+      }
+
+      .size {
+        display: grid;
+        justify-items: center;
+        gap: 10px;
+        min-width: 46px;
+      }
+
+      .size-stage {
+        display: grid;
+        place-items: center;
+        width: 70px;
+        height: 72px;
+        border-radius: 13px;
+        background: #f6f1e5;
+        box-shadow: inset 0 0 0 1px rgba(82, 67, 48, 0.13);
+      }
+
+      .size img { display: block; }
+      .size-label { color: #887d69; font-size: 10px; }
+
+      .mock-stack {
+        display: grid;
+        gap: 14px;
+        margin-top: 18px;
+      }
+
+      .topbar-mock,
+      .browser-mock {
+        overflow: hidden;
+        border: 1px solid #d9d0bf;
+        border-radius: 11px;
+        background: #fcfaf3;
+        box-shadow: 0 12px 24px rgba(0, 0, 0, 0.12);
+      }
+
+      .topbar-mock {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        height: 58px;
+        padding: 0 14px;
+        color: #443d31;
+      }
+
+      .traffic { display: flex; gap: 6px; }
+      .traffic i { width: 9px; height: 9px; border-radius: 999px; background: #d7cdbb; }
+      .topbar-mock img { width: 22px; height: 22px; margin-left: 3px; }
+
+      .pill {
+        display: flex;
+        align-items: center;
+        height: 28px;
+        padding: 0 10px;
+        border: 1px solid #d9d0bf;
+        border-radius: 8px;
+        background: #f8f4eb;
+        font-size: 11px;
+        font-weight: 700;
+      }
+
+      .pill.muted { color: #978b76; }
+
+      .browser-tabs {
+        display: flex;
+        align-items: end;
+        height: 46px;
+        padding: 8px 10px 0;
+        background: #eae4d8;
+      }
+
+      .browser-tab {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        width: 190px;
+        height: 38px;
+        padding: 0 13px;
+        border-radius: 9px 9px 0 0;
+        background: #fcfaf3;
+        color: #3d372b;
+        font-size: 12px;
+        font-weight: 650;
+      }
+
+      .browser-tab img { width: 16px; height: 16px; }
+
+      .browser-page {
+        height: 36px;
+        border-top: 1px solid #ded5c4;
+        background: #fcfaf3;
+      }
+
+      .platforms {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 14px;
+        margin-top: 18px;
+      }
+
+      .platform {
+        height: 116px;
+        overflow: hidden;
+        border: 1px solid #3f382d;
+        border-radius: 15px;
+        background: #181611;
+      }
+
+      .dock-scene {
+        position: relative;
+        display: grid;
+        place-items: center;
+        background: linear-gradient(150deg, #786b5c, #28251f 62%, #15140f);
+      }
+
+      .dock {
+        position: absolute;
+        bottom: 9px;
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        height: 76px;
+        padding: 8px 10px;
+        border: 1px solid rgba(255, 255, 255, 0.25);
+        border-radius: 18px;
+        background: rgba(242, 238, 230, 0.22);
+        backdrop-filter: blur(12px);
+      }
+
+      .dock i {
+        width: 48px;
+        height: 48px;
+        border-radius: 11px;
+        background: rgba(243, 239, 230, 0.58);
+      }
+
+      .dock img { width: 58px; height: 58px; }
+
+      .windows-scene {
+        display: grid;
+        place-items: center;
+        background: #ede9df;
+      }
+
+      .windows-tile {
+        display: grid;
+        justify-items: center;
+        gap: 8px;
+        color: #51493c;
+        font-size: 10px;
+        font-weight: 700;
+      }
+
+      .windows-tile img {
+        width: 62px;
+        height: 62px;
+        filter: drop-shadow(0 7px 10px rgba(41, 34, 25, 0.18));
+      }
+
+      .palette {
+        display: flex;
+        gap: 8px;
+        margin-top: 16px;
+      }
+
+      .swatch { flex: 1; height: 10px; border-radius: 999px; }
+      .seal { background: #b23a26; }
+      .paper { background: #f5f1e6; }
+      .ink { background: #221e15; }
+
+      .footer {
+        display: flex;
+        justify-content: space-between;
+        margin-top: 28px;
+        color: #786e5d;
+      }
+    </style>
+  </head>
+  <body>
+    <main class="board">
+      <header>
+        <div>
+          <div class="eyebrow">Maru identity study / 2026.08.16</div>
+          <h1>한글 전각의 인상과 작은 화면의 가독성을 함께 잡는 세 가지 방향</h1>
+        </div>
+        <p class="header-note">
+          공통 구조는 '마' 좌상단, '루' 우하단. 같은 색과 같은 크기에서 획, 질감, 여백만 달리해 판단합니다.
+        </p>
+      </header>
+
+      <section class="options" aria-label="Maru seal alternatives">
+        <article class="option" id="option-a">
+          <div class="option-head">
+            <img class="hero-mark" src="a-traditional-full.svg" alt="A안 전통 전각형" />
+            <div>
+              <div class="option-kicker">Direction A</div>
+              <h2>전통 전각형</h2>
+              <p class="option-copy">각진 칼맛, 비정형 인면, 절제된 인주 번짐. 한국 도장의 물성을 가장 강하게 드러냅니다.</p>
+            </div>
+          </div>
+          <div class="section">
+            <div class="section-label">Small-size test</div>
+            <div class="sizes">
+              <div class="size"><div class="size-stage"><img src="a-traditional-micro.svg" width="16" height="16" alt="" /></div><span class="size-label">16</span></div>
+              <div class="size"><div class="size-stage"><img src="a-traditional-micro.svg" width="22" height="22" alt="" /></div><span class="size-label">22</span></div>
+              <div class="size"><div class="size-stage"><img src="a-traditional-micro.svg" width="32" height="32" alt="" /></div><span class="size-label">32</span></div>
+              <div class="size"><div class="size-stage"><img src="a-traditional-full.svg" width="48" height="48" alt="" /></div><span class="size-label">48</span></div>
+              <div class="size"><div class="size-stage"><img src="a-traditional-full.svg" width="64" height="64" alt="" /></div><span class="size-label">64</span></div>
+            </div>
+          </div>
+          <div class="section">
+            <div class="section-label">Product surfaces</div>
+            <div class="mock-stack">
+              <div class="topbar-mock"><span class="traffic"><i></i><i></i><i></i></span><img src="a-traditional-micro.svg" alt="" /><span class="pill">work</span><span class="pill muted">Local</span><span class="pill">main</span></div>
+              <div class="browser-mock"><div class="browser-tabs"><div class="browser-tab"><img src="a-traditional-micro.svg" alt="" />Maru Workspace</div></div><div class="browser-page"></div></div>
+            </div>
+          </div>
+          <div class="section">
+            <div class="section-label">Desktop contexts</div>
+            <div class="platforms">
+              <div class="platform dock-scene"><div class="dock"><i></i><img src="a-traditional-full.svg" alt="" /><i></i></div></div>
+              <div class="platform windows-scene"><div class="windows-tile"><img src="a-traditional-full.svg" alt="" /><span>Maru</span></div></div>
+            </div>
+            <div class="palette"><i class="swatch seal"></i><i class="swatch paper"></i><i class="swatch ink"></i></div>
+          </div>
+        </article>
+
+        <article class="option" id="option-b">
+          <div class="option-head">
+            <img class="hero-mark" src="b-refined-full.svg" alt="B안 정제 낙관형" />
+            <div>
+              <div class="option-kicker">Direction B</div>
+              <h2>정제 낙관형</h2>
+              <p class="option-copy">둥근 획과 열린 여백, 부드러운 인면. 전통성과 디지털 친화성 사이의 균형을 택합니다.</p>
+            </div>
+          </div>
+          <div class="section">
+            <div class="section-label">Small-size test</div>
+            <div class="sizes">
+              <div class="size"><div class="size-stage"><img src="b-refined-micro.svg" width="16" height="16" alt="" /></div><span class="size-label">16</span></div>
+              <div class="size"><div class="size-stage"><img src="b-refined-micro.svg" width="22" height="22" alt="" /></div><span class="size-label">22</span></div>
+              <div class="size"><div class="size-stage"><img src="b-refined-micro.svg" width="32" height="32" alt="" /></div><span class="size-label">32</span></div>
+              <div class="size"><div class="size-stage"><img src="b-refined-full.svg" width="48" height="48" alt="" /></div><span class="size-label">48</span></div>
+              <div class="size"><div class="size-stage"><img src="b-refined-full.svg" width="64" height="64" alt="" /></div><span class="size-label">64</span></div>
+            </div>
+          </div>
+          <div class="section">
+            <div class="section-label">Product surfaces</div>
+            <div class="mock-stack">
+              <div class="topbar-mock"><span class="traffic"><i></i><i></i><i></i></span><img src="b-refined-micro.svg" alt="" /><span class="pill">work</span><span class="pill muted">Local</span><span class="pill">main</span></div>
+              <div class="browser-mock"><div class="browser-tabs"><div class="browser-tab"><img src="b-refined-micro.svg" alt="" />Maru Workspace</div></div><div class="browser-page"></div></div>
+            </div>
+          </div>
+          <div class="section">
+            <div class="section-label">Desktop contexts</div>
+            <div class="platforms">
+              <div class="platform dock-scene"><div class="dock"><i></i><img src="b-refined-full.svg" alt="" /><i></i></div></div>
+              <div class="platform windows-scene"><div class="windows-tile"><img src="b-refined-full.svg" alt="" /><span>Maru</span></div></div>
+            </div>
+            <div class="palette"><i class="swatch seal"></i><i class="swatch paper"></i><i class="swatch ink"></i></div>
+          </div>
+        </article>
+
+        <article class="option" id="option-c">
+          <div class="option-head">
+            <img class="hero-mark" src="c-modern-full.svg" alt="C안 현대 인장형" />
+            <div>
+              <div class="option-kicker">Direction C</div>
+              <h2>현대 인장형</h2>
+              <p class="option-copy">기하학적 전각 해석, 깨끗한 외곽, 강한 축소 대응. 앱 아이콘의 선명도를 우선합니다.</p>
+            </div>
+          </div>
+          <div class="section">
+            <div class="section-label">Small-size test</div>
+            <div class="sizes">
+              <div class="size"><div class="size-stage"><img src="c-modern-micro.svg" width="16" height="16" alt="" /></div><span class="size-label">16</span></div>
+              <div class="size"><div class="size-stage"><img src="c-modern-micro.svg" width="22" height="22" alt="" /></div><span class="size-label">22</span></div>
+              <div class="size"><div class="size-stage"><img src="c-modern-micro.svg" width="32" height="32" alt="" /></div><span class="size-label">32</span></div>
+              <div class="size"><div class="size-stage"><img src="c-modern-full.svg" width="48" height="48" alt="" /></div><span class="size-label">48</span></div>
+              <div class="size"><div class="size-stage"><img src="c-modern-full.svg" width="64" height="64" alt="" /></div><span class="size-label">64</span></div>
+            </div>
+          </div>
+          <div class="section">
+            <div class="section-label">Product surfaces</div>
+            <div class="mock-stack">
+              <div class="topbar-mock"><span class="traffic"><i></i><i></i><i></i></span><img src="c-modern-micro.svg" alt="" /><span class="pill">work</span><span class="pill muted">Local</span><span class="pill">main</span></div>
+              <div class="browser-mock"><div class="browser-tabs"><div class="browser-tab"><img src="c-modern-micro.svg" alt="" />Maru Workspace</div></div><div class="browser-page"></div></div>
+            </div>
+          </div>
+          <div class="section">
+            <div class="section-label">Desktop contexts</div>
+            <div class="platforms">
+              <div class="platform dock-scene"><div class="dock"><i></i><img src="c-modern-full.svg" alt="" /><i></i></div></div>
+              <div class="platform windows-scene"><div class="windows-tile"><img src="c-modern-full.svg" alt="" /><span>Maru</span></div></div>
+            </div>
+            <div class="palette"><i class="swatch seal"></i><i class="swatch paper"></i><i class="swatch ink"></i></div>
+          </div>
+        </article>
+      </section>
+
+      <div class="footer"><span>MARU / SEAL SYSTEM</span><span>A traditional · B refined · C modern</span></div>
+    </main>
+  </body>
+</html>

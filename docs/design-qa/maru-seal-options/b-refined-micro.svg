@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-labelledby="title desc">
+  <title id="title">Maru refined nakgwan micro seal</title>
+  <desc id="desc">Simplified refined Maru seal with rounded carving strokes.</desc>
+  <rect x="58" y="58" width="908" height="908" rx="154" fill="#B23A26" />
+  <g fill="none" stroke="#FDF8F2" stroke-width="68" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="159" y="171" width="202" height="260" rx="7" />
+    <path d="M414 171V431M414 297H510" />
+    <path d="M547 510H828V607H585V702H840" />
+    <path d="M555 758H837M696 758V856" />
+  </g>
+</svg>
