@@ -570,6 +570,11 @@ pub struct TaskTransitionRequest {
     /// RFC3339 timestamp written to `completedAt` and the event `ts`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub now_iso: Option<String>,
+    /// Web-action receipt id when this transition is replaying one
+    /// (`web_actions.rs`). Stamped onto the outbox record so a replayed
+    /// receipt is recognized as already applied. `None` for in-app calls.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub web_action_id: Option<String>,
     #[serde(default)]
     pub payload: JsonValue,
 }

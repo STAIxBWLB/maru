@@ -61,6 +61,11 @@ pub struct OutboxRecord {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub google_task_list_id: Option<String>,
     pub status: OutboxStatus,
+    /// Id of the `maru.web-task-action.v1` receipt this record was created
+    /// from (`web_actions.rs`). Present only for web-originated ops; it is
+    /// how a replayed receipt is recognized as already applied.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub web_action_id: Option<String>,
     #[serde(default)]
     pub attempts: u32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -139,6 +144,7 @@ pub(crate) fn enqueue_record(
     google_task_id: &str,
     google_task_list_id: Option<String>,
     status: OutboxStatus,
+    web_action_id: Option<String>,
     now_iso: &str,
 ) -> Result<OutboxRecord, String> {
     let stamp = now_iso.replace(|c: char| !c.is_ascii_alphanumeric(), "");
@@ -150,6 +156,7 @@ pub(crate) fn enqueue_record(
         google_task_id: google_task_id.to_string(),
         google_task_list_id,
         status,
+        web_action_id,
         attempts: 0,
         next_retry_at: None,
         last_error: None,
@@ -180,6 +187,15 @@ pub(crate) fn has_synced_complete(work: &Path, google_task_id: &str) -> Result<b
             && record.status == OutboxStatus::Synced
             && record.google_task_id == google_task_id
     }))
+}
+
+/// True when a record for this web-action receipt id already exists — the
+/// receipt's provider op was queued on an earlier apply, so replaying it must
+/// not queue a second one.
+pub(crate) fn has_web_action(work: &Path, web_action_id: &str) -> Result<bool, String> {
+    Ok(list_records(work)?
+        .iter()
+        .any(|record| record.web_action_id.as_deref() == Some(web_action_id)))
 }
 
 // --- Recovery ----------------------------------------------------------------
@@ -516,6 +532,7 @@ mod tests {
             "gtask-1",
             None,
             status,
+            None,
             NOW,
         )
         .unwrap()
@@ -761,6 +778,7 @@ mod tests {
             "gtask-2",
             None,
             OutboxStatus::Prepared,
+            None,
             NOW,
         )
         .unwrap();

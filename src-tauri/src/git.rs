@@ -974,7 +974,11 @@ fn sensitive_git_paths(paths: &[String]) -> Vec<String> {
         .collect()
 }
 
-fn is_sensitive_git_path(path: &str) -> bool {
+/// Secret-shaped repo path: credentials, keys, and runtime secret stores that
+/// must never be staged, sent to an AI provider, or written by a remote
+/// actor. Shared with `web_actions.rs`, which applies it to web-supplied
+/// task paths.
+pub(crate) fn is_sensitive_git_path(path: &str) -> bool {
     let lower = path.to_lowercase();
     let name = Path::new(&lower)
         .file_name()

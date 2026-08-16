@@ -74,6 +74,7 @@ mod vault_graph;
 mod vault_guard;
 mod vault_list;
 mod vault_watcher;
+pub mod web_actions;
 mod win_process;
 mod workspace;
 mod workspace_files;
@@ -257,6 +258,7 @@ use vault_list::{
     remove_workspace_root, set_active_workspace_root,
 };
 use vault_watcher::{start_vault_watcher, stop_vault_watcher, VaultWatcherState};
+use web_actions::{web_actions_apply, web_actions_scan};
 use workspace::{
     detect_workspace, list_workspaces, read_workspace_config, register_workspace_roots,
 };
@@ -406,6 +408,9 @@ pub fn run() {
             today_calendar_commitments,
             task_calendar_set_sync,
             today_calendar_publish,
+            // Web action receipts (maru.web-task-action.v1)
+            web_actions_scan,
+            web_actions_apply,
             store_shelf_files,
             store_shelf_files_as,
             list_memos,
