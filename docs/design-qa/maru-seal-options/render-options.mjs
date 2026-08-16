@@ -1,5 +1,5 @@
 import { chromium } from "@playwright/test";
-import { mkdir } from "node:fs/promises";
+import { mkdir, readFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -39,12 +39,12 @@ try {
         b: `b-refined-${variant}.svg`,
         c: `c-modern-${variant}.svg`,
       }[option];
+      const svg = await readFile(resolve(here, source), "utf8");
 
       await iconPage.setContent(
-        `<style>html,body{margin:0;background:transparent}img{display:block;width:100vw;height:100vh}</style>` +
-          `<img src="${pathToFileURL(resolve(here, source)).href}" alt="">`,
+        `<style>html,body{margin:0;background:transparent}svg{display:block;width:100vw;height:100vh}</style>${svg}`,
       );
-      await iconPage.locator("img").waitFor();
+      await iconPage.locator("svg").waitFor();
       await iconPage.screenshot({
         path: resolve(outputDirectory, `maru-seal-${option}-${variant}.png`),
         omitBackground: true,
