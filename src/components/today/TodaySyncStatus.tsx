@@ -31,6 +31,7 @@ import {
   taskIntegrationsDrain,
   taskIntegrationsRetry,
   webActionsApply,
+  webActionsImportTop,
   webActionsScan,
 } from "../../lib/today";
 import { useToday } from "./todayContext";
@@ -77,7 +78,7 @@ function StatusBadge({ status }: { status: OutboxStatus }) {
 
 export function TodaySyncStatus() {
   const { t } = useTranslation();
-  const { workPath, gwsBinary, defaultTaskList } = useToday();
+  const { workPath, gwsBinary, defaultTaskList, snapshot, reload } = useToday();
 
   const [records, setRecords] = useState<OutboxRecord[]>([]);
   const [webActions, setWebActions] = useState<WebActionSummary[]>([]);
@@ -137,8 +138,10 @@ export function TodaySyncStatus() {
   };
 
   /**
-   * Apply the web app's pending action receipts, then drain so any provider
-   * op they queued goes out in the same click. Never commits or pushes.
+   * One "apply what came from the web" action: the pending action receipts,
+   * then a drain so any provider op they queued goes out in the same click,
+   * then the web-selected Top 3 back into the day snapshot. Never commits or
+   * pushes.
    */
   const applyWebActions = async () => {
     if (!workPath || busy) return;
@@ -150,6 +153,14 @@ export function TodaySyncStatus() {
       await taskIntegrationsDrain(workPath, new Date().toISOString(), gwsBinary);
     } catch {
       // The reload below surfaces the real state either way.
+    }
+    if (snapshot) {
+      try {
+        const top = await webActionsImportTop(workPath, snapshot.logicalDay);
+        if (top.changed) await reload();
+      } catch {
+        // A failed import leaves the snapshot untouched by construction.
+      }
     }
     await load();
     setBusy(false);

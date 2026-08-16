@@ -368,6 +368,13 @@ export interface WebActionSummary {
   reason?: string | null;
 }
 
+export interface TopImportOutcome {
+  /** Number of Top entries the snapshot holds, when a change landed. */
+  imported: number;
+  changed: boolean;
+  reason?: string | null;
+}
+
 export interface WebActionsOutcome {
   applied: number;
   skipped: number;
@@ -537,6 +544,18 @@ export async function webActionsApply(
     nowIso,
     defaultTaskListId: defaultTaskListId ?? null,
   });
+}
+
+/**
+ * Reconciles a web-rewritten `## Top` lane in `tasks/daily/<day>.md` back into
+ * the local day snapshot. Declines on a revision conflict rather than
+ * clobbering a plan Maru changed in the meantime.
+ */
+export async function webActionsImportTop(
+  workPath: string,
+  logicalDay: string,
+): Promise<TopImportOutcome> {
+  return todayInvoke<TopImportOutcome>("web_actions_import_top", { workPath, logicalDay });
 }
 
 export async function todayNotifyNewDay(

@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { LocaleContext, t as translate } from "../../lib/i18n";
 import "../../lib/i18n/testing";
 import { DEFAULT_MARU_SETTINGS } from "../../lib/settings";
-import type { OutboxRecord, WebActionSummary } from "../../lib/today";
+import type { OutboxRecord, TodaySnapshot, WebActionSummary } from "../../lib/today";
 import type { TodayContextValue } from "./todayContext";
 import { TodayContext } from "./todayContext";
 import { TodaySyncStatus } from "./TodaySyncStatus";
@@ -20,6 +20,7 @@ vi.mock("../../lib/today", async (importOriginal) => {
     taskIntegrationsDrain: vi.fn(),
     webActionsScan: vi.fn(),
     webActionsApply: vi.fn(),
+    webActionsImportTop: vi.fn(),
   };
 });
 
@@ -28,6 +29,7 @@ import {
   taskIntegrationsDrain,
   taskIntegrationsRetry,
   webActionsApply,
+  webActionsImportTop,
   webActionsScan,
 } from "../../lib/today";
 
@@ -64,22 +66,25 @@ function webAction(overrides: Partial<WebActionSummary> = {}): WebActionSummary 
   };
 }
 
+const contextReload = vi.fn(async () => null);
+
 async function renderSection(
   records: OutboxRecord[],
   pending: WebActionSummary[] = [],
 ): Promise<HTMLElement> {
   vi.mocked(readTaskIntegrations).mockResolvedValue(records);
   vi.mocked(webActionsScan).mockResolvedValue(pending);
+  vi.mocked(webActionsImportTop).mockResolvedValue({ imported: 0, changed: false });
   const contextValue: TodayContextValue = {
     workPath: "/tmp/work",
     settings: { ...DEFAULT_MARU_SETTINGS.tasks.today, autoPlan: false },
     timezone: "Asia/Seoul",
     gwsBinary: "/opt/gws",
     defaultTaskList: "list-default",
-    snapshot: null,
+    snapshot: { logicalDay: "2026-08-16" } as TodaySnapshot,
     loading: false,
     mutate: vi.fn(async () => null),
-    reload: vi.fn(async () => {}),
+    reload: contextReload,
   };
   const container = document.createElement("div");
   document.body.appendChild(container);
@@ -152,6 +157,7 @@ describe("TodaySyncStatus", () => {
       items: [],
     });
     vi.mocked(taskIntegrationsDrain).mockResolvedValue({ drained: 1, failed: 0, blocked: 0 });
+    vi.mocked(webActionsImportTop).mockResolvedValue({ imported: 2, changed: true });
     await act(async () => {
       headerButton(container).click();
     });
@@ -177,6 +183,10 @@ describe("TodaySyncStatus", () => {
     const result = container.querySelector(".today-sync-web-result")?.textContent ?? "";
     expect(result).toContain("Git Sync");
     expect(result).toContain("재시도 필요 1건");
+    // The web-selected Top 3 is reconciled in the same click, and a change
+    // reloads the snapshot so the plan on screen matches.
+    expect(webActionsImportTop).toHaveBeenCalledWith("/tmp/work", "2026-08-16");
+    expect(contextReload).toHaveBeenCalled();
   });
 
   it("renders rows with op and status badges once expanded", async () => {
