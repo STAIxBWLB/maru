@@ -71,10 +71,13 @@ const contextReload = vi.fn(async () => null);
 async function renderSection(
   records: OutboxRecord[],
   pending: WebActionSummary[] = [],
+  topPending = false,
 ): Promise<HTMLElement> {
   vi.mocked(readTaskIntegrations).mockResolvedValue(records);
   vi.mocked(webActionsScan).mockResolvedValue(pending);
-  vi.mocked(webActionsImportTop).mockResolvedValue({ imported: 0, changed: false });
+  vi.mocked(webActionsImportTop).mockResolvedValue(
+    topPending ? { imported: 3, changed: true, reason: "pending" } : { imported: 0, changed: false },
+  );
   const contextValue: TodayContextValue = {
     workPath: "/tmp/work",
     settings: { ...DEFAULT_MARU_SETTINGS.tasks.today, autoPlan: false },
@@ -145,6 +148,36 @@ describe("TodaySyncStatus", () => {
     });
     expect(container.querySelector(".today-sync-status")).not.toBeNull();
     expect(container.querySelector(".today-sync-web-result")?.textContent).toContain("Git Sync");
+  });
+
+  it("offers the import when only the Top 3 changed, with no receipts at all", async () => {
+    // A web Top-3 reorder carries no action receipt, so the dry-run preview is
+    // the only signal that there is anything to apply.
+    const container = await renderSection([], [], true);
+    expect(webActionsImportTop).toHaveBeenCalledWith("/tmp/work", "2026-08-16", true);
+    expect(container.querySelector(".today-sync-status")).not.toBeNull();
+    expect(container.querySelector(".today-sync-status-count.neutral")?.textContent).toContain(
+      "웹 Top 3",
+    );
+    await act(async () => {
+      headerButton(container).click();
+    });
+    const apply = container.querySelector<HTMLButtonElement>(".today-sync-web .today-panel-link");
+    expect(apply).not.toBeNull();
+    vi.mocked(webActionsApply).mockResolvedValue({
+      applied: 0,
+      skipped: 0,
+      stale: 0,
+      invalid: 0,
+      items: [],
+    });
+    vi.mocked(taskIntegrationsDrain).mockResolvedValue({ drained: 0, failed: 0, blocked: 0 });
+    await act(async () => {
+      apply!.click();
+    });
+    // The real import runs without dryRun, and a change reloads the snapshot.
+    expect(webActionsImportTop).toHaveBeenCalledWith("/tmp/work", "2026-08-16");
+    expect(contextReload).toHaveBeenCalled();
   });
 
   it("applying web actions drains and reloads, and never commits", async () => {

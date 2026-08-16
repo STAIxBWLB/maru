@@ -2106,6 +2106,8 @@ export const en: Record<string, string> = {
   "today.sync.problemCount": "{count} need attention",
   "today.sync.web.pending": "{count} task changes from the web are waiting to be applied.",
   "today.sync.web.pendingCount": "{count} from web",
+  "today.sync.web.topPending": "The web reselected today's Top 3.",
+  "today.sync.web.topPendingCount": "Top 3 from web",
   "today.sync.web.apply": "Apply web changes",
   "today.sync.web.result": "Applied {applied}, already done {skipped}, needs retry {stale}, invalid {invalid}. Commit and push with Git Sync when you are ready.",
   "today.calendar.add": "Add to calendar",

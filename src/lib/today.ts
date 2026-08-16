@@ -549,13 +549,19 @@ export async function webActionsApply(
 /**
  * Reconciles a web-rewritten `## Top` lane in `tasks/daily/<day>.md` back into
  * the local day snapshot. Declines on a revision conflict rather than
- * clobbering a plan Maru changed in the meantime.
+ * clobbering a plan Maru changed in the meantime. `dryRun` reports whether an
+ * import would change anything without touching the snapshot.
  */
 export async function webActionsImportTop(
   workPath: string,
   logicalDay: string,
+  dryRun?: boolean,
 ): Promise<TopImportOutcome> {
-  return todayInvoke<TopImportOutcome>("web_actions_import_top", { workPath, logicalDay });
+  return todayInvoke<TopImportOutcome>("web_actions_import_top", {
+    workPath,
+    logicalDay,
+    dryRun: dryRun ?? null,
+  });
 }
 
 export async function todayNotifyNewDay(

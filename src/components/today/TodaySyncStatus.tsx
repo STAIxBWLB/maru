@@ -79,10 +79,15 @@ function StatusBadge({ status }: { status: OutboxStatus }) {
 export function TodaySyncStatus() {
   const { t } = useTranslation();
   const { workPath, gwsBinary, defaultTaskList, snapshot, reload } = useToday();
+  const logicalDay = snapshot?.logicalDay ?? null;
 
   const [records, setRecords] = useState<OutboxRecord[]>([]);
   const [webActions, setWebActions] = useState<WebActionSummary[]>([]);
   const [webOutcome, setWebOutcome] = useState<WebActionsOutcome | null>(null);
+  /** True when the day plan's Top lane differs from the snapshot's, i.e. the
+   *  web rewrote it. A Top-3 reorder carries no action receipt, so this is the
+   *  only signal that there is web work to apply. */
+  const [topPending, setTopPending] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [busy, setBusy] = useState(false);
 
@@ -98,7 +103,16 @@ export function TodaySyncStatus() {
     } catch {
       // Same: a failed scan keeps the last known receipts.
     }
-  }, [workPath]);
+    if (!logicalDay) {
+      setTopPending(false);
+      return;
+    }
+    try {
+      setTopPending((await webActionsImportTop(workPath, logicalDay, true)).changed);
+    } catch {
+      setTopPending(false);
+    }
+  }, [workPath, logicalDay]);
 
   useEffect(() => {
     void load();
@@ -154,9 +168,9 @@ export function TodaySyncStatus() {
     } catch {
       // The reload below surfaces the real state either way.
     }
-    if (snapshot) {
+    if (logicalDay) {
       try {
-        const top = await webActionsImportTop(workPath, snapshot.logicalDay);
+        const top = await webActionsImportTop(workPath, logicalDay);
         if (top.changed) await reload();
       } catch {
         // A failed import leaves the snapshot untouched by construction.
@@ -166,10 +180,12 @@ export function TodaySyncStatus() {
     setBusy(false);
   };
 
+  const webPending = webActions.length > 0 || topPending;
+
   // Keep rendering while a result is on screen: applying the last receipt can
-  // empty both lists, and the outcome is the only confirmation the user gets
+  // empty every list, and the outcome is the only confirmation the user gets
   // that the working tree changed and still needs Git Sync.
-  if (records.length === 0 && webActions.length === 0 && webOutcome === null) return null;
+  if (records.length === 0 && !webPending && webOutcome === null) return null;
 
   return (
     <section className="today-sync-status" aria-label={t("today.sync.title")}>
@@ -180,10 +196,12 @@ export function TodaySyncStatus() {
         onClick={() => setExpanded((prev) => !prev)}
       >
         <span className="today-sync-status-title">{t("today.sync.title")}</span>
-        {webActions.length > 0 ? (
+        {webPending ? (
           <span className="today-sync-status-count neutral">
             <CloudDownload size={11} strokeWidth={1.9} aria-hidden="true" />
-            {t("today.sync.web.pendingCount", { count: webActions.length })}
+            {webActions.length > 0
+              ? t("today.sync.web.pendingCount", { count: webActions.length })
+              : t("today.sync.web.topPendingCount")}
           </span>
         ) : null}
         {problemCount > 0 ? (
@@ -200,10 +218,12 @@ export function TodaySyncStatus() {
       </button>
       {expanded ? (
         <div className="today-sync-status-body">
-          {webActions.length > 0 ? (
+          {webPending ? (
             <div className="today-sync-web">
               <span className="today-sync-web-summary">
-                {t("today.sync.web.pending", { count: webActions.length })}
+                {webActions.length > 0
+                  ? t("today.sync.web.pending", { count: webActions.length })
+                  : t("today.sync.web.topPending")}
               </span>
               <button
                 type="button"

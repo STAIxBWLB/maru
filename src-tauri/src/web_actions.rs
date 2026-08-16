@@ -595,17 +595,47 @@ fn skipped(reason: &str) -> TopImportOutcome {
     }
 }
 
-/// Task path from one journal entry line, i.e. the exact inverse of
-/// `today_store::journal_item_line`: strip the leading `- `, the trailing
-/// ` (<n>m)` / ` (estimate pending)` duration group, and any `: <outcome>`
-/// suffix. Returns `None` for a line that carries no path.
+/// The full grammar `today_store::journal_item_line` emits: the item ref,
+/// then a duration group, then an optional `: <outcome>` suffix. Anchored at
+/// both ends and non-greedy on the ref, so an outcome containing its own
+/// parentheses ("Call Alice (follow up)") cannot be mistaken for the
+/// duration group.
+static JOURNAL_ITEM_RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+
+fn journal_item_re() -> &'static regex::Regex {
+    JOURNAL_ITEM_RE.get_or_init(|| {
+        regex::Regex::new(r"^(.*?)\s*\((?:\d+m|estimate pending)\)(?::\s.*)?$")
+            .expect("journal item regex")
+    })
+}
+
+/// Item ref from one journal entry line, i.e. the exact inverse of
+/// `today_store::journal_item_line`. Returns `None` for a line that is not an
+/// entry.
+///
+/// The ref is not always a task path: `item_ref.id()` is whatever identifies
+/// the plan item, which for a capture is an opaque id. Resolution to a real
+/// task is the caller's job (`web_actions_import_top`), which matches against
+/// the plan's existing refs before requiring a path.
 fn journal_entry_path(line: &str) -> Option<String> {
     let body = line.strip_prefix("- ")?;
-    // The outcome suffix follows the duration group, so cut the group first
-    // and only then the `: ` that can legitimately appear inside a title.
-    let head = match body.rfind(" (") {
-        Some(index) if body[index..].contains(')') => &body[..index],
-        _ => body.split(": ").next().unwrap_or(body),
+    let head = match journal_item_re().captures(body) {
+        Some(captures) => captures[1].to_string(),
+        None => {
+            // Hand-edited or estimate-less line. Drop a trailing parenthetical
+            // first, then an outcome suffix — `journal_item_line` emits
+            // `- <ref>: <outcome>` when an item has an outcome but no estimate.
+            let trimmed = body.trim_end();
+            let without_group = match (trimmed.rfind(" ("), trimmed.ends_with(')')) {
+                (Some(index), true) if !trimmed[index + 2..].contains('(') => &trimmed[..index],
+                _ => trimmed,
+            };
+            without_group
+                .split_once(": ")
+                .map(|(head, _)| head)
+                .unwrap_or(without_group)
+                .to_string()
+        }
     };
     let path = head.trim();
     (!path.is_empty()).then(|| path.to_string())
@@ -638,13 +668,7 @@ fn read_journal_top(raw: &str) -> Option<Vec<String>> {
 /// estimate. Displaced Top items move to the front of Flexible, and Overflow
 /// is untouched — nothing is dropped, and no ref appears twice
 /// (`today::validate_plan` rejects duplicates).
-fn plan_with_top(plan: &DailyPlanV1, revision: &str, paths: &[String]) -> DailyPlanV1 {
-    let wanted: Vec<PlanItemRef> = paths
-        .iter()
-        .map(|path| PlanItemRef::Task {
-            task_id: path.clone(),
-        })
-        .collect();
+fn plan_with_top(plan: &DailyPlanV1, revision: &str, wanted: &[PlanItemRef]) -> DailyPlanV1 {
     let promoted = |item_ref: &PlanItemRef| wanted.contains(item_ref);
 
     let mut next = plan.clone();
@@ -710,8 +734,12 @@ fn plan_with_top(plan: &DailyPlanV1, revision: &str, paths: &[String]) -> DailyP
 pub fn web_actions_import_top(
     work_path: String,
     logical_day: String,
+    dry_run: Option<bool>,
 ) -> Result<TopImportOutcome, String> {
-    assert_maru_can_write(&work_path, WorkspaceWriteAction::Modify)?;
+    let dry_run = dry_run.unwrap_or(false);
+    if !dry_run {
+        assert_maru_can_write(&work_path, WorkspaceWriteAction::Modify)?;
+    }
     let work = normalize_existing_dir(&work_path)?;
     let journal = work
         .join("tasks")
@@ -730,23 +758,40 @@ pub fn web_actions_import_top(
         return Ok(skipped("today_plan_missing"));
     };
 
-    // Only real, still-present task notes, deduped, clamped to the lane cap.
-    let mut wanted: Vec<String> = Vec::new();
-    for path in paths {
+    // Journal entries are `item_ref.id()`, which is a task path only for
+    // items Maru created from a note — a capture-backed item carries an opaque
+    // id instead. Resolve against the plan's existing refs first, so those
+    // survive an import verbatim; only an entry the plan does not already know
+    // has to look like a real task note (that is the web adding something).
+    let mut wanted: Vec<PlanItemRef> = Vec::new();
+    for entry in paths {
         if wanted.len() >= TOP_LANE_MAX {
             break;
         }
-        if wanted.contains(&path) || validate_task_path(&path).is_err() {
-            continue;
-        }
-        if resolve_inside_vault(&work_path, &path).is_ok_and(|note| note.is_file()) {
-            wanted.push(path);
+        let resolved = match plan.items().find(|item| item.item_ref.id() == entry) {
+            Some(item) => item.item_ref.clone(),
+            None if validate_task_path(&entry).is_ok()
+                && resolve_inside_vault(&work_path, &entry).is_ok_and(|note| note.is_file()) =>
+            {
+                PlanItemRef::Task { task_id: entry }
+            }
+            None => continue,
+        };
+        if !wanted.contains(&resolved) {
+            wanted.push(resolved);
         }
     }
 
     let current: Vec<&str> = plan.top.iter().map(|item| item.item_ref.id()).collect();
-    if current == wanted.iter().map(String::as_str).collect::<Vec<_>>() {
+    if current == wanted.iter().map(PlanItemRef::id).collect::<Vec<_>>() {
         return Ok(skipped("already_current"));
+    }
+    if dry_run {
+        return Ok(TopImportOutcome {
+            imported: wanted.len(),
+            changed: true,
+            reason: Some("pending".to_string()),
+        });
     }
 
     let next = plan_with_top(plan, &snapshot.revision, &wanted);
@@ -1378,7 +1423,11 @@ mod tests {
     }
 
     fn import(tmp: &tempfile::TempDir) -> TopImportOutcome {
-        web_actions_import_top(work_path(tmp), DAY.to_string()).unwrap()
+        web_actions_import_top(work_path(tmp), DAY.to_string(), None).unwrap()
+    }
+
+    fn preview(tmp: &tempfile::TempDir) -> TopImportOutcome {
+        web_actions_import_top(work_path(tmp), DAY.to_string(), Some(true)).unwrap()
     }
 
     fn plan_of(tmp: &tempfile::TempDir) -> DailyPlanV1 {
@@ -1414,10 +1463,52 @@ mod tests {
             journal_entry_path("- tasks/active/a.md").as_deref(),
             Some("tasks/active/a.md")
         );
+        // An outcome carrying its own parentheses must not be mistaken for
+        // the duration group.
+        assert_eq!(
+            journal_entry_path("- tasks/active/a.md (45m): Call Alice (follow up)").as_deref(),
+            Some("tasks/active/a.md")
+        );
+        // journal_item_line emits `- <ref>: <outcome>` when an item has an
+        // outcome but neither an estimate nor the provisional flag.
+        assert_eq!(
+            journal_entry_path("- tasks/active/a.md: Ship it").as_deref(),
+            Some("tasks/active/a.md")
+        );
+        assert_eq!(
+            journal_entry_path("- tasks/active/a.md: Call Alice (follow up)").as_deref(),
+            Some("tasks/active/a.md")
+        );
+        // Capture-backed items carry an opaque id, not a path.
+        assert_eq!(
+            journal_entry_path("- capture-abc123 (30m)").as_deref(),
+            Some("capture-abc123")
+        );
         // Not entries.
         assert!(journal_entry_path("## Flexible").is_none());
         assert!(journal_entry_path("").is_none());
         assert!(journal_entry_path("- ").is_none());
+    }
+
+    #[test]
+    fn a_dry_run_reports_a_pending_import_without_writing_anything() {
+        let tmp = setup_day(&["tasks/active/a.md"], &["tasks/active/b.md"], &[]);
+        assert_eq!(preview(&tmp).changed, false);
+
+        web_rewrites_top(&tmp, &["tasks/active/b.md"]);
+        let before =
+            fs::read_to_string(tmp.path().join(format!(".maru/today/{DAY}.json"))).unwrap();
+        let outcome = preview(&tmp);
+        assert!(outcome.changed);
+        assert_eq!(outcome.imported, 1);
+        assert_eq!(outcome.reason.as_deref(), Some("pending"));
+        // Nothing written: the snapshot is byte-identical.
+        assert_eq!(
+            fs::read_to_string(tmp.path().join(format!(".maru/today/{DAY}.json"))).unwrap(),
+            before
+        );
+        // And the real import still lands afterwards.
+        assert!(import(&tmp).changed);
     }
 
     #[test]
@@ -1449,6 +1540,47 @@ mod tests {
         // Lanes are renumbered, so validate_plan and the UI agree on order.
         assert_eq!(plan.top.iter().map(|item| item.order).collect::<Vec<_>>(), [0, 1]);
         assert_eq!(plan.flexible.iter().map(|item| item.order).collect::<Vec<_>>(), [0, 1]);
+    }
+
+    #[test]
+    fn journal_entries_that_are_not_paths_resolve_against_the_existing_plan() {
+        // `journal_item_line` writes item_ref.id(), which for a capture-backed
+        // item is an opaque id, not a note path. Requiring every entry to be a
+        // path would silently drop those items out of Top on any import.
+        let tmp = setup_day(&["tasks/active/a.md"], &[], &[]);
+        let mut snapshot = crate::today_store::load_snapshot(tmp.path(), DAY).unwrap();
+        let plan = snapshot.plan.as_mut().unwrap();
+        plan.top.push(DailyPlanItem {
+            item_ref: PlanItemRef::Capture {
+                capture_id: "capture-abc123".to_string(),
+            },
+            lane: PlanLane::Top,
+            order: 1,
+            outcome: Some("Review the captured request".to_string()),
+            estimate_minutes: Some(20),
+            estimate_provisional: false,
+            pinned: false,
+            proposed_block: None,
+            calendar_sync: CalendarSyncState::none(),
+        });
+        crate::today_store::persist_snapshot(tmp.path(), &mut snapshot).unwrap();
+        crate::today_store::project_journal(tmp.path(), &tmp.path().join("tasks"), &snapshot)
+            .unwrap();
+
+        // Untouched journal: the capture entry must survive, not be dropped.
+        assert_eq!(import(&tmp).reason.as_deref(), Some("already_current"));
+
+        // The web reorders, keeping the capture. Its ref stays a Capture, so
+        // the stable identity (and its estimate/outcome) is preserved.
+        web_rewrites_top(&tmp, &["capture-abc123", "tasks/active/a.md"]);
+        assert!(import(&tmp).changed);
+        let plan = plan_of(&tmp);
+        assert_eq!(ids(&plan.top), ["capture-abc123", "tasks/active/a.md"]);
+        assert!(matches!(
+            plan.top[0].item_ref,
+            PlanItemRef::Capture { .. }
+        ));
+        assert_eq!(plan.top[0].estimate_minutes, Some(20));
     }
 
     #[test]
@@ -1585,7 +1717,7 @@ mod tests {
         let next = plan_with_top(
             &plan,
             "rev-1",
-            &["tasks/active/c.md".to_string(), "tasks/active/b.md".to_string()],
+            &[task_ref("tasks/active/c.md"), task_ref("tasks/active/b.md")],
         );
         assert_eq!(next.input_revision, "rev-1");
         assert_eq!(ids(&next.top), ["tasks/active/c.md", "tasks/active/b.md"]);

@@ -2106,6 +2106,8 @@ export const ko: Record<string, string> = {
   "today.sync.problemCount": "확인 필요 {count}건",
   "today.sync.web.pending": "웹에서 넘어온 작업 변경 {count}건이 적용을 기다리고 있습니다.",
   "today.sync.web.pendingCount": "웹 {count}건",
+  "today.sync.web.topPending": "웹에서 오늘의 Top 3를 다시 선택했습니다.",
+  "today.sync.web.topPendingCount": "웹 Top 3",
   "today.sync.web.apply": "웹 변경 적용",
   "today.sync.web.result": "적용 {applied}건, 이미 적용됨 {skipped}건, 재시도 필요 {stale}건, 형식 오류 {invalid}건. 커밋·푸시는 Git Sync에서 진행해 주세요.",
   "today.calendar.add": "캘린더에 추가",
