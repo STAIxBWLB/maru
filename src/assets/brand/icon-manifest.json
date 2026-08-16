@@ -1,0 +1,7 @@
+{
+  "default": "maru-seal.svg",
+  "bg_color": "#B23A26",
+  "android_fg": "maru-seal-foreground.svg",
+  "android_fg_scale": 82,
+  "android_monochrome": "maru-seal-monochrome.svg"
+}

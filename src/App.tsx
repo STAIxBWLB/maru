@@ -42,6 +42,7 @@ import {
   X,
 } from "lucide-react";
 import { AddWorkspaceDialog } from "./components/AddWorkspaceDialog";
+import maruSealMicroUrl from "./assets/brand/maru-seal-micro.svg";
 import { CommandPalette } from "./components/CommandPalette";
 import { CommitDialog } from "./components/CommitDialog";
 import { DocumentList } from "./components/DocumentList";
@@ -8062,6 +8063,14 @@ function MainApp() {
           onPointerDown={handleTopbarPointerDown}
         >
           <div className="topbar-window-controls-guard" data-no-drag="true" aria-hidden="true" />
+          <img
+            className="topbar-brand-seal"
+            data-testid="topbar-brand-seal"
+            src={maruSealMicroUrl}
+            alt=""
+            aria-hidden="true"
+            draggable={false}
+          />
           <WorkspaceSwitcher
             registry={workspaceRegistry}
             activePath={explorerWorkspacePath}

@@ -1635,26 +1635,16 @@ a {
   -webkit-app-region: no-drag;
 }
 
-/* Brand seal: a small 도장 stamp carrying the 앱 이름. Pure CSS so it stays
-   out of the i18n string scan and the drag region keeps working. */
-.topbar::before {
-  content: "마루";
+/* The outlined SVG keeps the diagonal seal geometry identical across fonts,
+   themes, browser favicons, and native bundles. Pointer events stay on the
+   parent so this decorative mark remains part of the window drag region. */
+.topbar-brand-seal {
   flex: none;
   width: 22px;
   height: 22px;
-  display: grid;
-  place-items: center;
-  border-radius: 5px;
-  background: var(--accent);
-  color: var(--on-accent);
-  box-shadow:
-    inset 0 0 0 1px rgba(255, 255, 255, 0.14),
-    var(--shadow-sm);
-  font-family: var(--font-display);
-  font-size: var(--type-meta-size);
-  font-weight: 700;
-  letter-spacing: 0;
-  line-height: 1;
+  display: block;
+  pointer-events: none;
+  filter: drop-shadow(0 1px 1px rgba(34, 30, 21, 0.12));
 }
 
 .topbar-window-controls-guard {

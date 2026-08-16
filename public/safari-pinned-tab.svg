@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" aria-hidden="true">
+  <defs>
+    <mask id="glyph-cutout">
+      <rect width="1024" height="1024" fill="white" />
+      <g fill="black">
+        <path
+          fill-rule="evenodd"
+          d="M132 125H378L394 141V439L378 455H132L116 439V141ZM202 211V369L214 381H308L320 369V211L308 199H214Z"
+        />
+        <path d="M418 125H504V254H532L544 266V328L532 340H504V455H418Z" />
+      </g>
+      <g fill="none" stroke="black" stroke-width="78" stroke-linecap="square" stroke-linejoin="miter">
+        <path d="M548 500H844V602H584V704H868" />
+        <path d="M540 762H868M704 762V866" />
+      </g>
+    </mask>
+  </defs>
+  <path
+    fill="black"
+    mask="url(#glyph-cutout)"
+    d="M184 44H840Q856 44 868 56L968 156Q980 168 980 184V840Q980 856 968 868L868 968Q856 980 840 980H184Q168 980 156 968L56 868Q44 856 44 840V184Q44 168 56 156L156 56Q168 44 184 44Z"
+  />
+</svg>

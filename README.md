@@ -398,6 +398,12 @@ pnpm lint:i18n
 # Production build:
 pnpm build
 
+# Regenerate every icon from the canonical vector sources:
+pnpm icons:generate
+
+# Verify that committed web, desktop, Windows, iOS, and Android icons are current:
+pnpm icons:check
+
 # Full verification (typecheck + release-version sync + tests + frontend build):
 make verify
 

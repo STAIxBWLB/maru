@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-labelledby="title desc">
+  <title id="title">Maru traditional jeongak micro seal</title>
+  <desc id="desc">Simplified traditional Maru seal for favicon and toolbar sizes.</desc>
+  <path
+    fill="#B23A26"
+    d="M169 58C104 65 65 104 59 169C51 268 60 372 58 475L61 849C68 916 108 956 175 963C286 971 400 961 512 963L846 961C914 955 955 914 962 846C970 738 960 627 963 518L960 176C954 108 915 67 847 60C739 51 629 61 520 58Z"
+  />
+  <g fill="none" stroke="#FDF8F2" stroke-width="72" stroke-linecap="square" stroke-linejoin="bevel">
+    <path d="M155 166H360V430H155Z" />
+    <path d="M413 166V430M414 295H510" />
+    <path d="M542 507H830V607H582V704H842" />
+    <path d="M550 760H840M695 760V863" />
+  </g>
+</svg>

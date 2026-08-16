@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-labelledby="title desc">
+  <title id="title">Maru traditional jeongak seal</title>
+  <desc id="desc">Upright Ma in the upper left and Ru in the lower right, carved into a cinnabar seal.</desc>
+  <defs>
+    <mask id="stamp-edge">
+      <rect width="1024" height="1024" fill="black" />
+      <path
+        fill="white"
+        d="M163 65C123 69 88 90 72 129C56 170 64 240 61 302L65 708C67 784 57 863 91 912C122 956 190 956 261 960L742 956C819 958 892 963 935 921C972 883 961 805 964 733L961 269C964 193 969 123 929 88C887 51 815 64 743 61L276 65C235 65 197 60 163 65Z"
+      />
+      <path fill="black" d="M69 246h19v47H67zM934 157h22v38h-18zM141 938h44v19h-47zM947 741h18v58h-20z" />
+    </mask>
+  </defs>
+
+  <g mask="url(#stamp-edge)">
+    <rect width="1024" height="1024" fill="#B23A26" />
+  </g>
+
+  <g fill="none" stroke="#FDF8F2" stroke-width="62" stroke-linecap="square" stroke-linejoin="bevel">
+    <path d="M163 171L362 166L367 432L158 438Z" />
+    <path d="M415 166L411 440M413 294L511 289" />
+    <path d="M544 510L828 505L829 603L583 606L580 700L839 696" />
+    <path d="M552 759L838 754M695 758L698 858" />
+  </g>
+
+  <g fill="#B23A26" aria-hidden="true">
+    <path d="M142 244l48-7 5 15-50 7zM330 358l46-4 3 13-44 6zM395 206l38-2 2 14-37 4z" />
+    <path d="M573 515l58-5 3 16-58 5zM796 680l45-2 1 15-43 4zM677 739h15v46h-14z" />
+  </g>
+</svg>

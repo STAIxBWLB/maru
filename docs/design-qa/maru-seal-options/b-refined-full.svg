@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-labelledby="title desc">
+  <title id="title">Maru refined nakgwan seal</title>
+  <desc id="desc">A softer, open Korean seal with Ma above-left and Ru below-right.</desc>
+  <path
+    fill="#B23A26"
+    d="M178 62C112 65 71 107 66 174C59 278 67 384 64 489L67 841C72 908 114 950 182 957C286 965 392 957 497 960L839 957C906 952 948 910 956 843C964 741 956 637 959 535L956 181C951 113 910 72 843 65C738 57 632 65 527 62Z"
+  />
+
+  <g fill="none" stroke="#FDF8F2" stroke-width="56" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M168 180Q254 162 350 176Q365 296 352 424Q260 440 169 425Q156 302 168 180Z" />
+    <path d="M413 171Q403 300 414 435M412 297Q461 287 507 296" />
+    <path d="M551 518Q691 501 825 516Q833 559 825 604Q708 616 588 608Q578 652 586 696Q711 707 838 695" />
+    <path d="M558 758Q696 744 835 756M696 756Q688 806 699 852" />
+  </g>
+
+  <g fill="#B23A26" aria-hidden="true">
+    <ellipse cx="173" cy="325" rx="8" ry="22" transform="rotate(-8 173 325)" />
+    <ellipse cx="359" cy="226" rx="18" ry="7" transform="rotate(5 359 226)" />
+    <ellipse cx="585" cy="608" rx="20" ry="7" transform="rotate(-3 585 608)" />
+    <ellipse cx="760" cy="748" rx="8" ry="19" transform="rotate(8 760 748)" />
+  </g>
+</svg>
