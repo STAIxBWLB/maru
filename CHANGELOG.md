@@ -8,6 +8,24 @@ because releases cut frequently during active development. Versions before
 Dates are the release-tag dates. Only `feat`/`fix`-level changes are listed;
 `chore(release)` version bumps and merge commits are omitted.
 
+## v0.4.54 - 2026-08-16 - Today/Tasks Split and Dashboard Mode
+
+- **The combined Tasks mode is now three independent modes (#245).** The
+  activity rail opens with a new **Dashboard** mode: an at-a-glance workspace
+  overview with ten widgets (today summary, task counts, schedule, catalog
+  signals, inbox, agents, drafts, git, recents, sync) built entirely on
+  existing commands. Simple details open as in-mode drilldown views, while
+  deep work deep-links into the owning mode. **Today** keeps the
+  prepare/execute/review planner and calendar sync; **Tasks** is now the
+  standalone task and schedule manager with the full list, month/week/day
+  calendar, detail drawer, and AI runs panel, reachable via Cmd+Shift+T.
+- **Boot auto-open now honors the launch-route decision mode.** The planner
+  auto-open no longer lands on the task list, and the settings-load effect no
+  longer clobbers the auto-opened mode with the persisted one.
+- **The standalone Tasks pane keeps its responsive layout.** The `todaytasks`
+  container context moved from the retired Today "all" wrapper onto the
+  workbench surfaces, preserving the calendar and detail-drawer compaction.
+
 ## v0.4.53 - 2026-08-16 - Geometric Maru Seal
 
 - **Maru now carries a modern Korean seal across every surface (#243).** The
