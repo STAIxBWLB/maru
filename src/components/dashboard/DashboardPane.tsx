@@ -81,7 +81,10 @@ export function DashboardPane({
   const git = useDashboardGit(workPath, epoch);
   const sync = useDashboardSync(epoch);
 
-  const todayIso = useMemo(() => dashboardLogicalDay(new Date(), "00:00"), [epoch]);
+  const todayIso = useMemo(
+    () => dashboardLogicalDay(new Date(), effectiveSettings.today.dayStart),
+    [epoch, effectiveSettings.today.dayStart],
+  );
   const taskEntries = useMemo(() => tasks.data ?? [], [tasks.data]);
   const taskCounts = useMemo(() => taskFilterCounts(taskEntries, todayIso), [taskEntries, todayIso]);
   const catalogChips = useMemo(() => catalogKindChips(catalog.data), [catalog.data]);
@@ -436,6 +439,10 @@ export function DashboardPane({
               upcoming={upcoming}
               loading={schedule.loading || tasks.loading}
               error={schedule.error ?? tasks.error}
+              onRetry={() => {
+                schedule.refresh();
+                tasks.refresh();
+              }}
             />
           ) : view === "catalog" ? (
             <CatalogDrilldown
@@ -561,9 +568,10 @@ interface ScheduleDrilldownProps {
   upcoming: TaskCalendarEvent[];
   loading: boolean;
   error: string | null;
+  onRetry: () => void;
 }
 
-function ScheduleDrilldown({ commitments, upcoming, loading, error }: ScheduleDrilldownProps) {
+function ScheduleDrilldown({ commitments, upcoming, loading, error, onRetry }: ScheduleDrilldownProps) {
   const { t } = useTranslation();
   if (loading) {
     return (
@@ -578,6 +586,9 @@ function ScheduleDrilldown({ commitments, upcoming, loading, error }: ScheduleDr
     return (
       <div className="dashboard-widget-error" role="alert">
         <p>{t("dashboard.widget.error")}</p>
+        <button type="button" className="dashboard-widget-retry" onClick={onRetry}>
+          {t("dashboard.widget.retry")}
+        </button>
       </div>
     );
   }
@@ -634,6 +645,7 @@ function CatalogDrilldown({ workPath, kind, chips, onSelectKind }: CatalogDrilld
   const [entries, setEntries] = useState<CatalogEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [retryNonce, setRetryNonce] = useState(0);
 
   useEffect(() => {
     if (!workPath) {
@@ -659,7 +671,7 @@ function CatalogDrilldown({ workPath, kind, chips, onSelectKind }: CatalogDrilld
     return () => {
       cancelled = true;
     };
-  }, [workPath, kind]);
+  }, [workPath, kind, retryNonce]);
 
   return (
     <>
@@ -685,6 +697,13 @@ function CatalogDrilldown({ workPath, kind, chips, onSelectKind }: CatalogDrilld
       ) : error ? (
         <div className="dashboard-widget-error" role="alert">
           <p>{t("dashboard.widget.error")}</p>
+          <button
+            type="button"
+            className="dashboard-widget-retry"
+            onClick={() => setRetryNonce((value) => value + 1)}
+          >
+            {t("dashboard.widget.retry")}
+          </button>
         </div>
       ) : entries.length === 0 ? (
         <p className="dashboard-widget-empty">{t("dashboard.widget.catalog.empty")}</p>

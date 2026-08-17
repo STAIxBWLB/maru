@@ -53,7 +53,7 @@ export async function catalogScan(
   // Browser e2e seam (null in the Tauri shell or without a registered
   // handler) — same pattern as the api.ts command wrappers.
   const override = await invokeE2EOverride<CatalogScanReport>("catalog_scan", { req });
-  if (override) return override;
+  if (override !== null) return override;
   return invoke<CatalogScanReport>("catalog_scan", { req });
 }
 
@@ -74,7 +74,7 @@ export async function catalogQuery(params: CatalogQueryParams): Promise<CatalogE
     limit: params.limit,
   };
   const override = await invokeE2EOverride<CatalogEntry[]>("catalog_query", { req });
-  if (override) return override;
+  if (override !== null) return override;
   return invoke<CatalogEntry[]>("catalog_query", { req });
 }
 

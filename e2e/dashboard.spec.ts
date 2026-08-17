@@ -77,6 +77,14 @@ test("boots into the dashboard overview grid with all ten widgets", async ({ pag
     await expect(page.locator(`[data-dashboard-widget="${kind}"]`)).toHaveCount(1);
   }
 
+  // Geometry guard: the pane must fill the workbench, not fall into the
+  // documents grid column (regression: .dashboard-pane missing from the
+  // pane-placement :is() lists in styles.css left it auto-placed at ~27%).
+  const viewportWidth = page.viewportSize()?.width ?? 1280;
+  const paneBox = await page.locator(".dashboard-pane").boundingBox();
+  expect(paneBox).not.toBeNull();
+  expect(paneBox!.width).toBeGreaterThan(viewportWidth * 0.6);
+
   // Fixture-backed widgets render their data; the browser fallbacks render
   // their deterministic empty/setup states. Nothing errors.
   await expect(widget(page, "today").locator(".dashboard-widget-count")).toHaveText("3");

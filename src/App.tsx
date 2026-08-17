@@ -5418,8 +5418,11 @@ function MainApp() {
       void refreshProcessedItems();
     } else if (surfaceMode === "meetings") {
       void refreshProcessingMissions();
-    } else if (surfaceMode === "tasks") {
+    } else if (surfaceMode === "today") {
       setTodayRefreshEpoch((epoch) => epoch + 1);
+    } else if (surfaceMode === "tasks") {
+      // TasksPane owns its task-data refresh (in-pane Refresh button); the
+      // shared surface refresh still re-pulls the AI runs feeding its panel.
       void refreshProcessingMissions();
     } else if (surfaceMode === "files" && explorerWorkspacePath) {
       void refreshWorkspaceFiles(explorerWorkspacePath);

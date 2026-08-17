@@ -52,7 +52,9 @@ function useWidgetData<T>(
   });
   const [nonce, setNonce] = useState(0);
   const fetcherRef = useRef(fetcher);
-  fetcherRef.current = fetcher;
+  useEffect(() => {
+    fetcherRef.current = fetcher;
+  });
 
   useEffect(() => {
     if (!enabled) {

@@ -237,7 +237,7 @@ export function agentBoardSummary(board: AgentBoard): AgentBoardSummary {
   const nextRunAt = enabled
     .map((schedule) => schedule.nextRunAt)
     .filter((value): value is string => Boolean(value))
-    .sort()[0] ?? null;
+    .sort((a, b) => Date.parse(a) - Date.parse(b))[0] ?? null;
   return {
     agents: board.rows.length,
     running: board.rows.filter((row) => row.status === "running").length,
