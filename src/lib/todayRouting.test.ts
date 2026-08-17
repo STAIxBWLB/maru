@@ -53,8 +53,8 @@ describe("resolveLaunchRoute", () => {
     }
   });
 
-  it("targets the tasks mode", () => {
-    expect(resolveLaunchRoute(BASE)?.mode).toBe("tasks");
+  it("targets the today mode", () => {
+    expect(resolveLaunchRoute(BASE)?.mode).toBe("today");
   });
 });
 

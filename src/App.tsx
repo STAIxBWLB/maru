@@ -12,6 +12,7 @@ import type React from "react";
 import {
   AlertTriangle,
   Bot,
+  CalendarCheck,
   ChevronUp,
   Clock3,
   Code2,
@@ -21,6 +22,7 @@ import {
   FolderOpen,
   Globe,
   Inbox,
+  LayoutDashboard,
   LayoutGrid,
   ListTodo,
   MessageSquare,
@@ -500,6 +502,8 @@ const LazyAgentsPane = lazy(() => import("./components/agents/AgentsPane").then(
 const LazyCommsPane = lazy(() => import("./components/CommsPane").then((module) => ({ default: module.CommsPane })));
 const LazyMeetingsPane = lazy(() => import("./components/meetings/MeetingsPane").then((module) => ({ default: module.MeetingsPane })));
 const LazyTodayPane = lazy(() => import("./components/today/TodayPane").then((module) => ({ default: module.TodayPane })));
+const LazyTasksPane = lazy(() => import("./components/tasks/TasksPane").then((module) => ({ default: module.TasksPane })));
+const LazyDashboardPane = lazy(() => import("./components/dashboard/DashboardPane").then((module) => ({ default: module.DashboardPane })));
 const LazyCatalogPane = lazy(() => import("./components/catalog/CatalogPane").then((module) => ({ default: module.CatalogPane })));
 const LazySitesPane = lazy(() => import("./components/sites/SitesPane").then((module) => ({ default: module.SitesPane })));
 const LazyE2EFlowPane = lazy(() => import("./components/e2e/E2EFlowPane").then((module) => ({ default: module.E2EFlowPane })));
@@ -919,6 +923,9 @@ function MainApp() {
   // flips) — it must keep the auto-open decision instead of clobbering it.
   // Cleared on the first explicit user mode change.
   const todayAutoOpenPathRef = useRef<string | null>(null);
+  // Mode the boot auto-open landed on (from resolveLaunchRoute) — the
+  // settings-load effect re-applies this instead of the persisted mode.
+  const todayAutoOpenModeRef = useRef<AppMode | null>(null);
   // Fixed for the process lifetime; see bootAppMode for why the provisioned
   // browser-passkey build must land on Sites at launch.
   const browserPasskeyBuildRef = useRef(false);
@@ -1642,7 +1649,7 @@ function MainApp() {
             bootAppMode({
               storedMode:
                 todayAutoOpenPathRef.current === settingsWorkPath
-                  ? "tasks"
+                  ? (todayAutoOpenModeRef.current ?? "today")
                   : settings.ui.activeAppMode,
               browserPasskeyBuild: browserPasskeyBuildRef.current,
             }),
@@ -2040,6 +2047,7 @@ function MainApp() {
   const setPersistedAppMode = useCallback(
     (activeAppMode: AppMode) => {
       todayAutoOpenPathRef.current = null; // explicit user choice from here on
+      todayAutoOpenModeRef.current = null;
       setAppMode(activeAppMode);
       updateSettings((current) => ({
         ...current,
@@ -2072,6 +2080,7 @@ function MainApp() {
     (target?: GraphOpenTarget) => {
       setGraphOpenTarget(target ?? null);
       todayAutoOpenPathRef.current = null;
+      todayAutoOpenModeRef.current = null;
       setAppMode("graph");
       updateSettings((current) => ({
         ...current,
@@ -3910,8 +3919,9 @@ function MainApp() {
                 });
                 if (decision) {
                   setTodayRoute(decision.route);
-                  setAppMode("tasks");
+                  setAppMode(decision.mode);
                   todayAutoOpenPathRef.current = initialPath;
+                  todayAutoOpenModeRef.current = decision.mode;
                   window.localStorage.setItem(todayAutoOpenKey(initialPath), info.logicalDay);
                 }
               }
@@ -5089,15 +5099,30 @@ function MainApp() {
   const openToday = useCallback(
     (route: TodayRoute) => {
       setTodayRoute(route);
-      setPersistedAppMode("tasks");
+      setPersistedAppMode("today");
     },
     [setPersistedAppMode],
   );
 
-  // Explicit user navigation to Tasks lands on All Tasks as today.
+  // Explicit user navigation to Tasks opens the standalone task manager
+  // (the former Today "all" route).
   const openTasks = useCallback(() => {
-    openToday("all");
-  }, [openToday]);
+    setPersistedAppMode("tasks");
+  }, [setPersistedAppMode]);
+
+  const openDashboard = useCallback(() => {
+    setPersistedAppMode("dashboard");
+  }, [setPersistedAppMode]);
+
+  // Dashboard deep link: opening a recent document hands off to the Docs
+  // mode, which owns the editor surface.
+  const openDashboardDocument = useCallback(
+    (entry: VaultEntry) => {
+      setPersistedAppMode("pkm");
+      void selectEntry(entry);
+    },
+    [setPersistedAppMode, selectEntry],
+  );
 
   // Resolve the current day's route fresh (prepare vs execute) and open
   // Today. Shared by the new-day banner button and the notification click.
@@ -5393,8 +5418,11 @@ function MainApp() {
       void refreshProcessedItems();
     } else if (surfaceMode === "meetings") {
       void refreshProcessingMissions();
-    } else if (surfaceMode === "tasks") {
+    } else if (surfaceMode === "today") {
       setTodayRefreshEpoch((epoch) => epoch + 1);
+    } else if (surfaceMode === "tasks") {
+      // TasksPane owns its task-data refresh (in-pane Refresh button); the
+      // shared surface refresh still re-pulls the AI runs feeding its panel.
       void refreshProcessingMissions();
     } else if (surfaceMode === "files" && explorerWorkspacePath) {
       void refreshWorkspaceFiles(explorerWorkspacePath);
@@ -6413,9 +6441,6 @@ function MainApp() {
         case "meetings":
           openMeetings();
           break;
-        case "tasks":
-          openTasks();
-          break;
         case "sites":
           openSites();
           break;
@@ -6436,7 +6461,6 @@ function MainApp() {
       openInboxAndFocus,
       openMeetings,
       openSites,
-      openTasks,
       setPersistedAppMode,
       updateLayoutSettings,
     ],
@@ -6445,7 +6469,6 @@ function MainApp() {
   const openWorkbenchModeRight = useCallback(
     (mode: Exclude<AppMode, "pkm">) => {
       if (mode === "inbox") setInboxFocusTick((value) => value + 1);
-      if (mode === "tasks") setTodayRoute("all");
       if (mode === "gap") setGapDraftId(null);
       if (mode === "graph" && layoutSettings.toolPanelSurface === "graph") {
         updateLayoutSettings({
@@ -6901,6 +6924,12 @@ function MainApp() {
         case "open-tasks":
           openTasks();
           break;
+        case "open-today":
+          openTodayForCurrentDay();
+          break;
+        case "open-dashboard":
+          openDashboard();
+          break;
         case "open-sites":
           openSites();
           break;
@@ -6933,6 +6962,8 @@ function MainApp() {
       openComms,
       openMeetings,
       openTasks,
+      openTodayForCurrentDay,
+      openDashboard,
       openSites,
       checkForUpdates,
       splitEditorRight,
@@ -8173,6 +8204,15 @@ function MainApp() {
 
         <nav className="activity-rail" aria-label={t("activity.label")}>
           <ActivityModeButton
+            label={t("mode.dashboard")}
+            active={visibleAppMode === "dashboard"}
+            secondaryActive={rightWorkbenchMode === "dashboard"}
+            icon={<LayoutDashboard size={20} strokeWidth={1.9} />}
+            onOpenPrimary={() => openPrimaryWorkbenchMode("dashboard")}
+            onOpenRight={() => openWorkbenchModeRight("dashboard")}
+            openRightLabel={t("workbench.openRight", { name: t("mode.dashboard") })}
+          />
+          <ActivityModeButton
             label={t("mode.pkm")}
             active={visibleAppMode === "pkm" && !rightWorkbenchOpen}
             icon={<FileText size={20} />}
@@ -8186,6 +8226,7 @@ function MainApp() {
             ["inbox", Inbox],
             ["comms", MessageSquare],
             ["meetings", UsersRound],
+            ["today", CalendarCheck],
             ["tasks", ListTodo],
             ["drafts", PenLine],
             ["gap", Diff],
@@ -8662,7 +8703,7 @@ function MainApp() {
                 requestedView={meetingsRequestedView}
             onViewConsumed={handleMeetingsViewConsumed}
           />
-        ) : surfaceMode === "tasks" ? (
+        ) : surfaceMode === "today" ? (
           <LazyTodayPane
             route={todayRoute}
             onRouteChange={setTodayRoute}
@@ -8672,7 +8713,23 @@ function MainApp() {
             onLayoutChange={updateLayoutSettings}
             rolloverEpoch={todayRolloverEpoch}
             refreshRequestEpoch={todayRefreshEpoch}
-            tasksProps={tasksProps}
+            onOpenTasksMode={openTasks}
+          />
+        ) : surfaceMode === "tasks" ? (
+          <LazyTasksPane
+            {...tasksProps}
+            layout={layoutSettings}
+            onLayoutChange={updateLayoutSettings}
+            logicalDay={todayLogicalDayRef.current}
+          />
+        ) : surfaceMode === "dashboard" ? (
+          <LazyDashboardPane
+            workPath={inboxWorkspacePath}
+            effectiveSettings={effectiveTasksSettings}
+            recentEntries={recentEntries}
+            onOpenMode={openPrimaryWorkbenchMode}
+            onOpenDocument={openDashboardDocument}
+            onOpenSettings={openSettings}
           />
         ) : (
           <>

@@ -2,8 +2,9 @@
 //
 // The e2e webServer runs plain Vite (no Tauri backend), so every Today
 // command wrapper (src/lib/today.ts, plus the api.ts browser fallbacks for
-// scan_task_notes / scan_inbox_entries / read_document / save_document)
-// resolves through per-command handlers registered here on
+// scan_task_notes / scan_inbox_entries / read_document / save_document, and
+// the catalog.ts e2e seam for catalog_scan / catalog_query used by the
+// dashboard spec) resolves through per-command handlers registered here on
 // `window.__MARU_E2E_INVOKE__` (see src/lib/e2eInvoke.ts). This module owns
 // the deterministic fake: a serializable seed (logical day 2026-07-21, plan,
 // yesterday items, captures, task events, outbox records) plus an in-page
@@ -52,6 +53,12 @@ export interface TodaySeedOverrides {
   commitments?: unknown[];
   taskRows?: unknown[];
   inboxEntries?: unknown[];
+  /** Payload for catalog_scan (default: small deterministic report). */
+  catalogReport?: unknown;
+  /** Rows for catalog_query; filtered by req.kinds, capped by req.limit. */
+  catalogEntries?: unknown[];
+  /** First N catalog_scan calls reject before serving the report. */
+  catalogScanFailures?: number;
   documents?: Record<string, { content: string; revision?: string }>;
   brainDump?: string;
   rolloverFailures?: number;
@@ -383,6 +390,66 @@ function defaultCommitments() {
   ];
 }
 
+function defaultCatalogReport() {
+  return {
+    scanned_at: "2026-07-21T03:30:00+09:00",
+    entries_count: 4,
+    by_kind: { "deadline-due": 2, "approval-in-flight": 1, "evidence-unlinked": 1 },
+    bus_seen: ["AI혁신처"],
+    warnings: [],
+    elapsed_ms: 3,
+  };
+}
+
+function defaultCatalogEntries() {
+  const base = {
+    business_unit: "AI혁신처",
+    last_updated: "2026-07-20T09:00:00+09:00",
+  };
+  return [
+    {
+      ...base,
+      path: "ops/ai-innovation/rise-interim-report.md",
+      kind: "deadline-due",
+      title: "RISE 사업 중간보고서",
+      category: "formal-report",
+      deadline: "2026-07-25",
+      approval_status: null,
+      evidence_kind: null,
+    },
+    {
+      ...base,
+      path: "ops/ai-innovation/koica-plan.md",
+      kind: "deadline-due",
+      title: "KOICA 사업계획서",
+      category: "formal-report",
+      deadline: "2026-07-28",
+      approval_status: null,
+      evidence_kind: null,
+    },
+    {
+      ...base,
+      path: "ops/ai-innovation/summer-budget-approval.md",
+      kind: "approval-in-flight",
+      title: "여름학기 예산 결재",
+      category: "admin-approval",
+      deadline: null,
+      approval_status: "in-review",
+      evidence_kind: null,
+    },
+    {
+      ...base,
+      path: "ops/ai-innovation/equipment-receipt.md",
+      kind: "evidence-unlinked",
+      title: "실습실 장비 구입 증빙",
+      category: "evidence-cert",
+      deadline: null,
+      approval_status: null,
+      evidence_kind: "receipt",
+    },
+  ];
+}
+
 /** Build the JSON-serializable seed for the in-page fake Today backend. */
 export function buildTodaySeed(overrides: TodaySeedOverrides = {}) {
   const snapshot = {
@@ -438,6 +505,9 @@ export function buildTodaySeed(overrides: TodaySeedOverrides = {}) {
     outbox: overrides.outbox ?? defaultOutbox(),
     commitments: overrides.commitments ?? defaultCommitments(),
     rolloverFailures: overrides.rolloverFailures ?? 0,
+    catalogReport: overrides.catalogReport ?? defaultCatalogReport(),
+    catalogEntries: overrides.catalogEntries ?? defaultCatalogEntries(),
+    catalogScanFailures: overrides.catalogScanFailures ?? 0,
     taskRows: overrides.taskRows ?? defaultTaskRows(),
     inboxEntries:
       overrides.inboxEntries ??
@@ -494,6 +564,7 @@ export async function installTodayMocks(page: Page, seed: TodaySeed): Promise<vo
       documents: clone(injected.documents) as Record<string, { content: string; revision?: string }>,
       transitionCounter: 0,
       rolloverFailures: injected.rolloverFailures,
+      catalogScanFailures: injected.catalogScanFailures,
     };
 
     const calls: Array<{ command: string; args: Record<string, unknown> }> = [];
@@ -779,6 +850,23 @@ export async function installTodayMocks(page: Page, seed: TodaySeed): Promise<vo
       task_integrations_retry: () => ({ requeued: 0 }),
       read_task_integrations: () => clone(state.outbox),
       today_calendar_commitments: () => clone(state.commitments),
+      catalog_scan: () => {
+        if (state.catalogScanFailures > 0) {
+          state.catalogScanFailures -= 1;
+          throw new Error("mock catalog scan failure");
+        }
+        return clone(injected.catalogReport);
+      },
+      catalog_query: (args) => {
+        const req = (args.req ?? {}) as { kinds?: string[]; limit?: number };
+        const entries = clone(injected.catalogEntries) as Array<Record<string, unknown>>;
+        const kinds = Array.isArray(req.kinds) ? req.kinds : null;
+        const filtered =
+          kinds && kinds.length > 0
+            ? entries.filter((entry) => kinds.includes(String(entry.kind)))
+            : entries;
+        return filtered.slice(0, typeof req.limit === "number" ? req.limit : 50);
+      },
       task_calendar_set_sync: (args) => {
         applyMutation({
           type: "setCalendarSync",

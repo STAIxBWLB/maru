@@ -42,7 +42,7 @@ test("design QA screenshots, pixel anchors, and side-by-side", async ({ page }) 
 
   await page.clock.install();
   await page.clock.setFixedTime(new Date("2026-07-21T03:30:00+09:00"));
-  await installTodayMocks(page, buildTodaySeed({ markerDay: null, persistedMode: "tasks" }));
+  await installTodayMocks(page, buildTodaySeed({ markerDay: null, persistedMode: "today" }));
   await page.setViewportSize(REFERENCE_VIEWPORT);
   await page.goto("/");
 
@@ -127,15 +127,23 @@ test("design QA screenshots, pixel anchors, and side-by-side", async ({ page }) 
   await expect(page.locator(".today-review-reflection-input")).toBeVisible();
   await page.screenshot({ path: path.join(OUT_DIR, "today-review-1487.png") });
 
-  // --- All Tasks at the reference viewport ---------------------------------
+  // --- All Tasks (the standalone 태스크 mode) at the reference viewport -----
+  // "전체 태스크" switches the app mode: the planner unmounts and the
+  // standalone .tasks-pane takes over.
   await page.locator(".today-sidebar").getByRole("button", { name: "전체 태스크" }).click();
   await expect(page.locator(".tasks-pane")).toBeVisible();
+  await expect(page.locator(".today-pane")).toHaveCount(0);
   await expect(page.getByRole("separator", { name: "태스크 필터 영역 크기 조절" })).toBeVisible();
   await expect(page.getByRole("separator", { name: "일정 목록 영역 크기 조절" })).toBeVisible();
   await page.screenshot({ path: path.join(OUT_DIR, "today-tasks-1487.png") });
 
   // --- Prepare at 1440x920 (responsive note) --------------------------------
   await page.setViewportSize(WIDE_VIEWPORT);
+  await page
+    .locator(".activity-rail")
+    .getByRole("button", { name: "오늘", exact: true })
+    .click();
+  await expect(page.locator(".today-pane")).toBeVisible();
   await page.locator(".today-sidebar").getByRole("button", { name: "오늘 준비" }).click();
   await expect(page.locator(".today-panel-braindump")).toBeVisible();
   const wideBrain = await page.locator(".today-panel-braindump").boundingBox();

@@ -1,7 +1,7 @@
 // Maru Today — left sidebar for the Today pane. Stage navigation
-// (Prepare/Execute/Review), the calendar sync row, and the "Related"
-// section (Inbox / Upcoming / Log / All Tasks). Counts are optional: they
-// render only when the caller has real data to show.
+// (Prepare/Execute/Review), the calendar sync row, and a "Related" link
+// into the standalone Tasks mode. Counts are optional: they render only
+// when the caller has real data to show.
 
 import {
   Calendar,
@@ -16,6 +16,7 @@ import type { TodayRoute } from "../../lib/today";
 interface TodaySidebarProps {
   route: TodayRoute;
   onRouteChange: (route: TodayRoute) => void;
+  onOpenTasksMode: () => void;
   calendarCount?: number;
   inboxCount?: number;
   upcomingCount?: number;
@@ -24,6 +25,7 @@ interface TodaySidebarProps {
 export function TodaySidebar({
   route,
   onRouteChange,
+  onOpenTasksMode,
   calendarCount,
 }: TodaySidebarProps) {
   const { t } = useTranslation();
@@ -32,15 +34,6 @@ export function TodaySidebar({
     { route: "prepare", label: t("today.nav.prepare"), icon: Sunrise },
     { route: "execute", label: t("today.nav.execute"), icon: Play },
     { route: "review", label: t("today.nav.review"), icon: CircleCheck },
-  ];
-
-  const relatedItems: Array<{
-    route: TodayRoute;
-    label: string;
-    icon: typeof ListTodo;
-    count?: number;
-  }> = [
-    { route: "all", label: t("today.nav.allTasks"), icon: ListTodo },
   ];
 
   const itemClass = (itemRoute: TodayRoute) =>
@@ -88,20 +81,15 @@ export function TodaySidebar({
       <div className="today-sidebar-section">
         <p className="today-sidebar-label">{t("today.nav.related")}</p>
         <nav className="today-sidebar-nav" aria-label={t("today.nav.related")}>
-          {relatedItems.map(({ route: itemRoute, label, icon: Icon, count }) => (
-            <button
-              key={itemRoute}
-              type="button"
-              className={itemClass(itemRoute)}
-              aria-current={route === itemRoute ? "page" : undefined}
-              aria-label={label}
-              onClick={() => onRouteChange(itemRoute)}
-            >
-              <Icon size={16} strokeWidth={1.9} aria-hidden="true" />
-              <span className="today-nav-label">{label}</span>
-              {count !== undefined ? <span className="today-nav-count">{count}</span> : null}
-            </button>
-          ))}
+          <button
+            type="button"
+            className="today-nav-item"
+            aria-label={t("today.nav.allTasks")}
+            onClick={onOpenTasksMode}
+          >
+            <ListTodo size={16} strokeWidth={1.9} aria-hidden="true" />
+            <span className="today-nav-label">{t("today.nav.allTasks")}</span>
+          </button>
         </nav>
       </div>
     </aside>
