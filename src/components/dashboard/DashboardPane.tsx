@@ -73,7 +73,7 @@ export function DashboardPane({
 
   const today = useDashboardToday(workPath, effectiveSettings, epoch);
   const tasks = useDashboardTasks(workPath, epoch);
-  const schedule = useDashboardSchedule(workPath, effectiveSettings, epoch);
+  const schedule = useDashboardSchedule(workPath, effectiveSettings, epoch, today.data?.logicalDay ?? null);
   const catalog = useDashboardCatalog(workPath, epoch);
   const inbox = useDashboardInbox(workPath, epoch);
   const agents = useDashboardAgents(workPath, epoch);
@@ -82,8 +82,10 @@ export function DashboardPane({
   const sync = useDashboardSync(epoch);
 
   const todayIso = useMemo(
-    () => dashboardLogicalDay(new Date(), effectiveSettings.today.dayStart),
-    [epoch, effectiveSettings.today.dayStart],
+    // Prefer the backend-computed logical day (configured timezone aware),
+    // matching the Today flow; the local computation is the degraded fallback.
+    () => today.data?.logicalDay ?? dashboardLogicalDay(new Date(), effectiveSettings.today.dayStart),
+    [today.data, epoch, effectiveSettings.today.dayStart],
   );
   const taskEntries = useMemo(() => tasks.data ?? [], [tasks.data]);
   const taskCounts = useMemo(() => taskFilterCounts(taskEntries, todayIso), [taskEntries, todayIso]);

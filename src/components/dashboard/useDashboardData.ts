@@ -118,6 +118,10 @@ export function useDashboardSchedule(
   workPath: string | null,
   settings: TasksSettings,
   epoch: number,
+  /** Backend-computed logical day from the Today snapshot (configured
+   *  timezone aware). Falls back to a local computation when the snapshot
+   *  is unavailable (degraded mode). */
+  logicalDay: string | null,
 ): DashboardWidgetData<CalendarCommitment[]> {
   const calendarsKey = settings.today.availabilityCalendars.join("\n");
   return useWidgetData(
@@ -125,7 +129,7 @@ export function useDashboardSchedule(
     () =>
       todayCalendarCommitments(
         workPath!,
-        dashboardLogicalDay(new Date(), settings.today.dayStart),
+        logicalDay ?? dashboardLogicalDay(new Date(), settings.today.dayStart),
         settings.timezone ?? "Asia/Seoul",
         settings.today.dayStart,
         settings.today.sleepStart,
@@ -137,6 +141,7 @@ export function useDashboardSchedule(
       settings.today.dayStart,
       settings.today.sleepStart,
       calendarsKey,
+      logicalDay,
       epoch,
     ],
   );
