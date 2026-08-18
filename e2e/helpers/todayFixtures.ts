@@ -44,6 +44,8 @@ export interface TodaySeedOverrides {
   dayState?: string;
   route?: string;
   autoOpen?: boolean;
+  /** settings.today.enabled (default true). */
+  todayEnabled?: boolean;
   notificationsEnabled?: boolean;
   autoPlan?: boolean;
   plan?: unknown;
@@ -489,7 +491,7 @@ export function buildTodaySeed(overrides: TodaySeedOverrides = {}) {
       },
       tasks: {
         today: {
-          enabled: true,
+          enabled: overrides.todayEnabled ?? true,
           dayStart: "03:30",
           sleepStart: "21:30",
           notificationEnabled: overrides.notificationsEnabled ?? true,

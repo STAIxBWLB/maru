@@ -260,8 +260,8 @@ export function DashboardPane({
               schedule.refresh();
             }}
             empty={
-              !effectiveSettings.today.enabled ||
-              (laneCounts.top === 0 && commitments.length === 0)
+              (!effectiveSettings.today.enabled || laneCounts.top === 0) &&
+              commitments.length === 0
             }
             emptyLabel={
               effectiveSettings.today.enabled
@@ -322,7 +322,12 @@ export function DashboardPane({
             loading={tasks.loading}
             error={tasks.error}
             onRetry={tasks.refresh}
-            empty={taskEntries.length === 0 && catalogChips.every((chip) => chip.count === 0)}
+            empty={
+              !catalog.error &&
+              !catalog.loading &&
+              taskEntries.length === 0 &&
+              catalogChips.every((chip) => chip.count === 0)
+            }
             emptyLabel={t("dashboard.widget.attention.empty")}
           >
             <p className="dashboard-section-label">{t("dashboard.widget.tasks.title")}</p>

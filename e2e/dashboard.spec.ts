@@ -339,3 +339,39 @@ for (const width of [1024, 1280, 1487]) {
     ).toBe(true);
   });
 }
+
+// Both guards below come from review findings on the six-into-four merge: each
+// one folded a second data source into a card whose empty/error gate still only
+// consulted the first.
+
+test("today card keeps the agenda when Today itself is disabled", async ({ page }) => {
+  // useDashboardToday is gated on settings.today.enabled; useDashboardSchedule
+  // is not, so commitments still load. Before the fix the merged card fell
+  // straight to "Today is disabled" and the agenda that used to have its own
+  // card vanished with it.
+  await installTodayMocks(
+    page,
+    buildTodaySeed({ ...DASHBOARD_BOOT_SEED, todayEnabled: false }),
+  );
+  await gotoDashboard(page);
+
+  const today = widget(page, "today");
+  await expect(today).toContainText("주간 사업 점검 회의");
+  await expect(today.locator(".dashboard-widget-empty")).toHaveCount(0);
+});
+
+test("attention card surfaces a catalog failure even with no tasks", async ({ page }) => {
+  // A failed scan zero-fills every catalog chip, so a data-only empty test read
+  // "nothing needs attention" and painted the empty state over the nested error
+  // and its retry button, leaving no way back.
+  await installTodayMocks(
+    page,
+    buildTodaySeed({ ...DASHBOARD_BOOT_SEED, taskRows: [], catalogScanFailures: 2 }),
+  );
+  await gotoDashboard(page);
+
+  const attention = widget(page, "attention");
+  await expect(attention.locator(".dashboard-widget-error")).toBeVisible();
+  await expect(attention.locator(".dashboard-widget-retry")).toBeVisible();
+  await expect(attention.locator(".dashboard-widget-empty")).toHaveCount(0);
+});
