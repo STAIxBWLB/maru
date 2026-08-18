@@ -23,16 +23,17 @@ test.use({ timezoneId: "Asia/Seoul" });
 // fixture day, so the persisted "dashboard" mode is restored as-is.
 const DASHBOARD_BOOT_SEED = { markerDay: FIXTURE_DAY, persistedMode: "dashboard" } as const;
 
+// Eight, not ten: the schedule card folded into "today" (both answer "what is
+// today") and the task chips merged with the catalog signals into "attention",
+// whose chip vocabulary no longer restates the inbox badge beside it.
 const WIDGET_KINDS = [
   "today",
-  "tasks",
-  "schedule",
-  "catalog",
+  "attention",
   "inbox",
+  "recents",
   "agents",
   "drafts",
   "git",
-  "recents",
   "sync",
 ] as const;
 
@@ -65,7 +66,7 @@ function dashTaskRow(
   };
 }
 
-test("boots into the dashboard overview grid with all ten widgets", async ({ page }) => {
+test("boots into the dashboard overview grid with every widget", async ({ page }) => {
   await installTodayMocks(page, buildTodaySeed(DASHBOARD_BOOT_SEED));
   await gotoDashboard(page);
 
@@ -89,7 +90,8 @@ test("boots into the dashboard overview grid with all ten widgets", async ({ pag
   // their deterministic empty/setup states. Nothing errors.
   await expect(widget(page, "today").locator(".dashboard-widget-count")).toHaveText("3");
   await expect(widget(page, "today")).toContainText("준비 중");
-  await expect(widget(page, "schedule")).toContainText("주간 사업 점검 회의");
+  // The agenda merged into the today card.
+  await expect(widget(page, "today")).toContainText("주간 사업 점검 회의");
   // 2 mock drop items + 5 pending fixture entries; the latest list is sorted
   // by recency, so the newer pending entries lead.
   await expect(widget(page, "inbox").locator(".dashboard-widget-count")).toHaveText("7");
@@ -103,7 +105,7 @@ test("boots into the dashboard overview grid with all ten widgets", async ({ pag
   await expect(page.locator(".dashboard-widget-error")).toHaveCount(0);
 });
 
-test("tasks widget chips reflect seeded counts and drill down into filtered rows", async ({
+test("attention widget task chips reflect seeded counts and drill into filtered rows", async ({
   page,
 }) => {
   // The chip counts key off the wall-clock "today" — pin it to the fixture day.
@@ -131,7 +133,7 @@ test("tasks widget chips reflect seeded counts and drill down into filtered rows
   await installTodayMocks(page, buildTodaySeed({ ...DASHBOARD_BOOT_SEED, taskRows }));
   await gotoDashboard(page);
 
-  const tasks = widget(page, "tasks");
+  const tasks = widget(page, "attention");
   const chip = (name: string) => tasks.locator(".dashboard-chip", { hasText: name });
   await expect(chip("오늘").locator(".dashboard-chip-count")).toHaveText("1");
   await expect(chip("기한 초과").locator(".dashboard-chip-count")).toHaveText("1");
@@ -152,20 +154,21 @@ test("tasks widget chips reflect seeded counts and drill down into filtered rows
   await expect(page.locator(".dashboard-drilldown")).toHaveCount(0);
 });
 
-test("catalog widget renders seeded kind counts and drills into kind entries", async ({
+test("attention widget renders seeded catalog counts and drills into kind entries", async ({
   page,
 }) => {
   await installTodayMocks(page, buildTodaySeed(DASHBOARD_BOOT_SEED));
   await gotoDashboard(page);
 
-  const catalog = widget(page, "catalog");
-  await expect(catalog.locator(".dashboard-widget-count")).toHaveText("4");
+  const catalog = widget(page, "attention");
   const chip = (name: string) => catalog.locator(".dashboard-chip", { hasText: name });
   await expect(chip("마감 임박").locator(".dashboard-chip-count")).toHaveText("2");
   await expect(chip("결재 진행").locator(".dashboard-chip-count")).toHaveText("1");
   await expect(chip("미연결 증빙").locator(".dashboard-chip-count")).toHaveText("1");
-  await expect(chip("인박스 대기").locator(".dashboard-chip-count")).toHaveText("0");
-  await expect(chip("태스크 마감").locator(".dashboard-chip-count")).toHaveText("0");
+  // The inbox-pending and task-due kinds are gone: the inbox badge and the task
+  // chips in this same card already carry them, from the sources that own them.
+  await expect(catalog.locator(".dashboard-chip", { hasText: "인박스 대기" })).toHaveCount(0);
+  await expect(catalog.locator(".dashboard-chip", { hasText: "태스크 마감" })).toHaveCount(0);
 
   await chip("마감 임박").click();
   const drilldown = page.locator(".dashboard-drilldown-catalog");
@@ -188,13 +191,14 @@ test("a failing widget renders its own error and retry recovers it", async ({ pa
   );
   await gotoDashboard(page);
 
-  const catalog = widget(page, "catalog");
+  const catalog = widget(page, "attention");
   await expect(catalog.locator(".dashboard-widget-error")).toBeVisible();
   await expect(catalog.locator(".dashboard-widget-retry")).toBeVisible();
 
-  // The failure stays inside the catalog widget — neighbors render fine.
+  // The failure stays inside the catalog chip group: neighbours render fine and,
+  // crucially, so do the task chips sharing the card with it.
   await expect(page.locator(".dashboard-widget-error")).toHaveCount(1);
-  await expect(widget(page, "tasks").locator(".dashboard-chip").first()).toBeVisible();
+  await expect(catalog.locator(".dashboard-chip", { hasText: "오늘" })).toBeVisible();
   await expect(widget(page, "inbox")).toContainText("공유대학 예산안 검토 요청");
 
   await catalog.locator(".dashboard-widget-retry").click();
@@ -208,7 +212,7 @@ test("widget actions deep-link into the owning modes", async ({ page }) => {
   await installTodayMocks(page, buildTodaySeed(DASHBOARD_BOOT_SEED));
   await gotoDashboard(page);
 
-  await widget(page, "tasks").locator(".dashboard-widget-action").click();
+  await widget(page, "attention").locator(".dashboard-widget-action").click();
   await expect(page.locator(".tasks-pane")).toBeVisible();
   await expect(page.locator(".dashboard-pane")).toHaveCount(0);
 
@@ -252,4 +256,122 @@ test("recents widget lists seeded recent documents and opens one in Docs mode", 
   await expect(
     page.locator(".document-tab-title", { hasText: "Maru 용어집" }),
   ).toBeVisible();
+});
+
+// Regression guard: `.dashboard-list` was `display: grid` with an implicit
+// `auto` column track. A grid item's automatic minimum size keeps that track at
+// the item's min-content width, so the card only survives as long as the label
+// has *somewhere* to break. Inbox labels are slugs, and the global
+// `word-break: keep-all` (foundations.css) is stricter about break
+// opportunities in WebKit than in Chromium — in the shipped WKWebView app the
+// whole slug became one unbreakable token, the track grew to it, and the text
+// painted straight through the card border.
+//
+// Seeding hyphenated slugs would only reproduce that in WebKit, and this suite
+// runs Chromium. So seed labels with no break opportunity at all in any engine:
+// then the min-content width *is* the whole string everywhere, and the guard
+// fails on the pre-fix CSS as it should. What it pins is the behaviour we
+// actually want — a label too long for its card gets clipped, never escapes.
+const OVERFLOW_SEED_TITLES = [
+  `260818gwsYouHaveANewGoogleAccountForJejuAi${"AndAVeryLongUnbrokenTail".repeat(3)}`,
+  `260818msoActionRequired7DaysLeftToBackUpYourData${"BeforeTheDeadline".repeat(3)}`,
+  `제주한라대학교인공지능학과공유대학예산안검토요청최종본대외비${"2026년도사업계획".repeat(3)}`,
+];
+
+for (const width of [1024, 1280, 1487]) {
+  test(`dashboard lists stay inside their cards at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 1058 });
+    await installTodayMocks(
+      page,
+      buildTodaySeed({
+        ...DASHBOARD_BOOT_SEED,
+        inboxEntries: OVERFLOW_SEED_TITLES.map((title, index) => ({
+          id: `260818-gws-overflow-${index}`,
+          kind: "pendingItem",
+          path: `${FIXTURE_WORK_PATH}/inbox/items/pending/260818-gws-overflow-${index}`,
+          relPath: `inbox/items/pending/260818-gws-overflow-${index}`,
+          title,
+          channel: "gws",
+          sourceKind: "mail",
+          dropPath: null,
+          configuredRoot: "inbox",
+          itemId: `260818-gws-overflow-${index}`,
+          status: "pending",
+          manifestPath: null,
+          summaryPath: null,
+          routePath: null,
+          sizeBytes: 640,
+          receivedAt: `2026-08-18T0${index + 1}:00:00+09:00`,
+        })),
+      }),
+    );
+    await gotoDashboard(page);
+    await expect(widget(page, "inbox")).toBeVisible();
+
+    // No widget scrolls its own content horizontally...
+    const overflowingWidgets = await page
+      .locator(".dashboard-widget")
+      .evaluateAll((els) =>
+        els
+          .filter((el) => el.scrollWidth > el.clientWidth + 1)
+          .map((el) => el.getAttribute("data-dashboard-widget")),
+      );
+    expect(overflowingWidgets).toEqual([]);
+
+    // ...and no list row paints outside the card that owns it.
+    const escapedRows = await page
+      .locator(".dashboard-widget")
+      .evaluateAll((els) =>
+        els.flatMap((el) => {
+          const cardRight = el.getBoundingClientRect().right;
+          return [...el.querySelectorAll(".dashboard-list > li, .dashboard-link")]
+            .filter((row) => row.getBoundingClientRect().right > cardRight + 1)
+            .map(() => el.getAttribute("data-dashboard-widget"));
+        }),
+      );
+    expect(escapedRows).toEqual([]);
+
+    // The pane itself never gains a horizontal scrollbar.
+    expect(
+      await page
+        .locator(".dashboard-pane")
+        .evaluate((el) => el.scrollWidth <= el.clientWidth + 1),
+    ).toBe(true);
+  });
+}
+
+// Both guards below come from review findings on the six-into-four merge: each
+// one folded a second data source into a card whose empty/error gate still only
+// consulted the first.
+
+test("today card keeps the agenda when Today itself is disabled", async ({ page }) => {
+  // useDashboardToday is gated on settings.today.enabled; useDashboardSchedule
+  // is not, so commitments still load. Before the fix the merged card fell
+  // straight to "Today is disabled" and the agenda that used to have its own
+  // card vanished with it.
+  await installTodayMocks(
+    page,
+    buildTodaySeed({ ...DASHBOARD_BOOT_SEED, todayEnabled: false }),
+  );
+  await gotoDashboard(page);
+
+  const today = widget(page, "today");
+  await expect(today).toContainText("주간 사업 점검 회의");
+  await expect(today.locator(".dashboard-widget-empty")).toHaveCount(0);
+});
+
+test("attention card surfaces a catalog failure even with no tasks", async ({ page }) => {
+  // A failed scan zero-fills every catalog chip, so a data-only empty test read
+  // "nothing needs attention" and painted the empty state over the nested error
+  // and its retry button, leaving no way back.
+  await installTodayMocks(
+    page,
+    buildTodaySeed({ ...DASHBOARD_BOOT_SEED, taskRows: [], catalogScanFailures: 2 }),
+  );
+  await gotoDashboard(page);
+
+  const attention = widget(page, "attention");
+  await expect(attention.locator(".dashboard-widget-error")).toBeVisible();
+  await expect(attention.locator(".dashboard-widget-retry")).toBeVisible();
+  await expect(attention.locator(".dashboard-widget-empty")).toHaveCount(0);
 });

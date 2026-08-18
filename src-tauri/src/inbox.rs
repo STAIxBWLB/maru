@@ -241,7 +241,20 @@ struct PendingManifest {
     #[serde(default)]
     kind: Option<String>,
     #[serde(default)]
+    received_at: Option<String>,
+    #[serde(default)]
+    source: PendingManifestSource,
+    #[serde(default)]
     metadata: PendingManifestMetadata,
+}
+
+/// The ingest chain writes the human-facing name of the captured item here
+/// (a mail subject, a shared-file name). The manifest `id` next to it is a
+/// slug derived from that name, so it is the fallback, never the label.
+#[derive(Debug, Default, Deserialize)]
+struct PendingManifestSource {
+    #[serde(default)]
+    original_name: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -1007,12 +1020,32 @@ fn scan_inbox_entries_with_config(
             let item_dir = manifest_path.parent().unwrap_or(pending_root.as_path());
             let metadata = fs::metadata(&manifest_path)
                 .map_err(|err| format!("Cannot read inbox manifest metadata: {err}"))?;
-            let received_at = metadata
-                .modified()
-                .ok()
-                .map(DateTime::<Utc>::from)
-                .map(|dt| dt.to_rfc3339());
-            let title = manifest.id.clone();
+            // The manifest records when the item actually arrived; the file
+            // mtime only says when the manifest was last written, which a
+            // re-stage or a routing edit rewrites. Normalized to UTC because
+            // both this function's sort below and the dashboard's compare the
+            // string directly, so a `+09:00` manifest would otherwise order
+            // ahead of a later `+00:00` one (see `digest_generated_after`).
+            let received_at = manifest
+                .received_at
+                .as_deref()
+                .and_then(|raw| DateTime::parse_from_rfc3339(raw).ok())
+                .map(|dt| dt.with_timezone(&Utc).to_rfc3339())
+                .or_else(|| {
+                    metadata
+                        .modified()
+                        .ok()
+                        .map(DateTime::<Utc>::from)
+                        .map(|dt| dt.to_rfc3339())
+                });
+            let title = manifest
+                .source
+                .original_name
+                .as_deref()
+                .map(str::trim)
+                .filter(|name| !name.is_empty())
+                .map(str::to_string)
+                .unwrap_or_else(|| manifest.id.clone());
             entries.push(InboxEntry {
                 id: manifest_path
                     .strip_prefix(work)
@@ -2926,11 +2959,143 @@ metadata:
             .unwrap();
         assert_eq!(pending_entry.item_id.as_deref(), Some("260510-kakao-chat"));
         assert_eq!(pending_entry.status.as_deref(), Some("pending"));
+        // No `source.original_name` in this manifest, so the title falls back
+        // to the item id.
+        assert_eq!(pending_entry.title, "260510-kakao-chat");
         assert!(pending_entry
             .summary_path
             .as_deref()
             .unwrap()
             .ends_with("inbox/items/pending/260510-kakao-chat/digest.md"));
+    }
+
+    /// The manifest `id` is a slug of the original name, so surfacing it as the
+    /// title showed users `260801-gws-folder-shared-with-you-...` where the mail
+    /// subject belonged. `source.original_name` is the label; the id is only the
+    /// fallback, and a blank or whitespace-only name must not win over it.
+    #[test]
+    fn scan_inbox_entries_prefers_manifest_source_original_name_for_the_title() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        fs::write(
+            root.join("workspace.config.yaml"),
+            r#"
+inbox:
+  root: inbox
+  channels:
+    gws:
+      provider: gws
+      kind: message
+      dedupe: sha256
+      drop_paths:
+        - drop/gws
+"#,
+        )
+        .unwrap();
+
+        for (item_id, source_block) in [
+            (
+                "260801-gws-folder-shared",
+                "source:\n  original_name: 'Folder shared with you: \"솔트룩스 연구\"'\n",
+            ),
+            ("260802-gws-blank-name", "source:\n  original_name: '   '\n"),
+            ("260803-gws-no-source", ""),
+        ] {
+            fs::create_dir_all(root.join(format!("inbox/items/pending/{item_id}"))).unwrap();
+            fs::write(
+                root.join(format!("inbox/items/pending/{item_id}/manifest.yaml")),
+                format!("id: {item_id}\nstatus: pending\nchannel: gws\n{source_block}"),
+            )
+            .unwrap();
+        }
+
+        let entries = scan_inbox_entries(root.to_string_lossy().to_string(), None).unwrap();
+        let title_of = |item_id: &str| {
+            entries
+                .iter()
+                .find(|entry| entry.item_id.as_deref() == Some(item_id))
+                .unwrap_or_else(|| panic!("missing entry for {item_id}"))
+                .title
+                .clone()
+        };
+
+        assert_eq!(
+            title_of("260801-gws-folder-shared"),
+            "Folder shared with you: \"솔트룩스 연구\""
+        );
+        assert_eq!(title_of("260802-gws-blank-name"), "260802-gws-blank-name");
+        assert_eq!(title_of("260803-gws-no-source"), "260803-gws-no-source");
+    }
+
+    /// `received_at` used to come from the manifest's mtime, so the dashboard's
+    /// "latest" list ordered by when the file was last written rather than when
+    /// the mail arrived. The manifest's own timestamp wins, normalized to UTC:
+    /// both the sort below and the dashboard compare the string directly, so a
+    /// `+09:00` item would otherwise sort ahead of a strictly later `+00:00`
+    /// one.
+    #[test]
+    fn scan_inbox_entries_takes_received_at_from_the_manifest_normalized_to_utc() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        fs::write(
+            root.join("workspace.config.yaml"),
+            r#"
+inbox:
+  root: inbox
+  channels:
+    gws:
+      provider: gws
+      kind: message
+      dedupe: sha256
+      drop_paths:
+        - drop/gws
+"#,
+        )
+        .unwrap();
+
+        // Lexically "…19T01:00:00+09:00" > "…18T20:00:00+00:00", but as
+        // instants it is 16:00Z vs 20:00Z, so `later-utc` is the newer item.
+        for (item_id, received) in [
+            ("earlier-kst", "received_at: '2026-08-19T01:00:00+09:00'\n"),
+            ("later-utc", "received_at: '2026-08-18T20:00:00+00:00'\n"),
+            ("no-timestamp", ""),
+        ] {
+            fs::create_dir_all(root.join(format!("inbox/items/pending/{item_id}"))).unwrap();
+            fs::write(
+                root.join(format!("inbox/items/pending/{item_id}/manifest.yaml")),
+                format!("id: {item_id}\nstatus: pending\nchannel: gws\n{received}"),
+            )
+            .unwrap();
+        }
+
+        let entries = scan_inbox_entries(root.to_string_lossy().to_string(), None).unwrap();
+        let received_of = |item_id: &str| {
+            entries
+                .iter()
+                .find(|entry| entry.item_id.as_deref() == Some(item_id))
+                .unwrap_or_else(|| panic!("missing entry for {item_id}"))
+                .received_at
+                .clone()
+        };
+
+        assert_eq!(
+            received_of("earlier-kst").as_deref(),
+            Some("2026-08-18T16:00:00+00:00")
+        );
+        assert_eq!(
+            received_of("later-utc").as_deref(),
+            Some("2026-08-18T20:00:00+00:00")
+        );
+        // No manifest timestamp: falls back to the mtime, which is now.
+        assert!(received_of("no-timestamp").is_some());
+
+        // Newest first, by instant rather than by raw string.
+        let order: Vec<&str> = entries
+            .iter()
+            .filter_map(|entry| entry.item_id.as_deref())
+            .filter(|id| *id != "no-timestamp")
+            .collect();
+        assert_eq!(order, vec!["later-utc", "earlier-kst"]);
     }
 
     #[test]

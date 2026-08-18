@@ -20,6 +20,12 @@ export interface DashboardWidgetProps {
   /** Render the empty state instead of children. */
   empty?: boolean;
   emptyLabel?: string;
+  /**
+   * Status-strip form: same chrome and same state machine, tighter box, and the
+   * deep-link collapses to its arrow — four "전체 보기 →" links in a row of
+   * ambient status is noise.
+   */
+  compact?: boolean;
   children?: ReactNode;
 }
 
@@ -33,11 +39,18 @@ export function DashboardWidget({
   onRetry,
   empty = false,
   emptyLabel,
+  compact = false,
   children,
 }: DashboardWidgetProps) {
   const { t } = useTranslation();
+  const viewAllLabel = t("dashboard.widget.viewAll");
   return (
-    <section className={`dashboard-widget dashboard-widget-${kind}`} data-dashboard-widget={kind}>
+    <section
+      className={`dashboard-widget dashboard-widget-${kind}${
+        compact ? " dashboard-widget-compact" : ""
+      }`}
+      data-dashboard-widget={kind}
+    >
       <header className="dashboard-widget-header">
         <h3 className="dashboard-widget-title">{title}</h3>
         {count !== null && count !== undefined ? (
@@ -48,8 +61,10 @@ export function DashboardWidget({
             type="button"
             className="dashboard-widget-action"
             onClick={onViewAll}
+            aria-label={compact ? viewAllLabel : undefined}
+            title={compact ? viewAllLabel : undefined}
           >
-            {t("dashboard.widget.viewAll")}
+            {compact ? null : viewAllLabel}
             <ArrowRight size={12} strokeWidth={1.9} aria-hidden="true" />
           </button>
         ) : null}

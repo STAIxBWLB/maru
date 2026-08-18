@@ -21,13 +21,10 @@ import type {
   VaultEntry,
 } from "./types";
 
-export type DashboardView =
-  | "overview"
-  | "tasks"
-  | "schedule"
-  | "catalog"
-  | "inbox"
-  | "recents";
+/** Only the views something can actually navigate to. "schedule" and "inbox"
+ *  were declared and rendered but nothing ever set them: both widgets deep-link
+ *  into their owning mode instead, so those two drilldowns were unreachable. */
+export type DashboardView = "overview" | "tasks" | "catalog" | "recents";
 
 export type DashboardTaskFilter =
   | "today"
@@ -121,28 +118,16 @@ export function dashboardLogicalDay(now: Date, dayStart: string): string {
   return `${date.getFullYear()}-${month}-${day}`;
 }
 
-// === Schedule ===
-
-/** Upcoming task calendar events (due/scheduled) at or after `now`. */
-export function upcomingTaskEvents(
-  entries: TaskEntry[],
-  now: Date,
-  limit = 5,
-): TaskCalendarEvent[] {
-  return tasksToCalendarEvents(entries)
-    .filter((event) => event.end >= now)
-    .sort((a, b) => a.start.getTime() - b.start.getTime())
-    .slice(0, limit);
-}
-
 // === Catalog ===
 
+/** `inbox-pending` and `task-due` are deliberately absent: the inbox widget and
+ *  the task chips next to these already carry those counts, from the sources
+ *  that own them. The catalog scan is a snapshot, so keeping them here meant two
+ *  numbers for one thing that could disagree on screen. */
 export const DASHBOARD_CATALOG_KINDS: readonly CatalogItemKind[] = [
   "deadline-due",
   "approval-in-flight",
   "evidence-unlinked",
-  "inbox-pending",
-  "task-due",
 ];
 
 /** Ordered chip view-models for the catalog widget; kinds with zero hits are

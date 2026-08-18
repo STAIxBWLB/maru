@@ -13,7 +13,6 @@ import {
   planLaneCounts,
   planTopTitles,
   topRecentEntries,
-  upcomingTaskEvents,
 } from "./dashboard";
 import type { DailyPlanV1 } from "./today";
 import type { TaskEntry } from "./tasks";
@@ -139,20 +138,6 @@ describe("dashboardLogicalDay", () => {
   });
 });
 
-describe("upcomingTaskEvents", () => {
-  it("keeps only events that end after now, soonest first", () => {
-    const now = new Date("2026-08-16T09:00:00");
-    const entries = [
-      taskEntry({ relPath: "past.md", due: "2026-08-15" }),
-      taskEntry({ relPath: "later.md", calendarStart: "2026-08-17T10:00:00" }),
-      taskEntry({ relPath: "soon.md", calendarStart: "2026-08-16T11:00:00" }),
-      taskEntry({ relPath: "none.md" }),
-    ];
-    const events = upcomingTaskEvents(entries, now);
-    expect(events.map((event) => event.id)).toEqual(["soon.md", "later.md"]);
-  });
-});
-
 describe("catalogKindChips", () => {
   it("keeps a stable order and zero-fills missing kinds", () => {
     const report: CatalogScanReport = {
@@ -163,12 +148,12 @@ describe("catalogKindChips", () => {
       warnings: [],
       elapsed_ms: 1,
     };
+    // `task-due` is present in the report and deliberately not surfaced: the
+    // task chips beside these already count it, from the source that owns it.
     expect(catalogKindChips(report)).toEqual([
       { key: "deadline-due", count: 2 },
       { key: "approval-in-flight", count: 0 },
       { key: "evidence-unlinked", count: 0 },
-      { key: "inbox-pending", count: 0 },
-      { key: "task-due", count: 3 },
     ]);
     expect(catalogKindChips(null).every((chip) => chip.count === 0)).toBe(true);
   });

@@ -21,7 +21,6 @@ import {
   planLaneCounts,
   planTopTitles,
   topRecentEntries,
-  upcomingTaskEvents,
   type DashboardTaskFilter,
   type DashboardView,
 } from "../../lib/dashboard";
@@ -106,11 +105,6 @@ export function DashboardPane({
     () => planTopTitles(today.data?.plan, taskEntries),
     [today.data, taskEntries],
   );
-  const upcoming = useMemo(
-    () => upcomingTaskEvents(taskEntries, new Date(), 5),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [taskEntries, epoch],
-  );
   const commitments = schedule.data ?? [];
 
   const refreshAll = () => setEpoch((value) => value + 1);
@@ -128,13 +122,9 @@ export function DashboardPane({
   const drilldownTitle =
     view === "tasks"
       ? t("dashboard.widget.tasks.title")
-      : view === "schedule"
-        ? t("dashboard.widget.schedule.title")
-        : view === "catalog"
-          ? t("dashboard.widget.catalog.title")
-          : view === "inbox"
-            ? t("dashboard.widget.inbox.title")
-            : t("dashboard.widget.recents.title");
+      : view === "catalog"
+        ? t("dashboard.widget.catalog.title")
+        : t("dashboard.widget.recents.title");
 
   return (
     <div className="dashboard-pane">
@@ -154,156 +144,11 @@ export function DashboardPane({
       </header>
 
       {view === "overview" ? (
-        <div className="dashboard-grid">
-          <DashboardWidget
-            kind="today"
-            title={t("dashboard.widget.today.title")}
-            count={laneCounts.top > 0 ? laneCounts.top : null}
-            onViewAll={() => onOpenMode("today")}
-            loading={today.loading}
-            error={today.error}
-            onRetry={today.refresh}
-            empty={!effectiveSettings.today.enabled || laneCounts.top === 0}
-            emptyLabel={
-              effectiveSettings.today.enabled
-                ? t("dashboard.widget.today.empty")
-                : t("dashboard.widget.today.disabled")
-            }
-          >
-            <div className="dashboard-today-summary">
-              {today.data ? (
-                <span className="dashboard-pill">{t(`dashboard.today.state.${today.data.dayState}`)}</span>
-              ) : null}
-              <span className="dashboard-lanes muted">
-                {t("dashboard.today.lanes", {
-                  top: laneCounts.top,
-                  flexible: laneCounts.flexible,
-                  overflow: laneCounts.overflow,
-                })}
-              </span>
-            </div>
-            {topTitles.length > 0 ? (
-              <ol className="dashboard-list">
-                {topTitles.map((title) => (
-                  <li key={title}>{title}</li>
-                ))}
-              </ol>
-            ) : null}
-          </DashboardWidget>
-
-          <DashboardWidget
-            kind="tasks"
-            title={t("dashboard.widget.tasks.title")}
-            count={taskCounts.today + taskCounts.overdue}
-            onViewAll={() => onOpenMode("tasks")}
-            loading={tasks.loading}
-            error={tasks.error}
-            onRetry={tasks.refresh}
-            empty={taskEntries.length === 0}
-          >
-            <div className="dashboard-chips">
-              {DASHBOARD_TASK_FILTERS.map((filter) => (
-                <button
-                  key={filter}
-                  type="button"
-                  className="dashboard-chip"
-                  onClick={() => openTaskFilter(filter)}
-                >
-                  {t(`dashboard.tasks.filter.${filter}`)}
-                  <span className="dashboard-chip-count">{taskCounts[filter]}</span>
-                </button>
-              ))}
-            </div>
-          </DashboardWidget>
-
-          <DashboardWidget
-            kind="schedule"
-            title={t("dashboard.widget.schedule.title")}
-            count={commitments.length > 0 ? commitments.length : null}
-            onViewAll={() => onOpenMode("tasks")}
-            loading={schedule.loading || tasks.loading}
-            error={schedule.error ?? tasks.error}
-            onRetry={() => {
-              schedule.refresh();
-              tasks.refresh();
-            }}
-            empty={commitments.length === 0 && upcoming.length === 0}
-            emptyLabel={t("dashboard.widget.schedule.empty")}
-          >
-            <p className="dashboard-section-label">{t("dashboard.schedule.agenda")}</p>
-            <ul className="dashboard-list">
-              {commitments.slice(0, 4).map((commitment) => (
-                <li key={`${commitment.startIso}:${commitment.title}`}>
-                  <span className="dashboard-list-meta">
-                    {format(parseISO(commitment.startIso), "HH:mm")}
-                  </span>
-                  {commitment.title}
-                </li>
-              ))}
-            </ul>
-            {upcoming.length > 0 ? (
-              <>
-                <p className="dashboard-section-label">{t("dashboard.schedule.upcoming")}</p>
-                <ul className="dashboard-list">
-                  {upcoming.slice(0, 3).map((event) => (
-                    <li key={event.id}>
-                      <span className="dashboard-list-meta">
-                        {format(event.start, event.allDay ? "MM/dd" : "MM/dd HH:mm")}
-                      </span>
-                      {event.title}
-                    </li>
-                  ))}
-                </ul>
-              </>
-            ) : null}
-          </DashboardWidget>
-
-          <DashboardWidget
-            kind="catalog"
-            title={t("dashboard.widget.catalog.title")}
-            count={catalog.data?.entries_count ?? null}
-            onViewAll={() => onOpenMode("catalog")}
-            loading={catalog.loading}
-            error={catalog.error}
-            onRetry={catalog.refresh}
-            empty={(catalog.data?.entries_count ?? 0) === 0}
-            emptyLabel={t("dashboard.widget.catalog.empty")}
-          >
-            <div className="dashboard-chips">
-              {catalogChips.map((chip) => (
-                <button
-                  key={chip.key}
-                  type="button"
-                  className="dashboard-chip"
-                  onClick={() => openCatalogKind(chip.key)}
-                >
-                  {t(`dashboard.catalog.kind.${catalogKindKey(chip.key)}`)}
-                  <span className="dashboard-chip-count">{chip.count}</span>
-                </button>
-              ))}
-            </div>
-          </DashboardWidget>
-
-          <DashboardWidget
-            kind="inbox"
-            title={t("dashboard.widget.inbox.title")}
-            count={inboxData.pendingCount > 0 ? inboxData.pendingCount : null}
-            onViewAll={() => onOpenMode("inbox")}
-            loading={inbox.loading}
-            error={inbox.error}
-            onRetry={inbox.refresh}
-            empty={inboxData.pendingCount === 0}
-            emptyLabel={t("dashboard.widget.inbox.empty")}
-          >
-            <ul className="dashboard-list">
-              {inboxData.latest.map((item) => (
-                <li key={item.id}>{item.title}</li>
-              ))}
-            </ul>
-          </DashboardWidget>
-
+        <>
+        <div className="dashboard-status-strip">
           <DashboardWidget
             kind="agents"
+            compact
             title={t("dashboard.widget.agents.title")}
             count={agentSummary && agentSummary.running > 0 ? agentSummary.running : null}
             onViewAll={() => onOpenMode("agents")}
@@ -330,8 +175,10 @@ export function DashboardPane({
             ) : null}
           </DashboardWidget>
 
+
           <DashboardWidget
             kind="drafts"
+            compact
             title={t("dashboard.widget.drafts.title")}
             count={draftChips.reduce((sum, chip) => sum + chip.count, 0) || null}
             onViewAll={() => onOpenMode("drafts")}
@@ -343,7 +190,12 @@ export function DashboardPane({
           >
             <div className="dashboard-chips">
               {draftChips.map((chip) => (
-                <span key={chip.key} className="dashboard-chip dashboard-chip-static">
+                <span
+                  key={chip.key}
+                  className={`dashboard-chip dashboard-chip-static${
+                    chip.count === 0 ? " dashboard-chip-zero" : ""
+                  }`}
+                >
                   {t(`drafts.status.${chip.key}`)}
                   <span className="dashboard-chip-count">{chip.count}</span>
                 </span>
@@ -351,8 +203,10 @@ export function DashboardPane({
             </div>
           </DashboardWidget>
 
+
           <DashboardWidget
             kind="git"
+            compact
             title={t("dashboard.widget.git.title")}
             count={gitData.isRepo && !gitData.clean ? gitData.total : null}
             onViewAll={() => onOpenMode("files")}
@@ -376,6 +230,177 @@ export function DashboardPane({
             </div>
           </DashboardWidget>
 
+
+          <DashboardWidget
+            kind="sync"
+            compact
+            title={t("dashboard.widget.sync.title")}
+            count={syncBadge.scheduledJobs > 0 ? syncBadge.scheduledJobs : null}
+            onViewAll={() => onOpenSettings("jobs")}
+            loading={sync.loading}
+            error={sync.error}
+            onRetry={sync.refresh}
+          >
+            <span className={`dashboard-pill dashboard-sync-${syncBadge.state}`}>
+              {t(`system.dotSync.state.${syncBadge.state}`, { count: syncBadge.scheduledJobs })}
+            </span>
+          </DashboardWidget>
+        </div>
+
+        <div className="dashboard-grid">
+          <DashboardWidget
+            kind="today"
+            title={t("dashboard.widget.today.title")}
+            count={laneCounts.top > 0 ? laneCounts.top : null}
+            onViewAll={() => onOpenMode("today")}
+            loading={today.loading || schedule.loading}
+            error={today.error ?? schedule.error}
+            onRetry={() => {
+              today.refresh();
+              schedule.refresh();
+            }}
+            empty={
+              (!effectiveSettings.today.enabled || laneCounts.top === 0) &&
+              commitments.length === 0
+            }
+            emptyLabel={
+              effectiveSettings.today.enabled
+                ? t("dashboard.widget.today.empty")
+                : t("dashboard.widget.today.disabled")
+            }
+          >
+            <div className="dashboard-today-summary">
+              {today.data ? (
+                <span className="dashboard-pill">{t(`dashboard.today.state.${today.data.dayState}`)}</span>
+              ) : null}
+              <span className="dashboard-lanes muted">
+                {t("dashboard.today.lanes", {
+                  top: laneCounts.top,
+                  flexible: laneCounts.flexible,
+                  overflow: laneCounts.overflow,
+                })}
+              </span>
+            </div>
+            {topTitles.length > 0 ? (
+              <ol className="dashboard-list">
+                {topTitles.map((title) => (
+                  <li key={title} title={title}>
+                    {title}
+                  </li>
+                ))}
+              </ol>
+            ) : null}
+            {commitments.length > 0 ? (
+              <>
+                <p className="dashboard-section-label">{t("dashboard.schedule.agenda")}</p>
+                <ul className="dashboard-list">
+                  {commitments.slice(0, 4).map((commitment) => (
+                    <li key={`${commitment.startIso}:${commitment.title}`} title={commitment.title}>
+                      <span className="dashboard-list-meta">
+                        {format(parseISO(commitment.startIso), "HH:mm")}
+                      </span>
+                      {commitment.title}
+                    </li>
+                  ))}
+                </ul>
+              </>
+            ) : null}
+          </DashboardWidget>
+
+
+          {/* Task counts and catalog signals were two adjacent chip grids saying
+              overlapping things: the catalog's `inbox-pending` and `task-due`
+              kinds restated the Inbox card's badge and the task chips beside
+              them, and because the catalog scan is a snapshot the two could
+              disagree on screen. One card, one chip vocabulary, counts that
+              come from the source that owns them. */}
+          <DashboardWidget
+            kind="attention"
+            title={t("dashboard.widget.attention.title")}
+            count={taskCounts.today + taskCounts.overdue}
+            onViewAll={() => onOpenMode("tasks")}
+            loading={tasks.loading}
+            error={tasks.error}
+            onRetry={tasks.refresh}
+            empty={
+              !catalog.error &&
+              !catalog.loading &&
+              taskEntries.length === 0 &&
+              catalogChips.every((chip) => chip.count === 0)
+            }
+            emptyLabel={t("dashboard.widget.attention.empty")}
+          >
+            <p className="dashboard-section-label">{t("dashboard.widget.tasks.title")}</p>
+            <div className="dashboard-chips">
+              {DASHBOARD_TASK_FILTERS.map((filter) => (
+                <button
+                  key={filter}
+                  type="button"
+                  className={`dashboard-chip${taskCounts[filter] === 0 ? " dashboard-chip-zero" : ""}`}
+                  onClick={() => openTaskFilter(filter)}
+                >
+                  {t(`dashboard.tasks.filter.${filter}`)}
+                  <span className="dashboard-chip-count">{taskCounts[filter]}</span>
+                </button>
+              ))}
+            </div>
+            <p className="dashboard-section-label">{t("dashboard.widget.catalog.title")}</p>
+            {/* The catalog scan fails on its own schedule. Merging the two chip
+                groups must not merge their failure: a dead scan takes out this
+                group only, and the task chips above keep rendering. */}
+            {catalog.error ? (
+              <div className="dashboard-widget-error" role="alert">
+                <p>{t("dashboard.widget.error")}</p>
+                <button
+                  type="button"
+                  className="dashboard-widget-retry"
+                  onClick={catalog.refresh}
+                >
+                  <RefreshCcw size={12} strokeWidth={1.9} aria-hidden="true" />
+                  {t("dashboard.widget.retry")}
+                </button>
+              </div>
+            ) : (
+              <div className="dashboard-chips">
+                {catalogChips.map((chip) => (
+                  <button
+                    key={chip.key}
+                    type="button"
+                    className={`dashboard-chip${chip.count === 0 ? " dashboard-chip-zero" : ""}`}
+                    onClick={() => openCatalogKind(chip.key)}
+                  >
+                    {t(`dashboard.catalog.kind.${catalogKindKey(chip.key)}`)}
+                    <span className="dashboard-chip-count">{chip.count}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </DashboardWidget>
+
+          <DashboardWidget
+            kind="inbox"
+            title={t("dashboard.widget.inbox.title")}
+            count={inboxData.pendingCount > 0 ? inboxData.pendingCount : null}
+            onViewAll={() => onOpenMode("inbox")}
+            loading={inbox.loading}
+            error={inbox.error}
+            onRetry={inbox.refresh}
+            empty={inboxData.pendingCount === 0}
+            emptyLabel={t("dashboard.widget.inbox.empty")}
+          >
+            <ul className="dashboard-list">
+              {inboxData.latest.map((item) => (
+                <li key={item.id} title={item.title}>
+                  <span className="dashboard-list-meta">
+                    {formatRelativeDate(item.receivedAt, locale)}
+                  </span>
+                  {item.title}
+                </li>
+              ))}
+            </ul>
+          </DashboardWidget>
+
+
           <DashboardWidget
             kind="recents"
             title={t("dashboard.widget.recents.title")}
@@ -391,6 +416,7 @@ export function DashboardPane({
                   <button
                     type="button"
                     className="dashboard-link"
+                    title={entry.title}
                     onClick={() => onOpenDocument(entry)}
                   >
                     {entry.title}
@@ -399,21 +425,8 @@ export function DashboardPane({
               ))}
             </ul>
           </DashboardWidget>
-
-          <DashboardWidget
-            kind="sync"
-            title={t("dashboard.widget.sync.title")}
-            count={syncBadge.scheduledJobs > 0 ? syncBadge.scheduledJobs : null}
-            onViewAll={() => onOpenSettings("jobs")}
-            loading={sync.loading}
-            error={sync.error}
-            onRetry={sync.refresh}
-          >
-            <span className={`dashboard-pill dashboard-sync-${syncBadge.state}`}>
-              {t(`system.dotSync.state.${syncBadge.state}`, { count: syncBadge.scheduledJobs })}
-            </span>
-          </DashboardWidget>
         </div>
+        </>
       ) : (
         <div className={`dashboard-drilldown dashboard-drilldown-${view}`}>
           <div className="dashboard-drilldown-header">
@@ -435,32 +448,12 @@ export function DashboardPane({
               onSelectFilter={setTaskFilter}
               onOpenTasks={() => onOpenMode("tasks")}
             />
-          ) : view === "schedule" ? (
-            <ScheduleDrilldown
-              commitments={commitments}
-              upcoming={upcoming}
-              loading={schedule.loading || tasks.loading}
-              error={schedule.error ?? tasks.error}
-              onRetry={() => {
-                schedule.refresh();
-                tasks.refresh();
-              }}
-            />
           ) : view === "catalog" ? (
             <CatalogDrilldown
               workPath={workPath}
               kind={catalogKind}
               chips={catalogChips}
               onSelectKind={setCatalogKind}
-            />
-          ) : view === "inbox" ? (
-            <InboxDrilldown
-              items={inboxData.latest}
-              pendingCount={inboxData.pendingCount}
-              loading={inbox.loading}
-              error={inbox.error}
-              onRetry={inbox.refresh}
-              locale={locale}
             />
           ) : (
             <RecentsDrilldown entries={recentEntries} onOpenDocument={onOpenDocument} />
@@ -565,75 +558,6 @@ function TasksDrilldown({
   );
 }
 
-interface ScheduleDrilldownProps {
-  commitments: CalendarCommitment[];
-  upcoming: TaskCalendarEvent[];
-  loading: boolean;
-  error: string | null;
-  onRetry: () => void;
-}
-
-function ScheduleDrilldown({ commitments, upcoming, loading, error, onRetry }: ScheduleDrilldownProps) {
-  const { t } = useTranslation();
-  if (loading) {
-    return (
-      <div className="dashboard-widget-skeleton" aria-hidden="true">
-        <span />
-        <span />
-        <span />
-      </div>
-    );
-  }
-  if (error) {
-    return (
-      <div className="dashboard-widget-error" role="alert">
-        <p>{t("dashboard.widget.error")}</p>
-        <button type="button" className="dashboard-widget-retry" onClick={onRetry}>
-          {t("dashboard.widget.retry")}
-        </button>
-      </div>
-    );
-  }
-  if (commitments.length === 0 && upcoming.length === 0) {
-    return <p className="dashboard-widget-empty">{t("dashboard.widget.schedule.empty")}</p>;
-  }
-  return (
-    <>
-      <p className="dashboard-section-label">{t("dashboard.schedule.agenda")}</p>
-      {commitments.length === 0 ? (
-        <p className="dashboard-widget-empty">{t("dashboard.widget.empty")}</p>
-      ) : (
-        <ul className="dashboard-rows">
-          {commitments.map((commitment) => (
-            <li key={`${commitment.startIso}:${commitment.title}`} className="dashboard-row-static">
-              <span className="dashboard-row-meta">
-                {format(parseISO(commitment.startIso), "HH:mm")}
-                {" - "}
-                {format(parseISO(commitment.endIso), "HH:mm")}
-              </span>
-              <span className="dashboard-row-title">{commitment.title}</span>
-            </li>
-          ))}
-        </ul>
-      )}
-      <p className="dashboard-section-label">{t("dashboard.schedule.upcoming")}</p>
-      {upcoming.length === 0 ? (
-        <p className="dashboard-widget-empty">{t("dashboard.widget.empty")}</p>
-      ) : (
-        <ul className="dashboard-rows">
-          {upcoming.map((event) => (
-            <li key={event.id} className="dashboard-row-static">
-              <span className="dashboard-row-meta">
-                {format(event.start, event.allDay ? "MM/dd" : "MM/dd HH:mm")}
-              </span>
-              <span className="dashboard-row-title">{event.title}</span>
-            </li>
-          ))}
-        </ul>
-      )}
-    </>
-  );
-}
 
 interface CatalogDrilldownProps {
   workPath: string | null;
@@ -725,55 +649,6 @@ function CatalogDrilldown({ workPath, kind, chips, onSelectKind }: CatalogDrilld
   );
 }
 
-interface InboxDrilldownProps {
-  items: ReturnType<typeof inboxSummary>["latest"];
-  pendingCount: number;
-  loading: boolean;
-  error: string | null;
-  onRetry: () => void;
-  locale: "ko" | "en";
-}
-
-function InboxDrilldown({ items, pendingCount, loading, error, onRetry, locale }: InboxDrilldownProps) {
-  const { t } = useTranslation();
-  return (
-    <>
-      <p className="dashboard-section-label">
-        {t("dashboard.inbox.pending", { count: pendingCount })}
-      </p>
-      {loading ? (
-        <div className="dashboard-widget-skeleton" aria-hidden="true">
-          <span />
-          <span />
-          <span />
-        </div>
-      ) : error ? (
-        <div className="dashboard-widget-error" role="alert">
-          <p>{t("dashboard.widget.error")}</p>
-          <button type="button" className="dashboard-widget-retry" onClick={onRetry}>
-            <RefreshCcw size={12} strokeWidth={1.9} aria-hidden="true" />
-            {t("dashboard.widget.retry")}
-          </button>
-        </div>
-      ) : items.length === 0 ? (
-        <p className="dashboard-widget-empty">{t("dashboard.widget.inbox.empty")}</p>
-      ) : (
-        <ul className="dashboard-rows">
-          {items.map((item) => (
-            <li key={item.id} className="dashboard-row-static">
-              <span className="dashboard-row-title">{item.title}</span>
-              {item.receivedAt ? (
-                <span className="dashboard-row-meta muted">
-                  {formatRelativeDate(item.receivedAt, locale)}
-                </span>
-              ) : null}
-            </li>
-          ))}
-        </ul>
-      )}
-    </>
-  );
-}
 
 interface RecentsDrilldownProps {
   entries: VaultEntry[];
