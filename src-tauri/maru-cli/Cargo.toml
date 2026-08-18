@@ -1,6 +1,6 @@
 [package]
 name = "maru-cli"
-version = "0.4.55"
+version = "0.4.56"
 description = "Standalone command-line interface for Maru"
 authors = ["Maru Contributors"]
 license = "UNLICENSED"

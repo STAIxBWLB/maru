@@ -8,6 +8,23 @@ because releases cut frequently during active development. Versions before
 Dates are the release-tag dates. Only `feat`/`fix`-level changes are listed;
 `chore(release)` version bumps and merge commits are omitted.
 
+## v0.4.56 - 2026-08-18 - Configurable Dashboard Rows and Top Lane
+
+- **Dashboard list length is a setting (#249).** Each list used to stop at a
+  hardcoded limit, and the three disagreed: inbox 5, recent documents 5,
+  agenda 4. They now share `ui.dashboardListRows`, default 10, adjustable
+  between 3 and 50 under Settings > Appearance. The recent-documents source
+  and its stored history were raised to match, so the card can actually reach
+  the configured count.
+- **The Today top lane is a setting (#249).** The lane held exactly three
+  items, enforced by the planner, by promotion in Prepare and Execute, and by
+  yesterday-routing. It is now `tasks.today.topLaneSize`, default 3,
+  adjustable between 1 and 10 under Settings > Tasks, and applies to all of
+  those paths plus the dashboard. Labels that named a fixed quantity read
+  neutrally now, and the capacity warning states the configured number.
+  Web-action imports still fill to three, since that path runs without the
+  user's settings.
+
 ## v0.4.55 - 2026-08-18 - Readable Inbox, Fewer Dashboard Cards
 
 - **Dashboard lists no longer paint outside their cards (#247).** The widget
