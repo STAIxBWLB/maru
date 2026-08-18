@@ -48,17 +48,18 @@ import {
 export interface DashboardPaneProps {
   workPath: string | null;
   effectiveSettings: TasksSettings;
+  /** Rows each list renders before it stops (ui.dashboardListRows). */
+  listRows: number;
   recentEntries: VaultEntry[];
   onOpenMode: (mode: Exclude<MaruAppMode, "pkm">) => void;
   onOpenDocument: (entry: VaultEntry) => void;
   onOpenSettings: (tab?: string | null) => void;
 }
 
-const RECENTS_WIDGET_LIMIT = 5;
-
 export function DashboardPane({
   workPath,
   effectiveSettings,
+  listRows,
   recentEntries,
   onOpenMode,
   onOpenDocument,
@@ -91,8 +92,8 @@ export function DashboardPane({
   const catalogChips = useMemo(() => catalogKindChips(catalog.data), [catalog.data]);
   const draftChips = useMemo(() => draftStatusCounts(drafts.data), [drafts.data]);
   const inboxData = useMemo(
-    () => inboxSummary(inbox.data?.dropItems, inbox.data?.entries),
-    [inbox.data],
+    () => inboxSummary(inbox.data?.dropItems, inbox.data?.entries, listRows),
+    [inbox.data, listRows],
   );
   const agentSummary = useMemo(
     () => (agents.data ? agentBoardSummary(agents.data) : null),
@@ -102,8 +103,8 @@ export function DashboardPane({
   const syncBadge = useMemo(() => deriveDotSyncBadge(sync.data), [sync.data]);
   const laneCounts = useMemo(() => planLaneCounts(today.data?.plan), [today.data]);
   const topTitles = useMemo(
-    () => planTopTitles(today.data?.plan, taskEntries),
-    [today.data, taskEntries],
+    () => planTopTitles(today.data?.plan, taskEntries, effectiveSettings.today.topLaneSize),
+    [today.data, taskEntries, effectiveSettings.today.topLaneSize],
   );
   const commitments = schedule.data ?? [];
 
@@ -294,7 +295,7 @@ export function DashboardPane({
               <>
                 <p className="dashboard-section-label">{t("dashboard.schedule.agenda")}</p>
                 <ul className="dashboard-list">
-                  {commitments.slice(0, 4).map((commitment) => (
+                  {commitments.slice(0, listRows).map((commitment) => (
                     <li key={`${commitment.startIso}:${commitment.title}`} title={commitment.title}>
                       <span className="dashboard-list-meta">
                         {format(parseISO(commitment.startIso), "HH:mm")}
@@ -411,7 +412,7 @@ export function DashboardPane({
             emptyLabel={t("dashboard.widget.recents.empty")}
           >
             <ul className="dashboard-list">
-              {topRecentEntries(recentEntries, RECENTS_WIDGET_LIMIT).map((entry) => (
+              {topRecentEntries(recentEntries, listRows).map((entry) => (
                 <li key={entry.path}>
                   <button
                     type="button"

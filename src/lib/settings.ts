@@ -194,6 +194,8 @@ export interface MaruSettings {
     explorerPaneMode: ExplorerPaneMode;
     documentBrowserMode: DocumentBrowserMode;
     documentLabelMode: DocumentLabelMode;
+    /** Rows each dashboard list renders before it stops. Display-only. */
+    dashboardListRows: number;
     workspaceFileFilter: WorkspaceFileFilter;
     filesBrowserMode: FilesBrowserMode;
     filesSortKey: FilesSortKey;
@@ -311,6 +313,9 @@ export interface TasksTodaySettings {
   notificationEnabled: boolean;
   autoOpenFirstDailyLaunch: boolean;
   autoPlan: boolean;
+  /** How many items the plan's Top lane holds. A planner constraint, not a
+   *  display cap: promotion and yesterday-routing enforce it too. */
+  topLaneSize: number;
   dailyFocusCapMinutes: number;
   provisionalEstimateMinutes: number;
   /** Empty = all enabled calendars count toward availability. */
@@ -487,6 +492,7 @@ export const DEFAULT_MARU_SETTINGS: MaruSettings = {
     explorerPaneMode: "documents",
     documentBrowserMode: "tree",
     documentLabelMode: "title",
+    dashboardListRows: 10,
     workspaceFileFilter: "all",
     filesBrowserMode: "list",
     filesSortKey: "name",
@@ -635,6 +641,7 @@ export const DEFAULT_MARU_SETTINGS: MaruSettings = {
       notificationEnabled: true,
       autoOpenFirstDailyLaunch: true,
       autoPlan: true,
+      topLaneSize: 3,
       dailyFocusCapMinutes: 480,
       provisionalEstimateMinutes: 30,
       availabilityCalendars: [],
@@ -703,6 +710,7 @@ export function normalizeMaruSettings(value: unknown): MaruSettings {
       explorerPaneMode: parseExplorerPaneMode(ui.explorerPaneMode) ?? "documents",
       documentBrowserMode: parseBrowserMode(ui.documentBrowserMode) ?? "tree",
       documentLabelMode: parseDocumentLabelMode(ui.documentLabelMode) ?? "title",
+      dashboardListRows: normalizeIntegerInRange(ui.dashboardListRows, 3, 50, 10),
       workspaceFileFilter: parseWorkspaceFileFilter(ui.workspaceFileFilter) ?? "all",
       filesBrowserMode: "list",
       filesSortKey: parseFilesSortKey(ui.filesSortKey) ?? "name",
@@ -1196,6 +1204,23 @@ function normalizeDiagramSettings(value: unknown): DiagramSettings {
       DIAGRAM_RECENT_PATTERNS_CAP,
     ),
   };
+}
+
+/** Ranged integer setting. Absent or non-numeric input falls back to the
+ *  default; a real number is clamped, so a 0 typed into a min-1 field lands on
+ *  1 rather than silently reverting. `clampNumber` alone cannot do this:
+ *  `Number(null)` is 0, so a null would clamp to the minimum instead of
+ *  falling back. */
+function normalizeIntegerInRange(
+  value: unknown,
+  min: number,
+  max: number,
+  fallback: number,
+): number {
+  if (typeof value !== "number" && typeof value !== "string") return fallback;
+  const number = Number(value);
+  if (!Number.isFinite(number)) return fallback;
+  return Math.min(max, Math.max(min, Math.round(number)));
 }
 
 function clampNumber(value: unknown, min: number, max: number, fallback: number): number {
@@ -1702,6 +1727,7 @@ function normalizeTasksTodaySettings(value: unknown): TasksTodaySettings {
         ? today.autoOpenFirstDailyLaunch
         : fallback.autoOpenFirstDailyLaunch,
     autoPlan: typeof today.autoPlan === "boolean" ? today.autoPlan : fallback.autoPlan,
+    topLaneSize: normalizeIntegerInRange(today.topLaneSize, 1, 10, fallback.topLaneSize),
     dailyFocusCapMinutes: normalizePositiveInteger(
       today.dailyFocusCapMinutes,
       fallback.dailyFocusCapMinutes,

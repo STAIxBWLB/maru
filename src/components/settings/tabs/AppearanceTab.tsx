@@ -90,6 +90,30 @@ export function AppearanceTab({
           }
         />
       </SettingsSection>
+      <SettingsSection title={t("system.appearance.section.dashboard")}>
+        <SettingsRow
+          label={t("system.preferences.dashboardListRows")}
+          description={t("system.preferences.dashboardListRows.help")}
+          htmlFor="appearance-dashboard-list-rows"
+          control={
+            <input
+              id="appearance-dashboard-list-rows"
+              type="number"
+              min={3}
+              max={50}
+              value={settings.ui.dashboardListRows}
+              onChange={(event) =>
+                updateUi({
+                  dashboardListRows: Math.max(
+                    3,
+                    Math.min(50, Number(event.target.value) || 10),
+                  ),
+                })
+              }
+            />
+          }
+        />
+      </SettingsSection>
     </div>
   );
 }

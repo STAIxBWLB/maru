@@ -101,6 +101,33 @@ function keys(plan: DailyPlanV1): string[] {
 }
 
 describe("buildDeterministicPlan", () => {
+  it("sizes the top lane from the setting and defaults to three", () => {
+    const tasks = [
+      task({ taskId: "a", title: "A", priority: "highest" }),
+      task({ taskId: "b", title: "B", priority: "high" }),
+      task({ taskId: "c", title: "C", priority: "medium" }),
+      task({ taskId: "d", title: "D", priority: "low" }),
+      task({ taskId: "e", title: "E", priority: "none" }),
+    ];
+    const args = {
+      logicalDay: DAY,
+      inputRevision: "rev-1",
+      yesterday: [],
+      acceptedCaptures: [],
+      tasks,
+    };
+
+    expect(buildDeterministicPlan(args).top).toHaveLength(3);
+    expect(buildDeterministicPlan({ ...args, topLaneSize: 5 }).top).toHaveLength(5);
+    expect(buildDeterministicPlan({ ...args, topLaneSize: 1 }).top).toHaveLength(1);
+
+    // Whatever does not fit the lane keeps flowing into flexible.
+    const wide = buildDeterministicPlan({ ...args, topLaneSize: 5 });
+    expect(wide.flexible).toHaveLength(0);
+    const narrow = buildDeterministicPlan({ ...args, topLaneSize: 1 });
+    expect(narrow.flexible).toHaveLength(4);
+  });
+
   it("orders pinned, in-progress, overdue, due-today, captures, priority, oldest", () => {
     const existing = plan({
       flexible: [item({ key: "task:pinned", lane: "flexible", order: 0, pinned: true })],

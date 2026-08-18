@@ -35,7 +35,7 @@ import {
   sha256Hex,
   taskTransition,
 } from "../../lib/today";
-import { planItemRefKey, TOP_LANE_SIZE } from "../../lib/todayPlan";
+import { planItemRefKey } from "../../lib/todayPlan";
 import { TaskSheet } from "./TaskSheet";
 import { TodayStageScaffold } from "./TodayStageScaffold";
 import { TodaySyncStatus } from "./TodaySyncStatus";
@@ -78,7 +78,8 @@ function outboxToSyncStatus(record: OutboxRecord): TaskSyncStatus {
 
 export function TodayExecute({ onNavigate }: TodayExecuteProps) {
   const { t } = useTranslation();
-  const { workPath, snapshot, mutate, reload } = useToday();
+  const { workPath, snapshot, mutate, reload, settings } = useToday();
+  const topLaneSize = settings.topLaneSize;
   const { tasks, refresh } = useTodayTasks();
   const {
     notice: calendarNotice,
@@ -291,7 +292,7 @@ export function TodayExecute({ onNavigate }: TodayExecuteProps) {
   };
 
   const promote = (item: DailyPlanItem) => {
-    if (!plan || top.length >= TOP_LANE_SIZE) return;
+    if (!plan || top.length >= topLaneSize) return;
     const nextTop = [...top, { ...item, lane: "top" as const, order: top.length }];
     const nextFlexible = plan.flexible
       .filter((entry) => planItemRefKey(entry.itemRef) !== planItemRefKey(item.itemRef))
@@ -534,7 +535,7 @@ export function TodayExecute({ onNavigate }: TodayExecuteProps) {
                         className="today-exec-actions"
                         onClick={(event) => event.stopPropagation()}
                       >
-                        {top.length < TOP_LANE_SIZE ? (
+                        {top.length < topLaneSize ? (
                           <button
                             type="button"
                             className="today-icon-button today-icon-button-sm"

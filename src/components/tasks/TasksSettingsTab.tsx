@@ -133,6 +133,34 @@ export function TasksSettingsTab({
       </SettingsSection>
 
       <SettingsSection
+        title={t("tasks.settings.today.title")}
+        description={t("tasks.settings.today.description")}
+      >
+        <SettingsRow
+          label={t("tasks.settings.topLaneSize")}
+          description={t("tasks.settings.topLaneSize.help")}
+          htmlFor="tasks-settings-top-lane-size"
+          control={
+            <input
+              id="tasks-settings-top-lane-size"
+              type="number"
+              min={1}
+              max={10}
+              value={settings.today.topLaneSize}
+              onChange={(event) =>
+                update({
+                  today: {
+                    ...settings.today,
+                    topLaneSize: Math.max(1, Math.min(10, Number(event.target.value) || 3)),
+                  },
+                })
+              }
+            />
+          }
+        />
+      </SettingsSection>
+
+      <SettingsSection
         title={t("tasks.settings.google.title")}
         description={t("tasks.settings.google.description")}
       >

@@ -22,7 +22,6 @@ import type {
   PlanItemRef,
   TodayMutation,
 } from "../../lib/today";
-import { TOP_LANE_SIZE } from "../../lib/todayPlan";
 import { useToday } from "./todayContext";
 import { usePointerReorder } from "../ui/usePointerReorder";
 import { emptyPlanShell, resolveRefTitle, taskKeyOf } from "./todayPrepareUtils";
@@ -47,7 +46,8 @@ function planItemKey(item: DailyPlanItem): string {
 
 export function TodayTop3({ tasks, captures, markManualOrder, onChanged, onOpenTaskSheet }: TodayTop3Props) {
   const { t } = useTranslation();
-  const { snapshot, mutate } = useToday();
+  const { snapshot, mutate, settings } = useToday();
+  const topLaneSize = settings.topLaneSize;
 
   const [announcement, setAnnouncement] = useState("");
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
@@ -161,7 +161,7 @@ export function TodayTop3({ tasks, captures, markManualOrder, onChanged, onOpenT
   };
 
   const openAdd = () => {
-    if (top.length >= TOP_LANE_SIZE) {
+    if (top.length >= topLaneSize) {
       // Top 3 max enforced: warn instead of adding.
       setShowMaxWarning(true);
       return;
@@ -172,7 +172,7 @@ export function TodayTop3({ tasks, captures, markManualOrder, onChanged, onOpenT
   };
 
   const confirmAdd = () => {
-    if (!snapshot || !addTaskId || top.length >= TOP_LANE_SIZE) return;
+    if (!snapshot || !addTaskId || top.length >= topLaneSize) return;
     // Stale picker selection guard: never add a ref already in the plan.
     if (!pickerTasks.some((task) => taskKeyOf(task) === addTaskId)) return;
     const item: DailyPlanItem = {
@@ -299,7 +299,7 @@ export function TodayTop3({ tasks, captures, markManualOrder, onChanged, onOpenT
             })}
           </ol>
         )}
-        {showMaxWarning && top.length >= TOP_LANE_SIZE ? (
+        {showMaxWarning && top.length >= topLaneSize ? (
           <p className="today-top3-warning" role="alert">
             <TriangleAlert size={13} strokeWidth={1.9} aria-hidden="true" />
             {t("today.top3.maxWarning")}

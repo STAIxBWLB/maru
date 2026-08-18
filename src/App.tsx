@@ -8726,6 +8726,7 @@ function MainApp() {
           <LazyDashboardPane
             workPath={inboxWorkspacePath}
             effectiveSettings={effectiveTasksSettings}
+            listRows={maruSettings.ui.dashboardListRows}
             recentEntries={recentEntries}
             onOpenMode={openPrimaryWorkbenchMode}
             onOpenDocument={openDashboardDocument}

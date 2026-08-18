@@ -306,7 +306,13 @@ for (const width of [1024, 1280, 1487]) {
       }),
     );
     await gotoDashboard(page);
-    await expect(widget(page, "inbox")).toBeVisible();
+    // Wait for the unbreakable label itself, not just the card: it is the thing
+    // being measured.
+    await expect(widget(page, "inbox")).toContainText(OVERFLOW_SEED_TITLES[0]);
+    // Geometry read before the webfont swaps in measures a different string
+    // width than the one that ships, which is enough to flake this guard on a
+    // cold run. Settle first.
+    await page.evaluate(() => document.fonts.ready);
 
     // No widget scrolls its own content horizontally...
     const overflowingWidgets = await page
@@ -374,4 +380,30 @@ test("attention card surfaces a catalog failure even with no tasks", async ({ pa
   await expect(attention.locator(".dashboard-widget-error")).toBeVisible();
   await expect(attention.locator(".dashboard-widget-retry")).toBeVisible();
   await expect(attention.locator(".dashboard-widget-empty")).toHaveCount(0);
+});
+
+// The fixture seeds 2 drop items + 5 pending entries. At the old hardcoded cap
+// of 5 the last two were simply unreachable from the dashboard.
+test("dashboard lists show every seeded row at the default limit", async ({ page }) => {
+  await installTodayMocks(page, buildTodaySeed(DASHBOARD_BOOT_SEED));
+  await gotoDashboard(page);
+  await expect(widget(page, "inbox").locator(".dashboard-list > li")).toHaveCount(7);
+});
+
+test("dashboard lists honour a configured row count", async ({ page }) => {
+  await installTodayMocks(
+    page,
+    buildTodaySeed({ ...DASHBOARD_BOOT_SEED, dashboardListRows: 3 }),
+  );
+  await gotoDashboard(page);
+  await expect(widget(page, "inbox").locator(".dashboard-list > li")).toHaveCount(3);
+});
+
+test("today card shows as many top items as the lane is configured to hold", async ({ page }) => {
+  // The seeded plan carries three top items. The lane size is a planner
+  // constraint rather than a display cap, so shrinking it shrinks what the
+  // card is willing to show.
+  await installTodayMocks(page, buildTodaySeed({ ...DASHBOARD_BOOT_SEED, topLaneSize: 1 }));
+  await gotoDashboard(page);
+  await expect(widget(page, "today").locator("ol.dashboard-list > li")).toHaveCount(1);
 });
