@@ -406,6 +406,7 @@ describe("normalizeMaruSettings", () => {
       notificationEnabled: true,
       autoOpenFirstDailyLaunch: true,
       autoPlan: true,
+      topLaneSize: 3,
       dailyFocusCapMinutes: 480,
       provisionalEstimateMinutes: 30,
       availabilityCalendars: [],
@@ -414,6 +415,33 @@ describe("normalizeMaruSettings", () => {
       googleCompletionPolicy: "on-explicit-complete",
       journalRoot: "tasks/daily",
     });
+  });
+
+  it("clamps the dashboard list rows and the top lane size into their ranges", () => {
+    const tooSmall = normalizeMaruSettings({
+      ui: { dashboardListRows: 1 },
+      tasks: { today: { topLaneSize: 0 } },
+    });
+    expect(tooSmall.ui.dashboardListRows).toBe(3);
+    expect(tooSmall.tasks.today.topLaneSize).toBe(1);
+
+    const tooLarge = normalizeMaruSettings({
+      ui: { dashboardListRows: 500 },
+      tasks: { today: { topLaneSize: 99 } },
+    });
+    expect(tooLarge.ui.dashboardListRows).toBe(50);
+    expect(tooLarge.tasks.today.topLaneSize).toBe(10);
+
+    // Junk falls back to the default rather than to NaN.
+    const junk = normalizeMaruSettings({
+      ui: { dashboardListRows: "many" },
+      tasks: { today: { topLaneSize: null } },
+    });
+    expect(junk.ui.dashboardListRows).toBe(10);
+    expect(junk.tasks.today.topLaneSize).toBe(3);
+
+    // Fractions land on an integer; a half row is not a thing.
+    expect(normalizeMaruSettings({ ui: { dashboardListRows: 7.6 } }).ui.dashboardListRows).toBe(8);
   });
 
   it("normalizes the today block defensively and rejects invalid day times", () => {

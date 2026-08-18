@@ -31,7 +31,10 @@ import {
 
 export const TODAY_PLAN_SCHEMA_VERSION = "maru_today_plan_v1";
 export const DEFAULT_PROVISIONAL_ESTIMATE_MINUTES = 30;
-export const TOP_LANE_SIZE = 3;
+/** Default Top-lane capacity. The live value is `tasks.today.topLaneSize`;
+ *  this is the fallback for callers without settings in hand, and the
+ *  settings default itself. */
+export const DEFAULT_TOP_LANE_SIZE = 3;
 
 /** Stable identity key for a plan item (diff/protection/dedupe key). */
 export function planItemRefKey(ref: PlanItemRef): string {
@@ -109,13 +112,15 @@ export interface BuildDeterministicPlanArgs {
    *  everything past the top lane stays flexible. */
   capacityMinutes?: number | null;
   provisionalEstimateMinutes?: number;
+  /** Top-lane capacity; defaults to `DEFAULT_TOP_LANE_SIZE`. */
+  topLaneSize?: number;
 }
 
 /** Deterministic fallback plan used when no AI draft is available (and as the
  *  baseline the auto-planner protects user edits against). Ordering: pinned
  *  first, in-progress, overdue, due today, accepted morning captures,
- *  priority, then oldest. Top = first 3 of the merged order; flexible = rest
- *  up to capacity; overflow = remainder. */
+ *  priority, then oldest. Top = the first `topLaneSize` of the merged order;
+ *  flexible = rest up to capacity; overflow = remainder. */
 export function buildDeterministicPlan(args: BuildDeterministicPlanArgs): DailyPlanV1 {
   const provisional = args.provisionalEstimateMinutes ?? DEFAULT_PROVISIONAL_ESTIMATE_MINUTES;
   const existing = new Map<string, DailyPlanItem>();
@@ -169,11 +174,12 @@ export function buildDeterministicPlan(args: BuildDeterministicPlanArgs): DailyP
   const flexible: DailyPlanItem[] = [];
   const overflow: DailyPlanItem[] = [];
   const capacity = args.capacityMinutes ?? null;
+  const topLaneSize = args.topLaneSize ?? DEFAULT_TOP_LANE_SIZE;
   let usedMinutes = 0;
 
   seeds.forEach((seed, index) => {
     const estimate = seed.estimateMinutes ?? provisional;
-    if (index < TOP_LANE_SIZE) {
+    if (index < topLaneSize) {
       top.push(toItem(seed, "top", top.length));
       usedMinutes += estimate;
       return;

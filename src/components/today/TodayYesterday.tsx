@@ -76,7 +76,8 @@ function ProgressRing({ percent }: { percent: number }) {
 
 export function TodayYesterday({ onChanged, tasks }: TodayYesterdayProps) {
   const { t, locale } = useTranslation();
-  const { workPath, snapshot, mutate } = useToday();
+  const { workPath, snapshot, mutate, settings } = useToday();
+  const topLaneSize = settings.topLaneSize;
   const [expanded, setExpanded] = useState<Record<YesterdayGroup, boolean>>({
     done: false,
     progress: false,
@@ -177,7 +178,7 @@ export function TodayYesterday({ onChanged, tasks }: TodayYesterdayProps) {
         proposedBlock: null,
         calendarSync: { status: "none" },
       };
-    if (resolution === "today" && top.length < 3) {
+    if (resolution === "today" && top.length < topLaneSize) {
       top.push({ ...routed, lane: "top", order: top.length });
     } else if (resolution === "flexible") {
       flexible.push({ ...routed, lane: "flexible", order: flexible.length });
@@ -210,7 +211,7 @@ export function TodayYesterday({ onChanged, tasks }: TodayYesterdayProps) {
     if (
       resolution === "today" &&
       !topContainsItem &&
-      (snapshot.plan?.top.length ?? 0) >= 3
+      (snapshot.plan?.top.length ?? 0) >= topLaneSize
     ) {
       setNotice(t("today.yesterday.topFull"));
       return;
@@ -270,7 +271,7 @@ export function TodayYesterday({ onChanged, tasks }: TodayYesterdayProps) {
       (entry) =>
         entry.itemRef.kind === "task" && entry.itemRef.taskId === item.taskId,
     );
-    const topFull = !topContainsItem && (snapshot?.plan?.top.length ?? 0) >= 3;
+    const topFull = !topContainsItem && (snapshot?.plan?.top.length ?? 0) >= topLaneSize;
     return (
       <div
         className="today-yesterday-menu-wrap"
@@ -321,7 +322,7 @@ export function TodayYesterday({ onChanged, tasks }: TodayYesterdayProps) {
   };
 
   const selectedItems = filteredItems.filter((item) => selected.has(item.taskId));
-  const availableTopSlots = Math.max(0, 3 - (snapshot?.plan?.top.length ?? 0));
+  const availableTopSlots = Math.max(0, topLaneSize - (snapshot?.plan?.top.length ?? 0));
   const applyBulk = async (resolution: YesterdayResolution) => {
     for (const item of selectedItems) {
       await decide(item, resolution);

@@ -10,8 +10,15 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use std::collections::BTreeMap;
 
-/// Hard cap on the "top" lane of a daily plan.
-pub const TOP_LANE_MAX: usize = 3;
+/// Hard schema ceiling for the "top" lane. The *per-user* capacity is
+/// `tasks.today.topLaneSize` (1-10), enforced by the planner and the promotion
+/// gates on the frontend, which is the only writer of plans. This bound exists
+/// so a malformed plan cannot land in the store, not to pick the capacity.
+pub const TOP_LANE_MAX: usize = 10;
+/// Default top-lane capacity, mirroring the `tasks.today.topLaneSize` default.
+/// Also the cap web-action imports fill to: that path is backend-initiated and
+/// never sees the user's setting.
+pub const TOP_LANE_DEFAULT: usize = 3;
 /// Estimate used for plan items the caller left without an estimate.
 pub const PROVISIONAL_ESTIMATE_MINUTES: u32 = 30;
 
@@ -1070,7 +1077,11 @@ mod tests {
         let mut plan = DailyPlanV1 {
             logical_day: "2026-07-21".to_string(),
             input_revision: String::new(),
-            top: vec![item("a", None), item("b", None), item("c", None), item("d", None)],
+            // One past TOP_LANE_MAX: the schema ceiling, not the per-user
+            // capacity, which the frontend owns.
+            top: (0..=TOP_LANE_MAX)
+                .map(|index| item(&format!("t{index}"), None))
+                .collect(),
             flexible: vec![],
             overflow: vec![],
             reasons: vec![],
@@ -1090,7 +1101,7 @@ mod tests {
         plan.top[0].proposed_block = None;
         assert!(validate_plan(&plan, sleep, tz).is_ok());
         // Same ref in two lanes: rejected regardless of lane.
-        plan.flexible = vec![item("a", None)];
+        plan.flexible = vec![item("t0", None)];
         assert!(validate_plan(&plan, sleep, tz)
             .unwrap_err()
             .starts_with("today_plan_duplicate_ref"));

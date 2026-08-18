@@ -134,6 +134,7 @@ export function useTodayPlanner({ getCaptureCandidates, commitments }: UseTodayP
         pinned: existing,
         capacityMinutes: capacity.focusCapMinutes,
         provisionalEstimateMinutes: settings.provisionalEstimateMinutes,
+        topLaneSize: settings.topLaneSize,
       });
       const merged = preserveProtected(existing, proposed, {
         manualOrder: manualOrderRef.current,

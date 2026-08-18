@@ -46,6 +46,10 @@ export interface TodaySeedOverrides {
   autoOpen?: boolean;
   /** settings.today.enabled (default true). */
   todayEnabled?: boolean;
+  /** settings.ui.dashboardListRows (default: the app default). */
+  dashboardListRows?: number;
+  /** settings.tasks.today.topLaneSize (default: the app default). */
+  topLaneSize?: number;
   notificationsEnabled?: boolean;
   autoPlan?: boolean;
   plan?: unknown;
@@ -484,6 +488,9 @@ export function buildTodaySeed(overrides: TodaySeedOverrides = {}) {
       ui: {
         activeAppMode: overrides.persistedMode ?? "pkm",
         themeMode: overrides.themeMode ?? "light",
+        ...(overrides.dashboardListRows === undefined
+          ? {}
+          : { dashboardListRows: overrides.dashboardListRows }),
         // The reference shell has no right pane. The app auto-closes it on
         // mode *change* into tasks, but a straight boot into tasks keeps it.
         // Seed it closed to match the reference layout.
@@ -492,6 +499,9 @@ export function buildTodaySeed(overrides: TodaySeedOverrides = {}) {
       tasks: {
         today: {
           enabled: overrides.todayEnabled ?? true,
+          ...(overrides.topLaneSize === undefined
+            ? {}
+            : { topLaneSize: overrides.topLaneSize }),
           dayStart: "03:30",
           sleepStart: "21:30",
           notificationEnabled: overrides.notificationsEnabled ?? true,
