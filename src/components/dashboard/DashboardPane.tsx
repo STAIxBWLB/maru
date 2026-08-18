@@ -154,6 +154,109 @@ export function DashboardPane({
       </header>
 
       {view === "overview" ? (
+        <>
+        <div className="dashboard-status-strip">
+          <DashboardWidget
+            kind="agents"
+            compact
+            title={t("dashboard.widget.agents.title")}
+            count={agentSummary && agentSummary.running > 0 ? agentSummary.running : null}
+            onViewAll={() => onOpenMode("agents")}
+            loading={agents.loading}
+            error={agents.error}
+            onRetry={agents.refresh}
+            empty={agentSummary?.agents === 0}
+            emptyLabel={t("dashboard.widget.agents.empty")}
+          >
+            {agentSummary ? (
+              <div className="dashboard-kv">
+                <p>{t("dashboard.agents.summary", {
+                  running: agentSummary.running,
+                  scheduled: agentSummary.scheduled,
+                })}</p>
+                {agentSummary.nextRunAt ? (
+                  <p className="muted">
+                    {t("dashboard.agents.nextRun", {
+                      time: formatRelativeDate(agentSummary.nextRunAt, locale),
+                    })}
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
+          </DashboardWidget>
+
+
+          <DashboardWidget
+            kind="drafts"
+            compact
+            title={t("dashboard.widget.drafts.title")}
+            count={draftChips.reduce((sum, chip) => sum + chip.count, 0) || null}
+            onViewAll={() => onOpenMode("drafts")}
+            loading={drafts.loading}
+            error={drafts.error}
+            onRetry={drafts.refresh}
+            empty={draftChips.every((chip) => chip.count === 0)}
+            emptyLabel={t("dashboard.widget.drafts.empty")}
+          >
+            <div className="dashboard-chips">
+              {draftChips.map((chip) => (
+                <span
+                  key={chip.key}
+                  className={`dashboard-chip dashboard-chip-static${
+                    chip.count === 0 ? " dashboard-chip-zero" : ""
+                  }`}
+                >
+                  {t(`drafts.status.${chip.key}`)}
+                  <span className="dashboard-chip-count">{chip.count}</span>
+                </span>
+              ))}
+            </div>
+          </DashboardWidget>
+
+
+          <DashboardWidget
+            kind="git"
+            compact
+            title={t("dashboard.widget.git.title")}
+            count={gitData.isRepo && !gitData.clean ? gitData.total : null}
+            onViewAll={() => onOpenMode("files")}
+            loading={git.loading}
+            error={git.error}
+            onRetry={git.refresh}
+            empty={!gitData.isRepo}
+            emptyLabel={t("dashboard.widget.git.notRepo")}
+          >
+            <div className="dashboard-kv">
+              {gitData.branch ? <p className="dashboard-git-branch">{gitData.branch}</p> : null}
+              <p className="muted">
+                {gitData.clean
+                  ? t("dashboard.widget.git.clean")
+                  : t("dashboard.git.summary", {
+                      modified: gitData.modified,
+                      staged: gitData.staged,
+                      untracked: gitData.untracked,
+                    })}
+              </p>
+            </div>
+          </DashboardWidget>
+
+
+          <DashboardWidget
+            kind="sync"
+            compact
+            title={t("dashboard.widget.sync.title")}
+            count={syncBadge.scheduledJobs > 0 ? syncBadge.scheduledJobs : null}
+            onViewAll={() => onOpenSettings("jobs")}
+            loading={sync.loading}
+            error={sync.error}
+            onRetry={sync.refresh}
+          >
+            <span className={`dashboard-pill dashboard-sync-${syncBadge.state}`}>
+              {t(`system.dotSync.state.${syncBadge.state}`, { count: syncBadge.scheduledJobs })}
+            </span>
+          </DashboardWidget>
+        </div>
+
         <div className="dashboard-grid">
           <DashboardWidget
             kind="today"
@@ -185,36 +288,14 @@ export function DashboardPane({
             {topTitles.length > 0 ? (
               <ol className="dashboard-list">
                 {topTitles.map((title) => (
-                  <li key={title}>{title}</li>
+                  <li key={title} title={title}>
+                    {title}
+                  </li>
                 ))}
               </ol>
             ) : null}
           </DashboardWidget>
 
-          <DashboardWidget
-            kind="tasks"
-            title={t("dashboard.widget.tasks.title")}
-            count={taskCounts.today + taskCounts.overdue}
-            onViewAll={() => onOpenMode("tasks")}
-            loading={tasks.loading}
-            error={tasks.error}
-            onRetry={tasks.refresh}
-            empty={taskEntries.length === 0}
-          >
-            <div className="dashboard-chips">
-              {DASHBOARD_TASK_FILTERS.map((filter) => (
-                <button
-                  key={filter}
-                  type="button"
-                  className="dashboard-chip"
-                  onClick={() => openTaskFilter(filter)}
-                >
-                  {t(`dashboard.tasks.filter.${filter}`)}
-                  <span className="dashboard-chip-count">{taskCounts[filter]}</span>
-                </button>
-              ))}
-            </div>
-          </DashboardWidget>
 
           <DashboardWidget
             kind="schedule"
@@ -233,7 +314,7 @@ export function DashboardPane({
             <p className="dashboard-section-label">{t("dashboard.schedule.agenda")}</p>
             <ul className="dashboard-list">
               {commitments.slice(0, 4).map((commitment) => (
-                <li key={`${commitment.startIso}:${commitment.title}`}>
+                <li key={`${commitment.startIso}:${commitment.title}`} title={commitment.title}>
                   <span className="dashboard-list-meta">
                     {format(parseISO(commitment.startIso), "HH:mm")}
                   </span>
@@ -246,7 +327,7 @@ export function DashboardPane({
                 <p className="dashboard-section-label">{t("dashboard.schedule.upcoming")}</p>
                 <ul className="dashboard-list">
                   {upcoming.slice(0, 3).map((event) => (
-                    <li key={event.id}>
+                    <li key={event.id} title={event.title}>
                       <span className="dashboard-list-meta">
                         {format(event.start, event.allDay ? "MM/dd" : "MM/dd HH:mm")}
                       </span>
@@ -257,6 +338,33 @@ export function DashboardPane({
               </>
             ) : null}
           </DashboardWidget>
+
+
+          <DashboardWidget
+            kind="tasks"
+            title={t("dashboard.widget.tasks.title")}
+            count={taskCounts.today + taskCounts.overdue}
+            onViewAll={() => onOpenMode("tasks")}
+            loading={tasks.loading}
+            error={tasks.error}
+            onRetry={tasks.refresh}
+            empty={taskEntries.length === 0}
+          >
+            <div className="dashboard-chips">
+              {DASHBOARD_TASK_FILTERS.map((filter) => (
+                <button
+                  key={filter}
+                  type="button"
+                  className={`dashboard-chip${taskCounts[filter] === 0 ? " dashboard-chip-zero" : ""}`}
+                  onClick={() => openTaskFilter(filter)}
+                >
+                  {t(`dashboard.tasks.filter.${filter}`)}
+                  <span className="dashboard-chip-count">{taskCounts[filter]}</span>
+                </button>
+              ))}
+            </div>
+          </DashboardWidget>
+
 
           <DashboardWidget
             kind="catalog"
@@ -274,7 +382,7 @@ export function DashboardPane({
                 <button
                   key={chip.key}
                   type="button"
-                  className="dashboard-chip"
+                  className={`dashboard-chip${chip.count === 0 ? " dashboard-chip-zero" : ""}`}
                   onClick={() => openCatalogKind(chip.key)}
                 >
                   {t(`dashboard.catalog.kind.${catalogKindKey(chip.key)}`)}
@@ -283,6 +391,7 @@ export function DashboardPane({
               ))}
             </div>
           </DashboardWidget>
+
 
           <DashboardWidget
             kind="inbox"
@@ -297,84 +406,16 @@ export function DashboardPane({
           >
             <ul className="dashboard-list">
               {inboxData.latest.map((item) => (
-                <li key={item.id}>{item.title}</li>
+                <li key={item.id} title={item.title}>
+                  <span className="dashboard-list-meta">
+                    {formatRelativeDate(item.receivedAt, locale)}
+                  </span>
+                  {item.title}
+                </li>
               ))}
             </ul>
           </DashboardWidget>
 
-          <DashboardWidget
-            kind="agents"
-            title={t("dashboard.widget.agents.title")}
-            count={agentSummary && agentSummary.running > 0 ? agentSummary.running : null}
-            onViewAll={() => onOpenMode("agents")}
-            loading={agents.loading}
-            error={agents.error}
-            onRetry={agents.refresh}
-            empty={agentSummary?.agents === 0}
-            emptyLabel={t("dashboard.widget.agents.empty")}
-          >
-            {agentSummary ? (
-              <div className="dashboard-kv">
-                <p>{t("dashboard.agents.summary", {
-                  running: agentSummary.running,
-                  scheduled: agentSummary.scheduled,
-                })}</p>
-                {agentSummary.nextRunAt ? (
-                  <p className="muted">
-                    {t("dashboard.agents.nextRun", {
-                      time: formatRelativeDate(agentSummary.nextRunAt, locale),
-                    })}
-                  </p>
-                ) : null}
-              </div>
-            ) : null}
-          </DashboardWidget>
-
-          <DashboardWidget
-            kind="drafts"
-            title={t("dashboard.widget.drafts.title")}
-            count={draftChips.reduce((sum, chip) => sum + chip.count, 0) || null}
-            onViewAll={() => onOpenMode("drafts")}
-            loading={drafts.loading}
-            error={drafts.error}
-            onRetry={drafts.refresh}
-            empty={draftChips.every((chip) => chip.count === 0)}
-            emptyLabel={t("dashboard.widget.drafts.empty")}
-          >
-            <div className="dashboard-chips">
-              {draftChips.map((chip) => (
-                <span key={chip.key} className="dashboard-chip dashboard-chip-static">
-                  {t(`drafts.status.${chip.key}`)}
-                  <span className="dashboard-chip-count">{chip.count}</span>
-                </span>
-              ))}
-            </div>
-          </DashboardWidget>
-
-          <DashboardWidget
-            kind="git"
-            title={t("dashboard.widget.git.title")}
-            count={gitData.isRepo && !gitData.clean ? gitData.total : null}
-            onViewAll={() => onOpenMode("files")}
-            loading={git.loading}
-            error={git.error}
-            onRetry={git.refresh}
-            empty={!gitData.isRepo}
-            emptyLabel={t("dashboard.widget.git.notRepo")}
-          >
-            <div className="dashboard-kv">
-              {gitData.branch ? <p className="dashboard-git-branch">{gitData.branch}</p> : null}
-              <p className="muted">
-                {gitData.clean
-                  ? t("dashboard.widget.git.clean")
-                  : t("dashboard.git.summary", {
-                      modified: gitData.modified,
-                      staged: gitData.staged,
-                      untracked: gitData.untracked,
-                    })}
-              </p>
-            </div>
-          </DashboardWidget>
 
           <DashboardWidget
             kind="recents"
@@ -391,6 +432,7 @@ export function DashboardPane({
                   <button
                     type="button"
                     className="dashboard-link"
+                    title={entry.title}
                     onClick={() => onOpenDocument(entry)}
                   >
                     {entry.title}
@@ -399,21 +441,8 @@ export function DashboardPane({
               ))}
             </ul>
           </DashboardWidget>
-
-          <DashboardWidget
-            kind="sync"
-            title={t("dashboard.widget.sync.title")}
-            count={syncBadge.scheduledJobs > 0 ? syncBadge.scheduledJobs : null}
-            onViewAll={() => onOpenSettings("jobs")}
-            loading={sync.loading}
-            error={sync.error}
-            onRetry={sync.refresh}
-          >
-            <span className={`dashboard-pill dashboard-sync-${syncBadge.state}`}>
-              {t(`system.dotSync.state.${syncBadge.state}`, { count: syncBadge.scheduledJobs })}
-            </span>
-          </DashboardWidget>
         </div>
+        </>
       ) : (
         <div className={`dashboard-drilldown dashboard-drilldown-${view}`}>
           <div className="dashboard-drilldown-header">

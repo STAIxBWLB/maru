@@ -9893,6 +9893,16 @@ button.git-badge:hover {
   font-size: var(--type-label-size);
 }
 
+/* Ambient status (agents, drafts, git, sync) reads as a band above the content
+   cards rather than four cards of equal weight — each is a count or a pill, and
+   as full cards they left the bottom half of the pane empty. */
+.dashboard-status-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 14px;
+  padding: 0 22px 14px;
+}
+
 .dashboard-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
@@ -9900,15 +9910,44 @@ button.git-badge:hover {
   padding: 0 22px 22px;
 }
 
+/* Only above 1160px, where four columns actually fit: the spans would collapse
+   a 2-column layout into a single column at narrower widths. */
+@media (min-width: 1160px) {
+  .dashboard-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .dashboard-widget-today,
+  .dashboard-widget-schedule {
+    grid-column: span 2;
+  }
+}
+
 .dashboard-widget {
   display: flex;
   min-width: 0;
-  min-height: 160px;
+  min-height: 120px;
   flex-direction: column;
   border: 1px solid var(--line-soft);
   border-radius: var(--radius-lg);
   background: var(--panel);
   padding: 16px 18px;
+}
+
+.dashboard-widget-compact {
+  min-height: 0;
+  padding: 10px 14px;
+}
+
+.dashboard-widget-compact .dashboard-widget-body {
+  margin-top: 6px;
+}
+
+/* The card variant centers the empty/error text in the leftover height; a
+   compact tile has none, so it reads as a normal line instead. */
+.dashboard-widget-compact .dashboard-widget-empty,
+.dashboard-widget-compact .dashboard-widget-error {
+  margin: 0;
 }
 
 .dashboard-widget-header {
@@ -10061,12 +10100,29 @@ button.git-badge:hover {
   text-transform: uppercase;
 }
 
+/* The implicit column track is `auto`, which sizes to max-content — the label
+   with zero line breaks. Paired with the global `word-break: keep-all`
+   (foundations.css), space-free inbox slugs had no break opportunity to fall
+   back on and painted straight through the card border. `minmax(0, 1fr)` caps
+   the track at the card width so the row below can clip. */
 .dashboard-list {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 4px;
   margin: 0;
   padding-left: 18px;
   font-size: var(--type-label-size);
+}
+
+/* Left as `display: list-item` on purpose: the ol/ul markers matter (Today's
+   Top 3 is a ranking), and a block box ellipsizes its inline content anyway —
+   so a leading `.dashboard-list-meta` stays readable and only the trailing
+   title truncates. Going flex here would drop the markers. */
+.dashboard-list > li {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .dashboard-list-meta {
@@ -10112,6 +10168,13 @@ button.git-badge:hover {
   cursor: default;
 }
 
+/* A zero count is still a signal ("no deadlines"), so it is dimmed rather than
+   hidden — but rendered identically to a real count it just adds noise. */
+.dashboard-chip-zero {
+  color: var(--faint);
+  opacity: 0.65;
+}
+
 .dashboard-chip-count {
   color: var(--faint);
   font-variant-numeric: tabular-nums;
@@ -10123,26 +10186,39 @@ button.git-badge:hover {
 
 .dashboard-kv {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 4px;
   font-size: var(--type-label-size);
 }
 
 .dashboard-kv p {
   margin: 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .dashboard-git-branch {
   font-weight: 700;
 }
 
+/* An inline-block button does not inherit the parent li's ellipsis — its box
+   would just be hard-clipped — so it carries its own. */
 .dashboard-link {
+  display: block;
+  width: 100%;
+  min-width: 0;
   border: 0;
   background: none;
   padding: 0;
   color: var(--ink);
   cursor: pointer;
+  overflow: hidden;
   font-size: var(--type-label-size);
   text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .dashboard-link:hover {
@@ -10188,6 +10264,7 @@ button.git-badge:hover {
 
 .dashboard-rows {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 4px;
   margin: 0;
   padding: 0;
@@ -10240,7 +10317,8 @@ button.git-badge:hover {
 }
 
 @media (max-width: 720px) {
-  .dashboard-grid {
+  .dashboard-grid,
+  .dashboard-status-strip {
     grid-template-columns: minmax(0, 1fr);
   }
 }

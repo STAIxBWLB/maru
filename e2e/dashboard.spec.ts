@@ -253,3 +253,85 @@ test("recents widget lists seeded recent documents and opens one in Docs mode", 
     page.locator(".document-tab-title", { hasText: "Maru 용어집" }),
   ).toBeVisible();
 });
+
+// Regression guard: `.dashboard-list` was `display: grid` with an implicit
+// `auto` column track. A grid item's automatic minimum size keeps that track at
+// the item's min-content width, so the card only survives as long as the label
+// has *somewhere* to break. Inbox labels are slugs, and the global
+// `word-break: keep-all` (foundations.css) is stricter about break
+// opportunities in WebKit than in Chromium — in the shipped WKWebView app the
+// whole slug became one unbreakable token, the track grew to it, and the text
+// painted straight through the card border.
+//
+// Seeding hyphenated slugs would only reproduce that in WebKit, and this suite
+// runs Chromium. So seed labels with no break opportunity at all in any engine:
+// then the min-content width *is* the whole string everywhere, and the guard
+// fails on the pre-fix CSS as it should. What it pins is the behaviour we
+// actually want — a label too long for its card gets clipped, never escapes.
+const OVERFLOW_SEED_TITLES = [
+  `260818gwsYouHaveANewGoogleAccountForJejuAi${"AndAVeryLongUnbrokenTail".repeat(3)}`,
+  `260818msoActionRequired7DaysLeftToBackUpYourData${"BeforeTheDeadline".repeat(3)}`,
+  `제주한라대학교인공지능학과공유대학예산안검토요청최종본대외비${"2026년도사업계획".repeat(3)}`,
+];
+
+for (const width of [1024, 1280, 1487]) {
+  test(`dashboard lists stay inside their cards at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 1058 });
+    await installTodayMocks(
+      page,
+      buildTodaySeed({
+        ...DASHBOARD_BOOT_SEED,
+        inboxEntries: OVERFLOW_SEED_TITLES.map((title, index) => ({
+          id: `260818-gws-overflow-${index}`,
+          kind: "pendingItem",
+          path: `${FIXTURE_WORK_PATH}/inbox/items/pending/260818-gws-overflow-${index}`,
+          relPath: `inbox/items/pending/260818-gws-overflow-${index}`,
+          title,
+          channel: "gws",
+          sourceKind: "mail",
+          dropPath: null,
+          configuredRoot: "inbox",
+          itemId: `260818-gws-overflow-${index}`,
+          status: "pending",
+          manifestPath: null,
+          summaryPath: null,
+          routePath: null,
+          sizeBytes: 640,
+          receivedAt: `2026-08-18T0${index + 1}:00:00+09:00`,
+        })),
+      }),
+    );
+    await gotoDashboard(page);
+    await expect(widget(page, "inbox")).toBeVisible();
+
+    // No widget scrolls its own content horizontally...
+    const overflowingWidgets = await page
+      .locator(".dashboard-widget")
+      .evaluateAll((els) =>
+        els
+          .filter((el) => el.scrollWidth > el.clientWidth + 1)
+          .map((el) => el.getAttribute("data-dashboard-widget")),
+      );
+    expect(overflowingWidgets).toEqual([]);
+
+    // ...and no list row paints outside the card that owns it.
+    const escapedRows = await page
+      .locator(".dashboard-widget")
+      .evaluateAll((els) =>
+        els.flatMap((el) => {
+          const cardRight = el.getBoundingClientRect().right;
+          return [...el.querySelectorAll(".dashboard-list > li, .dashboard-link")]
+            .filter((row) => row.getBoundingClientRect().right > cardRight + 1)
+            .map(() => el.getAttribute("data-dashboard-widget"));
+        }),
+      );
+    expect(escapedRows).toEqual([]);
+
+    // The pane itself never gains a horizontal scrollbar.
+    expect(
+      await page
+        .locator(".dashboard-pane")
+        .evaluate((el) => el.scrollWidth <= el.clientWidth + 1),
+    ).toBe(true);
+  });
+}
