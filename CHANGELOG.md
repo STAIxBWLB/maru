@@ -8,6 +8,28 @@ because releases cut frequently during active development. Versions before
 Dates are the release-tag dates. Only `feat`/`fix`-level changes are listed;
 `chore(release)` version bumps and merge commits are omitted.
 
+## v0.4.55 - 2026-08-18 - Readable Inbox, Fewer Dashboard Cards
+
+- **Dashboard lists no longer paint outside their cards (#247).** The widget
+  lists sized their grid track to the label, so an inbox slug with no break
+  opportunity ran straight through the card border and past the pane. The
+  effect was WebKit-only, because the Korean `word-break: keep-all` rule is
+  stricter about break opportunities there than in Chromium.
+- **The inbox shows mail subjects instead of item slugs (#247).** A pending
+  item's title came from its manifest `id`, which is the directory name; it
+  now comes from the manifest's recorded original name and falls back to the
+  id. `received_at` likewise comes from the manifest rather than the file
+  mtime, so the "latest" list is ordered by when items arrived rather than by
+  when their manifests were last written.
+- **The dashboard overview regroups into a status strip and four cards
+  (#247).** Agents, drafts, git and sync are a count or a pill each and now
+  read as a strip above the content. Schedule folded into Today, and the task
+  chips merged with the catalog signals, which had been restating the inbox
+  badge and the task counts beside them closely enough that a stale scan could
+  contradict them on screen. Two drilldown views that nothing could navigate to
+  were removed.
+- **The bundled skills environment moves to graphifyy 0.9.45 (#246).**
+
 ## v0.4.54 - 2026-08-16 - Today/Tasks Split and Dashboard Mode
 
 - **The combined Tasks mode is now three independent modes (#245).** The
