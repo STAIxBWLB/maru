@@ -9910,16 +9910,13 @@ button.git-badge:hover {
   padding: 0 22px 22px;
 }
 
-/* Only above 1160px, where four columns actually fit: the spans would collapse
-   a 2-column layout into a single column at narrower widths. */
+/* Four content cards, so above 1160px they sit two-up rather than shrinking to
+   a quarter each: "what is on me now" on the first row, the two queues below.
+   Held to two columns because the cards carry lists and chip rows, both of
+   which need width more than they need to sit side by side. */
 @media (min-width: 1160px) {
   .dashboard-grid {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-  }
-
-  .dashboard-widget-today,
-  .dashboard-widget-schedule {
-    grid-column: span 2;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
