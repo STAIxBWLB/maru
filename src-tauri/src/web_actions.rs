@@ -28,7 +28,7 @@ use crate::tasks::{
 };
 use crate::today::{
     CalendarSyncState, DailyPlanItem, DailyPlanV1, PlanItemRef, PlanLane, TaskTransitionKind,
-    TaskTransitionRequest, TodayMutation, TOP_LANE_MAX,
+    TaskTransitionRequest, TodayMutation, TOP_LANE_DEFAULT,
 };
 use crate::today_lifecycle::{move_file, task_transition};
 use crate::today_outbox::{
@@ -765,7 +765,7 @@ pub fn web_actions_import_top(
     // has to look like a real task note (that is the web adding something).
     let mut wanted: Vec<PlanItemRef> = Vec::new();
     for entry in paths {
-        if wanted.len() >= TOP_LANE_MAX {
+        if wanted.len() >= TOP_LANE_DEFAULT {
             break;
         }
         let resolved = match plan.items().find(|item| item.item_ref.id() == entry) {
@@ -1606,13 +1606,13 @@ mod tests {
                 "tasks/active/b.md",
                 "tasks/active/c.md",
                 "tasks/active/d.md",
-                // Beyond TOP_LANE_MAX.
+                // Beyond TOP_LANE_DEFAULT.
                 "tasks/active/a.md",
             ],
         );
 
         let outcome = import(&tmp);
-        assert_eq!(outcome.imported, TOP_LANE_MAX);
+        assert_eq!(outcome.imported, TOP_LANE_DEFAULT);
         assert_eq!(
             ids(&plan_of(&tmp).top),
             ["tasks/active/b.md", "tasks/active/c.md", "tasks/active/d.md"]

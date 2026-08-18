@@ -314,7 +314,11 @@ describe("TodayPrepare", () => {
     await act(async () => {
       addButton.click();
     });
-    expect(container.textContent).toContain(translate("ko", "today.top3.maxWarning"));
+    // The warning states the configured capacity, so it has to be interpolated
+    // with the same value the component renders.
+    expect(container.textContent).toContain(
+      translate("ko", "today.top3.maxWarning", { count: 3 }),
+    );
     expect(container.querySelector(".today-top3-addform")).toBeNull();
     expect(mutate).not.toHaveBeenCalledWith(
       expect.objectContaining({ type: "setPlan", plan: expect.objectContaining({}) }),

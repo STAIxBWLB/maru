@@ -160,6 +160,11 @@ export function documentFilterDefaultDocType(
   return view?.type?.trim() || null;
 }
 
+/** How many recently-opened paths are kept and resolved. Matches the maximum
+ *  `ui.dashboardListRows` allows, so the setting can always be satisfied; the
+ *  dashboard card slices this down to the configured rows. */
+export const RECENT_PATHS_LIMIT = 50;
+
 export function getRecentEntries(
   index: DocumentIndex,
   recentPaths: string[],

@@ -302,7 +302,7 @@ export function TodayTop3({ tasks, captures, markManualOrder, onChanged, onOpenT
         {showMaxWarning && top.length >= topLaneSize ? (
           <p className="today-top3-warning" role="alert">
             <TriangleAlert size={13} strokeWidth={1.9} aria-hidden="true" />
-            {t("today.top3.maxWarning")}
+            {t("today.top3.maxWarning", { count: topLaneSize })}
           </p>
         ) : null}
         {adding ? (

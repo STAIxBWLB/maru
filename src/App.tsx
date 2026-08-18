@@ -231,6 +231,7 @@ import {
   countDocumentFilter,
   documentFilterDefaultDocType,
   getRecentEntries,
+  RECENT_PATHS_LIMIT,
   type BuiltInDocumentView,
   type DocumentFilter,
   type DocumentIndex,
@@ -1528,7 +1529,7 @@ function MainApp() {
   );
 
   const recentEntries = useMemo(
-    () => getRecentEntries(documentIndex, recentPaths, 8),
+    () => getRecentEntries(documentIndex, recentPaths, RECENT_PATHS_LIMIT),
     [documentIndex, recentPaths],
   );
   const editorTabSummaries = useMemo(
@@ -2493,7 +2494,7 @@ function MainApp() {
 
   const pushRecent = useCallback((path: string) => {
     setRecentPaths((prev) => {
-      const next = [path, ...prev.filter((p) => p !== path)].slice(0, 16);
+      const next = [path, ...prev.filter((p) => p !== path)].slice(0, RECENT_PATHS_LIMIT);
       if (typeof window !== "undefined") {
         window.localStorage.setItem(RECENT_KEY, JSON.stringify(next));
       }

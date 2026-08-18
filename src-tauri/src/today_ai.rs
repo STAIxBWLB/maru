@@ -627,16 +627,20 @@ mod tests {
     }
 
     #[test]
-    fn plan_output_rejects_more_than_three_top() {
+    fn plan_output_rejects_more_top_items_than_the_schema_ceiling() {
         let tmp = tempfile::tempdir().unwrap();
         let work = tmp.path().to_string_lossy().to_string();
         let snapshot = open_day(&work);
+        // The ceiling is the schema bound, not the per-user capacity: the
+        // planner and the promotion gates enforce `tasks.today.topLaneSize`.
+        let ids: Vec<String> = (0..=TOP_LANE_MAX).map(|index| format!("t{index}")).collect();
+        let refs: Vec<&str> = ids.iter().map(String::as_str).collect();
         let output = plan_output_json(
             &snapshot.revision,
-            vec![top_item("a"), top_item("b"), top_item("c"), top_item("d")],
+            ids.iter().map(|id| top_item(id)).collect(),
             vec![],
         );
-        assert!(plan_validation_err(output, &snapshot, &["a", "b", "c", "d"])
+        assert!(plan_validation_err(output, &snapshot, &refs)
             .starts_with("today_ai_too_many_top"));
     }
 
