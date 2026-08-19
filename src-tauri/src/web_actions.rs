@@ -42,6 +42,7 @@ use crate::vault_list::{assert_maru_can_write, WorkspaceWriteAction};
 use crate::win_process::NoWindow;
 use chrono::DateTime;
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Component, Path, PathBuf};
@@ -782,7 +783,11 @@ pub fn web_actions_import_top(
     // genuine overflow from entries that would have been rejected anyway --
     // `paths.len()` counts rejects and duplicates too, and reporting that as
     // dropped would overstate it several times over.
+    // `seen` rather than `resolved.contains`: the loop no longer stops at the
+    // lane, so a journal listing many valid paths would otherwise be quadratic,
+    // and this runs as a dry run on every Today load.
     let mut resolved: Vec<PlanItemRef> = Vec::new();
+    let mut seen: HashSet<PlanItemRef> = HashSet::new();
     for entry in paths {
         let item_ref = match plan.items().find(|item| item.item_ref.id() == entry) {
             Some(item) => item.item_ref.clone(),
@@ -793,7 +798,7 @@ pub fn web_actions_import_top(
             }
             None => continue,
         };
-        if !resolved.contains(&item_ref) {
+        if seen.insert(item_ref.clone()) {
             resolved.push(item_ref);
         }
     }
