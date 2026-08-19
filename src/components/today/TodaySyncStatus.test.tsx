@@ -72,11 +72,14 @@ async function renderSection(
   records: OutboxRecord[],
   pending: WebActionSummary[] = [],
   topPending = false,
+  topTruncated = 0,
 ): Promise<HTMLElement> {
   vi.mocked(readTaskIntegrations).mockResolvedValue(records);
   vi.mocked(webActionsScan).mockResolvedValue(pending);
   vi.mocked(webActionsImportTop).mockResolvedValue(
-    topPending ? { imported: 3, changed: true, reason: "pending" } : { imported: 0, changed: false },
+    topPending
+      ? { imported: 3, changed: true, truncated: topTruncated, reason: "pending" }
+      : { imported: 0, changed: false, truncated: topTruncated, reason: "already_current" },
   );
   const contextValue: TodayContextValue = {
     workPath: "/tmp/work",
@@ -154,10 +157,12 @@ describe("TodaySyncStatus", () => {
     // A web Top-3 reorder carries no action receipt, so the dry-run preview is
     // the only signal that there is anything to apply.
     const container = await renderSection([], [], true);
-    expect(webActionsImportTop).toHaveBeenCalledWith("/tmp/work", "2026-08-16", true);
+    expect(webActionsImportTop).toHaveBeenCalledWith("/tmp/work", "2026-08-16", true, 3);
     expect(container.querySelector(".today-sync-status")).not.toBeNull();
+    // Keyed off the dictionary rather than the literal: the lane size is
+    // configurable now, so this label no longer names a fixed quantity.
     expect(container.querySelector(".today-sync-status-count.neutral")?.textContent).toContain(
-      "웹 Top 3",
+      translate("ko", "today.sync.web.topPendingCount"),
     );
     await act(async () => {
       headerButton(container).click();
@@ -176,7 +181,7 @@ describe("TodaySyncStatus", () => {
       apply!.click();
     });
     // The real import runs without dryRun, and a change reloads the snapshot.
-    expect(webActionsImportTop).toHaveBeenCalledWith("/tmp/work", "2026-08-16");
+    expect(webActionsImportTop).toHaveBeenCalledWith("/tmp/work", "2026-08-16", false, 3);
     expect(contextReload).toHaveBeenCalled();
   });
 
@@ -190,7 +195,11 @@ describe("TodaySyncStatus", () => {
       items: [],
     });
     vi.mocked(taskIntegrationsDrain).mockResolvedValue({ drained: 1, failed: 0, blocked: 0 });
-    vi.mocked(webActionsImportTop).mockResolvedValue({ imported: 2, changed: true });
+    vi.mocked(webActionsImportTop).mockResolvedValue({
+      imported: 2,
+      changed: true,
+      truncated: 0,
+    });
     await act(async () => {
       headerButton(container).click();
     });
@@ -218,7 +227,7 @@ describe("TodaySyncStatus", () => {
     expect(result).toContain("재시도 필요 1건");
     // The web-selected Top 3 is reconciled in the same click, and a change
     // reloads the snapshot so the plan on screen matches.
-    expect(webActionsImportTop).toHaveBeenCalledWith("/tmp/work", "2026-08-16");
+    expect(webActionsImportTop).toHaveBeenCalledWith("/tmp/work", "2026-08-16", false, 3);
     expect(contextReload).toHaveBeenCalled();
   });
 
@@ -308,5 +317,20 @@ describe("TodaySyncStatus", () => {
     expect(taskIntegrationsRetry).toHaveBeenCalledWith("/tmp/work", null, expect.any(String));
     expect(taskIntegrationsDrain).toHaveBeenCalled();
     expect(vi.mocked(readTaskIntegrations).mock.calls.length).toBe(loadsBefore + 1);
+  });
+  it("shows the truncation notice even when nothing is pending", async () => {
+    // The worst case: the plan already holds what fits, so `changed` is false
+    // and there is nothing to apply, yet entries are dropped on every poll.
+    // A notice hung off pending state, or the section's early return, would
+    // hide that permanently.
+    const container = await renderSection([], [], false, 2);
+
+    expect(container.querySelector(".today-sync-status")).not.toBeNull();
+    await act(async () => {
+      headerButton(container).click();
+    });
+    expect(container.textContent).toContain(
+      translate("ko", "today.sync.web.topTruncated", { count: 2, lane: 3 }),
+    );
   });
 });

@@ -372,6 +372,8 @@ export interface TopImportOutcome {
   /** Number of Top entries the snapshot holds, when a change landed. */
   imported: number;
   changed: boolean;
+  /** Resolvable journal entries the lane had no room for. */
+  truncated: number;
   reason?: string | null;
 }
 
@@ -556,11 +558,13 @@ export async function webActionsImportTop(
   workPath: string,
   logicalDay: string,
   dryRun?: boolean,
+  topLaneSize?: number,
 ): Promise<TopImportOutcome> {
   return todayInvoke<TopImportOutcome>("web_actions_import_top", {
     workPath,
     logicalDay,
     dryRun: dryRun ?? null,
+    topLaneSize: topLaneSize ?? null,
   });
 }
 
