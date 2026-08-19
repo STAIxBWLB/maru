@@ -16,8 +16,9 @@ use std::collections::BTreeMap;
 /// so a malformed plan cannot land in the store, not to pick the capacity.
 pub const TOP_LANE_MAX: usize = 10;
 /// Default top-lane capacity, mirroring the `tasks.today.topLaneSize` default.
-/// Also the cap web-action imports fill to: that path is backend-initiated and
-/// never sees the user's setting.
+/// Also the cap `web_actions_import_top` fills to, which is a bug rather than a
+/// design: that command is invoked from the frontend and can be handed the
+/// configured size like every other Today command. Tracked in #250.
 pub const TOP_LANE_DEFAULT: usize = 3;
 /// Estimate used for plan items the caller left without an estimate.
 pub const PROVISIONAL_ESTIMATE_MINUTES: u32 = 30;

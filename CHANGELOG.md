@@ -22,8 +22,7 @@ Dates are the release-tag dates. Only `feat`/`fix`-level changes are listed;
   adjustable between 1 and 10 under Settings > Tasks, and applies to all of
   those paths plus the dashboard. Labels that named a fixed quantity read
   neutrally now, and the capacity warning states the configured number.
-  Web-action imports still fill to three, since that path runs without the
-  user's settings.
+  Web-action imports still fill to three (#250).
 
 ## v0.4.55 - 2026-08-18 - Readable Inbox, Fewer Dashboard Cards
 
