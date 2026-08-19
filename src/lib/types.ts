@@ -410,7 +410,11 @@ export interface InboxEntry {
   routePath: string | null;
   sizeBytes: number;
   receivedAt: string | null;
+  /** Who staged the item. Always set: "auto" or "manual", never absent. */
+  intakeMode: InboxIntakeMode;
 }
+
+export type InboxIntakeMode = "auto" | "manual";
 
 export type InboxProcessedStatus = "done" | "failed" | "duplicate";
 

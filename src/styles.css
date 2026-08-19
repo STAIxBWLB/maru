@@ -15730,6 +15730,19 @@ button.git-badge:hover {
   font-weight: 650;
 }
 
+/* Chips reuse `.inbox-filter-chip`; only the row needs a shape. */
+.inbox-intake-filter {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 0 0 10px;
+}
+
+.inbox-intake-filter .today-panel-link {
+  margin-left: auto;
+}
+
 .inbox-source-toolbar {
   align-items: center;
   gap: 8px;

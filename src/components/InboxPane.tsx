@@ -25,7 +25,9 @@ import {
   categoryLabel,
   countInboxEntryChannels,
   countInboxSources,
+  countInboxEntryIntakeModes,
   filterEntriesByChannel,
+  filterEntriesByIntakeMode,
   filterItemsBySource,
   groupEntriesByChannel,
   groupFilesBySource,
@@ -163,6 +165,7 @@ export const InboxPane = memo(function InboxPane({
   const paneRef = useRef<HTMLElement | null>(null);
   const [focusedKey, setFocusedKey] = useState<string | null>(null);
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
+  const [intakeFilter, setIntakeFilter] = useState<string | null>(null);
   const [lastSelectedKey, setLastSelectedKey] = useState<string | null>(null);
   const [cheatsheetOpen, setCheatsheetOpen] = useState(false);
   const [dragOverDrop, setDragOverDrop] = useState(false);
@@ -183,7 +186,13 @@ export const InboxPane = memo(function InboxPane({
   const fileSourceCounts = useMemo(() => countInboxSources(items), [items]);
   const entrySourceCounts = useMemo(() => countInboxEntryChannels(entries), [entries]);
   const visibleEntries = useMemo(
-    () => filterEntriesByChannel(entries, sourceFilter),
+    () => filterEntriesByIntakeMode(filterEntriesByChannel(entries, sourceFilter), intakeFilter),
+    [entries, sourceFilter, intakeFilter],
+  );
+  // Counted before the intake filter so the chips keep showing what switching
+  // to the other population would give you.
+  const intakeCounts = useMemo(
+    () => countInboxEntryIntakeModes(filterEntriesByChannel(entries, sourceFilter)),
     [entries, sourceFilter],
   );
   const visibleItems = useMemo(
@@ -654,6 +663,43 @@ export const InboxPane = memo(function InboxPane({
         <InboxSection
           title={t("inbox.section.configuredEntries")}
         >
+            <div
+              className="inbox-intake-filter"
+              role="toolbar"
+              aria-label={t("inbox.intake.filterLabel")}
+            >
+              {(["all", "auto", "manual"] as const).map((mode) => {
+                const value = mode === "all" ? null : mode;
+                const count =
+                  mode === "all"
+                    ? [...intakeCounts.values()].reduce((sum, n) => sum + n, 0)
+                    : (intakeCounts.get(mode) ?? 0);
+                return (
+                  <button
+                    key={mode}
+                    type="button"
+                    className={
+                      intakeFilter === value ? "inbox-filter-chip active" : "inbox-filter-chip"
+                    }
+                    aria-pressed={intakeFilter === value}
+                    onClick={() => setIntakeFilter(value)}
+                  >
+                    {t(`inbox.intake.${mode}`)}
+                    <span className="count">{count.toLocaleString(locale)}</span>
+                  </button>
+                );
+              })}
+              <button
+                type="button"
+                className="today-panel-link"
+                disabled={visibleEntries.length === 0}
+                onClick={() =>
+                  setSelectedKeys(new Set(visibleEntries.map((entry) => `entry:${entry.id}`)))
+                }
+              >
+                {t("inbox.intake.selectAll", { count: visibleEntries.length })}
+              </button>
+            </div>
             <div className="inbox-list">
               {visibleEntries.length === 0 ? (
                 <div className="inbox-empty">

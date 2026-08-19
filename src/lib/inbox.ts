@@ -72,6 +72,29 @@ export function filterEntriesByChannel<T extends { channel: string }>(
   return entries.filter((entry) => entry.channel === source);
 }
 
+/** Filter by who staged the item. `null` means every population. */
+export function filterEntriesByIntakeMode<T extends { intakeMode: string }>(
+  entries: T[],
+  mode: string | null,
+): T[] {
+  if (mode === null) return entries;
+  return entries.filter((entry) => entry.intakeMode === mode);
+}
+
+/** Auto/manual tally. Deliberately its own map rather than extra keys on the
+ *  channel counts: `CommsPane` sums those values for a total and renders one
+ *  card per key, so mixing populations in would double the total and invent a
+ *  source that does not exist. */
+export function countInboxEntryIntakeModes<T extends { intakeMode: string }>(
+  entries: T[],
+): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const entry of entries) {
+    counts.set(entry.intakeMode, (counts.get(entry.intakeMode) ?? 0) + 1);
+  }
+  return counts;
+}
+
 export function uniqueEntryChannels<T extends { channel: string }>(entries: T[]): string[] {
   const seen = new Set<string>();
   for (const entry of entries) seen.add(entry.channel);
