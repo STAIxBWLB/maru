@@ -78,7 +78,8 @@ function StatusBadge({ status }: { status: OutboxStatus }) {
 
 export function TodaySyncStatus() {
   const { t } = useTranslation();
-  const { workPath, gwsBinary, defaultTaskList, snapshot, reload } = useToday();
+  const { workPath, gwsBinary, defaultTaskList, snapshot, reload, settings } = useToday();
+  const topLaneSize = settings.topLaneSize;
   const logicalDay = snapshot?.logicalDay ?? null;
 
   const [records, setRecords] = useState<OutboxRecord[]>([]);
@@ -88,6 +89,7 @@ export function TodaySyncStatus() {
    *  web rewrote it. A Top-3 reorder carries no action receipt, so this is the
    *  only signal that there is web work to apply. */
   const [topPending, setTopPending] = useState(false);
+  const [topTruncated, setTopTruncated] = useState(0);
   const [expanded, setExpanded] = useState(false);
   const [busy, setBusy] = useState(false);
 
@@ -105,14 +107,18 @@ export function TodaySyncStatus() {
     }
     if (!logicalDay) {
       setTopPending(false);
+      setTopTruncated(0);
       return;
     }
     try {
-      setTopPending((await webActionsImportTop(workPath, logicalDay, true)).changed);
+      const preview = await webActionsImportTop(workPath, logicalDay, true, topLaneSize);
+      setTopPending(preview.changed);
+      setTopTruncated(preview.truncated);
     } catch {
       setTopPending(false);
+      setTopTruncated(0);
     }
-  }, [workPath, logicalDay]);
+  }, [workPath, logicalDay, topLaneSize]);
 
   useEffect(() => {
     void load();
@@ -170,7 +176,8 @@ export function TodaySyncStatus() {
     }
     if (logicalDay) {
       try {
-        const top = await webActionsImportTop(workPath, logicalDay);
+        const top = await webActionsImportTop(workPath, logicalDay, false, topLaneSize);
+        setTopTruncated(top.truncated);
         if (top.changed) await reload();
       } catch {
         // A failed import leaves the snapshot untouched by construction.
@@ -185,7 +192,9 @@ export function TodaySyncStatus() {
   // Keep rendering while a result is on screen: applying the last receipt can
   // empty every list, and the outcome is the only confirmation the user gets
   // that the working tree changed and still needs Git Sync.
-  if (records.length === 0 && !webPending && webOutcome === null) return null;
+  if (records.length === 0 && !webPending && webOutcome === null && topTruncated === 0) {
+    return null;
+  }
 
   return (
     <section className="today-sync-status" aria-label={t("today.sync.title")}>
@@ -235,6 +244,14 @@ export function TodaySyncStatus() {
                 {t("today.sync.web.apply")}
               </button>
             </div>
+          ) : null}
+          {topTruncated > 0 ? (
+            <p className="today-sync-web-result" role="status">
+              {t("today.sync.web.topTruncated", {
+                count: topTruncated,
+                lane: topLaneSize,
+              })}
+            </p>
           ) : null}
           {webOutcome ? (
             <p className="today-sync-web-result" role="status">

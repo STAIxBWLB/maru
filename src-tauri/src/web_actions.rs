@@ -28,7 +28,7 @@ use crate::tasks::{
 };
 use crate::today::{
     CalendarSyncState, DailyPlanItem, DailyPlanV1, PlanItemRef, PlanLane, TaskTransitionKind,
-    TaskTransitionRequest, TodayMutation, TOP_LANE_DEFAULT,
+    TaskTransitionRequest, TodayMutation, TOP_LANE_DEFAULT, TOP_LANE_MAX,
 };
 use crate::today_lifecycle::{move_file, task_transition};
 use crate::today_outbox::{
@@ -583,6 +583,10 @@ pub struct TopImportOutcome {
     /// True when the snapshot was rewritten. False means "nothing to do" or
     /// "declined"; `reason` says which.
     pub changed: bool,
+    /// Resolvable journal entries the lane had no room for. Zero on the early
+    /// skips, where the journal was never compared against the cap.
+    #[serde(default)]
+    pub truncated: usize,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
 }
@@ -591,6 +595,7 @@ fn skipped(reason: &str) -> TopImportOutcome {
     TopImportOutcome {
         imported: 0,
         changed: false,
+        truncated: 0,
         reason: Some(reason.to_string()),
     }
 }
@@ -728,15 +733,24 @@ fn plan_with_top(plan: &DailyPlanV1, revision: &str, wanted: &[PlanItemRef]) -> 
 ///
 /// Explicit, like applying receipts, and conservative at every step: it never
 /// creates a plan, never invents entries for tasks that do not exist, clamps
-/// to the lane cap, and declines on a revision conflict rather than
+/// to `top_lane_size`, and declines on a revision conflict rather than
 /// overwriting a plan Maru changed while the web edit was in flight.
+///
+/// `top_lane_size` is the caller's `tasks.today.topLaneSize`, passed the way
+/// `today_open` already receives `day_start` / `sleep_start`. It arrives over
+/// IPC, so it is clamped here rather than trusted: below 1 would empty the
+/// lane, above `TOP_LANE_MAX` would build a plan `validate_plan` rejects.
 #[tauri::command(async)]
 pub fn web_actions_import_top(
     work_path: String,
     logical_day: String,
     dry_run: Option<bool>,
+    top_lane_size: Option<usize>,
 ) -> Result<TopImportOutcome, String> {
     let dry_run = dry_run.unwrap_or(false);
+    let lane_size = top_lane_size
+        .unwrap_or(TOP_LANE_DEFAULT)
+        .clamp(1, TOP_LANE_MAX);
     if !dry_run {
         assert_maru_can_write(&work_path, WorkspaceWriteAction::Modify)?;
     }
@@ -763,12 +777,14 @@ pub fn web_actions_import_top(
     // id instead. Resolve against the plan's existing refs first, so those
     // survive an import verbatim; only an entry the plan does not already know
     // has to look like a real task note (that is the web adding something).
-    let mut wanted: Vec<PlanItemRef> = Vec::new();
+    // Resolve every entry before clamping, rather than breaking at the cap.
+    // Stopping early left the tail unvalidated, so there was no way to tell a
+    // genuine overflow from entries that would have been rejected anyway --
+    // `paths.len()` counts rejects and duplicates too, and reporting that as
+    // dropped would overstate it several times over.
+    let mut resolved: Vec<PlanItemRef> = Vec::new();
     for entry in paths {
-        if wanted.len() >= TOP_LANE_DEFAULT {
-            break;
-        }
-        let resolved = match plan.items().find(|item| item.item_ref.id() == entry) {
+        let item_ref = match plan.items().find(|item| item.item_ref.id() == entry) {
             Some(item) => item.item_ref.clone(),
             None if validate_task_path(&entry).is_ok()
                 && resolve_inside_vault(&work_path, &entry).is_ok_and(|note| note.is_file()) =>
@@ -777,19 +793,31 @@ pub fn web_actions_import_top(
             }
             None => continue,
         };
-        if !wanted.contains(&resolved) {
-            wanted.push(resolved);
+        if !resolved.contains(&item_ref) {
+            resolved.push(item_ref);
         }
     }
+    let truncated = resolved.len().saturating_sub(lane_size);
+    resolved.truncate(lane_size);
+    let wanted = resolved;
 
     let current: Vec<&str> = plan.top.iter().map(|item| item.item_ref.id()).collect();
     if current == wanted.iter().map(PlanItemRef::id).collect::<Vec<_>>() {
-        return Ok(skipped("already_current"));
+        // Not `skipped()`: the journal *was* compared against the cap here, so
+        // an overflow still has to be reported. This is the case that hides
+        // worst -- "nothing to do" while entries are being dropped every run.
+        return Ok(TopImportOutcome {
+            imported: 0,
+            changed: false,
+            truncated,
+            reason: Some("already_current".to_string()),
+        });
     }
     if dry_run {
         return Ok(TopImportOutcome {
             imported: wanted.len(),
             changed: true,
+            truncated,
             reason: Some("pending".to_string()),
         });
     }
@@ -805,6 +833,7 @@ pub fn web_actions_import_top(
         Ok(_) => Ok(TopImportOutcome {
             imported: wanted.len(),
             changed: true,
+            truncated,
             reason: None,
         }),
         // The snapshot moved under us: re-read on the next run, never clobber.
@@ -1423,11 +1452,16 @@ mod tests {
     }
 
     fn import(tmp: &tempfile::TempDir) -> TopImportOutcome {
-        web_actions_import_top(work_path(tmp), DAY.to_string(), None).unwrap()
+        web_actions_import_top(work_path(tmp), DAY.to_string(), None, None).unwrap()
+    }
+
+    /// Import with an explicit `tasks.today.topLaneSize`.
+    fn import_sized(tmp: &tempfile::TempDir, lane: usize) -> TopImportOutcome {
+        web_actions_import_top(work_path(tmp), DAY.to_string(), None, Some(lane)).unwrap()
     }
 
     fn preview(tmp: &tempfile::TempDir) -> TopImportOutcome {
-        web_actions_import_top(work_path(tmp), DAY.to_string(), Some(true)).unwrap()
+        web_actions_import_top(work_path(tmp), DAY.to_string(), Some(true), None).unwrap()
     }
 
     fn plan_of(tmp: &tempfile::TempDir) -> DailyPlanV1 {
@@ -1524,7 +1558,10 @@ mod tests {
         web_rewrites_top(&tmp, &["tasks/active/b.md", "tasks/active/e.md"]);
 
         let outcome = import(&tmp);
-        assert_eq!(outcome, TopImportOutcome { imported: 2, changed: true, reason: None });
+        assert_eq!(
+            outcome,
+            TopImportOutcome { imported: 2, changed: true, truncated: 0, reason: None }
+        );
 
         let plan = plan_of(&tmp);
         assert_eq!(ids(&plan.top), ["tasks/active/b.md", "tasks/active/e.md"]);
@@ -1617,6 +1654,86 @@ mod tests {
             ids(&plan_of(&tmp).top),
             ["tasks/active/b.md", "tasks/active/c.md", "tasks/active/d.md"]
         );
+        // Four entries resolved (b, c, d, a); the default lane took three. The
+        // rejects and the duplicate are not truncation, so this is 1 and not
+        // the 5 a `paths.len() - imported` would have claimed.
+        assert_eq!(outcome.truncated, 1);
+    }
+
+    /// The lane size is the caller's setting, not a constant: a wider lane
+    /// takes the entry the default dropped, and reports nothing truncated.
+    #[test]
+    fn import_fills_the_configured_lane_rather_than_the_default() {
+        let tmp = setup_day(&["tasks/active/a.md"], &[], &[]);
+        for name in ["b", "c", "d"] {
+            fs::write(
+                tmp.path().join(format!("tasks/active/{name}.md")),
+                "---\nstatus: active\n---\n",
+            )
+            .unwrap();
+        }
+        let entries = [
+            "tasks/active/b.md",
+            "tasks/active/c.md",
+            "tasks/active/d.md",
+            "tasks/active/a.md",
+        ];
+        web_rewrites_top(&tmp, &entries);
+
+        let outcome = import_sized(&tmp, 5);
+        assert_eq!(outcome.imported, 4);
+        assert_eq!(outcome.truncated, 0);
+        assert_eq!(ids(&plan_of(&tmp).top), entries);
+    }
+
+    /// The quiet case: the lane already holds what fits, so nothing changes and
+    /// the run reports "already_current" -- but entries are still being dropped
+    /// on every poll. Reporting 0 there would hide it permanently.
+    #[test]
+    fn import_reports_truncation_even_when_the_lane_is_already_current() {
+        let tmp = setup_day(&["tasks/active/a.md"], &[], &[]);
+        for name in ["b", "c"] {
+            fs::write(
+                tmp.path().join(format!("tasks/active/{name}.md")),
+                "---\nstatus: active\n---\n",
+            )
+            .unwrap();
+        }
+        // The plan already holds what a lane of one can take, and the web wrote
+        // two more. No import will ever move them, so the run has to say so.
+        web_rewrites_top(
+            &tmp,
+            &["tasks/active/a.md", "tasks/active/b.md", "tasks/active/c.md"],
+        );
+
+        let outcome = import_sized(&tmp, 1);
+        assert!(!outcome.changed);
+        assert_eq!(outcome.reason.as_deref(), Some("already_current"));
+        assert_eq!(outcome.truncated, 2);
+    }
+
+    /// Out-of-range sizes are clamped, not trusted: the argument crosses IPC.
+    /// Zero would empty the lane; past the ceiling would build a plan
+    /// `validate_plan` rejects.
+    #[test]
+    fn import_clamps_a_caller_supplied_lane_size_into_range() {
+        let tmp = setup_day(&["tasks/active/a.md"], &[], &[]);
+        for name in ["b", "c"] {
+            fs::write(
+                tmp.path().join(format!("tasks/active/{name}.md")),
+                "---\nstatus: active\n---\n",
+            )
+            .unwrap();
+        }
+        web_rewrites_top(
+            &tmp,
+            &["tasks/active/b.md", "tasks/active/c.md", "tasks/active/a.md"],
+        );
+
+        let outcome = import_sized(&tmp, 0);
+        assert_eq!(outcome.imported, 1, "0 clamps up to 1");
+        assert_eq!(outcome.truncated, 2);
+        assert_eq!(ids(&plan_of(&tmp).top), ["tasks/active/b.md"]);
     }
 
     #[test]
