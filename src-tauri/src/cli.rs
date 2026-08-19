@@ -481,6 +481,7 @@ fn run_skills_update(args: &[String]) -> i32 {
 fn run_skills_sync(args: &[String]) -> i32 {
     let mut apply: Option<bool> = None;
     let mut tools: Option<Vec<String>> = None;
+    let mut retarget = false;
     let mut json = false;
     let mut index = 0;
     while index < args.len() {
@@ -499,6 +500,7 @@ fn run_skills_sync(args: &[String]) -> i32 {
                 }
                 apply = Some(true);
             }
+            "--retarget" => retarget = true,
             "--tools" => {
                 index += 1;
                 let Some(value) = args.get(index) else {
@@ -520,7 +522,9 @@ fn run_skills_sync(args: &[String]) -> i32 {
             "--json" => json = true,
             other => {
                 eprintln!("unknown option: {other}");
-                eprintln!("usage: maru skills sync --check|--apply --tools claude,codex [--json]");
+                eprintln!(
+                    "usage: maru skills sync --check|--apply --tools claude,codex [--retarget] [--json]"
+                );
                 return 2;
             }
         }
@@ -530,11 +534,15 @@ fn run_skills_sync(args: &[String]) -> i32 {
         eprintln!("--check or --apply required");
         return 2;
     };
+    if retarget && !apply {
+        eprintln!("--retarget requires --apply");
+        return 2;
+    }
     let Some(tools) = tools else {
         eprintln!("--tools required");
         return 2;
     };
-    match skills_sync_tools(current_work_path(), tools, apply) {
+    match skills_sync_tools(current_work_path(), tools, apply, retarget) {
         Ok(report) => {
             if json {
                 println!(
