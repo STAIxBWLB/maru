@@ -1332,6 +1332,7 @@ pub fn skills_doctor(work_path: Option<String>) -> Result<SkillDoctorReport, Str
     }
     apply_registry_validation(&mut registry);
     let mut report = build_doctor_report(&registry);
+    report.issues.extend(doctor_foreign_root_issues(&registry));
     if !scan_issues.is_empty() {
         report.issues.splice(0..0, scan_issues);
         report.ok = !report.issues.iter().any(|issue| issue.severity == "error");
@@ -1346,6 +1347,7 @@ pub fn skills_sync_tools(
     work_path: Option<String>,
     tools: Vec<String>,
     apply: bool,
+    retarget: bool,
 ) -> Result<SkillToolSyncReport, String> {
     let tools = normalize_sync_tools(tools)?;
     let _guard = registry_guard()?;
@@ -1397,9 +1399,9 @@ pub fn skills_sync_tools(
         ));
     }
 
-    let mut actions = plan_tool_sync(&registry, &desired, &tools)?;
+    let mut actions = plan_tool_sync(&registry, &desired, &tools, retarget)?;
     if apply {
-        preflight_tool_sync(&registry, &desired, &tools)?;
+        preflight_tool_sync(&registry, &desired, &tools, retarget)?;
         let selected_tools: BTreeSet<String> = tools.iter().cloned().collect();
         let desired_keys: BTreeSet<(String, String)> = desired
             .iter()
@@ -1441,7 +1443,37 @@ pub fn skills_sync_tools(
             let maru_entry = host_fs::skills_root()?.join(&skill.name);
             create_maru_entry_symlink(&maru_entry, &skill_path, &skill.name)?;
             for target in &tools {
-                let tool_target = install_target_path(target, &skill.name)?;
+                let tool_target = effective_install_target(&registry, target, &skill.name, retarget)?;
+                if retarget {
+                    // The only path that may rewrite targetPath: remove the
+                    // exact-owned chain at the recorded root before re-linking
+                    // under the ambient one.
+                    if let Some(existing) = registry.installs.iter().find(|install| {
+                        install.managed_by == "maru"
+                            && install.target == *target
+                            && install.installed_as == skill.name
+                    }) {
+                        let recorded = PathBuf::from(&existing.target_path);
+                        if recorded != tool_target && stale_install_has_exact_owned_chain(existing)
+                        {
+                            fs::remove_file(&recorded).map_err(|err| {
+                                format!(
+                                    "Cannot remove previous install link {}: {err}",
+                                    host_fs::display_path(&recorded)
+                                )
+                            })?;
+                        } else if recorded != tool_target
+                            && stale_copy_has_exact_owned_install(existing)
+                        {
+                            fs::remove_dir_all(&recorded).map_err(|err| {
+                                format!(
+                                    "Cannot remove previous copy install {}: {err}",
+                                    host_fs::display_path(&recorded)
+                                )
+                            })?;
+                        }
+                    }
+                }
                 create_install_target_symlink(&tool_target, &maru_entry, &skill_path, &skill.name)?;
                 let created_at = registry
                     .installs
@@ -1505,7 +1537,26 @@ fn preflight_tool_sync(
     registry: &SkillsRegistry,
     desired: &[SkillRecord],
     tools: &[String],
+    retarget: bool,
 ) -> Result<(), String> {
+    // Recorded installs pin the codex root. Applying against a different
+    // ambient root would silently re-adopt under it and strand the recorded
+    // root's links, so refuse unless the caller asked for the move.
+    if !retarget && tools.iter().any(|target| target == "codex") {
+        let recorded = recorded_install_roots(registry, "codex");
+        let ambient = install_root("codex")?;
+        if !recorded.is_empty() && !recorded.contains(&ambient) {
+            return Err(format!(
+                "codex_install_root_diverged: recorded root(s) {}, ambient root {}; re-run with --retarget to move the installs",
+                recorded
+                    .iter()
+                    .map(|root| host_fs::display_path(root))
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                host_fs::display_path(&ambient),
+            ));
+        }
+    }
     for skill in desired {
         let skill_path = PathBuf::from(&skill.abs_path);
         let maru_entry = host_fs::skills_root()?.join(&skill.name);
@@ -1519,7 +1570,7 @@ fn preflight_tool_sync(
             ));
         }
         for target in tools {
-            let tool_target = install_target_path(target, &skill.name)?;
+            let tool_target = effective_install_target(registry, target, &skill.name, retarget)?;
             if path_occupied(&tool_target)
                 && !symlink_target_path_equals(&tool_target, &maru_entry)
                 && !symlink_target_resolves_to(&tool_target, &skill_path)
@@ -1589,17 +1640,18 @@ fn stale_install_has_exact_owned_chain(install: &SkillInstall) -> bool {
     let Ok(installed_as) = host_fs::safe_entry_name(&install.installed_as) else {
         return false;
     };
-    let Ok(expected_target) = install_target_path(&install.target, &installed_as) else {
-        return false;
-    };
     let Ok(expected_entry) = host_fs::skills_root().map(|root| root.join(&installed_as)) else {
         return false;
     };
-    Path::new(&install.target_path) == expected_target
-        && Path::new(&install.entrypoint_path) == expected_entry
-        && is_symlink_path(&expected_target)
+    // Verify the recorded chain, wherever it was recorded. Recomputing the
+    // expected target from the ambient root made exact-owned foreign-root
+    // records look registry-only, which is how an ambient flip stranded one
+    // root's links while re-adopting the other.
+    let recorded_target = Path::new(&install.target_path);
+    Path::new(&install.entrypoint_path) == expected_entry
+        && is_symlink_path(recorded_target)
         && is_symlink_path(&expected_entry)
-        && symlink_target_path_equals(&expected_target, &expected_entry)
+        && symlink_target_path_equals(recorded_target, &expected_entry)
 }
 
 fn stale_copy_has_exact_owned_install(install: &SkillInstall) -> bool {
@@ -1609,11 +1661,9 @@ fn stale_copy_has_exact_owned_install(install: &SkillInstall) -> bool {
     let Ok(installed_as) = host_fs::safe_entry_name(&install.installed_as) else {
         return false;
     };
-    let Ok(expected_target) = install_target_path(&install.target, &installed_as) else {
-        return false;
-    };
-    Path::new(&install.target_path) == expected_target
-        && copy_install_is_maru_managed(&expected_target, &installed_as)
+    // Verify the marker at the recorded path, same as the symlink chain: the
+    // ambient root is not authoritative for an install made under another one.
+    copy_install_is_maru_managed(Path::new(&install.target_path), &installed_as)
 }
 
 fn remove_exact_stale_install_links(
@@ -1672,6 +1722,7 @@ fn plan_tool_sync(
     registry: &SkillsRegistry,
     desired: &[SkillRecord],
     tools: &[String],
+    retarget: bool,
 ) -> Result<Vec<SkillToolSyncAction>, String> {
     let mut actions = Vec::new();
     let desired_keys: BTreeSet<(String, String)> = desired
@@ -1695,7 +1746,7 @@ fn plan_tool_sync(
             });
         }
         for target in tools {
-            let tool_target = install_target_path(target, &skill.name)?;
+            let tool_target = effective_install_target(registry, target, &skill.name, retarget)?;
             if !symlink_target_path_equals(&tool_target, &maru_entry) {
                 actions.push(SkillToolSyncAction {
                     action: "link-tool".to_string(),
@@ -2852,8 +2903,19 @@ fn ensure_inventory_sources(registry: &mut SkillsRegistry) {
     ];
     for (id, kind, path, skills_subdir) in inventories {
         if !path.is_dir() {
-            registry.sources.retain(|source| source.id != id);
-            registry.skills.retain(|skill| skill.source_id != id);
+            // An ambient-root flip must not delete a source that still exists
+            // at its recorded path; keep the record and skip the rewrite.
+            let recorded_exists = registry
+                .sources
+                .iter()
+                .find(|source| source.id == id)
+                .and_then(|source| source.path.as_deref())
+                .map(|recorded| Path::new(recorded).is_dir())
+                .unwrap_or(false);
+            if !recorded_exists {
+                registry.sources.retain(|source| source.id != id);
+                registry.skills.retain(|skill| skill.source_id != id);
+            }
             continue;
         }
         clear_removed_source(registry, id);
@@ -4502,6 +4564,61 @@ fn doctor_issue(
     }
 }
 
+/// Maru-owned links sitting in a codex skills root that no install record
+/// points at. Candidates are the default `~/.codex/skills`, the ambient
+/// `CODEX_HOME` root, and every recorded root, so a link stranded by an
+/// ambient-root flip is visible from either side. Strictly read-only:
+/// read_dir, symlink_metadata, and read_link only.
+fn doctor_foreign_root_issues(registry: &SkillsRegistry) -> Vec<SkillDoctorIssue> {
+    let mut roots = recorded_install_roots(registry, "codex");
+    if let Ok(base) = host_fs::install_root_base() {
+        roots.insert(base.join(".codex").join("skills"));
+    }
+    if let Ok(ambient) = install_root("codex") {
+        roots.insert(ambient);
+    }
+    let Ok(skills_root) = host_fs::skills_root() else {
+        return Vec::new();
+    };
+    let mut issues = Vec::new();
+    for root in roots {
+        let Ok(entries) = fs::read_dir(&root) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let link_path = entry.path();
+            if !is_symlink_path(&link_path) {
+                continue;
+            }
+            let recorded = registry.installs.iter().any(|install| {
+                install.managed_by == "maru" && Path::new(&install.target_path) == link_path
+            });
+            if recorded {
+                continue;
+            }
+            let points_into_maru = host_fs::read_link_target(&link_path)
+                .map(|target| target.starts_with(&skills_root))
+                .unwrap_or(false);
+            if !points_into_maru {
+                continue;
+            }
+            let installed_as = entry.file_name().to_string_lossy().to_string();
+            issues.push(doctor_issue(
+                "warn",
+                "install_link_foreign_root",
+                Some(installed_as),
+                Vec::new(),
+                format!(
+                    "{} is a Maru-owned link in {}, which no install record uses",
+                    host_fs::display_path(&link_path),
+                    host_fs::display_path(&root),
+                ),
+            ));
+        }
+    }
+    issues
+}
+
 fn scan_source_with_progress(
     source: &SkillSource,
     progress: ProgressReporter<'_>,
@@ -5139,6 +5256,45 @@ fn install_root(target: &str) -> Result<PathBuf, String> {
 fn install_target_path(target: &str, installed_as: &str) -> Result<PathBuf, String> {
     let installed_as = host_fs::safe_entry_name(installed_as)?;
     Ok(install_root(target)?.join(installed_as))
+}
+
+/// Roots that already hold recorded installs for a target. The recorded root
+/// is the parent of `installs[].targetPath` — the root that was ambient when
+/// the install was made, which is the only durable record of it.
+fn recorded_install_roots(registry: &SkillsRegistry, target: &str) -> BTreeSet<PathBuf> {
+    registry
+        .installs
+        .iter()
+        .filter(|install| install.managed_by == "maru" && install.target == target)
+        .filter_map(|install| {
+            Path::new(&install.target_path)
+                .parent()
+                .map(|parent| parent.to_path_buf())
+        })
+        .collect()
+}
+
+/// Where the install for `(target, installed_as)` lives. An existing record
+/// pins the install to the root that was active when it was made; only new
+/// installs (or an explicit retarget) resolve against the ambient root.
+/// Recomputing from the environment on every run let a shell with a different
+/// `CODEX_HOME` silently re-adopt one root's links while stranding the other.
+fn effective_install_target(
+    registry: &SkillsRegistry,
+    target: &str,
+    installed_as: &str,
+    retarget: bool,
+) -> Result<PathBuf, String> {
+    if !retarget {
+        if let Some(install) = registry.installs.iter().find(|install| {
+            install.managed_by == "maru"
+                && install.target == target
+                && install.installed_as == installed_as
+        }) {
+            return Ok(PathBuf::from(&install.target_path));
+        }
+    }
+    install_target_path(target, installed_as)
 }
 
 fn normalize_install_target(target: &str) -> Result<String, String> {
@@ -5907,7 +6063,7 @@ mod tests {
 
         let reloaded = load_registry_readonly_unlocked().unwrap();
         assert_eq!(reloaded.sources[0].ownership_class, "external-managed");
-        let report = skills_sync_tools(None, vec!["claude".to_string()], false).unwrap();
+        let report = skills_sync_tools(None, vec!["claude".to_string()], false, false).unwrap();
         assert_eq!(report.desired_skills, embedded_builtin_skill_count());
         assert!(report
             .actions
@@ -6327,7 +6483,7 @@ mod tests {
         assert!(!builtin_root.exists());
         assert!(!registry_path.exists());
 
-        let checked = skills_sync_tools(None, vec!["claude".to_string()], false).unwrap();
+        let checked = skills_sync_tools(None, vec!["claude".to_string()], false, false).unwrap();
 
         assert!(!checked.applied);
         assert_eq!(checked.desired_skills, embedded_builtin_skill_count());
@@ -6371,7 +6527,7 @@ mod tests {
         let _home = test_home();
         let tools = vec!["claude".to_string(), "codex".to_string()];
 
-        let applied = skills_sync_tools(None, tools.clone(), true).unwrap();
+        let applied = skills_sync_tools(None, tools.clone(), true, false).unwrap();
         assert!(applied.applied);
         assert!(applied.desired_skills > 0);
         assert_eq!(applied.desired_installs, applied.desired_skills * 2);
@@ -6384,7 +6540,7 @@ mod tests {
                 && matches!(install.target.as_str(), "claude" | "codex")
         }));
 
-        let checked = skills_sync_tools(None, tools, false).unwrap();
+        let checked = skills_sync_tools(None, tools, false, false).unwrap();
         assert!(!checked.applied);
         assert!(checked.actions.is_empty());
     }
@@ -6428,7 +6584,7 @@ mod tests {
         .unwrap();
 
         let tools = vec!["claude".to_string(), "codex".to_string()];
-        let applied = skills_sync_tools(None, tools.clone(), true).unwrap();
+        let applied = skills_sync_tools(None, tools.clone(), true, false).unwrap();
         assert_eq!(applied.desired_skills, 45);
         assert_eq!(applied.desired_installs, 90);
 
@@ -6476,7 +6632,7 @@ mod tests {
 
         let registry_path = registry_path().unwrap();
         let before = fs::read(&registry_path).unwrap();
-        let checked = skills_sync_tools(None, tools, false).unwrap();
+        let checked = skills_sync_tools(None, tools, false, false).unwrap();
         assert!(checked.actions.is_empty());
         assert_eq!(checked.desired_skills, 45);
         assert_eq!(checked.desired_installs, 90);
@@ -6496,7 +6652,7 @@ mod tests {
         let skills_root = host_fs::skills_root().unwrap();
         materialize_builtin_bundle(&skills_root.join(BUILTIN_DIR_NAME)).unwrap();
         let tools = vec!["claude".to_string()];
-        skills_sync_tools(None, tools.clone(), true).unwrap();
+        skills_sync_tools(None, tools.clone(), true, false).unwrap();
         let registry = load_registry().unwrap();
         let mut names: Vec<_> = registry
             .skills
@@ -6517,7 +6673,7 @@ mod tests {
         host_fs::create_symlink_no_clobber(&collision_target, &unrelated_skill).unwrap();
         let registry_before = fs::read(registry_path().unwrap()).unwrap();
 
-        let error = skills_sync_tools(None, tools, true).unwrap_err();
+        let error = skills_sync_tools(None, tools, true, false).unwrap_err();
 
         assert!(error.contains("not a proven Maru-owned install link"));
         assert!(!path_occupied(&first_target));
@@ -6535,7 +6691,7 @@ mod tests {
         let safe_source = write_skill(&imported_root, "stale-safe");
         let unsafe_source = write_skill(&imported_root, "stale-unsafe");
         let tools = vec!["claude".to_string()];
-        skills_sync_tools(None, tools.clone(), true).unwrap();
+        skills_sync_tools(None, tools.clone(), true, false).unwrap();
         let safe_target = install_target_path("claude", "stale-safe").unwrap();
         let unsafe_target = install_target_path("claude", "stale-unsafe").unwrap();
         fs::remove_file(&unsafe_target).unwrap();
@@ -6547,7 +6703,7 @@ mod tests {
         fs::remove_dir_all(safe_source).unwrap();
         fs::remove_dir_all(unsafe_source).unwrap();
 
-        let checked = skills_sync_tools(None, tools.clone(), false).unwrap();
+        let checked = skills_sync_tools(None, tools.clone(), false, false).unwrap();
         assert!(checked.actions.iter().any(|action| {
             action.skill_name == "stale-safe" && action.action == "remove-stale-install"
         }));
@@ -6556,7 +6712,7 @@ mod tests {
                 && action.action == "remove-stale-record"
                 && action.reason.starts_with("registry-only")
         }));
-        skills_sync_tools(None, tools, true).unwrap();
+        skills_sync_tools(None, tools, true, false).unwrap();
 
         assert!(!path_occupied(&safe_target));
         assert!(!path_occupied(
@@ -6570,6 +6726,225 @@ mod tests {
         assert!(registry.installs.iter().all(|install| {
             !matches!(install.installed_as.as_str(), "stale-safe" | "stale-unsafe")
         }));
+    }
+
+    /// Move every codex install record and its link to `foreign_root`,
+    /// mimicking installs recorded while a different CODEX_HOME was ambient.
+    fn move_codex_installs_to_foreign_root(foreign_root: &Path) {
+        let mut registry = load_registry().unwrap();
+        for install in registry
+            .installs
+            .iter_mut()
+            .filter(|install| install.target == "codex")
+        {
+            let entry = PathBuf::from(&install.entrypoint_path);
+            let foreign = foreign_root.join(&install.installed_as);
+            host_fs::create_symlink_no_clobber(&foreign, &entry).unwrap();
+            let ambient = install_target_path("codex", &install.installed_as).unwrap();
+            if is_symlink_path(&ambient) {
+                fs::remove_file(&ambient).unwrap();
+            }
+            install.target_path = path_string(&foreign);
+        }
+        save_registry_unlocked(&registry).unwrap();
+    }
+
+    #[test]
+    fn sync_check_plans_no_actions_when_codex_records_live_in_foreign_root() {
+        let _home = test_home();
+        let imported_root = host_fs::skills_root().unwrap().join("_imported");
+        write_skill(&imported_root, "foreign-rooted");
+        let tools = vec!["codex".to_string()];
+        skills_sync_tools(None, tools.clone(), true, false).unwrap();
+        let foreign = TempDir::new().unwrap();
+        move_codex_installs_to_foreign_root(foreign.path());
+
+        let checked = skills_sync_tools(None, tools, false, false).unwrap();
+
+        assert!(
+            checked.actions.is_empty(),
+            "recorded foreign roots should plan no actions, got {:?}",
+            checked.actions
+        );
+    }
+
+    #[test]
+    fn sync_apply_refuses_when_ambient_codex_root_diverges_from_records() {
+        let _home = test_home();
+        let imported_root = host_fs::skills_root().unwrap().join("_imported");
+        write_skill(&imported_root, "foreign-rooted");
+        let tools = vec!["codex".to_string()];
+        skills_sync_tools(None, tools.clone(), true, false).unwrap();
+        let foreign = TempDir::new().unwrap();
+        move_codex_installs_to_foreign_root(foreign.path());
+
+        let error = skills_sync_tools(None, tools, true, false).unwrap_err();
+
+        assert!(error.contains("codex_install_root_diverged"), "{error}");
+        assert!(error.contains("--retarget"), "{error}");
+        let registry = load_registry().unwrap();
+        let foreign_prefix = path_string(foreign.path());
+        assert!(registry
+            .installs
+            .iter()
+            .filter(|install| install.target == "codex")
+            .all(|install| install.target_path.starts_with(&foreign_prefix)));
+        assert!(is_symlink_path(&foreign.path().join("foreign-rooted")));
+    }
+
+    #[test]
+    fn sync_apply_retarget_moves_codex_installs_to_the_ambient_root() {
+        let _home = test_home();
+        let imported_root = host_fs::skills_root().unwrap().join("_imported");
+        write_skill(&imported_root, "foreign-rooted");
+        let tools = vec!["codex".to_string()];
+        skills_sync_tools(None, tools.clone(), true, false).unwrap();
+        let foreign = TempDir::new().unwrap();
+        move_codex_installs_to_foreign_root(foreign.path());
+
+        skills_sync_tools(None, tools, true, true).unwrap();
+
+        let registry = load_registry().unwrap();
+        let record = registry
+            .installs
+            .iter()
+            .find(|install| install.target == "codex" && install.installed_as == "foreign-rooted")
+            .unwrap();
+        let ambient = install_target_path("codex", "foreign-rooted").unwrap();
+        assert_eq!(record.target_path, path_string(&ambient));
+        assert!(symlink_target_path_equals(
+            &ambient,
+            Path::new(&record.entrypoint_path)
+        ));
+        assert!(!path_occupied(&foreign.path().join("foreign-rooted")));
+    }
+
+    #[test]
+    fn sync_apply_retarget_removes_recorded_copy_install() {
+        let _home = test_home();
+        let imported_root = host_fs::skills_root().unwrap().join("_imported");
+        let skill_path = write_skill(&imported_root, "copy-rooted");
+        let tools = vec!["codex".to_string()];
+        skills_sync_tools(None, tools.clone(), true, false).unwrap();
+        // Convert the codex install into a copy-mode install recorded under a
+        // foreign root, as an install made while another CODEX_HOME was
+        // ambient would look.
+        let foreign = TempDir::new().unwrap();
+        let foreign_copy = foreign.path().join("copy-rooted");
+        let mut registry = load_registry().unwrap();
+        let record = registry
+            .installs
+            .iter_mut()
+            .find(|install| install.target == "codex" && install.installed_as == "copy-rooted")
+            .unwrap();
+        let ambient = install_target_path("codex", "copy-rooted").unwrap();
+        fs::remove_file(&ambient).unwrap();
+        install_copy(&foreign_copy, &skill_path, &record.skill_id, "copy-rooted").unwrap();
+        record.mode = "copy".to_string();
+        record.target_path = path_string(&foreign_copy);
+        save_registry_unlocked(&registry).unwrap();
+
+        skills_sync_tools(None, tools, true, true).unwrap();
+
+        assert!(!path_occupied(&foreign_copy));
+        let registry = load_registry().unwrap();
+        let record = registry
+            .installs
+            .iter()
+            .find(|install| install.target == "codex" && install.installed_as == "copy-rooted")
+            .unwrap();
+        assert_eq!(record.mode, "symlink");
+        assert_eq!(record.target_path, path_string(&ambient));
+        assert!(is_symlink_path(&ambient));
+    }
+
+    #[test]
+    fn stale_sync_removes_exact_owned_chain_at_recorded_foreign_path() {
+        let _home = test_home();
+        let imported_root = host_fs::skills_root().unwrap().join("_imported");
+        let source = write_skill(&imported_root, "stale-foreign");
+        let tools = vec!["codex".to_string()];
+        skills_sync_tools(None, tools.clone(), true, false).unwrap();
+        let foreign = TempDir::new().unwrap();
+        move_codex_installs_to_foreign_root(foreign.path());
+        fs::remove_dir_all(source).unwrap();
+
+        let checked = skills_sync_tools(None, tools.clone(), false, false).unwrap();
+        assert!(checked.actions.iter().any(|action| {
+            action.skill_name == "stale-foreign" && action.action == "remove-stale-install"
+        }));
+        // Apply needs --retarget here because the recorded root diverges; the
+        // stale sweep still cleans the recorded foreign chain.
+        skills_sync_tools(None, tools, true, true).unwrap();
+
+        assert!(!path_occupied(&foreign.path().join("stale-foreign")));
+        let registry = load_registry().unwrap();
+        assert!(registry
+            .installs
+            .iter()
+            .all(|install| install.installed_as != "stale-foreign"));
+    }
+
+    #[test]
+    fn doctor_reports_maru_owned_links_in_unrecorded_roots() {
+        let _home = test_home();
+        let imported_root = host_fs::skills_root().unwrap().join("_imported");
+        write_skill(&imported_root, "stranded-link");
+        let tools = vec!["codex".to_string()];
+        skills_sync_tools(None, tools, true, false).unwrap();
+        let foreign = TempDir::new().unwrap();
+        move_codex_installs_to_foreign_root(foreign.path());
+        // A Maru-owned link in the ambient root that no record points at.
+        let entry = host_fs::skills_root().unwrap().join("stranded-link");
+        let ambient = install_target_path("codex", "stranded-link").unwrap();
+        host_fs::create_symlink_no_clobber(&ambient, &entry).unwrap();
+        let registry_path = registry_path().unwrap();
+        let before = fs::read(&registry_path).unwrap();
+
+        let report = skills_doctor(None).unwrap();
+
+        assert!(
+            report.issues.iter().any(|issue| {
+                issue.code == "install_link_foreign_root"
+                    && issue.skill_name.as_deref() == Some("stranded-link")
+            }),
+            "missing install_link_foreign_root issue: {:?}",
+            report
+                .issues
+                .iter()
+                .map(|issue| &issue.code)
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(fs::read(&registry_path).unwrap(), before);
+    }
+
+    #[test]
+    fn inventory_sources_keep_recorded_codex_native_source_when_ambient_missing() {
+        let _home = test_home();
+        let recorded = TempDir::new().unwrap();
+        let system = recorded.path().join("skills").join(".system");
+        fs::create_dir_all(&system).unwrap();
+        let system_path = path_string(&system);
+        let mut registry = SkillsRegistry::default();
+        registry.sources.push(SkillSource {
+            id: CODEX_NATIVE_SOURCE_ID.to_string(),
+            kind: "tool-native".to_string(),
+            ownership_class: source_ownership_class(CODEX_NATIVE_SOURCE_ID, "tool-native"),
+            path: Some(system_path.clone()),
+            repo_url: None,
+            skills_subdir: ".".to_string(),
+            branch: None,
+            last_synced_at: None,
+        });
+
+        ensure_inventory_sources(&mut registry);
+
+        let source = registry
+            .sources
+            .iter()
+            .find(|source| source.id == CODEX_NATIVE_SOURCE_ID)
+            .expect("recorded source must survive a missing ambient path");
+        assert_eq!(source.path.as_deref(), Some(system_path.as_str()));
     }
 
     #[test]
@@ -6613,7 +6988,7 @@ mod tests {
         });
         save_registry_unlocked(&registry).unwrap();
 
-        let checked = skills_sync_tools(None, vec!["claude".to_string()], false).unwrap();
+        let checked = skills_sync_tools(None, vec!["claude".to_string()], false, false).unwrap();
         assert!(checked.actions.iter().any(|action| {
             action.skill_name == "stale-copy-safe" && action.action == "remove-stale-install"
         }));
@@ -6621,7 +6996,7 @@ mod tests {
             action.skill_name == "stale-copy-unsafe" && action.action == "keep-stale-record"
         }));
 
-        skills_sync_tools(None, vec!["claude".to_string()], true).unwrap();
+        skills_sync_tools(None, vec!["claude".to_string()], true, false).unwrap();
 
         assert!(!safe_target.exists());
         assert!(unsafe_target.is_dir());
