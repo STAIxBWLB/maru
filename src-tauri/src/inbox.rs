@@ -265,16 +265,12 @@ struct PendingManifestSource {
 struct PendingManifestMetadata {
     #[serde(default)]
     source_kind: Option<String>,
+    /// Read as a raw value so a malformed block (`null`, a scalar, or a
+    /// non-string `intake_mode`) degrades to "manual" instead of failing to
+    /// deserialize and aborting the whole scan. `ProcessedProcessingHints`
+    /// reads the same block for `project`.
     #[serde(default)]
-    processing_hints: PendingProcessingHints,
-}
-
-/// Mirrors `ProcessedProcessingHints`, which reads the same manifest block for
-/// `project`. Only the field this side needs is parsed.
-#[derive(Debug, Default, Deserialize)]
-struct PendingProcessingHints {
-    #[serde(default)]
-    intake_mode: Option<String>,
+    processing_hints: Option<YamlValue>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -1062,8 +1058,14 @@ fn scan_inbox_entries_with_config(
                         .map(|dt| dt.to_rfc3339())
                 });
             // Read before the literal below moves `manifest.metadata`.
-            let intake_mode =
-                normalize_intake_mode(manifest.metadata.processing_hints.intake_mode.as_deref());
+            let intake_mode = normalize_intake_mode(
+                manifest
+                    .metadata
+                    .processing_hints
+                    .as_ref()
+                    .and_then(|hints| hints.get("intake_mode"))
+                    .and_then(YamlValue::as_str),
+            );
             let title = manifest
                 .source
                 .original_name
@@ -3111,6 +3113,9 @@ inbox:
             ("upper-item", "  processing_hints:\n    intake_mode: '  AUTO  '\n"),
             ("garbage-item", "  processing_hints:\n    intake_mode: sideways\n"),
             ("empty-item", "  processing_hints:\n    intake_mode: ''\n"),
+            ("numeric-item", "  processing_hints:\n    intake_mode: 7\n"),
+            ("null-hints-item", "  processing_hints: null\n"),
+            ("scalar-hints-item", "  processing_hints: sideways\n"),
             ("no-hints-item", ""),
         ] {
             fs::create_dir_all(root.join(format!("inbox/items/pending/{item_id}"))).unwrap();
@@ -3134,6 +3139,9 @@ inbox:
         assert_eq!(mode_of("upper-item"), "auto", "trimmed and lowercased");
         assert_eq!(mode_of("garbage-item"), "manual", "unknown is not a third state");
         assert_eq!(mode_of("empty-item"), "manual");
+        assert_eq!(mode_of("numeric-item"), "manual", "non-string intake_mode");
+        assert_eq!(mode_of("null-hints-item"), "manual", "null block");
+        assert_eq!(mode_of("scalar-hints-item"), "manual", "non-map block");
         assert_eq!(mode_of("no-hints-item"), "manual", "absent block");
 
         let dropped = entries
