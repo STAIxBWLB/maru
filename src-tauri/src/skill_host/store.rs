@@ -1462,6 +1462,15 @@ pub fn skills_sync_tools(
                                     host_fs::display_path(&recorded)
                                 )
                             })?;
+                        } else if recorded != tool_target
+                            && stale_copy_has_exact_owned_install(existing)
+                        {
+                            fs::remove_dir_all(&recorded).map_err(|err| {
+                                format!(
+                                    "Cannot remove previous copy install {}: {err}",
+                                    host_fs::display_path(&recorded)
+                                )
+                            })?;
                         }
                     }
                 }
@@ -1652,11 +1661,9 @@ fn stale_copy_has_exact_owned_install(install: &SkillInstall) -> bool {
     let Ok(installed_as) = host_fs::safe_entry_name(&install.installed_as) else {
         return false;
     };
-    let Ok(expected_target) = install_target_path(&install.target, &installed_as) else {
-        return false;
-    };
-    Path::new(&install.target_path) == expected_target
-        && copy_install_is_maru_managed(&expected_target, &installed_as)
+    // Verify the marker at the recorded path, same as the symlink chain: the
+    // ambient root is not authoritative for an install made under another one.
+    copy_install_is_maru_managed(Path::new(&install.target_path), &installed_as)
 }
 
 fn remove_exact_stale_install_links(
@@ -6810,6 +6817,45 @@ mod tests {
             Path::new(&record.entrypoint_path)
         ));
         assert!(!path_occupied(&foreign.path().join("foreign-rooted")));
+    }
+
+    #[test]
+    fn sync_apply_retarget_removes_recorded_copy_install() {
+        let _home = test_home();
+        let imported_root = host_fs::skills_root().unwrap().join("_imported");
+        let skill_path = write_skill(&imported_root, "copy-rooted");
+        let tools = vec!["codex".to_string()];
+        skills_sync_tools(None, tools.clone(), true, false).unwrap();
+        // Convert the codex install into a copy-mode install recorded under a
+        // foreign root, as an install made while another CODEX_HOME was
+        // ambient would look.
+        let foreign = TempDir::new().unwrap();
+        let foreign_copy = foreign.path().join("copy-rooted");
+        let mut registry = load_registry().unwrap();
+        let record = registry
+            .installs
+            .iter_mut()
+            .find(|install| install.target == "codex" && install.installed_as == "copy-rooted")
+            .unwrap();
+        let ambient = install_target_path("codex", "copy-rooted").unwrap();
+        fs::remove_file(&ambient).unwrap();
+        install_copy(&foreign_copy, &skill_path, &record.skill_id, "copy-rooted").unwrap();
+        record.mode = "copy".to_string();
+        record.target_path = path_string(&foreign_copy);
+        save_registry_unlocked(&registry).unwrap();
+
+        skills_sync_tools(None, tools, true, true).unwrap();
+
+        assert!(!path_occupied(&foreign_copy));
+        let registry = load_registry().unwrap();
+        let record = registry
+            .installs
+            .iter()
+            .find(|install| install.target == "codex" && install.installed_as == "copy-rooted")
+            .unwrap();
+        assert_eq!(record.mode, "symlink");
+        assert_eq!(record.target_path, path_string(&ambient));
+        assert!(is_symlink_path(&ambient));
     }
 
     #[test]
