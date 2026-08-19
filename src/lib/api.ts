@@ -67,6 +67,7 @@ import type {
   InboxDropItem,
   InboxDropStageOutcome,
   InboxEntry,
+  InboxIntakeMode,
   InboxProcessedItem,
   InboxProcessedItemDetail,
   InboxProcessedSnapshot,
@@ -724,16 +725,22 @@ export async function scanInboxDrop(vaultPath: string, scanOptions?: ScanOptions
   return invoke<InboxDropItem[]>("scan_inbox_drop", { vaultPath, scanOptions: scanOptions ?? null });
 }
 
-export async function scanInboxEntries(workPath: string, scanOptions?: ScanOptions): Promise<InboxEntry[]> {
+export async function scanInboxEntries(
+  workPath: string,
+  scanOptions?: ScanOptions,
+  intakeMode?: InboxIntakeMode | "all",
+): Promise<InboxEntry[]> {
+  const args = {
+    workPath,
+    scanOptions: scanOptions ?? null,
+    intakeMode: intakeMode ?? null,
+  };
   if (!isTauri()) {
-    const override = await invokeE2EOverride<InboxEntry[]>("scan_inbox_entries", {
-      workPath,
-      scanOptions: scanOptions ?? null,
-    });
+    const override = await invokeE2EOverride<InboxEntry[]>("scan_inbox_entries", args);
     if (override) return override;
     return [];
   }
-  return invoke<InboxEntry[]>("scan_inbox_entries", { workPath, scanOptions: scanOptions ?? null });
+  return invoke<InboxEntry[]>("scan_inbox_entries", args);
 }
 
 export interface InboxProcessedQuery {

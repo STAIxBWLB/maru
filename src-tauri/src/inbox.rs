@@ -125,6 +125,10 @@ pub struct InboxEntry {
     pub route_path: Option<String>,
     pub size_bytes: u64,
     pub received_at: Option<String>,
+    /// Who staged the item: "auto" when an unattended producer did, "manual"
+    /// otherwise. Always one of the two, never absent, so the frontend has no
+    /// third case to handle.
+    pub intake_mode: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -261,6 +265,16 @@ struct PendingManifestSource {
 struct PendingManifestMetadata {
     #[serde(default)]
     source_kind: Option<String>,
+    #[serde(default)]
+    processing_hints: PendingProcessingHints,
+}
+
+/// Mirrors `ProcessedProcessingHints`, which reads the same manifest block for
+/// `project`. Only the field this side needs is parsed.
+#[derive(Debug, Default, Deserialize)]
+struct PendingProcessingHints {
+    #[serde(default)]
+    intake_mode: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -343,11 +357,17 @@ pub fn scan_inbox_drop(
 pub fn scan_inbox_entries(
     work_path: String,
     scan_options: Option<ScanOptions>,
+    intake_mode: Option<String>,
 ) -> Result<Vec<InboxEntry>, String> {
     let work = resolve_inside_vault(&work_path, ".")?;
     let scan_filter = ScanFilter::from_options(scan_options)?;
     let config = inbox_settings::load_runtime_config_or_legacy(&work)?;
-    scan_inbox_entries_with_config(&work, &config, &scan_filter)
+    let intake_mode = normalize_intake_mode_filter(intake_mode.as_deref())?;
+    let mut entries = scan_inbox_entries_with_config(&work, &config, &scan_filter)?;
+    if let Some(mode) = intake_mode {
+        entries.retain(|entry| entry.intake_mode == mode);
+    }
+    Ok(entries)
 }
 
 #[tauri::command(async)]
@@ -986,6 +1006,9 @@ fn scan_inbox_entries_with_config(
                     route_path: None,
                     size_bytes: metadata.len(),
                     received_at,
+                    // A dropped file carries no manifest, so nobody declared it
+                    // automated: a person put it there.
+                    intake_mode: "manual".to_string(),
                 });
             }
         }
@@ -1038,6 +1061,9 @@ fn scan_inbox_entries_with_config(
                         .map(DateTime::<Utc>::from)
                         .map(|dt| dt.to_rfc3339())
                 });
+            // Read before the literal below moves `manifest.metadata`.
+            let intake_mode =
+                normalize_intake_mode(manifest.metadata.processing_hints.intake_mode.as_deref());
             let title = manifest
                 .source
                 .original_name
@@ -1081,6 +1107,7 @@ fn scan_inbox_entries_with_config(
                 ),
                 size_bytes: 0,
                 received_at,
+                intake_mode,
             });
         }
     }
@@ -1903,6 +1930,32 @@ fn move_path_to_system_trash(path: &Path) -> Result<(), String> {
     #[cfg(not(target_os = "macos"))]
     {
         trash::delete(path).map_err(|err| format!("Cannot move inbox item to system trash: {err}"))
+    }
+}
+
+/// Item-level intake mode. Anything that is not exactly `auto` is a manual
+/// stage, including a missing block, an empty string, or a value some future
+/// producer invents: the two-way split is what the UI acts on, so a third
+/// state would only be a bug waiting to surface. Filter values are validated
+/// separately -- there, an unknown value is an error, not a silent default.
+fn normalize_intake_mode(raw: Option<&str>) -> String {
+    match raw.map(str::trim).map(str::to_lowercase).as_deref() {
+        Some("auto") => "auto".to_string(),
+        _ => "manual".to_string(),
+    }
+}
+
+/// Filter side of `normalize_intake_mode`. An unknown value is rejected rather
+/// than silently widened to "everything": a caller asking for a population that
+/// does not exist has a bug, and returning the whole list would hide it.
+fn normalize_intake_mode_filter(raw: Option<&str>) -> Result<Option<String>, String> {
+    let Some(value) = raw.map(str::trim).filter(|value| !value.is_empty()) else {
+        return Ok(None);
+    };
+    match value.to_lowercase().as_str() {
+        "all" => Ok(None),
+        mode @ ("auto" | "manual") => Ok(Some(mode.to_string())),
+        other => Err(format!("unsupported_inbox_intake_mode: {other}")),
     }
 }
 
@@ -2941,7 +2994,7 @@ metadata:
         )
         .unwrap();
 
-        let entries = scan_inbox_entries(root.to_string_lossy().to_string(), None).unwrap();
+        let entries = scan_inbox_entries(root.to_string_lossy().to_string(), None, None).unwrap();
 
         assert_eq!(entries.len(), 2);
         let drop_entry = entries
@@ -3009,7 +3062,7 @@ inbox:
             .unwrap();
         }
 
-        let entries = scan_inbox_entries(root.to_string_lossy().to_string(), None).unwrap();
+        let entries = scan_inbox_entries(root.to_string_lossy().to_string(), None, None).unwrap();
         let title_of = |item_id: &str| {
             entries
                 .iter()
@@ -3025,6 +3078,120 @@ inbox:
         );
         assert_eq!(title_of("260802-gws-blank-name"), "260802-gws-blank-name");
         assert_eq!(title_of("260803-gws-no-source"), "260803-gws-no-source");
+    }
+
+    /// The two populations are handled differently downstream, so the field has
+    /// to be present on every row and never ambiguous: anything that is not
+    /// exactly `auto` is a manual stage, and a dropped file has no manifest to
+    /// declare otherwise.
+    #[test]
+    fn scan_inbox_entries_reports_intake_mode_and_defaults_to_manual() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        fs::write(
+            root.join("workspace.config.yaml"),
+            r#"
+inbox:
+  root: inbox
+  channels:
+    gws:
+      provider: gws
+      kind: message
+      dedupe: sha256
+      drop_paths:
+        - drop/gws
+"#,
+        )
+        .unwrap();
+        fs::create_dir_all(root.join("inbox/drop/gws")).unwrap();
+        fs::write(root.join("inbox/drop/gws/note.md"), b"dropped by hand").unwrap();
+
+        for (item_id, hints) in [
+            ("auto-item", "  processing_hints:\n    intake_mode: auto\n"),
+            ("upper-item", "  processing_hints:\n    intake_mode: '  AUTO  '\n"),
+            ("garbage-item", "  processing_hints:\n    intake_mode: sideways\n"),
+            ("empty-item", "  processing_hints:\n    intake_mode: ''\n"),
+            ("no-hints-item", ""),
+        ] {
+            fs::create_dir_all(root.join(format!("inbox/items/pending/{item_id}"))).unwrap();
+            fs::write(
+                root.join(format!("inbox/items/pending/{item_id}/manifest.yaml")),
+                format!("id: {item_id}\nstatus: pending\nchannel: gws\nmetadata:\n{hints}"),
+            )
+            .unwrap();
+        }
+
+        let entries = scan_inbox_entries(root.to_string_lossy().to_string(), None, None).unwrap();
+        let mode_of = |id: &str| {
+            entries
+                .iter()
+                .find(|entry| entry.item_id.as_deref() == Some(id))
+                .unwrap_or_else(|| panic!("missing entry for {id}"))
+                .intake_mode
+                .clone()
+        };
+        assert_eq!(mode_of("auto-item"), "auto");
+        assert_eq!(mode_of("upper-item"), "auto", "trimmed and lowercased");
+        assert_eq!(mode_of("garbage-item"), "manual", "unknown is not a third state");
+        assert_eq!(mode_of("empty-item"), "manual");
+        assert_eq!(mode_of("no-hints-item"), "manual", "absent block");
+
+        let dropped = entries
+            .iter()
+            .find(|entry| entry.kind == "dropFile")
+            .expect("drop file entry");
+        assert_eq!(dropped.intake_mode, "manual", "no manifest to declare otherwise");
+    }
+
+    #[test]
+    fn scan_inbox_entries_filters_by_intake_mode_and_rejects_unknown_values() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        fs::write(
+            root.join("workspace.config.yaml"),
+            r#"
+inbox:
+  root: inbox
+  channels:
+    gws:
+      provider: gws
+      kind: message
+      dedupe: sha256
+      drop_paths:
+        - drop/gws
+"#,
+        )
+        .unwrap();
+        for (item_id, mode) in [("a-auto", "auto"), ("b-auto", "auto"), ("c-manual", "manual")] {
+            fs::create_dir_all(root.join(format!("inbox/items/pending/{item_id}"))).unwrap();
+            fs::write(
+                root.join(format!("inbox/items/pending/{item_id}/manifest.yaml")),
+                format!(
+                    "id: {item_id}\nstatus: pending\nchannel: gws\nmetadata:\n  processing_hints:\n    intake_mode: {mode}\n"
+                ),
+            )
+            .unwrap();
+        }
+        let work = root.to_string_lossy().to_string();
+        let ids = |mode: Option<&str>| {
+            let mut out: Vec<String> = scan_inbox_entries(work.clone(), None, mode.map(str::to_string))
+                .unwrap()
+                .iter()
+                .filter_map(|entry| entry.item_id.clone())
+                .collect();
+            out.sort();
+            out
+        };
+
+        assert_eq!(ids(None), vec!["a-auto", "b-auto", "c-manual"]);
+        assert_eq!(ids(Some("all")), vec!["a-auto", "b-auto", "c-manual"]);
+        assert_eq!(ids(Some("auto")), vec!["a-auto", "b-auto"]);
+        assert_eq!(ids(Some("manual")), vec!["c-manual"]);
+
+        // A filter nobody defined is a caller bug; returning everything would
+        // hide it behind a list that looks plausible.
+        let err = scan_inbox_entries(work, None, Some("sideways".to_string())).unwrap_err();
+        assert!(err.starts_with("unsupported_inbox_intake_mode"), "{err}");
     }
 
     /// `received_at` used to come from the manifest's mtime, so the dashboard's
@@ -3068,7 +3235,7 @@ inbox:
             .unwrap();
         }
 
-        let entries = scan_inbox_entries(root.to_string_lossy().to_string(), None).unwrap();
+        let entries = scan_inbox_entries(root.to_string_lossy().to_string(), None, None).unwrap();
         let received_of = |item_id: &str| {
             entries
                 .iter()
@@ -3125,7 +3292,7 @@ inbox:
         .unwrap();
         fs::write(root.join("inbox/drop/kakao/real.txt"), b"real").unwrap();
 
-        let default_entries = scan_inbox_entries(root.to_string_lossy().to_string(), None).unwrap();
+        let default_entries = scan_inbox_entries(root.to_string_lossy().to_string(), None, None).unwrap();
         assert_eq!(default_entries.len(), 1);
         assert_eq!(default_entries[0].title, "real.txt");
 
@@ -3134,6 +3301,7 @@ inbox:
             Some(ScanOptions {
                 include_dot_folders: vec!["inbox/drop/kakao/.omc".to_string()],
             }),
+            None,
         )
         .unwrap();
         assert_eq!(allowlisted.len(), 2);
@@ -3155,7 +3323,7 @@ inbox:
         fs::create_dir_all(root.join("incoming/spool/alpha")).unwrap();
         fs::write(root.join("incoming/spool/alpha/note.md"), b"legacy").unwrap();
 
-        let entries = scan_inbox_entries(root.to_string_lossy().to_string(), None).unwrap();
+        let entries = scan_inbox_entries(root.to_string_lossy().to_string(), None, None).unwrap();
 
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].kind, "dropFile");

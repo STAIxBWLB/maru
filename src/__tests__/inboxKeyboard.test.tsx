@@ -231,6 +231,7 @@ function inboxEntry(kind: InboxEntry["kind"], relPath: string): InboxEntry {
     routePath: null,
     sizeBytes: 4,
     receivedAt: null,
+    intakeMode: "manual",
   };
 }
 

@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   countInboxEntryChannels,
+  countInboxEntryIntakeModes,
   filterEntriesByChannel,
+  filterEntriesByIntakeMode,
   filterItemsBySource,
   groupEntriesByChannel,
   groupFilesBySource,
@@ -121,6 +123,33 @@ describe("groupFilesBySource", () => {
   });
 });
 
+describe("intake mode", () => {
+  const entry = (id: string, intakeMode: "auto" | "manual"): InboxEntry => ({
+    ...inboxEntry(id, "gws"),
+    intakeMode,
+  });
+
+  it("filters by population and treats null as everything", () => {
+    const entries = [entry("a", "auto"), entry("b", "manual"), entry("c", "auto")];
+    expect(filterEntriesByIntakeMode(entries, null)).toHaveLength(3);
+    expect(filterEntriesByIntakeMode(entries, "auto").map((e) => e.id)).toEqual(["a", "c"]);
+    expect(filterEntriesByIntakeMode(entries, "manual").map((e) => e.id)).toEqual(["b"]);
+  });
+
+  it("tallies the two populations in their own map", () => {
+    const counts = countInboxEntryIntakeModes([
+      entry("a", "auto"),
+      entry("b", "manual"),
+      entry("c", "auto"),
+    ]);
+    // Its own map on purpose: folding these into the channel counts would
+    // double any total summed from that map.
+    expect(counts.get("auto")).toBe(2);
+    expect(counts.get("manual")).toBe(1);
+    expect([...counts.keys()].sort()).toEqual(["auto", "manual"]);
+  });
+});
+
 function inboxEntry(id: string, channel: string): InboxEntry {
   return {
     id,
@@ -139,5 +168,6 @@ function inboxEntry(id: string, channel: string): InboxEntry {
     routePath: null,
     sizeBytes: 4,
     receivedAt: null,
+    intakeMode: "manual",
   };
 }

@@ -205,6 +205,7 @@ describe("inboxSummary", () => {
       summaryPath: null,
       routePath: null,
       sizeBytes: 0,
+      intakeMode: "manual",
       receivedAt: "2026-08-16T01:00:00Z",
     },
     {
@@ -223,6 +224,7 @@ describe("inboxSummary", () => {
       summaryPath: null,
       routePath: null,
       sizeBytes: 0,
+      intakeMode: "manual",
       receivedAt: "2026-08-14T01:00:00Z",
     },
   ];

@@ -34,6 +34,7 @@ function pendingEntry(overrides: Partial<InboxEntry>): InboxEntry {
     routePath: null,
     sizeBytes: 0,
     receivedAt: "2026-07-21T08:00:00+09:00",
+    intakeMode: "manual",
     ...overrides,
   };
 }
