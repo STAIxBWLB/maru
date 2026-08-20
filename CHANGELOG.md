@@ -8,6 +8,49 @@ because releases cut frequently during active development. Versions before
 Dates are the release-tag dates. Only `feat`/`fix`-level changes are listed;
 `chore(release)` version bumps and merge commits are omitted.
 
+## v0.4.57 - 2026-08-20 - Project Portfolio and Find in Document
+
+- **The dashboard names your projects (#256).** The registry carries 60+
+  projects and nothing on the pane mentioned a single one. A new portfolio card
+  lists the ones asking for a human: overdue work, or open work on a project
+  nothing has touched in two weeks. Sub-projects fold into their parent on the
+  card and split apart in the drilldown, where category chips filter the full
+  set. A footer counts open tasks that belong to no registered project, so the
+  per-project numbers are not read as the whole workload. Task matching reuses
+  the resolver Tasks mode uses, so the two screens cannot disagree. A new
+  `scan_project_activity` command supplies the last meeting day and the newest
+  file activity per project.
+- **Three widgets show what they were already loading (#256).** Today reports
+  carryover as a count, plus free and busy minutes, an over-capacity flag,
+  unconfirmed content, and stale sources. Inbox splits the pending queue into
+  automated and hand-staged. The agents tile breaks out status tiers, which had
+  been hiding failures behind an otherwise quiet "Running N".
+- **Catalog scans honour `force_refresh` (#256).** The parameter was bound and
+  ignored, so every call re-walked `projects/`, `admin/`, `meetings/`, `tasks/`
+  and `inbox/` and rewrote a cache only queries ever read. A cache under five
+  minutes old now serves passive reads; the notify watcher and the dashboard
+  Refresh button force a rescan.
+- **Find in document on Cmd+F (#257).** Cmd+F searches the document body in
+  both source and preview, and Cmd+A is scoped to the body rather than the
+  whole window.
+- **Preview search highlights survive a reference rewrap (#260).** The
+  knowledge-graph highlight pass unwraps and re-wraps its ranges whenever it
+  re-runs, which destroyed any search highlights sharing the preview. Reference
+  maps load asynchronously, so they routinely arrived after a search was already
+  active: the highlights vanished for good while the find bar kept counting
+  matches. Both passes now share the dependencies that trigger a rewrap. A
+  related case where the highlights are cleared right after being re-applied is
+  open as #261.
+- **Inbox pending can be filtered by intake mode (#254).** Items carry whether
+  they arrived automatically or were staged by hand, and the pending list
+  filters and counts on it. The dashboard uses the same split.
+- **Web-action imports fill the configured top lane (#253).** Reconciling a
+  web-rewritten `## Top` section used to truncate at three regardless of
+  `tasks.today.topLaneSize`, without saying so. It now fills to the configured
+  size and reports what it dropped.
+- **Codex skill installs stay on their recorded root (#255).** An install
+  pinned to one root could be silently retargeted; it now refuses instead.
+
 ## v0.4.56 - 2026-08-18 - Configurable Dashboard Rows and Top Lane
 
 - **Dashboard list length is a setting (#249).** Each list used to stop at a
