@@ -590,3 +590,49 @@ test("preview find marks survive a KG highlight re-run", async ({ page }) => {
   await expect(preview.locator("mark.find-mark")).toHaveCount(1);
   await expect(preview.locator("mark.find-mark-current")).toHaveCount(1);
 });
+
+// Same defect on the KG side: the preview container is React's, so a re-render
+// restores it and the reference marks go with it. The click-target instability
+// this spec already retries for is the same churn seen from the outside.
+test("preview KG marks survive a re-render that highlighting does not depend on", async ({
+  page,
+}) => {
+  await openMeetingDoc(page);
+  await page.getByTestId("kg-highlight-toggle").click();
+  await page.locator(".tab-trigger", { hasText: "미리보기" }).click();
+  const preview = page.locator(".preview-surface");
+  await expect(preview.locator("mark.kg-ref-mark")).toHaveCount(1);
+
+  const outline = page.getByRole("button", { name: "개요 닫기" });
+  if (await outline.count()) {
+    await outline.first().click();
+    await expect(preview.locator("mark.kg-ref-mark")).toHaveCount(1);
+  }
+
+  await page.setViewportSize({ width: 1100, height: 800 });
+  await expect(preview.locator("mark.kg-ref-mark")).toHaveCount(1);
+});
+
+// Reported as #261. This one passes without the repair pass too, because #260
+// made the find effect share the KG dependencies and a locale switch changes
+// one of them. It was observed failing before that, and the timing is what
+// decides, so it is kept as a guard on the scenario rather than as proof of
+// this fix.
+test("both mark kinds survive a locale switch with a search open", async ({ page }) => {
+  await openMeetingDoc(page);
+  await page.getByTestId("kg-highlight-toggle").click();
+  await page.locator(".tab-trigger", { hasText: "미리보기" }).click();
+  const preview = page.locator(".preview-surface");
+  await expect(preview.locator("mark.kg-ref-mark")).toHaveCount(1);
+
+  const mod = await page.evaluate(() =>
+    navigator.platform.toLowerCase().includes("mac") ? "Meta" : "Control",
+  );
+  await page.keyboard.press(`${mod}+f`);
+  await page.locator(".editor-find-input").fill("보고");
+  await expect(preview.locator("mark.find-mark")).toHaveCount(1);
+
+  await page.keyboard.press(`${mod}+Shift+l`);
+  await expect(preview.locator("mark.find-mark")).toHaveCount(1);
+  await expect(preview.locator("mark.kg-ref-mark")).toHaveCount(1);
+});

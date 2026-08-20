@@ -1,22 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
 
-// Preview find marks are applied imperatively by an effect in EditorPane.tsx,
-// against a container React also owns and two other effects also write. The
-// preview HTML itself arrives through a 200ms debounce and a dynamic import, so
-// the moment the marks land is not tied to anything this spec can await.
-//
-// The preview assertions below fail on CI roughly half the time and have never
-// reproduced locally, including at --repeat-each=12 and under 8-worker
-// contention. Retrying matches what e2e/graph.spec.ts and e2e/kg-references.spec.ts
-// already do for the same class of race in the same container.
-//
-// This is a mitigation, not a fix. One real defect in this area was found and
-// fixed (KG rewraps destroyed find marks; see the regression test in
-// kg-references.spec.ts), and a second, still unexplained one is filed as #261:
-// the effect re-runs and re-applies its marks, yet the container is cleared
-// immediately afterwards. Whatever fixes #261 should retire this declaration.
-test.describe.configure({ retries: process.env.CI ? 2 : 0 });
-
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
     if (window.sessionStorage.getItem("maru:e2e:storage-cleared") === "true") return;
@@ -142,4 +125,35 @@ test("Cmd+Shift+F focuses the document list search", async ({ page }) => {
   const listSearchCombo = await appCombo(page, "Shift+F");
   await page.keyboard.press(listSearchCombo);
   await expect(page.getByPlaceholder("제목, 경로, 메타데이터, 요약 검색")).toBeFocused();
+});
+
+// The preview container's content belongs to React through
+// dangerouslySetInnerHTML, so any re-render restores it and drops the marks the
+// find effect applied. Nothing in that effect's dependencies changes when an
+// unrelated control re-renders the editor, so before the repair pass the
+// highlights were gone for good while the find bar kept counting matches.
+test("preview find marks survive a re-render that find does not depend on", async ({ page }) => {
+  await openGlossary(page);
+  const findCombo = await appCombo(page, "f");
+  await page.locator(".tab-trigger", { hasText: "미리보기" }).click();
+  const preview = page.locator(".preview-surface");
+  await expect(preview).toContainText("Maru 용어집");
+
+  await page.keyboard.press(findCombo);
+  await page.locator(".editor-find-input").fill("본부");
+  await expect(preview.locator("mark.find-mark")).toHaveCount(3);
+  await expect(preview.locator("mark.find-mark-current")).toHaveCount(1);
+
+  // Toggling the outline re-renders the editor and touches nothing the find
+  // effect depends on.
+  const outline = page.getByRole("button", { name: "개요 닫기" });
+  if (await outline.count()) {
+    await outline.first().click();
+    await expect(preview.locator("mark.find-mark")).toHaveCount(3);
+  }
+
+  // A viewport change is layout-only and must not cost the highlights either.
+  await page.setViewportSize({ width: 1100, height: 800 });
+  await expect(preview.locator("mark.find-mark")).toHaveCount(3);
+  await expect(preview.locator("mark.find-mark-current")).toHaveCount(1);
 });
