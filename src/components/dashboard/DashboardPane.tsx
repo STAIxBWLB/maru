@@ -370,6 +370,35 @@ export function DashboardPane({
           </DashboardWidget>
 
 
+          {/* Recents rides beside Today: the full-width Projects band below
+              strands any card left alone on its side of it, which used to
+              leave Today above and Recents below in half-empty rows. */}
+          <DashboardWidget
+            kind="recents"
+            title={t("dashboard.widget.recents.title")}
+            count={recentEntries.length > 0 ? recentEntries.length : null}
+            onViewAll={() => openDrilldown("recents")}
+            loading={false}
+            empty={recentEntries.length === 0}
+            emptyLabel={t("dashboard.widget.recents.empty")}
+          >
+            <ul className="dashboard-list">
+              {topRecentEntries(recentEntries, listRows).map((entry) => (
+                <li key={entry.path}>
+                  <button
+                    type="button"
+                    className="dashboard-link"
+                    title={entry.title}
+                    onClick={() => onOpenDocument(entry)}
+                  >
+                    {entry.title}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </DashboardWidget>
+
+
           {/* The registry carries 60+ projects and nothing on this pane used to
               name a single one. Rows are the ones asking for a human: overdue
               work, or open work on a project nothing has touched in two weeks.
@@ -502,32 +531,6 @@ export function DashboardPane({
                 })}
               </p>
             ) : null}
-          </DashboardWidget>
-
-
-          <DashboardWidget
-            kind="recents"
-            title={t("dashboard.widget.recents.title")}
-            count={recentEntries.length > 0 ? recentEntries.length : null}
-            onViewAll={() => openDrilldown("recents")}
-            loading={false}
-            empty={recentEntries.length === 0}
-            emptyLabel={t("dashboard.widget.recents.empty")}
-          >
-            <ul className="dashboard-list">
-              {topRecentEntries(recentEntries, listRows).map((entry) => (
-                <li key={entry.path}>
-                  <button
-                    type="button"
-                    className="dashboard-link"
-                    title={entry.title}
-                    onClick={() => onOpenDocument(entry)}
-                  >
-                    {entry.title}
-                  </button>
-                </li>
-              ))}
-            </ul>
           </DashboardWidget>
         </div>
         </>
