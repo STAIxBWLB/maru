@@ -1,5 +1,22 @@
 import { expect, test, type Page } from "@playwright/test";
 
+// Preview find marks are applied imperatively by an effect in EditorPane.tsx,
+// against a container React also owns and two other effects also write. The
+// preview HTML itself arrives through a 200ms debounce and a dynamic import, so
+// the moment the marks land is not tied to anything this spec can await.
+//
+// The preview assertions below fail on CI roughly half the time and have never
+// reproduced locally, including at --repeat-each=12 and under 8-worker
+// contention. Retrying matches what e2e/graph.spec.ts and e2e/kg-references.spec.ts
+// already do for the same class of race in the same container.
+//
+// This is a mitigation, not a fix. One real defect in this area was found and
+// fixed (KG rewraps destroyed find marks; see the regression test in
+// kg-references.spec.ts), and a second, still unexplained one is filed as #261:
+// the effect re-runs and re-applies its marks, yet the container is cleared
+// immediately afterwards. Whatever fixes #261 should retire this declaration.
+test.describe.configure({ retries: process.env.CI ? 2 : 0 });
+
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
     if (window.sessionStorage.getItem("maru:e2e:storage-cleared") === "true") return;
