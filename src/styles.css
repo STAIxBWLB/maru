@@ -25613,9 +25613,10 @@ select:focus-visible,
 
 /* The workbench pins every pane to overflow: hidden because the other panes
  * scroll an inner region. The dashboard pane is itself the scroller, so the
- * pin must not win over its own overflow-y. One descendant selector covers
- * the primary, primary-surface, and secondary-surface placements. */
-.app-workbench .dashboard-pane {
+ * pin must not win over its own overflow-y. The second selector matches the
+ * primary-surface pin's three-class specificity; source order then decides. */
+.app-workbench .dashboard-pane,
+.app-workbench > .workbench-primary-surface > .dashboard-pane {
   overflow-y: auto;
 }
 
