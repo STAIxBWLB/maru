@@ -12,21 +12,26 @@ import { catalogQuery, type CatalogEntry, type CatalogItemKind } from "../../lib
 import {
   DASHBOARD_TASK_FILTERS,
   agentBoardSummary,
+  agentStatusTiers,
   catalogKindChips,
   dashboardLogicalDay,
   draftStatusCounts,
   filterTasksForDashboard,
   gitSummary,
+  inboxIntakeCounts,
   inboxSummary,
   planLaneCounts,
   planTopTitles,
+  projectPortfolio,
+  todayPressure,
   topRecentEntries,
   type DashboardTaskFilter,
   type DashboardView,
+  type ProjectPortfolioRow,
 } from "../../lib/dashboard";
 import { formatRelativeDate } from "../../lib/document";
 import { deriveDotSyncBadge } from "../../lib/dotSync";
-import { useTranslation } from "../../lib/i18n";
+import { useTranslation, type Locale } from "../../lib/i18n";
 import type { MaruAppMode, TasksSettings } from "../../lib/settings";
 import { taskFilterCounts, type TaskCalendarEvent, type TaskEntry } from "../../lib/tasks";
 import type { CalendarCommitment } from "../../lib/today";
@@ -39,6 +44,7 @@ import {
   useDashboardDrafts,
   useDashboardGit,
   useDashboardInbox,
+  useDashboardProjects,
   useDashboardSchedule,
   useDashboardSync,
   useDashboardTasks,
@@ -69,6 +75,7 @@ export function DashboardPane({
   const [view, setView] = useState<DashboardView>("overview");
   const [taskFilter, setTaskFilter] = useState<DashboardTaskFilter>("today");
   const [catalogKind, setCatalogKind] = useState<CatalogItemKind>("deadline-due");
+  const [projectCategoryFilter, setProjectCategoryFilter] = useState<string | null>(null);
   const [epoch, setEpoch] = useState(0);
 
   const today = useDashboardToday(workPath, effectiveSettings, epoch);
@@ -76,6 +83,7 @@ export function DashboardPane({
   const schedule = useDashboardSchedule(workPath, effectiveSettings, epoch, today.data?.logicalDay ?? null);
   const catalog = useDashboardCatalog(workPath, epoch);
   const inbox = useDashboardInbox(workPath, epoch);
+  const projects = useDashboardProjects(workPath, epoch);
   const agents = useDashboardAgents(workPath, epoch);
   const drafts = useDashboardDrafts(workPath, epoch);
   const git = useDashboardGit(workPath, epoch);
@@ -99,9 +107,16 @@ export function DashboardPane({
     () => (agents.data ? agentBoardSummary(agents.data) : null),
     [agents.data],
   );
+  const agentTiers = useMemo(() => agentStatusTiers(agents.data), [agents.data]);
+  const intakeCounts = useMemo(() => inboxIntakeCounts(inbox.data?.entries), [inbox.data]);
+  const portfolio = useMemo(
+    () => projectPortfolio(projects.data?.projects, projects.data?.activity, taskEntries, todayIso),
+    [projects.data, taskEntries, todayIso],
+  );
   const gitData = useMemo(() => gitSummary(git.data), [git.data]);
   const syncBadge = useMemo(() => deriveDotSyncBadge(sync.data), [sync.data]);
   const laneCounts = useMemo(() => planLaneCounts(today.data?.plan), [today.data]);
+  const pressure = useMemo(() => todayPressure(today.data), [today.data]);
   const topTitles = useMemo(
     () => planTopTitles(today.data?.plan, taskEntries, effectiveSettings.today.topLaneSize),
     [today.data, taskEntries, effectiveSettings.today.topLaneSize],
@@ -125,7 +140,9 @@ export function DashboardPane({
       ? t("dashboard.widget.tasks.title")
       : view === "catalog"
         ? t("dashboard.widget.catalog.title")
-        : t("dashboard.widget.recents.title");
+        : view === "projects"
+          ? t("dashboard.widget.projects.title")
+          : t("dashboard.widget.recents.title");
 
   return (
     <div className="dashboard-pane">
@@ -165,6 +182,13 @@ export function DashboardPane({
                   running: agentSummary.running,
                   scheduled: agentSummary.scheduled,
                 })}</p>
+                {agentTiers.length > 0 ? (
+                  <p className="dashboard-inline-meta muted">
+                    {agentTiers
+                      .map((tier) => `${t(`dashboard.agents.status.${tier.key}`)} ${tier.count}`)
+                      .join(" · ")}
+                  </p>
+                ) : null}
                 {agentSummary.nextRunAt ? (
                   <p className="muted">
                     {t("dashboard.agents.nextRun", {
@@ -282,6 +306,43 @@ export function DashboardPane({
                 })}
               </span>
             </div>
+            {/* Pressure the lanes line cannot answer. Carryover is a count on
+                purpose: this workspace runs three-digit piles, and a list of
+                them would bury the plan it sits above. */}
+            {pressure.carryovers > 0 ||
+            pressure.overCapacity ||
+            pressure.unconfirmed ||
+            pressure.staleSources > 0 ||
+            pressure.freeMinutes !== null ? (
+              <div className="dashboard-today-pressure">
+                {pressure.carryovers > 0 ? (
+                  <span className="dashboard-pill">
+                    {t("dashboard.today.carryover", { count: pressure.carryovers })}
+                  </span>
+                ) : null}
+                {pressure.overCapacity ? (
+                  <span className="dashboard-pill dashboard-pill-accent">
+                    {t("dashboard.today.overCapacity")}
+                  </span>
+                ) : null}
+                {pressure.unconfirmed ? (
+                  <span className="dashboard-pill">{t("dashboard.today.unconfirmed")}</span>
+                ) : null}
+                {pressure.staleSources > 0 ? (
+                  <span className="dashboard-pill">
+                    {t("dashboard.today.staleSources", { count: pressure.staleSources })}
+                  </span>
+                ) : null}
+                {pressure.freeMinutes !== null ? (
+                  <span className="dashboard-inline-meta muted">
+                    {t("dashboard.today.capacity", {
+                      free: pressure.freeMinutes,
+                      busy: pressure.busyMinutes ?? 0,
+                    })}
+                  </span>
+                ) : null}
+              </div>
+            ) : null}
             {topTitles.length > 0 ? (
               <ol className="dashboard-list">
                 {topTitles.map((title) => (
@@ -308,6 +369,38 @@ export function DashboardPane({
             ) : null}
           </DashboardWidget>
 
+
+          {/* The registry carries 60+ projects and nothing on this pane used to
+              name a single one. Rows are the ones asking for a human: overdue
+              work, or open work on a project nothing has touched in two weeks.
+              Sub-projects fold into their parent here and split apart in the
+              drilldown, which is the unit the project picker uses. */}
+          <DashboardWidget
+            kind="projects"
+            title={t("dashboard.widget.projects.title")}
+            count={portfolio.attentionCount > 0 ? portfolio.attentionCount : null}
+            onViewAll={() => openDrilldown("projects")}
+            loading={projects.loading}
+            error={projects.error}
+            onRetry={projects.refresh}
+            empty={portfolio.rows.length === 0}
+            emptyLabel={t("dashboard.widget.projects.empty")}
+          >
+            {portfolio.attention.length > 0 ? (
+              <ul className="dashboard-rows">
+                {portfolio.attention.slice(0, listRows).map((row) => (
+                  <ProjectRow key={row.id} row={row} locale={locale} t={t} />
+                ))}
+              </ul>
+            ) : (
+              <p className="dashboard-inline-meta muted">{t("dashboard.projects.allClear")}</p>
+            )}
+            {portfolio.unassignedOpenTasks > 0 ? (
+              <p className="dashboard-inline-meta muted">
+                {t("dashboard.projects.unassigned", { count: portfolio.unassignedOpenTasks })}
+              </p>
+            ) : null}
+          </DashboardWidget>
 
           {/* Task counts and catalog signals were two adjacent chip grids saying
               overlapping things: the catalog's `inbox-pending` and `task-due`
@@ -399,6 +492,16 @@ export function DashboardPane({
                 </li>
               ))}
             </ul>
+            {/* The badge above merges drop files with pending entries, which is
+                the right total but hides which half a human has to stage. */}
+            {intakeCounts.auto + intakeCounts.manual > 0 ? (
+              <p className="dashboard-inline-meta muted">
+                {t("dashboard.inbox.intake", {
+                  auto: intakeCounts.auto,
+                  manual: intakeCounts.manual,
+                })}
+              </p>
+            ) : null}
           </DashboardWidget>
 
 
@@ -455,6 +558,15 @@ export function DashboardPane({
               kind={catalogKind}
               chips={catalogChips}
               onSelectKind={setCatalogKind}
+            />
+          ) : view === "projects" ? (
+            <ProjectsDrilldown
+              portfolio={portfolio}
+              category={projectCategoryFilter}
+              locale={locale}
+              t={t}
+              onSelectCategory={setProjectCategoryFilter}
+              onOpenTasks={() => onOpenMode("tasks")}
             />
           ) : (
             <RecentsDrilldown entries={recentEntries} onOpenDocument={onOpenDocument} />
@@ -650,6 +762,106 @@ function CatalogDrilldown({ workPath, kind, chips, onSelectKind }: CatalogDrilld
   );
 }
 
+
+type Translate = (key: string, vars?: Record<string, string | number>) => string;
+
+interface ProjectRowProps {
+  row: ProjectPortfolioRow;
+  locale: Locale;
+  t: Translate;
+}
+
+/** One project line: what is late, what is open, and when the project last
+ *  showed a sign of life. Meeting day and file activity answer different
+ *  questions (people vs work), so both are shown when present. */
+function ProjectRow({ row, locale, t }: ProjectRowProps) {
+  const meta = [
+    row.overdueTasks > 0 ? t("dashboard.projects.overdue", { count: row.overdueTasks }) : null,
+    row.openTasks > 0 ? t("dashboard.projects.open", { count: row.openTasks }) : null,
+    row.lastActivityAt
+      ? t("dashboard.projects.lastActivity", {
+          time: formatRelativeDate(row.lastActivityAt, locale),
+        })
+      : t("dashboard.projects.noActivity"),
+    row.lastMeetingDay
+      ? t("dashboard.projects.lastMeeting", {
+          time: formatRelativeDate(row.lastMeetingDay, locale),
+        })
+      : null,
+  ].filter((value): value is string => Boolean(value));
+
+  return (
+    <li className="dashboard-row-static dashboard-project-row" title={row.path}>
+      <span className="dashboard-row-title">{row.name}</span>
+      <span className="dashboard-row-meta">{meta.join(" · ")}</span>
+    </li>
+  );
+}
+
+interface ProjectsDrilldownProps {
+  portfolio: ReturnType<typeof projectPortfolio>;
+  category: string | null;
+  locale: Locale;
+  t: Translate;
+  onSelectCategory: (category: string | null) => void;
+  onOpenTasks: () => void;
+}
+
+/** The full registry, unfolded to the same unit as the project picker, with
+ *  category chips built from the data (the registry has no category field, so
+ *  the labels are path segments and stay untranslated). */
+function ProjectsDrilldown({
+  portfolio,
+  category,
+  locale,
+  t,
+  onSelectCategory,
+  onOpenTasks,
+}: ProjectsDrilldownProps) {
+  const rows = category
+    ? portfolio.allRows.filter((row) => row.category === category)
+    : portfolio.allRows;
+
+  return (
+    <>
+      <div className="dashboard-chips">
+        <button
+          type="button"
+          className={`dashboard-chip${category === null ? " active" : ""}`}
+          onClick={() => onSelectCategory(null)}
+        >
+          {t("dashboard.projects.allCategories")}
+          <span className="dashboard-chip-count">{portfolio.allRows.length}</span>
+        </button>
+        {portfolio.categories.map((chip) => (
+          <button
+            key={chip.key}
+            type="button"
+            className={`dashboard-chip${category === chip.key ? " active" : ""}`}
+            onClick={() => onSelectCategory(chip.key)}
+          >
+            {chip.key}
+            <span className="dashboard-chip-count">{chip.count}</span>
+          </button>
+        ))}
+      </div>
+      {rows.length === 0 ? (
+        <p className="dashboard-widget-empty">{t("dashboard.widget.projects.empty")}</p>
+      ) : (
+        <ul className="dashboard-rows">
+          {rows.map((row) => (
+            <ProjectRow key={row.id} row={row} locale={locale} t={t} />
+          ))}
+        </ul>
+      )}
+      <div className="dashboard-drilldown-footer">
+        <Button size="sm" variant="secondary" onClick={onOpenTasks}>
+          {t("dashboard.projects.openTasks")}
+        </Button>
+      </div>
+    </>
+  );
+}
 
 interface RecentsDrilldownProps {
   entries: VaultEntry[];

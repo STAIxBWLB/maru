@@ -64,7 +64,11 @@ pub enum PlanLane {
 
 /// Reference from a plan item (or carryover) to the thing it schedules.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
-#[serde(tag = "kind", rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub enum PlanItemRef {
     Task { task_id: String },
     Capture { capture_id: String },
@@ -710,7 +714,9 @@ pub fn compute_capacity(
     };
     let end = local_instant(tz, sleep_date, sleep_start)?;
     if end <= start {
-        return Err(format!("today_invalid_day_window: {day_start}-{sleep_start}"));
+        return Err(format!(
+            "today_invalid_day_window: {day_start}-{sleep_start}"
+        ));
     }
     let window_minutes = (end - start).num_minutes().max(0) as u32;
     let busy_minutes = merge_busy_intervals(busy)
@@ -779,10 +785,7 @@ pub fn validate_plan(plan: &DailyPlanV1, sleep_start: NaiveTime, tz: Tz) -> Resu
     let mut seen: Vec<&PlanItemRef> = Vec::new();
     for item in plan.items() {
         if seen.contains(&&item.item_ref) {
-            return Err(format!(
-                "today_plan_duplicate_ref: {}",
-                item.item_ref.id()
-            ));
+            return Err(format!("today_plan_duplicate_ref: {}", item.item_ref.id()));
         }
         seen.push(&item.item_ref);
         if let Some(block) = &item.proposed_block {
@@ -921,13 +924,20 @@ mod tests {
     #[test]
     fn merges_overlapping_busy_intervals() {
         let tz = parse_timezone("Asia/Seoul").unwrap();
-        let at = |h: u32, m: u32| {
-            tz.with_ymd_and_hms(2026, 7, 21, h, m, 0).single().unwrap()
-        };
+        let at = |h: u32, m: u32| tz.with_ymd_and_hms(2026, 7, 21, h, m, 0).single().unwrap();
         let busy = vec![
-            BusyInterval { start: at(10, 0), end: at(11, 0) },
-            BusyInterval { start: at(10, 30), end: at(12, 0) },
-            BusyInterval { start: at(14, 0), end: at(14, 30) },
+            BusyInterval {
+                start: at(10, 0),
+                end: at(11, 0),
+            },
+            BusyInterval {
+                start: at(10, 30),
+                end: at(12, 0),
+            },
+            BusyInterval {
+                start: at(14, 0),
+                end: at(14, 30),
+            },
         ];
         let merged = merge_busy_intervals(&busy);
         assert_eq!(merged.len(), 2);
@@ -945,8 +955,14 @@ mod tests {
                 .unwrap()
         };
         let busy = vec![
-            BusyInterval { start: at(10, 0), end: at(11, 0) },
-            BusyInterval { start: at(10, 30), end: at(12, 0) },
+            BusyInterval {
+                start: at(10, 0),
+                end: at(11, 0),
+            },
+            BusyInterval {
+                start: at(10, 30),
+                end: at(12, 0),
+            },
         ];
         // 03:30 -> 21:30 = 1080 min window; busy merges to 120 min.
         let summary = compute_capacity(
@@ -992,7 +1008,9 @@ mod tests {
             logical_day: "2026-07-21".to_string(),
             input_revision: String::new(),
             top: vec![DailyPlanItem {
-                item_ref: PlanItemRef::Task { task_id: "a".to_string() },
+                item_ref: PlanItemRef::Task {
+                    task_id: "a".to_string(),
+                },
                 lane: PlanLane::Top,
                 order: 0,
                 outcome: None,
@@ -1003,7 +1021,9 @@ mod tests {
                 calendar_sync: CalendarSyncState::none(),
             }],
             flexible: vec![DailyPlanItem {
-                item_ref: PlanItemRef::Task { task_id: "b".to_string() },
+                item_ref: PlanItemRef::Task {
+                    task_id: "b".to_string(),
+                },
                 lane: PlanLane::Flexible,
                 order: 0,
                 outcome: None,
@@ -1062,7 +1082,9 @@ mod tests {
     #[test]
     fn validate_plan_enforces_top_cap_and_sleep_guard() {
         let item = |id: &str, block: Option<ProposedBlock>| DailyPlanItem {
-            item_ref: PlanItemRef::Task { task_id: id.to_string() },
+            item_ref: PlanItemRef::Task {
+                task_id: id.to_string(),
+            },
             lane: PlanLane::Top,
             order: 0,
             outcome: None,

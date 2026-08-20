@@ -1252,9 +1252,7 @@ mod tests {
         assert!(is_sensitive_git_path(
             ".maru/secrets/apple/keychain-password"
         ));
-        assert!(is_sensitive_git_path(
-            "nested/.maru/secrets/workspace.env"
-        ));
+        assert!(is_sensitive_git_path("nested/.maru/secrets/workspace.env"));
     }
 
     #[test]

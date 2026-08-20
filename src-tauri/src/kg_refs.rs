@@ -430,8 +430,7 @@ fn compute_document_refs(
                     break;
                 }
             }
-            if per_note >= MAX_ENTITY_SPANS_PER_NOTE
-                || total_entity_spans >= MAX_ENTITY_SPANS_TOTAL
+            if per_note >= MAX_ENTITY_SPANS_PER_NOTE || total_entity_spans >= MAX_ENTITY_SPANS_TOTAL
             {
                 break;
             }
@@ -465,7 +464,10 @@ fn compute_document_refs(
         let b0 = b.spans.first().map(|s| s.start).unwrap_or(usize::MAX);
         a0.cmp(&b0)
             .then_with(|| a.node_path.cmp(&b.node_path))
-            .then_with(|| (a.match_kind == KgRefMatchKind::Entity).cmp(&(b.match_kind == KgRefMatchKind::Entity)))
+            .then_with(|| {
+                (a.match_kind == KgRefMatchKind::Entity)
+                    .cmp(&(b.match_kind == KgRefMatchKind::Entity))
+            })
     });
 
     Ok(DocumentRefMap {
@@ -502,7 +504,9 @@ pub fn kg_document_refs(work_path: String, doc_path: String) -> Result<DocumentR
     let cache_file = cache_file_path(&work, &doc_rel);
     if let Ok(raw) = fs::read_to_string(&cache_file) {
         if let Ok(cached) = serde_json::from_str::<DocumentRefMap>(&raw) {
-            if cached.doc_path == doc_rel && cached.doc_hash == doc_hash && cached.vault_stamp == stamp
+            if cached.doc_path == doc_rel
+                && cached.doc_hash == doc_hash
+                && cached.vault_stamp == stamp
             {
                 return Ok(cached);
             }
@@ -539,9 +543,7 @@ pub fn kg_refs_clear(work_path: String, doc_path: Option<String>) -> Result<u32,
         }
         return Ok(0);
     }
-    let dir = KG_CACHE_REL
-        .iter()
-        .fold(work, |acc, part| acc.join(part));
+    let dir = KG_CACHE_REL.iter().fold(work, |acc, part| acc.join(part));
     if !dir.is_dir() {
         return Ok(0);
     }
@@ -601,7 +603,11 @@ mod tests {
         }
     }
 
-    fn refs_for<'a>(map: &'a DocumentRefMap, node_path: &str, kind: KgRefMatchKind) -> Option<&'a KgNodeRef> {
+    fn refs_for<'a>(
+        map: &'a DocumentRefMap,
+        node_path: &str,
+        kind: KgRefMatchKind,
+    ) -> Option<&'a KgNodeRef> {
         map.refs
             .iter()
             .find(|r| r.node_path == node_path && r.match_kind == kind)
@@ -620,11 +626,7 @@ mod tests {
         assert_eq!(alpha.spans.len(), 3, "frontmatter + two body wikilinks");
 
         // Byte offsets slice the raw content back to the exact wikilinks.
-        let texts: Vec<&str> = alpha
-            .spans
-            .iter()
-            .map(|s| &doc[s.start..s.end])
-            .collect();
+        let texts: Vec<&str> = alpha.spans.iter().map(|s| &doc[s.start..s.end]).collect();
         assert_eq!(texts, vec!["[[Alpha]]", "[[Alpha]]", "[[Alpha|별칭]]"]);
         assert_eq!(alpha.spans[0].start, doc.find("[[Alpha]]").unwrap());
 
@@ -681,7 +683,11 @@ mod tests {
         let map = kg_document_refs(work, "doc.md".to_string()).unwrap();
         let node = refs_for(&map, "notes/deep-note.md", KgRefMatchKind::Wikilink).unwrap();
         assert_eq!(node.node_title, "Deep Title");
-        assert_eq!(node.spans.len(), 4, "all four spellings resolve to the same note");
+        assert_eq!(
+            node.spans.len(),
+            4,
+            "all four spellings resolve to the same note"
+        );
     }
 
     #[test]
@@ -710,17 +716,31 @@ mod tests {
     fn entity_match_korean_substring_and_aliases() {
         let (temp, work) = workspace();
         write_file(temp.path(), "ai.md", "# 인공지능\n");
-        write_file(temp.path(), "team.md", "---\naliases:\n  - 알파팀\n---\n# Team Alpha\n");
+        write_file(
+            temp.path(),
+            "team.md",
+            "---\naliases:\n  - 알파팀\n---\n# Team Alpha\n",
+        );
         // Korean title matches as plain substring (인공지능 inside 인공지능학과);
         // the frontmatter alias matches too.
-        write_file(temp.path(), "doc.md", "# Doc\n\n인공지능학과와 알파팀이 협업한다.\n");
+        write_file(
+            temp.path(),
+            "doc.md",
+            "# Doc\n\n인공지능학과와 알파팀이 협업한다.\n",
+        );
         let map = kg_document_refs(work, "doc.md".to_string()).unwrap();
         assert_eq!(
-            refs_for(&map, "ai.md", KgRefMatchKind::Entity).unwrap().spans.len(),
+            refs_for(&map, "ai.md", KgRefMatchKind::Entity)
+                .unwrap()
+                .spans
+                .len(),
             1
         );
         assert_eq!(
-            refs_for(&map, "team.md", KgRefMatchKind::Entity).unwrap().spans.len(),
+            refs_for(&map, "team.md", KgRefMatchKind::Entity)
+                .unwrap()
+                .spans
+                .len(),
             1
         );
     }
@@ -732,7 +752,11 @@ mod tests {
         write_file(temp.path(), "omega.md", "# Omega\n");
         // Doc titled "Doc Omega"? No — self is doc.md; "Omega" appears only in
         // the frontmatter here, which must not entity-match.
-        write_file(temp.path(), "doc.md", "---\nrelated: Omega\n---\n# Doc\n\nQ is short.\n");
+        write_file(
+            temp.path(),
+            "doc.md",
+            "---\nrelated: Omega\n---\n# Doc\n\nQ is short.\n",
+        );
         let map = kg_document_refs(work, "doc.md".to_string()).unwrap();
         assert!(refs_for(&map, "q.md", KgRefMatchKind::Entity).is_none());
         assert!(refs_for(&map, "omega.md", KgRefMatchKind::Entity).is_none());
@@ -812,14 +836,24 @@ mod tests {
 
         sentinelize_cache(&work);
         let hit = kg_document_refs(work.clone(), "doc.md".to_string()).unwrap();
-        assert_eq!(hit.computed_at, "sentinel", "second call must be a cache hit");
+        assert_eq!(
+            hit.computed_at, "sentinel",
+            "second call must be a cache hit"
+        );
         assert_eq!(hit.refs, first.refs, "a hit serves the stored refs");
         assert_eq!(hit.doc_hash, first.doc_hash);
 
         // Doc content change invalidates the entry.
-        write_file(temp.path(), "doc.md", "# Doc\n\nSee [[Alpha]] twice [[Alpha]].\n");
+        write_file(
+            temp.path(),
+            "doc.md",
+            "# Doc\n\nSee [[Alpha]] twice [[Alpha]].\n",
+        );
         let recomputed = kg_document_refs(work.clone(), "doc.md".to_string()).unwrap();
-        assert_ne!(recomputed.computed_at, "sentinel", "doc change must recompute");
+        assert_ne!(
+            recomputed.computed_at, "sentinel",
+            "doc change must recompute"
+        );
         let alpha = refs_for(&recomputed, "Alpha.md", KgRefMatchKind::Wikilink).unwrap();
         assert_eq!(alpha.spans.len(), 2);
     }
@@ -841,7 +875,10 @@ mod tests {
         // After a scan picks the change up, the stamp flips and we recompute.
         scan_vault(work.clone(), None).unwrap();
         let recomputed = kg_document_refs(work.clone(), "doc.md".to_string()).unwrap();
-        assert_ne!(recomputed.computed_at, "sentinel", "vault change must recompute");
+        assert_ne!(
+            recomputed.computed_at, "sentinel",
+            "vault change must recompute"
+        );
     }
 
     #[test]
@@ -874,10 +911,16 @@ mod tests {
         kg_document_refs(work.clone(), "b.md".to_string()).unwrap();
         assert_eq!(cache_entry_count(&work), 2);
 
-        assert_eq!(kg_refs_clear(work.clone(), Some("a.md".to_string())).unwrap(), 1);
+        assert_eq!(
+            kg_refs_clear(work.clone(), Some("a.md".to_string())).unwrap(),
+            1
+        );
         assert_eq!(cache_entry_count(&work), 1);
         // Clearing a doc with no entry is a no-op.
-        assert_eq!(kg_refs_clear(work.clone(), Some("a.md".to_string())).unwrap(), 0);
+        assert_eq!(
+            kg_refs_clear(work.clone(), Some("a.md".to_string())).unwrap(),
+            0
+        );
         assert_eq!(kg_refs_clear(work.clone(), None).unwrap(), 1);
         assert_eq!(cache_entry_count(&work), 0);
         assert_eq!(kg_refs_clear(work.clone(), None).unwrap(), 0);

@@ -920,12 +920,8 @@ mod tests {
         let nested = root.path().join("nested");
         fs::create_dir_all(&nested).unwrap();
 
-        let registry = add_workspace_root(entry(
-            "Nested",
-            &nested.to_string_lossy(),
-            "private",
-        ))
-        .unwrap();
+        let registry =
+            add_workspace_root(entry("Nested", &nested.to_string_lossy(), "private")).unwrap();
 
         let sandboxed = config_dir
             .path()

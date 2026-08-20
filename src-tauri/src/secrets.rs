@@ -262,9 +262,8 @@ fn migrate_at(
                 ));
                 if !dry_run {
                     if paths.primary.exists() {
-                        fs::remove_dir(&paths.primary).map_err(|err| {
-                            format!("Cannot replace empty .maru/secrets: {err}")
-                        })?;
+                        fs::remove_dir(&paths.primary)
+                            .map_err(|err| format!("Cannot replace empty .maru/secrets: {err}"))?;
                     } else if let Some(parent) = paths.primary.parent() {
                         fs::create_dir_all(parent).map_err(|err| {
                             format!("Cannot create .maru directory for secrets: {err}")

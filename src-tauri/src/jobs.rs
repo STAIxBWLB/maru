@@ -162,7 +162,10 @@ pub fn label_for(job_id: &str, work_path: &Path) -> Result<String, String> {
     validate_job_id(job_id)?;
     let canonical = canonical_work_path(work_path)?;
     let digest = Sha256::digest(canonical.to_string_lossy().as_bytes());
-    let hex: String = digest[..4].iter().map(|byte| format!("{byte:02x}")).collect();
+    let hex: String = digest[..4]
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
     Ok(format!("{JOB_LABEL_PREFIX}{job_id}.{hex}"))
 }
 
@@ -247,10 +250,7 @@ pub fn plist_for(job: &JobRecord, work_path: &Path) -> Result<String, String> {
         .to_string();
 
     let mut program_arguments = String::new();
-    program_arguments.push_str(&format!(
-        "    <string>{}</string>\n",
-        xml_escape(&command)
-    ));
+    program_arguments.push_str(&format!("    <string>{}</string>\n", xml_escape(&command)));
     for arg in &args {
         program_arguments.push_str(&format!("    <string>{}</string>\n", xml_escape(arg)));
     }
@@ -394,10 +394,9 @@ fn guarded_plist_path_in(canonical_launch_agents: &Path, label: &str) -> Result<
     validate_label(label)?;
     let plist = canonical_launch_agents.join(format!("{label}.plist"));
     match fs::symlink_metadata(&plist) {
-        Ok(meta) if meta.file_type().is_symlink() => Err(format!(
-            "plist_is_symlink: {}",
-            plist.to_string_lossy()
-        )),
+        Ok(meta) if meta.file_type().is_symlink() => {
+            Err(format!("plist_is_symlink: {}", plist.to_string_lossy()))
+        }
         _ => Ok(plist),
     }
 }
@@ -496,7 +495,9 @@ fn status_for(job: &JobRecord, work_path: &Path) -> Result<JobStatus, String> {
         let uid = current_uid()?;
         let print = print_launchd_state(&uid, &label);
         let enabled = if print.loaded {
-            !launchd_disabled_labels(&uid).iter().any(|entry| entry == &label)
+            !launchd_disabled_labels(&uid)
+                .iter()
+                .any(|entry| entry == &label)
         } else {
             false
         };
@@ -659,10 +660,7 @@ fn tail_lines(path: &Path, max_lines: usize) -> String {
     let content = String::from_utf8_lossy(&buf);
     // Starting mid-file clips the first line; drop the fragment.
     let content: &str = if offset > 0 {
-        content
-            .split_once('\n')
-            .map(|(_, rest)| rest)
-            .unwrap_or("")
+        content.split_once('\n').map(|(_, rest)| rest).unwrap_or("")
     } else {
         &content
     };
@@ -771,8 +769,7 @@ mod tests {
 
     #[test]
     fn guard_refuses_plist_outside_launch_agents() {
-        let err = guarded_plist_path("com.maru.job.test.deadbeef/../../etc/evil")
-            .unwrap_err();
+        let err = guarded_plist_path("com.maru.job.test.deadbeef/../../etc/evil").unwrap_err();
         assert!(err.starts_with("job_label_refused") || err == "plist_outside_launch_agents");
     }
 
@@ -882,7 +879,9 @@ mod tests {
             ),
         )
         .unwrap();
-        assert!(load_jobs(dir.path()).unwrap_err().starts_with("job_id_duplicate"));
+        assert!(load_jobs(dir.path())
+            .unwrap_err()
+            .starts_with("job_id_duplicate"));
 
         fs::write(
             maru_dir.join("jobs.json"),

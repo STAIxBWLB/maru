@@ -9974,13 +9974,19 @@ button.git-badge:hover {
   padding: 0 22px 22px;
 }
 
-/* Four content cards, so above 1160px they sit two-up rather than shrinking to
-   a quarter each: "what is on me now" on the first row, the two queues below.
-   Held to two columns because the cards carry lists and chip rows, both of
-   which need width more than they need to sit side by side. */
+/* Content cards sit two-up above 1160px rather than shrinking to a quarter
+   each: "what is on me now" first, the queues below. Held to two columns
+   because the cards carry lists and chip rows, both of which need width more
+   than they need to sit side by side. */
 @media (min-width: 1160px) {
   .dashboard-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  /* Portfolio rows carry a name plus four metrics, which does not survive a
+     half-width column. It gets its own full-width band. */
+  .dashboard-widget-projects {
+    grid-column: 1 / -1;
   }
 }
 
@@ -10140,6 +10146,30 @@ button.git-badge:hover {
 .dashboard-sync-attention {
   border-color: var(--warn);
   color: var(--warn);
+}
+
+.dashboard-pill-accent {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* Pressure pills under the Today lanes, and the same wrapping behaviour the
+   lane summary uses so a long row reflows instead of overflowing the card. */
+.dashboard-today-pressure {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+/* One-line supporting figure under a list (intake split, agent tiers, the
+   unassigned-task footer). Truncates rather than widening its card. */
+.dashboard-inline-meta {
+  margin: 0;
+  overflow: hidden;
+  font-size: var(--type-meta-size);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .dashboard-today-summary {
@@ -10375,6 +10405,27 @@ button.git-badge:hover {
   flex: 0 0 auto;
   color: var(--faint);
   font-size: var(--type-meta-size);
+}
+
+/* The project name keeps priority; the metric string gives way and ellipsizes.
+   `.dashboard-row-meta` alone is `flex: 0 0 auto`, which would push a four-part
+   metric string past the card edge on a narrow column. */
+.dashboard-project-row .dashboard-row-title {
+  flex: 1 1 auto;
+}
+
+.dashboard-project-row .dashboard-row-meta {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dashboard-drilldown-footer {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 4px;
 }
 
 @media (max-width: 720px) {

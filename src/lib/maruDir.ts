@@ -5,6 +5,8 @@
 // exercised without the Tauri shell.
 
 import { invoke } from "@tauri-apps/api/core";
+
+import { invokeE2EOverride } from "./e2eInvoke";
 import type {
   MaruWorkspaceMeta,
   MaruWorkspaceMetaPatch,
@@ -590,6 +592,11 @@ export async function listWorkspaceProjects(
   includeInactive = false,
 ): Promise<ProjectPickerEntry[]> {
   if (!isTauri()) {
+    const override = await invokeE2EOverride<ProjectPickerEntry[]>("list_workspace_projects", {
+      workPath,
+      includeInactive,
+    });
+    if (override) return override;
     return [
       { id: "sample", name: "Sample Project", path: "projects/sample/", status: "active" },
     ];

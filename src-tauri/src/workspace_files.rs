@@ -713,55 +713,55 @@ fn scan_workspace_entries_at(
         .filter_map(|path| {
             let path = path.as_path();
             let link_metadata = fs::symlink_metadata(path).ok()?;
-        let is_symlink = link_metadata.file_type().is_symlink();
-        let target_metadata = if is_symlink {
-            fs::metadata(path).ok()
-        } else {
-            None
-        };
-        let target_kind = if is_symlink {
-            Some(match target_metadata.as_ref() {
-                Some(metadata) if metadata.is_dir() => WorkspaceEntryTargetKind::Directory,
-                Some(metadata) if metadata.is_file() => WorkspaceEntryTargetKind::File,
-                _ => WorkspaceEntryTargetKind::Missing,
-            })
-        } else {
-            None
-        };
-        let effective_metadata = target_metadata.as_ref().unwrap_or(&link_metadata);
-        let kind = if is_symlink {
-            WorkspaceEntryKind::Symlink
-        } else if link_metadata.is_dir() {
-            WorkspaceEntryKind::Directory
-        } else if link_metadata.is_file() {
-            WorkspaceEntryKind::File
-        } else {
-            return None;
-        };
-        let rel_path = path
-            .strip_prefix(vault)
-            .unwrap_or(path)
-            .to_string_lossy()
-            .replace('\\', "/");
-        let parent_rel_path = Path::new(&rel_path)
-            .parent()
-            .map(|value| value.to_string_lossy().replace('\\', "/"))
-            .unwrap_or_default();
-        let extension = path
-            .extension()
-            .and_then(|value| value.to_str())
-            .map(|value| value.to_ascii_lowercase());
-        let file_like =
-            kind == WorkspaceEntryKind::File || target_kind == Some(WorkspaceEntryTargetKind::File);
-        let file_kind = if kind == WorkspaceEntryKind::Directory
-            || target_kind == Some(WorkspaceEntryTargetKind::Directory)
-        {
-            "directory".to_string()
-        } else if kind == WorkspaceEntryKind::Symlink {
-            extension.clone().unwrap_or_else(|| "symlink".to_string())
-        } else {
-            extension.clone().unwrap_or_else(|| "file".to_string())
-        };
+            let is_symlink = link_metadata.file_type().is_symlink();
+            let target_metadata = if is_symlink {
+                fs::metadata(path).ok()
+            } else {
+                None
+            };
+            let target_kind = if is_symlink {
+                Some(match target_metadata.as_ref() {
+                    Some(metadata) if metadata.is_dir() => WorkspaceEntryTargetKind::Directory,
+                    Some(metadata) if metadata.is_file() => WorkspaceEntryTargetKind::File,
+                    _ => WorkspaceEntryTargetKind::Missing,
+                })
+            } else {
+                None
+            };
+            let effective_metadata = target_metadata.as_ref().unwrap_or(&link_metadata);
+            let kind = if is_symlink {
+                WorkspaceEntryKind::Symlink
+            } else if link_metadata.is_dir() {
+                WorkspaceEntryKind::Directory
+            } else if link_metadata.is_file() {
+                WorkspaceEntryKind::File
+            } else {
+                return None;
+            };
+            let rel_path = path
+                .strip_prefix(vault)
+                .unwrap_or(path)
+                .to_string_lossy()
+                .replace('\\', "/");
+            let parent_rel_path = Path::new(&rel_path)
+                .parent()
+                .map(|value| value.to_string_lossy().replace('\\', "/"))
+                .unwrap_or_default();
+            let extension = path
+                .extension()
+                .and_then(|value| value.to_str())
+                .map(|value| value.to_ascii_lowercase());
+            let file_like = kind == WorkspaceEntryKind::File
+                || target_kind == Some(WorkspaceEntryTargetKind::File);
+            let file_kind = if kind == WorkspaceEntryKind::Directory
+                || target_kind == Some(WorkspaceEntryTargetKind::Directory)
+            {
+                "directory".to_string()
+            } else if kind == WorkspaceEntryKind::Symlink {
+                extension.clone().unwrap_or_else(|| "symlink".to_string())
+            } else {
+                extension.clone().unwrap_or_else(|| "file".to_string())
+            };
             Some(WorkspaceEntryNode {
                 kind,
                 target_kind,
@@ -1334,7 +1334,10 @@ mod tests {
             .unwrap();
 
         assert_eq!(linked.kind, WorkspaceEntryKind::Symlink);
-        assert_eq!(linked.target_kind, Some(WorkspaceEntryTargetKind::Directory));
+        assert_eq!(
+            linked.target_kind,
+            Some(WorkspaceEntryTargetKind::Directory)
+        );
     }
 
     #[test]

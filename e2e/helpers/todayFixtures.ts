@@ -59,6 +59,10 @@ export interface TodaySeedOverrides {
   commitments?: unknown[];
   taskRows?: unknown[];
   inboxEntries?: unknown[];
+  /** Rows for list_workspace_projects (default: three registry projects). */
+  workspaceProjects?: unknown[];
+  /** Rows for scan_project_activity (default: matches workspaceProjects). */
+  projectActivity?: unknown[];
   /** Payload for catalog_scan (default: small deterministic report). */
   catalogReport?: unknown;
   /** Rows for catalog_query; filtered by req.kinds, capped by req.limit. */
@@ -146,6 +150,7 @@ function inboxEntry(input: {
   channel: string;
   title: string;
   receivedAt: string;
+  intakeMode?: string;
 }) {
   const manifestPath = `inbox/items/pending/${input.id}/manifest.yaml`;
   return {
@@ -165,6 +170,7 @@ function inboxEntry(input: {
     routePath: null,
     sizeBytes: 640,
     receivedAt: input.receivedAt,
+    intakeMode: input.intakeMode ?? "auto",
   };
 }
 
@@ -253,8 +259,17 @@ function defaultDocuments(): Record<string, { content: string; revision?: string
 
 function defaultTaskRows() {
   return [
-    taskRow(TASK_A, TASK_A_TITLE, "active", { priority: "high", due: FIXTURE_DAY }),
-    taskRow(TASK_B, TASK_B_TITLE, "active", { priority: "high" }),
+    taskRow(TASK_A, TASK_A_TITLE, "active", {
+      priority: "high",
+      due: FIXTURE_DAY,
+      project: "rise-a2cl",
+    }),
+    // On a project nothing has touched since April: open work on a quiet
+    // project is the portfolio card's second attention reason.
+    taskRow(TASK_B, TASK_B_TITLE, "active", {
+      priority: "high",
+      project: "oda-koica-tiu",
+    }),
     taskRow(TASK_C, TASK_C_TITLE, "active"),
     taskRow(TASK_D, "외부 위원 초청 일정 확정", "active"),
     taskRow(
@@ -264,6 +279,41 @@ function defaultTaskRows() {
       { done: FIXTURE_DAY, completedAt: "2026-07-21T09:05:00+09:00" },
       "archive",
     ),
+  ];
+}
+
+/** A parent, its sub-project, and an unrelated unit — enough to exercise
+ *  folding, category chips, and the attention sort. */
+function defaultWorkspaceProjects() {
+  return [
+    { id: "rise", name: "RISE 사업단", path: "projects/rise", status: "active" },
+    {
+      id: "rise-a2cl",
+      name: "A2CL 성장엔진",
+      path: "projects/rise/a2cl-growth-engine",
+      status: "active",
+    },
+    { id: "oda-koica-tiu", name: "KOICA TIU", path: "projects/oda/koica-tiu", status: "active" },
+  ];
+}
+
+function defaultProjectActivity() {
+  return [
+    // Fresh relative to FIXTURE_DAY, so RISE is active rather than quiet.
+    { id: "rise", path: "projects/rise", lastMeetingDay: "2026-07-18", lastActivityAt: "2026-07-20T18:00:00+09:00" },
+    {
+      id: "rise-a2cl",
+      path: "projects/rise/a2cl-growth-engine",
+      lastMeetingDay: "2026-07-19",
+      lastActivityAt: "2026-07-20T09:00:00+09:00",
+    },
+    // Untouched for months: open work here should read as gone quiet.
+    {
+      id: "oda-koica-tiu",
+      path: "projects/oda/koica-tiu",
+      lastMeetingDay: null,
+      lastActivityAt: "2026-04-02T09:00:00+09:00",
+    },
   ];
 }
 
@@ -521,14 +571,18 @@ export function buildTodaySeed(overrides: TodaySeedOverrides = {}) {
     catalogEntries: overrides.catalogEntries ?? defaultCatalogEntries(),
     catalogScanFailures: overrides.catalogScanFailures ?? 0,
     taskRows: overrides.taskRows ?? defaultTaskRows(),
+    workspaceProjects: overrides.workspaceProjects ?? defaultWorkspaceProjects(),
+    projectActivity: overrides.projectActivity ?? defaultProjectActivity(),
     inboxEntries:
       overrides.inboxEntries ??
-      CAPTURES.map((capture) =>
+      CAPTURES.map((capture, index) =>
         inboxEntry({
           id: capture.id,
           channel: capture.channel,
           title: capture.subject,
           receivedAt: capture.receivedAt,
+          // Mixed intake so the dashboard's auto/manual split has both halves.
+          intakeMode: index % 2 === 0 ? "auto" : "manual",
         }),
       ),
     documents: overrides.documents ?? defaultDocuments(),
@@ -573,6 +627,8 @@ export async function installTodayMocks(page: Page, seed: TodaySeed): Promise<vo
       commitments: clone(injected.commitments),
       taskRows: clone(injected.taskRows),
       inboxEntries: clone(injected.inboxEntries),
+      workspaceProjects: clone(injected.workspaceProjects),
+      projectActivity: clone(injected.projectActivity),
       documents: clone(injected.documents) as Record<string, { content: string; revision?: string }>,
       transitionCounter: 0,
       rolloverFailures: injected.rolloverFailures,
@@ -898,6 +954,13 @@ export async function installTodayMocks(page: Page, seed: TodaySeed): Promise<vo
       today_apply_plan_result: () => clone(state.snapshot),
       scan_task_notes: () => clone(state.taskRows),
       scan_inbox_entries: () => clone(state.inboxEntries),
+      list_workspace_projects: () => clone(state.workspaceProjects),
+      scan_project_activity: () => ({
+        generatedAt: "2026-07-21T03:30:00+09:00",
+        rows: clone(state.projectActivity),
+        warnings: [],
+        elapsedMs: 4,
+      }),
       read_document: (args) => {
         const path = String(args.documentPath ?? "");
         const doc = state.documents[path];

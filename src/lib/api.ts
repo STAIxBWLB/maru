@@ -99,6 +99,7 @@ import type {
   GapReport,
   GapReportSummary,
   DocumentRefMap,
+  ProjectActivityReport,
   SchedulerSchedule,
   SchedulerScheduleInput,
   ScratchpadSource,
@@ -462,6 +463,29 @@ export async function scanTaskNotes(
     return mockTaskNoteRows(workPath);
   }
   return invoke<TaskNoteRow[]>("scan_task_notes", { workPath, root: root ?? null });
+}
+
+export async function scanProjectActivity(
+  workPath: string,
+  meetingWindowDays?: number | null,
+): Promise<ProjectActivityReport> {
+  const empty: ProjectActivityReport = {
+    generatedAt: "",
+    rows: [],
+    warnings: [],
+    elapsedMs: 0,
+  };
+  if (!isTauri()) {
+    const override = await invokeE2EOverride<ProjectActivityReport>("scan_project_activity", {
+      workPath,
+      meetingWindowDays: meetingWindowDays ?? null,
+    });
+    return override ?? empty;
+  }
+  return invoke<ProjectActivityReport>("scan_project_activity", {
+    workPath,
+    meetingWindowDays: meetingWindowDays ?? null,
+  });
 }
 
 export async function readTaskMetadata(

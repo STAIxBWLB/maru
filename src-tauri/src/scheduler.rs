@@ -6,7 +6,9 @@
 // schedule whose nextRunAt lies in the past fires exactly once (catch-up)
 // and is then re-aligned to its next future slot.
 
-use crate::agents::{agent_can_run_standalone, get_agent, global_ai_settings, AgentRecord, GlobalAiSettings};
+use crate::agents::{
+    agent_can_run_standalone, get_agent, global_ai_settings, AgentRecord, GlobalAiSettings,
+};
 use crate::approval::{require_approval, ApprovalState};
 use crate::atomic_file::write_atomic;
 use crate::skill_host::skills_dispatch_background;
@@ -257,9 +259,13 @@ fn set_enabled_impl(work_path: &str, id: &str, enabled: bool) -> Result<Schedule
     schedules[index].enabled = enabled;
     if enabled && schedules[index].next_run_at.is_none() {
         let schedule = &schedules[index];
-        schedules[index].next_run_at =
-            compute_next_run(Local::now(), schedule.hour, schedule.minute, &schedule.days_of_week)
-                .map(|next| next.to_rfc3339());
+        schedules[index].next_run_at = compute_next_run(
+            Local::now(),
+            schedule.hour,
+            schedule.minute,
+            &schedule.days_of_week,
+        )
+        .map(|next| next.to_rfc3339());
     }
     save_schedules(&work, &schedules)?;
     Ok(schedules[index].clone())
@@ -303,8 +309,10 @@ fn build_dispatch_prompt(work: &Path, skill_id: &str, prompt: &str) -> String {
     }
     let stripped = crate::gap::strip_gap_feedback_section(prompt);
     let entries = crate::gap::read_gap_log_entries(work).unwrap_or_default();
-    let digest =
-        crate::gap::build_gap_feedback_digest(&entries, crate::gap::GAP_FEEDBACK_DEFAULT_MAX_ENTRIES);
+    let digest = crate::gap::build_gap_feedback_digest(
+        &entries,
+        crate::gap::GAP_FEEDBACK_DEFAULT_MAX_ENTRIES,
+    );
     if stripped.trim().is_empty() && digest.is_empty() {
         return prompt.to_string();
     }
@@ -420,11 +428,7 @@ fn dispatch_metadata(
 
 /// `<sourceId>::<name>` -> `<name>`; anything else passes through.
 fn skill_name_of(skill_id: &str) -> String {
-    skill_id
-        .rsplit("::")
-        .next()
-        .unwrap_or(skill_id)
-        .to_string()
+    skill_id.rsplit("::").next().unwrap_or(skill_id).to_string()
 }
 
 fn dispatch_schedule(
@@ -464,13 +468,9 @@ fn run_due_for_workspace(app: &AppHandle, work: &Path, now: DateTime<Local>) -> 
         // corrupt state must never launch an AI mission.
         if let Some(next) = schedule.next_run_at.as_deref() {
             if DateTime::parse_from_rfc3339(next).is_err() {
-                let realigned = compute_next_run(
-                    now,
-                    schedule.hour,
-                    schedule.minute,
-                    &schedule.days_of_week,
-                )
-                .map(|value| value.to_rfc3339());
+                let realigned =
+                    compute_next_run(now, schedule.hour, schedule.minute, &schedule.days_of_week)
+                        .map(|value| value.to_rfc3339());
                 let mut updated = schedules.clone();
                 if let Some(index) = find_schedule(&updated, &schedule.id) {
                     updated[index].next_run_at = realigned;
@@ -609,11 +609,7 @@ pub fn scheduler_add(
 }
 
 #[tauri::command]
-pub fn scheduler_remove(
-    app: AppHandle,
-    work_path: String,
-    id: String,
-) -> Result<(), String> {
+pub fn scheduler_remove(app: AppHandle, work_path: String, id: String) -> Result<(), String> {
     remove_impl(&work_path, &id)?;
     emit_scheduler_changed(&app, &work_path);
     Ok(())
@@ -632,11 +628,7 @@ pub fn scheduler_set_enabled(
 }
 
 #[tauri::command]
-pub fn scheduler_run_now(
-    app: AppHandle,
-    work_path: String,
-    id: String,
-) -> Result<String, String> {
+pub fn scheduler_run_now(app: AppHandle, work_path: String, id: String) -> Result<String, String> {
     validate_schedule_id(&id)?;
     let work = crate::vault::normalize_existing_dir(&work_path)?;
     let schedules = load_schedules(&work)?;
@@ -673,7 +665,12 @@ mod tests {
 
     fn local(y: i32, mo: u32, d: u32, h: u32, mi: u32) -> DateTime<Local> {
         Local
-            .from_local_datetime(&chrono::NaiveDate::from_ymd_opt(y, mo, d).unwrap().and_hms_opt(h, mi, 0).unwrap())
+            .from_local_datetime(
+                &chrono::NaiveDate::from_ymd_opt(y, mo, d)
+                    .unwrap()
+                    .and_hms_opt(h, mi, 0)
+                    .unwrap(),
+            )
             .single()
             .unwrap()
     }
@@ -738,10 +735,16 @@ mod tests {
         // 2026-11-01 falls back 02:00 EDT -> 01:00 EST, so 01:30 happens twice.
         let now = ny(2026, 11, 1, 0, 30);
         let next = compute_next_run(now, 1, 30, &[]).expect("ambiguous slot must resolve");
-        assert_eq!(next.date_naive(), chrono::NaiveDate::from_ymd_opt(2026, 11, 1).unwrap());
+        assert_eq!(
+            next.date_naive(),
+            chrono::NaiveDate::from_ymd_opt(2026, 11, 1).unwrap()
+        );
         // 01:30 EDT (05:30 UTC), the earlier of the two instants.
         assert_eq!(next.naive_utc(), ny(2026, 11, 1, 1, 30).naive_utc());
-        assert_eq!(next.naive_utc().time(), chrono::NaiveTime::from_hms_opt(5, 30, 0).unwrap());
+        assert_eq!(
+            next.naive_utc().time(),
+            chrono::NaiveTime::from_hms_opt(5, 30, 0).unwrap()
+        );
     }
 
     #[test]
@@ -749,7 +752,10 @@ mod tests {
         // 2026-03-08 springs forward 02:00 -> 03:00, so 02:30 does not exist.
         let now = ny(2026, 3, 8, 0, 30);
         let next = compute_next_run(now, 2, 30, &[]).expect("nonexistent slot must skip the day");
-        assert_eq!(next.date_naive(), chrono::NaiveDate::from_ymd_opt(2026, 3, 9).unwrap());
+        assert_eq!(
+            next.date_naive(),
+            chrono::NaiveDate::from_ymd_opt(2026, 3, 9).unwrap()
+        );
     }
 
     #[test]
@@ -758,7 +764,10 @@ mod tests {
         // and push a Sunday-only schedule out a full week.
         let now = ny(2026, 3, 7, 23, 30);
         let next = compute_next_run(now, 9, 0, &[0]).expect("Sunday slot must be found");
-        assert_eq!(next.date_naive(), chrono::NaiveDate::from_ymd_opt(2026, 3, 8).unwrap());
+        assert_eq!(
+            next.date_naive(),
+            chrono::NaiveDate::from_ymd_opt(2026, 3, 8).unwrap()
+        );
         assert_eq!(next.date_naive().weekday().num_days_from_sunday(), 0);
     }
 
@@ -774,7 +783,10 @@ mod tests {
     fn due_detection_covers_catch_up() {
         let now = Local::now();
         let past = sample_schedule(Some("2000-01-01T00:00:00+00:00".to_string()), true);
-        assert!(is_due(&past, now), "past nextRunAt must fire once (catch-up)");
+        assert!(
+            is_due(&past, now),
+            "past nextRunAt must fire once (catch-up)"
+        );
         let future = sample_schedule(Some("2999-01-01T00:00:00+00:00".to_string()), true);
         assert!(!is_due(&future, now));
         let fresh = sample_schedule(None, true);
@@ -797,14 +809,20 @@ mod tests {
             "a fired schedule that could not re-align must not fire every tick"
         );
         let never_ran = sample_schedule(None, true);
-        assert!(is_due(&never_ran, now), "fresh or migrated schedule fires once");
+        assert!(
+            is_due(&never_ran, now),
+            "fresh or migrated schedule fires once"
+        );
     }
 
     #[test]
     fn persistence_round_trip() {
         let temp = TempDir::new().unwrap();
         assert!(load_schedules(temp.path()).unwrap().is_empty());
-        let schedules = vec![sample_schedule(Some("2026-07-31T09:30:00+09:00".to_string()), true)];
+        let schedules = vec![sample_schedule(
+            Some("2026-07-31T09:30:00+09:00".to_string()),
+            true,
+        )];
         save_schedules(temp.path(), &schedules).unwrap();
         let loaded = load_schedules(temp.path()).unwrap();
         assert_eq!(loaded, schedules);
@@ -1135,7 +1153,10 @@ mod tests {
             prompt: baked.clone(),
             ..sample_schedule(None, true) // skill_id "vault-sync"
         };
-        assert_eq!(build_dispatch_prompt(temp.path(), &schedule.skill_id, &schedule.prompt), baked);
+        assert_eq!(
+            build_dispatch_prompt(temp.path(), &schedule.skill_id, &schedule.prompt),
+            baked
+        );
     }
 
     #[test]
@@ -1155,7 +1176,10 @@ mod tests {
             )],
         );
         let legacy = format!("do stuff\n\n{GAP_FEEDBACK_SECTION_HEADER}\n\nstale digest");
-        let prompt = { let schedule = inbox_schedule(&legacy); build_dispatch_prompt(temp.path(), &schedule.skill_id, &schedule.prompt) };
+        let prompt = {
+            let schedule = inbox_schedule(&legacy);
+            build_dispatch_prompt(temp.path(), &schedule.skill_id, &schedule.prompt)
+        };
         assert!(!prompt.contains("stale digest"), "{prompt}");
         assert_eq!(
             prompt.matches(GAP_FEEDBACK_SECTION_HEADER).count(),
@@ -1199,17 +1223,23 @@ mod tests {
     fn dispatch_prompt_without_log_returns_stripped_bare_prompt() {
         let temp = TempDir::new().unwrap(); // no gap log at all
         let legacy = format!("do stuff\n\n{GAP_FEEDBACK_SECTION_HEADER}\n\nstale digest");
-        let prompt = { let schedule = inbox_schedule(&legacy); build_dispatch_prompt(temp.path(), &schedule.skill_id, &schedule.prompt) };
+        let prompt = {
+            let schedule = inbox_schedule(&legacy);
+            build_dispatch_prompt(temp.path(), &schedule.skill_id, &schedule.prompt)
+        };
         assert_eq!(prompt, "do stuff");
     }
 
     #[test]
     fn dispatch_prompt_keeps_original_when_strip_would_leave_nothing() {
         let temp = TempDir::new().unwrap(); // no gap log -> no fresh digest
-        // A legacy schedule whose stored prompt was ONLY the baked-in digest
-        // section: stripping must not produce an empty dispatch prompt.
+                                            // A legacy schedule whose stored prompt was ONLY the baked-in digest
+                                            // section: stripping must not produce an empty dispatch prompt.
         let only_digest = format!("{GAP_FEEDBACK_SECTION_HEADER}\n\nstale digest");
-        let prompt = { let schedule = inbox_schedule(&only_digest); build_dispatch_prompt(temp.path(), &schedule.skill_id, &schedule.prompt) };
+        let prompt = {
+            let schedule = inbox_schedule(&only_digest);
+            build_dispatch_prompt(temp.path(), &schedule.skill_id, &schedule.prompt)
+        };
         assert_eq!(prompt, only_digest);
     }
 
@@ -1222,6 +1252,9 @@ mod tests {
             prompt: baked.clone(),
             ..sample_schedule(None, true)
         };
-        assert_eq!(build_dispatch_prompt(temp.path(), &schedule.skill_id, &schedule.prompt), baked);
+        assert_eq!(
+            build_dispatch_prompt(temp.path(), &schedule.skill_id, &schedule.prompt),
+            baked
+        );
     }
 }

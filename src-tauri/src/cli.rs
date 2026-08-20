@@ -384,9 +384,7 @@ fn run_skills_update(args: &[String]) -> i32 {
                     let active = status
                         .active
                         .as_ref()
-                        .map(|active| {
-                            format!("{} (r{})", active.display_version, active.revision)
-                        })
+                        .map(|active| format!("{} (r{})", active.display_version, active.revision))
                         .unwrap_or_else(|| "none".to_string());
                     let channel = status
                         .available
@@ -402,8 +400,10 @@ fn run_skills_update(args: &[String]) -> i32 {
                         } else {
                             let mut blockers = Vec::new();
                             if !status.dirty_skills.is_empty() {
-                                blockers
-                                    .push(format!("local edits: {}", status.dirty_skills.join(", ")));
+                                blockers.push(format!(
+                                    "local edits: {}",
+                                    status.dirty_skills.join(", ")
+                                ));
                             }
                             if status.env_update_required {
                                 blockers.push("env update required (--repair-env)".to_string());
@@ -457,14 +457,10 @@ fn run_skills_update(args: &[String]) -> i32 {
                 0
             }
             Err(err)
-                if err.starts_with("bundle_not_newer")
-                    || err == "bundle_update_not_available" =>
+                if err.starts_with("bundle_not_newer") || err == "bundle_update_not_available" =>
             {
                 if json {
-                    println!(
-                        "{}",
-                        serde_json::json!({ "updated": false, "reason": err })
-                    );
+                    println!("{}", serde_json::json!({ "updated": false, "reason": err }));
                 } else {
                     println!("up to date ({err})");
                 }
@@ -992,10 +988,7 @@ mod tests {
 
     #[test]
     fn skills_update_requires_explicit_mode() {
-        assert_eq!(
-            run_cli(vec!["skills".to_string(), "update".to_string()]),
-            2
-        );
+        assert_eq!(run_cli(vec!["skills".to_string(), "update".to_string()]), 2);
     }
 
     #[test]

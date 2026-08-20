@@ -113,8 +113,6 @@ mod tests {
             repo_url: None,
         });
         assert!(!report.valid);
-        assert!(report
-            .errors
-            .contains(&"skills_subdir_invalid".to_string()));
+        assert!(report.errors.contains(&"skills_subdir_invalid".to_string()));
     }
 }

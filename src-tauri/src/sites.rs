@@ -61,8 +61,8 @@ fn read_sites_internal(path: &Path) -> Result<JsonValue, String> {
         write_sites_file(path, &value)?;
         return Ok(value);
     }
-    let buf = fs::read_to_string(path)
-        .map_err(|err| format!("Cannot read {}: {err}", path.display()))?;
+    let buf =
+        fs::read_to_string(path).map_err(|err| format!("Cannot read {}: {err}", path.display()))?;
     if buf.trim().is_empty() {
         let value = default_sites_value();
         write_sites_file(path, &value)?;
@@ -134,9 +134,7 @@ fn astro_site_re() -> &'static Regex {
     // matches:  site: 'https://halla.ai',  |  site: "https://x"  |  site: `https://x`
     // \b instead of a line maru so one-line configs
     // (`export default { site: '...' }`) match too.
-    RE.get_or_init(|| {
-        Regex::new(r#"\bsite\s*:\s*["'`](https?://[^"'`\s]+)["'`]"#).unwrap()
-    })
+    RE.get_or_init(|| Regex::new(r#"\bsite\s*:\s*["'`](https?://[^"'`\s]+)["'`]"#).unwrap())
 }
 
 fn readme_keyword_re() -> &'static Regex {
@@ -445,7 +443,10 @@ mod tests {
             &dir.join("package.json"),
             r#"{ "name": "alpha", "homepage": "https://homepage.example", "scripts": { "dev": "astro dev" } }"#,
         );
-        write(&dir.join("README.md"), "# Alpha\n\nLive: https://readme.example\n");
+        write(
+            &dir.join("README.md"),
+            "# Alpha\n\nLive: https://readme.example\n",
+        );
         let out = scan_work_sites(tmp.path().to_string_lossy().to_string()).unwrap();
         let c = candidate_for(&out, "alpha");
         assert_eq!(c.url.as_deref(), Some("https://alpha.example"));
@@ -459,10 +460,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let dir = tmp.path().join("bravo");
         write(&dir.join("docs/CNAME"), "courses.jeju.ai\n");
-        write(
-            &dir.join("package.json"),
-            r#"{ "name": "bravo" }"#,
-        );
+        write(&dir.join("package.json"), r#"{ "name": "bravo" }"#);
         let out = scan_work_sites(tmp.path().to_string_lossy().to_string()).unwrap();
         let c = candidate_for(&out, "bravo");
         assert_eq!(c.url.as_deref(), Some("https://courses.jeju.ai"));
@@ -477,7 +475,10 @@ mod tests {
             &dir.join("package.json"),
             r#"{ "name": "charlie", "homepage": "https://charlie.example/", "scripts": { "dev": "next dev" } }"#,
         );
-        write(&dir.join("README.md"), "# Charlie\n\nLive: https://readme.example\n");
+        write(
+            &dir.join("README.md"),
+            "# Charlie\n\nLive: https://readme.example\n",
+        );
         let out = scan_work_sites(tmp.path().to_string_lossy().to_string()).unwrap();
         let c = candidate_for(&out, "charlie");
         assert_eq!(c.url.as_deref(), Some("https://charlie.example"));

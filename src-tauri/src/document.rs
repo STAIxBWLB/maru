@@ -1,6 +1,8 @@
 use crate::filename_rules::{validate_filename_stem, validate_folder_name};
 use crate::frontmatter::{build_frontmatter, update_frontmatter_content, FrontmatterValue};
-use crate::vault::{is_document_extension, parse_frontmatter, resolve_inside_vault, slugify, title_from_content};
+use crate::vault::{
+    is_document_extension, parse_frontmatter, resolve_inside_vault, slugify, title_from_content,
+};
 use crate::vault_guard::{is_managed_root, validate_managed_write};
 use crate::vault_list::{assert_document_owner, assert_maru_can_write, WorkspaceWriteAction};
 use chrono::Utc;

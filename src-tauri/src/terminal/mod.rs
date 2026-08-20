@@ -1052,8 +1052,9 @@ fn build_terminal_command_spec(
     if kind == "kiro" && !shell_wrapper {
         // kiro-cli parses some flags (e.g. `--v3`) only at the top level,
         // before the `chat` subcommand; everything else stays after it.
-        let (top_level, rest): (Vec<String>, Vec<String>) =
-            extras.into_iter().partition(|arg| is_kiro_top_level_flag(arg));
+        let (top_level, rest): (Vec<String>, Vec<String>) = extras
+            .into_iter()
+            .partition(|arg| is_kiro_top_level_flag(arg));
         args.splice(..0, top_level);
         args.extend(rest);
     } else {
@@ -1087,7 +1088,9 @@ fn is_kiro_top_level_flag(arg: &str) -> bool {
 }
 
 fn is_shell_wrapper(program: &str, args: &[String]) -> bool {
-    let shell = Path::new(program).file_name().and_then(|name| name.to_str());
+    let shell = Path::new(program)
+        .file_name()
+        .and_then(|name| name.to_str());
     matches!(shell, Some("sh" | "bash" | "dash" | "ksh" | "zsh" | "fish"))
         && matches!(args.first().map(String::as_str), Some("-c" | "-lc"))
 }
@@ -1231,7 +1234,10 @@ mod tests {
         let drafts = crate::scratchpad::resolve_scratchpad_drafts_root(work.path()).unwrap();
         let mut caller_env = HashMap::new();
         caller_env.insert("MARU_SCRATCHPAD".to_string(), "/tmp/override".to_string());
-        caller_env.insert("MARU_DRAFTS".to_string(), "/tmp/override/drafts".to_string());
+        caller_env.insert(
+            "MARU_DRAFTS".to_string(),
+            "/tmp/override/drafts".to_string(),
+        );
         caller_env.insert("MARU_TEMP".to_string(), "/tmp/override/temp".to_string());
         caller_env.insert(
             "CLAUDE_CODE_TMPDIR".to_string(),
@@ -1318,7 +1324,10 @@ mod tests {
         )
         .unwrap();
         assert_eq!(spec.program, "/usr/local/bin/codex-1.5");
-        assert_eq!(spec.args, vec!["--cd", cwd_str.as_str(), "--profile", "dev"]);
+        assert_eq!(
+            spec.args,
+            vec!["--cd", cwd_str.as_str(), "--profile", "dev"]
+        );
 
         let shell =
             build_terminal_command_spec("shell", Some(&cwd_str), Some("/bin/dash"), None, None)

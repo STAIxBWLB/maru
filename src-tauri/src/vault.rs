@@ -512,14 +512,16 @@ pub fn read_vault_cache(vault_path: String) -> Result<Option<Vec<VaultEntry>>, S
     // A cache written before scratchpad exclusion still holds those entries;
     // drop them here so the first paint matches what the scan will return.
     let scratchpad_prefix = excluded_scratchpad_rel_prefix(&vault);
-    Ok(read_vault_cache_envelope(&vault)?.map(|cache| match scratchpad_prefix {
-        Some(prefix) => cache
-            .entries
-            .into_iter()
-            .filter(|entry| !entry.rel_path.starts_with(&prefix))
-            .collect(),
-        None => cache.entries,
-    }))
+    Ok(
+        read_vault_cache_envelope(&vault)?.map(|cache| match scratchpad_prefix {
+            Some(prefix) => cache
+                .entries
+                .into_iter()
+                .filter(|entry| !entry.rel_path.starts_with(&prefix))
+                .collect(),
+            None => cache.entries,
+        }),
+    )
 }
 
 fn read_vault_cache_envelope(vault: &Path) -> Result<Option<VaultCacheEnvelope>, String> {
@@ -998,7 +1000,9 @@ mod tests {
 
     #[test]
     fn is_document_extension_matches_case_insensitively() {
-        for ext in ["md", "MD", "markdown", "Markdown", "html", "HTML", "htm", "Htm"] {
+        for ext in [
+            "md", "MD", "markdown", "Markdown", "html", "HTML", "htm", "Htm",
+        ] {
             assert!(is_document_extension(ext), "expected {ext} to match");
         }
         for ext in ["", "txt", "mdx", "html5"] {
@@ -1010,7 +1014,11 @@ mod tests {
     fn scan_vault_finds_uppercase_html_documents() {
         let tmp = TempDir::new().unwrap();
         let root = tmp.path();
-        write_file(root, "page.HTML", "<html><body><h1>Upper</h1></body></html>\n");
+        write_file(
+            root,
+            "page.HTML",
+            "<html><body><h1>Upper</h1></body></html>\n",
+        );
         let entries = scan_vault(root.to_string_lossy().to_string(), None).unwrap();
         assert!(
             entries.iter().any(|e| e.path.ends_with("page.HTML")),
@@ -1041,8 +1049,14 @@ mod tests {
             "draft?.md".to_string(),
         ];
         let hit = |rel: &str| matches_maruignore(Path::new(rel), &patterns);
-        assert!(hit("notes/scratch.tmp.md"), "segment glob matches at any depth");
-        assert!(hit("archive/2019-old/a.md"), "path glob matches a prefix dir");
+        assert!(
+            hit("notes/scratch.tmp.md"),
+            "segment glob matches at any depth"
+        );
+        assert!(
+            hit("archive/2019-old/a.md"),
+            "path glob matches a prefix dir"
+        );
         assert!(hit("draft1.md"));
         assert!(!hit("notes/keep.md"));
         assert!(!hit("archive/2020-new/a.md"));
@@ -1375,7 +1389,10 @@ mod tests {
             None,
         )
         .unwrap();
-        let rels: Vec<&str> = entries.iter().map(|entry| entry.rel_path.as_str()).collect();
+        let rels: Vec<&str> = entries
+            .iter()
+            .map(|entry| entry.rel_path.as_str())
+            .collect();
         assert_eq!(
             rels,
             vec!["kept.md"],
@@ -1396,7 +1413,10 @@ mod tests {
             None,
         )
         .unwrap();
-        let rels: Vec<&str> = entries.iter().map(|entry| entry.rel_path.as_str()).collect();
+        let rels: Vec<&str> = entries
+            .iter()
+            .map(|entry| entry.rel_path.as_str())
+            .collect();
         assert_eq!(rels, vec!["keep.md"], "maruignored paths must be absent");
     }
 
@@ -1446,7 +1466,10 @@ mod tests {
             None,
         )
         .unwrap();
-        let rels: Vec<&str> = entries.iter().map(|entry| entry.rel_path.as_str()).collect();
+        let rels: Vec<&str> = entries
+            .iter()
+            .map(|entry| entry.rel_path.as_str())
+            .collect();
         assert_eq!(
             rels,
             vec!["top.md"],

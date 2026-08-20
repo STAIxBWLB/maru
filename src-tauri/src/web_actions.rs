@@ -31,12 +31,8 @@ use crate::today::{
     TaskTransitionRequest, TodayMutation, TOP_LANE_DEFAULT, TOP_LANE_MAX,
 };
 use crate::today_lifecycle::{move_file, task_transition};
-use crate::today_outbox::{
-    enqueue_record, has_web_action, OutboxOp, OutboxStatus, UpsertPayload,
-};
-use crate::today_store::{
-    load_snapshot, today_mutate, JOURNAL_END_MARKER, JOURNAL_START_MARKER,
-};
+use crate::today_outbox::{enqueue_record, has_web_action, OutboxOp, OutboxStatus, UpsertPayload};
+use crate::today_store::{load_snapshot, today_mutate, JOURNAL_END_MARKER, JOURNAL_START_MARKER};
 use crate::vault::{normalize_existing_dir, parse_frontmatter, resolve_inside_vault};
 use crate::vault_list::{assert_maru_can_write, WorkspaceWriteAction};
 use crate::win_process::NoWindow;
@@ -287,13 +283,17 @@ fn rewrite_status_line(content: &str, status: Option<&str>) -> String {
 
 fn mark_retry_needed(path: &Path) -> Result<(), String> {
     let raw = fs::read_to_string(path).map_err(|err| format!("Cannot read receipt: {err}"))?;
-    write_atomic(path, rewrite_status_line(&raw, Some(RETRY_NEEDED)).as_bytes())
+    write_atomic(
+        path,
+        rewrite_status_line(&raw, Some(RETRY_NEEDED)).as_bytes(),
+    )
 }
 
 /// Move a receipt to `applied/`, dropping any `retry-needed` marker a
 /// previous run left on it.
 fn move_to_applied(work: &Path, receipt_path: &Path) -> Result<String, String> {
-    let raw = fs::read_to_string(receipt_path).map_err(|err| format!("Cannot read receipt: {err}"))?;
+    let raw =
+        fs::read_to_string(receipt_path).map_err(|err| format!("Cannot read receipt: {err}"))?;
     let cleaned = rewrite_status_line(&raw, None);
     if cleaned != raw {
         write_atomic(receipt_path, cleaned.as_bytes())?;
@@ -537,12 +537,8 @@ fn apply_receipt(
             let frontmatter = normalize_task_frontmatter_aliases(yaml_to_json(&parts.meta));
             let completed_at = string_field(&frontmatter, "completedAt")
                 .unwrap_or_else(|| receipt.requested_at.clone());
-            let done = string_field(&frontmatter, "done").unwrap_or_else(|| {
-                completed_at
-                    .get(..10)
-                    .unwrap_or(&completed_at)
-                    .to_string()
-            });
+            let done = string_field(&frontmatter, "done")
+                .unwrap_or_else(|| completed_at.get(..10).unwrap_or(&completed_at).to_string());
             task_transition(
                 work_path.to_string(),
                 TaskTransitionRequest {
@@ -874,7 +870,8 @@ pub fn web_actions_apply(
 ) -> Result<WebActionsOutcome, String> {
     assert_maru_can_write(&work_path, WorkspaceWriteAction::Modify)?;
     assert_maru_can_write(&work_path, WorkspaceWriteAction::RenameMove)?;
-    DateTime::parse_from_rfc3339(&now_iso).map_err(|err| format!("now_iso must be RFC3339: {err}"))?;
+    DateTime::parse_from_rfc3339(&now_iso)
+        .map_err(|err| format!("now_iso must be RFC3339: {err}"))?;
     let work = normalize_existing_dir(&work_path)?;
     let mut outcome = WebActionsOutcome::default();
     for path in pending_receipt_files(&work) {
@@ -952,7 +949,10 @@ mod tests {
     }
 
     fn write_receipt(work: &Path, id: &str, body: &str) -> PathBuf {
-        let path = work.join(PENDING_ROOT).join("2026-08").join(format!("{id}.yaml"));
+        let path = work
+            .join(PENDING_ROOT)
+            .join("2026-08")
+            .join(format!("{id}.yaml"));
         fs::create_dir_all(path.parent().unwrap()).unwrap();
         fs::write(&path, body).unwrap();
         path
@@ -984,7 +984,11 @@ mod tests {
             ]
             .into_iter()
             .map(|(field, default)| {
-                let value = if field == key { value.to_string() } else { default };
+                let value = if field == key {
+                    value.to_string()
+                } else {
+                    default
+                };
                 format!("{field}: {value}\n")
             })
             .collect::<String>()
@@ -1038,10 +1042,7 @@ mod tests {
             "notes/active/task.md",
             "tasks/nowhere/task.md",
         ] {
-            assert!(
-                validate_task_path(bad).is_err(),
-                "{bad} must be rejected"
-            );
+            assert!(validate_task_path(bad).is_err(), "{bad} must be rejected");
         }
         for good in [
             "tasks/active/task.md",
@@ -1084,7 +1085,11 @@ mod tests {
         );
         // Local edit after the web committed: the blob no longer matches.
         let note = tmp.path().join("tasks/active/task.md");
-        fs::write(&note, "---\nstatus: done\ndone: 2026-08-16\n---\n# Edited\n").unwrap();
+        fs::write(
+            &note,
+            "---\nstatus: done\ndone: 2026-08-16\n---\n# Edited\n",
+        )
+        .unwrap();
 
         let outcome = apply(&tmp);
         assert_eq!(outcome.stale, 1);
@@ -1113,11 +1118,18 @@ mod tests {
 
     #[test]
     fn missing_task_note_is_stale_not_fatal() {
-        let (tmp, _) = setup("complete", "tasks/active/task.md", "---\nstatus: done\n---\n");
+        let (tmp, _) = setup(
+            "complete",
+            "tasks/active/task.md",
+            "---\nstatus: done\n---\n",
+        );
         fs::remove_file(tmp.path().join("tasks/active/task.md")).unwrap();
         let outcome = apply(&tmp);
         assert_eq!(outcome.stale, 1);
-        assert_eq!(outcome.items[0].reason.as_deref(), Some("task note is missing"));
+        assert_eq!(
+            outcome.items[0].reason.as_deref(),
+            Some("task note is missing")
+        );
     }
 
     // --- complete -----------------------------------------------------------
@@ -1159,7 +1171,11 @@ mod tests {
 
         // pending -> applied, marker-free.
         assert!(!receipt.exists());
-        let applied = tmp.path().join(APPLIED_ROOT).join("2026-08").join(format!("{ID}.yaml"));
+        let applied = tmp
+            .path()
+            .join(APPLIED_ROOT)
+            .join("2026-08")
+            .join(format!("{ID}.yaml"));
         let raw = fs::read_to_string(&applied).unwrap();
         assert!(!raw.contains("status:"));
         assert!(raw.contains("operation: complete"));
@@ -1178,7 +1194,10 @@ mod tests {
         apply(&tmp);
         let archived = fs::read_to_string(tmp.path().join("tasks/archive/task.md")).unwrap();
         // NOW is the receipt's requestedAt in this fixture.
-        assert!(archived.contains(&format!("completedAt: \"{NOW}\"")), "{archived}");
+        assert!(
+            archived.contains(&format!("completedAt: \"{NOW}\"")),
+            "{archived}"
+        );
         assert!(archived.contains("done: 2026-08-16"), "{archived}");
     }
 
@@ -1194,10 +1213,8 @@ mod tests {
         );
         assert_eq!(apply(&tmp).applied, 1);
         assert!(list_records(tmp.path()).unwrap().is_empty());
-        let ledger = fs::read_to_string(
-            tmp.path().join(".maru/today/web-actions/applied.jsonl"),
-        )
-        .unwrap();
+        let ledger =
+            fs::read_to_string(tmp.path().join(".maru/today/web-actions/applied.jsonl")).unwrap();
         assert!(ledger.contains(ID));
         assert!(ledger.contains("tasks/active/task.md"));
 
@@ -1268,7 +1285,10 @@ mod tests {
         assert_eq!(records[0].status, OutboxStatus::Ready);
         // No provider id yet: the drain inserts and fills it in.
         assert_eq!(records[0].google_task_id, "");
-        assert_eq!(records[0].google_task_list_id.as_deref(), Some("list-default"));
+        assert_eq!(
+            records[0].google_task_list_id.as_deref(),
+            Some("list-default")
+        );
         assert_eq!(records[0].web_action_id.as_deref(), Some(ID));
         let payload = records[0].payload.as_ref().unwrap();
         assert_eq!(payload.title, "보고서 제출");
@@ -1296,7 +1316,11 @@ mod tests {
 
     #[test]
     fn upsert_without_a_configured_list_defers_to_the_outbox_fallback() {
-        let (tmp, _) = setup("upsert", "tasks/active/task.md", "---\nstatus: active\n---\n# T\n");
+        let (tmp, _) = setup(
+            "upsert",
+            "tasks/active/task.md",
+            "---\nstatus: active\n---\n# T\n",
+        );
         apply(&tmp);
         assert!(list_records(tmp.path()).unwrap()[0]
             .google_task_list_id
@@ -1427,12 +1451,8 @@ mod tests {
             warnings: vec![],
         });
         crate::today_store::persist_snapshot(tmp.path(), &mut snapshot).unwrap();
-        crate::today_store::project_journal(
-            tmp.path(),
-            &tmp.path().join("tasks"),
-            &snapshot,
-        )
-        .unwrap();
+        crate::today_store::project_journal(tmp.path(), &tmp.path().join("tasks"), &snapshot)
+            .unwrap();
         tmp
     }
 
@@ -1445,7 +1465,10 @@ mod tests {
         let path = journal_path(tmp);
         let raw = fs::read_to_string(&path).unwrap();
         let lines: Vec<&str> = raw.lines().collect();
-        let heading = lines.iter().position(|line| line.trim() == "## Top").unwrap();
+        let heading = lines
+            .iter()
+            .position(|line| line.trim() == "## Top")
+            .unwrap();
         let mut end = heading + 1;
         while end < lines.len() && lines[end].starts_with("- ") {
             end += 1;
@@ -1565,23 +1588,43 @@ mod tests {
         let outcome = import(&tmp);
         assert_eq!(
             outcome,
-            TopImportOutcome { imported: 2, changed: true, truncated: 0, reason: None }
+            TopImportOutcome {
+                imported: 2,
+                changed: true,
+                truncated: 0,
+                reason: None
+            }
         );
 
         let plan = plan_of(&tmp);
         assert_eq!(ids(&plan.top), ["tasks/active/b.md", "tasks/active/e.md"]);
         // A promoted item keeps its estimate and outcome; a new one is provisional.
         assert_eq!(plan.top[0].estimate_minutes, Some(45));
-        assert_eq!(plan.top[0].outcome.as_deref(), Some("Ship tasks/active/b.md"));
+        assert_eq!(
+            plan.top[0].outcome.as_deref(),
+            Some("Ship tasks/active/b.md")
+        );
         assert!(plan.top[1].estimate_provisional);
         assert!(plan.top[1].estimate_minutes.is_none());
         // Displaced Top item leads Flexible; b is no longer duplicated there.
-        assert_eq!(ids(&plan.flexible), ["tasks/active/a.md", "tasks/active/c.md"]);
+        assert_eq!(
+            ids(&plan.flexible),
+            ["tasks/active/a.md", "tasks/active/c.md"]
+        );
         // Overflow untouched.
         assert_eq!(ids(&plan.overflow), ["tasks/active/d.md"]);
         // Lanes are renumbered, so validate_plan and the UI agree on order.
-        assert_eq!(plan.top.iter().map(|item| item.order).collect::<Vec<_>>(), [0, 1]);
-        assert_eq!(plan.flexible.iter().map(|item| item.order).collect::<Vec<_>>(), [0, 1]);
+        assert_eq!(
+            plan.top.iter().map(|item| item.order).collect::<Vec<_>>(),
+            [0, 1]
+        );
+        assert_eq!(
+            plan.flexible
+                .iter()
+                .map(|item| item.order)
+                .collect::<Vec<_>>(),
+            [0, 1]
+        );
     }
 
     #[test]
@@ -1618,10 +1661,7 @@ mod tests {
         assert!(import(&tmp).changed);
         let plan = plan_of(&tmp);
         assert_eq!(ids(&plan.top), ["capture-abc123", "tasks/active/a.md"]);
-        assert!(matches!(
-            plan.top[0].item_ref,
-            PlanItemRef::Capture { .. }
-        ));
+        assert!(matches!(plan.top[0].item_ref, PlanItemRef::Capture { .. }));
         assert_eq!(plan.top[0].estimate_minutes, Some(20));
     }
 
@@ -1657,7 +1697,11 @@ mod tests {
         assert_eq!(outcome.imported, TOP_LANE_DEFAULT);
         assert_eq!(
             ids(&plan_of(&tmp).top),
-            ["tasks/active/b.md", "tasks/active/c.md", "tasks/active/d.md"]
+            [
+                "tasks/active/b.md",
+                "tasks/active/c.md",
+                "tasks/active/d.md"
+            ]
         );
         // Four entries resolved (b, c, d, a); the default lane took three. The
         // rejects and the duplicate are not truncation, so this is 1 and not
@@ -1708,7 +1752,11 @@ mod tests {
         // two more. No import will ever move them, so the run has to say so.
         web_rewrites_top(
             &tmp,
-            &["tasks/active/a.md", "tasks/active/b.md", "tasks/active/c.md"],
+            &[
+                "tasks/active/a.md",
+                "tasks/active/b.md",
+                "tasks/active/c.md",
+            ],
         );
 
         let outcome = import_sized(&tmp, 1);
@@ -1732,7 +1780,11 @@ mod tests {
         }
         web_rewrites_top(
             &tmp,
-            &["tasks/active/b.md", "tasks/active/c.md", "tasks/active/a.md"],
+            &[
+                "tasks/active/b.md",
+                "tasks/active/c.md",
+                "tasks/active/a.md",
+            ],
         );
 
         let outcome = import_sized(&tmp, 0);
@@ -1744,7 +1796,8 @@ mod tests {
     #[test]
     fn import_is_a_no_op_when_the_journal_already_matches() {
         let tmp = setup_day(&["tasks/active/a.md"], &["tasks/active/b.md"], &[]);
-        let before = fs::read_to_string(tmp.path().join(format!(".maru/today/{DAY}.json"))).unwrap();
+        let before =
+            fs::read_to_string(tmp.path().join(format!(".maru/today/{DAY}.json"))).unwrap();
         let outcome = import(&tmp);
         assert_eq!(outcome.changed, false);
         assert_eq!(outcome.reason.as_deref(), Some("already_current"));

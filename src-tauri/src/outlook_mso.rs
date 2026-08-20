@@ -815,9 +815,10 @@ fn parse_outlook_page(raw: &str) -> Result<(Vec<OutlookMessage>, Option<String>)
     let json = extract_json_fragment(raw).ok_or_else(|| "no_json_payload".to_string())?;
     let value: serde_json::Value = serde_json::from_str(json).map_err(|err| err.to_string())?;
     let (raw_messages, next_link): (Vec<RawOutlookMessage>, Option<String>) = match value {
-        serde_json::Value::Array(_) => {
-            (serde_json::from_value(value).map_err(|err| err.to_string())?, None)
-        }
+        serde_json::Value::Array(_) => (
+            serde_json::from_value(value).map_err(|err| err.to_string())?,
+            None,
+        ),
         serde_json::Value::Object(mut object) => {
             let next_link = object.remove("@odata.nextLink").and_then(|value| {
                 value
