@@ -145,6 +145,54 @@ describe("resolveSelectScope", () => {
     ]);
     expect(scope?.className).toBe("today-pane");
   });
+
+  // Clicking a tab leaves focus on the tab strip; a later Cmd+A must use the
+  // selection anchor (e.g. a caret in the preview), not the surface behind
+  // the focused chrome.
+  it("skips chrome candidates so the anchor can resolve", () => {
+    mount(`<div class="app-shell">
+      <div class="editor-pane">
+        <div class="document-tabs-row"><button id="tab">doc.md</button></div>
+        <article class="preview-surface"><p id="caret">body</p></article>
+      </div>
+    </div>`);
+    const scope = resolveSelectScope([
+      null,
+      document.getElementById("tab"),
+      document.getElementById("caret"),
+    ]);
+    expect(scope?.className).toBe("preview-surface");
+  });
+
+  // A focused Radix tab panel resolves to the whole editor pane, but a caret
+  // in the preview narrows the selection to the preview text.
+  it("lets a nested anchor narrow a focused container's scope", () => {
+    mount(`<div class="app-shell">
+      <div class="editor-pane">
+        <div class="tab-panel" id="panel">
+          <article class="preview-surface"><p id="caret">body</p></article>
+        </div>
+      </div>
+    </div>`);
+    const scope = resolveSelectScope([
+      document.getElementById("panel"),
+      document.getElementById("caret"),
+    ]);
+    expect(scope?.className).toBe("preview-surface");
+  });
+
+  // Nested narrowing must not let a weaker candidate jump to a sibling pane.
+  it("does not narrow across sibling panes", () => {
+    mount(`<div class="app-shell">
+      <div class="editor-pane"><article class="preview-surface"><p id="caret">x</p></article></div>
+      <div class="today-pane"><p id="focused">y</p></div>
+    </div>`);
+    const scope = resolveSelectScope([
+      document.getElementById("focused"),
+      document.getElementById("caret"),
+    ]);
+    expect(scope?.className).toBe("today-pane");
+  });
 });
 
 describe("createSelectAllHandler", () => {

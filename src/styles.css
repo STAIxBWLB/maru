@@ -2825,6 +2825,70 @@ a {
   font-size: var(--type-micro-size);
 }
 
+/* In-document find bar (Cmd+F): sits between the editor toolbar and the tab
+   panels, scoped to the document body only. */
+.editor-find-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+}
+
+.editor-find-input {
+  min-width: 0;
+  width: 220px;
+  border: 0;
+  outline: 0;
+  /* WKWebView draws a native focused bezel on text inputs regardless of
+     border/outline; appearance:none is what actually removes it. */
+  appearance: none;
+  -webkit-appearance: none;
+  background: transparent;
+  color: var(--ink);
+  font-size: var(--type-body-size);
+}
+
+.editor-find-count {
+  color: var(--faint);
+  font-size: var(--type-micro-size);
+  white-space: nowrap;
+}
+
+.editor-find-unsupported {
+  color: var(--faint);
+  font-size: var(--type-micro-size);
+}
+
+.editor-find-nav {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--faint);
+  cursor: pointer;
+}
+
+.editor-find-nav:hover {
+  color: var(--ink);
+  border-color: var(--accent);
+}
+
+mark.find-mark {
+  background: color-mix(in srgb, var(--accent) 30%, transparent);
+  color: inherit;
+}
+
+mark.find-mark-current {
+  background: var(--accent);
+  color: var(--accent-ink, var(--ink));
+}
+
 .list-scroll {
   flex: 1;
   min-height: 0;

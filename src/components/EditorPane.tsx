@@ -1,7 +1,9 @@
 import * as Tabs from "@radix-ui/react-tabs";
 import {
   Check,
+  ChevronDown,
   ChevronRight,
+  ChevronUp,
   Clock3,
   Columns2,
   FileText,
@@ -27,6 +29,14 @@ import {
 } from "react";
 import { vaultValidateNote, type VaultSchemaReport } from "../lib/api";
 import { documentStats } from "../lib/document";
+import { EDITOR_FIND_OPEN_EVENT } from "../lib/editorFindEvents";
+import { getEditorTabsState, type EditorGroupId } from "../lib/editorTabsStore";
+import {
+  applyFindHighlights,
+  clearFindHighlights,
+  cycleMatchIndex,
+  findMatches,
+} from "../lib/findInDocument";
 import { isHtmlFileKind } from "../lib/htmlDocument";
 import {
   mapSpansToRenderedText,
@@ -136,6 +146,9 @@ interface EditorPaneProps {
   onToggleKgHighlight?: () => void;
   /** Preview-mark click → focus the KG node in the graph split. */
   onKgRefNodeClick?: (nodePath: string) => void;
+  /** Split-pane identity ("left" | "right"); the in-document find bar opens
+   *  only in the focused group. */
+  paneGroup?: EditorGroupId;
 }
 
 export const EditorPane = memo(forwardRef<HTMLDivElement, EditorPaneProps>(function EditorPane(
@@ -194,6 +207,7 @@ export const EditorPane = memo(forwardRef<HTMLDivElement, EditorPaneProps>(funct
     kgHighlightRefs = null,
     onToggleKgHighlight,
     onKgRefNodeClick,
+    paneGroup,
   },
   ref,
 ) {
@@ -336,6 +350,103 @@ export const EditorPane = memo(forwardRef<HTMLDivElement, EditorPaneProps>(funct
     applyKgPreviewHighlights(container, mapped, kgTitleFor);
     return () => clearKgPreviewHighlights(container);
   }, [kgSpans, previewHtml, isHtml, viewMode, kgSpanSource, kgTitleFor]);
+
+  // In-document find (Cmd+F). Source drives the textarea selection; markdown
+  // preview injects <mark class="find-mark">. Rich/visual and the HTML preview
+  // iframe own their DOM, so there the bar shows a notice instead.
+  const [findOpen, setFindOpen] = useState(false);
+  const [findQuery, setFindQuery] = useState("");
+  const [findIndex, setFindIndex] = useState(0);
+  const findInputRef = useRef<HTMLInputElement | null>(null);
+  const findSupported = activeMode === "source" || (activeMode === "preview" && !isHtml);
+  const documentPath = document?.path ?? null;
+
+  useEffect(() => {
+    const open = () => {
+      if (!documentPath) return;
+      if (paneGroup && paneGroup !== getEditorTabsState().focusedEditorGroup) return;
+      // Already open: state is unchanged, so the focus effect below does not
+      // rerun — refocus the mounted input explicitly.
+      if (findOpen) {
+        findInputRef.current?.focus();
+        findInputRef.current?.select();
+        return;
+      }
+      setFindOpen(true);
+    };
+    window.addEventListener(EDITOR_FIND_OPEN_EVENT, open);
+    return () => window.removeEventListener(EDITOR_FIND_OPEN_EVENT, open);
+  }, [documentPath, paneGroup, findOpen]);
+
+  // Focus after the bar has committed — a rAF from the event handler can run
+  // before the input mounts.
+  useEffect(() => {
+    if (!findOpen) return;
+    findInputRef.current?.focus();
+    findInputRef.current?.select();
+  }, [findOpen]);
+
+  // A document switch is a new search context.
+  useEffect(() => {
+    setFindOpen(false);
+    setFindQuery("");
+    setFindIndex(0);
+  }, [documentPath]);
+
+  const previewText = useMemo(() => {
+    if (activeMode !== "preview" || isHtml || !previewHtml) return "";
+    return (
+      new DOMParser().parseFromString(previewHtml, "text/html").body.textContent ?? ""
+    );
+  }, [activeMode, isHtml, previewHtml]);
+  const findText = activeMode === "source" ? draftContent : previewText;
+  const findMatchList = useMemo(
+    () => (findOpen && findSupported ? findMatches(findText, findQuery) : []),
+    [findOpen, findSupported, findText, findQuery],
+  );
+  const findCurrent =
+    findMatchList.length === 0 ? 0 : Math.min(findIndex, findMatchList.length - 1);
+
+  // Source: select the current match in the textarea and scroll to it. The
+  // textarea is not focused here — the find input keeps focus while typing.
+  useEffect(() => {
+    if (!findOpen || activeMode !== "source" || findMatchList.length === 0) return;
+    const ta = taRef.current;
+    if (!ta) return;
+    const match = findMatchList[findCurrent];
+    ta.setSelectionRange(match.start, match.end);
+    const lineHeight = parseFloat(window.getComputedStyle(ta).lineHeight) || 20;
+    const linesBefore = draftContent.slice(0, match.start).split("\n").length - 1;
+    ta.scrollTop = Math.max(0, linesBefore * lineHeight - ta.clientHeight / 2);
+  }, [findOpen, activeMode, findMatchList, findCurrent, taRef, draftContent]);
+
+  // Preview: mark matches after each debounced render, scroll the current one
+  // into view. Runs after the KG-mark effect; cleanup touches only find marks.
+  useEffect(() => {
+    if (!findOpen || activeMode !== "preview" || isHtml) return;
+    const container = previewRef.current;
+    if (!container || !previewHtml) return;
+    const count = applyFindHighlights(container, findQuery, findCurrent);
+    if (count > 0) {
+      container
+        .querySelector(".find-mark-current")
+        ?.scrollIntoView({ block: "center" });
+    }
+    return () => clearFindHighlights(container);
+  }, [findOpen, findQuery, findCurrent, activeMode, isHtml, previewHtml]);
+
+  const cycleFind = useCallback(
+    (dir: 1 | -1) => {
+      setFindIndex((index) => cycleMatchIndex(index, findMatchList.length, dir));
+    },
+    [findMatchList.length],
+  );
+  const closeFind = useCallback(() => {
+    setFindOpen(false);
+    setFindQuery("");
+    setFindIndex(0);
+    if (activeMode === "source") taRef.current?.focus();
+  }, [activeMode, taRef]);
 
   const handlePreviewClick = useCallback(
     (event: React.MouseEvent<HTMLElement>) => {
@@ -749,6 +860,75 @@ export const EditorPane = memo(forwardRef<HTMLDivElement, EditorPaneProps>(funct
               </button>
             ) : null}
           </div>
+          {findOpen ? (
+            <div className="editor-find-bar" role="search">
+              <input
+                ref={findInputRef}
+                className="editor-find-input"
+                value={findQuery}
+                placeholder={t("editor.find.placeholder")}
+                aria-label={t("editor.find.placeholder")}
+                onChange={(event) => {
+                  setFindQuery(event.target.value);
+                  setFindIndex(0);
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    cycleFind(event.shiftKey ? -1 : 1);
+                  } else if (event.key === "Escape") {
+                    event.preventDefault();
+                    closeFind();
+                  }
+                }}
+              />
+              {findSupported ? (
+                <>
+                  <span className="editor-find-count" aria-live="polite">
+                    {findQuery.trim() === ""
+                      ? ""
+                      : findMatchList.length === 0
+                        ? t("editor.find.noResults")
+                        : t("editor.find.count", {
+                            current: findCurrent + 1,
+                            total: findMatchList.length,
+                          })}
+                  </span>
+                  <button
+                    type="button"
+                    className="editor-find-nav"
+                    onClick={() => cycleFind(-1)}
+                    title={t("editor.find.previous")}
+                    aria-label={t("editor.find.previous")}
+                  >
+                    <ChevronUp size={12} />
+                  </button>
+                  <button
+                    type="button"
+                    className="editor-find-nav"
+                    onClick={() => cycleFind(1)}
+                    title={t("editor.find.next")}
+                    aria-label={t("editor.find.next")}
+                  >
+                    <ChevronDown size={12} />
+                  </button>
+                </>
+              ) : (
+                <span className="editor-find-unsupported">
+                  {t("editor.find.unsupported")}
+                </span>
+              )}
+              <button
+                type="button"
+                className="editor-find-nav"
+                onClick={closeFind}
+                title={t("editor.find.close")}
+                aria-label={t("editor.find.close")}
+              >
+                <X size={12} />
+              </button>
+            </div>
+          ) : null}
           <Tabs.Content className="tab-panel" value={isHtml ? "visual" : "rich"}>
             <Suspense fallback={<div className="editor-loading" role="status">…</div>}>
               {isHtml && document ? (
