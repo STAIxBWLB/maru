@@ -14,9 +14,11 @@ import {
   listSchedules,
   scanInboxDrop,
   scanInboxEntries,
+  scanProjectActivity,
   scanTaskNotes,
   type DotSyncOverview,
 } from "../../lib/api";
+import { listWorkspaceProjects } from "../../lib/maruDir";
 import { catalogScan, type CatalogScanReport } from "../../lib/catalog";
 import { dashboardLogicalDay } from "../../lib/dashboard";
 import type { TasksSettings } from "../../lib/settings";
@@ -27,7 +29,14 @@ import {
   type CalendarCommitment,
   type TodaySnapshot,
 } from "../../lib/today";
-import type { DraftEntry, GitStatus, InboxDropItem, InboxEntry } from "../../lib/types";
+import type {
+  DraftEntry,
+  GitStatus,
+  InboxDropItem,
+  InboxEntry,
+  ProjectActivityRow,
+  ProjectPickerEntry,
+} from "../../lib/types";
 
 export interface DashboardWidgetData<T> {
   data: T | null;
@@ -171,6 +180,32 @@ export function useDashboardInbox(
         scanInboxEntries(workPath!),
       ]);
       return { dropItems, entries };
+    },
+    [workPath, epoch],
+  );
+}
+
+export interface DashboardProjectsData {
+  projects: ProjectPickerEntry[];
+  activity: ProjectActivityRow[];
+}
+
+/** The registry and the activity scan are two reads of the same thing, so they
+ *  travel together: a portfolio row with a name but no activity (or the
+ *  reverse) is not worth rendering. Task counts are joined in the pane from the
+ *  rows the tasks widget already fetched. */
+export function useDashboardProjects(
+  workPath: string | null,
+  epoch: number,
+): DashboardWidgetData<DashboardProjectsData> {
+  return useWidgetData(
+    Boolean(workPath),
+    async () => {
+      const [projects, report] = await Promise.all([
+        listWorkspaceProjects(workPath!),
+        scanProjectActivity(workPath!),
+      ]);
+      return { projects, activity: report.rows };
     },
     [workPath, epoch],
   );

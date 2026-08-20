@@ -369,6 +369,22 @@ export interface ProjectPickerEntry {
   vaultNote?: string | null;
 }
 
+/// `scan_project_activity` 한 행. 프로젝트별 최근 회의일과 최근 파일 활동만 담는다.
+/// 태스크 집계는 프론트에서 Tasks 모드와 같은 매칭으로 계산한다.
+export interface ProjectActivityRow {
+  id: string;
+  path: string;
+  lastMeetingDay: string | null;
+  lastActivityAt: string | null;
+}
+
+export interface ProjectActivityReport {
+  generatedAt: string;
+  rows: ProjectActivityRow[];
+  warnings: string[];
+  elapsedMs: number;
+}
+
 export interface InboxChannelConfig {
   provider: string;
   skill?: string | null;

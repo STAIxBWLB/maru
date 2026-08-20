@@ -23,11 +23,13 @@ test.use({ timezoneId: "Asia/Seoul" });
 // fixture day, so the persisted "dashboard" mode is restored as-is.
 const DASHBOARD_BOOT_SEED = { markerDay: FIXTURE_DAY, persistedMode: "dashboard" } as const;
 
-// Eight, not ten: the schedule card folded into "today" (both answer "what is
-// today") and the task chips merged with the catalog signals into "attention",
-// whose chip vocabulary no longer restates the inbox badge beside it.
+// Nine. The schedule card folded into "today" (both answer "what is today")
+// and the task chips merged with the catalog signals into "attention", whose
+// chip vocabulary no longer restates the inbox badge beside it. "projects" is
+// the one addition since: nothing else on the pane names a project.
 const WIDGET_KINDS = [
   "today",
+  "projects",
   "attention",
   "inbox",
   "recents",
@@ -406,4 +408,104 @@ test("today card shows as many top items as the lane is configured to hold", asy
   await installTodayMocks(page, buildTodaySeed({ ...DASHBOARD_BOOT_SEED, topLaneSize: 1 }));
   await gotoDashboard(page);
   await expect(widget(page, "today").locator("ol.dashboard-list > li")).toHaveCount(1);
+});
+
+// The registry carries 60+ projects in the real workspace and, before this
+// card, nothing on the pane named a single one.
+test("projects card lists the projects wanting attention, folded into parents", async ({
+  page,
+}) => {
+  await page.clock.install();
+  await page.clock.setFixedTime(new Date("2026-07-21T09:00:00+09:00"));
+  await installTodayMocks(page, buildTodaySeed(DASHBOARD_BOOT_SEED));
+  await gotoDashboard(page);
+
+  const projects = widget(page, "projects");
+  const rows = projects.locator(".dashboard-project-row");
+  await expect(rows).toHaveCount(1);
+  // KOICA TIU: open work on a project untouched since April.
+  await expect(rows.first()).toContainText("KOICA TIU");
+  // One open task, and the last file touch is months old — the two facts that
+  // put this row on the card.
+  await expect(rows.first()).toContainText("진행 1");
+  await expect(rows.first()).toContainText("활동");
+  // The sub-project folds into RISE, and RISE is active, so neither shows here.
+  await expect(projects).not.toContainText("A2CL");
+});
+
+test("projects card counts overdue work and reports tasks with no project", async ({ page }) => {
+  await page.clock.install();
+  await page.clock.setFixedTime(new Date("2026-07-21T09:00:00+09:00"));
+  const taskRows = [
+    dashTaskRow("tasks/active/260710-late.md", "지연된 정산", "active", {
+      due: "2026-07-10",
+      projects: ["rise"],
+    }),
+    dashTaskRow("tasks/active/260721-loose.md", "미분류 업무", "active", { due: FIXTURE_DAY }),
+    dashTaskRow("tasks/active/260722-loose2.md", "미분류 업무 2", "active", {}),
+  ];
+  await installTodayMocks(page, buildTodaySeed({ ...DASHBOARD_BOOT_SEED, taskRows }));
+  await gotoDashboard(page);
+
+  const projects = widget(page, "projects");
+  await expect(projects.locator(".dashboard-widget-count")).toHaveText("1");
+  await expect(projects.locator(".dashboard-project-row").first()).toContainText("RISE");
+  // Unassigned open tasks stay visible so the per-project numbers are not read
+  // as the whole workload.
+  await expect(projects).toContainText("프로젝트 미지정 태스크 2");
+});
+
+test("projects drilldown unfolds sub-projects and filters by category", async ({ page }) => {
+  await installTodayMocks(page, buildTodaySeed(DASHBOARD_BOOT_SEED));
+  await gotoDashboard(page);
+
+  await widget(page, "projects").getByRole("button", { name: /전체 보기/ }).click();
+  const drilldown = page.locator(".dashboard-drilldown-projects");
+  await expect(drilldown.locator(".dashboard-project-row")).toHaveCount(3);
+  await expect(drilldown).toContainText("A2CL");
+
+  // Category chips come from the path segments, so they are data, not labels.
+  await drilldown.locator(".dashboard-chip", { hasText: "oda" }).click();
+  await expect(drilldown.locator(".dashboard-project-row")).toHaveCount(1);
+  await expect(drilldown.locator(".dashboard-project-row")).toContainText("KOICA TIU");
+
+  await drilldown.locator(".dashboard-chip", { hasText: "전체" }).first().click();
+  await expect(drilldown.locator(".dashboard-project-row")).toHaveCount(3);
+});
+
+test("today card reports carryover pressure as a count, never as rows", async ({ page }) => {
+  const carryovers = Array.from({ length: 121 }, (_, index) => ({
+    itemRef: { kind: "task", taskId: `tasks/active/carry-${index}.md` },
+    carriedFrom: "2026-07-20",
+  }));
+  const seed = buildTodaySeed(DASHBOARD_BOOT_SEED);
+  const snapshot = seed.snapshot as Record<string, unknown>;
+  snapshot.carryovers = carryovers;
+  snapshot.unconfirmedContent = true;
+  snapshot.capacity = {
+    dayStart: "03:30",
+    sleepStart: "23:30",
+    freeMinutes: 240,
+    busyMinutes: 180,
+    focusCapMinutes: 240,
+    proposedMinutes: 300,
+    remainingMinutes: -60,
+    overCapacity: true,
+    provisional: false,
+  };
+  await installTodayMocks(page, seed);
+  await gotoDashboard(page);
+
+  const pressure = widget(page, "today").locator(".dashboard-today-pressure");
+  await expect(pressure).toContainText("이월 121");
+  await expect(pressure).toContainText("용량 초과");
+  await expect(pressure).toContainText("미확인");
+  // A three-digit pile must never become three-digit rows.
+  await expect(widget(page, "today").locator("ol.dashboard-list > li")).toHaveCount(3);
+});
+
+test("inbox card splits the pending queue into automated and hand-staged", async ({ page }) => {
+  await installTodayMocks(page, buildTodaySeed(DASHBOARD_BOOT_SEED));
+  await gotoDashboard(page);
+  await expect(widget(page, "inbox").locator(".dashboard-inline-meta")).toContainText("자동");
 });
