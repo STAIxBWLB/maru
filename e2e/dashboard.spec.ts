@@ -108,6 +108,29 @@ test("boots into the dashboard overview grid with every widget", async ({ page }
   await expect(page.locator(".dashboard-widget-error")).toHaveCount(0);
 });
 
+test("the pane scrolls when the widgets overflow a short viewport", async ({ page }) => {
+  // Regression: the workbench pins every pane to overflow: hidden (other panes
+  // scroll an inner region), and that pin beat .dashboard-pane's own
+  // overflow-y: auto — tall dashboards were clipped with no way to reach the
+  // lower cards.
+  await page.setViewportSize({ width: 1280, height: 420 });
+  await installTodayMocks(page, buildTodaySeed(DASHBOARD_BOOT_SEED));
+  await gotoDashboard(page);
+
+  const pane = page.locator(".dashboard-pane");
+  const overflows = await pane.evaluate((el) => el.scrollHeight > el.clientHeight);
+  expect(overflows).toBe(true);
+
+  await pane.evaluate((el) => {
+    el.scrollTop = el.scrollHeight;
+  });
+  const scrollTop = await pane.evaluate((el) => el.scrollTop);
+  expect(scrollTop).toBeGreaterThan(0);
+
+  // The cards below the fold become reachable at the bottom of the scroll.
+  await expect(widget(page, "recents")).toBeInViewport();
+});
+
 test("attention widget task chips reflect seeded counts and drill into filtered rows", async ({
   page,
 }) => {

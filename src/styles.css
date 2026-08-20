@@ -25611,6 +25611,14 @@ select:focus-visible,
   overflow: hidden;
 }
 
+/* The workbench pins every pane to overflow: hidden because the other panes
+ * scroll an inner region. The dashboard pane is itself the scroller, so the
+ * pin must not win over its own overflow-y. One descendant selector covers
+ * the primary, primary-surface, and secondary-surface placements. */
+.app-workbench .dashboard-pane {
+  overflow-y: auto;
+}
+
 /* `grid-area: status` already resets row and column; re-setting them to auto
  * right after cancelled the named placement, so the bar was auto-placed into
  * the first free cell — row 4 of the 48px activity column. Every chip then
