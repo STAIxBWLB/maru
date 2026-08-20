@@ -8,6 +8,17 @@ because releases cut frequently during active development. Versions before
 Dates are the release-tag dates. Only `feat`/`fix`-level changes are listed;
 `chore(release)` version bumps and merge commits are omitted.
 
+## v0.4.59 - 2026-08-20 - A Dashboard That Scrolls
+
+- **The dashboard scrolls again (#267).** The workbench layout pins every pane
+  to `overflow: hidden` because the other panes scroll an inner container, and
+  that pin out-specified the dashboard pane's own `overflow-y: auto`. The
+  dashboard is the only pane whose root element is the scroller, so a
+  dashboard taller than the window was clipped with no way to reach the lower
+  cards. An override that matches the pin's specificity restores the scroll,
+  and an e2e regression test drives the pane in a short viewport so the pin
+  cannot silently win again.
+
 ## v0.4.58 - 2026-08-20 - Preview Highlights That Stay Put
 
 - **Search and reference highlights no longer vanish from the preview (#263).**
