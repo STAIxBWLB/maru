@@ -299,6 +299,10 @@ fn scan_last_activity(
             continue;
         };
         let Some(rel) = rel.to_str() else { continue };
+        // Registry paths are always "/"-separated; strip_prefix hands back the
+        // platform separator, so on Windows nothing would ever match and every
+        // project would read as untouched.
+        let rel = rel.replace('\\', "/");
         let Ok(modified) = entry
             .metadata()
             .map_err(std::io::Error::from)
@@ -546,6 +550,27 @@ projects:
             .find(|row| row.id == "oda-koica-tiu")
             .expect("row");
         assert_eq!(row.last_activity_at, None, "node_modules must be pruned");
+    }
+
+    #[test]
+    fn activity_matching_is_separator_agnostic() {
+        // strip_prefix returns the platform separator. Registry paths are
+        // always "/"-separated, so the comparison has to normalize or Windows
+        // reports every project as untouched.
+        let tmp = tempfile::tempdir().expect("tempdir");
+        setup(tmp.path());
+
+        let report = scan_project_activity_impl(tmp.path(), None).expect("scan");
+        let touched = report
+            .rows
+            .iter()
+            .filter(|row| row.last_activity_at.is_some())
+            .count();
+        assert!(
+            touched >= 3,
+            "every seeded project dir holds a file: {:?}",
+            report.rows
+        );
     }
 
     #[test]

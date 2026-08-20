@@ -11,6 +11,7 @@ import {
   FIXTURE_DAY,
   FIXTURE_WORK_PATH,
   installTodayMocks,
+  readTodayCalls,
 } from "./helpers/todayFixtures";
 
 test.describe.configure({ retries: 0 });
@@ -508,4 +509,27 @@ test("inbox card splits the pending queue into automated and hand-staged", async
   await installTodayMocks(page, buildTodaySeed(DASHBOARD_BOOT_SEED));
   await gotoDashboard(page);
   await expect(widget(page, "inbox").locator(".dashboard-inline-meta")).toContainText("자동");
+});
+
+// A cached catalog index is fine for first paint but not for an explicit
+// refresh: the scan honours force_refresh now, so the button has to ask for it.
+test("dashboard refresh forces a catalog rescan rather than accepting the cache", async ({
+  page,
+}) => {
+  await installTodayMocks(page, buildTodaySeed(DASHBOARD_BOOT_SEED));
+  await gotoDashboard(page);
+  await expect(widget(page, "attention")).toBeVisible();
+
+  // Counting calls would be brittle (React re-mounts effects in dev), so this
+  // asserts the contract instead: first paint never forces, Refresh always does.
+  const forceFlags = async () =>
+    (await readTodayCalls(page))
+      .filter((call) => call.command === "catalog_scan")
+      .map((call) => (call.args.req as { force_refresh?: boolean })?.force_refresh ?? false);
+
+  await expect.poll(async () => (await forceFlags()).length).toBeGreaterThan(0);
+  expect(await forceFlags()).not.toContain(true);
+
+  await page.locator(".dashboard-header").getByRole("button", { name: "새로고침" }).click();
+  await expect.poll(forceFlags).toContain(true);
 });

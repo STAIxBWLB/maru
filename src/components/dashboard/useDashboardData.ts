@@ -156,11 +156,18 @@ export function useDashboardSchedule(
   );
 }
 
+/** First paint may serve the cached index; pressing Refresh must not. `epoch`
+ *  is only bumped by the Refresh button, so it doubles as "the user asked for
+ *  current data". */
 export function useDashboardCatalog(
   workPath: string | null,
   epoch: number,
 ): DashboardWidgetData<CatalogScanReport> {
-  return useWidgetData(Boolean(workPath), () => catalogScan(workPath!), [workPath, epoch]);
+  return useWidgetData(
+    Boolean(workPath),
+    () => catalogScan(workPath!, epoch > 0),
+    [workPath, epoch],
+  );
 }
 
 export interface DashboardInboxData {

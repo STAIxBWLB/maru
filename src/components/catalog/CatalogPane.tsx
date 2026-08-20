@@ -110,7 +110,10 @@ export function CatalogPane({ workspaceRoot, onReveal }: CatalogPaneProps) {
       // Debounce front-end so a burst of fs events results in one scan call.
       if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
       refreshTimerRef.current = setTimeout(() => {
-        void refresh(false).catch(() => {
+        // The watcher fired because the workspace changed, so this must rescan
+        // rather than accept the cached index. Bursts are already coalesced by
+        // the backend debounce and the 300ms timer above.
+        void refresh(true).catch(() => {
           /* swallowed; reporter already set */
         });
       }, 300);
