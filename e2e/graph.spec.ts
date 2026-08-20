@@ -11,6 +11,10 @@ import { expect, test, type Page } from "@playwright/test";
 // GPU-overlay fixes: 5 failures before and 4 after over 102 local runs, at one
 // worker as well as two. Retry only this spec on CI so unrelated E2E regressions
 // remain hard failures; Playwright still reports a retried Graph pass as flaky.
+//
+// The drag test had its own cause on top of that residual — it was the one
+// pointer interaction here that skipped the picking-buffer warm-up — and that
+// is fixed. A drag failure is now a real signal rather than the known residual.
 test.describe.configure({ retries: process.env.CI ? 2 : 0 });
 
 test.beforeEach(async ({ page }) => {
@@ -627,6 +631,19 @@ test("dragging a node moves it (pin) without selecting; alt-click unpins", async
   const forbidden = watchForbiddenRequests(page);
   await enterGraph(page);
 
+  // Warm Sigma's GPU picking buffer the same way clickNode does. enterGraph
+  // ends on a 1ms camera animation and does not wait for the frame after it,
+  // so nodeViewportPoint can report the fitted coordinate while the picking
+  // buffer still holds the pre-fit frame. mouse.down() in that window resolves
+  // to no node: Sigma emits downStage instead of downNode, the drag handler
+  // never arms, and the moves pan the camera instead. Every assertion below
+  // except the pin still passes in that case, which is why this test used to
+  // fail on CI with nothing but "Expected: true, Received: false".
+  await waitForLayoutSettled(page);
+  await waitForCameraSettled(page);
+  await hoverNode(page, "maru-glossary");
+
+  const cameraBefore = await cameraState(page);
   const before = await nodePoint(page, "maru-glossary");
   await page.mouse.move(before.x, before.y);
   await page.mouse.down();
@@ -635,10 +652,16 @@ test("dragging a node moves it (pin) without selecting; alt-click unpins", async
   await page.mouse.move(before.x + 90, before.y + 20, { steps: 6 });
   await page.mouse.up();
 
-  // Moved > 3px ⇒ a drag, not a click: the node relocates, camera untouched,
-  // and nothing gets selected (inspector stays in the hidden tab).
+  // The node moved and the camera did not. Either half alone is satisfied by a
+  // camera pan, which is what a missed pick degrades into and what this test
+  // could not previously tell apart from a real drag.
   const after = await nodePoint(page, "maru-glossary");
   expect(Math.hypot(after.x - before.x, after.y - before.y)).toBeGreaterThan(20);
+  expect(await cameraState(page)).toMatchObject({
+    x: cameraBefore.x,
+    y: cameraBefore.y,
+    ratio: cameraBefore.ratio,
+  });
   await expect(activeInspector(page)).toHaveCount(0);
   await expect.poll(() => nodePinned(page, "maru-glossary")).toBe(true);
   await expect.poll(() => nodeClickReady(page, "maru-glossary")).toBe(true);
