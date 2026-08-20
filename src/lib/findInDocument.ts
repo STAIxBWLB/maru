@@ -3,8 +3,8 @@
 // The find bar searches the document body only. In Source mode it drives the
 // textarea selection; in Preview mode it wraps matches in <mark> elements,
 // mirroring the KG highlight approach (KgRefHighlight.tsx): purely additive
-// DOM, own CSS class, cleanup restores plain text nodes and never touches
-// `mark.kg-ref-mark`.
+// DOM with its own CSS class, applied to a detached document by
+// `decoratePreviewHtml` and never to a container React owns.
 
 export interface FindMatch {
   start: number;
@@ -33,7 +33,6 @@ export function cycleMatchIndex(current: number, total: number, dir: 1 | -1): nu
   return (current + dir + total) % total;
 }
 
-export const FIND_MARK_SELECTOR = "mark.find-mark";
 const FIND_MARK_CURRENT_CLASS = "find-mark-current";
 
 /**
@@ -92,10 +91,3 @@ export function applyFindHighlights(
 }
 
 /** Remove every find mark, restoring plain text nodes. */
-export function clearFindHighlights(container: HTMLElement): void {
-  const marks = container.querySelectorAll(FIND_MARK_SELECTOR);
-  for (const mark of marks) {
-    mark.replaceWith(document.createTextNode(mark.textContent ?? ""));
-  }
-  container.normalize();
-}

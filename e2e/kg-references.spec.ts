@@ -11,22 +11,6 @@ import { expect, test, type Page } from "@playwright/test";
 // node count). Feature B: the "참조 하이라이트" toggle decorates the source
 // backdrop and the preview with .kg-ref-mark elements; toggle off clears.
 
-// Preview marks are applied by an effect that unwraps and re-wraps the ranges
-// whenever it re-runs (EditorPane.tsx, the applyKgPreviewHighlights effect), so
-// the click target in "mark click focuses the graph" can be replaced underneath
-// Playwright: the observed failure alternated "element is not stable" and
-// "element was detached from the DOM, retrying" until the 30s timeout.
-//
-// Seen once on a CI push (2 workers) and not reproduced in 5+ single-worker
-// local runs of this spec, the full 118-test local suite, or the PR run; the
-// rerun of that same commit passed. The final DOM is correct either way, so this
-// is a click-stability race in the test rather than a product defect. Retrying
-// only this spec follows the same reasoning as e2e/graph.spec.ts: unrelated E2E
-// regressions stay hard failures, and Playwright still reports a retried pass as
-// flaky so it does not go unnoticed. Remove this once the effect stops
-// re-wrapping on every re-run.
-test.describe.configure({ retries: process.env.CI ? 2 : 0 });
-
 // Mirrors `sampleContent` in src/lib/fixtures.ts (now = 2026-04-27T09:00:00+09:00).
 const MOCK_DOC_CONTENT = `---
 type: meeting
@@ -298,9 +282,9 @@ test("highlight toggle decorates preview and mark click focuses the graph", asyn
 
   const toggle = page.getByTestId("kg-highlight-toggle");
   await toggle.click();
-  // Resolve the asynchronous reference map on the declarative source surface
-  // before mounting the imperatively decorated preview. This avoids racing the
-  // initial Markdown render without hiding latency behind a fixed sleep.
+  // Resolve the asynchronous reference map before switching to the preview, so
+  // the assertions below do not race the initial Markdown render. Waiting on
+  // the source surface keeps that explicit instead of hiding it behind a sleep.
   await expect(toggle).toHaveAttribute("aria-pressed", "true");
   await expect(page.locator(".kg-source-backdrop .kg-ref-mark")).toHaveCount(2);
 
@@ -565,10 +549,9 @@ test("a document citing everything from one paragraph shows no walk controls", a
 });
 
 // Reference maps load asynchronously, so they can land while a find is already
-// active. The KG preview effect unwraps and re-wraps its ranges on every re-run,
-// which used to take the find marks with it and never put them back: the find
-// effect did not depend on the spans, so nothing re-applied them. Toggling the
-// highlight on with a search open reproduces that ordering deterministically.
+// active. Both mark kinds are now produced by the same decoration pass, in a
+// fixed order, so a late-arriving map cannot cost the find marks. Toggling the
+// highlight on with a search open exercises that.
 test("preview find marks survive a KG highlight re-run", async ({ page }) => {
   await openMeetingDoc(page);
   await page.locator(".tab-trigger", { hasText: "미리보기" }).click();
@@ -591,9 +574,8 @@ test("preview find marks survive a KG highlight re-run", async ({ page }) => {
   await expect(preview.locator("mark.find-mark-current")).toHaveCount(1);
 });
 
-// Same defect on the KG side: the preview container is React's, so a re-render
-// restores it and the reference marks go with it. The click-target instability
-// this spec already retries for is the same churn seen from the outside.
+// The preview container is React's, so a re-render restores it. The marks are
+// part of the html React renders now, so they come back with it.
 test("preview KG marks survive a re-render that highlighting does not depend on", async ({
   page,
 }) => {
@@ -613,11 +595,8 @@ test("preview KG marks survive a re-render that highlighting does not depend on"
   await expect(preview.locator("mark.kg-ref-mark")).toHaveCount(1);
 });
 
-// Reported as #261. This one passes without the repair pass too, because #260
-// made the find effect share the KG dependencies and a locale switch changes
-// one of them. It was observed failing before that, and the timing is what
-// decides, so it is kept as a guard on the scenario rather than as proof of
-// this fix.
+// Reported as #261: a locale switch re-renders the editor, which restored the
+// preview and dropped both mark kinds while the find bar still counted matches.
 test("both mark kinds survive a locale switch with a search open", async ({ page }) => {
   await openMeetingDoc(page);
   await page.getByTestId("kg-highlight-toggle").click();
