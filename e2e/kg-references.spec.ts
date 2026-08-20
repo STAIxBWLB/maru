@@ -563,3 +563,30 @@ test("a document citing everything from one paragraph shows no walk controls", a
   // One leg is the old single-burst animation; a "1/1" control bar would be noise.
   await expect(page.getByTestId("graph-ref-walk")).toHaveCount(0);
 });
+
+// Reference maps load asynchronously, so they can land while a find is already
+// active. The KG preview effect unwraps and re-wraps its ranges on every re-run,
+// which used to take the find marks with it and never put them back: the find
+// effect did not depend on the spans, so nothing re-applied them. Toggling the
+// highlight on with a search open reproduces that ordering deterministically.
+test("preview find marks survive a KG highlight re-run", async ({ page }) => {
+  await openMeetingDoc(page);
+  await page.locator(".tab-trigger", { hasText: "미리보기" }).click();
+  const preview = page.locator(".preview-surface");
+  await expect(preview).toContainText("Maru 사업 주간 점검 회의");
+
+  const mod = await page.evaluate(() =>
+    navigator.platform.toLowerCase().includes("mac") ? "Meta" : "Control",
+  );
+  await page.keyboard.press(`${mod}+f`);
+  const findBar = page.locator(".editor-find-bar");
+  await expect(findBar).toBeVisible();
+  await findBar.locator(".editor-find-input").fill("보고");
+  await expect(preview.locator("mark.find-mark")).toHaveCount(1);
+
+  // The KG spans arrive (here: by toggling) after the search is already active.
+  await page.getByTestId("kg-highlight-toggle").click();
+  await expect(preview.locator("mark.kg-ref-mark")).toHaveCount(1);
+  await expect(preview.locator("mark.find-mark")).toHaveCount(1);
+  await expect(preview.locator("mark.find-mark-current")).toHaveCount(1);
+});

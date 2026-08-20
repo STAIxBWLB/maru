@@ -349,6 +349,10 @@ export const EditorPane = memo(forwardRef<HTMLDivElement, EditorPaneProps>(funct
     );
     applyKgPreviewHighlights(container, mapped, kgTitleFor);
     return () => clearKgPreviewHighlights(container);
+    // KG_PREVIEW_DEPS: the find effect below repeats this list. Both effects
+    // own marks in the same container and this one rewrites it wholesale, so a
+    // dependency added here must be added there too or find marks stop coming
+    // back after a rewrap.
   }, [kgSpans, previewHtml, isHtml, viewMode, kgSpanSource, kgTitleFor]);
 
   // In-document find (Cmd+F). Source drives the textarea selection; markdown
@@ -422,6 +426,14 @@ export const EditorPane = memo(forwardRef<HTMLDivElement, EditorPaneProps>(funct
 
   // Preview: mark matches after each debounced render, scroll the current one
   // into view. Runs after the KG-mark effect; cleanup touches only find marks.
+  //
+  // The KG_PREVIEW_DEPS values are repeated here even though they are unused:
+  // the KG effect unwraps and re-wraps its ranges whenever it re-runs, which
+  // destroys find marks sitting in the same container. Reference maps load
+  // asynchronously and their title formatter changes with the locale, so a
+  // rewrap can happen at any point while a search is active. Sharing the
+  // dependencies puts both effects in the same commit, and because this one is
+  // declared second React re-applies find marks on top of the rebuilt KG marks.
   useEffect(() => {
     if (!findOpen || activeMode !== "preview" || isHtml) return;
     const container = previewRef.current;
@@ -433,7 +445,19 @@ export const EditorPane = memo(forwardRef<HTMLDivElement, EditorPaneProps>(funct
         ?.scrollIntoView({ block: "center" });
     }
     return () => clearFindHighlights(container);
-  }, [findOpen, findQuery, findCurrent, activeMode, isHtml, previewHtml]);
+  }, [
+    findOpen,
+    findQuery,
+    findCurrent,
+    activeMode,
+    isHtml,
+    previewHtml,
+    // KG_PREVIEW_DEPS
+    kgSpans,
+    viewMode,
+    kgSpanSource,
+    kgTitleFor,
+  ]);
 
   const cycleFind = useCallback(
     (dir: 1 | -1) => {
