@@ -3,8 +3,9 @@
 // - KgSourceBackdrop: a mirrored text layer behind the (backgroundless)
 //   source textarea. The textarea itself is untouched — decorations are pure
 //   DOM, synced on scroll, and never modify the document.
-// - applyKgPreviewHighlights / clearKgPreviewHighlights: wrap rendered
-//   preview text ranges in <mark> elements (and unwrap them again).
+// - applyKgPreviewHighlights: wrap rendered preview text ranges in <mark>
+//   elements. Called by decoratePreviewHtml against a detached document, never
+//   against a container React owns.
 
 import { useEffect, useMemo, useRef, type RefObject } from "react";
 import {
@@ -66,7 +67,6 @@ export function KgSourceBackdrop({
   );
 }
 
-export const KG_PREVIEW_MARK_SELECTOR = "mark.kg-ref-mark";
 
 /**
  * Wrap each rendered span's text range in a <mark>. Spans are in
@@ -119,10 +119,3 @@ export function applyKgPreviewHighlights(
 }
 
 /** Remove every KG highlight mark, restoring plain text nodes. */
-export function clearKgPreviewHighlights(container: HTMLElement): void {
-  const marks = container.querySelectorAll(KG_PREVIEW_MARK_SELECTOR);
-  for (const mark of marks) {
-    mark.replaceWith(document.createTextNode(mark.textContent ?? ""));
-  }
-  container.normalize();
-}

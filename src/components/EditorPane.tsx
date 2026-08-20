@@ -33,9 +33,7 @@ import { EDITOR_FIND_OPEN_EVENT } from "../lib/editorFindEvents";
 import { getEditorTabsState, type EditorGroupId } from "../lib/editorTabsStore";
 import {
   applyFindHighlights,
-  clearFindHighlights,
   cycleMatchIndex,
-  FIND_MARK_SELECTOR,
   findMatches,
 } from "../lib/findInDocument";
 import { isHtmlFileKind } from "../lib/htmlDocument";
@@ -52,7 +50,6 @@ import { useDebouncedValue } from "../lib/useDebouncedValue";
 import { buildEntryIndex, resolveTargetIndexed } from "../lib/wikilinkSuggestions";
 import {
   applyKgPreviewHighlights,
-  clearKgPreviewHighlights,
   KgSourceBackdrop,
 } from "./KgRefHighlight";
 import { Button } from "./ui/Button";
@@ -150,6 +147,70 @@ interface EditorPaneProps {
   /** Split-pane identity ("left" | "right"); the in-document find bar opens
    *  only in the focused group. */
   paneGroup?: EditorGroupId;
+}
+
+interface PreviewDecoration {
+  kgSpans: KgCharSpan[] | null;
+  kgSource: string;
+  kgTitleFor: (span: { nodeTitle: string; matchKind: "wikilink" | "entity" }) => string;
+  /** Empty when find is closed or not applicable to the preview. */
+  findQuery: string;
+  findCurrent: number;
+  resolveWikilink: (target: string) => boolean;
+}
+
+/**
+ * Fold the reference marks, the find marks and the unresolved-wikilink class
+ * into the html React renders, so React owns every node in the preview.
+ *
+ * These used to be three effects mutating the mounted container. React assigns
+ * `dangerouslySetInnerHTML` unconditionally whenever the prop value is not
+ * identity-equal, so any re-render restored the container and dropped whatever
+ * they had applied, with nothing to put it back.
+ *
+ * Two invariants hold this together:
+ *   - Only DOM-constructed nodes may be added here. Everything below goes
+ *     through createElement/textContent/dataset, so nothing can escape its
+ *     element or attribute and the already-sanitized base html stays safe
+ *     without a second DOMPurify pass.
+ *   - Reference marks are applied before find marks, so a match inside a
+ *     reference nests as <mark kg><mark find>, which is what the DOM passes
+ *     produced when they ran in that commit order.
+ */
+export function decoratePreviewHtml(baseHtml: string, decoration: PreviewDecoration): string {
+  if (!baseHtml) return "";
+  const needsKg = Boolean(decoration.kgSpans?.length);
+  const needsFind = decoration.findQuery.trim().length > 0;
+  const needsWikilink = baseHtml.includes("data-wikilink");
+  if (!needsKg && !needsFind && !needsWikilink) return baseHtml;
+
+  // Parsed as a fragment inside an inert document. Both halves matter:
+  // `DOMParser(html, "text/html")` would move a leading <style> into <head>,
+  // and returning only the body would silently drop it; a detached <div> in
+  // this document would parse correctly but still fetch <img> sources, once
+  // per find-bar keystroke. The helpers below reach for the global `document`
+  // to build nodes across this boundary, which is legal because insertion
+  // adopts them; they do not need an ownerDocument parameter.
+  const body = document.implementation.createHTMLDocument("").createElement("div");
+  body.innerHTML = baseHtml;
+
+  if (needsKg) {
+    applyKgPreviewHighlights(
+      body,
+      mapSpansToRenderedText(body.textContent ?? "", decoration.kgSpans!, (span) =>
+        decoration.kgSource.slice(span.start, span.end),
+      ),
+      decoration.kgTitleFor,
+    );
+  }
+  if (needsFind) applyFindHighlights(body, decoration.findQuery, decoration.findCurrent);
+  if (needsWikilink) {
+    for (const anchor of body.querySelectorAll<HTMLElement>("[data-wikilink]")) {
+      const target = anchor.getAttribute("data-wikilink") ?? "";
+      anchor.classList.toggle("wikilink-missing", !(target && decoration.resolveWikilink(target)));
+    }
+  }
+  return body.innerHTML;
 }
 
 export const EditorPane = memo(forwardRef<HTMLDivElement, EditorPaneProps>(function EditorPane(
@@ -270,7 +331,7 @@ export const EditorPane = memo(forwardRef<HTMLDivElement, EditorPaneProps>(funct
       onChange,
     });
 
-  const [previewHtml, setPreviewHtml] = useState("");
+  const [previewBaseHtml, setPreviewBaseHtml] = useState("");
   // Preview rebuilds the whole DOM per render — debounce so a keystroke
   // burst coalesces into one renderMarkdown pass. KG span mapping in preview
   // mode keys off the same debounced value (below). The debounced entry
@@ -286,38 +347,20 @@ export const EditorPane = memo(forwardRef<HTMLDivElement, EditorPaneProps>(funct
     debouncedEntry.path === previewDraftEntry.path ? debouncedEntry.text : draftContent;
   useEffect(() => {
     if (!document || isHtml || viewMode !== "preview") {
-      setPreviewHtml("");
+      setPreviewBaseHtml("");
       return;
     }
     let cancelled = false;
     void import("../lib/markdown").then(({ renderMarkdown }) => {
-      if (!cancelled) setPreviewHtml(renderMarkdown(debouncedPreviewDraft));
+      if (!cancelled) setPreviewBaseHtml(renderMarkdown(debouncedPreviewDraft));
     });
     return () => {
       cancelled = true;
     };
   }, [debouncedPreviewDraft, document, isHtml, viewMode]);
 
-  // F3(b): mark unresolved wikilinks in the preview (red dotted) — clicking
-  // one routes to onWikilinkClick, which seeds the note-creation dialog.
-  // (The source tab is a plain textarea, so the preview surface hosts the
-  // visual marking.)
   const previewRef = useRef<HTMLDivElement | null>(null);
-  // How many marks the authoritative pass last produced. The repair passes read
-  // it so a span set or query that maps to nothing in the preview (frontmatter
-  // references, for one) never triggers a rescan on every render.
-  const kgMarkCountRef = useRef(0);
-  const findMarkCountRef = useRef(0);
   const previewIndex = useMemo(() => buildEntryIndex(entries), [entries]);
-  useEffect(() => {
-    if (isHtml || viewMode !== "preview" || !previewRef.current) return;
-    const anchors = previewRef.current.querySelectorAll<HTMLElement>("[data-wikilink]");
-    for (const anchor of anchors) {
-      const target = anchor.getAttribute("data-wikilink") ?? "";
-      const resolved = target ? resolveTargetIndexed(previewIndex, entries, target) : null;
-      anchor.classList.toggle("wikilink-missing", !resolved);
-    }
-  }, [previewHtml, isHtml, viewMode, previewIndex, entries]);
 
   // KG reference highlight (Feature B): byte-offset spans → JS indices over
   // the current draft. Offsets come from the saved document; a dirty draft
@@ -343,50 +386,6 @@ export const EditorPane = memo(forwardRef<HTMLDivElement, EditorPaneProps>(funct
     [t],
   );
 
-  // Preview mode: wrap rendered text ranges in <mark> after each render.
-  // Cleanup unwraps, so toggling off or switching docs restores the DOM.
-  useEffect(() => {
-    const container = previewRef.current;
-    if (!container || isHtml || viewMode !== "preview" || !kgSpans || !previewHtml) return;
-    const mapped = mapSpansToRenderedText(
-      container.textContent ?? "",
-      kgSpans,
-      (span) => kgSpanSource.slice(span.start, span.end),
-    );
-    applyKgPreviewHighlights(container, mapped, kgTitleFor);
-    kgMarkCountRef.current = container.querySelectorAll("mark.kg-ref-mark").length;
-    return () => {
-      clearKgPreviewHighlights(container);
-      kgMarkCountRef.current = 0;
-    };
-    // KG_PREVIEW_DEPS: the find effect below repeats this list. Both effects
-    // own marks in the same container and this one rewrites it wholesale, so a
-    // dependency added here must be added there too or find marks stop coming
-    // back after a rewrap.
-  }, [kgSpans, previewHtml, isHtml, viewMode, kgSpanSource, kgTitleFor]);
-
-  // React owns this container's content through dangerouslySetInnerHTML and
-  // restores it from previewHtml on re-renders that have nothing to do with
-  // highlighting (toggling the outline, resizing a pane). That silently drops
-  // the marks the effect above applied, and because none of its dependencies
-  // changed it never puts them back. This runs after every render and repairs
-  // only when marks are expected but absent, so the usual cost is one
-  // querySelector.
-  useEffect(() => {
-    if (isHtml || viewMode !== "preview" || !kgSpans || kgSpans.length === 0) return;
-    // Nothing to restore if the authoritative pass never managed to mark
-    // anything: remapping every span on every render would be pure waste.
-    if (kgMarkCountRef.current === 0) return;
-    const container = previewRef.current;
-    if (!container || !previewHtml) return;
-    if (container.querySelector("mark.kg-ref-mark")) return;
-    const mapped = mapSpansToRenderedText(
-      container.textContent ?? "",
-      kgSpans,
-      (span) => kgSpanSource.slice(span.start, span.end),
-    );
-    applyKgPreviewHighlights(container, mapped, kgTitleFor);
-  });
 
   // In-document find (Cmd+F). Source drives the textarea selection; markdown
   // preview injects <mark class="find-mark">. Rich/visual and the HTML preview
@@ -431,11 +430,11 @@ export const EditorPane = memo(forwardRef<HTMLDivElement, EditorPaneProps>(funct
   }, [documentPath]);
 
   const previewText = useMemo(() => {
-    if (activeMode !== "preview" || isHtml || !previewHtml) return "";
+    if (activeMode !== "preview" || isHtml || !previewBaseHtml) return "";
     return (
-      new DOMParser().parseFromString(previewHtml, "text/html").body.textContent ?? ""
+      new DOMParser().parseFromString(previewBaseHtml, "text/html").body.textContent ?? ""
     );
-  }, [activeMode, isHtml, previewHtml]);
+  }, [activeMode, isHtml, previewBaseHtml]);
   const findText = activeMode === "source" ? draftContent : previewText;
   const findMatchList = useMemo(
     () => (findOpen && findSupported ? findMatches(findText, findQuery) : []),
@@ -443,6 +442,48 @@ export const EditorPane = memo(forwardRef<HTMLDivElement, EditorPaneProps>(funct
   );
   const findCurrent =
     findMatchList.length === 0 ? 0 : Math.min(findIndex, findMatchList.length - 1);
+
+  // Everything that used to be applied to the mounted container is folded into
+  // the html React renders, so React is the only writer and a re-render cannot
+  // discard it.
+  const previewHtml = useMemo(
+    () =>
+      decoratePreviewHtml(previewBaseHtml, {
+        kgSpans,
+        kgSource: kgSpanSource,
+        kgTitleFor,
+        findQuery:
+          findOpen && findSupported && activeMode === "preview" && !isHtml ? findQuery : "",
+        findCurrent,
+        resolveWikilink: (target) => Boolean(resolveTargetIndexed(previewIndex, entries, target)),
+      }),
+    [
+      previewBaseHtml,
+      kgSpans,
+      kgSpanSource,
+      kgTitleFor,
+      findOpen,
+      findSupported,
+      activeMode,
+      isHtml,
+      findQuery,
+      findCurrent,
+      previewIndex,
+      entries,
+    ],
+  );
+
+  // React 19 skips a prop only when the value is identity-equal, and its
+  // dangerouslySetInnerHTML branch then assigns innerHTML unconditionally
+  // without comparing the string. An inline object literal is new every render,
+  // so the container was rewritten on every render and anything applied to it
+  // imperatively was discarded. Memoizing on the string means a recompute that
+  // yields identical HTML returns the same object and React writes nothing.
+  const previewMarkup = useMemo(() => ({ __html: previewHtml }), [previewHtml]);
+
+  // Derived from the undecorated html on purpose: the decoration depends on
+  // findCurrent, which depends on this match list, which would depend on the
+  // decorated html. Marks are additive, so the text is the same either way.
 
   // Source: select the current match in the textarea and scroll to it. The
   // textarea is not focused here — the find input keeps focus while typing.
@@ -457,55 +498,16 @@ export const EditorPane = memo(forwardRef<HTMLDivElement, EditorPaneProps>(funct
     ta.scrollTop = Math.max(0, linesBefore * lineHeight - ta.clientHeight / 2);
   }, [findOpen, activeMode, findMatchList, findCurrent, taRef, draftContent]);
 
-  // Preview: mark matches after each debounced render, scroll the current one
-  // into view. Runs after the KG-mark effect; cleanup touches only find marks.
-  //
-  // The KG_PREVIEW_DEPS values are repeated here even though they are unused:
-  // the KG effect unwraps and re-wraps its ranges whenever it re-runs, which
-  // destroys find marks sitting in the same container. Reference maps load
-  // asynchronously and their title formatter changes with the locale, so a
-  // rewrap can happen at any point while a search is active. Sharing the
-  // dependencies puts both effects in the same commit, and because this one is
-  // declared second React re-applies find marks on top of the rebuilt KG marks.
+  // The marks themselves are part of the rendered html now; the only thing
+  // left to do after the commit is bring the current match into view.
+  // `previewHtml` is a dependency because it is value-compared, so this fires
+  // exactly when the preview DOM actually changed. Trimming it to the find
+  // state alone would silently stop re-centering when content changes under an
+  // active search.
   useEffect(() => {
     if (!findOpen || activeMode !== "preview" || isHtml) return;
-    const container = previewRef.current;
-    if (!container || !previewHtml) return;
-    const count = applyFindHighlights(container, findQuery, findCurrent);
-    findMarkCountRef.current = count;
-    if (count > 0) {
-      container
-        .querySelector(".find-mark-current")
-        ?.scrollIntoView({ block: "center" });
-    }
-    return () => {
-      clearFindHighlights(container);
-      findMarkCountRef.current = 0;
-    };
-  }, [
-    findOpen,
-    findQuery,
-    findCurrent,
-    activeMode,
-    isHtml,
-    previewHtml,
-    // KG_PREVIEW_DEPS
-    kgSpans,
-    viewMode,
-    kgSpanSource,
-    kgTitleFor,
-  ]);
-
-  // Same repair for find marks: see the KG pass above. Without it a search
-  // stays counted in the find bar while its highlights are gone for good.
-  useEffect(() => {
-    if (!findOpen || activeMode !== "preview" || isHtml) return;
-    if (findMarkCountRef.current === 0) return;
-    const container = previewRef.current;
-    if (!container || !previewHtml) return;
-    if (container.querySelector(FIND_MARK_SELECTOR)) return;
-    applyFindHighlights(container, findQuery, findCurrent);
-  });
+    previewRef.current?.querySelector(".find-mark-current")?.scrollIntoView({ block: "center" });
+  }, [findOpen, activeMode, isHtml, findQuery, findCurrent, previewHtml]);
 
   const cycleFind = useCallback(
     (dir: 1 | -1) => {
@@ -1069,7 +1071,7 @@ export const EditorPane = memo(forwardRef<HTMLDivElement, EditorPaneProps>(funct
                 ref={previewRef}
                 className="preview-surface"
                 onClick={handlePreviewClick}
-                dangerouslySetInnerHTML={{ __html: previewHtml }}
+                dangerouslySetInnerHTML={previewMarkup}
               />
             )}
           </Tabs.Content>

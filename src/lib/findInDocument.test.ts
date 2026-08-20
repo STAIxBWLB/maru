@@ -3,7 +3,6 @@
 import { describe, expect, it } from "vitest";
 import {
   applyFindHighlights,
-  clearFindHighlights,
   cycleMatchIndex,
   findMatches,
 } from "./findInDocument";
@@ -52,7 +51,7 @@ describe("cycleMatchIndex", () => {
   });
 });
 
-describe("applyFindHighlights / clearFindHighlights", () => {
+describe("applyFindHighlights", () => {
   it("wraps matches and marks only the current one", () => {
     document.body.innerHTML = "<p>one two one</p>";
     const container = document.body.querySelector("p")!;
@@ -71,23 +70,21 @@ describe("applyFindHighlights / clearFindHighlights", () => {
     expect(container.querySelectorAll("mark.find-mark").length).toBeGreaterThanOrEqual(3);
   });
 
-  it("clear restores the exact original text", () => {
+  it("is purely additive: the text is unchanged", () => {
     document.body.innerHTML = "<p>al<strong>pha</strong> alpha</p>";
     const container = document.body.querySelector("p")!;
     const before = container.textContent;
     applyFindHighlights(container, "alpha", 0);
-    clearFindHighlights(container);
     expect(container.textContent).toBe(before);
-    expect(container.querySelectorAll("mark.find-mark")).toHaveLength(0);
   });
 
-  it("leaves KG highlight marks untouched", () => {
+  it("nests inside KG highlight marks instead of replacing them", () => {
     document.body.innerHTML =
       '<p>see <mark class="kg-ref-mark kg-ref-entity">alpha</mark> and alpha</p>';
     const container = document.body.querySelector("p")!;
     applyFindHighlights(container, "alpha", 0);
-    clearFindHighlights(container);
     expect(container.querySelectorAll("mark.kg-ref-mark")).toHaveLength(1);
+    expect(container.querySelectorAll("mark.kg-ref-mark mark.find-mark")).toHaveLength(1);
     expect(container.textContent).toBe("see alpha and alpha");
   });
 });

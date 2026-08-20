@@ -128,10 +128,10 @@ test("Cmd+Shift+F focuses the document list search", async ({ page }) => {
 });
 
 // The preview container's content belongs to React through
-// dangerouslySetInnerHTML, so any re-render restores it and drops the marks the
-// find effect applied. Nothing in that effect's dependencies changes when an
-// unrelated control re-renders the editor, so before the repair pass the
-// highlights were gone for good while the find bar kept counting matches.
+// dangerouslySetInnerHTML, and React reassigns it whenever the prop value is
+// not identity-equal. Marks applied to that container imperatively were
+// therefore dropped by any unrelated re-render, with nothing to put them back.
+// They are part of the rendered html now, so a re-render restores them too.
 test("preview find marks survive a re-render that find does not depend on", async ({ page }) => {
   await openGlossary(page);
   const findCombo = await appCombo(page, "f");
