@@ -303,6 +303,11 @@ export const EditorPane = memo(forwardRef<HTMLDivElement, EditorPaneProps>(funct
   // (The source tab is a plain textarea, so the preview surface hosts the
   // visual marking.)
   const previewRef = useRef<HTMLDivElement | null>(null);
+  // How many marks the authoritative pass last produced. The repair passes read
+  // it so a span set or query that maps to nothing in the preview (frontmatter
+  // references, for one) never triggers a rescan on every render.
+  const kgMarkCountRef = useRef(0);
+  const findMarkCountRef = useRef(0);
   const previewIndex = useMemo(() => buildEntryIndex(entries), [entries]);
   useEffect(() => {
     if (isHtml || viewMode !== "preview" || !previewRef.current) return;
@@ -349,7 +354,11 @@ export const EditorPane = memo(forwardRef<HTMLDivElement, EditorPaneProps>(funct
       (span) => kgSpanSource.slice(span.start, span.end),
     );
     applyKgPreviewHighlights(container, mapped, kgTitleFor);
-    return () => clearKgPreviewHighlights(container);
+    kgMarkCountRef.current = container.querySelectorAll("mark.kg-ref-mark").length;
+    return () => {
+      clearKgPreviewHighlights(container);
+      kgMarkCountRef.current = 0;
+    };
     // KG_PREVIEW_DEPS: the find effect below repeats this list. Both effects
     // own marks in the same container and this one rewrites it wholesale, so a
     // dependency added here must be added there too or find marks stop coming
@@ -365,6 +374,9 @@ export const EditorPane = memo(forwardRef<HTMLDivElement, EditorPaneProps>(funct
   // querySelector.
   useEffect(() => {
     if (isHtml || viewMode !== "preview" || !kgSpans || kgSpans.length === 0) return;
+    // Nothing to restore if the authoritative pass never managed to mark
+    // anything: remapping every span on every render would be pure waste.
+    if (kgMarkCountRef.current === 0) return;
     const container = previewRef.current;
     if (!container || !previewHtml) return;
     if (container.querySelector("mark.kg-ref-mark")) return;
@@ -460,12 +472,16 @@ export const EditorPane = memo(forwardRef<HTMLDivElement, EditorPaneProps>(funct
     const container = previewRef.current;
     if (!container || !previewHtml) return;
     const count = applyFindHighlights(container, findQuery, findCurrent);
+    findMarkCountRef.current = count;
     if (count > 0) {
       container
         .querySelector(".find-mark-current")
         ?.scrollIntoView({ block: "center" });
     }
-    return () => clearFindHighlights(container);
+    return () => {
+      clearFindHighlights(container);
+      findMarkCountRef.current = 0;
+    };
   }, [
     findOpen,
     findQuery,
@@ -484,7 +500,7 @@ export const EditorPane = memo(forwardRef<HTMLDivElement, EditorPaneProps>(funct
   // stays counted in the find bar while its highlights are gone for good.
   useEffect(() => {
     if (!findOpen || activeMode !== "preview" || isHtml) return;
-    if (findMatchList.length === 0) return;
+    if (findMarkCountRef.current === 0) return;
     const container = previewRef.current;
     if (!container || !previewHtml) return;
     if (container.querySelector(FIND_MARK_SELECTOR)) return;
