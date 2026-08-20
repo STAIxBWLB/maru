@@ -8,6 +8,24 @@ because releases cut frequently during active development. Versions before
 Dates are the release-tag dates. Only `feat`/`fix`-level changes are listed;
 `chore(release)` version bumps and merge commits are omitted.
 
+## v0.4.58 - 2026-08-20 - Preview Highlights That Stay Put
+
+- **Search and reference highlights no longer vanish from the preview (#263).**
+  React reassigns `dangerouslySetInnerHTML` whenever the prop value is not
+  identity-equal, and the preview passed a fresh object literal on every render,
+  so the container was rewritten every time and the marks applied to it were
+  discarded. Toggling the outline, resizing a pane or switching language with a
+  search open was enough: the highlights disappeared for good while the find bar
+  went on counting matches. The markup object is memoized on the HTML string, so
+  identical HTML now writes nothing.
+- **The marks are part of the rendered preview (#263).** Reference marks, find
+  marks and the unresolved-wikilink styling used to be three effects mutating a
+  container React owns. They are folded into the HTML React renders, so a
+  re-render restores them along with everything else. This retires the repair
+  passes added in v0.4.57 and removes the mark churn that made reference marks
+  hard to click while a document was being edited. A note that opens with a raw
+  `<style>` block keeps it.
+
 ## v0.4.57 - 2026-08-20 - Project Portfolio and Find in Document
 
 - **The dashboard names your projects (#256).** The registry carries 60+
