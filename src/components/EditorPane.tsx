@@ -35,6 +35,7 @@ import {
   applyFindHighlights,
   clearFindHighlights,
   cycleMatchIndex,
+  FIND_MARK_SELECTOR,
   findMatches,
 } from "../lib/findInDocument";
 import { isHtmlFileKind } from "../lib/htmlDocument";
@@ -302,6 +303,11 @@ export const EditorPane = memo(forwardRef<HTMLDivElement, EditorPaneProps>(funct
   // (The source tab is a plain textarea, so the preview surface hosts the
   // visual marking.)
   const previewRef = useRef<HTMLDivElement | null>(null);
+  // How many marks the authoritative pass last produced. The repair passes read
+  // it so a span set or query that maps to nothing in the preview (frontmatter
+  // references, for one) never triggers a rescan on every render.
+  const kgMarkCountRef = useRef(0);
+  const findMarkCountRef = useRef(0);
   const previewIndex = useMemo(() => buildEntryIndex(entries), [entries]);
   useEffect(() => {
     if (isHtml || viewMode !== "preview" || !previewRef.current) return;
@@ -348,12 +354,39 @@ export const EditorPane = memo(forwardRef<HTMLDivElement, EditorPaneProps>(funct
       (span) => kgSpanSource.slice(span.start, span.end),
     );
     applyKgPreviewHighlights(container, mapped, kgTitleFor);
-    return () => clearKgPreviewHighlights(container);
+    kgMarkCountRef.current = container.querySelectorAll("mark.kg-ref-mark").length;
+    return () => {
+      clearKgPreviewHighlights(container);
+      kgMarkCountRef.current = 0;
+    };
     // KG_PREVIEW_DEPS: the find effect below repeats this list. Both effects
     // own marks in the same container and this one rewrites it wholesale, so a
     // dependency added here must be added there too or find marks stop coming
     // back after a rewrap.
   }, [kgSpans, previewHtml, isHtml, viewMode, kgSpanSource, kgTitleFor]);
+
+  // React owns this container's content through dangerouslySetInnerHTML and
+  // restores it from previewHtml on re-renders that have nothing to do with
+  // highlighting (toggling the outline, resizing a pane). That silently drops
+  // the marks the effect above applied, and because none of its dependencies
+  // changed it never puts them back. This runs after every render and repairs
+  // only when marks are expected but absent, so the usual cost is one
+  // querySelector.
+  useEffect(() => {
+    if (isHtml || viewMode !== "preview" || !kgSpans || kgSpans.length === 0) return;
+    // Nothing to restore if the authoritative pass never managed to mark
+    // anything: remapping every span on every render would be pure waste.
+    if (kgMarkCountRef.current === 0) return;
+    const container = previewRef.current;
+    if (!container || !previewHtml) return;
+    if (container.querySelector("mark.kg-ref-mark")) return;
+    const mapped = mapSpansToRenderedText(
+      container.textContent ?? "",
+      kgSpans,
+      (span) => kgSpanSource.slice(span.start, span.end),
+    );
+    applyKgPreviewHighlights(container, mapped, kgTitleFor);
+  });
 
   // In-document find (Cmd+F). Source drives the textarea selection; markdown
   // preview injects <mark class="find-mark">. Rich/visual and the HTML preview
@@ -439,12 +472,16 @@ export const EditorPane = memo(forwardRef<HTMLDivElement, EditorPaneProps>(funct
     const container = previewRef.current;
     if (!container || !previewHtml) return;
     const count = applyFindHighlights(container, findQuery, findCurrent);
+    findMarkCountRef.current = count;
     if (count > 0) {
       container
         .querySelector(".find-mark-current")
         ?.scrollIntoView({ block: "center" });
     }
-    return () => clearFindHighlights(container);
+    return () => {
+      clearFindHighlights(container);
+      findMarkCountRef.current = 0;
+    };
   }, [
     findOpen,
     findQuery,
@@ -458,6 +495,17 @@ export const EditorPane = memo(forwardRef<HTMLDivElement, EditorPaneProps>(funct
     kgSpanSource,
     kgTitleFor,
   ]);
+
+  // Same repair for find marks: see the KG pass above. Without it a search
+  // stays counted in the find bar while its highlights are gone for good.
+  useEffect(() => {
+    if (!findOpen || activeMode !== "preview" || isHtml) return;
+    if (findMarkCountRef.current === 0) return;
+    const container = previewRef.current;
+    if (!container || !previewHtml) return;
+    if (container.querySelector(FIND_MARK_SELECTOR)) return;
+    applyFindHighlights(container, findQuery, findCurrent);
+  });
 
   const cycleFind = useCallback(
     (dir: 1 | -1) => {
