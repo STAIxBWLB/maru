@@ -422,6 +422,13 @@ export const EditorPane = memo(forwardRef<HTMLDivElement, EditorPaneProps>(funct
 
   // Preview: mark matches after each debounced render, scroll the current one
   // into view. Runs after the KG-mark effect; cleanup touches only find marks.
+  //
+  // `kgSpans` is a dependency even though it is unused here: the KG effect
+  // unwraps and re-wraps its ranges whenever it re-runs, which destroys find
+  // marks sitting in the same container. Reference maps load asynchronously, so
+  // they can land after a search is already active. Depending on `kgSpans` puts
+  // this effect in the same commit, and because it is declared after the KG
+  // effect React re-applies find marks on top of the rebuilt KG marks.
   useEffect(() => {
     if (!findOpen || activeMode !== "preview" || isHtml) return;
     const container = previewRef.current;
@@ -433,7 +440,7 @@ export const EditorPane = memo(forwardRef<HTMLDivElement, EditorPaneProps>(funct
         ?.scrollIntoView({ block: "center" });
     }
     return () => clearFindHighlights(container);
-  }, [findOpen, findQuery, findCurrent, activeMode, isHtml, previewHtml]);
+  }, [findOpen, findQuery, findCurrent, activeMode, isHtml, previewHtml, kgSpans]);
 
   const cycleFind = useCallback(
     (dir: 1 | -1) => {
