@@ -184,11 +184,15 @@ export function decoratePreviewHtml(baseHtml: string, decoration: PreviewDecorat
   const needsWikilink = baseHtml.includes("data-wikilink");
   if (!needsKg && !needsFind && !needsWikilink) return baseHtml;
 
-  // An inert document: a detached <div> would still fetch <img> sources, once
+  // Parsed as a fragment inside an inert document. Both halves matter:
+  // `DOMParser(html, "text/html")` would move a leading <style> into <head>,
+  // and returning only the body would silently drop it; a detached <div> in
+  // this document would parse correctly but still fetch <img> sources, once
   // per find-bar keystroke. The helpers below reach for the global `document`
-  // to build nodes across this boundary, which is legal because replaceWith
+  // to build nodes across this boundary, which is legal because insertion
   // adopts them; they do not need an ownerDocument parameter.
-  const body = new DOMParser().parseFromString(baseHtml, "text/html").body;
+  const body = document.implementation.createHTMLDocument("").createElement("div");
+  body.innerHTML = baseHtml;
 
   if (needsKg) {
     applyKgPreviewHighlights(

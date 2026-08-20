@@ -94,3 +94,14 @@ describe("decoratePreviewHtml", () => {
     expect(out).toBe(html);
   });
 });
+
+describe("decoratePreviewHtml parse context", () => {
+  it("keeps a leading head-category element that a document parse would relocate", () => {
+    // Parsing as a full text/html document puts a leading <style> in <head>,
+    // so returning body.innerHTML would drop it from the preview.
+    const html = "<style>p{color:red}</style><p>alpha</p>";
+    const out = decoratePreviewHtml(html, { ...NO_DECORATION, findQuery: "alpha" });
+    expect(out).toContain("<style>p{color:red}</style>");
+    expect(out).toContain("mark");
+  });
+});
