@@ -356,7 +356,10 @@ fn asset_revision(name: &str) -> Option<u64> {
 
 /// Locate the newest published bundle. Returns Ok(None) when the channel or
 /// its assets do not exist yet. Metadata signature is verified before parse.
-pub fn discover_remote_bundle(repo_slug: &str, channel_tag: &str) -> Result<Option<RemoteBundle>, String> {
+pub fn discover_remote_bundle(
+    repo_slug: &str,
+    channel_tag: &str,
+) -> Result<Option<RemoteBundle>, String> {
     if let Ok(url) = std::env::var("MARU_SKILLS_MANIFEST_URL") {
         if !url.trim().is_empty() {
             return discover_from_metadata_url(url.trim());
@@ -465,10 +468,16 @@ fn validate_metadata_paths(metadata: &BundleMetadata) -> Result<(), String> {
         return Err("metadata_files_empty".to_string());
     }
     if metadata.files.len() > MAX_ARCHIVE_ENTRIES {
-        return Err(format!("metadata_files_excessive: {}", metadata.files.len()));
+        return Err(format!(
+            "metadata_files_excessive: {}",
+            metadata.files.len()
+        ));
     }
     if metadata.archive.size > ARCHIVE_CAP_BYTES {
-        return Err(format!("metadata_archive_too_large: {}", metadata.archive.size));
+        return Err(format!(
+            "metadata_archive_too_large: {}",
+            metadata.archive.size
+        ));
     }
     // Bind the archive to the signed revision AND constrain its shape:
     // the name feeds bundle ids that are joined into filesystem paths, so
@@ -480,9 +489,7 @@ fn validate_metadata_paths(metadata: &BundleMetadata) -> Result<(), String> {
         .name
         .strip_prefix(&expected_prefix)
         .and_then(|rest| rest.strip_suffix(".zip"))
-        .map(|sha| {
-            !sha.is_empty() && sha.len() <= 64 && sha.bytes().all(|b| b.is_ascii_hexdigit())
-        })
+        .map(|sha| !sha.is_empty() && sha.len() <= 64 && sha.bytes().all(|b| b.is_ascii_hexdigit()))
         .unwrap_or(false);
     if !name_ok {
         return Err(format!(
@@ -500,7 +507,10 @@ fn validate_metadata_paths(metadata: &BundleMetadata) -> Result<(), String> {
             return Err(format!("metadata_duplicate_path: {}", file.path));
         }
         if !matches!(file.mode.as_str(), "644" | "755") {
-            return Err(format!("metadata_mode_invalid: {} {}", file.path, file.mode));
+            return Err(format!(
+                "metadata_mode_invalid: {} {}",
+                file.path, file.mode
+            ));
         }
     }
     Ok(())
@@ -529,7 +539,11 @@ fn validate_bundle_rel_path(path: &str) -> Result<(), String> {
             return Err(format!("bundle_path_invalid: {path}"));
         }
         // Windows reserved device names (with or without extension).
-        let stem = segment.split('.').next().unwrap_or(segment).to_ascii_uppercase();
+        let stem = segment
+            .split('.')
+            .next()
+            .unwrap_or(segment)
+            .to_ascii_uppercase();
         let reserved = matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL")
             || ((stem.starts_with("COM") || stem.starts_with("LPT"))
                 && stem.len() == 4
@@ -544,7 +558,11 @@ fn validate_bundle_rel_path(path: &str) -> Result<(), String> {
 /// Download the archive, verify its signature + digest + size, and return the
 /// bytes. Nothing on disk is touched.
 pub fn download_verified_archive(remote: &RemoteBundle) -> Result<Vec<u8>, String> {
-    let bytes = http_get_capped(&remote.archive_url, ARCHIVE_CAP_BYTES, HTTP_ARCHIVE_TIMEOUT_SECS)?;
+    let bytes = http_get_capped(
+        &remote.archive_url,
+        ARCHIVE_CAP_BYTES,
+        HTTP_ARCHIVE_TIMEOUT_SECS,
+    )?;
     if bytes.len() as u64 != remote.metadata.archive.size {
         return Err(format!(
             "archive_size_mismatch: {} != {}",

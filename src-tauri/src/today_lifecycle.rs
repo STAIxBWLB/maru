@@ -25,7 +25,9 @@ use crate::tasks::{
     bucket_from_task_path, conflict_free_path, normalize_task_frontmatter_aliases,
     resolve_tasks_root, string_field, target_path_for_bucket, yaml_to_json, TaskBucket,
 };
-use crate::today::{TaskSyncStatus, TaskTransitionKind, TaskTransitionOutcome, TaskTransitionRequest};
+use crate::today::{
+    TaskSyncStatus, TaskTransitionKind, TaskTransitionOutcome, TaskTransitionRequest,
+};
 use crate::today_outbox::{self, OutboxOp, OutboxRecord, OutboxStatus};
 use crate::today_store::{append_task_event_for, note_task_transition};
 use crate::vault::{normalize_existing_dir, parse_frontmatter, resolve_inside_vault};
@@ -114,11 +116,7 @@ fn patch(content: &str, key: &str, value: Option<FrontmatterValue>) -> Result<St
     update_frontmatter_content(content, key, value)
 }
 
-fn move_to_bucket(
-    tasks_root: &Path,
-    path: &Path,
-    target: TaskBucket,
-) -> Result<PathBuf, String> {
+fn move_to_bucket(tasks_root: &Path, path: &Path, target: TaskBucket) -> Result<PathBuf, String> {
     let current = bucket_from_task_path(tasks_root, path)?;
     if current == target {
         return Ok(path.to_path_buf());
@@ -191,7 +189,12 @@ fn run_complete(
     // until this lands, recovery owns the record.
     let sync_status = match prepared {
         Some(mut record) => {
-            today_outbox::set_record_status(&ctx.work, &mut record, OutboxStatus::Ready, &ctx.now_iso)?;
+            today_outbox::set_record_status(
+                &ctx.work,
+                &mut record,
+                OutboxStatus::Ready,
+                &ctx.now_iso,
+            )?;
             TaskSyncStatus::Syncing
         }
         None => TaskSyncStatus::Local,
@@ -233,9 +236,7 @@ fn run_reopen(ctx: TransitionContext, task_id: &str) -> Result<TaskTransitionOut
     // saw needs no remote call) is recorded `prepared` BEFORE the local
     // mutation, promoted to `ready` after the patch and before the move.
     let prepared = match &ctx.google_task_id {
-        Some(google_task_id)
-            if today_outbox::has_synced_complete(&ctx.work, google_task_id)? =>
-        {
+        Some(google_task_id) if today_outbox::has_synced_complete(&ctx.work, google_task_id)? => {
             Some(today_outbox::enqueue_record(
                 &ctx.work,
                 OutboxOp::Reopen,
@@ -260,7 +261,12 @@ fn run_reopen(ctx: TransitionContext, task_id: &str) -> Result<TaskTransitionOut
     write_atomic(&ctx.path, updated.as_bytes())?;
     let sync_status = match prepared {
         Some(mut record) => {
-            today_outbox::set_record_status(&ctx.work, &mut record, OutboxStatus::Ready, &ctx.now_iso)?;
+            today_outbox::set_record_status(
+                &ctx.work,
+                &mut record,
+                OutboxStatus::Ready,
+                &ctx.now_iso,
+            )?;
             TaskSyncStatus::Syncing
         }
         None => TaskSyncStatus::Local,
@@ -298,10 +304,18 @@ fn run_cancel(ctx: TransitionContext, task_id: &str) -> Result<TaskTransitionOut
         ctx.now_iso.clone(),
     )?;
     let _ = note_task_transition(&ctx.work, &ctx.date, task_id, "cancelled");
-    outcome_for(&final_path, TaskBucket::Archive, TaskSyncStatus::Local, task_id)
+    outcome_for(
+        &final_path,
+        TaskBucket::Archive,
+        TaskSyncStatus::Local,
+        task_id,
+    )
 }
 
-fn run_defer(ctx: TransitionContext, request: &TaskTransitionRequest) -> Result<TaskTransitionOutcome, String> {
+fn run_defer(
+    ctx: TransitionContext,
+    request: &TaskTransitionRequest,
+) -> Result<TaskTransitionOutcome, String> {
     let defer_date = request
         .defer_date
         .as_deref()
@@ -354,7 +368,9 @@ pub fn task_transition(
     assert_maru_can_write(&work_path, WorkspaceWriteAction::Modify)?;
     let work = normalize_existing_dir(&work_path)?;
     let lock = crate::today_store::work_lock_for(&work)?;
-    let _guard = lock.lock().map_err(|_| "today_work_lock_poisoned".to_string())?;
+    let _guard = lock
+        .lock()
+        .map_err(|_| "today_work_lock_poisoned".to_string())?;
     let ctx = load_context(
         &work_path,
         &request.task_path,
@@ -434,7 +450,9 @@ pub fn task_trash(
     assert_maru_can_write(&work_path, WorkspaceWriteAction::Delete)?;
     let work = normalize_existing_dir(&work_path)?;
     let lock = crate::today_store::work_lock_for(&work)?;
-    let _guard = lock.lock().map_err(|_| "today_work_lock_poisoned".to_string())?;
+    let _guard = lock
+        .lock()
+        .map_err(|_| "today_work_lock_poisoned".to_string())?;
     let ctx = load_context(&work_path, &task_path, &expected_task_hash, None, None)?;
     let trash_path = unique_task_trash_path(&ctx.work, &ctx.path)?;
     if let Some(parent) = trash_path.parent() {
@@ -491,11 +509,7 @@ mod tests {
         fs::create_dir_all(note.parent().unwrap()).unwrap();
         fs::write(&note, content).unwrap();
         let hash = revision_for(&fs::read_to_string(&note).unwrap());
-        (
-            tmp,
-            hash,
-            "tasks/active/task.md".to_string(),
-        )
+        (tmp, hash, "tasks/active/task.md".to_string())
     }
 
     fn request(kind: TaskTransitionKind, hash: &str, rel: &str) -> TaskTransitionRequest {
@@ -518,9 +532,8 @@ mod tests {
 
     #[test]
     fn complete_patches_moves_and_emits_event() {
-        let (tmp, hash, rel) = setup_task(
-            "---\ntitle: Ship\nstatus: active\nowner: Luca\n# a comment\n---\n# Body\n",
-        );
+        let (tmp, hash, rel) =
+            setup_task("---\ntitle: Ship\nstatus: active\nowner: Luca\n# a comment\n---\n# Body\n");
         let mut request = request(TaskTransitionKind::Complete, &hash, &rel);
         request.payload = json!({ "displayTitle": "Ship the release" });
         let outcome = task_transition(work(&tmp), request).unwrap();
@@ -539,10 +552,8 @@ mod tests {
         assert!(raw.contains("# Body"));
         assert_eq!(outcome.new_task_hash, revision_for(&raw));
 
-        let events = fs::read_to_string(
-            tmp.path().join(".maru/today/events/2026-07.jsonl"),
-        )
-        .unwrap();
+        let events =
+            fs::read_to_string(tmp.path().join(".maru/today/events/2026-07.jsonl")).unwrap();
         assert!(events.contains("\"kind\":\"task_completed\""));
         assert!(events.contains("\"taskId\":\"task-1\""));
         assert!(events.contains("\"displayTitle\":\"Ship the release\""));
@@ -562,8 +573,11 @@ mod tests {
         let (tmp, hash, rel) = setup_task(
             "---\nstatus: active\ngoogleTaskId: g-1\ngoogleTaskListId: list-1\n---\n# Body\n",
         );
-        let outcome = task_transition(work(&tmp), request(TaskTransitionKind::Complete, &hash, &rel))
-            .unwrap();
+        let outcome = task_transition(
+            work(&tmp),
+            request(TaskTransitionKind::Complete, &hash, &rel),
+        )
+        .unwrap();
 
         assert_eq!(outcome.sync_status, TaskSyncStatus::Syncing);
         let records = list_records(tmp.path()).unwrap();
@@ -579,16 +593,17 @@ mod tests {
         // Regression for the crash window that dropped provider completions:
         // `ready` must land before the archive move, and an unwritable
         // events dir must not abort a committed completion.
-        let (tmp, hash, rel) = setup_task(
-            "---\nstatus: active\ngoogleTaskId: g-1\n---\n# Body\n",
-        );
+        let (tmp, hash, rel) = setup_task("---\nstatus: active\ngoogleTaskId: g-1\n---\n# Body\n");
         // `.maru/today/events` as a FILE makes every event append fail.
         let events_dir = tmp.path().join(".maru/today/events");
         fs::create_dir_all(events_dir.parent().unwrap()).unwrap();
         fs::write(&events_dir, "not a directory").unwrap();
 
-        let outcome = task_transition(work(&tmp), request(TaskTransitionKind::Complete, &hash, &rel))
-            .unwrap();
+        let outcome = task_transition(
+            work(&tmp),
+            request(TaskTransitionKind::Complete, &hash, &rel),
+        )
+        .unwrap();
         assert_eq!(outcome.sync_status, TaskSyncStatus::Syncing);
         assert!(tmp.path().join("tasks/archive/task.md").exists());
         let records = list_records(tmp.path()).unwrap();
@@ -647,9 +662,11 @@ mod tests {
         )
         .unwrap();
         // A complete op already drained to the provider.
-        let mut synced = prepare_complete_op(tmp.path(), "tasks/archive/task.md", "g-1", None, None, NOW)
+        let mut synced =
+            prepare_complete_op(tmp.path(), "tasks/archive/task.md", "g-1", None, None, NOW)
+                .unwrap();
+        today_outbox::set_record_status(tmp.path(), &mut synced, OutboxStatus::Synced, NOW)
             .unwrap();
-        today_outbox::set_record_status(tmp.path(), &mut synced, OutboxStatus::Synced, NOW).unwrap();
 
         let hash = revision_for(&fs::read_to_string(&note).unwrap());
         let outcome = task_transition(
@@ -691,10 +708,9 @@ mod tests {
 
     #[test]
     fn cancel_moves_to_archive_without_provider_ops() {
-        let (tmp, hash, rel) =
-            setup_task("---\nstatus: active\ngoogleTaskId: g-1\n---\n# Body\n");
-        let outcome = task_transition(work(&tmp), request(TaskTransitionKind::Cancel, &hash, &rel))
-            .unwrap();
+        let (tmp, hash, rel) = setup_task("---\nstatus: active\ngoogleTaskId: g-1\n---\n# Body\n");
+        let outcome =
+            task_transition(work(&tmp), request(TaskTransitionKind::Cancel, &hash, &rel)).unwrap();
 
         assert_eq!(outcome.bucket, "archive");
         assert_eq!(outcome.sync_status, TaskSyncStatus::Local);
@@ -733,8 +749,7 @@ mod tests {
 
     #[test]
     fn trash_moves_note_and_queues_delete_only_on_opt_in() {
-        let (tmp, hash, rel) =
-            setup_task("---\nstatus: active\ngoogleTaskId: g-1\n---\n# Body\n");
+        let (tmp, hash, rel) = setup_task("---\nstatus: active\ngoogleTaskId: g-1\n---\n# Body\n");
 
         // Default: local-only trash.
         let outcome = task_trash(work(&tmp), rel.clone(), hash, None).unwrap();

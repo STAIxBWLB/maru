@@ -1443,7 +1443,8 @@ pub fn skills_sync_tools(
             let maru_entry = host_fs::skills_root()?.join(&skill.name);
             create_maru_entry_symlink(&maru_entry, &skill_path, &skill.name)?;
             for target in &tools {
-                let tool_target = effective_install_target(&registry, target, &skill.name, retarget)?;
+                let tool_target =
+                    effective_install_target(&registry, target, &skill.name, retarget)?;
                 if retarget {
                     // The only path that may rewrite targetPath: remove the
                     // exact-owned chain at the recorded root before re-linking
@@ -7202,9 +7203,9 @@ mod tests {
         }
         let refreshed = rescan_source_in_registry(&mut registry, BUILTIN_SOURCE_ID).unwrap();
 
-        assert!(refreshed.iter().all(|skill| {
-            skill.content_hash == skill.saved_hash && !skill.dirty
-        }));
+        assert!(refreshed
+            .iter()
+            .all(|skill| { skill.content_hash == skill.saved_hash && !skill.dirty }));
         let rotated = refreshed
             .iter()
             .find(|skill| skill.name == "gaejosik")

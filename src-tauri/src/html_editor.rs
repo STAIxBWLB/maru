@@ -27,9 +27,7 @@ fn resolve_html_editor_document_directory(
         .and_then(OsStr::to_str)
         .map(str::to_ascii_lowercase);
     if !matches!(extension.as_deref(), Some("html" | "htm")) {
-        return Err(
-            "prepare_html_editor_assets only supports .html/.htm documents".to_string(),
-        );
+        return Err("prepare_html_editor_assets only supports .html/.htm documents".to_string());
     }
     assert_document_owner(vault_path, &path)?;
     let parent = path
@@ -134,7 +132,10 @@ mod tests {
 
         let error = resolve_html_editor_document_directory(&root, "gone.html").unwrap_err();
 
-        assert!(error.contains("does not exist"), "unexpected error: {error}");
+        assert!(
+            error.contains("does not exist"),
+            "unexpected error: {error}"
+        );
     }
 
     #[test]
@@ -145,7 +146,10 @@ mod tests {
 
         let error = resolve_html_editor_document_directory(&root, "index.html").unwrap_err();
 
-        assert!(error.contains("workspace root"), "unexpected error: {error}");
+        assert!(
+            error.contains("workspace root"),
+            "unexpected error: {error}"
+        );
     }
 
     #[test]
@@ -156,10 +160,12 @@ mod tests {
         fs::create_dir_all(space.join(".maru")).unwrap();
         fs::write(space.join("page.html"), "<html></html>").unwrap();
 
-        let error =
-            resolve_html_editor_document_directory(&root, "space/page.html").unwrap_err();
+        let error = resolve_html_editor_document_directory(&root, "space/page.html").unwrap_err();
 
-        assert!(error.contains("workspace root"), "unexpected error: {error}");
+        assert!(
+            error.contains("workspace root"),
+            "unexpected error: {error}"
+        );
     }
 
     #[cfg(unix)]
@@ -173,8 +179,7 @@ mod tests {
         // containment passes, but canonicalizing the parent escapes the vault.
         std::os::unix::fs::symlink(outside_tmp.path(), vault_tmp.path().join("link")).unwrap();
 
-        let error =
-            resolve_html_editor_document_directory(&root, "link/x.html").unwrap_err();
+        let error = resolve_html_editor_document_directory(&root, "link/x.html").unwrap_err();
 
         assert!(error.contains("escapes"), "unexpected error: {error}");
     }

@@ -540,7 +540,9 @@ mod tests {
         let mut req = test_request(tmp.path());
         req.target_org = "KOICA 사업단".to_string();
         let resp = hub_submit_gate(req).unwrap();
-        assert!(resp.state.starts_with("blocked_by_safety:real_name_in_public"));
+        assert!(resp
+            .state
+            .starts_with("blocked_by_safety:real_name_in_public"));
         assert_eq!(cache::queue_depth(tmp.path()).unwrap(), 0);
     }
 
@@ -550,7 +552,9 @@ mod tests {
         let mut req = test_request(tmp.path());
         req.frontmatter_snapshot = serde_json::json!({"project": {"label": "Koica demo"}});
         let resp = hub_submit_gate(req).unwrap();
-        assert!(resp.state.starts_with("blocked_by_safety:real_name_in_public"));
+        assert!(resp
+            .state
+            .starts_with("blocked_by_safety:real_name_in_public"));
         assert_eq!(cache::queue_depth(tmp.path()).unwrap(), 0);
     }
 

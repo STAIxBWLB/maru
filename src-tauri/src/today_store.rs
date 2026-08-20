@@ -59,7 +59,9 @@ fn revisions_dir(work: &Path, day: &str) -> PathBuf {
 }
 
 fn events_path(work: &Path, month: &str) -> PathBuf {
-    today_dir(work).join("events").join(format!("{month}.jsonl"))
+    today_dir(work)
+        .join("events")
+        .join(format!("{month}.jsonl"))
 }
 
 fn finalize_dir(work: &Path) -> PathBuf {
@@ -81,9 +83,8 @@ fn validate_logical_day(day: &str) -> Result<(), String> {
 
 fn validate_month(month: &str) -> Result<(), String> {
     if month.len() == 7 && month.chars().nth(4) == Some('-') {
-        validate_logical_day(&format!("{month}-01")).map_err(|_| {
-            format!("today_invalid_month: {month}")
-        })?;
+        validate_logical_day(&format!("{month}-01"))
+            .map_err(|_| format!("today_invalid_month: {month}"))?;
         return Ok(());
     }
     Err(format!("today_invalid_month: {month}"))
@@ -144,9 +145,9 @@ fn write_finalize_journal(path: &Path, journal: &FinalizeJournal) -> Result<(), 
 fn safe_finalize_created_path(work: &Path, rel_path: &str) -> Option<PathBuf> {
     let rel = Path::new(rel_path);
     if rel.is_absolute()
-        || rel.components().any(|component| {
-            !matches!(component, std::path::Component::Normal(_))
-        })
+        || rel
+            .components()
+            .any(|component| !matches!(component, std::path::Component::Normal(_)))
     {
         return None;
     }
@@ -553,7 +554,9 @@ pub fn today_open(
         );
     }
     let lock = work_lock_for(&work)?;
-    let _guard = lock.lock().map_err(|_| "today_work_lock_poisoned".to_string())?;
+    let _guard = lock
+        .lock()
+        .map_err(|_| "today_work_lock_poisoned".to_string())?;
     if let Err(err) = recover_finalize_journals(&work) {
         let _ = append_task_event(
             &work,
@@ -608,11 +611,13 @@ pub fn today_mutate(
     assert_maru_can_write(&work_path, WorkspaceWriteAction::Modify)?;
     let work = normalize_existing_dir(&work_path)?;
     let lock = work_lock_for(&work)?;
-    let _guard = lock.lock().map_err(|_| "today_work_lock_poisoned".to_string())?;
+    let _guard = lock
+        .lock()
+        .map_err(|_| "today_work_lock_poisoned".to_string())?;
     let raw = fs::read_to_string(state_path(&work, &logical_day))
         .map_err(|_| "today_state_missing".to_string())?;
-    let mut snapshot: TodaySnapshot = serde_json::from_str(&raw)
-        .map_err(|err| format!("today_state_corrupt: {err}"))?;
+    let mut snapshot: TodaySnapshot =
+        serde_json::from_str(&raw).map_err(|err| format!("today_state_corrupt: {err}"))?;
     if snapshot.revision != expected_revision {
         return Err(format!(
             "today_conflict: expected revision {expected_revision}, found {}",
@@ -1102,7 +1107,10 @@ fn apply_mutation(
                 }
             }
             snapshot.plan = Some(next);
-            if matches!(snapshot.day_state, DayState::Unstarted | DayState::Preparing) {
+            if matches!(
+                snapshot.day_state,
+                DayState::Unstarted | DayState::Preparing
+            ) {
                 snapshot.day_state = DayState::Preparing;
             }
             Ok("plan_set")
@@ -1158,11 +1166,7 @@ fn last_mutation_event_kind(work: &Path, logical_day: &str) -> Result<Option<Str
     Ok(read_events_at(&path)?
         .into_iter()
         .filter(|event| {
-            event
-                .payload
-                .get("logicalDay")
-                .and_then(JsonValue::as_str)
-                == Some(logical_day)
+            event.payload.get("logicalDay").and_then(JsonValue::as_str) == Some(logical_day)
         })
         .last()
         .map(|event| event.kind))
@@ -1180,7 +1184,10 @@ fn is_untouched(snapshot: &TodaySnapshot) -> bool {
     snapshot.day_state == DayState::Unstarted
         && snapshot.brain_dump.trim().is_empty()
         && snapshot.plan.is_none()
-        && snapshot.yesterday.iter().all(|item| item.resolution.is_none())
+        && snapshot
+            .yesterday
+            .iter()
+            .all(|item| item.resolution.is_none())
         && snapshot.capture_decisions.is_empty()
 }
 
@@ -1222,7 +1229,9 @@ pub fn today_rollover(
         .format("%Y-%m-%d")
         .to_string();
     let lock = work_lock_for(&work)?;
-    let _guard = lock.lock().map_err(|_| "today_work_lock_poisoned".to_string())?;
+    let _guard = lock
+        .lock()
+        .map_err(|_| "today_work_lock_poisoned".to_string())?;
     let (outcome, _) = rollover_inner(&work, &new_day, now_iso, timezone, day_start, sleep_start)?;
     Ok(outcome)
 }
@@ -1826,7 +1835,10 @@ mod tests {
             serde_json::from_str(&fs::read_to_string(journal_path).unwrap()).unwrap();
         assert_eq!(recovered.phase, FinalizeJournalPhase::RolledBack);
         assert_eq!(recovered.created_files.len(), 1);
-        assert_eq!(recovered.created_files[0].rel_path, "notes/must-not-delete.md");
+        assert_eq!(
+            recovered.created_files[0].rel_path,
+            "notes/must-not-delete.md"
+        );
     }
 
     #[test]
@@ -1979,8 +1991,11 @@ mod tests {
         let confirmed = mutate(&work, &planned, TodayMutation::ConfirmSetup);
         let journal = tmp.path().join("tasks/daily/2026-07-21.md");
         let original = fs::read_to_string(&journal).unwrap();
-        fs::write(&journal, original.replace("## Reflection\n", "## Reflection\nmy notes\n"))
-            .unwrap();
+        fs::write(
+            &journal,
+            original.replace("## Reflection\n", "## Reflection\nmy notes\n"),
+        )
+        .unwrap();
         // Any later mutation on a planned day re-projects the journal.
         mutate(
             &work,
@@ -2310,7 +2325,9 @@ mod tests {
         });
         let after_move = mutate(&work, &after, TodayMutation::SetPlan { plan: moved });
         assert_eq!(
-            after_move.plan.as_ref().unwrap().top[0].calendar_sync.status,
+            after_move.plan.as_ref().unwrap().top[0]
+                .calendar_sync
+                .status,
             crate::today::CalendarSyncStatus::None
         );
     }
@@ -2389,7 +2406,10 @@ mod tests {
             updated.yesterday[0].resolution,
             Some(YesterdayResolution::Defer)
         );
-        assert_eq!(updated.yesterday[0].defer_date.as_deref(), Some("2026-07-25"));
+        assert_eq!(
+            updated.yesterday[0].defer_date.as_deref(),
+            Some("2026-07-25")
+        );
         let err = today_mutate(
             work,
             updated.logical_day.clone(),

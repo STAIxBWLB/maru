@@ -11,6 +11,10 @@ pub struct CatalogIndex {
     pub version: u32,
     pub generated_at: String,
     pub entries: Vec<CatalogEntry>,
+    /// bu-config.yaml 에서 수집한 사업단 슬러그. 캐시 히트 시 재스캔 없이
+    /// CatalogScanReport 를 복원하기 위해 함께 저장한다 (구 캐시는 빈 벡터).
+    #[serde(default)]
+    pub bus_seen: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -129,13 +133,17 @@ pub fn drilldown_impl(
     Ok(resp)
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use tempfile::TempDir;
 
-    fn entry(path: &str, kind: CatalogItemKind, deadline: Option<&str>, updated: &str) -> CatalogEntry {
+    fn entry(
+        path: &str,
+        kind: CatalogItemKind,
+        deadline: Option<&str>,
+        updated: &str,
+    ) -> CatalogEntry {
         CatalogEntry {
             path: path.to_string(),
             kind,
@@ -151,17 +159,33 @@ mod tests {
 
     #[test]
     fn query_filters_bu_category_and_kinds() {
-        let mut with_bu = entry("a.md", CatalogItemKind::DeadlineDue, Some("2026-02-01"), "2026-01-01");
+        let mut with_bu = entry(
+            "a.md",
+            CatalogItemKind::DeadlineDue,
+            Some("2026-02-01"),
+            "2026-01-01",
+        );
         with_bu.business_unit = Some("bu-a".to_string());
         with_bu.category = Some(DocCategory::FormalReport);
-        let mut other_bu = entry("b.md", CatalogItemKind::DeadlineDue, Some("2026-02-02"), "2026-01-02");
+        let mut other_bu = entry(
+            "b.md",
+            CatalogItemKind::DeadlineDue,
+            Some("2026-02-02"),
+            "2026-01-02",
+        );
         other_bu.business_unit = Some("bu-b".to_string());
-        let mut other_kind = entry("c.md", CatalogItemKind::InboxPending, Some("2026-01-15"), "2026-01-03");
+        let mut other_kind = entry(
+            "c.md",
+            CatalogItemKind::InboxPending,
+            Some("2026-01-15"),
+            "2026-01-03",
+        );
         other_kind.business_unit = Some("bu-a".to_string());
 
         let index = CatalogIndex {
             version: 1,
             generated_at: "2026-01-10T00:00:00Z".to_string(),
+            bus_seen: Vec::new(),
             entries: vec![with_bu, other_bu, other_kind],
         };
 
@@ -170,7 +194,9 @@ mod tests {
             ..CatalogQuery::default()
         });
         assert_eq!(by_bu.len(), 2);
-        assert!(by_bu.iter().all(|e| e.business_unit.as_deref() == Some("bu-a")));
+        assert!(by_bu
+            .iter()
+            .all(|e| e.business_unit.as_deref() == Some("bu-a")));
 
         let by_category = index.query(&CatalogQuery {
             category: Some(DocCategory::FormalReport),
@@ -192,10 +218,21 @@ mod tests {
         let index = CatalogIndex {
             version: 1,
             generated_at: "2026-01-10T00:00:00Z".to_string(),
+            bus_seen: Vec::new(),
             entries: vec![
                 entry("a.md", CatalogItemKind::DeadlineDue, None, "2026-01-01"),
-                entry("b.md", CatalogItemKind::DeadlineDue, Some("2026-03-01"), "2026-01-02"),
-                entry("c.md", CatalogItemKind::DeadlineDue, Some("2026-02-01"), "2026-01-03"),
+                entry(
+                    "b.md",
+                    CatalogItemKind::DeadlineDue,
+                    Some("2026-03-01"),
+                    "2026-01-02",
+                ),
+                entry(
+                    "c.md",
+                    CatalogItemKind::DeadlineDue,
+                    Some("2026-02-01"),
+                    "2026-01-03",
+                ),
                 entry("d.md", CatalogItemKind::DeadlineDue, None, "2026-02-01"),
             ],
         };

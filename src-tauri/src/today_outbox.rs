@@ -292,7 +292,9 @@ pub(crate) fn resolve_gws(override_path: Option<&str>) -> Result<PathBuf, String
             if is_executable(&candidate) {
                 return Ok(candidate);
             }
-            return Err(format!("cli_missing: gws override not executable: {trimmed}"));
+            return Err(format!(
+                "cli_missing: gws override not executable: {trimmed}"
+            ));
         }
     }
     resolve_program("gws").ok_or_else(|| {
@@ -323,10 +325,7 @@ fn upsert_body(record: &OutboxRecord, clear_missing_due: bool) -> String {
 }
 
 fn gws_args(record: &OutboxRecord) -> Vec<String> {
-    let list = record
-        .google_task_list_id
-        .as_deref()
-        .unwrap_or("@default");
+    let list = record.google_task_list_id.as_deref().unwrap_or("@default");
     let params = json!({ "tasklist": list, "task": record.google_task_id }).to_string();
     match record.op {
         // No provider id yet: create. Otherwise patch in place, so a retry
@@ -416,8 +415,7 @@ fn task_id_from_stdout(stdout: &[u8]) -> Option<String> {
 fn write_back_provider_ids(work: &Path, record: &OutboxRecord) -> Result<(), String> {
     let path = work.join(&record.task_path);
     let raw = fs::read_to_string(&path).map_err(|err| format!("Cannot read task note: {err}"))?;
-    let frontmatter =
-        crate::tasks::yaml_to_json(&parse_frontmatter(&raw).meta);
+    let frontmatter = crate::tasks::yaml_to_json(&parse_frontmatter(&raw).meta);
     let note_task_id = crate::tasks::string_field(&frontmatter, "googleTaskId");
     // The payload was snapshotted at enqueue time, so the note may have been
     // relinked since. Filling only what is missing means a newer linkage is
@@ -488,8 +486,7 @@ pub(crate) fn is_terminal_error(detail: &str) -> bool {
 // --- Commands -----------------------------------------------------------------
 
 fn parse_now(now_iso: &str) -> Result<DateTime<chrono::FixedOffset>, String> {
-    DateTime::parse_from_rfc3339(now_iso)
-        .map_err(|err| format!("now_iso must be RFC3339: {err}"))
+    DateTime::parse_from_rfc3339(now_iso).map_err(|err| format!("now_iso must be RFC3339: {err}"))
 }
 
 fn record_due(record: &OutboxRecord, now: DateTime<chrono::FixedOffset>) -> bool {
@@ -614,8 +611,7 @@ fn drain_record(
             } else {
                 record.attempts = record.attempts.saturating_add(1);
                 let retry_at = now + Duration::minutes(backoff_minutes(record.attempts));
-                record.next_retry_at =
-                    Some(retry_at.to_rfc3339_opts(SecondsFormat::Secs, true));
+                record.next_retry_at = Some(retry_at.to_rfc3339_opts(SecondsFormat::Secs, true));
                 record.last_error = Some(detail);
                 OutboxStatus::RetryNeeded
             }
@@ -776,8 +772,9 @@ mod tests {
         assert_eq!(args[2], "delete");
         assert!(!args.contains(&"--json".to_string()));
         record.google_task_list_id = Some("list-9".to_string());
-        assert!(gws_args(&record)
-            .contains(&r#"{"task":"gtask-1","tasklist":"list-9"}"#.to_string()));
+        assert!(
+            gws_args(&record).contains(&r#"{"task":"gtask-1","tasklist":"list-9"}"#.to_string())
+        );
     }
 
     #[test]
@@ -793,9 +790,12 @@ mod tests {
         );
         sample_record(work, OutboxOp::Complete, OutboxStatus::Ready);
 
-        let outcome =
-            task_integrations_drain(work_path.clone(), NOW.to_string(), Some(fake.to_string_lossy().to_string()))
-                .unwrap();
+        let outcome = task_integrations_drain(
+            work_path.clone(),
+            NOW.to_string(),
+            Some(fake.to_string_lossy().to_string()),
+        )
+        .unwrap();
         assert_eq!(outcome.drained, 1);
         assert_eq!(outcome.failed, 0);
         let records = read_task_integrations(work_path.clone()).unwrap();
@@ -805,9 +805,12 @@ mod tests {
         assert!(logged.contains(r#"{"status":"completed"}"#));
 
         // Idempotent: nothing due anymore.
-        let second =
-            task_integrations_drain(work_path, NOW.to_string(), Some(fake.to_string_lossy().to_string()))
-                .unwrap();
+        let second = task_integrations_drain(
+            work_path,
+            NOW.to_string(),
+            Some(fake.to_string_lossy().to_string()),
+        )
+        .unwrap();
         assert_eq!(second.drained, 0);
         assert_eq!(second.failed, 0);
         assert_eq!(second.blocked, 0);
@@ -833,7 +836,10 @@ mod tests {
         .unwrap();
         assert_eq!(outcome.blocked, 1);
         assert_eq!(outcome.drained, 0);
-        assert_eq!(read_task_integrations(work_path.clone()).unwrap()[0].status, OutboxStatus::AuthBlocked);
+        assert_eq!(
+            read_task_integrations(work_path.clone()).unwrap()[0].status,
+            OutboxStatus::AuthBlocked
+        );
 
         // Drain skips authBlocked records.
         let skipped = task_integrations_drain(
@@ -935,10 +941,8 @@ mod tests {
         assert_eq!(outcome.drained, 1);
         assert_eq!(outcome.failed, 0);
         assert!(list_records(tmp.path()).unwrap().is_empty());
-        let events = fs::read_to_string(
-            tmp.path().join(".maru/today/events/2026-07.jsonl"),
-        )
-        .unwrap();
+        let events =
+            fs::read_to_string(tmp.path().join(".maru/today/events/2026-07.jsonl")).unwrap();
         assert!(events.contains("outbox_dropped_terminal"));
     }
 
@@ -954,12 +958,24 @@ mod tests {
         fs::write(&note, "---\nstatus: done\n---\n").unwrap();
         sample_record(work, OutboxOp::Reopen, OutboxStatus::Prepared);
         let outcome = recover_outbox(work).unwrap();
-        assert_eq!(outcome, OutboxRecovery { recovered: 0, dropped: 1 });
+        assert_eq!(
+            outcome,
+            OutboxRecovery {
+                recovered: 0,
+                dropped: 1
+            }
+        );
         // Reopen prepared + note active: the reopen landed — sync is owed.
         fs::write(&note, "---\nstatus: active\n---\n").unwrap();
         sample_record(work, OutboxOp::Reopen, OutboxStatus::Prepared);
         let outcome = recover_outbox(work).unwrap();
-        assert_eq!(outcome, OutboxRecovery { recovered: 1, dropped: 0 });
+        assert_eq!(
+            outcome,
+            OutboxRecovery {
+                recovered: 1,
+                dropped: 0
+            }
+        );
         assert_eq!(list_records(work).unwrap()[0].status, OutboxStatus::Ready);
     }
 
@@ -996,13 +1012,22 @@ mod tests {
         let records = list_records(work).unwrap();
         let by_id = |id: &str| records.iter().find(|record| record.id == id).cloned();
         assert_eq!(by_id(&syncing.id).unwrap().status, OutboxStatus::Ready);
-        assert_eq!(by_id(&prepared_done.id).unwrap().status, OutboxStatus::Ready);
+        assert_eq!(
+            by_id(&prepared_done.id).unwrap().status,
+            OutboxStatus::Ready
+        );
         assert!(by_id(&prepared_not_done.id).is_none());
 
         // Missing outbox dir is fine.
         let empty = tempfile::tempdir().unwrap();
         let outcome = recover_outbox(empty.path()).unwrap();
-        assert_eq!(outcome, OutboxRecovery { recovered: 0, dropped: 0 });
+        assert_eq!(
+            outcome,
+            OutboxRecovery {
+                recovered: 0,
+                dropped: 0
+            }
+        );
     }
 
     #[test]
@@ -1013,12 +1038,9 @@ mod tests {
         let first = sample_record(work, OutboxOp::Complete, OutboxStatus::RetryNeeded);
         let second = sample_record(work, OutboxOp::Reopen, OutboxStatus::RetryNeeded);
 
-        let outcome = task_integrations_retry(
-            work_path,
-            Some(vec![first.id.clone()]),
-            NOW.to_string(),
-        )
-        .unwrap();
+        let outcome =
+            task_integrations_retry(work_path, Some(vec![first.id.clone()]), NOW.to_string())
+                .unwrap();
         assert_eq!(outcome.requeued, 1);
         let records = list_records(work).unwrap();
         let by_id = |id: &str| records.iter().find(|record| record.id == id).unwrap();
@@ -1091,7 +1113,9 @@ mod tests {
             upsert_body(&record, true),
             r#"{"due":null,"notes":"File: tasks/active/task.md","title":"Ship it"}"#
         );
-        assert!(gws_args(&record).contains(&r#"{"due":null,"notes":"File: tasks/active/task.md","title":"Ship it"}"#.to_string()));
+        assert!(gws_args(&record).contains(
+            &r#"{"due":null,"notes":"File: tasks/active/task.md","title":"Ship it"}"#.to_string()
+        ));
     }
 
     #[test]
@@ -1261,8 +1285,13 @@ mod tests {
         )
         .unwrap();
 
-        assert!(fs::read_to_string(&log).unwrap().contains("tasks tasks patch"));
-        assert_eq!(read_task_integrations(work_path.clone()).unwrap()[0].google_task_id, "g-old");
+        assert!(fs::read_to_string(&log)
+            .unwrap()
+            .contains("tasks tasks patch"));
+        assert_eq!(
+            read_task_integrations(work_path.clone()).unwrap()[0].google_task_id,
+            "g-old"
+        );
         let note = tmp.path().join("tasks/active/task.md");
         let raw = fs::read_to_string(&note).unwrap();
         assert!(raw.contains("googleTaskId: g-old"), "{raw}");
@@ -1332,10 +1361,19 @@ mod tests {
         )
         .unwrap();
         assert_eq!(outcome.drained, 1);
-        assert_eq!(read_task_integrations(work_path).unwrap()[0].status, OutboxStatus::Synced);
-        assert!(fs::read_to_string(&note).unwrap().contains("googleTaskId: g-new"));
+        assert_eq!(
+            read_task_integrations(work_path).unwrap()[0].status,
+            OutboxStatus::Synced
+        );
+        assert!(fs::read_to_string(&note)
+            .unwrap()
+            .contains("googleTaskId: g-new"));
         let logged = fs::read_to_string(&log).unwrap();
-        assert_eq!(logged.matches("insert").count(), 1, "exactly one insert: {logged}");
+        assert_eq!(
+            logged.matches("insert").count(),
+            1,
+            "exactly one insert: {logged}"
+        );
         assert!(logged.contains("tasks tasks patch"));
     }
 
@@ -1412,7 +1450,11 @@ mod tests {
             assert_eq!(outcome.failed, 1, "at {at}");
             let record = &read_task_integrations(work_path.clone()).unwrap()[0];
             assert_eq!(record.attempts, expected_attempts, "at {at}");
-            assert_eq!(record.next_retry_at.as_deref(), Some(expected_retry), "at {at}");
+            assert_eq!(
+                record.next_retry_at.as_deref(),
+                Some(expected_retry),
+                "at {at}"
+            );
         }
     }
 

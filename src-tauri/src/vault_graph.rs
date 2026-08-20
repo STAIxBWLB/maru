@@ -276,7 +276,11 @@ mod tests {
         // rerouted into the submodule even when one exists.
         let tmp = TempDir::new().unwrap();
         fs::create_dir_all(tmp.path().join("reports")).unwrap();
-        fs::write(tmp.path().join("reports/vault-graph.json"), r#"{"nodes": []}"#).unwrap();
+        fs::write(
+            tmp.path().join("reports/vault-graph.json"),
+            r#"{"nodes": []}"#,
+        )
+        .unwrap();
         fs::create_dir_all(tmp.path().join("vault/notes")).unwrap();
         let root = tmp.path().to_string_lossy().to_string();
         assert_eq!(vault_graph_root(root), None);

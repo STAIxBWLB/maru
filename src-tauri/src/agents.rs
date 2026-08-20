@@ -278,11 +278,13 @@ fn seed_record(seed: &AgentSeed) -> AgentRecord {
         enabled: seed.enabled,
         builtin: true,
         customized: false,
-        recommended_schedule: seed.schedule.map(|(hour, minute, days)| RecommendedSchedule {
-            hour,
-            minute,
-            days_of_week: days.to_vec(),
-        }),
+        recommended_schedule: seed
+            .schedule
+            .map(|(hour, minute, days)| RecommendedSchedule {
+                hour,
+                minute,
+                days_of_week: days.to_vec(),
+            }),
     }
 }
 
@@ -306,8 +308,8 @@ fn load_file() -> Result<AgentsFile, String> {
             ..AgentsFile::default()
         });
     }
-    let raw =
-        fs::read_to_string(&path).map_err(|err| format!("Cannot read {}: {err}", path.display()))?;
+    let raw = fs::read_to_string(&path)
+        .map_err(|err| format!("Cannot read {}: {err}", path.display()))?;
     // A corrupt file surfaces an error rather than being silently replaced:
     // agents are user data.
     serde_json::from_str(&raw).map_err(|err| format!("Cannot parse {}: {err}", path.display()))
@@ -354,7 +356,10 @@ fn merged(file: &AgentsFile) -> Result<Vec<AgentRecord>, String> {
     Ok(out)
 }
 
-fn apply_patch(base: &AgentRecord, patch: &JsonMap<String, JsonValue>) -> Result<AgentRecord, String> {
+fn apply_patch(
+    base: &AgentRecord,
+    patch: &JsonMap<String, JsonValue>,
+) -> Result<AgentRecord, String> {
     let mut value = serde_json::to_value(base)
         .map_err(|err| format!("Cannot serialize agent {}: {err}", base.id))?;
     let object = value
@@ -375,7 +380,10 @@ fn apply_patch(base: &AgentRecord, patch: &JsonMap<String, JsonValue>) -> Result
 }
 
 /// The sparse set of overridable fields where `next` differs from the seed.
-fn diff_vs_seed(seed: &AgentRecord, next: &AgentRecord) -> Result<JsonMap<String, JsonValue>, String> {
+fn diff_vs_seed(
+    seed: &AgentRecord,
+    next: &AgentRecord,
+) -> Result<JsonMap<String, JsonValue>, String> {
     let seed_value = serde_json::to_value(seed)
         .map_err(|err| format!("Cannot serialize agent {}: {err}", seed.id))?;
     let next_value = serde_json::to_value(next)
@@ -496,7 +504,11 @@ pub fn agents_upsert(agent: AgentRecord) -> Result<AgentRecord, String> {
     next.recommended_schedule = None;
     next.label_key = None;
     validate_agent(&next, false)?;
-    if next.label.as_ref().is_none_or(|label| label.trim().is_empty()) {
+    if next
+        .label
+        .as_ref()
+        .is_none_or(|label| label.trim().is_empty())
+    {
         return Err("agent_label_required".to_string());
     }
     match file.agents.iter_mut().find(|record| record.id == next.id) {
@@ -568,7 +580,9 @@ impl GlobalAiSettings {
 }
 
 pub fn global_ai_settings() -> GlobalAiSettings {
-    read_global_ai_block().map(parse_ai_block).unwrap_or_default()
+    read_global_ai_block()
+        .map(parse_ai_block)
+        .unwrap_or_default()
 }
 
 fn read_global_ai_block() -> Option<JsonValue> {
@@ -667,8 +681,7 @@ mod tests {
         // the new seed value for the untouched field.
         let mut next_seed = base.clone();
         next_seed.prompt = "새 시드 프롬프트".to_string();
-        let merged_after_upgrade =
-            apply_patch(&next_seed, patch.as_object().unwrap()).unwrap();
+        let merged_after_upgrade = apply_patch(&next_seed, patch.as_object().unwrap()).unwrap();
         assert_eq!(merged_after_upgrade.runtime, "codex");
         assert_eq!(merged_after_upgrade.prompt, "새 시드 프롬프트");
         assert!(merged_after_upgrade.customized);

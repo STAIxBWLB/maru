@@ -19,11 +19,22 @@ use crate::vault::parse_frontmatter;
 use crate::vault_list::load_registry;
 
 pub const VAULT_NOTE_TYPES: [&str; 8] = [
-    "insight", "decision", "observation", "person",
-    "project", "method", "moc", "reference",
+    "insight",
+    "decision",
+    "observation",
+    "person",
+    "project",
+    "method",
+    "moc",
+    "reference",
 ];
 pub const VAULT_NOTE_DOMAINS: [&str; 6] = [
-    "research", "projects", "teaching", "operations", "people", "ai-practice",
+    "research",
+    "projects",
+    "teaching",
+    "operations",
+    "people",
+    "ai-practice",
 ];
 const DESCRIPTION_MAX: usize = 200;
 
@@ -111,9 +122,9 @@ fn validate_note_content(content: &str) -> VaultSchemaReport {
 
     match meta.get("topics") {
         Some(Value::Sequence(items)) if !items.is_empty() => {
-            let all_wikilinks = items.iter().all(|item| {
-                matches!(item, Value::String(s) if s.contains("[[") && s.contains("]]"))
-            });
+            let all_wikilinks = items.iter().all(
+                |item| matches!(item, Value::String(s) if s.contains("[[") && s.contains("]]")),
+            );
             if !all_wikilinks {
                 issues.push(issue(
                     "topics",
@@ -215,7 +226,10 @@ mod tests {
     fn invalid_type_enum_rejected() {
         let content = VALID_NOTE.replace("type: insight", "type: meeting");
         let report = vault_validate_note(content, "notes/a.md".to_string()).unwrap();
-        assert!(report.issues.iter().any(|i| i.field == "type" && i.code == "invalid_enum"));
+        assert!(report
+            .issues
+            .iter()
+            .any(|i| i.field == "type" && i.code == "invalid_enum"));
     }
 
     #[test]
@@ -226,7 +240,10 @@ mod tests {
             &long,
         );
         let report = vault_validate_note(content, "notes/a.md".to_string()).unwrap();
-        assert!(report.issues.iter().any(|i| i.field == "description" && i.code == "too_long"));
+        assert!(report
+            .issues
+            .iter()
+            .any(|i| i.field == "description" && i.code == "too_long"));
     }
 
     #[test]
@@ -240,7 +257,10 @@ mod tests {
     fn non_wikilink_topics_rejected() {
         let content = VALID_NOTE.replace("[[operations]]", "operations");
         let report = vault_validate_note(content, "notes/a.md".to_string()).unwrap();
-        assert!(report.issues.iter().any(|i| i.field == "topics" && i.code == "not_wikilink"));
+        assert!(report
+            .issues
+            .iter()
+            .any(|i| i.field == "topics" && i.code == "not_wikilink"));
     }
 
     #[test]

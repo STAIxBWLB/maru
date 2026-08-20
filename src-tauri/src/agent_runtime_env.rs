@@ -291,11 +291,9 @@ mod tests {
             hidden_defaults: Vec::new(),
         };
 
-        let error = runtime_work_root_with_registry(
-            &canonicalize_or_self(&nested_public),
-            Some(&registry),
-        )
-        .unwrap_err();
+        let error =
+            runtime_work_root_with_registry(&canonicalize_or_self(&nested_public), Some(&registry))
+                .unwrap_err();
 
         assert!(error.contains("not registered as private"));
     }

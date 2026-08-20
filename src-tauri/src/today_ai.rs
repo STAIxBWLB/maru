@@ -507,10 +507,8 @@ mod tests {
         assert_eq!(plan.top.len(), 2);
         assert_eq!(plan.flexible.len(), 1);
         // State file on disk carries the new plan and revision.
-        let raw = fs::read_to_string(
-            tmp.path().join(".maru/today").join(format!("{DAY}.json")),
-        )
-        .unwrap();
+        let raw =
+            fs::read_to_string(tmp.path().join(".maru/today").join(format!("{DAY}.json"))).unwrap();
         let stored: TodaySnapshot = serde_json::from_str(&raw).unwrap();
         assert_eq!(stored.revision, applied.revision);
         assert!(stored.plan.is_some());
@@ -559,11 +557,7 @@ mod tests {
         assert!(err.starts_with("today_ai_stale_revision"));
     }
 
-    fn plan_validation_err(
-        output: String,
-        snapshot: &TodaySnapshot,
-        refs: &[&str],
-    ) -> String {
+    fn plan_validation_err(output: String, snapshot: &TodaySnapshot, refs: &[&str]) -> String {
         let raw: JsonValue = serde_json::from_str(&output).unwrap();
         let valid: HashSet<PlanItemRef> = valid_refs(refs).into_iter().collect();
         validate_plan_output(&raw, DAY, &snapshot.revision, &valid, SLEEP, tz()).unwrap_err()
@@ -576,8 +570,9 @@ mod tests {
         let snapshot = open_day(&work);
         let output = plan_output_json(&snapshot.revision, vec![top_item("a")], vec![])
             .replace(MARU_TODAY_PLAN_V1, "maru_today_plan_v0");
-        assert!(plan_validation_err(output, &snapshot, &["a"])
-            .starts_with("today_ai_schema_mismatch"));
+        assert!(
+            plan_validation_err(output, &snapshot, &["a"]).starts_with("today_ai_schema_mismatch")
+        );
     }
 
     #[test]
@@ -587,8 +582,7 @@ mod tests {
         let snapshot = open_day(&work);
         let output = plan_output_json(&snapshot.revision, vec![top_item("a")], vec![])
             .replace(DAY, "2026-07-22");
-        assert!(plan_validation_err(output, &snapshot, &["a"])
-            .starts_with("today_ai_day_mismatch"));
+        assert!(plan_validation_err(output, &snapshot, &["a"]).starts_with("today_ai_day_mismatch"));
     }
 
     #[test]
@@ -597,8 +591,9 @@ mod tests {
         let work = tmp.path().to_string_lossy().to_string();
         let snapshot = open_day(&work);
         let output = plan_output_json("stale-revision", vec![top_item("a")], vec![]);
-        assert!(plan_validation_err(output, &snapshot, &["a"])
-            .starts_with("today_ai_stale_revision"));
+        assert!(
+            plan_validation_err(output, &snapshot, &["a"]).starts_with("today_ai_stale_revision")
+        );
     }
 
     #[test]
@@ -607,8 +602,7 @@ mod tests {
         let work = tmp.path().to_string_lossy().to_string();
         let snapshot = open_day(&work);
         let output = plan_output_json(&snapshot.revision, vec![top_item("ghost")], vec![]);
-        assert!(plan_validation_err(output, &snapshot, &["a"])
-            .starts_with("today_ai_unknown_ref"));
+        assert!(plan_validation_err(output, &snapshot, &["a"]).starts_with("today_ai_unknown_ref"));
     }
 
     #[test]
@@ -622,8 +616,9 @@ mod tests {
             "order": 0,
         });
         let output = plan_output_json(&snapshot.revision, vec![top_item("a")], vec![dup_flexible]);
-        assert!(plan_validation_err(output, &snapshot, &["a"])
-            .starts_with("today_ai_duplicate_ref"));
+        assert!(
+            plan_validation_err(output, &snapshot, &["a"]).starts_with("today_ai_duplicate_ref")
+        );
     }
 
     #[test]
@@ -633,15 +628,16 @@ mod tests {
         let snapshot = open_day(&work);
         // The ceiling is the schema bound, not the per-user capacity: the
         // planner and the promotion gates enforce `tasks.today.topLaneSize`.
-        let ids: Vec<String> = (0..=TOP_LANE_MAX).map(|index| format!("t{index}")).collect();
+        let ids: Vec<String> = (0..=TOP_LANE_MAX)
+            .map(|index| format!("t{index}"))
+            .collect();
         let refs: Vec<&str> = ids.iter().map(String::as_str).collect();
         let output = plan_output_json(
             &snapshot.revision,
             ids.iter().map(|id| top_item(id)).collect(),
             vec![],
         );
-        assert!(plan_validation_err(output, &snapshot, &refs)
-            .starts_with("today_ai_too_many_top"));
+        assert!(plan_validation_err(output, &snapshot, &refs).starts_with("today_ai_too_many_top"));
     }
 
     #[test]
@@ -701,16 +697,18 @@ mod tests {
         item["proposedBlock"] =
             json!({"startIso": "2026-07-21T21:00:00+09:00", "endIso": "2026-07-21T22:00:00+09:00"});
         let output = plan_output_json(&snapshot.revision, vec![item], vec![]);
-        assert!(plan_validation_err(output, &snapshot, &["a"])
-            .starts_with("today_ai_block_past_sleep"));
+        assert!(
+            plan_validation_err(output, &snapshot, &["a"]).starts_with("today_ai_block_past_sleep")
+        );
         // Wholly inside the sleep window: equally rejected (the old
         // straddle-only check let a 22:00-23:00 block through).
         let mut item = top_item("a");
         item["proposedBlock"] =
             json!({"startIso": "2026-07-21T22:00:00+09:00", "endIso": "2026-07-21T23:00:00+09:00"});
         let output = plan_output_json(&snapshot.revision, vec![item], vec![]);
-        assert!(plan_validation_err(output, &snapshot, &["a"])
-            .starts_with("today_ai_block_past_sleep"));
+        assert!(
+            plan_validation_err(output, &snapshot, &["a"]).starts_with("today_ai_block_past_sleep")
+        );
     }
 
     #[test]
@@ -746,7 +744,8 @@ mod tests {
         .unwrap();
         raw["status"] = json!("done");
         let valid: HashSet<PlanItemRef> = valid_refs(&["a"]).into_iter().collect();
-        let err = validate_plan_output(&raw, DAY, &snapshot.revision, &valid, SLEEP, tz()).unwrap_err();
+        let err =
+            validate_plan_output(&raw, DAY, &snapshot.revision, &valid, SLEEP, tz()).unwrap_err();
         assert_eq!(err, "today_ai_destructive_field: status");
         // Nested inside a plan item.
         let mut raw: JsonValue = serde_json::from_str(&plan_output_json(
@@ -756,7 +755,8 @@ mod tests {
         ))
         .unwrap();
         raw["plan"]["top"][0]["status"] = json!("done");
-        let err = validate_plan_output(&raw, DAY, &snapshot.revision, &valid, SLEEP, tz()).unwrap_err();
+        let err =
+            validate_plan_output(&raw, DAY, &snapshot.revision, &valid, SLEEP, tz()).unwrap_err();
         assert_eq!(err, "today_ai_destructive_field: status");
         // External-system write key.
         let mut raw: JsonValue = serde_json::from_str(&plan_output_json(
@@ -766,7 +766,8 @@ mod tests {
         ))
         .unwrap();
         raw["googleTaskId"] = json!("gt-123");
-        let err = validate_plan_output(&raw, DAY, &snapshot.revision, &valid, SLEEP, tz()).unwrap_err();
+        let err =
+            validate_plan_output(&raw, DAY, &snapshot.revision, &valid, SLEEP, tz()).unwrap_err();
         assert_eq!(err, "today_ai_destructive_field: googleTaskId");
     }
 
@@ -780,7 +781,8 @@ mod tests {
         let output = plan_output_json(&snapshot.revision, vec![item], vec![]);
         let raw: JsonValue = serde_json::from_str(&output).unwrap();
         let valid: HashSet<PlanItemRef> = valid_refs(&["a"]).into_iter().collect();
-        let plan = validate_plan_output(&raw, DAY, &snapshot.revision, &valid, SLEEP, tz()).unwrap();
+        let plan =
+            validate_plan_output(&raw, DAY, &snapshot.revision, &valid, SLEEP, tz()).unwrap();
         assert_eq!(plan.top.len(), 1);
     }
 
@@ -809,7 +811,8 @@ mod tests {
         .unwrap();
         raw["surprise"] = json!(true);
         let valid: HashSet<PlanItemRef> = valid_refs(&["a"]).into_iter().collect();
-        let err = validate_plan_output(&raw, DAY, &snapshot.revision, &valid, SLEEP, tz()).unwrap_err();
+        let err =
+            validate_plan_output(&raw, DAY, &snapshot.revision, &valid, SLEEP, tz()).unwrap_err();
         assert!(err.starts_with("today_ai_invalid_payload"));
     }
 }

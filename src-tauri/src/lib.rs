@@ -46,9 +46,10 @@ mod meetings;
 mod mission_state;
 mod ops_catalog;
 mod outlook_mso;
+mod project_activity;
+mod scheduler;
 pub(crate) mod scratchpad;
 mod scratchpad_watcher;
-mod scheduler;
 mod secrets;
 mod share_outbox;
 mod shelf;
@@ -84,6 +85,7 @@ use agent_host::{
     agent_read_run_events, agent_replay_run_summary, agent_run_structured_loop,
     agent_write_redacted_run_summary, agents_account_status, agents_usage_status,
 };
+use agents::{agents_delete, agents_list, agents_reset, agents_upsert};
 use ai_router::{start_agent_cli_invocation, start_claude_cli_invocation};
 use approval::{prepare_approval, record_approval, ApprovalState};
 use binary_viewer::{
@@ -117,7 +119,6 @@ use evidence_binder::{evidence_binder_mutate, evidence_binder_read};
 use export::{export_dispatch, export_plan, export_validate};
 use file_manager::{open_in_file_manager, reveal_in_file_manager};
 use gap::{gap_analyze, gap_append_log, gap_log_list, gap_reports_list};
-use kg_refs::{kg_document_refs, kg_refs_clear};
 use git::{
     git_changes, git_commit, git_diff, git_generate_commit_message, git_status,
     git_sync_commit_push, git_sync_pull_rebase, git_sync_scan,
@@ -146,17 +147,16 @@ use kakao_relay::{
     enqueue_kakao_send, read_kakao_relay_messages, read_kakao_relay_status,
     read_kakao_send_results, stage_kakao_relay_new,
 };
+use kg_refs::{kg_document_refs, kg_refs_clear};
 use korean_date::parse_korean_date_cmd;
 use launchd_migration::{detect_legacy_telegram_launchd, unload_legacy_telegram_launchd};
 use linter::gaejosik_lint;
 use maru_dir::{
     bootstrap_maru_dir, delete_maru_rule, delete_maru_template, list_maru_rules,
-    list_maru_templates, list_workspace_projects, read_maru_mcp,
-    read_maru_ignore, read_maru_projects, read_maru_rule, read_maru_settings, read_maru_skills,
-    read_maru_template,
+    list_maru_templates, list_workspace_projects, read_maru_ignore, read_maru_mcp,
+    read_maru_projects, read_maru_rule, read_maru_settings, read_maru_skills, read_maru_template,
     read_maru_workspace, save_maru_ignore, save_maru_mcp, save_maru_projects, save_maru_rule,
-    save_maru_settings,
-    save_maru_template, update_maru_workspace,
+    save_maru_settings, save_maru_template, update_maru_workspace,
 };
 use meetings::{
     append_meetings_log, read_meeting_guides, read_meeting_metadata, read_meetings_log,
@@ -171,6 +171,10 @@ use outlook_mso::{
     check_mso_auth, decide_outlook_item, decide_outlook_items, fetch_outlook_unread,
     stage_outlook_items,
 };
+use project_activity::scan_project_activity;
+use scheduler::{
+    scheduler_add, scheduler_list, scheduler_remove, scheduler_run_now, scheduler_set_enabled,
+};
 use scratchpad::{
     scratchpad_cleanup_apply, scratchpad_cleanup_plan, scratchpad_create_idea, scratchpad_list,
     scratchpad_migrate_legacy_memos, scratchpad_read, scratchpad_rename, scratchpad_save,
@@ -178,10 +182,6 @@ use scratchpad::{
 };
 use scratchpad_watcher::{
     start_scratchpad_watcher, stop_scratchpad_watcher, ScratchpadWatcherState,
-};
-use agents::{agents_delete, agents_list, agents_reset, agents_upsert};
-use scheduler::{
-    scheduler_add, scheduler_list, scheduler_remove, scheduler_run_now, scheduler_set_enabled,
 };
 use secrets::{
     secrets_delete_text, secrets_doctor, secrets_migrate, secrets_read_text, secrets_scan,
@@ -619,6 +619,8 @@ pub fn run() {
             catalog_drilldown,
             catalog_watcher_start,
             catalog_watcher_stop,
+            // Dashboard project portfolio (issue #256)
+            scan_project_activity,
             // M7 Hub Connector (Phase 3 read, Phase 6 write)
             hub_status,
             hub_fetch_catalog,

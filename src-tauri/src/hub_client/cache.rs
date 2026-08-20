@@ -230,8 +230,8 @@ pub fn list_queue(workspace_root: &Path) -> io::Result<Vec<(PathBuf, QueuedSubmi
 /// Record a failed drain attempt: bump retry_count and keep the last error.
 pub fn mark_retry(path: &Path, error: &str) -> io::Result<()> {
     let text = std::fs::read_to_string(path)?;
-    let mut item: QueuedSubmitGate = serde_json::from_str(&text)
-        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+    let mut item: QueuedSubmitGate =
+        serde_json::from_str(&text).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
     item.retry_count += 1;
     item.last_error = Some(error.chars().take(500).collect());
     let text =
@@ -251,7 +251,6 @@ fn uuid_like() -> String {
         .unwrap_or(0);
     format!("{:016x}", nanos)
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -323,8 +322,14 @@ mod tests {
         let dir = queue_root(root);
         std::fs::create_dir_all(&dir).unwrap();
         for (name, id) in [
-            ("20260102T000000Z-0000000000000002-submit-gate-b.json", "req_b"),
-            ("20260101T000000Z-0000000000000001-submit-gate-a.json", "req_a"),
+            (
+                "20260102T000000Z-0000000000000002-submit-gate-b.json",
+                "req_b",
+            ),
+            (
+                "20260101T000000Z-0000000000000001-submit-gate-a.json",
+                "req_a",
+            ),
         ] {
             let item = QueuedSubmitGate {
                 request_id: id.to_string(),
@@ -335,11 +340,7 @@ mod tests {
                 retry_count: 0,
                 last_error: None,
             };
-            std::fs::write(
-                dir.join(name),
-                serde_json::to_string_pretty(&item).unwrap(),
-            )
-            .unwrap();
+            std::fs::write(dir.join(name), serde_json::to_string_pretty(&item).unwrap()).unwrap();
         }
         let items = list_queue(root).unwrap();
         assert_eq!(items.len(), 2);

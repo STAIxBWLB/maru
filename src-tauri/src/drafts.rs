@@ -8,8 +8,8 @@
 // the configured drafts collection, <work>/.maru/drafts/, and the explicit,
 // approval-gated promote target.
 
-use crate::atomic_file::{write_atomic, write_atomic_create};
 use crate::approval::{require_approval, ApprovalState};
+use crate::atomic_file::{write_atomic, write_atomic_create};
 use crate::scratchpad::{
     assert_no_symlink_components, assert_scratchpad_workspace_access, move_to_system_trash,
     resolve_scratchpad_drafts_root, resolve_scratchpad_root, ScratchpadSource,
@@ -402,7 +402,11 @@ fn create_impl(
 ///
 /// `runtime`, not `source`: `DraftEntry.source` is the AI runtime enum, and a
 /// drop that wants to record an inbox channel would otherwise collide with it.
-fn adopted_title(meta: &BTreeMap<String, serde_yaml::Value>, body: &str, file_stem: &str) -> String {
+fn adopted_title(
+    meta: &BTreeMap<String, serde_yaml::Value>,
+    body: &str,
+    file_stem: &str,
+) -> String {
     if let Some(title) = meta.get("title").and_then(|v| v.as_str()) {
         let trimmed = title.trim();
         if !trimmed.is_empty() {
@@ -460,7 +464,11 @@ fn adopt_entry_for(file_name: &str, content: &str, modified: String) -> DraftEnt
     let parts = crate::vault::parse_frontmatter(content);
     let meta = &parts.meta;
     let stem = file_name.strip_suffix(".md").unwrap_or(file_name);
-    let importance = match meta.get("importance").and_then(|v| v.as_str()).map(str::trim) {
+    let importance = match meta
+        .get("importance")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+    {
         Some("high") => Some(DraftImportance::High),
         Some("medium") => Some(DraftImportance::Medium),
         Some("low") => Some(DraftImportance::Low),
@@ -514,8 +522,10 @@ fn adopt_orphan_bodies(work: &Path, entries: &mut Vec<DraftEntry>) -> Result<boo
     if !root.is_dir() {
         return Ok(false);
     }
-    let known: std::collections::HashSet<String> =
-        entries.iter().map(|entry| entry.body_path.clone()).collect();
+    let known: std::collections::HashSet<String> = entries
+        .iter()
+        .map(|entry| entry.body_path.clone())
+        .collect();
     let mut orphans: Vec<String> = Vec::new();
     let read_dir = match fs::read_dir(&root) {
         Ok(read_dir) => read_dir,
@@ -992,11 +1002,7 @@ pub fn drafts_set_status(
 }
 
 #[tauri::command(async)]
-pub fn drafts_discard(
-    app: AppHandle,
-    work_path: String,
-    id: String,
-) -> Result<DraftEntry, String> {
+pub fn drafts_discard(app: AppHandle, work_path: String, id: String) -> Result<DraftEntry, String> {
     let entry = discard_impl(&work_path, &id)?;
     emit_drafts_changed(&app, &work_path, Some(id));
     Ok(entry)
@@ -1013,7 +1019,12 @@ pub fn drafts_promote(
     approval_id: Option<String>,
 ) -> Result<DraftEntry, String> {
     require_approval(&approvals, approval_id, DRAFTS_PROMOTE_KIND)?;
-    let entry = promote_impl(&work_path, &id, target, target_path.as_deref().unwrap_or(""))?;
+    let entry = promote_impl(
+        &work_path,
+        &id,
+        target,
+        target_path.as_deref().unwrap_or(""),
+    )?;
     emit_drafts_changed(&app, &work_path, Some(id));
     Ok(entry)
 }
@@ -1146,10 +1157,7 @@ mod tests {
         let entries = drafts_list(work).unwrap();
         assert_eq!(entries.len(), 2);
         // The pre-existing entry keeps its id and is not re-adopted as a copy.
-        assert_eq!(
-            entries.iter().filter(|e| e.id == created.id).count(),
-            1
-        );
+        assert_eq!(entries.iter().filter(|e| e.id == created.id).count(), 1);
         assert!(entries.iter().any(|e| e.title == "떨어진 초안"));
     }
 
@@ -1234,12 +1242,10 @@ mod tests {
         .unwrap();
 
         let entry = create_task_draft(&work, "Configured root");
-        assert!(
-            scratchpad
-                .join("generated-drafts")
-                .join(&entry.body_path)
-                .is_file()
-        );
+        assert!(scratchpad
+            .join("generated-drafts")
+            .join(&entry.body_path)
+            .is_file());
         assert!(!scratchpad.join("drafts").join(&entry.body_path).exists());
     }
 
@@ -1401,7 +1407,13 @@ mod tests {
     fn promote_document_writes_target_and_baseline() {
         let (temp, work) = workspace();
         let entry = create_task_draft(&work, "Promote to doc");
-        let promoted = promote_impl(&work, &entry.id, DraftPromoteTarget::Document, "notes/promoted.md").unwrap();
+        let promoted = promote_impl(
+            &work,
+            &entry.id,
+            DraftPromoteTarget::Document,
+            "notes/promoted.md",
+        )
+        .unwrap();
         assert_eq!(promoted.status, DraftStatus::Accepted);
         assert_eq!(promoted.promoted_to.as_deref(), Some("notes/promoted.md"));
         let target = temp.path().join("notes/promoted.md");
@@ -1419,10 +1431,22 @@ mod tests {
             "# Draft body\n\nDetails here.\n"
         );
         // Re-promoting an accepted draft is rejected.
-        assert!(promote_impl(&work, &entry.id, DraftPromoteTarget::Document, "notes/other.md").is_err());
+        assert!(promote_impl(
+            &work,
+            &entry.id,
+            DraftPromoteTarget::Document,
+            "notes/other.md"
+        )
+        .is_err());
         // Existing targets are never overwritten.
         let other = create_task_draft(&work, "Second draft");
-        let error = promote_impl(&work, &other.id, DraftPromoteTarget::Document, "notes/promoted.md").unwrap_err();
+        let error = promote_impl(
+            &work,
+            &other.id,
+            DraftPromoteTarget::Document,
+            "notes/promoted.md",
+        )
+        .unwrap_err();
         assert_eq!(error, "drafts_promote_target_exists");
     }
 
@@ -1597,7 +1621,10 @@ mod tests {
         let promoted = promote_impl(&work, &entry.id, DraftPromoteTarget::Task, "").unwrap();
         assert_eq!(promoted.status, DraftStatus::Accepted);
         let rel = promoted.promoted_to.clone().unwrap();
-        assert!(rel.starts_with("tasks/active/"), "unexpected rel path {rel}");
+        assert!(
+            rel.starts_with("tasks/active/"),
+            "unexpected rel path {rel}"
+        );
         let target = temp.path().join(&rel);
         let content = fs::read_to_string(&target).unwrap();
         assert!(content.contains("# Draft body"));

@@ -165,11 +165,7 @@ fn terminal_dispatch_spec(
         CliProviderKind::Kimi => {
             // Mirrors build_cli_command's kimi arm: permission flag, then
             // `-p <prompt>`. Plan mode matches the claude arm above.
-            let mut args = vec![
-                "--plan".to_string(),
-                "-p".to_string(),
-                composition.prompt,
-            ];
+            let mut args = vec!["--plan".to_string(), "-p".to_string(), composition.prompt];
             for dir in add_dirs {
                 args.push("--add-dir".to_string());
                 args.push(dir);

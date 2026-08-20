@@ -323,11 +323,7 @@ fn read_status_inner(work: &Path) -> KakaoRelayStatus {
     // The relay daemon writes `heartbeat_at`; accept the legacy `heartbeat` key too.
     let heartbeat = relay
         .as_ref()
-        .and_then(|value| {
-            value
-                .get("heartbeat")
-                .or_else(|| value.get("heartbeat_at"))
-        })
+        .and_then(|value| value.get("heartbeat").or_else(|| value.get("heartbeat_at")))
         .and_then(JsonValue::as_str)
         .map(ToString::to_string);
     let heartbeat_age_seconds = heartbeat
@@ -346,9 +342,7 @@ fn read_status_inner(work: &Path) -> KakaoRelayStatus {
         .filter(|value| *value > 0)
         .unwrap_or(DEFAULT_HEARTBEAT_INTERVAL_SECONDS);
     let stale = match heartbeat_age_seconds {
-        Some(age) => {
-            age > expected_interval.saturating_mul(3) || age > HEARTBEAT_STALE_MAX_SECONDS
-        }
+        Some(age) => age > expected_interval.saturating_mul(3) || age > HEARTBEAT_STALE_MAX_SECONDS,
         None => true,
     };
     let state = relay
@@ -426,7 +420,11 @@ fn cap_seen_ring(seen: BTreeSet<String>) -> Vec<String> {
     keys
 }
 
-fn stage_inner(work: &Path, media_stable_age: Duration, dry_run: bool) -> Result<KakaoRelayStageOutcome, String> {
+fn stage_inner(
+    work: &Path,
+    media_stable_age: Duration,
+    dry_run: bool,
+) -> Result<KakaoRelayStageOutcome, String> {
     let root = resolve_relay_root(work)?;
     let mut outcome = KakaoRelayStageOutcome::default();
     let drop_dir = match resolve_kakao_drop_dir(work) {
@@ -577,9 +575,11 @@ fn stage_inner(work: &Path, media_stable_age: Duration, dry_run: bool) -> Result
                     continue;
                 }
                 if !dry_run {
-                    let staged = fs::read(&path).map_err(|err| err.to_string()).and_then(
-                        |bytes| write_atomic(&drop_dir.join("files").join(&name), &bytes),
-                    );
+                    let staged = fs::read(&path)
+                        .map_err(|err| err.to_string())
+                        .and_then(|bytes| {
+                            write_atomic(&drop_dir.join("files").join(&name), &bytes)
+                        });
                     match staged {
                         Ok(()) => {
                             cursor.media.push(key);
@@ -622,7 +622,9 @@ fn enqueue_send_inner(
         return Err("chat_required".to_string());
     }
     let text = text.trim();
-    let attachment_path = attachment_path.map(str::trim).filter(|path| !path.is_empty());
+    let attachment_path = attachment_path
+        .map(str::trim)
+        .filter(|path| !path.is_empty());
     if text.is_empty() && attachment_path.is_none() {
         return Err("text_or_attachment_required".to_string());
     }
@@ -658,7 +660,10 @@ fn enqueue_send_inner(
         "requested_by": REQUESTED_BY,
         "requested_at": Utc::now().to_rfc3339(),
     });
-    let target = root.join("outbox").join("pending").join(format!("{id}.json"));
+    let target = root
+        .join("outbox")
+        .join("pending")
+        .join(format!("{id}.json"));
     let bytes = serde_json::to_vec_pretty(&payload)
         .map_err(|err| format!("kakao_send_payload_failed: {err}"))?;
     write_atomic(&target, &bytes)?;
@@ -703,7 +708,10 @@ fn read_send_results_inner(work: &Path, ids: &[String]) -> Result<Vec<KakaoSendR
             });
             continue;
         }
-        let pending_path = root.join("outbox").join("pending").join(format!("{id}.json"));
+        let pending_path = root
+            .join("outbox")
+            .join("pending")
+            .join(format!("{id}.json"));
         let status = if pending_path.is_file() {
             "queued"
         } else {
@@ -896,7 +904,11 @@ io:
         let fixture = fixture("drop/kakao");
         let status_dir = fixture.relay.path().join("status");
         fs::create_dir_all(&status_dir).unwrap();
-        fs::write(status_dir.join("relay.json"), "{\"state\":\"running\",\"heartbeat\":").unwrap();
+        fs::write(
+            status_dir.join("relay.json"),
+            "{\"state\":\"running\",\"heartbeat\":",
+        )
+        .unwrap();
         let status = read_status_inner(fixture.work.path());
         assert_eq!(status.state, "unreachable");
         assert!(status.stale);
@@ -957,7 +969,9 @@ io:
         assert!(!read_status_inner(fixture.work.path()).stale);
         fs::write(
             status_dir.join("relay.json"),
-            format!(r#"{{"state":"running","heartbeat":"{heartbeat}","poll_interval_seconds":10}}"#),
+            format!(
+                r#"{{"state":"running","heartbeat":"{heartbeat}","poll_interval_seconds":10}}"#
+            ),
         )
         .unwrap();
         assert!(read_status_inner(fixture.work.path()).stale);
@@ -1003,11 +1017,9 @@ io:
         assert_eq!(limited[1]["message"]["text"], "mid");
 
         assert!(read_messages_inner(fixture.work.path(), "../escape", None).is_err());
-        assert!(
-            read_messages_inner(fixture.work.path(), "missing", None)
-                .unwrap()
-                .is_empty()
-        );
+        assert!(read_messages_inner(fixture.work.path(), "missing", None)
+            .unwrap()
+            .is_empty());
     }
 
     #[test]
@@ -1032,8 +1044,10 @@ io:
         let outcome = stage_inner(fixture.work.path(), Duration::ZERO, false).unwrap();
         assert_eq!(outcome.staged_messages, 0);
         let drop = fixture.work.path().join("inbox/drop/kakao");
-        assert!(!drop.join("messages").exists()
-            || fs::read_dir(drop.join("messages")).unwrap().count() == 0);
+        assert!(
+            !drop.join("messages").exists()
+                || fs::read_dir(drop.join("messages")).unwrap().count() == 0
+        );
     }
 
     #[test]
@@ -1139,13 +1153,11 @@ io:
         write_envelope(&day, "090000-aaaa1111", "late");
         let outcome = stage_inner(fixture.work.path(), Duration::ZERO, false).unwrap();
         assert_eq!(outcome.staged_messages, 1);
-        assert!(
-            fixture
-                .work
-                .path()
-                .join("inbox/drop/kakao/messages/090000-aaaa1111.json")
-                .exists()
-        );
+        assert!(fixture
+            .work
+            .path()
+            .join("inbox/drop/kakao/messages/090000-aaaa1111.json")
+            .exists());
         // High-water mark stays at the newest key.
         let cursor = load_cursor(fixture.work.path());
         assert_eq!(

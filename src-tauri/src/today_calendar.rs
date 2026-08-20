@@ -35,7 +35,9 @@ use crate::today_store::{
     append_task_event_for, check_revision, load_snapshot_with_raw, persist_snapshot,
     snapshot_revision, work_lock_for,
 };
-use crate::vault::{load_maruignore, matches_maruignore, normalize_existing_dir, parse_frontmatter};
+use crate::vault::{
+    load_maruignore, matches_maruignore, normalize_existing_dir, parse_frontmatter,
+};
 use crate::vault_list::{assert_maru_can_write, WorkspaceWriteAction};
 use crate::win_process::NoWindow;
 use chrono::{DateTime, Duration, NaiveDate, NaiveDateTime, TimeZone};
@@ -104,9 +106,8 @@ fn parse_event_time(raw: &str, tz: Tz) -> Option<DateTime<Tz>> {
 fn note_event_for(work: &Path, path: &Path, default_tz: Tz) -> Option<NoteEvent> {
     let raw = fs::read_to_string(path).ok()?;
     let parts = parse_frontmatter(&raw);
-    let frontmatter = crate::tasks::normalize_task_frontmatter_aliases(crate::tasks::yaml_to_json(
-        &parts.meta,
-    ));
+    let frontmatter =
+        crate::tasks::normalize_task_frontmatter_aliases(crate::tasks::yaml_to_json(&parts.meta));
     let start_raw = string_field(&frontmatter, &["calendarStart", "calendar_start"])?;
     let note_tz = string_field(&frontmatter, &["timezone"])
         .and_then(|iana| parse_timezone(iana).ok())
@@ -118,12 +119,14 @@ fn note_event_for(work: &Path, path: &Path, default_tz: Tz) -> Option<NoteEvent>
         // means a one-hour block.
         .filter(|end| *end > start)
         .unwrap_or(start + Duration::hours(1));
-    let title = string_field(&frontmatter, &["title"]).map(ToString::to_string).unwrap_or_else(|| {
-        path.file_stem()
-            .and_then(|stem| stem.to_str())
-            .unwrap_or("event")
-            .to_string()
-    });
+    let title = string_field(&frontmatter, &["title"])
+        .map(ToString::to_string)
+        .unwrap_or_else(|| {
+            path.file_stem()
+                .and_then(|stem| stem.to_str())
+                .unwrap_or("event")
+                .to_string()
+        });
     let cancelled = string_field(&frontmatter, &["status"])
         .map(|status| status.eq_ignore_ascii_case("cancelled"))
         .unwrap_or(false);
@@ -166,9 +169,13 @@ fn day_window(
     let end = tz
         .from_local_datetime(&sleep_date.and_time(sleep_start))
         .single()
-        .ok_or_else(|| format!("today_local_time_unresolvable: {sleep_date} {sleep_start} in {tz}"))?;
+        .ok_or_else(|| {
+            format!("today_local_time_unresolvable: {sleep_date} {sleep_start} in {tz}")
+        })?;
     if end <= start {
-        return Err(format!("today_invalid_day_window: {day_start}-{sleep_start}"));
+        return Err(format!(
+            "today_invalid_day_window: {day_start}-{sleep_start}"
+        ));
     }
     Ok((start, end))
 }
@@ -257,10 +264,9 @@ pub fn today_calendar_commitments(
         if clipped_end <= clipped_start {
             continue;
         }
-        if commitments
-            .last()
-            .is_some_and(|last| last.title == event.title && last.start_iso == clipped_start.to_rfc3339())
-        {
+        if commitments.last().is_some_and(|last| {
+            last.title == event.title && last.start_iso == clipped_start.to_rfc3339()
+        }) {
             continue;
         }
         commitments.push(CalendarCommitment {
@@ -370,7 +376,9 @@ fn persist_item_sync(
     now_iso: &str,
 ) -> Result<bool, String> {
     let lock = work_lock_for(work)?;
-    let _guard = lock.lock().map_err(|_| "today_work_lock_poisoned".to_string())?;
+    let _guard = lock
+        .lock()
+        .map_err(|_| "today_work_lock_poisoned".to_string())?;
     let (raw, mut snapshot) = load_snapshot_with_raw(work, logical_day)?;
     let mut found = false;
     if let Some(plan) = snapshot.plan.as_mut() {
@@ -413,7 +421,8 @@ pub fn today_calendar_publish(
 ) -> Result<CalendarPublishOutcome, String> {
     assert_maru_can_write(&work_path, WorkspaceWriteAction::Modify)?;
     let work = normalize_existing_dir(&work_path)?;
-    DateTime::parse_from_rfc3339(&now_iso).map_err(|err| format!("now_iso must be RFC3339: {err}"))?;
+    DateTime::parse_from_rfc3339(&now_iso)
+        .map_err(|err| format!("now_iso must be RFC3339: {err}"))?;
     let (_, entry_snapshot) = load_snapshot_with_raw(&work, &logical_day)?;
     check_revision(&entry_snapshot, &expected_revision)?;
 
@@ -454,7 +463,10 @@ pub fn today_calendar_publish(
             .as_deref()
             .map(str::trim)
             .filter(|value| !value.is_empty())
-            .or(destination.as_deref().map(str::trim).filter(|value| !value.is_empty()))
+            .or(destination
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty()))
             .unwrap_or(FALLBACK_DESTINATION);
         let output = Command::new(&gws_bin)
             .env("PATH", augmented_path())
@@ -562,10 +574,7 @@ mod tests {
         tmp.path().to_string_lossy().to_string()
     }
 
-    fn commitments(
-        tmp: &tempfile::TempDir,
-        calendars: Vec<String>,
-    ) -> Vec<CalendarCommitment> {
+    fn commitments(tmp: &tempfile::TempDir, calendars: Vec<String>) -> Vec<CalendarCommitment> {
         today_calendar_commitments(
             work(tmp),
             DAY.to_string(),
@@ -699,7 +708,10 @@ mod tests {
         assert_eq!(commitments[0].end_iso, "2026-07-21T05:00:00+09:00");
         assert_eq!(commitments[1].start_iso, "2026-07-21T09:00:00+09:00");
         assert_eq!(commitments[1].end_iso, "2026-07-21T10:30:00+09:00");
-        assert!(commitments[1].source.starts_with("tasks/") || commitments[1].source.starts_with("calendar/"));
+        assert!(
+            commitments[1].source.starts_with("tasks/")
+                || commitments[1].source.starts_with("calendar/")
+        );
         // Missing end defaults to one hour.
         assert_eq!(commitments[2].end_iso, "2026-07-21T15:00:00+09:00");
     }
@@ -741,14 +753,26 @@ mod tests {
         let snapshot = open_with_plan(
             &tmp,
             vec![
-                plan_item("a", Some(block("2026-07-21T10:00:00+09:00", "2026-07-21T11:00:00+09:00"))),
+                plan_item(
+                    "a",
+                    Some(block(
+                        "2026-07-21T10:00:00+09:00",
+                        "2026-07-21T11:00:00+09:00",
+                    )),
+                ),
                 plan_item("b", None),
             ],
         );
         let updated = select(&tmp, &snapshot, "a", true).unwrap();
         let plan = updated.plan.as_ref().unwrap();
-        assert_eq!(plan.top[0].calendar_sync.status, CalendarSyncStatus::Selected);
-        assert_eq!(plan.top[0].calendar_sync.destination.as_deref(), Some("cal-1"));
+        assert_eq!(
+            plan.top[0].calendar_sync.status,
+            CalendarSyncStatus::Selected
+        );
+        assert_eq!(
+            plan.top[0].calendar_sync.destination.as_deref(),
+            Some("cal-1")
+        );
         assert_eq!(plan.top[1].calendar_sync.status, CalendarSyncStatus::None);
         assert_ne!(updated.revision, snapshot.revision);
 
@@ -768,7 +792,11 @@ mod tests {
 
     // --- Publish -----------------------------------------------------------------
 
-    fn publish(tmp: &tempfile::TempDir, snapshot: &TodaySnapshot, gws: &Path) -> CalendarPublishOutcome {
+    fn publish(
+        tmp: &tempfile::TempDir,
+        snapshot: &TodaySnapshot,
+        gws: &Path,
+    ) -> CalendarPublishOutcome {
         today_calendar_publish(
             work(tmp),
             snapshot.logical_day.clone(),
@@ -795,8 +823,20 @@ mod tests {
         let snapshot = open_with_plan(
             &tmp,
             vec![
-                plan_item("a", Some(block("2026-07-21T10:00:00+09:00", "2026-07-21T11:00:00+09:00"))),
-                plan_item("b", Some(block("2026-07-21T13:00:00+09:00", "2026-07-21T14:00:00+09:00"))),
+                plan_item(
+                    "a",
+                    Some(block(
+                        "2026-07-21T10:00:00+09:00",
+                        "2026-07-21T11:00:00+09:00",
+                    )),
+                ),
+                plan_item(
+                    "b",
+                    Some(block(
+                        "2026-07-21T13:00:00+09:00",
+                        "2026-07-21T14:00:00+09:00",
+                    )),
+                ),
             ],
         );
         // Only `a` is selected; `b` stays at none and must never publish.
@@ -808,7 +848,10 @@ mod tests {
         assert!(!outcome.blocked);
         let plan = outcome.snapshot.plan.as_ref().unwrap();
         assert_eq!(plan.top[0].calendar_sync.status, CalendarSyncStatus::Synced);
-        assert_eq!(plan.top[0].calendar_sync.event_id.as_deref(), Some("evt-42"));
+        assert_eq!(
+            plan.top[0].calendar_sync.event_id.as_deref(),
+            Some("evt-42")
+        );
         assert_eq!(plan.top[1].calendar_sync.status, CalendarSyncStatus::None);
         assert_ne!(outcome.snapshot.revision, snapshot.revision);
 
@@ -820,7 +863,8 @@ mod tests {
         assert!(logged.contains(r#""timeZone":"Asia/Seoul""#));
         assert!(!logged.contains("Ship b"));
 
-        let events = fs::read_to_string(tmp.path().join(".maru/today/events/2026-07.jsonl")).unwrap();
+        let events =
+            fs::read_to_string(tmp.path().join(".maru/today/events/2026-07.jsonl")).unwrap();
         assert!(events.contains("\"kind\":\"calendar_blocks_published\""));
     }
 
@@ -876,8 +920,20 @@ mod tests {
         let snapshot = open_with_plan(
             &tmp,
             vec![
-                plan_item("a", Some(block("2026-07-21T10:00:00+09:00", "2026-07-21T11:00:00+09:00"))),
-                plan_item("b", Some(block("2026-07-21T13:00:00+09:00", "2026-07-21T14:00:00+09:00"))),
+                plan_item(
+                    "a",
+                    Some(block(
+                        "2026-07-21T10:00:00+09:00",
+                        "2026-07-21T11:00:00+09:00",
+                    )),
+                ),
+                plan_item(
+                    "b",
+                    Some(block(
+                        "2026-07-21T13:00:00+09:00",
+                        "2026-07-21T14:00:00+09:00",
+                    )),
+                ),
             ],
         );
         let snapshot = select(&tmp, &snapshot, "a", true).unwrap();
@@ -889,8 +945,14 @@ mod tests {
         assert_eq!(outcome.failed, 0);
         let plan = outcome.snapshot.plan.as_ref().unwrap();
         // Both stay selected so a re-auth + republish retries the same set.
-        assert_eq!(plan.top[0].calendar_sync.status, CalendarSyncStatus::Selected);
-        assert_eq!(plan.top[1].calendar_sync.status, CalendarSyncStatus::Selected);
+        assert_eq!(
+            plan.top[0].calendar_sync.status,
+            CalendarSyncStatus::Selected
+        );
+        assert_eq!(
+            plan.top[1].calendar_sync.status,
+            CalendarSyncStatus::Selected
+        );
     }
 
     #[test]
@@ -910,8 +972,20 @@ mod tests {
         let snapshot = open_with_plan(
             &tmp,
             vec![
-                plan_item("a", Some(block("2026-07-21T10:00:00+09:00", "2026-07-21T11:00:00+09:00"))),
-                plan_item("b", Some(block("2026-07-21T13:00:00+09:00", "2026-07-21T14:00:00+09:00"))),
+                plan_item(
+                    "a",
+                    Some(block(
+                        "2026-07-21T10:00:00+09:00",
+                        "2026-07-21T11:00:00+09:00",
+                    )),
+                ),
+                plan_item(
+                    "b",
+                    Some(block(
+                        "2026-07-21T13:00:00+09:00",
+                        "2026-07-21T14:00:00+09:00",
+                    )),
+                ),
             ],
         );
         let snapshot = select(&tmp, &snapshot, "a", true).unwrap();
@@ -939,7 +1013,13 @@ mod tests {
         let fake = write_fake_gws(tmp.path(), "gws-ok", "#!/bin/sh\nexit 0\n");
         let snapshot = open_with_plan(
             &tmp,
-            vec![plan_item("a", Some(block("2026-07-21T10:00:00+09:00", "2026-07-21T11:00:00+09:00")))],
+            vec![plan_item(
+                "a",
+                Some(block(
+                    "2026-07-21T10:00:00+09:00",
+                    "2026-07-21T11:00:00+09:00",
+                )),
+            )],
         );
         // Nothing selected: no gws call, no revision bump.
         let outcome = publish(&tmp, &snapshot, &fake);

@@ -373,10 +373,7 @@ pub(crate) fn materialize_capture_task(
     write_atomic(&prepared.path, prepared.content.as_bytes())
         .map_err(|err| format!("Cannot write capture task note: {err}"))?;
     let row = task_row_for_path(work, &prepared.path, prepared.bucket)?;
-    Ok(MaterializedTaskWrite {
-        row,
-        created: true,
-    })
+    Ok(MaterializedTaskWrite { row, created: true })
 }
 
 #[tauri::command(async)]
@@ -826,12 +823,8 @@ pub(crate) fn normalize_task_frontmatter_aliases(mut frontmatter: JsonValue) -> 
                 .map(str::trim)
                 .find(|value| !value.is_empty()),
             _ => None,
-        })
-        {
-            map.insert(
-                "project".to_string(),
-                JsonValue::String(first.to_string()),
-            );
+        }) {
+            map.insert("project".to_string(), JsonValue::String(first.to_string()));
         }
     }
     if !map.contains_key("completedAt") {
@@ -1450,8 +1443,14 @@ mod tests {
         // web app writes (issue #232 work item 6), so no alias work is owed
         // for web-originated task notes.
         assert_eq!(parse_task_status("active"), Some(TaskStatus::Active));
-        assert_eq!(parse_task_status("In_Progress"), Some(TaskStatus::InProgress));
-        assert_eq!(parse_task_status("in-progress"), Some(TaskStatus::InProgress));
+        assert_eq!(
+            parse_task_status("In_Progress"),
+            Some(TaskStatus::InProgress)
+        );
+        assert_eq!(
+            parse_task_status("in-progress"),
+            Some(TaskStatus::InProgress)
+        );
         assert_eq!(parse_task_status("done"), Some(TaskStatus::Done));
         assert_eq!(parse_task_status("cancelled"), Some(TaskStatus::Cancelled));
         assert_eq!(parse_task_status("backlog"), Some(TaskStatus::Backlog));
@@ -1478,7 +1477,10 @@ mod tests {
 
         assert_eq!(rows.len(), 2);
         let list = rows.iter().find(|row| row.file_name == "task.md").unwrap();
-        let scalar = rows.iter().find(|row| row.file_name == "scalar.md").unwrap();
+        let scalar = rows
+            .iter()
+            .find(|row| row.file_name == "scalar.md")
+            .unwrap();
         assert_eq!(list.frontmatter["project"], json!("alpha"));
         assert_eq!(scalar.frontmatter["project"], json!("gamma"));
         // Original alias key stays untouched; writers never see `project` here.
@@ -1501,8 +1503,16 @@ mod tests {
             "---\nname: Frontmatter name\n---\n# Heading",
         )
         .unwrap();
-        fs::write(active.join("heading.md"), "---\nstatus: active\n---\n# Body heading").unwrap();
-        fs::write(active.join("filename-only.md"), "---\nstatus: active\n---\nBody").unwrap();
+        fs::write(
+            active.join("heading.md"),
+            "---\nstatus: active\n---\n# Body heading",
+        )
+        .unwrap();
+        fs::write(
+            active.join("filename-only.md"),
+            "---\nstatus: active\n---\nBody",
+        )
+        .unwrap();
 
         let rows = scan_task_notes(tmp.path().to_string_lossy().to_string(), None).unwrap();
         let titles = rows
@@ -1544,15 +1554,22 @@ mod tests {
         }
 
         // Canonical `done` date stays canonical; no completedAt is invented.
-        fs::write(dir.join("done-only.md"), "---\nstatus: done\ndone: 2026-07-05\n---\n# Task")
-            .unwrap();
+        fs::write(
+            dir.join("done-only.md"),
+            "---\nstatus: done\ndone: 2026-07-05\n---\n# Task",
+        )
+        .unwrap();
         let metadata =
             read_task_metadata(work.clone(), "tasks/archive/done-only.md".to_string()).unwrap();
         assert_eq!(metadata.frontmatter["done"], json!("2026-07-05"));
         assert!(metadata.frontmatter.get("completedAt").is_none());
 
         // Boolean `completed: true` carries no date — none is invented.
-        fs::write(dir.join("flag.md"), "---\nstatus: done\ncompleted: true\n---\n# Task").unwrap();
+        fs::write(
+            dir.join("flag.md"),
+            "---\nstatus: done\ncompleted: true\n---\n# Task",
+        )
+        .unwrap();
         let metadata = read_task_metadata(work, "tasks/archive/flag.md".to_string()).unwrap();
         assert!(metadata.frontmatter.get("completedAt").is_none());
     }

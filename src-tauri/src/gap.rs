@@ -408,11 +408,16 @@ fn classify_hunk(
         .collect();
 
     // 1. formatting
-    let all_blank = added.iter().chain(removed.iter()).all(|line| line.trim().is_empty());
-    let added_squashed: BTreeSet<String> = added.iter().map(|line| squash_whitespace(line)).collect();
+    let all_blank = added
+        .iter()
+        .chain(removed.iter())
+        .all(|line| line.trim().is_empty());
+    let added_squashed: BTreeSet<String> =
+        added.iter().map(|line| squash_whitespace(line)).collect();
     let removed_squashed: BTreeSet<String> =
         removed.iter().map(|line| squash_whitespace(line)).collect();
-    let whitespace_only = !added.is_empty() && !removed.is_empty() && added_squashed == removed_squashed;
+    let whitespace_only =
+        !added.is_empty() && !removed.is_empty() && added_squashed == removed_squashed;
     let frontmatter_only = match (old_frontmatter_end, new_frontmatter_end) {
         (Some(old_end), Some(new_end)) => {
             (!hunk.removed_idx.is_empty() || !hunk.added_idx.is_empty())
@@ -589,8 +594,12 @@ fn analyze_impl(work_path: &str, draft_id: &str) -> Result<GapReport, String> {
     let baseline = fs::read_to_string(&baseline_path)
         .map_err(|err| format!("Cannot read baseline {}: {err}", baseline_path.display()))?;
     let doc_path = promoted_doc_path(work_path, &promoted_to)?;
-    let current = fs::read_to_string(&doc_path)
-        .map_err(|err| format!("Cannot read promoted document {}: {err}", doc_path.display()))?;
+    let current = fs::read_to_string(&doc_path).map_err(|err| {
+        format!(
+            "Cannot read promoted document {}: {err}",
+            doc_path.display()
+        )
+    })?;
     Ok(build_report(&entry, &baseline, &current))
 }
 
@@ -755,10 +764,22 @@ pub(crate) const GAP_FEEDBACK_DEFAULT_MAX_ENTRIES: usize = 20;
 /// (label, hint) per edit type, in declaration order — stable ties in the
 /// dominant-type pick keep this order, same as the TS port.
 const GAP_TYPE_FEEDBACK: [(&str, &str); 4] = [
-    ("외부 정보 추가", "초안에 출처·수치·날짜 등 근거 정보를 더 포함할 것"),
-    ("직접 수정", "초안 문장을 최종 문서 톤에 맞춰 더 다듬어 작성할 것"),
-    ("교차 문서 참조", "관련 문서의 [[위키링크]]를 초안에 미리 포함할 것"),
-    ("서식 정리", "초안의 서식·공백·프론트매터를 최종 문서 형식에 맞출 것"),
+    (
+        "외부 정보 추가",
+        "초안에 출처·수치·날짜 등 근거 정보를 더 포함할 것",
+    ),
+    (
+        "직접 수정",
+        "초안 문장을 최종 문서 톤에 맞춰 더 다듬어 작성할 것",
+    ),
+    (
+        "교차 문서 참조",
+        "관련 문서의 [[위키링크]]를 초안에 미리 포함할 것",
+    ),
+    (
+        "서식 정리",
+        "초안의 서식·공백·프론트매터를 최종 문서 형식에 맞출 것",
+    ),
 ];
 
 /// Short Korean digest of recent user edit tendencies, appended to
@@ -838,7 +859,6 @@ pub(crate) fn strip_gap_feedback_section(prompt: &str) -> String {
     let line_start = prompt[..index].rfind('\n').map(|i| i + 1).unwrap_or(0);
     prompt[..line_start].trim_end().to_string()
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -967,7 +987,9 @@ mod tests {
         // A body change in the same doc is not formatting.
         let mixed = "---\ntitle: B\ntags: [x]\n---\nbody changed\n";
         let result = classified(old, mixed);
-        assert!(result.iter().any(|(kind, _)| *kind != GapHunkType::Formatting));
+        assert!(result
+            .iter()
+            .any(|(kind, _)| *kind != GapHunkType::Formatting));
     }
 
     #[test]
@@ -975,7 +997,8 @@ mod tests {
         // What an older drafts_promote left behind: baseline = raw draft body,
         // promoted note = the same body with generated frontmatter on top.
         let old = "# Draft body\n\nDetails here.\n";
-        let new = "---\nstatus: active\ntitle: Ship 3 reports\n---\n# Draft body\n\nDetails here.\n";
+        let new =
+            "---\nstatus: active\ntitle: Ship 3 reports\n---\n# Draft body\n\nDetails here.\n";
         let result = classified(old, new);
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].0, GapHunkType::Formatting);
@@ -993,7 +1016,11 @@ mod tests {
             GapHunkType::DirectEdit,
             "rewording around an existing citation is a direct edit"
         );
-        assert!(result[0].1.is_empty(), "unexpected evidence {:?}", result[0].1);
+        assert!(
+            result[0].1.is_empty(),
+            "unexpected evidence {:?}",
+            result[0].1
+        );
     }
 
     #[test]
@@ -1089,7 +1116,13 @@ mod tests {
         let (_temp, work) = workspace();
         let baseline = "# Report\n\nintro line\n\nold detail\n\ntail\n";
         let current = "# Report\n\nintro line\n\nnew detail from https://example.com\nadded 17 rows\n\ntail\n";
-        seed_promoted_draft(&work, "draft-abc-1", "notes/report.md", baseline, Some(current));
+        seed_promoted_draft(
+            &work,
+            "draft-abc-1",
+            "notes/report.md",
+            baseline,
+            Some(current),
+        );
 
         let report = analyze_impl(&work, "draft-abc-1").unwrap();
         assert_eq!(report.draft_id, "draft-abc-1");
@@ -1117,7 +1150,13 @@ mod tests {
     #[test]
     fn analyze_identical_doc_reports_zero_hunks() {
         let (_temp, work) = workspace();
-        seed_promoted_draft(&work, "draft-same-1", "notes/same.md", "body\n", Some("body\n"));
+        seed_promoted_draft(
+            &work,
+            "draft-same-1",
+            "notes/same.md",
+            "body\n",
+            Some("body\n"),
+        );
         let report = analyze_impl(&work, "draft-same-1").unwrap();
         assert_eq!(report.summary.total_hunks, 0);
         assert!(report.hunks.is_empty());
@@ -1155,7 +1194,13 @@ mod tests {
     #[test]
     fn log_entry_carries_provenance_for_normalizing_churn() {
         let (_temp, work) = workspace();
-        seed_promoted_draft(&work, "draft-prov", "notes/prov.md", "a\nb\n", Some("a\nb\nc\n"));
+        seed_promoted_draft(
+            &work,
+            "draft-prov",
+            "notes/prov.md",
+            "a\nb\n",
+            Some("a\nb\nc\n"),
+        );
         let entry = gap_append_log(work.clone(), "draft-prov".to_string()).unwrap();
         // Two added lines mean one thing against a 2-line baseline and another
         // against a 200-line one, so the size has to travel with the counts.
@@ -1185,7 +1230,13 @@ mod tests {
         assert_eq!(gap_log_list(work.clone(), None).unwrap().len(), 2);
 
         // Another draft is never confused with this one.
-        seed_promoted_draft(&work, "draft-other", "notes/other.md", "a\n", Some("a\nb\n"));
+        seed_promoted_draft(
+            &work,
+            "draft-other",
+            "notes/other.md",
+            "a\n",
+            Some("a\nb\n"),
+        );
         gap_append_log(work.clone(), "draft-other".to_string()).unwrap();
         assert_eq!(gap_log_list(work.clone(), None).unwrap().len(), 3);
     }
@@ -1216,8 +1267,7 @@ mod tests {
             seed_promoted_draft(&work, "draft-trav-1", bad, "a\n", None);
             let error = analyze_impl(&work, "draft-trav-1").unwrap_err();
             assert!(
-                error == "gap_promoted_doc_missing"
-                    || error.contains("escapes"),
+                error == "gap_promoted_doc_missing" || error.contains("escapes"),
                 "promotedTo {bad} must be rejected, got {error}"
             );
         }
@@ -1245,11 +1295,17 @@ mod tests {
 
         let rows = gap_reports_list(work.clone()).unwrap();
         assert_eq!(rows.len(), 2);
-        let first = rows.iter().find(|row| row.draft_id == "draft-rep-1").unwrap();
+        let first = rows
+            .iter()
+            .find(|row| row.draft_id == "draft-rep-1")
+            .unwrap();
         assert!(first.has_baseline);
         assert_eq!(first.promoted_to, "notes/a.md");
         assert_eq!(first.promoted_at, "2026-07-02T00:00:00Z");
-        let second = rows.iter().find(|row| row.draft_id == "draft-rep-2").unwrap();
+        let second = rows
+            .iter()
+            .find(|row| row.draft_id == "draft-rep-2")
+            .unwrap();
         assert!(!second.has_baseline);
 
         // The baseline can survive a moved/trashed promoted document. The row
@@ -1257,13 +1313,21 @@ mod tests {
         // attempting analysis and surfacing a raw backend error.
         fs::remove_file(temp.path().join("notes/a.md")).unwrap();
         let rows = gap_reports_list(work).unwrap();
-        let first = rows.iter().find(|row| row.draft_id == "draft-rep-1").unwrap();
+        let first = rows
+            .iter()
+            .find(|row| row.draft_id == "draft-rep-1")
+            .unwrap();
         assert!(!first.has_document);
     }
 
     // === Feedback digest (mirrors src/__tests__/gapAnalysis.test.ts) ===
 
-    fn feedback_entry(at: &str, added: usize, removed: usize, by_type: GapTypeCounts) -> GapLogEntry {
+    fn feedback_entry(
+        at: &str,
+        added: usize,
+        removed: usize,
+        by_type: GapTypeCounts,
+    ) -> GapLogEntry {
         GapLogEntry {
             at: at.to_string(),
             draft_id: "draft-fb".to_string(),
@@ -1315,17 +1379,30 @@ mod tests {
     #[test]
     fn digest_hints_the_dominant_type_only() {
         let digest = build_gap_feedback_digest(
-            &[feedback_entry("2026-07-30T09:00:00", 5, 0, counts(4, 1, 0, 0))],
+            &[feedback_entry(
+                "2026-07-30T09:00:00",
+                5,
+                0,
+                counts(4, 1, 0, 0),
+            )],
             20,
         );
-        assert!(digest.contains("가장 잦은 수정 유형은 외부 정보 추가"), "{digest}");
+        assert!(
+            digest.contains("가장 잦은 수정 유형은 외부 정보 추가"),
+            "{digest}"
+        );
         assert!(digest.contains("출처·수치·날짜"), "{digest}");
     }
 
     #[test]
     fn digest_hints_cross_doc_references_when_those_dominate() {
         let digest = build_gap_feedback_digest(
-            &[feedback_entry("2026-07-30T09:00:00", 4, 0, counts(0, 0, 3, 1))],
+            &[feedback_entry(
+                "2026-07-30T09:00:00",
+                4,
+                0,
+                counts(0, 0, 3, 1),
+            )],
             20,
         );
         assert!(digest.contains("교차 문서 참조"), "{digest}");
@@ -1335,7 +1412,12 @@ mod tests {
     #[test]
     fn digest_omits_the_hint_when_every_type_count_is_zero() {
         let digest = build_gap_feedback_digest(
-            &[feedback_entry("2026-07-30T09:00:00", 0, 0, counts(0, 0, 0, 0))],
+            &[feedback_entry(
+                "2026-07-30T09:00:00",
+                0,
+                0,
+                counts(0, 0, 0, 0),
+            )],
             20,
         );
         assert_eq!(digest.lines().count(), 1, "{digest}");
@@ -1359,12 +1441,18 @@ mod tests {
         assert!(digest.contains("최근 초안 2건"), "{digest}");
         assert!(digest.contains("추가 2줄"), "{digest}");
         assert!(digest.contains("외부 정보 0건"), "{digest}");
-        assert!(digest.contains("가장 잦은 수정 유형은 직접 수정"), "{digest}");
+        assert!(
+            digest.contains("가장 잦은 수정 유형은 직접 수정"),
+            "{digest}"
+        );
     }
 
     #[test]
     fn append_returns_the_prompt_unchanged_for_an_empty_digest() {
-        assert_eq!(append_gap_feedback_digest("run extract-tasks", ""), "run extract-tasks");
+        assert_eq!(
+            append_gap_feedback_digest("run extract-tasks", ""),
+            "run extract-tasks"
+        );
     }
 
     #[test]

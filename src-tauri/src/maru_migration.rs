@@ -79,7 +79,10 @@ mod tests {
         assert!(migrate_dot_dir(tmp.path()).unwrap());
         assert!(tmp.path().join(".maru/settings.json").is_file());
         let legacy = tmp.path().join(".anchor");
-        assert!(fs::symlink_metadata(&legacy).unwrap().file_type().is_symlink());
+        assert!(fs::symlink_metadata(&legacy)
+            .unwrap()
+            .file_type()
+            .is_symlink());
         // Old absolute paths still resolve through the compat symlink.
         assert!(legacy.join("settings.json").is_file());
     }

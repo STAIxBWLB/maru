@@ -1227,10 +1227,18 @@ pub fn list_workspace_projects(
     include_inactive: Option<bool>,
 ) -> Result<Vec<ProjectPickerEntry>, String> {
     let work = normalize_work_path(&work_path)?;
-    let include_inactive = include_inactive.unwrap_or(false);
+    workspace_project_entries(&work, include_inactive.unwrap_or(false))
+}
+
+/// 프로젝트 피커와 동일한 소스(.maru/projects.json → project-registry.yaml 폴백)에서
+/// 프로젝트 목록을 읽는다. `scan_project_activity` 가 같은 id 집합을 쓰도록 공유한다.
+pub(crate) fn workspace_project_entries(
+    work: &Path,
+    include_inactive: bool,
+) -> Result<Vec<ProjectPickerEntry>, String> {
     let mut entries = Vec::new();
     let mut seen = BTreeSet::new();
-    let projects_path = projects_json_path(&work);
+    let projects_path = projects_json_path(work);
     if projects_path.is_file() {
         if let Ok(value) = read_json(&projects_path) {
             collect_project_picker_entries_json(&value, include_inactive, &mut seen, &mut entries);

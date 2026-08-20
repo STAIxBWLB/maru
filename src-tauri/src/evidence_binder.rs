@@ -1713,13 +1713,9 @@ files:
             .bindings
             .push(binding("legacy:path", "receipt.pdf"));
         write_state(work, &path_state).unwrap();
-        let stable_state = read_or_create_state(
-            work,
-            "stable-id",
-            Some("projects/bu-a/old.md".into()),
-            &[],
-        )
-        .unwrap();
+        let stable_state =
+            read_or_create_state(work, "stable-id", Some("projects/bu-a/old.md".into()), &[])
+                .unwrap();
         write_state(work, &stable_state).unwrap();
         fs::write(work.join(".maru/binder/corrupt.json"), b"{broken").unwrap();
 

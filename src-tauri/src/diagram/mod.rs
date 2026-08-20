@@ -561,8 +561,7 @@ pub fn diagram_pattern_save(workspace: String, name: String, body: String) -> Re
     };
     assert_maru_can_write(&workspace, action)?;
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .map_err(|err| format!("Cannot create pattern folder: {err}"))?;
+        fs::create_dir_all(parent).map_err(|err| format!("Cannot create pattern folder: {err}"))?;
     }
     let payload = if body.ends_with('\n') {
         body
@@ -661,7 +660,8 @@ mod tests {
     }
 
     #[test]
-    fn validate_name_rejects_traversal() {        assert!(validate_name("../bad").is_err());
+    fn validate_name_rejects_traversal() {
+        assert!(validate_name("../bad").is_err());
         assert!(validate_name("..").is_err());
         assert!(validate_name("a/b").is_err());
         assert!(validate_name("a\\b").is_err());
@@ -873,8 +873,7 @@ mod tests {
         let (_tmp, work) = setup_workspace();
         let body = r#"{"v":1,"id":"p1","name":"My Preset","patternId":"table","createdAt":1,"updatedAt":1}"#;
         diagram_pattern_save(work.clone(), "preset-a".into(), body.into()).unwrap();
-        let path = PathBuf::from(&work)
-            .join(".maru/diagram-patterns/preset-a.pattern.json");
+        let path = PathBuf::from(&work).join(".maru/diagram-patterns/preset-a.pattern.json");
         assert!(path.is_file());
         let listed = diagram_pattern_list(work.clone()).unwrap();
         assert_eq!(listed.len(), 1);
@@ -900,10 +899,10 @@ mod tests {
     #[test]
     fn pattern_list_skips_non_preset_files() {
         let (_tmp, work) = setup_workspace();
-        let body = r#"{"v":1,"id":"p1","name":"x","patternId":"table","createdAt":1,"updatedAt":1}"#;
+        let body =
+            r#"{"v":1,"id":"p1","name":"x","patternId":"table","createdAt":1,"updatedAt":1}"#;
         diagram_pattern_save(work.clone(), "keep".into(), body.into()).unwrap();
-        let stray = PathBuf::from(&work)
-            .join(".maru/diagram-patterns/stray.txt");
+        let stray = PathBuf::from(&work).join(".maru/diagram-patterns/stray.txt");
         fs::write(&stray, "noise").unwrap();
         let listed = diagram_pattern_list(work).unwrap();
         assert_eq!(listed.len(), 1);
@@ -920,7 +919,10 @@ mod tests {
             b"<svg/>".to_vec(),
         )
         .unwrap();
-        assert_eq!(rel, "attachments/diagrams/doc-1/pattern-view-1-ab12cd34.svg");
+        assert_eq!(
+            rel,
+            "attachments/diagrams/doc-1/pattern-view-1-ab12cd34.svg"
+        );
         let path = PathBuf::from(&work).join(&rel);
         assert_eq!(fs::read(&path).unwrap(), b"<svg/>");
     }
@@ -928,13 +930,15 @@ mod tests {
     #[test]
     fn report_asset_rejects_traversal() {
         let (_tmp, work) = setup_workspace();
+        assert!(diagram_write_report_asset(
+            work.clone(),
+            "../escape".into(),
+            "a.svg".into(),
+            vec![]
+        )
+        .is_err());
         assert!(
-            diagram_write_report_asset(work.clone(), "../escape".into(), "a.svg".into(), vec![])
-                .is_err()
-        );
-        assert!(
-            diagram_write_report_asset(work.clone(), "a/b".into(), "a.svg".into(), vec![])
-                .is_err()
+            diagram_write_report_asset(work.clone(), "a/b".into(), "a.svg".into(), vec![]).is_err()
         );
         assert!(
             diagram_write_report_asset(work.clone(), "doc".into(), "../a.svg".into(), vec![])
@@ -944,24 +948,28 @@ mod tests {
             diagram_write_report_asset(work.clone(), "doc".into(), "a/b.svg".into(), vec![])
                 .is_err()
         );
-        assert!(
-            diagram_write_report_asset(work.clone(), "doc".into(), ".hidden.svg".into(), vec![])
-                .is_err()
-        );
-        assert!(
-            diagram_write_report_asset(work.clone(), "doc".into(), "with\0nul.svg".into(), vec![])
-                .is_err()
-        );
+        assert!(diagram_write_report_asset(
+            work.clone(),
+            "doc".into(),
+            ".hidden.svg".into(),
+            vec![]
+        )
+        .is_err());
+        assert!(diagram_write_report_asset(
+            work.clone(),
+            "doc".into(),
+            "with\0nul.svg".into(),
+            vec![]
+        )
+        .is_err());
         // ':' is an NTFS alternate-data-stream separator on Windows.
-        assert!(
-            diagram_write_report_asset(
-                work.clone(),
-                "doc".into(),
-                "pattern:view-1.svg".into(),
-                vec![]
-            )
-            .is_err()
-        );
+        assert!(diagram_write_report_asset(
+            work.clone(),
+            "doc".into(),
+            "pattern:view-1.svg".into(),
+            vec![]
+        )
+        .is_err());
         // Doc ids become directory names — same ASCII allowlist applies
         // (an imported doc id is an arbitrary JSON string).
         assert!(
@@ -984,24 +992,19 @@ mod tests {
     fn report_asset_rejects_bad_extension() {
         let (_tmp, work) = setup_workspace();
         assert!(
-            diagram_write_report_asset(work.clone(), "doc".into(), "a.exe".into(), vec![])
-                .is_err()
+            diagram_write_report_asset(work.clone(), "doc".into(), "a.exe".into(), vec![]).is_err()
         );
         assert!(
-            diagram_write_report_asset(work.clone(), "doc".into(), "noext".into(), vec![])
-                .is_err()
+            diagram_write_report_asset(work.clone(), "doc".into(), "noext".into(), vec![]).is_err()
         );
         assert!(
-            diagram_write_report_asset(work.clone(), "doc".into(), "a.jpg".into(), vec![])
-                .is_err()
+            diagram_write_report_asset(work.clone(), "doc".into(), "a.jpg".into(), vec![]).is_err()
         );
         assert!(
-            diagram_write_report_asset(work.clone(), "doc".into(), "a.png".into(), vec![])
-                .is_ok()
+            diagram_write_report_asset(work.clone(), "doc".into(), "a.png".into(), vec![]).is_ok()
         );
         assert!(
-            diagram_write_report_asset(work.clone(), "doc".into(), "a.json".into(), vec![])
-                .is_ok()
+            diagram_write_report_asset(work.clone(), "doc".into(), "a.json".into(), vec![]).is_ok()
         );
         assert!(diagram_write_report_asset(work, "doc".into(), "a.svg".into(), vec![]).is_ok());
     }

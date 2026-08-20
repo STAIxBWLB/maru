@@ -28,6 +28,9 @@ use super::{
 
 const DEFAULT_DEADLINE_HORIZON_DAYS: i64 = 14;
 const MAX_ENTRIES: usize = 1000;
+/// force_refresh 가 false 일 때 캐시를 그대로 재사용하는 최대 나이.
+/// 대시보드 새로고침 버튼은 force_refresh=true 로 호출하므로 강제 갱신 경로는 유지된다.
+const CACHE_TTL_SECS: u64 = 300;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct CatalogScanReport {
@@ -41,7 +44,7 @@ pub struct CatalogScanReport {
 
 pub fn scan_catalog_impl(
     workspace_root: &Path,
-    _force_refresh: bool,
+    force_refresh: bool,
 ) -> io::Result<CatalogScanReport> {
     let started = std::time::Instant::now();
     let mut warnings = Vec::new();
@@ -52,6 +55,14 @@ pub fn scan_catalog_impl(
             io::ErrorKind::NotFound,
             format!("workspace_root not found: {}", workspace_root.display()),
         ));
+    }
+
+    // 이 스캔은 projects/ + admin/ + meetings/ + tasks/ + inbox/ 를 전부 순회한다.
+    // force_refresh 가 false 이고 캐시가 CACHE_TTL_SECS 이내면 그대로 복원한다.
+    if !force_refresh {
+        if let Some(report) = cached_report(workspace_root, started) {
+            return Ok(report);
+        }
     }
 
     // Step 1-2: BU configs
@@ -91,16 +102,13 @@ pub fn scan_catalog_impl(
     }
 
     // by_kind 집계
-    let mut by_kind: HashMap<String, usize> = HashMap::new();
-    for e in &entries {
-        let k = format!("{:?}", e.kind).to_lowercase();
-        *by_kind.entry(k).or_insert(0) += 1;
-    }
+    let by_kind = aggregate_by_kind(&entries);
 
     let index = CatalogIndex {
         version: 1,
         generated_at: Utc::now().to_rfc3339(),
         entries: entries.clone(),
+        bus_seen: bus_seen.clone(),
     };
     let cache_path = catalog_cache_path(workspace_root);
     if let Some(parent) = cache_path.parent() {
@@ -118,6 +126,43 @@ pub fn scan_catalog_impl(
         warnings,
         elapsed_ms: started.elapsed().as_millis() as u64,
     })
+}
+
+/// 캐시가 충분히 신선하면 재스캔 없이 CatalogScanReport 를 복원한다.
+/// 파일 없음/파싱 불가/버전 불일치/만료면 None 을 돌려 정상 스캔으로 넘긴다.
+fn cached_report(workspace_root: &Path, started: std::time::Instant) -> Option<CatalogScanReport> {
+    let path = catalog_cache_path(workspace_root);
+    let age = std::fs::metadata(&path)
+        .and_then(|meta| meta.modified())
+        .ok()?
+        .elapsed()
+        .ok()?;
+    if age.as_secs() > CACHE_TTL_SECS {
+        return None;
+    }
+    let index: CatalogIndex = std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|text| serde_json::from_str(&text).ok())?;
+    if index.version != 1 {
+        return None;
+    }
+    Some(CatalogScanReport {
+        scanned_at: index.generated_at,
+        entries_count: index.entries.len(),
+        by_kind: aggregate_by_kind(&index.entries),
+        bus_seen: index.bus_seen,
+        warnings: Vec::new(),
+        elapsed_ms: started.elapsed().as_millis() as u64,
+    })
+}
+
+fn aggregate_by_kind(entries: &[CatalogEntry]) -> HashMap<String, usize> {
+    let mut by_kind: HashMap<String, usize> = HashMap::new();
+    for e in entries {
+        let k = format!("{:?}", e.kind).to_lowercase();
+        *by_kind.entry(k).or_insert(0) += 1;
+    }
+    by_kind
 }
 
 // ---------- BU configs ----------
@@ -845,6 +890,69 @@ mod tests {
         assert!(kinds.contains("InboxPending"));
         assert!(kinds.contains("TaskDue"));
         assert!(kinds.contains("EvidenceUnlinked"));
+    }
+
+    #[test]
+    fn cache_is_served_until_forced() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        make_workspace(tmp.path()).expect("setup");
+
+        let first = scan_catalog_impl(tmp.path(), true).expect("initial scan");
+        assert!(first.bus_seen.contains(&"sample-bu".to_string()));
+
+        // 워크스페이스에 항목을 추가해도 캐시가 신선하면 재스캔하지 않는다.
+        std::fs::create_dir_all(tmp.path().join("inbox/items/pending/260519-second-item"))
+            .expect("mkdir");
+        std::fs::write(
+            tmp.path()
+                .join("inbox/items/pending/260519-second-item/manifest.yaml"),
+            "schema: inbox-item/v1\ntitle: \"Second pending\"\n",
+        )
+        .expect("write");
+
+        let cached = scan_catalog_impl(tmp.path(), false).expect("cached scan");
+        assert_eq!(cached.entries_count, first.entries_count);
+        assert_eq!(cached.scanned_at, first.scanned_at);
+        // bus_seen 은 bu-config 스캔 산물이므로 캐시 복원 경로에서도 유지되어야 한다.
+        assert_eq!(cached.bus_seen, first.bus_seen);
+
+        let forced = scan_catalog_impl(tmp.path(), true).expect("forced scan");
+        assert_eq!(forced.entries_count, first.entries_count + 1);
+    }
+
+    #[test]
+    fn stale_cache_triggers_rescan() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        make_workspace(tmp.path()).expect("setup");
+        scan_catalog_impl(tmp.path(), true).expect("initial scan");
+
+        // 캐시 파일 mtime 을 TTL 밖으로 밀면 force_refresh=false 여도 재스캔한다.
+        let cache_path = catalog_cache_path(tmp.path());
+        let stale =
+            std::time::SystemTime::now() - std::time::Duration::from_secs(CACHE_TTL_SECS + 60);
+        let handle = std::fs::File::options()
+            .write(true)
+            .open(&cache_path)
+            .expect("open cache");
+        handle
+            .set_times(std::fs::FileTimes::new().set_modified(stale))
+            .expect("set mtime");
+        drop(handle);
+
+        std::fs::create_dir_all(tmp.path().join("inbox/items/pending/260520-third-item"))
+            .expect("mkdir");
+        std::fs::write(
+            tmp.path()
+                .join("inbox/items/pending/260520-third-item/manifest.yaml"),
+            "schema: inbox-item/v1\ntitle: \"Third pending\"\n",
+        )
+        .expect("write");
+
+        let rescanned = scan_catalog_impl(tmp.path(), false).expect("rescan");
+        assert!(rescanned
+            .by_kind
+            .get("inboxpending")
+            .is_some_and(|n| *n >= 2));
     }
 
     #[test]

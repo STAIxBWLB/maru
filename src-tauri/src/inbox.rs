@@ -3110,8 +3110,14 @@ inbox:
 
         for (item_id, hints) in [
             ("auto-item", "  processing_hints:\n    intake_mode: auto\n"),
-            ("upper-item", "  processing_hints:\n    intake_mode: '  AUTO  '\n"),
-            ("garbage-item", "  processing_hints:\n    intake_mode: sideways\n"),
+            (
+                "upper-item",
+                "  processing_hints:\n    intake_mode: '  AUTO  '\n",
+            ),
+            (
+                "garbage-item",
+                "  processing_hints:\n    intake_mode: sideways\n",
+            ),
             ("empty-item", "  processing_hints:\n    intake_mode: ''\n"),
             ("numeric-item", "  processing_hints:\n    intake_mode: 7\n"),
             ("null-hints-item", "  processing_hints: null\n"),
@@ -3137,7 +3143,11 @@ inbox:
         };
         assert_eq!(mode_of("auto-item"), "auto");
         assert_eq!(mode_of("upper-item"), "auto", "trimmed and lowercased");
-        assert_eq!(mode_of("garbage-item"), "manual", "unknown is not a third state");
+        assert_eq!(
+            mode_of("garbage-item"),
+            "manual",
+            "unknown is not a third state"
+        );
         assert_eq!(mode_of("empty-item"), "manual");
         assert_eq!(mode_of("numeric-item"), "manual", "non-string intake_mode");
         assert_eq!(mode_of("null-hints-item"), "manual", "null block");
@@ -3148,7 +3158,10 @@ inbox:
             .iter()
             .find(|entry| entry.kind == "dropFile")
             .expect("drop file entry");
-        assert_eq!(dropped.intake_mode, "manual", "no manifest to declare otherwise");
+        assert_eq!(
+            dropped.intake_mode, "manual",
+            "no manifest to declare otherwise"
+        );
     }
 
     #[test]
@@ -3170,7 +3183,11 @@ inbox:
 "#,
         )
         .unwrap();
-        for (item_id, mode) in [("a-auto", "auto"), ("b-auto", "auto"), ("c-manual", "manual")] {
+        for (item_id, mode) in [
+            ("a-auto", "auto"),
+            ("b-auto", "auto"),
+            ("c-manual", "manual"),
+        ] {
             fs::create_dir_all(root.join(format!("inbox/items/pending/{item_id}"))).unwrap();
             fs::write(
                 root.join(format!("inbox/items/pending/{item_id}/manifest.yaml")),
@@ -3182,11 +3199,12 @@ inbox:
         }
         let work = root.to_string_lossy().to_string();
         let ids = |mode: Option<&str>| {
-            let mut out: Vec<String> = scan_inbox_entries(work.clone(), None, mode.map(str::to_string))
-                .unwrap()
-                .iter()
-                .filter_map(|entry| entry.item_id.clone())
-                .collect();
+            let mut out: Vec<String> =
+                scan_inbox_entries(work.clone(), None, mode.map(str::to_string))
+                    .unwrap()
+                    .iter()
+                    .filter_map(|entry| entry.item_id.clone())
+                    .collect();
             out.sort();
             out
         };
@@ -3300,7 +3318,8 @@ inbox:
         .unwrap();
         fs::write(root.join("inbox/drop/kakao/real.txt"), b"real").unwrap();
 
-        let default_entries = scan_inbox_entries(root.to_string_lossy().to_string(), None, None).unwrap();
+        let default_entries =
+            scan_inbox_entries(root.to_string_lossy().to_string(), None, None).unwrap();
         assert_eq!(default_entries.len(), 1);
         assert_eq!(default_entries[0].title, "real.txt");
 

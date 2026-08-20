@@ -153,10 +153,7 @@ mod tests {
     fn block_nested_body_key() {
         let mut r = req();
         r.frontmatter_snapshot = serde_json::json!({"metadata": {"Content": "secret"}});
-        assert_eq!(
-            check_submit_gate(&r).unwrap_err(),
-            "forbidden_key:content"
-        );
+        assert_eq!(check_submit_gate(&r).unwrap_err(), "forbidden_key:content");
     }
 
     #[test]
