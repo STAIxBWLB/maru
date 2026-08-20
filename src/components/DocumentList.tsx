@@ -575,7 +575,7 @@ export const DocumentList = memo(function DocumentList({
           }}
           placeholder={t("list.searchPlaceholder")}
         />
-        <span className="kbd">⌘F</span>
+        <span className="kbd">⌘⇧F</span>
       </label>
 
       <div

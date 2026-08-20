@@ -119,11 +119,22 @@ export function closestModeSurface(el: unknown): HTMLElement | null {
  *  `null` means chrome or nothing at all - callers block the keystroke either
  *  way, never letting the browser select the whole window. */
 export function resolveSelectScope(candidates: unknown[]): HTMLElement | null {
+  let best: HTMLElement | null = null;
   for (const candidate of candidates) {
+    // A chrome candidate (a focused tab strip, the document list) resolves to
+    // nothing here. The handler already blocks the keystroke when the EVENT
+    // TARGET is chrome; for the weaker fallback candidates, falling through to
+    // the next one beats selecting the pane surface behind a focused tab.
+    if (isChromeTarget(candidate as EventTarget | null)) continue;
     const scope = closestPane(candidate) ?? closestModeSurface(candidate);
-    if (scope) return scope;
+    if (!scope) continue;
+    // A later, weaker candidate narrows the scope only when it sits strictly
+    // inside the current one: the focused Radix tab panel resolves to the
+    // whole editor pane, but a caret in the preview means the preview text.
+    if (best && !(best.contains(scope) && best !== scope)) continue;
+    best = scope;
   }
-  return null;
+  return best;
 }
 
 /** Cmd/Ctrl+A selects only the active pane's text instead of the whole window.

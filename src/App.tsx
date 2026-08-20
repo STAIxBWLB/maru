@@ -226,6 +226,7 @@ import {
   type EditorTabIdsPatch,
   type StoredTabs,
 } from "./lib/editorTabsStore";
+import { EDITOR_FIND_OPEN_EVENT } from "./lib/editorFindEvents";
 import {
   buildDocumentIndex,
   countDocumentFilter,
@@ -7010,7 +7011,17 @@ function MainApp() {
       "mod+p": () =>
         setPersistedEditorViewMode(editorViewMode === "preview" ? "rich" : "preview"),
       "mod+\\": () => updateLayoutSettings({ outlineOpen: !outlineOpen }),
-      "mod+f": focusSearch,
+      "mod+f": () => {
+        // PKM (documents) mode: Cmd+F is find-in-document. The file-list
+        // search keeps Cmd+Shift+F; other modes keep the list/other search
+        // focus.
+        if (appMode === "pkm") {
+          window.dispatchEvent(new CustomEvent(EDITOR_FIND_OPEN_EVENT));
+        } else {
+          focusSearch();
+        }
+      },
+      "mod+shift+f": focusSearch,
       "mod+r": refreshActiveSurface,
       "mod+shift+l": toggleLocale,
       "mod+,": openPreferences,
@@ -7029,6 +7040,7 @@ function MainApp() {
       },
     },
     [
+      appMode,
       saveCurrent,
       snapshotCurrent,
       focusSearch,
@@ -7976,6 +7988,7 @@ function MainApp() {
     const htmlState = htmlKey ? htmlPaneModes[htmlKey] : undefined;
     return (
       <EditorPane
+        paneGroup={group}
         document={docTab?.document ?? null}
         openingEntry={group === "left" ? openingEntry : null}
         draftContent={docTab?.draftContent ?? ""}
