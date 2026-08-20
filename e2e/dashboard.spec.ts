@@ -128,7 +128,39 @@ test("the pane scrolls when the widgets overflow a short viewport", async ({ pag
   expect(scrollTop).toBeGreaterThan(0);
 
   // The cards below the fold become reachable at the bottom of the scroll.
-  await expect(widget(page, "recents")).toBeInViewport();
+  await expect(widget(page, "inbox")).toBeInViewport();
+});
+
+test("the two-column grid pairs every card, with projects as the only full-width band", async ({
+  page,
+}) => {
+  // Regression: with the DOM order today/projects/attention/inbox/recents, the
+  // full-width projects band stranded Today above it and Recents below it, one
+  // half-empty row each. Recents now rides beside Today.
+  await page.setViewportSize({ width: 1280, height: 1058 });
+  await installTodayMocks(page, buildTodaySeed(DASHBOARD_BOOT_SEED));
+  await gotoDashboard(page);
+
+  const boxOf = async (kind: (typeof WIDGET_KINDS)[number]) => {
+    const box = await widget(page, kind).boundingBox();
+    expect(box).not.toBeNull();
+    return box!;
+  };
+  const [today, recents, projects, attention, inbox] = await Promise.all([
+    boxOf("today"),
+    boxOf("recents"),
+    boxOf("projects"),
+    boxOf("attention"),
+    boxOf("inbox"),
+  ]);
+
+  // Row 1 pairs Today with Recents; row 3 pairs Attention with Inbox.
+  expect(Math.abs(today.y - recents.y)).toBeLessThan(2);
+  expect(Math.abs(attention.y - inbox.y)).toBeLessThan(2);
+  // Projects is the full-width band between the two paired rows.
+  expect(projects.width).toBeGreaterThan(today.width * 1.8);
+  expect(projects.y).toBeGreaterThanOrEqual(today.y + today.height);
+  expect(attention.y).toBeGreaterThanOrEqual(projects.y + projects.height);
 });
 
 test("attention widget task chips reflect seeded counts and drill into filtered rows", async ({
