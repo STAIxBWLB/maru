@@ -11,18 +11,18 @@ export interface FindMatch {
   end: number;
 }
 
-/** Case-insensitive, non-overlapping matches. Empty query matches nothing. */
+/** Case-insensitive, non-overlapping matches. Empty query matches nothing.
+ *  Unicode-aware via the `iu` flags: lowercasing the document instead would
+ *  shift offsets whenever case folding changes string length (e.g. `İ`). */
 export function findMatches(text: string, query: string): FindMatch[] {
-  const needle = query.trim().toLowerCase();
+  const needle = query.trim();
   if (!needle) return [];
-  const haystack = text.toLowerCase();
+  const escaped = needle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const regex = new RegExp(escaped, "giu");
   const matches: FindMatch[] = [];
-  let cursor = 0;
-  while (cursor <= haystack.length - needle.length) {
-    const found = haystack.indexOf(needle, cursor);
-    if (found === -1) break;
-    matches.push({ start: found, end: found + needle.length });
-    cursor = found + needle.length;
+  let hit: RegExpExecArray | null;
+  while ((hit = regex.exec(text)) !== null) {
+    matches.push({ start: hit.index, end: hit.index + hit[0].length });
   }
   return matches;
 }

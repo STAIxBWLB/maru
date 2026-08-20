@@ -22,6 +22,16 @@ describe("findMatches", () => {
     expect(findMatches("anything", "   ")).toEqual([]);
   });
 
+  it("returns offsets into the original string when case folding changes length", () => {
+    // "İ".toLowerCase() is "i̇" (two code units): lowercasing the document
+    // would put "X" at index 2 instead of 1.
+    expect(findMatches("İX marks", "x")).toEqual([{ start: 1, end: 2 }]);
+  });
+
+  it("escapes regex metacharacters in the query", () => {
+    expect(findMatches("a.c a-c", "a.c")).toEqual([{ start: 0, end: 3 }]);
+  });
+
   it("does not overlap matches", () => {
     expect(findMatches("aaaa", "aa")).toEqual([
       { start: 0, end: 2 },

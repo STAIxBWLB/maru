@@ -40,6 +40,11 @@ test("Cmd+F finds text in the document body (source and preview)", async ({ page
   await expect(findBar).toBeVisible();
   await expect(findBar.locator(".editor-find-input")).toBeFocused();
 
+  // Repeated Cmd+F refocuses the bar after focus moved back to the document.
+  await textarea.click();
+  await page.keyboard.press(findCombo);
+  await expect(findBar.locator(".editor-find-input")).toBeFocused();
+
   await findBar.locator(".editor-find-input").fill("본부");
   await expect(findBar.locator(".editor-find-count")).toHaveText(/1 \/ [2-9]/);
   const firstSelection = await textarea.evaluate((el: HTMLTextAreaElement) => ({

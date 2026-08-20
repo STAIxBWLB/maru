@@ -365,11 +365,18 @@ export const EditorPane = memo(forwardRef<HTMLDivElement, EditorPaneProps>(funct
     const open = () => {
       if (!documentPath) return;
       if (paneGroup && paneGroup !== getEditorTabsState().focusedEditorGroup) return;
+      // Already open: state is unchanged, so the focus effect below does not
+      // rerun — refocus the mounted input explicitly.
+      if (findOpen) {
+        findInputRef.current?.focus();
+        findInputRef.current?.select();
+        return;
+      }
       setFindOpen(true);
     };
     window.addEventListener(EDITOR_FIND_OPEN_EVENT, open);
     return () => window.removeEventListener(EDITOR_FIND_OPEN_EVENT, open);
-  }, [documentPath, paneGroup]);
+  }, [documentPath, paneGroup, findOpen]);
 
   // Focus after the bar has committed — a rAF from the event handler can run
   // before the input mounts.
