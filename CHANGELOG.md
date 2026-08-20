@@ -8,6 +8,15 @@ because releases cut frequently during active development. Versions before
 Dates are the release-tag dates. Only `feat`/`fix`-level changes are listed;
 `chore(release)` version bumps and merge commits are omitted.
 
+## v0.4.60 - 2026-08-20 - No More Half-Empty Rows
+
+- **Every dashboard card has a row-mate (#269).** The two-column grid ordered
+  its cards today, projects, attention, inbox, recents, and the projects card
+  spans both columns. That band stranded Today alone in the row above it and
+  Recent documents alone in the row below, two half-empty rows of dead space.
+  Recents now rides beside Today: "now" on top, the portfolio band as a
+  divider, the two queue cards below. An e2e geometry test pins the pairing.
+
 ## v0.4.59 - 2026-08-20 - A Dashboard That Scrolls
 
 - **The dashboard scrolls again (#267).** The workbench layout pins every pane
