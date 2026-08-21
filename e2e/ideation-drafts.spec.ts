@@ -344,6 +344,33 @@ test("keeps ideation in the hub while Scratchpad preserves memos and temp result
   await expect(pane.getByText("발전 중")).toHaveCount(0);
 });
 
+test("navigates Scratchpad folders and uses Rich, Source, and Preview modes", async ({
+  page,
+}) => {
+  await page.goto("/");
+  const pane = await openScratchpad(page);
+  const tree = pane.getByRole("tree", { name: "폴더" });
+  await expect(tree).toBeVisible();
+  await expect(tree.getByRole("button", { name: /전체 스크래치패드/ })).toBeVisible();
+  await expect(tree.getByRole("button", { name: /메모/ })).toBeVisible();
+  await expect(tree.getByRole("button", { name: /임시 결과/ })).toBeVisible();
+
+  await tree.getByRole("button", { name: /codex/ }).click();
+  await expect(pane.locator(".scratchpad-list-item", { hasText: "result.md" })).toBeVisible();
+  await expect(pane.locator(".scratchpad-list-item", { hasText: "daily.md" })).toHaveCount(0);
+  await pane.locator(".scratchpad-list-item", { hasText: "result.md" }).click();
+
+  await expect(pane.locator("textarea.scratchpad-source-editor")).toBeVisible();
+  await pane.locator(".tab-trigger", { hasText: "리치" }).click();
+  await expect(pane.locator(".rich-editor-surface")).toBeVisible();
+  await pane.locator(".tab-trigger", { hasText: "미리보기" }).click();
+  await expect(pane.locator(".scratchpad-preview")).toContainText("볼트 그래프 뷰");
+  await pane.locator(".tab-trigger", { hasText: "원문" }).click();
+  await expect(pane.locator("textarea.scratchpad-source-editor")).toHaveValue(
+    /# 볼트 그래프 뷰/,
+  );
+});
+
 test("dispatches an ideate-to-draft mission and shows the in-progress state", async ({
   page,
 }) => {

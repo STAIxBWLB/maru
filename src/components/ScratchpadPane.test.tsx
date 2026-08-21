@@ -142,11 +142,19 @@ describe("ScratchpadPane safety flows", () => {
           sortKey={overrides.sortKey ?? "name"}
           listHeight={overrides.listHeight ?? 218}
           listWidth={overrides.listWidth ?? 320}
+          treeOpen
+          treeWidth={240}
+          expandedFolders={["memos", "temp"]}
+          editorViewMode="source"
           refreshRequestEpoch={0}
           onRefreshWorkspace={vi.fn()}
           onSortKeyChange={vi.fn()}
           onListHeightChange={vi.fn()}
           onListWidthChange={vi.fn()}
+          onTreeOpenChange={vi.fn()}
+          onTreeWidthChange={vi.fn()}
+          onExpandedFoldersChange={vi.fn()}
+          onEditorViewModeChange={vi.fn()}
           t={t}
         />,
       );
@@ -311,11 +319,19 @@ describe("ScratchpadPane safety flows", () => {
           sortKey="name"
           listHeight={218}
           listWidth={320}
+          treeOpen
+          treeWidth={240}
+          expandedFolders={["memos", "temp"]}
+          editorViewMode="source"
           refreshRequestEpoch={0}
           onRefreshWorkspace={vi.fn()}
           onSortKeyChange={vi.fn()}
           onListHeightChange={vi.fn()}
           onListWidthChange={vi.fn()}
+          onTreeOpenChange={vi.fn()}
+          onTreeWidthChange={vi.fn()}
+          onExpandedFoldersChange={vi.fn()}
+          onEditorViewModeChange={vi.fn()}
           t={t}
         />,
       );
@@ -372,11 +388,19 @@ describe("ScratchpadPane safety flows", () => {
           sortKey="name"
           listHeight={218}
           listWidth={320}
+          treeOpen
+          treeWidth={240}
+          expandedFolders={["memos", "temp"]}
+          editorViewMode="source"
           refreshRequestEpoch={0}
           onRefreshWorkspace={vi.fn()}
           onSortKeyChange={vi.fn()}
           onListHeightChange={vi.fn()}
           onListWidthChange={vi.fn()}
+          onTreeOpenChange={vi.fn()}
+          onTreeWidthChange={vi.fn()}
+          onExpandedFoldersChange={vi.fn()}
+          onEditorViewModeChange={vi.fn()}
           t={t}
         />,
       );
@@ -392,11 +416,19 @@ describe("ScratchpadPane safety flows", () => {
           sortKey="name"
           listHeight={218}
           listWidth={320}
+          treeOpen
+          treeWidth={240}
+          expandedFolders={["memos", "temp"]}
+          editorViewMode="source"
           refreshRequestEpoch={0}
           onRefreshWorkspace={vi.fn()}
           onSortKeyChange={vi.fn()}
           onListHeightChange={vi.fn()}
           onListWidthChange={vi.fn()}
+          onTreeOpenChange={vi.fn()}
+          onTreeWidthChange={vi.fn()}
+          onExpandedFoldersChange={vi.fn()}
+          onEditorViewModeChange={vi.fn()}
           t={t}
         />,
       );

@@ -139,6 +139,9 @@ export const SCRATCHPAD_LIST_HEIGHT = { defaultValue: 218, min: 120, max: 600 } 
 /** Drag limits for the Scratchpad navigator/editor split in the main workbench. */
 export const SCRATCHPAD_LIST_WIDTH = { defaultValue: 320, min: 260, max: 480 } as const;
 
+/** Drag limits for the Scratchpad virtual folder tree. */
+export const SCRATCHPAD_TREE_WIDTH = { defaultValue: 240, min: 200, max: 360 } as const;
+
 /** Drag limits for the Ideation drafts list/detail split. */
 export const DRAFTS_LIST_WIDTH = { defaultValue: 340, min: 260, max: 560 } as const;
 
@@ -160,6 +163,8 @@ export interface LayoutSettings {
   tasksSidebarWidth: number;
   calendarAgendaWidth: number;
   taskDetailsWidth: number;
+  scratchpadTreeOpen: boolean;
+  scratchpadTreeWidth: number;
   scratchpadListHeight: number;
   scratchpadListWidth: number;
   draftsListWidth: number;
@@ -206,6 +211,8 @@ export interface MaruSettings {
     filesSortKey: FilesSortKey;
     documentSortKey: SortKey;
     scratchpadSortKey: SortKey;
+    filesEditorViewMode: EditorViewModeSetting;
+    scratchpadEditorViewMode: EditorViewModeSetting;
     filesListAttributes: FilesListAttribute[];
     binaryFileIncludePatterns: string[];
     documentViews: DocumentViewDefinition[];
@@ -214,6 +221,7 @@ export interface MaruSettings {
     // an empty array means fully collapsed and new folders stay closed.
     collapsedTreeFolders: string[];
     collapsedFileFolders: string[];
+    scratchpadExpandedFolders: string[];
     documentTreeStateInitialized: boolean;
     fileTreeStateInitialized: boolean;
     fileQueueDefaultOperation: FileQueueDefaultOperation;
@@ -505,12 +513,15 @@ export const DEFAULT_MARU_SETTINGS: MaruSettings = {
     documentSortKey: "modifiedDesc",
     // Keeps the collection-grouped view as the Scratchpad default.
     scratchpadSortKey: "name",
+    filesEditorViewMode: "source",
+    scratchpadEditorViewMode: "source",
     filesListAttributes: [...DEFAULT_FILES_LIST_ATTRIBUTES],
     binaryFileIncludePatterns: [...DEFAULT_BINARY_FILE_INCLUDE_PATTERNS],
     documentViews: [],
     favorites: [],
     collapsedTreeFolders: [],
     collapsedFileFolders: [],
+    scratchpadExpandedFolders: ["memos", "temp"],
     documentTreeStateInitialized: false,
     fileTreeStateInitialized: false,
     fileQueueDefaultOperation: "copy",
@@ -527,6 +538,8 @@ export const DEFAULT_MARU_SETTINGS: MaruSettings = {
       tasksSidebarWidth: TODAY_LAYOUT_LIMITS.tasksSidebarWidth.defaultValue,
       calendarAgendaWidth: TODAY_LAYOUT_LIMITS.calendarAgendaWidth.defaultValue,
       taskDetailsWidth: TODAY_LAYOUT_LIMITS.taskDetailsWidth.defaultValue,
+      scratchpadTreeOpen: true,
+      scratchpadTreeWidth: SCRATCHPAD_TREE_WIDTH.defaultValue,
       scratchpadListHeight: SCRATCHPAD_LIST_HEIGHT.defaultValue,
       scratchpadListWidth: SCRATCHPAD_LIST_WIDTH.defaultValue,
       draftsListWidth: DRAFTS_LIST_WIDTH.defaultValue,
@@ -722,6 +735,10 @@ export function normalizeMaruSettings(value: unknown): MaruSettings {
       filesSortKey: parseFilesSortKey(ui.filesSortKey) ?? "name",
       documentSortKey: parseFilesSortKey(ui.documentSortKey) ?? "modifiedDesc",
       scratchpadSortKey: parseFilesSortKey(ui.scratchpadSortKey) ?? "name",
+      filesEditorViewMode:
+        parseEditorViewModeSetting(ui.filesEditorViewMode) ?? "source",
+      scratchpadEditorViewMode:
+        parseEditorViewModeSetting(ui.scratchpadEditorViewMode) ?? "source",
       filesListAttributes: normalizeFilesListAttributes(ui.filesListAttributes),
       binaryFileIncludePatterns: normalizeBinaryFileIncludePatterns(
         ui.binaryFileIncludePatterns,
@@ -730,6 +747,10 @@ export function normalizeMaruSettings(value: unknown): MaruSettings {
       favorites: normalizeFavoriteItems(ui.favorites),
       collapsedTreeFolders: parseStringArray(ui.collapsedTreeFolders),
       collapsedFileFolders: parseStringArray(ui.collapsedFileFolders),
+      scratchpadExpandedFolders:
+        ui.scratchpadExpandedFolders === undefined
+          ? [...DEFAULT_MARU_SETTINGS.ui.scratchpadExpandedFolders]
+          : parseStringArray(ui.scratchpadExpandedFolders),
       documentTreeStateInitialized: typeof ui.documentTreeStateInitialized === "boolean"
         ? ui.documentTreeStateInitialized
         : false,
@@ -1097,6 +1118,9 @@ function cloneDefaultSettings(): MaruSettings {
       favorites: DEFAULT_MARU_SETTINGS.ui.favorites.map((favorite) => ({ ...favorite })),
       collapsedTreeFolders: [...DEFAULT_MARU_SETTINGS.ui.collapsedTreeFolders],
       collapsedFileFolders: [...DEFAULT_MARU_SETTINGS.ui.collapsedFileFolders],
+      scratchpadExpandedFolders: [
+        ...DEFAULT_MARU_SETTINGS.ui.scratchpadExpandedFolders,
+      ],
       documentTreeStateInitialized: DEFAULT_MARU_SETTINGS.ui.documentTreeStateInitialized,
       fileTreeStateInitialized: DEFAULT_MARU_SETTINGS.ui.fileTreeStateInitialized,
       layout: { ...DEFAULT_MARU_SETTINGS.ui.layout },
@@ -2231,6 +2255,16 @@ function normalizeLayout(value: unknown, legacyTerminal: Record<string, unknown>
       typeof layout.taskDetailsWidth === "number"
         ? layout.taskDetailsWidth
         : TODAY_LAYOUT_LIMITS.taskDetailsWidth.defaultValue,
+    ),
+    scratchpadTreeOpen:
+      typeof layout.scratchpadTreeOpen === "boolean"
+        ? layout.scratchpadTreeOpen
+        : DEFAULT_MARU_SETTINGS.ui.layout.scratchpadTreeOpen,
+    scratchpadTreeWidth: normalizePaneWidth(
+      layout.scratchpadTreeWidth,
+      SCRATCHPAD_TREE_WIDTH.defaultValue,
+      SCRATCHPAD_TREE_WIDTH.min,
+      SCRATCHPAD_TREE_WIDTH.max,
     ),
     scratchpadListHeight: normalizePaneWidth(
       layout.scratchpadListHeight,
