@@ -24,6 +24,7 @@ export type TerminalAttachMentionStyle = "mention" | "path" | "read";
 export type ThemeMode = "system" | "light" | "dark";
 export type MaruAppMode =
   | "pkm"
+  | "scratchpad"
   | "files"
   | "inbox"
   | "comms"
@@ -40,7 +41,8 @@ export type MaruAppMode =
   | "drafts"
   | "gap"
   | "agents";
-export type RightWorkbenchSurface = "editor" | Exclude<MaruAppMode, "pkm">;
+export type RightWorkbenchMode = Exclude<MaruAppMode, "pkm" | "scratchpad">;
+export type RightWorkbenchSurface = "editor" | RightWorkbenchMode;
 export type WorkspaceVisibilitySetting = "private" | "public";
 export type EditorViewModeSetting = "rich" | "source" | "preview";
 export interface EditorPaneViewModes {
@@ -52,7 +54,6 @@ export type RightPaneTab =
   | "outline"
   | "explorer"
   | "files"
-  | "memo"
   | "info"
   | "skills"
   | "guideline"
@@ -135,6 +136,9 @@ export const DEFAULT_FILES_LIST_ATTRIBUTES: FilesListAttribute[] = [
  *  flex basis `.scratchpad-list` used before the split became resizable. */
 export const SCRATCHPAD_LIST_HEIGHT = { defaultValue: 218, min: 120, max: 600 } as const;
 
+/** Drag limits for the Scratchpad navigator/editor split in the main workbench. */
+export const SCRATCHPAD_LIST_WIDTH = { defaultValue: 320, min: 260, max: 480 } as const;
+
 /** Drag limits for the Ideation drafts list/detail split. */
 export const DRAFTS_LIST_WIDTH = { defaultValue: 340, min: 260, max: 560 } as const;
 
@@ -157,6 +161,7 @@ export interface LayoutSettings {
   calendarAgendaWidth: number;
   taskDetailsWidth: number;
   scratchpadListHeight: number;
+  scratchpadListWidth: number;
   draftsListWidth: number;
   outlineOpen: boolean;
   outlinePaneWidth: number;
@@ -523,6 +528,7 @@ export const DEFAULT_MARU_SETTINGS: MaruSettings = {
       calendarAgendaWidth: TODAY_LAYOUT_LIMITS.calendarAgendaWidth.defaultValue,
       taskDetailsWidth: TODAY_LAYOUT_LIMITS.taskDetailsWidth.defaultValue,
       scratchpadListHeight: SCRATCHPAD_LIST_HEIGHT.defaultValue,
+      scratchpadListWidth: SCRATCHPAD_LIST_WIDTH.defaultValue,
       draftsListWidth: DRAFTS_LIST_WIDTH.defaultValue,
       outlineOpen: true,
       outlinePaneWidth: 280,
@@ -1880,7 +1886,7 @@ function parseBrowserMode(value: unknown): DocumentBrowserMode | null {
 }
 
 function parseMaruAppMode(value: unknown): MaruAppMode | null {
-  return value === "pkm" || value === "files" || value === "inbox" || value === "comms" || value === "meetings"
+  return value === "pkm" || value === "scratchpad" || value === "files" || value === "inbox" || value === "comms" || value === "meetings"
     || value === "today" || value === "tasks" || value === "dashboard" || value === "catalog" || value === "studio" || value === "e2e"
     || value === "diagram" || value === "sites" || value === "graph" || value === "drafts"
     || value === "gap" || value === "agents"
@@ -1891,7 +1897,7 @@ function parseMaruAppMode(value: unknown): MaruAppMode | null {
 function parseRightWorkbenchSurface(value: unknown): RightWorkbenchSurface | null {
   if (value === "editor") return value;
   const mode = parseMaruAppMode(value);
-  return mode && mode !== "pkm" ? mode : null;
+  return mode && mode !== "pkm" && mode !== "scratchpad" ? mode : null;
 }
 
 function normalizeActiveAppMode(ui: Record<string, unknown>): MaruAppMode {
@@ -1932,7 +1938,7 @@ function normalizeEditorPaneViewModes(
 }
 
 function parseRightPaneTab(value: unknown): RightPaneTab | null {
-  return value === "workspace" || value === "outline" || value === "explorer" || value === "files" || value === "memo"
+  return value === "workspace" || value === "outline" || value === "explorer" || value === "files"
     || value === "info" || value === "skills" || value === "guideline" || value === "evidence"
     || value === "shareOutbox"
     ? value
@@ -2231,6 +2237,12 @@ function normalizeLayout(value: unknown, legacyTerminal: Record<string, unknown>
       SCRATCHPAD_LIST_HEIGHT.defaultValue,
       SCRATCHPAD_LIST_HEIGHT.min,
       SCRATCHPAD_LIST_HEIGHT.max,
+    ),
+    scratchpadListWidth: normalizePaneWidth(
+      layout.scratchpadListWidth,
+      SCRATCHPAD_LIST_WIDTH.defaultValue,
+      SCRATCHPAD_LIST_WIDTH.min,
+      SCRATCHPAD_LIST_WIDTH.max,
     ),
     draftsListWidth: normalizePaneWidth(
       layout.draftsListWidth,

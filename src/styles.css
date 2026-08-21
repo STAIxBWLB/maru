@@ -7557,6 +7557,10 @@ button.git-badge:hover {
 }
 
 .scratchpad-actions button {
+  white-space: nowrap;
+}
+
+.scratchpad-actions button {
   flex: 1;
   padding-inline: 6px;
 }
@@ -8196,6 +8200,246 @@ button.git-badge:hover {
 
   .scratchpad-actions button {
     flex: 0 0 30px;
+  }
+}
+
+/* Scratchpad is a first-class workbench. The navigator keeps temporary
+   material scannable while the editor receives the main share of the window. */
+.scratchpad-workspace {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  gap: 0;
+  grid-template-rows: auto minmax(0, 1fr);
+  overflow: hidden;
+  background: var(--panel);
+  container-name: scratchpad;
+  container-type: inline-size;
+}
+
+.scratchpad-mode-header {
+  min-width: 0;
+}
+
+.scratchpad-mode-header .mode-header-subtitle {
+  max-width: 48ch;
+}
+
+.scratchpad-actions {
+  flex-wrap: nowrap;
+}
+
+.scratchpad-actions > button:first-child {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--on-accent, #fff);
+}
+
+.scratchpad-actions > button:first-child:not(:disabled):hover {
+  border-color: color-mix(in srgb, var(--accent) 88%, var(--ink));
+  background: color-mix(in srgb, var(--accent) 88%, var(--ink));
+  color: var(--on-accent, #fff);
+}
+
+.scratchpad-actions .scratchpad-refresh-action {
+  flex: 0 0 30px;
+  width: 30px;
+  padding-inline: 0;
+}
+
+.scratchpad-workspace-body {
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(260px, var(--scratchpad-list-width, 320px)) 6px minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  grid-template-areas: "navigator resize-wide editor";
+  overflow: hidden;
+}
+
+.scratchpad-navigator {
+  grid-area: navigator;
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 10px;
+  overflow: hidden;
+  padding: 12px 10px 10px;
+  background: var(--panel-2);
+}
+
+.scratchpad-navigator-tools {
+  display: grid;
+  gap: 8px;
+}
+
+.scratchpad-navigator .scratchpad-search {
+  height: 34px;
+}
+
+.scratchpad-navigator .scratchpad-list {
+  min-height: 0;
+  height: auto;
+  flex: none;
+  padding: 0 3px 8px 0;
+}
+
+.scratchpad-navigator .scratchpad-list-item {
+  padding: 8px 9px;
+}
+
+.scratchpad-navigator .scratchpad-maintenance {
+  min-width: 0;
+  padding-top: 7px;
+  border-top: 1px solid var(--line-soft);
+}
+
+.scratchpad-resize {
+  min-width: 0;
+  min-height: 0;
+}
+
+.scratchpad-resize-wide {
+  grid-area: resize-wide;
+  display: flex;
+  width: 6px;
+}
+
+.scratchpad-resize-wide .pane-resize-handle {
+  width: 6px;
+}
+
+.scratchpad-resize-wide .pane-resize-handle::after {
+  left: 2px;
+  background: var(--line-soft);
+}
+
+.scratchpad-resize-compact {
+  display: none;
+}
+
+.scratchpad-editor-region {
+  grid-area: editor;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow: hidden;
+  padding: 16px;
+  background: var(--panel);
+}
+
+.scratchpad-editor-region .scratchpad-editor-shell {
+  min-width: 0;
+  min-height: 0;
+  gap: 10px;
+}
+
+.scratchpad-editor-region .scratchpad-path-field {
+  max-width: 880px;
+}
+
+.scratchpad-editor-region .scratchpad-editor,
+.scratchpad-editor-region .scratchpad-preview {
+  min-height: 0;
+  padding: 16px;
+  border-radius: var(--radius);
+  font-size: var(--type-body-size);
+  line-height: var(--type-body-leading);
+}
+
+.scratchpad-editor-region .scratchpad-editor-empty {
+  flex: 1;
+  min-height: 0;
+}
+
+.scratchpad-editor-empty strong {
+  color: var(--ink);
+  font-size: var(--type-heading-size);
+}
+
+.scratchpad-editor-empty button {
+  min-height: 30px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  padding: 0 10px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  background: var(--accent);
+  color: var(--on-accent, #fff);
+  font-size: var(--type-label-size);
+  font-weight: 680;
+}
+
+.scratchpad-editor-empty button:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+.scratchpad-workspace .scratchpad-cleanup-overlay {
+  z-index: 40;
+  padding: 20px;
+  background: color-mix(in srgb, var(--ink) 28%, transparent);
+}
+
+@container scratchpad (max-width: 720px) {
+  .scratchpad-workspace-body {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows:
+      minmax(160px, min(var(--scratchpad-list-height, 218px), 42%))
+      9px minmax(220px, 1fr);
+    grid-template-areas:
+      "navigator"
+      "resize-compact"
+      "editor";
+  }
+
+  .scratchpad-navigator {
+    padding: 10px;
+  }
+
+  .scratchpad-resize-wide {
+    display: none;
+  }
+
+  .scratchpad-resize-compact {
+    grid-area: resize-compact;
+    display: flex;
+    height: 9px;
+  }
+
+  .scratchpad-editor-region {
+    padding: 12px;
+  }
+}
+
+@container scratchpad (max-width: 560px) {
+  .scratchpad-mode-header .mode-header-subtitle {
+    display: none;
+  }
+
+  .scratchpad-actions button span {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+
+  .scratchpad-actions button {
+    flex: 0 0 30px;
+    width: 30px;
+    padding-inline: 0;
+  }
+
+  .scratchpad-editor-toolbar {
+    align-items: flex-start;
+    flex-direction: column;
   }
 }
 
@@ -25477,6 +25721,7 @@ select:focus-visible,
   .graph-view,
   .sites-pane,
   .files-workbench,
+  .scratchpad-workspace,
   .mode-loading
 ),
 .app-workbench > .workbench-primary-surface > :is(
@@ -25496,6 +25741,7 @@ select:focus-visible,
   .graph-view,
   .sites-pane,
   .files-workbench,
+  .scratchpad-workspace,
   .mode-loading
 ) {
   grid-area: 1 / 1 / -1 / -1;

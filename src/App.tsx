@@ -37,6 +37,7 @@ import {
   Route,
   Settings2,
   SquareTerminal,
+  StickyNote,
   UsersRound,
   WandSparkles,
   Waypoints,
@@ -58,6 +59,7 @@ import { EvidenceBinderPane } from "./components/evidence/EvidenceBinderPane";
 import { MissionBadge } from "./components/MissionBadge";
 import { NewDocumentDialog } from "./components/NewDocumentDialog";
 import { OutlinePane } from "./components/OutlinePane";
+import { ScratchpadPane } from "./components/ScratchpadPane";
 import type { TasksPaneProps } from "./components/tasks/TasksPane";
 import type {
   TerminalLaunchRequest,
@@ -379,6 +381,7 @@ import {
   type FilesSortKey,
   type SortKey,
   type RightPaneTab,
+  type RightWorkbenchMode,
   type RightWorkbenchSurface,
   type TerminalDock,
   type TerminalTheme,
@@ -918,6 +921,7 @@ function MainApp() {
   const [todayBannerVisible, setTodayBannerVisible] = useState(false);
   const [todayRolloverEpoch, setTodayRolloverEpoch] = useState(0);
   const [todayRefreshEpoch, setTodayRefreshEpoch] = useState(0);
+  const [scratchpadRefreshEpoch, setScratchpadRefreshEpoch] = useState(0);
   // Last logical day seen by the new-day watcher (boot seeds it too).
   const todayLogicalDayRef = useRef<string | null>(null);
   // Workspace whose boot auto-opened Today this launch. The settings-load
@@ -5422,6 +5426,8 @@ function MainApp() {
       void refreshProcessingMissions();
     } else if (surfaceMode === "today") {
       setTodayRefreshEpoch((epoch) => epoch + 1);
+    } else if (surfaceMode === "scratchpad") {
+      setScratchpadRefreshEpoch((epoch) => epoch + 1);
     } else if (surfaceMode === "tasks") {
       // TasksPane owns its task-data refresh (in-pane Refresh button); the
       // shared surface refresh still re-pulls the AI runs feeding its panel.
@@ -6469,7 +6475,7 @@ function MainApp() {
   );
 
   const openWorkbenchModeRight = useCallback(
-    (mode: Exclude<AppMode, "pkm">) => {
+    (mode: RightWorkbenchMode) => {
       if (mode === "inbox") setInboxFocusTick((value) => value + 1);
       if (mode === "gap") setGapDraftId(null);
       if (mode === "graph" && layoutSettings.toolPanelSurface === "graph") {
@@ -6844,9 +6850,7 @@ function MainApp() {
         case "open-scratchpad":
         case "new-scratchpad-memo":
         case "review-scratchpad-temp": {
-          setPersistedAppMode("pkm");
-          if (!outlineOpen) updateLayoutSettings({ outlineOpen: true });
-          setPersistedRightPaneTab("memo");
+          setPersistedAppMode("scratchpad");
           const action =
             id === "new-scratchpad-memo"
               ? "new-memo"
@@ -7238,6 +7242,7 @@ function MainApp() {
     graph: " graph-mode",
     files: " files-mode",
     drafts: " drafts-mode",
+    scratchpad: " scratchpad-mode",
     gap: " gap-mode",
     agents: " agents-mode",
   };
@@ -8235,6 +8240,12 @@ function MainApp() {
               setPersistedAppMode("pkm");
             }}
           />
+          <ActivityModeButton
+            label={t("mode.scratchpad")}
+            active={visibleAppMode === "scratchpad"}
+            icon={<StickyNote size={20} strokeWidth={1.9} />}
+            onOpenPrimary={() => openPrimaryWorkbenchMode("scratchpad")}
+          />
           {([
             ["files", FolderOpen],
             ["inbox", Inbox],
@@ -8559,6 +8570,24 @@ function MainApp() {
               const root = inboxWorkspacePath ?? settingsWorkPath;
               if (root) void revealInFileManager(root, path);
             }}
+          />
+        ) : surfaceMode === "scratchpad" ? (
+          <ScratchpadPane
+            key={primaryWorkspacePath ?? "scratchpad-unavailable"}
+            workPath={primaryWorkspacePath}
+            sortKey={maruSettings.ui.scratchpadSortKey}
+            listHeight={layoutSettings.scratchpadListHeight}
+            listWidth={layoutSettings.scratchpadListWidth}
+            refreshRequestEpoch={scratchpadRefreshEpoch}
+            onRefreshWorkspace={() => void refreshCurrent()}
+            onSortKeyChange={setScratchpadSortKey}
+            onListHeightChange={(scratchpadListHeight) =>
+              updateLayoutSettings({ scratchpadListHeight })
+            }
+            onListWidthChange={(scratchpadListWidth) =>
+              updateLayoutSettings({ scratchpadListWidth })
+            }
+            t={t}
           />
         ) : surfaceMode === "drafts" ? (
           <LazyDraftsPane
@@ -8891,17 +8920,9 @@ function MainApp() {
             entries={activeDocumentEntries}
             readOnly={!activeWorkspaceCanModify}
             workspacePath={activeDocumentWorkspacePath}
-            scratchpadWorkPath={primaryWorkspacePath}
-            scratchpadSortKey={maruSettings.ui.scratchpadSortKey}
-            scratchpadListHeight={layoutSettings.scratchpadListHeight}
-            onScratchpadSortKeyChange={setScratchpadSortKey}
-            onScratchpadListHeightChange={(scratchpadListHeight) =>
-              updateLayoutSettings({ scratchpadListHeight })
-            }
             activeLine={activeOutlineLine}
             onJumpToLine={jumpToOutlineLine}
             onClose={() => updateLayoutSettings({ outlineOpen: false })}
-                onRefreshWorkspace={() => void refreshCurrent()}
             onUpdateField={updateField}
             onSelectEntry={selectEntry}
             onMissingWikilink={handleWikilinkClick}

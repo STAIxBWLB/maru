@@ -3,6 +3,7 @@ import {
   DRAFTS_LIST_WIDTH,
   DEFAULT_MARU_SETTINGS,
   SCRATCHPAD_LIST_HEIGHT,
+  SCRATCHPAD_LIST_WIDTH,
   applyWorkspaceCommsOverrides,
   applyWorkspaceMeetingsOverrides,
   applyWorkspaceTasksOverrides,
@@ -64,6 +65,19 @@ describe("normalizeMaruSettings", () => {
     expect(normalizeMaruSettings({ ui: { rightPaneTab: "bogus" } }).ui.rightPaneTab).toBe(
       "workspace",
     );
+    expect(normalizeMaruSettings({ ui: { rightPaneTab: "memo" } }).ui.rightPaneTab).toBe(
+      "workspace",
+    );
+  });
+
+  it("accepts Scratchpad as a main mode but never as a right workbench", () => {
+    expect(
+      normalizeMaruSettings({ ui: { activeAppMode: "scratchpad" } }).ui.activeAppMode,
+    ).toBe("scratchpad");
+    expect(
+      normalizeMaruSettings({ ui: { rightWorkbenchSurface: "scratchpad" } }).ui
+        .rightWorkbenchSurface,
+    ).toBe("editor");
   });
 
   it("normalizes the persisted right workbench surface without consuming legacy graph split input", () => {
@@ -182,6 +196,7 @@ describe("normalizeMaruSettings", () => {
           documentsPaneWidth: 999,
           outlinePaneWidth: 100,
           scratchpadListHeight: 9999,
+          scratchpadListWidth: 9999,
           draftsListWidth: 999,
           editorSplitOpen: true,
           editorSplitSurface: "graph",
@@ -261,6 +276,7 @@ describe("normalizeMaruSettings", () => {
     expect(settings.ui.layout.documentsPaneWidth).toBe(560);
     expect(settings.ui.layout.outlinePaneWidth).toBe(240);
     expect(settings.ui.layout.scratchpadListHeight).toBe(SCRATCHPAD_LIST_HEIGHT.max);
+    expect(settings.ui.layout.scratchpadListWidth).toBe(SCRATCHPAD_LIST_WIDTH.max);
     expect(settings.ui.layout.draftsListWidth).toBe(DRAFTS_LIST_WIDTH.max);
     expect(settings.ui.layout.editorSplitRatio).toBe(0.7);
     expect(settings.ui.layout.terminalDock).toBe("right");
@@ -1326,6 +1342,7 @@ describe("normalizeMaruSettings", () => {
       tasksSidebarWidth: 240,
       calendarAgendaWidth: 280,
       taskDetailsWidth: 400,
+      scratchpadListWidth: SCRATCHPAD_LIST_WIDTH.defaultValue,
       draftsListWidth: DRAFTS_LIST_WIDTH.defaultValue,
     });
 
@@ -1336,6 +1353,7 @@ describe("normalizeMaruSettings", () => {
           tasksSidebarWidth: 999,
           calendarAgendaWidth: 40,
           taskDetailsWidth: 999,
+          scratchpadListWidth: 100,
           draftsListWidth: 100,
         },
       },
@@ -1345,6 +1363,7 @@ describe("normalizeMaruSettings", () => {
       tasksSidebarWidth: 360,
       calendarAgendaWidth: 200,
       taskDetailsWidth: 520,
+      scratchpadListWidth: SCRATCHPAD_LIST_WIDTH.min,
       draftsListWidth: DRAFTS_LIST_WIDTH.min,
     });
   });

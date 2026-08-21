@@ -307,8 +307,27 @@ async function openScratchpad(page: import("@playwright/test").Page) {
   await page.locator(".cmdk-item", { hasText: "스크래치패드 열기" }).click();
   const pane = page.locator(".scratchpad-pane");
   await expect(pane).toBeVisible();
+  await expect(
+    page.locator(".workbench-primary-surface > .scratchpad-workspace"),
+  ).toBeVisible();
+  await expect(page.locator(".outline-pane").getByRole("tab", { name: "스크래치패드" }))
+    .toHaveCount(0);
   return pane;
 }
+
+test("opens Scratchpad from the activity rail as a main-only workbench", async ({ page }) => {
+  await page.goto("/");
+  const activityButton = page.getByRole("button", { name: "스크래치패드", exact: true });
+  await expect(activityButton).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "스크래치패드 오른쪽에 열기 (Option-click)" }),
+  ).toHaveCount(0);
+
+  await activityButton.click();
+  await expect(activityButton).toHaveClass(/active/);
+  await expect(page.locator(".workbench-primary-surface > .scratchpad-workspace"))
+    .toBeVisible();
+});
 
 test("keeps ideation in the hub while Scratchpad preserves memos and temp results", async ({
   page,
@@ -319,7 +338,7 @@ test("keeps ideation in the hub while Scratchpad preserves memos and temp result
   await expect(pane.getByText("maru-vault-graph.md")).toHaveCount(0);
   await expect(pane.locator(".scratchpad-list-item", { hasText: "daily.md" })).toBeVisible();
   await expect(pane.locator(".scratchpad-list-item", { hasText: "result.md" })).toBeVisible();
-  await expect(pane.getByRole("button", { name: "새 메모" })).toBeVisible();
+  await expect(pane.getByRole("button", { name: "새 메모" }).first()).toBeVisible();
   await expect(pane.getByRole("button", { name: "임시 파일 정리" })).toBeVisible();
   await expect(pane.getByRole("button", { name: "새 아이디어" })).toHaveCount(0);
   await expect(pane.getByText("발전 중")).toHaveCount(0);

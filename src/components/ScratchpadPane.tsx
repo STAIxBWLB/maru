@@ -56,7 +56,12 @@ import {
   type ScratchpadDraft,
 } from "../lib/scratchpad";
 import { setError } from "../lib/errorStore";
-import { SCRATCHPAD_LIST_HEIGHT, type SortKey } from "../lib/settings";
+import {
+  SCRATCHPAD_LIST_HEIGHT,
+  SCRATCHPAD_LIST_WIDTH,
+  type SortKey,
+} from "../lib/settings";
+import { ModeHeader } from "./ui/ModeChrome";
 import { PaneResizeHandle } from "./ui/PaneResizeHandle";
 import { SortModeToggle } from "./ui/SortModeToggle";
 import type {
@@ -75,9 +80,12 @@ interface ScratchpadPaneProps {
   workPath: string | null;
   sortKey: SortKey;
   listHeight: number;
+  listWidth: number;
+  refreshRequestEpoch: number;
   onRefreshWorkspace: () => void;
   onSortKeyChange: (key: SortKey) => void;
   onListHeightChange: (height: number) => void;
+  onListWidthChange: (width: number) => void;
   t: Translate;
 }
 
@@ -124,9 +132,12 @@ export function ScratchpadPane({
   workPath,
   sortKey,
   listHeight,
+  listWidth,
+  refreshRequestEpoch,
   onRefreshWorkspace,
   onSortKeyChange,
   onListHeightChange,
+  onListWidthChange,
   t,
 }: ScratchpadPaneProps) {
   const [entries, setEntries] = useState<ScratchpadEntry[]>([]);
@@ -148,9 +159,13 @@ export function ScratchpadPane({
   const [recoveryDraft, setRecoveryDraft] = useState<ScratchpadDraft | null>(null);
   // Local during the drag, committed to settings on pointer release.
   const [draggedListHeight, setDraggedListHeight] = useState(listHeight);
+  const [draggedListWidth, setDraggedListWidth] = useState(listWidth);
   useEffect(() => {
     setDraggedListHeight(listHeight);
   }, [listHeight]);
+  useEffect(() => {
+    setDraggedListWidth(listWidth);
+  }, [listWidth]);
 
   const editorRef = useRef<ScratchpadDocument | null>(null);
   const contentRef = useRef("");
@@ -164,6 +179,7 @@ export function ScratchpadPane({
   const activeWatcherGenerationRef = useRef<number | null>(null);
   const cleanupDialogRef = useRef<HTMLElement | null>(null);
   const reviewTempTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const refreshRequestEpochRef = useRef(refreshRequestEpoch);
   activeWorkPathRef.current = workPath;
 
   const clearAutoSaveTimer = useCallback(() => {
@@ -340,6 +356,12 @@ export function ScratchpadPane({
     setRecoveryDraft(workPath ? readScratchpadDraft(workPath) : null);
     void refresh(false);
   }, [clearAutoSaveTimer, loadEditor, refresh, workPath]);
+
+  useEffect(() => {
+    if (refreshRequestEpochRef.current === refreshRequestEpoch) return;
+    refreshRequestEpochRef.current = refreshRequestEpoch;
+    void refresh(true);
+  }, [refresh, refreshRequestEpoch]);
 
   useEffect(() => {
     if (!workPath || !isTauri()) return;
@@ -803,137 +825,164 @@ export function ScratchpadPane({
 
   return (
     <section
-      className="right-tool-pane scratchpad-pane"
+      className="scratchpad-pane scratchpad-workspace"
       aria-label={t("rightPane.tab.memo")}
-      style={{ "--scratchpad-list-height": `${draggedListHeight}px` } as CSSProperties}
+      style={
+        {
+          "--scratchpad-list-height": `${draggedListHeight}px`,
+          "--scratchpad-list-width": `${draggedListWidth}px`,
+        } as CSSProperties
+      }
     >
-      <div className="scratchpad-heading">
-        <div>
-          <span>{t("rightPane.scratchpad.kicker")}</span>
-          <h3>{t("rightPane.tab.memo")}</h3>
-        </div>
-        <button
-          type="button"
-          className="scratchpad-icon-button"
-          onClick={() => void refresh(true)}
-          title={t("rightPane.scratchpad.refresh")}
-          aria-label={t("rightPane.scratchpad.refresh")}
-        >
-          <RefreshCw size={14} />
-        </button>
-      </div>
-
-      <div className="right-tool-actions scratchpad-actions">
-        <button type="button" onClick={() => void newMemo()} disabled={!workPath}>
-          <FilePlus2 size={13} />
-          <span>{t("rightPane.scratchpad.newMemo")}</span>
-        </button>
-        <button
-          ref={reviewTempTriggerRef}
-          type="button"
-          onClick={() => void reviewTempCleanup()}
-          disabled={!workPath || cleanupBusy}
-        >
-          <Trash2 size={13} />
-          <span>{t("rightPane.scratchpad.reviewTemp")}</span>
-        </button>
-      </div>
-
-      <label className="scratchpad-search">
-        <Search size={13} />
-        <input
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-          placeholder={t("rightPane.scratchpad.search")}
-          aria-label={t("rightPane.scratchpad.search")}
-        />
-      </label>
-
-      <SortModeToggle value={sortKey} onChange={onSortKeyChange} t={t} />
-
-      {localError ? (
-        <div className="scratchpad-inline-state error" role="alert">
-          <AlertTriangle size={14} />
-          <span>{localError}</span>
-        </div>
-      ) : null}
-
-      {recoveryDraft ? (
-        <div className="scratchpad-recovery" role="status">
-          <div>
-            <AlertTriangle size={14} />
-            <span>{t("rightPane.scratchpad.recoveryAvailable", { name: recoveryDraft.document.name })}</span>
-          </div>
-          <div className="right-tool-actions">
-            <button type="button" onClick={restoreRecoveryDraft}>
-              {t("rightPane.scratchpad.restoreDraft")}
+      <ModeHeader
+        className="scratchpad-mode-header"
+        title={t("rightPane.tab.memo")}
+        subtitle={t("scratchpad.subtitle")}
+        actions={
+          <div className="right-tool-actions scratchpad-actions">
+            <button type="button" onClick={() => void newMemo()} disabled={!workPath}>
+              <FilePlus2 size={14} />
+              <span>{t("rightPane.scratchpad.newMemo")}</span>
             </button>
-            <button type="button" onClick={discardRecoveryDraft}>
-              {t("rightPane.scratchpad.discardDraft")}
+            <button
+              ref={reviewTempTriggerRef}
+              type="button"
+              onClick={() => void reviewTempCleanup()}
+              disabled={!workPath || cleanupBusy}
+            >
+              <Trash2 size={14} />
+              <span>{t("rightPane.scratchpad.reviewTemp")}</span>
+            </button>
+            <button
+              type="button"
+              className="scratchpad-refresh-action"
+              onClick={() => void refresh(true)}
+              disabled={!workPath || loading}
+              title={t("rightPane.scratchpad.refresh")}
+              aria-label={t("rightPane.scratchpad.refresh")}
+            >
+              <RefreshCw size={14} />
             </button>
           </div>
-        </div>
-      ) : null}
-
-      <div className="scratchpad-maintenance">
-        <button type="button" onClick={() => void migrateMemos()} disabled={!workPath || migrationBusy}>
-          <FolderInput size={13} />
-          <span>{t("rightPane.scratchpad.migrateMemos")}</span>
-        </button>
-        {migrationStatus ? <span role="status">{migrationStatus}</span> : null}
-        {cleanupStatus ? <span role="status">{cleanupStatus}</span> : null}
-      </div>
-
-      <div className="scratchpad-list" aria-label={t("rightPane.scratchpad.list")}>
-        {loading && entries.length === 0 ? (
-          <div className="scratchpad-skeleton" aria-label={t("rightPane.scratchpad.loading")}>
-            <span />
-            <span />
-            <span />
-          </div>
-        ) : null}
-        {!loading && !hasEntries ? (
-          <div className="scratchpad-empty">
-            <List size={18} />
-            <strong>{query ? t("rightPane.scratchpad.noResults") : t("rightPane.scratchpad.empty")}</strong>
-            <span>{t("rightPane.scratchpad.emptyHint")}</span>
-          </div>
-        ) : null}
-        {flatSort
-          ? flatEntries.map(renderEntryRow)
-          : groupedEntries.map((section) => (
-              <section className="scratchpad-collection" key={section.collection}>
-                <header>
-                  <strong>{collectionLabel(section.collection, t)}</strong>
-                  <span>
-                    {section.groups.reduce((count, group) => count + group.entries.length, 0)}
-                  </span>
-                </header>
-                {section.groups.map((group) => (
-                  <div className="scratchpad-group" key={group.id}>
-                    <span className="scratchpad-group-label">
-                      {groupLabel(section.collection, group.id, t)}
-                    </span>
-                    {group.entries.map(renderEntryRow)}
-                  </div>
-                ))}
-              </section>
-            ))}
-      </div>
-
-      <PaneResizeHandle
-        label={t("rightPane.scratchpad.resizeList")}
-        orientation="horizontal"
-        value={draggedListHeight}
-        min={SCRATCHPAD_LIST_HEIGHT.min}
-        max={SCRATCHPAD_LIST_HEIGHT.max}
-        defaultValue={SCRATCHPAD_LIST_HEIGHT.defaultValue}
-        onChange={setDraggedListHeight}
-        onCommit={onListHeightChange}
+        }
       />
 
-      {editor ? (
-        <div className="scratchpad-editor-shell">
+      <div className="scratchpad-workspace-body">
+        <aside className="scratchpad-navigator" aria-label={t("rightPane.scratchpad.list")}>
+          <div className="scratchpad-navigator-tools">
+            <label className="scratchpad-search">
+              <Search size={14} />
+              <input
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder={t("rightPane.scratchpad.search")}
+                aria-label={t("rightPane.scratchpad.search")}
+              />
+            </label>
+
+            <SortModeToggle value={sortKey} onChange={onSortKeyChange} t={t} />
+
+            {localError ? (
+              <div className="scratchpad-inline-state error" role="alert">
+                <AlertTriangle size={14} />
+                <span>{localError}</span>
+              </div>
+            ) : null}
+          </div>
+
+          <div className="scratchpad-list">
+            {loading && entries.length === 0 ? (
+              <div className="scratchpad-skeleton" aria-label={t("rightPane.scratchpad.loading")}>
+                <span />
+                <span />
+                <span />
+              </div>
+            ) : null}
+            {!loading && !hasEntries ? (
+              <div className="scratchpad-empty">
+                <List size={18} />
+                <strong>{query ? t("rightPane.scratchpad.noResults") : t("rightPane.scratchpad.empty")}</strong>
+                <span>{t("rightPane.scratchpad.emptyHint")}</span>
+              </div>
+            ) : null}
+            {flatSort
+              ? flatEntries.map(renderEntryRow)
+              : groupedEntries.map((section) => (
+                  <section className="scratchpad-collection" key={section.collection}>
+                    <header>
+                      <strong>{collectionLabel(section.collection, t)}</strong>
+                      <span>
+                        {section.groups.reduce((count, group) => count + group.entries.length, 0)}
+                      </span>
+                    </header>
+                    {section.groups.map((group) => (
+                      <div className="scratchpad-group" key={group.id}>
+                        <span className="scratchpad-group-label">
+                          {groupLabel(section.collection, group.id, t)}
+                        </span>
+                        {group.entries.map(renderEntryRow)}
+                      </div>
+                    ))}
+                  </section>
+                ))}
+          </div>
+
+          <div className="scratchpad-maintenance">
+            <button type="button" onClick={() => void migrateMemos()} disabled={!workPath || migrationBusy}>
+              <FolderInput size={13} />
+              <span>{t("rightPane.scratchpad.migrateMemos")}</span>
+            </button>
+            {migrationStatus ? <span role="status">{migrationStatus}</span> : null}
+            {cleanupStatus ? <span role="status">{cleanupStatus}</span> : null}
+          </div>
+        </aside>
+
+        <div className="scratchpad-resize scratchpad-resize-wide">
+          <PaneResizeHandle
+            label={t("scratchpad.resizeNavigator")}
+            orientation="vertical"
+            value={draggedListWidth}
+            min={SCRATCHPAD_LIST_WIDTH.min}
+            max={SCRATCHPAD_LIST_WIDTH.max}
+            defaultValue={SCRATCHPAD_LIST_WIDTH.defaultValue}
+            onChange={setDraggedListWidth}
+            onCommit={onListWidthChange}
+          />
+        </div>
+
+        <div className="scratchpad-resize scratchpad-resize-compact">
+          <PaneResizeHandle
+            label={t("rightPane.scratchpad.resizeList")}
+            orientation="horizontal"
+            value={draggedListHeight}
+            min={SCRATCHPAD_LIST_HEIGHT.min}
+            max={SCRATCHPAD_LIST_HEIGHT.max}
+            defaultValue={SCRATCHPAD_LIST_HEIGHT.defaultValue}
+            onChange={setDraggedListHeight}
+            onCommit={onListHeightChange}
+          />
+        </div>
+
+        <main className="scratchpad-editor-region">
+          {recoveryDraft ? (
+            <div className="scratchpad-recovery" role="status">
+              <div>
+                <AlertTriangle size={14} />
+                <span>{t("rightPane.scratchpad.recoveryAvailable", { name: recoveryDraft.document.name })}</span>
+              </div>
+              <div className="right-tool-actions">
+                <button type="button" onClick={restoreRecoveryDraft}>
+                  {t("rightPane.scratchpad.restoreDraft")}
+                </button>
+                <button type="button" onClick={discardRecoveryDraft}>
+                  {t("rightPane.scratchpad.discardDraft")}
+                </button>
+              </div>
+            </div>
+          ) : null}
+
+          {editor ? (
+            <div className="scratchpad-editor-shell">
           {conflict ? (
             <div className="scratchpad-conflict" role="alert">
               <div>
@@ -1060,13 +1109,20 @@ export function ScratchpadPane({
               <span>{t("rightPane.scratchpad.saveAs")}</span>
             </button>
           </div>
-        </div>
-      ) : (
-        <div className="scratchpad-editor-empty">
-          <Lightbulb size={18} />
-          <span>{t("rightPane.scratchpad.selectHint")}</span>
-        </div>
-      )}
+            </div>
+          ) : (
+            <div className="scratchpad-editor-empty">
+              <Lightbulb size={22} />
+              <strong>{t("scratchpad.editorEmptyTitle")}</strong>
+              <span>{t("rightPane.scratchpad.selectHint")}</span>
+              <button type="button" onClick={() => void newMemo()} disabled={!workPath}>
+                <FilePlus2 size={14} />
+                {t("rightPane.scratchpad.newMemo")}
+              </button>
+            </div>
+          )}
+        </main>
+      </div>
 
       {cleanupCandidates ? (
         <div

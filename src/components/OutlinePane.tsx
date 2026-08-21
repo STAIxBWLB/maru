@@ -27,7 +27,6 @@ import {
   Presentation,
   Save,
   Send,
-  StickyNote,
   Trash2,
   X,
 } from "lucide-react";
@@ -57,7 +56,6 @@ import type {
   DocumentViewDefinition,
   ExplorerPaneMode,
   RightPaneTab,
-  SortKey,
 } from "../lib/settings";
 import type { BuiltInDocumentView, DocumentFilter } from "../lib/documentIndex";
 import type {
@@ -74,7 +72,6 @@ import {
 } from "../lib/workspaceFileTree";
 import { NeighborhoodPane } from "./NeighborhoodPane";
 import { ExplorerPane } from "./ExplorerPane";
-import { ScratchpadPane } from "./ScratchpadPane";
 import { SharedOutboxPane } from "./SharedOutboxPane";
 import { Sidebar } from "./Sidebar";
 
@@ -84,17 +81,11 @@ interface OutlinePaneProps {
   entries: VaultEntry[];
   readOnly: boolean;
   workspacePath: string | null;
-  scratchpadWorkPath: string | null;
-  scratchpadSortKey: SortKey;
-  scratchpadListHeight: number;
-  onScratchpadSortKeyChange: (key: SortKey) => void;
-  onScratchpadListHeightChange: (height: number) => void;
   /** Editor line currently scrolled to the top (source mode); highlights the
    *  matching outline heading. Null when tracking is inactive. */
   activeLine?: number | null;
   onJumpToLine: (line: number) => void;
   onClose: () => void;
-  onRefreshWorkspace: () => void;
   onUpdateField: (
     key: string,
     value: string | string[] | number | boolean | null,
@@ -227,15 +218,9 @@ export function OutlinePane({
   entries,
   readOnly,
   workspacePath,
-  scratchpadWorkPath,
-  scratchpadSortKey,
-  scratchpadListHeight,
-  onScratchpadSortKeyChange,
-  onScratchpadListHeightChange,
   activeLine = null,
   onJumpToLine,
   onClose,
-  onRefreshWorkspace,
   onUpdateField,
   onSelectEntry,
   onMissingWikilink,
@@ -299,7 +284,7 @@ export function OutlinePane({
   // the workspace tab. Fall back to the first valid tab when the persisted
   // tab is not available in the current mode.
   const visibleTabs: readonly RightPaneTab[] = isPkm
-    ? ["workspace", "outline", "explorer", "files", "memo", "shareOutbox", "skills", "guideline", "evidence", "info"]
+    ? ["workspace", "outline", "explorer", "files", "shareOutbox", "skills", "guideline", "evidence", "info"]
     : appMode === "inbox"
       ? ["workspace", "shareOutbox"]
       : ["workspace"];
@@ -429,8 +414,6 @@ export function OutlinePane({
                 <FolderTree size={20} />
               ) : id === "files" ? (
                 <Files size={20} />
-              ) : id === "memo" ? (
-                <StickyNote size={20} />
               ) : id === "shareOutbox" ? (
                 <Send size={20} />
               ) : id === "skills" ? (
@@ -553,19 +536,6 @@ export function OutlinePane({
                 t={t}
               />
             </>
-          ) : null}
-
-          {tab === "memo" ? (
-            <ScratchpadPane
-              key={scratchpadWorkPath ?? "scratchpad-unavailable"}
-              workPath={scratchpadWorkPath}
-              sortKey={scratchpadSortKey}
-              listHeight={scratchpadListHeight}
-              onRefreshWorkspace={onRefreshWorkspace}
-              onSortKeyChange={onScratchpadSortKeyChange}
-              onListHeightChange={onScratchpadListHeightChange}
-              t={t}
-            />
           ) : null}
 
           {tab === "shareOutbox" ? (
