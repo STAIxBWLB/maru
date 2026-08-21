@@ -8,6 +8,15 @@ because releases cut frequently during active development. Versions before
 Dates are the release-tag dates. Only `feat`/`fix`-level changes are listed;
 `chore(release)` version bumps and merge commits are omitted.
 
+## v0.4.61 - 2026-08-21 - Scratchpad Gets Room to Work
+
+- **Scratchpad is now a full workspace (#271).** The memo and temporary-result
+  editor has moved from the narrow Docs utility pane into its own left-rail
+  mode. A resizable navigator now sits beside the full-size editor, with a
+  stacked compact layout for narrow windows. Autosave, recovery, revision
+  conflicts, migration, and temporary-file cleanup keep their existing safety
+  behavior, while legacy right-pane settings migrate back to Workspace.
+
 ## v0.4.60 - 2026-08-20 - No More Half-Empty Rows
 
 - **Every dashboard card has a row-mate (#269).** The two-column grid ordered
