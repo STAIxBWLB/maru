@@ -302,23 +302,32 @@ test("gives Scratchpad a resizable main navigator and editor", async ({ page }) 
   await page.getByRole("button", { name: "스크래치패드", exact: true }).click();
 
   const workspace = page.locator(".scratchpad-workspace");
+  const tree = workspace.locator(".scratchpad-tree-pane");
   const navigator = workspace.locator(".scratchpad-navigator");
   const editor = workspace.locator(".scratchpad-editor-region");
+  const treeResize = workspace.getByRole("separator", {
+    name: "스크래치패드 폴더 트리 너비 조절",
+  });
   const resize = workspace.getByRole("separator", {
     name: "스크래치패드 목록 너비 조절",
   });
   await expect(workspace).toBeVisible();
+  await expect(tree).toBeVisible();
+  await expect(treeResize).toBeVisible();
   await expect(resize).toBeVisible();
 
-  const [workspaceBox, navigatorBox, editorBox] = await Promise.all([
+  const [workspaceBox, treeBox, navigatorBox, editorBox] = await Promise.all([
     workspace.boundingBox(),
+    tree.boundingBox(),
     navigator.boundingBox(),
     editor.boundingBox(),
   ]);
   expect(workspaceBox).not.toBeNull();
+  expect(treeBox).not.toBeNull();
   expect(navigatorBox).not.toBeNull();
   expect(editorBox).not.toBeNull();
-  if (!workspaceBox || !navigatorBox || !editorBox) return;
+  if (!workspaceBox || !treeBox || !navigatorBox || !editorBox) return;
+  expect(treeBox.width).toBeGreaterThanOrEqual(200);
   expect(navigatorBox.width).toBeGreaterThanOrEqual(260);
   expect(editorBox.width).toBeGreaterThan(navigatorBox.width);
   expect(editorBox.x).toBeGreaterThanOrEqual(navigatorBox.x + navigatorBox.width);
@@ -326,12 +335,14 @@ test("gives Scratchpad a resizable main navigator and editor", async ({ page }) 
 
   await resize.focus();
   await resize.press("ArrowRight");
+  await treeResize.focus();
+  await treeResize.press("ArrowRight");
   await expect
     .poll(async () => (await navigator.boundingBox())?.width ?? 0)
     .toBeGreaterThan(navigatorBox.width);
   await expect
     .poll(() => readPersistedLayout(page))
-    .toMatchObject({ scratchpadListWidth: 332 });
+    .toMatchObject({ scratchpadListWidth: 332, scratchpadTreeWidth: 252 });
 });
 
 test("stacks the Scratchpad navigator above the editor in a compact workbench", async ({

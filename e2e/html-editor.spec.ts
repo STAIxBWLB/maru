@@ -65,6 +65,27 @@ test("opens an .html document in Visual mode by default", async ({ page }) => {
   await expect(page.locator(".editor-status")).toContainText("HTML");
 });
 
+test("uses Visual, Source, and Preview safely inside Files", async ({ page }) => {
+  await page.goto("/?mockHtml=1");
+  await page.locator(".activity-rail").getByRole("button", { name: "파일", exact: true }).click();
+  const files = page.locator(".files-workbench");
+  await files.locator(".files-list-row", { hasText: "clean-report.html" }).click();
+
+  const editor = files.locator(".inline-document-editor");
+  await expect(editor).toBeVisible();
+  await expect(editor.locator(".tab-trigger", { hasText: "비주얼" })).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
+  await expect(editor.locator(VISUAL_FRAME)).toBeVisible();
+  await expect(editor.frameLocator(VISUAL_FRAME).locator("body")).toContainText("클린 문서");
+
+  await editor.locator(".tab-trigger", { hasText: "원문" }).click();
+  await expect(editor.locator("textarea.source-editor")).toHaveValue(/클린 문서/);
+  await editor.locator(".tab-trigger", { hasText: "미리보기" }).click();
+  await expect(editor.locator('[data-testid="html-preview-frame"]')).toBeVisible();
+});
+
 test("strips scripts from the runtime document but keeps them in source", async ({ page }) => {
   await openHtmlDocument(page, /sample-page\.html/, "sample-page.html");
 

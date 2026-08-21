@@ -2,11 +2,17 @@ import { listen } from "@tauri-apps/api/event";
 import {
   AlertTriangle,
   CheckSquare,
+  ChevronDown,
+  ChevronRight,
   Copy,
   FilePlus2,
+  Folder,
   FolderInput,
+  Layers,
   Lightbulb,
   List,
+  PanelLeftClose,
+  PanelLeftOpen,
   RefreshCw,
   RotateCcw,
   Save,
@@ -16,6 +22,8 @@ import {
   X,
 } from "lucide-react";
 import {
+  lazy,
+  Suspense,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -41,7 +49,6 @@ import {
   trashScratchpadDocument,
 } from "../lib/api";
 import {
-  filterScratchpadEntries,
   groupScratchpadEntries,
   isRevisionConflict,
   clearScratchpadDraft,
@@ -59,8 +66,17 @@ import { setError } from "../lib/errorStore";
 import {
   SCRATCHPAD_LIST_HEIGHT,
   SCRATCHPAD_LIST_WIDTH,
+  SCRATCHPAD_TREE_WIDTH,
   type SortKey,
 } from "../lib/settings";
+import {
+  buildScratchpadFolderTree,
+  filterScratchpadFolderEntries,
+  parseScratchpadFolderId,
+  scratchpadFolderAncestors,
+  type ScratchpadFolderNode,
+} from "../lib/scratchpadTree";
+import { DocumentModeSurface, type EditorViewMode } from "./DocumentModeSurface";
 import { ModeHeader } from "./ui/ModeChrome";
 import { PaneResizeHandle } from "./ui/PaneResizeHandle";
 import { SortModeToggle } from "./ui/SortModeToggle";
@@ -76,16 +92,30 @@ import type {
 type Translate = (key: string, vars?: Record<string, string | number>) => string;
 type SaveState = "idle" | "saving" | "saved" | "error";
 
+const SCRATCHPAD_LOCATION_KEY = "maru:scratchpad-location:v1";
+
+const LazyRichMarkdownEditor = lazy(() =>
+  import("./RichMarkdownEditor").then((module) => ({ default: module.RichMarkdownEditor })),
+);
+
 interface ScratchpadPaneProps {
   workPath: string | null;
   sortKey: SortKey;
   listHeight: number;
   listWidth: number;
+  treeOpen: boolean;
+  treeWidth: number;
+  expandedFolders: string[];
+  editorViewMode: EditorViewMode;
   refreshRequestEpoch: number;
   onRefreshWorkspace: () => void;
   onSortKeyChange: (key: SortKey) => void;
   onListHeightChange: (height: number) => void;
   onListWidthChange: (width: number) => void;
+  onTreeOpenChange: (open: boolean) => void;
+  onTreeWidthChange: (width: number) => void;
+  onExpandedFoldersChange: (folders: string[]) => void;
+  onEditorViewModeChange: (mode: EditorViewMode) => void;
   t: Translate;
 }
 
@@ -120,6 +150,86 @@ function groupLabel(collection: ScratchpadEntry["collection"], id: string, t: Tr
   return id;
 }
 
+function ScratchpadTreeRow({
+  node,
+  depth,
+  currentFolder,
+  expanded,
+  onNavigate,
+  onToggle,
+  t,
+}: {
+  node: ScratchpadFolderNode;
+  depth: number;
+  currentFolder: string;
+  expanded: Set<string>;
+  onNavigate: (folderId: string) => void;
+  onToggle: (folderId: string) => void;
+  t: Translate;
+}) {
+  const hasChildren = node.children.length > 0;
+  const isExpanded = expanded.has(node.id);
+  const label =
+    depth === 0 && node.collection
+      ? t(`rightPane.scratchpad.collection.${node.collection}`)
+      : node.name;
+  return (
+    <div>
+      <div
+        className={`scratchpad-tree-row${currentFolder === node.id ? " selected" : ""}`}
+        role="treeitem"
+        aria-level={depth + 1}
+        aria-selected={currentFolder === node.id}
+        aria-expanded={hasChildren ? isExpanded : undefined}
+        style={{ paddingLeft: `${8 + depth * 14}px` }}
+      >
+        <button
+          type="button"
+          className="scratchpad-tree-chevron"
+          onClick={() => onToggle(node.id)}
+          disabled={!hasChildren}
+          tabIndex={-1}
+          aria-label={isExpanded ? t("list.tree.collapse") : t("list.tree.expand")}
+        >
+          {hasChildren ? (
+            isExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />
+          ) : (
+            <span />
+          )}
+        </button>
+        <button
+          type="button"
+          className="scratchpad-tree-target"
+          onClick={() => onNavigate(node.id)}
+        >
+          <Folder size={14} />
+          <span>{label}</span>
+          <small>{node.fileCount}</small>
+          {node.staleCount > 0 ? (
+            <em title={t("rightPane.scratchpad.cleanupEligible")}>{node.staleCount}</em>
+          ) : null}
+        </button>
+      </div>
+      {hasChildren && isExpanded ? (
+        <div role="group">
+          {node.children.map((child) => (
+            <ScratchpadTreeRow
+              key={child.id}
+              node={child}
+              depth={depth + 1}
+              currentFolder={currentFolder}
+              expanded={expanded}
+              onNavigate={onNavigate}
+              onToggle={onToggle}
+              t={t}
+            />
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 let watcherTransition: Promise<void> = Promise.resolve();
 
 function queueWatcherTransition(task: () => Promise<void>): Promise<void> {
@@ -133,11 +243,19 @@ export function ScratchpadPane({
   sortKey,
   listHeight,
   listWidth,
+  treeOpen,
+  treeWidth,
+  expandedFolders,
+  editorViewMode,
   refreshRequestEpoch,
   onRefreshWorkspace,
   onSortKeyChange,
   onListHeightChange,
   onListWidthChange,
+  onTreeOpenChange,
+  onTreeWidthChange,
+  onExpandedFoldersChange,
+  onEditorViewModeChange,
   t,
 }: ScratchpadPaneProps) {
   const [entries, setEntries] = useState<ScratchpadEntry[]>([]);
@@ -149,7 +267,7 @@ export function ScratchpadPane({
   const [localError, setLocalError] = useState<string | null>(null);
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [conflict, setConflict] = useState(false);
-  const [viewMode, setViewMode] = useState<"source" | "preview">("source");
+  const [currentFolder, setCurrentFolder] = useState("");
   const [cleanupBusy, setCleanupBusy] = useState(false);
   const [cleanupCandidates, setCleanupCandidates] = useState<TempCleanupCandidate[] | null>(null);
   const [cleanupSelected, setCleanupSelected] = useState<Set<string>>(new Set());
@@ -160,12 +278,16 @@ export function ScratchpadPane({
   // Local during the drag, committed to settings on pointer release.
   const [draggedListHeight, setDraggedListHeight] = useState(listHeight);
   const [draggedListWidth, setDraggedListWidth] = useState(listWidth);
+  const [draggedTreeWidth, setDraggedTreeWidth] = useState(treeWidth);
   useEffect(() => {
     setDraggedListHeight(listHeight);
   }, [listHeight]);
   useEffect(() => {
     setDraggedListWidth(listWidth);
   }, [listWidth]);
+  useEffect(() => {
+    setDraggedTreeWidth(treeWidth);
+  }, [treeWidth]);
 
   const editorRef = useRef<ScratchpadDocument | null>(null);
   const contentRef = useRef("");
@@ -197,7 +319,6 @@ export function ScratchpadPane({
     setPathDraft(document?.relativePath ?? "");
     setConflict(false);
     setSaveState(document ? "saved" : "idle");
-    setViewMode("source");
     setRecoveryDraft(null);
   }, []);
 
@@ -478,11 +599,16 @@ export function ScratchpadPane({
 
   const newMemo = async () => {
     if (!(await flushCurrent())) return;
-    const relativePath = newMemoRelativePath();
+    const selectedFolder = parseScratchpadFolderId(currentFolder);
+    const leaf = newMemoRelativePath();
+    const relativePath =
+      selectedFolder?.collection === "memos" && selectedFolder.relativePath
+        ? `${selectedFolder.relativePath}/${leaf}`
+        : leaf;
     loadEditor({
       collection: "memos",
       relativePath,
-      name: relativePath,
+      name: leaf,
       source: "maru",
       format: "plain",
       updatedAt: null,
@@ -765,14 +891,56 @@ export function ScratchpadPane({
     cleanupDialogRef.current?.focus();
   }, [cleanupCandidates]);
 
+  useEffect(() => {
+    if (!workPath) {
+      setCurrentFolder("");
+      return;
+    }
+    try {
+      const stored = JSON.parse(
+        window.sessionStorage.getItem(SCRATCHPAD_LOCATION_KEY) ?? "{}",
+      ) as Record<string, string>;
+      setCurrentFolder(stored[workPath] ?? "");
+    } catch {
+      setCurrentFolder("");
+    }
+  }, [workPath]);
+
+  useEffect(() => {
+    if (!workPath) return;
+    try {
+      const stored = JSON.parse(
+        window.sessionStorage.getItem(SCRATCHPAD_LOCATION_KEY) ?? "{}",
+      ) as Record<string, string>;
+      stored[workPath] = currentFolder;
+      window.sessionStorage.setItem(SCRATCHPAD_LOCATION_KEY, JSON.stringify(stored));
+    } catch {
+      // Session storage is a convenience only; navigation must remain usable.
+    }
+  }, [currentFolder, workPath]);
+
+  const folderTree = useMemo(() => buildScratchpadFolderTree(entries), [entries]);
+  const folderIds = useMemo(() => {
+    const ids = new Set<string>([""]);
+    const visit = (node: ScratchpadFolderNode) => {
+      ids.add(node.id);
+      node.children.forEach(visit);
+    };
+    visit(folderTree);
+    return ids;
+  }, [folderTree]);
+  useEffect(() => {
+    if (!folderIds.has(currentFolder)) setCurrentFolder("");
+  }, [currentFolder, folderIds]);
+
   const filteredEntries = useMemo(
-    () => filterScratchpadEntries(entries, query),
-    [entries, query],
+    () => filterScratchpadFolderEntries(entries, currentFolder, query),
+    [currentFolder, entries, query],
   );
   // "name" keeps the collection/stage grouping; a time sort flattens it so the
   // most recently touched scratch file wins regardless of which collection it
   // lives in.
-  const flatSort = sortKey !== "name";
+  const flatSort = sortKey !== "name" || Boolean(currentFolder);
   const groupedEntries = useMemo(
     () => (flatSort ? [] : groupScratchpadEntries(filteredEntries)),
     [flatSort, filteredEntries],
@@ -787,6 +955,31 @@ export function ScratchpadPane({
     [content, editor?.format],
   );
   const selectedKey = editor ? scratchpadEntryKey(editor) : "";
+  const expandedSet = useMemo(() => new Set(expandedFolders), [expandedFolders]);
+  const navigateFolder = useCallback(
+    async (folderId: string) => {
+      if (folderId === currentFolder) return;
+      if (!(await flushCurrent())) return;
+      setCurrentFolder(folderId);
+      loadEditor(null);
+      onExpandedFoldersChange(
+        Array.from(new Set([...expandedFolders, ...scratchpadFolderAncestors(folderId)])),
+      );
+    },
+    [currentFolder, expandedFolders, flushCurrent, loadEditor, onExpandedFoldersChange],
+  );
+  const toggleFolder = useCallback(
+    (folderId: string) => {
+      onExpandedFoldersChange(
+        expandedSet.has(folderId)
+          ? expandedFolders.filter(
+              (item) => item !== folderId && !item.startsWith(`${folderId}/`),
+            )
+          : [...expandedFolders, folderId],
+      );
+    },
+    [expandedFolders, expandedSet, onExpandedFoldersChange],
+  );
   const renderEntryRow = (entry: ScratchpadEntry) => (
     <button
       key={scratchpadEntryKey(entry)}
@@ -825,12 +1018,13 @@ export function ScratchpadPane({
 
   return (
     <section
-      className="scratchpad-pane scratchpad-workspace"
+      className={`scratchpad-pane scratchpad-workspace${treeOpen ? " tree-open" : ""}`}
       aria-label={t("rightPane.tab.memo")}
       style={
         {
           "--scratchpad-list-height": `${draggedListHeight}px`,
           "--scratchpad-list-width": `${draggedListWidth}px`,
+          "--scratchpad-tree-width": treeOpen ? `${draggedTreeWidth}px` : "0px",
         } as CSSProperties
       }
     >
@@ -840,7 +1034,23 @@ export function ScratchpadPane({
         subtitle={t("scratchpad.subtitle")}
         actions={
           <div className="right-tool-actions scratchpad-actions">
-            <button type="button" onClick={() => void newMemo()} disabled={!workPath}>
+            {!treeOpen ? (
+              <button
+                type="button"
+                onClick={() => onTreeOpenChange(true)}
+                title={t("scratchpad.tree.show")}
+                aria-label={t("scratchpad.tree.show")}
+              >
+                <PanelLeftOpen size={14} />
+                <span>{t("scratchpad.tree.title")}</span>
+              </button>
+            ) : null}
+            <button
+              type="button"
+              className="scratchpad-new-memo-action"
+              onClick={() => void newMemo()}
+              disabled={!workPath}
+            >
               <FilePlus2 size={14} />
               <span>{t("rightPane.scratchpad.newMemo")}</span>
             </button>
@@ -868,7 +1078,82 @@ export function ScratchpadPane({
       />
 
       <div className="scratchpad-workspace-body">
+        {treeOpen ? (
+          <aside className="scratchpad-tree-pane" aria-label={t("scratchpad.tree.title")}>
+            <header className="scratchpad-tree-header">
+              <span>{t("scratchpad.tree.title")}</span>
+              <button
+                type="button"
+                onClick={() => onTreeOpenChange(false)}
+                title={t("scratchpad.tree.hide")}
+                aria-label={t("scratchpad.tree.hide")}
+              >
+                <PanelLeftClose size={14} />
+              </button>
+            </header>
+            <div className="scratchpad-tree-scroll" role="tree" aria-label={t("scratchpad.tree.title")}>
+              <div
+                className={`scratchpad-tree-row scratchpad-tree-all${currentFolder === "" ? " selected" : ""}`}
+                role="treeitem"
+                aria-level={1}
+                aria-selected={currentFolder === ""}
+              >
+                <span className="scratchpad-tree-chevron" />
+                <button
+                  type="button"
+                  className="scratchpad-tree-target"
+                  onClick={() => void navigateFolder("")}
+                >
+                  <Layers size={14} />
+                  <span>{t("scratchpad.tree.all")}</span>
+                  <small>{folderTree.fileCount}</small>
+                  {folderTree.staleCount > 0 ? <em>{folderTree.staleCount}</em> : null}
+                </button>
+              </div>
+              {folderTree.children.map((node) => (
+                <ScratchpadTreeRow
+                  key={node.id}
+                  node={node}
+                  depth={0}
+                  currentFolder={currentFolder}
+                  expanded={expandedSet}
+                  onNavigate={(folderId) => void navigateFolder(folderId)}
+                  onToggle={toggleFolder}
+                  t={t}
+                />
+              ))}
+            </div>
+            <div className="scratchpad-maintenance">
+              <button type="button" onClick={() => void migrateMemos()} disabled={!workPath || migrationBusy}>
+                <FolderInput size={13} />
+                <span>{t("rightPane.scratchpad.migrateMemos")}</span>
+              </button>
+              {migrationStatus ? <span role="status">{migrationStatus}</span> : null}
+              {cleanupStatus ? <span role="status">{cleanupStatus}</span> : null}
+            </div>
+          </aside>
+        ) : null}
+
+        {treeOpen ? (
+          <div className="scratchpad-resize scratchpad-tree-resize">
+            <PaneResizeHandle
+              label={t("scratchpad.tree.resize")}
+              orientation="vertical"
+              value={draggedTreeWidth}
+              min={SCRATCHPAD_TREE_WIDTH.min}
+              max={SCRATCHPAD_TREE_WIDTH.max}
+              defaultValue={SCRATCHPAD_TREE_WIDTH.defaultValue}
+              onChange={setDraggedTreeWidth}
+              onCommit={onTreeWidthChange}
+            />
+          </div>
+        ) : null}
+
         <aside className="scratchpad-navigator" aria-label={t("rightPane.scratchpad.list")}>
+          <div className="scratchpad-navigator-heading">
+            <span>{currentFolder ? currentFolder : t("scratchpad.tree.all")}</span>
+            <small>{filteredEntries.length}</small>
+          </div>
           <div className="scratchpad-navigator-tools">
             <label className="scratchpad-search">
               <Search size={14} />
@@ -927,14 +1212,6 @@ export function ScratchpadPane({
                 ))}
           </div>
 
-          <div className="scratchpad-maintenance">
-            <button type="button" onClick={() => void migrateMemos()} disabled={!workPath || migrationBusy}>
-              <FolderInput size={13} />
-              <span>{t("rightPane.scratchpad.migrateMemos")}</span>
-            </button>
-            {migrationStatus ? <span role="status">{migrationStatus}</span> : null}
-            {cleanupStatus ? <span role="status">{cleanupStatus}</span> : null}
-          </div>
         </aside>
 
         <div className="scratchpad-resize scratchpad-resize-wide">
@@ -1025,63 +1302,65 @@ export function ScratchpadPane({
             </div>
           </label>
 
-          <div className="scratchpad-editor-toolbar">
-            <div className="right-tool-actions">
-              <button
-                type="button"
-                className={viewMode === "source" ? "active" : ""}
-                onClick={() => setViewMode("source")}
-              >
-                {t("rightPane.scratchpad.source")}
-              </button>
-              {editor.format === "markdown" ? (
-                <button
-                  type="button"
-                  className={viewMode === "preview" ? "active" : ""}
-                  onClick={() => setViewMode("preview")}
-                >
-                  {t("rightPane.scratchpad.preview")}
-                </button>
-              ) : null}
-              {!editor.revision && editor.collection === "memos" ? (
-                <>
-                  <button
-                    type="button"
-                    className={editor.format === "plain" ? "active" : ""}
-                    onClick={() => changeNewMemoFormat("plain")}
-                  >
-                    {t("rightPane.scratchpad.plain")}
-                  </button>
-                  <button
-                    type="button"
-                    className={editor.format === "markdown" ? "active" : ""}
-                    onClick={() => changeNewMemoFormat("markdown")}
-                  >
-                    {t("rightPane.scratchpad.markdown")}
-                  </button>
-                </>
-              ) : null}
-            </div>
-            <span title={editor.relativePath}>
-              {editor.source} · {formatSize(editor.sizeBytes)}
-              {!editor.editable ? ` · ${t("rightPane.scratchpad.readOnly")}` : ""}
-            </span>
-          </div>
-
-          {viewMode === "preview" && editor.format === "markdown" ? (
-            <article
-              className="scratchpad-preview markdown-preview"
-              dangerouslySetInnerHTML={{ __html: previewHtml }}
-            />
-          ) : (
-            <textarea
-              className="scratchpad-editor"
-              value={content}
-              onChange={(event) => updateContent(event.target.value)}
-              placeholder={t("rightPane.scratchpad.placeholder")}
-              readOnly={!editor.editable}
-            />
-          )}
+          <DocumentModeSurface
+            t={t}
+            kind={editor.format === "markdown" ? "markdown" : "plain"}
+            mode={editor.format === "markdown" ? editorViewMode : "source"}
+            onModeChange={(mode) => onEditorViewModeChange(mode as EditorViewMode)}
+            toolbarAction={
+              <div className="scratchpad-editor-mode-meta">
+                {!editor.revision && editor.collection === "memos" ? (
+                  <div className="right-tool-actions">
+                    <button
+                      type="button"
+                      className={editor.format === "plain" ? "active" : ""}
+                      onClick={() => changeNewMemoFormat("plain")}
+                    >
+                      {t("rightPane.scratchpad.plain")}
+                    </button>
+                    <button
+                      type="button"
+                      className={editor.format === "markdown" ? "active" : ""}
+                      onClick={() => changeNewMemoFormat("markdown")}
+                    >
+                      {t("rightPane.scratchpad.markdown")}
+                    </button>
+                  </div>
+                ) : null}
+                <span title={editor.relativePath}>
+                  {editor.source} · {formatSize(editor.sizeBytes)}
+                  {!editor.editable ? ` · ${t("rightPane.scratchpad.readOnly")}` : ""}
+                </span>
+              </div>
+            }
+            richPanel={
+              <Suspense fallback={<div className="editor-loading" role="status">…</div>}>
+                <LazyRichMarkdownEditor
+                  value={content}
+                  onChange={updateContent}
+                  readOnly={!editor.editable}
+                />
+              </Suspense>
+            }
+            sourcePanel={
+              <div className="source-editor-wrap">
+                <textarea
+                  className="source-editor scratchpad-editor scratchpad-source-editor"
+                  value={content}
+                  onChange={(event) => updateContent(event.target.value)}
+                  placeholder={t("rightPane.scratchpad.placeholder")}
+                  readOnly={!editor.editable}
+                  spellCheck={false}
+                />
+              </div>
+            }
+            previewPanel={
+              <article
+                className="preview-surface scratchpad-preview"
+                dangerouslySetInnerHTML={{ __html: previewHtml }}
+              />
+            }
+          />
 
           <div className="scratchpad-editor-footer">
             <span />

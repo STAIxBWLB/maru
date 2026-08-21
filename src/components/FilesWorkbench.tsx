@@ -49,7 +49,6 @@ import {
   createWorkspaceDirectory,
   duplicateWorkspaceEntries,
   pasteWorkspaceEntries,
-  readDocument,
   renameWorkspaceEntry,
   trashWorkspaceEntries,
   type BinaryViewerClassification,
@@ -69,7 +68,6 @@ import {
   type FilesDirectoryTreeNode,
 } from "../lib/filesWorkbench";
 import { formatBytes, usesAssetProtocol } from "../lib/binaryViewer";
-import { renderMarkdown } from "../lib/markdown";
 import type {
   FavoriteItem,
   FilesListAttribute,
@@ -96,7 +94,6 @@ import { useContextMenuKeyboard } from "../lib/useContextMenuKeyboard";
 import { isEditableTarget } from "../lib/useScopedSelectAll";
 import { BinaryViewerPane } from "./BinaryViewerPane";
 import { FavoritesSection, type FavoriteTarget } from "./FavoritesSection";
-import { HtmlPreviewFrame } from "./HtmlVisualEditor";
 
 const LOCATION_KEY = "maru:files-location:v1";
 const CLIPBOARD_KEY = "maru:files-clipboard:v1";
@@ -158,6 +155,9 @@ interface FilesWorkbenchProps {
   canDelete: boolean;
   openDocumentPaths: string[];
   dirtyDocumentPaths: string[];
+  documentEditorPath: string | null;
+  documentEditorNode: React.ReactNode;
+  documentEditorError: string | null;
   pendingRevealTargetPath?: string | null;
   onRevealHandled?: () => void;
   onWorkspaceVisibilityChange: (visibility: WorkspaceVisibility) => void;
@@ -170,6 +170,7 @@ interface FilesWorkbenchProps {
   onExpandedFoldersChange: (paths: string[]) => void;
   onSelectionChange: (paths: string[]) => void;
   onOpenDocument: (entry: WorkspaceFileEntry) => void;
+  onPrepareDocument: (entry: WorkspaceFileEntry) => void;
   onQueuePaths: (paths: string[]) => void;
   onRevealInFinder: (path: string) => void;
   onRefresh: () => void;
@@ -223,6 +224,9 @@ export const FilesWorkbench = memo(function FilesWorkbench(props: FilesWorkbench
     canDelete,
     openDocumentPaths,
     dirtyDocumentPaths,
+    documentEditorPath,
+    documentEditorNode,
+    documentEditorError,
     pendingRevealTargetPath,
     onRevealHandled,
     onWorkspaceVisibilityChange,
@@ -235,6 +239,7 @@ export const FilesWorkbench = memo(function FilesWorkbench(props: FilesWorkbench
     onExpandedFoldersChange,
     onSelectionChange,
     onOpenDocument,
+    onPrepareDocument,
     onQueuePaths,
     onRevealInFinder,
     onRefresh,
@@ -1515,7 +1520,13 @@ export const FilesWorkbench = memo(function FilesWorkbench(props: FilesWorkbench
       {previewOpen ? (
         <aside className="files-preview-pane" aria-label={t("files.preview.title")}>
           <header>
-            <span>{t("files.preview.title")}</span>
+            <span>
+              {selectedEntries.length === 1 &&
+              primaryEntry &&
+              /\.(md|markdown|html|htm)$/i.test(primaryEntry.name)
+                ? t("files.editor.title")
+                : t("files.preview.title")}
+            </span>
             <button
               type="button"
               onClick={() => onLayoutChange({ filesPreviewOpen: false })}
@@ -1529,6 +1540,10 @@ export const FilesWorkbench = memo(function FilesWorkbench(props: FilesWorkbench
             workspacePath={workspacePath}
             entries={entries}
             selectedEntries={selectedEntries}
+            documentEditorPath={documentEditorPath}
+            documentEditorNode={documentEditorNode}
+            documentEditorError={documentEditorError}
+            onPrepareDocument={onPrepareDocument}
             onReveal={onRevealInFinder}
           />
         </aside>
@@ -1746,22 +1761,24 @@ function FilesPreview({
   workspacePath,
   entries,
   selectedEntries,
+  documentEditorPath,
+  documentEditorNode,
+  documentEditorError,
+  onPrepareDocument,
   onReveal,
 }: {
   workspacePath: string | null;
   entries: WorkspaceEntryNode[];
   selectedEntries: WorkspaceEntryNode[];
+  documentEditorPath: string | null;
+  documentEditorNode: React.ReactNode;
+  documentEditorError: string | null;
+  onPrepareDocument: (entry: WorkspaceFileEntry) => void;
   onReveal: (path: string) => void;
 }) {
   const { t } = useTranslation();
   const [preview, setPreview] = useState<
     | { status: "idle" | "loading" | "error"; message?: string }
-    | {
-        status: "document";
-        kind: "markdown" | "html";
-        content: string;
-        entry: WorkspaceEntryNode;
-      }
     | {
         status: "binary";
         entry: WorkspaceFileEntry;
@@ -1786,14 +1803,8 @@ function FilesPreview({
     void (async () => {
       try {
         if (/\.(md|markdown|html|htm)$/i.test(primary.name)) {
-          const document = await readDocument(workspacePath, primary.path);
-          if (request !== requestRef.current) return;
-          setPreview({
-            status: "document",
-            kind: /\.(html|htm)$/i.test(primary.name) ? "html" : "markdown",
-            content: document.content,
-            entry: primary,
-          });
+          onPrepareDocument(fileEntry);
+          if (request === requestRef.current) setPreview({ status: "idle" });
           return;
         }
         const classification = await binaryViewerClassify(workspacePath, primary.path);
@@ -1820,7 +1831,7 @@ function FilesPreview({
         });
       }
     })();
-  }, [primary, selectedEntries.length, t, workspacePath]);
+  }, [onPrepareDocument, primary, selectedEntries.length, t, workspacePath]);
 
   if (selectedEntries.length === 0) {
     return (
@@ -1870,6 +1881,32 @@ function FilesPreview({
       </div>
     );
   }
+  if (primary && /\.(md|markdown|html|htm)$/i.test(primary.name)) {
+    if (documentEditorPath === primary.path && documentEditorNode) {
+      return <>{documentEditorNode}</>;
+    }
+    if (documentEditorError) {
+      const fileEntry = workspaceNodeToFileEntry(primary);
+      return (
+        <div className="files-preview-error" role="alert">
+          <strong>{documentEditorError}</strong>
+          <div>
+            {fileEntry ? (
+              <button type="button" onClick={() => onPrepareDocument(fileEntry)}>
+                <RefreshCcw size={14} />
+                {t("files.editor.reload")}
+              </button>
+            ) : null}
+            <button type="button" onClick={() => onReveal(primary.path)}>
+              <FolderOpen size={14} />
+              {t("binaryViewer.revealInFinder")}
+            </button>
+          </div>
+        </div>
+      );
+    }
+    return <FilesPreviewSkeleton label={t("binaryViewer.loading")} />;
+  }
   if (preview.status === "loading") {
     return <FilesPreviewSkeleton label={t("binaryViewer.loading")} />;
   }
@@ -1883,34 +1920,6 @@ function FilesPreview({
             {t("binaryViewer.revealInFinder")}
           </button>
         ) : null}
-      </div>
-    );
-  }
-  if (preview.status === "document") {
-    return (
-      <div className="files-document-preview">
-        <header>
-          <div>
-            <strong>{preview.entry.name}</strong>
-            <small>{preview.entry.relPath}</small>
-          </div>
-          <button type="button" onClick={() => onReveal(preview.entry.path)}>
-            <FolderOpen size={14} />
-          </button>
-        </header>
-        {preview.kind === "html" && workspacePath ? (
-          <HtmlPreviewFrame
-            value={preview.content}
-            vaultPath={workspacePath}
-            documentPath={preview.entry.path}
-            title={preview.entry.name}
-          />
-        ) : (
-          <article
-            className="preview-surface"
-            dangerouslySetInnerHTML={{ __html: renderMarkdown(preview.content) }}
-          />
-        )}
       </div>
     );
   }

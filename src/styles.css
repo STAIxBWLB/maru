@@ -8230,13 +8230,13 @@ button.git-badge:hover {
   flex-wrap: nowrap;
 }
 
-.scratchpad-actions > button:first-child {
+.scratchpad-actions .scratchpad-new-memo-action {
   border-color: var(--accent);
   background: var(--accent);
   color: var(--on-accent, #fff);
 }
 
-.scratchpad-actions > button:first-child:not(:disabled):hover {
+.scratchpad-actions .scratchpad-new-memo-action:not(:disabled):hover {
   border-color: color-mix(in srgb, var(--accent) 88%, var(--ink));
   background: color-mix(in srgb, var(--accent) 88%, var(--ink));
   color: var(--on-accent, #fff);
@@ -8249,6 +8249,7 @@ button.git-badge:hover {
 }
 
 .scratchpad-workspace-body {
+  position: relative;
   min-width: 0;
   min-height: 0;
   display: grid;
@@ -8258,16 +8259,184 @@ button.git-badge:hover {
   overflow: hidden;
 }
 
+.scratchpad-workspace.tree-open .scratchpad-workspace-body {
+  grid-template-columns:
+    minmax(200px, var(--scratchpad-tree-width, 240px)) 6px
+    minmax(260px, var(--scratchpad-list-width, 320px)) 6px minmax(0, 1fr);
+  grid-template-areas: "tree tree-resize navigator resize-wide editor";
+}
+
+.scratchpad-tree-pane {
+  grid-area: tree;
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  overflow: hidden;
+  border-right: 1px solid var(--line-soft);
+  background: var(--panel-2);
+}
+
+.scratchpad-tree-header,
+.scratchpad-navigator-heading {
+  min-height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--muted);
+  border-bottom: 1px solid var(--line-soft);
+  font-size: var(--type-micro-size);
+  font-weight: 800;
+}
+
+.scratchpad-tree-header {
+  padding: 0 8px 0 12px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.scratchpad-tree-header button {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+  border-radius: var(--radius-sm);
+}
+
+.scratchpad-tree-header button:hover {
+  color: var(--ink);
+  background: var(--panel);
+}
+
+.scratchpad-tree-scroll {
+  min-height: 0;
+  padding: 8px 7px 16px;
+  overflow: auto;
+}
+
+.scratchpad-tree-row {
+  min-width: 0;
+  min-height: 28px;
+  display: flex;
+  align-items: center;
+  padding-right: 5px;
+  color: var(--muted);
+  border-radius: var(--radius-sm);
+}
+
+.scratchpad-tree-row:hover {
+  color: var(--ink);
+  background: var(--panel);
+}
+
+.scratchpad-tree-row.selected {
+  color: var(--accent);
+  background: var(--accent-tint);
+}
+
+.scratchpad-tree-chevron {
+  width: 18px;
+  height: 26px;
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  color: var(--faint);
+}
+
+.scratchpad-tree-chevron:disabled {
+  cursor: default;
+}
+
+.scratchpad-tree-chevron span {
+  width: 12px;
+}
+
+.scratchpad-tree-target {
+  min-width: 0;
+  flex: 1;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 6px;
+  color: inherit;
+  text-align: left;
+}
+
+.scratchpad-tree-target > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scratchpad-tree-target small {
+  color: var(--faint);
+  font-size: var(--type-micro-size);
+  font-variant-numeric: tabular-nums;
+}
+
+.scratchpad-tree-target em {
+  min-width: 17px;
+  padding: 1px 4px;
+  color: var(--warn);
+  border: 1px solid color-mix(in srgb, var(--warn) 28%, transparent);
+  border-radius: 4px;
+  font-size: var(--type-micro-size);
+  font-style: normal;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.scratchpad-tree-pane .scratchpad-maintenance {
+  min-width: 0;
+  padding: 8px 10px;
+  border-top: 1px solid var(--line-soft);
+}
+
+.scratchpad-tree-resize {
+  grid-area: tree-resize;
+  display: flex;
+  width: 6px;
+}
+
+.scratchpad-tree-resize .pane-resize-handle {
+  width: 6px;
+}
+
+.scratchpad-tree-resize .pane-resize-handle::after {
+  left: 2px;
+  background: var(--line-soft);
+}
+
 .scratchpad-navigator {
   grid-area: navigator;
   min-width: 0;
   min-height: 0;
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-rows: auto auto minmax(0, 1fr);
   gap: 10px;
   overflow: hidden;
   padding: 12px 10px 10px;
   background: var(--panel-2);
+}
+
+.scratchpad-navigator-heading {
+  padding: 0 4px;
+}
+
+.scratchpad-navigator-heading > span {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ink);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scratchpad-navigator-heading small {
+  color: var(--faint);
+  font-variant-numeric: tabular-nums;
 }
 
 .scratchpad-navigator-tools {
@@ -8288,12 +8457,6 @@ button.git-badge:hover {
 
 .scratchpad-navigator .scratchpad-list-item {
   padding: 8px 9px;
-}
-
-.scratchpad-navigator .scratchpad-maintenance {
-  min-width: 0;
-  padding-top: 7px;
-  border-top: 1px solid var(--line-soft);
 }
 
 .scratchpad-resize {
@@ -8335,6 +8498,8 @@ button.git-badge:hover {
 .scratchpad-editor-region .scratchpad-editor-shell {
   min-width: 0;
   min-height: 0;
+  display: flex;
+  flex-direction: column;
   gap: 10px;
 }
 
@@ -8342,13 +8507,37 @@ button.git-badge:hover {
   max-width: 880px;
 }
 
-.scratchpad-editor-region .scratchpad-editor,
 .scratchpad-editor-region .scratchpad-preview {
   min-height: 0;
   padding: 16px;
   border-radius: var(--radius);
   font-size: var(--type-body-size);
   line-height: var(--type-body-leading);
+}
+
+.scratchpad-editor-region .document-mode-surface {
+  flex: 1;
+  min-height: 0;
+}
+
+.scratchpad-editor-mode-meta {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.scratchpad-editor-mode-meta > span {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--faint);
+  font-size: var(--type-micro-size);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scratchpad-source-editor {
+  padding: 16px;
 }
 
 .scratchpad-editor-region .scratchpad-editor-empty {
@@ -8387,7 +8576,8 @@ button.git-badge:hover {
 }
 
 @container scratchpad (max-width: 720px) {
-  .scratchpad-workspace-body {
+  .scratchpad-workspace-body,
+  .scratchpad-workspace.tree-open .scratchpad-workspace-body {
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows:
       minmax(160px, min(var(--scratchpad-list-height, 218px), 42%))
@@ -8406,6 +8596,18 @@ button.git-badge:hover {
     display: none;
   }
 
+  .scratchpad-tree-resize {
+    display: none;
+  }
+
+  .scratchpad-tree-pane {
+    position: absolute;
+    z-index: 20;
+    inset: 0 auto 0 0;
+    width: min(var(--scratchpad-tree-width, 240px), 86cqw);
+    box-shadow: var(--shadow-lg);
+  }
+
   .scratchpad-resize-compact {
     grid-area: resize-compact;
     display: flex;
@@ -8414,6 +8616,26 @@ button.git-badge:hover {
 
   .scratchpad-editor-region {
     padding: 12px;
+  }
+}
+
+@container scratchpad (max-width: 980px) and (min-width: 721px) {
+  .scratchpad-workspace.tree-open .scratchpad-workspace-body {
+    grid-template-columns:
+      minmax(260px, var(--scratchpad-list-width, 320px)) 6px minmax(0, 1fr);
+    grid-template-areas: "navigator resize-wide editor";
+  }
+
+  .scratchpad-tree-resize {
+    display: none;
+  }
+
+  .scratchpad-tree-pane {
+    position: absolute;
+    z-index: 20;
+    inset: 0 auto 0 0;
+    width: min(var(--scratchpad-tree-width, 240px), 82cqw);
+    box-shadow: var(--shadow-lg);
   }
 }
 
@@ -8437,7 +8659,7 @@ button.git-badge:hover {
     padding-inline: 0;
   }
 
-  .scratchpad-editor-toolbar {
+  .scratchpad-editor-mode-meta {
     align-items: flex-start;
     flex-direction: column;
   }
@@ -23219,6 +23441,8 @@ button.git-badge:hover {
   overflow: hidden;
   border-left: 1px solid var(--line-soft);
   background: var(--panel-2);
+  container-name: filespreview;
+  container-type: inline-size;
 }
 
 .files-preview-pane > :not(header) {
@@ -23275,6 +23499,121 @@ button.git-badge:hover {
 
 .files-document-preview .markdown-preview {
   padding: 16px 18px 36px;
+}
+
+.inline-document-editor {
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--panel);
+}
+
+.inline-document-editor-header {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 7px 10px 7px 12px;
+  border-bottom: 1px solid var(--line-soft);
+  background: var(--panel);
+}
+
+.inline-document-editor-title {
+  min-width: 0;
+  display: grid;
+  gap: 1px;
+}
+
+.inline-document-editor-title > strong,
+.inline-document-editor-title > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.inline-document-editor-title > strong {
+  color: var(--ink);
+  font-size: var(--type-label-size);
+}
+
+.inline-document-editor-title > span {
+  color: var(--faint);
+  font-size: var(--type-micro-size);
+}
+
+.inline-document-editor-actions {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.inline-document-editor-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 10px;
+  color: var(--danger);
+  border-bottom: 1px solid color-mix(in srgb, var(--danger) 28%, var(--line));
+  background: var(--danger-soft);
+  font-size: var(--type-meta-size);
+}
+
+.inline-document-editor-error > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.inline-document-editor-error > div {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 5px;
+}
+
+.inline-document-editor-error button {
+  min-height: 26px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 7px;
+  color: var(--danger);
+  border: 1px solid color-mix(in srgb, var(--danger) 35%, var(--line));
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  font-size: var(--type-meta-size);
+}
+
+.inline-document-editor .document-mode-surface {
+  flex: 1;
+  min-height: 0;
+}
+
+@container filespreview (max-width: 520px) {
+  .inline-document-editor-header {
+    align-items: flex-start;
+  }
+
+  .inline-document-editor-actions .button-ghost > span:not(.button-icon) {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+
+  .inline-document-editor-error {
+    align-items: flex-start;
+    flex-direction: column;
+  }
 }
 
 .files-preview-summary {

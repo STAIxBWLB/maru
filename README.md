@@ -41,8 +41,8 @@ Flow is flag-gated.
 | Mode | Label (ko / en) | What it does |
 |------|-----------------|--------------|
 | `pkm` | 문서 / Docs | Default. Markdown/HTML document tree, editor, and right utility rail. |
-| `scratchpad` | 스크래치패드 / Scratchpad | Main-workbench memo and temporary-result editor with a resizable navigator, autosave, recovery, and cleanup. |
-| `files` | 파일 / Files | Finder-style workspace with folder tree, direct-child list, selection preview, search/filter/sort, and filesystem operations. |
+| `scratchpad` | 스크래치패드 / Scratchpad | Three-pane memo and temporary-result workspace with a virtual folder tree, searchable file list, Rich/Source/Preview editing, autosave, recovery, and cleanup. |
+| `files` | 파일 / Files | Finder-style workspace with folder tree, direct-child list, inline Markdown/HTML editor, binary previews, search/filter/sort, and filesystem operations. |
 | `inbox` | 인박스 / Inbox | Configured drop / pending / processed / Files / Gmail sections with classify + `a`/`r`/`p`. |
 | `comms` | 메시지 / Messages | Multichannel comms settings (Telegram auth/mapping, source config, macOS migration). |
 | `meetings` | 회의록 / Meetings | Transcript + auto-summary intake and the meeting-notes review workbench. |
@@ -131,12 +131,16 @@ Local assets:
 
 Files is independent from the Documents pane. It scans files, empty folders,
 and symlinks as first-class entries, then presents a resizable folder tree,
-the current folder's direct children, and a resizable preview pane. Searching
-within a folder includes its descendants; normal browsing remains direct-child
-only.
+the current folder's direct children, and a resizable editor/preview pane.
+Searching within a folder includes its descendants; normal browsing remains
+direct-child only.
 
-- Single-click selects and previews; double-click opens a folder, a document
-  in Docs, or another file in its external app.
+- Single-click selects and previews. Markdown opens Rich/Source/Preview and
+  HTML opens Visual/Source/Preview directly in Files, with explicit Save and
+  the same in-memory draft shared with Docs. Double-click opens a folder, a
+  document in Docs, or another file in its external app.
+- Directory and multi-selection summaries plus image/PDF/Office/media/archive
+  viewers remain available for non-document selections.
 - Multi-select, range select, keyboard navigation, drag/drop, rename, duplicate,
   Maru-internal cut/copy/paste, and new-folder creation are supported.
 - Delete moves entries to the operating system Trash. Risky deletes require
@@ -215,7 +219,7 @@ make homebrew-update RELEASE_TAG=v$(node -p "require('./package.json').version")
 │     Dashboard / Docs / Scratchpad / Files / Inbox / Messages │
 │     Meetings / Today / Tasks / Drafts / Gap / Agents /       │
 │     Catalog / Studio / Diagram / Graph / Sites / E2E         │
-│   Files tree/list/preview + editor tabs + Terminal/Graph Panel│
+│   Files/Scratchpad tree + list + editor + Terminal/Graph Panel│
 └──────────────────────────────┬──────────────────────────────┘
                                │ Tauri IPC
 ┌──────────────────────────────▼──────────────────────────────┐

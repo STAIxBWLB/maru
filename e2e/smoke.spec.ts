@@ -450,6 +450,14 @@ test("switches between public provider roots and gates read-only actions", async
   await expect(menu.getByRole("menuitem", { name: "이동..." })).toBeDisabled();
   await expect(menu.getByRole("menuitem", { name: "복제..." })).toBeDisabled();
   await expect(menu.getByRole("menuitem", { name: "삭제" })).toBeDisabled();
+
+  await page.locator(".activity-rail").getByRole("button", { name: "파일", exact: true }).click();
+  const files = page.locator(".files-workbench");
+  await files.getByRole("tree").getByRole("button", { name: "references", exact: true }).click();
+  await files.locator(".files-list-row", { hasText: "maru-glossary.md" }).click();
+  const filesEditor = files.locator(".inline-document-editor");
+  await expect(filesEditor.locator("textarea.source-editor")).toHaveAttribute("readonly", "");
+  await expect(filesEditor.getByRole("button", { name: "저장", exact: true })).toBeDisabled();
 });
 
 test("restores direct write policy when leaving Obsidian provider", async ({ page }) => {
@@ -1199,6 +1207,9 @@ test("scopes Files select-all to rows, search text, or preview text", async ({ p
 
   await search.fill("");
   await meeting.click();
+  const inlineEditor = files.locator(".inline-document-editor");
+  await expect(inlineEditor).toBeVisible();
+  await inlineEditor.locator(".tab-trigger", { hasText: "미리보기" }).click();
   const preview = files.locator(".preview-surface");
   await expect(preview).toContainText("Maru 사업 주간 점검 회의");
   await preview.click({ position: { x: 80, y: 80 } });
@@ -1206,6 +1217,72 @@ test("scopes Files select-all to rows, search text, or preview text", async ({ p
   await expect
     .poll(() => page.evaluate(() => window.getSelection()?.toString() ?? ""))
     .toContain("Maru 사업 주간 점검 회의");
+});
+
+test("edits Markdown in Files and shares the saved draft with Documents", async ({ page }) => {
+  await page.goto("/");
+  await page.locator(".activity-rail").getByRole("button", { name: "파일", exact: true }).click();
+
+  const files = page.locator(".files-workbench");
+  const meeting = files.locator(".files-list-row", { hasText: "maru-weekly-meeting.md" });
+  await meeting.click();
+  const editor = files.locator(".inline-document-editor");
+  await expect(editor).toBeVisible();
+  await expect(editor.locator(".tab-trigger", { hasText: "리치" })).toBeVisible();
+  await expect(editor.locator(".tab-trigger", { hasText: "원문" })).toBeVisible();
+  await expect(editor.locator(".tab-trigger", { hasText: "미리보기" })).toBeVisible();
+
+  const source = editor.locator("textarea.source-editor");
+  const marker = "Files inline editor marker 4862";
+  await source.fill(`${await source.inputValue()}\n\n${marker}`);
+  await expect(editor.getByText("저장 필요")).toBeVisible();
+
+  const attachments = files.locator(".files-list-row", { hasText: "attachments" });
+  await expect(attachments).toBeVisible();
+  await attachments.click();
+  await meeting.click();
+  await expect(editor.locator("textarea.source-editor")).toHaveValue(new RegExp(marker));
+
+  const saveShortcut = await page.evaluate(() =>
+    navigator.platform.toLowerCase().includes("mac") ? "Meta+S" : "Control+S",
+  );
+  await source.focus();
+  await page.keyboard.press(saveShortcut);
+  await expect(editor.getByText("저장됨")).toBeVisible();
+  await editor.locator(".tab-trigger", { hasText: "미리보기" }).click();
+  await expect(editor.locator(".preview-surface")).toContainText(marker);
+
+  await editor.getByRole("button", { name: "문서에서 열기" }).click();
+  await expect(page.locator(".document-list")).toBeVisible();
+  await page.locator(".tab-trigger", { hasText: "원문" }).click();
+  await expect(page.locator("textarea.source-editor")).toHaveValue(new RegExp(marker));
+});
+
+test("keeps a Files draft intact when revision-checked save conflicts", async ({ page }) => {
+  await page.addInitScript(() => {
+    (window as unknown as {
+      __MARU_E2E_INVOKE__: Record<string, () => unknown>;
+    }).__MARU_E2E_INVOKE__ = {
+      save_document: () => {
+        throw new Error("document_conflict: revision changed");
+      },
+    };
+  });
+  await page.goto("/");
+  await page.locator(".activity-rail").getByRole("button", { name: "파일", exact: true }).click();
+  const files = page.locator(".files-workbench");
+  await files.locator(".files-list-row", { hasText: "maru-weekly-meeting.md" }).click();
+  const editor = files.locator(".inline-document-editor");
+  const source = editor.locator("textarea.source-editor");
+  const marker = "conflicting Files draft 6184";
+  await source.fill(`${await source.inputValue()}\n\n${marker}`);
+  await editor.getByRole("button", { name: "저장", exact: true }).click();
+
+  await expect(editor.getByRole("alert")).toContainText("document_conflict");
+  await expect(source).toHaveValue(new RegExp(marker));
+  page.once("dialog", (dialog) => dialog.accept());
+  await editor.getByRole("button", { name: "디스크에서 다시 불러오기" }).click();
+  await expect(source).not.toHaveValue(new RegExp(marker));
 });
 
 test("switches between standalone Documents and Files workspaces", async ({ page }) => {

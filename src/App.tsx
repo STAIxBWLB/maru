@@ -60,6 +60,7 @@ import { MissionBadge } from "./components/MissionBadge";
 import { NewDocumentDialog } from "./components/NewDocumentDialog";
 import { OutlinePane } from "./components/OutlinePane";
 import { ScratchpadPane } from "./components/ScratchpadPane";
+import { InlineDocumentEditor } from "./components/InlineDocumentEditor";
 import type { TasksPaneProps } from "./components/tasks/TasksPane";
 import type {
   TerminalLaunchRequest,
@@ -814,6 +815,8 @@ function MainApp() {
   const routedOpenedSiteUrlIdRef = useRef(0);
   const [booting, setBooting] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [savingTabId, setSavingTabId] = useState<string | null>(null);
+  const [filesEditorErrors, setFilesEditorErrors] = useState<Record<string, string | null>>({});
   // Global error toast lives in the error store (step 9); setError is a
   // module action now, so every call site below keeps its old shape.
   const error = useError();
@@ -864,6 +867,8 @@ function MainApp() {
     ContextualDebouncedSaver<MaruSettings, SettingsSaveContext> | null
   >(null);
   const settingsSaveQueueRef = useRef<SaveQueue>(createSaveQueue());
+  const filesPreviewRequestRef = useRef(0);
+  const filesPreviewSelectionRef = useRef<string | null>(null);
   const collapsedTreeHydratedRef = useRef(false);
   const collapsedFileHydratedRef = useRef(false);
   const processedRequestSeqRef = useRef(0);
@@ -1225,6 +1230,23 @@ function MainApp() {
         : [],
     [explorerWorkspacePath, tabs],
   );
+  const filesSelectedDocumentNode = useMemo(() => {
+    if (selectedFilePaths.length !== 1) return null;
+    const node = workspaceEntryNodes.find((entry) => entry.path === selectedFilePaths[0]) ?? null;
+    return node && /\.(md|markdown|html|htm)$/i.test(node.name) ? node : null;
+  }, [selectedFilePaths, workspaceEntryNodes]);
+  const filesPreviewTab = useMemo(
+    () =>
+      filesSelectedDocumentNode && explorerWorkspacePath
+        ? tabs.find(
+            (tab) =>
+              tab.workspacePath === explorerWorkspacePath &&
+              tab.entry.path === filesSelectedDocumentNode.path,
+          ) ?? null
+        : null,
+    [explorerWorkspacePath, filesSelectedDocumentNode, tabs],
+  );
+  filesPreviewSelectionRef.current = filesSelectedDocumentNode?.path ?? null;
   const explorerWorkspaceCaps = useMemo(
     () => workspaceCapabilities(explorerWorkspace),
     [explorerWorkspace],
@@ -2358,6 +2380,36 @@ function MainApp() {
           ...current.ui,
           scratchpadSortKey,
         },
+      }));
+    },
+    [updateSettings],
+  );
+
+  const setScratchpadEditorViewMode = useCallback(
+    (scratchpadEditorViewMode: EditorViewMode) => {
+      updateSettings((current) => ({
+        ...current,
+        ui: { ...current.ui, scratchpadEditorViewMode },
+      }));
+    },
+    [updateSettings],
+  );
+
+  const setFilesEditorViewMode = useCallback(
+    (filesEditorViewMode: EditorViewMode) => {
+      updateSettings((current) => ({
+        ...current,
+        ui: { ...current.ui, filesEditorViewMode },
+      }));
+    },
+    [updateSettings],
+  );
+
+  const setScratchpadExpandedFolders = useCallback(
+    (scratchpadExpandedFolders: string[]) => {
+      updateSettings((current) => ({
+        ...current,
+        ui: { ...current.ui, scratchpadExpandedFolders },
       }));
     },
     [updateSettings],
@@ -4694,12 +4746,16 @@ function MainApp() {
     }
   }, [discardedEdit]);
 
-  const saveTab = useCallback(async (tabId: string | null) => {
-    const flushed = tabId ? flushHtmlDraft(tabId) : null;
+  const saveTab = useCallback(async (
+    tabId: string | null,
+    draftOverride?: string,
+    onFailure?: (message: string) => void,
+  ): Promise<boolean> => {
+    const flushed = draftOverride ?? (tabId ? flushHtmlDraft(tabId) : null);
     const target = getEditorTabsState().tabs.find((tab) => tab.id === tabId);
-    if (!target) return;
+    if (!target) return false;
     const draft = flushed ?? target.draftContent;
-    if (draft === target.document.content) return;
+    if (draft === target.document.content) return true;
     const workspace = workspaceRegistry.workspaces.find(
       (item) => item.path === target.workspacePath,
     );
@@ -4709,9 +4765,10 @@ function MainApp() {
           reason: workspaceWriteReason(workspace ?? null, "modify") ?? "workspace capabilities",
         }),
       );
-      return;
+      return false;
     }
     setSaving(true);
+    setSavingTabId(target.id);
     setError(null);
     try {
       const saved = await saveDocument(
@@ -4728,10 +4785,15 @@ function MainApp() {
         return { ...tab, entry: freshEntry, document: saved, draftContent: saved.content };
       });
       setGitRefreshTick((n) => n + 1);
+      return true;
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      const message = err instanceof Error ? err.message : String(err);
+      if (onFailure) onFailure(message);
+      else setError(message);
+      return false;
     } finally {
       setSaving(false);
+      setSavingTabId((current) => (current === target.id ? null : current));
     }
   }, [
     t,
@@ -6729,6 +6791,150 @@ function MainApp() {
     ],
   );
 
+  const prepareFilesPreviewDocument = useCallback(
+    async (entry: WorkspaceFileEntry) => {
+      const workspacePath = explorerWorkspacePath;
+      if (!workspacePath || !/\.(md|markdown|html|htm)$/i.test(entry.name)) return;
+      const existing = getEditorTabsState().tabs.find(
+        (tab) => tab.workspacePath === workspacePath && tab.entry.path === entry.path,
+      );
+      if (existing) return;
+      const request = ++filesPreviewRequestRef.current;
+      setFilesEditorErrors((current) => ({ ...current, [entry.path]: null }));
+      try {
+        const loaded = await readDocument(workspacePath, entry.path);
+        const payload = { ...loaded, path: entry.path, relPath: entry.relPath };
+        if (
+          request !== filesPreviewRequestRef.current ||
+          filesPreviewSelectionRef.current !== entry.path
+        ) {
+          return;
+        }
+        const knownEntry =
+          getWorkspaceStoreState().states[workspacePath]?.entries.find(
+            (candidate) => candidate.path === entry.path,
+          ) ?? null;
+        const tabEntry: VaultEntry = knownEntry ?? {
+          path: payload.path,
+          relPath: payload.relPath,
+          ownerWorkspacePath: workspacePath,
+          title: payload.title,
+          frontmatter: payload.meta,
+          updatedAt: entry.updatedAt,
+          wordCount: payload.body.trim() ? payload.body.trim().split(/\s+/).length : 0,
+          snippet: payload.body.slice(0, 240),
+          fileKind: payload.fileKind,
+          versionCount: 0,
+          links: [],
+        };
+        insertDocTab({
+          id: tabIdForEntry(tabEntry),
+          workspacePath,
+          visibility: explorerWorkspace?.visibility ?? explorerVisibility,
+          entry: tabEntry,
+          document: payload,
+          draftContent: payload.content,
+        });
+      } catch (err) {
+        if (request !== filesPreviewRequestRef.current) return;
+        const message = err instanceof Error ? err.message : String(err);
+        setFilesEditorErrors((current) => ({ ...current, [entry.path]: message }));
+      }
+    },
+    [explorerVisibility, explorerWorkspace?.visibility, explorerWorkspacePath],
+  );
+
+  const saveFilesPreviewDocument = useCallback(
+    async (contentOverride?: string) => {
+      const tab = filesPreviewTab;
+      if (!tab) return;
+      setFilesEditorErrors((current) => ({ ...current, [tab.entry.path]: null }));
+      const saved = await saveTab(tab.id, contentOverride, (message) => {
+        setFilesEditorErrors((current) => ({ ...current, [tab.entry.path]: message }));
+      });
+      if (saved) {
+        setFilesEditorErrors((current) => ({ ...current, [tab.entry.path]: null }));
+      }
+    },
+    [filesPreviewTab, saveTab],
+  );
+
+  const reloadFilesPreviewDocument = useCallback(async () => {
+    const tab = filesPreviewTab;
+    if (!tab) return;
+    if (
+      tab.draftContent !== tab.document.content &&
+      !window.confirm(t("files.editor.reloadConfirm"))
+    ) {
+      return;
+    }
+    try {
+      const loaded = await readDocument(tab.workspacePath, tab.entry.path);
+      const payload = { ...loaded, path: tab.entry.path, relPath: tab.entry.relPath };
+      mapDocTabs((candidate) =>
+        candidate.id === tab.id
+          ? { ...candidate, document: payload, draftContent: payload.content }
+          : candidate,
+      );
+      setFilesEditorErrors((current) => ({ ...current, [tab.entry.path]: null }));
+      void refreshWorkspaceFiles(tab.workspacePath);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      setFilesEditorErrors((current) => ({ ...current, [tab.entry.path]: message }));
+    }
+  }, [filesPreviewTab, refreshWorkspaceFiles, t]);
+
+  const openFilesPreviewInDocuments = useCallback(() => {
+    if (!filesPreviewTab) return;
+    activateEditorTab(filesPreviewTab.id, "left");
+    setPersistedAppMode("pkm");
+  }, [filesPreviewTab, setPersistedAppMode]);
+
+  const filesHtmlKey = filesPreviewTab ? `files:${filesPreviewTab.id}` : null;
+  const filesHtmlState = filesHtmlKey ? htmlPaneModes[filesHtmlKey] : undefined;
+  const handleFilesHtmlModeChange = useCallback(
+    (mode: HtmlViewMode) => {
+      if (!filesHtmlKey) return;
+      setHtmlPaneModes((current) => ({
+        ...current,
+        [filesHtmlKey]: { ...current[filesHtmlKey], mode },
+      }));
+    },
+    [filesHtmlKey],
+  );
+  const handleFilesHtmlRiskAck = useCallback(
+    (digest: string) => {
+      if (!filesHtmlKey) return;
+      setHtmlPaneModes((current) => ({
+        ...current,
+        [filesHtmlKey]: {
+          ...current[filesHtmlKey],
+          mode: current[filesHtmlKey]?.mode ?? "visual",
+          riskAckDigest: digest,
+        },
+      }));
+    },
+    [filesHtmlKey],
+  );
+
+  const saveActiveSurfaceDocument = useCallback(async () => {
+    const filesOwnFocus =
+      visibleAppMode === "files" ||
+      (rightWorkbenchMode === "files" && focusedWorkbenchSide === "right");
+    if (filesOwnFocus && filesPreviewTab) {
+      await saveFilesPreviewDocument();
+      return;
+    }
+    await saveCurrent();
+  }, [
+    filesPreviewTab,
+    focusedWorkbenchSide,
+    rightWorkbenchMode,
+    saveCurrent,
+    saveFilesPreviewDocument,
+    visibleAppMode,
+  ]);
+
   // Track which heading the source editor is scrolled to so the outline can
   // highlight the active one. Source mode only — the textarea has a uniform
   // line height, the same line↔scroll mapping jumpToOutlineLine relies on.
@@ -6877,7 +7083,7 @@ function MainApp() {
           void validateLastExportBundle();
           break;
         case "save":
-          void saveCurrent();
+          void saveActiveSurfaceDocument();
           break;
         case "snapshot":
           void snapshotCurrent();
@@ -6957,7 +7163,7 @@ function MainApp() {
       }
     },
     [
-      saveCurrent,
+      saveActiveSurfaceDocument,
       snapshotCurrent,
       refreshActiveSurface,
       toggleLocale,
@@ -6999,7 +7205,7 @@ function MainApp() {
 
   useKeyboardShortcuts(
     {
-      "mod+s": () => void saveCurrent(),
+      "mod+s": () => void saveActiveSurfaceDocument(),
       "mod+shift+s": () => void snapshotCurrent(),
       "mod+n": openNewDocumentDialog,
       "mod+d": splitActiveSurfaceRight,
@@ -7045,7 +7251,7 @@ function MainApp() {
     },
     [
       appMode,
-      saveCurrent,
+      saveActiveSurfaceDocument,
       snapshotCurrent,
       focusSearch,
       openInboxAndFocus,
@@ -7101,7 +7307,7 @@ function MainApp() {
           openNewDocumentDialog();
           break;
         case "file.save":
-          void saveCurrent();
+          void saveActiveSurfaceDocument();
           break;
         case "file.snapshot":
           void snapshotCurrent();
@@ -8492,6 +8698,40 @@ function MainApp() {
             }
             openDocumentPaths={explorerOpenDocumentPaths}
             dirtyDocumentPaths={explorerDirtyDocumentPaths}
+            documentEditorPath={filesPreviewTab?.entry.path ?? null}
+            documentEditorError={
+              filesSelectedDocumentNode
+                ? filesEditorErrors[filesSelectedDocumentNode.path] ?? null
+                : null
+            }
+            documentEditorNode={
+              filesPreviewTab && explorerWorkspacePath ? (
+                <InlineDocumentEditor
+                  key={filesPreviewTab.id}
+                  document={filesPreviewTab.document}
+                  content={filesPreviewTab.draftContent}
+                  mode={maruSettings.ui.filesEditorViewMode}
+                  htmlMode={filesHtmlState?.mode ?? "visual"}
+                  dirty={
+                    filesPreviewTab.draftContent !== filesPreviewTab.document.content
+                  }
+                  saving={savingTabId === filesPreviewTab.id}
+                  readOnly={!explorerWorkspaceCaps.canModify}
+                  readOnlyReason={workspaceWriteReason(explorerWorkspace, "modify")}
+                  error={filesEditorErrors[filesPreviewTab.entry.path] ?? null}
+                  vaultPath={explorerWorkspacePath}
+                  htmlRiskAckDigest={filesHtmlState?.riskAckDigest ?? null}
+                  onChange={(content) => updateTabDraft(filesPreviewTab.id, content)}
+                  onModeChange={setFilesEditorViewMode}
+                  onHtmlModeChange={handleFilesHtmlModeChange}
+                  onHtmlRiskAck={handleFilesHtmlRiskAck}
+                  onSave={saveFilesPreviewDocument}
+                  onReload={() => void reloadFilesPreviewDocument()}
+                  onOpenInDocuments={openFilesPreviewInDocuments}
+                  onReveal={() => revealTargetInFinder(filesPreviewTab.entry.path)}
+                />
+              ) : null
+            }
             pendingRevealTargetPath={
               pendingExplorerReveal?.pane === "files"
                 ? pendingExplorerReveal.targetPath
@@ -8514,6 +8754,7 @@ function MainApp() {
             onExpandedFoldersChange={setCollapsedFileFolders}
             onSelectionChange={setWorkspaceFileSelection}
             onOpenDocument={(entry) => void openWorkspaceFileEntry(entry)}
+            onPrepareDocument={prepareFilesPreviewDocument}
             onQueuePaths={(paths) => void queueExternalFiles(paths)}
             onRevealInFinder={revealTargetInFinder}
             onRefresh={() => {
@@ -8578,6 +8819,10 @@ function MainApp() {
             sortKey={maruSettings.ui.scratchpadSortKey}
             listHeight={layoutSettings.scratchpadListHeight}
             listWidth={layoutSettings.scratchpadListWidth}
+            treeOpen={layoutSettings.scratchpadTreeOpen}
+            treeWidth={layoutSettings.scratchpadTreeWidth}
+            expandedFolders={maruSettings.ui.scratchpadExpandedFolders}
+            editorViewMode={maruSettings.ui.scratchpadEditorViewMode}
             refreshRequestEpoch={scratchpadRefreshEpoch}
             onRefreshWorkspace={() => void refreshCurrent()}
             onSortKeyChange={setScratchpadSortKey}
@@ -8587,6 +8832,14 @@ function MainApp() {
             onListWidthChange={(scratchpadListWidth) =>
               updateLayoutSettings({ scratchpadListWidth })
             }
+            onTreeOpenChange={(scratchpadTreeOpen) =>
+              updateLayoutSettings({ scratchpadTreeOpen })
+            }
+            onTreeWidthChange={(scratchpadTreeWidth) =>
+              updateLayoutSettings({ scratchpadTreeWidth })
+            }
+            onExpandedFoldersChange={setScratchpadExpandedFolders}
+            onEditorViewModeChange={setScratchpadEditorViewMode}
             t={t}
           />
         ) : surfaceMode === "drafts" ? (

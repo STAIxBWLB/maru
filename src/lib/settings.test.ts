@@ -4,6 +4,7 @@ import {
   DEFAULT_MARU_SETTINGS,
   SCRATCHPAD_LIST_HEIGHT,
   SCRATCHPAD_LIST_WIDTH,
+  SCRATCHPAD_TREE_WIDTH,
   applyWorkspaceCommsOverrides,
   applyWorkspaceMeetingsOverrides,
   applyWorkspaceTasksOverrides,
@@ -78,6 +79,34 @@ describe("normalizeMaruSettings", () => {
       normalizeMaruSettings({ ui: { rightWorkbenchSurface: "scratchpad" } }).ui
         .rightWorkbenchSurface,
     ).toBe("editor");
+  });
+
+  it("normalizes Scratchpad tree and inline editor preferences", () => {
+    const defaults = normalizeMaruSettings({});
+    expect(defaults.ui.scratchpadExpandedFolders).toEqual(["memos", "temp"]);
+    expect(defaults.ui.filesEditorViewMode).toBe("source");
+    expect(defaults.ui.scratchpadEditorViewMode).toBe("source");
+    expect(defaults.ui.layout.scratchpadTreeOpen).toBe(true);
+    expect(defaults.ui.layout.scratchpadTreeWidth).toBe(
+      SCRATCHPAD_TREE_WIDTH.defaultValue,
+    );
+
+    const normalized = normalizeMaruSettings({
+      ui: {
+        filesEditorViewMode: "preview",
+        scratchpadEditorViewMode: "rich",
+        scratchpadExpandedFolders: ["memos/projects", "temp/codex"],
+        layout: { scratchpadTreeOpen: false, scratchpadTreeWidth: 9999 },
+      },
+    });
+    expect(normalized.ui.filesEditorViewMode).toBe("preview");
+    expect(normalized.ui.scratchpadEditorViewMode).toBe("rich");
+    expect(normalized.ui.scratchpadExpandedFolders).toEqual([
+      "memos/projects",
+      "temp/codex",
+    ]);
+    expect(normalized.ui.layout.scratchpadTreeOpen).toBe(false);
+    expect(normalized.ui.layout.scratchpadTreeWidth).toBe(SCRATCHPAD_TREE_WIDTH.max);
   });
 
   it("normalizes the persisted right workbench surface without consuming legacy graph split input", () => {

@@ -1,4 +1,3 @@
-import * as Tabs from "@radix-ui/react-tabs";
 import {
   Check,
   ChevronDown,
@@ -54,9 +53,14 @@ import {
 } from "./KgRefHighlight";
 import { Button } from "./ui/Button";
 import { useWikilinkAutocomplete } from "./WikilinkAutocomplete";
+import {
+  DocumentModeSurface,
+  type DocumentMode,
+  type EditorViewMode,
+  type HtmlViewMode,
+} from "./DocumentModeSurface";
 
-export type EditorViewMode = "rich" | "source" | "preview";
-export type HtmlViewMode = "visual" | "source" | "preview";
+export type { EditorViewMode, HtmlViewMode } from "./DocumentModeSurface";
 
 const LazyRichMarkdownEditor = lazy(() =>
   import("./RichMarkdownEditor").then((module) => ({ default: module.RichMarkdownEditor })),
@@ -901,27 +905,16 @@ export const EditorPane = memo(forwardRef<HTMLDivElement, EditorPaneProps>(funct
       {bodyOverride ? (
         <div className="editor-body editor-body--override">{bodyOverride}</div>
       ) : (
-        <Tabs.Root
-          className="editor-tabs"
-          value={activeMode}
-          onValueChange={(value) => {
+        <DocumentModeSurface
+          t={t}
+          kind={isHtml ? "html" : isMarkdown ? "markdown" : "plain"}
+          mode={activeMode}
+          onModeChange={(value: DocumentMode) => {
             if (isHtml) onHtmlViewModeChange?.(value as HtmlViewMode);
             else onViewModeChange(value as EditorViewMode);
           }}
-        >
-          <div className="editor-view-toolbar">
-            <Tabs.List className="editor-tabs-row" aria-label={t("editor.tabs.viewAria")}>
-              <Tabs.Trigger className="tab-trigger" value={isHtml ? "visual" : "rich"}>
-                {isHtml ? t("editor.tab.visual") : t("editor.tab.rich")}
-              </Tabs.Trigger>
-              <Tabs.Trigger className="tab-trigger" value="source">
-                {t("editor.tab.source")}
-              </Tabs.Trigger>
-              <Tabs.Trigger className="tab-trigger" value="preview">
-                {t("editor.tab.preview")}
-              </Tabs.Trigger>
-            </Tabs.List>
-            {isMarkdown && onOpenSourcePreview ? (
+          toolbarAction={
+            isMarkdown && onOpenSourcePreview ? (
               <button
                 type="button"
                 className="editor-source-preview-preset"
@@ -932,78 +925,80 @@ export const EditorPane = memo(forwardRef<HTMLDivElement, EditorPaneProps>(funct
                 <Columns2 size={12} />
                 <span>{t("editor.sourcePreview.label")}</span>
               </button>
-            ) : null}
-          </div>
-          {findOpen ? (
-            <div className="editor-find-bar" role="search">
-              <input
-                ref={findInputRef}
-                className="editor-find-input"
-                value={findQuery}
-                placeholder={t("editor.find.placeholder")}
-                aria-label={t("editor.find.placeholder")}
-                onChange={(event) => {
-                  setFindQuery(event.target.value);
-                  setFindIndex(0);
-                }}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter") {
-                    event.preventDefault();
-                    cycleFind(event.shiftKey ? -1 : 1);
-                  } else if (event.key === "Escape") {
-                    event.preventDefault();
-                    closeFind();
-                  }
-                }}
-              />
-              {findSupported ? (
-                <>
-                  <span className="editor-find-count" aria-live="polite">
-                    {findQuery.trim() === ""
-                      ? ""
-                      : findMatchList.length === 0
-                        ? t("editor.find.noResults")
-                        : t("editor.find.count", {
-                            current: findCurrent + 1,
-                            total: findMatchList.length,
-                          })}
+            ) : null
+          }
+          auxiliary={
+            findOpen ? (
+              <div className="editor-find-bar" role="search">
+                <input
+                  ref={findInputRef}
+                  className="editor-find-input"
+                  value={findQuery}
+                  placeholder={t("editor.find.placeholder")}
+                  aria-label={t("editor.find.placeholder")}
+                  onChange={(event) => {
+                    setFindQuery(event.target.value);
+                    setFindIndex(0);
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      cycleFind(event.shiftKey ? -1 : 1);
+                    } else if (event.key === "Escape") {
+                      event.preventDefault();
+                      closeFind();
+                    }
+                  }}
+                />
+                {findSupported ? (
+                  <>
+                    <span className="editor-find-count" aria-live="polite">
+                      {findQuery.trim() === ""
+                        ? ""
+                        : findMatchList.length === 0
+                          ? t("editor.find.noResults")
+                          : t("editor.find.count", {
+                              current: findCurrent + 1,
+                              total: findMatchList.length,
+                            })}
+                    </span>
+                    <button
+                      type="button"
+                      className="editor-find-nav"
+                      onClick={() => cycleFind(-1)}
+                      title={t("editor.find.previous")}
+                      aria-label={t("editor.find.previous")}
+                    >
+                      <ChevronUp size={12} />
+                    </button>
+                    <button
+                      type="button"
+                      className="editor-find-nav"
+                      onClick={() => cycleFind(1)}
+                      title={t("editor.find.next")}
+                      aria-label={t("editor.find.next")}
+                    >
+                      <ChevronDown size={12} />
+                    </button>
+                  </>
+                ) : (
+                  <span className="editor-find-unsupported">
+                    {t("editor.find.unsupported")}
                   </span>
-                  <button
-                    type="button"
-                    className="editor-find-nav"
-                    onClick={() => cycleFind(-1)}
-                    title={t("editor.find.previous")}
-                    aria-label={t("editor.find.previous")}
-                  >
-                    <ChevronUp size={12} />
-                  </button>
-                  <button
-                    type="button"
-                    className="editor-find-nav"
-                    onClick={() => cycleFind(1)}
-                    title={t("editor.find.next")}
-                    aria-label={t("editor.find.next")}
-                  >
-                    <ChevronDown size={12} />
-                  </button>
-                </>
-              ) : (
-                <span className="editor-find-unsupported">
-                  {t("editor.find.unsupported")}
-                </span>
-              )}
-              <button
-                type="button"
-                className="editor-find-nav"
-                onClick={closeFind}
-                title={t("editor.find.close")}
-                aria-label={t("editor.find.close")}
-              >
-                <X size={12} />
-              </button>
-            </div>
-          ) : null}
-          <Tabs.Content className="tab-panel" value={isHtml ? "visual" : "rich"}>
+                )}
+                <button
+                  type="button"
+                  className="editor-find-nav"
+                  onClick={closeFind}
+                  title={t("editor.find.close")}
+                  aria-label={t("editor.find.close")}
+                >
+                  <X size={12} />
+                </button>
+              </div>
+            ) : null
+          }
+          richPanel={
             <Suspense fallback={<div className="editor-loading" role="status">…</div>}>
               {isHtml && document ? (
                 <LazyHtmlVisualEditor
@@ -1029,35 +1024,37 @@ export const EditorPane = memo(forwardRef<HTMLDivElement, EditorPaneProps>(funct
                 />
               )}
             </Suspense>
-          </Tabs.Content>
-          <Tabs.Content className="tab-panel" value="source">
-            <div className={kgSpans ? "source-editor-wrap kg-active" : "source-editor-wrap"}>
-              {kgSpans ? (
-                <KgSourceBackdrop
-                  content={draftContent}
-                  spans={kgSpans}
-                  textareaRef={taRef}
-                  titleFor={kgTitleFor}
+          }
+          sourcePanel={
+            <>
+              <div className={kgSpans ? "source-editor-wrap kg-active" : "source-editor-wrap"}>
+                {kgSpans ? (
+                  <KgSourceBackdrop
+                    content={draftContent}
+                    spans={kgSpans}
+                    textareaRef={taRef}
+                    titleFor={kgTitleFor}
+                  />
+                ) : null}
+                <textarea
+                  ref={taRef}
+                  className="source-editor"
+                  value={draftContent}
+                  onChange={(event) => onChange(event.target.value)}
+                  readOnly={readOnly}
+                  onKeyDown={autocompleteHandlers.onKeyDown}
+                  onKeyUp={autocompleteHandlers.onKeyUp}
+                  onClick={handleSourceClick}
+                  onCompositionStart={autocompleteHandlers.onCompositionStart}
+                  onCompositionEnd={autocompleteHandlers.onCompositionEnd}
+                  spellCheck={false}
                 />
-              ) : null}
-              <textarea
-                ref={taRef}
-                className="source-editor"
-                value={draftContent}
-                onChange={(event) => onChange(event.target.value)}
-                readOnly={readOnly}
-                onKeyDown={autocompleteHandlers.onKeyDown}
-                onKeyUp={autocompleteHandlers.onKeyUp}
-                onClick={handleSourceClick}
-                onCompositionStart={autocompleteHandlers.onCompositionStart}
-                onCompositionEnd={autocompleteHandlers.onCompositionEnd}
-                spellCheck={false}
-              />
-            </div>
-            {autocompletePopup}
-          </Tabs.Content>
-          <Tabs.Content className="tab-panel" value="preview">
-            {isHtml && document ? (
+              </div>
+              {autocompletePopup}
+            </>
+          }
+          previewPanel={
+            isHtml && document ? (
               <Suspense fallback={<div className="editor-loading" role="status">…</div>}>
                 <LazyHtmlPreviewFrame
                   value={draftContent}
@@ -1073,9 +1070,9 @@ export const EditorPane = memo(forwardRef<HTMLDivElement, EditorPaneProps>(funct
                 onClick={handlePreviewClick}
                 dangerouslySetInnerHTML={previewMarkup}
               />
-            )}
-          </Tabs.Content>
-        </Tabs.Root>
+            )
+          }
+        />
       )}
 
       <footer className="editor-status">
