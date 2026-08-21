@@ -133,7 +133,7 @@ describe("ScratchpadPane safety flows", () => {
 
   async function render(
     workPath = "/work",
-    overrides: { sortKey?: SortKey; listHeight?: number } = {},
+    overrides: { sortKey?: SortKey; listHeight?: number; listWidth?: number } = {},
   ) {
     await act(async () => {
       root?.render(
@@ -141,9 +141,12 @@ describe("ScratchpadPane safety flows", () => {
           workPath={workPath}
           sortKey={overrides.sortKey ?? "name"}
           listHeight={overrides.listHeight ?? 218}
+          listWidth={overrides.listWidth ?? 320}
+          refreshRequestEpoch={0}
           onRefreshWorkspace={vi.fn()}
           onSortKeyChange={vi.fn()}
           onListHeightChange={vi.fn()}
+          onListWidthChange={vi.fn()}
           t={t}
         />,
       );
@@ -307,9 +310,12 @@ describe("ScratchpadPane safety flows", () => {
           workPath="/work-b"
           sortKey="name"
           listHeight={218}
+          listWidth={320}
+          refreshRequestEpoch={0}
           onRefreshWorkspace={vi.fn()}
           onSortKeyChange={vi.fn()}
           onListHeightChange={vi.fn()}
+          onListWidthChange={vi.fn()}
           t={t}
         />,
       );
@@ -365,9 +371,12 @@ describe("ScratchpadPane safety flows", () => {
           workPath="/work-b"
           sortKey="name"
           listHeight={218}
+          listWidth={320}
+          refreshRequestEpoch={0}
           onRefreshWorkspace={vi.fn()}
           onSortKeyChange={vi.fn()}
           onListHeightChange={vi.fn()}
+          onListWidthChange={vi.fn()}
           t={t}
         />,
       );
@@ -382,9 +391,12 @@ describe("ScratchpadPane safety flows", () => {
           workPath="/work-a"
           sortKey="name"
           listHeight={218}
+          listWidth={320}
+          refreshRequestEpoch={0}
           onRefreshWorkspace={vi.fn()}
           onSortKeyChange={vi.fn()}
           onListHeightChange={vi.fn()}
+          onListWidthChange={vi.fn()}
           t={t}
         />,
       );

@@ -1,10 +1,14 @@
-import type { MaruAppMode, RightWorkbenchSurface } from "./settings";
+import type {
+  MaruAppMode,
+  RightWorkbenchMode,
+  RightWorkbenchSurface,
+} from "./settings";
 
 export const DEFAULT_WORKBENCH_MIN_WIDTH = 608;
 export const DOCUMENT_WORKBENCH_MIN_WIDTH = 736;
 export const SPLIT_DOCUMENT_WORKBENCH_MIN_WIDTH = 736;
 
-export const RIGHT_WORKBENCH_MODES: readonly Exclude<MaruAppMode, "pkm">[] = [
+export const RIGHT_WORKBENCH_MODES: readonly RightWorkbenchMode[] = [
   "files",
   "inbox",
   "comms",
@@ -42,18 +46,18 @@ export function availableRightWorkbenchSurface(
 export interface WorkbenchPlacement {
   rightOpen: boolean;
   rightEditorOpen: boolean;
-  rightMode: Exclude<MaruAppMode, "pkm"> | null;
+  rightMode: RightWorkbenchMode | null;
 }
 
 export interface RightSitesCloseInput {
-  rightWorkbenchMode: Exclude<MaruAppMode, "pkm"> | null;
+  rightWorkbenchMode: RightWorkbenchMode | null;
   focusedWorkbenchSide: "left" | "right";
   documentHasFocus: boolean;
 }
 
 export interface WorkbenchMinimumWidthInput {
   visibleAppMode: MaruAppMode;
-  rightWorkbenchMode: Exclude<MaruAppMode, "pkm"> | null;
+  rightWorkbenchMode: RightWorkbenchMode | null;
   editorSplitOpen: boolean;
 }
 

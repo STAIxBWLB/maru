@@ -34,13 +34,14 @@ The deeper "what's next + how to continue" reference is [ROADMAP.md](ROADMAP.md)
 
 ## Modes
 
-The activity rail exposes seventeen top-level modes (Settings opens as an
+The activity rail exposes eighteen top-level modes (Settings opens as an
 in-app overlay, so it is not an app mode). Diagram and Graph default on; E2E
 Flow is flag-gated.
 
 | Mode | Label (ko / en) | What it does |
 |------|-----------------|--------------|
 | `pkm` | 문서 / Docs | Default. Markdown/HTML document tree, editor, and right utility rail. |
+| `scratchpad` | 스크래치패드 / Scratchpad | Main-workbench memo and temporary-result editor with a resizable navigator, autosave, recovery, and cleanup. |
 | `files` | 파일 / Files | Finder-style workspace with folder tree, direct-child list, selection preview, search/filter/sort, and filesystem operations. |
 | `inbox` | 인박스 / Inbox | Configured drop / pending / processed / Files / Gmail sections with classify + `a`/`r`/`p`. |
 | `comms` | 메시지 / Messages | Multichannel comms settings (Telegram auth/mapping, source config, macOS migration). |
@@ -210,10 +211,10 @@ make homebrew-update RELEASE_TAG=v$(node -p "require('./package.json').version")
 │   React 19 + Radix UI + BlockNote + marked + DOMPurify       │
 │   Sigma WebGL + Graphology · CodeMirror · alacritty canvas    │
 │                                                               │
-│   Activity rail (17 modes):                                  │
-│     Dashboard / Docs / Files / Inbox / Messages / Meetings / │
-│     Today / Tasks / Drafts / Gap / Agents / Catalog /        │
-│     Studio / Diagram / Graph / Sites / E2E                   │
+│   Activity rail (18 modes):                                  │
+│     Dashboard / Docs / Scratchpad / Files / Inbox / Messages │
+│     Meetings / Today / Tasks / Drafts / Gap / Agents /       │
+│     Catalog / Studio / Diagram / Graph / Sites / E2E         │
 │   Files tree/list/preview + editor tabs + Terminal/Graph Panel│
 └──────────────────────────────┬──────────────────────────────┘
                                │ Tauri IPC

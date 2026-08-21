@@ -17,6 +17,7 @@ async function dockTerminalRight(page: Page) {
 }
 
 const PRIMARY_MODES = [
+  ["스크래치패드", ".scratchpad-workspace"],
   ["파일", ".files-workbench"],
   ["인박스", ".inbox-pane"],
   ["메시지", ".comms-pane"],
@@ -254,7 +255,9 @@ for (const width of [1024, 1280]) {
     await page.goto("/");
     await dockTerminalRight(page);
 
-    for (const [label, selector] of PRIMARY_MODES) {
+    for (const [label, selector] of PRIMARY_MODES.filter(
+      ([modeLabel]) => modeLabel !== "스크래치패드",
+    )) {
       await page.getByRole("button", {
         name: `${label} 오른쪽에 열기 (Option-click)`,
       }).click();
@@ -292,6 +295,111 @@ for (const width of [1024, 1280]) {
     }
   });
 }
+
+test("gives Scratchpad a resizable main navigator and editor", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/");
+  await page.getByRole("button", { name: "스크래치패드", exact: true }).click();
+
+  const workspace = page.locator(".scratchpad-workspace");
+  const navigator = workspace.locator(".scratchpad-navigator");
+  const editor = workspace.locator(".scratchpad-editor-region");
+  const resize = workspace.getByRole("separator", {
+    name: "스크래치패드 목록 너비 조절",
+  });
+  await expect(workspace).toBeVisible();
+  await expect(resize).toBeVisible();
+
+  const [workspaceBox, navigatorBox, editorBox] = await Promise.all([
+    workspace.boundingBox(),
+    navigator.boundingBox(),
+    editor.boundingBox(),
+  ]);
+  expect(workspaceBox).not.toBeNull();
+  expect(navigatorBox).not.toBeNull();
+  expect(editorBox).not.toBeNull();
+  if (!workspaceBox || !navigatorBox || !editorBox) return;
+  expect(navigatorBox.width).toBeGreaterThanOrEqual(260);
+  expect(editorBox.width).toBeGreaterThan(navigatorBox.width);
+  expect(editorBox.x).toBeGreaterThanOrEqual(navigatorBox.x + navigatorBox.width);
+  expect(workspaceBox.width).toBeGreaterThanOrEqual(900);
+
+  await resize.focus();
+  await resize.press("ArrowRight");
+  await expect
+    .poll(async () => (await navigator.boundingBox())?.width ?? 0)
+    .toBeGreaterThan(navigatorBox.width);
+  await expect
+    .poll(() => readPersistedLayout(page))
+    .toMatchObject({ scratchpadListWidth: 332 });
+});
+
+test("stacks the Scratchpad navigator above the editor in a compact workbench", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 720, height: 800 });
+  await page.goto("/");
+  await page.getByRole("button", { name: "스크래치패드", exact: true }).click();
+
+  const workspace = page.locator(".scratchpad-workspace");
+  const navigator = workspace.locator(".scratchpad-navigator");
+  const editor = workspace.locator(".scratchpad-editor-region");
+  await expect(workspace.locator(".scratchpad-resize-wide")).toBeHidden();
+  await expect(workspace.locator(".scratchpad-resize-compact")).toBeVisible();
+  const [navigatorBox, editorBox] = await Promise.all([
+    navigator.boundingBox(),
+    editor.boundingBox(),
+  ]);
+  expect(navigatorBox).not.toBeNull();
+  expect(editorBox).not.toBeNull();
+  if (!navigatorBox || !editorBox) return;
+  expect(editorBox.y).toBeGreaterThanOrEqual(navigatorBox.y + navigatorBox.height);
+  expect(
+    await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1),
+  ).toBe(true);
+});
+
+test("keeps Scratchpad text and primary action legible in dark mode", async ({ page }) => {
+  await page.emulateMedia({ colorScheme: "dark" });
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/");
+  await page.getByRole("button", { name: "스크래치패드", exact: true }).click();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+
+  const ratios = await page.locator(".scratchpad-workspace").evaluate((workspace) => {
+    const parseRgb = (value: string) => {
+      const channels = value.match(/[\d.]+/g)?.slice(0, 3).map(Number) ?? [0, 0, 0];
+      return channels.map((channel) => {
+        const normalized = channel / 255;
+        return normalized <= 0.04045
+          ? normalized / 12.92
+          : ((normalized + 0.055) / 1.055) ** 2.4;
+      });
+    };
+    const luminance = (value: string) => {
+      const [red, green, blue] = parseRgb(value);
+      return 0.2126 * red + 0.7152 * green + 0.0722 * blue;
+    };
+    const contrast = (foreground: string, background: string) => {
+      const lighter = Math.max(luminance(foreground), luminance(background));
+      const darker = Math.min(luminance(foreground), luminance(background));
+      return (lighter + 0.05) / (darker + 0.05);
+    };
+    const title = workspace.querySelector<HTMLElement>(".mode-header-title");
+    const header = workspace.querySelector<HTMLElement>(".scratchpad-mode-header");
+    const primary = workspace.querySelector<HTMLElement>(".scratchpad-actions > button:first-child");
+    if (!title || !header || !primary) return { title: 0, primary: 0 };
+    const titleStyle = getComputedStyle(title);
+    const headerStyle = getComputedStyle(header);
+    const primaryStyle = getComputedStyle(primary);
+    return {
+      title: contrast(titleStyle.color, headerStyle.backgroundColor),
+      primary: contrast(primaryStyle.color, primaryStyle.backgroundColor),
+    };
+  });
+  expect(ratios.title).toBeGreaterThanOrEqual(4.5);
+  expect(ratios.primary).toBeGreaterThanOrEqual(4.5);
+});
 
 test("keeps every status bar control inside the status row", async ({ page }) => {
   // A screenshot of the bar element itself renders content the parent grid
