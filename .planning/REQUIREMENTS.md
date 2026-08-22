@@ -18,7 +18,7 @@ milestone with no end-user-visible surface.
 - [ ] **GATE-03**: `make verify` typechecks `e2e/` and `scripts/` alongside `src/`, so a type error in a Playwright spec is caught before it runs
 - [x] **GATE-04**: A failing e2e run in CI uploads a Playwright trace for the failing test
 - [x] **GATE-05**: Rebuilding an older commit uses the Rust toolchain that commit was built with, not whatever `stable` is today
-- [ ] **GATE-06**: `pnpm typecheck` passes with the deprecated `@types/dompurify` stub removed from `package.json`
+- [x] **GATE-06**: `pnpm typecheck` passes with the deprecated `@types/dompurify` stub removed from `package.json`
 - [x] **GATE-07**: The shipped E2E flow TODO ledger lists only open items, and the module states that it is hand-maintained rather than derived
 
 ### Scanner and Path Invariants
@@ -105,7 +105,7 @@ not compete with the structural work. Not in the current roadmap.
 | GATE-03 | Phase 1 | Pending |
 | GATE-04 | Phase 1 | Complete |
 | GATE-05 | Phase 1 | Complete |
-| GATE-06 | Phase 1 | Pending |
+| GATE-06 | Phase 1 | Complete |
 | GATE-07 | Phase 1 | Complete |
 | SCAN-01 | Phase 2 | Pending |
 | SCAN-02 | Phase 2 | Pending |
