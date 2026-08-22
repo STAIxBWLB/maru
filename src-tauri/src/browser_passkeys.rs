@@ -61,9 +61,13 @@ const AUTHENTICATION_SERVICES_PATH: &std::ffi::CStr =
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum BrowserPasskeyAuthorization {
+    #[cfg(target_os = "macos")]
     Authorized,
+    #[cfg(target_os = "macos")]
     Denied,
+    #[cfg(target_os = "macos")]
     NotDetermined,
+    #[cfg(target_os = "macos")]
     Unknown,
     Unsupported,
 }
@@ -100,6 +104,7 @@ fn unsupported_status() -> BrowserPasskeyStatus {
     }
 }
 
+#[cfg(target_os = "macos")]
 fn authorization_from_raw(value: isize) -> BrowserPasskeyAuthorization {
     match value {
         0 => BrowserPasskeyAuthorization::Authorized,
@@ -109,6 +114,7 @@ fn authorization_from_raw(value: isize) -> BrowserPasskeyAuthorization {
     }
 }
 
+#[cfg(target_os = "macos")]
 fn status_from_runtime_capabilities(
     has_managed_entitlement: bool,
     manager_available: bool,
@@ -313,6 +319,7 @@ pub async fn browser_passkey_request_authorization(
 mod tests {
     use super::*;
 
+    #[cfg(target_os = "macos")]
     #[test]
     fn native_authorization_values_are_mapped_explicitly() {
         assert_eq!(
@@ -343,6 +350,7 @@ mod tests {
         );
     }
 
+    #[cfg(target_os = "macos")]
     #[test]
     fn managed_entitlement_is_required_before_reporting_support() {
         let no_entitlement = status_from_runtime_capabilities(false, true, 0);

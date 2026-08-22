@@ -37,7 +37,9 @@ const MAX_TABS: usize = 12;
 const EVENT_NAVIGATED: &str = "sites://navigated";
 const EVENT_LOAD: &str = "sites://page-load";
 const EVENT_TITLE: &str = "sites://title-changed";
+#[cfg(target_os = "macos")]
 const EVENT_OPEN_REQUESTED: &str = "sites://open-requested";
+#[cfg(target_os = "macos")]
 const MAX_OPENED_URLS: usize = 64;
 
 #[derive(Default)]
@@ -46,6 +48,7 @@ pub struct SiteOpenedUrlState {
 }
 
 impl SiteOpenedUrlState {
+    #[cfg(target_os = "macos")]
     fn enqueue(&self, urls: Vec<Url>) -> Vec<String> {
         let accepted = filter_opened_urls(urls);
         if accepted.is_empty() {
@@ -113,6 +116,7 @@ fn parse_http_url(input: &str) -> Result<Url, String> {
     }
 }
 
+#[cfg(target_os = "macos")]
 fn filter_opened_urls(urls: Vec<Url>) -> Vec<String> {
     urls.into_iter()
         .filter(|url| matches!(url.scheme(), "http" | "https"))
@@ -120,6 +124,7 @@ fn filter_opened_urls(urls: Vec<Url>) -> Vec<String> {
         .collect()
 }
 
+#[cfg(target_os = "macos")]
 pub fn queue_opened_urls(app: &AppHandle, urls: Vec<Url>) {
     let accepted = app.state::<SiteOpenedUrlState>().enqueue(urls);
     if !accepted.is_empty() {
@@ -461,6 +466,7 @@ mod tests {
         value.parse().expect("test URL")
     }
 
+    #[cfg(target_os = "macos")]
     #[test]
     fn opened_url_filter_accepts_only_http_and_https() {
         assert_eq!(
@@ -477,6 +483,7 @@ mod tests {
         );
     }
 
+    #[cfg(target_os = "macos")]
     #[test]
     fn opened_url_queue_is_memory_only_bounded_and_drained() {
         let state = SiteOpenedUrlState::default();
