@@ -48,10 +48,6 @@ pub const GENERATED_DIRS: &[&str] = &[
 /// Containment check: `child` must resolve (lexically — symlinks untouched)
 /// to a path under `parent`. Canonical example for new path-accepting
 /// commands (SCAN-03).
-// allow(dead_code): maru_dir.rs's two call sites switch to this helper in
-// this plan's Task 3; the allow is removed in the same commit that rewires
-// them.
-#[allow(dead_code)]
 pub fn ensure_within(parent: &Path, child: &Path) -> Result<(), String> {
     let normalized = lexical_normalize(child);
     if !normalized.starts_with(parent) {
