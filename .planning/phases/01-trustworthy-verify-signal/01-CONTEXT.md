@@ -121,6 +121,17 @@ only proof is a green gate.
   Do NOT add `retries`. Retries would let a flaky test pass green and cost the
   no-retry signal the suite earned at v0.4.58 (193/193 first-attempt).
   `retain-on-failure` writes the trace on the first failure with no retry needed.
+  **Precision added 2026-08-22:** "the suite's no-retry property" means the top-level
+  `playwright.config.ts` setting. It is not literally true of every spec —
+  `e2e/graph.spec.ts:18` has carried its own
+  `test.describe.configure({ retries: process.env.CI ? 2 : 0 })` since 2026-07-27
+  for residual WebGL flakiness, a month before this phase. D-12 neither introduced
+  nor removed that; the CI runs for this phase report it as `1 flaky`, not as a pass.
+  **Cost measured after the fact:** `retain-on-failure` records every test and discards
+  the passes. With snapshots and screenshots on, that took CI e2e from a steady 5.5m /
+  203 passed to 7.4m / 2 failed. Narrowing to action-timeline-and-stacks-only
+  (`abf575d`) restored 5.4m / 0 failed, at the cost of DOM snapshots, screenshots, and
+  the network log.
 - **D-13:** Success criterion 3 is proven empirically, not by config inspection:
   land a deliberately failing spec, run CI once, confirm `trace.zip` is present
   in the uploaded artifacts, then revert the spec. Criteria 1 and 2 use the same

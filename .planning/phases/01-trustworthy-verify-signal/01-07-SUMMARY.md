@@ -70,7 +70,7 @@ requirements-completed: [GATE-02]
 
 coverage:
   - id: D1
-    description: "src/ (all files, not just App.tsx) reports zero ESLint errors and zero warnings under the D-02 four-rule set; every exhaustive-deps disable comment names the rule and carries a same-line reason; all 7 dead no-console directives removed; no dependency array's contents changed; no console. call touched; the one no-floating-promises site got a `void`, not an `await`"
+    description: "src/ (all files, not just App.tsx) reports zero ESLint errors and zero warnings under the D-02 four-rule set; every exhaustive-deps disable comment THIS PLAN ADDED names the rule and carries a same-line reason (8 pre-existing bare directives, all dated July and untouched here, still survive elsewhere in src/ — ESLint registers no rule requiring reasons, so GATE-02 is unaffected); all 7 dead no-console directives removed; no dependency array's contents changed; no console. call touched; the one no-floating-promises site got a `void`, not an `await`"
     requirement: "GATE-02"
     verification:
       - kind: unit

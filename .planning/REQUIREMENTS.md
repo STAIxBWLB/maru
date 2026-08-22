@@ -36,6 +36,21 @@ milestone with no end-user-visible surface.
 - [ ] **ERR-03**: Every existing `message.includes("<code>")` matcher branches on the typed code instead - starting with `evidence_binder_revision_conflict` at `src/components/evidence/EvidenceBinderPane.tsx:174`
 - [ ] **ERR-04**: Display-only errors are untouched - the `Result<T, String>` signature count stays within a few of today's 1,118
 
+> **Note for Phase 3 planning, from Phase 1's verification (2026-08-22).** None of the
+> seven `make verify` gates can catch a serde mismatch at the Rust-TypeScript IPC
+> boundary. Verified concretely against Phase 1's own reshape of
+> `SkillDispatchBackgroundArgs`: `cargo test --lib` constructs the struct directly and
+> never deserializes JSON, and `make test-e2e` serves plain `vite` rather than
+> `tauri-dev`, so `window.__TAURI_INTERNALS__` never exists and neither
+> `skills_dispatch_background` nor `terminal_spawn` is exercised by any e2e spec. A
+> camelCase or field-name drift there passes typecheck, unit tests, e2e, and clippy,
+> and fails only in the built app. This is the pre-disclosed
+> `native-tauri-e2e-runner-missing` gap, deliberately kept open (GATE-07) and deferred
+> to v2 — but Phase 3 adds more boundary structs of exactly this kind, so it inherits
+> the blind spot directly. Suggested cheap mitigation, well short of the deferred
+> native E2E runner: one `serde_json::from_value` round-trip test per new boundary
+> struct, asserting the wire shape the TypeScript caller actually sends.
+
 ### App Shell Decomposition
 
 - [ ] **SHELL-01**: `OutlinePane` reads its state from module stores instead of a ~71-prop bundle
