@@ -537,7 +537,9 @@ if snapshot.revision != expected_revision {
 | A3 | The ERR-04 tolerance ("within a few") absorbs a ~10-signature delta (7 commands + 3 shared helpers) | Pitfall 7 | If interpreted strictly as "4", Open Question 1 must go back to the user |
 | A4 | Tauri 2.10 rejects `invoke` with the raw serialized `Err` value (not wrapped) | Pattern 2 | Confirmed by docs [CITED: https://v2.tauri.app/develop/calling-rust/] and by the repo's own string-parsing code working today; if wrapping existed, `todayErrorCode` could not function |
 
-## Open Questions
+## Open Questions (RESOLVED)
+
+Dispositions: OQ1 → 03-01's blocking human-verify checkpoint ratifies the measured 7-command set. OQ2 → 03-03 deletes `todayErrorCode` and its tests (D-08). OQ3 → grep guard omitted at planner's discretion; the regression risk is covered by 03-04's rename drill plus typecheck.
 
 1. **Seven commands, not four — confirm scope with the user.**
    - What we know: CONTEXT specifics says "the four migrated commands are the
