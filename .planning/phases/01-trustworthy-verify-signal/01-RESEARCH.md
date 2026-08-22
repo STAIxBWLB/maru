@@ -402,14 +402,17 @@ No other change to this file. D-12 is explicit: do not add `retries`.
 | A2 | `rust-toolchain.toml` `channel = "1.98.0"` as the literal pin value | Pattern 2, Pitfall 6 | This is the correct value as of 2026-08-22 [CITED: rust blog], but D-11 says "the version CI builds with today" - the planner should let the first CI run under the new pin confirm this rather than trust a value that could be stale by execution time |
 | A3 | `components = ["clippy", "rustfmt"]` should be added to `rust-toolchain.toml` | Pattern 2 | Explicitly named as Claude's Discretion in CONTEXT.md - low risk, this is a convenience addition with no version-pinning implication |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
-1. **Exact clippy fix list for the 75 (lib) / 90 (all-targets) violations**
+> Both questions below were answered after this research was written. Resolutions
+> are recorded inline; the original text is kept for provenance.
+
+1. **Exact clippy fix list for the 75 (lib) / 90 (all-targets) violations** — **RESOLVED**: plan 01-02 Task 1 re-measures on the pinned toolchain before fixing, so the static number is never trusted at execution time.
    - What we know: Full violation text is captured in this session's `/tmp/clippy.log` (all-targets) and `/tmp/clippy-default.log` (lib-only) - not preserved past this session, but the categories seen include `manual_inspect`, `unnecessary_to_owned`, `field_reassign_with_default`, `bool_assert_comparison`, `useless_vec`, and more. Re-running `cargo clippy --offline -- -D warnings` in `src-tauri/` reproduces the full list.
    - What's unclear: Whether all 75/90 are one-line auto-fixable (`cargo clippy --fix`) or require manual judgment (e.g. the `field_reassign_with_default` one touches test setup code where the "fix" changes struct-literal shape).
    - Recommendation: The planner should budget a `cargo clippy --fix --allow-dirty -- -D warnings` pass first (handles most mechanical lints automatically), then manually address whatever remains - likely a small remainder given clippy's fix coverage is high for the lint categories observed here. Should re-measure on `rustc 1.98.0` first per Pitfall 6.
 
-2. **Whether `--all-targets` (90 violations, includes test code) or lib-only (75 violations) is the intended clippy scope**
+2. **Whether `--all-targets` (90 violations, includes test code) or lib-only (75 violations) is the intended clippy scope** — **RESOLVED**: lib-only, per CONTEXT.md D-08b. Matches the existing `test-rust` convention; `--all-targets` is explicitly banned in plan 01-02's acceptance criteria.
    - What we know: D-08 says "every violation it surfaces gets fixed," without specifying `--all-targets`. `test-rust` (`Makefile:188`) already runs `cargo test --lib` (lib scope only, no integration-test binaries), suggesting the repo's existing convention is lib-scoped tooling.
    - What's unclear: Whether test code (`#[cfg(test)] mod tests` blocks, which is where this repo's tests live per TESTING.md) should also be clippy-clean.
    - Recommendation: Match the existing `test-rust` convention - lib scope only (`cargo clippy -- -D warnings`, no `--all-targets`) - for consistency, unless the user explicitly wants test code held to the same bar. This keeps the fix list at 75 rather than 90.
