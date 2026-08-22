@@ -402,6 +402,13 @@ pnpm typecheck
 # i18n lint (ko/en parity + hardcoded UI string scan; also in make verify):
 pnpm lint:i18n
 
+# ESLint (four correctness rules over src/ + e2e/; also in make verify):
+pnpm lint
+
+# Rust format check and lint gate (both also in make verify):
+make fmt-check
+make clippy
+
 # Production build:
 pnpm build
 
@@ -411,7 +418,8 @@ pnpm icons:generate
 # Verify that committed web, desktop, Windows, iOS, and Android icons are current:
 pnpm icons:check
 
-# Full verification (typecheck + release-version sync + tests + frontend build):
+# Full verification (typecheck + ESLint + release-version sync + guards + unit
+# tests + Rust fmt/clippy + frontend build):
 make verify
 
 # Full verify plus release-only CLI and debug Tauri checks:
@@ -468,8 +476,9 @@ Codex skill sync writes to `$CODEX_HOME/skills` when `CODEX_HOME` is set, as
 it is for isolated Orca account profiles. Without that variable, it uses the
 standard `~/.codex/skills` directory.
 
-CI runs `make verify` (typecheck + release-version sync + guards + unit tests +
-frontend build) and `make test-e2e` on pull requests via
+CI runs `make verify` (typecheck + ESLint + release-version sync + guards + unit
+tests + Rust fmt-check and clippy + frontend build) and `make test-e2e` on
+pull requests via
 `.github/workflows/ci.yml`. Documentation-only changes do not start CI. A push
 to `main` first compares the pushed tree with its associated PR head and checks
 that the latest `CI PR #<number>` run for that exact head succeeded. The stable
@@ -479,6 +488,16 @@ steps; direct pushes, stale merge bases, missing checks, and API failures run
 the full suite. Version-changing PRs run
 `make release-checks` instead of `make verify`, adding CLI and debug Tauri
 checks without repeating verify, frontend build, or E2E.
+
+`typecheck` covers four TypeScript projects — `src/`, the node config files,
+`e2e/`, and `scripts/` — so a type error in a Playwright spec or a build script
+fails the gate instead of surfacing at run time. `rust-toolchain.toml` pins the
+Rust toolchain, so `make fmt-check` and `make clippy` resolve the same compiler
+on every machine and in CI rather than following whatever `stable` happens to
+be. A failing e2e in CI uploads a Playwright trace with the `playwright-report`
+artifact; the trace keeps the action timeline and the failing stack, but not DOM
+snapshots, screenshots, or the network log (see the comment in
+`playwright.config.ts` for why, and for when to turn them back on).
 
 `.github/workflows/release-preflight.yml` is a manual recovery gate. It keeps
 the intentionally exhaustive `make release-preflight` path but no longer
