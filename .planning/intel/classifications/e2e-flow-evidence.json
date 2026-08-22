@@ -1,0 +1,13 @@
+{
+  "source_path": "/Users/yj.lee/workspace/work/dev/maru/docs/e2e-flow-evidence.md",
+  "type": "DOC",
+  "confidence": "medium",
+  "manifest_override": false,
+  "title": "Maru E2E Flow Evidence",
+  "summary": "Records E2E flow opt-in switches, baseline vs post-change timing measurements per stage, and the verification commands used.",
+  "scope": ["E2E flow console", "Playwright smoke harness", "flow stage timings", "sample load", "skill lifecycle", "report generation", "slide generation", "local save", "re-query", "verification commands"],
+  "cross_refs": [],
+  "locked": false,
+  "precedence": null,
+  "notes": "No ADR signals (no status field, no Decision/Consequences). No user stories or acceptance criteria. Contains numeric timing gates that resemble SPEC/SLO content, but they are recorded measurement evidence against an already-set 30% target, not a contract the system must honor - classified DOC (context only). Mentions code artifacts (e2e/maru-e2e-flow.spec.ts, todos.json, metadata.json, scripts/e2e-mcp-smoke.mjs) and an unnamed 'attached plan file'; no document paths or markdown links present, so cross_refs is empty. Filename lacks a SHA suffix because no hashing tool was available in this session; slug is unique in the repo."
+}

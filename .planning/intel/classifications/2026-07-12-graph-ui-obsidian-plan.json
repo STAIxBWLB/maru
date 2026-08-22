@@ -1,0 +1,28 @@
+{
+  "source_path": "/Users/yj.lee/workspace/work/dev/maru/docs/superpowers/plans/2026-07-12-graph-ui-obsidian.md",
+  "type": "SPEC",
+  "confidence": "medium",
+  "manifest_override": false,
+  "title": "Graph UI Obsidian-Benchmark Refresh Implementation Plan",
+  "summary": "Task-by-task implementation plan making the Sigma graph view Obsidian-like: theme-token colors, zoom-linked label fade, whisper edges, community color groups replacing hulls.",
+  "scope": [
+    "graphStyle.ts",
+    "GraphCanvas.tsx",
+    "graphLabels.ts",
+    "GraphView.tsx",
+    "GraphFilterPanel.tsx",
+    "graph.css",
+    "GraphTheme",
+    "community color palettes",
+    "node label rendering",
+    "edge styling",
+    "community hulls removal",
+    "panel typography"
+  ],
+  "cross_refs": [
+    "docs/superpowers/specs/2026-07-12-graph-ui-obsidian-design.md"
+  ],
+  "locked": false,
+  "precedence": null,
+  "notes": "Path is docs/superpowers/plans/ (no adr|prd|spec path signal) and there is no frontmatter. Content is implementation contracts: a GraphTheme interface, fixed 12-slot palettes with an explicit 'do not reorder' constraint, labelAlpha fade thresholds, Sigma settings keys, and GraphSettings field removal (showHulls) - SPEC signals dominate over DOC prose. Classified SPEC rather than DOC because it carries binding technical constraints; the authoritative design doc it implements is linked in cross_refs. No decision/consequences sections (not ADR), no user stories or acceptance criteria (not PRD). Confidence medium: it is an execution plan derived from a separate spec, so some constraints may be restatements."
+}

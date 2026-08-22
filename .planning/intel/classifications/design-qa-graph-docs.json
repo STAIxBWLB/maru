@@ -1,0 +1,25 @@
+{
+  "source_path": "/Users/yj.lee/workspace/work/dev/maru/docs/design-qa-graph.md",
+  "type": "DOC",
+  "confidence": "medium",
+  "manifest_override": false,
+  "title": "Design QA: Graph canvas-first redesign",
+  "summary": "Design QA report comparing Maru's canvas-first graph redesign to an Obsidian reference; all rubric criteria pass after two iterations and an adversarial pass.",
+  "scope": [
+    "graph canvas",
+    "Sigma/WebGL rendering",
+    "dense-graph visual LOD",
+    "theme, accent, and color modes",
+    "graph toolbar and floating controls",
+    "Korean/English localization",
+    "keyboard accessibility"
+  ],
+  "cross_refs": [
+    "docs/design-qa/graph-implementation-final.png",
+    "docs/design-qa/graph-comparison-full.png",
+    "docs/design-qa/graph-comparison-canvas.png"
+  ],
+  "locked": false,
+  "precedence": null,
+  "notes": "No frontmatter, no numbered/typed filename convention. PASS-marked rubric lines superficially resemble PRD acceptance criteria, but they record verification results of an already-shipped implementation rather than stating requirements; no decision statement, no schema/contract. Resolved to DOC (context only). Output filename uses a path-derived suffix instead of a SHA-256 prefix because no shell tool was available to compute the digest; the directory component provides the same sibling-collision guarantee."
+}

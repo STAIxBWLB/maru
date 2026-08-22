@@ -1,0 +1,21 @@
+{
+  "source_path": "/Users/yj.lee/workspace/work/dev/maru/docs/macos-passkeys.md",
+  "type": "DOC",
+  "confidence": "medium",
+  "manifest_override": false,
+  "title": "macOS browser passkeys",
+  "summary": "Operator runbook for the opt-in macOS browser-passkey build: entitlement request, Apple criteria, provisioning profile, signed and notarized build, failure behaviour.",
+  "scope": [
+    "macOS browser passkeys",
+    "com.apple.developer.web-browser.public-key-credential entitlement",
+    "Developer ID provisioning profile",
+    "notarization",
+    "Sites webview",
+    "browser_passkey_status runtime check",
+    "make macos-passkey-readiness-check"
+  ],
+  "cross_refs": [],
+  "locked": false,
+  "precedence": null,
+  "notes": "Runbook prose plus step-by-step operator procedure -> DOC. Competing SPEC signal: a criteria table mapping Apple requirements to Maru implementation files, plus fail-closed prerequisites and a stop condition. Not an API/schema/protocol contract, and path is docs/ (no spec/rfc convention), so DOC wins; recorded as medium confidence because the criteria table and stop condition read as normative build constraints. No ADR status field, no decision/consequences sections, no user stories. Referenced paths are source files (src-tauri/Info.passkeys.plist, src-tauri/src/site_view.rs, src/lib/startupAppMode.ts, .github/workflows/release-bundles.yml) and external Apple URLs, not sibling docs, so cross_refs is empty."
+}

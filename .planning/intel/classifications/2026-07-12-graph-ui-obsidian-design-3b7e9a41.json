@@ -1,0 +1,26 @@
+{
+  "source_path": "/Users/yj.lee/workspace/work/dev/maru/docs/superpowers/specs/2026-07-12-graph-ui-obsidian-design.md",
+  "type": "SPEC",
+  "confidence": "high",
+  "manifest_override": true,
+  "title": "Graph UI refresh: Obsidian-benchmark rendering and typography",
+  "summary": "Design spec for the graph screen: theme-token canvas colors, zoom-faded custom labels, hulls removed for color groups, panel typography pass.",
+  "scope": [
+    "graph canvas rendering",
+    "Sigma label renderer",
+    "theme tokens",
+    "community color palettes",
+    "community hulls (removal)",
+    "graph panel and toolbar typography",
+    "GraphCanvas.tsx",
+    "graphStyle.ts",
+    "GraphView.tsx",
+    "GraphFilterPanel.tsx",
+    "graph.css",
+    "e2e/graph.spec.ts"
+  ],
+  "cross_refs": [],
+  "locked": false,
+  "precedence": null,
+  "notes": "MANIFEST_TYPE=SPEC applied; heuristic/LLM classification skipped. Content also carries a '## Decisions (user-confirmed)' section and 'Status: approved (design)', which alone would read as ADR-ish, but the manifest is authoritative and the body is implementation contract (rendering values, file-level changes, verification steps). Status 'approved (design), pending implementation plan' is not an ADR 'Accepted' status, so locked=false. cross_refs empty: the doc references source/test files, not other documents."
+}

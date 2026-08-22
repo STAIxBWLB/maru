@@ -1,0 +1,34 @@
+{
+  "source_path": "/Users/yj.lee/workspace/work/dev/maru/docs/graph.md",
+  "type": "SPEC",
+  "confidence": "medium",
+  "manifest_override": false,
+  "title": "Graph mode (Phase 8)",
+  "summary": "Technical specification of the Graph activity-rail mode: dual-source data model, Sigma/ForceAtlas2 rendering, derivation pipeline, GraphSettingsV3 schema, managed writes, and test contracts.",
+  "scope": [
+    "graph mode",
+    "vault knowledge graph",
+    "vault-graph.json community overlay",
+    "vault_graph_read",
+    "Sigma WebGL renderer",
+    "Graphology ForceAtlas2 worker",
+    "derivation pipeline",
+    "GraphSettingsV3",
+    "saved views",
+    "local targets",
+    "graph legend and color palettes",
+    "PNG/SVG export",
+    "graph insights and pathfinding",
+    "managed vault writes",
+    "graph-driven authoring",
+    "layout cache",
+    "Terminal/Graph panel"
+  ],
+  "cross_refs": [
+    "_meta/migrations/2607-deep-restructure/specs/maru-vault-graph-spec.md",
+    "README"
+  ],
+  "locked": false,
+  "precedence": null,
+  "notes": "SPEC vs DOC competed. Chose SPEC: dominant signals are implementation contracts, not prose explanation — a versioned settings schema (GraphSettingsV3, schemaVersion 3, with V1->V2/V2->V3 migration rules), a Rust command signature (vault_graph_read(vault_path) -> Option<VaultGraphFile>), a renderer state machine enum, degradation rules, a stated capability invariant (vault note deletion stays MCP-only, README 'Critical invariants' #6), performance budgets with a dated baseline, and named test contracts. No ADR signals (no Status field, no Decision/Consequences pair), no PRD signals (no user stories, acceptance criteria, or success metrics). Confidence held at medium because path is plain docs/ with no spec/ convention or frontmatter, and line 22 names an external SSOT ('Spec 정본 (work repo): maru-vault-graph-spec.md, DR-020') — this file documents already-landed behavior, so on conflict the work-repo spec should outrank it. Source-code paths cited throughout (src/lib/graph/*, src-tauri/src/*) were not recorded as cross_refs since they are code, not documents."
+}
