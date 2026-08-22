@@ -80,7 +80,7 @@ pub fn load_or_empty(workspace_root: &Path) -> io::Result<CatalogIndex> {
         return Ok(CatalogIndex::default());
     }
     let text = std::fs::read_to_string(&path)?;
-    serde_json::from_str(&text).map_err(|e| io::Error::new(io::ErrorKind::Other, e))
+    serde_json::from_str(&text).map_err(|e| io::Error::other(e))
 }
 
 pub fn drilldown_impl(

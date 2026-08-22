@@ -114,8 +114,7 @@ pub fn scan_catalog_impl(
     if let Some(parent) = cache_path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let json = serde_json::to_string_pretty(&index)
-        .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+    let json = serde_json::to_string_pretty(&index).map_err(|e| io::Error::other(e))?;
     std::fs::write(&cache_path, json)?;
 
     Ok(CatalogScanReport {
@@ -208,7 +207,7 @@ fn collect_bu_configs(
                 continue;
             }
             let p = entry.path();
-            if p.file_name().map_or(false, |n| n == "bu-config.yaml")
+            if p.file_name().is_some_and(|n| n == "bu-config.yaml")
                 && p.to_string_lossy().contains("/.maru/")
             {
                 match parse_bu_config(p) {
@@ -698,7 +697,7 @@ fn is_excluded_dir_for_bu_scan(p: &Path) -> bool {
     }
     // .maru/<sub> 형태 검사
     if let Some(parent) = p.parent() {
-        if parent.file_name().map_or(false, |n| n == ".maru") {
+        if parent.file_name().is_some_and(|n| n == ".maru") {
             return matches!(
                 name.as_ref(),
                 "cache"

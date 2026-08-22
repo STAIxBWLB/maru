@@ -341,10 +341,7 @@ fn check_output(output: Output) -> io::Result<()> {
         .chain(stdout.lines())
         .find(|line| !line.trim().is_empty())
         .unwrap_or("converter failed");
-    Err(io::Error::new(
-        io::ErrorKind::Other,
-        format!("converter failed: {message}"),
-    ))
+    Err(io::Error::other(format!("converter failed: {message}")))
 }
 
 fn command_label(program: &Path, args: &[OsString]) -> String {

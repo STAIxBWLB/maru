@@ -600,8 +600,8 @@ fn save_runtime_config(
     work: &Path,
     config: InboxRuntimeConfig,
 ) -> Result<InboxRuntimeConfig, String> {
-    validate_inbox_runtime_config(&work, &config)?;
-    let path = workspace_config_path(&work);
+    validate_inbox_runtime_config(work, &config)?;
+    let path = workspace_config_path(work);
     if !path.exists() {
         return Err("workspace_config_missing".to_string());
     }

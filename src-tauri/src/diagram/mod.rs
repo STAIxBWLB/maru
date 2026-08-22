@@ -418,7 +418,7 @@ fn prune_snapshots(dir: &Path, cap: usize) -> Result<(), String> {
     if entries.len() <= cap {
         return Ok(());
     }
-    entries.sort_by(|a, b| a.1.cmp(&b.1));
+    entries.sort_by_key(|a| a.1);
     for (path, _) in entries.iter().take(entries.len() - cap) {
         let _ = fs::remove_file(path);
     }

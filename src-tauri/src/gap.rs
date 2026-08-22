@@ -677,8 +677,7 @@ fn last_entry_for(log_path: &Path, draft_id: &str) -> Option<GapLogEntry> {
     let raw = fs::read_to_string(log_path).ok()?;
     raw.lines()
         .filter_map(|line| serde_json::from_str::<GapLogEntry>(line).ok())
-        .filter(|entry| entry.draft_id == draft_id)
-        .next_back()
+        .rfind(|entry| entry.draft_id == draft_id)
 }
 
 /// Read and parse the gap log for a workspace, newest-first. Corrupt lines

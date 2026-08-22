@@ -446,7 +446,7 @@ impl ProcessTree {
 
         #[cfg(unix)]
         {
-            return terminate_unix_process_group(child, self.process_group_id);
+            terminate_unix_process_group(child, self.process_group_id)
         }
 
         #[cfg(not(any(unix, windows)))]
@@ -529,7 +529,7 @@ fn terminate_tree_and_reap(
 fn tree_kill_error_is_ignorable(error: &io::Error) -> bool {
     #[cfg(unix)]
     {
-        return process_not_found(error);
+        process_not_found(error)
     }
 
     #[cfg(not(unix))]

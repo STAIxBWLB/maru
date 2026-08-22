@@ -273,7 +273,7 @@ fn git_diff_for_path(path: &Path, file_path: &str) -> Result<String, String> {
     // Combined diff: index changes ∪ worktree changes for this path. -U2
     // keeps context tight so dialog stays compact.
     let output = Command::new("git")
-        .args(["diff", "HEAD", "--", &file_path])
+        .args(["diff", "HEAD", "--", file_path])
         .arg("-U2")
         .current_dir(path)
         .no_window()
@@ -292,7 +292,7 @@ fn git_diff_for_path(path: &Path, file_path: &str) -> Result<String, String> {
     if text.is_empty() {
         // Untracked file: synthesise a "+" diff from raw content so the
         // dialog has something useful to show.
-        let abs = path.join(&file_path);
+        let abs = path.join(file_path);
         if let Ok(content) = std::fs::read_to_string(&abs) {
             let prefixed: String = content
                 .lines()

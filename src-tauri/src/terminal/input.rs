@@ -295,7 +295,7 @@ fn encode_line_break(
 
 fn ctrl_encoded(value: &str) -> Option<String> {
     let ch = value.chars().next()?.to_ascii_lowercase();
-    if ('a'..='z').contains(&ch) {
+    if ch.is_ascii_lowercase() {
         let byte = (ch as u8) - b'a' + 1;
         return Some((byte as char).to_string());
     }

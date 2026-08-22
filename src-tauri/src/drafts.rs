@@ -1035,9 +1035,9 @@ fn relink_promoted_impl(
     target_path: &str,
 ) -> Result<DraftEntry, String> {
     assert_scratchpad_workspace_access(Path::new(&work_path))?;
-    assert_maru_can_write(&work_path, WorkspaceWriteAction::Modify)?;
+    assert_maru_can_write(work_path, WorkspaceWriteAction::Modify)?;
     validate_draft_id(id)?;
-    let work = crate::vault::normalize_existing_dir(&work_path)?;
+    let work = crate::vault::normalize_existing_dir(work_path)?;
     let mut entries = load_index(&work)?;
     let index = find_entry(&entries, id).ok_or_else(|| "drafts_not_found".to_string())?;
     let entry = &entries[index];

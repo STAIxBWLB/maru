@@ -1245,7 +1245,7 @@ fn collect_processed_candidates(
     let mut candidates = Vec::new();
     let mut counts = std::collections::HashMap::new();
     for status in statuses {
-        let status_dir = processed_status_dir(&root, config, &status)?;
+        let status_dir = processed_status_dir(root, config, status)?;
         if !status_dir.exists() {
             continue;
         }

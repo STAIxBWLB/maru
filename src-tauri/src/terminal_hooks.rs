@@ -334,7 +334,7 @@ fn merge_claude_hooks(root: &mut Value, cli: &str) -> bool {
             *entry = json!([]);
         }
         let array = entry.as_array_mut().expect("event array");
-        let already = array.iter().any(|group| group_has_maru_command(group));
+        let already = array.iter().any(group_has_maru_command);
         if !already {
             array.push(json!({
                 "hooks": [ { "type": "command", "command": command } ]

@@ -178,12 +178,12 @@ fn is_catalog_relevant(path: &Path, root: &Path) -> bool {
     // OS 잡파일 무시
     if path
         .file_name()
-        .map_or(false, |n| n.to_string_lossy().starts_with('.'))
+        .is_some_and(|n| n.to_string_lossy().starts_with('.'))
     {
         // `.evidence.yaml` 사이드카는 catalog 상태 변경 신호 — 허용
         if !path
             .file_name()
-            .map_or(false, |n| n.to_string_lossy().contains(".evidence.yaml"))
+            .is_some_and(|n| n.to_string_lossy().contains(".evidence.yaml"))
         {
             return false;
         }
