@@ -114,7 +114,7 @@ pub fn scan_catalog_impl(
     if let Some(parent) = cache_path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let json = serde_json::to_string_pretty(&index).map_err(|e| io::Error::other(e))?;
+    let json = serde_json::to_string_pretty(&index).map_err(io::Error::other)?;
     std::fs::write(&cache_path, json)?;
 
     Ok(CatalogScanReport {

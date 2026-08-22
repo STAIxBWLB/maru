@@ -557,8 +557,7 @@ pub fn read_tasks_log(
         fs::read_to_string(&log_path).map_err(|err| format!("Cannot read tasks log: {err}"))?;
     let cap = limit
         .unwrap_or(TASKS_LOG_DEFAULT_LIMIT)
-        .min(TASKS_LOG_MAX_LIMIT)
-        .max(1);
+        .clamp(1, TASKS_LOG_MAX_LIMIT);
     let filter: Option<BTreeSet<String>> = event_filter
         .map(|values| {
             values

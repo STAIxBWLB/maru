@@ -507,7 +507,7 @@ pub fn agents_upsert(agent: AgentRecord) -> Result<AgentRecord, String> {
     if next
         .label
         .as_ref()
-        .is_none_or(|label| label.trim().is_empty())
+        .map_or(true, |label| label.trim().is_empty())
     {
         return Err("agent_label_required".to_string());
     }

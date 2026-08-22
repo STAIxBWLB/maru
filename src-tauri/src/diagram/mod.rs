@@ -179,7 +179,7 @@ pub fn diagram_list_documents(workspace: String) -> Result<Vec<DiagramFile>, Str
             doc_title,
         });
     }
-    out.sort_by(|a, b| b.modified_at.cmp(&a.modified_at));
+    out.sort_by_key(|d| std::cmp::Reverse(d.modified_at));
     Ok(out)
 }
 
@@ -605,7 +605,7 @@ pub fn diagram_pattern_list(workspace: String) -> Result<Vec<DiagramFile>, Strin
             doc_title,
         });
     }
-    out.sort_by(|a, b| b.modified_at.cmp(&a.modified_at));
+    out.sort_by_key(|d| std::cmp::Reverse(d.modified_at));
     Ok(out)
 }
 

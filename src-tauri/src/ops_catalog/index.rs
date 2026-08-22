@@ -80,7 +80,7 @@ pub fn load_or_empty(workspace_root: &Path) -> io::Result<CatalogIndex> {
         return Ok(CatalogIndex::default());
     }
     let text = std::fs::read_to_string(&path)?;
-    serde_json::from_str(&text).map_err(|e| io::Error::other(e))
+    serde_json::from_str(&text).map_err(io::Error::other)
 }
 
 pub fn drilldown_impl(
@@ -96,9 +96,9 @@ pub fn drilldown_impl(
 
     // frontmatter 추출 (--- ... --- 블록)
     if let Ok(content) = std::fs::read_to_string(&full) {
-        if content.starts_with("---\n") {
-            if let Some(end) = content[4..].find("\n---") {
-                resp.frontmatter_yaml = Some(content[4..4 + end].to_string());
+        if let Some(rest) = content.strip_prefix("---\n") {
+            if let Some(end) = rest.find("\n---") {
+                resp.frontmatter_yaml = Some(rest[..end].to_string());
             }
         }
     }

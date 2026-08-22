@@ -1165,10 +1165,9 @@ fn last_mutation_event_kind(work: &Path, logical_day: &str) -> Result<Option<Str
     }
     Ok(read_events_at(&path)?
         .into_iter()
-        .filter(|event| {
+        .rfind(|event| {
             event.payload.get("logicalDay").and_then(JsonValue::as_str) == Some(logical_day)
         })
-        .next_back()
         .map(|event| event.kind))
 }
 

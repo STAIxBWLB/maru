@@ -157,26 +157,42 @@ pub(crate) fn list_records(work: &Path) -> Result<Vec<OutboxRecord>, String> {
     Ok(records)
 }
 
+/// The record content `enqueue_record` writes, everything except the
+/// workspace and the timestamp it stamps the record with. Bundled to keep
+/// the function's argument count under clippy's threshold.
+pub(crate) struct OutboxRecordDraft {
+    pub op: OutboxOp,
+    pub task_path: String,
+    pub google_task_id: String,
+    pub google_task_list_id: Option<String>,
+    pub payload: Option<UpsertPayload>,
+    pub status: OutboxStatus,
+    pub web_action_id: Option<String>,
+}
+
 /// Persist a new outbox record. Written BEFORE the local mutation when
 /// `status` is `Prepared` (see crash-recovery semantics in the module docs).
 pub(crate) fn enqueue_record(
     work: &Path,
-    op: OutboxOp,
-    task_path: &str,
-    google_task_id: &str,
-    google_task_list_id: Option<String>,
-    payload: Option<UpsertPayload>,
-    status: OutboxStatus,
-    web_action_id: Option<String>,
+    draft: OutboxRecordDraft,
     now_iso: &str,
 ) -> Result<OutboxRecord, String> {
+    let OutboxRecordDraft {
+        op,
+        task_path,
+        google_task_id,
+        google_task_list_id,
+        payload,
+        status,
+        web_action_id,
+    } = draft;
     let stamp = now_iso.replace(|c: char| !c.is_ascii_alphanumeric(), "");
     let unique = &uuid::Uuid::new_v4().simple().to_string()[..8];
     let record = OutboxRecord {
         id: format!("{stamp}-{unique}"),
         op,
-        task_path: task_path.to_string(),
-        google_task_id: google_task_id.to_string(),
+        task_path,
+        google_task_id,
         google_task_list_id,
         payload,
         status,
@@ -724,13 +740,15 @@ mod tests {
     fn sample_record(work: &Path, op: OutboxOp, status: OutboxStatus) -> OutboxRecord {
         enqueue_record(
             work,
-            op,
-            "tasks/active/task.md",
-            "gtask-1",
-            None,
-            None,
-            status,
-            None,
+            OutboxRecordDraft {
+                op,
+                task_path: "tasks/active/task.md".to_string(),
+                google_task_id: "gtask-1".to_string(),
+                google_task_list_id: None,
+                payload: None,
+                status,
+                web_action_id: None,
+            },
             NOW,
         )
         .unwrap()
@@ -991,13 +1009,15 @@ mod tests {
         let prepared_not_done = sample_record(work, OutboxOp::Complete, OutboxStatus::Prepared);
         let prepared_done = enqueue_record(
             work,
-            OutboxOp::Complete,
-            "tasks/archive/done.md",
-            "gtask-2",
-            None,
-            None,
-            OutboxStatus::Prepared,
-            None,
+            OutboxRecordDraft {
+                op: OutboxOp::Complete,
+                task_path: "tasks/archive/done.md".to_string(),
+                google_task_id: "gtask-2".to_string(),
+                google_task_list_id: None,
+                payload: None,
+                status: OutboxStatus::Prepared,
+                web_action_id: None,
+            },
             NOW,
         )
         .unwrap();
@@ -1054,17 +1074,19 @@ mod tests {
         fs::write(&note, "---\nstatus: active\nowner: Luca\n---\n# Ship it\n").unwrap();
         enqueue_record(
             work,
-            OutboxOp::Upsert,
-            "tasks/active/task.md",
-            google_task_id,
-            Some("list-7".to_string()),
-            Some(UpsertPayload {
-                title: "Ship it".to_string(),
-                notes: "File: tasks/active/task.md".to_string(),
-                due: Some("2026-08-31T00:00:00.000Z".to_string()),
-            }),
-            OutboxStatus::Ready,
-            Some("wa-1".to_string()),
+            OutboxRecordDraft {
+                op: OutboxOp::Upsert,
+                task_path: "tasks/active/task.md".to_string(),
+                google_task_id: google_task_id.to_string(),
+                google_task_list_id: Some("list-7".to_string()),
+                payload: Some(UpsertPayload {
+                    title: "Ship it".to_string(),
+                    notes: "File: tasks/active/task.md".to_string(),
+                    due: Some("2026-08-31T00:00:00.000Z".to_string()),
+                }),
+                status: OutboxStatus::Ready,
+                web_action_id: Some("wa-1".to_string()),
+            },
             NOW,
         )
         .unwrap()

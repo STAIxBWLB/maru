@@ -7,6 +7,7 @@
 //!   - type ∈ {insight, decision, observation, person, project, method, moc, reference}
 //!   - domain ∈ {research, projects, teaching, operations, people, ai-practice}
 //!   - topics: non-empty array, every item containing a `[[wikilink]]`
+//!
 //! Unknown fields pass through untouched — a frontmatter field carrying a
 //! wikilink IS a relation (vault README principle); validation must not strip
 //! or reject it. Files outside `notes/` (the vault log, reports/, templates/)

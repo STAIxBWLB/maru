@@ -1135,7 +1135,16 @@ fn scan_processed_items_with_config(
     let statuses = normalize_processed_statuses(statuses)?;
     let (candidates, _) = collect_processed_candidates(&root, config, &statuses)?;
     Ok(process_processed_candidates(
-        work, &root, config, candidates, &statuses, channel, query, limit,
+        work,
+        &root,
+        config,
+        candidates,
+        &statuses,
+        ProcessedFilter {
+            channel,
+            query,
+            limit,
+        },
     ))
 }
 
@@ -1160,9 +1169,11 @@ fn scan_processed_snapshot_with_config(
         config,
         candidates,
         &requested_statuses,
-        channel,
-        query,
-        limit,
+        ProcessedFilter {
+            channel,
+            query,
+            limit,
+        },
     );
     Ok(InboxProcessedSnapshot { items, counts })
 }
@@ -1190,7 +1201,7 @@ struct ErrorProcessedCandidate {
 
 #[derive(Debug)]
 enum ProcessedCandidate {
-    Parsed(ParsedProcessedCandidate),
+    Parsed(Box<ParsedProcessedCandidate>),
     Error(ErrorProcessedCandidate),
 }
 
@@ -1278,7 +1289,7 @@ fn collect_processed_candidates(
                         manifest_path,
                         &raw,
                     ) {
-                        Ok(candidate) => ProcessedCandidate::Parsed(candidate),
+                        Ok(candidate) => ProcessedCandidate::Parsed(Box::new(candidate)),
                         Err(err) => ProcessedCandidate::Error(error_processed_candidate(
                             &item_dir, status, err,
                         )),
@@ -1297,23 +1308,32 @@ fn collect_processed_candidates(
     Ok((candidates, counts))
 }
 
+/// Caller-requested narrowing for a processed-items scan: which channel,
+/// which search text, and how many to return. Bundled to keep
+/// `process_processed_candidates`'s argument count under clippy's threshold.
+struct ProcessedFilter {
+    channel: Option<String>,
+    query: Option<String>,
+    limit: Option<usize>,
+}
+
 fn process_processed_candidates(
     work: &Path,
     root: &Path,
     config: &InboxRuntimeConfig,
     candidates: Vec<ProcessedCandidate>,
     statuses: &[String],
-    channel: Option<String>,
-    query: Option<String>,
-    limit: Option<usize>,
+    filter: ProcessedFilter,
 ) -> Vec<InboxProcessedItem> {
-    let channel = channel
+    let channel = filter
+        .channel
         .map(|value| value.trim().to_lowercase())
         .filter(|value| !value.is_empty());
-    let query = query
+    let query = filter
+        .query
         .map(|value| value.trim().to_lowercase())
         .filter(|value| !value.is_empty());
-    let limit = limit.unwrap_or(100).clamp(1, 500);
+    let limit = filter.limit.unwrap_or(100).clamp(1, 500);
     let mut candidates = candidates
         .into_iter()
         .filter(|candidate| {
@@ -1508,7 +1528,7 @@ fn hydrate_processed_candidate(
         ProcessedCandidate::Parsed(candidate) => {
             let item_dir = candidate.item_dir.clone();
             let folder_status = candidate.folder_status.clone();
-            match build_processed_item_from_candidate(root, config, candidate) {
+            match build_processed_item_from_candidate(root, config, *candidate) {
                 Ok(item) => item,
                 Err(err) => error_processed_item(work, config, &item_dir, &folder_status, err),
             }

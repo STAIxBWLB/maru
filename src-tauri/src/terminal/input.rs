@@ -102,10 +102,12 @@ pub fn encode_terminal_input(
         } => encode_key(
             kind,
             key,
-            *shift_key,
-            *alt_key,
-            *ctrl_key,
-            *meta_key,
+            Modifiers {
+                shift: *shift_key,
+                alt: *alt_key,
+                ctrl: *ctrl_key,
+                meta: *meta_key,
+            },
             kitty_keyboard_active,
             bracketed_paste_active,
         ),
@@ -163,9 +165,12 @@ pub fn encode_mouse_input(command: &TerminalInputCommand, modes: MouseModes) -> 
                 *row,
                 motion,
                 release,
-                *shift_key,
-                *alt_key,
-                *ctrl_key,
+                Modifiers {
+                    shift: *shift_key,
+                    alt: *alt_key,
+                    ctrl: *ctrl_key,
+                    meta: false,
+                },
                 modes.sgr,
             ))
         }
@@ -181,11 +186,34 @@ pub fn encode_mouse_input(command: &TerminalInputCommand, modes: MouseModes) -> 
             // no matching release in either protocol.
             let button = if *up { 64 } else { 65 };
             Some(encode_mouse_report(
-                button, *col, *row, false, false, *shift_key, *alt_key, *ctrl_key, modes.sgr,
+                button,
+                *col,
+                *row,
+                false,
+                false,
+                Modifiers {
+                    shift: *shift_key,
+                    alt: *alt_key,
+                    ctrl: *ctrl_key,
+                    meta: false,
+                },
+                modes.sgr,
             ))
         }
         _ => None,
     }
+}
+
+/// Shift/Alt/Ctrl/Meta modifier state for one input event. Bundled to keep
+/// `encode_mouse_report`/`encode_key`'s argument counts under clippy's
+/// threshold; neither SGR nor legacy X10 mouse reports have a wire bit for
+/// `meta`, so mouse callers just leave it `false`.
+#[derive(Clone, Copy, Debug, Default)]
+struct Modifiers {
+    shift: bool,
+    alt: bool,
+    ctrl: bool,
+    meta: bool,
 }
 
 /// Build a single SGR (1006) or legacy X10 mouse report. Coordinates are
@@ -196,22 +224,20 @@ fn encode_mouse_report(
     row: u16,
     motion: bool,
     release: bool,
-    shift: bool,
-    alt: bool,
-    ctrl: bool,
+    modifiers: Modifiers,
     sgr: bool,
 ) -> Vec<u8> {
     let mut cb = base_button;
     if motion {
         cb += 32;
     }
-    if shift {
+    if modifiers.shift {
         cb += 4;
     }
-    if alt {
+    if modifiers.alt {
         cb += 8;
     }
-    if ctrl {
+    if modifiers.ctrl {
         cb += 16;
     }
     let x = col as u32 + 1;
@@ -236,13 +262,16 @@ fn encode_mouse_report(
 fn encode_key(
     kind: &str,
     key: &str,
-    shift: bool,
-    alt: bool,
-    ctrl: bool,
-    meta: bool,
+    modifiers: Modifiers,
     kitty_keyboard_active: bool,
     bracketed_paste_active: bool,
 ) -> Option<String> {
+    let Modifiers {
+        shift,
+        alt,
+        ctrl,
+        meta,
+    } = modifiers;
     if key == "Enter" && shift && !alt && !ctrl && !meta {
         return encode_line_break(kind, kitty_keyboard_active, bracketed_paste_active);
     }

@@ -706,13 +706,11 @@ pub(crate) fn rekey_document_states(
         });
     }
 
-    let mut written = 0;
-    for item in &pending {
+    for (written, item) in pending.iter().enumerate() {
         if let Err(err) = write_atomic(&item.target, &item.updated) {
             rollback_rekeys(&pending[..written]);
             return Err(format!("Cannot rekey evidence binder state: {err}"));
         }
-        written += 1;
     }
     for item in &pending {
         if item.target == item.source {
@@ -937,18 +935,20 @@ fn discover_sidecar_candidates(
             candidates.push(build_candidate(
                 work,
                 &evidence_path,
-                "sidecar",
-                scope.and_then(|scope| scope.business_unit.clone()),
-                Some(path_string(path)),
-                None,
-                sidecar_yaml
-                    .as_ref()
-                    .and_then(|yaml| sidecar_string(yaml, "summary")),
-                sidecar.kind,
-                sidecar.status,
-                sidecar.sha256,
-                sidecar.companion_for,
-                None,
+                CandidateMeta {
+                    source: "sidecar",
+                    business_unit: scope.and_then(|scope| scope.business_unit.clone()),
+                    sidecar_path: Some(path_string(path)),
+                    inbox_item_id: None,
+                    summary: sidecar_yaml
+                        .as_ref()
+                        .and_then(|yaml| sidecar_string(yaml, "summary")),
+                    evidence_kind: sidecar.kind,
+                    sidecar_status: sidecar.status,
+                    sidecar_sha256: sidecar.sha256,
+                    companion_for: sidecar.companion_for,
+                    title_override: None,
+                },
             )?);
         }
     }
@@ -1000,23 +1000,25 @@ fn discover_processed_candidates(
                 let candidate = build_candidate(
                     work,
                     &path,
-                    "inboxProcessed",
-                    manifest.business_unit.clone(),
-                    None,
-                    manifest.id.clone(),
-                    Some(format!(
-                        "{}{}",
-                        manifest
-                            .channel
-                            .clone()
-                            .unwrap_or_else(|| "inbox".to_string()),
-                        status_prefix(status)
-                    )),
-                    None,
-                    SidecarStatus::None,
-                    None,
-                    None,
-                    Some(title),
+                    CandidateMeta {
+                        source: "inboxProcessed",
+                        business_unit: manifest.business_unit.clone(),
+                        sidecar_path: None,
+                        inbox_item_id: manifest.id.clone(),
+                        summary: Some(format!(
+                            "{}{}",
+                            manifest
+                                .channel
+                                .clone()
+                                .unwrap_or_else(|| "inbox".to_string()),
+                            status_prefix(status)
+                        )),
+                        evidence_kind: None,
+                        sidecar_status: SidecarStatus::None,
+                        sidecar_sha256: None,
+                        companion_for: None,
+                        title_override: Some(title),
+                    },
                 )?;
                 candidates.push(candidate);
             }
@@ -1025,10 +1027,11 @@ fn discover_processed_candidates(
     Ok(candidates)
 }
 
-fn build_candidate(
-    work: &Path,
-    path: &Path,
-    source: &str,
+/// The descriptive fields `build_candidate` attaches to a discovered evidence
+/// file, everything beyond "which workspace, which path". Bundled to keep the
+/// function's argument count under clippy's threshold.
+struct CandidateMeta {
+    source: &'static str,
     business_unit: Option<String>,
     sidecar_path: Option<String>,
     inbox_item_id: Option<String>,
@@ -1038,7 +1041,25 @@ fn build_candidate(
     sidecar_sha256: Option<String>,
     companion_for: Option<String>,
     title_override: Option<String>,
+}
+
+fn build_candidate(
+    work: &Path,
+    path: &Path,
+    meta: CandidateMeta,
 ) -> Result<EvidenceBinderCandidate, String> {
+    let CandidateMeta {
+        source,
+        business_unit,
+        sidecar_path,
+        inbox_item_id,
+        summary,
+        evidence_kind,
+        sidecar_status,
+        sidecar_sha256,
+        companion_for,
+        title_override,
+    } = meta;
     let metadata = fs::metadata(path).map_err(|err| format!("Cannot inspect evidence: {err}"))?;
     let detected_format =
         kordoc_lite::detect_document_format_path(path).unwrap_or(DocumentFormat::Unknown);

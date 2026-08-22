@@ -463,7 +463,6 @@ pub async fn decide_outlook_item(
     m365_path: Option<String>,
 ) -> Result<OutlookDecisionOutcome, String> {
     crate::approval::require_approval(&approvals, approval_id, decision.approval_kind())?;
-    drop(approvals);
     let outcome = tauri::async_runtime::spawn_blocking(move || {
         decide_outlook_item_now(
             work_path.as_deref(),
@@ -488,7 +487,6 @@ pub async fn decide_outlook_items(
     m365_path: Option<String>,
 ) -> Result<Vec<OutlookDecisionOutcome>, String> {
     require_outlook_items_approval(&approvals, approval_id, &items)?;
-    drop(approvals);
     let outcomes = tauri::async_runtime::spawn_blocking(move || {
         let work_path = require_workspace_path(work_path.as_deref())?;
         let context = resolve_mso_context(Some(work_path), m365_path.as_deref())?;

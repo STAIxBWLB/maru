@@ -149,9 +149,11 @@ impl TerminalModel {
             cols: cols as usize,
             rows: rows as usize,
         };
-        let mut config = Config::default();
-        config.kitty_keyboard = true;
-        config.scrolling_history = 5000;
+        let config = Config {
+            kitty_keyboard: true,
+            scrolling_history: 5000,
+            ..Config::default()
+        };
         let term = Term::new(config, &size, proxy);
         Self {
             term,

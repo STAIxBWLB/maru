@@ -2020,14 +2020,16 @@ export async function terminalSpawn(
   }
   const channel = new Channel<TerminalStreamMessage>((message) => onEvent?.(message));
   const generation = await invoke<string>("terminal_spawn", {
-    sessionId,
-    kind,
-    cwd,
-    command: options.command ?? null,
-    extraArgs: options.extraArgs ?? null,
-    extraEnv: options.extraEnv ?? null,
-    cols: options.cols ?? null,
-    rows: options.rows ?? null,
+    args: {
+      sessionId,
+      kind,
+      cwd,
+      command: options.command ?? null,
+      extraArgs: options.extraArgs ?? null,
+      extraEnv: options.extraEnv ?? null,
+      cols: options.cols ?? null,
+      rows: options.rows ?? null,
+    },
     onEvent: channel,
   });
   return { generation, channel };

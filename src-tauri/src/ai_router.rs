@@ -96,8 +96,10 @@ pub fn start_agent_cli_invocation(
         Some(resolved_cwd),
         stdin_payload,
         extra_env.unwrap_or_default(),
-        provider_kind.id().to_string(),
-        Some(mission_metadata),
+        MissionInfo {
+            kind: provider_kind.id().to_string(),
+            metadata: Some(mission_metadata),
+        },
     )
 }
 
@@ -171,8 +173,17 @@ fn build_agent_command(
     Ok((provider_kind, resolved_cwd, cmd, stdin_payload))
 }
 
+/// The mission this invocation registers itself under: what
+/// `mission_state::register_mission_with_metadata` needs beyond the app
+/// handle, invocation id, and child pid. Bundled to keep
+/// `spawn_streaming_invocation`'s argument count under clippy's threshold.
+struct MissionInfo {
+    kind: String,
+    metadata: Option<JsonValue>,
+}
+
 /// Spawn `cmd`, wire stdout/stderr pumps + the reaper, register a mission keyed
-/// by `mission_kind`, and (when `stdin_payload` is `Some`) write the prompt to
+/// by `mission.kind`, and (when `stdin_payload` is `Some`) write the prompt to
 /// the child's stdin on its own thread so the pipe closes on EOF (Codex). Shared
 /// by both the generic command and the Claude wrapper.
 fn spawn_streaming_invocation(
@@ -182,8 +193,7 @@ fn spawn_streaming_invocation(
     cwd: Option<String>,
     stdin_payload: Option<String>,
     extra_env: HashMap<String, String>,
-    mission_kind: String,
-    mission_metadata: Option<JsonValue>,
+    mission: MissionInfo,
 ) -> Result<String, String> {
     if let Some(cwd) = cwd.as_ref() {
         cmd.current_dir(cwd);
@@ -251,9 +261,9 @@ fn spawn_streaming_invocation(
     let _ = mission_state::register_mission_with_metadata(
         &app,
         &invocation_id,
-        &mission_kind,
+        &mission.kind,
         child_pid,
-        mission_metadata,
+        mission.metadata,
     );
 
     // Reaper thread: wait for exit, then drain both output pumps before
