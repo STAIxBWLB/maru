@@ -827,7 +827,7 @@ fn ensure_secret_parent_dirs(paths: &SecretsPaths, path: &Path) -> Result<(), St
 }
 
 fn looks_binary(bytes: &[u8]) -> bool {
-    bytes.iter().any(|byte| *byte == 0)
+    bytes.contains(&0)
 }
 
 fn secret_candidate_reason(path: &Path) -> Option<String> {

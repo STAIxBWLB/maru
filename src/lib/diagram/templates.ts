@@ -157,11 +157,11 @@ function tSwot(cx: number, cy: number, t: Translator): TemplateBundle {
   const w = 200;
   const h = 140;
   const gap = 12;
-  const styleFor = (bg: string, fc: string, hdbg: string): DiagramNode["style"] => ({
+  const styleFor = (bg: string, fc: string, _hdbg: string): DiagramNode["style"] => ({
     bg, border: PALETTE.outline, fc, fs: 11,
   });
   void styleFor;
-  const sec = (x: number, y: number, key: string, headerBg: string): DiagramNode =>
+  const sec = (x: number, y: number, key: string, _headerBg: string): DiagramNode =>
     mkNode("section", x, y, {
       w, h,
       title: t(`diagram.template.swot.${key}`),

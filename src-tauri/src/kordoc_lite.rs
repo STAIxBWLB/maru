@@ -229,18 +229,14 @@ fn section_xml_to_html(xml: &str) -> Result<String, String> {
                     cell_open = true;
                 }
                 "t" => depth_t += 1,
-                "linebreak" | "lineBreak" => {
-                    if in_para || cell_open {
-                        out.push_str("<br/>");
-                    }
+                "linebreak" | "lineBreak" if (in_para || cell_open) => {
+                    out.push_str("<br/>");
                 }
                 _ => {}
             },
             Event::Empty(start) => match local_name(start.name().as_ref()).as_str() {
-                "linebreak" | "lineBreak" | "br" => {
-                    if in_para || cell_open {
-                        out.push_str("<br/>");
-                    }
+                "linebreak" | "lineBreak" | "br" if (in_para || cell_open) => {
+                    out.push_str("<br/>");
                 }
                 _ => {}
             },

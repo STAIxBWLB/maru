@@ -12,7 +12,6 @@ import { useTranslation } from "../../lib/i18n";
 import {
   activeImplementationDraft,
   buildIdeateToDraftPrompt,
-  IDEATION_DRAFTS_SKILL_NAME,
   IMPLEMENTATION_DRAFT_MISSION_KIND,
   implementationDraftMissionIdeaPath,
   ingestImplementationDraftRun,

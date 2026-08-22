@@ -160,6 +160,10 @@ cli-smoke-debug: $(ICON_PATH) ## Smoke a debug CLI after test compilation, avoid
 typecheck: node_modules ## tsc --build (no emit)
 	$(PNPM) typecheck
 
+.PHONY: lint
+lint: node_modules ## ESLint gate: hook-dependency + unused-symbol correctness rules (src/ + e2e/)
+	$(PNPM) lint
+
 .PHONY: test
 test: test-ts test-rust ## Run all unit tests (TS vitest + Rust cargo test)
 
@@ -187,6 +191,14 @@ test-ts: node_modules ## TypeScript / React unit tests (vitest)
 .PHONY: test-rust
 test-rust: $(ICON_PATH) ## Rust unit + integration tests (cargo test --lib)
 	cd $(TAURI_DIR) && $(CARGO) test --lib
+
+.PHONY: fmt-check
+fmt-check: ## Rust format check (no changes written)
+	cd $(TAURI_DIR) && $(CARGO) fmt --check
+
+.PHONY: clippy
+clippy: $(ICON_PATH) ## Rust lint gate (cargo clippy -D warnings, lib scope)
+	cd $(TAURI_DIR) && $(CARGO) clippy -- -D warnings
 
 .PHONY: test-cli
 test-cli: $(ICON_PATH) ## Compile and test standalone Maru CLI binary
@@ -306,7 +318,7 @@ homebrew-fetch: ## Fetch Maru Homebrew cask and CLI formula in HOMEBREW_TAP_DIR
 # ---------------------------------------------------------------------------
 
 .PHONY: verify
-verify: typecheck release-version-check icons-check lint-i18n check-select-chrome check-type-tokens test-ts test-rust build-frontend ## Full verification: typecheck + release versions + generated assets + guards + tests + frontend build
+verify: typecheck lint release-version-check icons-check lint-i18n check-select-chrome check-type-tokens test-ts test-rust fmt-check clippy build-frontend ## Full verification: typecheck + ESLint gate + release versions + generated assets + guards + tests + Rust format check + Rust lint gate + frontend build
 
 # ---------------------------------------------------------------------------
 # Clean

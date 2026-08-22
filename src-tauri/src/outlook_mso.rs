@@ -326,13 +326,13 @@ fn validate_m365_status_output(
         }
         return Err(timeout_detail(
             "m365_timeout: readiness probe exceeded its deadline",
-            &output,
+            output,
         ));
     }
     if !output.status.success() {
-        return Err(classify_m365_output_error(&output));
+        return Err(classify_m365_output_error(output));
     }
-    reject_truncated_json_stdout(&output, "Microsoft 365 status response")?;
+    reject_truncated_json_stdout(output, "Microsoft 365 status response")?;
     let stdout = String::from_utf8_lossy(&output.stdout);
     if is_m365_logged_out_status(&stdout) {
         return Err(format!("auth_required: {M365_AUTH_REQUIRED_DETAIL}"));
@@ -371,9 +371,9 @@ fn is_m365_logged_out_status(raw: &str) -> bool {
 fn workspace_identity_matches(config: &WorkspaceMsoConfig, identity: &M365StatusIdentity) -> bool {
     let matches = |expected: &Option<String>, actual: &Option<String>| {
         expected.as_ref().map_or(true, |expected| {
-            actual.as_ref().map_or(false, |actual| {
-                expected.trim().eq_ignore_ascii_case(actual.trim())
-            })
+            actual
+                .as_ref()
+                .is_some_and(|actual| expected.trim().eq_ignore_ascii_case(actual.trim()))
         })
     };
     matches(&config.app_id, &identity.app_id) && matches(&config.tenant_id, &identity.app_tenant)
@@ -463,7 +463,6 @@ pub async fn decide_outlook_item(
     m365_path: Option<String>,
 ) -> Result<OutlookDecisionOutcome, String> {
     crate::approval::require_approval(&approvals, approval_id, decision.approval_kind())?;
-    drop(approvals);
     let outcome = tauri::async_runtime::spawn_blocking(move || {
         decide_outlook_item_now(
             work_path.as_deref(),
@@ -488,7 +487,6 @@ pub async fn decide_outlook_items(
     m365_path: Option<String>,
 ) -> Result<Vec<OutlookDecisionOutcome>, String> {
     require_outlook_items_approval(&approvals, approval_id, &items)?;
-    drop(approvals);
     let outcomes = tauri::async_runtime::spawn_blocking(move || {
         let work_path = require_workspace_path(work_path.as_deref())?;
         let context = resolve_mso_context(Some(work_path), m365_path.as_deref())?;

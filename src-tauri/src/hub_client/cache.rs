@@ -37,8 +37,7 @@ pub fn load_etag_index(cache_root: &Path) -> io::Result<EtagIndex> {
 pub fn save_etag_index(cache_root: &Path, index: &EtagIndex) -> io::Result<()> {
     std::fs::create_dir_all(cache_root)?;
     let path = etag_index_path(cache_root);
-    let text =
-        serde_json::to_string_pretty(index).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+    let text = serde_json::to_string_pretty(index).map_err(io::Error::other)?;
     std::fs::write(&path, text)
 }
 
@@ -191,8 +190,7 @@ pub fn enqueue_submit_gate(
         retry_count: 0,
         last_error: None,
     };
-    let text =
-        serde_json::to_string_pretty(&item).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+    let text = serde_json::to_string_pretty(&item).map_err(io::Error::other)?;
     std::fs::write(&path, text)?;
     Ok(path)
 }
@@ -234,8 +232,7 @@ pub fn mark_retry(path: &Path, error: &str) -> io::Result<()> {
         serde_json::from_str(&text).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
     item.retry_count += 1;
     item.last_error = Some(error.chars().take(500).collect());
-    let text =
-        serde_json::to_string_pretty(&item).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+    let text = serde_json::to_string_pretty(&item).map_err(io::Error::other)?;
     std::fs::write(path, text)
 }
 

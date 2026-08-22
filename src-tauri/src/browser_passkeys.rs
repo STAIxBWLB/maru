@@ -61,9 +61,13 @@ const AUTHENTICATION_SERVICES_PATH: &std::ffi::CStr =
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum BrowserPasskeyAuthorization {
+    #[cfg(any(target_os = "macos", test))]
     Authorized,
+    #[cfg(any(target_os = "macos", test))]
     Denied,
+    #[cfg(any(target_os = "macos", test))]
     NotDetermined,
+    #[cfg(any(target_os = "macos", test))]
     Unknown,
     Unsupported,
 }
@@ -100,6 +104,7 @@ fn unsupported_status() -> BrowserPasskeyStatus {
     }
 }
 
+#[cfg(any(target_os = "macos", test))]
 fn authorization_from_raw(value: isize) -> BrowserPasskeyAuthorization {
     match value {
         0 => BrowserPasskeyAuthorization::Authorized,
@@ -109,6 +114,7 @@ fn authorization_from_raw(value: isize) -> BrowserPasskeyAuthorization {
     }
 }
 
+#[cfg(any(target_os = "macos", test))]
 fn status_from_runtime_capabilities(
     has_managed_entitlement: bool,
     manager_available: bool,

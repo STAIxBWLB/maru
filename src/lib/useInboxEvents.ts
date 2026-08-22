@@ -115,7 +115,6 @@ export function useInboxEvents({
         // Most likely cause: <workspace>/inbox/downloads doesn't exist yet.
         // Surface a soft notice but keep polling functional.
         if (!cancelled) {
-          // eslint-disable-next-line no-console
           console.info("[maru] inbox watcher not started:", err);
         }
         return;
@@ -133,7 +132,6 @@ export function useInboxEvents({
         }
       } catch (err) {
         // Browser dev shell — `@tauri-apps/api/event` may not be wired.
-        // eslint-disable-next-line no-console
         console.info("[maru] inbox event listener unavailable:", err);
       }
     })();

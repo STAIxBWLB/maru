@@ -161,8 +161,7 @@ pub fn plan_bundle(
     };
 
     let manifest_path = bundle_dir.join("manifest.yaml");
-    let yaml =
-        serde_yaml::to_string(&manifest).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+    let yaml = serde_yaml::to_string(&manifest).map_err(io::Error::other)?;
     std::fs::write(&manifest_path, yaml)?;
 
     Ok((manifest_path, manifest))
@@ -182,17 +181,16 @@ pub fn load_manifest(path: &Path) -> io::Result<ExportManifest> {
 }
 
 pub fn save_manifest(path: &Path, manifest: &ExportManifest) -> io::Result<()> {
-    let yaml =
-        serde_yaml::to_string(manifest).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+    let yaml = serde_yaml::to_string(manifest).map_err(io::Error::other)?;
     std::fs::write(path, yaml)
 }
 
 // ---------------------------------------------------------------- transitions
 
-fn entry_mut<'a>(
-    manifest: &'a mut ExportManifest,
+fn entry_mut(
+    manifest: &mut ExportManifest,
     format: ExportFormat,
-) -> io::Result<&'a mut ExportOutputEntry> {
+) -> io::Result<&mut ExportOutputEntry> {
     manifest
         .outputs
         .iter_mut()

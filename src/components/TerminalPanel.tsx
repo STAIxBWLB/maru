@@ -44,7 +44,6 @@ import {
   terminalSpawn,
   terminalText,
   decodeTerminalWireFrame,
-  type TerminalFrame,
   type TerminalInputCommand,
   type TerminalSpawnHandle,
   type TerminalStreamMessage,
@@ -607,20 +606,32 @@ export const TerminalPanel = memo(
       return () => {
         disposedRef.current = true;
         cancelTerminalLayoutRefresh(layoutRefreshRafRef);
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- unmount teardown reads each ref's live value on purpose; this effect has no deps and never re-runs mid-life
         for (const sessionId of sessionByTabRef.current.values()) {
           void terminalKill(sessionId);
         }
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- unmount teardown reads each ref's live value on purpose; this effect has no deps and never re-runs mid-life
         for (const pump of inputPumpsRef.current.values()) pump.fail();
         inputPumpsRef.current.clear();
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- unmount teardown reads each ref's live value on purpose; this effect has no deps and never re-runs mid-life
         channelsBySessionRef.current.clear();
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- unmount teardown reads each ref's live value on purpose; this effect has no deps and never re-runs mid-life
         generationBySessionRef.current.clear();
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- unmount teardown reads each ref's live value on purpose; this effect has no deps and never re-runs mid-life
         streamSeqBySessionRef.current.clear();
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- unmount teardown reads each ref's live value on purpose; this effect has no deps and never re-runs mid-life
         pendingFramesRef.current.clear();
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- unmount teardown reads each ref's live value on purpose; this effect has no deps and never re-runs mid-life
         visibilityBySessionRef.current.clear();
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- unmount teardown reads each ref's live value on purpose; this effect has no deps and never re-runs mid-life
         cancelledSessionsRef.current.clear();
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- unmount teardown reads each ref's live value on purpose; this effect has no deps and never re-runs mid-life
         sessionHandlersRef.current.clear();
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- unmount teardown reads each ref's live value on purpose; this effect has no deps and never re-runs mid-life
         mouseModesBySessionRef.current.clear();
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- unmount teardown reads each ref's live value on purpose; this effect has no deps and never re-runs mid-life
         handleRefCallbacksRef.current.clear();
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- unmount teardown reads each ref's live value on purpose; this effect has no deps and never re-runs mid-life
         handlesRef.current.clear();
       };
     }, []);
@@ -790,6 +801,7 @@ export const TerminalPanel = memo(
           setError(err instanceof Error ? err.message : String(err));
         }
       },
+      // eslint-disable-next-line react-hooks/exhaustive-deps -- settings.ai.commandOverrides is read from the outer settings object at call time; adding it here would re-create this launcher on every settings edit, not just command-override changes
       [
         activeContext,
         canRunTerminal,
@@ -1781,6 +1793,7 @@ export const TerminalPanel = memo(
         cache.set(sessionId, handlers);
       }
       return handlers;
+      // eslint-disable-next-line react-hooks/exhaustive-deps -- handler closures are cached per-session by sessionId already; pulling openSearch/readClipboardText/writeClipboardText into deps would invalidate the whole cache on every re-render of those callbacks
     }, []);
 
     const getHandleRefCallback = useCallback(

@@ -24,7 +24,9 @@ pub const PROVISIONAL_ESTIMATE_MINUTES: u32 = 30;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
+#[derive(Default)]
 pub enum TodayRoute {
+    #[default]
     Prepare,
     Execute,
     Review,
@@ -45,7 +47,9 @@ pub enum TodayStage {
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
+#[derive(Default)]
 pub enum DayState {
+    #[default]
     Unstarted,
     Preparing,
     Planned,
@@ -56,8 +60,10 @@ pub enum DayState {
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
+#[derive(Default)]
 pub enum PlanLane {
     Top,
+    #[default]
     Flexible,
     Overflow,
 }
@@ -92,7 +98,9 @@ pub struct ProposedBlock {
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
+#[derive(Default)]
 pub enum CalendarSyncStatus {
+    #[default]
     None,
     Selected,
     Syncing,
@@ -114,12 +122,6 @@ pub struct CalendarSyncState {
     /// to the command-level destination, then `primary`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub destination: Option<String>,
-}
-
-impl Default for CalendarSyncStatus {
-    fn default() -> Self {
-        CalendarSyncStatus::None
-    }
 }
 
 impl CalendarSyncState {
@@ -157,12 +159,6 @@ pub struct DailyPlanItem {
     pub proposed_block: Option<ProposedBlock>,
     #[serde(default)]
     pub calendar_sync: CalendarSyncState,
-}
-
-impl Default for PlanLane {
-    fn default() -> Self {
-        PlanLane::Flexible
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -397,18 +393,6 @@ pub struct TodaySnapshot {
     /// before the user confirmed or skipped it.
     #[serde(default)]
     pub unconfirmed_content: bool,
-}
-
-impl Default for DayState {
-    fn default() -> Self {
-        DayState::Unstarted
-    }
-}
-
-impl Default for TodayRoute {
-    fn default() -> Self {
-        TodayRoute::Prepare
-    }
 }
 
 impl TodaySnapshot {

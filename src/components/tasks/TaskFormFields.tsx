@@ -61,6 +61,7 @@ export function TaskFormFields({
     const next = draftFromEntry(entry, metadata?.relPath === entry.relPath ? metadata : null);
     applyDraft(next);
     setPristine(next);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the form should only reset when the user switches to a different entry (relPath change), not on every re-render of the same entry/metadata object identity
   }, [entry?.relPath]);
 
   const currentDraft = useMemo<TaskDetailDraft>(() => ({

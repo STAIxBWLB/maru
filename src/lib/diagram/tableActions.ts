@@ -34,7 +34,6 @@ import type {
   DiagramNode,
   DiagramPageFormat,
   NodeId,
-  TableCellAddress,
   TableSelection,
 } from "./types";
 

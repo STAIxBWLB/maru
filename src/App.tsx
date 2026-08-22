@@ -13,9 +13,7 @@ import {
   AlertTriangle,
   Bot,
   CalendarCheck,
-  ChevronUp,
   Clock3,
-  Code2,
   Command,
   Diff,
   FileText,
@@ -27,8 +25,6 @@ import {
   ListTodo,
   MessageSquare,
   Network,
-  PanelBottom,
-  PanelRight,
   PanelRightClose,
   PanelRightOpen,
   PanelTopOpen,
@@ -36,7 +32,6 @@ import {
   RefreshCcw,
   Route,
   Settings2,
-  SquareTerminal,
   StickyNote,
   UsersRound,
   WandSparkles,
@@ -88,9 +83,7 @@ import {
   addWorkspaceRoot,
   acceptInboxItem,
   acceptInboxItems,
-  binaryViewerClassify,
   binaryViewerOpenExternal,
-  binaryViewerPrepareAsset,
   checkGwsAuth,
   checkMsoAuth,
   checkTelegramAuth,
@@ -146,7 +139,6 @@ import {
   terminalHooksInstall,
   terminalHooksStatus,
   terminalHooksUninstall,
-  terminalAvailable,
   writeAgentContextHint,
   trashDocument,
   trashInboxItems,
@@ -205,7 +197,6 @@ import {
   appendRestoredDocTabs,
   closeTabs,
   getEditorTabsState,
-  insertBinaryTab,
   insertDocTab,
   mapDocTabs,
   orderedTabsInState,
@@ -481,7 +472,6 @@ import {
   isOpenableDocumentFile,
   type WorkspaceFilesPaneFilters,
 } from "./lib/workspaceFileTree";
-import { usesAssetProtocol } from "./lib/binaryViewer";
 import {
   emptyHistory,
   goBack,
@@ -527,10 +517,6 @@ type PendingExplorerReveal = {
 
 function isBinaryTab(tab: AnyTab | null | undefined): tab is BinaryTab {
   return Boolean(tab && (tab as BinaryTab).kind === "binary");
-}
-
-function tabIdForWorkspaceFile(entry: WorkspaceFileEntry): string {
-  return `binary:${entry.path}`;
 }
 
 function favoriteKey(kind: FavoriteKind, relPath: string): string {
@@ -1010,19 +996,15 @@ function MainApp() {
   // Provider accept/reject decisions are memory-only (kept for the bulk
   // inbox flow and a future comms list); writes go through gws/mws CLIs.
   const [, setGmailError] = useState<string | null>(null);
-  const [gmailDecisions, setGmailDecisions] = useState<Map<string, InboxDecision>>(
-    () => new Map(),
-  );
-  const [outlookDecisions, setOutlookDecisions] = useState<Map<string, InboxDecision>>(
+  // gmailDecisions itself is never read (kept for a future comms list); the
+  // setter still drives the accept/reject flow below.
+  const [_gmailDecisions, setGmailDecisions] = useState<Map<string, InboxDecision>>(
     () => new Map(),
   );
   // Telegram messages/polling live in the telegram events store (step 9): the
   // listener hook writes them; refreshCommsDashboard and the polling toggles
   // write polling through the same store action names as before.
   const telegramPolling = useTelegramPolling();
-  const [telegramDecisions, setTelegramDecisions] = useState<Map<string, InboxDecision>>(
-    () => new Map(),
-  );
   const [migrationServices, setMigrationServices] = useState<LegacyLaunchdService[]>([]);
   const [migrationBusy, setMigrationBusy] = useState(false);
   const [inboxSourceFilter, setInboxSourceFilter] = useState<string | null>(null);
@@ -1426,10 +1408,6 @@ function MainApp() {
       return workspaceCan(owner, action);
     });
   }, [fileQueue, workspaceRegistry.workspaces]);
-  const activeWorkspaceWriteReason = useMemo(
-    () => workspaceWriteReason(activeDocumentWorkspace),
-    [activeDocumentWorkspace],
-  );
   const explorerWorkspaceCaption = useMemo(() => {
     if (!explorerWorkspace) return null;
     const status = workspaceWriteStatus(explorerWorkspace);
@@ -3504,6 +3482,7 @@ function MainApp() {
         });
       }
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- t is read only in the catch-path error string; excluding it avoids recreating this callback on every locale change
     [
       agents,
       maruSettings.ai,
@@ -3836,6 +3815,7 @@ function MainApp() {
         await runAuthoritativeScan(true);
       }
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- updateWorkspaceState is flagged unneeded; not removed here to avoid changing this callback's re-creation timing, a behavior change out of scope for this phase
     [pushRecent, readStoredTabsForWorkspace, scanOptions, updateWorkspaceState],
   );
 
@@ -4005,8 +3985,7 @@ function MainApp() {
       }
     }
     void boot();
-    // boot only once on mount
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- boot only once on mount
   }, []);
 
   const handleAddWorkspace = useCallback(
@@ -4230,52 +4209,6 @@ function MainApp() {
     [explorerWorkspacePath],
   );
 
-  const openBinaryWorkspaceFile = useCallback(
-    (entry: WorkspaceFileEntry, workspacePath: string, visibility: WorkspaceVisibility) => {
-      const tabId = tabIdForWorkspaceFile(entry);
-      const existing = getEditorTabsState().binaryTabs.find((tab) => tab.id === tabId);
-      const targetGroup = editorSplitOpen ? getEditorTabsState().focusedEditorGroup : "left";
-      setExplorerVisibility(visibility);
-      if (existing) {
-        activateEditorTab(existing.id, targetGroup);
-        return;
-      }
-      void (async () => {
-        setError(null);
-        try {
-          const classification = await binaryViewerClassify(workspacePath, entry.path);
-          const assetPath = usesAssetProtocol(classification.category)
-            ? await binaryViewerPrepareAsset(workspacePath, entry.path)
-            : entry.path;
-          const newTab: BinaryTab = {
-            kind: "binary",
-            id: tabId,
-            workspacePath,
-            visibility,
-            fileEntry: {
-              ...entry,
-              path: assetPath,
-              extension: classification.extension ?? entry.extension,
-              fileKind: classification.extension ?? entry.fileKind,
-              sizeBytes: classification.sizeBytes || entry.sizeBytes,
-            },
-            classification,
-            status: "ready",
-            error: null,
-          };
-          insertBinaryTab(newTab, { activate: true, group: targetGroup });
-        } catch (err) {
-          setError(err instanceof Error ? err.message : String(err));
-        }
-      })();
-    },
-    [
-      binaryViewerClassify,
-      binaryViewerPrepareAsset,
-      editorSplitOpen,
-    ],
-  );
-
   const isFavorite = useCallback(
     (kind: FavoriteKind, relPath: string) => {
       const normalizedRelPath = normalizeFavoriteTargetRelPath(relPath);
@@ -4397,6 +4330,7 @@ function MainApp() {
         }
       })();
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- t is read only in the early-return error string; excluding it avoids recreating this callback on every locale change
     [
       explorerVisibility,
       explorerWorkspacePath,
@@ -4655,6 +4589,7 @@ function MainApp() {
       setError(message);
       return [];
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- updateWorkspaceState is flagged unneeded; not removed here to avoid changing this callback's re-creation timing, a behavior change out of scope for this phase
   }, [
     fileQueue,
     refreshWorkspaceFiles,
@@ -5499,6 +5434,7 @@ function MainApp() {
     } else {
       void refreshCurrent();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- refreshSourceRuns is flagged unneeded; not removed here to avoid changing this callback's re-creation timing, a behavior change out of scope for this phase
   }, [
     surfaceMode,
     explorerWorkspacePath,
@@ -6446,7 +6382,7 @@ function MainApp() {
     ) {
       setKgRefFocus(null);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- kgHighlight/kgRefFocus are read only to decide whether to clear them; including them would re-run this effect every time it just cleared them itself
   }, [activeDocumentWorkspacePath, kgActiveDocPath]);
 
   const exitKgReferenceFocus = useCallback(() => {
@@ -6971,7 +6907,6 @@ function MainApp() {
       ta.removeEventListener("scroll", onScroll);
       if (raf) window.cancelAnimationFrame(raf);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [outlineOpen, rightPaneTab, editorViewMode, focusedEditorGroup, document?.path]);
 
   const exportActiveDocumentBundle = useCallback(async (): Promise<void> => {
@@ -7162,6 +7097,7 @@ function MainApp() {
           break;
       }
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- requestTerminalLaunch and setPersistedRightPaneTab are flagged unneeded in this large command-dispatch callback; not removed here to avoid changing its re-creation timing, a behavior change out of scope for this phase
     [
       saveActiveSurfaceDocument,
       snapshotCurrent,
@@ -7388,6 +7324,7 @@ function MainApp() {
           break;
       }
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- requestTerminalLaunch and saveActiveSurfaceDocument are read in this menu-command switch but not listed; not added here to avoid changing this callback's re-creation timing, a behavior change out of scope for this phase
     [
       documentsPaneOpen,
       closeActiveSurface,
@@ -7779,6 +7716,7 @@ function MainApp() {
         }}
       />
     ),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- updateWorkspaceState is flagged unneeded; not removed here to avoid changing this memo's recomputation timing, a behavior change out of scope for this phase
     [
       maruSettings.graph,
       graphDataPath,

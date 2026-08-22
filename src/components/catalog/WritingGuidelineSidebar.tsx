@@ -76,7 +76,7 @@ export function WritingGuidelineSidebar({
     }
     let cancelled = false;
     setState({ loading: true, error: null, guidelines: [] });
-    Promise.all(
+    void Promise.all(
       guidelineIds.map((id) =>
         fetchGuideline(id, { workspaceRoot }).catch((err) => {
           // Per-guideline failure: capture as a synthetic stub so the
@@ -103,6 +103,7 @@ export function WritingGuidelineSidebar({
     return () => {
       cancelled = true;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- guidelineIds is a fresh array each render (useMemo keyed on documentBody/frontmatter already covers it); depending on the joined string mirrors that identity without re-fetching on every render
   }, [workspaceRoot, guidelineIds.join("|"), t]);
 
   if (guidelineIds.length === 0) {

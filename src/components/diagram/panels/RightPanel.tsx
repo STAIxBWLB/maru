@@ -1,4 +1,4 @@
-import { useCallback, type ChangeEvent } from "react";
+import { useCallback } from "react";
 
 import {
   defaultCoalescer,

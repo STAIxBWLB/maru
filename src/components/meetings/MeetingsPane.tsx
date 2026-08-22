@@ -167,7 +167,7 @@ interface MeetingsPaneProps {
 
 export const MeetingsPane = memo(function MeetingsPane({
   workPath,
-  settings,
+  settings: _settings,
   effectiveSettings,
   labelMode,
   skills,

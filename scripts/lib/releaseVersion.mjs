@@ -165,6 +165,9 @@ export function parseCargoPackage(cargoToml) {
  *
  * `rootCargo`, `cliCargo`, and `metadata` are accepted as concise aliases so
  * callers can pass structured fixtures without first reshaping their data.
+ *
+ * @param {Record<string, unknown>} [surfaces]
+ * @param {{ tag?: string | null }} [options]
  */
 export function validateReleaseVersions(surfaces = {}, { tag = null } = {}) {
   const input = surfaces && typeof surfaces === "object" ? surfaces : {};

@@ -200,18 +200,39 @@ fn terminal_dispatch_spec(
     }
 }
 
+/// `skills_dispatch_background`'s invoke payload, bundled into one
+/// deserializable struct to keep the command's own argument count under
+/// clippy's threshold. Frontend caller (`skillsDispatchBackground` in
+/// `src/lib/skills.ts`) nests its params under this `args` key; field names
+/// are unchanged, so no other caller is affected.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillDispatchBackgroundArgs {
+    pub skill_id: String,
+    pub runtime: String,
+    pub prompt: String,
+    pub cwd: Option<String>,
+    pub context: Option<Vec<SkillContextItem>>,
+    pub metadata: Option<JsonValue>,
+    pub command_override: Option<String>,
+    pub permission_mode: Option<String>,
+}
+
 #[tauri::command]
 pub fn skills_dispatch_background(
     app: AppHandle,
-    skill_id: String,
-    runtime: String,
-    prompt: String,
-    cwd: Option<String>,
-    context: Option<Vec<SkillContextItem>>,
-    metadata: Option<JsonValue>,
-    command_override: Option<String>,
-    permission_mode: Option<String>,
+    args: SkillDispatchBackgroundArgs,
 ) -> Result<String, String> {
+    let SkillDispatchBackgroundArgs {
+        skill_id,
+        runtime,
+        prompt,
+        cwd,
+        context,
+        metadata,
+        command_override,
+        permission_mode,
+    } = args;
     let command_override = command_override.filter(|value| !value.trim().is_empty());
     let permission_mode =
         normalize_permission_mode(permission_mode.as_deref().unwrap_or("plan")).to_string();
@@ -261,9 +282,11 @@ pub fn skills_dispatch_background(
         composition.cwd,
         env,
         stdin_payload,
-        metadata,
-        run_request,
-        retry_payload,
+        BackgroundRunInfo {
+            metadata,
+            run_request,
+            retry_payload,
+        },
     )
 }
 
@@ -411,6 +434,15 @@ fn normalize_runtime(runtime: &str) -> Result<String, String> {
     }
 }
 
+/// The mission-registration and run-log payloads built once at the call site,
+/// bundled to keep `spawn_background`'s argument count under clippy's
+/// threshold.
+struct BackgroundRunInfo {
+    metadata: Option<JsonValue>,
+    run_request: AgentRunRequest,
+    retry_payload: JsonValue,
+}
+
 fn spawn_background(
     app: AppHandle,
     invocation_id: String,
@@ -418,10 +450,13 @@ fn spawn_background(
     cwd: String,
     env: BTreeMap<String, String>,
     stdin_payload: Option<String>,
-    metadata: Option<JsonValue>,
-    run_request: AgentRunRequest,
-    retry_payload: JsonValue,
+    run_info: BackgroundRunInfo,
 ) -> Result<String, String> {
+    let BackgroundRunInfo {
+        metadata,
+        run_request,
+        retry_payload,
+    } = run_info;
     let _ = append_run_event_payload(
         &cwd,
         &invocation_id,

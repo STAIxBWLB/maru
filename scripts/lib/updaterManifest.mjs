@@ -262,6 +262,18 @@ function releaseMetadataFrom(input) {
  * `signatures` is intentionally supplied by the caller. The publisher owns
  * downloading `.sig` files; this function only validates and composes values,
  * making it pure and network-free.
+ *
+ * @param {{
+ *   tag?: string,
+ *   release?: { tagName?: string, assets?: unknown[], body?: string, publishedAt?: string },
+ *   assets?: unknown[],
+ *   body?: string,
+ *   publishedAt?: string,
+ *   tagName?: string,
+ *   signatures?: Map<string, string> | Record<string, string> | Array<[string, string]>,
+ *   signatureByAssetName?: Map<string, string> | Record<string, string> | Array<[string, string]>,
+ *   repo?: string,
+ * }} [options]
  */
 export function buildUpdaterManifest({
   tag,

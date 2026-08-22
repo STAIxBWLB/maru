@@ -63,7 +63,6 @@ export function t(
   const dict = dictionaries[locale] ?? dictionaries.en;
   let template = dict?.[key];
   if (template === undefined) {
-    // eslint-disable-next-line no-console
     console.warn(`[i18n] missing key "${key}" for locale "${locale}"`);
     return key;
   }
@@ -144,7 +143,6 @@ export function useLocaleState(): LocaleState {
     void loadLocale(locale)
       .catch(() => loadLocale(locale))
       .catch((err: unknown) => {
-        // eslint-disable-next-line no-console
         console.error(`[i18n] failed to load locale "${locale}"`, err);
         // Fall through to ready: rendering raw keys beats a window that
         // stays blank forever behind the `ready` gate.
@@ -180,6 +178,7 @@ export function useLocaleState(): LocaleState {
     (key: string, vars?: Record<string, string | number>) => t(locale, key, vars),
     // `ready` is a dep on purpose: t()'s result changes when the dictionary
     // registers, so memoized consumers of `t` must recompute after load.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- translate's body doesn't read `ready` directly, but consumers memoized on this callback need to re-run once the dictionary loads
     [locale, ready],
   );
   return useMemo(

@@ -141,7 +141,7 @@ pub enum TerminalStreamMessage {
         generation: String,
         seq: u64,
         prev_seq: u64,
-        frame: snapshot::TerminalWireFrame,
+        frame: Box<snapshot::TerminalWireFrame>,
     },
     Exit {
         session_id: String,
@@ -246,7 +246,7 @@ impl TerminalStream {
             generation: self.generation.clone(),
             seq,
             prev_seq: seq.saturating_sub(1),
-            frame: frame.into(),
+            frame: Box::new(frame.into()),
         })
     }
 
@@ -333,9 +333,15 @@ pub enum TerminalSelectionCommand {
     SelectAll,
 }
 
-#[tauri::command]
-pub async fn terminal_spawn(
-    state: State<'_, TerminalState>,
+/// `terminal_spawn`'s plain-data invoke fields, bundled into one
+/// deserializable struct to keep the command's own argument count under
+/// clippy's threshold. `on_event`'s `Channel` stays a top-level parameter,
+/// since it carries Tauri's own channel-registration wiring. Frontend caller
+/// (`terminalSpawn` in `src/lib/api.ts`) nests these under this `args` key;
+/// field names are unchanged, so no other caller is affected.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TerminalSpawnArgs {
     session_id: String,
     kind: String,
     cwd: Option<String>,
@@ -344,8 +350,24 @@ pub async fn terminal_spawn(
     extra_env: Option<HashMap<String, String>>,
     cols: Option<u16>,
     rows: Option<u16>,
+}
+
+#[tauri::command]
+pub async fn terminal_spawn(
+    state: State<'_, TerminalState>,
+    args: TerminalSpawnArgs,
     on_event: Channel<TerminalStreamMessage>,
 ) -> Result<String, String> {
+    let TerminalSpawnArgs {
+        session_id,
+        kind,
+        cwd,
+        command,
+        extra_args,
+        extra_env,
+        cols,
+        rows,
+    } = args;
     if session_id.trim().is_empty() {
         return Err("terminal_session_id_required".to_string());
     }

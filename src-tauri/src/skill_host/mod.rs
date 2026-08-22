@@ -6,7 +6,7 @@ pub mod store;
 
 pub use dispatch::{
     skills_dispatch_background, skills_dispatch_compose, skills_dispatch_terminal,
-    skills_runtime_status,
+    skills_runtime_status, SkillDispatchBackgroundArgs,
 };
 pub use env::{skills_env_bootstrap, skills_env_repair, skills_env_status};
 pub use store::{

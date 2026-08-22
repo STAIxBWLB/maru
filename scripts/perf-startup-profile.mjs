@@ -49,13 +49,19 @@ try {
     await page.goto(`http://127.0.0.1:${port}/?startupProfile=1`);
     await page.waitForFunction(
       () =>
-        window.__MARU_STARTUP_PROFILE__?.marks?.some(
+        /** @type {Window & { __MARU_STARTUP_PROFILE__?: { marks?: Array<{ name: string }> } }} */ (
+          window
+        ).__MARU_STARTUP_PROFILE__?.marks?.some(
           (mark) => mark.name === "boot:end" || mark.name === "boot:error",
         ) ?? false,
       null,
       { timeout: 30_000 },
     );
-    const profile = await page.evaluate(() => window.__MARU_STARTUP_PROFILE__ ?? null);
+    const profile = await page.evaluate(
+      () =>
+        /** @type {Window & { __MARU_STARTUP_PROFILE__?: unknown }} */ (window)
+          .__MARU_STARTUP_PROFILE__ ?? null,
+    );
     const json = `${JSON.stringify(profile, null, 2)}\n`;
     if (outPath) await fs.writeFile(outPath, json);
     else process.stdout.write(json);

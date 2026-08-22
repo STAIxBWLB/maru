@@ -63,13 +63,15 @@ pub(crate) fn prepare_complete_op(
 ) -> Result<OutboxRecord, String> {
     today_outbox::enqueue_record(
         work,
-        OutboxOp::Complete,
-        rel_path,
-        google_task_id,
-        google_task_list_id,
-        None,
-        OutboxStatus::Prepared,
-        web_action_id,
+        today_outbox::OutboxRecordDraft {
+            op: OutboxOp::Complete,
+            task_path: rel_path.to_string(),
+            google_task_id: google_task_id.to_string(),
+            google_task_list_id,
+            payload: None,
+            status: OutboxStatus::Prepared,
+            web_action_id,
+        },
         now_iso,
     )
 }
@@ -239,13 +241,15 @@ fn run_reopen(ctx: TransitionContext, task_id: &str) -> Result<TaskTransitionOut
         Some(google_task_id) if today_outbox::has_synced_complete(&ctx.work, google_task_id)? => {
             Some(today_outbox::enqueue_record(
                 &ctx.work,
-                OutboxOp::Reopen,
-                &ctx.rel_path,
-                google_task_id,
-                ctx.google_task_list_id.clone(),
-                None,
-                OutboxStatus::Prepared,
-                None,
+                today_outbox::OutboxRecordDraft {
+                    op: OutboxOp::Reopen,
+                    task_path: ctx.rel_path.clone(),
+                    google_task_id: google_task_id.to_string(),
+                    google_task_list_id: ctx.google_task_list_id.clone(),
+                    payload: None,
+                    status: OutboxStatus::Prepared,
+                    web_action_id: None,
+                },
                 &ctx.now_iso,
             )?)
         }
@@ -464,13 +468,15 @@ pub fn task_trash(
         if let Some(google_task_id) = &ctx.google_task_id {
             today_outbox::enqueue_record(
                 &ctx.work,
-                OutboxOp::Delete,
-                &ctx.rel_path,
-                google_task_id,
-                ctx.google_task_list_id.clone(),
-                None,
-                OutboxStatus::Ready,
-                None,
+                today_outbox::OutboxRecordDraft {
+                    op: OutboxOp::Delete,
+                    task_path: ctx.rel_path.clone(),
+                    google_task_id: google_task_id.to_string(),
+                    google_task_list_id: ctx.google_task_list_id.clone(),
+                    payload: None,
+                    status: OutboxStatus::Ready,
+                    web_action_id: None,
+                },
                 &ctx.now_iso,
             )?;
         }

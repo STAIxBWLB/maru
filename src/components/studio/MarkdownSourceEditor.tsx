@@ -89,6 +89,7 @@ export function MarkdownSourceEditor({
       view.destroy();
       if (viewRef.current === view) viewRef.current = null;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- readOnly is applied via readOnlyCompartment.reconfigure in a separate effect below; including it here would recreate the whole CodeMirror view on every toggle instead of reconfiguring in place
   }, [editableCompartment, lintCompartment, readOnlyCompartment]);
 
   useEffect(() => {

@@ -160,6 +160,7 @@ fn maru_home_dir() -> Result<PathBuf, String> {
         .ok_or_else(|| "Could not determine home directory for ~/.maru".to_string())
 }
 
+#[cfg(test)]
 fn global_settings_json_path_for_home(home: &Path) -> PathBuf {
     home.join(".maru").join("settings.json")
 }
@@ -666,6 +667,7 @@ fn read_maru_settings_internal(work: &Path, global_path: &Path) -> Result<JsonVa
     Ok(settings)
 }
 
+#[cfg(test)]
 fn save_maru_settings_internal(
     work: &Path,
     global_path: &Path,

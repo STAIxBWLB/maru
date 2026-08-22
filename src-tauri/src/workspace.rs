@@ -149,7 +149,7 @@ struct PublicWorkspaceSpec {
 }
 
 fn mapping_string(map: &serde_yaml::Mapping, key: &str) -> Option<String> {
-    map.get(&Value::String(key.to_string()))
+    map.get(Value::String(key.to_string()))
         .and_then(Value::as_str)
         .map(str::trim)
         .filter(|value| !value.is_empty())

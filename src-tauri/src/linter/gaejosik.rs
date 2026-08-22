@@ -115,8 +115,7 @@ fn match_line(line: &str) -> Option<RuleMatch> {
     if stripped.is_empty() {
         return None;
     }
-    let core = stripped
-        .trim_end_matches(|ch: char| matches!(ch, '.' | '。' | '!' | '?' | ')' | ']' | '"' | '\''));
+    let core = stripped.trim_end_matches(['.', '。', '!', '?', ')', ']', '"', '\'']);
     if core.is_empty() {
         return None;
     }
@@ -157,8 +156,7 @@ fn match_line(line: &str) -> Option<RuleMatch> {
 
 fn matched_span(line: &str, suffix: &str) -> (u32, u32) {
     let stripped = strip_markdown_prefix(line).trim_end();
-    let core = stripped
-        .trim_end_matches(|ch: char| matches!(ch, '.' | '。' | '!' | '?' | ')' | ']' | '"' | '\''));
+    let core = stripped.trim_end_matches(['.', '。', '!', '?', ')', ']', '"', '\'']);
     let start_byte = line.find(stripped).unwrap_or(0);
     let prefix_len = line[..start_byte].chars().count() as u32;
     let core_len = core.chars().count() as u32;

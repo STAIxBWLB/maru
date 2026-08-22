@@ -11,8 +11,8 @@ use crate::agents::{
 };
 use crate::approval::{require_approval, ApprovalState};
 use crate::atomic_file::write_atomic;
-use crate::skill_host::skills_dispatch_background;
 use crate::skill_host::store::resolve_skill_id;
+use crate::skill_host::{skills_dispatch_background, SkillDispatchBackgroundArgs};
 use chrono::{DateTime, Datelike, Days, Local, NaiveDate, TimeZone};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
@@ -442,14 +442,16 @@ fn dispatch_schedule(
     let metadata = dispatch_metadata(schedule, &plan, &skill_id, work);
     skills_dispatch_background(
         app.clone(),
-        skill_id.clone(),
-        plan.runtime.clone(),
-        build_dispatch_prompt(work, &skill_id, &plan.prompt),
-        Some(work.to_string_lossy().to_string()),
-        None,
-        Some(metadata),
-        plan.command_override.clone(),
-        plan.permission_mode.clone(),
+        SkillDispatchBackgroundArgs {
+            skill_id: skill_id.clone(),
+            runtime: plan.runtime.clone(),
+            prompt: build_dispatch_prompt(work, &skill_id, &plan.prompt),
+            cwd: Some(work.to_string_lossy().to_string()),
+            context: None,
+            metadata: Some(metadata),
+            command_override: plan.command_override.clone(),
+            permission_mode: plan.permission_mode.clone(),
+        },
     )
 }
 

@@ -7,7 +7,21 @@ const IDEA_PATH = "ideas/maru-vault-graph.md";
 // init-script closure so command handlers behave like a tiny in-memory backend.
 function seedBackend(page: import("@playwright/test").Page) {
   return page.addInitScript(() => {
-    const drafts = [
+    type DraftEntry = {
+      id: string;
+      kind: string;
+      title: string;
+      status: string;
+      importance: string | null;
+      confidence: number | null;
+      source: string;
+      originRefs: string[];
+      bodyPath: string;
+      promotedTo: string | null;
+      createdAt: string;
+      updatedAt: string;
+    };
+    const drafts: DraftEntry[] = [
       {
         id: "d-weekly",
         kind: "task",

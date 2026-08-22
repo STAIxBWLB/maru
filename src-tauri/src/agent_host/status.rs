@@ -199,7 +199,7 @@ fn probe_codex_account(binary: &Path, status: &mut AgentAccountStatus) {
             status.login_method = Some(method);
             status.email = codex_auth_json()
                 .as_deref()
-                .and_then(|text| parse_codex_auth_email(text));
+                .and_then(parse_codex_auth_email);
         }
         None => {
             status.auth_status = "unauthenticated".to_string();
@@ -805,10 +805,10 @@ fn read_file_tail(path: &Path, max_bytes: u64) -> std::io::Result<String> {
 
 // --- small helpers -----------------------------------------------------------
 
-fn override_for<'a>(
-    overrides: Option<&'a HashMap<String, String>>,
+fn override_for(
+    overrides: Option<&HashMap<String, String>>,
     provider: CliProviderKind,
-) -> Option<&'a str> {
+) -> Option<&str> {
     overrides
         .and_then(|map| map.get(provider.id()))
         .map(String::as_str)

@@ -648,7 +648,7 @@ export async function installTodayMocks(page: Page, seed: TodaySeed): Promise<vo
       route?: string;
       brainDump?: string;
       plan?: unknown;
-      taskId?: string;
+      taskId?: string | null;
       resolution?: string;
       deferDate?: string | null;
       itemRef?: { kind: string; taskId?: string; captureId?: string };
@@ -656,7 +656,6 @@ export async function installTodayMocks(page: Page, seed: TodaySeed): Promise<vo
       destination?: string | null;
       captureId?: string;
       decision?: string;
-      taskId?: string | null;
       taskPath?: string | null;
     }) => {
       const snap = state.snapshot as Record<string, unknown> & {
@@ -889,7 +888,9 @@ export async function installTodayMocks(page: Page, seed: TodaySeed): Promise<vo
       read_task_events: (args) => {
         const day = typeof args.day === "string" ? args.day : null;
         return clone(
-          day ? state.events.filter((event) => String(event.ts).startsWith(day)) : state.events,
+          day
+            ? state.events.filter((event) => String((event as { ts?: string }).ts).startsWith(day))
+            : state.events,
         );
       },
       task_transition: (args) => {

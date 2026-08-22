@@ -179,7 +179,7 @@ pub fn diagram_list_documents(workspace: String) -> Result<Vec<DiagramFile>, Str
             doc_title,
         });
     }
-    out.sort_by(|a, b| b.modified_at.cmp(&a.modified_at));
+    out.sort_by_key(|d| std::cmp::Reverse(d.modified_at));
     Ok(out)
 }
 
@@ -418,7 +418,7 @@ fn prune_snapshots(dir: &Path, cap: usize) -> Result<(), String> {
     if entries.len() <= cap {
         return Ok(());
     }
-    entries.sort_by(|a, b| a.1.cmp(&b.1));
+    entries.sort_by_key(|a| a.1);
     for (path, _) in entries.iter().take(entries.len() - cap) {
         let _ = fs::remove_file(path);
     }
@@ -605,7 +605,7 @@ pub fn diagram_pattern_list(workspace: String) -> Result<Vec<DiagramFile>, Strin
             doc_title,
         });
     }
-    out.sort_by(|a, b| b.modified_at.cmp(&a.modified_at));
+    out.sort_by_key(|d| std::cmp::Reverse(d.modified_at));
     Ok(out)
 }
 

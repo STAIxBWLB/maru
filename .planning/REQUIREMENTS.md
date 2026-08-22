@@ -13,13 +13,13 @@ milestone with no end-user-visible surface.
 
 ### Verification Signal
 
-- [ ] **GATE-01**: `make verify` fails when Rust code carries a clippy warning or is unformatted
-- [ ] **GATE-02**: `make verify` fails when a React hook dependency list is wrong or a declared symbol is unused
-- [ ] **GATE-03**: `make verify` typechecks `e2e/` and `scripts/` alongside `src/`, so a type error in a Playwright spec is caught before it runs
-- [ ] **GATE-04**: A failing e2e run in CI uploads a Playwright trace for the failing test
-- [ ] **GATE-05**: Rebuilding an older commit uses the Rust toolchain that commit was built with, not whatever `stable` is today
-- [ ] **GATE-06**: `pnpm typecheck` passes with the deprecated `@types/dompurify` stub removed from `package.json`
-- [ ] **GATE-07**: The shipped E2E flow TODO ledger lists only open items, and the module states that it is hand-maintained rather than derived
+- [x] **GATE-01**: `make verify` fails when Rust code carries a clippy warning or is unformatted (fmt half done in 01-01; clippy half is 01-02)
+- [x] **GATE-02**: `make verify` fails when a React hook dependency list is wrong or a declared symbol is unused
+- [x] **GATE-03**: `make verify` typechecks `e2e/` and `scripts/` alongside `src/`, so a type error in a Playwright spec is caught before it runs
+- [x] **GATE-04**: A failing e2e run in CI uploads a Playwright trace for the failing test
+- [x] **GATE-05**: Rebuilding an older commit uses the Rust toolchain that commit was built with, not whatever `stable` is today
+- [x] **GATE-06**: `pnpm typecheck` passes with the deprecated `@types/dompurify` stub removed from `package.json`
+- [x] **GATE-07**: The shipped E2E flow TODO ledger lists only open items, and the module states that it is hand-maintained rather than derived
 
 ### Scanner and Path Invariants
 
@@ -35,6 +35,21 @@ milestone with no end-user-visible surface.
 - [ ] **ERR-02**: Renaming an error code fails the build on both the Rust and TypeScript side instead of silently breaking a recovery path
 - [ ] **ERR-03**: Every existing `message.includes("<code>")` matcher branches on the typed code instead - starting with `evidence_binder_revision_conflict` at `src/components/evidence/EvidenceBinderPane.tsx:174`
 - [ ] **ERR-04**: Display-only errors are untouched - the `Result<T, String>` signature count stays within a few of today's 1,118
+
+> **Note for Phase 3 planning, from Phase 1's verification (2026-08-22).** None of the
+> seven `make verify` gates can catch a serde mismatch at the Rust-TypeScript IPC
+> boundary. Verified concretely against Phase 1's own reshape of
+> `SkillDispatchBackgroundArgs`: `cargo test --lib` constructs the struct directly and
+> never deserializes JSON, and `make test-e2e` serves plain `vite` rather than
+> `tauri-dev`, so `window.__TAURI_INTERNALS__` never exists and neither
+> `skills_dispatch_background` nor `terminal_spawn` is exercised by any e2e spec. A
+> camelCase or field-name drift there passes typecheck, unit tests, e2e, and clippy,
+> and fails only in the built app. This is the pre-disclosed
+> `native-tauri-e2e-runner-missing` gap, deliberately kept open (GATE-07) and deferred
+> to v2 — but Phase 3 adds more boundary structs of exactly this kind, so it inherits
+> the blind spot directly. Suggested cheap mitigation, well short of the deferred
+> native E2E runner: one `serde_json::from_value` round-trip test per new boundary
+> struct, asserting the wire shape the TypeScript caller actually sends.
 
 ### App Shell Decomposition
 
@@ -100,13 +115,13 @@ not compete with the structural work. Not in the current roadmap.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| GATE-01 | Phase 1 | Pending |
-| GATE-02 | Phase 1 | Pending |
-| GATE-03 | Phase 1 | Pending |
-| GATE-04 | Phase 1 | Pending |
-| GATE-05 | Phase 1 | Pending |
-| GATE-06 | Phase 1 | Pending |
-| GATE-07 | Phase 1 | Pending |
+| GATE-01 | Phase 1 | Complete |
+| GATE-02 | Phase 1 | Complete |
+| GATE-03 | Phase 1 | Complete |
+| GATE-04 | Phase 1 | Complete |
+| GATE-05 | Phase 1 | Complete |
+| GATE-06 | Phase 1 | Complete |
+| GATE-07 | Phase 1 | Complete |
 | SCAN-01 | Phase 2 | Pending |
 | SCAN-02 | Phase 2 | Pending |
 | SCAN-03 | Phase 2 | Pending |
@@ -126,6 +141,7 @@ not compete with the structural work. Not in the current roadmap.
 | SHELL-08 | Phase 5 | Pending |
 
 **Coverage:**
+
 - v1 requirements: 24 total
 - Mapped to phases: 24
 - Unmapped: 0 ✓

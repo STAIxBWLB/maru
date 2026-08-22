@@ -15,6 +15,7 @@ mode-routing chain. Nothing user-visible changes in any phase; that is the point
 ## Phases
 
 **Phase Numbering:**
+
 - Integer phases (1, 2, 3): Planned milestone work
 - Decimal phases (2.1, 2.2): Urgent insertions (marked with INSERTED)
 
@@ -29,18 +30,42 @@ Decimal phases appear between their surrounding integers in numeric order.
 ## Phase Details
 
 ### Phase 1: Trustworthy Verify Signal
+
 **Goal**: A developer can believe a green `make verify` means a refactor changed nothing
 **Depends on**: Nothing (first phase)
 **Requirements**: GATE-01, GATE-02, GATE-03, GATE-04, GATE-05, GATE-06, GATE-07
 **Success Criteria** (what must be TRUE):
+
   1. A deliberately broken hook dependency list, an unused symbol, an unformatted Rust file, and a clippy warning each fail `make verify` locally and in CI
   2. A type error introduced into a Playwright spec or a `scripts/*.mjs` file fails `make verify` instead of surfacing at runtime
   3. A failing e2e test in CI leaves a downloadable Playwright trace in the uploaded artifacts
   4. Checking out an older commit and building reproduces that commit's Rust toolchain rather than today's `stable`
   5. `pnpm typecheck` passes with `@types/dompurify` removed, and the shipped E2E flow ledger contains no already-resolved entries
-**Plans**: TBD
+
+**Plans**: 7/7 plans executed
+
+Plans:
+**Wave 1**
+
+- [x] 01-01-PLAN.md - Tracer: pin the Rust toolchain and gate `make verify` on `cargo fmt --check` (GATE-05, GATE-01 format half)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [x] 01-02-PLAN.md - Fix the clippy backlog to zero and add the `clippy` gate (GATE-01)
+- [x] 01-03-PLAN.md - Playwright trace on first failure, and a truthful E2E flow ledger (GATE-04, GATE-07)
+- [x] 01-04-PLAN.md - Typecheck `e2e/` via a new project reference, drop the deprecated types stub (GATE-03 e2e half, GATE-06)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
+- [x] 01-05-PLAN.md - Typecheck `scripts/` under `checkJs` and reference it (GATE-03 scripts half)
+- [x] 01-06-PLAN.md - Install ESLint, write the flat config, clear `src/App.tsx` (GATE-02 setup)
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
+- [x] 01-07-PLAN.md - Clear the rest of the lint backlog and add the `lint` gate (GATE-02)
 
 Notes for planning:
+
 - The cheapest Rust half is zero-config: `cargo clippy -- -D warnings` and `cargo fmt --check` appended to the `verify` target (`Makefile:309`). The Rust code is already idiomatic enough to pass or near-pass.
 - The TypeScript half is the one place a new dependency may be justified: `noUnusedLocals`/`noUnusedParameters` in `tsconfig.app.json` is free, but `react-hooks/exhaustive-deps` needs a linter. Scope it to the correctness rules that guard Phases 4-5; do not open a style campaign.
 - GATE-03 is a third `tsc -b` project reference covering `e2e` and `scripts`; today `tsconfig.app.json` includes only `["src"]`.
@@ -50,18 +75,22 @@ Notes for planning:
 - Adding gates will surface pre-existing violations. Fixing them is in scope; rewriting the code they point at is not.
 
 ### Phase 2: Shared Scanner and Path Invariants
+
 **Goal**: A new command author has exactly one prune list and one containment helper to reach for
 **Depends on**: Phase 1
 **Requirements**: SCAN-01, SCAN-02, SCAN-03, SCAN-04, SCAN-05
 **Success Criteria** (what must be TRUE):
+
   1. Adding a generated directory to the skip set is a one-line edit in one file, and `workspace_files.rs`, `vault.rs`, `secrets.rs`, `project_activity.rs`, and `evidence_binder.rs` all honor it
   2. A workspace scan over a repo-containing folder no longer walks into `.git` object storage or `.venv`
   3. `ensure_within` is importable from a shared module and is the obvious canonical example, while the existing per-module checks stay as they are
   4. A test proves that joining a `maru_home()`/`env_root()` result against a non-absolute base panics or errors rather than creating a tree in the working directory
   5. `Users/yj.lee/.maru/env/` no longer exists at the repo root
+
 **Plans**: TBD
 
 Notes for planning:
+
 - The `workspace_files.rs:21` list is already `pub(crate)`; promoting it is the shortest path. The unified constant must be the union that includes `.git` and `.venv`, not the intersection.
 - Keep `maru_dir.rs:79`'s twelve-entry `.maruignore` default separate and unchanged - it is a user-facing file format, not a scanner constant.
 - Do not retrofit the ~20 existing path validators. `Component::ParentDir` checks and substring `".."` checks are not equivalent, but each is individually sound today; converting them all is a much larger behavioral risk than the problem justifies.
@@ -69,34 +98,42 @@ Notes for planning:
 - SCAN-05 is a delete; SCAN-04 is the guard that stops it recurring. Do them together or the delete is cosmetic.
 
 ### Phase 3: Typed IPC Error Contract
+
 **Goal**: A frontend recovery path breaks at compile time when the error it depends on is renamed
 **Depends on**: Phase 1
 **Requirements**: ERR-01, ERR-02, ERR-03, ERR-04
 **Success Criteria** (what must be TRUE):
+
   1. A frontend caller can read a stable `code` and a human message from every error it branches on, without parsing the message
   2. Renaming a code on the Rust side fails `make verify` on the TypeScript side, and vice versa
   3. No `message.includes("<error_code>")` matcher remains in `src/` for a code that moved to the contract
   4. The `Result<T, String>` count in `src-tauri/src/` is essentially unchanged from today's 1,118 - display-only errors were not touched
+
 **Plans**: TBD
 
 Notes for planning:
+
 - Start from the codes the frontend actually branches on today: `evidence_binder_revision_conflict` (`src/components/evidence/EvidenceBinderPane.tsx:174`), plus the prefix-encoded families `unknown_source:`, `install_target_exists:`, `terminal_kill_failed:`. Grep `src/` for `.includes(` against error text to find the rest; the set is expected to be small.
 - Two real error enums already exist (`agent_host/status.rs:351`, `hub_client/http.rs:19`). Reuse the shape rather than inventing a third convention.
 - The mirrored union belongs in `src/lib/types.ts`. "Fails the build on both sides" is the requirement; a generated file or an exhaustive `satisfies` check both satisfy it - pick the one with the smaller diff.
 - The Tauri bridge turns `Err` into a rejected promise and `src/lib/errorStore.ts` renders it. Whatever struct is chosen must still produce a readable toast without special-casing at every call site.
 
 ### Phase 4: Editor Surface State Extraction
+
 **Goal**: The two highest-arity panes own their state, and editing stops re-rendering the whole shell
 **Depends on**: Phase 1
 **Requirements**: SHELL-01, SHELL-02, SHELL-03, SHELL-04
 **Success Criteria** (what must be TRUE):
+
   1. `OutlinePane` and `EditorPane` each take a small prop list and read the rest from module stores via `useSyncExternalStore`
   2. Typing in the editor does not re-render `DocumentList`, `TerminalPanel`, or the activity rail
   3. `EditorPane` has a component test that fails if a preview mark is lost to an unrelated re-render - the #260/#262/#264 failure mode
   4. The e2e suite, unit tests, and the startup/bundle budget gates pass unchanged, and no lazy mode pane has been pulled into the entry chunk
+
 **Plans**: TBD
 
 Notes for planning:
+
 - Peel one pane's prop cluster per plan, highest arity first: `OutlinePane` (~71 props, `src/App.tsx:8917`), then `EditorPane` (~55, `src/App.tsx:7995`).
 - The pattern is already proven in this repo: `src/lib/errorStore.ts`, `editorTabsStore.ts`, `appOverlayStore.ts`, `workspaceStore.ts`. Do not introduce a state library or a Context-provider tree.
 - Hard invariant on `EditorPane`: marks must be folded into the HTML string React renders, and the markup object memoized on that string. Never add an effect that mutates the preview container's DOM - React reassigns `dangerouslySetInnerHTML` on any non-identity-equal prop, and the effect will not re-run because nothing it depends on changed (`src/components/EditorPane.tsx:167`).
@@ -104,17 +141,21 @@ Notes for planning:
 - No UI hint annotation: this phase must produce pixel-identical output, so a UI design spec is the wrong downstream step.
 
 ### Phase 5: Shell Decomposition Completion
+
 **Goal**: `src/App.tsx` is a shell, not a state container - a new pane can be added without touching it
 **Depends on**: Phase 4
 **Requirements**: SHELL-05, SHELL-06, SHELL-07, SHELL-08
 **Success Criteria** (what must be TRUE):
+
   1. `DocumentList` and `TerminalPanel` read their state from module stores instead of ~40- and ~25-prop bundles
   2. Mode selection is a registry lookup, and adding a mode surface does not add a branch to a nested ternary chain
   3. Adding state to any decomposed pane is a change inside that pane's store and component, with no edit to `src/App.tsx`
   4. `make verify` and the e2e suite pass with no visible behavior change, and `MainApp`'s `useState`/`useEffect` count is a fraction of today's 68/50
+
 **Plans**: TBD
 
 Notes for planning:
+
 - Remaining prop bundles: `DocumentList` (~40, `src/App.tsx:8781`), `TerminalPanel` (~25, `src/App.tsx:9040`). The mode ternary chain runs roughly `src/App.tsx:8600` to `:8790`.
 - Terminal invariant: preserve the generation check on every session-scoped command. It is what stops a stale frontend handle writing into a recycled session, and it is easy to lose when moving state.
 - The mode registry must keep every mode surface a `React.lazy` chunk. A registry that eagerly imports all 18 surfaces will fail `scripts/check-bundle-budget.mjs`, which is the intended safety net.
@@ -128,7 +169,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Trustworthy Verify Signal | 0/TBD | Not started | - |
+| 1. Trustworthy Verify Signal | 7/7 | In Progress|  |
 | 2. Shared Scanner and Path Invariants | 0/TBD | Not started | - |
 | 3. Typed IPC Error Contract | 0/TBD | Not started | - |
 | 4. Editor Surface State Extraction | 0/TBD | Not started | - |

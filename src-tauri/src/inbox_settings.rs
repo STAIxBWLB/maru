@@ -502,9 +502,14 @@ pub fn load_runtime_config_or_legacy(work: &Path) -> Result<InboxRuntimeConfig, 
         return Ok(config);
     }
     let legacy = load(work);
-    let mut config = InboxRuntimeConfig::default();
-    config.root = ".".to_string();
-    config.gmail.gws_path = legacy.gws_path.clone();
+    let mut config = InboxRuntimeConfig {
+        root: ".".to_string(),
+        gmail: InboxGmailConfig {
+            gws_path: legacy.gws_path.clone(),
+            ..InboxGmailConfig::default()
+        },
+        ..InboxRuntimeConfig::default()
+    };
     config.channels.clear();
     let sources = if legacy.sources.is_empty() {
         default_sources()
@@ -600,8 +605,8 @@ fn save_runtime_config(
     work: &Path,
     config: InboxRuntimeConfig,
 ) -> Result<InboxRuntimeConfig, String> {
-    validate_inbox_runtime_config(&work, &config)?;
-    let path = workspace_config_path(&work);
+    validate_inbox_runtime_config(work, &config)?;
+    let path = workspace_config_path(work);
     if !path.exists() {
         return Err("workspace_config_missing".to_string());
     }

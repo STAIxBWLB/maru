@@ -204,8 +204,7 @@ pub fn read_meetings_log(
         fs::read_to_string(&log_path).map_err(|err| format!("Cannot read meetings log: {err}"))?;
     let cap = limit
         .unwrap_or(MEETINGS_LOG_DEFAULT_LIMIT)
-        .min(MEETINGS_LOG_MAX_LIMIT)
-        .max(1);
+        .clamp(1, MEETINGS_LOG_MAX_LIMIT);
     let filter: Option<BTreeSet<String>> = event_filter
         .map(|values| values.into_iter().filter(|v| !v.is_empty()).collect())
         .filter(|set: &BTreeSet<String>| !set.is_empty());

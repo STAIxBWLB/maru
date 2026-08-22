@@ -625,7 +625,7 @@ export async function skillsDispatchBackground(params: {
   permissionMode?: string | null;
 }): Promise<string> {
   if (!isTauri()) return `mock-skill-run-${params.runtime}-${Date.now()}`;
-  return invoke<string>("skills_dispatch_background", params);
+  return invoke<string>("skills_dispatch_background", { args: params });
 }
 
 export async function agentReadRunEvents(

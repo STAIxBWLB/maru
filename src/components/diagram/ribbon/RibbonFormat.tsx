@@ -3,7 +3,7 @@ import { useCallback } from "react";
 import { defaultCoalescer, pasteStyleToSelection, withSnapshot } from "../../../lib/diagram/actions";
 import { useDiagram, useDiagramStore } from "../DiagramStoreContext";
 import { useTranslation } from "../../../lib/i18n";
-import { RibbonButton, RibbonGroup } from "./ribbonPrimitives";
+import { RibbonGroup } from "./ribbonPrimitives";
 
 interface Preset {
   id: string;

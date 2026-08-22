@@ -31,7 +31,9 @@ use crate::today::{
     TaskTransitionRequest, TodayMutation, TOP_LANE_DEFAULT, TOP_LANE_MAX,
 };
 use crate::today_lifecycle::{move_file, task_transition};
-use crate::today_outbox::{enqueue_record, has_web_action, OutboxOp, OutboxStatus, UpsertPayload};
+use crate::today_outbox::{
+    enqueue_record, has_web_action, OutboxOp, OutboxRecordDraft, OutboxStatus, UpsertPayload,
+};
 use crate::today_store::{load_snapshot, today_mutate, JOURNAL_END_MARKER, JOURNAL_START_MARKER};
 use crate::vault::{normalize_existing_dir, parse_frontmatter, resolve_inside_vault};
 use crate::vault_list::{assert_maru_can_write, WorkspaceWriteAction};
@@ -421,12 +423,25 @@ fn invalid_summary(
 
 /// Read + validate one receipt file. `Err` carries the summary so the caller
 /// can report it without re-deriving the fields.
-fn load_receipt(work: &Path, path: &Path) -> Result<Receipt, WebActionSummary> {
-    let raw = fs::read_to_string(path)
-        .map_err(|err| invalid_summary(work, path, None, format!("Cannot read receipt: {err}")))?;
-    let parsed: RawReceipt = serde_yaml::from_str(&raw)
-        .map_err(|err| invalid_summary(work, path, None, format!("Cannot parse receipt: {err}")))?;
-    validate_receipt(&parsed).map_err(|reason| invalid_summary(work, path, Some(&parsed), reason))
+fn load_receipt(work: &Path, path: &Path) -> Result<Receipt, Box<WebActionSummary>> {
+    let raw = fs::read_to_string(path).map_err(|err| {
+        Box::new(invalid_summary(
+            work,
+            path,
+            None,
+            format!("Cannot read receipt: {err}"),
+        ))
+    })?;
+    let parsed: RawReceipt = serde_yaml::from_str(&raw).map_err(|err| {
+        Box::new(invalid_summary(
+            work,
+            path,
+            None,
+            format!("Cannot parse receipt: {err}"),
+        ))
+    })?;
+    validate_receipt(&parsed)
+        .map_err(|reason| Box::new(invalid_summary(work, path, Some(&parsed), reason)))
 }
 
 /// Google Tasks wants an RFC3339 timestamp; task notes carry a plain
@@ -478,17 +493,19 @@ fn queue_upsert(
     });
     enqueue_record(
         work,
-        OutboxOp::Upsert,
-        &receipt.task_path,
-        // Empty on first sight of the task: the drain inserts, then writes
-        // the returned id back into the note.
-        &string_field(&frontmatter, "googleTaskId").unwrap_or_default(),
-        list_id,
-        Some(payload),
-        // Ready, not Prepared: the web already committed the note, so there
-        // is no local mutation for recovery to reconcile against.
-        OutboxStatus::Ready,
-        Some(receipt.id.clone()),
+        OutboxRecordDraft {
+            op: OutboxOp::Upsert,
+            task_path: receipt.task_path.clone(),
+            // Empty on first sight of the task: the drain inserts, then
+            // writes the returned id back into the note.
+            google_task_id: string_field(&frontmatter, "googleTaskId").unwrap_or_default(),
+            google_task_list_id: list_id,
+            payload: Some(payload),
+            // Ready, not Prepared: the web already committed the note, so
+            // there is no local mutation for recovery to reconcile against.
+            status: OutboxStatus::Ready,
+            web_action_id: Some(receipt.id.clone()),
+        },
         now_iso,
     )?;
     Ok(())
@@ -854,7 +871,7 @@ pub fn web_actions_scan(work_path: String) -> Result<Vec<WebActionSummary>, Stri
         .into_iter()
         .map(|path| match load_receipt(&work, &path) {
             Ok(receipt) => summary_for(&work, &path, &receipt, WebActionState::Pending, None),
-            Err(summary) => summary,
+            Err(summary) => *summary,
         })
         .collect())
 }
@@ -879,7 +896,7 @@ pub fn web_actions_apply(
             Ok(receipt) => receipt,
             Err(summary) => {
                 outcome.invalid += 1;
-                outcome.items.push(summary);
+                outcome.items.push(*summary);
                 continue;
             }
         };
