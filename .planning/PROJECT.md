@@ -43,15 +43,16 @@ real files the user owns, and nothing is lost if Maru is uninstalled.
   auto-update via minisign-verified `latest.json`
 - ✓ Measured and gated startup/bundle budgets (320 KiB gzip initial JS, 70 KiB
   CSS, lazy GraphView/RichMarkdownEditor/i18n chunks)
+- ✓ `make verify` is a signal a refactor can be trusted against — Phase 1
+  (pinned rust-toolchain 1.98.0, fmt-check + clippy gates, ESLint four-rule
+  gate wired into verify, `e2e/`+`scripts/` typechecked, CI trace on e2e
+  failure with no retries; UAT 24/24)
 
 ### Active
 
 <!-- Milestone 1: structural debt paydown. Scoped to the Tech Debt section of
      .planning/codebase/CONCERNS.md. -->
 
-- [ ] `make verify` is a signal a refactor can be trusted against (Rust lint
-      gate, hook-dependency gate, `e2e/`+`scripts/` typechecked, CI traces on
-      e2e failure, pinned Rust toolchain)
 - [ ] One shared generated-directory prune list replaces the five diverged copies
 - [ ] One shared path-containment helper is the canonical one for new commands
 - [ ] Errors the frontend branches on carry a typed `code`, not a string prefix
@@ -173,7 +174,7 @@ ones this milestone can actually break are listed here.
 |----------|-----------|---------|
 | Milestone 1 = structural debt paydown, no features | Behavior-preserving work is only verifiable if behavior is not also changing | - Pending |
 | Scope drawn from CONCERNS.md Tech Debt, not from the SPECs | 18 ingested docs describe shipped behavior; inventing forward work from them would be fabrication | - Pending |
-| Verification gates land before the decomposition (Phase 1) | Moving 68 `useState` / 50 `useEffect` without a hook-dependency gate reproduces #260/#262/#264 | - Pending |
+| Verification gates land before the decomposition (Phase 1) | Moving 68 `useState` / 50 `useEffect` without a hook-dependency gate reproduces #260/#262/#264 | ✓ Phase 1 — 7 gates live, deliberate-break proofs red-then-green, UAT 24/24 |
 | Continue the module-store precedent instead of adding a state library | `errorStore`/`workspaceStore`/`editorTabsStore` already prove the pattern here | - Pending |
 | Typed error contract covers only branched-on errors | Converting 1,118 signatures is cost without benefit; display-only errors read fine as strings | - Pending |
 | Promote `ensure_within`, do not retrofit all ~20 callers | Existing checks are individually sound; the problem is that a new author has no canonical example | - Pending |
@@ -181,4 +182,4 @@ ones this milestone can actually break are listed here.
 | 64 SPEC constraints recorded as invariants, not decisions | 0 ADRs in the set - nothing is decision-locked, so a future ADR can override any of them | - Pending |
 
 ---
-*Last updated: 2026-08-22 after initial project definition from /gsd-ingest-docs + /gsd-map-codebase*
+*Last updated: 2026-08-23 after Phase 1*

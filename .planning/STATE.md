@@ -2,13 +2,13 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-current_phase: 1
-current_phase_name: Trustworthy Verify Signal
-status: executing
+current_phase: 2
+current_phase_name: Shared Scanner and Path Invariants
+status: planning
 stopped_at: Completed 01-07-PLAN.md - Phase 1 fully executed, GATE-02 flipped, all 7 plans done
-last_updated: "2026-08-22T10:12:57.572Z"
-last_activity: 2026-08-22
-last_activity_desc: Roadmap created from /gsd-ingest-docs intel + /gsd-map-codebase
+last_updated: "2026-08-22T20:08:17.730Z"
+last_activity: 2026-08-23
+last_activity_desc: Phase 1 complete, transitioned to Phase 2
 progress:
   total_phases: 1
   completed_phases: 1
@@ -20,17 +20,17 @@ progress:
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-08-22)
+See: .planning/PROJECT.md (updated 2026-08-23)
 
 **Core value:** The filesystem stays the source of truth - everything Maru shows is derived from real files the user owns, and nothing is lost if Maru is uninstalled.
-**Current focus:** Phase 1 - Trustworthy Verify Signal
+**Current focus:** Phase 2 - Shared Scanner and Path Invariants
 
 ## Current Position
 
-Phase: 1 of 5 (Trustworthy Verify Signal)
-Plan: 7 of 7 in current phase
-Status: Ready to execute
-Last activity: 2026-08-22 - Completed 01-01 (rust-toolchain.toml pin + fmt-check gate)
+Phase: 2 of 5 (Shared Scanner and Path Invariants)
+Plan: Not started
+Status: Ready to plan
+Last activity: 2026-08-23 — Phase 1 complete, transitioned to Phase 2
 
 Progress: [██████████] 100%
 
@@ -38,7 +38,7 @@ Progress: [██████████] 100%
 
 **Velocity:**
 
-- Total plans completed: 0
+- Total plans completed: 7
 - Average duration: -
 - Total execution time: -
 
@@ -46,7 +46,7 @@ Progress: [██████████] 100%
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
-| - | - | - | - |
+| 1 | 7 | - | - |
 
 **Recent Trend:**
 
@@ -106,8 +106,6 @@ None yet.
 - No `.planning/config.json` exists; defaults assumed - granularity `standard`, `phase_id_convention` sequential, `project_code` null. Regenerate phase IDs if a config lands with different values.
 - `src/App.tsx` has no test of any kind. Phases 4-5 depend on Phase 1's hook-dependency gate plus the per-pane tests written during extraction; there is no existing safety net for the decomposition.
 - `make verify` runs on ubuntu-22.04 only and e2e runs Chromium against Vite with mocked IPC. Nothing in CI exercises WKWebView, the real PTY, IME input, or the macOS menu - macOS-affecting changes need a real-app run.
-- make verify's fmt-check/clippy/build-frontend steps unverified end-to-end pending a concurrent session's hwped.rs/lib.rs work landing in this shared checkout; not caused by 01-06
-- make verify's test-rust/fmt-check/clippy steps unverified end-to-end on this shared checkout pending the concurrent hwped session's work landing; not caused by 01-07. CI run on the committed tree is the authoritative composite check and is pending from the team lead
 
 ## Deferred Items
 
@@ -121,6 +119,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-08-22T10:12:57.566Z
-Stopped at: Completed 01-07-PLAN.md - Phase 1 fully executed, GATE-02 flipped, all 7 plans done
+Last session: 2026-08-22T20:09:25Z
+Stopped at: Phase 1 complete (UAT 24/24, SECURITY verified), ready to plan Phase 2
 Resume file: None
