@@ -136,6 +136,7 @@ const UI_FLOW = [
   "saved-result-requery",
 ];
 
+/** Hand-maintained: edited as flow gaps are found and closed, not derived from README or REQUIREMENTS. */
 const TODO_LEDGER: E2EFlowTodo[] = [
   {
     id: "readme-slide-export-conflict",
@@ -159,12 +160,6 @@ const TODO_LEDGER: E2EFlowTodo[] = [
     id: "hub-connector-deferred-local-first",
     content:
       "Maru Hub remains a separate service; this flow verifies local MCP/local storage only.",
-    status: "todo",
-  },
-  {
-    id: "skill-name-drift",
-    content:
-      "README names inbox-processor, lint, and hwpx-fill while current bundled skills are inbox-process, vault-lint, and hwpx.",
     status: "todo",
   },
   {
