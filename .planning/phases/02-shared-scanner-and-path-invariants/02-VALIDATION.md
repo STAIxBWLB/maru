@@ -40,11 +40,12 @@ created: 2026-08-23
 
 | Task ID | Plan | Wave | Requirement | Threat Ref | Secure Behavior | Test Type | Automated Command | File Exists | Status |
 |---------|------|------|-------------|------------|-----------------|-----------|-------------------|-------------|--------|
-| TBD by planner | — | — | SCAN-01 | — | Union edit is one-line, all five scanners honor it | unit | `cargo test --lib paths` | ❌ W0 | ⬜ pending |
-| TBD by planner | — | — | SCAN-02 | — | Workspace/vault scans skip `.git`/`.venv` | unit (fixture tree) | `cargo test --lib vault workspace_files` | ✅ | ⬜ pending |
-| TBD by planner | — | — | SCAN-03 | — | `ensure_within` importable from `paths.rs`, rejects escapes lexically | unit | `cargo test --lib paths` | ❌ W0 | ⬜ pending |
-| TBD by planner | — | — | SCAN-04 | — | Non-absolute home base errors instead of materializing a tree | unit (MARU_TEST_HOME fixture) | `cargo test --lib skill_host::fs` | ✅ | ⬜ pending |
-| TBD by planner | — | — | SCAN-05 | — | Stray `Users/` tree deleted, no recurrence | filesystem assertion | `test ! -d Users` + guard test above | ✅ | ⬜ pending |
+| 02-01 Task 1 (tracer: `paths.rs` module — GENERATED_DIRS union, `ensure_within`, `require_absolute`, full unit tests) | 02-01 | 1 | SCAN-01, SCAN-03 | T-02-01, T-02-02 | Union edit is one-line in `paths.rs`; `ensure_within` rejects escapes lexically; module registered and consumed by workspace_files/content_search | unit | `cd src-tauri && cargo test --lib -- paths:: workspace_files:: content_search::` | ❌ created by 02-01 | ⬜ pending |
+| 02-01 Task 2 (`rg_visibility` reconciliation — generated dirs un-allowlistable) | 02-01 | 1 | SCAN-02 | T-02-02 | Allowlisting a nested `.git` no longer resurrects it into content search (`exclude_git: true` unconditionally) | unit (red→green expectation flip on `rg_hidden_and_git_traversal_follow_dot_folder_allowlist`) | `cd src-tauri && cargo test --lib content_search::` | ✅ | ⬜ pending |
+| 02-02 Task 1 (SCAN-02 union-proof test, red first) + Tasks 2-3 (rewire vault/secrets/project_activity/evidence_binder) | 02-02 | 2 | SCAN-01, SCAN-02 | T-02-04, T-02-05, T-02-06 | Vault scans exclude `__pycache__`/`.git`/`.venv` contents; all five scanners honor the union; `.maru` stays out of evidence discovery | unit (fixture tree, red→green) | `cd src-tauri && cargo test --lib -- vault:: secrets:: project_activity:: evidence_binder:: inbox::` | ✅ | ⬜ pending |
+| 02-01 Task 3 (`ensure_within` promotion — maru_dir.rs drops private copy) | 02-01 | 1 | SCAN-03 | T-02-01 | `ensure_within` importable from `paths.rs`; byte-identical error message; studio/diagram sibling copies untouched | unit | `cd src-tauri && cargo test --lib maru_dir::` | ❌ created by 02-01 | ⬜ pending |
+| 02-03 Task 1 (`require_absolute` guard in `maru_home()`/`install_root_base()` + regression test `maru_home_rejects_relative_test_home`) | 02-03 | 2 | SCAN-04 | T-02-07, T-02-08 | Non-absolute home base errors via `Err` on every return path instead of materializing a tree | unit (MARU_TEST_HOME fixture, red→green) | `cd src-tauri && cargo test --lib skill_host::fs` | ✅ | ⬜ pending |
+| 02-03 Task 2 (delete stray `Users/` tree, same plan as the guard per D-10) | 02-03 | 2 | SCAN-05 | T-02-07 | Stray `Users/` tree deleted, no recurrence | filesystem assertion | `test ! -e Users` + guard test above | ✅ | ⬜ pending |
 
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
 
@@ -52,7 +53,7 @@ created: 2026-08-23
 
 ## Wave 0 Requirements
 
-- [ ] `src-tauri/src/paths.rs` test module — stubs for SCAN-01/03/04 guard tests (created by the plan that introduces the module; no separate framework install needed)
+- [ ] `src-tauri/src/paths.rs` test module — full unit tests (ensure_within descendant/equal/escape/unrelated-absolute; require_absolute absolute/relative) delivered by 02-01 Task 1; the SCAN-04 guard regression test (`maru_home_rejects_relative_test_home`) is delivered by 02-03 Task 1. No stub scaffolding or separate framework install needed.
 
 ---
 
