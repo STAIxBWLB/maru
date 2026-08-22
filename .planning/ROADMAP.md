@@ -38,7 +38,16 @@ Decimal phases appear between their surrounding integers in numeric order.
   3. A failing e2e test in CI leaves a downloadable Playwright trace in the uploaded artifacts
   4. Checking out an older commit and building reproduces that commit's Rust toolchain rather than today's `stable`
   5. `pnpm typecheck` passes with `@types/dompurify` removed, and the shipped E2E flow ledger contains no already-resolved entries
-**Plans**: TBD
+**Plans**: 7 plans
+
+Plans:
+- [ ] 01-01-PLAN.md - Tracer: pin the Rust toolchain and gate `make verify` on `cargo fmt --check` (GATE-05, GATE-01 format half)
+- [ ] 01-02-PLAN.md - Fix the clippy backlog to zero and add the `clippy` gate (GATE-01)
+- [ ] 01-03-PLAN.md - Playwright trace on first failure, and a truthful E2E flow ledger (GATE-04, GATE-07)
+- [ ] 01-04-PLAN.md - Typecheck `e2e/` via a new project reference, drop the deprecated types stub (GATE-03 e2e half, GATE-06)
+- [ ] 01-05-PLAN.md - Typecheck `scripts/` under `checkJs` and reference it (GATE-03 scripts half)
+- [ ] 01-06-PLAN.md - Install ESLint, write the flat config, clear `src/App.tsx` (GATE-02 setup)
+- [ ] 01-07-PLAN.md - Clear the rest of the lint backlog and add the `lint` gate (GATE-02)
 
 Notes for planning:
 - The cheapest Rust half is zero-config: `cargo clippy -- -D warnings` and `cargo fmt --check` appended to the `verify` target (`Makefile:309`). The Rust code is already idiomatic enough to pass or near-pass.
@@ -128,7 +137,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Trustworthy Verify Signal | 0/TBD | Not started | - |
+| 1. Trustworthy Verify Signal | 0/7 | Not started | - |
 | 2. Shared Scanner and Path Invariants | 0/TBD | Not started | - |
 | 3. Typed IPC Error Contract | 0/TBD | Not started | - |
 | 4. Editor Surface State Extraction | 0/TBD | Not started | - |
