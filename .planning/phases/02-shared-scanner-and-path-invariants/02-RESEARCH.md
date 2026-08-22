@@ -364,17 +364,19 @@ fn scanner_excludes_git_venv_and_pycache_even_without_dot_rule() {
 | A2 | The historical producer of the stray `Users/` tree was a relative `MARU_TEST_HOME`-style join (per CONCERNS.md:190); the exact producer is unproven since `test_maru_home_override` is `cfg(test)`-only in current code | Pattern 3 | Low — the guard covers both branches regardless of the historical cause |
 | A3 | No user has a generated-dir name (e.g. `.git`) in their `scan.includeDotFolders` setting in the wild; if one does, their allowlist silently stops resurrecting it | Pitfall 2 | Silent, narrow behavior change; accepted by D-04's "intended behavior change" framing |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Stale vault cache after scope reduction.**
    - What we know: `read_vault_cache` (`vault.rs:509-525`) emits cached entries filtered only by the scratchpad prefix — a cache written before this phase can surface now-pruned paths (e.g. `__pycache__/*.md` if any existed) on first paint until the next `scan_vault` rewrites the cache (`:417`). Precedent: `read_vault_cache_drops_stale_scratchpad_entries` test (`:1245`) and its comment (:512-513) show the fix pattern.
    - What's unclear: whether the planner wants a cache-read filter against `GENERATED_DIRS` (mirroring the scratchpad precedent) or accepts self-healing on next scan.
    - Recommendation: accept self-healing (entries were rare-to-nonexistent before, since dot-dirs were already excluded and `__pycache__` rarely holds documents). Flag in the plan as a known, bounded transient; do not add the filter unless the executor's verification shows visible staleness.
+   - **Resolution:** ACCEPT self-healing per the recommendation — no cache-read filter added. Documented as a bounded transient in 02-02-PLAN.md's "Flagged assumptions" (SCAN-02 / stale vault cache), with an instruction to surface visible staleness rather than silently adding the filter.
 
 2. **`rg_visibility` final shape after the union.**
    - What we know: Pitfall 2's contradiction must be resolved; the test at `content_search.rs:867-900` needs its `git_allowed` expectation updated.
    - What's unclear: exact code shape (collapse `exclude_git` into the glob loop vs. keep both checks).
    - Recommendation: keep the struct, make `exclude_git` reflect "can never include .git" (i.e. `true` while `.git ∈ GENERATED_DIRS`), and rename/extend the test to assert generated dirs are un-allowlistable. Planner owns the final shape (Claude's-discretion: call-site rewiring).
+   - **Resolution:** Follow the recommendation — 02-01-PLAN.md Task 2 keeps the `RgVisibility` struct, sets `exclude_git: true` unconditionally (generated dirs are un-allowlistable), and flips the `git_allowed` expectation in `rg_hidden_and_git_traversal_follow_dot_folder_allowlist` with a red-then-green proof. Final micro-shape left to executor discretion per the plan's task action.
 
 ## Environment Availability
 
@@ -409,7 +411,7 @@ fn scanner_excludes_git_venv_and_pycache_even_without_dot_rule() {
 | Req ID | Behavior | Test Type | Automated Command | File Exists? |
 |--------|----------|-----------|-------------------|--------------|
 | SCAN-01 | One constant, five+one importers | compile + unit | `cargo test --lib` (compile is the proof: lists deleted, single source) | ❌ new `paths.rs` |
-| SCAN-02 | `.git`/`.venv`/`__pycache__` excluded | unit | `cargo test --lib workspace_files::tests:: vault::tests:: content_search::tests::` | ✅ extend existing (`workspace_files.rs:1231`, `vault.rs:1298`, `content_search.rs:867`) |
+| SCAN-02 | `.git`/`.venv`/`__pycache__` excluded | unit | `cargo test --lib -- workspace_files::tests:: vault::tests:: content_search::tests::` | ✅ extend existing (`workspace_files.rs:1231`, `vault.rs:1298`, `content_search.rs:867`) |
 | SCAN-03 | `ensure_within` importable + canonical | unit + doc | `cargo test --lib paths::tests::` | ❌ new tests in `paths.rs` |
 | SCAN-04 | Relative home root → `Err`, no cwd tree | unit | `cargo test --lib skill_host::fs::tests::` | ❌ new test in `fs.rs` (fixture exists) |
 | SCAN-05 | `Users/` gone | manual/filesystem | `test ! -e Users && git status --porcelain -- Users/` empty | ❌ verification step in plan |
