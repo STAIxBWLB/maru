@@ -103,11 +103,13 @@ overlay is produced out-of-band by the `vault-graph` skill
   node/edge scale 0.5–2), `panels` (one optional pinned Tools drawer with a
   width clamped 280–480), and `savedViews`
   (source/mode/localTarget/profile/display per view). V2 settings migrate
-  without losing filters or saved views. Legacy default displays keep the app
-  theme with violet accent and community colors; only fresh installs adopt the
-  V6 dark/seal/origin canvas defaults. The toolbar menu creates, applies,
-  replaces by name, and deletes views; query, selection, path, camera, and
-  overlay state remain transient.
+  without losing filters or saved views. A stored V2 display still at its own
+  defaults adopts the V6 display defaults (seal accent, origin colors) but
+  keeps the `app` theme; a customized V2 display keeps `app` theme with violet
+  accent and community colors (`migrateGraphSettingsV2`). Only fresh installs
+  take the dark theme. The toolbar menu creates, applies, replaces by name, and
+  deletes views; query, selection, path, camera, and overlay state remain
+  transient.
 - Display wiring is hot-applied: arrows/labels via `setSetting` or attribute
   updates + `refresh()`, never a graph rebuild. Frontmatter edges carry a
   stable `relationColor` (palette hash); body `wiki_link` edges stay neutral.
