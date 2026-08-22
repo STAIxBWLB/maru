@@ -227,14 +227,6 @@ impl ScanFilter {
         !self.include_dot_folders.is_empty()
     }
 
-    pub(crate) fn could_include_dot_folder_named(&self, folder_name: &str) -> bool {
-        self.include_dot_folders.iter().any(|path| {
-            path.components().any(
-                |component| matches!(component, Component::Normal(value) if value == folder_name),
-            )
-        })
-    }
-
     pub fn is_excluded_path(&self, path: &Path, root: &Path, generated_dirs: &[&str]) -> bool {
         let Ok(rel) = path.strip_prefix(root) else {
             return true;

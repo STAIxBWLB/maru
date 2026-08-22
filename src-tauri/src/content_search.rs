@@ -267,7 +267,10 @@ impl PendingFile {
 fn rg_visibility(scan_filter: &ScanFilter) -> RgVisibility {
     RgVisibility {
         hidden: scan_filter.includes_dot_folders(),
-        exclude_git: !scan_filter.could_include_dot_folder_named(".git"),
+        // `.git` is in GENERATED_DIRS, so the glob loop excludes it
+        // unconditionally — a generated dir can never be allowlisted back
+        // into search results (SCAN-02).
+        exclude_git: true,
     }
 }
 
