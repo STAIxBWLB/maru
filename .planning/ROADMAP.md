@@ -22,7 +22,7 @@ mode-routing chain. Nothing user-visible changes in any phase; that is the point
 Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 1: Trustworthy Verify Signal** - Make `make verify` and CI tell the truth about a behavior-preserving change (completed 2026-08-23)
-- [ ] **Phase 2: Shared Scanner and Path Invariants** - Collapse five prune lists and ~20 containment checks into one of each
+- [x] **Phase 2: Shared Scanner and Path Invariants** - Collapse five prune lists and ~20 containment checks into one of each (completed 2026-08-23)
 - [ ] **Phase 3: Typed IPC Error Contract** - Give the errors the frontend branches on a machine-readable code
 - [ ] **Phase 4: Editor Surface State Extraction** - Move `OutlinePane` and `EditorPane` off their prop bundles onto module stores
 - [ ] **Phase 5: Shell Decomposition Completion** - Move the remaining panes and mode routing out of `MainApp`
@@ -180,7 +180,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Trustworthy Verify Signal | 7/7 | Complete    | 2026-08-23 |
-| 2. Shared Scanner and Path Invariants | 3/3 | In Progress|  |
+| 2. Shared Scanner and Path Invariants | 3/3 | Complete    | 2026-08-23 |
 | 3. Typed IPC Error Contract | 0/TBD | Not started | - |
 | 4. Editor Surface State Extraction | 0/TBD | Not started | - |
 | 5. Shell Decomposition Completion | 0/TBD | Not started | - |
