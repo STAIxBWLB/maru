@@ -23,12 +23,20 @@ only proof is a green gate.
 
 ### Linter (GATE-02)
 
-- **D-01:** ESLint 9 with flat config. It is the only linter that implements
-  `react-hooks/exhaustive-deps` properly, which is the rule GATE-02 exists for,
-  and the 18 `eslint-disable` comments already sitting in `src/` keep working
-  instead of needing conversion. — **Reversibility:** costly — switching later
-  means rewriting every disable comment to the new tool's syntax and re-tuning
-  the rule set; the 18 existing comments are already written against ESLint.
+- **D-01:** ESLint with flat config, pinned to **10.x** (`eslint@10.9.0` at time
+  of writing). It is the only linter that implements `react-hooks/exhaustive-deps`
+  properly, which is the rule GATE-02 exists for, and the 18 `eslint-disable`
+  comments already sitting in `src/` keep working instead of needing conversion.
+  — **Reversibility:** costly — switching later means rewriting every disable
+  comment to the new tool's syntax and re-tuning the rule set; the 18 existing
+  comments are already written against ESLint.
+  **Amended 2026-08-22:** originally written as "ESLint 9". Verified that
+  `npm view eslint version` is `10.9.0` and that `eslint@9.39.5` is deprecated
+  ("This version is no longer supported"). Major 10 is also flat-config-only, so
+  the intent behind "9" — the flat-config generation, as opposed to `.eslintrc` —
+  is preserved. `typescript-eslint`, `eslint-plugin-react-hooks`, and
+  `eslint-plugin-react-refresh` all declare `^10` in their peer ranges, so the
+  compatibility cost is zero.
 - **D-02:** Correctness rules only, no style rules:
   `react-hooks/rules-of-hooks`, `react-hooks/exhaustive-deps`,
   `no-unused-vars`, `no-floating-promises`. This is the set that guards the
@@ -47,19 +55,39 @@ only proof is a green gate.
 
 - **D-05:** Staged adoption per rule, not a single flip. Mechanically safe rules
   (`no-unused-vars`, `rules-of-hooks`) go straight to `error`.
-- **D-06:** `exhaustive-deps` is set to `error` too, but each of the 49 existing
-  violations in `src/App.tsx` gets an `eslint-disable-next-line` carrying a short
-  reason. New violations are blocked from day one, and the comments become a
-  grep-able worklist that Phases 4-5 burn down as they touch each pane. Chosen
-  over a baseline file (another artifact to maintain) and over blanket `warn`
-  (warnings get ignored and would not block new violations).
+- **D-06:** `exhaustive-deps` is set to `error` too, but each existing violation
+  in `src/App.tsx` gets an `eslint-disable-next-line` carrying a short reason.
+  New violations are blocked from day one, and the comments become a grep-able
+  worklist that Phases 4-5 burn down as they touch each pane. Chosen over a
+  baseline file (another artifact to maintain) and over blanket `warn` (warnings
+  get ignored and would not block new violations).
+  **Sizing (measured 2026-08-22, RESEARCH.md Pitfall 2):** 22 real violations in
+  `App.tsx` — 10 `exhaustive-deps` + 12 `no-unused-vars` — not the 49 first
+  written here. 49 was the `useEffect` call count, not a violation count. The
+  strategy is unchanged; only the size was wrong. One existing disable comment at
+  `App.tsx:6974` is now a stale directive and should be removed while the new
+  ones are added.
 - **D-07:** `no-console` is not enabled. The 35 `console.` calls in non-test
   `src/` stay. This is a style rule, and the roadmap explicitly rules out a lint
   style campaign.
 - **D-08:** Rust clippy runs as `-D warnings` with no crate-level `allow`
-  escapes. Every violation it surfaces gets fixed. The roadmap estimated the
-  Rust code would "pass or near-pass" but never measured it; if the count turns
-  out large, that is a planning-time finding, not a reason to add `allow`.
+  escapes. Every violation it surfaces gets fixed.
+  **Measured 2026-08-22, and reaffirmed after measuring:** the roadmap's
+  "pass or near-pass" estimate was wrong. `cargo clippy --offline -- -D warnings`
+  reports **75 violations** at lib scope; `cargo fmt --check` reports 0. The
+  count was put back to the user with the option to defer the fixes or allow
+  some lints, and D-08 was reaffirmed as written: fix all 75, no `allow`.
+  Approach: run `cargo clippy --fix` first to clear the mechanical majority
+  (`manual_inspect`, `unnecessary_to_owned`, `useless_vec` and similar), then
+  handle the remainder by hand.
+  **Caveat:** 75 is a lower bound. It was measured on local `rustc 1.96.0`; true
+  current stable is 1.98.0, and 1.97/1.98 each may add lints. Re-measure once
+  `rust-toolchain.toml` (D-11) lands.
+- **D-08b:** Clippy scope is lib only — `cargo clippy -- -D warnings`, not
+  `--all-targets`. This matches the repo's existing convention, where
+  `test-rust` (`Makefile:188`) already runs `cargo test --lib`. `--all-targets`
+  would add 15 more violations in `#[cfg(test)]` blocks for no gain against the
+  refactor risk this phase defends.
 
 ### Typecheck coverage (GATE-03) and toolchain pin (GATE-05)
 
@@ -69,6 +97,14 @@ only proof is a green gate.
   `allowJs` + `checkJs`. Both are added to the `references` array in
   `tsconfig.json`. Splitting them keeps the `.ts` specs from inheriting the
   looser settings that `.mjs` needs.
+- **D-09b:** `@types/node@22` is added as a devDependency. It is absent from the
+  entire dependency tree today, and without it `tsc -b` cannot resolve
+  `types: ["node"]` — 18 of 24 `scripts/*.mjs` files and 3 `e2e/` specs reference
+  Node builtins. This is the specific case the roadmap's "the one place a new
+  dependency may be justified" clause covers; scope it to this one package.
+  `tsconfig.scripts.json` also needs `"DOM"` in `lib`, because
+  `scripts/perf-startup-profile.mjs` calls `window` inside Playwright
+  `page.evaluate` callbacks that run in the browser, not in Node.
 - **D-10:** `tsconfig.scripts.json` runs with `strict: false`. `checkJs` alone
   catches the real failures (typos in call sites, missing exports, wrong arity)
   without demanding JSDoc annotations across 17 build scripts. Keeps the phase
@@ -161,9 +197,10 @@ only proof is a green gate.
 ### Integration Points
 - `make verify` is the single gate the whole milestone is measured against; every
   GATE in this phase terminates there.
-- `src/App.tsx` holds 49 `useEffect` calls, all of which D-06 annotates. That
-  file is also the Phase 4 and Phase 5 target, so the disable comments written
-  here are read as a worklist there.
+- `src/App.tsx` holds 49 `useEffect` calls, but only 10 of them actually violate
+  `exhaustive-deps` (measured). D-06 annotates those 10, plus 12 `no-unused-vars`
+  sites. That file is also the Phase 4 and Phase 5 target, so the disable comments
+  written here are read as a worklist there.
 
 </code_context>
 
