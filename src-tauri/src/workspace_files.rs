@@ -1,11 +1,14 @@
 use crate::evidence_binder::rekey_document_states;
+use crate::paths::GENERATED_DIRS;
 use crate::vault::{
     load_maruignore, matches_maruignore, normalize_existing_dir, resolve_inside_vault, ScanFilter,
     ScanOptions,
 };
 use crate::vault_guard::is_managed_root;
 use crate::vault_list::{assert_maru_can_write, WorkspaceWriteAction};
+use crate::win_process::NoWindow;
 use chrono::{DateTime, Utc};
+use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::fs;
@@ -13,20 +16,8 @@ use std::io::Read;
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
-
-use crate::win_process::NoWindow;
-use rayon::prelude::*;
 use walkdir::WalkDir;
 
-pub(crate) const GENERATED_DIRS: &[&str] = &[
-    "node_modules",
-    "target",
-    "dist",
-    "build",
-    ".next",
-    ".turbo",
-    ".cache",
-];
 const BINARY_SAMPLE_BYTES: usize = 8 * 1024;
 const KNOWN_BINARY_EXTENSIONS: &[&str] = &[
     "7z", "app", "bin", "db", "dmg", "doc", "docx", "gif", "gz", "heic", "hwp", "hwpx", "icns",

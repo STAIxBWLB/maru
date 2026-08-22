@@ -1,10 +1,11 @@
 use crate::cli_path::resolve_program;
 use crate::inbox_settings::expand_tilde;
+use crate::paths::GENERATED_DIRS;
 use crate::vault::{
     lexical_normalize, load_maruignore, matches_maruignore, ScanFilter, ScanOptions,
 };
 use crate::win_process::NoWindow;
-use crate::workspace_files::{is_binary_file, GENERATED_DIRS};
+use crate::workspace_files::is_binary_file;
 use rayon::prelude::*;
 use regex::Regex;
 use serde::{Deserialize, Serialize};

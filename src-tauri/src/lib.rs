@@ -46,6 +46,7 @@ mod meetings;
 mod mission_state;
 mod ops_catalog;
 mod outlook_mso;
+mod paths;
 mod project_activity;
 mod scheduler;
 pub(crate) mod scratchpad;
