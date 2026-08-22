@@ -98,10 +98,6 @@ async function ensureRightPaneVisible(page: Page) {
 test("boots the sample workspace and opens multiple editor tabs", async ({ page }) => {
   await page.goto("/");
 
-  // TEMPORARY GATE-04 RE-PROOF — reverted in the next commit. Re-exercises the trace
-  // path under the narrowed config (snapshots/screenshots off) landed in a064994.
-  await expect(page.getByRole("button", { name: "__gate04_reproof_no_such_button__" })).toBeVisible();
-
   await expect(page.getByRole("button", { name: "Sample Workspace", exact: true })).toBeVisible();
   await expect(page.getByRole("tab", { name: "Private" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Public 추가" })).toBeVisible();
