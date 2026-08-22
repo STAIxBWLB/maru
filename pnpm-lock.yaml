@@ -62,9 +62,6 @@ importers:
       '@tauri-apps/plugin-updater':
         specifier: ^2
         version: 2.10.1
-      '@types/dompurify':
-        specifier: ^3.2.0
-        version: 3.2.0
       date-fns:
         specifier: ^3.0.0
         version: 3.6.0
@@ -105,6 +102,9 @@ importers:
       '@tauri-apps/cli':
         specifier: ^2.10.0
         version: 2.10.1
+      '@types/node':
+        specifier: ^22.20.1
+        version: 22.20.1
       '@types/react':
         specifier: ^19.2.7
         version: 19.2.14
@@ -113,7 +113,7 @@ importers:
         version: 19.2.3(@types/react@19.2.14)
       '@vitejs/plugin-react':
         specifier: ^5.1.1
-        version: 5.2.0(vite@7.3.2)
+        version: 5.2.0(vite@7.3.2(@types/node@22.20.1))
       graphology-types:
         specifier: 0.24.8
         version: 0.24.8
@@ -125,10 +125,10 @@ importers:
         version: 5.9.3
       vite:
         specifier: ^7.3.1
-        version: 7.3.2
+        version: 7.3.2(@types/node@22.20.1)
       vitest:
         specifier: ^4.1.5
-        version: 4.1.5(jsdom@29.1.1)(vite@7.3.2)
+        version: 4.1.5(@types/node@22.20.1)(jsdom@29.1.1)(vite@7.3.2(@types/node@22.20.1))
 
 packages:
 
@@ -1147,10 +1147,6 @@ packages:
   '@types/deep-eql@4.0.2':
     resolution: {integrity: sha512-c9h9dVVMigMPc4bwTvC5dxqtqJZwQPePsWjPlpSOnojbor6pGqdk541lfA7AqFQr5pB1BRdq0juY9db81BwyFw==}
 
-  '@types/dompurify@3.2.0':
-    resolution: {integrity: sha512-Fgg31wv9QbLDA0SpTOXO3MaxySc4DKGLi8sna4/Utjo4r3ZRPdCt4UQee8BWr+Q5z21yifghREPJGYaEOEIACg==}
-    deprecated: This is a stub types definition. dompurify provides its own type definitions, so you do not need this installed.
-
   '@types/estree@1.0.8':
     resolution: {integrity: sha512-dWHzHa2WqEXI/O1E9OjrocMTKJl2mSrEolh1Iomrv6U+JuNwaHXsXx9bLu5gG7BUWFIN0skIQJQ/L1rIex4X6w==}
 
@@ -1162,6 +1158,9 @@ packages:
 
   '@types/ms@2.1.0':
     resolution: {integrity: sha512-GsCCIZDE/p3i96vtEqx+7dBUGXrc7zeSK3wwPHIaRThS+9OhWIXRqzs4d6k1SVU8g91DrNRWxWUGhp5KXQb2VA==}
+
+  '@types/node@22.20.1':
+    resolution: {integrity: sha512-EANqOCF9QFyra+4pfxUcX9STKJpCLjMbObVzljIJomAWSnuSIEAvyzEU53GaajbXJEgdh0iEcPL+DGvpUd4k1Q==}
 
   '@types/react-dom@19.2.3':
     resolution: {integrity: sha512-jp2L/eY6fn+KgVVQAOqYItbF0VY/YApe5Mz2F0aykSO8gx31bYCZyvSeYxCHKvzHG5eZjc+zyaS5BrBWya2+kQ==}
@@ -2001,6 +2000,9 @@ packages:
     resolution: {integrity: sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw==}
     engines: {node: '>=14.17'}
     hasBin: true
+
+  undici-types@6.21.0:
+    resolution: {integrity: sha512-iwDZqg0QAGrg9Rav5H4n0M64c3mkR59cJ6wQp+7C4nI0gsmExaedaYLNO44eT4AtBBwjbTiGPMlt2Md0T9H9JQ==}
 
   undici@7.27.2:
     resolution: {integrity: sha512-uZsKNuzQxDMUY6M3pIMvy5tvlGmtq8XJ2oLAkfRKGNu+1VQAIvLy2xIVG5ATZl5wDXl/tddByAWCizRbOme+TA==}
@@ -3267,10 +3269,6 @@ snapshots:
 
   '@types/deep-eql@4.0.2': {}
 
-  '@types/dompurify@3.2.0':
-    dependencies:
-      dompurify: 3.4.1
-
   '@types/estree@1.0.8': {}
 
   '@types/hast@3.0.4':
@@ -3282,6 +3280,10 @@ snapshots:
       '@types/unist': 3.0.3
 
   '@types/ms@2.1.0': {}
+
+  '@types/node@22.20.1':
+    dependencies:
+      undici-types: 6.21.0
 
   '@types/react-dom@19.2.3(@types/react@19.2.14)':
     dependencies:
@@ -3302,7 +3304,7 @@ snapshots:
 
   '@ungap/structured-clone@1.3.0': {}
 
-  '@vitejs/plugin-react@5.2.0(vite@7.3.2)':
+  '@vitejs/plugin-react@5.2.0(vite@7.3.2(@types/node@22.20.1))':
     dependencies:
       '@babel/core': 7.29.0
       '@babel/plugin-transform-react-jsx-self': 7.27.1(@babel/core@7.29.0)
@@ -3310,7 +3312,7 @@ snapshots:
       '@rolldown/pluginutils': 1.0.0-rc.3
       '@types/babel__core': 7.20.5
       react-refresh: 0.18.0
-      vite: 7.3.2
+      vite: 7.3.2(@types/node@22.20.1)
     transitivePeerDependencies:
       - supports-color
 
@@ -3323,13 +3325,13 @@ snapshots:
       chai: 6.2.2
       tinyrainbow: 3.1.0
 
-  '@vitest/mocker@4.1.5(vite@7.3.2)':
+  '@vitest/mocker@4.1.5(vite@7.3.2(@types/node@22.20.1))':
     dependencies:
       '@vitest/spy': 4.1.5
       estree-walker: 3.0.3
       magic-string: 0.30.21
     optionalDependencies:
-      vite: 7.3.2
+      vite: 7.3.2(@types/node@22.20.1)
 
   '@vitest/pretty-format@4.1.5':
     dependencies:
@@ -4392,6 +4394,8 @@ snapshots:
 
   typescript@5.9.3: {}
 
+  undici-types@6.21.0: {}
+
   undici@7.27.2: {}
 
   unified@11.0.5:
@@ -4491,7 +4495,7 @@ snapshots:
       '@types/unist': 3.0.3
       vfile-message: 4.0.3
 
-  vite@7.3.2:
+  vite@7.3.2(@types/node@22.20.1):
     dependencies:
       esbuild: 0.27.7
       fdir: 6.5.0(picomatch@4.0.4)
@@ -4500,12 +4504,13 @@ snapshots:
       rollup: 4.60.2
       tinyglobby: 0.2.16
     optionalDependencies:
+      '@types/node': 22.20.1
       fsevents: 2.3.3
 
-  vitest@4.1.5(jsdom@29.1.1)(vite@7.3.2):
+  vitest@4.1.5(@types/node@22.20.1)(jsdom@29.1.1)(vite@7.3.2(@types/node@22.20.1)):
     dependencies:
       '@vitest/expect': 4.1.5
-      '@vitest/mocker': 4.1.5(vite@7.3.2)
+      '@vitest/mocker': 4.1.5(vite@7.3.2(@types/node@22.20.1))
       '@vitest/pretty-format': 4.1.5
       '@vitest/runner': 4.1.5
       '@vitest/snapshot': 4.1.5
@@ -4522,9 +4527,10 @@ snapshots:
       tinyexec: 1.1.1
       tinyglobby: 0.2.16
       tinyrainbow: 3.1.0
-      vite: 7.3.2
+      vite: 7.3.2(@types/node@22.20.1)
       why-is-node-running: 2.3.0
     optionalDependencies:
+      '@types/node': 22.20.1
       jsdom: 29.1.1
     transitivePeerDependencies:
       - msw

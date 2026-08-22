@@ -293,10 +293,10 @@ export function ScratchpadPane({
   const contentRef = useRef("");
   const dirtyRef = useRef(false);
   const editSerialRef = useRef(0);
-  const autoSaveTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
+  const autoSaveTimerRef = useRef<number | null>(null);
   const saveInFlightRef = useRef<Promise<boolean> | null>(null);
   const refreshSerialRef = useRef(0);
-  const watcherRefreshTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
+  const watcherRefreshTimerRef = useRef<number | null>(null);
   const activeWorkPathRef = useRef(workPath);
   const activeWatcherGenerationRef = useRef<number | null>(null);
   const cleanupDialogRef = useRef<HTMLElement | null>(null);
