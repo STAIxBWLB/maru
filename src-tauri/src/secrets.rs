@@ -1,3 +1,4 @@
+use crate::paths::GENERATED_DIRS;
 use crate::vault::lexical_normalize;
 use serde::{Deserialize, Serialize};
 use serde_yaml::Value as YamlValue;
@@ -8,21 +9,6 @@ use walkdir::WalkDir;
 
 const MARU_SECRETS_REL: &str = ".maru/secrets";
 const LEGACY_SECRETS_REL: &str = ".secrets";
-
-const GENERATED_DIRS: &[&str] = &[
-    ".git",
-    "node_modules",
-    ".next",
-    ".venv",
-    "target",
-    "dist",
-    "build",
-    ".cache",
-    ".context",
-    ".omc",
-    ".omx",
-    ".pnpm-store",
-];
 
 const GENERATED_SECRET_LEAF_FILES: &[&str] =
     &[".ds_store", ".localized", "thumbs.db", "desktop.ini"];

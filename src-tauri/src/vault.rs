@@ -13,21 +13,13 @@ use walkdir::WalkDir;
 use include_dir::{include_dir, Dir};
 
 use crate::atomic_file::write_atomic;
+use crate::paths::GENERATED_DIRS;
 use crate::scratchpad::{assert_scratchpad_workspace_access, resolve_scratchpad_root};
 use crate::skill_host::fs as host_fs;
 use crate::vault_list::registered_nested_roots;
 
 const VAULT_CACHE_REL: &[&str] = &[".maru", "cache", "workspace-index-v3.json"];
 const LEGACY_VAULT_CACHE_REL: &[&str] = &[".maru", "cache", "workspace-index-v2.json"];
-const GENERATED_DIRS: &[&str] = &[
-    "node_modules",
-    "target",
-    "dist",
-    "build",
-    ".next",
-    ".turbo",
-    ".cache",
-];
 
 /// The curated sample workspace, embedded into the binary at compile time so it
 /// ships inside the installer on every platform (same mechanism as the builtin
