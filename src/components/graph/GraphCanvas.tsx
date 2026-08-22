@@ -392,7 +392,7 @@ function StaticGraphFallback({
   display,
   selectedId,
   focusNodeId,
-  favoriteIds,
+  favoriteIds: _favoriteIds,
   onSelect,
   onOpen,
 }: {
@@ -1674,6 +1674,7 @@ export function GraphCanvas({
     renderer.refresh();
     // colorMode belongs here too: origin mode owns the edge color, so switching
     // into or out of it must repaint edges without a rebuild.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only relationColors and colorMode actually change edge painting; the rest of `display` re-renders far more often and would repaint on every unrelated setting change
   }, [display.relationColors, display.colorMode]);
 
   useEffect(() => {

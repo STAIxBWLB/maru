@@ -59,7 +59,6 @@ export function renderMarkdown(markdown: string): string {
       ADD_ATTR: ["target", "data-wikilink"],
     });
   } catch (err) {
-    // eslint-disable-next-line no-console
     console.error("[markdown] render failed, falling back to plain text", err);
     const plain = markdown
       .replaceAll("&", "&amp;")

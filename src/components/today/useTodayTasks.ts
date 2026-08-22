@@ -28,6 +28,7 @@ export function useTodayTasks(): TodayTasks {
     } catch {
       return [];
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- refreshEpoch is the deliberate re-fetch trigger from useToday(); the callback body doesn't read it directly but must be re-created so callers pick up the bump
   }, [workPath, refreshEpoch]);
 
   useEffect(() => {

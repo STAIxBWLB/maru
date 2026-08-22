@@ -58,12 +58,6 @@ interface LoadedPreset {
   preset: PatternPresetV1;
 }
 
-function selectionKey(selection: GallerySelection): string {
-  return selection.kind === "pattern"
-    ? `pattern:${selection.patternId}`
-    : `preset:${selection.storageName}`;
-}
-
 function PatternPreview({
   pattern,
   dataset,

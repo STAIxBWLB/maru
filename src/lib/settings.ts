@@ -1981,10 +1981,6 @@ function parseWorkspaceFileFilter(value: unknown): WorkspaceFileFilter | null {
   return value === "all" || value === "tracked" || value === "binary" ? value : null;
 }
 
-function parseFilesBrowserMode(value: unknown): FilesBrowserMode | null {
-  return value === "list" || value === "tree" ? value : null;
-}
-
 function parseFilesSortKey(value: unknown): FilesSortKey | null {
   return value === "name" || value === "modifiedDesc" || value === "modifiedAsc" ? value : null;
 }

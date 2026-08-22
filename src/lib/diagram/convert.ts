@@ -486,7 +486,7 @@ function buildFlowFromRecords(
   mapping: FieldMapping,
   carriedLinks: ExtractedRecords["links"],
   name: string,
-  warnings: ConversionWarning[],
+  _warnings: ConversionWarning[],
 ): FlowDataset {
   const nodeIds = new Map<string, string>();
   const nodeFor = (label: string): string => {

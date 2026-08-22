@@ -50,7 +50,6 @@ import type {
   OutlookMessage,
   OutlookDecisionOutcome,
   OutlookDecisionRequest,
-  ProjectPickerEntry,
   StageOutcome,
   TelegramMessage,
   TelegramFetchOptions,

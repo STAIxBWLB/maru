@@ -479,6 +479,7 @@ export function GraphView({
   }, [localFocus]);
   // "now" for stale-note detection — recomputed whenever the model changes
   // (i.e. on vault edits) so it doesn't stay frozen at mount time.
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- model is the intentional recompute trigger even though Date.now() itself does not read it
   const now = useMemo(() => Date.now(), [model]);
 
   // One pure derivation pipeline (facet → relation → local → prune → search),

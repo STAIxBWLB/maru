@@ -94,10 +94,6 @@ function renderPreview(targetPatternId = "report.timeline"): Harness {
   return { container, root, onConfirm, onCancel, doc, viewId };
 }
 
-function query<T extends Element>(selector: string): T | null {
-  return document.body.querySelector<T>(selector);
-}
-
 function queryAll<T extends Element>(selector: string): T[] {
   return [...document.body.querySelectorAll<T>(selector)];
 }

@@ -33,8 +33,7 @@ import { formatRelativeDate } from "../../lib/document";
 import { deriveDotSyncBadge } from "../../lib/dotSync";
 import { useTranslation, type Locale } from "../../lib/i18n";
 import type { MaruAppMode, TasksSettings } from "../../lib/settings";
-import { taskFilterCounts, type TaskCalendarEvent, type TaskEntry } from "../../lib/tasks";
-import type { CalendarCommitment } from "../../lib/today";
+import { taskFilterCounts, type TaskEntry } from "../../lib/tasks";
 import type { VaultEntry } from "../../lib/types";
 import { Button } from "../ui/Button";
 import { DashboardWidget } from "./DashboardWidget";
@@ -93,6 +92,7 @@ export function DashboardPane({
     // Prefer the backend-computed logical day (configured timezone aware),
     // matching the Today flow; the local computation is the degraded fallback.
     () => today.data?.logicalDay ?? dashboardLogicalDay(new Date(), effectiveSettings.today.dayStart),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- epoch drives the refetch that produces today.data; keeping it here documents that relationship even though today.data alone would retrigger this memo
     [today.data, epoch, effectiveSettings.today.dayStart],
   );
   const taskEntries = useMemo(() => tasks.data ?? [], [tasks.data]);

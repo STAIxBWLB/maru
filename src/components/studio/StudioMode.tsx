@@ -233,6 +233,7 @@ export function StudioMode({
       cancelled = true;
       loadingRef.current = false;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- this effect loads a document by id/path on switch; depending on the full activeDocument object would re-run on every in-place edit, not just on document switch
   }, [activeDocId, activeDocument?.path, workspaceRoot]);
 
   useEffect(() => {
@@ -273,6 +274,7 @@ export function StudioMode({
     return () => {
       cancelled = true;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- this effect fetches the template/guideline library on step entry; depending on the full `state` object would refetch on every draft keystroke instead of only on step/category change
   }, [category, state?.currentStep, workspaceRoot]);
 
   useEffect(() => {
@@ -298,6 +300,7 @@ export function StudioMode({
       cancelled = true;
       window.clearTimeout(timer);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the debounced lint pass depends on the draft body text and step, not the whole `state` object, which also holds unrelated fields (title, metadata) that would trigger extra lint runs
   }, [currentLintDismissals, state?.bodyDraft, state?.currentStep, workspaceRoot]);
 
   const patchState = useCallback((updater: (prev: StudioState) => StudioState) => {

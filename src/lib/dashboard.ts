@@ -10,8 +10,6 @@ import type { DailyPlanV1, TodaySnapshot } from "./today";
 import {
   filterTasksByQuery,
   isOverdue,
-  tasksToCalendarEvents,
-  type TaskCalendarEvent,
   type TaskEntry,
   type TaskFilters,
 } from "./tasks";

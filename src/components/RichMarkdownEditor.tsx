@@ -174,7 +174,6 @@ export function RichMarkdownEditor({
         );
       } catch (err) {
         // Keep the source tab authoritative if BlockNote cannot parse a body.
-        // eslint-disable-next-line no-console
         console.error("[BlockNote] markdown import failed", err);
       } finally {
         if (!cancelled) suppressChangeRef.current = false;
@@ -212,7 +211,6 @@ export function RichMarkdownEditor({
       lastEmittedValueRef.current = next;
       onChange(next);
     } catch (err) {
-      // eslint-disable-next-line no-console
       console.error("[BlockNote] markdown export failed", err);
     }
   }

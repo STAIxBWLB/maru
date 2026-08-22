@@ -27,7 +27,6 @@ import {
   Presentation,
   Save,
   Send,
-  Trash2,
   X,
 } from "lucide-react";
 import type React from "react";
@@ -217,7 +216,6 @@ export function OutlinePane({
   draftContent,
   entries,
   readOnly,
-  workspacePath,
   activeLine = null,
   onJumpToLine,
   onClose,
