@@ -1,3 +1,6 @@
+---
+last_mapped_commit: a938128cd8f34d36b2f2361d683d8b419c8ca534
+---
 # Codebase Structure
 
 **Analysis Date:** 2026-08-22
@@ -8,9 +11,9 @@
 maru/
 ├── src/                      # React frontend (Tauri webview)
 │   ├── main.tsx              # Web entry: createRoot + font chunks
-│   ├── App.tsx               # App shell, mode routing, editor tabs (9,337 lines)
+│   ├── App.tsx               # App shell, mode routing, editor tabs (9,590 lines)
 │   ├── foundations.css       # Design tokens (type scale, shell geometry, colors)
-│   ├── styles.css            # Global stylesheet (26,095 lines)
+│   ├── styles.css            # Global stylesheet (26,434 lines)
 │   ├── components/           # UI components, one subdirectory per mode
 │   ├── lib/                  # IPC facade, pure logic, stores, hooks, i18n
 │   ├── approval/             # Approval gate dialog
@@ -44,15 +47,15 @@ maru/
 ## Directory Purposes
 
 **`src/components/`:**
-- Purpose: Every rendered surface. Flat `.tsx` files are shell-level components; subdirectories are per-mode or per-domain.
+- Purpose: Every rendered surface. Flat `.tsx` files (30 components + 3 co-located tests) are shell-level; the 22 subdirectories are per-mode or per-domain.
 - Contains: `agents/`, `binaryViewers/`, `calendar/`, `catalog/`, `comms/`, `dashboard/`, `diagram/` (with `canvas/`, `modals/`, `panels/`, `ribbon/`), `drafts/`, `e2e/`, `evidence/`, `gap/`, `graph/`, `inbox/`, `jobs/`, `meetings/`, `settings/` (with `tabs/`), `sites/`, `skills/`, `studio/`, `tasks/`, `today/`, `ui/`.
-- Key files: `src/components/EditorPane.tsx`, `src/components/TerminalPanel.tsx`, `src/components/FilesWorkbench.tsx`, `src/components/CommandPalette.tsx`, `src/components/ui/` (shared `Button`, `Field`, `Toggle`, `DialogSurface`, `ModeChrome`, `PaneResizeHandle`).
+- Key files: `src/components/EditorPane.tsx` (Documents editor, 1,093 lines), `src/components/DocumentModeSurface.tsx` (shared rich/source/preview tab chrome, 79), `src/components/InlineDocumentEditor.tsx` (docked editor for non-Documents modes, 243), `src/components/FilesWorkbench.tsx` (2,132), `src/components/ScratchpadPane.tsx` (1,504), `src/components/OutlinePane.tsx` (1,702), `src/components/TerminalPanel.tsx`, `src/components/CommandPalette.tsx`, `src/components/ui/` (shared `Button`, `Field`, `Toggle`, `DialogSurface`, `ModeChrome`, `PaneResizeHandle`, `SortModeToggle`).
 
 **`src/lib/`:**
 - Purpose: Everything non-visual. The only layer allowed to call Tauri.
-- Contains: the IPC facade, feature logic modules, `*Store.ts` module stores, `use*.ts` hooks, shared `types.ts`, and `i18n/`.
-- Key files: `src/lib/api.ts` (3,739 lines), `src/lib/settings.ts` (2,430), `src/lib/types.ts` (1,370), `src/lib/workspaceStore.ts`, `src/lib/editorTabsStore.ts`, `src/lib/errorStore.ts`, `src/lib/fixtures.ts` (browser-mode mock data).
-- Subdirectories: `calendar/`, `diagram/` (the largest, ~40 pure modules with paired tests), `graph/` (includes `analysis.worker.ts`), `i18n/locales/`.
+- Contains: 114 non-test flat modules: the IPC facade, feature logic modules, `*Store.ts` module stores, `use*.ts` hooks, shared `types.ts`, and `i18n/`.
+- Key files: `src/lib/api.ts` (3,739 lines), `src/lib/settings.ts` (2,464), `src/lib/types.ts` (1,370), `src/lib/workspaceStore.ts`, `src/lib/editorTabsStore.ts`, `src/lib/errorStore.ts`, `src/lib/appOverlayStore.ts`, `src/lib/telegramEventsStore.ts`, `src/lib/scratchpad.ts` + `src/lib/scratchpadTree.ts` (virtual folder tree), `src/lib/fixtures.ts` (browser-mode mock data).
+- Subdirectories: `calendar/`, `diagram/` (the largest, ~40 pure modules with paired tests), `graph/` (includes `analysis.worker.ts`), `i18n/locales/` (`ko.ts` 3,820 lines, `en.ts` 3,824).
 
 **`src-tauri/src/`:**
 - Purpose: The Rust core. One module per feature; `lib.rs` is the only aggregator.
@@ -76,11 +79,17 @@ maru/
 
 **Entry Points:**
 - `src/main.tsx`: React root mount.
-- `src/App.tsx`: `App()` at line 739, `MainApp()` at line 774.
+- `src/App.tsx`: `App()` at line 740, `MainApp()` at line 775.
 - `src-tauri/src/main.rs`: native entry; `--maru-cli` routes to the CLI.
 - `src-tauri/src/lib.rs:272`: `run()`: Tauri builder, managed state, command registry.
 - `src-tauri/maru-cli/src/main.rs`: standalone CLI binary.
 - `sidecars/maru-mcp/index.mjs`: MCP stdio server.
+
+**Mode routing inside `src/App.tsx`:**
+- Lazy mode-surface imports: `src/App.tsx:501`-`:521` (17 `lazy()` chunks). `ScratchpadPane` is the one eager mode import (`:62`); `InlineDocumentEditor` is also eager (`:63`) but lazy-loads its own heavy editors.
+- Surface-mode ternary chain: `src/App.tsx:8622` (`e2e`) through `:9031` (default = Documents shell).
+- Editor pane factory: `renderEditorPane()` at `src/App.tsx:8181`, invoked at `:8570`, `:9132`, `:9145`.
+- Outline pane: `src/App.tsx:9170`.
 
 **Configuration:**
 - `src-tauri/tauri.conf.json`: window policy, CSP, asset protocol, updater, bundle identifier `kr.maru.desktop`.
@@ -92,6 +101,7 @@ maru/
 **Core Logic:**
 - Frontend IPC: `src/lib/api.ts`
 - Frontend state: `src/lib/workspaceStore.ts`, `src/lib/editorTabsStore.ts`, `src/lib/errorStore.ts`, `src/lib/appOverlayStore.ts`
+- Frontend persisted UI state: `src/lib/settings.ts` (`MaruSettings.ui.*`, `MaruSettings.ui.layout.*`)
 - Backend registry: `src-tauri/src/lib.rs`
 - Backend write path: `src-tauri/src/document.rs`, `src-tauri/src/frontmatter/ops.rs`, `src-tauri/src/atomic_file.rs`
 - Backend guards: `src-tauri/src/vault_guard.rs`, `src-tauri/src/vault_list.rs`, `src-tauri/src/filename_rules.rs`
@@ -105,8 +115,8 @@ maru/
 ## Naming Conventions
 
 **Files:**
-- React components: `PascalCase.tsx` (`src/components/DocumentList.tsx`, `src/components/today/TodayPane.tsx`).
-- Frontend logic/stores/hooks: `camelCase.ts` (`src/lib/todayPlan.ts`, `src/lib/workspaceStore.ts`, `src/lib/useActiveMissions.ts`).
+- React components: `PascalCase.tsx` (`src/components/DocumentModeSurface.tsx`, `src/components/today/TodayPane.tsx`).
+- Frontend logic/stores/hooks: `camelCase.ts` (`src/lib/scratchpadTree.ts`, `src/lib/workspaceStore.ts`, `src/lib/useActiveMissions.ts`).
 - Tests: sibling `<name>.test.ts` / `<name>.test.tsx`; benches `<name>.bench.ts`; fixtures `fixtures.ts` or `__fixtures__/`.
 - Rust: `snake_case.rs`, one module per feature; multi-file features use `<feature>/mod.rs`.
 - Node scripts: `kebab-case.mjs`.
@@ -114,16 +124,17 @@ maru/
 - Scoped CSS: `<domain>.css` inside the component directory (`src/components/graph/graph.css`).
 
 **Directories:**
-- Frontend: lowercase camelCase-free single words matching the mode id (`today/`, `tasks/`, `drafts/`, `binaryViewers/` is the one camelCase exception).
+- Frontend: lowercase single words matching the mode id (`today/`, `tasks/`, `drafts/`; `binaryViewers/` is the one camelCase exception).
 - Rust: `snake_case`.
 
 **Symbols:**
 - Rust commands: `snake_case` verbs, feature-prefixed (`skills_list_sources`, `today_open`, `diagram_save_document`).
 - Frontend facade functions: `camelCase` mirror of the command name (`skillsListSources`, `todayOpen`).
 - Rust structs crossing IPC: `#[serde(rename_all = "camelCase")]` so TypeScript sees camelCase fields.
-- Tauri events: `namespace://event_name` (`vault://index-delta`, `ai://output`, `skills://updated`).
-- i18n keys: dot-namespaced (`system.tab.secrets`, `app.unsaved.title`).
+- Tauri events: `namespace://event_name` (`vault://index-delta`, `ai://output`, `skills://updated`, `scratchpad://changed`).
+- i18n keys: dot-namespaced (`system.tab.secrets`, `app.unsaved.title`, `scratchpad.tree.title`, `files.editor.openInDocuments`).
 - Store internals: exported pure `<verb>InState` helpers, thin `use<Slice>()` hooks.
+- Settings keys: `ui.<feature><Thing>` for view state, `ui.layout.<feature><Thing>` for geometry (`ui.scratchpadEditorViewMode`, `ui.layout.scratchpadTreeWidth`).
 
 ## Where to Add New Code
 
@@ -136,7 +147,7 @@ maru/
 
 **New feature / mode:**
 - Mode id: add to `MaruAppMode` in `src/lib/settings.ts:25` and to the mode table in `README.md`.
-- Pane: `src/components/<mode>/<Mode>Pane.tsx`; register a `lazy()` import near `src/App.tsx:500` and add the branch in the surface-mode chain.
+- Pane: `src/components/<mode>/<Mode>Pane.tsx`; register a `lazy()` import near `src/App.tsx:501` and add the branch in the surface-mode chain (`src/App.tsx:8622`-`:9031`).
 - Logic: `src/lib/<mode>.ts` with a sibling `src/lib/<mode>.test.ts`.
 - Strings: add every key to both `src/lib/i18n/locales/ko.ts` and `src/lib/i18n/locales/en.ts` in the same change.
 - Styles: prefer a scoped `src/components/<mode>/<mode>.css` over appending to `src/styles.css`.
@@ -147,8 +158,20 @@ maru/
 - Shell-level (used by `App.tsx` directly): `src/components/`.
 - Reusable primitive: `src/components/ui/`.
 
+**New document-editing surface (a mode that needs to edit a file in place):**
+- Do not rebuild tab chrome. Render `src/components/DocumentModeSurface.tsx` with `kind` (`markdown` | `html` | `plain`), the controlled `mode` / `onModeChange` pair, and your three panels.
+- If you need a full editor (title header, dirty badge, save button, error strip, status footer), embed `src/components/InlineDocumentEditor.tsx` instead and feed it a `DocumentPayload` plus a draft from `src/lib/editorTabsStore.ts`. Precedent: the Files preview slot at `src/App.tsx:8709` rendered through `documentEditorNode` in `src/components/FilesWorkbench.tsx:1884`.
+- Lazy-load any heavy editor you add (`RichMarkdownEditor`, `HtmlVisualEditor`) with `lazy()` at module scope, as in `src/components/InlineDocumentEditor.tsx:19`; the entry chunk is size-gated.
+- Persist the view mode as its own settings key (`ui.<mode>EditorViewMode`) rather than sharing another mode's.
+
+**New persisted UI setting:**
+- Field on `MaruSettings.ui` (view state) or `MaruSettings.ui.layout` (geometry) in `src/lib/settings.ts`.
+- Three places must be updated together or the key silently disappears for existing users: `DEFAULT_MARU_SETTINGS`, `normalizeMaruSettings` (or `normalizeLayout` for layout keys), and `cloneDefaultSettings`.
+- Drag limits go in a `const <NAME> = { defaultValue, min, max } as const` near the top of `src/lib/settings.ts` (`SCRATCHPAD_TREE_WIDTH` is the pattern) and feed `normalizePaneWidth`.
+- Cover the round trip in `src/lib/settings.test.ts`.
+
 **New shared state:**
-- `src/lib/<name>Store.ts` following `src/lib/errorStore.ts`: module state, `publish()`, `useSyncExternalStore` hook, exported pure helpers for testing. Do not add another prop to `MainApp`.
+- `src/lib/<name>Store.ts` following `src/lib/errorStore.ts`: module state, `publish()`, `useSyncExternalStore` hook, exported pure helpers for testing. Do not add another prop to `MainApp`; `EditorPane`, `FilesWorkbench`, and `OutlinePane` already take 55, 61, and 68 props respectively.
 
 **Utilities:**
 - Frontend: `src/lib/<topic>.ts` (there is no `utils.ts` catch-all; keep helpers with their topic).

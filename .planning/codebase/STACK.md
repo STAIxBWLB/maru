@@ -1,21 +1,25 @@
+---
+last_mapped_commit: a938128cd8f34d36b2f2361d683d8b419c8ca534
+---
+
 # Technology Stack
 
 **Analysis Date:** 2026-08-22
 
-Maru is a local-first Tauri 2 desktop app: a React 19 + TypeScript frontend in
-`src/` talking over Tauri IPC to a Rust core in `src-tauri/src/`, plus a
-standalone Rust CLI (`src-tauri/maru-cli/`) and a Node MCP sidecar
+Maru (v0.4.62) is a local-first Tauri 2 desktop app: a React 19 + TypeScript
+frontend in `src/` talking over Tauri IPC to a Rust core in `src-tauri/src/`,
+plus a standalone Rust CLI (`src-tauri/maru-cli/`) and a Node MCP sidecar
 (`sidecars/maru-mcp/`).
 
 ## Languages
 
 **Primary:**
-- TypeScript 5.9 (`~5.9.3`) - all frontend code under `src/`, e2e specs under `e2e/`, build/release scripts under `scripts/*.mjs`. Config: `tsconfig.json`, `tsconfig.app.json`, `tsconfig.node.json`
+- TypeScript 5.9 (`~5.9.3`) - all frontend code under `src/` (562 `.ts`/`.tsx` files, 184 of them `*.test.ts(x)`), e2e specs under `e2e/`, build/release scripts under `scripts/*.mjs`. Config: `tsconfig.json`, `tsconfig.app.json`, `tsconfig.node.json`
 - Rust 2021 edition, MSRV 1.77.2 - desktop core `src-tauri/src/` (85+ modules), CLI `src-tauri/maru-cli/src/main.rs`. Config: `src-tauri/Cargo.toml`
 
 **Secondary:**
 - JavaScript ESM (`.mjs`) - Node tooling in `scripts/` and the MCP sidecar `sidecars/maru-mcp/index.mjs`. No build step, run directly by Node
-- CSS - hand-authored design system in `src/styles.css` (~4k lines) and `src/foundations.css`. No CSS framework, no preprocessor
+- CSS - hand-authored design system in `src/styles.css` (~26k lines, the single global stylesheet) and `src/foundations.css` (91 lines of tokens). Two feature-scoped stylesheets exist alongside it: `src/components/diagram/diagram.css`, `src/components/graph/graph.css`, `src/components/settings/settings.css`. No CSS framework, no preprocessor
 - Python - only inside bundled skills (`skills/skills/hwpx/scripts/`, `skills/skills/io-kakao/scripts/`), executed out-of-process from the managed venv, never linked into the app
 
 ## Runtime
@@ -36,12 +40,12 @@ standalone Rust CLI (`src-tauri/maru-cli/`) and a Node MCP sidecar
 
 **Core:**
 - Tauri 2.10 (`tauri` crate, `@tauri-apps/api` ^2.10.1) - desktop shell, IPC, windowing, bundling. Uses the `unstable` cargo feature for child webviews (`src-tauri/src/site_view.rs`) and `protocol-asset` for local file serving
-- React 19.2 + React DOM 19.2 - frontend UI, entry `src/main.tsx`, root component `src/App.tsx`
+- React 19.2 + React DOM 19.2 - frontend UI, entry `src/main.tsx`, root component `src/App.tsx`. No router, no Redux/Zustand: mode switching and app state live in `App.tsx` plus hand-rolled `useSyncExternalStore` stores under `src/lib/` (`editorTabsStore.ts`, `workspaceStore.ts`, `errorStore.ts`, `appOverlayStore.ts`, `telegramEventsStore.ts`)
 - Vite 7.3 with `@vitejs/plugin-react` - dev server (127.0.0.1:5307, strict port) and production bundler. Config: `vite.config.ts`
 
 **Testing:**
 - Vitest 4.1 - TS/React unit tests, run via `pnpm test` (`vitest run src scripts`). No `vitest.config.ts`; per-file `@vitest-environment jsdom` pragmas select the DOM environment (`jsdom` ^29.1.1)
-- Playwright 1.59 (`@playwright/test`) - browser e2e against the mocked-Tauri Vite build. Config: `playwright.config.ts`, specs in `e2e/` (24 specs), Chromium project only
+- Playwright 1.59 (`@playwright/test`) - browser e2e against the mocked-Tauri Vite build. Config: `playwright.config.ts`, specs in `e2e/` (23 specs), Chromium project only
 - `cargo test --lib` - Rust unit/integration tests colocated in `#[cfg(test)]` modules inside `src-tauri/src/`
 
 **Build/Dev:**
@@ -53,11 +57,11 @@ standalone Rust CLI (`src-tauri/maru-cli/`) and a Node MCP sidecar
 ## Key Dependencies
 
 **Critical (frontend):**
-- `@blocknote/core|react|mantine` ^0.49 - rich markdown editor (`src/components/RichMarkdownEditor.tsx`); lazy-chunked and budget-enforced
-- `@codemirror/*` ^6 (`state`, `view`, `commands`, `lang-markdown`) - source-mode editor
-- `sigma` 3.0.3 + `graphology` 0.26 + `graphology-layout-forceatlas2` - WebGL knowledge graph (`src/lib/graph/`, `src/components/graph/`); versions are pinned exactly, not caret-ranged
-- `marked` ^18 + `dompurify` ^3.4 - markdown preview rendering and sanitization
-- `@radix-ui/react-dialog`, `@radix-ui/react-tabs` - the only UI primitives; everything else is hand-rolled
+- `@blocknote/core|react|mantine` ^0.49 - rich markdown editor (`src/components/RichMarkdownEditor.tsx`); always behind `React.lazy`, budget-enforced. Three call sites load it: `src/components/EditorPane.tsx`, `src/components/InlineDocumentEditor.tsx`, `src/components/ScratchpadPane.tsx`
+- `@codemirror/*` ^6 (`state`, `view`, `commands`, `lang-markdown`) - used by exactly one component, the Studio source editor `src/components/studio/MarkdownSourceEditor.tsx`. The Documents / Files / Scratchpad "Source" tabs are a plain `<textarea>`, not CodeMirror
+- `sigma` 3.0.3 + `@sigma/node-border` 3.0.0 + `@sigma/export-image` 3.0.0 + `graphology` 0.26 + `graphology-layout` 0.6.1 + `graphology-layout-forceatlas2` 0.10.1 (worker build) - WebGL knowledge graph (`src/lib/graph/`, `src/components/graph/GraphCanvas.tsx`); versions are pinned exactly, not caret-ranged
+- `marked` ^18 + `dompurify` ^3.4 - markdown preview rendering and sanitization (`src/lib/markdown.ts`)
+- `@radix-ui/react-dialog`, `@radix-ui/react-tabs` - the only UI primitives; everything else is hand-rolled. Radix Tabs is now wrapped once in `src/components/DocumentModeSurface.tsx` rather than re-declared per editor
 - `lucide-react`, `react-icons` - icon sets
 - `date-fns` ^3 - date math
 - `@fontsource/noto-serif-kr` - bundled Korean serif; Pretendard is expected from the OS (`src/styles.css`)
@@ -85,6 +89,7 @@ standalone Rust CLI (`src-tauri/maru-cli/`) and a Node MCP sidecar
 - No `.env` in the repo; `.env*` is gitignored and the app reads no dotenv at runtime
 - Vite exposes only `VITE_` and `TAURI_` prefixed vars (`envPrefix` in `vite.config.ts`)
 - Runtime behavior is file-configured, not env-configured. Per-workspace state lives in `<workspace>/.maru/` (`workspace.json`, `settings.json`, `workspace-state.json`, `projects.json`, `mcp.json`, `inbox.json`, `secrets/`, `queue/hub/`, `binder/`, `drafts/`, `today/`, `schedules.json`) - layout documented at `src-tauri/src/maru_dir.rs:1`
+- The frontend half of `settings.json` is typed and defaulted in `src/lib/settings.ts`: `MaruSettings` / `DEFAULT_MARU_SETTINGS` / `normalizeMaruSettings`. Every new UI preference must be added in all three places plus `cloneDefaultSettings`, or it silently resets on load. Pane sizes are declared as `{ defaultValue, min, max }` constants (e.g. `SCRATCHPAD_TREE_WIDTH`, `SCRATCHPAD_LIST_WIDTH`, `DRAFTS_LIST_WIDTH`) and clamped by `normalizePaneWidth`
 - Global preferences live at `~/.maru/settings.json`; skills and their venv live at `~/.maru/skills/` and `~/.maru/env/` (`src-tauri/src/skill_host/env.rs`, `store.rs`)
 - Provider wiring (Gmail/Outlook/Telegram/Kakao/Hub) is read from the workspace's `workspace.config.yaml` - see `src-tauri/src/telegram_io.rs`, `outlook_mso.rs`, `hub_client/mod.rs`
 - Test/QA env overrides only: `MARU_TEST_HOME`, `MARU_TEST_CONFIG_DIR`, `MARU_MISSION_STATE_DIR`, `MARU_E2E_PORT`, `MARU_SKILLS_MANIFEST_URL`, `MARU_SKILLS_PUBKEY`, `MARU_HWPX_BIN`, `MARU_CLI_SMOKE`, `MARU_STARTUP_PROFILE`
@@ -94,8 +99,8 @@ standalone Rust CLI (`src-tauri/maru-cli/`) and a Node MCP sidecar
 - `vite.config.ts` - React plugin, fixed dev host/port, env prefixes
 - `src-tauri/tauri.conf.json` - product identity (`kr.maru.desktop`), window defaults, strict CSP (no remote origins in `default-src`/`connect-src`), asset protocol, updater endpoint and minisign pubkey, bundle targets `all` with updater artifacts, macOS resource `maru-cli`
 - `src-tauri/tauri.passkeys.conf.json` + `Entitlements.plist` + `Info.passkeys.plist` - opt-in macOS browser-passkey build variant
-- `scripts/check-bundle-budget.mjs` - gzip budget gate run as part of `pnpm build:frontend`; also asserts GraphView, RichMarkdownEditor, and i18n dictionaries stay lazy chunks
-- `scripts/generate-icons.mjs` (+ `icons:check`), `scripts/lint-i18n.mjs`, `scripts/check-select-chrome.mjs` - generated-asset and static guards wired into `make verify`
+- `scripts/check-bundle-budget.mjs` - gzip budget gate run as part of `pnpm build:frontend`; also asserts `GraphView`, `RichMarkdownEditor`, and the i18n dictionaries stay lazy chunks. Any new component that pulls BlockNote or the graph stack must go through `React.lazy` or this gate fails the build
+- `scripts/generate-icons.mjs` (+ `icons:check`), `scripts/lint-i18n.mjs`, `scripts/check-select-chrome.mjs` - generated-asset and static guards wired into `make verify`. `lint-i18n.mjs` enforces key parity between `src/lib/i18n/locales/en.ts` and `ko.ts`
 
 ## Platform Requirements
 

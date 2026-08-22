@@ -1,3 +1,7 @@
+---
+last_mapped_commit: a938128cd8f34d36b2f2361d683d8b419c8ca534
+---
+
 # External Integrations
 
 **Analysis Date:** 2026-08-22
@@ -7,8 +11,10 @@ the user already installed, or a file-based relay on disk. Only three code paths
 open a network socket from the app: `hub_client/http.rs`, the OTA skills-bundle
 downloader in `skill_host/bundle_update.rs`, and `tauri-plugin-updater`. All
 three go through `reqwest` (blocking, rustls-tls) or the Tauri plugin. The
-frontend CSP in `src-tauri/tauri.conf.json` allows no remote origin at all, so
-the React layer cannot reach the network directly.
+frontend CSP in `src-tauri/tauri.conf.json` allows no remote origin at all, and
+`src/` contains zero non-test `fetch()`, `XMLHttpRequest`, or `WebSocket` call
+sites, so the React layer cannot and does not reach the network directly. Every
+frontend integration is an `invoke()` through `src/lib/api.ts`.
 
 ## APIs & External Services
 
@@ -26,23 +32,27 @@ the React layer cannot reach the network directly.
 - `src-tauri/src/today_outbox.rs` - Google Tasks mutations, written durably to `<work>/.maru/today/outbox/<id>.json` first, then drained through `gws` with retry backoff (1/5/15/60 min, then hourly) and an `authBlocked` state
 - `src-tauri/src/today_calendar.rs` - publish-only Calendar path. Reads capacity from local markdown notes (`calendarStart`/`calendarEnd` frontmatter) so the planner works offline; only explicitly selected blocks are pushed
 - Auth: `gws` owns it (system keyring). Maru only classifies auth failure strings
+- Frontend clients: `src/lib/gmail.ts`, `src/lib/today.ts`, `src/lib/todayPlan.ts`
 - Config: `workspace.config.yaml` `io.*` plus `<vault>/.maru/inbox.json` for an absolute `gws` path override
 
 **Microsoft 365 (Outlook mail, calendar, Graph) via the `m365` CLI:**
 - `src-tauri/src/outlook_mso.rs` (2178 lines, the largest connector) - message listing with an explicit `$select` field set, accept/reject staging, Maru categories (`maru-accepted` / `maru-rejected`), bulk actions
 - Auth: `m365` device-code login (`https://microsoft.com/devicelogin`); Maru surfaces auth-required and workspace-mismatch states and never handles tokens
+- Frontend client: `src/lib/outlook.ts`, UI under `src/components/comms/`
 - Output limits: 2 MiB stdout / 64 KiB stderr caps, 10s readiness timeout, sensitive-value scrubbing before diagnostics are shown (`command_output.rs`)
 
 **Telegram:**
 - `src-tauri/src/telegram_io.rs` - inbound polling (default 60s, floor 30s) through the bundled `io-telegram` skill script, run with the managed Python from `~/.maru/env`
   - Config: `workspace.config.yaml` `io.providers.telegram.{python_path,script_path}`; `api_id` / `api_hash` in the workspace secret store
 - Outbound notification bot token + chat id are stored in settings (`src/lib/api.ts` masks them as `****mock` in the mocked API surface)
+- Frontend: `src/lib/telegram.ts`, `src/lib/telegramMonitor.ts`, event fan-out via `src/lib/telegramEventsStore.ts` / `src/lib/useTelegramEvents.ts`
 
 **KakaoTalk (file relay, no API):**
 - `src-tauri/src/kakao_relay.rs` - a daemon on a separate Mac syncs a Dropbox "relay bus" folder; Maru reads `status/relay.json`, `rooms/rooms.json`, `messages/<room>/<date>/*.json`, and queues outbound sends into `outbox/{pending,attachments,done}/`
   - Tolerates partial Dropbox sync: unparseable JSON is skipped, media younger than 10s is treated as in flight
   - Heartbeat: 300s expected, stale after 900s
   - Config root: `io.providers.kakao.relay_root`
+  - Frontend: `src/lib/kakaoRelay.ts`, `src/components/comms/KakaoRelayPanel.tsx`
 
 **Maru Hub (self-hosted FastAPI service):**
 - `src-tauri/src/hub_client/` - read-mirror of the shared operations catalog and document library
@@ -51,20 +61,21 @@ the React layer cannot reach the network directly.
   - Safety pre-flight before any write: `hub_client/safety.rs`. Body/binary/PII upload is forbidden on the read path by design
   - Offline: submits queue at `<workspace>/.maru/queue/hub/` (one JSON per request) and drain FIFO via `hub_queue_drain`
   - Config: `workspace.config.yaml` `hub.{enabled,endpoint,deployment_mode,timeout_ms}`; optional bearer `api_token`
+  - Frontend: `src/lib/hubClient.ts`, `src/lib/hubLibrary.ts`
 
 **GitHub (release + OTA distribution):**
 - Skills bundles: `GET https://api.github.com/repos/<slug>/releases/tags/skills-channel`, then download + minisign verify + sha256 + zip staging (`src-tauri/src/skill_host/bundle_update.rs`). Caps: 8 MiB metadata, 256 MiB archive, 512 MiB uncompressed, 20k entries
-- App updates: `tauri-plugin-updater` polls `https://github.com/STAIxBWLB/maru/releases/latest/download/latest.json` (`src-tauri/tauri.conf.json`, client `src/lib/updater.ts`)
+- App updates: `tauri-plugin-updater` polls `https://github.com/STAIxBWLB/maru/releases/latest/download/latest.json` (`src-tauri/tauri.conf.json`, client `src/lib/updater.ts`, toasts via `src/lib/useUpdaterToasts.ts`)
 
 **Local system tools:**
-- `git` - status/diff/commit/sync by shell-out, no libgit2 (`src-tauri/src/git.rs`). Commit+push is approval-gated (`GIT_SYNC_COMMIT_PUSH_APPROVAL_KIND`)
-- `dot` CLI (>= 2.63.0) - workspace cloud-mirror and Mac-peer sync managed from Settings > Jobs (`src-tauri/src/dot_sync.rs`). Fixed argv, never a shell; mutating actions serialized behind a global lock
-- `hwp` / HWPX toolchain - document export and template fill (`src-tauri/src/export/dispatch.rs`, `template_fill.rs`), binary override `MARU_HWPX_BIN`
+- `git` - status/diff/commit/sync by shell-out, no libgit2 (`src-tauri/src/git.rs`). Commit+push is approval-gated (`GIT_SYNC_COMMIT_PUSH_APPROVAL_KIND`); frontend `src/lib/gitSync.ts`, `src/lib/gitStatusDisplay.ts`
+- `dot` CLI (>= 2.63.0) - workspace cloud-mirror and Mac-peer sync managed from Settings > Jobs (`src-tauri/src/dot_sync.rs`, frontend `src/lib/dotSync.ts`). Fixed argv, never a shell; mutating actions serialized behind a global lock
+- `hwp` / HWPX toolchain - document export and template fill (`src-tauri/src/export/dispatch.rs`, `template_fill.rs`), binary override `MARU_HWPX_BIN`; frontend `src/lib/export.ts`
 - macOS `launchd` - migration/registration for scheduled work (`src-tauri/src/launchd_migration.rs`)
 
 **MCP:**
 - Local Node sidecar `sidecars/maru-mcp/index.mjs` - stdio MCP server exposing `workspace.search`, `document.read`, and related read-first tools, scoped to `MARU_MCP_WORKSPACE` with a realpath jail
-- User-configured MCP servers are stored per workspace at `<workspace>/.maru/mcp.json` (`src-tauri/src/maru_dir.rs`)
+- User-configured MCP servers are stored per workspace at `<workspace>/.maru/mcp.json` (`src-tauri/src/maru_dir.rs`), edited from `src/components/settings/tabs/McpTab.tsx`
 
 ## Data Storage
 
@@ -74,10 +85,12 @@ the React layer cannot reach the network directly.
 **File Storage:**
 - Local filesystem only. The workspace is a directory of markdown/HTML plus binaries; all app state is JSON/YAML under `<workspace>/.maru/` and `~/.maru/`
 - Writes go through `src-tauri/src/atomic_file.rs` (`write_atomic`) and are gated by `vault_guard.rs` / `vault_list.rs` write assertions
+- Every document surface in the frontend funnels through the same two IPC commands - `read_document` and `save_document` (`readDocument` / `saveDocument` in `src/lib/api.ts`, with `expectedRevision` for optimistic-concurrency). Three surfaces now share them: the Documents editor (`src/components/EditorPane.tsx`), the Files workbench inline editor (`src/components/InlineDocumentEditor.tsx`, wired in `src/App.tsx` via `prepareFilesPreviewDocument` / `saveFilesPreviewDocument`), and the Scratchpad editor (`src/components/ScratchpadPane.tsx`). Adding a fourth editing surface means reusing these, not opening a new IPC path
+- Scratchpad content is addressed as `<collection>/<relativePath>` virtual paths (`src/lib/scratchpadTree.ts`), with `memos` and `temp` the only navigable collections; the tree is derived in the frontend from a flat entry list, not stored on disk
 - Dropbox is used as a transport medium for the Kakao relay bus only, not as app storage
 
 **Caching:**
-- In-process: parallel workspace scan index with warm-start cache (`src-tauri/src/workspace.rs`)
+- In-process: parallel workspace scan index with warm-start cache (`src-tauri/src/workspace.rs`), mirrored to the frontend in `src/lib/workspaceStore.ts`
 - On-disk: Hub response cache with ETag (`hub_client/cache.rs`), ops-catalog index (`ops_catalog/index.rs`), skills bundle baselines under `~/.maru/skills/_bundles/`
 
 ## Authentication & Identity
@@ -86,8 +99,8 @@ the React layer cannot reach the network directly.
 - None for the app itself. Maru is a single-user local app with no login
 - Every external identity is delegated to the CLI that owns it: `gws` (Google, keyring), `m365` (Microsoft device code), Telegram API credentials in the workspace secret store, `git` credentials from the user's own config
 - Hub uses an optional static bearer token from `workspace.config.yaml`
-- Secret hygiene is a first-class feature: `src-tauri/src/secrets.rs` (1421 lines) scans for stray credentials, enforces `<work>/.maru/secrets/` as the managed root (legacy `.secrets` kept as a symlink), checks file permissions, and reports candidates and issues
-- macOS browser passkeys: `src-tauri/src/browser_passkeys.rs` only exposes Apple's browser-level permission gate to the main webview; it accepts no relying party, challenge, or credential, so it cannot become a second WebAuthn implementation
+- Secret hygiene is a first-class feature: `src-tauri/src/secrets.rs` (1421 lines) scans for stray credentials, enforces `<work>/.maru/secrets/` as the managed root (legacy `.secrets` kept as a symlink), checks file permissions, and reports candidates and issues; surfaced in `src/components/settings/tabs/SecretsTab.tsx`
+- macOS browser passkeys: `src-tauri/src/browser_passkeys.rs` only exposes Apple's browser-level permission gate to the main webview; it accepts no relying party, challenge, or credential, so it cannot become a second WebAuthn implementation. Frontend shim: `src/lib/browserPasskeys.ts`
 
 ## Monitoring & Observability
 
@@ -97,7 +110,7 @@ the React layer cannot reach the network directly.
 **Logs:**
 - Local only. Mission/run logs under `~/.maru` and the workspace (`src-tauri/src/mission_state.rs`, `agent_host/event_store.rs`), tailed in the UI
 - `agent_host/cloud_dashboard.rs` produces a redacted run summary (counts and provider/skill names only) for explicit user export, not automatic upload
-- Frontend errors surface through an in-app store (`src/lib/errorStore.ts`)
+- Frontend errors surface through an in-app store (`src/lib/errorStore.ts`). Per-surface failures that should not hijack the global toast are kept local instead - e.g. the Files inline editor holds a `filesEditorErrors` map keyed by path in `src/App.tsx` and renders it inside the editor
 
 ## CI/CD & Deployment
 
@@ -128,7 +141,7 @@ the React layer cannot reach the network directly.
 **Incoming:**
 - No HTTP server, no listening port, no webhook receiver
 - The closest equivalent is `src-tauri/src/web_actions.rs`: the Maru web app commits `maru.web-task-action.v1` receipts to `shared/web/task-actions/pending/YYYY-MM/<uuid>.yaml` in the workspace repo; after `git pull`, an explicit user-invoked command validates each receipt (traversal / dotfile / secret-shape / bucket checks, fail-closed) and applies it through `today_lifecycle.rs` and `today_outbox.rs`, then moves it to `applied/YYYY-MM/`
-- Filesystem watchers act as local event sources: `inbox_watcher.rs`, `vault_watcher.rs`, `scratchpad_watcher.rs`, `ops_catalog/watcher.rs` (all `notify` 6)
+- Filesystem watchers act as local event sources: `inbox_watcher.rs`, `vault_watcher.rs`, `scratchpad_watcher.rs`, `ops_catalog/watcher.rs` (all `notify` 6). The frontend subscribes through `src/lib/useInboxEvents.ts` and the Scratchpad watcher start/stop calls in `src/lib/api.ts`
 
 **Outgoing:**
 - Hub `POST /api/v1/documents/sync` and `POST /api/v1/documents/{id}/finalize` (approval-gated, queued when offline)

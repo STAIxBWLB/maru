@@ -1,3 +1,6 @@
+---
+last_mapped_commit: a938128cd8f34d36b2f2361d683d8b419c8ca534
+---
 <!-- refreshed: 2026-08-22 -->
 # Architecture
 
@@ -11,9 +14,9 @@
 ├──────────────────┬──────────────────┬───────────────────────┤
 │  App shell       │  Mode panes      │  Frontend lib layer   │
 │  `src/App.tsx`   │ `src/components/`│  `src/lib/`           │
-│  activity rail,  │  18 lazy-loaded  │  IPC facade + pure    │
-│  editor tabs,    │  mode surfaces   │  logic + stores       │
-│  panels, dialogs │                  │  `src/lib/api.ts`     │
+│  activity rail,  │  17 lazy mode    │  IPC facade + pure    │
+│  editor tabs,    │  surfaces + one  │  logic + stores       │
+│  panels, dialogs │  eager Scratchpad│  `src/lib/api.ts`     │
 └────────┬─────────┴────────┬─────────┴──────────┬────────────┘
          │                  │                     │
          │  invoke()        │  Channel<T>         │  listen()
@@ -48,6 +51,12 @@
 |-----------|----------------|------|
 | Web entry | Mounts React root, loads split display fonts, marks startup profile | `src/main.tsx` |
 | App shell | Activity rail, mode routing, editor tabs, panels, dialogs, prop assembly | `src/App.tsx` |
+| Document mode surface | Shared rich/source/preview tab chrome for every editing host; stateless | `src/components/DocumentModeSurface.tsx` |
+| Docked document editor | Self-contained header + mode surface + status footer for a `DocumentPayload` embedded in a non-Documents mode | `src/components/InlineDocumentEditor.tsx` |
+| Documents editor pane | Tab strip, find bar, wikilink autocomplete, KG highlight, schema strip, mode surface | `src/components/EditorPane.tsx` |
+| Files workbench | Tree/list/preview explorer; hosts the inline editor through a `documentEditorNode` slot | `src/components/FilesWorkbench.tsx` |
+| Scratchpad pane | Virtual folder tree, entry list, own document editor and autosave loop | `src/components/ScratchpadPane.tsx` |
+| Scratchpad tree logic | Pure fold of flat scratchpad entries into a virtual folder tree + folder/query filtering | `src/lib/scratchpadTree.ts` |
 | IPC facade | Every `invoke()` call plus a browser-mode mock fallback | `src/lib/api.ts` |
 | Settings model | `MaruAppMode`, layered settings parse/normalize/persist | `src/lib/settings.ts` |
 | Workspace store | Workspace registry, document index, file tree, watcher lifecycle | `src/lib/workspaceStore.ts` |
@@ -73,8 +82,9 @@
 - All business logic lives in Rust; React owns rendering, editing surfaces, and layout only (README "Module boundary rules").
 - Every backend call goes through one facade module, `src/lib/api.ts`, which also supplies browser-mode mocks so `pnpm dev` runs without Tauri.
 - State lives in module-level stores read through `useSyncExternalStore`; no Redux/Zustand/Context-provider tree for app state.
-- Mode surfaces are `React.lazy` chunks, keeping the entry bundle inside a budget enforced by `scripts/check-bundle-budget.mjs`.
-- Backend↔frontend push uses named Tauri events (`vault://index-delta`, `ai://output`, and so on) and typed `Channel<T>` streams for high-rate terminal frames.
+- Mode surfaces are `React.lazy` chunks (`src/App.tsx:501`-`:521`), keeping the entry bundle inside a budget enforced by `scripts/check-bundle-budget.mjs`. `ScratchpadPane` is the one eagerly imported mode (`src/App.tsx:62`).
+- Editing surfaces compose rather than duplicate: one stateless `DocumentModeSurface` supplies the rich/source/preview tab chrome to the Documents pane, the Files inline editor, and Scratchpad.
+- Backend↔frontend push uses named Tauri events (`vault://index-delta`, `ai://output`, `scratchpad://changed`, and so on) and typed `Channel<T>` streams for high-rate terminal frames.
 - Rust modules are flat, one file (or one directory) per feature, each exporting its own `#[tauri::command]` functions that `lib.rs` re-exports.
 
 ## Layers
@@ -82,14 +92,14 @@
 **React shell (`src/App.tsx`, `src/components/`):**
 - Purpose: Render the activity rail, the active mode surface, editor tabs, the bottom/right tool panel, and dialogs.
 - Location: `src/App.tsx`, `src/components/**`
-- Contains: `.tsx` components, per-mode subdirectories, shared primitives in `src/components/ui/`.
+- Contains: 30 shell-level `.tsx` components, 22 per-mode subdirectories, shared primitives in `src/components/ui/`.
 - Depends on: `src/lib/**` (API, stores, pure logic, i18n).
 - Used by: nothing; this is the top.
 
 **Frontend lib layer (`src/lib/`):**
 - Purpose: The only place that talks to Tauri, plus pure, unit-testable domain logic and state stores.
 - Location: `src/lib/**`
-- Contains: `api.ts` (IPC facade), feature modules (`today.ts`, `skills.ts`, `inbox.ts`, and so on), stores (`*Store.ts`), hooks (`use*.ts`), `types.ts`, `i18n/`.
+- Contains: 114 non-test flat modules: `api.ts` (IPC facade), feature modules (`today.ts`, `skills.ts`, `inbox.ts`, `scratchpad.ts`, `scratchpadTree.ts`, and so on), stores (`*Store.ts`), hooks (`use*.ts`), `types.ts`, `i18n/`.
 - Depends on: `@tauri-apps/api`, nothing from `src/components/` except one type import in `src/lib/appOverlayStore.ts:3`.
 - Used by: `src/App.tsx` and every component.
 
@@ -113,17 +123,89 @@
 - Depends on: Node ≥20.19 and `MARU_MCP_WORKSPACE`.
 - Used by: external agent CLIs, smoke-tested by `scripts/e2e-mcp-smoke.mjs`.
 
+## Shell State Distribution
+
+`MainApp` (`src/App.tsx:775`) is the single owner of shell state and the single assembler of every pane's props. Its hook census: 69 `useState`, 51 `useRef`, 51 `useMemo`, 48 `useEffect`, 261 `useCallback`.
+
+**What `MainApp` already reads from stores (not local state):**
+- `useWorkspaceRegistry()` (`src/App.tsx:785`), `useWorkspaceStates()` (`:786`) from `src/lib/workspaceStore.ts`
+- `useDocTabs()` (`src/App.tsx:793`) from `src/lib/editorTabsStore.ts`
+- `useError()` from `src/lib/errorStore.ts`
+
+**What it still owns locally and re-broadcasts as props:**
+- `maruSettings` (`src/App.tsx:1048`) with `layoutSettings = maruSettings.ui.layout` (`:1259`); writes go through `updateSettings` (`:1812`) / `updateLayoutSettings` (`:1847`) or narrow setters such as `setFilesEditorViewMode` (`:2398`), `setScratchpadEditorViewMode`, `setScratchpadExpandedFolders`.
+- Per-pane view state: `editorPaneViewModes` (`:830`), `htmlPaneModes` (`:835`, keyed `"<group>:<tabId>"` for the Documents panes and `"files:<tabId>"` for the Files inline editor), `savingTabId` (`:818`), `filesEditorErrors` (`:819`), `scratchpadRefreshEpoch` (`:929`).
+- Derived tab views: `editorTabSummaries` (`:1562`), `filesSelectedDocumentNode` (`:1233`), `filesPreviewTab` (`:1238`).
+
+**Prop bundles reaching the four panes a module-store refactor would target:**
+
+| Pane | Props | Assembled at | Interface | Nature of the bundle |
+|------|-------|--------------|-----------|----------------------|
+| `EditorPane` | 55 | `renderEditorPane(group, tab, tabId)` at `src/App.tsx:8181`, called at `:8570`, `:9132`, `:9145` | `EditorPaneProps` in `src/components/EditorPane.tsx` | Per-group: every callback is duplicated as `handleLeft*` / `handleRight*` and selected by a `group === "right" ? x : y` ternary at the call site. `group` itself is the only discriminator the pane receives. |
+| `OutlinePane` | 68 | inline JSX at `src/App.tsx:9170` | `OutlinePaneProps` in `src/components/OutlinePane.tsx` | Three unrelated concerns fused: frontmatter/outline for the active document, the file queue, and a second copy of the workspace explorer (`explorer*` and `files*` props). |
+| `FilesWorkbench` | 61 | inline JSX at `src/App.tsx:8663` (lazy) | `FilesWorkbenchProps` in `src/components/FilesWorkbench.tsx` | Workspace entries + capability flags + layout settings, plus a rendered-node slot: `documentEditorNode`, `documentEditorPath`, `documentEditorError`, `onPrepareDocument`. |
+| `ScratchpadPane` | 18 | inline JSX at `src/App.tsx:8816` | `ScratchpadPaneProps` in `src/components/ScratchpadPane.tsx` | Settings/layout plumbing only (`sortKey`, `listHeight`, `listWidth`, `treeOpen`, `treeWidth`, `expandedFolders`, `editorViewMode` + their setters), one `refreshRequestEpoch` signal, `workPath`, and `t`. All document state is pane-local. |
+
+`ScratchpadPane` is the working reference for the target shape: it takes only persisted settings and a refresh signal, keeps its document/editor/autosave state internal (`src/components/ScratchpadPane.tsx:261`-`:303`), and calls `src/lib/api.ts` directly. The other three carry callback bundles that only exist because their state lives in `MainApp`.
+
+**Coupling to preserve when moving state out:**
+- `EditorPane` and the Files inline editor share one `htmlPaneModes` map; the key prefix is the only thing separating them (`src/App.tsx:8199`, `:6893`).
+- Draft content for the Files inline editor is *not* separate state; it is the same `editorTabsStore` tab draft the Documents pane edits (`updateTabDraft`), which is what keeps the two views of one file in sync.
+- `saveTab` (`src/App.tsx:4746`) returns a boolean and accepts an `onFailure` callback so a host can route the error to its own surface instead of the global toast; `saveActiveSurfaceDocument` (`:6919`) picks the Files inline editor over the Documents editor when Files owns focus.
+
+## Document Editing Surfaces
+
+Three hosts render a document editor. They share the tab chrome and nothing else.
+
+```text
+MainApp (src/App.tsx:775)
+├─ renderEditorPane()  ──► EditorPane           ──► DocumentModeSurface  (EditorPane.tsx:908)
+├─ surfaceMode "files" ──► LazyFilesWorkbench
+│     documentEditorNode = <InlineDocumentEditor> (App.tsx:8709)
+│        └─ rendered by FilesPreview            (FilesWorkbench.tsx:1884)
+│              InlineDocumentEditor             ──► DocumentModeSurface  (InlineDocumentEditor.tsx:169)
+└─ surfaceMode "scratchpad" ──► ScratchpadPane  ──► DocumentModeSurface  (ScratchpadPane.tsx:1305)
+```
+
+**`DocumentModeSurface` (`src/components/DocumentModeSurface.tsx`, 79 lines):**
+- Stateless. A Radix `Tabs.Root` that renders a rich/visual tab (only for `kind` `markdown` or `html`), a source tab, and a preview tab (suppressed for `kind` `plain`), plus optional `toolbarAction` and `auxiliary` slots.
+- Owns no mode state: `mode` in, `onModeChange` out. It forces `source` when `kind === "plain"`.
+- Exports the shared view-mode types `EditorViewMode` (`rich | source | preview`) and `HtmlViewMode` (`visual | source | preview`); `src/components/EditorPane.tsx:63` re-exports them, so existing `import ... from "./EditorPane"` call sites still resolve.
+
+**`InlineDocumentEditor` (`src/components/InlineDocumentEditor.tsx`, 243 lines):**
+- A complete docked editor: title/path header, dirty and read-only badges, reveal / open-in-Documents / save actions, an error strip with reload, the mode surface, and a line/word/char status footer.
+- Holds almost no state: one `htmlFlushRef` and two `useMemo`s (`previewHtml`, `stats`). Document, draft content, both view modes, dirty, saving, and error all arrive as props from `MainApp`; the draft itself lives in `editorTabsStore`.
+- Eagerly imported by `src/App.tsx:63` but internally `lazy()`-loads `RichMarkdownEditor`, `HtmlVisualEditor`, and `HtmlPreviewFrame`, so the heavy editors stay out of the entry chunk.
+- HTML documents flush the visual editor before a mode change or save (`InlineDocumentEditor.tsx:83`), mirroring the `htmlFlushRef` contract `EditorPane` uses.
+
 ## Data Flow
 
 ### Primary Request Path (document open → edit → save)
 
-1. User picks a document in the explorer; `MainApp` calls the facade (`src/App.tsx:774`).
+1. User picks a document in the explorer; `MainApp` calls the facade (`src/App.tsx:775`).
 2. `readDocument()` invokes `read_document` (`src/lib/api.ts`).
 3. Rust resolves the path lexically inside the workspace, parses frontmatter, and returns a `DocumentPayload` carrying a `revision` digest (`src-tauri/src/document.rs:83`).
 4. The payload becomes an `EditorTab` in the tabs store (`src/lib/editorTabsStore.ts`).
 5. Edits update `draftContent`; a debounced saver serializes writes (`src/lib/debouncedSave.ts`).
-6. `saveDocument(root, path, content, expectedRevision)` invokes `save_document` (`src/lib/api.ts:1077`, called at `src/App.tsx:4717`).
+6. `saveDocument(root, path, content, expectedRevision)` invokes `save_document` (`src/lib/api.ts:1077`), reached through `saveTab` (`src/App.tsx:4746`).
 7. Rust checks the expected revision, runs the managed-write guard, then writes atomically (`src-tauri/src/document.rs:135` → `src-tauri/src/atomic_file.rs:12`).
+
+### Files workbench inline document edit
+
+1. Selecting exactly one `.md`/`.markdown`/`.html`/`.htm` node makes `filesSelectedDocumentNode` non-null (`src/App.tsx:1233`); `FilesPreview`'s effect calls `onPrepareDocument(fileEntry)` (`src/components/FilesWorkbench.tsx:1806`).
+2. `prepareFilesPreviewDocument` (`src/App.tsx:6794`) reads the document and inserts a real doc tab into `editorTabsStore`, discarding stale responses via `filesPreviewRequestRef` / `filesPreviewSelectionRef`. If the file is already open, it returns immediately and reuses the existing tab.
+3. `filesPreviewTab` (`src/App.tsx:1238`) resolves that tab; `MainApp` builds `<InlineDocumentEditor>` and hands it down as the `documentEditorNode` prop, which `FilesPreview` renders in place of the old read-only preview (`src/components/FilesWorkbench.tsx:1884`).
+4. Typing calls `updateTabDraft(tab.id, content)`, so the Files preview and any Documents-mode tab of the same file edit one draft.
+5. Save runs `saveFilesPreviewDocument` → `saveTab(id, contentOverride, onFailure)`; failures land in `filesEditorErrors` and render in the pane's error strip, not the global toast.
+6. Reload (`reloadFilesPreviewDocument`, `src/App.tsx:6862`) confirms before discarding a dirty draft, re-reads from disk, and refreshes the workspace file list.
+
+### Scratchpad browse and edit
+
+1. `ScratchpadPane` calls `listScratchpad()` and folds the flat result with `buildScratchpadFolderTree` (`src/lib/scratchpadTree.ts:26`) into a virtual tree rooted at the two navigable collections, `memos` and `temp`.
+2. Selecting a folder sets pane-local `currentFolder`; `filterScratchpadFolderEntries` (`src/lib/scratchpadTree.ts:99`) narrows the list to that folder's direct children, and widens to descendants once a query is typed.
+3. Tree expansion persists to `ui.scratchpadExpandedFolders`, tree visibility/width to `ui.layout.scratchpadTreeOpen` / `scratchpadTreeWidth`, and the editor tab to `ui.scratchpadEditorViewMode`; all of it flows through `MainApp` callbacks into `src/lib/settings.ts`.
+4. Document reads/writes go straight from the pane to `src/lib/api.ts` (`readScratchpadDocument`, `saveScratchpadDocument`, `renameScratchpadDocument`, `trashScratchpadDocument`), with a pane-local debounced autosave and a `revision` conflict banner.
+5. `startScratchpadWatcher` plus `scratchpad://changed` / `scratchpad://error` listeners (`src/components/ScratchpadPane.tsx:495`) trigger debounced refreshes; a generation counter drops events from a superseded workspace.
 
 ### Workspace change propagation (watcher delta)
 
@@ -148,7 +230,7 @@
 **State Management:**
 - Module-level state object + `publish()` + `useSyncExternalStore` per slice. Stores: `src/lib/workspaceStore.ts`, `src/lib/editorTabsStore.ts`, `src/lib/errorStore.ts`, `src/lib/appOverlayStore.ts`, `src/lib/telegramEventsStore.ts`, `src/lib/missionProgress.ts`, `src/lib/useActiveMissions.ts`, and the diagram store in `src/components/diagram/DiagramStoreContext.tsx`.
 - Pure `*InState` helper functions are exported for direct unit testing; the hook wrappers stay trivial.
-- Persistent UI state goes to `~/.maru/settings.json` through `src/lib/settings.ts`; a few view keys use `localStorage` (`maru:lastOpenedNote:v1`, `maru:openTabs:v1`, `maru:recent:v1`, `maru:locale:v1`).
+- Persistent UI state goes to `~/.maru/settings.json` through `src/lib/settings.ts`; a few view keys use `localStorage` (`maru:lastOpenedNote:v1`, `maru:openTabs:v1`, `maru:recent:v1`, `maru:locale:v1`, `maru:scratchpad-location:v1`, `maru:files-location:v1`).
 
 ## Key Abstractions
 
@@ -166,6 +248,16 @@
 - Purpose: Shared app state without prop drilling or a provider tree.
 - Examples: `src/lib/workspaceStore.ts`, `src/lib/errorStore.ts`
 - Pattern: module-level state, `Set<() => void>` subscribers, `publish()` replacing state atomically, per-slice `useSyncExternalStore` hooks.
+
+**Document mode surface:**
+- Purpose: One tab chrome (rich/visual, source, preview) for every editing host, so a new host does not re-derive tab wiring or the `plain`/`markdown`/`html` capability rules.
+- Examples: `src/components/DocumentModeSurface.tsx`, consumed at `src/components/EditorPane.tsx:908`, `src/components/InlineDocumentEditor.tsx:169`, `src/components/ScratchpadPane.tsx:1305`
+- Pattern: fully controlled. The host passes `kind`, `mode`, `onModeChange`, the three panels as nodes, plus optional `toolbarAction` / `auxiliary`. Mode persistence is the host's job (`ui.filesEditorViewMode`, `ui.scratchpadEditorViewMode`, `editorPaneViewModes`).
+
+**Rendered-node slot prop:**
+- Purpose: Let a mode pane host an editor whose state lives in `MainApp` without giving the pane that state.
+- Examples: `documentEditorNode` on `FilesWorkbench` (`src/App.tsx:8707`, consumed at `src/components/FilesWorkbench.tsx:1884`), `bodyOverride` on `EditorPane`.
+- Pattern: the pane receives `ReactNode` plus the minimum identity/error props it needs to decide *whether* to render the slot; it never reaches into the node.
 
 **Managed Tauri state:**
 - Purpose: Long-lived backend singletons (watchers, pollers, PTY sessions, missions).
@@ -214,27 +306,35 @@
 - **Threading:** The webview runs one JS thread; Rust commands run on the Tauri command pool only when declared `#[tauri::command(async)]` (76 of 356 today). A synchronous command doing heavy filesystem work blocks the caller; scanners and catalog queries are explicitly marked async (`src-tauri/src/vault.rs:290`, `src-tauri/src/ops_catalog/mod.rs:61`). New heavy-I/O commands must follow that.
 - **Global state:** Rust keeps process-wide `OnceLock<Mutex<()>>` locks to serialize registry and journal writes: `skill_host/store.rs:45` (`REGISTRY_LOCK`), `skill_host/fs.rs:199`, `jobs.rs:16`, `dot_sync.rs:14`, `evidence_binder.rs:19`, plus `scheduler.rs:31` (`TICKER_STARTED`) and `scheduler.rs:38` (`LAST_FIRED`). Two `include_dir!` statics embed read-only payloads: `vault.rs:36` (sample workspace) and `skill_host/store.rs:43` (skills bootstrap).
 - **Circular imports:** None in the frontend dependency direction: `src/lib/` never imports from `src/components/` except one type-only import (`src/lib/appOverlayStore.ts:3`), and nothing imports `src/App.tsx`. Keep it that way.
+- **Editor-surface imports:** `src/components/DocumentModeSurface.tsx` is a leaf; it imports only Radix and React types. Do not let it import a host (`EditorPane`, `InlineDocumentEditor`, `ScratchpadPane`) or a store; the direction is host → surface only.
 - **Filesystem is authoritative:** `.maru/cache/workspace-index-v3.json` is disposable; React state is derived. Never treat cache contents as truth.
 - **Frontmatter writes:** `src-tauri/src/frontmatter/ops.rs` is the only allowed YAML write path; key order and comments must survive a single-field patch.
 - **Path containment is lexical:** `resolve_inside_vault` / `lexical_normalize` (`src-tauri/src/vault.rs:581`, `:618`) deliberately avoid `canonicalize()` so user-created symlinks inside a workspace stay part of it.
 - **Write gating:** Every mutating command routes through `vault_list::assert_maru_can_write` / `assert_document_owner` and, for managed vaults, `vault_guard::validate_managed_write` with a pre-mutation snapshot.
 - **macOS window policy:** `backgroundThrottling: "throttle"` in `src-tauri/tauri.conf.json` is a contract guarded by `scripts/tauri-window-policy.test.mjs`.
-- **Bundle budget:** the entry chunk is size-gated by `scripts/check-bundle-budget.mjs`, which is why mode panes and locale dictionaries are dynamic imports.
+- **Bundle budget:** the entry chunk is size-gated by `scripts/check-bundle-budget.mjs`, which is why mode panes, locale dictionaries, and the rich/HTML editors are dynamic imports. A new editing host must `lazy()` its heavy editors the way `InlineDocumentEditor.tsx:19` does, not import them at module scope.
 - **i18n parity:** every UI string lives in `src/lib/i18n/locales/{ko,en}.ts`; `pnpm lint:i18n` fails on key drift or a hardcoded string in `src/**/*.tsx`.
+- **Settings migration:** every new `MaruSettings` key needs a default in `DEFAULT_MARU_SETTINGS`, a branch in `normalizeMaruSettings` (or `normalizeLayout`), and an entry in `cloneDefaultSettings`; missing any one of the three silently drops the key for existing users. `scratchpadExpandedFolders` (`src/lib/settings.ts:750`) shows the `undefined`-means-default variant.
 
 ## Anti-Patterns
 
 ### Monolithic `MainApp`
 
-**What happens:** `src/App.tsx` is 9,337 lines. `MainApp` (`src/App.tsx:774`) holds hundreds of `useState`/`useCallback` bindings and passes them down as large prop bundles; the mode surface is selected by a nested ternary chain that runs roughly from `src/App.tsx:8600` to `:8790`.
-**Why it's wrong:** Any mode change forces a read of the whole shell, prop bundles grow monotonically, and unrelated state churn re-renders every open pane.
-**Do this instead:** Add new shared state as a module store next to `src/lib/workspaceStore.ts` and read it inside the owning pane with `useSyncExternalStore`, instead of threading another prop through `MainApp`. Extraction precedent: the comment blocks at `src/lib/workspaceStore.ts:14` and `src/lib/errorStore.ts:3` record earlier slices pulled out of `MainApp`.
+**What happens:** `src/App.tsx` is 9,590 lines. `MainApp` (`src/App.tsx:775`) holds 69 `useState` bindings and 261 `useCallback`s and passes them down as large prop bundles (55 props to `EditorPane`, 61 to `FilesWorkbench`, 68 to `OutlinePane`); the mode surface is selected by a nested ternary chain that runs from `src/App.tsx:8622` to `:9031`.
+**Why it's wrong:** Any mode change forces a read of the whole shell, prop bundles grow monotonically, and unrelated state churn re-renders every open pane. The `handleLeft*`/`handleRight*` duplication in `renderEditorPane` (`src/App.tsx:8181`) doubles every new editor callback.
+**Do this instead:** Add new shared state as a module store next to `src/lib/workspaceStore.ts` and read it inside the owning pane with `useSyncExternalStore`, instead of threading another prop through `MainApp`. `ScratchpadPane` (18 props, all document state local) is the shape to copy. Extraction precedent: the comment blocks at `src/lib/workspaceStore.ts:14` and `src/lib/errorStore.ts:3` record earlier slices pulled out of `MainApp`.
 
 ### Business logic drifting into React
 
 **What happens:** Pane components occasionally compute domain results (routing, classification, formatting) inline in JSX.
 **Why it's wrong:** It breaks the documented module boundary (README "Module boundary rules": React handles only editors, palette, graph layout, diagram canvas) and the logic becomes untestable without rendering.
-**Do this instead:** Put the pure function in `src/lib/<feature>.ts` with a sibling `<feature>.test.ts`, and let the component call it. See `src/lib/todayPlan.ts` + `src/lib/todayPlan.test.ts`.
+**Do this instead:** Put the pure function in `src/lib/<feature>.ts` with a sibling `<feature>.test.ts`, and let the component call it. Recent precedent: the Scratchpad folder tree went to `src/lib/scratchpadTree.ts` + `src/lib/scratchpadTree.test.ts` rather than into `ScratchpadPane`.
+
+### Re-implementing editor chrome per host
+
+**What happens:** Before the shared surface existed, the Files preview owned a private read-only markdown/HTML renderer and Scratchpad owned its own tab strip.
+**Why it's wrong:** Three copies of the rich/source/preview rules drift: a `plain` file would get a preview tab in one host and not another, and HTML flush-before-save was implemented once.
+**Do this instead:** Render `DocumentModeSurface` and pass panels in. If the host needs a full editor (header, dirty badge, save, status bar), embed `InlineDocumentEditor` and feed it a `DocumentPayload` plus a draft from `editorTabsStore`.
 
 ### Duplicated `isTauri` definitions
 
@@ -244,32 +344,34 @@
 
 ### One global stylesheet
 
-**What happens:** `src/styles.css` is 26,095 lines and holds nearly all component styling; only `diagram`, `graph`, and `settings` have scoped files (`src/components/diagram/diagram.css`, `src/components/graph/graph.css`, `src/components/settings/settings.css`).
+**What happens:** `src/styles.css` is 26,434 lines and holds nearly all component styling; only `diagram`, `graph`, and `settings` have scoped files (`src/components/diagram/diagram.css`, `src/components/graph/graph.css`, `src/components/settings/settings.css`). The Scratchpad tree and inline-editor work added 363 more lines to the global sheet.
 **Why it's wrong:** Selectors are globally reachable, so a new rule can silently restyle an unrelated mode, and dead CSS is impossible to detect.
 **Do this instead:** For a new mode or a large pane, add a scoped `<mode>.css` next to its component and import it there; use the design tokens declared in `src/foundations.css` rather than raw values.
 
 ## Error Handling
 
-**Strategy:** Rust commands return `Result<T, String>` (1,118 occurrences) with human-readable messages; the Tauri bridge turns `Err` into a rejected promise, and the frontend surfaces it through a single global toast.
+**Strategy:** Rust commands return `Result<T, String>` (1,118 occurrences) with human-readable messages; the Tauri bridge turns `Err` into a rejected promise, and the frontend surfaces it through a single global toast, except in panes that own an inline error strip.
 
 **Patterns:**
 - Rust: `.map_err(|err| format!("Cannot write {}: {err}", path.display()))?`: always name the path or operation (`src-tauri/src/atomic_file.rs`).
 - Rust background work uses `let _ = app.emit(...)` so a missing listener never fails the operation.
 - Frontend: `setError(...)` / `clearError()` from `src/lib/errorStore.ts`; `setError` also accepts an updater so a reporter can clear only its own message.
-- Save paths use `expectedRevision` for optimistic concurrency; a mismatch is a domain error, not a crash.
+- Surface-local errors: a host that can show the failure next to the document passes an `onFailure` callback instead of letting `saveTab` toast (`filesEditorErrors` in `src/App.tsx:6847`, `localError` in `src/components/ScratchpadPane.tsx:267`).
+- Save paths use `expectedRevision` for optimistic concurrency; a mismatch is a domain error, not a crash; Scratchpad renders it as a conflict banner (`isRevisionConflict` in `src/lib/scratchpad.ts`).
 - Chunk loading (`loadLocale`) never caches a rejected promise, so a transient failure can be retried (`src/lib/i18n.ts`).
+- Async reads that can be superseded carry a request serial plus a selection guard and drop stale responses (`src/App.tsx:6801`, `src/components/ScratchpadPane.tsx:298`).
 
 ## Cross-Cutting Concerns
 
 **Logging:** No logging framework. Rust reports through returned errors and emitted events; AI-run output is persisted per mission and read back via `read_ai_mission_log`. Startup timing goes through `src/lib/startupProfile.ts` (`markStartup` / `measureStartup`), consumed by `scripts/perf-startup-profile.mjs`.
 
-**Validation:** Filenames and folders through `src-tauri/src/filename_rules.rs`; workspace containment through `vault::resolve_inside_vault`; managed-vault schema through `src-tauri/src/vault_guard.rs`; skill sources validated against the `maru.source.json` manifest schema on install with rollback on failure.
+**Validation:** Filenames and folders through `src-tauri/src/filename_rules.rs`; workspace containment through `vault::resolve_inside_vault`; managed-vault schema through `src-tauri/src/vault_guard.rs`; skill sources validated against the `maru.source.json` manifest schema on install with rollback on failure. Frontend settings are re-validated on every load by `normalizeMaruSettings` (`src/lib/settings.ts`).
 
 **Authentication:** No app account. Provider auth is delegated to external CLIs and probed per provider (`check_gws_auth`, `check_mso_auth`, `check_telegram_auth`, `agents_account_status`). Secrets live as files under `<workspace>/.maru/secrets/` and are managed by `src-tauri/src/secrets.rs`; values are never rendered until explicitly revealed.
 
-**Permissions:** The webview capability allowlist is `src-tauri/capabilities/default.json`; CSP and the scoped asset protocol are configured in `src-tauri/tauri.conf.json`. Agent autonomy is staged behind `src-tauri/src/approval.rs` and `agent_host/protected_write.rs`.
+**Permissions:** The webview capability allowlist is `src-tauri/capabilities/default.json`; CSP and the scoped asset protocol are configured in `src-tauri/tauri.conf.json`. Agent autonomy is staged behind `src-tauri/src/approval.rs` and `agent_host/protected_write.rs`. In the UI, write capability is resolved per workspace (`workspaceCapabilities`, `workspaceWriteReason`) and passed to each editing host as `readOnly` + `readOnlyReason`.
 
-**Internationalization:** ko-KR and en-US are equal first-class locales; dictionaries load as separate chunks and `t()` stays synchronous once `ready`.
+**Internationalization:** ko-KR and en-US are equal first-class locales; dictionaries load as separate chunks and `t()` stays synchronous once `ready`. `DocumentModeSurface` takes `t` as a prop rather than calling the hook, so it stays usable from hosts that already have a translator in scope.
 
 ---
 
