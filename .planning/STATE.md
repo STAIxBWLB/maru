@@ -5,15 +5,15 @@ milestone_name: milestone
 current_phase: 1
 current_phase_name: Trustworthy Verify Signal
 status: executing
-stopped_at: Completed 01-04-PLAN.md
-last_updated: "2026-08-22T08:22:42.579Z"
+stopped_at: Completed 01-05-PLAN.md
+last_updated: "2026-08-22T08:32:53.969Z"
 last_activity: 2026-08-22
 last_activity_desc: Roadmap created from /gsd-ingest-docs intel + /gsd-map-codebase
 progress:
   total_phases: 1
   completed_phases: 0
   total_plans: 7
-  completed_plans: 4
+  completed_plans: 5
 ---
 
 # Project State
@@ -28,11 +28,11 @@ See: .planning/PROJECT.md (updated 2026-08-22)
 ## Current Position
 
 Phase: 1 of 5 (Trustworthy Verify Signal)
-Plan: 4 of 7 in current phase
+Plan: 5 of 7 in current phase
 Status: Ready to execute
 Last activity: 2026-08-22 - Completed 01-01 (rust-toolchain.toml pin + fmt-check gate)
 
-Progress: [██████░░░░] 57%
+Progress: [███████░░░] 71%
 
 ## Performance Metrics
 
@@ -62,6 +62,7 @@ Progress: [██████░░░░] 57%
 | Phase 01 P02 | 37min | 3 tasks | 42 files |
 | Phase 01-trustworthy-verify-signal P03 | 51min | 3 tasks | 2 files |
 | Phase 01 P04 | 20min | 4 tasks | 7 files |
+| Phase 01 P05 | 15min | 3 tasks | 8 files |
 
 ## Accumulated Context
 
@@ -82,6 +83,9 @@ Recent decisions affecting current work:
 - [Phase 1]: @types/node@22.20.1 approved at the blocking-human package-legitimacy checkpoint after independent live npm registry re-verification (349.7M weekly downloads, DefinitelyTyped repo)
 - [Phase 1]: tsconfig.e2e.json left composite:true out, deviating from the plan's literal action text - it introduced a spurious TS6307 project-boundary error (e2e/workbench-layout.spec.ts importing src/lib/settings.ts) unrelated to the real e2e type backlog; tsc -b accepts the solution-file reference without it
 - [Phase 1]: GATE-03 not marked complete in REQUIREMENTS.md - it is one requirement spanning e2e/ and scripts/, and plan 01-04 only finishes the e2e/ half; scripts/ is plan 01-05
+- [Phase 1]: Kept composite: true on tsconfig.scripts.json (unlike 01-04's tsconfig.e2e.json deviation); scripts/ has no cross-project import so the TS6307 boundary error 01-04 hit never triggers
+- [Phase 1]: Re-measured scripts/ error count: 42 across 8 files, not RESEARCH.md's stored 44/9; all 42 traced to one destructured-options JSDoc-inference gap
+- [Phase 1]: GATE-03 marked complete in REQUIREMENTS.md: 01-05 finishes the scripts/ half 01-04 deliberately left open
 
 ### Pending Todos
 
@@ -105,6 +109,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-08-22T08:22:42.571Z
-Stopped at: Completed 01-04-PLAN.md
+Last session: 2026-08-22T08:32:53.962Z
+Stopped at: Completed 01-05-PLAN.md
 Resume file: None
