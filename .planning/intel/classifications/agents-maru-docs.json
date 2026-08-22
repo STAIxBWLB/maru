@@ -1,0 +1,24 @@
+{
+  "source_path": "/Users/yj.lee/workspace/work/dev/maru/docs/agents.md",
+  "type": "SPEC",
+  "confidence": "medium",
+  "manifest_override": false,
+  "title": "Agents",
+  "summary": "Technical specification of Maru's agent subsystem: record fields, global storage with sparse builtin overrides, the runAgent dispatch path, chat, backend capabilities, and schedule binding.",
+  "scope": [
+    "AgentRecord",
+    "agent registry",
+    "~/.maru/agents.json storage and builtin overrides",
+    "runAgent dispatcher",
+    "agent chat / transcript replay",
+    "CLI backend capabilities (claude, codex, kimi, kiro)",
+    "scheduler binding via agentId",
+    "scratchpad environment variables"
+  ],
+  "cross_refs": [
+    "README"
+  ],
+  "locked": false,
+  "precedence": null,
+  "notes": "No frontmatter, no ADR path/filename convention, no Status field, no Decision/Consequences sections. Dominant signals are SPEC-grade: field/constraint tables (id regex, enum values), a JSON storage schema, a backend capability matrix, and named invariants the implementation must honor (metadata.origin never overwritten, agentId always stamped, unattended runs default to plan). Design rationale prose is embedded throughout ('exists as a tab rather than an app mode because...', 'stays out of make verify because...'), which is an ADR-like signal, but it is distributed rationale for one subsystem rather than a single recorded decision with status, so SPEC wins. Cross-ref 'README' is a bare filename mention, not a markdown link; code paths (src-tauri/src/agents.rs, src/lib/agents.ts) and config paths (~/.maru/agents.json, <work>/.maru/schedules.json) were not recorded as doc cross-refs. Output filename uses a path-derived suffix instead of a SHA-256 prefix because no shell tool was available to compute the hash; uniqueness is preserved via the maru/docs path components."
+}

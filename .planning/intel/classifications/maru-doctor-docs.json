@@ -1,0 +1,23 @@
+{
+  "source_path": "/Users/yj.lee/workspace/work/dev/maru/docs/maru-doctor.md",
+  "type": "SPEC",
+  "confidence": "medium",
+  "manifest_override": false,
+  "title": "Maru Doctor",
+  "summary": "Behavioral contract for the read-only `maru doctor` command and the related skills dirty/update/sync/reconcile commands, including issue codes and exit codes.",
+  "scope": [
+    "maru doctor",
+    "maru skills dirty",
+    "maru skills update",
+    "maru skills sync",
+    "maru skills reconcile",
+    "skills registry",
+    "~/.maru/skills",
+    "OTA skills bundle",
+    "tool runtime symlinks"
+  ],
+  "cross_refs": [],
+  "locked": false,
+  "precedence": null,
+  "notes": "SPEC vs DOC ambiguity. No adr/prd/spec path or filename convention, no frontmatter, and prose-heavy sections read like reference documentation (DOC signal). Chose SPEC because the dominant content is machine-facing contract: an issue-code table with severity levels, explicit exit-code semantics (--quiet exits 0/1, sync --check exits 1), read-only guarantees (never writes registry.json, never repairs links), and refusal rules (bundled --accept refused, non-symlink tool content not overwritten). Per the ambiguity rule the higher-precedence signal (SPEC) wins. cross_refs empty: the document mentions filesystem paths (registry.json, SKILL.md, ~/.maru/skills/_bundles/<id>/) but contains no links or references to other documents."
+}

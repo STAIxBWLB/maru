@@ -1,0 +1,23 @@
+{
+  "source_path": "/Users/yj.lee/workspace/work/dev/maru/docs/kg-references.md",
+  "type": "SPEC",
+  "confidence": "medium",
+  "manifest_override": false,
+  "title": "KG reference mapping and visualization",
+  "summary": "Contract for the on-demand kg_document_refs mapping service: match kinds, disk cache validity, byte-offset semantics, and the two consuming visualization surfaces.",
+  "scope": [
+    "kg_document_refs",
+    "DocumentRefMap",
+    "wikilink resolution",
+    "entity matching",
+    "kg-cache disk cache",
+    "byte-offset conversion",
+    "editor highlights",
+    "graph reference focus",
+    "converge animation"
+  ],
+  "cross_refs": [],
+  "locked": false,
+  "precedence": null,
+  "notes": "SPEC vs DOC ambiguity. Prose-heavy with design rationale (DOC signal), but dominant content is implementation contracts the system must honor: command signature and return type, match-kind definitions, output caps (20 spans/note, 200 total), cache validity conditions, UTF-8 byte-offset semantics, referenceFocus payload shape, and two hard rendering constraints. Resolved to SPEC per precedence rule. No ADR signals (no status/decision/consequences) and no PRD signals (no user stories or acceptance criteria). cross_refs empty: all path mentions are source files (src-tauri/src/kg_refs.rs, src/lib/kgRefs.ts, e2e/kg-references.spec.ts), not documents."
+}

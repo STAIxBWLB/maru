@@ -1,0 +1,26 @@
+{
+  "source_path": "/Users/yj.lee/workspace/work/dev/maru/docs/gap-analysis.md",
+  "type": "SPEC",
+  "confidence": "medium",
+  "manifest_override": false,
+  "title": "Gap analysis",
+  "summary": "Technical contract for diffing a promoted draft against its frozen baseline, classifying human edits, logging them, and feeding the digest back into draft prompts.",
+  "scope": [
+    "gap analysis",
+    "drafts",
+    "promote baseline",
+    "line-level diff",
+    "hunk classification heuristics",
+    "gap-log.jsonl",
+    "gap feedback digest",
+    "scheduler dispatch prompt",
+    "inbox-process"
+  ],
+  "cross_refs": [
+    "drafts.md",
+    "skills/skills/inbox-process/SKILL.md"
+  ],
+  "locked": false,
+  "precedence": null,
+  "notes": "No frontmatter, no filename/path convention signal (plain docs/ root). Classified on content: command signatures (gap_analyze, gap_log_list, gap_append_log, drafts_relink_promoted), a JSON log record schema, enumerated hunk fields with an op enum, an ordered first-match-wins heuristic table, and stated invariants ('Isolation invariant', 'the two must stay in sync') — these are implementation contracts the system must honor, so SPEC over DOC despite explanatory prose. Contains one 'Trade-off:' line and rationale asides but no ADR structure (no Status/Context/Decision/Consequences) and no user stories or acceptance criteria, so neither ADR nor PRD. cross_refs lists only referenced markdown docs; the many src-tauri/ and src/ code paths are implementation pointers, not doc references. Filename suffix follows the sibling '-docs' convention rather than a SHA-256 prefix: no shell tool was available in this session to compute the hash, and 'gap-analysis' is unique among current classification outputs, so collision risk is nil."
+}

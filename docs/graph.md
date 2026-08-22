@@ -5,19 +5,19 @@ knowledge graph and, with managed writes enabled, lets you edit note frontmatter
 under a schema gate. It ships in three layers — 8a (read-only), 8b (managed
 writes), 8c (graph-driven authoring) — all landed and default-on, then refined
 by **V2** (warm-start worker, design-token UI, client-side insights) and **V3**
-(imperative rendering, persisted usability affordances, legend/hull
+(imperative rendering, persisted usability affordances, legend
 visualization, PNG/SVG export), and **V4** (Sigma WebGL, Graphology
 ForceAtlas2 worker, incremental index refresh, reviewed relationship writes).
 **V5** reworked the workspace UI (adaptive tiers, per-source filter profiles,
 display controls, a single derivation pipeline) and hardened the renderer
 lifecycle (state machine, mount gating, camera-fit rules, real-Sigma e2e).
 **V6** makes the canvas primary: compact floating controls, one
-progressive-disclosure tools surface, dark neutral defaults with a selectable
-accent, dense-graph visual LOD, and safe recovery while the canvas container is
-temporarily zero-sized. Graph also shares a persistent, resizable Panel with
-Terminal. The Panel behaves like VS Code: switch Terminal/Graph tabs, dock the
-whole Panel at the bottom or right, collapse/maximize it, and keep the document
-editor available in the main area.
+progressive-disclosure tools surface, dark defaults with origin colors and a
+selectable accent, dense-graph visual LOD, and safe recovery while the canvas
+container is temporarily zero-sized. Graph also shares a persistent, resizable
+Panel with Terminal. The Panel behaves like VS Code: switch Terminal/Graph tabs,
+dock the whole Panel at the bottom or right, collapse/maximize it, and keep the
+document editor available in the main area.
 
 Spec 정본 (work repo): `_meta/migrations/2607-deep-restructure/specs/maru-vault-graph-spec.md` (DR-020).
 
@@ -56,9 +56,10 @@ overlay is produced out-of-band by the `vault-graph` skill
   node attribute. V6 also enables Sigma's invalid-container guard so hiding or
   maximizing another pane cannot crash the entire app while Graph is mounted.
 - `src/components/graph/GraphLegend.tsx` — collapsible color key overlay,
-  shown only when it describes the active canvas colors (domain color mode, or
-  community color mode on an enriched graph; hidden for neutral); collapses to
-  an icon button outside the wide tier.
+  shown only when it describes the active canvas colors (origin, domain, or
+  community color mode; hidden for neutral, and in origin mode when the graph
+  holds a single origin class); collapses to an icon button outside the wide
+  tier.
 - `src/components/graph/GraphToolbar.tsx` — compact floating view/source/saved
   selector, search combobox (ranked results over the current filtered graph,
   full keyboard/ARIA), search-as-filter toggle, visible/total counts, one Tools
@@ -97,14 +98,18 @@ overlay is produced out-of-band by the `vault-graph` skill
   minVisibleNeighbors — `minVisibleNeighbors` replaces the old scope toggle
   and minDegree; the V1→V2 migration maps `all`→workspace and
   `max(minDegree, connected ? 1 : 0)`), `display` (arrows typed|all|none,
-  label density low|balanced|high, neutral|domain|community colors, optional
-  relation colors, dark|light|app theme, violet|green accent, node/edge scale
-  0.5–2), `panels` (one optional pinned Tools drawer with a width clamped
-  280–480), and `savedViews` (source/mode/localTarget/profile/display per
-  view). V2 settings migrate without losing filters or saved views. Legacy
-  default displays adopt the V6 dark/neutral/violet canvas defaults. The toolbar
-  menu creates, applies, replaces by name, and deletes views; query, selection,
-  path, camera, and overlay state remain transient.
+  label density low|balanced|high, neutral|domain|community|origin colors,
+  optional relation colors, dark|light|app theme, seal|violet|green accent,
+  node/edge scale 0.5–2), `panels` (one optional pinned Tools drawer with a
+  width clamped 280–480), and `savedViews`
+  (source/mode/localTarget/profile/display per view). V2 settings migrate
+  without losing filters or saved views. A stored V2 display still at its own
+  defaults adopts the V6 display defaults (seal accent, origin colors) but
+  keeps the `app` theme; a customized V2 display keeps `app` theme with violet
+  accent and community colors (`migrateGraphSettingsV2`). Only fresh installs
+  take the dark theme. The toolbar menu creates, applies, replaces by name, and
+  deletes views; query, selection, path, camera, and overlay state remain
+  transient.
 - Display wiring is hot-applied: arrows/labels via `setSetting` or attribute
   updates + `refresh()`, never a graph rebuild. Frontmatter edges carry a
   stable `relationColor` (palette hash); body `wiki_link` edges stay neutral.
@@ -120,8 +125,8 @@ overlay is produced out-of-band by the `vault-graph` skill
   surface to Details; clearing returns it to Insights. Insight sections preview 6 rows with
   a "more" expander; hidden-link rows show shared-neighbor `via` evidence and
   the prediction score.
-- Dark, neutral, low-label output is the default. Dense graphs reduce node and
-  edge prominence before Sigma draws them, preserving a readable focal
+- Dark, low-label output with origin colors is the default. Dense graphs reduce
+  node and edge prominence before Sigma draws them, preserving a readable focal
   selection instead of a bright edge mass.
 - Favorites render a ★ above the node in the production canvas label drawer
   (plus the warn border ring), not only in the e2e overlay.

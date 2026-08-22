@@ -1,0 +1,135 @@
+# Requirements: maru
+
+**Defined:** 2026-08-22
+**Core Value:** The filesystem stays the source of truth - everything Maru shows is derived from real files the user owns, and nothing is lost if Maru is uninstalled.
+
+**Provenance:** 0 PRDs were present in the ingested doc set, so no requirement IDs
+came from ingest. Every v1 requirement below is derived from the Tech Debt section
+of `.planning/codebase/CONCERNS.md`, which the milestone brief names as the scope.
+"User" throughout means the developer changing this code - this is a debt-paydown
+milestone with no end-user-visible surface.
+
+## v1 Requirements
+
+### Verification Signal
+
+- [ ] **GATE-01**: `make verify` fails when Rust code carries a clippy warning or is unformatted
+- [ ] **GATE-02**: `make verify` fails when a React hook dependency list is wrong or a declared symbol is unused
+- [ ] **GATE-03**: `make verify` typechecks `e2e/` and `scripts/` alongside `src/`, so a type error in a Playwright spec is caught before it runs
+- [ ] **GATE-04**: A failing e2e run in CI uploads a Playwright trace for the failing test
+- [ ] **GATE-05**: Rebuilding an older commit uses the Rust toolchain that commit was built with, not whatever `stable` is today
+- [ ] **GATE-06**: `pnpm typecheck` passes with the deprecated `@types/dompurify` stub removed from `package.json`
+- [ ] **GATE-07**: The shipped E2E flow TODO ledger lists only open items, and the module states that it is hand-maintained rather than derived
+
+### Scanner and Path Invariants
+
+- [ ] **SCAN-01**: Adding a generated directory to the prune list is a one-line edit in one place, and all five scanners pick it up
+- [ ] **SCAN-02**: Workspace and vault scans no longer descend into `.git` or `.venv`
+- [ ] **SCAN-03**: A canonical path-containment helper is importable outside `maru_dir.rs`, and a new path-accepting command author has one obvious example to copy
+- [ ] **SCAN-04**: Joining a home-rooted path against a non-absolute base fails loudly instead of materializing a directory tree inside the repo
+- [ ] **SCAN-05**: The stray `Users/yj.lee/.maru/env/` tree is gone from the repo root
+
+### Typed IPC Errors
+
+- [ ] **ERR-01**: A frontend caller can read a stable machine-readable `code` from any error it needs to branch on, alongside the human-readable message
+- [ ] **ERR-02**: Renaming an error code fails the build on both the Rust and TypeScript side instead of silently breaking a recovery path
+- [ ] **ERR-03**: Every existing `message.includes("<code>")` matcher branches on the typed code instead - starting with `evidence_binder_revision_conflict` at `src/components/evidence/EvidenceBinderPane.tsx:174`
+- [ ] **ERR-04**: Display-only errors are untouched - the `Result<T, String>` signature count stays within a few of today's 1,118
+
+### App Shell Decomposition
+
+- [ ] **SHELL-01**: `OutlinePane` reads its state from module stores instead of a ~71-prop bundle
+- [ ] **SHELL-02**: `EditorPane` reads its state from module stores instead of a ~55-prop bundle
+- [ ] **SHELL-03**: Typing in the editor no longer re-renders unrelated panes
+- [ ] **SHELL-04**: `EditorPane` has a component test covering the preview-mark path that regressed across #260/#262/#264
+- [ ] **SHELL-05**: `DocumentList` reads its state from module stores instead of a ~40-prop bundle
+- [ ] **SHELL-06**: `TerminalPanel` reads its state from module stores instead of a ~25-prop bundle
+- [ ] **SHELL-07**: Adding a mode surface is a registry entry, not an added branch in a ~190-line nested ternary chain
+- [ ] **SHELL-08**: Adding state to a pane no longer requires editing `src/App.tsx`
+
+## v2 Requirements
+
+Real items from `.planning/codebase/CONCERNS.md`, deliberately deferred so they do
+not compete with the structural work. Not in the current roadmap.
+
+### Concurrency and Performance
+
+- **PERF-01**: Network- and subprocess-bound IPC commands do not block the main thread (37 sync commands reach `WalkDir`/subprocess/network in their first 80 lines)
+- **PERF-02**: `skills_sync_source` releases the global registry lock across the network round-trip
+- **PERF-03**: A panic under a long-lived global lock does not brick the feature until app restart (apply the `into_inner()` recovery already used in `skill_host/fs.rs:155`)
+- **PERF-04**: Recursive filesystem watchers filter by the shared prune list once a watched root can contain a heavy subtree
+
+### Security
+
+- **SEC-01**: `script-src 'self' blob:` is audited and dropped from the CSP if the Vite build no longer needs it
+- **SEC-02**: A regression test asserts every `dangerouslySetInnerHTML` value originates from a DOMPurify call
+
+### Reliability
+
+- **REL-01**: A terminal child that traps SIGHUP can still be killed (process-group SIGKILL escalation, the pattern already at `command_output.rs:404`/`:543`)
+
+### Testing
+
+- **TEST-01**: A native Tauri E2E runner verifies the real IPC contract end to end (tracked in-repo as `native-tauri-e2e-runner-missing`)
+- **TEST-02**: Frontend coverage is measured as a non-gating report
+- **TEST-03**: The remaining large untested components have co-located tests (`MeetingsPane`, `FilesWorkbench`, `GraphCanvas`, `DiagramMode`, `SkillsTab`, `StudioMode`, `GraphView`, `InboxPane`, and 23 more)
+- **TEST-04**: `app_menu.rs` has a smoke test, since CI never exercises the macOS menu
+
+### Documentation and Dependencies
+
+- **DEP-01**: Each exact version pin in the graph stack and `trash = "=4.1.1"` carries a one-line comment recording why
+
+### Deferred Product Work
+
+- **HUB-01**: Hub graph-metadata sync - the only explicit deferral in the ingested doc set (`docs/graph.md`), held until a Hub consumer exists
+
+## Out of Scope
+
+| Feature | Reason |
+|---------|--------|
+| Any new product feature | Behavior-preserving work is only verifiable if behavior is not also changing |
+| Converting all 1,118 `Result<T, String>` signatures | Explicitly rejected in the CONCERNS.md fix approach; cost without benefit for display-only errors |
+| Retrofitting all ~20 existing path-traversal validators | The existing checks are individually sound; the problem is the absence of a canonical example, not the callers |
+| Changing `.maruignore` defaults | It is a user-facing file format, not a scanner constant |
+| Any visible UI change during decomposition | A refactor that alters output cannot be verified against the existing e2e suite |
+| Full lint style campaign (formatting, import order, `console` removal) | Only correctness rules that guard the decomposition earn a place in `verify` |
+| Replacing the state approach with Redux/Zustand/Context | The module-store + `useSyncExternalStore` precedent already works here |
+| New requirements invented from the 13 SPECs | They describe shipped behavior; they are invariants to preserve, not features to build |
+
+## Traceability
+
+| Requirement | Phase | Status |
+|-------------|-------|--------|
+| GATE-01 | Phase 1 | Pending |
+| GATE-02 | Phase 1 | Pending |
+| GATE-03 | Phase 1 | Pending |
+| GATE-04 | Phase 1 | Pending |
+| GATE-05 | Phase 1 | Pending |
+| GATE-06 | Phase 1 | Pending |
+| GATE-07 | Phase 1 | Pending |
+| SCAN-01 | Phase 2 | Pending |
+| SCAN-02 | Phase 2 | Pending |
+| SCAN-03 | Phase 2 | Pending |
+| SCAN-04 | Phase 2 | Pending |
+| SCAN-05 | Phase 2 | Pending |
+| ERR-01 | Phase 3 | Pending |
+| ERR-02 | Phase 3 | Pending |
+| ERR-03 | Phase 3 | Pending |
+| ERR-04 | Phase 3 | Pending |
+| SHELL-01 | Phase 4 | Pending |
+| SHELL-02 | Phase 4 | Pending |
+| SHELL-03 | Phase 4 | Pending |
+| SHELL-04 | Phase 4 | Pending |
+| SHELL-05 | Phase 5 | Pending |
+| SHELL-06 | Phase 5 | Pending |
+| SHELL-07 | Phase 5 | Pending |
+| SHELL-08 | Phase 5 | Pending |
+
+**Coverage:**
+- v1 requirements: 24 total
+- Mapped to phases: 24
+- Unmapped: 0 ✓
+
+---
+*Requirements defined: 2026-08-22*
+*Last updated: 2026-08-22 after initial definition*

@@ -1,0 +1,24 @@
+{
+  "source_path": "/Users/yj.lee/workspace/work/dev/maru/docs/studio.md",
+  "type": "SPEC",
+  "confidence": "medium",
+  "manifest_override": false,
+  "title": "Document Studio (M2)",
+  "summary": "Describes the 7-step Studio authoring wizard, its per-document state storage, Tauri command surface, M4 export pipeline, and frontmatter/provenance invariants.",
+  "scope": [
+    "Document Studio",
+    "activity-rail studio mode",
+    "7-step authoring wizard",
+    "gaejosik lint",
+    "HWPX field fill",
+    "studio state persistence",
+    "export pipeline (M4)",
+    "export manifest",
+    "frontmatter byte-identity",
+    "template provenance"
+  ],
+  "cross_refs": [],
+  "locked": false,
+  "precedence": null,
+  "notes": "Competing SPEC vs DOC signals: prose-heavy description of already-shipped behavior (DOC), but dominant content is implementation contracts — Tauri command names (studio_state_*, studio_apply_body, template_get_fields, template_fill_hwpx, export_*), state file layout .maru/studio/<doc-id>/state.json, manifest.yaml as export SSOT, and a 'Related invariants' section (frontmatter byte-identity, provenance frontmatter keys). Resolved to SPEC per ambiguity rule (SPEC > DOC) so the invariants survive as technical constraints. No frontmatter, no numbered/spec filename convention, no schema or endpoint tables — hence medium, not high. Referenced paths are source-code files, not documents, so cross_refs is empty."
+}
