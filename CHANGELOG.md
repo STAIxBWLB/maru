@@ -8,6 +8,18 @@ because releases cut frequently during active development. Versions before
 Dates are the release-tag dates. Only `feat`/`fix`-level changes are listed;
 `chore(release)` version bumps and merge commits are omitted.
 
+## v0.4.62 - 2026-08-22 - One Document, Three Views
+
+- **Scratchpad now navigates folders, files, and content side by side (#273).**
+  Its main workbench adds a resizable virtual folder tree ahead of the file
+  list and editor. Markdown memos switch between Rich, Source, and Preview,
+  while autosave, recovery drafts, revision conflicts, and temporary-file
+  cleanup retain their existing safety behavior.
+- **Files edits documents without leaving the workspace (#273).** Markdown and
+  HTML files use the same Rich/Visual, Source, and Preview surfaces as Docs,
+  share in-memory drafts across both workspaces, and save explicitly with
+  conflict recovery and read-only enforcement. Binary previews are unchanged.
+
 ## v0.4.61 - 2026-08-21 - Scratchpad Gets Room to Work
 
 - **Scratchpad is now a full workspace (#271).** The memo and temporary-result
