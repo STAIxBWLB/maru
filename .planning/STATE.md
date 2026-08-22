@@ -2,18 +2,18 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-current_phase: 2
+current_phase: 02
 current_phase_name: Shared Scanner and Path Invariants
 status: executing
-stopped_at: Phase 2 context gathered
-last_updated: "2026-08-22T21:04:28.362Z"
+stopped_at: Completed 02-01-PLAN.md
+last_updated: "2026-08-22T21:43:38.894Z"
 last_activity: 2026-08-23
 last_activity_desc: Phase 1 complete, transitioned to Phase 2
 progress:
   total_phases: 2
   completed_phases: 1
   total_plans: 10
-  completed_plans: 7
+  completed_plans: 8
 ---
 
 # Project State
@@ -23,16 +23,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-08-23)
 
 **Core value:** The filesystem stays the source of truth - everything Maru shows is derived from real files the user owns, and nothing is lost if Maru is uninstalled.
-**Current focus:** Phase 2 - Shared Scanner and Path Invariants
+**Current focus:** Phase 02 — Shared Scanner and Path Invariants
 
 ## Current Position
 
-Phase: 2 of 5 (Shared Scanner and Path Invariants)
-Plan: Not started
+Phase: 02 (Shared Scanner and Path Invariants) — EXECUTING
+Plan: 2 of 3
 Status: Ready to execute
-Last activity: 2026-08-23 — Phase 1 complete, transitioned to Phase 2
+Last activity: 2026-08-23 — Phase 02 execution started
 
-Progress: [██████████] 100%
+Progress: [████████░░] 80%
 
 ## Performance Metrics
 
@@ -65,6 +65,7 @@ Progress: [██████████] 100%
 | Phase 01 P05 | 15min | 3 tasks | 8 files |
 | Phase 01-trustworthy-verify-signal P06 | 20min | 3 tasks | 4 files |
 | Phase 01-trustworthy-verify-signal P07 | 70min | 3 tasks | 30 files |
+| Phase 02 P01 | 9min | 3 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -96,6 +97,9 @@ Recent decisions affecting current work:
 - [Phase 1]: Positional/required-interface unused args (favoriteIds, settings, warnings, hdbg, headerBg) renamed with a leading underscore rather than deleted, since deletion would have required touching call sites or type signatures outside this plan's fix-not-rewrite mandate
 - [Phase 1]: GATE-02 flipped - make lint added to the verify prerequisite list immediately after typecheck, proven red-then-green on both react-hooks/exhaustive-deps and no-unused-vars via deliberate break-and-revert on src/components/today/useTodayTasks.ts
 - [Phase 1]: Full make verify could not be proven green on the shared checkout - test-rust failed on 12 outlook_mso timeout tests racing a concurrent session's own cargo test --workspace process, and cargo clippy/fmt-check both fail solely inside the concurrent session's uncommitted src-tauri/src/hwped.rs; neither traces to this plan's diff (zero Rust files touched). Each gate this plan owns was verified individually instead (make lint both directions, pnpm typecheck, pnpm test, make test-e2e, all green); CI is the authoritative composite check, to be triggered by the team lead
+- [Phase ?]: [Phase 2]: mod paths; registered between outlook_mso and project_activity (true alphabetical, rustfmt-verified) - plan-stated ops_catalog/outlook_mso slot violates the strictly-alphabetical registry convention
+- [Phase ?]: [Phase 2]: vault.rs could_include_dot_folder_named deleted (lost its only caller when rg_visibility went unconditional) rather than kept as dead code under the clippy gate
+- [Phase ?]: [Phase 2]: ensure_within error message kept byte-identical (Path escapes the .maru directory) - live user-visible string in a behavior-preserving phase (RESEARCH Pitfall 4)
 
 ### Pending Todos
 
@@ -119,6 +123,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-08-22T20:23:25.414Z
-Stopped at: Phase 2 context gathered
-Resume file: .planning/phases/02-shared-scanner-and-path-invariants/02-CONTEXT.md
+Last session: 2026-08-22T21:43:29.601Z
+Stopped at: Completed 02-01-PLAN.md
+Resume file: None

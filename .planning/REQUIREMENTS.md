@@ -23,9 +23,9 @@ milestone with no end-user-visible surface.
 
 ### Scanner and Path Invariants
 
-- [ ] **SCAN-01**: Adding a generated directory to the prune list is a one-line edit in one place, and all five scanners pick it up
-- [ ] **SCAN-02**: Workspace and vault scans no longer descend into `.git` or `.venv`
-- [ ] **SCAN-03**: A canonical path-containment helper is importable outside `maru_dir.rs`, and a new path-accepting command author has one obvious example to copy
+- [x] **SCAN-01**: Adding a generated directory to the prune list is a one-line edit in one place, and all five scanners pick it up
+- [x] **SCAN-02**: Workspace and vault scans no longer descend into `.git` or `.venv`
+- [x] **SCAN-03**: A canonical path-containment helper is importable outside `maru_dir.rs`, and a new path-accepting command author has one obvious example to copy
 - [ ] **SCAN-04**: Joining a home-rooted path against a non-absolute base fails loudly instead of materializing a directory tree inside the repo
 - [ ] **SCAN-05**: The stray `Users/yj.lee/.maru/env/` tree is gone from the repo root
 
@@ -122,9 +122,9 @@ not compete with the structural work. Not in the current roadmap.
 | GATE-05 | Phase 1 | Complete |
 | GATE-06 | Phase 1 | Complete |
 | GATE-07 | Phase 1 | Complete |
-| SCAN-01 | Phase 2 | Pending |
-| SCAN-02 | Phase 2 | Pending |
-| SCAN-03 | Phase 2 | Pending |
+| SCAN-01 | Phase 2 | Complete |
+| SCAN-02 | Phase 2 | Complete |
+| SCAN-03 | Phase 2 | Complete |
 | SCAN-04 | Phase 2 | Pending |
 | SCAN-05 | Phase 2 | Pending |
 | ERR-01 | Phase 3 | Pending |

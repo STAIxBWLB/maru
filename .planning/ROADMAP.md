@@ -87,12 +87,12 @@ Notes for planning:
   4. A test proves that joining a `maru_home()`/`env_root()` result against a non-absolute base panics or errors rather than creating a tree in the working directory
   5. `Users/yj.lee/.maru/env/` no longer exists at the repo root
 
-**Plans**: 3 plans
+**Plans**: 1/3 plans executed
 
 Plans:
 **Wave 1**
 
-- [ ] 02-01-PLAN.md - Tracer: create `src-tauri/src/paths.rs` (GENERATED_DIRS union + ensure_within + require_absolute), register it, rewire workspace_files/content_search, promote ensure_within into maru_dir (SCAN-01, SCAN-02, SCAN-03)
+- [x] 02-01-PLAN.md - Tracer: create `src-tauri/src/paths.rs` (GENERATED_DIRS union + ensure_within + require_absolute), register it, rewire workspace_files/content_search, promote ensure_within into maru_dir (SCAN-01, SCAN-02, SCAN-03)
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
@@ -180,7 +180,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Trustworthy Verify Signal | 7/7 | Complete    | 2026-08-23 |
-| 2. Shared Scanner and Path Invariants | 0/TBD | Not started | - |
+| 2. Shared Scanner and Path Invariants | 1/3 | In Progress|  |
 | 3. Typed IPC Error Contract | 0/TBD | Not started | - |
 | 4. Editor Surface State Extraction | 0/TBD | Not started | - |
 | 5. Shell Decomposition Completion | 0/TBD | Not started | - |
