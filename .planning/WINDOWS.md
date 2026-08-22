@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 1
+open_count: 0
 waived_count: 0
-fixed_count: 0
+fixed_count: 1
 total_count: 1
-last_updated: 2026-08-22T21:43:44.468Z
+last_updated: 2026-08-22T22:00:52.150Z
 ---
 
 # Broken Windows Ledger
@@ -15,7 +15,7 @@ last_updated: 2026-08-22T21:43:44.468Z
 
 | id | phase | kind | file | line | description | status | reason | recorded_at | resolved_at |
 |----|-------|------|------|------|-------------|--------|--------|-------------|-------------|
-| 1 | 02 | todo | src-tauri/src/paths.rs |  | require_absolute keeps #[allow(dead_code)] until plan 02-03 wires the SCAN-04 guard in skill_host/fs.rs | open |  | 2026-08-22T21:43:44.468Z |  |
+| 1 | 02 | todo | src-tauri/src/paths.rs |  | require_absolute keeps #[allow(dead_code)] until plan 02-03 wires the SCAN-04 guard in skill_host/fs.rs | fixed |  | 2026-08-22T21:43:44.468Z | 2026-08-22T22:00:52.150Z |
 
 ````json
 [
@@ -26,10 +26,10 @@ last_updated: 2026-08-22T21:43:44.468Z
     "file": "src-tauri/src/paths.rs",
     "line": null,
     "description": "require_absolute keeps #[allow(dead_code)] until plan 02-03 wires the SCAN-04 guard in skill_host/fs.rs",
-    "status": "open",
+    "status": "fixed",
     "reason": "",
     "recorded_at": "2026-08-22T21:43:44.468Z",
-    "resolved_at": null
+    "resolved_at": "2026-08-22T22:00:52.150Z"
   }
 ]
 ````

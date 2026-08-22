@@ -4,16 +4,16 @@ milestone: v1.0
 milestone_name: milestone
 current_phase: 02
 current_phase_name: Shared Scanner and Path Invariants
-status: executing
-stopped_at: Completed 02-02-PLAN.md
-last_updated: "2026-08-22T21:52:43.409Z"
+status: verifying
+stopped_at: Completed 02-03-PLAN.md
+last_updated: "2026-08-22T22:03:08.431Z"
 last_activity: 2026-08-23
 last_activity_desc: Phase 1 complete, transitioned to Phase 2
 progress:
   total_phases: 2
-  completed_phases: 1
+  completed_phases: 2
   total_plans: 10
-  completed_plans: 9
+  completed_plans: 10
 ---
 
 # Project State
@@ -29,10 +29,10 @@ See: .planning/PROJECT.md (updated 2026-08-23)
 
 Phase: 02 (Shared Scanner and Path Invariants) — EXECUTING
 Plan: 3 of 3
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-08-23 — Phase 02 execution started
 
-Progress: [█████████░] 90%
+Progress: [██████████] 100%
 
 ## Performance Metrics
 
@@ -67,6 +67,7 @@ Progress: [█████████░] 90%
 | Phase 01-trustworthy-verify-signal P07 | 70min | 3 tasks | 30 files |
 | Phase 02 P01 | 9min | 3 tasks | 6 files |
 | Phase 02 P02 | 5min | 3 tasks | 4 files |
+| Phase 02 P03 | 7min | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -102,6 +103,9 @@ Recent decisions affecting current work:
 - [Phase ?]: [Phase 2]: vault.rs could_include_dot_folder_named deleted (lost its only caller when rg_visibility went unconditional) rather than kept as dead code under the clippy gate
 - [Phase ?]: [Phase 2]: ensure_within error message kept byte-identical (Path escapes the .maru directory) - live user-visible string in a behavior-preserving phase (RESEARCH Pitfall 4)
 - [Phase ?]: [Phase 2]: 02-02 union-proof fixture leaves written as .md documents instead of the plan's literal .pyc/extensionless/.py leaves - scan_vault only collects md/markdown/html/htm, so the literal fixture could never go red and the SCAN-02 proof required the change
+- [Phase ?]: [Phase 2]: 02-03 guard shape - maru_home()/install_root_base() restructured to a single exit wrapped in require_absolute, so a future early-return cannot bypass the check without restructuring the exit
+- [Phase ?]: [Phase 2]: 02-03 env_root()/skills_root() get no separate guard - they derive from maru_home() and are covered transitively; duplicating the check would re-fragment the invariant
+- [Phase ?]: [Phase 2]: 02-03 require_absolute's temporary allow(dead_code) removed in the same commit the first consumer landed - closes WINDOWS.md ledger entry 1
 
 ### Pending Todos
 
@@ -125,6 +129,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-08-22T21:52:43.402Z
-Stopped at: Completed 02-02-PLAN.md
+Last session: 2026-08-22T22:03:08.423Z
+Stopped at: Completed 02-03-PLAN.md
 Resume file: None
