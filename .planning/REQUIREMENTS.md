@@ -13,7 +13,7 @@ milestone with no end-user-visible surface.
 
 ### Verification Signal
 
-- [ ] **GATE-01**: `make verify` fails when Rust code carries a clippy warning or is unformatted (fmt half done in 01-01; clippy half is 01-02)
+- [x] **GATE-01**: `make verify` fails when Rust code carries a clippy warning or is unformatted (fmt half done in 01-01; clippy half is 01-02)
 - [ ] **GATE-02**: `make verify` fails when a React hook dependency list is wrong or a declared symbol is unused
 - [ ] **GATE-03**: `make verify` typechecks `e2e/` and `scripts/` alongside `src/`, so a type error in a Playwright spec is caught before it runs
 - [ ] **GATE-04**: A failing e2e run in CI uploads a Playwright trace for the failing test
@@ -100,7 +100,7 @@ not compete with the structural work. Not in the current roadmap.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| GATE-01 | Phase 1 | Partial (fmt done in 01-01, clippy pending in 01-02) |
+| GATE-01 | Phase 1 | Complete |
 | GATE-02 | Phase 1 | Pending |
 | GATE-03 | Phase 1 | Pending |
 | GATE-04 | Phase 1 | Pending |
