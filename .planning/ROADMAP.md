@@ -87,7 +87,7 @@ Notes for planning:
   4. A test proves that joining a `maru_home()`/`env_root()` result against a non-absolute base panics or errors rather than creating a tree in the working directory
   5. `Users/yj.lee/.maru/env/` no longer exists at the repo root
 
-**Plans**: 1/3 plans executed
+**Plans**: 2/3 plans executed
 
 Plans:
 **Wave 1**
@@ -96,7 +96,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 02-02-PLAN.md - Rewire vault/secrets/project_activity/evidence_binder to the union; red-then-green SCAN-02 union-proof test; .maru retained module-locally (SCAN-01, SCAN-02)
+- [x] 02-02-PLAN.md - Rewire vault/secrets/project_activity/evidence_binder to the union; red-then-green SCAN-02 union-proof test; .maru retained module-locally (SCAN-01, SCAN-02)
 - [ ] 02-03-PLAN.md - SCAN-04 absolute-base guard inside maru_home()/install_root_base() + regression test + delete stray Users/ tree (SCAN-04, SCAN-05)
 
 Notes for planning:
@@ -180,7 +180,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Trustworthy Verify Signal | 7/7 | Complete    | 2026-08-23 |
-| 2. Shared Scanner and Path Invariants | 1/3 | In Progress|  |
+| 2. Shared Scanner and Path Invariants | 2/3 | In Progress|  |
 | 3. Typed IPC Error Contract | 0/TBD | Not started | - |
 | 4. Editor Surface State Extraction | 0/TBD | Not started | - |
 | 5. Shell Decomposition Completion | 0/TBD | Not started | - |
