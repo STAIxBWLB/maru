@@ -23,6 +23,10 @@ export const WARN_PROFILE_DAYS = 365;
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
+/**
+ * @param {object} profile
+ * @param {{ expectedBundleId?: string, appleTeamId?: string | null, now?: number }} [options]
+ */
 export function evaluateProvisioningProfile(
   profile,
   { expectedBundleId, appleTeamId = null, now = Date.now() } = {},

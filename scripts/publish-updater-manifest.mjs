@@ -123,6 +123,8 @@ function runGhDownload(args) {
  * Download each signature directly into a caller-owned temporary path. `gh`
  * performs authenticated access using GH_TOKEN without the token appearing in
  * a URL, command argument, or log line.
+ *
+ * @param {{ tag?: string, repo?: string, version?: string, directory?: string, runGh?: (args: string[]) => void }} [options]
  */
 export function downloadUpdaterSignatures({
   tag,

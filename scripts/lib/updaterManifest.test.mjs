@@ -17,10 +17,11 @@ function releaseAssets() {
   }));
 }
 
+/** @returns {Array<[string, string]>} */
 function signatureEntries() {
   return UPDATER_ASSET_PAIRS.map(({ signature }) => {
     const name = signature(VERSION);
-    return [name, `signature-for-${name}`];
+    return /** @type {[string, string]} */ ([name, `signature-for-${name}`]);
   });
 }
 
@@ -34,7 +35,6 @@ function fixture(overrides = {}) {
   };
   return {
     tag: TAG,
-    release,
     signatures: new Map(signatureEntries()),
     ...overrides,
     release,
