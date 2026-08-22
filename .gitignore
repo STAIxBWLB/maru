@@ -66,3 +66,6 @@ test-results/
 # Python caches generated when skills run in place
 skills/**/__pycache__/
 skills/**/.pytest_cache/
+
+# GSD run-scoped runtime state (isolation sentinel)
+.gsd/
