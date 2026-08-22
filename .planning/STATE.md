@@ -5,15 +5,15 @@ milestone_name: milestone
 current_phase: 1
 current_phase_name: Trustworthy Verify Signal
 status: executing
-stopped_at: Completed 01-05-PLAN.md
-last_updated: "2026-08-22T08:32:53.969Z"
+stopped_at: Completed 01-06-PLAN.md
+last_updated: "2026-08-22T09:41:15.277Z"
 last_activity: 2026-08-22
 last_activity_desc: Roadmap created from /gsd-ingest-docs intel + /gsd-map-codebase
 progress:
   total_phases: 1
   completed_phases: 0
   total_plans: 7
-  completed_plans: 5
+  completed_plans: 6
 ---
 
 # Project State
@@ -28,11 +28,11 @@ See: .planning/PROJECT.md (updated 2026-08-22)
 ## Current Position
 
 Phase: 1 of 5 (Trustworthy Verify Signal)
-Plan: 5 of 7 in current phase
+Plan: 6 of 7 in current phase
 Status: Ready to execute
 Last activity: 2026-08-22 - Completed 01-01 (rust-toolchain.toml pin + fmt-check gate)
 
-Progress: [███████░░░] 71%
+Progress: [█████████░] 86%
 
 ## Performance Metrics
 
@@ -63,6 +63,7 @@ Progress: [███████░░░] 71%
 | Phase 01-trustworthy-verify-signal P03 | 51min | 3 tasks | 2 files |
 | Phase 01 P04 | 20min | 4 tasks | 7 files |
 | Phase 01 P05 | 15min | 3 tasks | 8 files |
+| Phase 01-trustworthy-verify-signal P06 | 20min | 3 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -86,6 +87,9 @@ Recent decisions affecting current work:
 - [Phase 1]: Kept composite: true on tsconfig.scripts.json (unlike 01-04's tsconfig.e2e.json deviation); scripts/ has no cross-project import so the TS6307 boundary error 01-04 hit never triggers
 - [Phase 1]: Re-measured scripts/ error count: 42 across 8 files, not RESEARCH.md's stored 44/9; all 42 traced to one destructured-options JSDoc-inference gap
 - [Phase 1]: GATE-03 marked complete in REQUIREMENTS.md: 01-05 finishes the scripts/ half 01-04 deliberately left open
+- [Phase 1]: eslint@10.9.0, typescript-eslint@8.67.0, eslint-plugin-react-hooks@7.1.1 approved at the blocking-human legitimacy checkpoint after independent live-registry re-verification
+- [Phase 1]: App.tsx re-measured at 22 real violations (13 no-unused-vars + 9 exhaustive-deps), not the plan's 12+10; deleting one dead useCallback retired a no-unused-vars fix and its paired exhaustive-deps violation together, landing the final committed split at 12+8
+- [Phase 1]: make verify's fmt-check failed solely on a concurrent unrelated session's Rust files (hwped.rs, lib.rs) sharing this checkout; reported and not diagnosed per the team lead's instruction, everything in 01-06's own scope (typecheck, test, eslint, cargo test --lib) verified green independently
 
 ### Pending Todos
 
@@ -96,6 +100,7 @@ None yet.
 - No `.planning/config.json` exists; defaults assumed - granularity `standard`, `phase_id_convention` sequential, `project_code` null. Regenerate phase IDs if a config lands with different values.
 - `src/App.tsx` has no test of any kind. Phases 4-5 depend on Phase 1's hook-dependency gate plus the per-pane tests written during extraction; there is no existing safety net for the decomposition.
 - `make verify` runs on ubuntu-22.04 only and e2e runs Chromium against Vite with mocked IPC. Nothing in CI exercises WKWebView, the real PTY, IME input, or the macOS menu - macOS-affecting changes need a real-app run.
+- make verify's fmt-check/clippy/build-frontend steps unverified end-to-end pending a concurrent session's hwped.rs/lib.rs work landing in this shared checkout; not caused by 01-06
 
 ## Deferred Items
 
@@ -109,6 +114,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-08-22T08:32:53.962Z
-Stopped at: Completed 01-05-PLAN.md
+Last session: 2026-08-22T09:41:15.270Z
+Stopped at: Completed 01-06-PLAN.md
 Resume file: None
