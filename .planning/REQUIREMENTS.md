@@ -16,10 +16,10 @@ milestone with no end-user-visible surface.
 - [x] **GATE-01**: `make verify` fails when Rust code carries a clippy warning or is unformatted (fmt half done in 01-01; clippy half is 01-02)
 - [ ] **GATE-02**: `make verify` fails when a React hook dependency list is wrong or a declared symbol is unused
 - [ ] **GATE-03**: `make verify` typechecks `e2e/` and `scripts/` alongside `src/`, so a type error in a Playwright spec is caught before it runs
-- [ ] **GATE-04**: A failing e2e run in CI uploads a Playwright trace for the failing test
+- [x] **GATE-04**: A failing e2e run in CI uploads a Playwright trace for the failing test
 - [x] **GATE-05**: Rebuilding an older commit uses the Rust toolchain that commit was built with, not whatever `stable` is today
 - [ ] **GATE-06**: `pnpm typecheck` passes with the deprecated `@types/dompurify` stub removed from `package.json`
-- [ ] **GATE-07**: The shipped E2E flow TODO ledger lists only open items, and the module states that it is hand-maintained rather than derived
+- [x] **GATE-07**: The shipped E2E flow TODO ledger lists only open items, and the module states that it is hand-maintained rather than derived
 
 ### Scanner and Path Invariants
 
@@ -103,10 +103,10 @@ not compete with the structural work. Not in the current roadmap.
 | GATE-01 | Phase 1 | Complete |
 | GATE-02 | Phase 1 | Pending |
 | GATE-03 | Phase 1 | Pending |
-| GATE-04 | Phase 1 | Pending |
+| GATE-04 | Phase 1 | Complete |
 | GATE-05 | Phase 1 | Complete |
 | GATE-06 | Phase 1 | Pending |
-| GATE-07 | Phase 1 | Pending |
+| GATE-07 | Phase 1 | Complete |
 | SCAN-01 | Phase 2 | Pending |
 | SCAN-02 | Phase 2 | Pending |
 | SCAN-03 | Phase 2 | Pending |

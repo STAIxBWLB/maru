@@ -5,15 +5,15 @@ milestone_name: milestone
 current_phase: 1
 current_phase_name: Trustworthy Verify Signal
 status: executing
-stopped_at: Completed 01-02-PLAN.md
-last_updated: "2026-08-22T06:41:44.579Z"
+stopped_at: Completed 01-03-PLAN.md
+last_updated: "2026-08-22T07:40:38.119Z"
 last_activity: 2026-08-22
 last_activity_desc: Roadmap created from /gsd-ingest-docs intel + /gsd-map-codebase
 progress:
   total_phases: 1
   completed_phases: 0
   total_plans: 7
-  completed_plans: 2
+  completed_plans: 3
 ---
 
 # Project State
@@ -28,11 +28,11 @@ See: .planning/PROJECT.md (updated 2026-08-22)
 ## Current Position
 
 Phase: 1 of 5 (Trustworthy Verify Signal)
-Plan: 2 of 7 in current phase
+Plan: 3 of 7 in current phase
 Status: Ready to execute
 Last activity: 2026-08-22 - Completed 01-01 (rust-toolchain.toml pin + fmt-check gate)
 
-Progress: [███░░░░░░░] 29%
+Progress: [████░░░░░░] 43%
 
 ## Performance Metrics
 
@@ -60,6 +60,7 @@ Progress: [███░░░░░░░] 29%
 |------|----------|-------|-------|
 | Phase 01 P01 | 8min | 2 tasks | 2 files |
 | Phase 01 P02 | 37min | 3 tasks | 42 files |
+| Phase 01-trustworthy-verify-signal P03 | 51min | 3 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -74,6 +75,9 @@ Recent decisions affecting current work:
 - [Phase 1]: Pinned rust-toolchain.toml to rustc 1.98.0, resolved live via rustup update stable (D-11), not the RESEARCH.md-predicted value
 - [Phase 1]: Re-measured clippy count on rustc 1.98.0 matched RESEARCH.md's 75 exactly; 36 auto-fixed via cargo clippy --fix, 39 fixed by hand with zero suppression attributes added
 - [Phase 1]: Two too_many_arguments violations on #[tauri::command] IPC boundaries fixed by bundling params into a struct and updating the paired frontend invoke() call in the same commit, rather than adding a new allow(clippy::too_many_arguments)
+- [Phase 1]: D-12 held under empirical proof: retain-on-failure captured a first-attempt trace with zero retries in a real CI run (GATE-04)
+- [Phase 1]: GATE-04's CI proof required workflow_dispatch, not a branch push, since ci.yml's push trigger is scoped to branches: [main]
+- [Phase 1]: skill-name-drift deleted outright from TODO_LEDGER (not marked done) - GATE-07 requires the shipped ledger to list only open items
 
 ### Pending Todos
 
@@ -97,6 +101,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-08-22T06:41:44.573Z
-Stopped at: Completed 01-02-PLAN.md
+Last session: 2026-08-22T07:40:38.113Z
+Stopped at: Completed 01-03-PLAN.md
 Resume file: None
