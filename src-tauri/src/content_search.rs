@@ -895,9 +895,12 @@ mod tests {
             rg_visibility(&git_allowed),
             RgVisibility {
                 hidden: true,
-                exclude_git: false,
+                exclude_git: true,
             }
         );
+        // SCAN-02: generated dirs are un-allowlistable — allowlisting a path
+        // under .git must not resurrect it into rg results.
+        assert!(rg_visibility(&git_allowed).exclude_git);
     }
 
     #[test]
