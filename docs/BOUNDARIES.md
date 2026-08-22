@@ -2,7 +2,7 @@
 
 Maru owns skills and runtime federation. `dotfiles-v2` owns environment and
 tool settings. This file mirrors the workspace policy in
-`~/workspace/work/_sys/rules/skills-ssot.md`.
+`~/workspace/work/_meta/rules/skills-ssot.md`.
 
 ## Maru Owns
 
