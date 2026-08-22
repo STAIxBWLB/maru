@@ -42,7 +42,7 @@ Decimal phases appear between their surrounding integers in numeric order.
   4. Checking out an older commit and building reproduces that commit's Rust toolchain rather than today's `stable`
   5. `pnpm typecheck` passes with `@types/dompurify` removed, and the shipped E2E flow ledger contains no already-resolved entries
 
-**Plans**: 6/7 plans executed
+**Plans**: 7/7 plans executed
 
 Plans:
 **Wave 1**
@@ -62,7 +62,7 @@ Plans:
 
 **Wave 4** *(blocked on Wave 3 completion)*
 
-- [ ] 01-07-PLAN.md - Clear the rest of the lint backlog and add the `lint` gate (GATE-02)
+- [x] 01-07-PLAN.md - Clear the rest of the lint backlog and add the `lint` gate (GATE-02)
 
 Notes for planning:
 
@@ -169,7 +169,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Trustworthy Verify Signal | 6/7 | In Progress|  |
+| 1. Trustworthy Verify Signal | 7/7 | In Progress|  |
 | 2. Shared Scanner and Path Invariants | 0/TBD | Not started | - |
 | 3. Typed IPC Error Contract | 0/TBD | Not started | - |
 | 4. Editor Surface State Extraction | 0/TBD | Not started | - |
