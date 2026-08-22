@@ -1301,6 +1301,31 @@ mod tests {
         assert_eq!(titles, vec!["Kept"]);
     }
 
+    /// SCAN-02 union proof: a vault scan over a fixture tree containing
+    /// `__pycache__/`, `.git/`, and `.venv/` returns none of their contents.
+    /// `.git`/`.venv` were already excluded by the dot-segment rule in
+    /// `is_excluded_path`; the genuinely new exclusions this test proves are
+    /// `__pycache__` (non-dot, so the dot rule never covered it) and
+    /// unconditional union membership. This test was RED while vault.rs still
+    /// carried its private 7-entry prune list and went GREEN when the scan
+    /// switched to the shared 14-entry `crate::paths::GENERATED_DIRS`.
+    #[test]
+    fn scan_excludes_generated_dirs_union_including_pycache() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        write_file(root, "keep.md", "# Keep\n");
+        write_file(root, "__pycache__/cached.md", "# Cached\n");
+        write_file(root, ".git/objects/ab/cdef.md", "# Git Object\n");
+        write_file(root, ".venv/lib/python3.12/site.md", "# Venv\n");
+
+        let entries = scan_vault(root.to_string_lossy().to_string(), None).unwrap();
+        let rels: Vec<&str> = entries
+            .iter()
+            .map(|entry| entry.rel_path.as_str())
+            .collect();
+        assert_eq!(rels, vec!["keep.md"]);
+    }
+
     #[test]
     fn scan_vault_precomputes_version_names() {
         let tmp = TempDir::new().unwrap();
