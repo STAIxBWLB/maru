@@ -2,6 +2,8 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
+use crate::paths::require_absolute;
+
 #[cfg(unix)]
 use std::os::unix::fs as unix_fs;
 #[cfg(unix)]
@@ -15,10 +17,15 @@ pub fn home_dir() -> Result<PathBuf, String> {
 }
 
 pub fn maru_home() -> Result<PathBuf, String> {
-    if let Some(path) = test_maru_home_override() {
-        return Ok(path.join(".maru"));
-    }
-    Ok(home_dir()?.join(".maru"))
+    // The final value is validated on every return path, including the
+    // test-override branch (D-08/D-09): a relative base would silently
+    // materialize directory trees in the process cwd.
+    let base = if let Some(path) = test_maru_home_override() {
+        path.join(".maru")
+    } else {
+        home_dir()?.join(".maru")
+    };
+    require_absolute(base)
 }
 
 pub fn skills_root() -> Result<PathBuf, String> {
@@ -33,10 +40,13 @@ pub fn env_root() -> Result<PathBuf, String> {
 /// resolve. In production this is the real home; under tests it follows the
 /// `MARU_TEST_HOME` override so installs stay sandboxed.
 pub fn install_root_base() -> Result<PathBuf, String> {
-    if let Some(path) = test_maru_home_override() {
-        return Ok(path);
-    }
-    home_dir()
+    // Same absolute-base guard as maru_home() — covers both the test-override
+    // and the production branch (D-08/D-09, Pitfall 6).
+    let base = match test_maru_home_override() {
+        Some(path) => path,
+        None => home_dir()?,
+    };
+    require_absolute(base)
 }
 
 /// Resolve Codex's active home. Isolated hosts such as Orca set `CODEX_HOME`

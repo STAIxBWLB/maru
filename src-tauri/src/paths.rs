@@ -59,10 +59,6 @@ pub fn ensure_within(parent: &Path, child: &Path) -> Result<(), String> {
 /// A home-rooted base must be absolute before anything joins against it —
 /// a relative base silently materializes trees in the cwd (the stray
 /// `Users/` incident class). Consumed by `skill_host/fs.rs` (SCAN-04).
-// allow(dead_code): the first consumer lands in plan 02-03 (the SCAN-04
-// guard inside maru_home()/install_root_base()); remove this attribute when
-// that rewire lands.
-#[allow(dead_code)]
 pub fn require_absolute(path: PathBuf) -> Result<PathBuf, String> {
     if path.is_absolute() {
         Ok(path)
