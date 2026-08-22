@@ -265,6 +265,43 @@ mod tests {
     }
 
     #[test]
+    fn maru_home_rejects_relative_test_home() {
+        // SCAN-04: a non-absolute home base must fail loudly via Err on every
+        // return path — a relative base otherwise materializes directory
+        // trees in the process cwd (the stray `Users/` incident class).
+        let _guard = test_maru_home_lock();
+        let previous = std::env::var_os("MARU_TEST_HOME");
+        std::env::set_var("MARU_TEST_HOME", "relative-home");
+
+        let home_result = maru_home();
+        let env_result = env_root();
+        let install_result = install_root_base();
+
+        // Restore the previous env value on all paths (BundleTestHome Drop
+        // idiom) so the mutation cannot leak into sibling tests.
+        if let Some(previous) = previous.as_ref() {
+            std::env::set_var("MARU_TEST_HOME", previous);
+        } else {
+            std::env::remove_var("MARU_TEST_HOME");
+        }
+
+        assert!(
+            home_result.is_err(),
+            "maru_home() must reject a relative base, got: {home_result:?}"
+        );
+        assert!(
+            env_result.is_err(),
+            "env_root() must reject a relative base (derived from maru_home), got: {env_result:?}"
+        );
+        assert!(
+            install_result.is_err(),
+            "install_root_base() must reject a relative base, got: {install_result:?}"
+        );
+        // The guard must fire before anything is created: no tree in cwd.
+        assert!(!Path::new("relative-home").exists());
+    }
+
+    #[test]
     fn codex_home_prefers_configured_profile_and_falls_back_to_dot_codex() {
         let home = Path::new("/users/tester");
         assert_eq!(
