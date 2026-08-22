@@ -21,7 +21,7 @@ mode-routing chain. Nothing user-visible changes in any phase; that is the point
 
 Decimal phases appear between their surrounding integers in numeric order.
 
-- [ ] **Phase 1: Trustworthy Verify Signal** - Make `make verify` and CI tell the truth about a behavior-preserving change
+- [x] **Phase 1: Trustworthy Verify Signal** - Make `make verify` and CI tell the truth about a behavior-preserving change (completed 2026-08-23)
 - [ ] **Phase 2: Shared Scanner and Path Invariants** - Collapse five prune lists and ~20 containment checks into one of each
 - [ ] **Phase 3: Typed IPC Error Contract** - Give the errors the frontend branches on a machine-readable code
 - [ ] **Phase 4: Editor Surface State Extraction** - Move `OutlinePane` and `EditorPane` off their prop bundles onto module stores
@@ -87,7 +87,17 @@ Notes for planning:
   4. A test proves that joining a `maru_home()`/`env_root()` result against a non-absolute base panics or errors rather than creating a tree in the working directory
   5. `Users/yj.lee/.maru/env/` no longer exists at the repo root
 
-**Plans**: TBD
+**Plans**: 3 plans
+
+Plans:
+**Wave 1**
+
+- [ ] 02-01-PLAN.md - Tracer: create `src-tauri/src/paths.rs` (GENERATED_DIRS union + ensure_within + require_absolute), register it, rewire workspace_files/content_search, promote ensure_within into maru_dir (SCAN-01, SCAN-02, SCAN-03)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [ ] 02-02-PLAN.md - Rewire vault/secrets/project_activity/evidence_binder to the union; red-then-green SCAN-02 union-proof test; .maru retained module-locally (SCAN-01, SCAN-02)
+- [ ] 02-03-PLAN.md - SCAN-04 absolute-base guard inside maru_home()/install_root_base() + regression test + delete stray Users/ tree (SCAN-04, SCAN-05)
 
 Notes for planning:
 
@@ -169,7 +179,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Trustworthy Verify Signal | 7/7 | In Progress|  |
+| 1. Trustworthy Verify Signal | 7/7 | Complete    | 2026-08-23 |
 | 2. Shared Scanner and Path Invariants | 0/TBD | Not started | - |
 | 3. Typed IPC Error Contract | 0/TBD | Not started | - |
 | 4. Editor Surface State Extraction | 0/TBD | Not started | - |
