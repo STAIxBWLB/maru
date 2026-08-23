@@ -111,6 +111,39 @@ All four ERR-01..04 requirements: SATISFIED (see table above). REQUIREMENTS.md's
    - **Expected:** Each mutation succeeds or fails through the real native IPC bridge with no console serde/deserialize errors, and each conflict path fires its typed recovery branch (reload / conflict notice) exactly as the mocked and unit-tested behavior predicts.
    - **Why human:** No CI gate exercises WKWebView; this is the pre-disclosed `native-tauri-e2e-runner-missing` blind spot (REQUIREMENTS.md's Phase 3 note, inherited from Phase 1's own verification finding #1). 03-01's checkpoint for this exact smoke was approved by the user, but 03-01-SUMMARY.md's own "Human Verification" section states plainly that no per-step observations were reported back. No later plan (03-02/03-03/03-04) re-attempted or closed this gap - all of their evidence is `cargo test`, `vitest`, `tsc`, and Playwright's mocked IPC layer, none of which exercises the real bridge. This is not a phase-goal failure (D-09's serde round-trip tests and the extensive unit/component test coverage above are strong indirect evidence the wire shape is correct), but it is the one place this phase's own evidence chain has a real, disclosed hole rather than a closed loop.
 
+## Post-Verification Review Findings (Codex, PR #279)
+
+A Codex adversarial review of the branch diff returned three medium findings after
+this verification was written. All three were independently checked against the
+tree and are accurate. None is a live defect in Phase 3's output; all three say the
+same thing from different angles, which is that the phase is less closed than its
+own artifacts suggest.
+
+Two are recorded as v2 requirements rather than widened into PR #279:
+
+- **ERR-05, the contract constrains declarations but not emissions.** `IpcError` is
+  a `pub struct` with a `pub code: String`, so any module can construct an arbitrary
+  code. The cross-language guard in `src/lib/types.test.ts` inventories `pub const`
+  declarations only and never inspects construction sites, so an unregistered code
+  passes the Rust pin, `tsc -b`, and the regex guard alike. `normalizeIpcError` then
+  downgrades it to a plain `Error` and no recovery branch runs. Moving or renaming a
+  declaration fails closed; the emission path is the silent hole.
+- **ERR-06, commands that emit reserved codes already sit outside the boundary.**
+  `today_apply_plan_result` and `task_calendar_set_sync` both reach `today_mutate`
+  and flatten its typed error back to `String`. Confirmed: no caller branches on
+  either path today, so nothing regressed and 03-02's "display-only, no frontend
+  branch" justification is factually correct. The durability critique still stands:
+  the boundary was drawn by current frontend usage and validated by a global
+  signature count, so a future author gets no compile-time signal that the
+  advertised recovery is unavailable on those paths.
+
+The third sharpens the human-verification item above rather than adding to it. The
+Playwright test at `e2e/smoke.spec.ts:1261` reads like native conflict coverage, but
+it injects a JavaScript `Error` with a synthetic `code` through `addInitScript` and
+never crosses Rust serialization, Tauri's macOS callback transport, or WKWebView
+promise rejection. Verified. It is not evidence for the native path, and should not
+be mistaken for it when this gap is next assessed.
+
 ## Gaps Summary
 
 No roadmap success criterion and no ERR-01..04 requirement is FAILED. All four are independently verified true in the codebase, with ERR-02 (the phase's central and hardest-to-fake claim) specifically re-proven by an independent drill in this verification pass rather than accepted from SUMMARY text. One item - real-app WKWebView evidence for the migrated wire shape - remains open exactly as 03-01-SUMMARY.md itself disclosed, and is carried forward here as a human-verification item rather than silently dropped or treated as closed by proxy (unit tests, serde round-trip tests, and Playwright's mocked layer are not the same evidence as the real native bridge). Recommend a short human smoke pass (the checklist above) before treating Phase 3 as fully closed, though nothing found in this verification blocks proceeding to Phase 4 on the merits of the typed-error-contract work itself.

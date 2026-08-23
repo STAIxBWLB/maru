@@ -165,6 +165,7 @@ None yet.
 | Reliability | REL-01 SIGHUP-immortal terminal session | v2 | 2026-08-22 |
 | Testing | TEST-01..04 (native Tauri E2E runner, coverage, remaining component tests, app_menu smoke) | v2 | 2026-08-22 |
 | Product | HUB-01 Hub graph-metadata sync - the doc set's only explicit deferral | v2 | 2026-08-22 |
+| Typed IPC | ERR-05 closed-enum contract (emission sites unconstrained; guard checks declarations only), ERR-06 typed return for every conflict-emitting command (today_apply_plan_result, task_calendar_set_sync flatten to String) | v2 | 2026-08-23 |
 
 ## Session Continuity
 
