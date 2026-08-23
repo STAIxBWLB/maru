@@ -32,6 +32,7 @@ use crate::cli_path::{augmented_path, is_executable, resolve_program};
 use crate::command_output::{
     run_command_with_timeout_and_limits, CommandTermination, OutputLimits,
 };
+use crate::paths::{ensure_within, lexical_normalize};
 use crate::win_process::NoWindow;
 
 /// Mirrors the Node engine's 60s timeout and 32MB maxBuffer.
@@ -284,14 +285,19 @@ fn stage_document(
         let canonical_root = std::fs::canonicalize(root)
             .map_err(|err| format!("hwped_bad_request: workspaceRoot not readable: {err}"))?;
         let joined = canonical_root.join(candidate);
-        let canonical = std::fs::canonicalize(&joined)
-            .map_err(|err| format!("hwped_bad_request: document not found: {path} ({err})"))?;
-        if !canonical.starts_with(&canonical_root) {
-            return Err(format!(
-                "hwped_bad_request: document path escapes workspaceRoot: {path}"
-            ));
+        // Containment is lexical (crate::paths::ensure_within, SCAN-03).
+        // canonicalize() here would follow symlinks, so a deliberate
+        // workspace symlink whose target sits outside the workspace - the
+        // documented inbox layout - would falsely read as an escape. `..`
+        // traversal is still blocked, by lexical_normalize.
+        ensure_within(&canonical_root, &joined).map_err(|_| {
+            format!("hwped_bad_request: document path escapes workspaceRoot: {path}")
+        })?;
+        let resolved = lexical_normalize(&joined);
+        if !resolved.exists() {
+            return Err(format!("hwped_bad_request: document not found: {path}"));
         }
-        return Ok(canonical);
+        return Ok(resolved);
     }
     let Some(data_base64) = document.data_base64.as_deref() else {
         return Err("hwped_bad_request: document requires path or dataBase64".to_string());
@@ -743,6 +749,28 @@ mod tests {
         };
         let err = stage_document(tmp.path(), &doc, Some(root.to_str().unwrap())).unwrap_err();
         assert!(err.contains("escapes workspaceRoot"));
+    }
+
+    /// A deliberate workspace symlink pointing outside the workspace stays
+    /// readable - the lexical-containment invariant (paths.rs), not a
+    /// canonicalize() escape.
+    #[cfg(unix)]
+    #[test]
+    fn stage_document_follows_workspace_symlink_to_an_outside_target() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("root");
+        let outside = tmp.path().join("outside");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(outside.join("a.hwpx"), b"x").unwrap();
+        std::os::unix::fs::symlink(&outside, root.join("inbox")).unwrap();
+        let doc = HwpedDocumentRef {
+            name: "a.hwpx".to_string(),
+            path: Some("inbox/a.hwpx".to_string()),
+            data_base64: None,
+        };
+        let staged = stage_document(tmp.path(), &doc, Some(root.to_str().unwrap())).unwrap();
+        assert_eq!(std::fs::read(&staged).unwrap(), b"x");
     }
 
     #[test]
