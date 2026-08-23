@@ -23,6 +23,7 @@
 
 use crate::atomic_file::write_atomic;
 use crate::document::revision_for;
+use crate::ipc_error::TODAY_CONFLICT;
 use crate::tasks::{
     normalize_task_frontmatter_aliases, string_field, task_display_title, yaml_to_json, TaskBucket,
 };
@@ -856,7 +857,7 @@ pub fn web_actions_import_top(
             reason: None,
         }),
         // The snapshot moved under us: re-read on the next run, never clobber.
-        Err(err) if err.code == "today_conflict" => Ok(skipped("conflict")),
+        Err(err) if err.code == TODAY_CONFLICT => Ok(skipped("conflict")),
         Err(err) => Err(err.to_string()),
     }
 }
