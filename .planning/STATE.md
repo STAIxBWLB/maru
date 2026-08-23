@@ -4,11 +4,11 @@ milestone: v1.0
 milestone_name: milestone
 current_phase: 03
 current_phase_name: typed-ipc-error-contract
-status: executing
-stopped_at: Completed 03-04-PLAN.md
-last_updated: "2026-08-23T14:18:18.980Z"
-last_activity: 2026-08-23
-last_activity_desc: Phase 03 plan 03 complete - frontend IPC error branch sites migrated to err.code, todayErrorCode retired
+status: phase_complete
+stopped_at: Phase 03 complete and verified (passed); PR #279 open; Phase 4 not started
+last_updated: "2026-08-24T04:45:00.000Z"
+last_activity: 2026-08-24
+last_activity_desc: Phase 03 complete - verification passed after the real-app WKWebView smoke closed the last evidence gap
 progress:
   total_phases: 3
   completed_phases: 3
@@ -23,16 +23,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-08-23)
 
 **Core value:** The filesystem stays the source of truth - everything Maru shows is derived from real files the user owns, and nothing is lost if Maru is uninstalled.
-**Current focus:** Phase 03 - Typed IPC Error Contract
+**Current focus:** Phase 03 complete; Phase 4 (Editor Surface State Extraction) is next
 
 ## Current Position
 
-Phase: 03 (Typed IPC Error Contract) - EXECUTING
-Plan: 4 of 4 complete (03-01, 03-02, 03-03); wave 3 (03-04) next
-Status: Ready to execute
-Last activity: 2026-08-23 - 03-03 frontend branch-site migration landed; ERR-01/ERR-03 marked complete
+Phase: 03 (Typed IPC Error Contract) - COMPLETE, verified passed
+Plan: 4 of 4 complete
+Status: Verified passed on branch gsd/phase-3-typed-ipc-error-contract (PR #279)
+Last activity: 2026-08-24 - real-app WKWebView smoke closed the last evidence gap and found two live defects
 
-Progress: [██████████] 100% (3/4 plans)
+Progress: [████████████░░░░░░░░] 60% (3/5 phases)
 
 ## Performance Metrics
 
@@ -145,6 +145,8 @@ Recent decisions affecting current work:
   reports complete: the Phase 2.1 planning artifacts, the HWPE-01..03 requirement
   registration, and the Semantica Phases 6-9 roadmap entries drawn from
   `docs/semantica-adoption-plan.md`.
+- [Phase 3]: The real-app WKWebView smoke found two live defects nothing else could see - EvidenceBinderMutation lacked serde rename_all_fields so every camelCase mutation was rejected at the bridge, and evidence discovery blocked the UI thread for over 40s on a 64k-file workspace. Treat "no native gate" as a real coverage hole in later phases, not a formality
+- [Phase 3]: Codex adversarial review produced ERR-05 and ERR-06 (v2 requirements) - the contract pins declarations but not emission sites, and commands able to emit reserved codes still flatten to String
 
 ### Pending Todos
 
@@ -169,6 +171,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-08-23T14:18:18.972Z
-Stopped at: Completed 03-04-PLAN.md
-Resume file: None
+Last session: 2026-08-24T04:45:00.000Z
+Stopped at: Phase 03 complete and verified; PR #279 open, Phase 4 not started
+Resume file: .planning/phases/03-typed-ipc-error-contract/03-VERIFICATION.md

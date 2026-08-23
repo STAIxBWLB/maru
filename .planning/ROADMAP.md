@@ -23,7 +23,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 1: Trustworthy Verify Signal** - Make `make verify` and CI tell the truth about a behavior-preserving change (completed 2026-08-23)
 - [x] **Phase 2: Shared Scanner and Path Invariants** - Collapse five prune lists and ~20 containment checks into one of each (completed 2026-08-23)
-- [ ] **Phase 3: Typed IPC Error Contract** - Give the errors the frontend branches on a machine-readable code
+- [x] **Phase 3: Typed IPC Error Contract** - Give the errors the frontend branches on a machine-readable code (completed 2026-08-24)
 - [ ] **Phase 4: Editor Surface State Extraction** - Move `OutlinePane` and `EditorPane` off their prop bundles onto module stores
 - [ ] **Phase 5: Shell Decomposition Completion** - Move the remaining panes and mode routing out of `MainApp`
 
@@ -119,7 +119,7 @@ Notes for planning:
   3. No `message.includes("<error_code>")` matcher remains in `src/` for a code that moved to the contract
   4. The `Result<T, String>` count in `src-tauri/src/` is essentially unchanged from the measured baseline of 1,138 (CONCERNS.md's 1,118 is stale) - display-only errors were not touched
 
-**Plans**: 4/4 plans executed
+**Plans**: 4/4 plans complete
 
 Plans:
 **Wave 1**
@@ -195,7 +195,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5
 |-------|----------------|--------|-----------|
 | 1. Trustworthy Verify Signal | 7/7 | Complete    | 2026-08-23 |
 | 2. Shared Scanner and Path Invariants | 3/3 | Complete    | 2026-08-23 |
-| 3. Typed IPC Error Contract | 4/4 | In Progress|  |
+| 3. Typed IPC Error Contract | 4/4 | Complete   | 2026-08-24 |
 | 4. Editor Surface State Extraction | 0/TBD | Not started | - |
 | 5. Shell Decomposition Completion | 0/TBD | Not started | - |
 
