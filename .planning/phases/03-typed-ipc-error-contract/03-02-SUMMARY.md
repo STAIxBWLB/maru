@@ -163,23 +163,20 @@ status: complete
 - **Verification:** `cargo --offline test --lib today`, `cargo --offline test --lib web_actions` (both fully green)
 - **Committed in:** `e603f69` (part of task 1 commit)
 
-**5. [Review-caught - ERR-02 defect] web_actions.rs:859 compared err.code against a raw string literal instead of TODAY_CONFLICT**
+**5. [Review-caught - ERR-02 defect] web_actions.rs's retry branch compared err.code against a raw string literal instead of TODAY_CONFLICT**
 - **Found during:** Team-lead review of this plan's commits, after task 1/2 landed
 - **Issue:** `Err(err) if err.code == "today_conflict" => Ok(skipped("conflict"))` is the only Rust-side branch on a contract code in the whole tree. Comparing against the literal instead of the `TODAY_CONFLICT` constant defeats ERR-02 at exactly the site it protects: renaming the constant's value would fail `ipc_error_codes_are_stable` but leave this literal matching nothing, silently breaking the conflict-retry recovery path with no build error
 - **Fix:** imported `TODAY_CONFLICT` from `crate::ipc_error`; changed the guard to `err.code == TODAY_CONFLICT`. The test assertion at web_actions.rs:1863 (`assert_eq!(stale.code, "today_conflict")`) is left as a literal by design, it is what makes a rename of the constant observable
 - **Files modified:** src-tauri/src/web_actions.rs
 - **Verification:** `cargo --offline test --lib web_actions`, `cargo --offline clippy --lib -- -D warnings`, `cargo --offline fmt -- --check`
 - **Committed in:** `98f655b` (separate fix commit on top of task 1)
-- **Note for 03-04:** `web_actions.rs:859` is the only Rust-side branch on a contract code in the tree (confirmed by grep across `src-tauri/src`). 03-04's ERR-02 rename drill must exercise this site too, not just the TypeScript union, or the drill only proves half the contract.
+- **Note for 03-04:** `web_actions.rs:860` (`web_actions_import_top`'s retry-branch match guard) is the only Rust-side branch on a contract code in the tree (confirmed by grep across `src-tauri/src`). 03-04's ERR-02 rename drill must exercise this site too, not just the TypeScript union, or the drill only proves half the contract.
 
 ---
 
 **Total deviations:** 5 (2x Rule 3, 2x Rule 1, 1 review-caught). All are compile-correctness or contract-integrity fixes made necessary by this plan's own signature changes rippling into callers PATTERNS.md/PLAN.md did not enumerate. No scope creep: no new functionality, no reworded user-visible text, no new suppression attributes.
 
 ## Issues Encountered
-
-- **`web_actions.rs:859` initially compared the contract code as a raw string literal, defeating ERR-02 at the one Rust-side branch site that exists.** Caught in orchestrator review, fixed on top of this plan's commits. The migrated branch read `err.code == "today_conflict"` rather than using the `TODAY_CONFLICT` constant. A grep over `src-tauri/src` confirms this is the ONLY Rust-side branch on a contract code in the tree, which makes the gap consequential: renaming the constant's value would leave `ipc_error_codes_are_stable` red, but a deliberate rename that updates that test would silently stop this branch matching, killing the conflict-skip recovery path with no build error. That is precisely the "silently breaking a recovery path" failure ERR-02 is chartered to eliminate. The site was missed because `web_actions.rs` was absent from the plan's `files_modified` list, so it never received the PATTERNS.md per-file treatment the enumerated files got. Fixed by importing `TODAY_CONFLICT` and comparing against it; the test assertion at `:1864` deliberately keeps the raw literal, since a test pinning the wire value is what makes a rename observable.
-- **Note for 03-04's ERR-02 rename drill:** `web_actions.rs:860` is the only Rust-side contract-code branch. The drill must exercise it, or it proves only the TypeScript half of the two-sided gate.
 
 - **Full `cargo --offline test --lib` raced a concurrent unrelated session's `cargo test --workspace` on this shared machine** (a separate hwp-cli project checkout, PID 82928, running the entire time this plan executed). The first full-suite run failed 12 `outlook_mso::tests::*` cases with `m365_timeout: readiness probe exceeded its deadline`, a CPU-contention timeout, not a real regression: `outlook_mso.rs` is untouched by this plan's diff (`git diff --stat` confirms only the six files listed above changed), and this exact failure mode is already documented in STATE.md's Phase 1 decision log ("test-rust failed on 12 outlook_mso timeout tests racing a concurrent session's own cargo test --workspace process"). Verified unrelated by running the task-scoped test filters this plan's diff actually covers (`today`, `document`, `web_actions`, 167 tests, 100% pass) plus `cargo clippy --lib -- -D warnings` (clean) and `cargo fmt -- --check` (clean) independently of the full-suite run. A second full-suite run, started once the first returned, finished with the identical result (1205 passed, the same 12 outlook_mso cases failed, same "readiness probe exceeded its deadline" pattern), confirming the failure is stable and unrelated to this plan's diff rather than a one-off flake.
 
@@ -193,7 +190,7 @@ ERR-01 is claimed by all three of 03-01, 03-02, and 03-03's frontmatter (a requi
 
 ## Self-Check: PASSED
 
-All six modified source files (today_store.rs, today_calendar.rs, today_lifecycle.rs, today_ai.rs, document.rs, web_actions.rs) confirmed present on disk. All three commits (e603f69, eff3526, 4eb2716) confirmed present in git log.
+All six modified source files (today_store.rs, today_calendar.rs, today_lifecycle.rs, today_ai.rs, document.rs, web_actions.rs) confirmed present on disk. All commits (e603f69, eff3526, 4eb2716, 98f655b) confirmed present in git log.
 
 ---
 *Phase: 03-typed-ipc-error-contract*
