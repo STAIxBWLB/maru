@@ -127,6 +127,16 @@ Local assets:
   snapshots) preserve the original HTML extension, including case, and the
   vault scanner/watcher recognize HTML extensions case-insensitively.
 
+## HWPX editor bridge
+
+Six `hwped_*` commands (`src-tauri/src/hwped.rs`, wrappers in
+`src/lib/hwped.ts`) spawn the `hwp` binary (hwp-cli >= 0.8.7) behind the
+hwp-editor `HwpEngine` contract: read / render / edit / compose / validate /
+capabilities. Fixed argv, no shell, 60s timeout; documents cross as
+workspace paths or base64; edit ops arrive as JS-side `opsToArgv` fragments.
+Backend-only for now — embedding the editor UI into a mode is a later
+decision. See [docs/hwp-editor.md](docs/hwp-editor.md).
+
 ## Files workspace
 
 Files is independent from the Documents pane. It scans files, empty folders,
