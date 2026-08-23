@@ -4,13 +4,15 @@ use crate::kordoc_lite::{self, DocumentFormat, KordocLiteCheck};
 use crate::paths::GENERATED_DIRS;
 use crate::vault::normalize_existing_dir;
 use crate::vault_list::{assert_maru_can_write, WorkspaceWriteAction};
+use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::collections::{BTreeSet, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fs::{self, File};
 use std::io::Read;
 use std::path::{Component, Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Mutex, OnceLock};
+use std::time::UNIX_EPOCH;
 use walkdir::WalkDir;
 
 const BINDER_SCHEMA_VERSION: u32 = 2;
@@ -18,7 +20,10 @@ const MAX_CANDIDATES: usize = 200;
 const MAX_TARGETS_PER_CATEGORY: usize = 50;
 const MAX_TARGET_LENGTH: usize = 200;
 const MAX_NOTE_LENGTH: usize = 2_000;
+const MAX_INSPECTION_CACHE_ENTRIES: usize = 512;
 static BINDER_WRITE_LOCK: Mutex<()> = Mutex::new(());
+static INSPECTION_CACHE: OnceLock<Mutex<HashMap<CandidateInspectionKey, CandidateInspection>>> =
+    OnceLock::new();
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -131,7 +136,11 @@ pub struct EvidenceBinderMutateRequest {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-#[serde(tag = "type", rename_all = "camelCase")]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub enum EvidenceBinderMutation {
     Link {
         candidate_id: String,
@@ -230,7 +239,7 @@ impl ProcessedManifestFile {
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn evidence_binder_read(
     req: EvidenceBinderReadRequest,
 ) -> Result<EvidenceBinderResponse, String> {
@@ -246,7 +255,7 @@ pub fn evidence_binder_read(
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn evidence_binder_mutate(
     req: EvidenceBinderMutateRequest,
 ) -> Result<EvidenceBinderResponse, IpcError> {
@@ -879,34 +888,45 @@ fn discover_candidates(
 ) -> Result<Vec<EvidenceBinderCandidate>, String> {
     let scope = document_scope(work, document_path);
     let mut seen = BTreeSet::<String>::new();
-    let mut candidates = Vec::new();
+    let mut seeds = Vec::new();
 
-    for candidate in discover_sidecar_candidates(work, scope.as_ref())? {
-        if seen.insert(candidate.rel_path.clone()) {
-            candidates.push(candidate);
+    for seed in discover_sidecar_candidate_seeds(work, scope.as_ref())? {
+        if seen.insert(seed.rel_path.clone()) {
+            seeds.push(seed);
         }
     }
-    for candidate in discover_processed_candidates(work, scope.as_ref())? {
-        if seen.insert(candidate.rel_path.clone()) {
-            candidates.push(candidate);
+    for seed in discover_processed_candidate_seeds(work, scope.as_ref())? {
+        if seen.insert(seed.rel_path.clone()) {
+            seeds.push(seed);
         }
     }
 
-    candidates.sort_by(|a, b| {
+    // Candidate validation may open Office archives and scan every HWPX XML
+    // member. Select the newest bounded set while discovery is still metadata-
+    // only so an unscoped document never deep-inspects the entire inbox.
+    let seeds = sort_and_limit_candidate_seeds(seeds);
+    seeds
+        .into_par_iter()
+        .map(|seed| build_candidate(work, &seed.path, seed.meta))
+        .collect()
+}
+
+fn sort_and_limit_candidate_seeds(mut seeds: Vec<CandidateSeed>) -> Vec<CandidateSeed> {
+    seeds.sort_by(|a, b| {
         b.updated_at
             .cmp(&a.updated_at)
             .then_with(|| a.rel_path.cmp(&b.rel_path))
     });
-    candidates.truncate(MAX_CANDIDATES);
-    Ok(candidates)
+    seeds.truncate(MAX_CANDIDATES);
+    seeds
 }
 
-fn discover_sidecar_candidates(
+fn discover_sidecar_candidate_seeds(
     work: &Path,
     scope: Option<&DocumentScope>,
-) -> Result<Vec<EvidenceBinderCandidate>, String> {
+) -> Result<Vec<CandidateSeed>, String> {
     let bases = scoped_bases(work, scope);
-    let mut candidates = Vec::new();
+    let mut seeds = Vec::new();
     for base in bases {
         if !base.exists() {
             continue;
@@ -940,9 +960,9 @@ fn discover_sidecar_candidates(
                 .as_ref()
                 .map(sidecar_metadata)
                 .unwrap_or_default();
-            candidates.push(build_candidate(
+            seeds.push(candidate_seed(
                 work,
-                &evidence_path,
+                evidence_path,
                 CandidateMeta {
                     source: "sidecar",
                     business_unit: scope.and_then(|scope| scope.business_unit.clone()),
@@ -957,18 +977,18 @@ fn discover_sidecar_candidates(
                     companion_for: sidecar.companion_for,
                     title_override: None,
                 },
-            )?);
+            ));
         }
     }
-    Ok(candidates)
+    Ok(seeds)
 }
 
-fn discover_processed_candidates(
+fn discover_processed_candidate_seeds(
     work: &Path,
     scope: Option<&DocumentScope>,
-) -> Result<Vec<EvidenceBinderCandidate>, String> {
+) -> Result<Vec<CandidateSeed>, String> {
     let items = work.join("inbox").join("items");
-    let mut candidates = Vec::new();
+    let mut seeds = Vec::new();
     for status in ["done", "failed", "duplicate"] {
         let root = items.join(status);
         if !root.exists() {
@@ -1005,9 +1025,9 @@ fn discover_processed_candidates(
                     continue;
                 }
                 let title = manifest_title_for_path(&manifest, &path);
-                let candidate = build_candidate(
+                let seed = candidate_seed(
                     work,
-                    &path,
+                    path,
                     CandidateMeta {
                         source: "inboxProcessed",
                         business_unit: manifest.business_unit.clone(),
@@ -1027,12 +1047,43 @@ fn discover_processed_candidates(
                         companion_for: None,
                         title_override: Some(title),
                     },
-                )?;
-                candidates.push(candidate);
+                );
+                seeds.push(seed);
             }
         }
     }
-    Ok(candidates)
+    Ok(seeds)
+}
+
+struct CandidateSeed {
+    path: PathBuf,
+    meta: CandidateMeta,
+    rel_path: String,
+    updated_at: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct CandidateInspectionKey {
+    path: PathBuf,
+    size_bytes: u64,
+    modified_nanos: u128,
+}
+
+#[derive(Debug, Clone)]
+struct CandidateInspection {
+    detected_format: DocumentFormat,
+    validation_checks: Vec<KordocLiteCheck>,
+    hwp_field_count: u32,
+    hwp_field_labels: Vec<String>,
+}
+
+fn candidate_seed(work: &Path, path: PathBuf, meta: CandidateMeta) -> CandidateSeed {
+    CandidateSeed {
+        rel_path: relative_to(&path, work),
+        updated_at: file_mtime(&path),
+        path,
+        meta,
+    }
 }
 
 /// The descriptive fields `build_candidate` attaches to a discovered evidence
@@ -1069,34 +1120,12 @@ fn build_candidate(
         title_override,
     } = meta;
     let metadata = fs::metadata(path).map_err(|err| format!("Cannot inspect evidence: {err}"))?;
-    let detected_format =
-        kordoc_lite::detect_document_format_path(path).unwrap_or(DocumentFormat::Unknown);
     let extension = path
         .extension()
         .and_then(|ext| ext.to_str())
         .unwrap_or("")
         .to_ascii_lowercase();
-    let validation_checks = if path.is_file() {
-        kordoc_lite::validate_export_artifact(path, &extension)
-    } else {
-        Vec::new()
-    };
-    let (hwp_field_count, hwp_field_labels) = if detected_format == DocumentFormat::Hwpx {
-        match kordoc_lite::scan_hwpx_fields(path) {
-            Ok(scan) => {
-                let labels = scan
-                    .fields
-                    .iter()
-                    .take(8)
-                    .map(|field| field.label.clone())
-                    .collect::<Vec<_>>();
-                (scan.fields.len() as u32, labels)
-            }
-            Err(_) => (0, Vec::new()),
-        }
-    } else {
-        (0, Vec::new())
-    };
+    let inspection = inspect_candidate_file(path, &metadata, &extension);
     let rel_path = relative_to(path, work);
     let title = title_override.unwrap_or_else(|| {
         path.file_name()
@@ -1113,10 +1142,10 @@ fn build_candidate(
         business_unit,
         size_bytes: metadata.len(),
         updated_at: file_mtime(path),
-        detected_format,
-        validation_checks,
-        hwp_field_count,
-        hwp_field_labels,
+        detected_format: inspection.detected_format,
+        validation_checks: inspection.validation_checks,
+        hwp_field_count: inspection.hwp_field_count,
+        hwp_field_labels: inspection.hwp_field_labels,
         sidecar_path,
         sidecar_status,
         sidecar_sha256,
@@ -1124,6 +1153,70 @@ fn build_candidate(
         inbox_item_id,
         summary,
     })
+}
+
+fn inspect_candidate_file(
+    path: &Path,
+    metadata: &fs::Metadata,
+    extension: &str,
+) -> CandidateInspection {
+    let modified_nanos = metadata
+        .modified()
+        .ok()
+        .and_then(|modified| modified.duration_since(UNIX_EPOCH).ok())
+        .map(|duration| duration.as_nanos())
+        .unwrap_or_default();
+    let key = CandidateInspectionKey {
+        path: path.to_path_buf(),
+        size_bytes: metadata.len(),
+        modified_nanos,
+    };
+    let cache = INSPECTION_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    if let Ok(cache) = cache.lock() {
+        if let Some(inspection) = cache.get(&key) {
+            return inspection.clone();
+        }
+    }
+
+    let detected_format =
+        kordoc_lite::detect_document_format_path(path).unwrap_or(DocumentFormat::Unknown);
+    let validation_checks = if path.is_file() {
+        kordoc_lite::validate_export_artifact(path, extension)
+    } else {
+        Vec::new()
+    };
+    let validation_failed = validation_checks.iter().any(|check| check.status == "fail");
+    let (hwp_field_count, hwp_field_labels) =
+        if detected_format == DocumentFormat::Hwpx && !validation_failed {
+            match kordoc_lite::scan_hwpx_fields(path) {
+                Ok(scan) => {
+                    let labels = scan
+                        .fields
+                        .iter()
+                        .take(8)
+                        .map(|field| field.label.clone())
+                        .collect::<Vec<_>>();
+                    (scan.fields.len() as u32, labels)
+                }
+                Err(_) => (0, Vec::new()),
+            }
+        } else {
+            (0, Vec::new())
+        };
+    let inspection = CandidateInspection {
+        detected_format,
+        validation_checks,
+        hwp_field_count,
+        hwp_field_labels,
+    };
+
+    if let Ok(mut cache) = cache.lock() {
+        if cache.len() >= MAX_INSPECTION_CACHE_ENTRIES {
+            cache.clear();
+        }
+        cache.insert(key, inspection.clone());
+    }
+    inspection
 }
 
 #[derive(Debug, Clone)]
@@ -1383,6 +1476,90 @@ mod tests {
             submission_selected_at: None,
             linked_at: "2026-05-24T00:00:00Z".to_string(),
         }
+    }
+
+    #[test]
+    fn mutation_request_deserializes_frontend_camel_case_fields() {
+        let mutations = [
+            serde_json::json!({ "type": "link", "candidateId": "ev-a" }),
+            serde_json::json!({ "type": "unlink", "bindingId": "binding-a" }),
+            serde_json::json!({
+                "type": "setTargets",
+                "bindingId": "binding-a",
+                "sectionBindings": ["Section"],
+                "kpiBindings": ["KPI"],
+                "submissionChecklistBindings": ["Checklist"]
+            }),
+            serde_json::json!({
+                "type": "setNote",
+                "bindingId": "binding-a",
+                "note": "checked"
+            }),
+            serde_json::json!({
+                "type": "setLocalVerified",
+                "bindingId": "binding-a",
+                "verified": true
+            }),
+            serde_json::json!({
+                "type": "setIncludeInSubmission",
+                "bindingId": "binding-a",
+                "include": true
+            }),
+        ];
+
+        for mutation in mutations {
+            let request: EvidenceBinderMutateRequest = serde_json::from_value(serde_json::json!({
+                "workPath": "/tmp/work",
+                "docId": "doc-1",
+                "documentPath": "report.md",
+                "expectedRevision": "revision-1",
+                "mutation": mutation
+            }))
+            .unwrap();
+            assert_eq!(request.doc_id, "doc-1");
+        }
+
+        let request: EvidenceBinderMutateRequest = serde_json::from_value(serde_json::json!({
+            "workPath": "/tmp/work",
+            "docId": "doc-1",
+            "expectedRevision": "revision-1",
+            "mutation": { "type": "link", "candidateId": "ev-a" }
+        }))
+        .unwrap();
+        assert!(matches!(
+            request.mutation,
+            EvidenceBinderMutation::Link { candidate_id } if candidate_id == "ev-a"
+        ));
+    }
+
+    #[test]
+    fn candidate_seeds_are_limited_before_deep_inspection() {
+        let seeds = (0..=MAX_CANDIDATES)
+            .map(|index| CandidateSeed {
+                path: PathBuf::from(format!("candidate-{index}.hwpx")),
+                rel_path: format!("candidate-{index}.hwpx"),
+                updated_at: Some(format!("{index:04}")),
+                meta: CandidateMeta {
+                    source: "inboxProcessed",
+                    business_unit: None,
+                    sidecar_path: None,
+                    inbox_item_id: None,
+                    summary: None,
+                    evidence_kind: None,
+                    sidecar_status: SidecarStatus::None,
+                    sidecar_sha256: None,
+                    companion_for: None,
+                    title_override: None,
+                },
+            })
+            .collect();
+
+        let selected = sort_and_limit_candidate_seeds(seeds);
+        assert_eq!(selected.len(), MAX_CANDIDATES);
+        assert_eq!(selected[0].rel_path, "candidate-200.hwpx");
+        assert!(selected
+            .iter()
+            .all(|seed| seed.rel_path != "candidate-0.hwpx"));
     }
 
     #[test]
