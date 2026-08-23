@@ -166,8 +166,16 @@ jobs:
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      # rust-toolchain.toml pins the channel (GATE-05), so cargo resolves to the
+      # pinned toolchain rather than the stable one the action installed. Adding
+      # targets through the action's `targets:` input adds them to stable, which
+      # the build never uses - the v0.4.63 macOS Intel job failed on exactly that
+      # ("Target x86_64-apple-darwin is not installed"). Run rustup from the repo
+      # so it resolves the pinned toolchain and installs the targets there.
+      - name: Add macOS cross targets to the pinned toolchain
+        if: matrix.platform == 'macos-latest'
+        run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
 
       - name: Cache Rust build
         uses: Swatinem/rust-cache@v2
