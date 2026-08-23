@@ -8,6 +8,28 @@ because releases cut frequently during active development. Versions before
 Dates are the release-tag dates. Only `feat`/`fix`-level changes are listed;
 `chore(release)` version bumps and merge commits are omitted.
 
+## v0.4.63 - 2026-08-24 - Evidence Binder, Fixed and Fast
+
+- **Evidence Binder mutations reach the backend again (#279).** Linking,
+  unlinking, editing targets, notes, local-verified, and include-in-submission
+  were all rejected at the IPC bridge: the mutation payload is camelCase, but
+  the Rust enum only renamed its variants and still expected snake_case fields,
+  so every change failed before it did anything. Every mutation shape now has a
+  regression test pinning the wire contract.
+- **Opening a document with evidence candidates no longer freezes the app
+  (#279).** Candidate discovery deep-inspected every match on the UI thread,
+  opening Office archives and scanning HWPX members before applying any limit.
+  On a 64,744-file workspace that pinned the main thread above 98% CPU for over
+  40 seconds. Discovery now stays metadata-only until it has selected the newest
+  bounded set, runs that set off the UI thread in parallel, skips a redundant
+  HWPX pass after a failed validation, and caches inspections by path, size, and
+  mtime. The same load finishes in about 4 seconds and the window stays
+  responsive.
+- **HWP/HWPX documents can be read, rendered, edited, and validated through the
+  hwp-editor engine (#277).** Six commands bridge to the `hwp` binary
+  (hwp-cli 0.8.7 or newer) behind the editor's engine contract. This is a
+  backend capability only; no Maru surface uses it yet.
+
 ## v0.4.62 - 2026-08-22 - One Document, Three Views
 
 - **Scratchpad now navigates folders, files, and content side by side (#273).**
