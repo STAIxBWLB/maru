@@ -1,28 +1,27 @@
 ---
 phase: 03-typed-ipc-error-contract
-verified: 2026-08-23T14:34:21Z
-status: human_needed
+verified: 2026-08-23T19:45:33Z
+status: passed
 score: 4/4 roadmap success criteria verified, 4/4 ERR requirements verified
 behavior_unverified: 0
 overrides_applied: 0
-human_verification:
-  - test: "Run the real app (pnpm tauri dev or make tauri-dev), open a document with an evidence binder, apply an accept/reject mutation, and separately force a today/task/document revision conflict from the real UI (not the Playwright mock layer)."
-    expected: "The mutation succeeds through the actual WKWebView Tauri IPC bridge with no console serde/deserialize errors, and on the conflict path each of the four recovery branches (EvidenceBinderPane reload, isTodayConflict, isTaskConflict, TodayReview/reportInsert document_conflict) fires exactly as the mocked/unit-tested behavior predicts, with per-step observations recorded."
-    why_human: "No CI gate exercises WKWebView (make test-e2e serves plain vite, not tauri-dev, so window.__TAURI_INTERNALS__ never exists). This is the pre-disclosed native-tauri-e2e-runner-missing blind spot carried from Phase 1's own verification into this phase's REQUIREMENTS.md note. 03-01's checkpoint for exactly this smoke was approved by the user, but no per-step observations were reported back (recorded candidly in 03-01-SUMMARY.md's own Human Verification section), so there is still no real evidence the migrated {code, message} wire shape round-trips through the actual native bridge for any of the 7 migrated commands, only through cargo test, vitest unit/component tests, and Playwright's mocked IPC layer."
+human_verification: []
 ---
 
 # Phase 3: Typed IPC Error Contract Verification Report
 
 **Phase Goal:** A frontend recovery path breaks at compile time when the error it depends on is renamed
-**Verified:** 2026-08-23
-**Status:** human_needed (all four roadmap success criteria and all four ERR requirements independently verified true in the codebase; one carried-forward gap - no real-app WKWebView evidence - flagged below rather than papered over)
-**Re-verification:** No - initial verification
+**Verified:** 2026-08-24
+**Status:** passed (all roadmap and ERR requirements remain verified; the real-app WKWebView smoke is now complete)
+**Re-verification:** Yes - native WKWebView follow-up after the initial verifier report
 
 ## Summary
 
-Every claim below was re-derived against the current tree on `gsd/phase-3-typed-ipc-error-contract` (HEAD `c8791ff`), not read off SUMMARY.md text. In particular, the ERR-02 mechanism - the phase's central claim - was proven independently in this verification pass by performing my own rename drill rather than trusting 03-04's reported drill: I edited `TODAY_CONFLICT`'s value in `src-tauri/src/ipc_error.rs` together with both of that file's own hardcoded-literal tests (`ipc_error_codes_are_stable` and `ipc_error_wire_shape_round_trips`, the way a real developer would do a matched rename), and confirmed `cargo test --lib ipc_error` and `pnpm typecheck` both stayed green while `pnpm vitest run src/lib/types.test.ts` (the new cross-language guard) went red with the exact mismatch expected. The edit was reverted; `git diff --exit-code -- src-tauri/src/ipc_error.rs` confirmed byte-identical, and the full drill was re-run green after revert.
+The initial verifier claims below were re-derived on `gsd/phase-3-typed-ipc-error-contract` at `c8791ff`, not read off SUMMARY.md text; the native follow-up was run on the current branch after the later review commits and the fixes recorded here. In particular, the ERR-02 mechanism - the phase's central claim - was proven independently in the initial verification pass by performing a rename drill rather than trusting 03-04's reported drill: `TODAY_CONFLICT`'s value in `src-tauri/src/ipc_error.rs` and both same-file hardcoded-literal tests were changed together, leaving `cargo test --lib ipc_error` and `pnpm typecheck` green while `pnpm vitest run src/lib/types.test.ts` went red with the expected cross-language mismatch. The edit was reverted and the guard was re-run green.
 
-The one open item is not a phase-goal failure: it is the same real-app-evidence gap 03-01's own SUMMARY disclosed at the time (checkpoint approved without per-step smoke observations reported back), still open because no later plan closed it. It is carried forward here rather than silently dropped.
+The previously open real-app evidence item is now closed. A native `pnpm tauri:dev` run exercised the document-conflict recovery path and an Evidence Binder link/undo mutation through WKWebView. The first binder attempt exposed a real camelCase deserialization defect (`candidateId` was rejected as missing `candidate_id`); the enum now uses `rename_all_fields = "camelCase"`, all mutation wire shapes have a Rust regression test, and the fresh-process retry completed with no console serde/deserialize errors.
+
+The same follow-up fixed the severe native responsiveness problem encountered during the smoke. Evidence discovery now runs off the UI thread, limits candidates before deep Office/HWPX inspection, skips a second HWPX unzip after validation failure, parallelizes the bounded inspection set, and caches file inspections by path/size/mtime. On the real 64,744-file workspace, a cache-empty 200-candidate load completed in 4 seconds while UI observation remained responsive at 0.25 seconds; the previous implementation blocked the main thread above 98% CPU for more than 40 seconds.
 
 ## Goal Achievement
 
@@ -102,14 +101,13 @@ All four ERR-01..04 requirements: SATISFIED (see table above). REQUIREMENTS.md's
 | ERR-03 residual matcher grep | `grep -rnE '\.includes\("(today_conflict\|task_conflict\|document_conflict\|evidence_binder_revision_conflict)"' src/` | empty | PASS |
 | ERR-02 rename drill | see dedicated section above | red on the guard, green everywhere else, reverted clean | PASS |
 
-**Full `make verify` was not re-run in this pass** (it was run by the orchestrator immediately before this verification, on this exact commit, and is cited rather than duplicated per the assignment's instruction): exit 0, `test-rust` 1217 passed / 0 failed / 3 ignored, `test-ts` 190 files / 1858 tests, bundle budget within limits. The targeted spot-checks above independently re-confirm the phase-relevant subset of that result rather than taking it purely on faith.
+**Full `make verify` was re-run after the native fixes:** exit 0, `test-rust` 1219 passed / 0 failed / 3 ignored, `test-ts` 190 files / 1858 tests, fmt and clippy clean, production build and bundle budget within limits.
 
-### Human Verification Required
+### Native App Verification Completed
 
-1. **Real-app (WKWebView) smoke of the migrated wire shape, with reported observations.**
-   - **Test:** Run `pnpm tauri dev` or `make tauri-dev`. Exercise at least one accept/reject mutation and one forced revision conflict for each of: evidence binder, today mutation, task transition, document save.
-   - **Expected:** Each mutation succeeds or fails through the real native IPC bridge with no console serde/deserialize errors, and each conflict path fires its typed recovery branch (reload / conflict notice) exactly as the mocked and unit-tested behavior predicts.
-   - **Why human:** No CI gate exercises WKWebView; this is the pre-disclosed `native-tauri-e2e-runner-missing` blind spot (REQUIREMENTS.md's Phase 3 note, inherited from Phase 1's own verification finding #1). 03-01's checkpoint for this exact smoke was approved by the user, but 03-01-SUMMARY.md's own "Human Verification" section states plainly that no per-step observations were reported back. No later plan (03-02/03-03/03-04) re-attempted or closed this gap - all of their evidence is `cargo test`, `vitest`, `tsc`, and Playwright's mocked IPC layer, none of which exercises the real bridge. This is not a phase-goal failure (D-09's serde round-trip tests and the extensive unit/component test coverage above are strong indirect evidence the wire shape is correct), but it is the one place this phase's own evidence chain has a real, disclosed hole rather than a closed loop.
+1. **Document conflict through the native bridge:** opened a temporary Markdown document in Files, kept an unsaved Maru edit, changed the file externally, and pressed Save. The UI displayed `document_conflict: expected revision ..., found ...`; the editor remained `Unsaved`, and the Maru draft text remained intact.
+2. **Evidence Binder mutation through the native bridge:** on a fresh temporary document, linked the first discovered candidate (`0 linked` to `1 linked`) and used Undo (`1 linked` to `0 linked`). The schema-v2 binder file reflected both changes. A fresh Web Inspector Console showed no errors, including no serde/deserialize or invalid-argument entry.
+3. **Cleanup:** closed the temporary tab and removed both the temporary document and its binder state. The user's evidence files were never modified.
 
 ## Post-Verification Review Findings (Codex, PR #279)
 
@@ -146,8 +144,8 @@ be mistaken for it when this gap is next assessed.
 
 ## Gaps Summary
 
-No roadmap success criterion and no ERR-01..04 requirement is FAILED. All four are independently verified true in the codebase, with ERR-02 (the phase's central and hardest-to-fake claim) specifically re-proven by an independent drill in this verification pass rather than accepted from SUMMARY text. One item - real-app WKWebView evidence for the migrated wire shape - remains open exactly as 03-01-SUMMARY.md itself disclosed, and is carried forward here as a human-verification item rather than silently dropped or treated as closed by proxy (unit tests, serde round-trip tests, and Playwright's mocked layer are not the same evidence as the real native bridge). Recommend a short human smoke pass (the checklist above) before treating Phase 3 as fully closed, though nothing found in this verification blocks proceeding to Phase 4 on the merits of the typed-error-contract work itself.
+No roadmap success criterion and no ERR-01..04 requirement is failed. All four are independently verified true in the codebase, ERR-02 remains protected by the cross-language rename drill, and the real-app WKWebView evidence gap is now closed by the native observations above. Phase 3 is passed.
 
 ---
-*Verified: 2026-08-23*
-*Verifier: Claude (gsd-verifier)*
+*Verified: 2026-08-24*
+*Verifier: Claude (initial code verification), Codex (native WKWebView follow-up)*
