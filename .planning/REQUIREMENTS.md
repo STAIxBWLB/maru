@@ -23,11 +23,11 @@ milestone with no end-user-visible surface.
 
 ### Scanner and Path Invariants
 
-- [ ] **SCAN-01**: Adding a generated directory to the prune list is a one-line edit in one place, and all five scanners pick it up
-- [ ] **SCAN-02**: Workspace and vault scans no longer descend into `.git` or `.venv`
-- [ ] **SCAN-03**: A canonical path-containment helper is importable outside `maru_dir.rs`, and a new path-accepting command author has one obvious example to copy
-- [ ] **SCAN-04**: Joining a home-rooted path against a non-absolute base fails loudly instead of materializing a directory tree inside the repo
-- [ ] **SCAN-05**: The stray `Users/yj.lee/.maru/env/` tree is gone from the repo root
+- [x] **SCAN-01**: Adding a generated directory to the prune list is a one-line edit in one place, and all five scanners pick it up
+- [x] **SCAN-02**: Workspace and vault scans no longer descend into `.git` or `.venv`
+- [x] **SCAN-03**: A canonical path-containment helper is importable outside `maru_dir.rs`, and a new path-accepting command author has one obvious example to copy
+- [x] **SCAN-04**: Joining a home-rooted path against a non-absolute base fails loudly instead of materializing a directory tree inside the repo
+- [x] **SCAN-05**: The stray `Users/yj.lee/.maru/env/` tree is gone from the repo root
 
 ### Typed IPC Errors
 
@@ -102,7 +102,7 @@ not compete with the structural work. Not in the current roadmap.
 
 | Feature | Reason |
 |---------|--------|
-| Any new product feature | Behavior-preserving work is only verifiable if behavior is not also changing |
+| Any new product feature | Behavior-preserving work is only verifiable if behavior is not also changing. **Exception, 2026-08-23:** the `hwped_*` hwp-editor bridge landed from a parallel track and is adopted, not built, by this milestone - see STATE.md "Scope Exceptions" |
 | Converting all 1,118 `Result<T, String>` signatures | Explicitly rejected in the CONCERNS.md fix approach; cost without benefit for display-only errors |
 | Retrofitting all ~20 existing path-traversal validators | The existing checks are individually sound; the problem is the absence of a canonical example, not the callers |
 | Changing `.maruignore` defaults | It is a user-facing file format, not a scanner constant |
@@ -122,11 +122,11 @@ not compete with the structural work. Not in the current roadmap.
 | GATE-05 | Phase 1 | Complete |
 | GATE-06 | Phase 1 | Complete |
 | GATE-07 | Phase 1 | Complete |
-| SCAN-01 | Phase 2 | Pending |
-| SCAN-02 | Phase 2 | Pending |
-| SCAN-03 | Phase 2 | Pending |
-| SCAN-04 | Phase 2 | Pending |
-| SCAN-05 | Phase 2 | Pending |
+| SCAN-01 | Phase 2 | Complete |
+| SCAN-02 | Phase 2 | Complete |
+| SCAN-03 | Phase 2 | Complete |
+| SCAN-04 | Phase 2 | Complete |
+| SCAN-05 | Phase 2 | Complete |
 | ERR-01 | Phase 3 | Pending |
 | ERR-02 | Phase 3 | Pending |
 | ERR-03 | Phase 3 | Pending |

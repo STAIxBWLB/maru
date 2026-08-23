@@ -2,35 +2,35 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-current_phase: 1
-current_phase_name: Trustworthy Verify Signal
+current_phase: 3
+current_phase_name: Typed IPC Error Contract
 status: executing
-stopped_at: Completed 01-07-PLAN.md - Phase 1 fully executed, GATE-02 flipped, all 7 plans done
-last_updated: "2026-08-22T10:12:57.572Z"
-last_activity: 2026-08-22
-last_activity_desc: Roadmap created from /gsd-ingest-docs intel + /gsd-map-codebase
+stopped_at: Phase 3 context gathered
+last_updated: "2026-08-22T23:53:08.966Z"
+last_activity: 2026-08-23
+last_activity_desc: Phase 1 complete, transitioned to Phase 2
 progress:
-  total_phases: 1
-  completed_phases: 1
-  total_plans: 7
-  completed_plans: 7
+  total_phases: 3
+  completed_phases: 2
+  total_plans: 14
+  completed_plans: 10
 ---
 
 # Project State
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-08-22)
+See: .planning/PROJECT.md (updated 2026-08-23)
 
 **Core value:** The filesystem stays the source of truth - everything Maru shows is derived from real files the user owns, and nothing is lost if Maru is uninstalled.
-**Current focus:** Phase 1 - Trustworthy Verify Signal
+**Current focus:** Phase 02 — Shared Scanner and Path Invariants
 
 ## Current Position
 
-Phase: 1 of 5 (Trustworthy Verify Signal)
-Plan: 7 of 7 in current phase
+Phase: 3 — Typed IPC Error Contract
+Plan: Not started
 Status: Ready to execute
-Last activity: 2026-08-22 - Completed 01-01 (rust-toolchain.toml pin + fmt-check gate)
+Last activity: 2026-08-23 — Phase 2 complete, transitioned to Phase 3
 
 Progress: [██████████] 100%
 
@@ -38,7 +38,7 @@ Progress: [██████████] 100%
 
 **Velocity:**
 
-- Total plans completed: 0
+- Total plans completed: 10
 - Average duration: -
 - Total execution time: -
 
@@ -46,7 +46,8 @@ Progress: [██████████] 100%
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
-| - | - | - | - |
+| 1 | 7 | - | - |
+| 2 | 3 | - | - |
 
 **Recent Trend:**
 
@@ -65,6 +66,9 @@ Progress: [██████████] 100%
 | Phase 01 P05 | 15min | 3 tasks | 8 files |
 | Phase 01-trustworthy-verify-signal P06 | 20min | 3 tasks | 4 files |
 | Phase 01-trustworthy-verify-signal P07 | 70min | 3 tasks | 30 files |
+| Phase 02 P01 | 9min | 3 tasks | 6 files |
+| Phase 02 P02 | 5min | 3 tasks | 4 files |
+| Phase 02 P03 | 7min | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -96,6 +100,35 @@ Recent decisions affecting current work:
 - [Phase 1]: Positional/required-interface unused args (favoriteIds, settings, warnings, hdbg, headerBg) renamed with a leading underscore rather than deleted, since deletion would have required touching call sites or type signatures outside this plan's fix-not-rewrite mandate
 - [Phase 1]: GATE-02 flipped - make lint added to the verify prerequisite list immediately after typecheck, proven red-then-green on both react-hooks/exhaustive-deps and no-unused-vars via deliberate break-and-revert on src/components/today/useTodayTasks.ts
 - [Phase 1]: Full make verify could not be proven green on the shared checkout - test-rust failed on 12 outlook_mso timeout tests racing a concurrent session's own cargo test --workspace process, and cargo clippy/fmt-check both fail solely inside the concurrent session's uncommitted src-tauri/src/hwped.rs; neither traces to this plan's diff (zero Rust files touched). Each gate this plan owns was verified individually instead (make lint both directions, pnpm typecheck, pnpm test, make test-e2e, all green); CI is the authoritative composite check, to be triggered by the team lead
+- [Phase ?]: [Phase 2]: mod paths; registered between outlook_mso and project_activity (true alphabetical, rustfmt-verified) - plan-stated ops_catalog/outlook_mso slot violates the strictly-alphabetical registry convention
+- [Phase ?]: [Phase 2]: vault.rs could_include_dot_folder_named deleted (lost its only caller when rg_visibility went unconditional) rather than kept as dead code under the clippy gate
+- [Phase ?]: [Phase 2]: ensure_within error message kept byte-identical (Path escapes the .maru directory) - live user-visible string in a behavior-preserving phase (RESEARCH Pitfall 4)
+- [Phase ?]: [Phase 2]: 02-02 union-proof fixture leaves written as .md documents instead of the plan's literal .pyc/extensionless/.py leaves - scan_vault only collects md/markdown/html/htm, so the literal fixture could never go red and the SCAN-02 proof required the change
+- [Phase ?]: [Phase 2]: 02-03 guard shape - maru_home()/install_root_base() restructured to a single exit wrapped in require_absolute, so a future early-return cannot bypass the check without restructuring the exit
+- [Phase ?]: [Phase 2]: 02-03 env_root()/skills_root() get no separate guard - they derive from maru_home() and are covered transitively; duplicating the check would re-fragment the invariant
+- [Phase ?]: [Phase 2]: 02-03 require_absolute's temporary allow(dead_code) removed in the same commit the first consumer landed - closes WINDOWS.md ledger entry 1
+
+### Scope Exceptions
+
+- **hwp-editor bridge (`hwped_*`), recorded 2026-08-23.** Six Tauri commands
+  (`src-tauri/src/hwped.rs`, wrappers in `src/lib/hwped.ts`) spawning the `hwp`
+  binary landed from a parallel track while this milestone was running. They are a
+  new product feature, which the milestone charter excludes, so they are recorded
+  here as an adopted exception rather than milestone work: this milestone owns the
+  gate signal, not the feature. Phases 1 and 2 each reported `make verify` as
+  unprovable locally because this file failed `clippy` and `fmt-check` while
+  untracked (`01-06-SUMMARY.md`, `01-07-SUMMARY.md`, `02-02-SUMMARY.md`); those two
+  clippy findings and the formatting diffs are fixed in the same commit that adopts
+  it, so the composite gate runs against the same tree CI sees.
+- The bridge's error strings (`cli_missing:`, `hwp_timeout:`, `hwp_failed:`,
+  `hwp_parse_failed:`, `hwped_bad_request:`) stay `Result<T, String>` and are
+  **exempt from the Phase 3 typed contract**. `src/lib/hwped.ts` contains no error
+  branching at all, so they are display-only - exactly the class ERR-04 protects
+  from migration.
+- Still owed, deliberately deferred until the hwp-editor implementation track
+  reports complete: the Phase 2.1 planning artifacts, the HWPE-01..03 requirement
+  registration, and the Semantica Phases 6-9 roadmap entries drawn from
+  `docs/semantica-adoption-plan.md`.
 
 ### Pending Todos
 
@@ -103,11 +136,9 @@ None yet.
 
 ### Blockers/Concerns
 
-- No `.planning/config.json` exists; defaults assumed - granularity `standard`, `phase_id_convention` sequential, `project_code` null. Regenerate phase IDs if a config lands with different values.
+- **Phase 3's ERR-04 count band is coupled to `hwped.rs`.** The pinned command reports 1,138 on the tree that adopts the bridge, and `hwped.rs` contributes 19 of those matches; without it the tree reads 1,119 and the post-migration count lands at 1,109, below `03-04-PLAN.md`'s `[1118, 1138]` band. Re-measure the baseline before Phase 3 executes and write the new number into `03-02-PLAN.md` and `03-04-PLAN.md` - continued hwp-editor work keeps moving it.
 - `src/App.tsx` has no test of any kind. Phases 4-5 depend on Phase 1's hook-dependency gate plus the per-pane tests written during extraction; there is no existing safety net for the decomposition.
 - `make verify` runs on ubuntu-22.04 only and e2e runs Chromium against Vite with mocked IPC. Nothing in CI exercises WKWebView, the real PTY, IME input, or the macOS menu - macOS-affecting changes need a real-app run.
-- make verify's fmt-check/clippy/build-frontend steps unverified end-to-end pending a concurrent session's hwped.rs/lib.rs work landing in this shared checkout; not caused by 01-06
-- make verify's test-rust/fmt-check/clippy steps unverified end-to-end on this shared checkout pending the concurrent hwped session's work landing; not caused by 01-07. CI run on the committed tree is the authoritative composite check and is pending from the team lead
 
 ## Deferred Items
 
@@ -121,6 +152,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-08-22T10:12:57.566Z
-Stopped at: Completed 01-07-PLAN.md - Phase 1 fully executed, GATE-02 flipped, all 7 plans done
-Resume file: None
+Last session: 2026-08-22T22:29:59.605Z
+Stopped at: Phase 3 context gathered
+Resume file: .planning/phases/03-typed-ipc-error-contract/03-CONTEXT.md

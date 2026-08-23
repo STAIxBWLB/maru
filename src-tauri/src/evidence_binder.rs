@@ -1,5 +1,6 @@
 use crate::atomic_file::write_atomic;
 use crate::kordoc_lite::{self, DocumentFormat, KordocLiteCheck};
+use crate::paths::GENERATED_DIRS;
 use crate::vault::normalize_existing_dir;
 use crate::vault_list::{assert_maru_can_write, WorkspaceWriteAction};
 use serde::{Deserialize, Serialize};
@@ -1333,7 +1334,10 @@ fn status_prefix(status: &str) -> &'static str {
 fn is_excluded_dir(path: &Path) -> bool {
     path.file_name()
         .and_then(|name| name.to_str())
-        .is_some_and(|name| matches!(name, ".git" | "node_modules" | "target" | "dist" | ".maru"))
+        // `.maru` is Maru state, not a generated dir — it deliberately stays
+        // out of the shared GENERATED_DIRS constant and is excluded here
+        // module-locally, so discovery never surfaces Maru state as evidence.
+        .is_some_and(|name| GENERATED_DIRS.contains(&name) || name == ".maru")
 }
 
 fn relative_to(path: &Path, root: &Path) -> String {

@@ -28,6 +28,7 @@ mod gmail_gws;
 mod graph_authoring;
 mod html_editor;
 mod hub_client;
+mod hwped;
 mod inbox;
 mod inbox_classifier;
 mod inbox_drop;
@@ -46,6 +47,7 @@ mod meetings;
 mod mission_state;
 mod ops_catalog;
 mod outlook_mso;
+mod paths;
 mod project_activity;
 mod scheduler;
 pub(crate) mod scratchpad;
@@ -129,6 +131,9 @@ use gmail_gws::{
 use graph_authoring::{graph_link_apply, graph_link_preview};
 use html_editor::prepare_html_editor_assets;
 use hub_client::{hub_fetch_catalog, hub_poll_gate, hub_queue_drain, hub_status, hub_submit_gate};
+use hwped::{
+    hwped_capabilities, hwped_compose, hwped_edit, hwped_read, hwped_render, hwped_validate,
+};
 use inbox::{
     accept_inbox_item, accept_inbox_items, apply_inbox_decisions, count_inbox_processed_by_channel,
     read_inbox_processed_item, read_inbox_source_runs, reject_inbox_item, reject_inbox_items,
@@ -645,6 +650,13 @@ pub fn run() {
             template_prepare_hwpx_template,
             template_fill_hwpx,
             gaejosik_lint,
+            // hwp-editor engine bridge (thin hwp-cli spawner; hwped.rs)
+            hwped_read,
+            hwped_render,
+            hwped_edit,
+            hwped_compose,
+            hwped_validate,
+            hwped_capabilities,
             // Diagram mode (Phase 1 + Phase 4)
             diagram_save_document,
             diagram_load_document,

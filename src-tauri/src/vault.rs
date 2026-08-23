@@ -13,21 +13,13 @@ use walkdir::WalkDir;
 use include_dir::{include_dir, Dir};
 
 use crate::atomic_file::write_atomic;
+use crate::paths::GENERATED_DIRS;
 use crate::scratchpad::{assert_scratchpad_workspace_access, resolve_scratchpad_root};
 use crate::skill_host::fs as host_fs;
 use crate::vault_list::registered_nested_roots;
 
 const VAULT_CACHE_REL: &[&str] = &[".maru", "cache", "workspace-index-v3.json"];
 const LEGACY_VAULT_CACHE_REL: &[&str] = &[".maru", "cache", "workspace-index-v2.json"];
-const GENERATED_DIRS: &[&str] = &[
-    "node_modules",
-    "target",
-    "dist",
-    "build",
-    ".next",
-    ".turbo",
-    ".cache",
-];
 
 /// The curated sample workspace, embedded into the binary at compile time so it
 /// ships inside the installer on every platform (same mechanism as the builtin
@@ -225,14 +217,6 @@ impl ScanFilter {
 
     pub fn includes_dot_folders(&self) -> bool {
         !self.include_dot_folders.is_empty()
-    }
-
-    pub(crate) fn could_include_dot_folder_named(&self, folder_name: &str) -> bool {
-        self.include_dot_folders.iter().any(|path| {
-            path.components().any(
-                |component| matches!(component, Component::Normal(value) if value == folder_name),
-            )
-        })
     }
 
     pub fn is_excluded_path(&self, path: &Path, root: &Path, generated_dirs: &[&str]) -> bool {
@@ -1307,6 +1291,31 @@ mod tests {
         let entries = scan_vault(root.to_string_lossy().to_string(), None).unwrap();
         let titles: Vec<&str> = entries.iter().map(|e| e.title.as_str()).collect();
         assert_eq!(titles, vec!["Kept"]);
+    }
+
+    /// SCAN-02 union proof: a vault scan over a fixture tree containing
+    /// `__pycache__/`, `.git/`, and `.venv/` returns none of their contents.
+    /// `.git`/`.venv` were already excluded by the dot-segment rule in
+    /// `is_excluded_path`; the genuinely new exclusions this test proves are
+    /// `__pycache__` (non-dot, so the dot rule never covered it) and
+    /// unconditional union membership. This test was RED while vault.rs still
+    /// carried its private 7-entry prune list and went GREEN when the scan
+    /// switched to the shared 14-entry `crate::paths::GENERATED_DIRS`.
+    #[test]
+    fn scan_excludes_generated_dirs_union_including_pycache() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        write_file(root, "keep.md", "# Keep\n");
+        write_file(root, "__pycache__/cached.md", "# Cached\n");
+        write_file(root, ".git/objects/ab/cdef.md", "# Git Object\n");
+        write_file(root, ".venv/lib/python3.12/site.md", "# Venv\n");
+
+        let entries = scan_vault(root.to_string_lossy().to_string(), None).unwrap();
+        let rels: Vec<&str> = entries
+            .iter()
+            .map(|entry| entry.rel_path.as_str())
+            .collect();
+        assert_eq!(rels, vec!["keep.md"]);
     }
 
     #[test]

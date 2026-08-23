@@ -21,7 +21,8 @@
 // migration via `ensure_maru_dir`.
 
 use crate::atomic_file::write_atomic;
-use crate::vault::{lexical_normalize, parse_frontmatter, title_from_content};
+use crate::paths::ensure_within;
+use crate::vault::{parse_frontmatter, title_from_content};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value as JsonValue};
@@ -183,14 +184,6 @@ fn validate_leaf_name(name: &str) -> Result<(), String> {
         || trimmed.starts_with('.')
     {
         return Err(format!("Invalid name: {name}"));
-    }
-    Ok(())
-}
-
-fn ensure_within(parent: &Path, child: &Path) -> Result<(), String> {
-    let normalized = lexical_normalize(child);
-    if !normalized.starts_with(parent) {
-        return Err("Path escapes the .maru directory".to_string());
     }
     Ok(())
 }

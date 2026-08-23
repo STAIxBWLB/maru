@@ -17,21 +17,11 @@ use std::path::Path;
 use walkdir::WalkDir;
 
 use crate::maru_dir::workspace_project_entries;
+use crate::paths::GENERATED_DIRS;
 use crate::vault::{normalize_existing_dir, parse_frontmatter};
 
 /// 회의 조회 기본 창(일). 이보다 오래된 회의는 "최근 회의 없음"으로 표시된다.
 const DEFAULT_MEETING_WINDOW_DAYS: u32 = 180;
-
-/// 활동 집계에서 제외하는 디렉토리 이름. `dev` 가 등록된 프로젝트라
-/// node_modules/target 을 걷어내지 않으면 워크스페이스 전체보다 무거워진다.
-const PRUNED_DIRS: [&str; 6] = [
-    "node_modules",
-    "target",
-    "dist",
-    "build",
-    ".venv",
-    "__pycache__",
-];
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -337,7 +327,7 @@ fn is_pruned_dir(path: &Path) -> bool {
     let Some(name) = path.file_name().and_then(|value| value.to_str()) else {
         return false;
     };
-    if PRUNED_DIRS.contains(&name) {
+    if GENERATED_DIRS.contains(&name) {
         return true;
     }
     name.starts_with('.') && name.len() > 1

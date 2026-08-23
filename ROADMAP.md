@@ -242,3 +242,35 @@ Maru-side pieces, all shipped in v0.4.33 unless noted:
 The Ideation hub now supports manual idea creation, revision-checked editing,
 and the allowed lifecycle transitions. Voice intake remains future work: it
 needs a transcriber the workspace does not have.
+
+## 10. Semantica-inspired intelligence track (planned)
+
+Selective adoption of capabilities from the semantica KG framework, as
+patterns reimplemented on Maru's existing stack — the semantica package itself
+is not installed (torch/transformers/spacy footprint), and embedding/vector
+semantic search stays on the README "Hard No" list. Full mapping, anti-pattern
+lessons, and per-stage gates: `docs/semantica-adoption-plan.md`.
+
+| Stage | Status | Deliverable |
+|-------|--------|-------------|
+| S1 — Foundations | 📋 | Structured decision frontmatter schema (category/scenario/reasoning/outcome/confidence + causal links), unified provenance/stable-id helper, append-only graph mutation log |
+| S2 — Extraction | 📋 | Claude-CLI entity/relation extraction (`entity_extract.rs`, modeled on `inbox_classifier.rs`) feeding proposal-only writes through `graph_authoring.rs` |
+| S3 — Quality | 📋 | Entity resolution / duplicate-note candidates (string similarity + graph neighborhoods, no embeddings) and LLM-assisted conflict candidates, both approval-gated |
+| S4 — Surface | 📋 | Versioned vault schema artifact validated by `vault_guard.rs` + vault-lint; read-only graph-analytics / decision-query MCP tools in `sidecars/maru-mcp/` (Hub `proposal_queue` counterpart required for any future write tool) |
+
+## 11. hwp-editor bridge (side track, backend landed)
+
+Maru hosts the [hwp-editor](https://github.com/entelecheia/hwp-editor) engine
+behind six `hwped_*` Tauri commands that spawn the `hwp` binary (hwp-cli >=
+0.8.7). It is a thin CLI spawner with no process lifecycle, mirroring the
+editor's Node `CliEngine` so both hosts stay on one contract.
+
+| Stage | State | Outcome |
+|-------|-------|---------|
+| Backend bridge | ✅ | `src-tauri/src/hwped.rs` + typed wrappers in `src/lib/hwped.ts`: read / render / edit / compose / validate / capabilities. Fixed argv, no shell, 60s timeout, 32MB stdout cap; documents cross as workspace paths (escape-guarded) or base64; edit ops arrive as JS-side `opsToArgv` fragments so Rust owns no op grammar. |
+| UI embedding | 📋 | Vendoring `@hwp-editor/core` and giving the editor a Maru mode is a separate decision, not made yet. |
+| Resident MCP server | ⛔ | `hwp mcp --root <dir>` kept alive for render-heavy sessions. Deliberately not implemented: the spawner keeps parity with the Node engine and carries no process lifecycle. |
+
+Errors are prefixed strings (`cli_missing:`, `hwp_timeout:`, `hwp_failed:`,
+`hwp_parse_failed:`, `hwped_bad_request:`) following the `gws` convention, and
+stay display-only. Detailed usage doc: [docs/hwp-editor.md](docs/hwp-editor.md).

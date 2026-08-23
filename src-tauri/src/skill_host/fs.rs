@@ -2,6 +2,8 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
+use crate::paths::require_absolute;
+
 #[cfg(unix)]
 use std::os::unix::fs as unix_fs;
 #[cfg(unix)]
@@ -15,10 +17,15 @@ pub fn home_dir() -> Result<PathBuf, String> {
 }
 
 pub fn maru_home() -> Result<PathBuf, String> {
-    if let Some(path) = test_maru_home_override() {
-        return Ok(path.join(".maru"));
-    }
-    Ok(home_dir()?.join(".maru"))
+    // The final value is validated on every return path, including the
+    // test-override branch (D-08/D-09): a relative base would silently
+    // materialize directory trees in the process cwd.
+    let base = if let Some(path) = test_maru_home_override() {
+        path.join(".maru")
+    } else {
+        home_dir()?.join(".maru")
+    };
+    require_absolute(base)
 }
 
 pub fn skills_root() -> Result<PathBuf, String> {
@@ -33,10 +40,13 @@ pub fn env_root() -> Result<PathBuf, String> {
 /// resolve. In production this is the real home; under tests it follows the
 /// `MARU_TEST_HOME` override so installs stay sandboxed.
 pub fn install_root_base() -> Result<PathBuf, String> {
-    if let Some(path) = test_maru_home_override() {
-        return Ok(path);
-    }
-    home_dir()
+    // Same absolute-base guard as maru_home() — covers both the test-override
+    // and the production branch (D-08/D-09, Pitfall 6).
+    let base = match test_maru_home_override() {
+        Some(path) => path,
+        None => home_dir()?,
+    };
+    require_absolute(base)
 }
 
 /// Resolve Codex's active home. Isolated hosts such as Orca set `CODEX_HOME`
@@ -262,6 +272,43 @@ mod tests {
         let value: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
         assert_eq!(value, json!({ "new": true }));
         assert_eq!(fs::read_dir(tmp.path()).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn maru_home_rejects_relative_test_home() {
+        // SCAN-04: a non-absolute home base must fail loudly via Err on every
+        // return path — a relative base otherwise materializes directory
+        // trees in the process cwd (the stray `Users/` incident class).
+        let _guard = test_maru_home_lock();
+        let previous = std::env::var_os("MARU_TEST_HOME");
+        std::env::set_var("MARU_TEST_HOME", "relative-home");
+
+        let home_result = maru_home();
+        let env_result = env_root();
+        let install_result = install_root_base();
+
+        // Restore the previous env value on all paths (BundleTestHome Drop
+        // idiom) so the mutation cannot leak into sibling tests.
+        if let Some(previous) = previous.as_ref() {
+            std::env::set_var("MARU_TEST_HOME", previous);
+        } else {
+            std::env::remove_var("MARU_TEST_HOME");
+        }
+
+        assert!(
+            home_result.is_err(),
+            "maru_home() must reject a relative base, got: {home_result:?}"
+        );
+        assert!(
+            env_result.is_err(),
+            "env_root() must reject a relative base (derived from maru_home), got: {env_result:?}"
+        );
+        assert!(
+            install_result.is_err(),
+            "install_root_base() must reject a relative base, got: {install_result:?}"
+        );
+        // The guard must fire before anything is created: no tree in cwd.
+        assert!(!Path::new("relative-home").exists());
     }
 
     #[test]

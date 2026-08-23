@@ -1,11 +1,12 @@
 ---
 phase: 01-trustworthy-verify-signal
 verified: 2026-08-22T00:00:00Z
-status: human_needed
+status: passed
 score: 5/5 roadmap success criteria verified, 7/7 GATE requirements verified
 behavior_unverified: 1
 overrides_applied: 0
 human_verification:
+
   - test: "Re-run the GATE-04 CI probe (deliberately-failing e2e spec, revert after) against the CURRENT playwright.config.ts trace setting (`{ mode: retain-on-failure, snapshots: false, screenshots: false }`, commit a064994), not the earlier wide-trace config that CI run 32559390372 actually exercised."
     expected: "A non-empty, genuinely diagnosable trace.zip (0-trace.network, 0-trace.stacks present) is still produced for the failing test with no retry, confirming the narrower config still satisfies success criterion 3 in practice, not just by Playwright's documented default behavior."
     why_human: "CI run 32568102852 (headSha a064994, the commit that narrowed the trace) was a fully green make verify run with zero e2e failures, so it never exercised the trace-capture path under the config that is actually shipped on HEAD. The only real evidence of a working trace.zip (CI run 32559390372, 14-entry trace including DOM snapshot jpegs) was captured before the narrowing commit, against a materially richer trace config. This is a config-drift gap in the empirical proof, not a broken gate - Playwright's `retain-on-failure` mode is documented to always write trace.zip regardless of the snapshots/screenshots sub-flags - but the specific claim ('the narrowed trace is still sufficient to diagnose a real CI failure') has not been re-proven against what actually ships."
@@ -85,8 +86,10 @@ phase's own `b36f3f8`):
 - `cargo test --lib` - the existing tests construct the Rust struct directly
   (`skill_host/dispatch.rs`), bypassing JSON deserialization entirely; no test does
   `serde_json::from_value::<SkillDispatchBackgroundArgs>(json!({...}))`.
+
 - `pnpm typecheck` - TypeScript's structural typing has no knowledge of Rust's serde rename
   rules; it cannot detect a field-name mismatch.
+
 - `pnpm exec eslint` - irrelevant to wire shape.
 - `make test-e2e` - all 23 specs run Chromium against a plain Vite dev server
   (`playwright.config.ts`'s `webServer.command` is `vite`, not `tauri-dev`), so
