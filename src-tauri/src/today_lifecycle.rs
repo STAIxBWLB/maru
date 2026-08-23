@@ -21,6 +21,7 @@
 use crate::atomic_file::write_atomic;
 use crate::document::revision_for;
 use crate::frontmatter::{update_frontmatter_content, FrontmatterValue};
+use crate::ipc_error::{IpcError, TASK_CONFLICT};
 use crate::tasks::{
     bucket_from_task_path, conflict_free_path, normalize_task_frontmatter_aliases,
     resolve_tasks_root, string_field, target_path_for_bucket, yaml_to_json, TaskBucket,
@@ -82,15 +83,16 @@ fn load_context(
     expected_task_hash: &str,
     date: Option<&str>,
     now_iso: Option<&str>,
-) -> Result<TransitionContext, String> {
+) -> Result<TransitionContext, IpcError> {
     let work = normalize_existing_dir(work_path)?;
     let path = resolve_inside_vault(work_path, task_path)?;
     let raw = fs::read_to_string(&path).map_err(|err| format!("Cannot read task note: {err}"))?;
     let actual_hash = revision_for(&raw);
     if actual_hash != expected_task_hash {
-        return Err(format!(
-            "task_conflict: expected hash {expected_task_hash}, found {actual_hash}"
-        ));
+        return Err(IpcError {
+            code: TASK_CONFLICT.to_string(),
+            message: format!("expected hash {expected_task_hash}, found {actual_hash}"),
+        });
     }
     let tasks_root = resolve_tasks_root(&work, "tasks")?;
     let parts = parse_frontmatter(&raw);
@@ -368,7 +370,7 @@ fn run_defer(
 pub fn task_transition(
     work_path: String,
     request: TaskTransitionRequest,
-) -> Result<TaskTransitionOutcome, String> {
+) -> Result<TaskTransitionOutcome, IpcError> {
     assert_maru_can_write(&work_path, WorkspaceWriteAction::Modify)?;
     let work = normalize_existing_dir(&work_path)?;
     let lock = crate::today_store::work_lock_for(&work)?;
@@ -382,7 +384,7 @@ pub fn task_transition(
         request.date.as_deref(),
         request.now_iso.as_deref(),
     )?;
-    match request.kind {
+    let outcome = match request.kind {
         TaskTransitionKind::Complete => {
             assert_maru_can_write(&work_path, WorkspaceWriteAction::RenameMove)?;
             run_complete(ctx, &request)
@@ -396,7 +398,8 @@ pub fn task_transition(
             run_cancel(ctx, &request.task_id)
         }
         TaskTransitionKind::Defer => run_defer(ctx, &request),
-    }
+    };
+    outcome.map_err(IpcError::from)
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -450,7 +453,7 @@ pub fn task_trash(
     task_path: String,
     expected_task_hash: String,
     remote_delete: Option<bool>,
-) -> Result<TaskTrashOutcome, String> {
+) -> Result<TaskTrashOutcome, IpcError> {
     assert_maru_can_write(&work_path, WorkspaceWriteAction::Delete)?;
     let work = normalize_existing_dir(&work_path)?;
     let lock = crate::today_store::work_lock_for(&work)?;
@@ -571,7 +574,10 @@ mod tests {
         let mut req = request(TaskTransitionKind::Complete, "bogus", &rel);
         req.expected_task_hash = "bogus".to_string();
         let err = task_transition(work(&tmp), req).unwrap_err();
-        assert!(err.starts_with("task_conflict: expected hash bogus, found "));
+        assert_eq!(err.code, TASK_CONFLICT);
+        assert!(err
+            .to_string()
+            .starts_with("task_conflict: expected hash bogus, found "));
     }
 
     #[test]
@@ -750,7 +756,7 @@ mod tests {
             request(TaskTransitionKind::Defer, &hash2, &rel2),
         )
         .unwrap_err();
-        assert_eq!(err, "task_defer_date_required");
+        assert_eq!(err.to_string(), "task_defer_date_required");
     }
 
     #[test]
@@ -786,6 +792,9 @@ mod tests {
         // Hash is enforced on trash too.
         let (tmp3, _hash3, rel3) = setup_task("---\nstatus: active\n---\n# Body\n");
         let err = task_trash(work(&tmp3), rel3, "bogus".to_string(), None).unwrap_err();
-        assert!(err.starts_with("task_conflict: expected hash bogus, found "));
+        assert_eq!(err.code, TASK_CONFLICT);
+        assert!(err
+            .to_string()
+            .starts_with("task_conflict: expected hash bogus, found "));
     }
 }
