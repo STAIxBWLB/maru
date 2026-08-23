@@ -1264,7 +1264,7 @@ test("keeps a Files draft intact when revision-checked save conflicts", async ({
       __MARU_E2E_INVOKE__: Record<string, () => unknown>;
     }).__MARU_E2E_INVOKE__ = {
       save_document: () => {
-        throw new Error("document_conflict: revision changed");
+        throw Object.assign(new Error("revision changed"), { code: "document_conflict" });
       },
     };
   });

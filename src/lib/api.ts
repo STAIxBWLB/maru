@@ -23,6 +23,7 @@ import {
 import { getViewerCategory, type ViewerCategory } from "./binaryViewer";
 import { denseMockEntries } from "./graph/fixtures";
 import { invokeE2EOverride } from "./e2eInvoke";
+import { normalizeIpcError } from "./ipcError";
 import type {
   KakaoEnqueueResult,
   KakaoRelayEnvelope,
@@ -1079,25 +1080,29 @@ export async function saveDocument(
   content: string,
   expectedRevision?: string | null,
 ): Promise<DocumentPayload> {
-  if (!isTauri()) {
-    const override = await invokeE2EOverride<DocumentPayload>("save_document", {
+  try {
+    if (!isTauri()) {
+      const override = await invokeE2EOverride<DocumentPayload>("save_document", {
+        vaultPath,
+        documentPath,
+        content,
+        expectedRevision: expectedRevision ?? null,
+      });
+      if (override) return override;
+      const doc = readMockDocument(documentPath);
+      doc.content = content;
+      doc.body = content.replace(/^---[\s\S]*?---\n/, "");
+      return doc;
+    }
+    return await invoke<DocumentPayload>("save_document", {
       vaultPath,
       documentPath,
       content,
       expectedRevision: expectedRevision ?? null,
     });
-    if (override) return override;
-    const doc = readMockDocument(documentPath);
-    doc.content = content;
-    doc.body = content.replace(/^---[\s\S]*?---\n/, "");
-    return doc;
+  } catch (err) {
+    throw normalizeIpcError(err);
   }
-  return invoke<DocumentPayload>("save_document", {
-    vaultPath,
-    documentPath,
-    content,
-    expectedRevision: expectedRevision ?? null,
-  });
 }
 
 /** Patch a single frontmatter field while preserving order + comments of
