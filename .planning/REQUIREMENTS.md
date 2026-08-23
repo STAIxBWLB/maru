@@ -102,7 +102,7 @@ not compete with the structural work. Not in the current roadmap.
 
 | Feature | Reason |
 |---------|--------|
-| Any new product feature | Behavior-preserving work is only verifiable if behavior is not also changing |
+| Any new product feature | Behavior-preserving work is only verifiable if behavior is not also changing. **Exception, 2026-08-23:** the `hwped_*` hwp-editor bridge landed from a parallel track and is adopted, not built, by this milestone - see STATE.md "Scope Exceptions" |
 | Converting all 1,118 `Result<T, String>` signatures | Explicitly rejected in the CONCERNS.md fix approach; cost without benefit for display-only errors |
 | Retrofitting all ~20 existing path-traversal validators | The existing checks are individually sound; the problem is the absence of a canonical example, not the callers |
 | Changing `.maruignore` defaults | It is a user-facing file format, not a scanner constant |

@@ -108,13 +108,35 @@ Recent decisions affecting current work:
 - [Phase ?]: [Phase 2]: 02-03 env_root()/skills_root() get no separate guard - they derive from maru_home() and are covered transitively; duplicating the check would re-fragment the invariant
 - [Phase ?]: [Phase 2]: 02-03 require_absolute's temporary allow(dead_code) removed in the same commit the first consumer landed - closes WINDOWS.md ledger entry 1
 
+### Scope Exceptions
+
+- **hwp-editor bridge (`hwped_*`), recorded 2026-08-23.** Six Tauri commands
+  (`src-tauri/src/hwped.rs`, wrappers in `src/lib/hwped.ts`) spawning the `hwp`
+  binary landed from a parallel track while this milestone was running. They are a
+  new product feature, which the milestone charter excludes, so they are recorded
+  here as an adopted exception rather than milestone work: this milestone owns the
+  gate signal, not the feature. Phases 1 and 2 each reported `make verify` as
+  unprovable locally because this file failed `clippy` and `fmt-check` while
+  untracked (`01-06-SUMMARY.md`, `01-07-SUMMARY.md`, `02-02-SUMMARY.md`); those two
+  clippy findings and the formatting diffs are fixed in the same commit that adopts
+  it, so the composite gate runs against the same tree CI sees.
+- The bridge's error strings (`cli_missing:`, `hwp_timeout:`, `hwp_failed:`,
+  `hwp_parse_failed:`, `hwped_bad_request:`) stay `Result<T, String>` and are
+  **exempt from the Phase 3 typed contract**. `src/lib/hwped.ts` contains no error
+  branching at all, so they are display-only - exactly the class ERR-04 protects
+  from migration.
+- Still owed, deliberately deferred until the hwp-editor implementation track
+  reports complete: the Phase 2.1 planning artifacts, the HWPE-01..03 requirement
+  registration, and the Semantica Phases 6-9 roadmap entries drawn from
+  `docs/semantica-adoption-plan.md`.
+
 ### Pending Todos
 
 None yet.
 
 ### Blockers/Concerns
 
-- No `.planning/config.json` exists; defaults assumed - granularity `standard`, `phase_id_convention` sequential, `project_code` null. Regenerate phase IDs if a config lands with different values.
+- **Phase 3's ERR-04 count band is coupled to `hwped.rs`.** The pinned command reports 1,138 on the tree that adopts the bridge, and `hwped.rs` contributes 19 of those matches; without it the tree reads 1,119 and the post-migration count lands at 1,109, below `03-04-PLAN.md`'s `[1118, 1138]` band. Re-measure the baseline before Phase 3 executes and write the new number into `03-02-PLAN.md` and `03-04-PLAN.md` - continued hwp-editor work keeps moving it.
 - `src/App.tsx` has no test of any kind. Phases 4-5 depend on Phase 1's hook-dependency gate plus the per-pane tests written during extraction; there is no existing safety net for the decomposition.
 - `make verify` runs on ubuntu-22.04 only and e2e runs Chromium against Vite with mocked IPC. Nothing in CI exercises WKWebView, the real PTY, IME input, or the macOS menu - macOS-affecting changes need a real-app run.
 

@@ -66,7 +66,9 @@ real files the user owns, and nothing is lost if Maru is uninstalled.
 ### Out of Scope
 
 - **New product features of any kind** - this milestone preserves behavior; a
-  feature landing mid-refactor makes every regression ambiguous
+  feature landing mid-refactor makes every regression ambiguous. One recorded
+  exception: the `hwped_*` hwp-editor bridge, written by a parallel track and
+  adopted here rather than built (STATE.md "Scope Exceptions")
 - **Converting all 1,118 `Result<T, String>` signatures** - CONCERNS.md rejects
   it explicitly; only the errors the frontend actually branches on move
 - **Retrofitting all ~20 existing path-traversal validators** - the existing
