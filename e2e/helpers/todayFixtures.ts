@@ -749,14 +749,18 @@ export async function installTodayMocks(page: Page, seed: TodaySeed): Promise<vo
         const snapRevision = String((state.snapshot as { revision?: unknown }).revision ?? "");
         const expected = String(args.expectedRevision ?? "");
         if (expected !== snapRevision) {
-          throw new Error(
-            `today_conflict: expected revision ${expected}, found ${snapRevision}`,
+          throw Object.assign(
+            new Error(`expected revision ${expected}, found ${snapRevision}`),
+            { code: "today_conflict" },
           );
         }
         const mutation = args.mutation as { type?: string; plan?: { inputRevision?: string } };
         if (mutation.type === "setPlan" && mutation.plan?.inputRevision !== snapRevision) {
-          throw new Error(
-            `today_conflict: expected revision ${mutation.plan?.inputRevision ?? ""}, found ${snapRevision}`,
+          throw Object.assign(
+            new Error(
+              `expected revision ${mutation.plan?.inputRevision ?? ""}, found ${snapRevision}`,
+            ),
+            { code: "today_conflict" },
           );
         }
         applyMutation(args.mutation as never);
@@ -788,8 +792,11 @@ export async function installTodayMocks(page: Page, seed: TodaySeed): Promise<vo
           throw new Error(`today_plan_day_mismatch: ${request.logicalDay} != ${state.logicalDay}`);
         }
         if (request.expectedRevision !== snap.revision) {
-          throw new Error(
-            `today_conflict: expected revision ${request.expectedRevision}, found ${snap.revision}`,
+          throw Object.assign(
+            new Error(
+              `expected revision ${request.expectedRevision}, found ${snap.revision}`,
+            ),
+            { code: "today_conflict" },
           );
         }
 

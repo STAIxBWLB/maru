@@ -26,6 +26,7 @@ import {
   type EvidenceTargetSuggestions,
 } from "../../lib/evidenceBinder";
 import { setError } from "../../lib/errorStore";
+import { IpcError } from "../../lib/ipcError";
 import { useTranslation } from "../../lib/i18n";
 
 interface EvidenceBinderPaneProps {
@@ -171,7 +172,8 @@ export function EvidenceBinderPane({
           setRevision(previousRevision);
           const message = err instanceof Error ? err.message : String(err);
           setError(message);
-          if (message.includes("evidence_binder_revision_conflict")) void load();
+          if (err instanceof IpcError && err.code === "evidence_binder_revision_conflict")
+            void load();
         }
       } finally {
         if (mutationSeqRef.current === mutationSeq) {

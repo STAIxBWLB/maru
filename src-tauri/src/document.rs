@@ -1,5 +1,6 @@
 use crate::filename_rules::{validate_filename_stem, validate_folder_name};
 use crate::frontmatter::{build_frontmatter, update_frontmatter_content, FrontmatterValue};
+use crate::ipc_error::{IpcError, DOCUMENT_CONFLICT};
 use crate::vault::{
     is_document_extension, parse_frontmatter, resolve_inside_vault, slugify, title_from_content,
 };
@@ -119,13 +120,14 @@ pub(crate) fn revision_for(content: &str) -> String {
     format!("{:x}", Sha256::digest(content.as_bytes()))
 }
 
-fn assert_expected_revision(current: &str, expected: Option<&str>) -> Result<(), String> {
+fn assert_expected_revision(current: &str, expected: Option<&str>) -> Result<(), IpcError> {
     if let Some(expected) = expected {
         let actual = revision_for(current);
         if actual != expected {
-            return Err(format!(
-                "document_conflict: expected revision {expected}, found {actual}"
-            ));
+            return Err(IpcError {
+                code: DOCUMENT_CONFLICT.to_string(),
+                message: format!("expected revision {expected}, found {actual}"),
+            });
         }
     }
     Ok(())
@@ -137,7 +139,7 @@ pub fn save_document(
     document_path: String,
     content: String,
     expected_revision: Option<String>,
-) -> Result<DocumentPayload, String> {
+) -> Result<DocumentPayload, IpcError> {
     let path = resolve_inside_vault(&vault_path, &document_path)?;
     assert_document_owner(&vault_path, &path)?;
     assert_maru_can_write(&vault_path, WorkspaceWriteAction::Modify)?;
@@ -147,9 +149,10 @@ pub fn save_document(
             fs::read_to_string(&path).map_err(|err| format!("Cannot read document: {err}"))?;
         assert_expected_revision(&current, expected_revision.as_deref())?;
     } else if let Some(expected) = expected_revision.as_deref() {
-        return Err(format!(
-            "document_conflict: expected revision {expected}, file is missing"
-        ));
+        return Err(IpcError {
+            code: DOCUMENT_CONFLICT.to_string(),
+            message: format!("expected revision {expected}, file is missing"),
+        });
     }
     // Managed roots snapshot the on-disk content before every overwrite
     // (maru-vault-graph-spec §2.4 가드 불변식) — conflict safety vs MCP co-writes.
@@ -182,14 +185,17 @@ pub fn save_document(
                 fs::read_to_string(&path).map_err(|err| format!("Cannot read document: {err}"))?;
             assert_expected_revision(&current, expected_revision.as_deref())?;
         } else {
-            return Err(format!(
-                "document_conflict: expected revision {}, file is missing",
-                expected_revision.as_deref().unwrap_or_default()
-            ));
+            return Err(IpcError {
+                code: DOCUMENT_CONFLICT.to_string(),
+                message: format!(
+                    "expected revision {}, file is missing",
+                    expected_revision.as_deref().unwrap_or_default()
+                ),
+            });
         }
     }
     write_atomic(&path, content.as_bytes())?;
-    read_document(vault_path, path.to_string_lossy().to_string())
+    read_document(vault_path, path.to_string_lossy().to_string()).map_err(Into::into)
 }
 
 /// Patch a single frontmatter field on disk while preserving the order and
@@ -216,7 +222,7 @@ pub fn update_frontmatter_field(
     assert_maru_can_write(&vault_path, WorkspaceWriteAction::Modify)?;
     let original =
         fs::read_to_string(&path).map_err(|err| format!("Cannot read document: {err}"))?;
-    assert_expected_revision(&original, expected_revision.as_deref())?;
+    assert_expected_revision(&original, expected_revision.as_deref()).map_err(|e| e.to_string())?;
     let mapped = value.map(FrontmatterValue::from);
     let updated = update_frontmatter_content(&original, &key, mapped)?;
     if updated != original {
@@ -735,7 +741,8 @@ mod tests {
         )
         .unwrap_err();
 
-        assert!(error.starts_with("document_conflict:"));
+        assert_eq!(error.code, DOCUMENT_CONFLICT);
+        assert!(error.to_string().starts_with("document_conflict:"));
         assert_eq!(
             fs::read_to_string(tmp.path().join("note.md")).unwrap(),
             "# External edit\n"
@@ -1222,8 +1229,9 @@ mod tests {
         )
         .unwrap_err();
 
+        assert_eq!(error.code, DOCUMENT_CONFLICT);
         assert_eq!(
-            error,
+            error.to_string(),
             "document_conflict: expected revision abc123, file is missing"
         );
         assert!(!tmp.path().join("ghost.md").exists());

@@ -20,6 +20,7 @@
 import { readDocument } from "../api";
 import { diagramWriteReportAsset } from "../diagram";
 import { blobToUint8Array, exportPng } from "./export";
+import { IpcError } from "../ipcError";
 import { serializeDoc } from "./persistence";
 import { renderDocToSvg } from "./renderSvg";
 import { buildManagedBlock, spliceManagedBlock } from "./reportLink";
@@ -89,8 +90,8 @@ export function scopeDocForRender(doc: DiagramDoc, scope: string): DiagramDoc {
   };
 }
 
-function isConflict(message: string): boolean {
-  return message.includes("document_conflict");
+function isConflict(err: unknown): boolean {
+  return err instanceof IpcError && err.code === "document_conflict";
 }
 
 /**
@@ -157,7 +158,7 @@ export async function insertDiagramIntoReport(
       : { status: "inserted", targetPath: target.path };
   } catch (err) {
     const message = errorMessage(err);
-    return isConflict(message)
+    return isConflict(err)
       ? { status: "conflict", message }
       : { status: "error", message };
   }

@@ -296,6 +296,7 @@ pub fn today_apply_plan_result(
         expected_revision,
         TodayMutation::SetPlan { plan },
     )
+    .map_err(|e| e.to_string())
 }
 
 #[cfg(test)]

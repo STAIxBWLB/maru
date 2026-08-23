@@ -10,6 +10,7 @@
 
 use crate::atomic_file::write_atomic;
 use crate::document::revision_for;
+use crate::ipc_error::{IpcError, TODAY_CONFLICT};
 use crate::tasks::{
     materialize_capture_task, prepare_capture_task_materialization, resolve_tasks_root,
     CreateTaskDraft, TaskBucket,
@@ -507,12 +508,15 @@ pub(crate) fn load_snapshot_with_raw(
 pub(crate) fn check_revision(
     snapshot: &TodaySnapshot,
     expected_revision: &str,
-) -> Result<(), String> {
+) -> Result<(), IpcError> {
     if snapshot.revision != expected_revision {
-        return Err(format!(
-            "today_conflict: expected revision {expected_revision}, found {}",
-            snapshot.revision
-        ));
+        return Err(IpcError {
+            code: TODAY_CONFLICT.to_string(),
+            message: format!(
+                "expected revision {expected_revision}, found {}",
+                snapshot.revision
+            ),
+        });
     }
     Ok(())
 }
@@ -606,7 +610,7 @@ pub fn today_mutate(
     logical_day: String,
     expected_revision: String,
     mutation: TodayMutation,
-) -> Result<TodaySnapshot, String> {
+) -> Result<TodaySnapshot, IpcError> {
     validate_logical_day(&logical_day)?;
     assert_maru_can_write(&work_path, WorkspaceWriteAction::Modify)?;
     let work = normalize_existing_dir(&work_path)?;
@@ -619,10 +623,13 @@ pub fn today_mutate(
     let mut snapshot: TodaySnapshot =
         serde_json::from_str(&raw).map_err(|err| format!("today_state_corrupt: {err}"))?;
     if snapshot.revision != expected_revision {
-        return Err(format!(
-            "today_conflict: expected revision {expected_revision}, found {}",
-            snapshot.revision
-        ));
+        return Err(IpcError {
+            code: TODAY_CONFLICT.to_string(),
+            message: format!(
+                "expected revision {expected_revision}, found {}",
+                snapshot.revision
+            ),
+        });
     }
     let event_kind: &str;
     if matches!(mutation, TodayMutation::Undo) {
@@ -630,12 +637,12 @@ pub fn today_mutate(
         // a row would just ping-pong, so a second undo is rejected until a
         // new mutation lands (tracked via the day's event log).
         if last_mutation_event_kind(&work, &logical_day)? == Some("undo".to_string()) {
-            return Err("today_undo_unavailable".to_string());
+            return Err("today_undo_unavailable".to_string().into());
         }
         let Some((_, restored)) =
             newest_valid_revision(&work, &logical_day, Some(&snapshot.revision))
         else {
-            return Err("today_undo_unavailable".to_string());
+            return Err("today_undo_unavailable".to_string().into());
         };
         snapshot_revision(&work, &snapshot, &raw)?;
         snapshot = restored;
@@ -666,10 +673,10 @@ pub fn today_mutate(
 pub fn today_finalize_setup(
     work_path: String,
     request: TodayFinalizeSetupRequest,
-) -> Result<TodayFinalizeSetupOutcome, String> {
+) -> Result<TodayFinalizeSetupOutcome, IpcError> {
     validate_logical_day(&request.logical_day)?;
     if request.idempotency_key.trim().is_empty() {
-        return Err("today_finalize_idempotency_key_required".to_string());
+        return Err("today_finalize_idempotency_key_required".to_string().into());
     }
     assert_maru_can_write(&work_path, WorkspaceWriteAction::Modify)?;
     let work = normalize_existing_dir(&work_path)?;
@@ -692,7 +699,7 @@ pub fn today_finalize_setup(
         if existing.phase != FinalizeJournalPhase::RolledBack
             && existing.request_hash != request_hash
         {
-            return Err("today_finalize_idempotency_conflict".to_string());
+            return Err("today_finalize_idempotency_conflict".to_string().into());
         }
         if existing.phase == FinalizeJournalPhase::Committed {
             let mut outcome = existing
@@ -715,7 +722,8 @@ pub fn today_finalize_setup(
         return Err(format!(
             "today_invalid_transition: finalizeSetup from {:?}",
             snapshot.day_state
-        ));
+        )
+        .into());
     }
 
     let mut plan = match request.action {
@@ -728,7 +736,8 @@ pub fn today_finalize_setup(
             return Err(format!(
                 "today_plan_day_mismatch: {} != {}",
                 candidate_plan.logical_day, snapshot.logical_day
-            ));
+            )
+            .into());
         }
         validate_plan(
             candidate_plan,
@@ -750,7 +759,8 @@ pub fn today_finalize_setup(
         return Err(format!(
             "today_finalize_capture_id_required: {}",
             capture.title.trim()
-        ));
+        )
+        .into());
     }
     if let Some(capture) = request
         .captures
@@ -760,10 +770,11 @@ pub fn today_finalize_setup(
         return Err(format!(
             "today_finalize_capture_title_required: {}",
             capture.capture_id
-        ));
+        )
+        .into());
     }
     if capture_inputs.len() != request.captures.len() {
-        return Err("today_finalize_duplicate_capture".to_string());
+        return Err("today_finalize_duplicate_capture".to_string().into());
     }
     let capture_refs: BTreeSet<String> = plan
         .as_ref()
@@ -778,7 +789,7 @@ pub fn today_finalize_setup(
         .iter()
         .find(|capture_id| !capture_inputs.contains_key(*capture_id))
     {
-        return Err(format!("today_finalize_capture_missing: {missing}"));
+        return Err(format!("today_finalize_capture_missing: {missing}").into());
     }
 
     let mut journal = FinalizeJournal {
@@ -947,7 +958,7 @@ pub fn today_finalize_setup(
                 .created_files
                 .retain(|entry| preserved.contains(&entry.rel_path));
             let _ = write_finalize_journal(&journal_path, &journal);
-            return Err(err);
+            return Err(err.into());
         }
     };
 
@@ -972,7 +983,7 @@ pub fn today_finalize_setup(
 fn apply_mutation(
     snapshot: &mut TodaySnapshot,
     mutation: &TodayMutation,
-) -> Result<&'static str, String> {
+) -> Result<&'static str, IpcError> {
     match mutation {
         TodayMutation::SetRoute { route } => {
             snapshot.route = *route;
@@ -994,7 +1005,8 @@ fn apply_mutation(
                 return Err(format!(
                     "today_invalid_transition: confirmSetup from {:?}",
                     snapshot.day_state
-                ));
+                )
+                .into());
             }
             if let Some(plan) = &snapshot.plan {
                 validate_plan(
@@ -1015,7 +1027,8 @@ fn apply_mutation(
                 return Err(format!(
                     "today_invalid_transition: quickSkip from {:?}",
                     snapshot.day_state
-                ));
+                )
+                .into());
             }
             snapshot.day_state = DayState::Skipped;
             snapshot.stage = Some(TodayStage::Execute);
@@ -1041,7 +1054,7 @@ fn apply_mutation(
             defer_date,
         } => {
             if capture_id.trim().is_empty() {
-                return Err("today_capture_id_required".to_string());
+                return Err("today_capture_id_required".to_string().into());
             }
             snapshot.capture_decisions.insert(
                 capture_id.clone(),
@@ -1056,16 +1069,20 @@ fn apply_mutation(
         }
         TodayMutation::SetPlan { plan } => {
             if plan.input_revision != snapshot.revision {
-                return Err(format!(
-                    "today_conflict: expected revision {}, found {}",
-                    plan.input_revision, snapshot.revision
-                ));
+                return Err(IpcError {
+                    code: TODAY_CONFLICT.to_string(),
+                    message: format!(
+                        "expected revision {}, found {}",
+                        plan.input_revision, snapshot.revision
+                    ),
+                });
             }
             if plan.logical_day != snapshot.logical_day {
                 return Err(format!(
                     "today_plan_day_mismatch: {} != {}",
                     plan.logical_day, snapshot.logical_day
-                ));
+                )
+                .into());
             }
             validate_plan(
                 plan,
@@ -1869,7 +1886,10 @@ mod tests {
             },
         )
         .unwrap_err();
-        assert!(err.starts_with("today_conflict: expected revision bogus, found "));
+        assert_eq!(err.code, TODAY_CONFLICT);
+        assert!(err
+            .to_string()
+            .starts_with("today_conflict: expected revision bogus, found "));
     }
 
     #[test]
@@ -1916,7 +1936,7 @@ mod tests {
             TodayMutation::Undo,
         )
         .unwrap_err();
-        assert_eq!(err, "today_undo_unavailable");
+        assert_eq!(err.to_string(), "today_undo_unavailable");
     }
 
     #[test]
@@ -1933,7 +1953,7 @@ mod tests {
             TodayMutation::SetPlan { plan: stale_plan },
         )
         .unwrap_err();
-        assert!(err.starts_with("today_conflict"));
+        assert_eq!(err.code, TODAY_CONFLICT);
         let planned = mutate(
             &work,
             &snapshot,
@@ -2420,7 +2440,7 @@ mod tests {
             },
         )
         .unwrap_err();
-        assert!(err.starts_with("today_yesterday_item_missing"));
+        assert!(err.to_string().starts_with("today_yesterday_item_missing"));
     }
 
     #[test]
@@ -2487,6 +2507,6 @@ mod tests {
             TodayMutation::SetPlan { plan },
         )
         .unwrap_err();
-        assert!(err.starts_with("today_block_crosses_sleep"));
+        assert!(err.to_string().starts_with("today_block_crosses_sleep"));
     }
 }

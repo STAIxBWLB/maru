@@ -26,6 +26,7 @@
 // Items at `none` are never published.
 
 use crate::cli_path::augmented_path;
+use crate::ipc_error::IpcError;
 use crate::today::{
     parse_day_start, parse_sleep_start, parse_timezone, CalendarCommitment, CalendarSyncState,
     CalendarSyncStatus, PlanItemRef, ProposedBlock, TodayMutation, TodaySnapshot,
@@ -303,6 +304,7 @@ pub fn task_calendar_set_sync(
             destination,
         },
     )
+    .map_err(|e| e.to_string())
 }
 
 // --- Publish ------------------------------------------------------------------
@@ -418,7 +420,7 @@ pub fn today_calendar_publish(
     destination: Option<String>,
     gws_path: Option<String>,
     now_iso: String,
-) -> Result<CalendarPublishOutcome, String> {
+) -> Result<CalendarPublishOutcome, IpcError> {
     assert_maru_can_write(&work_path, WorkspaceWriteAction::Modify)?;
     let work = normalize_existing_dir(&work_path)?;
     DateTime::parse_from_rfc3339(&now_iso)
@@ -1035,6 +1037,9 @@ mod tests {
             NOW.to_string(),
         )
         .unwrap_err();
-        assert!(err.starts_with("today_conflict: expected revision bogus, found "));
+        assert_eq!(err.code, "today_conflict");
+        assert!(err
+            .to_string()
+            .starts_with("today_conflict: expected revision bogus, found "));
     }
 }

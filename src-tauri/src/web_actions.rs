@@ -23,6 +23,7 @@
 
 use crate::atomic_file::write_atomic;
 use crate::document::revision_for;
+use crate::ipc_error::TODAY_CONFLICT;
 use crate::tasks::{
     normalize_task_frontmatter_aliases, string_field, task_display_title, yaml_to_json, TaskBucket,
 };
@@ -569,7 +570,8 @@ fn apply_receipt(
                     web_action_id: Some(receipt.id.clone()),
                     payload: serde_json::json!({}),
                 },
-            )?;
+            )
+            .map_err(|e| e.to_string())?;
             ledger_append(work, receipt, now_iso)?;
             Ok(WebActionState::Applied)
         }
@@ -855,8 +857,8 @@ pub fn web_actions_import_top(
             reason: None,
         }),
         // The snapshot moved under us: re-read on the next run, never clobber.
-        Err(err) if err.starts_with("today_conflict") => Ok(skipped("conflict")),
-        Err(err) => Err(err),
+        Err(err) if err.code == TODAY_CONFLICT => Ok(skipped("conflict")),
+        Err(err) => Err(err.to_string()),
     }
 }
 
@@ -1859,7 +1861,7 @@ mod tests {
             },
         )
         .unwrap_err();
-        assert!(stale.starts_with("today_conflict"));
+        assert_eq!(stale.code, "today_conflict");
     }
 
     #[test]

@@ -58,6 +58,28 @@ export type WorkspaceProvider =
   | "nextcloud"
   | "obsidian"
   | "unknown";
+
+/** The typed IPC error contract (Phase 3, ERR-02/ERR-04): the exhaustive list
+ *  of codes the frontend branches on. Renaming an entry here without updating
+ *  every `err.code === "<code>"` comparison fails `tsc -b` on this side, and
+ *  renaming a value in `src-tauri/src/ipc_error.rs` without updating this
+ *  array fails `types.test.ts`'s cross-language guard, which asserts the two
+ *  sides agree - neither side's own pin test alone catches a one-sided
+ *  rename. */
+export const IPC_ERROR_CODES = [
+  "today_conflict",
+  "task_conflict",
+  "document_conflict",
+  "evidence_binder_revision_conflict",
+] as const;
+export type IpcErrorCode = (typeof IPC_ERROR_CODES)[number];
+
+/** Wire shape a migrated Tauri command rejects with. */
+export interface IpcErrorBody {
+  code: string;
+  message: string;
+}
+
 export type WorkspaceExternalWriter =
   | "gdrive"
   | "onedrive"

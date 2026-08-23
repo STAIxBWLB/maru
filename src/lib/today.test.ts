@@ -5,6 +5,7 @@ vi.mock("@tauri-apps/api/core", () => ({
 }));
 
 import { invoke } from "@tauri-apps/api/core";
+import { IpcError } from "./ipcError";
 import {
   isTaskConflict,
   isTodayConflict,
@@ -17,7 +18,6 @@ import {
   taskTrash,
   todayApplyPlanResult,
   todayBuildPlanRequest,
-  todayErrorCode,
   todayLogicalDay,
   todayMutate,
   todayNotifyNewDay,
@@ -191,38 +191,32 @@ describe("sha256Hex", () => {
   });
 });
 
-describe("todayErrorCode", () => {
-  it("extracts the machine-readable prefix before ': '", () => {
-    expect(todayErrorCode("today_conflict: expected revision abc, found def")).toBe(
-      "today_conflict",
-    );
-    expect(todayErrorCode("task_conflict: expected hash bogus, found deadbeef")).toBe(
-      "task_conflict",
-    );
-    expect(todayErrorCode("today_state_missing")).toBeNull();
-  });
-
-  it("reads Error instances and rejects non-string input", () => {
-    expect(todayErrorCode(new Error("today_invalid_day_start: 25:00"))).toBe(
-      "today_invalid_day_start",
-    );
-    expect(todayErrorCode(null)).toBeNull();
-    expect(todayErrorCode({ message: "today_conflict: x" })).toBeNull();
-    expect(todayErrorCode("no machine prefix here")).toBeNull();
-  });
-});
-
 describe("conflict helpers", () => {
-  it("isTodayConflict matches only today_conflict", () => {
-    expect(isTodayConflict("today_conflict: expected revision a, found b")).toBe(true);
-    expect(isTodayConflict(new Error("today_conflict: x"))).toBe(true);
-    expect(isTodayConflict("task_conflict: x")).toBe(false);
+  it("isTodayConflict matches only an IpcError coded today_conflict", () => {
+    expect(
+      isTodayConflict(new IpcError({ code: "today_conflict", message: "expected revision a, found b" })),
+    ).toBe(true);
+    expect(
+      isTodayConflict(new IpcError({ code: "task_conflict", message: "expected hash a, found b" })),
+    ).toBe(false);
+    // Legacy prefix strings and plain Errors are no longer recognized — only
+    // a normalized IpcError carries a machine-readable code (D-08).
+    expect(isTodayConflict("today_conflict: expected revision a, found b")).toBe(false);
+    expect(isTodayConflict(new Error("today_conflict: x"))).toBe(false);
     expect(isTodayConflict("today_state_missing")).toBe(false);
+    expect(isTodayConflict(null)).toBe(false);
+    expect(isTodayConflict(undefined)).toBe(false);
   });
 
-  it("isTaskConflict matches only task_conflict", () => {
-    expect(isTaskConflict("task_conflict: expected hash bogus, found abc")).toBe(true);
-    expect(isTaskConflict("today_conflict: x")).toBe(false);
+  it("isTaskConflict matches only an IpcError coded task_conflict", () => {
+    expect(
+      isTaskConflict(new IpcError({ code: "task_conflict", message: "expected hash bogus, found abc" })),
+    ).toBe(true);
+    expect(
+      isTaskConflict(new IpcError({ code: "today_conflict", message: "expected revision a, found b" })),
+    ).toBe(false);
+    expect(isTaskConflict("task_conflict: expected hash bogus, found abc")).toBe(false);
+    expect(isTaskConflict(null)).toBe(false);
     expect(isTaskConflict(undefined)).toBe(false);
   });
 });

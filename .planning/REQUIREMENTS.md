@@ -31,10 +31,10 @@ milestone with no end-user-visible surface.
 
 ### Typed IPC Errors
 
-- [ ] **ERR-01**: A frontend caller can read a stable machine-readable `code` from any error it needs to branch on, alongside the human-readable message
-- [ ] **ERR-02**: Renaming an error code fails the build on both the Rust and TypeScript side instead of silently breaking a recovery path
-- [ ] **ERR-03**: Every existing `message.includes("<code>")` matcher branches on the typed code instead - starting with `evidence_binder_revision_conflict` at `src/components/evidence/EvidenceBinderPane.tsx:174`
-- [ ] **ERR-04**: Display-only errors are untouched - the `Result<T, String>` signature count stays within a few of the measured baseline of 1,138 (CONCERNS.md's 1,118 is stale; re-measure before Phase 3 executes)
+- [x] **ERR-01**: A frontend caller can read a stable machine-readable `code` from any error it needs to branch on, alongside the human-readable message
+- [x] **ERR-02**: Renaming an error code fails the build on both the Rust and TypeScript side instead of silently breaking a recovery path
+- [x] **ERR-03**: Every existing `message.includes("<code>")` matcher branches on the typed code instead - starting with `evidence_binder_revision_conflict` at `src/components/evidence/EvidenceBinderPane.tsx:174`
+- [x] **ERR-04**: Display-only errors are untouched - the `Result<T, String>` signature count stays within a few of the measured baseline of 1,138 (CONCERNS.md's 1,118 is stale; re-measure before Phase 3 executes)
 
 > **Note for Phase 3 planning, from Phase 1's verification (2026-08-22).** None of the
 > seven `make verify` gates can catch a serde mismatch at the Rust-TypeScript IPC
@@ -94,6 +94,15 @@ not compete with the structural work. Not in the current roadmap.
 
 - **DEP-01**: Each exact version pin in the graph stack and `trash = "=4.1.1"` carries a one-line comment recording why
 
+### Typed IPC Contract Hardening
+
+Raised by the Codex adversarial review of PR #279 (2026-08-23), verified against
+the tree. Neither is a live defect in Phase 3's output; both are durability gaps
+in the contract Phase 3 established, deliberately not widened into that PR.
+
+- **ERR-05**: The contract constrains which codes Rust can emit, not just which it declares. `IpcError` is a `pub struct` with a `pub code: String`, so any module can mint an arbitrary code, and the cross-language guard in `src/lib/types.test.ts` inventories `pub const` declarations only - it never inspects construction sites. An unregistered code passes the Rust pin, `tsc -b`, and the regex guard, then `normalizeIpcError` downgrades it to a plain `Error` and no recovery branch runs. The shape that closes this is a closed Rust enum serialized as a tagged union with an explicit legacy/display-only variant, private construction, and a TS union generated from that enum rather than regex-parsed from Rust source
+- **ERR-06**: Every command capable of emitting a reserved conflict code returns `IpcError`, independent of whether a caller branches on it today. `today_apply_plan_result` (`today_ai.rs`) and `task_calendar_set_sync` (`today_calendar.rs`) both reach `today_mutate` and flatten its typed error back to `String` via `.map_err(|e| e.to_string())`, so a conflict on those paths arrives at the frontend as a plain string and `isTodayConflict` returns false. No caller branches on them today, so nothing regressed - but the boundary was drawn by current frontend usage and validated by a global signature count, which gives a future author no compile-time signal that the advertised recovery is unavailable. Needs an `IpcResult<T>` alias or command-level declaration plus a test that inventories code-producing commands
+
 ### Deferred Product Work
 
 - **HUB-01**: Hub graph-metadata sync - the only explicit deferral in the ingested doc set (`docs/graph.md`), held until a Hub consumer exists
@@ -127,10 +136,10 @@ not compete with the structural work. Not in the current roadmap.
 | SCAN-03 | Phase 2 | Complete |
 | SCAN-04 | Phase 2 | Complete |
 | SCAN-05 | Phase 2 | Complete |
-| ERR-01 | Phase 3 | Pending |
-| ERR-02 | Phase 3 | Pending |
-| ERR-03 | Phase 3 | Pending |
-| ERR-04 | Phase 3 | Pending |
+| ERR-01 | Phase 3 | Complete |
+| ERR-02 | Phase 3 | Complete |
+| ERR-03 | Phase 3 | Complete |
+| ERR-04 | Phase 3 | Complete |
 | SHELL-01 | Phase 4 | Pending |
 | SHELL-02 | Phase 4 | Pending |
 | SHELL-03 | Phase 4 | Pending |

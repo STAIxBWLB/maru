@@ -7,6 +7,7 @@ import {
   type ReportInsertDeps,
   type ReportInsertRequest,
 } from "./reportInsert";
+import { IpcError } from "../ipcError";
 import { buildManagedBlock } from "./reportLink";
 import { createEmptyDoc, type DiagramDoc, type DiagramEdge, type DiagramNode } from "./types";
 
@@ -186,7 +187,9 @@ describe("insertDiagramIntoReport", () => {
   it("surfaces a revision conflict without retrying", async () => {
     const harness = makeHarness();
     harness.deps.saveTarget = () =>
-      Promise.reject(new Error("document_conflict: expected rev-1, found rev-2"));
+      Promise.reject(
+        new IpcError({ code: "document_conflict", message: "expected rev-1, found rev-2" }),
+      );
     const outcome = await insertDiagramIntoReport(makeRequest(), harness.deps);
     expect(outcome.status).toBe("conflict");
     expect((outcome as { message: string }).message).toContain("document_conflict");

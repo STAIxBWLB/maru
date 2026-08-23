@@ -34,6 +34,7 @@ mod inbox_classifier;
 mod inbox_drop;
 mod inbox_settings;
 mod inbox_watcher;
+mod ipc_error;
 mod jobs;
 mod kakao_relay;
 mod kg_refs;

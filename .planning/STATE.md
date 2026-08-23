@@ -2,18 +2,18 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-current_phase: 3
-current_phase_name: Typed IPC Error Contract
-status: executing
-stopped_at: Phase 3 context gathered
-last_updated: "2026-08-22T23:53:08.966Z"
-last_activity: 2026-08-23
-last_activity_desc: Phase 1 complete, transitioned to Phase 2
+current_phase: 03
+current_phase_name: typed-ipc-error-contract
+status: phase_complete
+stopped_at: Phase 03 complete and verified (passed); PR #279 open; Phase 4 not started
+last_updated: "2026-08-24T04:45:00.000Z"
+last_activity: 2026-08-24
+last_activity_desc: Phase 03 complete - verification passed after the real-app WKWebView smoke closed the last evidence gap
 progress:
   total_phases: 3
-  completed_phases: 2
+  completed_phases: 3
   total_plans: 14
-  completed_plans: 10
+  completed_plans: 14
 ---
 
 # Project State
@@ -23,16 +23,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-08-23)
 
 **Core value:** The filesystem stays the source of truth - everything Maru shows is derived from real files the user owns, and nothing is lost if Maru is uninstalled.
-**Current focus:** Phase 02 — Shared Scanner and Path Invariants
+**Current focus:** Phase 03 complete; Phase 4 (Editor Surface State Extraction) is next
 
 ## Current Position
 
-Phase: 3 — Typed IPC Error Contract
-Plan: Not started
-Status: Ready to execute
-Last activity: 2026-08-23 — Phase 2 complete, transitioned to Phase 3
+Phase: 03 (Typed IPC Error Contract) - COMPLETE, verified passed
+Plan: 4 of 4 complete
+Status: Verified passed on branch gsd/phase-3-typed-ipc-error-contract (PR #279)
+Last activity: 2026-08-24 - real-app WKWebView smoke closed the last evidence gap and found two live defects
 
-Progress: [██████████] 100%
+Progress: [████████████░░░░░░░░] 60% (3/5 phases)
 
 ## Performance Metrics
 
@@ -69,6 +69,9 @@ Progress: [██████████] 100%
 | Phase 02 P01 | 9min | 3 tasks | 6 files |
 | Phase 02 P02 | 5min | 3 tasks | 4 files |
 | Phase 02 P03 | 7min | 2 tasks | 3 files |
+| Phase 03 P02 | ~50min | 2 tasks | 6 files |
+| Phase 03 P03 | 15min | 2 tasks | 9 files |
+| Phase 03 P04 | ~35min | 2 tasks | 0 files |
 
 ## Accumulated Context
 
@@ -107,6 +110,17 @@ Recent decisions affecting current work:
 - [Phase ?]: [Phase 2]: 02-03 guard shape - maru_home()/install_root_base() restructured to a single exit wrapped in require_absolute, so a future early-return cannot bypass the check without restructuring the exit
 - [Phase ?]: [Phase 2]: 02-03 env_root()/skills_root() get no separate guard - they derive from maru_home() and are covered transitively; duplicating the check would re-fragment the invariant
 - [Phase ?]: [Phase 2]: 02-03 require_absolute's temporary allow(dead_code) removed in the same commit the first consumer landed - closes WINDOWS.md ledger entry 1
+- [Phase 3]: 03-01 ratified the 7-command branch-on scope over CONTEXT's "four commands" wording - same four codes, seven commands; graph_link_apply stays display-only and OUT
+- [Phase 3]: 03-01 ERR-04 pre-migration baseline measured at B = 1138 before any edit, matching the planning-time figure; 03-02 records against B-10 and 03-04 asserts within [B-20, B]
+- [Phase 3]: 03-01 leaves `cargo clippy -- -D warnings` transiently red on three not-yet-consumed code constants rather than adding a suppression attribute - the phase prohibition holds and 03-02 clears it
+- [Phase 3]: 03-01's human-verify checkpoint was approved without per-step smoke observations being reported back, so no real-app evidence exists for the migrated path yet
+- [Phase ?]: [Phase 3]: 03-02 found web_actions.rs (not in the plan's file list) calls today_mutate and task_transition directly; its call sites and one internal conflict-code branch needed the same map_err adapter / code-based check as the plan's own adapter sites, added as Rule 3 fallout
+- [Phase ?]: [Phase 3]: 03-02 also fixed document.rs's update_frontmatter_field (uncalled out in PATTERNS.md), which calls assert_expected_revision directly and needed the same map_err adapter as today_apply_plan_result
+- [Phase ?]: [Phase 3]: 03-02 measured the post-migration ERR-04 count at 1128, exactly B-10 against 03-01's baseline B=1138, confirming no signature outside the 10-item migration set changed
+- [Phase ?]: [Phase 3]: 03-02 migrated eleven prefix-string test assertions, not the six PATTERNS.md/PLAN.md enumerated by line number, since every unwrap_err() on a migrated command now yields IpcError regardless of which error path fired
+- [Phase ?]: All three today_conflict fixture throw sites migrated to raw wire shape (not just the two the plan named by line), keeping the one-normalization-point invariant intact
+- [Phase ?]: ERR-01 and ERR-03 marked complete after verifying all four contract codes have a frontend reader and the residual substring-matcher grep is zero; ERR-02 left open for 03-04's formal two-sided rename drill
+- [Phase ?]: ERR-02 drill extended to three sub-drills (Rust value pin, Rust name/build, TS union/tsc) so the web_actions.rs:860 branch site is proven build-protected, not just the pin test
 
 ### Scope Exceptions
 
@@ -120,15 +134,19 @@ Recent decisions affecting current work:
   untracked (`01-06-SUMMARY.md`, `01-07-SUMMARY.md`, `02-02-SUMMARY.md`); those two
   clippy findings and the formatting diffs are fixed in the same commit that adopts
   it, so the composite gate runs against the same tree CI sees.
+
 - The bridge's error strings (`cli_missing:`, `hwp_timeout:`, `hwp_failed:`,
   `hwp_parse_failed:`, `hwped_bad_request:`) stay `Result<T, String>` and are
   **exempt from the Phase 3 typed contract**. `src/lib/hwped.ts` contains no error
   branching at all, so they are display-only - exactly the class ERR-04 protects
   from migration.
+
 - Still owed, deliberately deferred until the hwp-editor implementation track
   reports complete: the Phase 2.1 planning artifacts, the HWPE-01..03 requirement
   registration, and the Semantica Phases 6-9 roadmap entries drawn from
   `docs/semantica-adoption-plan.md`.
+- [Phase 3]: The real-app WKWebView smoke found two live defects nothing else could see - EvidenceBinderMutation lacked serde rename_all_fields so every camelCase mutation was rejected at the bridge, and evidence discovery blocked the UI thread for over 40s on a 64k-file workspace. Treat "no native gate" as a real coverage hole in later phases, not a formality
+- [Phase 3]: Codex adversarial review produced ERR-05 and ERR-06 (v2 requirements) - the contract pins declarations but not emission sites, and commands able to emit reserved codes still flatten to String
 
 ### Pending Todos
 
@@ -149,9 +167,10 @@ None yet.
 | Reliability | REL-01 SIGHUP-immortal terminal session | v2 | 2026-08-22 |
 | Testing | TEST-01..04 (native Tauri E2E runner, coverage, remaining component tests, app_menu smoke) | v2 | 2026-08-22 |
 | Product | HUB-01 Hub graph-metadata sync - the doc set's only explicit deferral | v2 | 2026-08-22 |
+| Typed IPC | ERR-05 closed-enum contract (emission sites unconstrained; guard checks declarations only), ERR-06 typed return for every conflict-emitting command (today_apply_plan_result, task_calendar_set_sync flatten to String) | v2 | 2026-08-23 |
 
 ## Session Continuity
 
-Last session: 2026-08-22T22:29:59.605Z
-Stopped at: Phase 3 context gathered
-Resume file: .planning/phases/03-typed-ipc-error-contract/03-CONTEXT.md
+Last session: 2026-08-24T04:45:00.000Z
+Stopped at: Phase 03 complete and verified; PR #279 open, Phase 4 not started
+Resume file: .planning/phases/03-typed-ipc-error-contract/03-VERIFICATION.md
