@@ -15,9 +15,9 @@ provides:
 affects: [03-typed-ipc-error-contract (03-03 frontend branch sites, 03-04 gates)]
 
 actuals:
-  tokens: 5493
+  tokens: 5558
   tasks: 2
-  commits: 2
+  commits: 3
 
 tech-stack:
   added: []
@@ -122,7 +122,7 @@ status: complete
 
 ## Decisions Made
 
-- **web_actions.rs adopted as an undeclared fallout fix, not a scope change.** It calls `today_mutate` (4 sites) and `task_transition` (1 site) directly and is not in this plan's `files_modified` list or `03-PATTERNS.md`'s file classification. Once `today_mutate`/`task_transition` flip to `IpcError`, `web_actions.rs` fails to compile without changes at every one of those call sites. Two of the four `today_mutate` sites are `.unwrap()` success-path tests requiring no change; the other two (`apply_receipt`'s `task_transition` call, `web_actions_import_top`'s `today_mutate` match) needed the map_err adapter, and `web_actions_import_top`'s internal `Err(err) if err.starts_with("today_conflict")` branch (a real Rust-side retry decision, not just a test) moved to `err.code == "today_conflict"`. This is Rule 3 (blocking issue caused directly by this plan's own signature changes), not new functionality.
+- **web_actions.rs adopted as an undeclared fallout fix, not a scope change.** It calls `today_mutate` (4 sites) and `task_transition` (1 site) directly and is not in this plan's `files_modified` list or `03-PATTERNS.md`'s file classification. Once `today_mutate`/`task_transition` flip to `IpcError`, `web_actions.rs` fails to compile without changes at every one of those call sites. Two of the four `today_mutate` sites are `.unwrap()` success-path tests requiring no change; the other two (`apply_receipt`'s `task_transition` call, `web_actions_import_top`'s `today_mutate` match) needed the map_err adapter, and `web_actions_import_top`'s internal `Err(err) if err.starts_with("today_conflict")` branch (a real Rust-side retry decision, not just a test) moved to `err.code == TODAY_CONFLICT`. This is Rule 3 (blocking issue caused directly by this plan's own signature changes), not new functionality.
 - **`update_frontmatter_field` also needed the map_err adapter.** Not named in PATTERNS.md's file classification or the plan's action text, it directly calls `assert_expected_revision(...)?` and fails to compile once that helper flips to `IpcError`. Same ERR-04 reasoning as `today_apply_plan_result`: no frontend branch reads this command's error by code, so it stays `Result<_, String>`.
 - **The plan's "today_mutate's two inline revision guards" description was imprecise for the second guard.** It lives inside `apply_mutation` (a private helper `today_mutate` calls via `?` on the `TodayMutation::SetPlan` arm), not inside `today_mutate`'s own body. The constructed `IpcError` is identical either way; only the location description needed correcting during implementation.
 - **Eleven prefix-string assertions migrated, not six.** The plan's read_first blocks enumerated six by line number (today_store.rs, today_lifecycle.rs, document.rs). Because every `unwrap_err()` on a migrated command now yields `IpcError` regardless of which error path inside that command fired, five more assertions needed a `.to_string()` insertion just to keep compiling, even though they check non-contract legacy strings (`today_undo_unavailable`, `today_yesterday_item_missing`, `today_block_crosses_sleep`, `task_defer_date_required`, and web_actions.rs's stale-revision check). None were weakened; each still asserts the same text it did before, just through `.to_string()`.
@@ -134,10 +134,10 @@ status: complete
 **1. [Rule 3 - Blocking compile issue] web_actions.rs call sites needed the map_err adapter / code-based branch**
 - **Found during:** Task 1, after flipping today_mutate and task_transition
 - **Issue:** `cargo build --lib` failed with three type mismatches: `apply_receipt`'s `task_transition(...)?` (E0277, no `From<IpcError> for String`), and `web_actions_import_top`'s `today_mutate(...)` match arms (`err.starts_with(...)` doesn't exist on `IpcError`; `Err(err) => Err(err)` type mismatch)
-- **Fix:** `.map_err(|e| e.to_string())?` at the `task_transition` call; `err.code == "today_conflict"` replacing `err.starts_with("today_conflict")` in the retry-branch match guard, and `Err(err.to_string())` for the fallthrough arm
+- **Fix:** `.map_err(|e| e.to_string())?` at the `task_transition` call; `err.code == TODAY_CONFLICT` (imported from `crate::ipc_error`) replacing `err.starts_with("today_conflict")` in the retry-branch match guard, and `Err(err.to_string())` for the fallthrough arm
 - **Files modified:** src-tauri/src/web_actions.rs
 - **Verification:** `cargo --offline test --lib web_actions` (29 passed)
-- **Committed in:** `e603f69` (part of task 1 commit)
+- **Committed in:** `e603f69` (part of task 1 commit); the guard's literal-vs-constant follow-up below landed in a separate commit
 
 **2. [Rule 1 - Bug/compile fix] today_mutate's own today_undo_unavailable sites and task_calendar_set_sync's tail call also needed conversion**
 - **Found during:** Task 1, first `cargo build --lib` after the signature flips
@@ -163,11 +163,23 @@ status: complete
 - **Verification:** `cargo --offline test --lib today`, `cargo --offline test --lib web_actions` (both fully green)
 - **Committed in:** `e603f69` (part of task 1 commit)
 
+**5. [Review-caught - ERR-02 defect] web_actions.rs:859 compared err.code against a raw string literal instead of TODAY_CONFLICT**
+- **Found during:** Team-lead review of this plan's commits, after task 1/2 landed
+- **Issue:** `Err(err) if err.code == "today_conflict" => Ok(skipped("conflict"))` is the only Rust-side branch on a contract code in the whole tree. Comparing against the literal instead of the `TODAY_CONFLICT` constant defeats ERR-02 at exactly the site it protects: renaming the constant's value would fail `ipc_error_codes_are_stable` but leave this literal matching nothing, silently breaking the conflict-retry recovery path with no build error
+- **Fix:** imported `TODAY_CONFLICT` from `crate::ipc_error`; changed the guard to `err.code == TODAY_CONFLICT`. The test assertion at web_actions.rs:1863 (`assert_eq!(stale.code, "today_conflict")`) is left as a literal by design, it is what makes a rename of the constant observable
+- **Files modified:** src-tauri/src/web_actions.rs
+- **Verification:** `cargo --offline test --lib web_actions`, `cargo --offline clippy --lib -- -D warnings`, `cargo --offline fmt -- --check`
+- **Committed in:** `98f655b` (separate fix commit on top of task 1)
+- **Note for 03-04:** `web_actions.rs:859` is the only Rust-side branch on a contract code in the tree (confirmed by grep across `src-tauri/src`). 03-04's ERR-02 rename drill must exercise this site too, not just the TypeScript union, or the drill only proves half the contract.
+
 ---
 
-**Total deviations:** 4 auto-fixed (2x Rule 3, 2x Rule 1). All are compile-correctness fixes made necessary by this plan's own signature changes rippling into callers PATTERNS.md/PLAN.md did not enumerate. No scope creep: no new functionality, no reworded user-visible text, no new suppression attributes.
+**Total deviations:** 5 (2x Rule 3, 2x Rule 1, 1 review-caught). All are compile-correctness or contract-integrity fixes made necessary by this plan's own signature changes rippling into callers PATTERNS.md/PLAN.md did not enumerate. No scope creep: no new functionality, no reworded user-visible text, no new suppression attributes.
 
 ## Issues Encountered
+
+- **`web_actions.rs:859` initially compared the contract code as a raw string literal, defeating ERR-02 at the one Rust-side branch site that exists.** Caught in orchestrator review, fixed on top of this plan's commits. The migrated branch read `err.code == "today_conflict"` rather than using the `TODAY_CONFLICT` constant. A grep over `src-tauri/src` confirms this is the ONLY Rust-side branch on a contract code in the tree, which makes the gap consequential: renaming the constant's value would leave `ipc_error_codes_are_stable` red, but a deliberate rename that updates that test would silently stop this branch matching, killing the conflict-skip recovery path with no build error. That is precisely the "silently breaking a recovery path" failure ERR-02 is chartered to eliminate. The site was missed because `web_actions.rs` was absent from the plan's `files_modified` list, so it never received the PATTERNS.md per-file treatment the enumerated files got. Fixed by importing `TODAY_CONFLICT` and comparing against it; the test assertion at `:1864` deliberately keeps the raw literal, since a test pinning the wire value is what makes a rename observable.
+- **Note for 03-04's ERR-02 rename drill:** `web_actions.rs:860` is the only Rust-side contract-code branch. The drill must exercise it, or it proves only the TypeScript half of the two-sided gate.
 
 - **Full `cargo --offline test --lib` raced a concurrent unrelated session's `cargo test --workspace` on this shared machine** (a separate hwp-cli project checkout, PID 82928, running the entire time this plan executed). The first full-suite run failed 12 `outlook_mso::tests::*` cases with `m365_timeout: readiness probe exceeded its deadline`, a CPU-contention timeout, not a real regression: `outlook_mso.rs` is untouched by this plan's diff (`git diff --stat` confirms only the six files listed above changed), and this exact failure mode is already documented in STATE.md's Phase 1 decision log ("test-rust failed on 12 outlook_mso timeout tests racing a concurrent session's own cargo test --workspace process"). Verified unrelated by running the task-scoped test filters this plan's diff actually covers (`today`, `document`, `web_actions`, 167 tests, 100% pass) plus `cargo clippy --lib -- -D warnings` (clean) and `cargo fmt -- --check` (clean) independently of the full-suite run. A second full-suite run, started once the first returned, finished with the identical result (1205 passed, the same 12 outlook_mso cases failed, same "readiness probe exceeded its deadline" pattern), confirming the failure is stable and unrelated to this plan's diff rather than a one-off flake.
 
