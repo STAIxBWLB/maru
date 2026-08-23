@@ -10,8 +10,9 @@ Give the errors the frontend branches on a stable machine-readable `code`, so a
 rename breaks the build on both sides instead of silently breaking a recovery
 path. Covers ERR-01..04: a typed `{ code, message }` contract over IPC for the
 branch-on set, a two-sided rename-fails-the-build mechanism, migration of the
-existing `message.includes(...)` matchers, and zero touch to the 1,118
-display-only `Result<T, String>` signatures.
+existing `message.includes(...)` matchers, and zero touch to the ~1,138
+display-only `Result<T, String>` signatures (measured baseline; CONCERNS.md's
+1,118 is stale).
 
 </domain>
 
@@ -95,7 +96,8 @@ display-only `Result<T, String>` signatures.
 
 ### Evidence
 - `.planning/codebase/CONCERNS.md` §Tech Debt — "Stringly-typed IPC errors":
-  the 1,118 signatures, the two existing error enums
+  the 1,118 signatures (stale as written; the measured baseline is 1,138 —
+  RESEARCH Pitfall 6), the two existing error enums
   (`src-tauri/src/agent_host/status.rs:351`, `src-tauri/src/hub_client/http.rs:19`),
   and the prescribed `{ code, message }` struct + `types.ts` mirror approach
 
@@ -136,7 +138,8 @@ display-only `Result<T, String>` signatures.
 <specifics>
 ## Specific Ideas
 
-- ERR-04's guard is a count: `Result<T, String>` stays within a few of 1,118 —
+- ERR-04's guard is a count: `Result<T, String>` stays within a few of the
+  pre-migration baseline 03-01 measures (planning-time figure 1,138) —
   the four migrated commands are the only signature changes.
 - The phase's own proof of ERR-02 is a deliberate rename drill: rename a code
   on one side, watch `make verify` go red on the other, revert (the Phase 1

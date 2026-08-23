@@ -69,7 +69,7 @@ real files the user owns, and nothing is lost if Maru is uninstalled.
   feature landing mid-refactor makes every regression ambiguous. One recorded
   exception: the `hwped_*` hwp-editor bridge, written by a parallel track and
   adopted here rather than built (STATE.md "Scope Exceptions")
-- **Converting all 1,118 `Result<T, String>` signatures** - CONCERNS.md rejects
+- **Converting every `Result<T, String>` signature** - CONCERNS.md rejects
   it explicitly; only the errors the frontend actually branches on move
 - **Retrofitting all ~20 existing path-traversal validators** - the existing
   checks are individually sound; promoting the canonical helper is the goal
@@ -181,7 +181,7 @@ ones this milestone can actually break are listed here.
 | Scope drawn from CONCERNS.md Tech Debt, not from the SPECs | 18 ingested docs describe shipped behavior; inventing forward work from them would be fabrication | - Pending |
 | Verification gates land before the decomposition (Phase 1) | Moving 68 `useState` / 50 `useEffect` without a hook-dependency gate reproduces #260/#262/#264 | ✓ Phase 1 — 7 gates live, deliberate-break proofs red-then-green, UAT 24/24 |
 | Continue the module-store precedent instead of adding a state library | `errorStore`/`workspaceStore`/`editorTabsStore` already prove the pattern here | - Pending |
-| Typed error contract covers only branched-on errors | Converting 1,118 signatures is cost without benefit; display-only errors read fine as strings | - Pending |
+| Typed error contract covers only branched-on errors | Converting all ~1,138 signatures is cost without benefit; display-only errors read fine as strings | - Pending |
 | Promote `ensure_within`, do not retrofit all ~20 callers | Existing checks are individually sound; the problem is that a new author has no canonical example | ✓ Phase 2 — promoted to `crate::paths`, doc + tests as the example, zero retrofits |
 | Phases 4-5 get no `UI hint` annotation | They refactor UI state plumbing with pixel-identical output as the success criterion; a UI design spec would be the wrong downstream suggestion | - Pending |
 | 64 SPEC constraints recorded as invariants, not decisions | 0 ADRs in the set - nothing is decision-locked, so a future ADR can override any of them | - Pending |
