@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { MOCK_VAULT_PATH } from "./fixtures";
+import { IpcError, normalizeIpcError } from "./ipcError";
 import { extractOutline } from "./markdown";
 
 declare global {
@@ -131,18 +132,25 @@ export async function mutateEvidenceBinder(params: {
   expectedRevision: string;
   mutation: EvidenceBinderMutation;
 }): Promise<EvidenceBinderResponse> {
-  if (!isTauri()) {
-    const key = `${params.workPath}:${params.docId}`;
-    const current =
-      mockBinderStates.get(key) ?? mockEvidenceBinder(params.docId, params.documentPath);
-    if (current.revision !== params.expectedRevision) {
-      throw new Error("evidence_binder_revision_conflict");
+  try {
+    if (!isTauri()) {
+      const key = `${params.workPath}:${params.docId}`;
+      const current =
+        mockBinderStates.get(key) ?? mockEvidenceBinder(params.docId, params.documentPath);
+      if (current.revision !== params.expectedRevision) {
+        throw new IpcError({
+          code: "evidence_binder_revision_conflict",
+          message: `expected revision ${params.expectedRevision}, found ${current.revision}`,
+        });
+      }
+      const next = applyMockMutation(current, params.mutation);
+      mockBinderStates.set(key, next);
+      return structuredClone(next);
     }
-    const next = applyMockMutation(current, params.mutation);
-    mockBinderStates.set(key, next);
-    return structuredClone(next);
+    return await invoke<EvidenceBinderResponse>("evidence_binder_mutate", { req: params });
+  } catch (err) {
+    throw normalizeIpcError(err);
   }
-  return invoke<EvidenceBinderResponse>("evidence_binder_mutate", { req: params });
 }
 
 export function evidenceCandidateSummary(candidate: EvidenceBinderCandidate): string {

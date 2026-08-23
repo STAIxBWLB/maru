@@ -1,4 +1,5 @@
 use crate::atomic_file::write_atomic;
+use crate::ipc_error::{IpcError, EVIDENCE_BINDER_REVISION_CONFLICT};
 use crate::kordoc_lite::{self, DocumentFormat, KordocLiteCheck};
 use crate::paths::GENERATED_DIRS;
 use crate::vault::normalize_existing_dir;
@@ -248,7 +249,7 @@ pub fn evidence_binder_read(
 #[tauri::command]
 pub fn evidence_binder_mutate(
     req: EvidenceBinderMutateRequest,
-) -> Result<EvidenceBinderResponse, String> {
+) -> Result<EvidenceBinderResponse, IpcError> {
     let work = normalize_existing_dir(&req.work_path)?;
     assert_maru_can_write(&req.work_path, WorkspaceWriteAction::Modify)?;
     let doc_id = sanitize_doc_id(&req.doc_id)?;
@@ -259,7 +260,13 @@ pub fn evidence_binder_mutate(
     let mut state = read_or_create_state(&work, &doc_id, req.document_path.clone(), &candidates)?;
     let actual_revision = state_revision(&state)?;
     if actual_revision != req.expected_revision {
-        return Err("evidence_binder_revision_conflict".to_string());
+        return Err(IpcError {
+            code: EVIDENCE_BINDER_REVISION_CONFLICT.to_string(),
+            message: format!(
+                "expected revision {}, found {actual_revision}",
+                req.expected_revision
+            ),
+        });
     }
     apply_mutation(&work, &mut state, &candidates, req.mutation)?;
     state.schema_version = BINDER_SCHEMA_VERSION;
@@ -1712,14 +1719,21 @@ files:
             work_path: path_string(work),
             doc_id: "doc-1".into(),
             document_path: Some("projects/bu-a/report.md".into()),
-            expected_revision: read.revision,
+            expected_revision: read.revision.clone(),
             mutation: EvidenceBinderMutation::SetNote {
                 binding_id: saved.state.bindings[0].binding_id.clone(),
                 note: Some("stale".into()),
             },
         })
         .unwrap_err();
-        assert_eq!(error, "evidence_binder_revision_conflict");
+        assert_eq!(error.code, EVIDENCE_BINDER_REVISION_CONFLICT);
+        assert_eq!(
+            error.to_string(),
+            format!(
+                "evidence_binder_revision_conflict: expected revision {}, found {}",
+                read.revision, saved.revision
+            )
+        );
     }
 
     #[test]
