@@ -4,6 +4,7 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { LocaleContext, t as translate } from "../../lib/i18n";
+import { IpcError } from "../../lib/ipcError";
 import { DEFAULT_MARU_SETTINGS } from "../../lib/settings";
 import type {
   DailyPlanItem,
@@ -251,7 +252,9 @@ describe("TodayExecute", () => {
 
   it("shows a conflict notice and reloads on task_conflict", async () => {
     const { container, reload } = await renderExecute();
-    vi.mocked(taskTransition).mockRejectedValue("task_conflict: expected hash a, found b");
+    vi.mocked(taskTransition).mockRejectedValue(
+      new IpcError({ code: "task_conflict", message: "expected hash a, found b" }),
+    );
     await act(async () => {
       completeButtons(container)[0].click();
     });

@@ -4,15 +4,24 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { invokeE2EOverride } from "./e2eInvoke";
+import { IpcError, normalizeIpcError } from "./ipcError";
 
 /** Single invoke funnel for every Today command. In a plain browser (dev /
  *  Playwright) commands resolve through per-command e2e fixtures when
  *  registered; without a fixture the raw invoke rejects, preserving the
- *  previous degraded-mode behavior. In the Tauri shell this is a pass-through. */
+ *  previous degraded-mode behavior. In the Tauri shell this is a pass-through.
+ *  The whole body is normalized so a fixture throw (e2e override, resolved
+ *  before invoke) and a real Tauri rejection both surface the same shape to
+ *  branch sites — unmigrated commands still reject with raw strings, which
+ *  normalizeIpcError passes through unchanged. */
 async function todayInvoke<T>(command: string, args: Record<string, unknown>): Promise<T> {
-  const override = await invokeE2EOverride<T>(command, args);
-  if (override !== null) return override;
-  return invoke<T>(command, args);
+  try {
+    const override = await invokeE2EOverride<T>(command, args);
+    if (override !== null) return override;
+    return await invoke<T>(command, args);
+  } catch (err) {
+    throw normalizeIpcError(err);
+  }
 }
 
 export type TodayRoute =
@@ -693,25 +702,13 @@ export async function sha256Hex(text: string): Promise<string> {
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
-/** Machine-readable error prefix Rust emits before `": "`
- *  (e.g. "today_conflict: expected revision ..." -> "today_conflict"). */
-export function todayErrorCode(err: unknown): string | null {
-  const message =
-    typeof err === "string" ? err : err instanceof Error ? err.message : null;
-  if (!message) return null;
-  const index = message.indexOf(": ");
-  if (index <= 0) return null;
-  const code = message.slice(0, index);
-  return /^[a-z][a-z0-9_]*$/.test(code) ? code : null;
-}
-
 /** Optimistic-concurrency conflict from `today_mutate` (stale revision). */
 export function isTodayConflict(err: unknown): boolean {
-  return todayErrorCode(err) === "today_conflict";
+  return err instanceof IpcError && err.code === "today_conflict";
 }
 
 /** Optimistic-concurrency conflict from `task_transition` / `task_trash`
  *  (stale expected task hash). */
 export function isTaskConflict(err: unknown): boolean {
-  return todayErrorCode(err) === "task_conflict";
+  return err instanceof IpcError && err.code === "task_conflict";
 }

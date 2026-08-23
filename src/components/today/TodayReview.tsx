@@ -10,9 +10,10 @@ import { TriangleAlert } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { readDocument, saveDocument } from "../../lib/api";
 import { useTranslation } from "../../lib/i18n";
+import { IpcError } from "../../lib/ipcError";
 import type { DocumentPayload } from "../../lib/types";
 import type { TaskEvent, TodayRoute } from "../../lib/today";
-import { readTaskEvents, todayErrorCode } from "../../lib/today";
+import { readTaskEvents } from "../../lib/today";
 import { planItemRefKey } from "../../lib/todayPlan";
 import { TodayStageScaffold } from "./TodayStageScaffold";
 import { useToday } from "./todayContext";
@@ -173,7 +174,7 @@ export function TodayReview({ onNavigate }: TodayReviewProps) {
       setReflectionSaved(true);
       setTimeout(() => setReflectionSaved(false), 2500);
     } catch (err) {
-      if (todayErrorCode(err) === "document_conflict") {
+      if (err instanceof IpcError && err.code === "document_conflict") {
         setNotice("conflict");
         try {
           const fresh = await readDocument(workPath, journalPath);
