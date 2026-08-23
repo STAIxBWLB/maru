@@ -2,18 +2,18 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-current_phase: 3
-current_phase_name: Typed IPC Error Contract
+current_phase: 03
+current_phase_name: typed-ipc-error-contract
 status: executing
-stopped_at: Phase 3 context gathered
-last_updated: "2026-08-22T23:53:08.966Z"
+stopped_at: Phase 03 plan 01 complete (checkpoint approved), wave 2 next
+last_updated: "2026-08-23T02:20:00.000Z"
 last_activity: 2026-08-23
-last_activity_desc: Phase 1 complete, transitioned to Phase 2
+last_activity_desc: Phase 03 plan 01 complete - typed IPC error contract tracer landed
 progress:
   total_phases: 3
   completed_phases: 2
   total_plans: 14
-  completed_plans: 10
+  completed_plans: 11
 ---
 
 # Project State
@@ -23,16 +23,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-08-23)
 
 **Core value:** The filesystem stays the source of truth - everything Maru shows is derived from real files the user owns, and nothing is lost if Maru is uninstalled.
-**Current focus:** Phase 02 — Shared Scanner and Path Invariants
+**Current focus:** Phase 03 - Typed IPC Error Contract
 
 ## Current Position
 
-Phase: 3 — Typed IPC Error Contract
-Plan: Not started
-Status: Ready to execute
-Last activity: 2026-08-23 — Phase 2 complete, transitioned to Phase 3
+Phase: 03 (Typed IPC Error Contract) - EXECUTING
+Plan: 1 of 4 complete (03-01); wave 2 (03-02, 03-03) next
+Status: Executing Phase 03 on branch gsd/phase-3-typed-ipc-error-contract
+Last activity: 2026-08-23 - 03-01 tracer landed, human-verify checkpoint approved
 
-Progress: [██████████] 100%
+Progress: [█████░░░░░░░░░░░░░░░] 25% (1/4 plans)
 
 ## Performance Metrics
 
@@ -107,6 +107,10 @@ Recent decisions affecting current work:
 - [Phase ?]: [Phase 2]: 02-03 guard shape - maru_home()/install_root_base() restructured to a single exit wrapped in require_absolute, so a future early-return cannot bypass the check without restructuring the exit
 - [Phase ?]: [Phase 2]: 02-03 env_root()/skills_root() get no separate guard - they derive from maru_home() and are covered transitively; duplicating the check would re-fragment the invariant
 - [Phase ?]: [Phase 2]: 02-03 require_absolute's temporary allow(dead_code) removed in the same commit the first consumer landed - closes WINDOWS.md ledger entry 1
+- [Phase 3]: 03-01 ratified the 7-command branch-on scope over CONTEXT's "four commands" wording - same four codes, seven commands; graph_link_apply stays display-only and OUT
+- [Phase 3]: 03-01 ERR-04 pre-migration baseline measured at B = 1138 before any edit, matching the planning-time figure; 03-02 records against B-10 and 03-04 asserts within [B-20, B]
+- [Phase 3]: 03-01 leaves `cargo clippy -- -D warnings` transiently red on three not-yet-consumed code constants rather than adding a suppression attribute - the phase prohibition holds and 03-02 clears it
+- [Phase 3]: 03-01's human-verify checkpoint was approved without per-step smoke observations being reported back, so no real-app evidence exists for the migrated path yet
 
 ### Scope Exceptions
 
@@ -120,11 +124,13 @@ Recent decisions affecting current work:
   untracked (`01-06-SUMMARY.md`, `01-07-SUMMARY.md`, `02-02-SUMMARY.md`); those two
   clippy findings and the formatting diffs are fixed in the same commit that adopts
   it, so the composite gate runs against the same tree CI sees.
+
 - The bridge's error strings (`cli_missing:`, `hwp_timeout:`, `hwp_failed:`,
   `hwp_parse_failed:`, `hwped_bad_request:`) stay `Result<T, String>` and are
   **exempt from the Phase 3 typed contract**. `src/lib/hwped.ts` contains no error
   branching at all, so they are display-only - exactly the class ERR-04 protects
   from migration.
+
 - Still owed, deliberately deferred until the hwp-editor implementation track
   reports complete: the Phase 2.1 planning artifacts, the HWPE-01..03 requirement
   registration, and the Semantica Phases 6-9 roadmap entries drawn from
@@ -152,6 +158,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-08-22T22:29:59.605Z
-Stopped at: Phase 3 context gathered
-Resume file: .planning/phases/03-typed-ipc-error-contract/03-CONTEXT.md
+Last session: 2026-08-23T02:20:00.000Z
+Stopped at: Phase 03 plan 01 complete, wave 2 not yet dispatched
+Resume file: .planning/phases/03-typed-ipc-error-contract/03-01-SUMMARY.md

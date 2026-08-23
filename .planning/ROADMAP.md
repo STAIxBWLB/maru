@@ -119,12 +119,12 @@ Notes for planning:
   3. No `message.includes("<error_code>")` matcher remains in `src/` for a code that moved to the contract
   4. The `Result<T, String>` count in `src-tauri/src/` is essentially unchanged from the measured baseline of 1,138 (CONCERNS.md's 1,118 is stale) - display-only errors were not touched
 
-**Plans**: 0/4 plans executed
+**Plans**: 1/4 plans executed
 
 Plans:
 **Wave 1**
 
-- [ ] 03-01-PLAN.md - Tracer: IpcError struct + TS mirror + normalizer, proven end-to-end on evidence_binder_revision_conflict; real-app smoke checkpoint ratifying the 7-command scope (ERR-01, ERR-02)
+- [x] 03-01-PLAN.md - Tracer: IpcError struct + TS mirror + normalizer, proven end-to-end on evidence_binder_revision_conflict; real-app smoke checkpoint ratifying the 7-command scope (ERR-01, ERR-02)
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
@@ -195,7 +195,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5
 |-------|----------------|--------|-----------|
 | 1. Trustworthy Verify Signal | 7/7 | Complete    | 2026-08-23 |
 | 2. Shared Scanner and Path Invariants | 3/3 | Complete    | 2026-08-23 |
-| 3. Typed IPC Error Contract | 0/4 | Not started | - |
+| 3. Typed IPC Error Contract | 1/4 | In Progress|  |
 | 4. Editor Surface State Extraction | 0/TBD | Not started | - |
 | 5. Shell Decomposition Completion | 0/TBD | Not started | - |
 
