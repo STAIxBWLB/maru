@@ -42,7 +42,7 @@ key-decisions:
   - "The day_conflict guard the plan calls today_mutate's 'second inline revision guard' actually lives inside apply_mutation, a private helper today_mutate calls via ? on TodayMutation::SetPlan - not literally inside today_mutate's own body. The behavior (IpcError with TODAY_CONFLICT, verbatim suffix) is unchanged; only the plan's location description was imprecise"
   - "Eleven prefix-string test assertions needed migration in total, not the six PATTERNS.md/PLAN.md enumerated by line number: every unwrap_err() on a migrated command yields IpcError now, regardless of which of that command's error paths fired, so non-conflict legacy-string assertions (today_undo_unavailable, today_yesterday_item_missing, today_block_crosses_sleep, task_defer_date_required, web_actions.rs's stale-revision check) needed a .to_string() insertion to keep compiling, even though they carry no contract code"
 
-requirements-completed: [ERR-01, ERR-04]
+requirements-completed: [ERR-04]
 
 coverage:
   - id: D1
@@ -171,9 +171,17 @@ status: complete
 
 - **Full `cargo --offline test --lib` raced a concurrent unrelated session's `cargo test --workspace` on this shared machine** (a separate hwp-cli project checkout, PID 82928, running the entire time this plan executed). The first full-suite run failed 12 `outlook_mso::tests::*` cases with `m365_timeout: readiness probe exceeded its deadline`, a CPU-contention timeout, not a real regression: `outlook_mso.rs` is untouched by this plan's diff (`git diff --stat` confirms only the six files listed above changed), and this exact failure mode is already documented in STATE.md's Phase 1 decision log ("test-rust failed on 12 outlook_mso timeout tests racing a concurrent session's own cargo test --workspace process"). Verified unrelated by running the task-scoped test filters this plan's diff actually covers (`today`, `document`, `web_actions`, 167 tests, 100% pass) plus `cargo clippy --lib -- -D warnings` (clean) and `cargo fmt -- --check` (clean) independently of the full-suite run. A second full-suite run, started once the first returned, finished with the identical result (1205 passed, the same 12 outlook_mso cases failed, same "readiness probe exceeded its deadline" pattern), confirming the failure is stable and unrelated to this plan's diff rather than a one-off flake.
 
+## Requirement Completion Note
+
+ERR-01 is claimed by all three of 03-01, 03-02, and 03-03's frontmatter (a requirement spanning multiple plans, the same pattern Phase 1 hit with GATE-03). REQUIREMENTS.md is left with ERR-01 unmarked here: the requirement text says "a frontend caller can read" the code, and that is only true today for `evidence_binder_revision_conflict` (03-01's tracer). The other six codes this plan produced on the Rust side have no frontend caller reading `.code` yet; that lands in 03-03. Only ERR-04 (a pure Rust-side signature-count invariant, fully true as of this commit) is marked complete here.
+
 ## Next Phase Readiness
 
 03-03 (frontend branch-site migration) is unblocked: all seven Rust commands in the branch-on set now emit `{ code, message }` on their conflict paths. 03-04's ERR-04 gate can check the measured `1128` against its `[B-20, B]` band directly from this SUMMARY without re-deriving it. The map_err-adapter pattern documented here (four instances: today_apply_plan_result, task_calendar_set_sync, update_frontmatter_field, web_actions.rs) is worth 03-04 checking exhaustively: any other caller of `today_mutate`/`task_transition`/`check_revision`/`load_context`/`assert_expected_revision` outside the seven-command set would need the same treatment, and this plan's own discovery process (build-error-driven, not a full call-graph audit) does not guarantee every such caller was found, though `cargo build --lib` succeeding is strong evidence none remain.
+
+## Self-Check: PASSED
+
+All six modified source files (today_store.rs, today_calendar.rs, today_lifecycle.rs, today_ai.rs, document.rs, web_actions.rs) confirmed present on disk. All three commits (e603f69, eff3526, 4eb2716) confirmed present in git log.
 
 ---
 *Phase: 03-typed-ipc-error-contract*

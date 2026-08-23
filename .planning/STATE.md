@@ -5,15 +5,15 @@ milestone_name: milestone
 current_phase: 03
 current_phase_name: typed-ipc-error-contract
 status: executing
-stopped_at: Phase 03 plan 01 complete (checkpoint approved), wave 2 next
-last_updated: "2026-08-23T02:20:00.000Z"
+stopped_at: Completed 03-02-PLAN.md
+last_updated: "2026-08-23T13:51:48.448Z"
 last_activity: 2026-08-23
 last_activity_desc: Phase 03 plan 01 complete - typed IPC error contract tracer landed
 progress:
   total_phases: 3
   completed_phases: 2
   total_plans: 14
-  completed_plans: 11
+  completed_plans: 12
 ---
 
 # Project State
@@ -28,11 +28,11 @@ See: .planning/PROJECT.md (updated 2026-08-23)
 ## Current Position
 
 Phase: 03 (Typed IPC Error Contract) - EXECUTING
-Plan: 1 of 4 complete (03-01); wave 2 (03-02, 03-03) next
-Status: Executing Phase 03 on branch gsd/phase-3-typed-ipc-error-contract
+Plan: 2 of 4 complete (03-01); wave 2 (03-02, 03-03) next
+Status: Ready to execute
 Last activity: 2026-08-23 - 03-01 tracer landed, human-verify checkpoint approved
 
-Progress: [█████░░░░░░░░░░░░░░░] 25% (1/4 plans)
+Progress: [█████████░] 86% (1/4 plans)
 
 ## Performance Metrics
 
@@ -69,6 +69,7 @@ Progress: [█████░░░░░░░░░░░░░░░] 25% (1/
 | Phase 02 P01 | 9min | 3 tasks | 6 files |
 | Phase 02 P02 | 5min | 3 tasks | 4 files |
 | Phase 02 P03 | 7min | 2 tasks | 3 files |
+| Phase 03 P02 | ~50min | 2 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -111,6 +112,10 @@ Recent decisions affecting current work:
 - [Phase 3]: 03-01 ERR-04 pre-migration baseline measured at B = 1138 before any edit, matching the planning-time figure; 03-02 records against B-10 and 03-04 asserts within [B-20, B]
 - [Phase 3]: 03-01 leaves `cargo clippy -- -D warnings` transiently red on three not-yet-consumed code constants rather than adding a suppression attribute - the phase prohibition holds and 03-02 clears it
 - [Phase 3]: 03-01's human-verify checkpoint was approved without per-step smoke observations being reported back, so no real-app evidence exists for the migrated path yet
+- [Phase ?]: [Phase 3]: 03-02 found web_actions.rs (not in the plan's file list) calls today_mutate and task_transition directly; its call sites and one internal conflict-code branch needed the same map_err adapter / code-based check as the plan's own adapter sites, added as Rule 3 fallout
+- [Phase ?]: [Phase 3]: 03-02 also fixed document.rs's update_frontmatter_field (uncalled out in PATTERNS.md), which calls assert_expected_revision directly and needed the same map_err adapter as today_apply_plan_result
+- [Phase ?]: [Phase 3]: 03-02 measured the post-migration ERR-04 count at 1128, exactly B-10 against 03-01's baseline B=1138, confirming no signature outside the 10-item migration set changed
+- [Phase ?]: [Phase 3]: 03-02 migrated eleven prefix-string test assertions, not the six PATTERNS.md/PLAN.md enumerated by line number, since every unwrap_err() on a migrated command now yields IpcError regardless of which error path fired
 
 ### Scope Exceptions
 
@@ -158,6 +163,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-08-23T02:20:00.000Z
-Stopped at: Phase 03 plan 01 complete, wave 2 not yet dispatched
-Resume file: .planning/phases/03-typed-ipc-error-contract/03-01-SUMMARY.md
+Last session: 2026-08-23T13:51:48.441Z
+Stopped at: Completed 03-02-PLAN.md
+Resume file: None

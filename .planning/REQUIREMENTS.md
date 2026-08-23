@@ -34,7 +34,7 @@ milestone with no end-user-visible surface.
 - [ ] **ERR-01**: A frontend caller can read a stable machine-readable `code` from any error it needs to branch on, alongside the human-readable message
 - [ ] **ERR-02**: Renaming an error code fails the build on both the Rust and TypeScript side instead of silently breaking a recovery path
 - [ ] **ERR-03**: Every existing `message.includes("<code>")` matcher branches on the typed code instead - starting with `evidence_binder_revision_conflict` at `src/components/evidence/EvidenceBinderPane.tsx:174`
-- [ ] **ERR-04**: Display-only errors are untouched - the `Result<T, String>` signature count stays within a few of the measured baseline of 1,138 (CONCERNS.md's 1,118 is stale; re-measure before Phase 3 executes)
+- [x] **ERR-04**: Display-only errors are untouched - the `Result<T, String>` signature count stays within a few of the measured baseline of 1,138 (CONCERNS.md's 1,118 is stale; re-measure before Phase 3 executes)
 
 > **Note for Phase 3 planning, from Phase 1's verification (2026-08-22).** None of the
 > seven `make verify` gates can catch a serde mismatch at the Rust-TypeScript IPC
@@ -130,7 +130,7 @@ not compete with the structural work. Not in the current roadmap.
 | ERR-01 | Phase 3 | Pending |
 | ERR-02 | Phase 3 | Pending |
 | ERR-03 | Phase 3 | Pending |
-| ERR-04 | Phase 3 | Pending |
+| ERR-04 | Phase 3 | Complete |
 | SHELL-01 | Phase 4 | Pending |
 | SHELL-02 | Phase 4 | Pending |
 | SHELL-03 | Phase 4 | Pending |

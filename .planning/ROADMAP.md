@@ -119,7 +119,7 @@ Notes for planning:
   3. No `message.includes("<error_code>")` matcher remains in `src/` for a code that moved to the contract
   4. The `Result<T, String>` count in `src-tauri/src/` is essentially unchanged from the measured baseline of 1,138 (CONCERNS.md's 1,118 is stale) - display-only errors were not touched
 
-**Plans**: 1/4 plans executed
+**Plans**: 2/4 plans executed
 
 Plans:
 **Wave 1**
@@ -128,7 +128,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 03-02-PLAN.md - Migrate the today and document Rust domains to IpcError; map_err adapter for today_ai; record the ERR-04 count (ERR-01, ERR-04)
+- [x] 03-02-PLAN.md - Migrate the today and document Rust domains to IpcError; map_err adapter for today_ai; record the ERR-04 count (ERR-01, ERR-04)
 - [ ] 03-03-PLAN.md - Normalize the today/save funnels, migrate all five branch sites to err.code, retire todayErrorCode, align e2e fixtures (ERR-01, ERR-03)
 
 **Wave 3** *(blocked on Wave 2 completion)*
@@ -195,7 +195,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5
 |-------|----------------|--------|-----------|
 | 1. Trustworthy Verify Signal | 7/7 | Complete    | 2026-08-23 |
 | 2. Shared Scanner and Path Invariants | 3/3 | Complete    | 2026-08-23 |
-| 3. Typed IPC Error Contract | 1/4 | In Progress|  |
+| 3. Typed IPC Error Contract | 2/4 | In Progress|  |
 | 4. Editor Surface State Extraction | 0/TBD | Not started | - |
 | 5. Shell Decomposition Completion | 0/TBD | Not started | - |
 
