@@ -117,7 +117,7 @@ Notes for planning:
   1. A frontend caller can read a stable `code` and a human message from every error it branches on, without parsing the message
   2. Renaming a code on the Rust side fails `make verify` on the TypeScript side, and vice versa
   3. No `message.includes("<error_code>")` matcher remains in `src/` for a code that moved to the contract
-  4. The `Result<T, String>` count in `src-tauri/src/` is essentially unchanged from today's 1,118 - display-only errors were not touched
+  4. The `Result<T, String>` count in `src-tauri/src/` is essentially unchanged from the measured baseline of 1,138 (CONCERNS.md's 1,118 is stale) - display-only errors were not touched
 
 **Plans**: 0/4 plans executed
 

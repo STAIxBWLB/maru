@@ -34,7 +34,7 @@ milestone with no end-user-visible surface.
 - [ ] **ERR-01**: A frontend caller can read a stable machine-readable `code` from any error it needs to branch on, alongside the human-readable message
 - [ ] **ERR-02**: Renaming an error code fails the build on both the Rust and TypeScript side instead of silently breaking a recovery path
 - [ ] **ERR-03**: Every existing `message.includes("<code>")` matcher branches on the typed code instead - starting with `evidence_binder_revision_conflict` at `src/components/evidence/EvidenceBinderPane.tsx:174`
-- [ ] **ERR-04**: Display-only errors are untouched - the `Result<T, String>` signature count stays within a few of today's 1,118
+- [ ] **ERR-04**: Display-only errors are untouched - the `Result<T, String>` signature count stays within a few of the measured baseline of 1,138 (CONCERNS.md's 1,118 is stale; re-measure before Phase 3 executes)
 
 > **Note for Phase 3 planning, from Phase 1's verification (2026-08-22).** None of the
 > seven `make verify` gates can catch a serde mismatch at the Rust-TypeScript IPC
@@ -103,7 +103,7 @@ not compete with the structural work. Not in the current roadmap.
 | Feature | Reason |
 |---------|--------|
 | Any new product feature | Behavior-preserving work is only verifiable if behavior is not also changing. **Exception, 2026-08-23:** the `hwped_*` hwp-editor bridge landed from a parallel track and is adopted, not built, by this milestone - see STATE.md "Scope Exceptions" |
-| Converting all 1,118 `Result<T, String>` signatures | Explicitly rejected in the CONCERNS.md fix approach; cost without benefit for display-only errors |
+| Converting every `Result<T, String>` signature | Explicitly rejected in the CONCERNS.md fix approach; cost without benefit for display-only errors |
 | Retrofitting all ~20 existing path-traversal validators | The existing checks are individually sound; the problem is the absence of a canonical example, not the callers |
 | Changing `.maruignore` defaults | It is a user-facing file format, not a scanner constant |
 | Any visible UI change during decomposition | A refactor that alters output cannot be verified against the existing e2e suite |

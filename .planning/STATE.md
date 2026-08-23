@@ -136,7 +136,7 @@ None yet.
 
 ### Blockers/Concerns
 
-- **Phase 3's ERR-04 count band is coupled to `hwped.rs`.** The pinned command reports 1,138 on the tree that adopts the bridge, and `hwped.rs` contributes 19 of those matches; without it the tree reads 1,119 and the post-migration count lands at 1,109, below `03-04-PLAN.md`'s `[1118, 1138]` band. Re-measure the baseline before Phase 3 executes and write the new number into `03-02-PLAN.md` and `03-04-PLAN.md` - continued hwp-editor work keeps moving it.
+- **Phase 3's ERR-04 count band is coupled to `hwped.rs`.** The pinned command reports 1,138, and `hwped.rs` contributes 19 of those matches; without it the tree reads 1,119 and the post-migration count lands at 1,109, below `03-04-PLAN.md`'s `[1118, 1138]` band. The baseline is now anchored to a commit rather than a date - re-confirmed 2026-08-23 on the committed tree at 34f96ee - and `03-02`/`03-04` cite that provenance. Residual risk: the hwp-editor track is still active, so `03-04` now requires a re-measurement at the start of the plan rather than treating drift as exceptional.
 - `src/App.tsx` has no test of any kind. Phases 4-5 depend on Phase 1's hook-dependency gate plus the per-pane tests written during extraction; there is no existing safety net for the decomposition.
 - `make verify` runs on ubuntu-22.04 only and e2e runs Chromium against Vite with mocked IPC. Nothing in CI exercises WKWebView, the real PTY, IME input, or the macOS menu - macOS-affecting changes need a real-app run.
 
