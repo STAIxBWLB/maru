@@ -435,10 +435,10 @@ make verify
 # Full verify plus release-only CLI and debug Tauri checks:
 make release-checks
 
-# Release preflight core (diff + release checks + release-mode CLI smoke):
+# Release preflight core (diff + release checks):
 make release-preflight-core
 
-# Complete local release gate (preflight core + Playwright e2e):
+# Complete local release gate (preflight core + release-mode CLI smoke + Playwright e2e):
 make release-preflight
 
 # Smoke the real installed AI CLIs. Every provider unit test drives a fake
@@ -520,12 +520,13 @@ snapshots, screenshots, or the network log (see the comment in
 `playwright.config.ts` for why, and for when to turn them back on).
 
 `.github/workflows/release-preflight.yml` is a manual recovery gate. It runs
-`make release-preflight-core` and `playwright e2e` as parallel jobs. The core
-target performs the diff check, `make release-checks`, and the release-mode CLI
-smoke; the E2E job retains failure artifact uploads. Locally,
-`make release-preflight` remains the complete gate by running the core target
-followed by `make test-e2e`. Release Preflight no longer duplicates PR
-verification automatically when a version tag is pushed.
+`make release-preflight-core`, `make cli-smoke`, and `playwright e2e` as three
+parallel jobs. The core target performs the diff check and
+`make release-checks`; the independent CLI job performs the release-mode smoke,
+and the E2E job retains failure artifact uploads. Locally,
+`make release-preflight` remains the complete sequential gate by running the
+core target, release-mode CLI smoke, and `make test-e2e`. Release Preflight no
+longer duplicates PR verification automatically when a version tag is pushed.
 
 ## Skills Bundle Channel (OTA)
 
