@@ -208,7 +208,7 @@ pub fn update_frontmatter_field(
     key: String,
     value: Option<FieldInput>,
     expected_revision: Option<String>,
-) -> Result<DocumentPayload, String> {
+) -> Result<DocumentPayload, IpcError> {
     let path = resolve_inside_vault(&vault_path, &document_path)?;
     let is_html = path
         .extension()
@@ -216,13 +216,15 @@ pub fn update_frontmatter_field(
         .map(|value| matches!(value.to_ascii_lowercase().as_str(), "html" | "htm"))
         .unwrap_or(false);
     if is_html {
-        return Err("frontmatter editing is not supported for HTML documents".to_string());
+        return Err("frontmatter editing is not supported for HTML documents"
+            .to_string()
+            .into());
     }
     assert_document_owner(&vault_path, &path)?;
     assert_maru_can_write(&vault_path, WorkspaceWriteAction::Modify)?;
     let original =
         fs::read_to_string(&path).map_err(|err| format!("Cannot read document: {err}"))?;
-    assert_expected_revision(&original, expected_revision.as_deref()).map_err(|e| e.to_string())?;
+    assert_expected_revision(&original, expected_revision.as_deref())?;
     let mapped = value.map(FrontmatterValue::from);
     let updated = update_frontmatter_content(&original, &key, mapped)?;
     if updated != original {
@@ -242,7 +244,7 @@ pub fn update_frontmatter_field(
         }
         write_atomic(&path, updated.as_bytes())?;
     }
-    read_document(vault_path, path.to_string_lossy().to_string())
+    read_document(vault_path, path.to_string_lossy().to_string()).map_err(Into::into)
 }
 
 /// Optional Hub-driven prefill values. When the user picks a template +
@@ -1211,7 +1213,7 @@ mod tests {
         .unwrap_err();
 
         assert_eq!(
-            error,
+            error.to_string(),
             "frontmatter editing is not supported for HTML documents"
         );
     }

@@ -1118,13 +1118,20 @@ export async function updateFrontmatterField(
     const doc = readMockDocument(documentPath);
     return doc;
   }
-  return invoke<DocumentPayload>("update_frontmatter_field", {
-    vaultPath,
-    documentPath,
-    key,
-    value,
-    expectedRevision: expectedRevision ?? null,
-  });
+  try {
+    return await invoke<DocumentPayload>("update_frontmatter_field", {
+      vaultPath,
+      documentPath,
+      key,
+      value,
+      expectedRevision: expectedRevision ?? null,
+    });
+  } catch (err) {
+    // The command returns IpcError (ERR-06), so its rejection is a
+    // { code, message } object rather than a string. Without this funnel a
+    // caller doing String(err) would render "[object Object]".
+    throw normalizeIpcError(err);
+  }
 }
 
 /**
