@@ -259,11 +259,15 @@ release-checks: verify test-cli cli-smoke-debug ## Full verify plus release-only
 	$(PNPM) tauri build --debug --no-bundle --config '{"build":{"beforeBuildCommand":null}}'
 	$(PNPM) clean:tauri-debug -- --force
 
-.PHONY: release-preflight
-release-preflight: ## Release preflight: diff, verify, CLI smoke, e2e, and debug no-bundle Tauri build
+.PHONY: release-preflight-core
+release-preflight-core: ## Release preflight core: diff, verify, CLI smoke, and debug no-bundle Tauri build
 	$(MAKE) diff-check
 	$(MAKE) release-checks
 	$(MAKE) cli-smoke
+
+.PHONY: release-preflight
+release-preflight: ## Complete local release preflight: core checks plus e2e
+	$(MAKE) release-preflight-core
 	$(MAKE) test-e2e
 
 .PHONY: macos-distribution-check

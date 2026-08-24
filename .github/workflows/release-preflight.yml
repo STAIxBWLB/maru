@@ -14,10 +14,10 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  release-preflight:
-    name: make release-preflight
+  release-preflight-core:
+    name: make release-preflight-core
     runs-on: ubuntu-22.04
-    timeout-minutes: 90
+    timeout-minutes: 60
 
     steps:
       - name: Checkout
@@ -41,7 +41,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri -> target
-          key: release-preflight-ubuntu-22.04
+          shared-key: ubuntu-22.04-validation
 
       - name: Install Linux Tauri dependencies
         run: |
@@ -58,8 +58,44 @@ jobs:
       - name: Install frontend dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Run release preflight core
+        run: make release-preflight-core
+
+  e2e:
+    name: playwright e2e
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 9.15.0
+
+      - name: Setup Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22.22.3
+          cache: pnpm
+
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+
       - name: Install Playwright browser
         run: pnpm exec playwright install --with-deps chromium
 
-      - name: Run release preflight
-        run: make release-preflight
+      - name: Run e2e
+        run: make test-e2e
+
+      - name: Upload e2e artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7
