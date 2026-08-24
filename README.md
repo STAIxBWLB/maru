@@ -435,6 +435,12 @@ make verify
 # Full verify plus release-only CLI and debug Tauri checks:
 make release-checks
 
+# Release preflight core (diff + release checks + release-mode CLI smoke):
+make release-preflight-core
+
+# Complete local release gate (preflight core + Playwright e2e):
+make release-preflight
+
 # Smoke the real installed AI CLIs. Every provider unit test drives a fake
 # shell script, so this is the only check that touches the actual integration:
 # --version, auth classification, skills-gate/account-probe agreement,
@@ -486,18 +492,22 @@ Codex skill sync writes to `$CODEX_HOME/skills` when `CODEX_HOME` is set, as
 it is for isolated Orca account profiles. Without that variable, it uses the
 standard `~/.codex/skills` directory.
 
-CI runs `make verify` (typecheck + ESLint + release-version sync + guards + unit
-tests + Rust fmt-check and clippy + frontend build) and `make test-e2e` on
-pull requests via
-`.github/workflows/ci.yml`. Documentation-only changes do not start CI. A push
-to `main` first compares the pushed tree with its associated PR head and checks
-that the latest `CI PR #<number>` run for that exact head succeeded. The stable
-run name keeps the check PR-specific even when GitHub's workflow-run API omits
-its `pull_requests` association. Only that exact-tree case skips the expensive
-steps; direct pushes, stale merge bases, missing checks, and API failures run
-the full suite. Version-changing PRs run
-`make release-checks` instead of `make verify`, adding CLI and debug Tauri
-checks without repeating verify, frontend build, or E2E.
+CI starts with a lightweight `decision` job in `.github/workflows/ci.yml`.
+When full validation is required, its independent `make verify` and
+`playwright e2e` jobs run in parallel. The first job covers typecheck, ESLint,
+release-version sync, guards, unit tests, Rust fmt-check and clippy, and the
+frontend build; the second runs `make test-e2e` without installing Rust or
+Tauri system libraries. Documentation-only and planning-only changes,
+including `.planning/**`, do not start CI.
+
+A push to `main` first compares the pushed tree with its associated PR head and
+checks that the latest `CI PR #<number>` run for that exact head succeeded. The
+stable run name keeps the check PR-specific even when GitHub's workflow-run API
+omits its `pull_requests` association. Only that exact-tree case skips the
+expensive jobs; direct pushes, differing merged trees, missing checks, and API
+failures run the full suite. Version-changing PRs run `make release-checks`
+instead of `make verify`, adding CLI and debug Tauri checks without repeating
+verify, the frontend build, or E2E.
 
 `typecheck` covers four TypeScript projects — `src/`, the node config files,
 `e2e/`, and `scripts/` — so a type error in a Playwright spec or a build script
@@ -509,9 +519,13 @@ artifact; the trace keeps the action timeline and the failing stack, but not DOM
 snapshots, screenshots, or the network log (see the comment in
 `playwright.config.ts` for why, and for when to turn them back on).
 
-`.github/workflows/release-preflight.yml` is a manual recovery gate. It keeps
-the intentionally exhaustive `make release-preflight` path but no longer
-duplicates PR verification automatically when a version tag is pushed.
+`.github/workflows/release-preflight.yml` is a manual recovery gate. It runs
+`make release-preflight-core` and `playwright e2e` as parallel jobs. The core
+target performs the diff check, `make release-checks`, and the release-mode CLI
+smoke; the E2E job retains failure artifact uploads. Locally,
+`make release-preflight` remains the complete gate by running the core target
+followed by `make test-e2e`. Release Preflight no longer duplicates PR
+verification automatically when a version tag is pushed.
 
 ## Skills Bundle Channel (OTA)
 
@@ -532,13 +546,14 @@ cutting an app release.
 
 Publishing a GitHub Release (a `v*` tag; the skills channel is excluded)
 triggers `.github/workflows/release-bundles.yml`.
-The workflow validates the tag, synchronized version surfaces, locked Cargo
-metadata, and required secrets once before starting platform runners. It then
-builds native Tauri bundles concurrently on macOS ARM, macOS Intel, Ubuntu,
-and Windows and uploads the generated `.app` / `.dmg`, `.deb` / `.rpm` /
-`.AppImage`, `.exe`, and `.msi` assets to that same release. Each macOS app job
-also builds `maru-cli` from the populated target cache, packages a tarball
-containing a `maru` executable, and uploads
+The workflow keeps its `prepare` to four-platform `build` matrix to `finalize`
+topology. It validates the tag, synchronized version surfaces, locked Cargo
+metadata, and required secrets once before starting platform runners. The
+matrix remains fail-fast with up to four concurrent legs and builds native
+Tauri bundles on macOS ARM, macOS Intel, Ubuntu, and Windows. Each macOS leg
+installs only its own matrix target into the repository-pinned Rust toolchain,
+then builds `maru-cli` from that target cache, packages a tarball containing a
+`maru` executable, and uploads
 `maru-cli_<version>_darwin_{aarch64,x86_64}.tar.gz` plus SHA256 files.
 
 Platform jobs never update `latest.json`. After all four jobs succeed, one
