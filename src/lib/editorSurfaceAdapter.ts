@@ -187,6 +187,12 @@ type EditorTabAction = (tabId: string, scope: EditorPaneScope, state: EditorPane
 
 export interface CreateEditorPaneCommandsOptions {
   getState: () => EditorPaneState;
+  invoke?: (
+    operation: keyof EditorPaneCommands,
+    args: readonly unknown[],
+    scope: EditorPaneScope,
+    state: EditorPaneState,
+  ) => void | Promise<void>;
   selectTab?: EditorTabAction;
   closeTab?: EditorTabAction;
   closeOtherTabs?: EditorTabAction;
@@ -222,6 +228,46 @@ export function createEditorPaneCommands(
   options: CreateEditorPaneCommandsOptions,
 ): EditorPaneCommands {
   const state = () => options.getState();
+  if (options.invoke) {
+    const invoke = async (
+      operation: keyof EditorPaneCommands,
+      args: readonly unknown[] = [],
+    ): Promise<void> => {
+      const current = state();
+      await options.invoke?.(operation, args, current.scope, current);
+    };
+    return {
+      selectTab: (tabId) => invoke("selectTab", [tabId]),
+      closeTab: (tabId) => invoke("closeTab", [tabId]),
+      closeOtherTabs: (tabId) => invoke("closeOtherTabs", [tabId]),
+      closeTabsToRight: (tabId) => invoke("closeTabsToRight", [tabId]),
+      closeSavedTabs: () => invoke("closeSavedTabs"),
+      closeAllTabs: () => invoke("closeAllTabs"),
+      copyTabName: (tabId) => invoke("copyTabName", [tabId]),
+      copyTabPath: (tabId) => invoke("copyTabPath", [tabId]),
+      copyTabRelativePath: (tabId) => invoke("copyTabRelativePath", [tabId]),
+      renameTab: (tabId) => invoke("renameTab", [tabId]),
+      moveTab: (tabId) => invoke("moveTab", [tabId]),
+      duplicateTab: (tabId) => invoke("duplicateTab", [tabId]),
+      deleteTab: (tabId) => invoke("deleteTab", [tabId]),
+      openTabPreview: (tabId) => invoke("openTabPreview", [tabId]),
+      revealTabInFinder: (tabId) => invoke("revealTabInFinder", [tabId]),
+      revealTabInExplorer: (tabId) => invoke("revealTabInExplorer", [tabId]),
+      save: () => invoke("save"),
+      snapshot: () => invoke("snapshot"),
+      splitRight: () => invoke("splitRight"),
+      openSourcePreview: () => invoke("openSourcePreview"),
+      openGraphRight: () => invoke("openGraphRight"),
+      focusPane: () => invoke("focusPane"),
+      toggleOutline: () => invoke("toggleOutline"),
+      persistViewMode: (mode) => invoke("persistViewMode", [mode]),
+      flushHtmlDraft: () => invoke("flushHtmlDraft"),
+      visualizeRefs: () => invoke("visualizeRefs"),
+      toggleKgHighlight: () => invoke("toggleKgHighlight"),
+      openKgRefNode: (nodePath) => invoke("openKgRefNode", [nodePath]),
+      openWikilink: (target) => invoke("openWikilink", [target]),
+    };
+  }
   const scopeAction = async (action?: EditorScopeAction): Promise<void> => {
     const current = state();
     await action?.(current.scope, current);

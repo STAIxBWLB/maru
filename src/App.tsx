@@ -54,7 +54,11 @@ import { EvidenceBinderPane } from "./components/evidence/EvidenceBinderPane";
 import { MissionBadge } from "./components/MissionBadge";
 import { NewDocumentDialog } from "./components/NewDocumentDialog";
 import { OutlinePane } from "./components/OutlinePane";
-import { createEditorPaneCommands, createOutlinePaneCommands } from "./lib/editorSurfaceAdapter";
+import {
+  createEditorPaneCommands,
+  createOutlinePaneCommands,
+  type EditorPaneCommands,
+} from "./lib/editorSurfaceAdapter";
 import {
   cleanupEditorSurfaceWorkspace,
   createEditorSurfacePersistence,
@@ -8212,6 +8216,74 @@ function MainApp() {
     () => updateLayoutSettings({ outlineOpen: !outlineOpen }),
     [outlineOpen, updateLayoutSettings],
   );
+  const editorPaneScopesRef = useRef<Record<EditorGroupId, EditorPaneScope>>({
+    left: { workspacePath: "", group: "left", tabId: "" },
+    right: { workspacePath: "", group: "right", tabId: "" },
+  });
+  const editorPaneCommandDispatchRef = useRef<(
+    group: EditorGroupId,
+    operation: keyof EditorPaneCommands,
+    args: readonly unknown[],
+    scope: EditorPaneScope,
+  ) => void | Promise<void>>(() => {});
+  editorPaneCommandDispatchRef.current = async (group, operation, args, scope) => {
+    const tabId = args[0] as string;
+    switch (operation) {
+      case "selectTab": return group === "right" ? handleRightSelectTab(tabId) : handleLeftSelectTab(tabId);
+      case "closeTab": return group === "right" ? handleRightCloseTab() : handleLeftCloseTab(tabId);
+      case "closeOtherTabs": return closeOtherTabs(tabId);
+      case "closeTabsToRight": return closeTabsToRight(tabId);
+      case "closeSavedTabs": return closeSavedTabs();
+      case "closeAllTabs": return closeAllCleanTabs();
+      case "copyTabName": return copyTabName(tabId);
+      case "copyTabPath": return copyTabPath(tabId);
+      case "copyTabRelativePath": return copyTabRelativePath(tabId);
+      case "renameTab": return handleRenameTab(tabId);
+      case "moveTab": return handleMoveTab(tabId);
+      case "duplicateTab": return handleDuplicateTab(tabId);
+      case "deleteTab": return handleDeleteTab(tabId);
+      case "openTabPreview": return group === "right" ? handleRightOpenTabPreview(tabId) : handleLeftOpenTabPreview(tabId);
+      case "revealTabInFinder": return revealTabInFinder(tabId);
+      case "revealTabInExplorer": return group === "right" ? handleRightRevealTabInExplorer(tabId) : handleLeftRevealTabInExplorer(tabId);
+      case "save": return void saveTab(scope.tabId);
+      case "snapshot": return void snapshotTab(scope.tabId);
+      case "splitRight": return splitEditorRight();
+      case "openSourcePreview": return void openSourcePreviewSplit();
+      case "openGraphRight": return void openGraphPanel();
+      case "focusPane": return group === "right" ? handleRightFocusPane() : handleLeftFocusPane();
+      case "toggleOutline": return handleToggleOutline();
+      case "persistViewMode": return setPersistedEditorViewMode(args[0] as EditorViewMode, group);
+      case "flushHtmlDraft": return void flushHtmlDraft(scope.tabId);
+      case "visualizeRefs": {
+        const current = getEditorPaneState(scope).document.tab;
+        if (current) visualizeDocRefs(current);
+        return;
+      }
+      case "toggleKgHighlight": {
+        const current = getEditorPaneState(scope).document.tab;
+        if (current) toggleKgHighlight(current);
+        return;
+      }
+      case "openKgRefNode": return handleKgRefNodeClick(args[0] as string);
+      case "openWikilink": return handleWikilinkClick(args[0] as string);
+    }
+  };
+  const leftEditorPaneCommands = useMemo(
+    () => createEditorPaneCommands({
+      getState: () => getEditorPaneState(editorPaneScopesRef.current.left),
+      invoke: (operation, args, scope) =>
+        editorPaneCommandDispatchRef.current("left", operation, args, scope),
+    }),
+    [],
+  );
+  const rightEditorPaneCommands = useMemo(
+    () => createEditorPaneCommands({
+      getState: () => getEditorPaneState(editorPaneScopesRef.current.right),
+      invoke: (operation, args, scope) =>
+        editorPaneCommandDispatchRef.current("right", operation, args, scope),
+    }),
+    [],
+  );
 
   const renderEditorPane = (
     group: EditorGroupId,
@@ -8267,48 +8339,8 @@ function MainApp() {
       htmlViewMode: htmlState?.mode ?? "visual",
       htmlRiskAckDigest: htmlState?.riskAckDigest ?? null,
     });
-    const commands = createEditorPaneCommands({
-      getState: () => getEditorPaneState(scope),
-      selectTab: (nextTabId) => group === "right" ? handleRightSelectTab(nextTabId) : handleLeftSelectTab(nextTabId),
-      closeTab: (nextTabId) => group === "right" ? handleRightCloseTab() : handleLeftCloseTab(nextTabId),
-      closeOtherTabs,
-      closeTabsToRight,
-      closeSavedTabs,
-      closeAllTabs: closeAllCleanTabs,
-      copyTabName,
-      copyTabPath,
-      copyTabRelativePath,
-      renameTab: handleRenameTab,
-      moveTab: handleMoveTab,
-      duplicateTab: handleDuplicateTab,
-      deleteTab: handleDeleteTab,
-      openTabPreview: (nextTabId) => group === "right" ? handleRightOpenTabPreview(nextTabId) : handleLeftOpenTabPreview(nextTabId),
-      revealTabInFinder,
-      revealTabInExplorer: (nextTabId) => group === "right" ? handleRightRevealTabInExplorer(nextTabId) : handleLeftRevealTabInExplorer(nextTabId),
-      save: (currentScope) => void saveTab(currentScope.tabId),
-      snapshot: (currentScope) => void snapshotTab(currentScope.tabId),
-      splitRight: splitEditorRight,
-      openSourcePreview: () => {
-        void openSourcePreviewSplit();
-      },
-      openGraphRight: () => openGraphPanel(),
-      focusPane: () => group === "right" ? handleRightFocusPane() : handleLeftFocusPane(),
-      toggleOutline: handleToggleOutline,
-      persistViewMode: (mode) => setPersistedEditorViewMode(mode, group),
-      flushHtmlDraft: (currentScope) => {
-        void flushHtmlDraft(currentScope.tabId);
-      },
-      visualizeRefs: () => {
-        const current = getEditorPaneState(scope).document.tab;
-        if (current) visualizeDocRefs(current);
-      },
-      toggleKgHighlight: () => {
-        const current = getEditorPaneState(scope).document.tab;
-        if (current) toggleKgHighlight(current);
-      },
-      openKgRefNode: (nodePath) => handleKgRefNodeClick(nodePath),
-      openWikilink: handleWikilinkClick,
-    });
+    editorPaneScopesRef.current[group] = scope;
+    const commands = group === "right" ? rightEditorPaneCommands : leftEditorPaneCommands;
     return (
       <EditorPane
         scope={scope}
