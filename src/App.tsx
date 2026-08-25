@@ -57,6 +57,7 @@ import { OutlinePane } from "./components/OutlinePane";
 import { createOutlinePaneCommands } from "./lib/editorSurfaceAdapter";
 import {
   getOutlinePaneState,
+  hydrateOutlinePaneState,
   replaceOutlineFileQueue,
   setOutlineFileQueueCanApply,
   setOutlineFileQueueSelection,
@@ -6703,28 +6704,6 @@ function MainApp() {
     });
   }, [focusedEditorGroup, setPersistedEditorViewMode]);
 
-  const outlinePaneCommands = useMemo(
-    () =>
-      createOutlinePaneCommands({
-        getState: () => getOutlinePaneState(outlinePaneScope),
-        // The port supplies the current document path for its narrow contract;
-        // existing jump behavior selects the currently focused editor group.
-        jumpToLine: (line) => jumpToOutlineLine(line),
-        queueExternalFiles,
-        queueFileSources: addFileQueueSources,
-        updateFileQueueItem,
-        applyFileQueue: applyQueuedFiles,
-      }),
-    [
-      addFileQueueSources,
-      applyQueuedFiles,
-      jumpToOutlineLine,
-      outlinePaneScope,
-      queueExternalFiles,
-      updateFileQueueItem,
-    ],
-  );
-
   const openWorkspaceFileEntry = useCallback(
     async (entry: WorkspaceFileEntry, line?: number) => {
       if (!isOpenableDocumentFile(entry)) {
@@ -6763,6 +6742,67 @@ function MainApp() {
       selectEntry,
       setPersistedAppMode,
       t,
+    ],
+  );
+
+  const graphVaultPathRef = useRef<string | null>(null);
+
+  const outlinePaneCommands = useMemo(
+    () =>
+      createOutlinePaneCommands({
+        getState: () => getOutlinePaneState(outlinePaneScope),
+        closeOutline: () => updateLayoutSettings({ outlineOpen: false }),
+        jumpToLine: (line) => jumpToOutlineLine(line),
+        setRightPaneTab: setPersistedRightPaneTab,
+        updateField,
+        selectEntry: async (entry) => {
+          await selectEntry(entry);
+        },
+        openMissingWikilink: handleWikilinkClick,
+        openGraph: (localTarget) => openGraphMode({
+          source: activeDocumentWorkspacePath === graphVaultPathRef.current ? "vault" : "workspace",
+          localTarget,
+        }),
+        setDocumentFilter: setExplorerDocumentFilter,
+        updateDocumentViews,
+        openNewDocument: openNewDocumentDialog,
+        openCommandPalette,
+        setExplorerExpandedFolders: setCollapsedFileFolders,
+        refreshExplorer: () =>
+          explorerWorkspacePath ? refreshWorkspaceFiles(explorerWorkspacePath) : undefined,
+        openWorkspaceFile: openWorkspaceFileEntry,
+        ignoreWorkspaceEntry: (relPath) => ignoreEntry(relPath),
+        setFilesPaneFilters,
+        revealFileInFinder: revealTargetInFinder,
+        queueExternalFiles,
+        queueFileSources: addFileQueueSources,
+        updateFileQueueItem,
+        applyFileQueue: applyQueuedFiles,
+      }),
+    [
+      activeDocumentWorkspacePath,
+      addFileQueueSources,
+      applyQueuedFiles,
+      explorerWorkspacePath,
+      handleWikilinkClick,
+      ignoreEntry,
+      jumpToOutlineLine,
+      openGraphMode,
+      openNewDocumentDialog,
+      openWorkspaceFileEntry,
+      outlinePaneScope,
+      queueExternalFiles,
+      refreshWorkspaceFiles,
+      revealTargetInFinder,
+      selectEntry,
+      setCollapsedFileFolders,
+      setExplorerDocumentFilter,
+      setFilesPaneFilters,
+      setPersistedRightPaneTab,
+      updateDocumentViews,
+      updateField,
+      updateFileQueueItem,
+      updateLayoutSettings,
     ],
   );
 
@@ -6947,6 +6987,86 @@ function MainApp() {
       if (raf) window.cancelAnimationFrame(raf);
     };
   }, [outlineOpen, rightPaneTab, editorViewMode, focusedEditorGroup, document?.path]);
+
+  const outlineSidebarSlice = useMemo(
+    () => ({
+      entries: activeDocumentEntries,
+      readOnly: !activeWorkspaceCanModify,
+      isManagedVaultNote: Boolean(
+        activeDocumentWorkspace?.writePolicy === "managed" &&
+          document?.relPath.startsWith("notes/") &&
+          document.relPath.toLowerCase().endsWith(".md"),
+      ),
+      activeTab: rightPaneTab,
+      activeLine: activeOutlineLine,
+      appMode: visibleAppMode,
+      contentCount: documentIndex.contentCount,
+      typeCounts: documentIndex.typeCounts,
+      documentViews: maruSettings.ui.documentViews,
+      viewCounts: builtInDocumentViewCounts,
+      customViewCounts: customDocumentViewCounts,
+      recentEntries,
+      selectedPath,
+      documentFilter,
+      canCreateDocument: activeWorkspaceCanCreate,
+    }),
+    [
+      activeDocumentEntries,
+      activeDocumentWorkspace?.writePolicy,
+      activeOutlineLine,
+      activeWorkspaceCanCreate,
+      activeWorkspaceCanModify,
+      builtInDocumentViewCounts,
+      customDocumentViewCounts,
+      document?.relPath,
+      documentFilter,
+      documentIndex.contentCount,
+      documentIndex.typeCounts,
+      maruSettings.ui.documentViews,
+      recentEntries,
+      rightPaneTab,
+      selectedPath,
+      visibleAppMode,
+    ],
+  );
+
+  const outlineExplorerSlice = useMemo(
+    () => ({
+      workspaceFileEntries: fileEntries,
+      explorerWorkspacePath,
+      explorerExpandedFolders: collapsedFileFolders,
+      explorerSelectedPath: selectedPath,
+      explorerLoading: explorerWorkspaceFilesState.loading ||
+        explorerWorkspaceFilesState.refreshing || shouldScanExplorerWorkspaceFiles,
+      explorerReady: explorerWorkspaceFilesState.scanStatus === "ready",
+      explorerRefreshing: explorerWorkspaceFilesState.refreshing,
+      explorerIncludeDotFolders: maruSettings.scan.includeDotFolders,
+      selectedWorkspaceFileEntries,
+      filesPaneFilters,
+      explorerPaneMode: maruSettings.ui.explorerPaneMode,
+    }),
+    [
+      collapsedFileFolders,
+      explorerWorkspaceFilesState.loading,
+      explorerWorkspaceFilesState.refreshing,
+      explorerWorkspaceFilesState.scanStatus,
+      explorerWorkspacePath,
+      fileEntries,
+      filesPaneFilters,
+      maruSettings.scan.includeDotFolders,
+      maruSettings.ui.explorerPaneMode,
+      selectedPath,
+      selectedWorkspaceFileEntries,
+      shouldScanExplorerWorkspaceFiles,
+    ],
+  );
+
+  useEffect(() => {
+    hydrateOutlinePaneState(outlinePaneScope, {
+      sidebar: outlineSidebarSlice,
+      explorer: outlineExplorerSlice,
+    });
+  }, [outlineExplorerSlice, outlinePaneScope, outlineSidebarSlice]);
 
   const exportActiveDocumentBundle = useCallback(async (): Promise<void> => {
     const workspaceRoot = activeDocumentWorkspacePath;
@@ -7458,6 +7578,7 @@ function MainApp() {
     workspaceRegistry.activeByVisibility.public ??
     publicWorkspaces[0]?.path ??
     null;
+  graphVaultPathRef.current = graphVaultPath;
   const graphDataPath =
     maruSettings.graph.source === "vault"
       ? graphVaultPath ?? activeDocumentWorkspacePath
@@ -9148,64 +9269,7 @@ function MainApp() {
           <OutlinePane
             scope={outlinePaneScope}
             commands={outlinePaneCommands}
-            activeLine={activeOutlineLine}
-            onClose={() => updateLayoutSettings({ outlineOpen: false })}
             paneRef={outlinePaneRef}
-            sidebar={{
-              entries: activeDocumentEntries,
-              readOnly: !activeWorkspaceCanModify,
-              onUpdateField: updateField,
-              onSelectEntry: selectEntry,
-              onMissingWikilink: handleWikilinkClick,
-              onOpenGraph: (localTarget) => openGraphMode({
-                source: activeDocumentWorkspacePath === graphVaultPath ? "vault" : "workspace",
-                localTarget,
-              }),
-              isManagedVaultNote: Boolean(
-                activeDocumentWorkspace?.writePolicy === "managed" &&
-                  document?.relPath.startsWith("notes/") &&
-                  document.relPath.toLowerCase().endsWith(".md"),
-              ),
-              activeTab: rightPaneTab,
-              onTabChange: setPersistedRightPaneTab,
-              appMode: visibleAppMode,
-              contentCount: documentIndex.contentCount,
-              typeCounts: documentIndex.typeCounts,
-              documentViews: maruSettings.ui.documentViews,
-              viewCounts: builtInDocumentViewCounts,
-              customViewCounts: customDocumentViewCounts,
-              recentEntries,
-              selectedPath,
-              documentFilter,
-              onDocumentFilter: setExplorerDocumentFilter,
-              onDocumentViewsChange: updateDocumentViews,
-              onNewDocument: openNewDocumentDialog,
-              canCreateDocument: activeWorkspaceCanCreate,
-              onSelectRecent: selectEntry,
-              onOpenCommandPalette: openCommandPalette,
-            }}
-            explorer={{
-              workspaceFileEntries: fileEntries,
-              explorerWorkspacePath,
-              explorerExpandedFolders: collapsedFileFolders,
-              onExplorerExpandedFoldersChange: setCollapsedFileFolders,
-              explorerSelectedPath: selectedPath,
-              explorerLoading: explorerWorkspaceFilesState.loading ||
-                explorerWorkspaceFilesState.refreshing || shouldScanExplorerWorkspaceFiles,
-              explorerReady: explorerWorkspaceFilesState.scanStatus === "ready",
-              explorerRefreshing: explorerWorkspaceFilesState.refreshing,
-              onExplorerRefresh: () => {
-                if (explorerWorkspacePath) void refreshWorkspaceFiles(explorerWorkspacePath);
-              },
-              onOpenWorkspaceFile: (entry, line) => void openWorkspaceFileEntry(entry, line),
-              explorerIncludeDotFolders: maruSettings.scan.includeDotFolders,
-              onIgnoreWorkspaceEntry: (relPath) => void ignoreEntry(relPath),
-              selectedWorkspaceFileEntries,
-              filesPaneFilters,
-              onFilesPaneFiltersChange: setFilesPaneFilters,
-              explorerPaneMode: maruSettings.ui.explorerPaneMode,
-              onRevealFileInFinder: revealTargetInFinder,
-            }}
             slots={{
               shareWorkspacePath,
               shareDocumentDirty: Boolean(dirty),

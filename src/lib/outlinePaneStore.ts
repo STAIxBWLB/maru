@@ -1,7 +1,18 @@
 import { useSyncExternalStore } from "react";
 
 import { useActiveTabIds, useDocTabs } from "./editorTabsStore";
-import type { DocumentPayload, FileQueueItem } from "./types";
+import type { BuiltInDocumentView, DocumentFilter } from "./documentIndex";
+import type {
+  DocumentViewDefinition,
+  ExplorerPaneMode,
+  MaruAppMode,
+  RightPaneTab,
+} from "./settings";
+import type { DocumentPayload, FileQueueItem, VaultEntry, WorkspaceFileEntry } from "./types";
+import {
+  EMPTY_WORKSPACE_FILES_PANE_FILTERS,
+  type WorkspaceFilesPaneFilters,
+} from "./workspaceFileTree";
 
 /** The Outline facade is deliberately keyed by workspace. `tabId` is an
  * optional render selector, not owned state: tabs and drafts remain in
@@ -27,10 +38,46 @@ export interface OutlineOperationSlice {
   fileQueueError: string | null;
 }
 
+/** Render-only values from the document/sidebar domain. Commands remain in
+ * editorSurfaceAdapter so this facade never owns shell side effects. */
+export interface OutlineSidebarSlice {
+  entries: VaultEntry[];
+  readOnly: boolean;
+  isManagedVaultNote: boolean;
+  activeTab: RightPaneTab;
+  activeLine: number | null;
+  appMode: MaruAppMode;
+  contentCount: number;
+  typeCounts: Array<[string, number]>;
+  documentViews: DocumentViewDefinition[];
+  viewCounts: Record<BuiltInDocumentView, number>;
+  customViewCounts: Record<string, number>;
+  recentEntries: VaultEntry[];
+  selectedPath: string | null;
+  documentFilter: DocumentFilter;
+  canCreateDocument: boolean;
+}
+
+export interface OutlineExplorerSlice {
+  workspaceFileEntries: WorkspaceFileEntry[];
+  explorerWorkspacePath: string | null;
+  explorerExpandedFolders: string[];
+  explorerSelectedPath: string | null;
+  explorerLoading: boolean;
+  explorerReady: boolean;
+  explorerRefreshing: boolean;
+  explorerIncludeDotFolders: string[];
+  selectedWorkspaceFileEntries: WorkspaceFileEntry[];
+  filesPaneFilters: WorkspaceFilesPaneFilters;
+  explorerPaneMode: ExplorerPaneMode;
+}
+
 export interface OutlinePaneState {
   document: OutlineDocumentSlice;
   fileQueue: OutlineFileQueueSlice;
   operation: OutlineOperationSlice;
+  sidebar: OutlineSidebarSlice;
+  explorer: OutlineExplorerSlice;
 }
 
 const EMPTY_DOCUMENT_SLICE: OutlineDocumentSlice = { document: null, draftContent: "" };
@@ -40,10 +87,42 @@ const EMPTY_FILE_QUEUE_SLICE: OutlineFileQueueSlice = {
   canApplyFileQueue: false,
 };
 const EMPTY_OPERATION_SLICE: OutlineOperationSlice = { applyingFileQueue: false, fileQueueError: null };
+const EMPTY_SIDEBAR_SLICE: OutlineSidebarSlice = {
+  entries: [],
+  readOnly: false,
+  isManagedVaultNote: false,
+  activeTab: "workspace",
+  activeLine: null,
+  appMode: "pkm",
+  contentCount: 0,
+  typeCounts: [],
+  documentViews: [],
+  viewCounts: { inbox: 0, drafts: 0, archive: 0, recentlyUpdated: 0 },
+  customViewCounts: {},
+  recentEntries: [],
+  selectedPath: null,
+  documentFilter: { kind: "all" },
+  canCreateDocument: false,
+};
+const EMPTY_EXPLORER_SLICE: OutlineExplorerSlice = {
+  workspaceFileEntries: [],
+  explorerWorkspacePath: null,
+  explorerExpandedFolders: [],
+  explorerSelectedPath: null,
+  explorerLoading: false,
+  explorerReady: false,
+  explorerRefreshing: false,
+  explorerIncludeDotFolders: [],
+  selectedWorkspaceFileEntries: [],
+  filesPaneFilters: EMPTY_WORKSPACE_FILES_PANE_FILTERS,
+  explorerPaneMode: "documents",
+};
 const EMPTY_OUTLINE_PANE_STATE: OutlinePaneState = {
   document: EMPTY_DOCUMENT_SLICE,
   fileQueue: EMPTY_FILE_QUEUE_SLICE,
   operation: EMPTY_OPERATION_SLICE,
+  sidebar: EMPTY_SIDEBAR_SLICE,
+  explorer: EMPTY_EXPLORER_SLICE,
 };
 
 let statesByWorkspace: Record<string, OutlinePaneState> = {};
@@ -52,6 +131,8 @@ type SliceSubscribers = Map<string, Set<SliceSubscriber>>;
 const documentSubscribers: SliceSubscribers = new Map();
 const fileQueueSubscribers: SliceSubscribers = new Map();
 const operationSubscribers: SliceSubscribers = new Map();
+const sidebarSubscribers: SliceSubscribers = new Map();
+const explorerSubscribers: SliceSubscribers = new Map();
 const documentSliceCache = new Map<string, { tab: object | null; slice: OutlineDocumentSlice }>();
 
 function stateFor(scope: OutlinePaneScope): OutlinePaneState {
@@ -69,6 +150,8 @@ function publishWorkspace(scope: OutlinePaneScope, next: OutlinePaneState): void
   if (next.document !== current.document) notify(documentSubscribers, scope.workspacePath);
   if (next.fileQueue !== current.fileQueue) notify(fileQueueSubscribers, scope.workspacePath);
   if (next.operation !== current.operation) notify(operationSubscribers, scope.workspacePath);
+  if (next.sidebar !== current.sidebar) notify(sidebarSubscribers, scope.workspacePath);
+  if (next.explorer !== current.explorer) notify(explorerSubscribers, scope.workspacePath);
 }
 
 function subscribeToSlice(
@@ -95,6 +178,14 @@ export function subscribeOutlineFileQueueSlice(scope: OutlinePaneScope, subscrib
 
 function subscribeOutlineOperationSlice(scope: OutlinePaneScope, subscriber: SliceSubscriber): () => void {
   return subscribeToSlice(operationSubscribers, scope, subscriber);
+}
+
+export function subscribeOutlineSidebarSlice(scope: OutlinePaneScope, subscriber: SliceSubscriber): () => void {
+  return subscribeToSlice(sidebarSubscribers, scope, subscriber);
+}
+
+export function subscribeOutlineExplorerSlice(scope: OutlinePaneScope, subscriber: SliceSubscriber): () => void {
+  return subscribeToSlice(explorerSubscribers, scope, subscriber);
 }
 
 function sameFileQueueItems(left: FileQueueItem[], right: FileQueueItem[]): boolean {
@@ -236,11 +327,15 @@ export function hydrateOutlinePaneState(
     document: patch.document ?? current.document,
     fileQueue: nextFileQueue,
     operation: patch.operation ?? current.operation,
+    sidebar: patch.sidebar ?? current.sidebar,
+    explorer: patch.explorer ?? current.explorer,
   };
   if (
     next.document === current.document &&
     next.fileQueue === current.fileQueue &&
-    next.operation === current.operation
+    next.operation === current.operation &&
+    next.sidebar === current.sidebar &&
+    next.explorer === current.explorer
   ) return current;
   publishWorkspace(scope, next);
   return next;
@@ -255,6 +350,8 @@ export function cleanupOutlinePaneWorkspace(workspacePath: string): void {
   notify(documentSubscribers, workspacePath);
   notify(fileQueueSubscribers, workspacePath);
   notify(operationSubscribers, workspacePath);
+  notify(sidebarSubscribers, workspacePath);
+  notify(explorerSubscribers, workspacePath);
 }
 
 /** Stable facade slice. Canonical document/draft values come from
@@ -296,12 +393,34 @@ export function useOutlineOperationSlice(scope: OutlinePaneScope): OutlineOperat
   );
 }
 
+export function useOutlineSidebarSlice(scope: OutlinePaneScope): OutlineSidebarSlice {
+  return useSyncExternalStore(
+    (subscriber) => subscribeOutlineSidebarSlice(scope, subscriber),
+    () => stateFor(scope).sidebar,
+    () => stateFor(scope).sidebar,
+  );
+}
+
+export function useOutlineExplorerSlice(scope: OutlinePaneScope): OutlineExplorerSlice {
+  return useSyncExternalStore(
+    (subscriber) => subscribeOutlineExplorerSlice(scope, subscriber),
+    () => stateFor(scope).explorer,
+    () => stateFor(scope).explorer,
+  );
+}
+
 /** Test-only reset keeps the module singleton deterministic without exposing
  * mutation to production callers. */
 export function resetOutlinePaneStoreForTest(): void {
   statesByWorkspace = {};
   documentSliceCache.clear();
-  for (const subscribers of [documentSubscribers, fileQueueSubscribers, operationSubscribers]) {
+  for (const subscribers of [
+    documentSubscribers,
+    fileQueueSubscribers,
+    operationSubscribers,
+    sidebarSubscribers,
+    explorerSubscribers,
+  ]) {
     for (const scoped of subscribers.values()) {
       for (const subscriber of scoped) subscriber();
     }
