@@ -62,20 +62,12 @@ import {
   type OutlinePaneScope,
 } from "../lib/outlinePaneStore";
 import { useContextMenuKeyboard } from "../lib/useContextMenuKeyboard";
-import type {
-  MaruAppMode,
-  DocumentViewDefinition,
-  ExplorerPaneMode,
-  RightPaneTab,
-} from "../lib/settings";
-import type { BuiltInDocumentView, DocumentFilter } from "../lib/documentIndex";
+import type { RightPaneTab } from "../lib/settings";
 import type {
   FileQueueItem,
   FileQueueSourceInfo,
-  VaultEntry,
   WorkspaceFileEntry,
 } from "../lib/types";
-import type { GraphLocalTarget } from "../lib/settings";
 import {
   collectWorkspaceFileExtensionCounts,
   type WorkspaceFilesPaneFilters,
