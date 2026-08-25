@@ -1,37 +1,63 @@
 // @vitest-environment jsdom
 
 import { readFileSync } from "node:fs";
-import { useMemo } from "react";
+import { resolve } from "node:path";
 import { createRoot, type Root } from "react-dom/client";
 import { act } from "react";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { decoratePreviewHtml } from "./EditorPane";
+vi.mock("../lib/markdown", () => ({
+  renderMarkdown: () => '<p>reference <mark class="find-mark find-mark-current">match</mark></p>',
+}));
 
-const editorPaneSource = new URL("./EditorPane.tsx", import.meta.url);
+import { EditorPane } from "./EditorPane";
+import { createEditorPaneCommands } from "../lib/editorSurfaceAdapter";
+import {
+  getEditorPaneState,
+  patchEditorPaneOperation,
+  patchEditorPaneViewPreview,
+  resetEditorPaneStoreForTests,
+  setEditorPanePresentation,
+  type EditorPaneScope,
+} from "../lib/editorPaneStore";
+import { replaceAllDocTabs, type EditorTab } from "../lib/editorTabsStore";
+import { LocaleContext } from "../lib/i18n";
 
-async function loadEditorSurface() {
-  const specifier = ["../lib/editor", "PaneStore"].join("");
-  return import(/* @vite-ignore */ specifier);
-}
+const editorPaneSource = resolve(process.cwd(), "src/components/EditorPane.tsx");
+const scope: EditorPaneScope = { workspacePath: "/workspace", group: "left", tabId: "note.md" };
+const commands = createEditorPaneCommands({ getState: () => getEditorPaneState(scope) });
+const t = (key: string) => key;
 
-function PreviewHarness({ operationVersion }: { operationVersion: number }) {
-  const previewHtml = useMemo(() => {
-    void operationVersion;
-    return decoratePreviewHtml(
-        '<p><mark class="kg-ref-mark">reference</mark> <mark class="find-mark find-mark-current">match</mark></p>',
-        {
-          kgSpans: null,
-          kgSource: "",
-          kgTitleFor: () => "",
-          findQuery: "",
-          findCurrent: operationVersion,
-          resolveWikilink: () => true,
-        },
-    );
-  }, [operationVersion]);
-  const previewMarkup = useMemo(() => ({ __html: previewHtml }), [previewHtml]);
-  return <article className="preview-surface" dangerouslySetInnerHTML={previewMarkup} />;
+function renderPane(root: Root): void {
+  const document = {
+    path: "/workspace/note.md",
+    relPath: "note.md",
+    title: "note",
+    content: "reference match",
+    body: "reference match",
+    meta: {},
+    fileKind: "markdown",
+  };
+  replaceAllDocTabs(
+    [{ id: scope.tabId, workspacePath: scope.workspacePath, document, draftContent: document.content } as EditorTab],
+    { activeTabId: scope.tabId, leftActiveTabId: scope.tabId, rightActiveTabId: null, focusedEditorGroup: "left" },
+  );
+  setEditorPanePresentation(
+    scope,
+    {
+      tabs: [], activeTabId: scope.tabId, outlineOpen: false, activeWorkspaceLabel: null,
+      documentLabel: null, readOnly: false, canSnapshot: false, readOnlyReason: null,
+      entries: [], bodyOverride: null, vaultPath: scope.workspacePath, isManagedVaultNote: false,
+      kgHighlightRefs: [{ nodePath: "target.md", nodeTitle: "target", matchKind: "entity", spans: [{ start: 0, end: 9, paragraph: 0 }] }],
+    },
+    { openingEntry: null, saving: false },
+  );
+  patchEditorPaneViewPreview(scope, { viewMode: "preview" });
+  root.render(
+    <LocaleContext.Provider value={{ locale: "en", setLocale: () => {}, t }}>
+      <EditorPane scope={scope} commands={commands} />
+    </LocaleContext.Provider>,
+  );
 }
 
 describe("EditorPane preview identity contract", () => {
@@ -42,6 +68,7 @@ describe("EditorPane preview identity contract", () => {
     (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
     container = document.createElement("div");
     document.body.appendChild(container);
+    resetEditorPaneStoreForTests();
   });
 
   afterEach(async () => {
@@ -53,19 +80,16 @@ describe("EditorPane preview identity contract", () => {
   });
 
   it("retains preview marks and the same marked DOM node through an unrelated operation update", async () => {
-    const surface = await loadEditorSurface();
-    const scope = { workspacePath: "/workspace", group: "left", tabId: "note.md" };
     root = createRoot(container);
     await act(async () => {
-      root?.render(<PreviewHarness operationVersion={0} />);
+      renderPane(root!);
     });
     const retainedMark = container.querySelector("mark.kg-ref-mark");
     expect(retainedMark).toBeInstanceOf(HTMLElement);
     expect(container.querySelector("mark.find-mark.find-mark-current")).toBeInstanceOf(HTMLElement);
 
     await act(async () => {
-      surface.patchEditorPaneOperation(scope, { saving: true });
-      root?.render(<PreviewHarness operationVersion={1} />);
+      patchEditorPaneOperation(scope, { saving: true });
     });
 
     expect(container.querySelector("mark.kg-ref-mark")).toBe(retainedMark);
@@ -73,7 +97,6 @@ describe("EditorPane preview identity contract", () => {
   });
 
   it("keeps preview markup React-owned and memoized only on previewHtml", async () => {
-    await loadEditorSurface();
     const source = readFileSync(editorPaneSource, "utf8");
 
     expect(source).toContain("const previewMarkup = useMemo(() => ({ __html: previewHtml }), [previewHtml]);");

@@ -109,16 +109,32 @@ describe("Editor surface render isolation", () => {
     let viewRenders = 0;
     let operationRenders = 0;
 
-    function Subscribers() {
+    function DocumentSubscriber() {
       useSyncExternalStore(surface.subscribeEditorDocument(scope), () => surface.getEditorDocumentSlice(scope));
       documentRenders += 1;
+      return null;
+    }
+
+    function TabsSubscriber() {
       useSyncExternalStore(surface.subscribeEditorTabs(scope), () => surface.getEditorTabsSlice(scope));
       tabsRenders += 1;
+      return null;
+    }
+
+    function ViewSubscriber() {
       useSyncExternalStore(surface.subscribeEditorViewPreview(scope), () => surface.getEditorViewPreviewSlice(scope));
       viewRenders += 1;
+      return null;
+    }
+
+    function OperationSubscriber() {
       useSyncExternalStore(surface.subscribeEditorOperation(scope), () => surface.getEditorOperationSlice(scope));
       operationRenders += 1;
       return null;
+    }
+
+    function Subscribers() {
+      return <><DocumentSubscriber /><TabsSubscriber /><ViewSubscriber /><OperationSubscriber /></>;
     }
 
     root = createRoot(container);

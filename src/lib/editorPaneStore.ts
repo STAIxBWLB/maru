@@ -272,7 +272,10 @@ export function setEditorPanePresentation(
 
 /** Pure facade action: canonical draft ownership stays in editorTabsStore. */
 export function updateEditorPaneDraft(scope: EditorPaneScope, content: string): void {
+  if (getEditorPaneState(scope).document.draftContent === content) return;
   updateTabDraft(scope.tabId, content);
+  stateCache.delete(scopeKey(scope));
+  notify(scope, "document");
 }
 
 export function patchEditorPaneViewPreview(
@@ -405,6 +408,38 @@ function useEditorPaneDomain<T>(scope: EditorPaneScope, domain: EditorPaneDomain
     read,
     read,
   );
+}
+
+export function subscribeEditorDocument(scope: EditorPaneScope): (subscriber: () => void) => () => void {
+  return (subscriber) => subscribe(scope, "document", subscriber);
+}
+
+export function subscribeEditorTabs(scope: EditorPaneScope): (subscriber: () => void) => () => void {
+  return (subscriber) => subscribe(scope, "tabs", subscriber);
+}
+
+export function subscribeEditorViewPreview(scope: EditorPaneScope): (subscriber: () => void) => () => void {
+  return (subscriber) => subscribe(scope, "viewPreview", subscriber);
+}
+
+export function subscribeEditorOperation(scope: EditorPaneScope): (subscriber: () => void) => () => void {
+  return (subscriber) => subscribe(scope, "operation", subscriber);
+}
+
+export function getEditorDocumentSlice(scope: EditorPaneScope): EditorPaneDocumentSlice {
+  return getEditorPaneState(scope).document;
+}
+
+export function getEditorTabsSlice(scope: EditorPaneScope): EditorPaneTabsSlice {
+  return getEditorPaneState(scope).tabs;
+}
+
+export function getEditorViewPreviewSlice(scope: EditorPaneScope): EditorPaneViewPreviewSlice {
+  return getEditorPaneState(scope).viewPreview;
+}
+
+export function getEditorOperationSlice(scope: EditorPaneScope): EditorPaneOperationSlice {
+  return getEditorPaneState(scope).operation;
 }
 
 export function useEditorDocumentSlice(scope: EditorPaneScope): EditorPaneDocumentSlice {
