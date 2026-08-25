@@ -72,6 +72,25 @@ describe("Editor facade contract", () => {
     expect(after.operation).not.toBe(before.operation);
   });
 
+  it("publishes transient HTML mode and risk acknowledgement changes to the view slice", async () => {
+    const surface = await loadEditorSurface();
+    const scope = { workspacePath: "/workspace-a", group: "left", tabId: "note.html" } as const;
+    const before = surface.getEditorPaneState(scope);
+
+    const after = surface.patchEditorPaneViewPreview(scope, {
+      htmlViewMode: "preview",
+      htmlRiskAckDigest: "safe-html-digest",
+    });
+
+    expect(after.viewPreview).toEqual({
+      viewMode: "source",
+      htmlViewMode: "preview",
+      htmlRiskAckDigest: "safe-html-digest",
+    });
+    expect(after.viewPreview).not.toBe(before.viewPreview);
+    expect(after.operation).toBe(before.operation);
+  });
+
   it("observes canonical draft updates without storing a facade draft", async () => {
     const surface = await loadEditorSurface();
     const scope = { workspacePath: "/workspace-a", group: "left", tabId: "note.md" } as const;

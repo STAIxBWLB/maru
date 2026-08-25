@@ -8302,8 +8302,6 @@ function MainApp() {
         docTab?.document.relPath.startsWith("notes/") &&
         docTab.document.relPath.toLowerCase().endsWith(".md"),
     );
-    const htmlKey = docTab ? `${group}:${docTab.id}` : null;
-    const htmlState = htmlKey ? htmlPaneModes[htmlKey] : undefined;
     const scope: EditorPaneScope = {
       workspacePath: tab?.workspacePath ?? activeDocumentWorkspacePath ?? "",
       group,
@@ -8336,8 +8334,6 @@ function MainApp() {
     );
     patchEditorPaneViewPreview(scope, {
       viewMode: editorPaneViewModes[group],
-      htmlViewMode: htmlState?.mode ?? "visual",
-      htmlRiskAckDigest: htmlState?.riskAckDigest ?? null,
     });
     editorPaneScopesRef.current[group] = scope;
     const commands = group === "right" ? rightEditorPaneCommands : leftEditorPaneCommands;

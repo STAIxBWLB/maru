@@ -232,7 +232,7 @@ export function getEditorPaneState(scope: EditorPaneScope): EditorPaneState {
   const tabs =
     cached?.tabsState === tabsState ? (previous?.tabs ?? getTabsSlice(scope, tabsState)) : getTabsSlice(scope, tabsState);
   const viewPreview =
-    cached?.groupViewMode === groupViewMode
+    cached?.local.viewPreview === local.viewPreview && cached.groupViewMode === groupViewMode
       ? cached.snapshot.viewPreview
       : { ...local.viewPreview, viewMode: groupViewMode };
   const snapshot = {
