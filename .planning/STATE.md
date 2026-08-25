@@ -5,15 +5,15 @@ milestone_name: milestone
 current_phase: 04
 current_phase_name: Editor Surface State Extraction
 status: executing
-stopped_at: Completed 04-01-PLAN.md
-last_updated: "2026-08-25T20:30:25.604Z"
+stopped_at: Completed 04-02-PLAN.md
+last_updated: "2026-08-25T21:17:14.663Z"
 last_activity: 2026-08-26
 last_activity_desc: Phase 04 execution started
 progress:
   total_phases: 4
   completed_phases: 3
   total_plans: 20
-  completed_plans: 15
+  completed_plans: 16
 ---
 
 # Project State
@@ -28,11 +28,11 @@ See: .planning/PROJECT.md (updated 2026-08-23)
 ## Current Position
 
 Phase: 04 (Editor Surface State Extraction) — EXECUTING
-Plan: 2 of 6
+Plan: 3 of 6
 Status: Ready to execute
 Last activity: 2026-08-26 — Phase 04 execution started
 
-Progress: [████████░░] 75% (3/5 phases)
+Progress: [████████░░] 80% (3/5 phases)
 
 ## Performance Metrics
 
@@ -73,6 +73,7 @@ Progress: [████████░░] 75% (3/5 phases)
 | Phase 03 P03 | 15min | 2 tasks | 9 files |
 | Phase 03 P04 | ~35min | 2 tasks | 0 files |
 | Phase 04 P01 | 6min | 2 tasks | 4 files |
+| Phase 04 P02 | 13min | 2 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -123,6 +124,9 @@ Recent decisions affecting current work:
 - [Phase ?]: ERR-01 and ERR-03 marked complete after verifying all four contract codes have a frontend reader and the residual substring-matcher grep is zero; ERR-02 left open for 03-04's formal two-sided rename drill
 - [Phase ?]: ERR-02 drill extended to three sub-drills (Rust value pin, Rust name/build, TS union/tsc) so the web_actions.rs:860 branch site is proven build-protected, not just the pin test
 - [Phase ?]: Wave 0 contracts remain activation-gated until their owning production plan removes the condition.
+- [Phase ?]: Use workspace-keyed, per-domain subscriber maps so file-queue publishes cannot notify document consumers.
+- [Phase ?]: Keep queue update and selection transitions pure in outlinePaneStore; reserve OutlinePaneCommands for shell orchestration and persistence effects.
+- [Phase ?]: Keep queue progress and actionable failures in the operation slice while notification-only failures continue through errorStore.
 
 ### Scope Exceptions
 
@@ -174,6 +178,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-08-25T20:30:25.595Z
-Stopped at: Completed 04-01-PLAN.md
+Last session: 2026-08-25T21:17:14.655Z
+Stopped at: Completed 04-02-PLAN.md
 Resume file: None
