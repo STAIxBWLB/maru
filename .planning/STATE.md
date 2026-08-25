@@ -77,7 +77,7 @@ Progress: [██████████] 100% (3/5 phases)
 | Phase 04-editor-surface-state-extraction P03 | 9min | 2 tasks | 6 files |
 | Phase 04 P04 | 12min | 2 tasks | 4 files |
 | Phase 04 P05 | 15min | 2 tasks | 8 files |
-| Phase 04 P06 | 10h 10min | 2 tasks | 4 files |
+| Phase 04 P06 | 1h 40min | 2 tasks | 4 files |
 
 ## Accumulated Context
 
