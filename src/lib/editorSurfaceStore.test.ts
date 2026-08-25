@@ -203,7 +203,7 @@ describe("Editor facade contract", () => {
 
 });
 
-describe.skip("Editor facade component migration contract", () => {
+describe("Editor facade component migration contract", () => {
   it("uses a stable command port that delegates against the current scope snapshot", async () => {
     const surface = await loadEditorSurface();
     const scope = { workspacePath: "/workspace-a", group: "left", tabId: "first.md" };
