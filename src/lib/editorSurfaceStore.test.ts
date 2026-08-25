@@ -107,6 +107,30 @@ describe("Editor facade contract", () => {
     expect(surface.getEditorPaneState(stale)).toBeDefined();
   });
 
+  it("cleans only the requested group or workspace and never a canonical draft", async () => {
+    const surface = await loadEditorSurface();
+    const left = { workspacePath: "/workspace-a", group: "left", tabId: "note.md" } as const;
+    const right = { workspacePath: "/workspace-a", group: "right", tabId: "note.md" } as const;
+    const otherWorkspace = {
+      workspacePath: "/workspace-b",
+      group: "right",
+      tabId: "note.md",
+    } as const;
+
+    surface.patchEditorPaneOperation(left, { saving: true });
+    surface.patchEditorPaneViewPreview(right, { viewMode: "preview" });
+    surface.patchEditorPaneOperation(otherWorkspace, { conflict: "conflict" });
+    surface.cleanupEditorPaneGroup("/workspace-a", "right");
+
+    expect(surface.hasEditorPaneState(left)).toBe(true);
+    expect(surface.hasEditorPaneState(right)).toBe(false);
+    expect(surface.hasEditorPaneState(otherWorkspace)).toBe(true);
+
+    surface.cleanupEditorPaneWorkspace("/workspace-a");
+    expect(surface.hasEditorPaneState(left)).toBe(false);
+    expect(surface.hasEditorPaneState(otherWorkspace)).toBe(true);
+  });
+
 });
 
 describe.skip("Editor facade component migration contract", () => {
