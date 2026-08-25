@@ -5,15 +5,15 @@ milestone_name: milestone
 current_phase: 04
 current_phase_name: Editor Surface State Extraction
 status: executing
-stopped_at: Completed 04-03-PLAN.md
-last_updated: "2026-08-25T21:29:44.802Z"
+stopped_at: Completed 04-04-PLAN.md
+last_updated: "2026-08-25T21:43:05.894Z"
 last_activity: 2026-08-26
 last_activity_desc: Phase 04 execution started
 progress:
   total_phases: 4
   completed_phases: 3
   total_plans: 20
-  completed_plans: 17
+  completed_plans: 18
 ---
 
 # Project State
@@ -28,11 +28,11 @@ See: .planning/PROJECT.md (updated 2026-08-23)
 ## Current Position
 
 Phase: 04 (Editor Surface State Extraction) — EXECUTING
-Plan: 4 of 6
+Plan: 5 of 6
 Status: Ready to execute
 Last activity: 2026-08-26 — Phase 04 execution started
 
-Progress: [█████████░] 85% (3/5 phases)
+Progress: [█████████░] 90% (3/5 phases)
 
 ## Performance Metrics
 
@@ -75,6 +75,7 @@ Progress: [█████████░] 85% (3/5 phases)
 | Phase 04 P01 | 6min | 2 tasks | 4 files |
 | Phase 04 P02 | 13min | 2 tasks | 5 files |
 | Phase 04-editor-surface-state-extraction P03 | 9min | 2 tasks | 6 files |
+| Phase 04 P04 | 12min | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -131,6 +132,9 @@ Recent decisions affecting current work:
 - [Phase ?]: OutlinePane now receives only scope, commands, pane ref, and render slots; sidebar and explorer values are facade slices.
 - [Phase ?]: The persistence adapter consumes App's existing loadWorkspace request id and never owns a second generation counter.
 - [Phase ?]: Workspace cleanup drops only facade-local Outline records, leaving editorTabsStore drafts and MaruSettings untouched.
+- [Phase ?]: Editor view modes are workspace and split-group scoped; HTML mode, risk acknowledgement, and operation state remain tab-local transient facade state.
+- [Phase ?]: Editor hydration reuses App loadWorkspaceRequestRef and the normalized settings writer; no second generation counter or settings key exists.
+- [Phase ?]: Facade cleanup runs after canonical editorTabsStore closes, so it never deletes an unsaved draft itself.
 
 ### Scope Exceptions
 
@@ -182,6 +186,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-08-25T21:29:44.793Z
-Stopped at: Completed 04-03-PLAN.md
+Last session: 2026-08-25T21:43:05.886Z
+Stopped at: Completed 04-04-PLAN.md
 Resume file: None
