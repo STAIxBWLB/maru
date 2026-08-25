@@ -3,8 +3,6 @@ import { fileURLToPath } from "node:url";
 import * as ts from "typescript";
 import { describe, expect, it, vi } from "vitest";
 
-const wave0ContractsEnabled = process.env.PHASE4_WAVE0_CONTRACT === "1";
-const describeWave0 = wave0ContractsEnabled ? describe : describe.skip;
 const outlinePanePath = fileURLToPath(new URL("../components/OutlinePane.tsx", import.meta.url));
 
 function interfacePropertyNames(filePath: string, interfaceName: string): string[] {
@@ -25,7 +23,7 @@ async function loadOutlineSurface() {
   return import(/* @vite-ignore */ specifier);
 }
 
-describeWave0("Outline facade contract", () => {
+describe("Outline facade contract", () => {
   it("keeps no-op and changed render-domain snapshot identities scoped to one workspace", async () => {
     const surface = await loadOutlineSurface();
     const scope = { workspacePath: "/workspace-a" };
