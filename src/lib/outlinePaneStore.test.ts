@@ -69,6 +69,44 @@ describe("Outline facade contract", () => {
     expect(jumpToLine).toHaveBeenCalledWith(42, "/workspace-a/later.md");
   });
 
+  it("publishes file-queue changes only to the file-queue render domain", async () => {
+    const surface = await loadOutlineSurface();
+    const scope = { workspacePath: "/workspace-a" };
+    const documentSubscriber = vi.fn();
+    const fileQueueSubscriber = vi.fn();
+    const unsubscribeDocument = surface.subscribeOutlineDocumentSlice(scope, documentSubscriber);
+    const unsubscribeFileQueue = surface.subscribeOutlineFileQueueSlice(scope, fileQueueSubscriber);
+
+    const before = surface.getOutlinePaneState(scope);
+    surface.replaceOutlineFileQueue(scope, [{
+      id: "queue-1",
+      status: "queued",
+      sourcePath: "/outside/source.md",
+      sourceRelPath: "source.md",
+      sourceKind: "file",
+      fileName: "source.md",
+      targetDir: "/workspace-a",
+      operation: "copy",
+      message: null,
+      targetPath: null,
+    }]);
+    const queued = surface.getOutlinePaneState(scope);
+
+    expect(fileQueueSubscriber).toHaveBeenCalledTimes(1);
+    expect(documentSubscriber).not.toHaveBeenCalled();
+    expect(queued.document).toBe(before.document);
+    expect(queued.fileQueue).not.toBe(before.fileQueue);
+
+    const selected = surface.selectOutlineFileQueueItemInState(queued, "queue-1", false);
+    expect(surface.selectOutlineFileQueueItemInState(selected, "queue-1", false)).toBe(selected);
+    const updated = surface.updateOutlineFileQueueItemInState(selected, "queue-1", { operation: "move" });
+    expect(updated.document).toBe(selected.document);
+    expect(updated.fileQueue).not.toBe(selected.fileQueue);
+
+    unsubscribeDocument();
+    unsubscribeFileQueue();
+  });
+
   it("keeps OutlinePane within the structural prop budget", async () => {
     await loadOutlineSurface();
     const properties = interfacePropertyNames(outlinePanePath, "OutlinePaneProps");
