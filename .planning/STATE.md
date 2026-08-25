@@ -5,12 +5,12 @@ milestone_name: milestone
 current_phase: 03
 current_phase_name: typed-ipc-error-contract
 status: phase_complete
-stopped_at: Phase 03 complete and verified (passed); PR #279 open; Phase 4 not started
-last_updated: "2026-08-24T04:45:00.000Z"
+stopped_at: Phase 4 context gathered
+last_updated: "2026-08-25T19:39:16.687Z"
 last_activity: 2026-08-24
 last_activity_desc: Phase 03 complete - verification passed after the real-app WKWebView smoke closed the last evidence gap
 progress:
-  total_phases: 3
+  total_phases: 4
   completed_phases: 3
   total_plans: 14
   completed_plans: 14
@@ -145,6 +145,7 @@ Recent decisions affecting current work:
   reports complete: the Phase 2.1 planning artifacts, the HWPE-01..03 requirement
   registration, and the Semantica Phases 6-9 roadmap entries drawn from
   `docs/semantica-adoption-plan.md`.
+
 - [Phase 3]: The real-app WKWebView smoke found two live defects nothing else could see - EvidenceBinderMutation lacked serde rename_all_fields so every camelCase mutation was rejected at the bridge, and evidence discovery blocked the UI thread for over 40s on a 64k-file workspace. Treat "no native gate" as a real coverage hole in later phases, not a formality
 - [Phase 3]: Codex adversarial review produced ERR-05 and ERR-06 (v2 requirements) - the contract pins declarations but not emission sites, and commands able to emit reserved codes still flatten to String
 
@@ -171,6 +172,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-08-24T04:45:00.000Z
-Stopped at: Phase 03 complete and verified; PR #279 open, Phase 4 not started
-Resume file: .planning/phases/03-typed-ipc-error-contract/03-VERIFICATION.md
+Last session: 2026-08-25T19:39:16.673Z
+Stopped at: Phase 4 context gathered
+Resume file: .planning/phases/04-editor-surface-state-extraction/04-CONTEXT.md
