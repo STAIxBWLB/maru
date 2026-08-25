@@ -154,7 +154,14 @@ Notes for planning:
   3. `EditorPane` has a component test that fails if a preview mark is lost to an unrelated re-render - the #260/#262/#264 failure mode
   4. The e2e suite, unit tests, and the startup/bundle budget gates pass unchanged, and no lazy mode pane has been pulled into the entry chunk
 
-**Plans**: TBD
+**Plans**: 5 plans
+
+Plans:
+- [ ] 04-01-PLAN.md - Prove the production Outline facade/command-port tracer and first isolated render domains
+- [ ] 04-02-PLAN.md - Complete Outline extraction, guarded persistence, cleanup, and the eight-prop contract
+- [ ] 04-03-PLAN.md - Establish keyed Editor state, exact persistence boundaries, and lifecycle isolation
+- [ ] 04-04-PLAN.md - Migrate EditorPane and prove render isolation plus preview DOM identity
+- [ ] 04-05-PLAN.md - Run composite gates and the single focused native Tauri smoke
 
 Notes for planning:
 
