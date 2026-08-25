@@ -44,7 +44,8 @@ import maruSealMicroUrl from "./assets/brand/maru-seal-micro.svg";
 import { CommandPalette } from "./components/CommandPalette";
 import { CommitDialog } from "./components/CommitDialog";
 import { DocumentList } from "./components/DocumentList";
-import { EditorPane, type EditorViewMode, type HtmlViewMode } from "./components/EditorPane";
+import { EditorPaneFacade } from "./components/EditorPaneFacade";
+import { type EditorViewMode, type HtmlViewMode } from "./components/EditorPane";
 import type { HtmlEditorFlushHandle } from "./components/HtmlVisualEditor";
 import { BinaryViewerPane } from "./components/BinaryViewerPane";
 import { GitStatusBadge } from "./components/GitStatusBadge";
@@ -70,8 +71,6 @@ import {
   cleanupEditorPaneTabAcrossGroups,
   cleanupEditorPaneWorkspace,
   getEditorPaneState,
-  patchEditorPaneViewPreview,
-  setEditorPanePresentation,
   type EditorPaneScope,
 } from "./lib/editorPaneStore";
 import {
@@ -8307,42 +8306,37 @@ function MainApp() {
       group,
       tabId: tabId ?? "",
     };
-    setEditorPanePresentation(
-      scope,
-      {
-        tabs: group === "right" ? rightEditorGroupTabs : editorTabSummaries,
-        activeTabId: tabId,
-        outlineOpen,
-        activeWorkspaceLabel: workspace?.label ?? null,
-        documentLabel: docTab
-          ? documentDisplayName(docTab.document, maruSettings.ui.documentLabelMode)
-          : binaryTab?.fileEntry.name ?? null,
-        readOnly: !caps.canModify || Boolean(binaryTab),
-        canSnapshot: caps.canCreate && !binaryTab,
-        readOnlyReason,
-        entries: tab ? workspaceStates[tab.workspacePath]?.entries ?? entries : entries,
-        bodyOverride: group === "right" ? rightBinaryBody : leftBinaryBody,
-        vaultPath: docTab?.workspacePath ?? null,
-        isManagedVaultNote,
-        kgHighlightRefs:
-          docTab && kgHighlight?.docPath === docTab.document.relPath ? kgHighlight.refs : null,
-      },
-      {
-        openingEntry: group === "left" ? openingEntry : null,
-        saving: saving && resolvedActiveTabId === tabId && !binaryTab,
-      },
-    );
-    patchEditorPaneViewPreview(scope, {
-      viewMode: editorPaneViewModes[group],
-    });
     editorPaneScopesRef.current[group] = scope;
     const commands = group === "right" ? rightEditorPaneCommands : leftEditorPaneCommands;
     return (
-      <EditorPane
+      <EditorPaneFacade
         scope={scope}
         commands={commands}
         textareaRef={group === "right" ? rightEditorTextareaRef : editorTextareaRef}
         htmlFlushRef={group === "left" ? leftHtmlFlushRef : rightHtmlFlushRef}
+        presentation={{
+          tabs: group === "right" ? rightEditorGroupTabs : editorTabSummaries,
+          activeTabId: tabId,
+          outlineOpen,
+          activeWorkspaceLabel: workspace?.label ?? null,
+          documentLabel: docTab
+            ? documentDisplayName(docTab.document, maruSettings.ui.documentLabelMode)
+            : binaryTab?.fileEntry.name ?? null,
+          readOnly: !caps.canModify || Boolean(binaryTab),
+          canSnapshot: caps.canCreate && !binaryTab,
+          readOnlyReason,
+          entries: tab ? workspaceStates[tab.workspacePath]?.entries ?? entries : entries,
+          bodyOverride: group === "right" ? rightBinaryBody : leftBinaryBody,
+          vaultPath: docTab?.workspacePath ?? null,
+          isManagedVaultNote,
+          kgHighlightRefs:
+            docTab && kgHighlight?.docPath === docTab.document.relPath ? kgHighlight.refs : null,
+        }}
+        operation={{
+          openingEntry: group === "left" ? openingEntry : null,
+          saving: saving && resolvedActiveTabId === tabId && !binaryTab,
+        }}
+        viewMode={editorPaneViewModes[group]}
       />
     );
   };
