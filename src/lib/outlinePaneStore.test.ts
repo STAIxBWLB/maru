@@ -183,7 +183,7 @@ describe("Outline facade contract", () => {
     const adapter = persistence.createEditorSurfacePersistence({
       currentWorkspacePath: () => activeWorkspace,
       currentRequestId: () => requestId,
-      publish: surface.hydrateOutlinePaneState,
+      publish: surface.setOutlineRightPaneTab,
       cleanupWorkspace: surface.cleanupOutlinePaneWorkspace,
       scheduleSettings: vi.fn(),
     });
@@ -207,12 +207,13 @@ describe("Outline facade contract", () => {
   it("saves only rightPaneTab and removes facade-local workspace records", async () => {
     const surface = await loadOutlineSurface();
     const persistence = await loadPersistence();
+    const tabs = await import("./editorTabsStore");
     const workspacePath = "/workspace-a";
     const scheduleSettings = vi.fn();
     const adapter = persistence.createEditorSurfacePersistence({
       currentWorkspacePath: () => workspacePath,
       currentRequestId: () => 1,
-      publish: surface.hydrateOutlinePaneState,
+      publish: surface.setOutlineRightPaneTab,
       cleanupWorkspace: surface.cleanupOutlinePaneWorkspace,
       scheduleSettings,
     });
@@ -221,12 +222,27 @@ describe("Outline facade contract", () => {
       sidebar: { activeTab: "outline" },
       explorer: { explorerWorkspacePath: workspacePath },
     });
+    tabs.restoreWorkspaceTabs(
+      workspacePath,
+      {
+        id: "draft-tab",
+        workspacePath,
+        draftContent: "unsaved canonical draft",
+      } as never,
+      {
+        leftActiveTabId: "draft-tab",
+        rightActiveTabId: null,
+        focusedEditorGroup: "left",
+      },
+    );
     adapter.setRightPaneTab("files");
     const next = scheduleSettings.mock.calls[0][0](DEFAULT_MARU_SETTINGS);
     expect(next.ui).toEqual({ ...DEFAULT_MARU_SETTINGS.ui, rightPaneTab: "files" });
 
     adapter.cleanupWorkspace(workspacePath);
     expect(surface.getOutlinePaneState({ workspacePath }).sidebar.activeTab).toBe("workspace");
+    expect(tabs.getEditorTabsState().tabs[0]?.draftContent).toBe("unsaved canonical draft");
     expect(DEFAULT_MARU_SETTINGS.ui.rightPaneTab).toBe("workspace");
+    tabs.resetWorkspaceTabs(workspacePath);
   });
 });

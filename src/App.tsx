@@ -56,6 +56,11 @@ import { NewDocumentDialog } from "./components/NewDocumentDialog";
 import { OutlinePane } from "./components/OutlinePane";
 import { createOutlinePaneCommands } from "./lib/editorSurfaceAdapter";
 import {
+  cleanupEditorSurfaceWorkspace,
+  createEditorSurfacePersistence,
+  hydrateEditorSurfaces,
+} from "./lib/editorSurfacePersistence";
+import {
   getOutlinePaneState,
   hydrateOutlinePaneState,
   replaceOutlineFileQueue,
@@ -1843,6 +1848,26 @@ function MainApp() {
     [settingsWorkPath, settingsWritable],
   );
 
+  const editorSurfacePersistence = useMemo(
+    () =>
+      createEditorSurfacePersistence({
+        currentWorkspacePath: () => explorerWorkspacePath ?? null,
+        currentRequestId: () => loadWorkspaceRequestRef.current,
+        setRightPaneTab,
+        scheduleSettings: updateSettings,
+      }),
+    [explorerWorkspacePath, updateSettings],
+  );
+
+  useEffect(() => {
+    if (!explorerWorkspacePath) return;
+    void hydrateEditorSurfaces(
+      editorSurfacePersistence,
+      { workspacePath: explorerWorkspacePath, requestId: loadWorkspaceRequestRef.current },
+      maruSettings.ui.rightPaneTab,
+    );
+  }, [editorSurfacePersistence, explorerWorkspacePath, maruSettings.ui.rightPaneTab]);
+
   const updateLayoutSettings = useCallback(
     (
       patch: Partial<MaruSettings["ui"]["layout"]>,
@@ -2174,16 +2199,9 @@ function MainApp() {
 
   const setPersistedRightPaneTab = useCallback(
     (rightPaneTab: RightPaneTab) => {
-      setRightPaneTab(rightPaneTab);
-      updateSettings((current) => ({
-        ...current,
-        ui: {
-          ...current.ui,
-          rightPaneTab,
-        },
-      }));
+      editorSurfacePersistence.setRightPaneTab(rightPaneTab);
     },
-    [updateSettings],
+    [editorSurfacePersistence],
   );
 
   // Draft handoff into gap mode: the pane consumes it once on mount, so a
@@ -4062,6 +4080,7 @@ function MainApp() {
       setWorkspaceRegistry(registry);
       removeWorkspaceState(path);
       removeWorkspaceDocTabs(path);
+      cleanupEditorSurfaceWorkspace(editorSurfacePersistence, path);
       const nextPath =
         registry.activeByVisibility[explorerVisibility] ??
         registry.activeByVisibility.private ??
@@ -4074,7 +4093,7 @@ function MainApp() {
         await loadWorkspace(nextPath, nextVisibility);
       }
     },
-    [explorerVisibility, loadWorkspace, t],
+    [editorSurfacePersistence, explorerVisibility, loadWorkspace, t],
   );
 
   const useSampleWorkspace = useCallback(async () => {

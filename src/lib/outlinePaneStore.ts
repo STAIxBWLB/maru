@@ -303,6 +303,16 @@ export function setOutlineOperation(scope: OutlinePaneScope, patch: Partial<Outl
   return updateOutlinePaneState(scope, (state) => setOutlineOperationInState(state, patch));
 }
 
+/** The persisted right-pane choice is a narrow sidebar field. Keeping the
+ * merge here preserves every other render-domain value and its identity. */
+export function setOutlineRightPaneTab(scope: OutlinePaneScope, activeTab: RightPaneTab): OutlinePaneState {
+  return updateOutlinePaneState(scope, (state) =>
+    state.sidebar.activeTab === activeTab
+      ? state
+      : { ...state, sidebar: { ...state.sidebar, activeTab } },
+  );
+}
+
 /** A non-React current snapshot for command ports and narrow shell adapters. */
 export function getOutlinePaneState(scope: OutlinePaneScope): OutlinePaneState {
   return stateFor(scope);
