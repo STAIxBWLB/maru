@@ -61,6 +61,7 @@ import {
   setOutlineFileQueueCanApply,
   setOutlineFileQueueSelection,
   setOutlineOperation,
+  updateOutlineFileQueueItem,
   useOutlineFileQueueSlice,
   type OutlinePaneScope,
 } from "./lib/outlinePaneStore";
@@ -4499,13 +4500,7 @@ function MainApp() {
 
   const updateFileQueueItem = useCallback(
     (id: string, patch: Partial<Pick<FileQueueItem, "targetDir" | "operation">>) => {
-      const current = getOutlinePaneState(outlinePaneScope);
-      const next = current.fileQueue.fileQueue.map((item) =>
-        item.id === id
-          ? { ...item, ...patch, status: "queued" as const, message: null, targetPath: null }
-          : item,
-      );
-      replaceOutlineFileQueue(outlinePaneScope, next);
+      updateOutlineFileQueueItem(outlinePaneScope, id, patch);
       if (patch.operation) {
         updateSettings((settings) => ({
           ...settings,
