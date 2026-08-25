@@ -2,18 +2,18 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-current_phase: 03
-current_phase_name: typed-ipc-error-contract
-status: phase_complete
-stopped_at: Phase 4 context gathered
-last_updated: "2026-08-25T20:18:18.943Z"
-last_activity: 2026-08-24
-last_activity_desc: Phase 03 complete - verification passed after the real-app WKWebView smoke closed the last evidence gap
+current_phase: 04
+current_phase_name: Editor Surface State Extraction
+status: executing
+stopped_at: Completed 04-01-PLAN.md
+last_updated: "2026-08-25T20:30:25.604Z"
+last_activity: 2026-08-26
+last_activity_desc: Phase 04 execution started
 progress:
   total_phases: 4
   completed_phases: 3
   total_plans: 20
-  completed_plans: 14
+  completed_plans: 15
 ---
 
 # Project State
@@ -23,16 +23,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-08-23)
 
 **Core value:** The filesystem stays the source of truth - everything Maru shows is derived from real files the user owns, and nothing is lost if Maru is uninstalled.
-**Current focus:** Phase 03 complete; Phase 4 (Editor Surface State Extraction) is next
+**Current focus:** Phase 04 — Editor Surface State Extraction
 
 ## Current Position
 
-Phase: 03 (Typed IPC Error Contract) - COMPLETE, verified passed
-Plan: 4 of 4 complete
-Status: Verified passed on branch gsd/phase-3-typed-ipc-error-contract (PR #279)
-Last activity: 2026-08-24 - real-app WKWebView smoke closed the last evidence gap and found two live defects
+Phase: 04 (Editor Surface State Extraction) — EXECUTING
+Plan: 2 of 6
+Status: Ready to execute
+Last activity: 2026-08-26 — Phase 04 execution started
 
-Progress: [████████████░░░░░░░░] 60% (3/5 phases)
+Progress: [████████░░] 75% (3/5 phases)
 
 ## Performance Metrics
 
@@ -72,6 +72,7 @@ Progress: [████████████░░░░░░░░] 60% (3/
 | Phase 03 P02 | ~50min | 2 tasks | 6 files |
 | Phase 03 P03 | 15min | 2 tasks | 9 files |
 | Phase 03 P04 | ~35min | 2 tasks | 0 files |
+| Phase 04 P01 | 6min | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -121,6 +122,7 @@ Recent decisions affecting current work:
 - [Phase ?]: All three today_conflict fixture throw sites migrated to raw wire shape (not just the two the plan named by line), keeping the one-normalization-point invariant intact
 - [Phase ?]: ERR-01 and ERR-03 marked complete after verifying all four contract codes have a frontend reader and the residual substring-matcher grep is zero; ERR-02 left open for 03-04's formal two-sided rename drill
 - [Phase ?]: ERR-02 drill extended to three sub-drills (Rust value pin, Rust name/build, TS union/tsc) so the web_actions.rs:860 branch site is proven build-protected, not just the pin test
+- [Phase ?]: Wave 0 contracts remain activation-gated until their owning production plan removes the condition.
 
 ### Scope Exceptions
 
@@ -172,6 +174,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-08-25T19:39:16.673Z
-Stopped at: Phase 4 context gathered
-Resume file: .planning/phases/04-editor-surface-state-extraction/04-CONTEXT.md
+Last session: 2026-08-25T20:30:25.595Z
+Stopped at: Completed 04-01-PLAN.md
+Resume file: None
