@@ -54,7 +54,7 @@ import { EvidenceBinderPane } from "./components/evidence/EvidenceBinderPane";
 import { MissionBadge } from "./components/MissionBadge";
 import { NewDocumentDialog } from "./components/NewDocumentDialog";
 import { OutlinePane } from "./components/OutlinePane";
-import { createOutlinePaneCommands } from "./lib/editorSurfaceAdapter";
+import { createEditorPaneCommands, createOutlinePaneCommands } from "./lib/editorSurfaceAdapter";
 import {
   cleanupEditorSurfaceWorkspace,
   createEditorSurfacePersistence,
@@ -65,6 +65,10 @@ import {
   cleanupEditorPaneGroup,
   cleanupEditorPaneTabAcrossGroups,
   cleanupEditorPaneWorkspace,
+  getEditorPaneState,
+  patchEditorPaneViewPreview,
+  setEditorPanePresentation,
+  type EditorPaneScope,
 } from "./lib/editorPaneStore";
 import {
   getOutlinePaneState,
@@ -203,7 +207,6 @@ import {
   type SaveQueue,
 } from "./lib/debouncedSave";
 import { documentDisplayName } from "./lib/document";
-import { isHtmlFileKind } from "./lib/htmlDocument";
 import { refStepsByParagraph, uniqueRefNodePaths } from "./lib/kgRefs";
 import type { KgRefStep } from "./lib/kgRefs";
 import type { DraftGraphFocusRequest } from "./lib/draftGraphRelations";
@@ -8106,10 +8109,6 @@ function MainApp() {
   // are not allowed inside it), so the per-group closures it used to build
   // inline are hoisted here as explicit left/right variants; the render
   // sites select the matching variant on `group`.
-  const leftDocTab = isBinaryTab(leftTab) ? null : (leftTab as EditorTab | null);
-  const rightDocTab = isBinaryTab(rightTab) ? null : (rightTab as EditorTab | null);
-  const leftHtmlKey = leftDocTab ? `left:${leftDocTab.id}` : null;
-  const rightHtmlKey = rightDocTab ? `right:${rightDocTab.id}` : null;
   const rightEditorGroupTabs = useMemo(
     () =>
       rightTab
@@ -8141,22 +8140,6 @@ function MainApp() {
         />
       ) : null,
     [rightTab, handleBinaryViewerError],
-  );
-  const handleLeftEditorChange = useCallback(
-    (content: string) => {
-      if (!leftResolvedTabId) return;
-      activateEditorTab(leftResolvedTabId, "left");
-      updateTabDraft(leftResolvedTabId, content);
-    },
-    [leftResolvedTabId],
-  );
-  const handleRightEditorChange = useCallback(
-    (content: string) => {
-      if (!rightResolvedTabId) return;
-      activateEditorTab(rightResolvedTabId, "right");
-      updateTabDraft(rightResolvedTabId, content);
-    },
-    [rightResolvedTabId],
   );
   const handleLeftSelectTab = useCallback(
     (nextTabId: string) => selectTab(nextTabId, "left"),
@@ -8190,22 +8173,6 @@ function MainApp() {
     (nextTabId: string) => revealTabInExplorer(nextTabId, "right"),
     [revealTabInExplorer],
   );
-  const handleLeftSaveTab = useCallback(
-    () => void saveTab(leftResolvedTabId),
-    [leftResolvedTabId, saveTab],
-  );
-  const handleRightSaveTab = useCallback(
-    () => void saveTab(rightResolvedTabId),
-    [rightResolvedTabId, saveTab],
-  );
-  const handleLeftSnapshotTab = useCallback(
-    () => void snapshotTab(leftResolvedTabId),
-    [leftResolvedTabId, snapshotTab],
-  );
-  const handleRightSnapshotTab = useCallback(
-    () => void snapshotTab(rightResolvedTabId),
-    [rightResolvedTabId, snapshotTab],
-  );
   const handleLeftFocusPane = useCallback(() => {
     setFocusedWorkbenchSide("left");
     if (leftResolvedTabId) activateEditorTab(leftResolvedTabId, "left");
@@ -8214,76 +8181,6 @@ function MainApp() {
     setFocusedWorkbenchSide("right");
     if (rightResolvedTabId) activateEditorTab(rightResolvedTabId, "right");
   }, [rightResolvedTabId]);
-  const handleLeftViewModeChange = useCallback(
-    (mode: EditorViewMode) => setPersistedEditorViewMode(mode, "left"),
-    [setPersistedEditorViewMode],
-  );
-  const handleRightViewModeChange = useCallback(
-    (mode: EditorViewMode) => setPersistedEditorViewMode(mode, "right"),
-    [setPersistedEditorViewMode],
-  );
-  const handleLeftVisualizeRefs = useCallback(() => {
-    if (leftDocTab) visualizeDocRefs(leftDocTab);
-  }, [leftDocTab, visualizeDocRefs]);
-  const handleRightVisualizeRefs = useCallback(() => {
-    if (rightDocTab) visualizeDocRefs(rightDocTab);
-  }, [rightDocTab, visualizeDocRefs]);
-  const handleLeftToggleKgHighlight = useCallback(() => {
-    if (leftDocTab) toggleKgHighlight(leftDocTab);
-  }, [leftDocTab, toggleKgHighlight]);
-  const handleRightToggleKgHighlight = useCallback(() => {
-    if (rightDocTab) toggleKgHighlight(rightDocTab);
-  }, [rightDocTab, toggleKgHighlight]);
-  const handleLeftHtmlViewModeChange = useCallback(
-    (mode: HtmlViewMode) => {
-      if (!leftDocTab || !leftHtmlKey) return;
-      flushHtmlDraft(leftDocTab.id);
-      setHtmlPaneModes((prev) => ({
-        ...prev,
-        [leftHtmlKey]: { ...prev[leftHtmlKey], mode },
-      }));
-    },
-    [leftDocTab, leftHtmlKey, flushHtmlDraft],
-  );
-  const handleRightHtmlViewModeChange = useCallback(
-    (mode: HtmlViewMode) => {
-      if (!rightDocTab || !rightHtmlKey) return;
-      flushHtmlDraft(rightDocTab.id);
-      setHtmlPaneModes((prev) => ({
-        ...prev,
-        [rightHtmlKey]: { ...prev[rightHtmlKey], mode },
-      }));
-    },
-    [rightDocTab, rightHtmlKey, flushHtmlDraft],
-  );
-  const handleLeftHtmlRiskAck = useCallback(
-    (digest: string) => {
-      if (!leftHtmlKey) return;
-      setHtmlPaneModes((prev) => ({
-        ...prev,
-        [leftHtmlKey]: {
-          ...prev[leftHtmlKey],
-          mode: prev[leftHtmlKey]?.mode ?? "visual",
-          riskAckDigest: digest,
-        },
-      }));
-    },
-    [leftHtmlKey],
-  );
-  const handleRightHtmlRiskAck = useCallback(
-    (digest: string) => {
-      if (!rightHtmlKey) return;
-      setHtmlPaneModes((prev) => ({
-        ...prev,
-        [rightHtmlKey]: {
-          ...prev[rightHtmlKey],
-          mode: prev[rightHtmlKey]?.mode ?? "visual",
-          riskAckDigest: digest,
-        },
-      }));
-    },
-    [rightHtmlKey],
-  );
   const handleRenameTab = useCallback(
     (nextTabId: string) => void renameTabDocument(nextTabId),
     [renameTabDocument],
@@ -8335,90 +8232,88 @@ function MainApp() {
     );
     const htmlKey = docTab ? `${group}:${docTab.id}` : null;
     const htmlState = htmlKey ? htmlPaneModes[htmlKey] : undefined;
+    const scope: EditorPaneScope = {
+      workspacePath: tab?.workspacePath ?? activeDocumentWorkspacePath ?? "",
+      group,
+      tabId: tabId ?? "",
+    };
+    setEditorPanePresentation(
+      scope,
+      {
+        tabs: group === "right" ? rightEditorGroupTabs : editorTabSummaries,
+        activeTabId: tabId,
+        outlineOpen,
+        activeWorkspaceLabel: workspace?.label ?? null,
+        documentLabel: docTab
+          ? documentDisplayName(docTab.document, maruSettings.ui.documentLabelMode)
+          : binaryTab?.fileEntry.name ?? null,
+        readOnly: !caps.canModify || Boolean(binaryTab),
+        canSnapshot: caps.canCreate && !binaryTab,
+        readOnlyReason,
+        entries: tab ? workspaceStates[tab.workspacePath]?.entries ?? entries : entries,
+        bodyOverride: group === "right" ? rightBinaryBody : leftBinaryBody,
+        vaultPath: docTab?.workspacePath ?? null,
+        isManagedVaultNote,
+        kgHighlightRefs:
+          docTab && kgHighlight?.docPath === docTab.document.relPath ? kgHighlight.refs : null,
+      },
+      {
+        openingEntry: group === "left" ? openingEntry : null,
+        saving: saving && resolvedActiveTabId === tabId && !binaryTab,
+      },
+    );
+    patchEditorPaneViewPreview(scope, {
+      viewMode: editorPaneViewModes[group],
+      htmlViewMode: htmlState?.mode ?? "visual",
+      htmlRiskAckDigest: htmlState?.riskAckDigest ?? null,
+    });
+    const commands = createEditorPaneCommands({
+      getState: () => getEditorPaneState(scope),
+      selectTab: (nextTabId) => group === "right" ? handleRightSelectTab(nextTabId) : handleLeftSelectTab(nextTabId),
+      closeTab: (nextTabId) => group === "right" ? handleRightCloseTab() : handleLeftCloseTab(nextTabId),
+      closeOtherTabs,
+      closeTabsToRight,
+      closeSavedTabs,
+      closeAllTabs: closeAllCleanTabs,
+      copyTabName,
+      copyTabPath,
+      copyTabRelativePath,
+      renameTab: handleRenameTab,
+      moveTab: handleMoveTab,
+      duplicateTab: handleDuplicateTab,
+      deleteTab: handleDeleteTab,
+      openTabPreview: (nextTabId) => group === "right" ? handleRightOpenTabPreview(nextTabId) : handleLeftOpenTabPreview(nextTabId),
+      revealTabInFinder,
+      revealTabInExplorer: (nextTabId) => group === "right" ? handleRightRevealTabInExplorer(nextTabId) : handleLeftRevealTabInExplorer(nextTabId),
+      save: (currentScope) => void saveTab(currentScope.tabId),
+      snapshot: (currentScope) => void snapshotTab(currentScope.tabId),
+      splitRight: splitEditorRight,
+      openSourcePreview: () => {
+        void openSourcePreviewSplit();
+      },
+      openGraphRight: () => openGraphPanel(),
+      focusPane: () => group === "right" ? handleRightFocusPane() : handleLeftFocusPane(),
+      toggleOutline: handleToggleOutline,
+      persistViewMode: (mode) => setPersistedEditorViewMode(mode, group),
+      flushHtmlDraft: (currentScope) => {
+        void flushHtmlDraft(currentScope.tabId);
+      },
+      visualizeRefs: () => {
+        const current = getEditorPaneState(scope).document.tab;
+        if (current) visualizeDocRefs(current);
+      },
+      toggleKgHighlight: () => {
+        const current = getEditorPaneState(scope).document.tab;
+        if (current) toggleKgHighlight(current);
+      },
+      openKgRefNode: (nodePath) => handleKgRefNodeClick(nodePath),
+      openWikilink: handleWikilinkClick,
+    });
     return (
       <EditorPane
-        paneGroup={group}
-        document={docTab?.document ?? null}
-        openingEntry={group === "left" ? openingEntry : null}
-        draftContent={docTab?.draftContent ?? ""}
-        saving={saving && resolvedActiveTabId === tabId && !binaryTab}
-        dirty={Boolean(docTab && docTab.draftContent !== docTab.document.content)}
-        outlineOpen={outlineOpen}
-        activeWorkspaceLabel={workspace?.label ?? null}
-        documentLabel={
-          docTab
-            ? documentDisplayName(docTab.document, maruSettings.ui.documentLabelMode)
-            : binaryTab?.fileEntry.name ?? null
-        }
-        readOnly={!caps.canModify || Boolean(binaryTab)}
-        canSnapshot={caps.canCreate && !binaryTab}
-        readOnlyReason={readOnlyReason}
-        isManagedVaultNote={isManagedVaultNote}
-        viewMode={editorPaneViewModes[group]}
-        tabs={group === "right" ? rightEditorGroupTabs : editorTabSummaries}
-        activeTabId={tabId}
-        bodyOverride={group === "right" ? rightBinaryBody : leftBinaryBody}
-        entries={tab ? workspaceStates[tab.workspacePath]?.entries ?? entries : entries}
-        onChange={group === "right" ? handleRightEditorChange : handleLeftEditorChange}
-        onSelectTab={group === "right" ? handleRightSelectTab : handleLeftSelectTab}
-        onCloseTab={group === "right" ? handleRightCloseTab : handleLeftCloseTab}
-        onCloseOtherTabs={closeOtherTabs}
-        onCloseTabsToRight={closeTabsToRight}
-        onCloseSavedTabs={closeSavedTabs}
-        onCloseAllTabs={closeAllCleanTabs}
-        onCopyTabName={copyTabName}
-        onCopyTabPath={copyTabPath}
-        onCopyTabRelativePath={copyTabRelativePath}
-        onRenameTab={handleRenameTab}
-        onMoveTab={handleMoveTab}
-        onDuplicateTab={handleDuplicateTab}
-        onDeleteTab={handleDeleteTab}
-        onOpenTabPreview={
-          group === "right" ? handleRightOpenTabPreview : handleLeftOpenTabPreview
-        }
-        onRevealTabInFinder={revealTabInFinder}
-        onRevealTabInExplorer={
-          group === "right" ? handleRightRevealTabInExplorer : handleLeftRevealTabInExplorer
-        }
-        onSave={group === "right" ? handleRightSaveTab : handleLeftSaveTab}
-        onSnapshot={group === "right" ? handleRightSnapshotTab : handleLeftSnapshotTab}
-        onSplitRight={splitEditorRight}
-        onOpenSourcePreview={docTab ? openSourcePreviewSplit : undefined}
-        onOpenGraphRight={openGraphPanel}
-        onVisualizeRefs={
-          docTab && !isHtmlFileKind(docTab.document.fileKind)
-            ? group === "right"
-              ? handleRightVisualizeRefs
-              : handleLeftVisualizeRefs
-            : undefined
-        }
-        kgHighlightRefs={
-          docTab && kgHighlight?.docPath === docTab.document.relPath
-            ? kgHighlight.refs
-            : null
-        }
-        onToggleKgHighlight={
-          docTab && !isHtmlFileKind(docTab.document.fileKind)
-            ? group === "right"
-              ? handleRightToggleKgHighlight
-              : handleLeftToggleKgHighlight
-            : undefined
-        }
-        onKgRefNodeClick={handleKgRefNodeClick}
-        onFocusPane={group === "right" ? handleRightFocusPane : handleLeftFocusPane}
-        onToggleOutline={handleToggleOutline}
-        onViewModeChange={
-          group === "right" ? handleRightViewModeChange : handleLeftViewModeChange
-        }
-        onWikilinkClick={handleWikilinkClick}
+        scope={scope}
+        commands={commands}
         textareaRef={group === "right" ? rightEditorTextareaRef : editorTextareaRef}
-        vaultPath={docTab?.workspacePath ?? null}
-        htmlViewMode={htmlState?.mode ?? "visual"}
-        onHtmlViewModeChange={
-          group === "right" ? handleRightHtmlViewModeChange : handleLeftHtmlViewModeChange
-        }
-        htmlRiskAckDigest={htmlState?.riskAckDigest ?? null}
-        onHtmlRiskAck={group === "right" ? handleRightHtmlRiskAck : handleLeftHtmlRiskAck}
         htmlFlushRef={group === "left" ? leftHtmlFlushRef : rightHtmlFlushRef}
       />
     );

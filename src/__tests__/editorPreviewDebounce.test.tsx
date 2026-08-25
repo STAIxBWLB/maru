@@ -23,6 +23,15 @@ vi.mock("../lib/markdown", () => ({
 }));
 
 import { EditorPane } from "../components/EditorPane";
+import { createEditorPaneCommands } from "../lib/editorSurfaceAdapter";
+import {
+  getEditorPaneState,
+  patchEditorPaneViewPreview,
+  resetEditorPaneStoreForTests,
+  setEditorPanePresentation,
+  type EditorPaneScope,
+} from "../lib/editorPaneStore";
+import { replaceAllDocTabs, type EditorTab } from "../lib/editorTabsStore";
 import { LocaleContext } from "../lib/i18n";
 import type { DocumentPayload } from "../lib/types";
 
@@ -55,51 +64,45 @@ const otherDoc: DocumentPayload = {
 };
 
 const noop = () => {};
+const scope: EditorPaneScope = { workspacePath: "/workspace", group: "left", tabId: "note.md" };
+const commands = createEditorPaneCommands({ getState: () => getEditorPaneState(scope) });
 
 function renderPane(root: Root, draftContent: string, document: DocumentPayload = doc) {
+  const tab = {
+    id: scope.tabId,
+    workspacePath: scope.workspacePath,
+    document,
+    draftContent,
+  } as EditorTab;
+  replaceAllDocTabs([tab], {
+    activeTabId: tab.id,
+    leftActiveTabId: tab.id,
+    rightActiveTabId: null,
+    focusedEditorGroup: "left",
+  });
+  setEditorPanePresentation(
+    scope,
+    {
+      tabs: [],
+      activeTabId: tab.id,
+      outlineOpen: false,
+      activeWorkspaceLabel: null,
+      documentLabel: null,
+      readOnly: false,
+      canSnapshot: false,
+      readOnlyReason: null,
+      entries: [],
+      bodyOverride: null,
+      vaultPath: scope.workspacePath,
+      isManagedVaultNote: false,
+      kgHighlightRefs: null,
+    },
+    { openingEntry: null, saving: false },
+  );
+  patchEditorPaneViewPreview(scope, { viewMode: "preview" });
   root.render(
     <LocaleContext.Provider value={{ locale: "en", setLocale: noop, t }}>
-      <EditorPane
-        document={document}
-        openingEntry={null}
-        draftContent={draftContent}
-        saving={false}
-        dirty={false}
-        outlineOpen={false}
-        activeWorkspaceLabel={null}
-        documentLabel={null}
-        readOnly={false}
-        canSnapshot={false}
-        readOnlyReason={null}
-        viewMode="preview"
-        tabs={[]}
-        activeTabId={null}
-        entries={[]}
-        onChange={noop}
-        onSelectTab={noop}
-        onCloseTab={noop}
-        onCloseOtherTabs={noop}
-        onCloseTabsToRight={noop}
-        onCloseSavedTabs={noop}
-        onCloseAllTabs={noop}
-        onCopyTabName={noop}
-        onCopyTabPath={noop}
-        onCopyTabRelativePath={noop}
-        onRenameTab={noop}
-        onMoveTab={noop}
-        onDuplicateTab={noop}
-        onDeleteTab={noop}
-        onOpenTabPreview={noop}
-        onRevealTabInFinder={noop}
-        onRevealTabInExplorer={noop}
-        onSave={noop}
-        onSnapshot={noop}
-        onSplitRight={noop}
-        onOpenGraphRight={noop}
-        onToggleOutline={noop}
-        onViewModeChange={noop}
-        onWikilinkClick={noop}
-      />
+      <EditorPane scope={scope} commands={commands} />
     </LocaleContext.Provider>,
   );
 }
@@ -110,6 +113,7 @@ describe("EditorPane preview debounce", () => {
 
   beforeEach(() => {
     vi.useFakeTimers();
+    resetEditorPaneStoreForTests();
     container = document.createElement("div");
     document.body.appendChild(container);
   });

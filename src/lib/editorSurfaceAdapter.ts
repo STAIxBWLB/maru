@@ -1,4 +1,6 @@
+import type { EditorPaneScope, EditorPaneState } from "./editorPaneStore";
 import type { OutlinePaneState } from "./outlinePaneStore";
+import type { EditorViewMode } from "../components/DocumentModeSurface";
 import type { DocumentFilter } from "./documentIndex";
 import type { GraphLocalTarget, RightPaneTab, DocumentViewDefinition } from "./settings";
 import type { FileQueueItem, FileQueueSourceInfo, VaultEntry, WorkspaceFileEntry } from "./types";
@@ -145,10 +147,127 @@ export function createOutlinePaneCommands(
   };
 }
 
-/** Reserved for the later Editor migration. Keeping the named export here
- * fixes the dedicated adapter seam before consumers arrive. */
-export interface EditorPaneCommands {}
+/** Editor receives only the shell operations it invokes. Local state changes
+ * stay in editorPaneStore; this port keeps filesystem and cross-surface work
+ * behind the existing App orchestration. */
+export interface EditorPaneCommands {
+  selectTab(tabId: string): Promise<void>;
+  closeTab(tabId: string): Promise<void>;
+  closeOtherTabs(tabId: string): Promise<void>;
+  closeTabsToRight(tabId: string): Promise<void>;
+  closeSavedTabs(): Promise<void>;
+  closeAllTabs(): Promise<void>;
+  copyTabName(tabId: string): Promise<void>;
+  copyTabPath(tabId: string): Promise<void>;
+  copyTabRelativePath(tabId: string): Promise<void>;
+  renameTab(tabId: string): Promise<void>;
+  moveTab(tabId: string): Promise<void>;
+  duplicateTab(tabId: string): Promise<void>;
+  deleteTab(tabId: string): Promise<void>;
+  openTabPreview(tabId: string): Promise<void>;
+  revealTabInFinder(tabId: string): Promise<void>;
+  revealTabInExplorer(tabId: string): Promise<void>;
+  save(): Promise<void>;
+  snapshot(): Promise<void>;
+  splitRight(): Promise<void>;
+  openSourcePreview(): Promise<void>;
+  openGraphRight(): Promise<void>;
+  focusPane(): Promise<void>;
+  toggleOutline(): Promise<void>;
+  persistViewMode(mode: EditorViewMode): Promise<void>;
+  flushHtmlDraft(): Promise<void>;
+  visualizeRefs(): Promise<void>;
+  toggleKgHighlight(): Promise<void>;
+  openKgRefNode(nodePath: string): Promise<void>;
+  openWikilink(target: string): Promise<void>;
+}
 
-export function createEditorPaneCommands(): EditorPaneCommands {
-  return {};
+type EditorScopeAction = (scope: EditorPaneScope, state: EditorPaneState) => void | Promise<void>;
+type EditorTabAction = (tabId: string, scope: EditorPaneScope, state: EditorPaneState) => void | Promise<void>;
+
+export interface CreateEditorPaneCommandsOptions {
+  getState: () => EditorPaneState;
+  selectTab?: EditorTabAction;
+  closeTab?: EditorTabAction;
+  closeOtherTabs?: EditorTabAction;
+  closeTabsToRight?: EditorTabAction;
+  closeSavedTabs?: EditorScopeAction;
+  closeAllTabs?: EditorScopeAction;
+  copyTabName?: EditorTabAction;
+  copyTabPath?: EditorTabAction;
+  copyTabRelativePath?: EditorTabAction;
+  renameTab?: EditorTabAction;
+  moveTab?: EditorTabAction;
+  duplicateTab?: EditorTabAction;
+  deleteTab?: EditorTabAction;
+  openTabPreview?: EditorTabAction;
+  revealTabInFinder?: EditorTabAction;
+  revealTabInExplorer?: EditorTabAction;
+  save?: EditorScopeAction;
+  snapshot?: EditorScopeAction;
+  splitRight?: EditorScopeAction;
+  openSourcePreview?: EditorScopeAction;
+  openGraphRight?: EditorScopeAction;
+  focusPane?: EditorScopeAction;
+  toggleOutline?: EditorScopeAction;
+  persistViewMode?: (mode: EditorViewMode, scope: EditorPaneScope, state: EditorPaneState) => void | Promise<void>;
+  flushHtmlDraft?: EditorScopeAction;
+  visualizeRefs?: EditorScopeAction;
+  toggleKgHighlight?: EditorScopeAction;
+  openKgRefNode?: (nodePath: string, scope: EditorPaneScope, state: EditorPaneState) => void | Promise<void>;
+  openWikilink?: (target: string, scope: EditorPaneScope, state: EditorPaneState) => void | Promise<void>;
+}
+
+export function createEditorPaneCommands(
+  options: CreateEditorPaneCommandsOptions,
+): EditorPaneCommands {
+  const state = () => options.getState();
+  const scopeAction = async (action?: EditorScopeAction): Promise<void> => {
+    const current = state();
+    await action?.(current.scope, current);
+  };
+  const tabAction = async (tabId: string, action?: EditorTabAction): Promise<void> => {
+    const current = state();
+    await action?.(tabId, current.scope, current);
+  };
+  return {
+    selectTab: (tabId) => tabAction(tabId, options.selectTab),
+    closeTab: (tabId) => tabAction(tabId, options.closeTab),
+    closeOtherTabs: (tabId) => tabAction(tabId, options.closeOtherTabs),
+    closeTabsToRight: (tabId) => tabAction(tabId, options.closeTabsToRight),
+    closeSavedTabs: () => scopeAction(options.closeSavedTabs),
+    closeAllTabs: () => scopeAction(options.closeAllTabs),
+    copyTabName: (tabId) => tabAction(tabId, options.copyTabName),
+    copyTabPath: (tabId) => tabAction(tabId, options.copyTabPath),
+    copyTabRelativePath: (tabId) => tabAction(tabId, options.copyTabRelativePath),
+    renameTab: (tabId) => tabAction(tabId, options.renameTab),
+    moveTab: (tabId) => tabAction(tabId, options.moveTab),
+    duplicateTab: (tabId) => tabAction(tabId, options.duplicateTab),
+    deleteTab: (tabId) => tabAction(tabId, options.deleteTab),
+    openTabPreview: (tabId) => tabAction(tabId, options.openTabPreview),
+    revealTabInFinder: (tabId) => tabAction(tabId, options.revealTabInFinder),
+    revealTabInExplorer: (tabId) => tabAction(tabId, options.revealTabInExplorer),
+    save: () => scopeAction(options.save),
+    snapshot: () => scopeAction(options.snapshot),
+    splitRight: () => scopeAction(options.splitRight),
+    openSourcePreview: () => scopeAction(options.openSourcePreview),
+    openGraphRight: () => scopeAction(options.openGraphRight),
+    focusPane: () => scopeAction(options.focusPane),
+    toggleOutline: () => scopeAction(options.toggleOutline),
+    async persistViewMode(mode): Promise<void> {
+      const current = state();
+      await options.persistViewMode?.(mode, current.scope, current);
+    },
+    flushHtmlDraft: () => scopeAction(options.flushHtmlDraft),
+    visualizeRefs: () => scopeAction(options.visualizeRefs),
+    toggleKgHighlight: () => scopeAction(options.toggleKgHighlight),
+    async openKgRefNode(nodePath): Promise<void> {
+      const current = state();
+      await options.openKgRefNode?.(nodePath, current.scope, current);
+    },
+    async openWikilink(target): Promise<void> {
+      const current = state();
+      await options.openWikilink?.(target, current.scope, current);
+    },
+  };
 }

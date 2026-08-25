@@ -1,16 +1,18 @@
-import { useSyncExternalStore } from "react";
+import { useSyncExternalStore, type ReactNode } from "react";
 
 import {
   getEditorTabsState,
   type EditorGroupId,
   type EditorTab,
   type EditorTabsState,
+  updateTabDraft,
   useActiveTabIds,
   useDocTabs,
   useTabOrder,
 } from "./editorTabsStore";
 import type { EditorViewMode, HtmlViewMode } from "../components/DocumentModeSurface";
-import type { DocumentPayload, VaultEntry } from "./types";
+import type { DocumentPayload, KgNodeRef, VaultEntry } from "./types";
+import type { EditorTabSummary } from "../components/EditorPane";
 
 /**
  * The Editor facade key is explicit. A tab id alone is not sufficient: the
@@ -47,16 +49,36 @@ export interface EditorPaneOperationSlice {
   error: string | null;
 }
 
+/** Shell-derived display inputs. Canonical documents and drafts remain in editorTabsStore. */
+export interface EditorPanePresentationSlice {
+  tabs: readonly EditorTabSummary[];
+  activeTabId: string | null;
+  outlineOpen: boolean;
+  activeWorkspaceLabel: string | null;
+  documentLabel: string | null;
+  readOnly: boolean;
+  canSnapshot: boolean;
+  readOnlyReason: string | null;
+  entries: readonly VaultEntry[];
+  bodyOverride: ReactNode;
+  vaultPath: string | null;
+  isManagedVaultNote: boolean;
+  kgHighlightRefs: readonly KgNodeRef[] | null;
+}
+
 export interface EditorPaneState {
+  scope: EditorPaneScope;
   document: EditorPaneDocumentSlice;
   tabs: EditorPaneTabsSlice;
   viewPreview: EditorPaneViewPreviewSlice;
   operation: EditorPaneOperationSlice;
+  presentation: EditorPanePresentationSlice;
 }
 
 interface EditorPaneLocalState {
   viewPreview: EditorPaneViewPreviewSlice;
   operation: EditorPaneOperationSlice;
+  presentation: EditorPanePresentationSlice;
 }
 
 type EditorPaneDomain = keyof EditorPaneState;
@@ -72,6 +94,22 @@ const DEFAULT_OPERATION: EditorPaneOperationSlice = {
   saving: false,
   conflict: null,
   error: null,
+};
+
+const DEFAULT_PRESENTATION: EditorPanePresentationSlice = {
+  tabs: [],
+  activeTabId: null,
+  outlineOpen: false,
+  activeWorkspaceLabel: null,
+  documentLabel: null,
+  readOnly: false,
+  canSnapshot: false,
+  readOnlyReason: null,
+  entries: [],
+  bodyOverride: null,
+  vaultPath: null,
+  isManagedVaultNote: false,
+  kgHighlightRefs: null,
 };
 
 const editorPaneLocalState = new Map<string, EditorPaneLocalState>();
@@ -100,7 +138,11 @@ function groupViewModeFor(scope: EditorPaneScope, local: EditorPaneLocalState): 
 }
 
 function defaultLocalState(): EditorPaneLocalState {
-  return { viewPreview: DEFAULT_VIEW_PREVIEW, operation: DEFAULT_OPERATION };
+  return {
+    viewPreview: DEFAULT_VIEW_PREVIEW,
+    operation: DEFAULT_OPERATION,
+    presentation: DEFAULT_PRESENTATION,
+  };
 }
 
 function localStateFor(scope: EditorPaneScope): EditorPaneLocalState {
@@ -194,13 +236,43 @@ export function getEditorPaneState(scope: EditorPaneScope): EditorPaneState {
       ? cached.snapshot.viewPreview
       : { ...local.viewPreview, viewMode: groupViewMode };
   const snapshot = {
+    scope,
     document,
     tabs,
     viewPreview,
     operation: local.operation,
+    presentation: local.presentation,
   };
   stateCache.set(key, { local, groupViewMode, tabsState, snapshot });
   return snapshot;
+}
+
+export function setEditorPanePresentation(
+  scope: EditorPaneScope,
+  presentation: EditorPanePresentationSlice,
+  operation: Pick<EditorPaneOperationSlice, "openingEntry" | "saving">,
+): void {
+  const current = localStateFor(scope);
+  const presentationChanged = Object.keys(presentation).some(
+    (key) => presentation[key as keyof EditorPanePresentationSlice] !== current.presentation[key as keyof EditorPanePresentationSlice],
+  );
+  const nextOperation = { ...current.operation, ...operation };
+  const operationChanged = nextOperation.openingEntry !== current.operation.openingEntry || nextOperation.saving !== current.operation.saving;
+  if (!presentationChanged && !operationChanged) return;
+  const next = {
+    ...current,
+    ...(presentationChanged ? { presentation } : {}),
+    ...(operationChanged ? { operation: nextOperation } : {}),
+  };
+  editorPaneLocalState.set(scopeKey(scope), next);
+  stateCache.delete(scopeKey(scope));
+  if (presentationChanged) notify(scope, "presentation");
+  if (operationChanged) notify(scope, "operation");
+}
+
+/** Pure facade action: canonical draft ownership stays in editorTabsStore. */
+export function updateEditorPaneDraft(scope: EditorPaneScope, content: string): void {
+  updateTabDraft(scope.tabId, content);
 }
 
 export function patchEditorPaneViewPreview(
@@ -327,20 +399,6 @@ export function replaceEditorPaneScope(from: EditorPaneScope, to: EditorPaneScop
   stateCache.delete(scopeKey(to));
 }
 
-export interface EditorPaneCommands {
-  save: () => Promise<void>;
-}
-
-export function createEditorPaneCommands({
-  getState,
-  save,
-}: {
-  getState: () => EditorPaneState;
-  save: (state: EditorPaneState) => void | Promise<void>;
-}): EditorPaneCommands {
-  return { save: async () => save(getState()) };
-}
-
 function useEditorPaneDomain<T>(scope: EditorPaneScope, domain: EditorPaneDomain, read: () => T): T {
   return useSyncExternalStore(
     (subscriber) => subscribe(scope, domain, subscriber),
@@ -367,6 +425,10 @@ export function useEditorViewPreviewSlice(scope: EditorPaneScope): EditorPaneVie
 
 export function useEditorOperationSlice(scope: EditorPaneScope): EditorPaneOperationSlice {
   return useEditorPaneDomain(scope, "operation", () => getEditorPaneState(scope).operation);
+}
+
+export function useEditorPresentationSlice(scope: EditorPaneScope): EditorPanePresentationSlice {
+  return useEditorPaneDomain(scope, "presentation", () => getEditorPaneState(scope).presentation);
 }
 
 /** Test-only reset. It never reaches or mutates editorTabsStore. */
