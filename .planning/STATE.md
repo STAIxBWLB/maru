@@ -5,15 +5,15 @@ milestone_name: milestone
 current_phase: 04
 current_phase_name: Editor Surface State Extraction
 status: executing
-stopped_at: Completed 04-02-PLAN.md
-last_updated: "2026-08-25T21:17:14.663Z"
+stopped_at: Completed 04-03-PLAN.md
+last_updated: "2026-08-25T21:29:44.802Z"
 last_activity: 2026-08-26
 last_activity_desc: Phase 04 execution started
 progress:
   total_phases: 4
   completed_phases: 3
   total_plans: 20
-  completed_plans: 16
+  completed_plans: 17
 ---
 
 # Project State
@@ -28,11 +28,11 @@ See: .planning/PROJECT.md (updated 2026-08-23)
 ## Current Position
 
 Phase: 04 (Editor Surface State Extraction) — EXECUTING
-Plan: 3 of 6
+Plan: 4 of 6
 Status: Ready to execute
 Last activity: 2026-08-26 — Phase 04 execution started
 
-Progress: [████████░░] 80% (3/5 phases)
+Progress: [█████████░] 85% (3/5 phases)
 
 ## Performance Metrics
 
@@ -74,6 +74,7 @@ Progress: [████████░░] 80% (3/5 phases)
 | Phase 03 P04 | ~35min | 2 tasks | 0 files |
 | Phase 04 P01 | 6min | 2 tasks | 4 files |
 | Phase 04 P02 | 13min | 2 tasks | 5 files |
+| Phase 04-editor-surface-state-extraction P03 | 9min | 2 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -127,6 +128,9 @@ Recent decisions affecting current work:
 - [Phase ?]: Use workspace-keyed, per-domain subscriber maps so file-queue publishes cannot notify document consumers.
 - [Phase ?]: Keep queue update and selection transitions pure in outlinePaneStore; reserve OutlinePaneCommands for shell orchestration and persistence effects.
 - [Phase ?]: Keep queue progress and actionable failures in the operation slice while notification-only failures continue through errorStore.
+- [Phase ?]: OutlinePane now receives only scope, commands, pane ref, and render slots; sidebar and explorer values are facade slices.
+- [Phase ?]: The persistence adapter consumes App's existing loadWorkspace request id and never owns a second generation counter.
+- [Phase ?]: Workspace cleanup drops only facade-local Outline records, leaving editorTabsStore drafts and MaruSettings untouched.
 
 ### Scope Exceptions
 
@@ -178,6 +182,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-08-25T21:17:14.655Z
-Stopped at: Completed 04-02-PLAN.md
+Last session: 2026-08-25T21:29:44.793Z
+Stopped at: Completed 04-03-PLAN.md
 Resume file: None
