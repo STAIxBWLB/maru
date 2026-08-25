@@ -157,11 +157,25 @@ Notes for planning:
 **Plans**: 6 plans
 
 Plans:
+**Wave 1**
+
 - [ ] 04-01-PLAN.md - Create all Wave 0 facade, render-isolation, preview-identity, and prop-budget contracts before production work
 - [ ] 04-02-PLAN.md - Prove the production Outline facade/command-port tracer and first isolated render domains
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
 - [ ] 04-03-PLAN.md - Complete Outline extraction, guarded persistence, cleanup, and the eight-prop contract
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
 - [ ] 04-04-PLAN.md - Establish keyed Editor state, exact persistence boundaries, and lifecycle isolation
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
 - [ ] 04-05-PLAN.md - Migrate EditorPane and drive render-isolation plus preview DOM-identity contracts green
+
+**Wave 5** *(blocked on Wave 4 completion)*
+
 - [ ] 04-06-PLAN.md - Run composite gates and the single focused native Tauri smoke
 
 Notes for planning:
