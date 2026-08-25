@@ -4,16 +4,16 @@ milestone: v1.0
 milestone_name: milestone
 current_phase: 04
 current_phase_name: Editor Surface State Extraction
-status: executing
-stopped_at: Completed 04-05-PLAN.md
-last_updated: "2026-08-25T21:59:39.908Z"
+status: verifying
+stopped_at: Completed 04-06-PLAN.md
+last_updated: "2026-08-25T23:42:52.577Z"
 last_activity: 2026-08-26
 last_activity_desc: Phase 04 execution started
 progress:
   total_phases: 4
-  completed_phases: 3
+  completed_phases: 4
   total_plans: 20
-  completed_plans: 19
+  completed_plans: 20
 ---
 
 # Project State
@@ -29,10 +29,10 @@ See: .planning/PROJECT.md (updated 2026-08-23)
 
 Phase: 04 (Editor Surface State Extraction) — EXECUTING
 Plan: 6 of 6
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-08-26 — Phase 04 execution started
 
-Progress: [██████████] 95% (3/5 phases)
+Progress: [██████████] 100% (3/5 phases)
 
 ## Performance Metrics
 
@@ -77,6 +77,7 @@ Progress: [██████████] 95% (3/5 phases)
 | Phase 04-editor-surface-state-extraction P03 | 9min | 2 tasks | 6 files |
 | Phase 04 P04 | 12min | 2 tasks | 4 files |
 | Phase 04 P05 | 15min | 2 tasks | 8 files |
+| Phase 04 P06 | 10h 10min | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -139,6 +140,8 @@ Recent decisions affecting current work:
 - [Phase ?]: EditorPane now receives only scope, commands, and optional editor refs; all render values are read from keyed facade slices.
 - [Phase ?]: EditorPaneCommands objects are stable across App renders and dispatch against current keyed scope and current shell handlers.
 - [Phase ?]: Preview markup remains memoized solely on previewHtml and React remains the only preview DOM writer.
+- [Phase ?]: Keep HTML view/risk state facade-local so parent App renders cannot replay stale legacy values.
+- [Phase ?]: Require a distinct-bundle native WKWebView smoke after deterministic editor-surface gates pass.
 
 ### Scope Exceptions
 
@@ -190,6 +193,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-08-25T21:59:39.899Z
-Stopped at: Completed 04-05-PLAN.md
+Last session: 2026-08-25T23:42:52.569Z
+Stopped at: Completed 04-06-PLAN.md
 Resume file: None
