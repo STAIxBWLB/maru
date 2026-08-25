@@ -111,12 +111,58 @@ describe("Outline facade contract", () => {
     await loadOutlineSurface();
     const properties = interfacePropertyNames(outlinePanePath, "OutlinePaneProps");
 
-    expect(properties).toHaveLength(8);
-    expect(properties).toEqual(
-      expect.arrayContaining(["scope", "commands"]),
-    );
+    expect(properties).toEqual(["scope", "commands", "paneRef", "slots"]);
     expect(properties).not.toEqual(
-      expect.arrayContaining(["document", "draftContent", "onJumpToLine", "fileQueue", "onApplyFileQueue"]),
+      expect.arrayContaining([
+        "document",
+        "draftContent",
+        "onJumpToLine",
+        "fileQueue",
+        "onApplyFileQueue",
+        "activeLine",
+        "onClose",
+        "sidebar",
+        "explorer",
+      ]),
     );
+  });
+
+  it("keeps explorer and active-tab/share/sidebar reads in independent facade slices", async () => {
+    const surface = await loadOutlineSurface();
+    const scope = { workspacePath: "/workspace-a" };
+    const explorerSubscriber = vi.fn();
+    const sidebarSubscriber = vi.fn();
+    const unsubscribeExplorer = surface.subscribeOutlineExplorerSlice(scope, explorerSubscriber);
+    const unsubscribeSidebar = surface.subscribeOutlineSidebarSlice(scope, sidebarSubscriber);
+
+    const initial = surface.getOutlinePaneState(scope);
+    surface.hydrateOutlinePaneState(scope, {
+      explorer: { query: "report" },
+      sidebar: { activeTab: "outline", activeLine: 2 },
+    });
+    const hydrated = surface.getOutlinePaneState(scope);
+
+    expect(explorerSubscriber).toHaveBeenCalledTimes(1);
+    expect(sidebarSubscriber).toHaveBeenCalledTimes(1);
+    expect(hydrated.document).toBe(initial.document);
+    expect(hydrated.fileQueue).toBe(initial.fileQueue);
+    expect(hydrated.operation).toBe(initial.operation);
+
+    unsubscribeExplorer();
+    unsubscribeSidebar();
+  });
+
+  it("exposes shell effects only through the command port", async () => {
+    const surface = await loadOutlineSurface();
+    const closeOutline = vi.fn();
+    const commands = surface.createOutlinePaneCommands({
+      getState: () => surface.getOutlinePaneState({ workspacePath: "/workspace-a" }),
+      jumpToLine: vi.fn(),
+      closeOutline,
+    });
+
+    await commands.closeOutline();
+
+    expect(closeOutline).toHaveBeenCalledOnce();
   });
 });
