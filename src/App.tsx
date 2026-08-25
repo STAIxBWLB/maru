@@ -54,6 +54,8 @@ import { EvidenceBinderPane } from "./components/evidence/EvidenceBinderPane";
 import { MissionBadge } from "./components/MissionBadge";
 import { NewDocumentDialog } from "./components/NewDocumentDialog";
 import { OutlinePane } from "./components/OutlinePane";
+import { createOutlinePaneCommands } from "./lib/editorSurfaceAdapter";
+import { getOutlinePaneState, type OutlinePaneScope } from "./lib/outlinePaneStore";
 import { ScratchpadPane } from "./components/ScratchpadPane";
 import { InlineDocumentEditor } from "./components/InlineDocumentEditor";
 import type { TasksPaneProps } from "./components/tasks/TasksPane";
@@ -1307,6 +1309,13 @@ function MainApp() {
   );
   const selectedPath = pendingSelectedPath ?? selectedEntry?.path ?? null;
   const activeDocumentWorkspacePath = activeTab?.workspacePath ?? explorerWorkspacePath;
+  const outlinePaneScope = useMemo<OutlinePaneScope>(
+    () => ({
+      workspacePath: activeDocumentWorkspacePath ?? "",
+      tabId: resolvedActiveTabId,
+    }),
+    [activeDocumentWorkspacePath, resolvedActiveTabId],
+  );
   const activeDocumentWorkspace = useMemo(
     () =>
       activeDocumentWorkspacePath
@@ -6686,6 +6695,17 @@ function MainApp() {
     });
   }, [focusedEditorGroup, setPersistedEditorViewMode]);
 
+  const outlinePaneCommands = useMemo(
+    () =>
+      createOutlinePaneCommands({
+        getState: () => getOutlinePaneState(outlinePaneScope),
+        // The port supplies the current document path for its narrow contract;
+        // existing jump behavior selects the currently focused editor group.
+        jumpToLine: (line) => jumpToOutlineLine(line),
+      }),
+    [jumpToOutlineLine, outlinePaneScope],
+  );
+
   const openWorkspaceFileEntry = useCallback(
     async (entry: WorkspaceFileEntry, line?: number) => {
       if (!isOpenableDocumentFile(entry)) {
@@ -9106,89 +9126,81 @@ function MainApp() {
 
         {outlineOpen && visibleAppMode !== "files" && !rightWorkbenchOpen ? (
           <OutlinePane
-            document={document}
-            draftContent={draftContent}
-            entries={activeDocumentEntries}
-            readOnly={!activeWorkspaceCanModify}
-            workspacePath={activeDocumentWorkspacePath}
+            scope={outlinePaneScope}
+            commands={outlinePaneCommands}
             activeLine={activeOutlineLine}
-            onJumpToLine={jumpToOutlineLine}
             onClose={() => updateLayoutSettings({ outlineOpen: false })}
-            onUpdateField={updateField}
-            onSelectEntry={selectEntry}
-            onMissingWikilink={handleWikilinkClick}
-            onOpenGraph={(localTarget) =>
-              openGraphMode({
-                source:
-                  activeDocumentWorkspacePath === graphVaultPath ? "vault" : "workspace",
-                localTarget,
-              })
-            }
-            isManagedVaultNote={Boolean(
-              activeDocumentWorkspace?.writePolicy === "managed" &&
-                document?.relPath.startsWith("notes/") &&
-                document.relPath.toLowerCase().endsWith(".md"),
-            )}
-            fileQueue={fileQueue}
-            canApplyFileQueue={canApplyFileQueue}
-            onUpdateFileQueueItem={updateFileQueueItem}
-            selectedFileQueueItemIds={selectedFileQueueItemIds}
-            onSelectFileQueueItem={selectFileQueueItem}
-            onQueueExternalFiles={queueExternalFiles}
-            onQueueFileSources={addFileQueueSources}
-            onApplyFileQueue={applyQueuedFiles}
-            onClearFileQueue={clearFileQueue}
-            onClearSelectedFileQueueItems={clearSelectedFileQueueItems}
-            workspaceFileEntries={fileEntries}
-            explorerWorkspacePath={explorerWorkspacePath}
-            explorerExpandedFolders={collapsedFileFolders}
-            onExplorerExpandedFoldersChange={setCollapsedFileFolders}
-            explorerSelectedPath={selectedPath}
-            explorerLoading={
-              explorerWorkspaceFilesState.loading ||
-              explorerWorkspaceFilesState.refreshing ||
-              shouldScanExplorerWorkspaceFiles
-            }
-            explorerReady={explorerWorkspaceFilesState.scanStatus === "ready"}
-            explorerRefreshing={explorerWorkspaceFilesState.refreshing}
-            onExplorerRefresh={() => {
-              if (explorerWorkspacePath) {
-                void refreshWorkspaceFiles(explorerWorkspacePath);
-              }
-            }}
-            onOpenWorkspaceFile={(entry, line) =>
-              void openWorkspaceFileEntry(entry, line)
-            }
-            explorerIncludeDotFolders={maruSettings.scan.includeDotFolders}
-            onIgnoreWorkspaceEntry={(relPath) => void ignoreEntry(relPath)}
-            selectedWorkspaceFileEntries={selectedWorkspaceFileEntries}
-            filesPaneFilters={filesPaneFilters}
-            onFilesPaneFiltersChange={setFilesPaneFilters}
-            explorerPaneMode={maruSettings.ui.explorerPaneMode}
-            onRevealFileInFinder={revealTargetInFinder}
-            activeTab={rightPaneTab}
-            onTabChange={setPersistedRightPaneTab}
             paneRef={outlinePaneRef}
-            shareWorkspacePath={shareWorkspacePath}
-            shareDocumentDirty={Boolean(dirty)}
-            inboxShareablePaths={inboxShareablePaths}
-            appMode={visibleAppMode}
-            contentCount={documentIndex.contentCount}
-            typeCounts={documentIndex.typeCounts}
-            documentViews={maruSettings.ui.documentViews}
-            viewCounts={builtInDocumentViewCounts}
-            customViewCounts={customDocumentViewCounts}
-            recentEntries={recentEntries}
-            selectedPath={selectedPath}
-            documentFilter={documentFilter}
-            onDocumentFilter={setExplorerDocumentFilter}
-            onDocumentViewsChange={updateDocumentViews}
-            onNewDocument={openNewDocumentDialog}
-            canCreateDocument={activeWorkspaceCanCreate}
-            onSelectRecent={selectEntry}
-            onOpenCommandPalette={openCommandPalette}
-            skillsNode={
-              <div className="skills-pane-stack">
+            sidebar={{
+              entries: activeDocumentEntries,
+              readOnly: !activeWorkspaceCanModify,
+              onUpdateField: updateField,
+              onSelectEntry: selectEntry,
+              onMissingWikilink: handleWikilinkClick,
+              onOpenGraph: (localTarget) => openGraphMode({
+                source: activeDocumentWorkspacePath === graphVaultPath ? "vault" : "workspace",
+                localTarget,
+              }),
+              isManagedVaultNote: Boolean(
+                activeDocumentWorkspace?.writePolicy === "managed" &&
+                  document?.relPath.startsWith("notes/") &&
+                  document.relPath.toLowerCase().endsWith(".md"),
+              ),
+              activeTab: rightPaneTab,
+              onTabChange: setPersistedRightPaneTab,
+              appMode: visibleAppMode,
+              contentCount: documentIndex.contentCount,
+              typeCounts: documentIndex.typeCounts,
+              documentViews: maruSettings.ui.documentViews,
+              viewCounts: builtInDocumentViewCounts,
+              customViewCounts: customDocumentViewCounts,
+              recentEntries,
+              selectedPath,
+              documentFilter,
+              onDocumentFilter: setExplorerDocumentFilter,
+              onDocumentViewsChange: updateDocumentViews,
+              onNewDocument: openNewDocumentDialog,
+              canCreateDocument: activeWorkspaceCanCreate,
+              onSelectRecent: selectEntry,
+              onOpenCommandPalette: openCommandPalette,
+            }}
+            explorer={{
+              fileQueue,
+              canApplyFileQueue,
+              onUpdateFileQueueItem: updateFileQueueItem,
+              selectedFileQueueItemIds,
+              onSelectFileQueueItem: selectFileQueueItem,
+              onQueueExternalFiles: queueExternalFiles,
+              onQueueFileSources: addFileQueueSources,
+              onApplyFileQueue: applyQueuedFiles,
+              onClearFileQueue: clearFileQueue,
+              onClearSelectedFileQueueItems: clearSelectedFileQueueItems,
+              workspaceFileEntries: fileEntries,
+              explorerWorkspacePath,
+              explorerExpandedFolders: collapsedFileFolders,
+              onExplorerExpandedFoldersChange: setCollapsedFileFolders,
+              explorerSelectedPath: selectedPath,
+              explorerLoading: explorerWorkspaceFilesState.loading ||
+                explorerWorkspaceFilesState.refreshing || shouldScanExplorerWorkspaceFiles,
+              explorerReady: explorerWorkspaceFilesState.scanStatus === "ready",
+              explorerRefreshing: explorerWorkspaceFilesState.refreshing,
+              onExplorerRefresh: () => {
+                if (explorerWorkspacePath) void refreshWorkspaceFiles(explorerWorkspacePath);
+              },
+              onOpenWorkspaceFile: (entry, line) => void openWorkspaceFileEntry(entry, line),
+              explorerIncludeDotFolders: maruSettings.scan.includeDotFolders,
+              onIgnoreWorkspaceEntry: (relPath) => void ignoreEntry(relPath),
+              selectedWorkspaceFileEntries,
+              filesPaneFilters,
+              onFilesPaneFiltersChange: setFilesPaneFilters,
+              explorerPaneMode: maruSettings.ui.explorerPaneMode,
+              onRevealFileInFinder: revealTargetInFinder,
+            }}
+            slots={{
+              shareWorkspacePath,
+              shareDocumentDirty: Boolean(dirty),
+              inboxShareablePaths,
+              skillsNode: <div className="skills-pane-stack">
                 <SkillRunsPanel
                   workPath={activeDocumentWorkspacePath ?? inboxWorkspacePath}
                   missions={trackedAgentMissions}
@@ -9207,23 +9219,19 @@ function MainApp() {
                   onRefresh={refreshSkills}
                   onRunSkill={(skill) => openSkillCompose(skill)}
                 />
-              </div>
-            }
-            guidelineNode={
-              <WritingGuidelineSidebar
+              </div>,
+              guidelineNode: <WritingGuidelineSidebar
                 workspaceRoot={activeDocumentWorkspacePath}
                 documentBody={draftContent || document?.content || ""}
                 frontmatter={document?.meta ?? null}
-              />
-            }
-            evidenceNode={
-              <EvidenceBinderPane
+              />,
+              evidenceNode: <EvidenceBinderPane
                 workspaceRoot={activeDocumentWorkspacePath}
                 docId={evidenceBinderDocId}
                 documentPath={document?.path ?? null}
                 documentMarkdown={draftContent || document?.content || ""}
-              />
-            }
+              />,
+            }}
           />
         ) : null}
         </div>

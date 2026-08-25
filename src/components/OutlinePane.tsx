@@ -48,7 +48,9 @@ import {
 } from "../lib/fileDrag";
 import { extractOutline } from "../lib/markdown";
 import { setError } from "../lib/errorStore";
+import type { OutlinePaneCommands } from "../lib/editorSurfaceAdapter";
 import { useTranslation } from "../lib/i18n";
+import { useOutlineDocumentSlice, type OutlinePaneScope } from "../lib/outlinePaneStore";
 import { useContextMenuKeyboard } from "../lib/useContextMenuKeyboard";
 import type {
   MaruAppMode,
@@ -74,17 +76,9 @@ import { ExplorerPane } from "./ExplorerPane";
 import { SharedOutboxPane } from "./SharedOutboxPane";
 import { Sidebar } from "./Sidebar";
 
-interface OutlinePaneProps {
-  document: DocumentPayload | null;
-  draftContent: string;
+interface OutlinePaneSidebarProps {
   entries: VaultEntry[];
   readOnly: boolean;
-  workspacePath: string | null;
-  /** Editor line currently scrolled to the top (source mode); highlights the
-   *  matching outline heading. Null when tracking is inactive. */
-  activeLine?: number | null;
-  onJumpToLine: (line: number) => void;
-  onClose: () => void;
   onUpdateField: (
     key: string,
     value: string | string[] | number | boolean | null,
@@ -95,6 +89,26 @@ interface OutlinePaneProps {
   /** Managed vault note — swaps the free-form type input for the schema form
    *  (description 카운터·type/domain select·topics 칩, spec §3 F1). */
   isManagedVaultNote?: boolean;
+  activeTab: RightPaneTab;
+  onTabChange: (tab: RightPaneTab) => void;
+  appMode: MaruAppMode;
+  contentCount: number;
+  typeCounts: Array<[string, number]>;
+  documentViews: DocumentViewDefinition[];
+  viewCounts: Record<BuiltInDocumentView, number>;
+  customViewCounts: Record<string, number>;
+  recentEntries: VaultEntry[];
+  selectedPath: string | null;
+  documentFilter: DocumentFilter;
+  onDocumentFilter: (filter: DocumentFilter) => void;
+  onDocumentViewsChange: (views: DocumentViewDefinition[]) => void;
+  onNewDocument: (docType?: string) => void;
+  canCreateDocument: boolean;
+  onSelectRecent: (entry: VaultEntry) => void;
+  onOpenCommandPalette: () => void;
+}
+
+interface OutlinePaneExplorerProps {
   fileQueue: FileQueueItem[];
   canApplyFileQueue: boolean;
   onUpdateFileQueueItem: (
@@ -125,9 +139,9 @@ interface OutlinePaneProps {
   onFilesPaneFiltersChange: (filters: WorkspaceFilesPaneFilters) => void;
   explorerPaneMode: ExplorerPaneMode;
   onRevealFileInFinder: (targetPath: string) => void;
-  activeTab: RightPaneTab;
-  onTabChange: (tab: RightPaneTab) => void;
-  paneRef?: React.RefObject<HTMLElement | null>;
+}
+
+interface OutlinePaneSlots {
   skillsNode?: React.ReactNode;
   guidelineNode?: React.ReactNode;
   evidenceNode?: React.ReactNode;
@@ -137,21 +151,19 @@ interface OutlinePaneProps {
   shareDocumentDirty: boolean;
   /** Shareable absolute file paths reported by the Inbox selection. */
   inboxShareablePaths: string[];
-  appMode: MaruAppMode;
-  contentCount: number;
-  typeCounts: Array<[string, number]>;
-  documentViews: DocumentViewDefinition[];
-  viewCounts: Record<BuiltInDocumentView, number>;
-  customViewCounts: Record<string, number>;
-  recentEntries: VaultEntry[];
-  selectedPath: string | null;
-  documentFilter: DocumentFilter;
-  onDocumentFilter: (filter: DocumentFilter) => void;
-  onDocumentViewsChange: (views: DocumentViewDefinition[]) => void;
-  onNewDocument: (docType?: string) => void;
-  canCreateDocument: boolean;
-  onSelectRecent: (entry: VaultEntry) => void;
-  onOpenCommandPalette: () => void;
+}
+
+interface OutlinePaneProps {
+  scope: OutlinePaneScope;
+  commands: OutlinePaneCommands;
+  /** Editor line currently scrolled to the top (source mode); highlights the
+   *  matching outline heading. Null when tracking is inactive. */
+  activeLine?: number | null;
+  onClose: () => void;
+  paneRef?: React.RefObject<HTMLElement | null>;
+  sidebar: OutlinePaneSidebarProps;
+  explorer: OutlinePaneExplorerProps;
+  slots: OutlinePaneSlots;
 }
 
 const STANDARD_TYPES = [
@@ -212,70 +224,79 @@ const AUDIO_EXTENSIONS = new Set(["aac", "aiff", "flac", "m4a", "mp3", "ogg", "w
 const VIDEO_EXTENSIONS = new Set(["avi", "m4v", "mkv", "mov", "mp4", "webm", "wmv"]);
 
 export function OutlinePane({
-  document,
-  draftContent,
-  entries,
-  readOnly,
+  scope,
+  commands,
   activeLine = null,
-  onJumpToLine,
   onClose,
-  onUpdateField,
-  onSelectEntry,
-  onMissingWikilink,
-  onOpenGraph,
-  isManagedVaultNote,
-  fileQueue,
-  canApplyFileQueue,
-  onUpdateFileQueueItem,
-  selectedFileQueueItemIds,
-  onSelectFileQueueItem,
-  onQueueExternalFiles,
-  onQueueFileSources,
-  onApplyFileQueue,
-  onClearFileQueue,
-  onClearSelectedFileQueueItems,
-  workspaceFileEntries,
-  explorerWorkspacePath,
-  explorerExpandedFolders,
-  onExplorerExpandedFoldersChange,
-  explorerSelectedPath,
-  explorerLoading,
-  explorerReady,
-  explorerRefreshing,
-  onExplorerRefresh,
-  onOpenWorkspaceFile,
-  explorerIncludeDotFolders,
-  onIgnoreWorkspaceEntry,
-  selectedWorkspaceFileEntries,
-  filesPaneFilters,
-  onFilesPaneFiltersChange,
-  explorerPaneMode,
-  onRevealFileInFinder,
-  activeTab,
-  onTabChange,
   paneRef,
-  skillsNode,
-  guidelineNode,
-  evidenceNode,
-  shareWorkspacePath,
-  shareDocumentDirty,
-  inboxShareablePaths,
-  appMode,
-  contentCount,
-  typeCounts,
-  documentViews,
-  viewCounts,
-  customViewCounts,
-  recentEntries,
-  selectedPath,
-  documentFilter,
-  onDocumentFilter,
-  onDocumentViewsChange,
-  onNewDocument,
-  canCreateDocument,
-  onSelectRecent,
-  onOpenCommandPalette,
+  sidebar,
+  explorer,
+  slots,
 }: OutlinePaneProps) {
+  const { document, draftContent } = useOutlineDocumentSlice(scope);
+  const {
+    entries,
+    readOnly,
+    onUpdateField,
+    onSelectEntry,
+    onMissingWikilink,
+    onOpenGraph,
+    isManagedVaultNote,
+    activeTab,
+    onTabChange,
+    appMode,
+    contentCount,
+    typeCounts,
+    documentViews,
+    viewCounts,
+    customViewCounts,
+    recentEntries,
+    selectedPath,
+    documentFilter,
+    onDocumentFilter,
+    onDocumentViewsChange,
+    onNewDocument,
+    canCreateDocument,
+    onSelectRecent,
+    onOpenCommandPalette,
+  } = sidebar;
+  const {
+    fileQueue,
+    canApplyFileQueue,
+    onUpdateFileQueueItem,
+    selectedFileQueueItemIds,
+    onSelectFileQueueItem,
+    onQueueExternalFiles,
+    onQueueFileSources,
+    onApplyFileQueue,
+    onClearFileQueue,
+    onClearSelectedFileQueueItems,
+    workspaceFileEntries,
+    explorerWorkspacePath,
+    explorerExpandedFolders,
+    onExplorerExpandedFoldersChange,
+    explorerSelectedPath,
+    explorerLoading,
+    explorerReady,
+    explorerRefreshing,
+    onExplorerRefresh,
+    onOpenWorkspaceFile,
+    explorerIncludeDotFolders,
+    onIgnoreWorkspaceEntry,
+    selectedWorkspaceFileEntries,
+    filesPaneFilters,
+    onFilesPaneFiltersChange,
+    explorerPaneMode,
+    onRevealFileInFinder,
+  } = explorer;
+  const {
+    skillsNode,
+    guidelineNode,
+    evidenceNode,
+    shareWorkspacePath,
+    shareDocumentDirty,
+    inboxShareablePaths,
+  } = slots;
   const { t } = useTranslation();
   const isPkm = appMode === "pkm";
   // Shared Outbox is reachable in PKM (Docs) and Inbox only; other modes keep
@@ -464,7 +485,7 @@ export function OutlinePane({
                         }
                         data-level={heading.level}
                         aria-current={i === activeHeadingIndex ? "true" : undefined}
-                        onClick={() => onJumpToLine(heading.line)}
+                        onClick={() => void commands.jumpToLine(heading.line)}
                         title={heading.text}
                       >
                         {heading.text}
