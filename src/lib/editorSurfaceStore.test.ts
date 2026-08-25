@@ -13,6 +13,7 @@ import { createEditorSurfacePersistence } from "./editorSurfacePersistence";
 import { DEFAULT_MARU_SETTINGS, type EditorPaneViewModes } from "./settings";
 
 const editorPanePath = fileURLToPath(new URL("../components/EditorPane.tsx", import.meta.url));
+const appPath = fileURLToPath(new URL("../App.tsx", import.meta.url));
 
 function interfacePropertyNames(filePath: string, interfaceName: string): string[] {
   const source = ts.createSourceFile(filePath, readFileSync(filePath, "utf8"), ts.ScriptTarget.Latest, true);
@@ -190,6 +191,14 @@ describe("Editor facade contract", () => {
     expect(afterModes.ui).not.toHaveProperty("riskAckDigest");
     expect(afterModes.ui).not.toHaveProperty("operation");
     expect(afterTab.ui.rightPaneTab).toBe("outline");
+  });
+
+  it("wires tab, split-group, and workspace lifecycle cleanup through the live shell", () => {
+    const source = readFileSync(appPath, "utf8");
+
+    expect(source).toContain("cleanupEditorPaneTabAcrossGroups(closing.workspacePath, closing.id)");
+    expect(source).toContain("cleanupEditorPaneGroup(rightTab.workspacePath, \"right\")");
+    expect(source).toContain("cleanupEditorPaneWorkspace(explorerWorkspacePath)");
   });
 
 });

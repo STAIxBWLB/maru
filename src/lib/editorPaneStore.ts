@@ -75,14 +75,28 @@ const DEFAULT_OPERATION: EditorPaneOperationSlice = {
 };
 
 const editorPaneLocalState = new Map<string, EditorPaneLocalState>();
+const editorPaneGroupViewModes = new Map<string, EditorViewMode>();
 const subscribers = new Map<string, Map<EditorPaneDomain, Set<() => void>>>();
 const stateCache = new Map<
   string,
-  { local: EditorPaneLocalState; tabsState: EditorTabsState; snapshot: EditorPaneState }
+  {
+    local: EditorPaneLocalState;
+    groupViewMode: EditorViewMode;
+    tabsState: EditorTabsState;
+    snapshot: EditorPaneState;
+  }
 >();
 
 function scopeKey(scope: EditorPaneScope): string {
   return `${scope.workspacePath}\u0000${scope.group}\u0000${scope.tabId}`;
+}
+
+function groupKey(workspacePath: string, group: EditorGroupId): string {
+  return `${workspacePath}\u0000${group}`;
+}
+
+function groupViewModeFor(scope: EditorPaneScope, local: EditorPaneLocalState): EditorViewMode {
+  return editorPaneGroupViewModes.get(groupKey(scope.workspacePath, scope.group)) ?? local.viewPreview.viewMode;
 }
 
 function defaultLocalState(): EditorPaneLocalState {
@@ -161,20 +175,31 @@ export function getEditorPaneState(scope: EditorPaneScope): EditorPaneState {
   const local = localStateFor(scope);
   const tabsState = getEditorTabsState();
   const cached = stateCache.get(key);
-  if (cached?.local === local && cached.tabsState === tabsState) return cached.snapshot;
+  const groupViewMode = groupViewModeFor(scope, local);
+  if (
+    cached?.local === local &&
+    cached.groupViewMode === groupViewMode &&
+    cached.tabsState === tabsState
+  ) {
+    return cached.snapshot;
+  }
 
   const previous = cached?.snapshot;
   const document =
     cached?.tabsState === tabsState ? (previous?.document ?? getDocumentSlice(scope, tabsState)) : getDocumentSlice(scope, tabsState);
   const tabs =
     cached?.tabsState === tabsState ? (previous?.tabs ?? getTabsSlice(scope, tabsState)) : getTabsSlice(scope, tabsState);
+  const viewPreview =
+    cached?.groupViewMode === groupViewMode
+      ? cached.snapshot.viewPreview
+      : { ...local.viewPreview, viewMode: groupViewMode };
   const snapshot = {
     document,
     tabs,
-    viewPreview: local.viewPreview,
+    viewPreview,
     operation: local.operation,
   };
-  stateCache.set(key, { local, tabsState, snapshot });
+  stateCache.set(key, { local, groupViewMode, tabsState, snapshot });
   return snapshot;
 }
 
@@ -183,13 +208,47 @@ export function patchEditorPaneViewPreview(
   patch: Partial<EditorPaneViewPreviewSlice>,
 ): EditorPaneState {
   const current = localStateFor(scope);
-  const nextViewPreview = { ...current.viewPreview, ...patch };
-  const changed = (Object.keys(patch) as (keyof EditorPaneViewPreviewSlice)[]).some(
+  const currentViewMode = groupViewModeFor(scope, current);
+  const nextViewMode = patch.viewMode ?? currentViewMode;
+  const { viewMode: _viewMode, ...localPatch } = patch;
+  const nextViewPreview = { ...current.viewPreview, ...localPatch };
+  const localChanged = (Object.keys(localPatch) as (keyof Omit<EditorPaneViewPreviewSlice, "viewMode">)[]).some(
     (key) => nextViewPreview[key] !== current.viewPreview[key],
   );
-  if (!changed) return getEditorPaneState(scope);
-  publishLocal(scope, "viewPreview", { ...current, viewPreview: nextViewPreview });
+  const groupChanged = nextViewMode !== currentViewMode;
+  if (!localChanged && !groupChanged) return getEditorPaneState(scope);
+  if (groupChanged) {
+    editorPaneGroupViewModes.set(groupKey(scope.workspacePath, scope.group), nextViewMode);
+    for (const key of [...stateCache.keys()]) {
+      const [workspacePath, group, tabId] = key.split("\u0000") as [string, EditorGroupId, string];
+      if (workspacePath !== scope.workspacePath || group !== scope.group) continue;
+      stateCache.delete(key);
+      notify({ workspacePath, group, tabId }, "viewPreview");
+    }
+  }
+  if (localChanged) {
+    publishLocal(scope, "viewPreview", { ...current, viewPreview: nextViewPreview });
+  }
   return getEditorPaneState(scope);
+}
+
+/** Atomically applies the persisted left/right view modes for one workspace. */
+export function setEditorPaneViewModes(
+  workspacePath: string,
+  modes: { left: EditorViewMode; right: EditorViewMode },
+): void {
+  const changedGroups = (Object.entries(modes) as [EditorGroupId, EditorViewMode][]).filter(
+    ([group, mode]) => editorPaneGroupViewModes.get(groupKey(workspacePath, group)) !== mode,
+  );
+  if (changedGroups.length === 0) return;
+  for (const [group, mode] of changedGroups) editorPaneGroupViewModes.set(groupKey(workspacePath, group), mode);
+  for (const key of [...stateCache.keys()]) {
+    const [cachedWorkspacePath, group] = key.split("\u0000") as [string, EditorGroupId, string];
+    if (cachedWorkspacePath !== workspacePath || !changedGroups.some(([changed]) => changed === group)) continue;
+    stateCache.delete(key);
+    const [, , tabId] = key.split("\u0000") as [string, EditorGroupId, string];
+    notify({ workspacePath, group, tabId }, "viewPreview");
+  }
 }
 
 export function patchEditorPaneOperation(
@@ -244,10 +303,17 @@ export function cleanupEditorPaneTab(scope: EditorPaneScope): void {
 
 export function cleanupEditorPaneGroup(workspacePath: string, group: EditorGroupId): void {
   cleanupMatching((scope) => scope.workspacePath === workspacePath && scope.group === group);
+  editorPaneGroupViewModes.delete(groupKey(workspacePath, group));
 }
 
 export function cleanupEditorPaneWorkspace(workspacePath: string): void {
   cleanupMatching((scope) => scope.workspacePath === workspacePath);
+  editorPaneGroupViewModes.delete(groupKey(workspacePath, "left"));
+  editorPaneGroupViewModes.delete(groupKey(workspacePath, "right"));
+}
+
+export function cleanupEditorPaneTabAcrossGroups(workspacePath: string, tabId: string): void {
+  cleanupMatching((scope) => scope.workspacePath === workspacePath && scope.tabId === tabId);
 }
 
 /** Moves only facade-local transient state between scopes; canonical drafts remain in editorTabsStore. */
@@ -306,6 +372,7 @@ export function useEditorOperationSlice(scope: EditorPaneScope): EditorPaneOpera
 /** Test-only reset. It never reaches or mutates editorTabsStore. */
 export function resetEditorPaneStoreForTests(): void {
   editorPaneLocalState.clear();
+  editorPaneGroupViewModes.clear();
   stateCache.clear();
   subscribers.clear();
 }

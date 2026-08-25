@@ -58,8 +58,14 @@ import { createOutlinePaneCommands } from "./lib/editorSurfaceAdapter";
 import {
   cleanupEditorSurfaceWorkspace,
   createEditorSurfacePersistence,
+  hydrateEditorPaneViewModes,
   hydrateEditorSurfaces,
 } from "./lib/editorSurfacePersistence";
+import {
+  cleanupEditorPaneGroup,
+  cleanupEditorPaneTabAcrossGroups,
+  cleanupEditorPaneWorkspace,
+} from "./lib/editorPaneStore";
 import {
   getOutlinePaneState,
   hydrateOutlinePaneState,
@@ -1853,6 +1859,7 @@ function MainApp() {
       createEditorSurfacePersistence({
         currentWorkspacePath: () => explorerWorkspacePath ?? null,
         currentRequestId: () => loadWorkspaceRequestRef.current,
+        setEditorPaneViewModes,
         setRightPaneTab,
         scheduleSettings: updateSettings,
       }),
@@ -1861,12 +1868,24 @@ function MainApp() {
 
   useEffect(() => {
     if (!explorerWorkspacePath) return;
-    void hydrateEditorSurfaces(
-      editorSurfacePersistence,
-      { workspacePath: explorerWorkspacePath, requestId: loadWorkspaceRequestRef.current },
-      maruSettings.ui.rightPaneTab,
-    );
-  }, [editorSurfacePersistence, explorerWorkspacePath, maruSettings.ui.rightPaneTab]);
+    const identity = {
+      workspacePath: explorerWorkspacePath,
+      requestId: loadWorkspaceRequestRef.current,
+    };
+    void Promise.all([
+      hydrateEditorSurfaces(editorSurfacePersistence, identity, maruSettings.ui.rightPaneTab),
+      hydrateEditorPaneViewModes(
+        editorSurfacePersistence,
+        identity,
+        maruSettings.ui.editorPaneViewModes,
+      ),
+    ]);
+  }, [
+    editorSurfacePersistence,
+    explorerWorkspacePath,
+    maruSettings.ui.editorPaneViewModes,
+    maruSettings.ui.rightPaneTab,
+  ]);
 
   const updateLayoutSettings = useCallback(
     (
@@ -2180,21 +2199,19 @@ function MainApp() {
 
   const setPersistedEditorViewMode = useCallback(
     (editorViewMode: EditorViewModeSetting, group: EditorGroupId = focusedEditorGroup) => {
-      setEditorPaneViewModes((current) => ({ ...current, [group]: editorViewMode }));
-      updateSettings((current) => ({
-        ...current,
-        ui: {
-          ...current.ui,
-          editorViewMode:
-            group === "left" ? editorViewMode : current.ui.editorPaneViewModes.left,
-          editorPaneViewModes: {
-            ...current.ui.editorPaneViewModes,
-            [group]: editorViewMode,
-          },
-        },
-      }));
+      const modes = { ...editorPaneViewModes, [group]: editorViewMode };
+      editorSurfacePersistence.setEditorPaneViewModes(
+        activeDocumentWorkspacePath ?? explorerWorkspacePath,
+        modes,
+      );
     },
-    [focusedEditorGroup, updateSettings],
+    [
+      activeDocumentWorkspacePath,
+      editorPaneViewModes,
+      editorSurfacePersistence,
+      explorerWorkspacePath,
+      focusedEditorGroup,
+    ],
   );
 
   const setPersistedRightPaneTab = useCallback(
@@ -3693,6 +3710,9 @@ function MainApp() {
       preferRelPath: string | null = null,
     ) => {
       markStartup("workspace:load:start", { path, visibility });
+      if (explorerWorkspacePath && explorerWorkspacePath !== path) {
+        cleanupEditorPaneWorkspace(explorerWorkspacePath);
+      }
       const requestId = ++loadWorkspaceRequestRef.current;
       updateWorkspaceState(path, {
         loading: true,
@@ -3714,6 +3734,7 @@ function MainApp() {
 
         if (!candidate) {
           resetWorkspaceTabs(path);
+          cleanupEditorPaneWorkspace(path);
           setPendingSelectedPath(null);
           updateWorkspaceState(path, { loading: false, startupIoReady: true });
           markStartup("workspace:first-usable", { path, source, entries: nextEntries.length });
@@ -5749,6 +5770,7 @@ function MainApp() {
         { leftResolvedTabId, rightResolvedTabId, resolvedActiveTabId },
         { resetFocusOnRightClose: true },
       );
+      if (closing) cleanupEditorPaneTabAcrossGroups(closing.workspacePath, closing.id);
       if (rightClosed) updateLayoutSettings({ editorSplitOpen: false });
     },
     [
@@ -5764,6 +5786,7 @@ function MainApp() {
     (tabIds: string[], postIds?: EditorTabIdsPatch) => {
       const closeSet = new Set(tabIds);
       if (closeSet.size === 0) return;
+      const closingTabs = getEditorTabsState().tabs.filter((tab) => closeSet.has(tab.id));
       let dirtyClosing: { tab: EditorTab; draft: string } | null = null;
       for (const tab of getEditorTabsState().tabs) {
         if (!closeSet.has(tab.id)) continue;
@@ -5786,6 +5809,7 @@ function MainApp() {
         { leftResolvedTabId, rightResolvedTabId, resolvedActiveTabId },
         postIds ? { postIds } : undefined,
       );
+      for (const tab of closingTabs) cleanupEditorPaneTabAcrossGroups(tab.workspacePath, tab.id);
       if (rightClosed) updateLayoutSettings({ editorSplitOpen: false });
     },
     [
@@ -6166,9 +6190,10 @@ function MainApp() {
       focusedEditorGroup: "left",
       ...(leftResolvedTabId ? { activeTabId: leftResolvedTabId } : {}),
     });
+    if (rightTab) cleanupEditorPaneGroup(rightTab.workspacePath, "right");
     setFocusedWorkbenchSide("left");
     updateLayoutSettings({ editorSplitOpen: false });
-  }, [leftResolvedTabId, updateLayoutSettings]);
+  }, [leftResolvedTabId, rightTab, updateLayoutSettings]);
 
   const closeActiveSurface = useCallback(() => {
     const terminalPanel = terminalPanelRef.current;
@@ -6292,21 +6317,16 @@ function MainApp() {
       focusedEditorGroup: "left",
     });
     setFocusedWorkbenchSide("left");
-    setEditorPaneViewModes({ left: "source", right: "preview" });
-    updateSettings((current) => ({
-      ...current,
-      ui: {
-        ...current.ui,
-        editorViewMode: "source",
-        editorPaneViewModes: { left: "source", right: "preview" },
-      },
-    }));
+    editorSurfacePersistence.setEditorPaneViewModes(
+      target.workspacePath,
+      { left: "source", right: "preview" },
+    );
     updateLayoutSettings({ editorSplitOpen: true });
   }, [
+    editorSurfacePersistence,
     editorSplitOpen,
     setPersistedRightWorkbenchSurface,
     updateLayoutSettings,
-    updateSettings,
   ]);
 
   const openGraphPanel = useCallback(
