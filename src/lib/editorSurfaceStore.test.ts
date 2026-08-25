@@ -1,10 +1,15 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import * as ts from "typescript";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const wave0ContractsEnabled = process.env.PHASE4_WAVE0_CONTRACT === "1";
-const describeWave0 = wave0ContractsEnabled ? describe : describe.skip;
+import {
+  getEditorTabsState,
+  replaceAllDocTabs,
+  type EditorTab,
+  updateTabDraft,
+} from "./editorTabsStore";
+
 const editorPanePath = fileURLToPath(new URL("../components/EditorPane.tsx", import.meta.url));
 
 function interfacePropertyNames(filePath: string, interfaceName: string): string[] {
@@ -25,7 +30,17 @@ async function loadEditorSurface() {
   return import(/* @vite-ignore */ specifier);
 }
 
-describeWave0("Editor facade contract", () => {
+describe("Editor facade contract", () => {
+  beforeEach(async () => {
+    const surface = await loadEditorSurface();
+    surface.resetEditorPaneStoreForTests();
+    replaceAllDocTabs([], {
+      activeTabId: null,
+      leftActiveTabId: null,
+      rightActiveTabId: null,
+      focusedEditorGroup: "left",
+    });
+  });
   it("isolates the same tab id by workspace and editor group while preserving no-op identity", async () => {
     const surface = await loadEditorSurface();
     const left = { workspacePath: "/workspace-a", group: "left", tabId: "note.md" };
@@ -53,6 +68,32 @@ describeWave0("Editor facade contract", () => {
     expect(after.operation).not.toBe(before.operation);
   });
 
+  it("observes canonical draft updates without storing a facade draft", async () => {
+    const surface = await loadEditorSurface();
+    const scope = { workspacePath: "/workspace-a", group: "left", tabId: "note.md" } as const;
+    const tab = {
+      id: scope.tabId,
+      workspacePath: scope.workspacePath,
+      document: { content: "before" },
+      draftContent: "before",
+    } as EditorTab;
+    replaceAllDocTabs([tab], {
+      activeTabId: tab.id,
+      leftActiveTabId: tab.id,
+      rightActiveTabId: null,
+      focusedEditorGroup: "left",
+    });
+
+    const before = surface.getEditorPaneState(scope);
+    updateTabDraft(tab.id, "after");
+    const after = surface.getEditorPaneState(scope);
+
+    expect(after.document.draftContent).toBe("after");
+    expect(after.document).not.toBe(before.document);
+    surface.cleanupEditorPaneTab(scope);
+    expect(getEditorTabsState().tabs[0]?.draftContent).toBe("after");
+  });
+
   it("accepts only current workspace hydration and removes the exact closed scope", async () => {
     const surface = await loadEditorSurface();
     const active = { workspacePath: "/workspace-a", group: "left", tabId: "note.md" };
@@ -66,6 +107,9 @@ describeWave0("Editor facade contract", () => {
     expect(surface.getEditorPaneState(stale)).toBeDefined();
   });
 
+});
+
+describe.skip("Editor facade component migration contract", () => {
   it("uses a stable command port that delegates against the current scope snapshot", async () => {
     const surface = await loadEditorSurface();
     const scope = { workspacePath: "/workspace-a", group: "left", tabId: "first.md" };
