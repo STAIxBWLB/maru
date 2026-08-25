@@ -9,6 +9,8 @@ import {
   type EditorTab,
   updateTabDraft,
 } from "./editorTabsStore";
+import { createEditorSurfacePersistence } from "./editorSurfacePersistence";
+import { DEFAULT_MARU_SETTINGS, type EditorPaneViewModes } from "./settings";
 
 const editorPanePath = fileURLToPath(new URL("../components/EditorPane.tsx", import.meta.url));
 
@@ -129,6 +131,65 @@ describe("Editor facade contract", () => {
     surface.cleanupEditorPaneWorkspace("/workspace-a");
     expect(surface.hasEditorPaneState(left)).toBe(false);
     expect(surface.hasEditorPaneState(otherWorkspace)).toBe(true);
+  });
+
+  it("hydrates both persisted group modes only for the current workspace generation", async () => {
+    const surface = await loadEditorSurface();
+    let currentWorkspacePath = "/workspace-b";
+    let currentRequestId = 2;
+    const persistence = createEditorSurfacePersistence({
+      currentWorkspacePath: () => currentWorkspacePath,
+      currentRequestId: () => currentRequestId,
+      scheduleSettings: () => {},
+    });
+    const staleModes: EditorPaneViewModes = { left: "source", right: "rich" };
+    const currentModes: EditorPaneViewModes = { left: "preview", right: "source" };
+    const leftB = { workspacePath: "/workspace-b", group: "left", tabId: "note.md" } as const;
+    const rightB = { workspacePath: "/workspace-b", group: "right", tabId: "note.md" } as const;
+    surface.patchEditorPaneViewPreview(leftB, { viewMode: "rich" });
+    surface.patchEditorPaneViewPreview(rightB, { viewMode: "rich" });
+
+    expect(
+      await persistence.hydrateEditorPaneViewModes(
+        { workspacePath: "/workspace-a", requestId: 1 },
+        staleModes,
+      ),
+    ).toBe(false);
+    expect(surface.getEditorPaneState(leftB).viewPreview.viewMode).toBe("rich");
+    expect(surface.getEditorPaneState(rightB).viewPreview.viewMode).toBe("rich");
+
+    expect(
+      await persistence.hydrateEditorPaneViewModes(
+        { workspacePath: currentWorkspacePath, requestId: currentRequestId },
+        currentModes,
+      ),
+    ).toBe(true);
+    expect(surface.getEditorPaneState(leftB).viewPreview.viewMode).toBe("preview");
+    expect(surface.getEditorPaneState(rightB).viewPreview.viewMode).toBe("source");
+
+    currentWorkspacePath = "/workspace-c";
+    currentRequestId = 3;
+  });
+
+  it("saves only existing view-mode settings and never transient facade state", async () => {
+    const updates: Array<(current: typeof DEFAULT_MARU_SETTINGS) => typeof DEFAULT_MARU_SETTINGS> = [];
+    const persistence = createEditorSurfacePersistence({
+      currentWorkspacePath: () => "/workspace-a",
+      currentRequestId: () => 1,
+      scheduleSettings: (updater) => updates.push(updater),
+    });
+    const modes: EditorPaneViewModes = { left: "rich", right: "preview" };
+
+    persistence.setEditorPaneViewModes("/workspace-a", modes);
+    persistence.setRightPaneTab("outline");
+
+    const afterModes = updates[0](DEFAULT_MARU_SETTINGS);
+    const afterTab = updates[1](afterModes);
+    expect(afterModes.ui.editorPaneViewModes).toEqual(modes);
+    expect(afterModes.ui).not.toHaveProperty("htmlPaneModes");
+    expect(afterModes.ui).not.toHaveProperty("riskAckDigest");
+    expect(afterModes.ui).not.toHaveProperty("operation");
+    expect(afterTab.ui.rightPaneTab).toBe("outline");
   });
 
 });
