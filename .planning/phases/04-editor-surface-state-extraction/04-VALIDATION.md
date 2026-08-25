@@ -39,11 +39,11 @@ created: 2026-08-26
 
 | Task ID | Plan | Wave | Requirement | Threat Ref | Secure Behavior | Test Type | Automated Command | File Exists | Status |
 |---------|------|------|-------------|------------|-----------------|-----------|-------------------|-------------|--------|
-| 04-W0-01 | TBD | 0 | SHELL-01 | T-04-01 | Outline actions remain behind a least-authority command port and existing write checks | unit + component | `pnpm test -- src/lib/outlinePaneStore.test.ts` | No - W0 | pending |
-| 04-W0-02 | TBD | 0 | SHELL-02 | Editor actions remain behind a least-authority command port; keyed pane state does not bleed across groups | unit + component | `pnpm test -- src/lib/editorSurfaceStore.test.ts` | No - W0 | pending |
-| 04-W0-03 | TBD | 0 | SHELL-03 | Typing changes only subscribed editor slices and never unrelated shell probes | component harness | `pnpm test -- src/__tests__/editorSurfaceRenderIsolation.test.tsx` | No - W0 | pending |
-| 04-W0-04 | TBD | 0 | SHELL-04 | Preview marks stay inside sanitized React-owned HTML and retain DOM identity | component regression | `pnpm test -- src/components/EditorPane.test.tsx` | No - W0 | pending |
-| 04-W0-05 | TBD | 0 | SHELL-01, SHELL-02 | Both panes remain at or below eight props with no individual state value/change callback props | static source test | Focused Vitest command selected by the planner | No - W0 | pending |
+| 04-W0-01 | 04-01 | 0 | SHELL-01 | T-04-01 | Outline actions remain behind a least-authority command port and existing write checks | unit + component | `pnpm test -- src/lib/outlinePaneStore.test.ts` | No - W0 | pending |
+| 04-W0-02 | 04-01 | 0 | SHELL-02 | Editor actions remain behind a least-authority command port; keyed pane state does not bleed across groups | unit + component | `pnpm test -- src/lib/editorSurfaceStore.test.ts` | No - W0 | pending |
+| 04-W0-03 | 04-01 | 0 | SHELL-03 | Typing changes only subscribed editor slices and never unrelated shell probes | component harness | `pnpm test -- src/__tests__/editorSurfaceRenderIsolation.test.tsx` | No - W0 | pending |
+| 04-W0-04 | 04-01 | 0 | SHELL-04 | Preview marks stay inside sanitized React-owned HTML and retain DOM identity | component regression | `pnpm test -- src/components/EditorPane.test.tsx` | No - W0 | pending |
+| 04-W0-05 | 04-01 | 0 | SHELL-01, SHELL-02 | Both panes remain at or below eight props with no individual state value/change callback props | static source test | `pnpm test -- src/lib/outlinePaneStore.test.ts src/lib/editorSurfaceStore.test.ts` | No - W0 | pending |
 
 *Status: pending, green, red, or flaky.*
 

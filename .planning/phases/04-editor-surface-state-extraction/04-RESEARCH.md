@@ -311,12 +311,13 @@ Source and verbatim values: `"const previewMarkup = useMemo(() => ({ __html: pre
 | A1 | `src/lib/outlinePaneStore.ts`, `src/lib/editorPaneStore.ts`, `src/lib/editorSurfacePersistence.ts`, and `src/__tests__/editorSurfaceState.test.tsx` are suitable filenames. | Recommended Project Structure | Low; planner may rename while keeping the required ownership boundaries. |
 | A2 | A focused native smoke can be recorded as a checklist rather than an existing automation script. | Validation Architecture | Medium; planner must choose a reproducible invocation/checklist before execution. |
 
-## Open Questions
+## Resolved Questions
 
-1. **Which existing asynchronous workspace load provides the facade generation source?**
-   - What we know: The phase requires a workspace identity plus generation guard. [VERIFIED: .planning/phases/04-editor-surface-state-extraction/04-CONTEXT.md:61-63]
-   - What's unclear: The exact currently authoritative generation counter is not a locked filename or API.
-   - Recommendation: In Wave 0, locate the active workspace-load transition and have the persistence adapter own an incremented facade hydration generation at that boundary. [ASSUMED]
+### RESOLVED: Authoritative workspace-load generation source
+
+- **Choice:** Use the existing `loadWorkspaceRequestRef` in `src/App.tsx` as the sole facade-hydration generation source. `loadWorkspace` increments it exactly once at request entry with `const requestId = ++loadWorkspaceRequestRef.current`, and every asynchronous cache read, primary-document restore, companion-tab restore, authoritative scan, and load-finalization publish compares that captured `requestId` with the ref's current value before mutating state. [VERIFIED: src/App.tsx:876] [VERIFIED: src/App.tsx:3648-3801]
+- **Rationale:** This counter already defines which asynchronous workspace load is current. Reusing its captured `requestId` gives facade hydration the same freshness boundary as workspace entries and restored tabs; a second facade-specific counter could diverge and admit a settings hydrate that the workspace loader has already superseded. [VERIFIED: src/App.tsx:3655-3801]
+- **Implementation consequence:** `App.tsx` must pass the captured `requestId` and workspace path into `editorSurfacePersistence`; the adapter may publish only while both the path is current and `loadWorkspaceRequestRef.current === requestId`. The adapter must not increment or own another generation counter. The existing normalized debounced settings saver remains the write path. [VERIFIED: src/App.tsx:1638-1719] [VERIFIED: src/App.tsx:1790-1823]
 
 ## Environment Availability
 
