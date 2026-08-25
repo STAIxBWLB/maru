@@ -55,7 +55,15 @@ import { MissionBadge } from "./components/MissionBadge";
 import { NewDocumentDialog } from "./components/NewDocumentDialog";
 import { OutlinePane } from "./components/OutlinePane";
 import { createOutlinePaneCommands } from "./lib/editorSurfaceAdapter";
-import { getOutlinePaneState, type OutlinePaneScope } from "./lib/outlinePaneStore";
+import {
+  getOutlinePaneState,
+  replaceOutlineFileQueue,
+  setOutlineFileQueueCanApply,
+  setOutlineFileQueueSelection,
+  setOutlineOperation,
+  useOutlineFileQueueSlice,
+  type OutlinePaneScope,
+} from "./lib/outlinePaneStore";
 import { ScratchpadPane } from "./components/ScratchpadPane";
 import { InlineDocumentEditor } from "./components/InlineDocumentEditor";
 import type { TasksPaneProps } from "./components/tasks/TasksPane";
@@ -790,8 +798,6 @@ function MainApp() {
   const collapsedTreeFoldersByVisibility = useCollapsedTreeFoldersByVisibility();
   const collapsedFileFoldersByVisibility = useCollapsedFileFoldersByVisibility();
   const selectedFilePathsByWorkspace = useSelectedFilePathsByWorkspace();
-  const [fileQueue, setFileQueue] = useState<FileQueueItem[]>([]);
-  const [selectedFileQueueItemIds, setSelectedFileQueueItemIds] = useState<string[]>([]);
   const [filesPaneFilters, setFilesPaneFilters] = useState<WorkspaceFilesPaneFilters>(
     EMPTY_WORKSPACE_FILES_PANE_FILTERS,
   );
@@ -1184,10 +1190,6 @@ function MainApp() {
     () => new Set(selectedFilePaths),
     [selectedFilePaths],
   );
-  const queuedSourcePaths = useMemo(
-    () => fileQueue.map((item) => item.sourcePath),
-    [fileQueue],
-  );
   const selectedWorkspaceFileEntries = useMemo(
     () => fileEntries.filter((entry) => selectedFilePathSet.has(entry.path)),
     [fileEntries, selectedFilePathSet],
@@ -1316,6 +1318,11 @@ function MainApp() {
     }),
     [activeDocumentWorkspacePath, resolvedActiveTabId],
   );
+  const { fileQueue, selectedFileQueueItemIds } = useOutlineFileQueueSlice(outlinePaneScope);
+  const queuedSourcePaths = useMemo(
+    () => fileQueue.map((item) => item.sourcePath),
+    [fileQueue],
+  );
   const activeDocumentWorkspace = useMemo(
     () =>
       activeDocumentWorkspacePath
@@ -1417,6 +1424,9 @@ function MainApp() {
       return workspaceCan(owner, action);
     });
   }, [fileQueue, workspaceRegistry.workspaces]);
+  useEffect(() => {
+    setOutlineFileQueueCanApply(outlinePaneScope, canApplyFileQueue);
+  }, [canApplyFileQueue, outlinePaneScope]);
   const explorerWorkspaceCaption = useMemo(() => {
     if (!explorerWorkspace) return null;
     const status = workspaceWriteStatus(explorerWorkspace);
@@ -2304,8 +2314,10 @@ function MainApp() {
 
   useEffect(() => {
     const ids = new Set(fileQueue.map((item) => item.id));
-    setSelectedFileQueueItemIds((current) => current.filter((id) => ids.has(id)));
-  }, [fileQueue]);
+    const selected = getOutlinePaneState(outlinePaneScope).fileQueue.selectedFileQueueItemIds;
+    const next = selected.filter((id) => ids.has(id));
+    if (next.length !== selected.length) setOutlineFileQueueSelection(outlinePaneScope, next);
+  }, [fileQueue, outlinePaneScope]);
 
   const setDocumentBrowserMode = useCallback(
     (mode: DocumentBrowserMode) => {
@@ -4432,24 +4444,25 @@ function MainApp() {
       if (sources.length === 0) return;
       const addedIds: string[] = [];
       const seed = Date.now();
-      setFileQueue((current) => {
-        const existing = new Set(
-          current
-            .filter((item) => item.status === "queued")
-            .map((item) => `${item.sourcePath}\u0000${item.targetDir}\u0000${item.sourceKind}`),
-        );
-        const additions: FileQueueItem[] = [];
-        for (const source of sources) {
-          const key = `${source.path}\u0000${targetDir}\u0000${source.sourceKind}`;
-          if (existing.has(key)) continue;
-          existing.add(key);
-          const item = fileQueueItemFromSource(source, targetDir, operation, seed, additions.length);
-          addedIds.push(item.id);
-          additions.push(item);
-        }
-        return additions.length > 0 ? [...current, ...additions] : current;
-      });
-      if (addedIds.length > 0) setSelectedFileQueueItemIds(addedIds);
+      const current = getOutlinePaneState(outlinePaneScope).fileQueue.fileQueue;
+      const existing = new Set(
+        current
+          .filter((item) => item.status === "queued")
+          .map((item) => `${item.sourcePath}\u0000${item.targetDir}\u0000${item.sourceKind}`),
+      );
+      const additions: FileQueueItem[] = [];
+      for (const source of sources) {
+        const key = `${source.path}\u0000${targetDir}\u0000${source.sourceKind}`;
+        if (existing.has(key)) continue;
+        existing.add(key);
+        const item = fileQueueItemFromSource(source, targetDir, operation, seed, additions.length);
+        addedIds.push(item.id);
+        additions.push(item);
+      }
+      if (additions.length > 0) {
+        replaceOutlineFileQueue(outlinePaneScope, [...current, ...additions]);
+        setOutlineFileQueueSelection(outlinePaneScope, addedIds);
+      }
       if (visibleAppMode !== "files") {
         setPersistedAppMode("pkm");
         if (!outlineOpen) updateLayoutSettings({ outlineOpen: true });
@@ -4458,6 +4471,7 @@ function MainApp() {
     },
     [
       maruSettings.ui.fileQueueDefaultOperation,
+      outlinePaneScope,
       outlineOpen,
       setPersistedAppMode,
       setPersistedRightPaneTab,
@@ -4483,49 +4497,31 @@ function MainApp() {
     ],
   );
 
-  const selectFileQueueItem = useCallback((id: string, additive: boolean) => {
-    setSelectedFileQueueItemIds((current) => {
-      if (!additive) return [id];
-      return current.includes(id) ? current.filter((item) => item !== id) : [...current, id];
-    });
-  }, []);
-
   const updateFileQueueItem = useCallback(
     (id: string, patch: Partial<Pick<FileQueueItem, "targetDir" | "operation">>) => {
-      setFileQueue((current) =>
-        current.map((item) =>
-          item.id === id
-            ? { ...item, ...patch, status: "queued", message: null, targetPath: null }
-            : item,
-        ),
+      const current = getOutlinePaneState(outlinePaneScope);
+      const next = current.fileQueue.fileQueue.map((item) =>
+        item.id === id
+          ? { ...item, ...patch, status: "queued" as const, message: null, targetPath: null }
+          : item,
       );
+      replaceOutlineFileQueue(outlinePaneScope, next);
       if (patch.operation) {
-        updateSettings((current) => ({
-          ...current,
+        updateSettings((settings) => ({
+          ...settings,
           ui: {
-            ...current.ui,
+            ...settings.ui,
             fileQueueDefaultOperation: patch.operation as FileStoreOperation,
           },
         }));
       }
     },
-    [updateSettings],
+    [outlinePaneScope, updateSettings],
   );
 
-  const clearFileQueue = useCallback(() => {
-    setFileQueue([]);
-    setSelectedFileQueueItemIds([]);
-  }, []);
-
-  const clearSelectedFileQueueItems = useCallback(() => {
-    const selected = new Set(selectedFileQueueItemIds);
-    if (selected.size === 0) return;
-    setFileQueue((current) => current.filter((item) => !selected.has(item.id)));
-    setSelectedFileQueueItemIds([]);
-  }, [selectedFileQueueItemIds]);
-
   const applyQueuedFiles = useCallback(async (itemsOverride?: FileQueueItem[]) => {
-    const queued = itemsOverride ?? fileQueue.filter((item) => item.status === "queued");
+    const queued = itemsOverride ?? getOutlinePaneState(outlinePaneScope).fileQueue.fileQueue
+      .filter((item) => item.status === "queued");
     if (queued.length === 0) return [];
     const groups = new Map<string, FileQueueItem[]>();
     for (const item of queued) {
@@ -4554,6 +4550,7 @@ function MainApp() {
       groups.set(owner.path, bucket);
     }
     setError(null);
+    setOutlineOperation(outlinePaneScope, { applyingFileQueue: true, fileQueueError: null });
     try {
       const outcomes: FileQueueApplyOutcome[] = (
         await Promise.all(
@@ -4563,7 +4560,9 @@ function MainApp() {
         )
       ).flat();
       const byId = new Map(outcomes.map((outcome) => [outcome.id, outcome]));
-      setFileQueue((current) =>
+      const current = getOutlinePaneState(outlinePaneScope).fileQueue.fileQueue;
+      replaceOutlineFileQueue(
+        outlinePaneScope,
         current.map((item) => {
           const outcome = byId.get(item.id);
           if (!outcome) return item;
@@ -4578,29 +4577,37 @@ function MainApp() {
       );
       if (itemsOverride) {
         const appliedIds = new Set(itemsOverride.map((item) => item.id));
-        setSelectedFileQueueItemIds((current) => current.filter((id) => !appliedIds.has(id)));
+        setOutlineFileQueueSelection(
+          outlinePaneScope,
+          getOutlinePaneState(outlinePaneScope).fileQueue.selectedFileQueueItemIds
+            .filter((id) => !appliedIds.has(id)),
+        );
       }
       for (const workspacePath of groups.keys()) {
         await refreshWorkspaceFiles(workspacePath);
         await rescanWorkspaceEntries(workspacePath, scanOptions);
       }
+      setOutlineOperation(outlinePaneScope, { applyingFileQueue: false, fileQueueError: null });
       return outcomes;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       const failedIds = itemsOverride ? new Set(itemsOverride.map((item) => item.id)) : null;
-      setFileQueue((current) =>
+      const current = getOutlinePaneState(outlinePaneScope).fileQueue.fileQueue;
+      replaceOutlineFileQueue(
+        outlinePaneScope,
         current.map((item) =>
           item.status === "queued" && (!failedIds || failedIds.has(item.id))
             ? { ...item, status: "error", message }
             : item,
         ),
       );
+      setOutlineOperation(outlinePaneScope, { applyingFileQueue: false, fileQueueError: message });
       setError(message);
       return [];
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- updateWorkspaceState is flagged unneeded; not removed here to avoid changing this callback's re-creation timing, a behavior change out of scope for this phase
   }, [
-    fileQueue,
+    outlinePaneScope,
     refreshWorkspaceFiles,
     scanOptions,
     t,
@@ -4637,12 +4644,14 @@ function MainApp() {
         message: null,
         targetPath: null,
       }));
-      setFileQueue((current) =>
-        current.map((item) => nextItems.find((next) => next.id === item.id) ?? item),
+      replaceOutlineFileQueue(
+        outlinePaneScope,
+        getOutlinePaneState(outlinePaneScope).fileQueue.fileQueue
+          .map((item) => nextItems.find((next) => next.id === item.id) ?? item),
       );
       await applyQueuedFiles(nextItems);
     },
-    [applyQueuedFiles, fileQueue, selectedQueuedFileQueueItems],
+    [applyQueuedFiles, fileQueue, outlinePaneScope, selectedQueuedFileQueueItems],
   );
 
   const navigateBack = useCallback(() => {
@@ -5605,8 +5614,11 @@ function MainApp() {
       const queueItems = sourcesFromExplorerPayload({ ...payload, items }).map((source, index) =>
         fileQueueItemFromSource(source, targetDir, operation, seed, index),
       );
-      setFileQueue((current) => [...current, ...queueItems]);
-      setSelectedFileQueueItemIds(queueItems.map((item) => item.id));
+      replaceOutlineFileQueue(
+        outlinePaneScope,
+        [...getOutlinePaneState(outlinePaneScope).fileQueue.fileQueue, ...queueItems],
+      );
+      setOutlineFileQueueSelection(outlinePaneScope, queueItems.map((item) => item.id));
       setPersistedAppMode("pkm");
       if (!outlineOpen) updateLayoutSettings({ outlineOpen: true });
       setPersistedRightPaneTab("files");
@@ -6702,8 +6714,19 @@ function MainApp() {
         // The port supplies the current document path for its narrow contract;
         // existing jump behavior selects the currently focused editor group.
         jumpToLine: (line) => jumpToOutlineLine(line),
+        queueExternalFiles,
+        queueFileSources: addFileQueueSources,
+        updateFileQueueItem,
+        applyFileQueue: applyQueuedFiles,
       }),
-    [jumpToOutlineLine, outlinePaneScope],
+    [
+      addFileQueueSources,
+      applyQueuedFiles,
+      jumpToOutlineLine,
+      outlinePaneScope,
+      queueExternalFiles,
+      updateFileQueueItem,
+    ],
   );
 
   const openWorkspaceFileEntry = useCallback(
@@ -7146,7 +7169,8 @@ function MainApp() {
       setPersistedEditorViewMode,
       setPersistedRightPaneTab,
       updateLayoutSettings,
-      outlineOpen,
+    outlineOpen,
+    outlinePaneScope,
       openGraphPanel,
       openGraphWorkspace,
       openSkillCompose,
@@ -9165,16 +9189,6 @@ function MainApp() {
               onOpenCommandPalette: openCommandPalette,
             }}
             explorer={{
-              fileQueue,
-              canApplyFileQueue,
-              onUpdateFileQueueItem: updateFileQueueItem,
-              selectedFileQueueItemIds,
-              onSelectFileQueueItem: selectFileQueueItem,
-              onQueueExternalFiles: queueExternalFiles,
-              onQueueFileSources: addFileQueueSources,
-              onApplyFileQueue: applyQueuedFiles,
-              onClearFileQueue: clearFileQueue,
-              onClearSelectedFileQueueItems: clearSelectedFileQueueItems,
               workspaceFileEntries: fileEntries,
               explorerWorkspacePath,
               explorerExpandedFolders: collapsedFileFolders,

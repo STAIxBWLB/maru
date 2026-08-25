@@ -1,10 +1,6 @@
 import { useSyncExternalStore } from "react";
 
-import {
-  getEditorTabsState,
-  useActiveTabIds,
-  useDocTabs,
-} from "./editorTabsStore";
+import { getEditorTabsState, useActiveTabIds, useDocTabs } from "./editorTabsStore";
 import type { DocumentPayload, FileQueueItem } from "./types";
 
 /** The Outline facade is deliberately keyed by workspace. `tabId` is an
@@ -37,19 +33,13 @@ export interface OutlinePaneState {
   operation: OutlineOperationSlice;
 }
 
-const EMPTY_DOCUMENT_SLICE: OutlineDocumentSlice = {
-  document: null,
-  draftContent: "",
-};
+const EMPTY_DOCUMENT_SLICE: OutlineDocumentSlice = { document: null, draftContent: "" };
 const EMPTY_FILE_QUEUE_SLICE: OutlineFileQueueSlice = {
   fileQueue: [],
   selectedFileQueueItemIds: [],
   canApplyFileQueue: false,
 };
-const EMPTY_OPERATION_SLICE: OutlineOperationSlice = {
-  applyingFileQueue: false,
-  fileQueueError: null,
-};
+const EMPTY_OPERATION_SLICE: OutlineOperationSlice = { applyingFileQueue: false, fileQueueError: null };
 const EMPTY_OUTLINE_PANE_STATE: OutlinePaneState = {
   document: EMPTY_DOCUMENT_SLICE,
   fileQueue: EMPTY_FILE_QUEUE_SLICE,
@@ -57,31 +47,169 @@ const EMPTY_OUTLINE_PANE_STATE: OutlinePaneState = {
 };
 
 let statesByWorkspace: Record<string, OutlinePaneState> = {};
-const subscribers = new Set<() => void>();
+type SliceSubscriber = () => void;
+type SliceSubscribers = Map<string, Set<SliceSubscriber>>;
+const documentSubscribers: SliceSubscribers = new Map();
+const fileQueueSubscribers: SliceSubscribers = new Map();
+const operationSubscribers: SliceSubscribers = new Map();
 const documentSliceCache = new Map<string, { tab: object | null; slice: OutlineDocumentSlice }>();
 
 function stateFor(scope: OutlinePaneScope): OutlinePaneState {
   return statesByWorkspace[scope.workspacePath] ?? EMPTY_OUTLINE_PANE_STATE;
 }
 
-function publish(next: Record<string, OutlinePaneState>): void {
-  if (next === statesByWorkspace) return;
-  statesByWorkspace = next;
-  for (const subscriber of subscribers) subscriber();
+function notify(subscribers: SliceSubscribers, workspacePath: string): void {
+  for (const subscriber of subscribers.get(workspacePath) ?? []) subscriber();
 }
 
-function documentSliceFromTabs(scope: OutlinePaneScope): OutlineDocumentSlice | null {
-  const state = getEditorTabsState();
-  const tabId = scope.tabId ?? state.activeTabId;
-  const tab = state.tabs.find(
-    (candidate) => candidate.id === tabId && candidate.workspacePath === scope.workspacePath,
-  ) ?? null;
-  if (!tab) return null;
-  const cached = documentSliceCache.get(scope.workspacePath);
-  if (cached?.tab === tab) return cached.slice;
-  const slice = { document: tab.document, draftContent: tab.draftContent };
-  documentSliceCache.set(scope.workspacePath, { tab, slice });
-  return slice;
+function publishWorkspace(scope: OutlinePaneScope, next: OutlinePaneState): void {
+  const current = stateFor(scope);
+  if (next === current) return;
+  statesByWorkspace = { ...statesByWorkspace, [scope.workspacePath]: next };
+  if (next.document !== current.document) notify(documentSubscribers, scope.workspacePath);
+  if (next.fileQueue !== current.fileQueue) notify(fileQueueSubscribers, scope.workspacePath);
+  if (next.operation !== current.operation) notify(operationSubscribers, scope.workspacePath);
+}
+
+function subscribeToSlice(
+  subscribers: SliceSubscribers,
+  scope: OutlinePaneScope,
+  subscriber: SliceSubscriber,
+): () => void {
+  const scoped = subscribers.get(scope.workspacePath) ?? new Set<SliceSubscriber>();
+  scoped.add(subscriber);
+  subscribers.set(scope.workspacePath, scoped);
+  return () => {
+    scoped.delete(subscriber);
+    if (scoped.size === 0) subscribers.delete(scope.workspacePath);
+  };
+}
+
+export function subscribeOutlineDocumentSlice(scope: OutlinePaneScope, subscriber: SliceSubscriber): () => void {
+  return subscribeToSlice(documentSubscribers, scope, subscriber);
+}
+
+export function subscribeOutlineFileQueueSlice(scope: OutlinePaneScope, subscriber: SliceSubscriber): () => void {
+  return subscribeToSlice(fileQueueSubscribers, scope, subscriber);
+}
+
+function subscribeOutlineOperationSlice(scope: OutlinePaneScope, subscriber: SliceSubscriber): () => void {
+  return subscribeToSlice(operationSubscribers, scope, subscriber);
+}
+
+function sameFileQueueItems(left: FileQueueItem[], right: FileQueueItem[]): boolean {
+  return left === right || (left.length === right.length && left.every((item, index) => item === right[index]));
+}
+
+function sameItemIds(left: string[], right: string[]): boolean {
+  return left === right || (left.length === right.length && left.every((id, index) => id === right[index]));
+}
+
+export function replaceOutlineFileQueueInState(state: OutlinePaneState, fileQueue: FileQueueItem[]): OutlinePaneState {
+  if (sameFileQueueItems(state.fileQueue.fileQueue, fileQueue)) return state;
+  return { ...state, fileQueue: { ...state.fileQueue, fileQueue } };
+}
+
+export function setOutlineFileQueueCanApplyInState(
+  state: OutlinePaneState,
+  canApplyFileQueue: boolean,
+): OutlinePaneState {
+  return state.fileQueue.canApplyFileQueue === canApplyFileQueue
+    ? state
+    : { ...state, fileQueue: { ...state.fileQueue, canApplyFileQueue } };
+}
+
+export function selectOutlineFileQueueItemInState(
+  state: OutlinePaneState,
+  id: string,
+  additive: boolean,
+): OutlinePaneState {
+  const selected = state.fileQueue.selectedFileQueueItemIds;
+  const nextSelected = !additive
+    ? [id]
+    : selected.includes(id) ? selected.filter((item) => item !== id) : [...selected, id];
+  if (sameItemIds(selected, nextSelected)) return state;
+  return { ...state, fileQueue: { ...state.fileQueue, selectedFileQueueItemIds: nextSelected } };
+}
+
+export function setOutlineFileQueueSelectionInState(
+  state: OutlinePaneState,
+  selectedFileQueueItemIds: string[],
+): OutlinePaneState {
+  if (sameItemIds(state.fileQueue.selectedFileQueueItemIds, selectedFileQueueItemIds)) return state;
+  return { ...state, fileQueue: { ...state.fileQueue, selectedFileQueueItemIds } };
+}
+
+export function updateOutlineFileQueueItemInState(
+  state: OutlinePaneState,
+  id: string,
+  patch: Partial<Pick<FileQueueItem, "targetDir" | "operation">>,
+): OutlinePaneState {
+  const index = state.fileQueue.fileQueue.findIndex((item) => item.id === id);
+  if (index < 0) return state;
+  const item = state.fileQueue.fileQueue[index];
+  const nextItem: FileQueueItem = { ...item, ...patch, status: "queued", message: null, targetPath: null };
+  if (
+    nextItem.targetDir === item.targetDir &&
+    nextItem.operation === item.operation &&
+    nextItem.status === item.status &&
+    nextItem.message === item.message &&
+    nextItem.targetPath === item.targetPath
+  ) return state;
+  const fileQueue = [...state.fileQueue.fileQueue];
+  fileQueue[index] = nextItem;
+  return { ...state, fileQueue: { ...state.fileQueue, fileQueue } };
+}
+
+export function setOutlineOperationInState(
+  state: OutlinePaneState,
+  patch: Partial<OutlineOperationSlice>,
+): OutlinePaneState {
+  const operation = { ...state.operation, ...patch };
+  return operation.applyingFileQueue === state.operation.applyingFileQueue &&
+    operation.fileQueueError === state.operation.fileQueueError
+    ? state
+    : { ...state, operation };
+}
+
+function updateOutlinePaneState(
+  scope: OutlinePaneScope,
+  updater: (state: OutlinePaneState) => OutlinePaneState,
+): OutlinePaneState {
+  const next = updater(stateFor(scope));
+  publishWorkspace(scope, next);
+  return next;
+}
+
+export function replaceOutlineFileQueue(scope: OutlinePaneScope, fileQueue: FileQueueItem[]): OutlinePaneState {
+  return updateOutlinePaneState(scope, (state) => replaceOutlineFileQueueInState(state, fileQueue));
+}
+
+export function setOutlineFileQueueCanApply(scope: OutlinePaneScope, canApplyFileQueue: boolean): OutlinePaneState {
+  return updateOutlinePaneState(scope, (state) => setOutlineFileQueueCanApplyInState(state, canApplyFileQueue));
+}
+
+export function selectOutlineFileQueueItem(scope: OutlinePaneScope, id: string, additive: boolean): OutlinePaneState {
+  return updateOutlinePaneState(scope, (state) => selectOutlineFileQueueItemInState(state, id, additive));
+}
+
+export function setOutlineFileQueueSelection(
+  scope: OutlinePaneScope,
+  selectedFileQueueItemIds: string[],
+): OutlinePaneState {
+  return updateOutlinePaneState(scope, (state) => setOutlineFileQueueSelectionInState(state, selectedFileQueueItemIds));
+}
+
+export function updateOutlineFileQueueItem(
+  scope: OutlinePaneScope,
+  id: string,
+  patch: Partial<Pick<FileQueueItem, "targetDir" | "operation">>,
+): OutlinePaneState {
+  return updateOutlinePaneState(scope, (state) => updateOutlineFileQueueItemInState(state, id, patch));
+}
+
+export function setOutlineOperation(scope: OutlinePaneScope, patch: Partial<OutlineOperationSlice>): OutlinePaneState {
+  return updateOutlinePaneState(scope, (state) => setOutlineOperationInState(state, patch));
 }
 
 /** A non-React current snapshot for command ports and narrow shell adapters. */
@@ -114,7 +242,7 @@ export function hydrateOutlinePaneState(
     next.fileQueue === current.fileQueue &&
     next.operation === current.operation
   ) return current;
-  publish({ ...statesByWorkspace, [scope.workspacePath]: next });
+  publishWorkspace(scope, next);
   return next;
 }
 
@@ -122,23 +250,19 @@ export function cleanupOutlinePaneWorkspace(workspacePath: string): void {
   if (!(workspacePath in statesByWorkspace)) return;
   const next = { ...statesByWorkspace };
   delete next[workspacePath];
+  statesByWorkspace = next;
   documentSliceCache.delete(workspacePath);
-  publish(next);
+  notify(documentSubscribers, workspacePath);
+  notify(fileQueueSubscribers, workspacePath);
+  notify(operationSubscribers, workspacePath);
 }
 
-function subscribe(subscriber: () => void): () => void {
-  subscribers.add(subscriber);
-  return () => subscribers.delete(subscriber);
-}
-
-/**
- * Stable facade slice. Canonical document/draft values come from
+/** Stable facade slice. Canonical document/draft values come from
  * editorTabsStore; the local subscription supplies a stable fallback for
- * lifecycle tests and future pane-local hydration.
- */
+ * lifecycle tests and future pane-local hydration. */
 export function useOutlineDocumentSlice(scope: OutlinePaneScope): OutlineDocumentSlice {
   const fallback = useSyncExternalStore(
-    subscribe,
+    (subscriber) => subscribeOutlineDocumentSlice(scope, subscriber),
     () => stateFor(scope).document,
     () => stateFor(scope).document,
   );
@@ -158,7 +282,7 @@ export function useOutlineDocumentSlice(scope: OutlinePaneScope): OutlineDocumen
 
 export function useOutlineFileQueueSlice(scope: OutlinePaneScope): OutlineFileQueueSlice {
   return useSyncExternalStore(
-    subscribe,
+    (subscriber) => subscribeOutlineFileQueueSlice(scope, subscriber),
     () => stateFor(scope).fileQueue,
     () => stateFor(scope).fileQueue,
   );
@@ -166,7 +290,7 @@ export function useOutlineFileQueueSlice(scope: OutlinePaneScope): OutlineFileQu
 
 export function useOutlineOperationSlice(scope: OutlinePaneScope): OutlineOperationSlice {
   return useSyncExternalStore(
-    subscribe,
+    (subscriber) => subscribeOutlineOperationSlice(scope, subscriber),
     () => stateFor(scope).operation,
     () => stateFor(scope).operation,
   );
@@ -177,7 +301,12 @@ export function useOutlineOperationSlice(scope: OutlinePaneScope): OutlineOperat
 export function resetOutlinePaneStoreForTest(): void {
   statesByWorkspace = {};
   documentSliceCache.clear();
-  for (const subscriber of subscribers) subscriber();
+  for (const subscribers of [documentSubscribers, fileQueueSubscribers, operationSubscribers]) {
+    for (const scoped of subscribers.values()) {
+      for (const subscriber of scoped) subscriber();
+    }
+    subscribers.clear();
+  }
 }
 
 export { createOutlinePaneCommands } from "./editorSurfaceAdapter";

@@ -50,7 +50,15 @@ import { extractOutline } from "../lib/markdown";
 import { setError } from "../lib/errorStore";
 import type { OutlinePaneCommands } from "../lib/editorSurfaceAdapter";
 import { useTranslation } from "../lib/i18n";
-import { useOutlineDocumentSlice, type OutlinePaneScope } from "../lib/outlinePaneStore";
+import {
+  replaceOutlineFileQueue,
+  selectOutlineFileQueueItem,
+  setOutlineFileQueueSelection,
+  useOutlineDocumentSlice,
+  useOutlineFileQueueSlice,
+  useOutlineOperationSlice,
+  type OutlinePaneScope,
+} from "../lib/outlinePaneStore";
 import { useContextMenuKeyboard } from "../lib/useContextMenuKeyboard";
 import type {
   MaruAppMode,
@@ -109,19 +117,6 @@ interface OutlinePaneSidebarProps {
 }
 
 interface OutlinePaneExplorerProps {
-  fileQueue: FileQueueItem[];
-  canApplyFileQueue: boolean;
-  onUpdateFileQueueItem: (
-    id: string,
-    patch: Partial<Pick<FileQueueItem, "targetDir" | "operation">>,
-  ) => void;
-  selectedFileQueueItemIds: string[];
-  onSelectFileQueueItem: (id: string, additive: boolean) => void;
-  onQueueExternalFiles: (paths: string[]) => Promise<void>;
-  onQueueFileSources: (sources: FileQueueSourceInfo[], targetDir: string) => void;
-  onApplyFileQueue: () => Promise<unknown>;
-  onClearFileQueue: () => void;
-  onClearSelectedFileQueueItems: () => void;
   workspaceFileEntries: WorkspaceFileEntry[];
   explorerWorkspacePath: string | null;
   explorerExpandedFolders: string[];
@@ -234,6 +229,8 @@ export function OutlinePane({
   slots,
 }: OutlinePaneProps) {
   const { document, draftContent } = useOutlineDocumentSlice(scope);
+  const { fileQueue, canApplyFileQueue, selectedFileQueueItemIds } = useOutlineFileQueueSlice(scope);
+  const { applyingFileQueue } = useOutlineOperationSlice(scope);
   const {
     entries,
     readOnly,
@@ -261,16 +258,6 @@ export function OutlinePane({
     onOpenCommandPalette,
   } = sidebar;
   const {
-    fileQueue,
-    canApplyFileQueue,
-    onUpdateFileQueueItem,
-    selectedFileQueueItemIds,
-    onSelectFileQueueItem,
-    onQueueExternalFiles,
-    onQueueFileSources,
-    onApplyFileQueue,
-    onClearFileQueue,
-    onClearSelectedFileQueueItems,
     workspaceFileEntries,
     explorerWorkspacePath,
     explorerExpandedFolders,
@@ -364,7 +351,7 @@ export function OutlinePane({
   }, [entries]);
   const queueExplorerPayload = useCallback(
     (payload: ExplorerDragPayload) => {
-      onQueueFileSources(
+      void commands.queueFileSources(
         payload.items.map((item) => ({
           path: item.path,
           sourceRelPath: item.relPath,
@@ -374,7 +361,7 @@ export function OutlinePane({
         payload.workspacePath,
       );
     },
-    [onQueueFileSources],
+    [commands],
   );
 
   return (
@@ -545,13 +532,25 @@ export function OutlinePane({
                 queue={fileQueue}
                 canApplyFileQueue={canApplyFileQueue}
                 selectedIds={selectedFileQueueItemIds}
-                onUpdateItem={onUpdateFileQueueItem}
-                onSelectItem={onSelectFileQueueItem}
-                onQueueExternalFiles={onQueueExternalFiles}
-                onQueueFileSources={onQueueFileSources}
-                onApply={onApplyFileQueue}
-                onClear={onClearFileQueue}
-                onClearSelected={onClearSelectedFileQueueItems}
+                working={applyingFileQueue}
+                onUpdateItem={commands.updateFileQueueItem}
+                onSelectItem={(id, additive) => selectOutlineFileQueueItem(scope, id, additive)}
+                onQueueExternalFiles={commands.queueExternalFiles}
+                onQueueFileSources={commands.queueFileSources}
+                onApply={commands.applyFileQueue}
+                onClear={() => {
+                  replaceOutlineFileQueue(scope, []);
+                  setOutlineFileQueueSelection(scope, []);
+                }}
+                onClearSelected={() => {
+                  const selected = new Set(selectedFileQueueItemIds);
+                  if (selected.size === 0) return;
+                  replaceOutlineFileQueue(
+                    scope,
+                    fileQueue.filter((item) => !selected.has(item.id)),
+                  );
+                  setOutlineFileQueueSelection(scope, []);
+                }}
                 t={t}
               />
             </>
@@ -727,6 +726,7 @@ function FilesQueuePane({
   queue,
   canApplyFileQueue,
   selectedIds,
+  working,
   onUpdateItem,
   onSelectItem,
   onQueueExternalFiles,
@@ -739,6 +739,7 @@ function FilesQueuePane({
   queue: FileQueueItem[];
   canApplyFileQueue: boolean;
   selectedIds: string[];
+  working: boolean;
   onUpdateItem: (
     id: string,
     patch: Partial<Pick<FileQueueItem, "targetDir" | "operation">>,
@@ -751,7 +752,6 @@ function FilesQueuePane({
   onClearSelected: () => void;
   t: (key: string, vars?: Record<string, string | number>) => string;
 }) {
-  const [working, setWorking] = useState(false);
   const [viewMode, setViewMode] = useState<"list" | "icons">("icons");
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
   const contextMenuRef = useRef<HTMLDivElement>(null);
@@ -831,14 +831,11 @@ function FilesQueuePane({
   };
 
   const apply = async () => {
-    setWorking(true);
     setError(null);
     try {
       await onApply();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setWorking(false);
     }
   };
 
