@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import * as ts from "typescript";
 import { describe, expect, it, vi } from "vitest";
+import { DEFAULT_MARU_SETTINGS } from "./settings";
 
 const outlinePanePath = fileURLToPath(new URL("../components/OutlinePane.tsx", import.meta.url));
 
@@ -20,6 +21,11 @@ function interfacePropertyNames(filePath: string, interfaceName: string): string
 
 async function loadOutlineSurface() {
   const specifier = ["./outline", "PaneStore"].join("");
+  return import(/* @vite-ignore */ specifier);
+}
+
+async function loadPersistence() {
+  const specifier = ["./editorSurface", "Persistence"].join("");
   return import(/* @vite-ignore */ specifier);
 }
 
@@ -164,5 +170,63 @@ describe("Outline facade contract", () => {
     await commands.closeOutline();
 
     expect(closeOutline).toHaveBeenCalledOnce();
+  });
+
+  it("rejects a late workspace hydration before its one facade publish", async () => {
+    const surface = await loadOutlineSurface();
+    const persistence = await loadPersistence();
+    const scopeA = { workspacePath: "/workspace-a" };
+    const scopeB = { workspacePath: "/workspace-b" };
+    let activeWorkspace = scopeA.workspacePath;
+    let requestId = 1;
+    let resolveTab: ((tab: "outline") => void) | undefined;
+    const adapter = persistence.createEditorSurfacePersistence({
+      currentWorkspacePath: () => activeWorkspace,
+      currentRequestId: () => requestId,
+      publish: surface.hydrateOutlinePaneState,
+      cleanupWorkspace: surface.cleanupOutlinePaneWorkspace,
+      scheduleSettings: vi.fn(),
+    });
+    const staleHydration = adapter.hydrate(
+      { workspacePath: scopeA.workspacePath, requestId },
+      new Promise<"outline">((resolve) => {
+        resolveTab = resolve;
+      }),
+    );
+
+    activeWorkspace = scopeB.workspacePath;
+    requestId = 2;
+    surface.hydrateOutlinePaneState(scopeB, { sidebar: { activeTab: "workspace" } });
+    const before = surface.getOutlinePaneState(scopeB).sidebar;
+    resolveTab?.("outline");
+
+    await expect(staleHydration).resolves.toBe(false);
+    expect(surface.getOutlinePaneState(scopeB).sidebar).toBe(before);
+  });
+
+  it("saves only rightPaneTab and removes facade-local workspace records", async () => {
+    const surface = await loadOutlineSurface();
+    const persistence = await loadPersistence();
+    const workspacePath = "/workspace-a";
+    const scheduleSettings = vi.fn();
+    const adapter = persistence.createEditorSurfacePersistence({
+      currentWorkspacePath: () => workspacePath,
+      currentRequestId: () => 1,
+      publish: surface.hydrateOutlinePaneState,
+      cleanupWorkspace: surface.cleanupOutlinePaneWorkspace,
+      scheduleSettings,
+    });
+
+    surface.hydrateOutlinePaneState({ workspacePath }, {
+      sidebar: { activeTab: "outline" },
+      explorer: { explorerWorkspacePath: workspacePath },
+    });
+    adapter.setRightPaneTab("files");
+    const next = scheduleSettings.mock.calls[0][0](DEFAULT_MARU_SETTINGS);
+    expect(next.ui).toEqual({ ...DEFAULT_MARU_SETTINGS.ui, rightPaneTab: "files" });
+
+    adapter.cleanupWorkspace(workspacePath);
+    expect(surface.getOutlinePaneState({ workspacePath }).sidebar.activeTab).toBe("workspace");
+    expect(DEFAULT_MARU_SETTINGS.ui.rightPaneTab).toBe("workspace");
   });
 });
