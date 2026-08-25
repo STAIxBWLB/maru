@@ -4,8 +4,6 @@ import { act, useSyncExternalStore } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-const wave0ContractsEnabled = process.env.PHASE4_WAVE0_CONTRACT === "1";
-const describeWave0 = wave0ContractsEnabled ? describe : describe.skip;
 
 async function loadEditorSurface() {
   const specifier = ["../lib/editor", "PaneStore"].join("");
@@ -25,7 +23,7 @@ function dispatchEditorInput(input: HTMLInputElement, value: string) {
   input.dispatchEvent(new Event("change", { bubbles: true }));
 }
 
-describeWave0("Editor surface render isolation", () => {
+describe("Editor surface render isolation", () => {
   let container: HTMLDivElement;
   let root: Root | null = null;
 

@@ -8,8 +8,6 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { decoratePreviewHtml } from "./EditorPane";
 
-const wave0ContractsEnabled = process.env.PHASE4_WAVE0_CONTRACT === "1";
-const describeWave0 = wave0ContractsEnabled ? describe : describe.skip;
 const editorPaneSource = new URL("./EditorPane.tsx", import.meta.url);
 
 async function loadEditorSurface() {
@@ -36,7 +34,7 @@ function PreviewHarness({ operationVersion }: { operationVersion: number }) {
   return <article className="preview-surface" dangerouslySetInnerHTML={previewMarkup} />;
 }
 
-describeWave0("EditorPane preview identity contract", () => {
+describe("EditorPane preview identity contract", () => {
   let container: HTMLDivElement;
   let root: Root | null = null;
 
