@@ -68,7 +68,6 @@ import type {
 } from "../lib/settings";
 import type { BuiltInDocumentView, DocumentFilter } from "../lib/documentIndex";
 import type {
-  DocumentPayload,
   FileQueueItem,
   FileQueueSourceInfo,
   VaultEntry,

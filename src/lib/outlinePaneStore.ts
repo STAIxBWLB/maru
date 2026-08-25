@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from "react";
 
-import { getEditorTabsState, useActiveTabIds, useDocTabs } from "./editorTabsStore";
+import { useActiveTabIds, useDocTabs } from "./editorTabsStore";
 import type { DocumentPayload, FileQueueItem } from "./types";
 
 /** The Outline facade is deliberately keyed by workspace. `tabId` is an

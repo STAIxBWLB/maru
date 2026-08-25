@@ -5704,6 +5704,7 @@ function MainApp() {
       applyQueuedFiles,
       lastOpenKeyForWorkspace,
       outlineOpen,
+      outlinePaneScope,
       pushRecent,
       setPersistedAppMode,
       setPersistedRightPaneTab,
