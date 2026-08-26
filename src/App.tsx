@@ -425,6 +425,11 @@ import {
   type WorkspaceVisibilitySetting,
 } from "./lib/settings";
 import {
+  hydrateShellSettings,
+  updateShellSettings,
+  useShellSettings,
+} from "./lib/shellSettingsStore";
+import {
   availableRightWorkbenchSurface,
   minimumWorkbenchWidth,
   resolveWorkbenchPlacement,
@@ -1207,9 +1212,8 @@ export function MainApp() {
   const [meetingsRequestedView, setMeetingsRequestedView] = useState<
     "transcript" | "external" | null
   >(null);
-  const [maruSettings, setMaruSettings] = useState<MaruSettings>(() =>
-    normalizeMaruSettings(DEFAULT_MARU_SETTINGS),
-  );
+  const maruSettings = useShellSettings();
+  const setMaruSettings = updateShellSettings;
   const [settingsLoaded, setSettingsLoaded] = useState(false);
   const [, startExplorerTransition] = useTransition();
   const scanOptions = useMemo(
@@ -1845,6 +1849,7 @@ export function MainApp() {
 
   useEffect(() => {
     let cancelled = false;
+    const settingsRequestId = loadWorkspaceRequestRef.current;
     setSettingsLoaded(false);
     if (!settingsWorkPath) {
       if (booting && workspaceRegistry.workspaces.length === 0) {
@@ -1858,8 +1863,7 @@ export function MainApp() {
     }
     void readMaruSettings(settingsWorkPath)
       .then((settings) => {
-        if (!cancelled) {
-          setMaruSettings(settings);
+        if (!cancelled && hydrateShellSettings(settings, settingsRequestId, loadWorkspaceRequestRef.current)) {
           // A boot-time Today auto-open beat this load; keep it instead of
           // re-applying the persisted mode over it.
           setAppMode(
@@ -1885,7 +1889,7 @@ export function MainApp() {
     return () => {
       cancelled = true;
     };
-  }, [booting, settingsWorkPath, workspaceRegistry.workspaces.length]);
+  }, [booting, settingsWorkPath, setMaruSettings, workspaceRegistry.workspaces.length]);
 
   useEffect(() => {
     let dispose: (() => void) | null = null;
@@ -1927,7 +1931,7 @@ export function MainApp() {
       dispose = off;
     });
     return () => dispose?.();
-  }, [settingsWorkPath]);
+  }, [settingsWorkPath, setMaruSettings]);
 
   useEffect(() => {
     const apply = () => {
@@ -2030,7 +2034,7 @@ export function MainApp() {
         return next;
       });
     },
-    [settingsWorkPath, settingsWritable],
+    [settingsWorkPath, settingsWritable, setMaruSettings],
   );
 
   const editorSurfacePersistence = useMemo(
