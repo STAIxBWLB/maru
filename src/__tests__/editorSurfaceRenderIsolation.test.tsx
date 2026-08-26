@@ -36,6 +36,12 @@ import {
   setTerminalPanelActiveContext,
 } from "../lib/terminalPanelStore";
 import { createTerminalTab, createTerminalTask } from "../lib/terminal";
+import {
+  publishDocumentBrowser,
+  resetDocumentBrowserStoreForTests,
+  useDocumentBrowserSlice,
+} from "../lib/documentBrowserStore";
+import { useGraphModeSlice, visualModeController } from "../lib/visualModeStore";
 
 
 async function loadEditorSurface() {
@@ -82,6 +88,9 @@ describe("Editor surface render isolation", () => {
       focusedEditorGroup: "left",
     });
     resetTerminalPanelStore();
+    resetDocumentBrowserStoreForTests();
+    visualModeController.setGraphFocusTarget(null);
+    visualModeController.setGraphReferenceFocus(null);
     container.remove();
   });
 
@@ -257,5 +266,78 @@ describe("Editor surface render isolation", () => {
     expect(renders.get("DocumentList") ?? 0).toBe(before.get("DocumentList"));
     expect(renders.get("ActivityRail") ?? 0).toBe(before.get("ActivityRail"));
     expect(renders.get("TerminalPanel") ?? 0).toBeGreaterThan(before.get("TerminalPanel") ?? 0);
+  });
+
+  it("isolates document-browser publishes from MainApp and unrelated shell surfaces", async () => {
+    const renders = new Map<string, number>();
+    let browserSubscriberRenders = 0;
+    function BrowserSubscriber() {
+      useDocumentBrowserSlice({ workspacePath: "", visibility: "private" }, "queryFilter");
+      browserSubscriberRenders += 1;
+      return null;
+    }
+    restoreRenderObserver = setShellSurfaceRenderObserverForTest((target) => {
+      renders.set(target, (renders.get(target) ?? 0) + 1);
+    });
+    root = createRoot(container);
+    await act(async () => {
+      root?.render(<><MainApp /><BrowserSubscriber /></>);
+    });
+    await act(async () => {});
+
+    const before = new Map(["MainApp", "DocumentList", "ActivityRail", "TerminalPanel"].map(
+      (target) => [target, renders.get(target) ?? 0],
+    ));
+    const browserBefore = browserSubscriberRenders;
+
+    await act(async () => {
+      publishDocumentBrowser({ workspacePath: "", visibility: "private" }, { query: "phase-five" });
+    });
+
+    expect(renders.get("MainApp") ?? 0).toBe(before.get("MainApp"));
+    expect(renders.get("ActivityRail") ?? 0).toBe(before.get("ActivityRail"));
+    expect(renders.get("TerminalPanel") ?? 0).toBe(before.get("TerminalPanel"));
+    expect(browserSubscriberRenders).toBeGreaterThan(browserBefore);
+  });
+
+  it("isolates active mode-local publishes from MainApp and unrelated shell surfaces", async () => {
+    const renders = new Map<string, number>();
+    let graphSubscriberRenders = 0;
+    function GraphSubscriber() {
+      useGraphModeSlice();
+      graphSubscriberRenders += 1;
+      return null;
+    }
+    restoreRenderObserver = setShellSurfaceRenderObserverForTest((target) => {
+      renders.set(target, (renders.get(target) ?? 0) + 1);
+    });
+    root = createRoot(container);
+    await act(async () => {
+      root?.render(<><MainApp /><GraphSubscriber /></>);
+    });
+    await act(async () => {});
+    await act(async () => {});
+
+    const before = new Map(["MainApp", "DocumentList", "ActivityRail", "TerminalPanel"].map(
+      (target) => [target, renders.get(target) ?? 0],
+    ));
+    const graphBefore = graphSubscriberRenders;
+
+    await act(async () => {
+      visualModeController.setGraphReferenceFocus({
+        source: "editor",
+        docPath: "/workspace/note.md",
+        docRoot: "/workspace",
+        nodePaths: ["note.md"],
+        steps: [{ paragraph: 0, nodePaths: ["note.md"] }],
+        nonce: 1,
+      });
+    });
+
+    expect(renders.get("MainApp") ?? 0).toBe(before.get("MainApp"));
+    expect(renders.get("DocumentList") ?? 0).toBe(before.get("DocumentList"));
+    expect(renders.get("ActivityRail") ?? 0).toBe(before.get("ActivityRail"));
+    expect(renders.get("TerminalPanel") ?? 0).toBe(before.get("TerminalPanel"));
+    expect(graphSubscriberRenders).toBeGreaterThan(graphBefore);
   });
 });
