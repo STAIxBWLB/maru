@@ -7,7 +7,7 @@ import type { FavoriteTarget } from "../components/FavoritesSection";
 import type { FavoriteKind } from "./settings";
 
 export type ModePlacement = "primary" | "right" | "panel";
-export type RegisteredModeId = "pkm" | "e2e" | "diagram" | "graph" | "sites";
+export type RegisteredModeId = "pkm" | "e2e" | "diagram" | "graph" | "sites" | "agents";
 
 /** Identifiers only: adapters subscribe to their own data instead of receiving shell snapshots. */
 export interface ModeHostScope {
@@ -27,6 +27,7 @@ export interface ModeHostCommands {
   onGraphChanged?(): void;
   sitesOverlayOpen?: boolean;
   closeRightWorkbench?(): void;
+  confirmApproval?(input: unknown): Promise<string | null>;
 }
 
 export interface ModeAdapterProps {
@@ -78,6 +79,13 @@ const modeRegistry: Record<RegisteredModeId, ModeDescriptor> = {
     isAvailable: () => true,
     fallback: "mode-loading",
   },
+  agents: {
+    id: "agents",
+    load: () => import("./modeAdapters/AgentsModeAdapter").then((module) => ({ default: module.AgentsModeAdapter })),
+    placements: ["primary"],
+    isAvailable: () => true,
+    fallback: "mode-loading",
+  },
 };
 
 const lazyAdapters: Record<RegisteredModeId, ReturnType<typeof lazy<ComponentType<ModeAdapterProps>>>> = {
@@ -86,6 +94,7 @@ const lazyAdapters: Record<RegisteredModeId, ReturnType<typeof lazy<ComponentTyp
   diagram: lazy(modeRegistry.diagram.load),
   graph: lazy(modeRegistry.graph.load),
   sites: lazy(modeRegistry.sites.load),
+  agents: lazy(modeRegistry.agents.load),
 };
 
 export function getModeDescriptor(mode: string): ModeDescriptor | null {

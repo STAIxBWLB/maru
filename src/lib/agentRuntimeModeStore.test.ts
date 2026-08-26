@@ -73,7 +73,7 @@ describe("agentRuntimeModeStore", () => {
   });
 
   it("rejects stale workspace skill responses without resetting process-global missions", async () => {
-    let resolveOld: ((value: Awaited<ReturnType<AgentRuntimeController["refreshSkills"]>>) => void) | null = null;
+    let resolveOld: (() => void) | undefined;
     const controller = createAgentRuntimeController({
       listAgents: async () => [],
       listSkills: (workPath) =>
@@ -115,7 +115,7 @@ describe("agentRuntimeModeStore", () => {
     const oldRequest = controller.refreshSkills();
     controller.setWorkspace("/workspace-b");
     await controller.refreshSkills();
-    resolveOld?.();
+    if (resolveOld) resolveOld();
     await oldRequest;
 
     expect(controller.getRegistrySlice().workspacePath).toBe("/workspace-b");

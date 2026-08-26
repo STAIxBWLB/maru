@@ -108,7 +108,7 @@ import {
 import { WorkspaceSwitcher } from "./components/WorkspaceSwitcher";
 import type { FavoriteTarget } from "./components/FavoritesSection";
 import { useApprovalGate } from "./approval/ApprovalDialog";
-import { markStartup, measureStartup, scheduleStartupIdle } from "./lib/startupProfile";
+import { markStartup, measureStartup } from "./lib/startupProfile";
 import {
   ComposeDialog,
   type ComposeDialogSeed,
@@ -169,7 +169,6 @@ import {
   stageOutlookItems,
   stageTelegramItems,
   startTelegramPolling,
-  stopAiMission,
   stopTelegramPolling,
   telegramPollingStatus,
   removeAgentContextHint,
@@ -305,17 +304,15 @@ import { requestSiteViewCloseActive } from "./lib/siteView";
 import { useScopedSelectAll } from "./lib/useScopedSelectAll";
 import type { TerminalKind } from "./lib/terminal";
 import {
-  skillsListSkills,
   type SkillContextItem,
   type SkillDispatchRuntime,
   type SkillRecord,
   type TerminalDispatchSpec,
 } from "./lib/skills";
-import { activeTrackedAgentMissions, isTrackedAgentMission } from "./lib/skillRuns";
+import { activeTrackedAgentMissions } from "./lib/skillRuns";
 import {
   agentErrorMessage,
   inlineAgentRuntime,
-  listAgents,
   requireAgent,
   runAgent,
   type AgentRecord,
@@ -347,10 +344,16 @@ import type {
   WorkspaceVisibility,
   WorkspaceWritePolicy,
 } from "./lib/types";
-import { ingestMissionUpdate, missionStoreLoadStamp, useTrackedMissions } from "./lib/useActiveMissions";
+import { missionStoreLoadStamp } from "./lib/useActiveMissions";
+import {
+  agentRuntimeController,
+  AgentRuntimeBootstrap,
+  AgentRuntimeMissionBridge,
+  useAgentMissionSlice,
+  useAgentRegistrySlice,
+} from "./lib/agentRuntimeModeStore";
 import { setError, useError } from "./lib/errorStore";
 import { setTelegramMessages, setTelegramPolling, useTelegramPolling } from "./lib/telegramEventsStore";
-import { useAiOutputLog } from "./lib/useAiOutputLog";
 import { useDestructiveActionGuard } from "./lib/useDestructiveActionGuard";
 import { useInboxEvents } from "./lib/useInboxEvents";
 import { useTelegramEvents } from "./lib/useTelegramEvents";
@@ -533,7 +536,6 @@ const LazyStudioMode = lazy(() => import("./components/studio/StudioMode").then(
 const LazyInboxPane = lazy(() => import("./components/InboxPane").then((module) => ({ default: module.InboxPane })));
 const LazyDraftsPane = lazy(() => import("./components/drafts/DraftsPane").then((module) => ({ default: module.DraftsPane })));
 const LazyGapPane = lazy(() => import("./components/gap/GapPane").then((module) => ({ default: module.GapPane })));
-const LazyAgentsPane = lazy(() => import("./components/agents/AgentsPane").then((module) => ({ default: module.AgentsPane })));
 const LazyCommsPane = lazy(() => import("./components/CommsPane").then((module) => ({ default: module.CommsPane })));
 const LazyMeetingsPane = lazy(() => import("./components/meetings/MeetingsPane").then((module) => ({ default: module.MeetingsPane })));
 const LazyTodayPane = lazy(() => import("./components/today/TodayPane").then((module) => ({ default: module.TodayPane })));
@@ -1037,8 +1039,6 @@ export function MainApp() {
   const commsReadinessRequestSeqRef = useRef(0);
   const commsDashboardRequestSeqRef = useRef(0);
   const migrationCheckedRef = useRef(false);
-  const processingMissionIdsRef = useRef<Set<string>>(new Set());
-  const processingMissionsRef = useRef<MissionRecord[]>([]);
   const prevProcessingMissionsRef = useRef<MissionRecord[] | null>(null);
   const prevMissionLoadStampRef = useRef(missionStoreLoadStamp());
 
@@ -1138,11 +1138,15 @@ export function MainApp() {
   const [processedQuery, setProcessedQuery] = useState("");
   const [processedDeferredQuery, setProcessedDeferredQuery] = useState("");
   const [processedDetail, setProcessedDetail] = useState<InboxProcessedItemDetail | null>(null);
-  // Tracked agent missions (skill + structured-loop) come from the shared
-  // ai://mission_update store in lib/useActiveMissions — the same store
-  // MissionBadge/AgentUsageBar use — instead of a second local listener.
-  const processingMissions = useTrackedMissions();
-  const [processingLogLines, setProcessingLogLines] = useState<Record<string, string[]>>({});
+  // Agent, skill, mission, and log state are stable external-store slices.
+  // MainApp only composes them for still-inline downstream modes.
+  const agentRegistry = useAgentRegistrySlice();
+  const agentMission = useAgentMissionSlice();
+  const agents = agentRegistry.agents as AgentRecord[];
+  const skills = agentRegistry.skills as SkillRecord[];
+  const skillsLoading = agentRegistry.skillsLoading;
+  const processingMissions = agentMission.missions as MissionRecord[];
+  const processingLogLines = agentMission.logLines as Record<string, string[]>;
   // Per-source processing run state for the Messages dashboard.
   const [sourceRuns, setSourceRuns] = useState<InboxSourceRun[]>([]);
   const [processedCounts, setProcessedCounts] = useState<Record<string, number>>({});
@@ -1174,13 +1178,6 @@ export function MainApp() {
   // toasts hook (step 9); the JSX below only reads the returned values.
   const { updateToast, installPendingUpdate, dismissUpdateToast, checkForUpdates } =
     useUpdaterToasts(t);
-  const [skills, setSkills] = useState<SkillRecord[]>([]);
-  const [skillsLoading, setSkillsLoading] = useState(false);
-  // Agent records back every AI feature's backend/permission/prompt choice.
-  // Builtin seeds always resolve, so an empty list only ever means the registry
-  // read failed; `requireAgent` turns that into a visible error at dispatch.
-  const [agents, setAgents] = useState<AgentRecord[]>([]);
-  const skillsStartupLoadKeyRef = useRef<string | null>(null);
   const composeSeed = useComposeSeed();
   const [meetingsRequestedView, setMeetingsRequestedView] = useState<
     "transcript" | "external" | null
@@ -2205,69 +2202,7 @@ export function MainApp() {
     [agents, maruSettings.ai],
   );
 
-  const refreshAgents = useCallback(async () => {
-    try {
-      setAgents(await listAgents());
-    } catch (error) {
-      setError(error instanceof Error ? error.message : String(error));
-    }
-  }, []);
-
-  useEffect(() => {
-    void refreshAgents();
-  }, [refreshAgents]);
-
-  const refreshSkills = useCallback(async (options: { refresh?: boolean } = {}) => {
-    if (!settingsWorkPath) {
-      setSkills([]);
-      return [];
-    }
-    setSkillsLoading(true);
-    try {
-      const next = await measureStartup(
-        options.refresh ? "skills:refresh" : "skills:cached-read",
-        () => skillsListSkills(settingsWorkPath, options),
-        { workPath: settingsWorkPath },
-      );
-      setSkills(next);
-      return next;
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-      return [];
-    } finally {
-      setSkillsLoading(false);
-    }
-  }, [settingsWorkPath]);
-
-  useEffect(() => {
-    if (booting || !settingsWorkPath || !settingsWorkspaceStartupReady) return;
-    if (skillsStartupLoadKeyRef.current === settingsWorkPath) return;
-
-    const key = settingsWorkPath;
-    let cancelled = false;
-    let started = false;
-    let cancelRefresh: (() => void) | null = null;
-    const cancelCached = scheduleStartupIdle(() => {
-      started = true;
-      skillsStartupLoadKeyRef.current = key;
-      void (async () => {
-        const cached = await refreshSkills();
-        if (cancelled || cached.length > 0) return;
-        cancelRefresh = scheduleStartupIdle(() => {
-          if (!cancelled) void refreshSkills({ refresh: true });
-        }, 2500);
-      })();
-    });
-
-    return () => {
-      cancelled = true;
-      cancelCached();
-      cancelRefresh?.();
-      if (!started && skillsStartupLoadKeyRef.current === key) {
-        skillsStartupLoadKeyRef.current = null;
-      }
-    };
-  }, [booting, refreshSkills, settingsWorkPath, settingsWorkspaceStartupReady]);
+  const refreshSkills = agentRuntimeController.refreshSkills;
 
   const setPersistedAppMode = useCallback(
     (activeAppMode: AppMode) => {
@@ -2759,11 +2694,6 @@ export function MainApp() {
   );
 
   useEffect(() => {
-    processingMissionIdsRef.current = new Set(processingMissions.map((mission) => mission.id));
-    processingMissionsRef.current = processingMissions;
-  }, [processingMissions]);
-
-  useEffect(() => {
     const timer = window.setTimeout(() => {
       setProcessedDeferredQuery(processedQuery.trim());
     }, 250);
@@ -3035,22 +2965,7 @@ export function MainApp() {
   // ai://mission_update store (useTrackedMissions), so there is nothing to
   // re-list here.
   const refreshProcessingMissions = useCallback(async () => {
-    try {
-      const missions = processingMissionsRef.current;
-      const tails = await Promise.all(
-        missions.map((mission) =>
-          readAiMissionLog(mission.id, 80)
-            .then((tail) => [mission.id, tail.lines] as const)
-            .catch(() => [mission.id, []] as const),
-        ),
-      );
-      setProcessingLogLines((current) => ({
-        ...current,
-        ...Object.fromEntries(tails),
-      }));
-    } catch {
-      // Mission log tails are a secondary diagnostic surface.
-    }
+    await agentRuntimeController.refreshMissionLogs();
   }, []);
 
   const refreshCommsDashboard = useCallback(async (
@@ -3401,11 +3316,7 @@ export function MainApp() {
             ...(trimmedContext ? { processingContext: trimmedContext } : {}),
           },
         });
-        processingMissionIdsRef.current = new Set([
-          ...processingMissionIdsRef.current,
-          invocationId,
-        ]);
-        setProcessingLogLines((current) => ({ ...current, [invocationId]: [] }));
+        agentRuntimeController.trackMission(invocationId);
         void refreshProcessingMissions();
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
@@ -3585,38 +3496,12 @@ export function MainApp() {
     [effectiveCommsSettings.telegram.monitorConfigPath, inboxWorkspacePath, processInboxKeys],
   );
 
-  const stopProcessingMission = useCallback(async (id: string) => {
-    try {
-      const record = await stopAiMission(id);
-      if (isTrackedAgentMission(record)) {
-        ingestMissionUpdate(record);
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    }
-  }, []);
+  const stopProcessingMission = agentRuntimeController.stopMission;
 
   const handleMeetingsMissionStarted = useCallback(
     (invocationId: string) => {
-      processingMissionIdsRef.current = new Set([
-        ...processingMissionIdsRef.current,
-        invocationId,
-      ]);
-      setProcessingLogLines((current) => ({ ...current, [invocationId]: [] }));
+      agentRuntimeController.trackMission(invocationId);
       setError(`Background skill run started: ${invocationId}`);
-      void refreshProcessingMissions();
-    },
-    [refreshProcessingMissions],
-  );
-
-  /** Same tracking, no banner: a successful start is not an error. */
-  const trackMissionQuietly = useCallback(
-    (invocationId: string) => {
-      processingMissionIdsRef.current = new Set([
-        ...processingMissionIdsRef.current,
-        invocationId,
-      ]);
-      setProcessingLogLines((current) => ({ ...current, [invocationId]: [] }));
       void refreshProcessingMissions();
     },
     [refreshProcessingMissions],
@@ -3729,8 +3614,6 @@ export function MainApp() {
     inboxWorkspacePath,
     refreshCommsDashboardRef,
   });
-  useAiOutputLog(processingMissionIdsRef, setProcessingLogLines);
-
   useEffect(() => {
     // In comms this is also the filter/search refetch path: the callback
     // identity changes with the query and channel, re-running this effect.
@@ -3779,12 +3662,7 @@ export function MainApp() {
       }
       if (!matchesActiveMission(record)) {
         void readAiMissionLog(record.id, 100)
-          .then((tail) =>
-            setProcessingLogLines((current) => ({
-              ...current,
-              [record.id]: tail.lines,
-            })),
-          )
+          .then((tail) => agentRuntimeController.publishMissionLog(record.id, tail.lines))
           .catch(() => {});
       }
     }
@@ -8680,6 +8558,12 @@ export function MainApp() {
           openPrimary={openPrimaryWorkbenchMode}
           openRight={openWorkbenchModeRight}
         />
+        <AgentRuntimeBootstrap
+          booting={booting}
+          workspacePath={settingsWorkPath}
+          workspaceReady={settingsWorkspaceStartupReady}
+        />
+        <AgentRuntimeMissionBridge />
         <ActivityRail
           visibleAppMode={visibleAppMode}
           rightWorkbenchMode={rightWorkbenchMode}
@@ -8790,6 +8674,7 @@ export function MainApp() {
               },
               sitesOverlayOpen,
               closeRightWorkbench: rightWorkbenchMode === "sites" ? closeRightWorkbench : undefined,
+              confirmApproval: approvalGate.confirmApproval,
             }}
           />
         ) : surfaceMode === "files" ? (
@@ -9006,21 +8891,6 @@ export function MainApp() {
             onConsumeInitialDraftId={() => setGapDraftId(null)}
             onOpenInGraph={openGapGraphFocus}
             onExitReferenceFocus={exitKgReferenceFocus}
-              />
-        ) : surfaceMode === "agents" ? (
-          <LazyAgentsPane
-            workPath={inboxWorkspacePath}
-            skills={skills}
-            ai={maruSettings.ai}
-            missions={processingMissions}
-            logLines={processingLogLines}
-            runtimeCommands={aiRuntimeCommands}
-            tasksRoot={effectiveTasksSettings.root}
-            onRefreshMissions={refreshProcessingMissions}
-            onStopMission={stopProcessingMission}
-            onMissionStarted={trackMissionQuietly}
-            onConfirmApproval={approvalGate.confirmApproval}
-            onAgentsChanged={refreshAgents}
               />
         ) : surfaceMode === "inbox" ? (
           <LazyInboxPane
