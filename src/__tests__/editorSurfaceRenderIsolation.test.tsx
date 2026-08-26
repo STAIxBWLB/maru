@@ -27,6 +27,7 @@ import {
 import { registerDictionaries } from "../lib/i18n";
 import { en } from "../lib/i18n/locales/en";
 import { ko } from "../lib/i18n/locales/ko";
+import { getEditorPaneState } from "../lib/editorPaneStore";
 import { setShellSurfaceRenderObserverForTest } from "../lib/shellSurfaceRenderProbe";
 
 
@@ -107,22 +108,34 @@ describe("Editor surface render isolation", () => {
     });
     const shellTargets = ["DocumentList", "TerminalPanel", "ActivityRail"] as const;
     const before = new Map(shellTargets.map((target) => [target, renders.get(target) ?? 0]));
+    const expectShellStable = () => {
+      for (const target of shellTargets) expect(renders.get(target) ?? 0).toBe(before.get(target));
+    };
 
     await act(async () => {
       updateTabDraft(left.id, "left dirty");
     });
     expect(getEditorTabsState().tabs.find((tab) => tab.id === left.id)?.draftContent).toBe("left dirty");
     expect(getEditorTabsState().tabs.find((tab) => tab.id === right.id)?.draftContent).toBe("right");
+    expect(getEditorPaneState({ workspacePath: "/workspace", group: "left", tabId: left.id }).document.draftContent).toBe("left dirty");
+    expect(getEditorPaneState({ workspacePath: "/workspace", group: "right", tabId: right.id }).document.draftContent).toBe("right");
     expect(renders.get("MainApp")).toBeGreaterThan(0);
-    for (const target of shellTargets) expect(renders.get(target) ?? 0).toBe(before.get(target));
+    expectShellStable();
 
     await act(async () => {
       updateTabDraft(left.id, "left dirty again");
-      updateTabDraft(right.id, "right dirty");
     });
     expect(getEditorTabsState().tabs.find((tab) => tab.id === left.id)?.draftContent).toBe("left dirty again");
+    expect(getEditorPaneState({ workspacePath: "/workspace", group: "left", tabId: left.id }).document.draftContent).toBe("left dirty again");
+    expectShellStable();
+
+    await act(async () => {
+      updateTabDraft(right.id, "right dirty");
+    });
     expect(getEditorTabsState().tabs.find((tab) => tab.id === right.id)?.draftContent).toBe("right dirty");
-    for (const target of shellTargets) expect(renders.get(target) ?? 0).toBe(before.get(target));
+    expect(getEditorPaneState({ workspacePath: "/workspace", group: "right", tabId: right.id }).document.draftContent).toBe("right dirty");
+    expect(getEditorPaneState({ workspacePath: "/workspace", group: "left", tabId: left.id }).document.draftContent).toBe("left dirty again");
+    expectShellStable();
   });
 
   it("publishes only the changed render-domain subscriber", async () => {
