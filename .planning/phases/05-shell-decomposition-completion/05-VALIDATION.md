@@ -2,9 +2,9 @@
 phase: 05
 slug: shell-decomposition-completion
 # status lifecycle: draft (seeded by plan-phase) -> validated (set by validate-phase)
-status: draft
-nyquist_compliant: false
-wave_0_complete: false
+status: validated
+nyquist_compliant: true
+wave_0_complete: true
 created: 2026-08-26
 ---
 
@@ -39,11 +39,11 @@ created: 2026-08-26
 
 | Task ID | Plan | Wave | Requirement | Threat Ref | Secure Behavior | Test Type | Automated Command | File Exists | Status |
 |---------|------|------|-------------|------------|-----------------|-----------|-------------------|-------------|--------|
-| 05-W0-01 | TBD | 0 | SHELL-05 | T-05-04 | Browser actions stay behind typed command ports and canonical store ownership is not duplicated. | Unit + component + static prop contract | `pnpm test -- src/lib/documentBrowserStore.test.ts src/components/DocumentList.test.tsx` | No - W0 | pending |
-| 05-W0-02 | TBD | 0 | SHELL-06 | Every session command rejects a stale generation-bearing handle and accepts the current handle. | TS/Rust unit + component + command table | `pnpm test -- src/lib/terminalPanelStore.test.ts src/components/TerminalPanel.test.ts && cd src-tauri && cargo test terminal` | Partial - extend in W0 | pending |
-| 05-W0-03 | TBD | 0 | SHELL-07 | Registry descriptors use dynamic imports and registered mode surfaces remain outside the entry chunk. | Registry + static guard + production build | `pnpm test -- src/lib/modeRegistry.test.ts && pnpm build` | No - W0 | pending |
-| 05-W0-04 | TBD | 0 | SHELL-08 | Document, terminal, mode-local, and editor publishes do not re-execute `MainApp`. | Real-shell render harness + architecture guard | `pnpm test -- src/__tests__/editorSurfaceRenderIsolation.test.tsx && pnpm typecheck` | Partial - extend in W0 | pending |
-| 05-W0-05 | TBD | 0 | SHELL-05, SHELL-06 | Existing settings/localStorage data round-trips through the new owners while stale hydration is rejected and transient state stays transient. | Golden fixture + lifecycle matrix | `pnpm test -- src/lib/documentBrowserStore.test.ts src/lib/terminalPanelStore.test.ts` | No - W0 | pending |
+| 05-01-T1, 05-01-T2 | 01 | 1 | SHELL-05, SHELL-08 | T-05-04 | Four-input `DocumentList` reads canonical, workspace-scoped browser slices; repeated reveal is nonce-safe and workspace cleanup removes stale state. | Unit + component contract | `pnpm test -- src/lib/documentBrowserStore.test.ts src/components/DocumentList.test.tsx` | Yes | green |
+| 05-02-T1, 05-02-T2; 05-03-T1 | 02, 03 | 1, 2 | SHELL-06, SHELL-08 | T-05-01, T-05-02 | Every session command uses an opaque generation handle; stale recycled handles are rejected, while terminal state is separated from runtime and local interaction state. | TS/Rust unit + component | `pnpm test -- src/lib/terminalSessionHandle.test.ts src/lib/terminalPanelStore.test.ts src/components/TerminalPanel.test.ts && (cd src-tauri && cargo test terminal)` | Yes | green |
+| 05-04-T1, 05-05-T1 through 05-10-T3 | 04-10 | 3-9 | SHELL-07, SHELL-08 | T-05-03, T-05-04 | All 18 app modes have exactly one dedicated lazy descriptor and adapter; mode-specific ownership is outside `MainApp`. | Registry, store, and production-bundle contract | `pnpm test -- src/lib/modeRegistry.test.ts src/lib/shellDecomposition.test.ts && pnpm build && pnpm check:bundle-budget` | Yes | green |
+| 05-11-T1 | 11 | 10 | SHELL-05, SHELL-06, SHELL-07, SHELL-08 | T-05-01 through T-05-04 | Hook ceilings, target-owner absence, lazy imports, and document/terminal/mode publish isolation stay enforced. | Architecture + real-shell render harness | `pnpm test -- src/lib/shellDecomposition.test.ts src/lib/modeRegistry.test.ts src/__tests__/editorSurfaceRenderIsolation.test.tsx && pnpm typecheck` | Yes | green |
+| 05-11-T2 | 11 | 10 | SHELL-07, SHELL-08 | T-05-03 | A temporary pane-state and temporary lazy mode can be added without changing `src/App.tsx`, then are restored safely. | Deliberate mutation drill | `node scripts/check-shell-extensibility.mjs` | Yes | green (execution evidence in 05-11 summary) |
 
 *Status values are pending, green, red, or flaky. Planner replaces provisional W0 IDs with final task IDs.*
 
@@ -51,11 +51,11 @@ created: 2026-08-26
 
 ## Wave 0 Requirements
 
-- [ ] `src/lib/documentBrowserStore.test.ts` and a `DocumentList` facade/prop-budget test for SHELL-05.
-- [ ] `src/lib/terminalPanelStore.test.ts` plus Rust/frontend generation-handle tables covering every session-scoped wrapper for SHELL-06.
-- [ ] `src/lib/modeRegistry.test.ts` or an equivalent static guard for descriptor shape, dynamic import factories, placement/fallback policy, and no eager mode imports for SHELL-07.
-- [ ] Extend `src/__tests__/editorSurfaceRenderIsolation.test.tsx` to document-browser, terminal, and mode-local publishes for SHELL-08.
-- [ ] Golden existing settings/localStorage fixtures for semantic round trip, stale hydration rejection, terminal continuity, and transient-state non-persistence.
+- [x] `src/lib/documentBrowserStore.test.ts` and `src/components/DocumentList.test.tsx` prove the canonical browser owner, four-prop facade, repeat reveal, cleanup, and slice identity.
+- [x] `src/lib/terminalSessionHandle.test.ts`, `src/lib/terminalPanelStore.test.ts`, and Rust terminal tests prove generation-handle coverage and transient/runtime separation.
+- [x] `src/lib/modeRegistry.test.ts`, `src/lib/shellDecomposition.test.ts`, and the bundle budget prove descriptor shape, all-mode coverage, dynamic imports, and no eager adapter imports.
+- [x] `src/__tests__/editorSurfaceRenderIsolation.test.tsx` proves document-browser, terminal, and active mode-local publishes do not re-execute `MainApp` or unrelated shell surfaces.
+- [x] Browser and terminal store tests cover stale cleanup/identity and non-persistence of runtime or interaction-only fields; settings lifecycle coverage is retained in `src/lib/shellSettingsStore.test.ts`.
 
 ---
 
@@ -78,13 +78,30 @@ created: 2026-08-26
 
 ---
 
+## Validation Audit 2026-08-27
+
+| Metric | Count |
+|--------|-------|
+| Gaps found | 0 |
+| Resolved with new tests | 0 |
+| Escalated | 0 |
+| Existing behavioral contracts re-run | 4 requirement groups |
+
+### Audit Evidence
+
+- `pnpm test -- ...` completed with 211 passed test files and 1,942 passed tests on the rerun. The first full-suite attempt had one non-reproducing `editorSurfaceRenderIsolation` assertion failure; the isolated test and the immediate full-suite rerun passed. Treat this as a test-environment/order warning, not a satisfied-by-assumption result.
+- `cd src-tauri && cargo test terminal` completed with 76 passed tests, including stale/current recycled-handle behavior and the every-session-command gateway test.
+- `pnpm typecheck` passed.
+- `pnpm build && pnpm check:bundle-budget` passed with the initial bundle at 298.7 KiB gzip (320 KiB limit) and CSS at 61.2 KiB gzip (70 KiB limit); required lazy adapter chunks remained present.
+- The add-state/add-mode drill was not re-run in this audit because it deliberately writes temporary implementation source, which is outside the audit's read-only implementation constraint. Its completed, restoring run is recorded in `05-11-SUMMARY.md` and remains covered by `scripts/check-shell-extensibility.mjs`.
+
 ## Validation Sign-Off
 
-- [ ] All tasks have `<automated>` verification or Wave 0 dependencies.
-- [ ] Sampling continuity: no 3 consecutive tasks without automated verification.
-- [ ] Wave 0 covers all missing references.
-- [ ] No watch-mode flags.
-- [ ] Focused feedback latency remains under 120 seconds.
-- [ ] `nyquist_compliant: true` set in frontmatter after implementation evidence exists.
+- [x] All tasks have automated verification.
+- [x] Sampling continuity: no 3 consecutive tasks without automated verification.
+- [x] Wave 0 references replaced by implemented task coverage.
+- [x] No watch-mode flags.
+- [x] Focused feedback latency remains under 120 seconds.
+- [x] `nyquist_compliant: true` set in frontmatter after implementation evidence exists.
 
-**Approval:** pending
+**Approval:** validated 2026-08-27
