@@ -2,6 +2,7 @@ import { lazy, Suspense, type ComponentType, type ReactNode } from "react";
 
 import type { DocumentBrowserScope } from "./documentBrowserStore";
 import type { DocumentOpsModeHost } from "./documentOpsModeStore";
+import type { ScanOptions } from "./types";
 import { isDiagramEnabled } from "./diagramFlag";
 import { isE2EFlowEnabled } from "./e2eFlow";
 import type { FavoriteTarget } from "../components/FavoritesSection";
@@ -30,7 +31,9 @@ export interface ModeHostCommands {
   createGraphNote?(target: string): void;
   isGraphFavorite?(kind: FavoriteKind, relPath: string): boolean;
   toggleGraphFavorite?(target: FavoriteTarget): void;
-  onGraphChanged?(): void;
+  /** The Graph adapter resolves the final data root, then asks the shell to refresh that exact root. */
+  onGraphChanged?(workspacePath: string): void;
+  graphScanOptions?: ScanOptions;
   sitesOverlayOpen?: boolean;
   closeRightWorkbench?(): void;
   confirmApproval?(input: unknown): Promise<string | null>;

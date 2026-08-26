@@ -7166,10 +7166,8 @@ export function MainApp() {
               createGraphNote: handleWikilinkClick,
               isGraphFavorite: isFavorite,
               toggleGraphFavorite: toggleFavorite,
-              onGraphChanged: () => {
-                const root = inboxWorkspacePath ?? settingsWorkPath;
-                if (root) void rescanWorkspaceEntries(root, scanOptions);
-              },
+              onGraphChanged: (graphDataPath) => void rescanWorkspaceEntries(graphDataPath, scanOptions),
+              graphScanOptions: scanOptions,
             }}
           />
         ),
@@ -8286,10 +8284,8 @@ export function MainApp() {
               createGraphNote: handleWikilinkClick,
               isGraphFavorite: isFavorite,
               toggleGraphFavorite: toggleFavorite,
-              onGraphChanged: () => {
-                const root = inboxWorkspacePath ?? settingsWorkPath;
-                if (root) void rescanWorkspaceEntries(root, scanOptions);
-              },
+              onGraphChanged: (graphDataPath) => void rescanWorkspaceEntries(graphDataPath, scanOptions),
+              graphScanOptions: scanOptions,
               sitesOverlayOpen,
               closeRightWorkbench: rightWorkbenchMode === "sites" ? closeRightWorkbench : undefined,
               confirmApproval: approvalGate.confirmApproval,
