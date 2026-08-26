@@ -1,6 +1,6 @@
 ---
 phase: 04
-fixed_at: 2026-08-25T23:57:56Z
+fixed_at: 2026-08-26T02:52:42Z
 review_path: .planning/phases/04-editor-surface-state-extraction/04-REVIEW.md
 iteration: 1
 findings_in_scope: 1
@@ -11,7 +11,7 @@ status: all_fixed
 
 # Phase 04: Code Review Fix Report
 
-**Fixed at:** 2026-08-25T23:57:56Z
+**Fixed at:** 2026-08-26T02:52:42Z
 **Source review:** `.planning/phases/04-editor-surface-state-extraction/04-REVIEW.md`
 **Iteration:** 1
 
@@ -23,23 +23,21 @@ status: all_fixed
 
 ## Fixed Issues
 
-### WR-01: Editor facade is mutated during `MainApp` render
+### BL-01: The real-shell isolation regression can pass vacuously
 
-**Files modified:** `src/App.tsx`, `src/components/EditorPaneFacade.tsx`, `src/components/EditorPaneFacade.test.tsx`
-**Commit:** `9b23e8f`
-**Applied fix:** Moved shell-derived editor presentation, operation, and view-mode publication behind an `EditorPaneFacade` layout effect. `MainApp` now only calculates props during render, so store subscriber callbacks run after commit.
+**Files modified:** `src/__tests__/editorSurfaceRenderIsolation.test.tsx`
+**Commit:** `d49235b`
+**Applied fix:** Waited for ordinary mount effects, required nonzero initial renders for `MainApp`, `DocumentList`, `TerminalPanel`, and `ActivityRail`, then proved the first `updateTabDraft()` publication increases `MainApp` while all three shell boundaries remain exactly at their initial nonzero counts.
 
 ## Verification
 
-Verification ran in the main checkout because this workflow is configured without an isolated worktree.
+Verification ran in the isolated worktree `/Users/yj.lee/workspace/work/dev/maru/.claude/worktrees/rf-04-1787712680-10365`, using the main checkout's installed dependencies without modifying them.
 
-- `pnpm exec vitest run src/components/EditorPaneFacade.test.tsx src/__tests__/editorSurfaceRenderIsolation.test.tsx` passed: 2 files, 3 tests
-- `pnpm typecheck` passed
-- `pnpm lint -- src/App.tsx src/components/EditorPaneFacade.tsx src/components/EditorPaneFacade.test.tsx` passed
-- The added regression test re-renders an already-subscribed facade with a changed operation slice, confirms publication occurred, and asserts no render-phase update warning was emitted.
+- `/Users/yj.lee/workspace/work/dev/maru/node_modules/.bin/vitest run --root /Users/yj.lee/workspace/work/dev/maru/.claude/worktrees/rf-04-1787712680-10365 src/__tests__/editorSurfaceRenderIsolation.test.tsx` passed: 1 file, 2 tests
+- `/Users/yj.lee/workspace/work/dev/maru/node_modules/.bin/tsc -b` passed
 
 ---
 
-_Fixed: 2026-08-25T23:57:56Z_
+_Fixed: 2026-08-26T02:52:42Z_
 _Fixer: the agent (gsd-code-fixer)_
 _Iteration: 1_
