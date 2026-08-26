@@ -14,4 +14,15 @@ describe("modeRegistry", () => {
     expect(typeof descriptor?.load).toBe("function");
     expect(descriptor?.isAvailable()).toBe(true);
   });
+
+  it("keeps E2E lazy, feature-gated, and available in both workbench placements", () => {
+    const descriptor = getModeDescriptor("e2e");
+
+    expect(descriptor).toMatchObject({
+      id: "e2e",
+      placements: ["primary", "right"],
+      fallback: "mode-loading",
+    });
+    expect(typeof descriptor?.load).toBe("function");
+  });
 });
