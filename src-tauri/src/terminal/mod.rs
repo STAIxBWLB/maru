@@ -1490,6 +1490,46 @@ mod tests {
     }
 
     #[test]
+    fn terminal_session_handle_deserializes_the_frontend_camel_case_shape() {
+        let handle: TerminalSessionHandle = serde_json::from_value(json!({
+            "sessionId": "term-recycled",
+            "generation": "current-generation"
+        }))
+        .unwrap();
+        assert_eq!(handle.session_id, "term-recycled");
+        assert_eq!(handle.generation, "current-generation");
+    }
+
+    #[test]
+    fn every_session_command_uses_the_generation_checked_handle_gateway() {
+        let source = include_str!("mod.rs");
+        for command in [
+            "terminal_write",
+            "terminal_input",
+            "terminal_input_batch",
+            "terminal_ack",
+            "terminal_request_full",
+            "terminal_set_visibility",
+            "terminal_selection",
+            "terminal_copy_selection",
+            "terminal_scroll",
+            "terminal_clear",
+            "terminal_text",
+            "terminal_search",
+            "terminal_resize",
+            "terminal_kill",
+        ] {
+            let command_start = source.find(&format!("pub async fn {command}")).unwrap();
+            let command_source = &source[command_start..];
+            let body_start = command_source.find('{').unwrap();
+            let first_lookup = command_source[body_start..]
+                .find("get_session_generation")
+                .unwrap();
+            assert!(first_lookup < 600, "{command} must validate its handle before mutation");
+        }
+    }
+
+    #[test]
     fn stream_credit_bounds_unacknowledged_frames() {
         let channel = Channel::new(|_| Ok(()));
         let stream = TerminalStream::new("term-1".to_string(), "generation-1".to_string(), channel);
