@@ -4,16 +4,16 @@ milestone: v1.0
 milestone_name: milestone
 current_phase: 05
 current_phase_name: Shell Decomposition Completion
-status: executing
-stopped_at: Completed 05-10-PLAN.md
-last_updated: "2026-08-26T16:08:15.934Z"
+status: verifying
+stopped_at: Completed 05-11-PLAN.md
+last_updated: "2026-08-26T21:58:45.490Z"
 last_activity: 2026-08-26
 last_activity_desc: Phase 04 execution started
 progress:
   total_phases: 5
-  completed_phases: 4
+  completed_phases: 5
   total_plans: 32
-  completed_plans: 31
+  completed_plans: 32
 ---
 
 # Project State
@@ -29,10 +29,10 @@ See: .planning/PROJECT.md (updated 2026-08-23)
 
 Phase: 05 (Shell Decomposition Completion) — EXECUTING
 Plan: 11 of 11
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-08-26 — Phase 05 execution started
 
-Progress: [██████████] 97% (3/5 phases)
+Progress: [██████████] 100% (3/5 phases)
 
 ## Performance Metrics
 
@@ -90,6 +90,7 @@ Progress: [██████████] 97% (3/5 phases)
 | Phase 05 P08 | 13min | 2 tasks | 10 files |
 | Phase 05 P09 | 7min | 2 tasks | 8 files |
 | Phase 05 P10 | 9min | 3 tasks | 9 files |
+| Phase 05 P11 | 2h 7m | 3 tasks | 25 files |
 
 ## Accumulated Context
 
@@ -178,6 +179,9 @@ Recent decisions affecting current work:
 - [Phase ?]: Files, Studio, and Catalog preserve canonical drafts, capability and revision gates, settings keys, and filesystem commands behind lazy adapters.
 - [Phase ?]: Planning adapters use isolated controller slices while canonical task, agent, and settings owners remain external.
 - [Phase ?]: Mode registry IDs are typed as MaruAppMode and exhaustively tested across all 18 modes.
+- [Phase ?]: MainApp stays below the D-13 ceiling at 15 useState and 24 useEffect calls, with lifecycle ownership in named modules.
+- [Phase ?]: Extensibility drills mutate real production source only inside a finally-restored boundary and assert App byte identity.
+- [Phase ?]: The 05-11 native checkpoint is approved; no per-flow observations were reported, so none are inferred.
 
 ### Scope Exceptions
 
@@ -229,6 +233,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-08-26T16:08:15.926Z
-Stopped at: Completed 05-10-PLAN.md
+Last session: 2026-08-26T21:58:45.482Z
+Stopped at: Completed 05-11-PLAN.md
 Resume file: None
