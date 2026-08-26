@@ -25,4 +25,15 @@ describe("modeRegistry", () => {
     });
     expect(typeof descriptor?.load).toBe("function");
   });
+
+  it("registers Diagram as a primary/right lazy surface without moving rail metadata", () => {
+    const descriptor = getModeDescriptor("diagram");
+
+    expect(descriptor).toMatchObject({
+      id: "diagram",
+      placements: ["primary", "right"],
+      fallback: "mode-loading",
+    });
+    expect(typeof descriptor?.load).toBe("function");
+  });
 });
