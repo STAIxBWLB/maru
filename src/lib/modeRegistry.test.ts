@@ -51,4 +51,13 @@ describe("modeRegistry", () => {
     expect(typeof getModeDescriptor("graph")?.load).toBe("function");
     expect(typeof getModeDescriptor("sites")?.load).toBe("function");
   });
+
+  it("registers Agents as a primary-only lazy surface", () => {
+    expect(getModeDescriptor("agents")).toMatchObject({
+      id: "agents",
+      placements: ["primary"],
+      fallback: "mode-loading",
+    });
+    expect(typeof getModeDescriptor("agents")?.load).toBe("function");
+  });
 });
