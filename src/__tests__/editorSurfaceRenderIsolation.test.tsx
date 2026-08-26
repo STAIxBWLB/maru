@@ -106,8 +106,14 @@ describe("Editor surface render isolation", () => {
     await act(async () => {
       root?.render(<MainApp />);
     });
+    await act(async () => {});
     const shellTargets = ["DocumentList", "TerminalPanel", "ActivityRail"] as const;
     const before = new Map(shellTargets.map((target) => [target, renders.get(target) ?? 0]));
+    const mainBefore = renders.get("MainApp") ?? 0;
+    expect(mainBefore).toBeGreaterThan(0);
+    for (const target of shellTargets) {
+      expect(before.get(target)).toBeGreaterThan(0);
+    }
     const expectShellStable = () => {
       for (const target of shellTargets) expect(renders.get(target) ?? 0).toBe(before.get(target));
     };
@@ -119,7 +125,7 @@ describe("Editor surface render isolation", () => {
     expect(getEditorTabsState().tabs.find((tab) => tab.id === right.id)?.draftContent).toBe("right");
     expect(getEditorPaneState({ workspacePath: "/workspace", group: "left", tabId: left.id }).document.draftContent).toBe("left dirty");
     expect(getEditorPaneState({ workspacePath: "/workspace", group: "right", tabId: right.id }).document.draftContent).toBe("right");
-    expect(renders.get("MainApp")).toBeGreaterThan(0);
+    expect(renders.get("MainApp") ?? 0).toBeGreaterThan(mainBefore);
     expectShellStable();
 
     await act(async () => {
