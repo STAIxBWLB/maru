@@ -5,15 +5,15 @@ milestone_name: milestone
 current_phase: 05
 current_phase_name: Shell Decomposition Completion
 status: executing
-stopped_at: Completed 05-01-PLAN.md
-last_updated: "2026-08-26T14:10:43.616Z"
+stopped_at: Completed 05-02-PLAN.md
+last_updated: "2026-08-26T14:23:06.336Z"
 last_activity: 2026-08-26
 last_activity_desc: Phase 04 execution started
 progress:
   total_phases: 5
   completed_phases: 4
   total_plans: 32
-  completed_plans: 22
+  completed_plans: 23
 ---
 
 # Project State
@@ -28,11 +28,11 @@ See: .planning/PROJECT.md (updated 2026-08-23)
 ## Current Position
 
 Phase: 05 (Shell Decomposition Completion) — EXECUTING
-Plan: 2 of 11
+Plan: 3 of 11
 Status: Ready to execute
 Last activity: 2026-08-26 — Phase 05 execution started
 
-Progress: [███████░░░] 69% (3/5 phases)
+Progress: [███████░░░] 72% (3/5 phases)
 
 ## Performance Metrics
 
@@ -81,6 +81,7 @@ Progress: [███████░░░] 69% (3/5 phases)
 | Phase 04 P06 | 1h 40min | 2 tasks | 4 files |
 | Phase 04 P07 | 13min | 2 tasks | 5 files |
 | Phase 05 P01 | 1h 10m | 2 tasks | 8 files |
+| Phase 05 P02 | 10m | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -149,6 +150,9 @@ Recent decisions affecting current work:
 - [Phase ?]: Render instrumentation observes static target names only and defaults to a no-op.
 - [Phase ?]: DocumentList now exposes only scope, commands, searchInputRef, and paneRef; browser state publishes through keyed external-store slices.
 - [Phase ?]: Outline composes document selection and filters from documentBrowserStore instead of mirroring browser state.
+- [Phase ?]: TerminalSessionHandle is the only frontend identity accepted by session-scoped terminal wrappers.
+- [Phase ?]: Rust validates terminal handles against the authoritative registry before every read or mutation.
+- [Phase ?]: Unknown terminal kills remain idempotent, but stale recycled handles are rejected.
 
 ### Scope Exceptions
 
@@ -200,6 +204,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-08-26T14:10:43.607Z
-Stopped at: Completed 05-01-PLAN.md
+Last session: 2026-08-26T14:23:06.327Z
+Stopped at: Completed 05-02-PLAN.md
 Resume file: None
