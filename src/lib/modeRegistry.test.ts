@@ -82,4 +82,11 @@ describe("modeRegistry", () => {
     expect(getModeDescriptor("files")).toMatchObject({ id: "files", placements: ["primary"] });
     expect(typeof getModeDescriptor("files")?.load).toBe("function");
   });
+
+  it("registers Studio and Catalog as dedicated primary lazy surfaces", () => {
+    expect(getModeDescriptor("studio")).toMatchObject({ id: "studio", placements: ["primary"] });
+    expect(getModeDescriptor("catalog")).toMatchObject({ id: "catalog", placements: ["primary"] });
+    expect(typeof getModeDescriptor("studio")?.load).toBe("function");
+    expect(typeof getModeDescriptor("catalog")?.load).toBe("function");
+  });
 });
