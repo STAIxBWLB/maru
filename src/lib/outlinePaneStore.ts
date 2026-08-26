@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from "react";
 
 import { useActiveTabIds, useDocTabs } from "./editorTabsStore";
+import { getDocumentBrowserSlice, useDocumentBrowserSlice, type DocumentBrowserScope } from "./documentBrowserStore";
 import type { BuiltInDocumentView, DocumentFilter } from "./documentIndex";
 import type {
   DocumentViewDefinition,
@@ -20,6 +21,7 @@ import {
 export interface OutlinePaneScope {
   workspacePath: string;
   tabId?: string | null;
+  browserScope?: DocumentBrowserScope;
 }
 
 export interface OutlineDocumentSlice {
@@ -53,9 +55,15 @@ export interface OutlineSidebarSlice {
   viewCounts: Record<BuiltInDocumentView, number>;
   customViewCounts: Record<string, number>;
   recentEntries: VaultEntry[];
-  selectedPath: string | null;
-  documentFilter: DocumentFilter;
   canCreateDocument: boolean;
+}
+
+/** Browser data remains owned by documentBrowserStore; Outline composes this
+ * view instead of publishing a second synchronized sidebar record. */
+export interface OutlineBrowserSlice {
+  selectedPath: string | null;
+  query: string;
+  documentFilter: DocumentFilter;
 }
 
 export interface OutlineExplorerSlice {
@@ -100,8 +108,6 @@ const EMPTY_SIDEBAR_SLICE: OutlineSidebarSlice = {
   viewCounts: { inbox: 0, drafts: 0, archive: 0, recentlyUpdated: 0 },
   customViewCounts: {},
   recentEntries: [],
-  selectedPath: null,
-  documentFilter: { kind: "all" },
   canCreateDocument: false,
 };
 const EMPTY_EXPLORER_SLICE: OutlineExplorerSlice = {
@@ -134,6 +140,30 @@ const operationSubscribers: SliceSubscribers = new Map();
 const sidebarSubscribers: SliceSubscribers = new Map();
 const explorerSubscribers: SliceSubscribers = new Map();
 const documentSliceCache = new Map<string, { tab: object | null; slice: OutlineDocumentSlice }>();
+const browserSliceCache = new Map<
+  string,
+  { selection: object; queryFilter: object; slice: OutlineBrowserSlice }
+>();
+
+function browserScopeFor(scope: OutlinePaneScope): DocumentBrowserScope {
+  return scope.browserScope ?? { workspacePath: scope.workspacePath, visibility: "private" };
+}
+
+function browserSliceFor(scope: OutlinePaneScope): OutlineBrowserSlice {
+  const browserScope = browserScopeFor(scope);
+  const selection = getDocumentBrowserSlice(browserScope, "selection");
+  const queryFilter = getDocumentBrowserSlice(browserScope, "queryFilter");
+  const cacheKey = `${browserScope.visibility}:${browserScope.workspacePath}`;
+  const cached = browserSliceCache.get(cacheKey);
+  if (cached?.selection === selection && cached.queryFilter === queryFilter) return cached.slice;
+  const slice = {
+    selectedPath: selection.selectedPath,
+    query: queryFilter.query,
+    documentFilter: queryFilter.documentFilter,
+  };
+  browserSliceCache.set(cacheKey, { selection, queryFilter, slice });
+  return slice;
+}
 
 function stateFor(scope: OutlinePaneScope): OutlinePaneState {
   return statesByWorkspace[scope.workspacePath] ?? EMPTY_OUTLINE_PANE_STATE;
@@ -318,6 +348,10 @@ export function getOutlinePaneState(scope: OutlinePaneScope): OutlinePaneState {
   return stateFor(scope);
 }
 
+export function getOutlineBrowserSlice(scope: OutlinePaneScope): OutlineBrowserSlice {
+  return browserSliceFor(scope);
+}
+
 /**
  * Test/hydration support for the facade-local render domains. Production
  * document reads are composed from editorTabsStore by useOutlineDocumentSlice,
@@ -357,6 +391,9 @@ export function cleanupOutlinePaneWorkspace(workspacePath: string): void {
   delete next[workspacePath];
   statesByWorkspace = next;
   documentSliceCache.delete(workspacePath);
+  for (const cacheKey of browserSliceCache.keys()) {
+    if (cacheKey.endsWith(`:${workspacePath}`)) browserSliceCache.delete(cacheKey);
+  }
   notify(documentSubscribers, workspacePath);
   notify(fileQueueSubscribers, workspacePath);
   notify(operationSubscribers, workspacePath);
@@ -411,6 +448,22 @@ export function useOutlineSidebarSlice(scope: OutlinePaneScope): OutlineSidebarS
   );
 }
 
+export function useOutlineBrowserSlice(scope: OutlinePaneScope): OutlineBrowserSlice {
+  const browserScope = browserScopeFor(scope);
+  const selection = useDocumentBrowserSlice(browserScope, "selection");
+  const queryFilter = useDocumentBrowserSlice(browserScope, "queryFilter");
+  const cacheKey = `${browserScope.visibility}:${browserScope.workspacePath}`;
+  const cached = browserSliceCache.get(cacheKey);
+  if (cached?.selection === selection && cached.queryFilter === queryFilter) return cached.slice;
+  const slice = {
+    selectedPath: selection.selectedPath,
+    query: queryFilter.query,
+    documentFilter: queryFilter.documentFilter,
+  };
+  browserSliceCache.set(cacheKey, { selection, queryFilter, slice });
+  return slice;
+}
+
 export function useOutlineExplorerSlice(scope: OutlinePaneScope): OutlineExplorerSlice {
   return useSyncExternalStore(
     (subscriber) => subscribeOutlineExplorerSlice(scope, subscriber),
@@ -424,6 +477,7 @@ export function useOutlineExplorerSlice(scope: OutlinePaneScope): OutlineExplore
 export function resetOutlinePaneStoreForTest(): void {
   statesByWorkspace = {};
   documentSliceCache.clear();
+  browserSliceCache.clear();
   for (const subscribers of [
     documentSubscribers,
     fileQueueSubscribers,

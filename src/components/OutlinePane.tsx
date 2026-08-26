@@ -55,6 +55,7 @@ import {
   selectOutlineFileQueueItem,
   setOutlineFileQueueSelection,
   useOutlineDocumentSlice,
+  useOutlineBrowserSlice,
   useOutlineExplorerSlice,
   useOutlineFileQueueSlice,
   useOutlineOperationSlice,
@@ -163,6 +164,7 @@ export function OutlinePane({
   const { fileQueue, canApplyFileQueue, selectedFileQueueItemIds } = useOutlineFileQueueSlice(scope);
   const { applyingFileQueue } = useOutlineOperationSlice(scope);
   const sidebar = useOutlineSidebarSlice(scope);
+  const browser = useOutlineBrowserSlice(scope);
   const explorer = useOutlineExplorerSlice(scope);
   const {
     entries,
@@ -177,10 +179,9 @@ export function OutlinePane({
     viewCounts,
     customViewCounts,
     recentEntries,
-    selectedPath,
-    documentFilter,
     canCreateDocument,
   } = sidebar;
+  const { selectedPath, documentFilter } = browser;
   const {
     workspaceFileEntries,
     explorerWorkspacePath,

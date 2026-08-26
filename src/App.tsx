@@ -1480,12 +1480,17 @@ export function MainApp() {
   );
   const selectedPath = pendingSelectedPath ?? selectedEntry?.path ?? null;
   const activeDocumentWorkspacePath = activeTab?.workspacePath ?? explorerWorkspacePath;
+  const documentBrowserScope = useMemo<DocumentBrowserScope>(
+    () => ({ workspacePath: explorerWorkspacePath ?? "", visibility: explorerVisibility }),
+    [explorerVisibility, explorerWorkspacePath],
+  );
   const outlinePaneScope = useMemo<OutlinePaneScope>(
     () => ({
       workspacePath: activeDocumentWorkspacePath ?? "",
       tabId: resolvedActiveTabId,
+      browserScope: documentBrowserScope,
     }),
-    [activeDocumentWorkspacePath, resolvedActiveTabId],
+    [activeDocumentWorkspacePath, documentBrowserScope, resolvedActiveTabId],
   );
   const { fileQueue, selectedFileQueueItemIds } = useOutlineFileQueueSlice(outlinePaneScope);
   const queuedSourcePaths = useMemo(
@@ -7205,8 +7210,6 @@ export function MainApp() {
       viewCounts: builtInDocumentViewCounts,
       customViewCounts: customDocumentViewCounts,
       recentEntries,
-      selectedPath,
-      documentFilter,
       canCreateDocument: activeWorkspaceCanCreate,
     }),
     [
@@ -7218,13 +7221,11 @@ export function MainApp() {
       builtInDocumentViewCounts,
       customDocumentViewCounts,
       document?.relPath,
-      documentFilter,
       documentIndex.contentCount,
       documentIndex.typeCounts,
       maruSettings.ui.documentViews,
       recentEntries,
       rightPaneTab,
-      selectedPath,
       visibleAppMode,
     ],
   );
@@ -8581,10 +8582,6 @@ export function MainApp() {
     [applyExplorerDragSourcesToDestination],
   );
 
-  const documentBrowserScope = useMemo<DocumentBrowserScope>(
-    () => ({ workspacePath: explorerWorkspacePath ?? "", visibility: explorerVisibility }),
-    [explorerVisibility, explorerWorkspacePath],
-  );
   const documentBrowserCommands = useMemo<DocumentListCommands>(
     () => ({
       setWorkspaceVisibility: handleExplorerWorkspaceVisibilityChange,
