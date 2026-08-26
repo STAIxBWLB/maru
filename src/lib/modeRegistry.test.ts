@@ -70,4 +70,11 @@ describe("modeRegistry", () => {
     expect(getModeDescriptor("comms")).toMatchObject({ id: "comms", placements: ["primary"] });
     expect(typeof getModeDescriptor("comms")?.load).toBe("function");
   });
+
+  it("registers Drafts and Gap as dedicated primary lazy surfaces", () => {
+    expect(getModeDescriptor("drafts")).toMatchObject({ id: "drafts", placements: ["primary"] });
+    expect(getModeDescriptor("gap")).toMatchObject({ id: "gap", placements: ["primary"] });
+    expect(typeof getModeDescriptor("drafts")?.load).toBe("function");
+    expect(typeof getModeDescriptor("gap")?.load).toBe("function");
+  });
 });
