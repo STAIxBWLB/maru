@@ -158,6 +158,27 @@ describe("Outline facade contract", () => {
     unsubscribeSidebar();
   });
 
+  it("composes browser selection and filters from the canonical document-browser owner", async () => {
+    const surface = await loadOutlineSurface();
+    const browser = await import("./documentBrowserStore");
+    const browserScope = { workspacePath: "/workspace-a", visibility: "private" as const };
+    browser.publishDocumentBrowser(browserScope, {
+      selectedPath: "/workspace-a/note.md",
+      query: "report",
+      documentFilter: { kind: "view", view: "inbox" },
+    });
+
+    const slice = surface.getOutlineBrowserSlice({ workspacePath: "/workspace-a", browserScope });
+
+    expect(slice).toEqual({
+      selectedPath: "/workspace-a/note.md",
+      query: "report",
+      documentFilter: { kind: "view", view: "inbox" },
+    });
+    expect(Object.keys(surface.getOutlinePaneState({ workspacePath: "/workspace-a" }).sidebar))
+      .not.toEqual(expect.arrayContaining(["selectedPath", "documentFilter"]));
+  });
+
   it("exposes shell effects only through the command port", async () => {
     const surface = await loadOutlineSurface();
     const closeOutline = vi.fn();
