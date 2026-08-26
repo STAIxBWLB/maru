@@ -5,15 +5,15 @@ milestone_name: milestone
 current_phase: 05
 current_phase_name: Shell Decomposition Completion
 status: executing
-stopped_at: Completed 05-07-PLAN.md
-last_updated: "2026-08-26T15:28:26.474Z"
+stopped_at: Completed 05-08-PLAN.md
+last_updated: "2026-08-26T15:45:20.916Z"
 last_activity: 2026-08-26
 last_activity_desc: Phase 04 execution started
 progress:
   total_phases: 5
   completed_phases: 4
   total_plans: 32
-  completed_plans: 28
+  completed_plans: 29
 ---
 
 # Project State
@@ -28,11 +28,11 @@ See: .planning/PROJECT.md (updated 2026-08-23)
 ## Current Position
 
 Phase: 05 (Shell Decomposition Completion) — EXECUTING
-Plan: 8 of 11
+Plan: 9 of 11
 Status: Ready to execute
 Last activity: 2026-08-26 — Phase 05 execution started
 
-Progress: [█████████░] 88% (3/5 phases)
+Progress: [█████████░] 91% (3/5 phases)
 
 ## Performance Metrics
 
@@ -87,6 +87,7 @@ Progress: [█████████░] 88% (3/5 phases)
 | Phase 05 P05 | 11min | 2 tasks | 9 files |
 | Phase 05 P06 | 9m | 2 tasks | 7 files |
 | Phase 05 P07 | 7min | 2 tasks | 7 files |
+| Phase 05 P08 | 13min | 2 tasks | 10 files |
 
 ## Accumulated Context
 
@@ -168,6 +169,9 @@ Recent decisions affecting current work:
 - [Phase ?]: Agents uses a dedicated lazy adapter with only ModeHostScope and ModeHostCommands.
 - [Phase ?]: Inbox and Comms render through registry-loaded adapters while retaining their existing typed action and approval ports.
 - [Phase ?]: Processed-item state is one controller domain shared by both adapters rather than synchronized copies.
+- [Phase ?]: Scratchpad keeps document, autosave, watcher, recovery, and editor state in ScratchpadPane; only shell refresh and settings projections move to knowledgeModeStore.
+- [Phase ?]: Drafts and Gap compose canonical workspace, agent-runtime, shell-settings, and visual-mode ownership instead of copying filesystem or approval state.
+- [Phase ?]: Gap handoffs use a request nonce so repeated explicit selections of the same draft remain distinguishable after consumption.
 
 ### Scope Exceptions
 
@@ -219,6 +223,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-08-26T15:28:26.466Z
-Stopped at: Completed 05-07-PLAN.md
+Last session: 2026-08-26T15:45:20.908Z
+Stopped at: Completed 05-08-PLAN.md
 Resume file: None
