@@ -172,7 +172,6 @@ import {
   stopAiMission,
   stopTelegramPolling,
   telegramPollingStatus,
-  vaultGraphRoot,
   removeAgentContextHint,
   terminalHooksInstall,
   terminalHooksStatus,
@@ -219,7 +218,6 @@ import {
 } from "./lib/debouncedSave";
 import { documentDisplayName } from "./lib/document";
 import { refStepsByParagraph, uniqueRefNodePaths } from "./lib/kgRefs";
-import type { KgRefStep } from "./lib/kgRefs";
 import type { DraftGraphFocusRequest } from "./lib/draftGraphRelations";
 import { isDiagramEnabled } from "./lib/diagramFlag";
 import { isE2EFlowEnabled } from "./lib/e2eFlow";
@@ -496,7 +494,6 @@ import {
   useFileQueryByVisibility,
   useQueryByVisibility,
   useSelectedFilePathsByWorkspace,
-  useVaultWatcherSync,
   useWorkspaceFileStates,
   useWorkspaceRegistry,
   useWorkspaceStates,
@@ -1409,8 +1406,6 @@ export function MainApp() {
   const rightWorkbenchMode = workbenchPlacement.rightMode;
   const rightWorkbenchOpen = workbenchPlacement.rightOpen && rightWorkbenchMode !== null;
   const surfaceMode = rightWorkbenchMode ?? visibleAppMode;
-  const panelGraphOpen =
-    layoutSettings.terminalOpen && layoutSettings.toolPanelSurface === "graph";
   const editorViewMode = editorPaneViewModes[focusedEditorGroup];
   const firstTabId = orderedAnyTabs[0]?.id ?? null;
   const leftResolvedTabId = leftActiveTabId ?? activeTabId ?? firstTabId;
@@ -7948,11 +7943,13 @@ export function MainApp() {
       documentBrowserScope,
       handleWikilinkClick,
       inboxWorkspacePath,
+      isFavorite,
       rightWorkbenchMode,
       scanOptions,
       selectEntry,
       setPersistedAppMode,
       settingsWorkPath,
+      toggleFavorite,
       visibleAppMode,
     ],
   );
