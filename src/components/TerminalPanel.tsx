@@ -56,11 +56,20 @@ import { isAgentKind } from "../lib/agentCapabilities";
 import { clipboardReadText, clipboardWriteText } from "../lib/clipboard";
 import { useTranslation } from "../lib/i18n";
 import { recordShellSurfaceRender } from "../lib/shellSurfaceRenderProbe";
-import { dispatchTerminalPanelTabs, useTerminalTabsSlice } from "../lib/terminalPanelStore";
+import {
+  dispatchTerminalPanelTabs,
+  setTerminalPanelError,
+  useTerminalActiveContextSlice,
+  useTerminalErrorSlice,
+  useTerminalLayoutSlice,
+  useTerminalRequestSlice,
+  useTerminalTabsSlice,
+  type TerminalPanelScope,
+} from "../lib/terminalPanelStore";
 import { getTerminalRuntimeController } from "../lib/terminalRuntimeController";
+import type { TerminalPanelCommands } from "../lib/terminalSurfaceAdapter";
 import type {
   MaruSettings,
-  TerminalDock,
   TerminalTheme,
   ToolPanelSurface,
 } from "../lib/settings";
@@ -95,36 +104,14 @@ import {
   terminalHookEventToStatus,
   terminalTabStatus,
   terminalTaskStatus,
-  type ActiveTerminalContext,
   type AttachMentionStyle,
   type TerminalKind,
 } from "../lib/terminal";
 
 interface TerminalPanelProps {
-  cwd: string | null;
-  activeContext: ActiveTerminalContext;
-  settings: MaruSettings;
-  launchRequest?: TerminalLaunchRequest | null;
-  open: boolean;
-  height: number;
-  dock: TerminalDock;
-  width: number;
-  splitOpen: boolean;
-  splitRatio: number;
-  maximized: boolean;
-  activeSurface: ToolPanelSurface;
+  scope: TerminalPanelScope;
+  commands: TerminalPanelCommands;
   graphNode: React.ReactNode;
-  graphTheme: "dark" | "light" | "app";
-  onOpenChange: (open: boolean) => void;
-  onHeightChange: (height: number) => void;
-  onDockChange: (dock: TerminalDock) => void;
-  onWidthChange: (width: number) => void;
-  onSplitOpenChange: (open: boolean) => void;
-  onSplitRatioChange: (ratio: number) => void;
-  onMaximizedChange: (maximized: boolean) => void;
-  onSurfaceChange: (surface: ToolPanelSurface) => void;
-  onTerminalThemeChange: (theme: TerminalTheme) => void;
-  onGraphThemeChange: (theme: "dark" | "light" | "app") => void;
 }
 
 export interface TerminalLaunchRequest {
@@ -267,10 +254,23 @@ function isTextEditingTarget(target: EventTarget | null): boolean {
 export const TerminalPanel = memo(
   forwardRef<TerminalPanelHandle, TerminalPanelProps>(function TerminalPanel(
     {
-      cwd,
-      activeContext,
-      settings,
-      launchRequest,
+      scope,
+      commands,
+      graphNode,
+    },
+    ref,
+  ) {
+    recordShellSurfaceRender("TerminalPanel");
+    const { t } = useTranslation();
+    const state = useTerminalTabsSlice();
+    const layout = useTerminalLayoutSlice();
+    const activeContext = useTerminalActiveContextSlice();
+    const launchRequest = useTerminalRequestSlice();
+    const error = useTerminalErrorSlice();
+    const dispatch = useCallback(dispatchTerminalPanelTabs, []);
+    const settings = commands.getSettings();
+    const { cwd } = scope;
+    const {
       open,
       height,
       dock,
@@ -279,8 +279,10 @@ export const TerminalPanel = memo(
       splitRatio,
       maximized,
       activeSurface,
-      graphNode,
+      terminalTheme: _terminalTheme,
       graphTheme,
+    } = layout;
+    const {
       onOpenChange,
       onHeightChange,
       onDockChange,
@@ -291,13 +293,8 @@ export const TerminalPanel = memo(
       onSurfaceChange,
       onTerminalThemeChange,
       onGraphThemeChange,
-    },
-    ref,
-  ) {
-    recordShellSurfaceRender("TerminalPanel");
-    const { t } = useTranslation();
-    const state = useTerminalTabsSlice();
-    const dispatch = useCallback(dispatchTerminalPanelTabs, []);
+    } = commands;
+    void _terminalTheme;
     // Process-scoped owner for native resources. The existing per-instance refs
     // below continue to provide component-local render interaction until their
     // lifecycle registrations have completed; no controller object is exposed
@@ -311,7 +308,7 @@ export const TerminalPanel = memo(
     const [focusedGroup, setFocusedGroup] = useState<"left" | "right">("left");
     const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
     const [renamingTaskId, setRenamingTaskId] = useState<string | null>(null);
-    const [error, setError] = useState<string | null>(null);
+    const setError = useCallback(setTerminalPanelError, []);
     const handlesRef = useRef(runtimeController.registry<NativeTerminalViewHandle>("native-view-handles"));
     const terminalPanelRootRef = useRef<HTMLElement | null>(null);
     const terminalBodyRef = useRef<HTMLDivElement | null>(null);
@@ -577,7 +574,7 @@ export const TerminalPanel = memo(
           });
         }
       },
-      [applyStreamFrame, dispatch],
+      [applyStreamFrame, dispatch, setError],
     );
 
     useEffect(() => {
@@ -820,6 +817,7 @@ export const TerminalPanel = memo(
         onOpenChange,
         open,
         settings.terminal.launchers,
+        setError,
         state.activeTaskId,
         state.tasks,
         t,
@@ -929,7 +927,7 @@ export const TerminalPanel = memo(
         }
         dispatch({ type: "close", tabId });
       },
-      [activeTaskTabs, dispatch, onSplitOpenChange, rightTabId, splitOpen],
+      [activeTaskTabs, dispatch, onSplitOpenChange, rightTabId, setError, splitOpen],
     );
 
     const closeTask = useCallback((taskId: string) => {
@@ -964,7 +962,7 @@ export const TerminalPanel = memo(
         setFocusedGroup("left");
       }
       dispatch({ type: "closeTask", taskId });
-    }, [dispatch, rightTab, state.tabs]);
+    }, [dispatch, rightTab, setError, state.tabs]);
 
     const createTask = useCallback(() => {
       // Delegate to launch with forceNewTask so task + session are created in a
@@ -1513,7 +1511,7 @@ export const TerminalPanel = memo(
           setError(t("terminal.clipboard.writeFailed"));
         }
       },
-      [t],
+      [setError, t],
     );
 
     const readClipboardText = useCallback(async (): Promise<string> => {
@@ -1523,7 +1521,7 @@ export const TerminalPanel = memo(
         setError(t("terminal.clipboard.readFailed"));
         return "";
       }
-    }, [t]);
+    }, [setError, t]);
 
     const copySelectedTerminalText = useCallback(
       (text: string) => {
@@ -1566,7 +1564,7 @@ export const TerminalPanel = memo(
           setError(err instanceof Error ? err.message : String(err));
         }
       },
-      [getFocusedSessionId, searchCaseSensitive, searchQuery],
+      [getFocusedSessionId, searchCaseSensitive, searchQuery, setError],
     );
 
     const handleTerminalKeyDownCapture = useCallback(
@@ -1694,6 +1692,7 @@ export const TerminalPanel = memo(
         rightTab,
         settings.terminal.autoLaunch,
         settings.terminal.shortcuts,
+        setError,
         splitOpen,
         writeClipboardText,
       ],

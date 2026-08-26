@@ -90,10 +90,15 @@ import { ScratchpadPane } from "./components/ScratchpadPane";
 import { InlineDocumentEditor } from "./components/InlineDocumentEditor";
 import type { TasksPaneProps } from "./components/tasks/TasksPane";
 import type {
-  TerminalLaunchRequest,
   TerminalPanelHandle,
 } from "./components/TerminalPanel";
 import { TerminalPanel } from "./components/TerminalPanel";
+import { createTerminalPanelCommands } from "./lib/terminalSurfaceAdapter";
+import {
+  setTerminalPanelActiveContext,
+  setTerminalPanelLayout,
+  setTerminalPanelRequest,
+} from "./lib/terminalPanelStore";
 import { recordShellSurfaceRender } from "./lib/shellSurfaceRenderProbe";
 import {
   buildMaruBackgroundContextEnv,
@@ -1191,8 +1196,6 @@ export function MainApp() {
   // toasts hook (step 9); the JSX below only reads the returned values.
   const { updateToast, installPendingUpdate, dismissUpdateToast, checkForUpdates } =
     useUpdaterToasts(t);
-  const [terminalLaunchRequest, setTerminalLaunchRequest] =
-    useState<TerminalLaunchRequest | null>(null);
   const [skills, setSkills] = useState<SkillRecord[]>([]);
   const [skillsLoading, setSkillsLoading] = useState(false);
   // Agent records back every AI feature's backend/permission/prompt choice.
@@ -1539,6 +1542,21 @@ export function MainApp() {
     selectedEntry?.title,
     scratchpadRoot,
   ]);
+  useEffect(() => {
+    setTerminalPanelActiveContext(activeTerminalContext);
+    setTerminalPanelLayout({
+      open: maruSettings.ui.layout.terminalOpen,
+      height: maruSettings.ui.layout.terminalHeight,
+      dock: maruSettings.ui.layout.terminalDock,
+      width: maruSettings.ui.layout.terminalWidth,
+      splitOpen: maruSettings.ui.layout.terminalSplitOpen,
+      splitRatio: maruSettings.ui.layout.terminalSplitRatio,
+      maximized: maruSettings.ui.layout.terminalMaximized,
+      activeSurface: maruSettings.ui.layout.toolPanelSurface,
+      terminalTheme: maruSettings.terminal.theme,
+      graphTheme: maruSettings.graph.display.theme,
+    });
+  }, [activeTerminalContext, maruSettings]);
   const terminalPanelRef = useRef<TerminalPanelHandle | null>(null);
   const shouldScanExplorerWorkspaceFiles = shouldLazyScanWorkspaceFiles({
     paneMode: workspaceFileScanPaneMode({
@@ -2084,7 +2102,7 @@ export function MainApp() {
   const requestTerminalLaunch = useCallback(
     (kind: TerminalKind) => {
       markStartup("terminal:launch-request", { kind });
-      setTerminalLaunchRequest({
+      setTerminalPanelRequest({
         kind,
         nonce: Date.now(),
       });
@@ -2101,7 +2119,7 @@ export function MainApp() {
         listen(SETTINGS_TERMINAL_LAUNCH_EVENT, (event) => {
           const payload = event.payload as SettingsTerminalLaunchPayload | null;
           if (!payload) return;
-          setTerminalLaunchRequest({
+          setTerminalPanelRequest({
             kind: "shell",
             nonce: Date.now(),
             title: "Provider Auth",
@@ -4622,7 +4640,7 @@ export function MainApp() {
   }, [setPersistedAppMode]);
 
   const launchSkillTerminal = useCallback((spec: TerminalDispatchSpec) => {
-    setTerminalLaunchRequest({
+    setTerminalPanelRequest({
       kind: spec.kind,
       nonce: Date.now(),
       title: spec.title,
@@ -5530,7 +5548,7 @@ export function MainApp() {
 
   const startTelegramLogin = useCallback(() => {
     const command = telegramLoginCommand(effectiveCommsSettings.telegram);
-    setTerminalLaunchRequest({
+    setTerminalPanelRequest({
       kind: "shell",
       nonce: Date.now(),
       title: "Telegram Login",
@@ -5543,7 +5561,7 @@ export function MainApp() {
 
   const startGwsAuth = useCallback(() => {
     const command = gwsAuthCommand(inboxRuntimeConfig.gmail?.gws_path ?? null);
-    setTerminalLaunchRequest({
+    setTerminalPanelRequest({
       kind: "shell",
       nonce: Date.now(),
       title: "Gmail Auth",
@@ -5560,7 +5578,7 @@ export function MainApp() {
       effectiveCommsSettings.outlook.m365Path,
       workspaceM365AuthConfig,
     );
-    setTerminalLaunchRequest({
+    setTerminalPanelRequest({
       kind: "shell",
       nonce: Date.now(),
       title: "Outlook Auth",
@@ -8669,6 +8687,40 @@ export function MainApp() {
     selectedPath,
   ]);
 
+  const terminalPanelScope = useMemo(
+    () => ({ cwd: activeDocumentWorkspacePath }),
+    [activeDocumentWorkspacePath],
+  );
+  const terminalPanelCommands = useMemo(
+    () =>
+      createTerminalPanelCommands({
+        getSettings: () => maruSettings,
+        onOpenChange: handleTerminalOpenChange,
+        onHeightChange: handleTerminalHeightChange,
+        onDockChange: dockTerminal,
+        onWidthChange: handleTerminalWidthChange,
+        onSplitOpenChange: handleTerminalSplitOpenChange,
+        onSplitRatioChange: handleTerminalSplitRatioChange,
+        onMaximizedChange: handleTerminalMaximizedChange,
+        onSurfaceChange: handleToolPanelSurfaceChange,
+        onTerminalThemeChange: handleTerminalThemeChange,
+        onGraphThemeChange: handlePanelGraphThemeChange,
+      }),
+    [
+      dockTerminal,
+      handlePanelGraphThemeChange,
+      handleTerminalHeightChange,
+      handleTerminalMaximizedChange,
+      handleTerminalOpenChange,
+      handleTerminalSplitOpenChange,
+      handleTerminalSplitRatioChange,
+      handleTerminalThemeChange,
+      handleTerminalWidthChange,
+      handleToolPanelSurfaceChange,
+      maruSettings,
+    ],
+  );
+
   // Gate first paint on the active locale dictionary: the dicts are lazy
   // chunks now, and rendering before load would flash raw i18n keys.
   if (!localeValue.ready) return null;
@@ -9399,30 +9451,9 @@ export function MainApp() {
 
         <TerminalPanel
           ref={terminalPanelRef}
-          cwd={activeDocumentWorkspacePath}
-          activeContext={activeTerminalContext}
-          settings={maruSettings}
-          launchRequest={terminalLaunchRequest}
-          open={maruSettings.ui.layout.terminalOpen}
-          height={maruSettings.ui.layout.terminalHeight}
-          dock={maruSettings.ui.layout.terminalDock}
-          width={maruSettings.ui.layout.terminalWidth}
-          splitOpen={maruSettings.ui.layout.terminalSplitOpen}
-          splitRatio={maruSettings.ui.layout.terminalSplitRatio}
-          maximized={maruSettings.ui.layout.terminalMaximized}
-          activeSurface={maruSettings.ui.layout.toolPanelSurface}
+          scope={terminalPanelScope}
+          commands={terminalPanelCommands}
           graphNode={panelGraphNode}
-          graphTheme={maruSettings.graph.display.theme}
-          onOpenChange={handleTerminalOpenChange}
-          onHeightChange={handleTerminalHeightChange}
-          onDockChange={dockTerminal}
-          onWidthChange={handleTerminalWidthChange}
-          onSplitOpenChange={handleTerminalSplitOpenChange}
-          onSplitRatioChange={handleTerminalSplitRatioChange}
-          onMaximizedChange={handleTerminalMaximizedChange}
-          onSurfaceChange={handleToolPanelSurfaceChange}
-          onTerminalThemeChange={handleTerminalThemeChange}
-          onGraphThemeChange={handlePanelGraphThemeChange}
         />
 
         <div className="toast-stack">

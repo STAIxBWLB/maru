@@ -30,6 +30,12 @@ import { en } from "../lib/i18n/locales/en";
 import { ko } from "../lib/i18n/locales/ko";
 import { getEditorPaneState } from "../lib/editorPaneStore";
 import { setShellSurfaceRenderObserverForTest } from "../lib/shellSurfaceRenderProbe";
+import {
+  dispatchTerminalPanelTabs,
+  resetTerminalPanelStore,
+  setTerminalPanelActiveContext,
+} from "../lib/terminalPanelStore";
+import { createTerminalTab, createTerminalTask } from "../lib/terminal";
 
 
 async function loadEditorSurface() {
@@ -75,6 +81,7 @@ describe("Editor surface render isolation", () => {
       rightActiveTabId: null,
       focusedEditorGroup: "left",
     });
+    resetTerminalPanelStore();
     container.remove();
   });
 
@@ -206,5 +213,49 @@ describe("Editor surface render isolation", () => {
       "graphNode",
     ]);
     expect(source).toContain("forwardRef<TerminalPanelHandle, TerminalPanelProps>");
+  });
+
+  it("isolates terminal publishes from MainApp and unrelated shell surfaces", async () => {
+    const renders = new Map<string, number>();
+    restoreRenderObserver = setShellSurfaceRenderObserverForTest((target) => {
+      renders.set(target, (renders.get(target) ?? 0) + 1);
+    });
+    root = createRoot(container);
+    await act(async () => {
+      root?.render(<MainApp />);
+    });
+    await act(async () => {});
+    const before = new Map(["MainApp", "DocumentList", "ActivityRail", "TerminalPanel"].map(
+      (target) => [target, renders.get(target) ?? 0],
+    ));
+
+    await act(async () => {
+      dispatchTerminalPanelTabs({
+        type: "createTask",
+        task: createTerminalTask("terminal-task", "Terminal", "/workspace"),
+      });
+      dispatchTerminalPanelTabs({
+        type: "create",
+        tab: createTerminalTab("terminal-tab", "shell", "Shell", {
+          taskId: "terminal-task",
+          cwd: "/workspace",
+        }),
+      });
+      setTerminalPanelActiveContext({
+        workspaceRoot: "/workspace",
+        scratchpadRoot: null,
+        workspaceVisibility: "private",
+        appMode: "pkm",
+        docAbsPath: null,
+        docRelPath: null,
+        docTitle: null,
+        docType: null,
+      });
+    });
+
+    expect(renders.get("MainApp") ?? 0).toBe(before.get("MainApp"));
+    expect(renders.get("DocumentList") ?? 0).toBe(before.get("DocumentList"));
+    expect(renders.get("ActivityRail") ?? 0).toBe(before.get("ActivityRail"));
+    expect(renders.get("TerminalPanel") ?? 0).toBeGreaterThan(before.get("TerminalPanel") ?? 0);
   });
 });
