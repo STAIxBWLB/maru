@@ -18,7 +18,7 @@ describe("documentOpsModeStore", () => {
       preview: { path: "second.md", content: "current" },
     });
     expect(Object.isFrozen(controller.getFilesSlice())).toBe(true);
-    expect(notify).toHaveBeenCalledTimes(2);
+    expect(notify).toHaveBeenCalledTimes(3);
   });
 
   it("publishes Files, Studio, and Catalog domains independently", () => {

@@ -1,13 +1,14 @@
 import { lazy, Suspense, type ComponentType, type ReactNode } from "react";
 
 import type { DocumentBrowserScope } from "./documentBrowserStore";
+import type { DocumentOpsModeHost } from "./documentOpsModeStore";
 import { isDiagramEnabled } from "./diagramFlag";
 import { isE2EFlowEnabled } from "./e2eFlow";
 import type { FavoriteTarget } from "../components/FavoritesSection";
 import type { FavoriteKind, MaruSettings } from "./settings";
 
 export type ModePlacement = "primary" | "right" | "panel";
-export type RegisteredModeId = "pkm" | "e2e" | "diagram" | "graph" | "sites" | "agents" | "inbox" | "comms" | "scratchpad" | "drafts" | "gap";
+export type RegisteredModeId = "pkm" | "e2e" | "diagram" | "graph" | "sites" | "agents" | "inbox" | "comms" | "scratchpad" | "drafts" | "gap" | "files";
 
 /** Identifiers only: adapters subscribe to their own data instead of receiving shell snapshots. */
 export interface ModeHostScope {
@@ -33,6 +34,7 @@ export interface ModeHostCommands {
   translate?(key: string, vars?: Record<string, string | number>): string;
   openPrimaryMode?(mode: "agents" | "gap"): void;
   openGraphPanel?(): void;
+  documentOps?: DocumentOpsModeHost;
 }
 
 export interface ModeAdapterProps {
@@ -126,6 +128,13 @@ const modeRegistry: Record<RegisteredModeId, ModeDescriptor> = {
     isAvailable: () => true,
     fallback: "mode-loading",
   },
+  files: {
+    id: "files",
+    load: () => import("./modeAdapters/FilesModeAdapter").then((module) => ({ default: module.FilesModeAdapter })),
+    placements: ["primary"],
+    isAvailable: () => true,
+    fallback: "mode-loading",
+  },
 };
 
 const lazyAdapters: Record<RegisteredModeId, ReturnType<typeof lazy<ComponentType<ModeAdapterProps>>>> = {
@@ -140,6 +149,7 @@ const lazyAdapters: Record<RegisteredModeId, ReturnType<typeof lazy<ComponentTyp
   scratchpad: lazy(modeRegistry.scratchpad.load),
   drafts: lazy(modeRegistry.drafts.load),
   gap: lazy(modeRegistry.gap.load),
+  files: lazy(modeRegistry.files.load),
 };
 
 export function getModeDescriptor(mode: string): ModeDescriptor | null {

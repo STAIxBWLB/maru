@@ -542,11 +542,6 @@ const LazyTodayPane = lazy(() => import("./components/today/TodayPane").then((mo
 const LazyTasksPane = lazy(() => import("./components/tasks/TasksPane").then((module) => ({ default: module.TasksPane })));
 const LazyDashboardPane = lazy(() => import("./components/dashboard/DashboardPane").then((module) => ({ default: module.DashboardPane })));
 const LazyCatalogPane = lazy(() => import("./components/catalog/CatalogPane").then((module) => ({ default: module.CatalogPane })));
-const LazyFilesWorkbench = lazy(() =>
-  import("./components/FilesWorkbench").then((module) => ({
-    default: module.FilesWorkbench,
-  })),
-);
 const LazySettingsSurface = lazy(() => import("./components/settings/SettingsSurface"));
 
 type PendingExplorerReveal = {
@@ -8765,123 +8760,71 @@ export function MainApp() {
             }}
           />
         ) : surfaceMode === "files" ? (
-          <LazyFilesWorkbench
-            onIgnore={(relPath) => void ignoreEntry(relPath)}
-            entries={workspaceEntryNodes}
-            selectedPaths={selectedFilePaths}
-            query={fileQuery}
-            loading={
-              (booting ||
-                explorerWorkspaceFilesState.loading ||
-                shouldScanExplorerWorkspaceFiles) &&
-              workspaceEntryNodes.length === 0
-            }
-            refreshing={explorerWorkspaceFilesState.refreshing}
-            workspacePath={explorerWorkspacePath}
-            workspaceVisibility={explorerVisibility}
-            publicWorkspaceAvailable={publicWorkspaceAvailable}
-            activeWorkspaceLabel={explorerWorkspaceCaption}
-            filter={maruSettings.ui.workspaceFileFilter}
-            sortKey={maruSettings.ui.filesSortKey}
-            filesListAttributes={maruSettings.ui.filesListAttributes}
-            paneFilters={filesPaneFilters}
-            queuedSourcePaths={queuedSourcePaths}
-            expandedFolders={collapsedFileFolders}
-            treeOpen={layoutSettings.filesTreeOpen}
-            treeWidth={layoutSettings.filesTreeWidth}
-            previewOpen={layoutSettings.filesPreviewOpen}
-            previewWidth={layoutSettings.filesPreviewWidth}
-            favorites={maruSettings.ui.favorites}
-            canCreate={
-              explorerWorkspaceCaps.canCreate && explorerWorkspace?.writePolicy !== "managed"
-            }
-            canRenameMove={
-              explorerWorkspaceCaps.canRenameMove && explorerWorkspace?.writePolicy !== "managed"
-            }
-            canDelete={
-              explorerWorkspaceCaps.canDelete && explorerWorkspace?.writePolicy !== "managed"
-            }
-            openDocumentPaths={explorerOpenDocumentPaths}
-            dirtyDocumentPaths={explorerDirtyDocumentPaths}
-            documentEditorPath={filesPreviewTab?.entry.path ?? null}
-            documentEditorError={
-              filesSelectedDocumentNode
-                ? filesEditorErrors[filesSelectedDocumentNode.path] ?? null
-                : null
-            }
-            documentEditorNode={
-              filesPreviewTab && explorerWorkspacePath ? (
-                <InlineDocumentEditor
-                  key={filesPreviewTab.id}
-                  document={filesPreviewTab.document}
-                  content={filesPreviewTab.draftContent}
-                  mode={maruSettings.ui.filesEditorViewMode}
-                  htmlMode={filesHtmlState?.mode ?? "visual"}
-                  dirty={
-                    filesPreviewTab.draftContent !== filesPreviewTab.document.content
-                  }
-                  saving={savingTabId === filesPreviewTab.id}
-                  readOnly={!explorerWorkspaceCaps.canModify}
-                  readOnlyReason={workspaceWriteReason(explorerWorkspace, "modify")}
-                  error={filesEditorErrors[filesPreviewTab.entry.path] ?? null}
-                  vaultPath={explorerWorkspacePath}
-                  htmlRiskAckDigest={filesHtmlState?.riskAckDigest ?? null}
-                  onChange={(content) => updateTabDraft(filesPreviewTab.id, content)}
-                  onModeChange={setFilesEditorViewMode}
-                  onHtmlModeChange={handleFilesHtmlModeChange}
-                  onHtmlRiskAck={handleFilesHtmlRiskAck}
-                  onSave={saveFilesPreviewDocument}
-                  onReload={() => void reloadFilesPreviewDocument()}
-                  onOpenInDocuments={openFilesPreviewInDocuments}
-                  onReveal={() => revealTargetInFinder(filesPreviewTab.entry.path)}
-                />
-              ) : null
-            }
-            pendingRevealTargetPath={
-              pendingExplorerReveal?.pane === "files"
-                ? pendingExplorerReveal.targetPath
-                : null
-            }
-            onRevealHandled={() => setPendingExplorerReveal(null)}
-            onWorkspaceVisibilityChange={(visibility) => {
-              setExplorerVisibility(visibility);
-              const nextPath = workspaceRegistry.activeByVisibility[visibility];
-              if (nextPath && !workspaceStates[nextPath]?.entries.length) {
-                void loadWorkspace(nextPath, visibility);
-              }
+          <ModeSurfaceHost
+            mode="files"
+            placement="primary"
+            scope={{ workspacePath: explorerWorkspacePath, documentBrowserScope }}
+            commands={{
+              renderPrimarySurface: () => null,
+              documentOps: {
+                files: {
+                  props: {
+                    onIgnore: (relPath) => void ignoreEntry(relPath), entries: workspaceEntryNodes,
+                    selectedPaths: selectedFilePaths, query: fileQuery,
+                    loading: (booting || explorerWorkspaceFilesState.loading || shouldScanExplorerWorkspaceFiles) && workspaceEntryNodes.length === 0,
+                    refreshing: explorerWorkspaceFilesState.refreshing, workspacePath: explorerWorkspacePath,
+                    workspaceVisibility: explorerVisibility, publicWorkspaceAvailable, activeWorkspaceLabel: explorerWorkspaceCaption,
+                    filter: maruSettings.ui.workspaceFileFilter, sortKey: maruSettings.ui.filesSortKey,
+                    filesListAttributes: maruSettings.ui.filesListAttributes, paneFilters: filesPaneFilters,
+                    queuedSourcePaths, expandedFolders: collapsedFileFolders, treeOpen: layoutSettings.filesTreeOpen,
+                    treeWidth: layoutSettings.filesTreeWidth, previewOpen: layoutSettings.filesPreviewOpen,
+                    previewWidth: layoutSettings.filesPreviewWidth, favorites: maruSettings.ui.favorites,
+                    canCreate: explorerWorkspaceCaps.canCreate && explorerWorkspace?.writePolicy !== "managed",
+                    canRenameMove: explorerWorkspaceCaps.canRenameMove && explorerWorkspace?.writePolicy !== "managed",
+                    canDelete: explorerWorkspaceCaps.canDelete && explorerWorkspace?.writePolicy !== "managed",
+                    openDocumentPaths: explorerOpenDocumentPaths, dirtyDocumentPaths: explorerDirtyDocumentPaths,
+                    documentEditorPath: filesPreviewTab?.entry.path ?? null,
+                    documentEditorError: filesSelectedDocumentNode ? filesEditorErrors[filesSelectedDocumentNode.path] ?? null : null,
+                    pendingRevealTargetPath: pendingExplorerReveal?.pane === "files" ? pendingExplorerReveal.targetPath : null,
+                    onRevealHandled: () => setPendingExplorerReveal(null),
+                    onWorkspaceVisibilityChange: (visibility) => {
+                      setExplorerVisibility(visibility);
+                      const nextPath = workspaceRegistry.activeByVisibility[visibility];
+                      if (nextPath && !workspaceStates[nextPath]?.entries.length) void loadWorkspace(nextPath, visibility);
+                    },
+                    onAddPublicWorkspace: () => openAddWorkspaceDialog("public"), onQueryChange: setWorkspaceFileQuery,
+                    onFilterChange: setWorkspaceFileFilter, onSortKeyChange: setFilesSortKey,
+                    onFilesListAttributesChange: setFilesListAttributes, onPaneFiltersChange: setFilesPaneFilters,
+                    onExpandedFoldersChange: setCollapsedFileFolders, onSelectionChange: setWorkspaceFileSelection,
+                    onOpenDocument: (entry) => void openWorkspaceFileEntry(entry), onPrepareDocument: prepareFilesPreviewDocument,
+                    onQueuePaths: (paths) => void queueExternalFiles(paths), onRevealInFinder: revealTargetInFinder,
+                    onRefresh: () => { if (explorerWorkspacePath) void refreshWorkspaceFiles(explorerWorkspacePath); },
+                    onFilesystemMutated: handleFilesFilesystemMutated, onLayoutChange: updateLayoutSettings,
+                    onOpenFavorite: openFavorite, onRemoveFavorite: removeFavorite, onToggleFavorite: toggleFavorite,
+                    isFavoriteMissing, isFavorite,
+                    onOpenInBrowser: (targetPath) => {
+                      if (!explorerWorkspacePath) return;
+                      void binaryViewerOpenExternal(explorerWorkspacePath, targetPath).catch((err: unknown) => setError(err instanceof Error ? err.message : String(err)));
+                    },
+                    onApplySkillToTarget: applySkillToFileTarget, onAttachToTerminal: attachPathToTerminal,
+                  },
+                  editor: filesPreviewTab && explorerWorkspacePath ? {
+                    document: filesPreviewTab.document, content: filesPreviewTab.draftContent,
+                    mode: maruSettings.ui.filesEditorViewMode, htmlMode: filesHtmlState?.mode ?? "visual",
+                    dirty: filesPreviewTab.draftContent !== filesPreviewTab.document.content,
+                    saving: savingTabId === filesPreviewTab.id, readOnly: !explorerWorkspaceCaps.canModify,
+                    readOnlyReason: workspaceWriteReason(explorerWorkspace, "modify"),
+                    error: filesEditorErrors[filesPreviewTab.entry.path] ?? null, vaultPath: explorerWorkspacePath,
+                    htmlRiskAckDigest: filesHtmlState?.riskAckDigest ?? null,
+                    onChange: (content) => updateTabDraft(filesPreviewTab.id, content), onModeChange: setFilesEditorViewMode,
+                    onHtmlModeChange: handleFilesHtmlModeChange, onHtmlRiskAck: handleFilesHtmlRiskAck,
+                    onSave: saveFilesPreviewDocument, onReload: () => void reloadFilesPreviewDocument(),
+                    onOpenInDocuments: openFilesPreviewInDocuments, onReveal: () => revealTargetInFinder(filesPreviewTab.entry.path),
+                  } : null,
+                },
+              },
             }}
-            onAddPublicWorkspace={() => openAddWorkspaceDialog("public")}
-            onQueryChange={setWorkspaceFileQuery}
-            onFilterChange={setWorkspaceFileFilter}
-            onSortKeyChange={setFilesSortKey}
-            onFilesListAttributesChange={setFilesListAttributes}
-            onPaneFiltersChange={setFilesPaneFilters}
-            onExpandedFoldersChange={setCollapsedFileFolders}
-            onSelectionChange={setWorkspaceFileSelection}
-            onOpenDocument={(entry) => void openWorkspaceFileEntry(entry)}
-            onPrepareDocument={prepareFilesPreviewDocument}
-            onQueuePaths={(paths) => void queueExternalFiles(paths)}
-            onRevealInFinder={revealTargetInFinder}
-            onRefresh={() => {
-              if (explorerWorkspacePath) void refreshWorkspaceFiles(explorerWorkspacePath);
-            }}
-            onFilesystemMutated={handleFilesFilesystemMutated}
-            onLayoutChange={updateLayoutSettings}
-            onOpenFavorite={openFavorite}
-            onRemoveFavorite={removeFavorite}
-            onToggleFavorite={toggleFavorite}
-            isFavoriteMissing={isFavoriteMissing}
-            isFavorite={isFavorite}
-            onOpenInBrowser={(targetPath) => {
-              if (!explorerWorkspacePath) return;
-              void binaryViewerOpenExternal(explorerWorkspacePath, targetPath).catch(
-                (err: unknown) =>
-                  setError(err instanceof Error ? err.message : String(err)),
-              );
-            }}
-            onApplySkillToTarget={applySkillToFileTarget}
-            onAttachToTerminal={attachPathToTerminal}
-              />
+          />
         ) : surfaceMode === "studio" ? (
           <LazyStudioMode
             workspaceRoot={activeDocumentWorkspacePath ?? inboxWorkspacePath ?? settingsWorkPath}
@@ -8908,7 +8851,7 @@ export function MainApp() {
               const root = activeDocumentWorkspacePath ?? inboxWorkspacePath ?? settingsWorkPath;
               if (root) void revealInFileManager(root, path);
             }}
-              />
+          />
         ) : surfaceMode === "catalog" ? (
           <LazyCatalogPane
             workspaceRoot={inboxWorkspacePath ?? settingsWorkPath}
