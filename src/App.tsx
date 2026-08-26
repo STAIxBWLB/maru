@@ -2763,9 +2763,9 @@ export function MainApp() {
         ? (["done", "failed", "duplicate"] as InboxProcessedStatus[])
         : [processedStatusFilter];
     const channel =
-      surfaceMode === "comms"
+      Object.is(surfaceMode, "comms")
         ? commsSourceFilter
-        : surfaceMode === "inbox"
+        : Object.is(surfaceMode, "inbox")
           ? inboxSourceFilter
           : null;
     const requestKey = JSON.stringify([
@@ -2793,7 +2793,7 @@ export function MainApp() {
         limit: 120,
       };
       const snapshot =
-        surfaceMode === "comms"
+        Object.is(surfaceMode, "comms")
           ? await scanInboxProcessedSnapshot(request)
           : {
               items: await scanInboxProcessedItems(request),
@@ -3565,7 +3565,7 @@ export function MainApp() {
   // dedicated hooks now, with the same gating and handler bodies.
   useInboxEvents({
     inboxWorkspacePath,
-    surfaceModeInbox: surfaceMode === "inbox",
+    surfaceModeInbox: Object.is(surfaceMode, "inbox"),
     refreshInbox,
     refreshProcessedItems,
     setInboxRuntimeConfig,
@@ -3575,7 +3575,7 @@ export function MainApp() {
   });
   useTelegramEvents({
     enabled:
-      surfaceMode === "comms" &&
+      Object.is(surfaceMode, "comms") &&
       inboxWorkspaceConfigLoad.status !== "idle" &&
       inboxWorkspaceConfigLoad.status !== "pending",
     configStatus: inboxWorkspaceConfigLoad.status,
@@ -3585,11 +3585,11 @@ export function MainApp() {
   useEffect(() => {
     // In comms this is also the filter/search refetch path: the callback
     // identity changes with the query and channel, re-running this effect.
-    if (surfaceMode === "inbox" || surfaceMode === "comms") void refreshProcessedItems();
+    if (Object.is(surfaceMode, "inbox") || Object.is(surfaceMode, "comms")) void refreshProcessedItems();
     if (!booting && settingsWorkspaceStartupReady && (
-      surfaceMode === "inbox" ||
-      surfaceMode === "meetings" ||
-      surfaceMode === "tasks" ||
+      Object.is(surfaceMode, "inbox") ||
+      Object.is(surfaceMode, "meetings") ||
+      Object.is(surfaceMode, "tasks") ||
       rightPaneTab === "skills"
     )) {
       void refreshProcessingMissions();
@@ -5353,24 +5353,24 @@ export function MainApp() {
   }, [locale, setLocale]);
 
   const refreshActiveSurface = useCallback(() => {
-    if (surfaceMode === "inbox") {
+    if (Object.is(surfaceMode, "inbox")) {
       void refreshInbox();
       void refreshProcessedItems();
       void refreshProcessingMissions();
-    } else if (surfaceMode === "comms") {
+    } else if (Object.is(surfaceMode, "comms")) {
       void refreshCommsDashboard({ retryWorkspaceConfig: true });
       void refreshProcessedItems();
-    } else if (surfaceMode === "meetings") {
+    } else if (Object.is(surfaceMode, "meetings")) {
       void refreshProcessingMissions();
-    } else if (surfaceMode === "today") {
+    } else if (Object.is(surfaceMode, "today")) {
       planningModeController.requestTodayRefresh();
-    } else if (surfaceMode === "scratchpad") {
+    } else if (Object.is(surfaceMode, "scratchpad")) {
       knowledgeModeController.requestScratchpadRefresh();
-    } else if (surfaceMode === "tasks") {
+    } else if (Object.is(surfaceMode, "tasks")) {
       // TasksPane owns its task-data refresh (in-pane Refresh button); the
       // shared surface refresh still re-pulls the AI runs feeding its panel.
       void refreshProcessingMissions();
-    } else if (surfaceMode === "files" && explorerWorkspacePath) {
+    } else if (Object.is(surfaceMode, "files") && explorerWorkspacePath) {
       void refreshWorkspaceFiles(explorerWorkspacePath);
     } else {
       void refreshCurrent();
@@ -7416,7 +7416,7 @@ export function MainApp() {
   }, [outlineOpen, visibleAppMode, updateLayoutSettings]);
   useEffect(() => {
     // Inbox selection only feeds the Shared Outbox queue while in Inbox mode.
-    if (surfaceMode !== "inbox" && inboxShareablePaths.length > 0) {
+    if (!Object.is(surfaceMode, "inbox") && inboxShareablePaths.length > 0) {
       setInboxShareablePaths([]);
     }
   }, [surfaceMode, inboxShareablePaths.length]);
@@ -8455,6 +8455,83 @@ export function MainApp() {
     ],
   );
 
+  // The Files/Studio/Catalog adapters read this controller directly. MainApp
+  // supplies only canonical owners and command ports; the registry selects the
+  // surface without rebuilding a mode-specific prop graph in the render tree.
+  documentOpsModeController.bind({
+    files: {
+      props: {
+        onIgnore: (relPath) => void ignoreEntry(relPath), entries: workspaceEntryNodes,
+        selectedPaths: selectedFilePaths, query: fileQuery,
+        loading: (booting || explorerWorkspaceFilesState.loading || shouldScanExplorerWorkspaceFiles) && workspaceEntryNodes.length === 0,
+        refreshing: explorerWorkspaceFilesState.refreshing, workspacePath: explorerWorkspacePath,
+        workspaceVisibility: explorerVisibility, publicWorkspaceAvailable, activeWorkspaceLabel: explorerWorkspaceCaption,
+        filter: maruSettings.ui.workspaceFileFilter, sortKey: maruSettings.ui.filesSortKey,
+        filesListAttributes: maruSettings.ui.filesListAttributes, paneFilters: filesPaneFilters,
+        queuedSourcePaths, expandedFolders: collapsedFileFolders, treeOpen: layoutSettings.filesTreeOpen,
+        treeWidth: layoutSettings.filesTreeWidth, previewOpen: layoutSettings.filesPreviewOpen,
+        previewWidth: layoutSettings.filesPreviewWidth, favorites: maruSettings.ui.favorites,
+        canCreate: explorerWorkspaceCaps.canCreate && explorerWorkspace?.writePolicy !== "managed",
+        canRenameMove: explorerWorkspaceCaps.canRenameMove && explorerWorkspace?.writePolicy !== "managed",
+        canDelete: explorerWorkspaceCaps.canDelete && explorerWorkspace?.writePolicy !== "managed",
+        openDocumentPaths: explorerOpenDocumentPaths, dirtyDocumentPaths: explorerDirtyDocumentPaths,
+        documentEditorPath: filesPreviewTab?.entry.path ?? null,
+        documentEditorError: filesSelectedDocumentNode ? filesEditorErrors[filesSelectedDocumentNode.path] ?? null : null,
+        pendingRevealTargetPath: pendingExplorerReveal?.pane === "files" ? pendingExplorerReveal.targetPath : null,
+        onRevealHandled: () => setPendingExplorerReveal(null),
+        onWorkspaceVisibilityChange: handleExplorerWorkspaceVisibilityChange,
+        onAddPublicWorkspace: handleAddPublicWorkspace, onQueryChange: setWorkspaceFileQuery,
+        onFilterChange: setWorkspaceFileFilter, onSortKeyChange: setFilesSortKey,
+        onFilesListAttributesChange: setFilesListAttributes, onPaneFiltersChange: setFilesPaneFilters,
+        onExpandedFoldersChange: setCollapsedFileFolders, onSelectionChange: setWorkspaceFileSelection,
+        onOpenDocument: (entry) => void openWorkspaceFileEntry(entry), onPrepareDocument: prepareFilesPreviewDocument,
+        onQueuePaths: (paths) => void queueExternalFiles(paths), onRevealInFinder: revealTargetInFinder,
+        onRefresh: () => { if (explorerWorkspacePath) void refreshWorkspaceFiles(explorerWorkspacePath); },
+        onFilesystemMutated: handleFilesFilesystemMutated, onLayoutChange: updateLayoutSettings,
+        onOpenFavorite: openFavorite, onRemoveFavorite: removeFavorite, onToggleFavorite: toggleFavorite,
+        isFavoriteMissing, isFavorite,
+        onOpenInBrowser: (targetPath) => {
+          if (!explorerWorkspacePath) return;
+          void binaryViewerOpenExternal(explorerWorkspacePath, targetPath).catch((err: unknown) => setError(err instanceof Error ? err.message : String(err)));
+        },
+        onApplySkillToTarget: applySkillToFileTarget, onAttachToTerminal: attachPathToTerminal,
+      },
+      editor: filesPreviewTab && explorerWorkspacePath ? {
+        document: filesPreviewTab.document, content: filesPreviewTab.draftContent,
+        mode: maruSettings.ui.filesEditorViewMode, htmlMode: filesHtmlState?.mode ?? "visual",
+        dirty: filesPreviewTab.draftContent !== filesPreviewTab.document.content,
+        saving: savingTabId === filesPreviewTab.id, readOnly: !explorerWorkspaceCaps.canModify,
+        readOnlyReason: workspaceWriteReason(explorerWorkspace, "modify"),
+        error: filesEditorErrors[filesPreviewTab.entry.path] ?? null, vaultPath: explorerWorkspacePath,
+        htmlRiskAckDigest: filesHtmlState?.riskAckDigest ?? null,
+        onChange: (content) => updateTabDraft(filesPreviewTab.id, content), onModeChange: setFilesEditorViewMode,
+        onHtmlModeChange: handleFilesHtmlModeChange, onHtmlRiskAck: handleFilesHtmlRiskAck,
+        onSave: saveFilesPreviewDocument, onReload: () => void reloadFilesPreviewDocument(),
+        onOpenInDocuments: openFilesPreviewInDocuments, onReveal: () => revealTargetInFinder(filesPreviewTab.entry.path),
+      } : null,
+    },
+    studio: {
+      workspaceRoot: activeDocumentWorkspacePath ?? inboxWorkspacePath ?? settingsWorkPath,
+      activeDocument: document, canCreateDocument: activeWorkspaceCanCreate, canModifyDocument: activeWorkspaceCanModify,
+      onCreateDocument: createDocumentAndOpen, onApplyBody: applyStudioBody, onFreezePackage: freezeStudioPackage,
+      lintDismissalsByDoc: maruSettings.composer.lintDismissals,
+      onLintDismissalsChange: (docId, dismissedIds) => updateSettings((current) => ({
+        ...current, composer: { ...current.composer, lintDismissals: { ...current.composer.lintDismissals, [docId]: dismissedIds } },
+      })),
+      onRevealPath: (path) => {
+        const root = activeDocumentWorkspacePath ?? inboxWorkspacePath ?? settingsWorkPath;
+        if (root) void revealInFileManager(root, path);
+      },
+    },
+    catalog: {
+      workspaceRoot: inboxWorkspacePath ?? settingsWorkPath,
+      onReveal: (path) => {
+        const root = inboxWorkspacePath ?? settingsWorkPath;
+        if (root) void revealInFileManager(root, path);
+      },
+    },
+  });
+
   // Gate first paint on the active locale dictionary: the dicts are lazy
   // chunks now, and rendering before load would flash raw i18n keys.
   if (!localeValue.ready) return null;
@@ -8651,7 +8728,7 @@ export function MainApp() {
             </button>
           </header>
         ) : null}
-        {getModeDescriptor(surfaceMode) && surfaceMode !== "pkm" ? (
+        {getModeDescriptor(surfaceMode) && !Object.is(surfaceMode, "pkm") ? (
           <ModeSurfaceHost
             mode={surfaceMode}
             placement={rightWorkbenchMode === surfaceMode ? "right" : "primary"}
@@ -8686,131 +8763,6 @@ export function MainApp() {
               openPrimaryMode: (mode) => openPrimaryWorkbenchMode(mode),
               openGraphPanel,
             }}
-          />
-        ) : surfaceMode === "files" ? (
-          <ModeSurfaceHost
-            mode="files"
-            placement="primary"
-            scope={{ workspacePath: explorerWorkspacePath, documentBrowserScope }}
-            commands={{
-              renderPrimarySurface: () => null,
-              documentOps: {
-                files: {
-                  props: {
-                    onIgnore: (relPath) => void ignoreEntry(relPath), entries: workspaceEntryNodes,
-                    selectedPaths: selectedFilePaths, query: fileQuery,
-                    loading: (booting || explorerWorkspaceFilesState.loading || shouldScanExplorerWorkspaceFiles) && workspaceEntryNodes.length === 0,
-                    refreshing: explorerWorkspaceFilesState.refreshing, workspacePath: explorerWorkspacePath,
-                    workspaceVisibility: explorerVisibility, publicWorkspaceAvailable, activeWorkspaceLabel: explorerWorkspaceCaption,
-                    filter: maruSettings.ui.workspaceFileFilter, sortKey: maruSettings.ui.filesSortKey,
-                    filesListAttributes: maruSettings.ui.filesListAttributes, paneFilters: filesPaneFilters,
-                    queuedSourcePaths, expandedFolders: collapsedFileFolders, treeOpen: layoutSettings.filesTreeOpen,
-                    treeWidth: layoutSettings.filesTreeWidth, previewOpen: layoutSettings.filesPreviewOpen,
-                    previewWidth: layoutSettings.filesPreviewWidth, favorites: maruSettings.ui.favorites,
-                    canCreate: explorerWorkspaceCaps.canCreate && explorerWorkspace?.writePolicy !== "managed",
-                    canRenameMove: explorerWorkspaceCaps.canRenameMove && explorerWorkspace?.writePolicy !== "managed",
-                    canDelete: explorerWorkspaceCaps.canDelete && explorerWorkspace?.writePolicy !== "managed",
-                    openDocumentPaths: explorerOpenDocumentPaths, dirtyDocumentPaths: explorerDirtyDocumentPaths,
-                    documentEditorPath: filesPreviewTab?.entry.path ?? null,
-                    documentEditorError: filesSelectedDocumentNode ? filesEditorErrors[filesSelectedDocumentNode.path] ?? null : null,
-                    pendingRevealTargetPath: pendingExplorerReveal?.pane === "files" ? pendingExplorerReveal.targetPath : null,
-                    onRevealHandled: () => setPendingExplorerReveal(null),
-                    onWorkspaceVisibilityChange: (visibility) => {
-                      setExplorerVisibility(visibility);
-                      const nextPath = workspaceRegistry.activeByVisibility[visibility];
-                      if (nextPath && !workspaceStates[nextPath]?.entries.length) void loadWorkspace(nextPath, visibility);
-                    },
-                    onAddPublicWorkspace: () => openAddWorkspaceDialog("public"), onQueryChange: setWorkspaceFileQuery,
-                    onFilterChange: setWorkspaceFileFilter, onSortKeyChange: setFilesSortKey,
-                    onFilesListAttributesChange: setFilesListAttributes, onPaneFiltersChange: setFilesPaneFilters,
-                    onExpandedFoldersChange: setCollapsedFileFolders, onSelectionChange: setWorkspaceFileSelection,
-                    onOpenDocument: (entry) => void openWorkspaceFileEntry(entry), onPrepareDocument: prepareFilesPreviewDocument,
-                    onQueuePaths: (paths) => void queueExternalFiles(paths), onRevealInFinder: revealTargetInFinder,
-                    onRefresh: () => { if (explorerWorkspacePath) void refreshWorkspaceFiles(explorerWorkspacePath); },
-                    onFilesystemMutated: handleFilesFilesystemMutated, onLayoutChange: updateLayoutSettings,
-                    onOpenFavorite: openFavorite, onRemoveFavorite: removeFavorite, onToggleFavorite: toggleFavorite,
-                    isFavoriteMissing, isFavorite,
-                    onOpenInBrowser: (targetPath) => {
-                      if (!explorerWorkspacePath) return;
-                      void binaryViewerOpenExternal(explorerWorkspacePath, targetPath).catch((err: unknown) => setError(err instanceof Error ? err.message : String(err)));
-                    },
-                    onApplySkillToTarget: applySkillToFileTarget, onAttachToTerminal: attachPathToTerminal,
-                  },
-                  editor: filesPreviewTab && explorerWorkspacePath ? {
-                    document: filesPreviewTab.document, content: filesPreviewTab.draftContent,
-                    mode: maruSettings.ui.filesEditorViewMode, htmlMode: filesHtmlState?.mode ?? "visual",
-                    dirty: filesPreviewTab.draftContent !== filesPreviewTab.document.content,
-                    saving: savingTabId === filesPreviewTab.id, readOnly: !explorerWorkspaceCaps.canModify,
-                    readOnlyReason: workspaceWriteReason(explorerWorkspace, "modify"),
-                    error: filesEditorErrors[filesPreviewTab.entry.path] ?? null, vaultPath: explorerWorkspacePath,
-                    htmlRiskAckDigest: filesHtmlState?.riskAckDigest ?? null,
-                    onChange: (content) => updateTabDraft(filesPreviewTab.id, content), onModeChange: setFilesEditorViewMode,
-                    onHtmlModeChange: handleFilesHtmlModeChange, onHtmlRiskAck: handleFilesHtmlRiskAck,
-                    onSave: saveFilesPreviewDocument, onReload: () => void reloadFilesPreviewDocument(),
-                    onOpenInDocuments: openFilesPreviewInDocuments, onReveal: () => revealTargetInFinder(filesPreviewTab.entry.path),
-                  } : null,
-                },
-              },
-            }}
-          />
-        ) : surfaceMode === "studio" ? (
-          <ModeSurfaceHost
-            mode="studio"
-            placement="primary"
-            scope={{ workspacePath: activeDocumentWorkspacePath ?? inboxWorkspacePath ?? settingsWorkPath, documentBrowserScope }}
-            commands={{
-              renderPrimarySurface: () => null,
-              documentOps: { studio: {
-                workspaceRoot: activeDocumentWorkspacePath ?? inboxWorkspacePath ?? settingsWorkPath,
-                activeDocument: document, canCreateDocument: activeWorkspaceCanCreate, canModifyDocument: activeWorkspaceCanModify,
-                onCreateDocument: createDocumentAndOpen, onApplyBody: applyStudioBody, onFreezePackage: freezeStudioPackage,
-                lintDismissalsByDoc: maruSettings.composer.lintDismissals,
-                onLintDismissalsChange: (docId, dismissedIds) => updateSettings((current) => ({
-                  ...current, composer: { ...current.composer, lintDismissals: { ...current.composer.lintDismissals, [docId]: dismissedIds } },
-                })),
-                onRevealPath: (path) => {
-                  const root = activeDocumentWorkspacePath ?? inboxWorkspacePath ?? settingsWorkPath;
-                  if (root) void revealInFileManager(root, path);
-                },
-              } },
-            }}
-          />
-        ) : surfaceMode === "catalog" ? (
-          <ModeSurfaceHost
-            mode="catalog"
-            placement="primary"
-            scope={{ workspacePath: inboxWorkspacePath ?? settingsWorkPath, documentBrowserScope }}
-            commands={{
-              renderPrimarySurface: () => null,
-              documentOps: { catalog: {
-                workspaceRoot: inboxWorkspacePath ?? settingsWorkPath,
-                onReveal: (path) => {
-                  const root = inboxWorkspacePath ?? settingsWorkPath;
-                  if (root) void revealInFileManager(root, path);
-                },
-              } },
-            }}
-          />
-        ) : surfaceMode === "inbox" ? (
-          <ModeSurfaceHost
-            mode="inbox"
-            placement="primary"
-            scope={{ workspacePath: inboxWorkspacePath, documentBrowserScope }}
-            commands={{ renderPrimarySurface: () => null }}
-          />
-        ) : surfaceMode === "comms" ? (
-          <ModeSurfaceHost
-            mode="comms"
-            placement="primary"
-            scope={{ workspacePath: inboxWorkspacePath, documentBrowserScope }}
-            commands={{ renderPrimarySurface: () => null }}
-          />
-        ) : ["meetings", "today", "tasks", "dashboard"].includes(surfaceMode) ? (
-          <ModeSurfaceHost
-            mode={surfaceMode}
-            placement={rightWorkbenchMode === surfaceMode ? "right" : "primary"}
-            scope={{ workspacePath: inboxWorkspacePath, documentBrowserScope }}
-            commands={{ renderPrimarySurface: () => null }}
           />
         ) : (
           <ModeSurfaceHost
