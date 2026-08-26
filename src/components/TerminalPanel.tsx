@@ -24,7 +24,6 @@ import {
   useEffect,
   useImperativeHandle,
   useMemo,
-  useReducer,
   useRef,
   useState,
 } from "react";
@@ -57,6 +56,8 @@ import { isAgentKind } from "../lib/agentCapabilities";
 import { clipboardReadText, clipboardWriteText } from "../lib/clipboard";
 import { useTranslation } from "../lib/i18n";
 import { recordShellSurfaceRender } from "../lib/shellSurfaceRenderProbe";
+import { dispatchTerminalPanelTabs, useTerminalTabsSlice } from "../lib/terminalPanelStore";
+import { getTerminalRuntimeController } from "../lib/terminalRuntimeController";
 import type {
   MaruSettings,
   TerminalDock,
@@ -78,9 +79,7 @@ import {
   createTerminalTab,
   createTerminalTask,
   describeActiveContextChip,
-  EMPTY_TERMINAL_STATE,
   isRelaunchableTab,
-  loadPersistedTerminalState,
   mergeMaruTerminalEnv,
   pathMention,
   persistTerminalState,
@@ -95,7 +94,6 @@ import {
   terminalCommandPreview,
   terminalHookEventToStatus,
   terminalTabStatus,
-  terminalTabsReducer,
   terminalTaskStatus,
   type ActiveTerminalContext,
   type AttachMentionStyle,
@@ -298,11 +296,14 @@ export const TerminalPanel = memo(
   ) {
     recordShellSurfaceRender("TerminalPanel");
     const { t } = useTranslation();
-    const [state, dispatch] = useReducer(
-      terminalTabsReducer,
-      EMPTY_TERMINAL_STATE,
-      loadPersistedTerminalState,
-    );
+    const state = useTerminalTabsSlice();
+    const dispatch = useCallback(dispatchTerminalPanelTabs, []);
+    // Process-scoped owner for native resources. The existing per-instance refs
+    // below continue to provide component-local render interaction until their
+    // lifecycle registrations have completed; no controller object is exposed
+    // through the observable terminal state.
+    const runtimeController = getTerminalRuntimeController();
+    void runtimeController;
     const [draftHeight, setDraftHeight] = useState(height);
     const [draftWidth, setDraftWidth] = useState(width);
     const [draftSplitRatio, setDraftSplitRatio] = useState(splitRatio);
@@ -311,36 +312,29 @@ export const TerminalPanel = memo(
     const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
     const [renamingTaskId, setRenamingTaskId] = useState<string | null>(null);
     const [error, setError] = useState<string | null>(null);
-    const handlesRef = useRef<Map<string, NativeTerminalViewHandle>>(new Map());
+    const handlesRef = useRef(runtimeController.registry<NativeTerminalViewHandle>("native-view-handles"));
     const terminalPanelRootRef = useRef<HTMLElement | null>(null);
     const terminalBodyRef = useRef<HTMLDivElement | null>(null);
     const searchInputRef = useRef<HTMLInputElement | null>(null);
-    const sessionByTabRef = useRef<Map<string, string>>(new Map());
-    const tabBySessionRef = useRef<Map<string, string>>(new Map());
-    const handleBySessionRef = useRef<Map<string, TerminalSessionHandle>>(new Map());
-    const channelsBySessionRef = useRef<Map<string, TerminalSpawnHandle["channel"]>>(new Map());
-    const streamSeqBySessionRef = useRef<Map<string, { generation: string; lastSeq: number }>>(
-      new Map(),
-    );
-    const pendingFramesRef = useRef<Map<string, TerminalStreamMessage[]>>(new Map());
-    const visibilityBySessionRef = useRef<Map<string, boolean>>(new Map());
+    const sessionByTabRef = useRef(runtimeController.registry<string>("session-by-tab"));
+    const tabBySessionRef = useRef(runtimeController.registry<string>("tab-by-session"));
+    const handleBySessionRef = useRef(runtimeController.registry<TerminalSessionHandle>("session-handles"));
+    const channelsBySessionRef = useRef(runtimeController.registry<TerminalSpawnHandle["channel"]>("channels"));
+    const streamSeqBySessionRef = useRef(runtimeController.registry<{ generation: string; lastSeq: number }>("stream-cursors"));
+    const pendingFramesRef = useRef(runtimeController.registry<TerminalStreamMessage[]>("pending-frames"));
+    const visibilityBySessionRef = useRef(runtimeController.registry<boolean>("visibility"));
     // Bumped (paced) when a visibility send fails, re-running the visibility
     // effect: a ref delete alone never re-triggers it, and a hidden->visible
     // send that stays lost parks the backend frame emitter until refocus.
     const [visibilityRetryNonce, setVisibilityRetryNonce] = useState(0);
-    const inputPumpsRef = useRef<Map<string, TerminalInputPump>>(new Map());
-    const cancelledSessionsRef = useRef<Set<string>>(new Set());
-    const disposedRef = useRef(false);
-    const handleRefCallbacksRef = useRef<
-      Map<string, (handle: NativeTerminalViewHandle | null) => void>
-    >(new Map());
+    const inputPumpsRef = useRef(runtimeController.registry<TerminalInputPump>("input-pumps"));
+    const cancelledSessionsRef = useRef(runtimeController.registrySet("cancelled-sessions"));
+    const disposedRef = useRef(runtimeController.isDisposed);
+    const handleRefCallbacksRef = useRef(runtimeController.registry<(handle: NativeTerminalViewHandle | null) => void>("native-handle-callbacks"));
     // One stable handler object per session so NativeTerminalView's memo() can
     // bail out — inline closures here would re-render every grid on any state
     // change. Pruned when the session ends.
-    const sessionHandlersRef = useRef<
-      Map<
-        string,
-        {
+    const sessionHandlersRef = useRef(runtimeController.registry<{
           onInput: (command: TerminalInputCommand) => void;
           onResize: (cols: number, rows: number) => void;
           onScroll: (delta: number) => void;
@@ -353,12 +347,10 @@ export const TerminalPanel = memo(
           onContextFind: () => void;
           onContextClear: () => void;
           canForwardMouse: () => boolean;
-        }
-      >
-    >(new Map());
+        }>("session-handlers"));
     // Whether each session's program has requested a mouse mode; lets us stop
     // suppressing hover so TUIs (claude/codex) receive it.
-    const mouseModesBySessionRef = useRef<Map<string, boolean>>(new Map());
+    const mouseModesBySessionRef = useRef(runtimeController.registry<boolean>("mouse-modes"));
     const [searchOpen, setSearchOpen] = useState(false);
     const [searchQuery, setSearchQuery] = useState("");
     const [searchCaseSensitive, setSearchCaseSensitive] = useState(false);
@@ -508,7 +500,7 @@ export const TerminalPanel = memo(
           dispatch({ type: "markAttention", sessionId });
         }
       },
-      [],
+      [dispatch],
     );
 
     const handleTerminalStreamMessage = useCallback(
@@ -585,7 +577,7 @@ export const TerminalPanel = memo(
           });
         }
       },
-      [applyStreamFrame],
+      [applyStreamFrame, dispatch],
     );
 
     useEffect(() => {
@@ -615,7 +607,7 @@ export const TerminalPanel = memo(
         // otherwise we leak the registration.
         void statusPromise.then((off) => off()).catch(() => {});
       };
-    }, [canRunTerminal]);
+    }, [canRunTerminal, dispatch]);
 
     useEffect(() => {
       disposedRef.current = false;
@@ -901,6 +893,7 @@ export const TerminalPanel = memo(
       splitOpen,
       state.activeTabId,
       terminalVisible,
+      dispatch,
     ]);
 
     const closeTab = useCallback(
@@ -936,7 +929,7 @@ export const TerminalPanel = memo(
         }
         dispatch({ type: "close", tabId });
       },
-      [activeTaskTabs, onSplitOpenChange, rightTabId, splitOpen],
+      [activeTaskTabs, dispatch, onSplitOpenChange, rightTabId, splitOpen],
     );
 
     const closeTask = useCallback((taskId: string) => {
@@ -971,7 +964,7 @@ export const TerminalPanel = memo(
         setFocusedGroup("left");
       }
       dispatch({ type: "closeTask", taskId });
-    }, [rightTab, state.tabs]);
+    }, [dispatch, rightTab, state.tabs]);
 
     const createTask = useCallback(() => {
       // Delegate to launch with forceNewTask so task + session are created in a
@@ -994,7 +987,7 @@ export const TerminalPanel = memo(
           extraArgs: resumeArgs.length > 0 ? resumeArgs : undefined,
         });
       },
-      [launch, state.tabs],
+      [dispatch, launch, state.tabs],
     );
 
     const toggleOpen = useCallback(() => {
@@ -1208,12 +1201,13 @@ export const TerminalPanel = memo(
       state.activeTabId,
       state.tabs,
       visibilityRetryNonce,
+      dispatch,
     ]);
 
     // Clearing attention when a session gains focus.
     useEffect(() => {
       if (focusedTabId) dispatch({ type: "clearAttention", tabId: focusedTabId });
-    }, [focusedTabId]);
+    }, [dispatch, focusedTabId]);
 
     const focusedKind = useMemo(() => {
       const tab = state.tabs.find((item) => item.id === focusedTabId);
@@ -1693,6 +1687,7 @@ export const TerminalPanel = memo(
         getFocusedSessionId,
         getFocusedTerminalHandle,
         launch,
+        dispatch,
         onSplitOpenChange,
         openSearch,
         readClipboardText,
