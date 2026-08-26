@@ -268,6 +268,7 @@ import {
   type DocumentIndex,
 } from "./lib/documentIndex";
 import {
+  cleanupDocumentBrowserWorkspace,
   publishDocumentBrowser,
   requestDocumentReveal,
   type DocumentBrowserScope,
@@ -3760,6 +3761,7 @@ export function MainApp() {
       setWorkspaceRegistry(registry);
       removeWorkspaceState(path);
       removeWorkspaceDocTabs(path);
+      cleanupDocumentBrowserWorkspace(path);
       cleanupEditorSurfaceWorkspace(editorSurfacePersistence, path);
       const nextPath =
         registry.activeByVisibility[explorerVisibility] ??

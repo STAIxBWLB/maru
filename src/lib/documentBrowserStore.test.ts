@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import {
   acknowledgeDocumentReveal,
   getDocumentBrowserSlice,
+  cleanupDocumentBrowserWorkspace,
   publishDocumentBrowser,
   requestDocumentReveal,
   resetDocumentBrowserStoreForTests,
@@ -51,6 +52,21 @@ describe("documentBrowserStore", () => {
     expect(acknowledgeDocumentReveal(scope, first.nonce)).toBe(false);
     expect(getDocumentBrowserSlice(scope, "reveal").intent).toEqual(second);
     expect(acknowledgeDocumentReveal(scope, second.nonce)).toBe(true);
+    expect(getDocumentBrowserSlice(scope, "reveal").intent).toBeNull();
+  });
+
+  it("drops document state and pending reveal intents when a workspace is removed", () => {
+    publishDocumentBrowser(scope, {
+      query: "stale query",
+      selectedPath: "/tmp/workspace/one.md",
+      favorites: [{ kind: "note", relPath: "one.md" }],
+    });
+    requestDocumentReveal(scope, "/tmp/workspace/one.md");
+
+    cleanupDocumentBrowserWorkspace(scope.workspacePath);
+
+    expect(getDocumentBrowserSlice(scope, "queryFilter")).toMatchObject({ query: "", loading: false });
+    expect(getDocumentBrowserSlice(scope, "selection").selectedPath).toBeNull();
     expect(getDocumentBrowserSlice(scope, "reveal").intent).toBeNull();
   });
 });
