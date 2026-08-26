@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -67,5 +69,17 @@ describe("communicationsModeStore", () => {
 
     controller.publishProcessed({ query: "" });
     expect(controller.getCommsSlice()).not.toBe(comms);
+  });
+
+  it("keeps Comms behind a dedicated adapter instead of a MainApp render branch", () => {
+    const app = readFileSync(resolve(import.meta.dirname, "../App.tsx"), "utf8");
+    const adapter = readFileSync(
+      resolve(import.meta.dirname, "modeAdapters/CommsModeAdapter.tsx"),
+      "utf8",
+    );
+
+    expect(app).not.toContain("LazyCommsPane");
+    expect(adapter).toContain("useCommsModeSlice");
+    expect(adapter).toContain("CommsPane");
   });
 });
