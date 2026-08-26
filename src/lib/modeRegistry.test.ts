@@ -37,15 +37,18 @@ describe("modeRegistry", () => {
     expect(typeof descriptor?.load).toBe("function");
   });
 
-  it("registers Graph and Sites as separate lazy surfaces in both workbench placements", () => {
-    for (const mode of ["graph", "sites"]) {
-      const descriptor = getModeDescriptor(mode);
-      expect(descriptor).toMatchObject({
-        id: mode,
-        placements: ["primary", "right"],
-        fallback: "mode-loading",
-      });
-      expect(typeof descriptor?.load).toBe("function");
-    }
+  it("registers Graph and Sites as separate lazy surfaces in their required placements", () => {
+    expect(getModeDescriptor("graph")).toMatchObject({
+      id: "graph",
+      placements: ["primary", "right", "panel"],
+      fallback: "mode-loading",
+    });
+    expect(getModeDescriptor("sites")).toMatchObject({
+      id: "sites",
+      placements: ["primary", "right"],
+      fallback: "mode-loading",
+    });
+    expect(typeof getModeDescriptor("graph")?.load).toBe("function");
+    expect(typeof getModeDescriptor("sites")?.load).toBe("function");
   });
 });

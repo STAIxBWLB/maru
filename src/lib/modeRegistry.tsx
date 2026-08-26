@@ -3,9 +3,11 @@ import { lazy, Suspense, type ComponentType, type ReactNode } from "react";
 import type { DocumentBrowserScope } from "./documentBrowserStore";
 import { isDiagramEnabled } from "./diagramFlag";
 import { isE2EFlowEnabled } from "./e2eFlow";
+import type { FavoriteTarget } from "../components/FavoritesSection";
+import type { FavoriteKind } from "./settings";
 
-export type ModePlacement = "primary" | "right";
-export type RegisteredModeId = "pkm" | "e2e" | "diagram";
+export type ModePlacement = "primary" | "right" | "panel";
+export type RegisteredModeId = "pkm" | "e2e" | "diagram" | "graph" | "sites";
 
 /** Identifiers only: adapters subscribe to their own data instead of receiving shell snapshots. */
 export interface ModeHostScope {
@@ -18,6 +20,13 @@ export interface ModeHostCommands {
   renderPrimarySurface(): ReactNode;
   revealPath?(path: string): void;
   saveDocument?(path: string, content: string, expectedRevision: string | null): Promise<unknown>;
+  openGraphEntry?(entry: unknown): void;
+  createGraphNote?(target: string): void;
+  isGraphFavorite?(kind: FavoriteKind, relPath: string): boolean;
+  toggleGraphFavorite?(target: FavoriteTarget): void;
+  onGraphChanged?(): void;
+  sitesOverlayOpen?: boolean;
+  closeRightWorkbench?(): void;
 }
 
 export interface ModeAdapterProps {
@@ -55,12 +64,28 @@ const modeRegistry: Record<RegisteredModeId, ModeDescriptor> = {
     isAvailable: isDiagramEnabled,
     fallback: "mode-loading",
   },
+  graph: {
+    id: "graph",
+    load: () => import("./modeAdapters/GraphModeAdapter").then((module) => ({ default: module.GraphModeAdapter })),
+    placements: ["primary", "right", "panel"],
+    isAvailable: () => true,
+    fallback: "mode-loading",
+  },
+  sites: {
+    id: "sites",
+    load: () => import("./modeAdapters/SitesModeAdapter").then((module) => ({ default: module.SitesModeAdapter })),
+    placements: ["primary", "right"],
+    isAvailable: () => true,
+    fallback: "mode-loading",
+  },
 };
 
 const lazyAdapters: Record<RegisteredModeId, ReturnType<typeof lazy<ComponentType<ModeAdapterProps>>>> = {
   pkm: lazy(modeRegistry.pkm.load),
   e2e: lazy(modeRegistry.e2e.load),
   diagram: lazy(modeRegistry.diagram.load),
+  graph: lazy(modeRegistry.graph.load),
+  sites: lazy(modeRegistry.sites.load),
 };
 
 export function getModeDescriptor(mode: string): ModeDescriptor | null {

@@ -29,8 +29,10 @@ function check(label, asset, maxGzipBytes) {
 check("initial JS", largestMatching(/^index-.*\.js$/), 320 * 1024);
 check("initial CSS", largestMatching(/^index-.*\.css$/), 70 * 1024);
 
-if (!files.some((file) => /^GraphView-.*\.js$/.test(file))) {
-  throw new Error("bundle-budget: GraphView must remain a lazy chunk");
+for (const adapter of ["DiagramModeAdapter", "GraphModeAdapter", "SitesModeAdapter"]) {
+  if (!files.some((file) => new RegExp(`^${adapter}-.*\\.js$`).test(file))) {
+    throw new Error(`bundle-budget: ${adapter} must remain a lazy chunk`);
+  }
 }
 if (!files.some((file) => /^RichMarkdownEditor-.*\.js$/.test(file))) {
   throw new Error("bundle-budget: RichMarkdownEditor must remain a lazy chunk");
@@ -48,12 +50,22 @@ if (!modeRegistrySource.includes('import("./modeAdapters/PkmModeAdapter")')) {
 if (!modeRegistrySource.includes('import("./modeAdapters/E2EFlowModeAdapter")')) {
   throw new Error("bundle-budget: E2E adapter must use a dynamic registry import");
 }
+for (const adapter of ["DiagramModeAdapter", "GraphModeAdapter", "SitesModeAdapter"]) {
+  if (!modeRegistrySource.includes(`import("./modeAdapters/${adapter}")`)) {
+    throw new Error(`bundle-budget: ${adapter} must use a dynamic registry import`);
+  }
+}
 const appSource = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
 if (appSource.includes('from "./lib/modeAdapters/PkmModeAdapter"')) {
   throw new Error("bundle-budget: App must not eagerly import the PKM adapter");
 }
 if (appSource.includes('from "./lib/modeAdapters/E2EFlowModeAdapter"')) {
   throw new Error("bundle-budget: App must not eagerly import the E2E adapter");
+}
+for (const adapter of ["DiagramModeAdapter", "GraphModeAdapter", "SitesModeAdapter"]) {
+  if (appSource.includes(`from "./lib/modeAdapters/${adapter}"`)) {
+    throw new Error(`bundle-budget: App must not eagerly import the ${adapter}`);
+  }
 }
 if (!files.some((file) => /^ko-.*\.js$/.test(file)) || !files.some((file) => /^en-.*\.js$/.test(file))) {
   throw new Error("bundle-budget: i18n dictionaries must remain lazy chunks");

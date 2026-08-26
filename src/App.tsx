@@ -303,13 +303,7 @@ import {
 import { useKeyboardShortcuts } from "./lib/useKeyboardShortcuts";
 import { browserPasskeyBuildOnce } from "./lib/browserPasskeys";
 import { bootAppMode } from "./lib/startupAppMode";
-import {
-  buildSiteViewOpenRequests,
-  requestSiteViewCloseActive,
-  subscribeSiteViewOpenRequests,
-  unroutedSiteViewOpenRequestId,
-  type SiteViewOpenRequest,
-} from "./lib/siteView";
+import { requestSiteViewCloseActive } from "./lib/siteView";
 import { useScopedSelectAll } from "./lib/useScopedSelectAll";
 import type { TerminalKind } from "./lib/terminal";
 import {
@@ -430,6 +424,7 @@ import {
   useShellSettings,
 } from "./lib/shellSettingsStore";
 import { getModeDescriptor, ModeSurfaceHost } from "./lib/modeRegistry";
+import { SitesOpenRequestBridge, visualModeController } from "./lib/visualModeStore";
 import {
   availableRightWorkbenchSurface,
   minimumWorkbenchWidth,
@@ -537,7 +532,6 @@ const MAX_DOCUMENTS_PANE_WIDTH = 560;
 const MIN_OUTLINE_PANE_WIDTH = 240;
 const MAX_OUTLINE_PANE_WIDTH = 520;
 
-const LazyGraphView = lazy(() => import("./components/graph/GraphView").then((module) => ({ default: module.GraphView })));
 const LazyStudioMode = lazy(() => import("./components/studio/StudioMode").then((module) => ({ default: module.StudioMode })));
 const LazyInboxPane = lazy(() => import("./components/InboxPane").then((module) => ({ default: module.InboxPane })));
 const LazyDraftsPane = lazy(() => import("./components/drafts/DraftsPane").then((module) => ({ default: module.DraftsPane })));
@@ -549,7 +543,6 @@ const LazyTodayPane = lazy(() => import("./components/today/TodayPane").then((mo
 const LazyTasksPane = lazy(() => import("./components/tasks/TasksPane").then((module) => ({ default: module.TasksPane })));
 const LazyDashboardPane = lazy(() => import("./components/dashboard/DashboardPane").then((module) => ({ default: module.DashboardPane })));
 const LazyCatalogPane = lazy(() => import("./components/catalog/CatalogPane").then((module) => ({ default: module.CatalogPane })));
-const LazySitesPane = lazy(() => import("./components/sites/SitesPane").then((module) => ({ default: module.SitesPane })));
 const LazyFilesWorkbench = lazy(() =>
   import("./components/FilesWorkbench").then((module) => ({
     default: module.FilesWorkbench,
@@ -982,9 +975,6 @@ export function MainApp() {
   const [pendingExplorerReveal, setPendingExplorerReveal] = useState<PendingExplorerReveal | null>(
     null,
   );
-  const [pendingOpenedSiteUrls, setPendingOpenedSiteUrls] = useState<SiteViewOpenRequest[]>([]);
-  const nextOpenedSiteUrlIdRef = useRef(0);
-  const routedOpenedSiteUrlIdRef = useRef(0);
   const [booting, setBooting] = useState(true);
   const [saving, setSaving] = useState(false);
   const [savingTabId, setSavingTabId] = useState<string | null>(null);
@@ -1121,21 +1111,8 @@ export function MainApp() {
         ? "pkm"
         : appMode;
   // Graph mode focus target (NeighborhoodPane "그래프에서 보기" → k-hop focus).
-  const [graphOpenTarget, setGraphOpenTarget] = useState<GraphOpenTarget | null>(null);
   // KG reference visualization (kg_refs Phase 4). Session-local, on-demand:
   // nothing is computed until the user clicks the per-document triggers.
-  const [kgRefFocus, setKgRefFocus] = useState<{
-    source: "editor" | "drafts" | "gap";
-    docPath: string;
-    /** nodePaths are relative to this root, which is the document's workspace —
-     *  the graph may be reading a nested vault/ instead. */
-    docRoot: string;
-    nodePaths: string[];
-    /** Same references grouped by the paragraph that cites them, so the graph
-     *  can walk the document instead of lighting everything up at once. */
-    steps: KgRefStep[];
-    nonce: number;
-  } | null>(null);
   // Reference-focus requests are session-local but can outlive the editor
   // action that started them. Every new owner invalidates older requests so a
   // late editor response cannot overwrite a drafts/gap overlay or reopen the
@@ -2331,7 +2308,7 @@ export function MainApp() {
 
   const openGraphMode = useCallback(
     (target?: GraphOpenTarget) => {
-      setGraphOpenTarget(target ?? null);
+      visualModeController.setGraphFocusTarget(target ?? null);
       todayAutoOpenPathRef.current = null;
       todayAutoOpenModeRef.current = null;
       setAppMode("graph");
@@ -6523,7 +6500,7 @@ export function MainApp() {
         rawTarget && typeof rawTarget.source === "string" && rawTarget.localTarget
           ? rawTarget
           : null;
-      setGraphOpenTarget(target);
+      visualModeController.setGraphFocusTarget(target);
       setPersistedAppMode("pkm");
       updateLayoutSettings({
         terminalOpen: true,
@@ -6572,7 +6549,7 @@ export function MainApp() {
       void kgDocumentRefs(tab.workspacePath, tab.document.relPath)
         .then((map) => {
           if (!isCurrentRequest()) return;
-          setKgRefFocus({
+          visualModeController.setGraphReferenceFocus({
             source: "editor",
             docPath: map.docPath,
             docRoot: tab.workspacePath,
@@ -6619,11 +6596,9 @@ export function MainApp() {
       kgRefRequestRef.current += 1;
       kgRefOwnerRef.current = null;
     }
-    if (
-      kgRefFocus?.source === "editor" &&
-      kgRefFocus.docPath !== kgActiveDocPath
-    ) {
-      setKgRefFocus(null);
+    const referenceFocus = visualModeController.getGraphModeSlice().referenceFocus;
+    if (referenceFocus?.source === "editor" && referenceFocus.docPath !== kgActiveDocPath) {
+      visualModeController.setGraphReferenceFocus(null);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- kgHighlight/kgRefFocus are read only to decide whether to clear them; including them would re-run this effect every time it just cleared them itself
   }, [activeDocumentWorkspacePath, kgActiveDocPath]);
@@ -6631,14 +6606,14 @@ export function MainApp() {
   const exitKgReferenceFocus = useCallback(() => {
     kgRefRequestRef.current += 1;
     kgRefOwnerRef.current = null;
-    setKgRefFocus(null);
+    visualModeController.setGraphReferenceFocus(null);
   }, []);
   const openDraftGraphFocus = useCallback(
     (request: DraftGraphFocusRequest, source: "drafts" | "gap") => {
       if (!primaryWorkspacePath || request.nodePaths.length === 0) return;
       kgRefRequestRef.current += 1;
       kgRefOwnerRef.current = source;
-      setKgRefFocus({
+      visualModeController.setGraphReferenceFocus({
         source,
         docPath: request.docPath,
         docRoot: primaryWorkspacePath,
@@ -6738,52 +6713,6 @@ export function MainApp() {
       updateLayoutSettings,
     ],
   );
-
-  const enqueueOpenedSiteUrls = useCallback((urls: unknown) => {
-    const batch = buildSiteViewOpenRequests(urls, nextOpenedSiteUrlIdRef.current);
-    nextOpenedSiteUrlIdRef.current = batch.nextId;
-    if (batch.requests.length > 0) {
-      setPendingOpenedSiteUrls((current) => [...current, ...batch.requests]);
-    }
-  }, []);
-
-  const acknowledgeOpenedSiteUrls = useCallback((handledIds: readonly number[]) => {
-    const handled = new Set(handledIds);
-    setPendingOpenedSiteUrls((current) => current.filter((request) => !handled.has(request.id)));
-  }, []);
-
-  // The subscription installs its native listener before draining the cold
-  // queue and returns synchronous cleanup, so effect teardown cannot consume
-  // and discard a URL while an async listener promise is still resolving.
-  useEffect(() => {
-    if (booting) return;
-    return subscribeSiteViewOpenRequests(enqueueOpenedSiteUrls);
-  }, [booting, enqueueOpenedSiteUrls]);
-
-  // Preserve the active document when possible: an OS-opened web URL uses the
-  // right Sites workbench from Docs, and otherwise opens/keeps primary Sites.
-  // Route once per arriving request (ids are monotonic, so the tail carries the
-  // newest): a request Sites cannot fit yet — the tab cap — must not reopen the
-  // workbench the user just closed on every render.
-  useEffect(() => {
-    const routeId = unroutedSiteViewOpenRequestId(
-      pendingOpenedSiteUrls,
-      routedOpenedSiteUrlIdRef.current,
-    );
-    if (routeId === null) return;
-    routedOpenedSiteUrlIdRef.current = routeId;
-    if (visibleAppMode === "pkm") {
-      if (rightWorkbenchMode !== "sites") openWorkbenchModeRight("sites");
-      return;
-    }
-    if (visibleAppMode !== "sites") openPrimaryWorkbenchMode("sites");
-  }, [
-    openPrimaryWorkbenchMode,
-    openWorkbenchModeRight,
-    pendingOpenedSiteUrls,
-    rightWorkbenchMode,
-    visibleAppMode,
-  ]);
 
   const closeRightWorkbench = useCallback(() => {
     setFocusedWorkbenchSide("left");
@@ -7770,92 +7699,11 @@ export function MainApp() {
     gap: " gap-mode",
     agents: " agents-mode",
   };
-  const graphWorkspacePath =
-    workspaceRegistry.activeByVisibility.private ?? privateWorkspaces[0]?.path ?? activeDocumentWorkspacePath;
-  // The vault is usually a `vault/` submodule inside the workspace; only fall
-  // back to the public-workspace-as-vault setup when there is no such folder.
-  // The probe result is keyed by workspace so a switch A→B can never serve
-  // A's vault while B's probe is still in flight.
-  const [nestedVault, setNestedVault] = useState<{
-    workspace: string;
-    root: string | null;
-  } | null>(null);
-  useEffect(() => {
-    if (!graphWorkspacePath) return;
-    let cancelled = false;
-    void vaultGraphRoot(graphWorkspacePath)
-      .then((root) => {
-        if (!cancelled) setNestedVault({ workspace: graphWorkspacePath, root });
-      })
-      .catch(() => undefined);
-    return () => {
-      cancelled = true;
-    };
-  }, [graphWorkspacePath]);
-  const nestedVaultPath =
-    nestedVault?.workspace === graphWorkspacePath ? nestedVault.root : null;
-  const graphVaultPath =
-    nestedVaultPath ??
-    workspaceRegistry.activeByVisibility.public ??
-    publicWorkspaces[0]?.path ??
-    null;
+  // Graph discovers the nested vault and drives its watcher inside
+  // GraphModeAdapter. MainApp only retains this lightweight source hint for
+  // editor-originated Graph focus requests.
+  const graphVaultPath = workspaceRegistry.activeByVisibility.public ?? publicWorkspaces[0]?.path ?? null;
   graphVaultPathRef.current = graphVaultPath;
-  const graphDataPath =
-    maruSettings.graph.source === "vault"
-      ? graphVaultPath ?? activeDocumentWorkspacePath
-      : graphWorkspacePath ?? activeDocumentWorkspacePath;
-  const graphEntries = graphDataPath
-    ? workspaceStates[graphDataPath]?.entries ?? NO_ENTRIES
-    : activeDocumentEntries;
-  const graphSurfaceVisible =
-    visibleAppMode === "graph" || rightWorkbenchMode === "graph" || panelGraphOpen;
-  const vaultWatchPath = graphSurfaceVisible ? graphDataPath : activeDocumentWorkspacePath;
-  // Read the current state from the store: the first thing this effect does is
-  // patch the workspace state, so depending on it would re-run the effect,
-  // cancel the scan it just started, and then bail on its own `loading: true`
-  // — the entries would never land for a path nothing else populates (e.g.
-  // the vault submodule, which only the graph scans).
-  useEffect(() => {
-    if (!graphSurfaceVisible || !graphDataPath) return;
-    const current = getWorkspaceStoreState().states[graphDataPath];
-    if (current?.startupIoReady || current?.loading || current?.refreshing) return;
-    // Land every result, cancelled or not: the writes are keyed by path, so a
-    // late one is still correct for that key. Skipping them was the bug — any
-    // re-run (settings load swaps the `scanOptions` array identity, or the
-    // surface flips visible) cancelled the in-flight scan, and the guard above
-    // then saw the `loading: true` this effect had just set and bailed
-    // forever. `cancelled` now only suppresses a toast nobody asked for.
-    const path = graphDataPath;
-    let cancelled = false;
-    updateWorkspaceState(path, { loading: true });
-    void (async () => {
-      try {
-        const cached = await readVaultCache(path);
-        if (cached) updateWorkspaceState(path, { entries: cached, loading: false, refreshing: true });
-        const fresh = await rescanWorkspaceEntries(path, scanOptions);
-        if (fresh) {
-          updateWorkspaceState(path, { startupIoReady: true });
-        } else {
-          // A newer rescan or watcher delta superseded this scan and owns the
-          // entries now; just don't leave this effect's loading flags stuck.
-          updateWorkspaceState(path, { loading: false, refreshing: false });
-        }
-      } catch (err) {
-        updateWorkspaceState(path, { loading: false, refreshing: false });
-        if (!cancelled) setError(err instanceof Error ? err.message : String(err));
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [graphDataPath, graphSurfaceVisible, scanOptions]);
-  // Watcher lifecycle + `vault://index-delta` incremental apply live in the
-  // workspace store now (same enabled condition as the old effect).
-  useVaultWatcherSync(
-    vaultWatchPath,
-    Boolean(graphSurfaceVisible && graphDataPath && vaultWatchPath),
-    scanOptions,
-  );
   const lastAppModeRef = useRef<AppMode>(visibleAppMode);
   useEffect(() => {
     const previous = lastAppModeRef.current;
@@ -8069,61 +7917,44 @@ export function MainApp() {
     [updateLayoutSettings],
   );
 
-  const renderGraphSurface = useCallback(
-    (placement: "full" | "panel") => (
-      <LazyGraphView
-        key={`${placement}:${maruSettings.graph.source}:${graphDataPath ?? "no-workspace"}`}
-        workspacePath={graphDataPath}
-        entries={graphEntries}
-        focusTarget={graphOpenTarget}
-        onFocusTargetChange={setGraphOpenTarget}
-        onOpenEntry={(entry) => {
-          // Panel opens must surface the editor too — the panel is visible in
-          // every app mode, but the opened document only shows in pkm.
-          setPersistedAppMode("pkm");
-          void selectEntry(entry, "left");
-        }}
-        onCreateNote={handleWikilinkClick}
-        graphSettings={maruSettings.graph}
-        onGraphSettingsChange={(graph) =>
-          updateSettings((current) => ({ ...current, graph }))
-        }
-        isFavorite={isFavorite}
-        onToggleFavorite={toggleFavorite}
-        referenceFocus={kgRefFocus}
-        onExitReferenceFocus={exitKgReferenceFocus}
-        onGraphChanged={() => {
-          if (!graphDataPath) return;
-          void rescanWorkspaceEntries(graphDataPath, scanOptions);
-        }}
-      />
-    ),
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- updateWorkspaceState is flagged unneeded; not removed here to avoid changing this memo's recomputation timing, a behavior change out of scope for this phase
-    [
-      maruSettings.graph,
-      graphDataPath,
-      graphEntries,
-      graphOpenTarget,
-      kgRefFocus,
-      exitKgReferenceFocus,
-      selectEntry,
-      handleWikilinkClick,
-      isFavorite,
-      toggleFavorite,
-      scanOptions,
-      updateWorkspaceState,
-      updateSettings,
-      setPersistedAppMode,
-    ],
-  );
   // Stable element so TerminalPanel's memo() keeps working; null while the
   // full graph mode is visible so two Sigma instances never run at once.
   const panelGraphNode = useMemo(
     () =>
       visibleAppMode === "graph" || rightWorkbenchMode === "graph"
         ? null
-        : renderGraphSurface("panel"),
-    [renderGraphSurface, rightWorkbenchMode, visibleAppMode],
+        : (
+          <ModeSurfaceHost
+            mode="graph"
+            placement="panel"
+            scope={{ workspacePath: inboxWorkspacePath ?? settingsWorkPath, documentBrowserScope }}
+            commands={{
+              renderPrimarySurface: () => null,
+              openGraphEntry: (entry) => {
+                setPersistedAppMode("pkm");
+                void selectEntry(entry as VaultEntry, "left");
+              },
+              createGraphNote: handleWikilinkClick,
+              isGraphFavorite: isFavorite,
+              toggleGraphFavorite: toggleFavorite,
+              onGraphChanged: () => {
+                const root = inboxWorkspacePath ?? settingsWorkPath;
+                if (root) void rescanWorkspaceEntries(root, scanOptions);
+              },
+            }}
+          />
+        ),
+    [
+      documentBrowserScope,
+      handleWikilinkClick,
+      inboxWorkspacePath,
+      rightWorkbenchMode,
+      scanOptions,
+      selectEntry,
+      setPersistedAppMode,
+      settingsWorkPath,
+      visibleAppMode,
+    ],
   );
 
   // ------------------------------------------------------------------
@@ -8845,6 +8676,13 @@ export function MainApp() {
           </div>
         )}
 
+        <SitesOpenRequestBridge
+          booting={booting}
+          visibleMode={visibleAppMode}
+          rightWorkbenchMode={rightWorkbenchMode}
+          openPrimary={openPrimaryWorkbenchMode}
+          openRight={openWorkbenchModeRight}
+        />
         <ActivityRail
           visibleAppMode={visibleAppMode}
           rightWorkbenchMode={rightWorkbenchMode}
@@ -8942,16 +8780,20 @@ export function MainApp() {
                 if (!root) return Promise.reject(new Error("workspace required"));
                 return saveDocument(root, path, content, expectedRevision);
               },
+              openGraphEntry: (entry) => {
+                setPersistedAppMode("pkm");
+                void selectEntry(entry as VaultEntry, "left");
+              },
+              createGraphNote: handleWikilinkClick,
+              isGraphFavorite: isFavorite,
+              toggleGraphFavorite: toggleFavorite,
+              onGraphChanged: () => {
+                const root = inboxWorkspacePath ?? settingsWorkPath;
+                if (root) void rescanWorkspaceEntries(root, scanOptions);
+              },
+              sitesOverlayOpen,
+              closeRightWorkbench: rightWorkbenchMode === "sites" ? closeRightWorkbench : undefined,
             }}
-          />
-        ) : surfaceMode === "graph" ? (
-          renderGraphSurface("full")
-        ) : surfaceMode === "sites" ? (
-          <LazySitesPane
-            overlayOpen={sitesOverlayOpen}
-                onEmptyClose={rightWorkbenchMode === "sites" ? closeRightWorkbench : undefined}
-            openedUrls={pendingOpenedSiteUrls}
-            onOpenedUrlsHandled={acknowledgeOpenedSiteUrls}
           />
         ) : surfaceMode === "files" ? (
           <LazyFilesWorkbench
