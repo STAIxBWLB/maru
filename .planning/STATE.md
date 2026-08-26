@@ -5,15 +5,15 @@ milestone_name: milestone
 current_phase: 05
 current_phase_name: Shell Decomposition Completion
 status: executing
-stopped_at: Completed 05-03-PLAN.md
-last_updated: "2026-08-26T14:37:48.734Z"
+stopped_at: Completed 05-04-PLAN.md
+last_updated: "2026-08-26T14:49:00.340Z"
 last_activity: 2026-08-26
 last_activity_desc: Phase 04 execution started
 progress:
   total_phases: 5
   completed_phases: 4
   total_plans: 32
-  completed_plans: 24
+  completed_plans: 25
 ---
 
 # Project State
@@ -28,11 +28,11 @@ See: .planning/PROJECT.md (updated 2026-08-23)
 ## Current Position
 
 Phase: 05 (Shell Decomposition Completion) — EXECUTING
-Plan: 4 of 11
+Plan: 5 of 11
 Status: Ready to execute
 Last activity: 2026-08-26 — Phase 05 execution started
 
-Progress: [████████░░] 75% (3/5 phases)
+Progress: [████████░░] 78% (3/5 phases)
 
 ## Performance Metrics
 
@@ -83,6 +83,7 @@ Progress: [████████░░] 75% (3/5 phases)
 | Phase 05 P01 | 1h 10m | 2 tasks | 8 files |
 | Phase 05 P02 | 10m | 2 tasks | 4 files |
 | Phase 05 P03 | 14min | 2 tasks | 7 files |
+| Phase 05 P04 | 8min | 3 tasks | 8 files |
 
 ## Accumulated Context
 
@@ -156,6 +157,8 @@ Recent decisions affecting current work:
 - [Phase ?]: Unknown terminal kills remain idempotent, but stale recycled handles are rejected.
 - [Phase ?]: Terminal reducer state is process-global while launch context is a separate slice.
 - [Phase ?]: TerminalPanel accepts only scope, commands, graphNode, and its forwarded ref.
+- [Phase ?]: Normalized MaruSettings now has one module-store owner, while MainApp subscribes to its current snapshot.
+- [Phase ?]: PKM and E2E descriptors own dynamic loaders, placement, availability, and fallback identity; ActivityRail metadata remains in App.
 
 ### Scope Exceptions
 
@@ -207,6 +210,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-08-26T14:37:48.726Z
-Stopped at: Completed 05-03-PLAN.md
+Last session: 2026-08-26T14:49:00.331Z
+Stopped at: Completed 05-04-PLAN.md
 Resume file: None
