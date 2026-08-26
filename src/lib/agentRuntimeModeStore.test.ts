@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -136,5 +138,33 @@ describe("agentRuntimeModeStore", () => {
     controller.publishRuntime({ ai: {}, runtimeCommands: {}, tasksRoot: null });
     expect(controller.getRegistrySlice()).toBe(registry);
     expect(controller.getMissionSlice()).not.toBe(mission);
+  });
+
+  it("reuses the runtime slice when equivalent settings-derived values are republished", () => {
+    const controller = createController();
+    controller.publishRuntime({
+      ai: { defaultRuntime: "claude" },
+      runtimeCommands: { claude: "claude --dangerously-skip-permissions" },
+      tasksRoot: "/workspace/tasks",
+    });
+    const runtime = controller.getRuntimeSlice();
+
+    controller.publishRuntime({
+      ai: { defaultRuntime: "claude" },
+      runtimeCommands: { claude: "claude --dangerously-skip-permissions" },
+      tasksRoot: "/workspace/tasks",
+    });
+
+    expect(controller.getRuntimeSlice()).toBe(runtime);
+  });
+
+  it("keeps Agents-specific state setters and direct renderer imports out of MainApp", () => {
+    const app = readFileSync(resolve(import.meta.dirname, "../App.tsx"), "utf8");
+
+    expect(app).not.toContain("LazyAgentsPane");
+    expect(app).not.toContain("setSkills(");
+    expect(app).not.toContain("setAgents(");
+    expect(app).not.toContain("setProcessingLogLines(");
+    expect(app).not.toContain("useAiOutputLog(");
   });
 });
