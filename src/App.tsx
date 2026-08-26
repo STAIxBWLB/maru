@@ -159,7 +159,6 @@ import {
   scanInboxEntries,
   scanInboxProcessedItems,
   scanInboxProcessedSnapshot,
-  scanWorkspaceEntries,
   setActiveWorkspaceRoot,
   stageGmailItems,
   stageInboxDropFiles,
@@ -201,7 +200,6 @@ import {
   listWorkspaceProjects,
   registerWorkspaceRoots,
   saveMaruSettings,
-  listenMaruIgnoreUpdated,
   listenMaruSettingsUpdated,
   updateMaruWorkspace,
 } from "./lib/maruDir";
@@ -341,7 +339,6 @@ import type {
   WorkspaceVisibility,
   WorkspaceWritePolicy,
 } from "./lib/types";
-import { missionStoreLoadStamp } from "./lib/useActiveMissions";
 import {
   agentRuntimeController,
   AgentRuntimeBootstrap,
@@ -362,6 +359,19 @@ import {
   documentOpsModeController,
   useFilesPresentationSlice,
 } from "./lib/documentOpsModeStore";
+import {
+  useFilesDocumentLifecycle,
+  useInitialWorkspaceFilesScan,
+  useMaruIgnoreRescan,
+  useWorkspaceFilesLifecycle,
+} from "./lib/documentOpsModeLifecycle";
+import {
+  useCommunicationsProcessedLifecycle,
+  useCommunicationsRefreshRouting,
+  useCommunicationsRequestRefs,
+  useLatestCommunicationsDashboard,
+  useMissionCompletionLifecycle,
+} from "./lib/communicationsModeLifecycle";
 import { useDestructiveActionGuard } from "./lib/useDestructiveActionGuard";
 import { useInboxEvents } from "./lib/useInboxEvents";
 import { useTelegramEvents } from "./lib/useTelegramEvents";
@@ -473,12 +483,10 @@ import {
 } from "./lib/windowLayout";
 import { resolveWikilinkTarget } from "./lib/wikilinkSuggestions";
 import {
-  isCurrentWorkspaceFilesScanRequest,
   mergeFreshEntry,
   planVaultStartup,
   shouldLazyScanWorkspaceFiles,
   workspaceFileScanPaneMode,
-  workspaceFilesScanStatusAfterFailure,
 } from "./lib/vaultStartup";
 // Workspace system: external store (src/lib/workspaceStore.ts). Slices
 // subscribe via useSyncExternalStore; orchestrators read the current state at
@@ -499,7 +507,6 @@ import {
   setQueryByVisibility,
   setSelectedFilePathsByWorkspace,
   setWorkspaceRegistry,
-  updateWorkspaceFileState,
   updateWorkspaceState,
   useCollapsedFileFoldersByVisibility,
   useCollapsedTreeFoldersByVisibility,
@@ -1003,7 +1010,6 @@ export function MainApp() {
   const workspaceRegistry = useWorkspaceRegistry();
   const workspaceStates = useWorkspaceStates();
   const workspaceFileStates = useWorkspaceFileStates();
-  const workspaceFileRequestSeqRef = useRef<Record<string, number>>({});
   const explorerVisibility = useExplorerVisibility();
   // Editor tab system: external store (src/lib/editorTabsStore.ts). Slices
   // subscribe via useSyncExternalStore; orchestrators read the current state
@@ -1079,19 +1085,18 @@ export function MainApp() {
     ContextualDebouncedSaver<MaruSettings, SettingsSaveContext> | null
   >(null);
   const settingsSaveQueueRef = useRef<SaveQueue>(createSaveQueue());
-  const filesPreviewRequestRef = useRef(0);
-  const filesPreviewSelectionRef = useRef<string | null>(null);
   const collapsedTreeHydratedRef = useRef(false);
   const collapsedFileHydratedRef = useRef(false);
-  const processedRequestSeqRef = useRef(0);
-  const processedDetailRequestSeqRef = useRef(0);
-  const processedItemsRef = useRef<InboxProcessedItem[]>([]);
-  const processedItemsKeyRef = useRef("");
-  const commsReadinessRequestSeqRef = useRef(0);
-  const commsDashboardRequestSeqRef = useRef(0);
-  const migrationCheckedRef = useRef(false);
-  const prevProcessingMissionsRef = useRef<MissionRecord[] | null>(null);
-  const prevMissionLoadStampRef = useRef(missionStoreLoadStamp());
+  const communicationsRequests = useCommunicationsRequestRefs();
+  const {
+    processedRequest: processedRequestSeqRef,
+    processedDetailRequest: processedDetailRequestSeqRef,
+    processedItems: processedItemsRef,
+    processedItemsKey: processedItemsKeyRef,
+    readinessRequest: commsReadinessRequestSeqRef,
+    dashboardRequest: commsDashboardRequestSeqRef,
+    migrationChecked: migrationCheckedRef,
+  } = communicationsRequests;
 
   // Monotonic counter so a slow readDocument from an earlier click cannot
   // overwrite the editor with stale content if the user clicked a later
@@ -1393,7 +1398,6 @@ export function MainApp() {
         : null,
     [explorerWorkspacePath, filesSelectedDocumentNode, tabs],
   );
-  filesPreviewSelectionRef.current = filesSelectedDocumentNode?.path ?? null;
   const explorerWorkspaceCaps = useMemo(
     () => workspaceCapabilities(explorerWorkspace),
     [explorerWorkspace],
@@ -2661,36 +2665,26 @@ export function MainApp() {
     [inboxRuntimeConfig],
   );
 
-  useEffect(() => {
-    const timer = window.setTimeout(() => {
-      setProcessedDeferredQuery(processedQuery.trim());
-    }, 250);
-    return () => window.clearTimeout(timer);
-  }, [processedQuery]);
-
-  useEffect(() => {
-    processedDetailRequestSeqRef.current += 1;
-    setProcessedDetail(null);
-  }, [
-    processedDeferredQuery,
-    processedStatusFilter,
-    commsSourceFilter,
-    inboxSourceFilter,
-  ]);
-
-  useEffect(() => {
-    processedRequestSeqRef.current += 1;
-    processedDetailRequestSeqRef.current += 1;
-    commsReadinessRequestSeqRef.current += 1;
-    commsDashboardRequestSeqRef.current += 1;
-    processedItemsRef.current = [];
-    processedItemsKeyRef.current = "";
+  const resetProcessedWorkspace = useCallback(() => {
     setProcessedItems([]);
     setProcessedCounts({});
     setProcessedDetail(null);
     setProcessedError(null);
     setCommsRefreshing(false);
-  }, [inboxWorkspacePath]);
+  }, []);
+
+  useCommunicationsProcessedLifecycle({
+    processedQuery,
+    inboxWorkspacePath,
+    processedDeferredQuery,
+    processedStatusFilter,
+    commsSourceFilter,
+    inboxSourceFilter,
+    refs: communicationsRequests,
+    setProcessedDeferredQuery,
+    setProcessedDetail,
+    resetProcessedWorkspace,
+  });
 
   // Watcher bursts coalesce: a refresh requested while one is in flight
   // re-runs once after it lands, so the two scans never overlap and the
@@ -2820,6 +2814,9 @@ export function MainApp() {
       }
     }
   }, [
+    processedItemsKeyRef,
+    processedItemsRef,
+    processedRequestSeqRef,
     surfaceMode,
     commsSourceFilter,
     inboxSourceFilter,
@@ -2905,6 +2902,7 @@ export function MainApp() {
     }
     setCommsAuthStatuses(statuses);
   }, [
+    commsReadinessRequestSeqRef,
     effectiveCommsSettings.outlook,
     effectiveCommsSettings.telegram,
     inboxRuntimeConfig.gmail?.enabled,
@@ -2926,7 +2924,7 @@ export function MainApp() {
         setProcessedError(err instanceof Error ? err.message : String(err));
       }
     },
-    [inboxWorkspacePath],
+    [inboxWorkspacePath, processedDetailRequestSeqRef],
   );
 
   // Log tails only — the mission list itself streams from the shared
@@ -2979,21 +2977,18 @@ export function MainApp() {
       }
     }
   }, [
+    commsDashboardRequestSeqRef,
     isMac,
+    migrationCheckedRef,
     refreshCommsReadiness,
     refreshProcessingMissions,
     refreshSourceRuns,
     retryInboxWorkspaceConfig,
   ]);
 
-  // Latest-callback ref so the comms-mode effect below re-runs only on mode or
-  // workspace changes — not every time a filter recreates the dashboard
-  // callback (which would re-subscribe the telegram listener and re-run the
-  // provider auth CLI checks on each keystroke).
-  const refreshCommsDashboardRef = useRef(refreshCommsDashboard);
-  useEffect(() => {
-    refreshCommsDashboardRef.current = refreshCommsDashboard;
-  }, [refreshCommsDashboard]);
+  // The communications owner keeps the latest dashboard command so provider
+  // listeners do not resubscribe while filters recreate the callback.
+  const refreshCommsDashboardRef = useLatestCommunicationsDashboard(refreshCommsDashboard);
 
   const updateInboxCarry = useCallback(
     (id: string, patch: Partial<InboxCarry>) => {
@@ -3582,26 +3577,14 @@ export function MainApp() {
     inboxWorkspacePath,
     refreshCommsDashboardRef,
   });
-  useEffect(() => {
-    // In comms this is also the filter/search refetch path: the callback
-    // identity changes with the query and channel, re-running this effect.
-    if (Object.is(surfaceMode, "inbox") || Object.is(surfaceMode, "comms")) void refreshProcessedItems();
-    if (!booting && settingsWorkspaceStartupReady && (
-      Object.is(surfaceMode, "inbox") ||
-      Object.is(surfaceMode, "meetings") ||
-      Object.is(surfaceMode, "tasks") ||
-      rightPaneTab === "skills"
-    )) {
-      void refreshProcessingMissions();
-    }
-  }, [
+  useCommunicationsRefreshRouting({
     surfaceMode,
     booting,
+    settingsWorkspaceStartupReady,
+    rightPaneTab,
     refreshProcessedItems,
     refreshProcessingMissions,
-    rightPaneTab,
-    settingsWorkspaceStartupReady,
-  ]);
+  });
 
   // Mission-completion side effects. These used to live in App's own
   // ai://mission_update listener; the shared store (useTrackedMissions) owns
@@ -3613,95 +3596,26 @@ export function MainApp() {
   // deserialized, so a load-stamp change resets the baseline instead of
   // replaying up to MAX_TRACKED log reads for missions that finished long ago.
   // The old listener reacted to events only and never to a listed snapshot.
-  useEffect(() => {
-    const previous = prevProcessingMissionsRef.current;
-    prevProcessingMissionsRef.current = processingMissions;
-    const loadStamp = missionStoreLoadStamp();
-    const snapshotReloaded = loadStamp !== prevMissionLoadStampRef.current;
-    prevMissionLoadStampRef.current = loadStamp;
-    if (previous === null || snapshotReloaded || previous === processingMissions) return;
-    const previousById = new Map(previous.map((mission) => [mission.id, mission]));
-    for (const record of processingMissions) {
-      if (previousById.get(record.id) === record) continue;
-      const inboxMission = isInboxProcessMission(record);
-      if (inboxMission && !matchesActiveMission(record)) {
-        void refreshProcessedItems();
-        void refreshSourceRuns();
-      }
-      if (!matchesActiveMission(record)) {
-        void readAiMissionLog(record.id, 100)
-          .then((tail) => agentRuntimeController.publishMissionLog(record.id, tail.lines))
-          .catch(() => {});
-      }
-    }
-  }, [processingMissions, refreshProcessedItems, refreshSourceRuns]);
+  const readCompletedMissionLog = useCallback(async (id: string) => {
+    const tail = await readAiMissionLog(id, 100);
+    agentRuntimeController.publishMissionLog(id, tail.lines);
+  }, []);
 
-  const refreshWorkspaceFiles = useCallback(
-    async (path: string, initial = false) => {
-      const requestSeq = (workspaceFileRequestSeqRef.current[path] ?? 0) + 1;
-      workspaceFileRequestSeqRef.current[path] = requestSeq;
-      updateWorkspaceFileState(path, initial ? { loading: true } : { refreshing: true });
-      try {
-        const snapshot = await scanWorkspaceEntries(path, scanOptions);
-        if (
-          !isCurrentWorkspaceFilesScanRequest(
-            workspaceFileRequestSeqRef.current,
-            path,
-            requestSeq,
-          )
-        ) {
-          return;
-        }
-        const files = snapshot.entries
-          .filter(
-            (entry) =>
-              entry.kind === "file" ||
-              (entry.kind === "symlink" && entry.targetKind === "file"),
-          )
-          .map((entry) => ({
-            path: entry.path,
-            relPath: entry.relPath,
-            name: entry.name,
-            extension: entry.extension,
-            fileKind: entry.fileKind,
-            sizeBytes: entry.sizeBytes,
-            updatedAt: entry.updatedAt,
-            gitTracked: entry.gitTracked,
-            binary: entry.binary,
-          }));
-        updateWorkspaceFileState(path, {
-          entries: files,
-          nodes: snapshot.entries,
-          scanStatus: "ready",
-          loading: false,
-          refreshing: false,
-        });
-      } catch (err) {
-        if (
-          !isCurrentWorkspaceFilesScanRequest(
-            workspaceFileRequestSeqRef.current,
-            path,
-            requestSeq,
-          )
-        ) {
-          return;
-        }
-        setError(err instanceof Error ? err.message : String(err));
-        const previous = getWorkspaceStoreState().fileStates[path] ?? EMPTY_WORKSPACE_FILES_STATE;
-        updateWorkspaceFileState(path, {
-          scanStatus: workspaceFilesScanStatusAfterFailure(previous.scanStatus),
-          loading: false,
-          refreshing: false,
-        });
-      }
-    },
-    [scanOptions],
+  useMissionCompletionLifecycle({
+    processingMissions,
+    isInboxProcessMission,
+    matchesActiveMission,
+    refreshProcessedItems,
+    refreshSourceRuns,
+    readMissionLog: readCompletedMissionLog,
+  });
+
+  const refreshWorkspaceFiles = useWorkspaceFilesLifecycle({ scanOptions, setError });
+  useInitialWorkspaceFilesScan(
+    explorerWorkspacePath,
+    shouldScanExplorerWorkspaceFiles,
+    refreshWorkspaceFiles,
   );
-
-  useEffect(() => {
-    if (!explorerWorkspacePath || !shouldScanExplorerWorkspaceFiles) return;
-    void refreshWorkspaceFiles(explorerWorkspacePath, true);
-  }, [explorerWorkspacePath, refreshWorkspaceFiles, shouldScanExplorerWorkspaceFiles]);
 
   const loadWorkspace = useCallback(
     async (
@@ -5099,17 +5013,9 @@ export function MainApp() {
     visibleAppMode,
   ]);
 
-  // The scan honours `.maruignore`, so an edit in Settings > Ignore list
-  // leaves every loaded list stale until we rescan.
-  useEffect(() => {
-    let dispose: (() => void) | null = null;
-    void listenMaruIgnoreUpdated((payload) => {
-      if (payload.workPath === explorerWorkspacePath) void refreshAfterIgnoreChange();
-    }).then((off) => {
-      dispose = off;
-    });
-    return () => dispose?.();
-  }, [explorerWorkspacePath, refreshAfterIgnoreChange]);
+  // The document-ops owner subscribes to ignore changes and keeps both scans
+  // coherent; this shell only composes the two canonical refresh commands.
+  useMaruIgnoreRescan(explorerWorkspacePath, refreshAfterIgnoreChange);
 
   // "Hide from the list" is an edit to `.maruignore`: the scan reads that
   // file, so the rescan is what actually drops the row. Settings > Ignore list
@@ -6653,98 +6559,21 @@ export function MainApp() {
     ],
   );
 
-  const prepareFilesPreviewDocument = useCallback(
-    async (entry: WorkspaceFileEntry) => {
-      const workspacePath = explorerWorkspacePath;
-      if (!workspacePath || !/\.(md|markdown|html|htm)$/i.test(entry.name)) return;
-      const existing = getEditorTabsState().tabs.find(
-        (tab) => tab.workspacePath === workspacePath && tab.entry.path === entry.path,
-      );
-      if (existing) return;
-      const request = ++filesPreviewRequestRef.current;
-      setFilesEditorErrors((current) => ({ ...current, [entry.path]: null }));
-      try {
-        const loaded = await readDocument(workspacePath, entry.path);
-        const payload = { ...loaded, path: entry.path, relPath: entry.relPath };
-        if (
-          request !== filesPreviewRequestRef.current ||
-          filesPreviewSelectionRef.current !== entry.path
-        ) {
-          return;
-        }
-        const knownEntry =
-          getWorkspaceStoreState().states[workspacePath]?.entries.find(
-            (candidate) => candidate.path === entry.path,
-          ) ?? null;
-        const tabEntry: VaultEntry = knownEntry ?? {
-          path: payload.path,
-          relPath: payload.relPath,
-          ownerWorkspacePath: workspacePath,
-          title: payload.title,
-          frontmatter: payload.meta,
-          updatedAt: entry.updatedAt,
-          wordCount: payload.body.trim() ? payload.body.trim().split(/\s+/).length : 0,
-          snippet: payload.body.slice(0, 240),
-          fileKind: payload.fileKind,
-          versionCount: 0,
-          links: [],
-        };
-        insertDocTab({
-          id: tabIdForEntry(tabEntry),
-          workspacePath,
-          visibility: explorerWorkspace?.visibility ?? explorerVisibility,
-          entry: tabEntry,
-          document: payload,
-          draftContent: payload.content,
-        });
-      } catch (err) {
-        if (request !== filesPreviewRequestRef.current) return;
-        const message = err instanceof Error ? err.message : String(err);
-        setFilesEditorErrors((current) => ({ ...current, [entry.path]: message }));
-      }
-    },
-    [explorerVisibility, explorerWorkspace?.visibility, explorerWorkspacePath],
-  );
-
-  const saveFilesPreviewDocument = useCallback(
-    async (contentOverride?: string) => {
-      const tab = filesPreviewTab;
-      if (!tab) return;
-      setFilesEditorErrors((current) => ({ ...current, [tab.entry.path]: null }));
-      const saved = await saveTab(tab.id, contentOverride, (message) => {
-        setFilesEditorErrors((current) => ({ ...current, [tab.entry.path]: message }));
-      });
-      if (saved) {
-        setFilesEditorErrors((current) => ({ ...current, [tab.entry.path]: null }));
-      }
-    },
-    [filesPreviewTab, saveTab],
-  );
-
-  const reloadFilesPreviewDocument = useCallback(async () => {
-    const tab = filesPreviewTab;
-    if (!tab) return;
-    if (
-      tab.draftContent !== tab.document.content &&
-      !window.confirm(t("files.editor.reloadConfirm"))
-    ) {
-      return;
-    }
-    try {
-      const loaded = await readDocument(tab.workspacePath, tab.entry.path);
-      const payload = { ...loaded, path: tab.entry.path, relPath: tab.entry.relPath };
-      mapDocTabs((candidate) =>
-        candidate.id === tab.id
-          ? { ...candidate, document: payload, draftContent: payload.content }
-          : candidate,
-      );
-      setFilesEditorErrors((current) => ({ ...current, [tab.entry.path]: null }));
-      void refreshWorkspaceFiles(tab.workspacePath);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      setFilesEditorErrors((current) => ({ ...current, [tab.entry.path]: message }));
-    }
-  }, [filesPreviewTab, refreshWorkspaceFiles, t]);
+  const {
+    prepareDocument: prepareFilesPreviewDocument,
+    saveDocument: saveFilesPreviewDocument,
+    reloadDocument: reloadFilesPreviewDocument,
+  } = useFilesDocumentLifecycle({
+    selectedPath: filesSelectedDocumentNode?.path ?? null,
+    workspacePath: explorerWorkspacePath,
+    workspaceVisibility: explorerVisibility,
+    workspaceEntryVisibility: explorerWorkspace?.visibility,
+    previewTab: filesPreviewTab,
+    setEditorError: setFilesEditorErrors,
+    saveTab,
+    refreshWorkspaceFiles,
+    confirmReload: () => window.confirm(t("files.editor.reloadConfirm")),
+  });
 
   const openFilesPreviewInDocuments = useCallback(() => {
     if (!filesPreviewTab) return;
