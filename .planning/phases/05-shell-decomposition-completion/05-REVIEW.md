@@ -1,8 +1,8 @@
 ---
 phase: 05-shell-decomposition-completion
-reviewed: 2026-08-26T22:03:52Z
+reviewed: 2026-08-27T07:41:12+09:00
 depth: standard
-files_reviewed: 65
+files_reviewed: 68
 files_reviewed_list:
   - scripts/check-bundle-budget.mjs
   - scripts/check-shell-extensibility.mjs
@@ -40,6 +40,7 @@ files_reviewed_list:
   - src/lib/modeAdapters/FilesModeAdapter.tsx
   - src/lib/modeAdapters/GapModeAdapter.tsx
   - src/lib/modeAdapters/GraphModeAdapter.tsx
+  - src/lib/modeAdapters/GraphModeAdapter.test.tsx
   - src/lib/modeAdapters/InboxModeAdapter.tsx
   - src/lib/modeAdapters/MeetingsModeAdapter.tsx
   - src/lib/modeAdapters/PkmModeAdapter.tsx
@@ -48,6 +49,8 @@ files_reviewed_list:
   - src/lib/modeAdapters/StudioModeAdapter.tsx
   - src/lib/modeAdapters/TasksModeAdapter.tsx
   - src/lib/modeAdapters/TodayModeAdapter.tsx
+  - src/lib/modeHostLifecycle.tsx
+  - src/lib/modeHostLifecycle.test.tsx
   - src/lib/modeRegistry.test.ts
   - src/lib/modeRegistry.tsx
   - src/lib/outlinePaneLifecycle.ts
@@ -70,62 +73,32 @@ files_reviewed_list:
   - src/lib/visualModeStore.ts
   - src/lib/workspaceBootLifecycle.ts
 findings:
-  critical: 2
-  warning: 1
+  critical: 0
+  warning: 0
   info: 0
-  total: 3
-status: issues_found
+  total: 0
+status: clean
 ---
 
 # Phase 05: Code Review Report
 
-**Reviewed:** 2026-08-26T22:03:52Z
+**Reviewed:** 2026-08-27T07:41:12+09:00
 **Depth:** standard
-**Files Reviewed:** 65
-**Status:** issues_found
+**Files Reviewed:** 68
+**Status:** clean
 
 ## Summary
 
-The shell extraction preserves the terminal handle type boundary, but it regresses the Graph mode's independent data lifecycle and introduces synchronous external-store writes during `MainApp` rendering. The new document-browser singleton also is not released when a workspace is removed. The current tests primarily assert architecture/source shape, so these runtime paths can pass the existing gates.
+All 68 scoped source files were re-reviewed at standard depth. The prior production fixes remain intact: Graph mode independently resolves, scans, and watches its effective graph-data path; graph writes refresh that path; host publication occurs after commit; and workspace removal clears document-browser state.
+
+The final tests now exercise the real registered graph watcher listener and its 150 ms debounce, verify delivery of a nested-vault delta to `GraphView`, and assert document-browser cleanup for index, favorites, selection, query/loading, and reveal intent. Focused tests, TypeScript typechecking, ESLint, and the terminal-session handle unit test pass.
 
 ## Narrative Findings (AI reviewer)
 
-## Critical Issues
-
-### CR-01: Graph mode no longer loads or watches its actual graph workspace
-
-**Classification:** BLOCKER
-
-**File:** `src/lib/modeAdapters/GraphModeAdapter.tsx:32-38`
-
-**Issue:** The adapter resolves `graphDataPath` and reads `workspaceStates[graphDataPath]`, but it never starts the cache/authoritative scan or `useVaultWatcherSync` lifecycle that was removed from `MainApp`. For the normal nested-vault case, that path is not the active workspace and has no other loader, so Graph opens with an empty model and subsequent filesystem changes are never observed. In addition, the new `onGraphChanged` callbacks rescan `inboxWorkspacePath`/`settingsWorkPath`, not this resolved `graphDataPath`, at `src/App.tsx:7169-7171` and `src/App.tsx:8289-8291`; applying a graph relation therefore cannot refresh the graph's own index.
-
-**Fix:** Move the previous graph cache scan, authoritative rescan, and watcher subscription into `GraphModeAdapter`, keyed by its resolved `graphDataPath` and visibility. Keep the adapter's own current-path/generation guard. Expose a graph-local refresh callback from that adapter (or pass the resolved data path through a narrow port) so `onGraphChanged` rescans exactly `graphDataPath`. Add a runtime test opening a nested vault that has not previously been loaded, then asserting initial entries and a watcher delta reach `GraphView`.
-
-### CR-02: Mode host stores are synchronously mutated during `MainApp` render
-
-**Classification:** BLOCKER
-
-**File:** `src/App.tsx:7356`, `src/App.tsx:7458`, `src/App.tsx:7552`, `src/App.tsx:7997-8069`
-
-**Issue:** These `bind*` calls notify `useSyncExternalStore` subscribers while `MainApp` is still rendering. The document-ops call is especially unconditional: it constructs a fresh nested host/prop object each render, and `documentOpsModeController.bind()` treats the changed object identities as new snapshots (`src/lib/documentOpsModeStore.ts:140-145`). Once Files, Studio, or Catalog is mounted, any unrelated `MainApp` render synchronously schedules that adapter during the parent render, producing React's cross-component update warning and risking render churn/inconsistent pre-commit snapshots. The communications and planning bindings have the same invalid render-time publication path when their memoized hosts change.
-
-**Fix:** Build stable host objects with `useMemo`, then publish them from `useLayoutEffect` (or a dedicated non-render bridge component) with complete dependencies. Do this for document-ops, communications, and planning bindings; the adapter should render `null` or a prior compatible host until the effect publishes. Add an integration test that mounts the active adapter, triggers an unrelated shell render, and asserts no React render-phase update warning and no extra adapter publication.
-
-## Warnings
-
-### WR-01: Removed workspace leaves document-browser singleton state and reveal intents live
-
-**Classification:** WARNING
-
-**File:** `src/lib/documentBrowserStore.ts:302-314`; `src/App.tsx:3758-3762`
-
-**Issue:** `cleanupDocumentBrowserWorkspace()` is implemented but has no production caller. Removing a workspace clears workspace, tab, and editor-surface records, but retains its document index, selection, favorites snapshot, and any nonce-bearing reveal intent in the global browser store. Re-adding the same path can render the stale snapshot before the post-render publisher catches up, and repeated add/remove cycles leak every old workspace snapshot.
-
-**Fix:** Import and invoke `cleanupDocumentBrowserWorkspace(path)` in `handleRemoveWorkspace` alongside `removeWorkspaceState` and editor-surface cleanup. Add a lifecycle test that publishes browser state and a reveal intent, removes the workspace, then confirms a fresh scope returns `EMPTY_STATE` with no pending intent.
+No Critical or Warning findings remain in the reviewed scope.
 
 ---
 
-_Reviewed: 2026-08-26T22:03:52Z_
+_Reviewed: 2026-08-27T07:41:12+09:00_
 _Reviewer: the agent (gsd-code-reviewer)_
 _Depth: standard_
