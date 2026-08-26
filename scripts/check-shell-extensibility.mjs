@@ -18,9 +18,9 @@ function replaceOnce(source, anchor, replacement, label) {
   return source.replace(anchor, replacement);
 }
 
-function run(command, args) {
+function run(command, args, env = {}) {
   process.stdout.write(`\n$ ${command} ${args.join(" ")}\n`);
-  const result = spawnSync(command, args, { stdio: "inherit" });
+  const result = spawnSync(command, args, { stdio: "inherit", env: { ...process.env, ...env } });
   if (result.status !== 0) throw new Error(`drill command failed: ${command} ${args.join(" ")}`);
 }
 
@@ -96,7 +96,11 @@ async function runAddModeDrill() {
     );
 
     run("pnpm", ["typecheck"]);
-    run("pnpm", ["test", "--", "src/lib/shellDecomposition.test.ts", "src/lib/modeRegistry.test.ts"]);
+    run(
+      "pnpm",
+      ["test", "--", "src/lib/shellDecomposition.test.ts", "src/lib/modeRegistry.test.ts"],
+      { PHASE5_EXTENSIBILITY_DRILL: "1" },
+    );
     run("pnpm", ["build"]);
     run("pnpm", ["check:bundle-budget"]);
   });

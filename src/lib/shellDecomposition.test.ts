@@ -70,15 +70,19 @@ describe("shell decomposition architecture", () => {
   });
 
   it("keeps every registered mode lazy and App free of eager adapter imports", async () => {
-    const [{ text: appSource }, registrySource] = await Promise.all([
+    const [{ text: appSource }, registrySource, settingsSource] = await Promise.all([
       readMainApp(),
       readFile("src/lib/modeRegistry.tsx", "utf8"),
+      readFile("src/lib/settings.ts", "utf8"),
     ]);
-    const ids = [...registrySource.matchAll(/^\s{2}([\w-]+): \{\n\s{4}id: /gm)].map((match) => match[1]);
-    expect(ids).toHaveLength(18);
-    expect(new Set(ids).size).toBe(18);
+    const ids = [...registrySource.matchAll(/^\s{2}"?([\w-]+)"?: \{\n\s{4}id: /gm)].map((match) => match[1]);
+    const modeUnion = settingsSource.match(/export type MaruAppMode =([\s\S]*?);/)?.[1] ?? "";
+    const sourceModeIds = [...modeUnion.matchAll(/"([\w-]+)"/g)].map((match) => match[1]);
+    expect([...ids].sort()).toEqual([...sourceModeIds].sort());
+    expect(ids).toHaveLength(process.env.PHASE5_EXTENSIBILITY_DRILL === "1" ? 19 : 18);
+    expect(new Set(ids).size).toBe(ids.length);
     for (const id of ids) {
-      const entry = registrySource.match(new RegExp(`\\n  ${id}: \\{([\\s\\S]*?)\\n  \\},`))?.[1] ?? "";
+      const entry = registrySource.match(new RegExp(`\\n  "?${id}"?: \\{([\\s\\S]*?)\\n  \\},`))?.[1] ?? "";
       expect(entry).toContain('load: () => import("./modeAdapters/');
       expect(registrySource).toMatch(new RegExp(`lazy\\(modeRegistry(?:\\.${id}|\\["${id}"\\])\\.load\\)`));
     }
