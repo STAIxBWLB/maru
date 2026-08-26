@@ -77,6 +77,17 @@ function freezeLines(lines: readonly string[]): readonly string[] {
   return Object.freeze([...lines]);
 }
 
+function reuseRecord<T extends Readonly<Record<string, unknown>>>(previous: T, next: T): T {
+  const previousKeys = Object.keys(previous);
+  if (
+    previousKeys.length === Object.keys(next).length &&
+    previousKeys.every((key) => previous[key] === next[key])
+  ) {
+    return previous;
+  }
+  return Object.freeze({ ...next }) as T;
+}
+
 function reportStoreError(error: unknown): void {
   setError(error instanceof Error ? error.message : String(error));
 }
@@ -218,12 +229,14 @@ export function createAgentRuntimeController(
       }
     },
     publishRuntime(next) {
+      const ai = reuseRecord(runtime.ai, next.ai);
+      const runtimeCommands = reuseRecord(runtime.runtimeCommands, next.runtimeCommands);
       if (
-        runtime.ai === next.ai &&
-        runtime.runtimeCommands === next.runtimeCommands &&
+        runtime.ai === ai &&
+        runtime.runtimeCommands === runtimeCommands &&
         runtime.tasksRoot === next.tasksRoot
       ) return;
-      runtime = Object.freeze(next);
+      runtime = Object.freeze({ ai, runtimeCommands, tasksRoot: next.tasksRoot });
       notify("runtime");
     },
   };
