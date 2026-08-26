@@ -1,5 +1,6 @@
 import {
   lazy,
+  memo,
   Suspense,
   useCallback,
   useEffect,
@@ -92,6 +93,7 @@ import type {
   TerminalPanelHandle,
 } from "./components/TerminalPanel";
 import { TerminalPanel } from "./components/TerminalPanel";
+import { recordShellSurfaceRender } from "./lib/shellSurfaceRenderProbe";
 import {
   buildMaruBackgroundContextEnv,
   scratchpadRootForWorkspace,
@@ -264,7 +266,7 @@ import {
   buildGmailScanQuery,
   normalizeGmailScanLimit,
 } from "./lib/gmail";
-import { LocaleContext, useLocaleState } from "./lib/i18n";
+import { LocaleContext, useLocaleState, useTranslation } from "./lib/i18n";
 import { listenForMenuCommand } from "./lib/menu";
 import { currentPlatform, isMacPlatform } from "./lib/platform";
 import {
@@ -618,6 +620,146 @@ function ActivityModeButton({
   );
 }
 
+interface ActivityRailProps {
+  visibleAppMode: AppMode;
+  rightWorkbenchMode: AppMode | null;
+  rightWorkbenchOpen: boolean;
+  e2eFlowEnabled: boolean;
+  diagramEnabled: boolean;
+  outlineOpen: boolean;
+  documentsPaneOpen: boolean;
+  settingsWorkPath: string | null;
+  onOpenPrimary: (mode: Exclude<AppMode, "pkm">) => void;
+  onOpenRight: (mode: RightWorkbenchMode) => void;
+  onOpenPkm: () => void;
+  onOpenCommandPalette: () => void;
+  onToggleOutline: () => void;
+  onToggleDocuments: () => void;
+  onOpenPreferences: () => void;
+}
+
+const ActivityRail = memo(function ActivityRail({
+  visibleAppMode,
+  rightWorkbenchMode,
+  rightWorkbenchOpen,
+  e2eFlowEnabled,
+  diagramEnabled,
+  outlineOpen,
+  documentsPaneOpen,
+  settingsWorkPath,
+  onOpenPrimary,
+  onOpenRight,
+  onOpenPkm,
+  onOpenCommandPalette,
+  onToggleOutline,
+  onToggleDocuments,
+  onOpenPreferences,
+}: ActivityRailProps) {
+  recordShellSurfaceRender("ActivityRail");
+  const { t } = useTranslation();
+
+  return (
+    <nav className="activity-rail" aria-label={t("activity.label")}>
+      <ActivityModeButton
+        label={t("mode.dashboard")}
+        active={visibleAppMode === "dashboard"}
+        secondaryActive={rightWorkbenchMode === "dashboard"}
+        icon={<LayoutDashboard size={20} strokeWidth={1.9} />}
+        onOpenPrimary={() => onOpenPrimary("dashboard")}
+        onOpenRight={() => onOpenRight("dashboard")}
+        openRightLabel={t("workbench.openRight", { name: t("mode.dashboard") })}
+      />
+      <ActivityModeButton
+        label={t("mode.pkm")}
+        active={visibleAppMode === "pkm" && !rightWorkbenchOpen}
+        icon={<FileText size={20} />}
+        onOpenPrimary={onOpenPkm}
+      />
+      <ActivityModeButton
+        label={t("mode.scratchpad")}
+        active={visibleAppMode === "scratchpad"}
+        icon={<StickyNote size={20} strokeWidth={1.9} />}
+        onOpenPrimary={() => onOpenPrimary("scratchpad")}
+      />
+      {([
+        ["files", FolderOpen],
+        ["inbox", Inbox],
+        ["comms", MessageSquare],
+        ["meetings", UsersRound],
+        ["today", CalendarCheck],
+        ["tasks", ListTodo],
+        ["drafts", PenLine],
+        ["gap", Diff],
+        ["agents", Bot],
+        ["catalog", LayoutGrid],
+        ["studio", Workflow],
+        ["sites", Globe],
+      ] as const).map(([mode, Icon]) => (
+        <ActivityModeButton
+          key={mode}
+          label={t(`mode.${mode}`)}
+          active={visibleAppMode === mode}
+          secondaryActive={rightWorkbenchMode === mode}
+          icon={<Icon size={20} strokeWidth={1.9} />}
+          onOpenPrimary={() => onOpenPrimary(mode)}
+          onOpenRight={() => onOpenRight(mode)}
+          openRightLabel={t("workbench.openRight", { name: t(`mode.${mode}`) })}
+        />
+      ))}
+      {e2eFlowEnabled ? (
+        <ActivityModeButton
+          label={t("mode.e2e")}
+          active={visibleAppMode === "e2e"}
+          secondaryActive={rightWorkbenchMode === "e2e"}
+          icon={<Route size={20} strokeWidth={1.9} />}
+          onOpenPrimary={() => onOpenPrimary("e2e")}
+          onOpenRight={() => onOpenRight("e2e")}
+          openRightLabel={t("workbench.openRight", { name: t("mode.e2e") })}
+        />
+      ) : null}
+      {diagramEnabled ? (
+        <ActivityModeButton
+          label={t("mode.diagram")}
+          active={visibleAppMode === "diagram"}
+          secondaryActive={rightWorkbenchMode === "diagram"}
+          icon={<Network size={20} strokeWidth={1.9} />}
+          onOpenPrimary={() => onOpenPrimary("diagram")}
+          onOpenRight={() => onOpenRight("diagram")}
+          openRightLabel={t("workbench.openRight", { name: t("mode.diagram") })}
+        />
+      ) : null}
+      <ActivityModeButton
+        label={t("mode.graph")}
+        active={visibleAppMode === "graph"}
+        secondaryActive={rightWorkbenchMode === "graph"}
+        icon={<Waypoints size={20} strokeWidth={1.9} />}
+        onOpenPrimary={() => onOpenPrimary("graph")}
+        onOpenRight={() => onOpenRight("graph")}
+        openRightLabel={t("workbench.openRight", { name: t("mode.graph") })}
+      />
+      <button type="button" className="activity-button" onClick={onOpenCommandPalette} title={t("sidebar.commandPalette")} aria-label={t("sidebar.commandPalette")}>
+        <Command size={19} />
+      </button>
+      {visibleAppMode === "pkm" || visibleAppMode === "inbox" ? (
+        <button type="button" className={outlineOpen ? "activity-button active" : "activity-button"} onClick={onToggleOutline} title={outlineOpen ? t("layout.hideRightPane") : t("layout.showRightPane")} aria-label={outlineOpen ? t("layout.hideRightPane") : t("layout.showRightPane")}>
+          {outlineOpen ? <PanelRightClose size={19} /> : <PanelRightOpen size={19} />}
+        </button>
+      ) : null}
+      {visibleAppMode === "pkm" ? (
+        <button type="button" className={documentsPaneOpen ? "activity-button active" : "activity-button"} onClick={onToggleDocuments} title={documentsPaneOpen ? t("layout.hideDocuments") : t("layout.showDocuments")} aria-label={documentsPaneOpen ? t("layout.hideDocuments") : t("layout.showDocuments")}>
+          <FileText size={19} />
+        </button>
+      ) : null}
+      <span className="activity-spacer" />
+      {settingsWorkPath ? (
+        <button type="button" className="activity-button" onClick={onOpenPreferences} title={t("mode.system")} aria-label={t("mode.system")}>
+          <Settings2 size={20} />
+        </button>
+      ) : null}
+    </nav>
+  );
+});
+
 interface InboxCarry {
   decision: InboxDecision;
   classification: InboxClassification | null;
@@ -787,7 +929,8 @@ function clampPaneWidth(value: number, min: number, max: number): number {
   return Math.round(Math.min(upper, Math.max(min, value)));
 }
 
-function MainApp() {
+export function MainApp() {
+  recordShellSurfaceRender("MainApp");
   const localeValue = useLocaleState();
   const { t, locale, setLocale } = localeValue;
   const approvalGate = useApprovalGate();
@@ -8361,6 +8504,73 @@ function MainApp() {
     void startWindowDrag().catch(() => {});
   }, []);
 
+  const openPkmFromActivityRail = useCallback(() => {
+    updateLayoutSettings({ editorSplitOpen: false });
+    setPersistedAppMode("pkm");
+  }, [setPersistedAppMode, updateLayoutSettings]);
+  const toggleOutlineFromActivityRail = useCallback(
+    () => updateLayoutSettings({ outlineOpen: !outlineOpen }),
+    [outlineOpen, updateLayoutSettings],
+  );
+  const toggleDocumentsFromActivityRail = useCallback(
+    () => updateLayoutSettings({ documentsPaneOpen: !documentsPaneOpen }),
+    [documentsPaneOpen, updateLayoutSettings],
+  );
+
+  const handleExplorerWorkspaceVisibilityChange = useCallback(
+    (visibility: WorkspaceVisibility) => {
+      setExplorerVisibility(visibility);
+      const nextPath = workspaceRegistry.activeByVisibility[visibility];
+      if (nextPath && !workspaceStates[nextPath]?.entries.length) {
+        void loadWorkspace(nextPath, visibility);
+      }
+    },
+    [loadWorkspace, workspaceRegistry.activeByVisibility, workspaceStates],
+  );
+  const handleAddPublicWorkspace = useCallback(
+    () => openAddWorkspaceDialog("public"),
+    [openAddWorkspaceDialog],
+  );
+  const handleRevealInFiles = useCallback(
+    (targetPath: string) => {
+      if (!explorerWorkspacePath) return;
+      revealPathInFiles(explorerWorkspacePath, explorerVisibility, targetPath);
+    },
+    [explorerVisibility, explorerWorkspacePath, revealPathInFiles],
+  );
+  const handleIgnoreExplorerEntry = useCallback(
+    (relPath: string) => void ignoreEntry(relPath),
+    [ignoreEntry],
+  );
+  const handleRefreshExplorer = useCallback(() => void refreshCurrent(), [refreshCurrent]);
+  const handleCloseDocumentsPane = useCallback(
+    () => updateLayoutSettings({ documentsPaneOpen: false }),
+    [updateLayoutSettings],
+  );
+  const handleExplorerRevealHandled = useCallback(() => setPendingExplorerReveal(null), []);
+  const handleApplyFileQueueToDestination = useCallback(
+    (
+      targetPath: string,
+      targetKind: "file" | "directory",
+      operation: FileStoreOperation,
+      itemIds?: string[],
+    ) => {
+      void applySelectedFileQueueToDestination(targetPath, targetKind, operation, itemIds);
+    },
+    [applySelectedFileQueueToDestination],
+  );
+  const handleApplyExplorerDragToDestination = useCallback(
+    (
+      payload: ExplorerDragPayload,
+      targetPath: string,
+      targetKind: "file" | "directory",
+      operation: FileStoreOperation,
+    ) => {
+      void applyExplorerDragSourcesToDestination(payload, targetPath, targetKind, operation);
+    },
+    [applyExplorerDragSourcesToDestination],
+  );
+
   // Gate first paint on the active locale dictionary: the dicts are lazy
   // chunks now, and rendering before load would flash raw i18n keys.
   if (!localeValue.ready) return null;
@@ -8482,133 +8692,23 @@ function MainApp() {
           </div>
         )}
 
-        <nav className="activity-rail" aria-label={t("activity.label")}>
-          <ActivityModeButton
-            label={t("mode.dashboard")}
-            active={visibleAppMode === "dashboard"}
-            secondaryActive={rightWorkbenchMode === "dashboard"}
-            icon={<LayoutDashboard size={20} strokeWidth={1.9} />}
-            onOpenPrimary={() => openPrimaryWorkbenchMode("dashboard")}
-            onOpenRight={() => openWorkbenchModeRight("dashboard")}
-            openRightLabel={t("workbench.openRight", { name: t("mode.dashboard") })}
-          />
-          <ActivityModeButton
-            label={t("mode.pkm")}
-            active={visibleAppMode === "pkm" && !rightWorkbenchOpen}
-            icon={<FileText size={20} />}
-            onOpenPrimary={() => {
-              updateLayoutSettings({ editorSplitOpen: false });
-              setPersistedAppMode("pkm");
-            }}
-          />
-          <ActivityModeButton
-            label={t("mode.scratchpad")}
-            active={visibleAppMode === "scratchpad"}
-            icon={<StickyNote size={20} strokeWidth={1.9} />}
-            onOpenPrimary={() => openPrimaryWorkbenchMode("scratchpad")}
-          />
-          {([
-            ["files", FolderOpen],
-            ["inbox", Inbox],
-            ["comms", MessageSquare],
-            ["meetings", UsersRound],
-            ["today", CalendarCheck],
-            ["tasks", ListTodo],
-            ["drafts", PenLine],
-            ["gap", Diff],
-            ["agents", Bot],
-            ["catalog", LayoutGrid],
-            ["studio", Workflow],
-            ["sites", Globe],
-          ] as const).map(([mode, Icon]) => (
-            <ActivityModeButton
-              key={mode}
-              label={t(`mode.${mode}`)}
-              active={visibleAppMode === mode}
-              secondaryActive={rightWorkbenchMode === mode}
-              icon={<Icon size={20} strokeWidth={1.9} />}
-              onOpenPrimary={() => openPrimaryWorkbenchMode(mode)}
-              onOpenRight={() => openWorkbenchModeRight(mode)}
-              openRightLabel={t("workbench.openRight", { name: t(`mode.${mode}`) })}
-            />
-          ))}
-          {e2eFlowEnabled ? (
-            <ActivityModeButton
-              label={t("mode.e2e")}
-              active={visibleAppMode === "e2e"}
-              secondaryActive={rightWorkbenchMode === "e2e"}
-              icon={<Route size={20} strokeWidth={1.9} />}
-              onOpenPrimary={() => openPrimaryWorkbenchMode("e2e")}
-              onOpenRight={() => openWorkbenchModeRight("e2e")}
-              openRightLabel={t("workbench.openRight", { name: t("mode.e2e") })}
-            />
-          ) : null}
-          {diagramEnabled ? (
-            <ActivityModeButton
-              label={t("mode.diagram")}
-              active={visibleAppMode === "diagram"}
-              secondaryActive={rightWorkbenchMode === "diagram"}
-              icon={<Network size={20} strokeWidth={1.9} />}
-              onOpenPrimary={() => openPrimaryWorkbenchMode("diagram")}
-              onOpenRight={() => openWorkbenchModeRight("diagram")}
-              openRightLabel={t("workbench.openRight", { name: t("mode.diagram") })}
-            />
-          ) : null}
-          <ActivityModeButton
-            label={t("mode.graph")}
-            active={visibleAppMode === "graph"}
-            secondaryActive={rightWorkbenchMode === "graph"}
-            icon={<Waypoints size={20} strokeWidth={1.9} />}
-            onOpenPrimary={() => openPrimaryWorkbenchMode("graph")}
-            onOpenRight={() => openWorkbenchModeRight("graph")}
-            openRightLabel={t("workbench.openRight", { name: t("mode.graph") })}
-          />
-          <button
-            type="button"
-            className="activity-button"
-            onClick={openCommandPalette}
-            title={t("sidebar.commandPalette")}
-            aria-label={t("sidebar.commandPalette")}
-          >
-            <Command size={19} />
-          </button>
-          {visibleAppMode === "pkm" || visibleAppMode === "inbox" ? (
-            <button
-              type="button"
-              className={outlineOpen ? "activity-button active" : "activity-button"}
-              onClick={() => updateLayoutSettings({ outlineOpen: !outlineOpen })}
-              title={outlineOpen ? t("layout.hideRightPane") : t("layout.showRightPane")}
-              aria-label={outlineOpen ? t("layout.hideRightPane") : t("layout.showRightPane")}
-            >
-              {outlineOpen ? <PanelRightClose size={19} /> : <PanelRightOpen size={19} />}
-            </button>
-          ) : null}
-          {visibleAppMode === "pkm" ? (
-            <button
-              type="button"
-              className={documentsPaneOpen ? "activity-button active" : "activity-button"}
-              onClick={() => updateLayoutSettings({ documentsPaneOpen: !documentsPaneOpen })}
-              title={documentsPaneOpen ? t("layout.hideDocuments") : t("layout.showDocuments")}
-              aria-label={
-                documentsPaneOpen ? t("layout.hideDocuments") : t("layout.showDocuments")
-              }
-            >
-              <FileText size={19} />
-            </button>
-          ) : null}
-          <span className="activity-spacer" />
-          {settingsWorkPath ? (
-            <button
-              type="button"
-              className="activity-button"
-              onClick={openPreferences}
-              title={t("mode.system")}
-              aria-label={t("mode.system")}
-            >
-              <Settings2 size={20} />
-            </button>
-          ) : null}
-        </nav>
+        <ActivityRail
+          visibleAppMode={visibleAppMode}
+          rightWorkbenchMode={rightWorkbenchMode}
+          rightWorkbenchOpen={rightWorkbenchOpen}
+          e2eFlowEnabled={e2eFlowEnabled}
+          diagramEnabled={diagramEnabled}
+          outlineOpen={outlineOpen}
+          documentsPaneOpen={documentsPaneOpen}
+          settingsWorkPath={settingsWorkPath}
+          onOpenPrimary={openPrimaryWorkbenchMode}
+          onOpenRight={openWorkbenchModeRight}
+          onOpenPkm={openPkmFromActivityRail}
+          onOpenCommandPalette={openCommandPalette}
+          onToggleOutline={toggleOutlineFromActivityRail}
+          onToggleDocuments={toggleDocumentsFromActivityRail}
+          onOpenPreferences={openPreferences}
+        />
 
         <div
           className={
@@ -9096,14 +9196,8 @@ function MainApp() {
                 workspaceVisibility={explorerVisibility}
                 publicWorkspaceAvailable={publicWorkspaceAvailable}
                 activeWorkspaceLabel={explorerWorkspaceCaption}
-                onWorkspaceVisibilityChange={(visibility) => {
-                  setExplorerVisibility(visibility);
-                  const nextPath = workspaceRegistry.activeByVisibility[visibility];
-                  if (nextPath && !workspaceStates[nextPath]?.entries.length) {
-                    void loadWorkspace(nextPath, visibility);
-                  }
-                }}
-                onAddPublicWorkspace={() => openAddWorkspaceDialog("public")}
+                onWorkspaceVisibilityChange={handleExplorerWorkspaceVisibilityChange}
+                onAddPublicWorkspace={handleAddPublicWorkspace}
                 browserMode={maruSettings.ui.documentBrowserMode}
                 sortKey={maruSettings.ui.documentSortKey}
                 documentLabelMode={maruSettings.ui.documentLabelMode}
@@ -9114,18 +9208,11 @@ function MainApp() {
                 onCollapsedTreeFoldersChange={setCollapsedTreeFolders}
                 onSelect={selectEntry}
                 onRevealInFinder={revealTargetInFinder}
-                onRevealInFiles={(targetPath) => {
-                  if (!explorerWorkspacePath) return;
-                  revealPathInFiles(
-                    explorerWorkspacePath,
-                    explorerVisibility,
-                    targetPath,
-                  );
-                }}
-                onIgnore={(relPath) => void ignoreEntry(relPath)}
-                onRefresh={() => void refreshCurrent()}
+                onRevealInFiles={handleRevealInFiles}
+                onIgnore={handleIgnoreExplorerEntry}
+                onRefresh={handleRefreshExplorer}
                 refreshing={explorerWorkspaceState.refreshing}
-                onClose={() => updateLayoutSettings({ documentsPaneOpen: false })}
+                onClose={handleCloseDocumentsPane}
                 searchInputRef={searchInputRef}
                 paneRef={documentsPaneRef}
                 vaultPath={explorerWorkspacePath}
@@ -9134,7 +9221,7 @@ function MainApp() {
                     ? pendingExplorerReveal.targetPath
                     : null
                 }
-                onRevealHandled={() => setPendingExplorerReveal(null)}
+                onRevealHandled={handleExplorerRevealHandled}
                 favorites={maruSettings.ui.favorites}
                 onOpenFavorite={openFavorite}
                 onRemoveFavorite={removeFavorite}
@@ -9142,22 +9229,8 @@ function MainApp() {
                 isFavorite={isFavorite}
                 isFavoriteMissing={isFavoriteMissing}
                 selectedFileQueueCount={selectedQueuedFileQueueItems.length}
-                onApplyFileQueueToDestination={(targetPath, targetKind, operation, itemIds) => {
-                  void applySelectedFileQueueToDestination(
-                    targetPath,
-                    targetKind,
-                    operation,
-                    itemIds,
-                  );
-                }}
-                onApplyExplorerDragToDestination={(payload, targetPath, targetKind, operation) => {
-                  void applyExplorerDragSourcesToDestination(
-                    payload,
-                    targetPath,
-                    targetKind,
-                    operation,
-                  );
-                }}
+                onApplyFileQueueToDestination={handleApplyFileQueueToDestination}
+                onApplyExplorerDragToDestination={handleApplyExplorerDragToDestination}
               />
             ) : null}
             {documentsPaneOpen ? (

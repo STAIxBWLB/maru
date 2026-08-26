@@ -2,7 +2,32 @@
 
 import { act, useSyncExternalStore } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+vi.mock("@tauri-apps/api/core", () => ({
+  Channel: class Channel<T> {
+    onmessage: ((message: T) => void) | null = null;
+  },
+  invoke: vi.fn().mockResolvedValue(null),
+}));
+vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn().mockResolvedValue(() => {}) }));
+vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn(), save: vi.fn() }));
+vi.mock("../lib/today", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../lib/today")>()),
+  todayLogicalDay: vi.fn().mockResolvedValue({ logicalDay: "2026-08-26" }),
+}));
+
+import { MainApp } from "../App";
+import {
+  getEditorTabsState,
+  replaceAllDocTabs,
+  updateTabDraft,
+  type EditorTab,
+} from "../lib/editorTabsStore";
+import { registerDictionaries } from "../lib/i18n";
+import { en } from "../lib/i18n/locales/en";
+import { ko } from "../lib/i18n/locales/ko";
+import { setShellSurfaceRenderObserverForTest } from "../lib/shellSurfaceRenderProbe";
 
 
 async function loadEditorSurface() {
@@ -16,89 +41,88 @@ type EditorPaneScope = {
   tabId: string;
 };
 
-function dispatchEditorInput(input: HTMLInputElement, value: string) {
-  const valueSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
-  valueSetter?.call(input, value);
-  input.dispatchEvent(new Event("input", { bubbles: true }));
-  input.dispatchEvent(new Event("change", { bubbles: true }));
-}
-
 describe("Editor surface render isolation", () => {
   let container: HTMLDivElement;
   let root: Root | null = null;
+  let restoreRenderObserver: (() => void) | null = null;
 
   beforeEach(() => {
     (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    registerDictionaries({ en, ko });
+    Object.defineProperty(window, "localStorage", {
+      configurable: true,
+      value: {
+        getItem: () => "en",
+        setItem: () => {},
+      },
+    });
     container = document.createElement("div");
     document.body.appendChild(container);
   });
 
   afterEach(async () => {
+    restoreRenderObserver?.();
+    restoreRenderObserver = null;
     await act(async () => {
       root?.unmount();
     });
     root = null;
+    replaceAllDocTabs([], {
+      activeTabId: null,
+      leftActiveTabId: null,
+      rightActiveTabId: null,
+      focusedEditorGroup: "left",
+    });
     container.remove();
   });
 
-  it("typing in either editor leaves the opposite editor and unrelated shell probes unchanged", async () => {
-    const surface = await loadEditorSurface();
+  it("keeps the real MainApp shell surfaces isolated for left and right draft publishes", async () => {
     const renders = new Map<string, number>();
-    const count = (name: string) => renders.set(name, (renders.get(name) ?? 0) + 1);
-    const left: EditorPaneScope = { workspacePath: "/workspace", group: "left", tabId: "left.md" };
-    const right: EditorPaneScope = { workspacePath: "/workspace", group: "right", tabId: "right.md" };
-
-    function EditorProbe({ scope, label }: { scope: EditorPaneScope; label: string }) {
-      const documentSlice = useSyncExternalStore(
-        surface.subscribeEditorDocument(scope),
-        () => surface.getEditorDocumentSlice(scope),
-        () => surface.getEditorDocumentSlice(scope),
-      );
-      count(label);
-      return (
-        <input
-          aria-label={label}
-          value={documentSlice.draftContent}
-          onChange={(event) => surface.updateEditorPaneDraft(scope, event.target.value)}
-        />
-      );
-    }
-
-    function ShellProbe({ name }: { name: "DocumentList" | "TerminalPanel" | "activity-rail" }) {
-      count(name);
-      return <div data-probe={name} />;
-    }
-
+    restoreRenderObserver = setShellSurfaceRenderObserverForTest((target) => {
+      renders.set(target, (renders.get(target) ?? 0) + 1);
+    });
+    const left = {
+      id: "left.md",
+      workspacePath: "/workspace",
+      entry: { path: "/workspace/left.md", relPath: "left.md", title: "left" },
+      document: { path: "/workspace/left.md", relPath: "left.md", title: "left", content: "left", body: "left", meta: {}, fileKind: "markdown" },
+      draftContent: "left",
+    } as EditorTab;
+    const right = {
+      id: "right.md",
+      workspacePath: "/workspace",
+      entry: { path: "/workspace/right.md", relPath: "right.md", title: "right" },
+      document: { path: "/workspace/right.md", relPath: "right.md", title: "right", content: "right", body: "right", meta: {}, fileKind: "markdown" },
+      draftContent: "right",
+    } as EditorTab;
+    replaceAllDocTabs([left, right], {
+      activeTabId: left.id,
+      leftActiveTabId: left.id,
+      rightActiveTabId: right.id,
+      focusedEditorGroup: "left",
+    });
     root = createRoot(container);
     await act(async () => {
-      root?.render(
-        <>
-          <EditorProbe scope={left} label="left-editor" />
-          <EditorProbe scope={right} label="right-editor" />
-          <ShellProbe name="DocumentList" />
-          <ShellProbe name="TerminalPanel" />
-          <ShellProbe name="activity-rail" />
-        </>,
-      );
+      root?.render(<MainApp />);
     });
+    const shellTargets = ["DocumentList", "TerminalPanel", "ActivityRail"] as const;
+    const before = new Map(shellTargets.map((target) => [target, renders.get(target) ?? 0]));
 
-    const leftBefore = renders.get("left-editor");
-    const rightBefore = renders.get("right-editor");
-    const shellBefore = ["DocumentList", "TerminalPanel", "activity-rail"].map((name) => renders.get(name));
     await act(async () => {
-      dispatchEditorInput(container.querySelector<HTMLInputElement>("[aria-label='left-editor']")!, "left edit");
+      updateTabDraft(left.id, "left dirty");
     });
-    expect(renders.get("left-editor")).toBe((leftBefore ?? 0) + 1);
-    expect(renders.get("right-editor")).toBe(rightBefore);
-    expect(["DocumentList", "TerminalPanel", "activity-rail"].map((name) => renders.get(name))).toEqual(shellBefore);
+    expect(getEditorTabsState().tabs.find((tab) => tab.id === left.id)?.draftContent).toBe("left dirty");
+    expect(getEditorTabsState().tabs.find((tab) => tab.id === right.id)?.draftContent).toBe("right");
+    expect(renders.get("MainApp")).toBeGreaterThan(0);
+    for (const target of shellTargets) expect(renders.get(target) ?? 0).toBe(before.get(target));
 
-    const rightAfterLeft = renders.get("right-editor");
     await act(async () => {
-      dispatchEditorInput(container.querySelector<HTMLInputElement>("[aria-label='right-editor']")!, "right edit");
+      updateTabDraft(left.id, "left dirty again");
+      updateTabDraft(right.id, "right dirty");
     });
-    expect(renders.get("right-editor")).toBe((rightAfterLeft ?? 0) + 1);
-    expect(renders.get("left-editor")).toBe((leftBefore ?? 0) + 1);
-    expect(["DocumentList", "TerminalPanel", "activity-rail"].map((name) => renders.get(name))).toEqual(shellBefore);
+    expect(getEditorTabsState().tabs.find((tab) => tab.id === left.id)?.draftContent).toBe("left dirty again");
+    expect(getEditorTabsState().tabs.find((tab) => tab.id === right.id)?.draftContent).toBe("right dirty");
+    for (const target of shellTargets) expect(renders.get(target) ?? 0).toBe(before.get(target));
   });
 
   it("publishes only the changed render-domain subscriber", async () => {

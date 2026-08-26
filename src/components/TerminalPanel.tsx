@@ -54,6 +54,7 @@ import {
 import { isAgentKind } from "../lib/agentCapabilities";
 import { clipboardReadText, clipboardWriteText } from "../lib/clipboard";
 import { useTranslation } from "../lib/i18n";
+import { recordShellSurfaceRender } from "../lib/shellSurfaceRenderProbe";
 import type {
   MaruSettings,
   TerminalDock,
@@ -293,6 +294,7 @@ export const TerminalPanel = memo(
     },
     ref,
   ) {
+    recordShellSurfaceRender("TerminalPanel");
     const { t } = useTranslation();
     const [state, dispatch] = useReducer(
       terminalTabsReducer,

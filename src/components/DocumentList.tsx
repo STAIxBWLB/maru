@@ -51,6 +51,7 @@ import {
   type DocumentIndex,
 } from "../lib/documentIndex";
 import { useTranslation } from "../lib/i18n";
+import { recordShellSurfaceRender } from "../lib/shellSurfaceRenderProbe";
 import { clampMenuPosition } from "../lib/menu";
 import { useContextMenuKeyboard } from "../lib/useContextMenuKeyboard";
 import type {
@@ -170,6 +171,7 @@ export const DocumentList = memo(function DocumentList({
   onApplyFileQueueToDestination,
   onApplyExplorerDragToDestination,
 }: DocumentListProps) {
+  recordShellSurfaceRender("DocumentList");
   const { t, locale } = useTranslation();
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const lastSentQueryRef = useRef(query);
