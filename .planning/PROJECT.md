@@ -52,6 +52,9 @@ real files the user owns, and nothing is lost if Maru is uninstalled.
 - ✓ One shared path-containment helper is the canonical one for new commands —
   Phase 2 (`crate::paths::ensure_within`, lexical, plus `require_absolute`
   guarding `maru_home()`/`install_root_base()`)
+- ✓ `OutlinePane` and `EditorPane` own keyed module-store state instead of
+  71/55-prop bundles — Phase 4 (four structural props each, real MainApp
+  render-isolation proof, preview marked-node identity, native WKWebView smoke)
 
 ### Active
 
@@ -59,9 +62,8 @@ real files the user owns, and nothing is lost if Maru is uninstalled.
      .planning/codebase/CONCERNS.md. -->
 
 - [ ] Errors the frontend branches on carry a typed `code`, not a string prefix
-- [ ] `src/App.tsx` no longer owns pane state - `OutlinePane`, `EditorPane`,
-      `DocumentList`, and `TerminalPanel` read module stores instead of 71/55/40/25-prop
-      bundles
+- [ ] Complete shell decomposition: move `DocumentList` and `TerminalPanel`
+      state plus mode routing out of `src/App.tsx`
 
 ### Out of Scope
 
@@ -187,4 +189,4 @@ ones this milestone can actually break are listed here.
 | 64 SPEC constraints recorded as invariants, not decisions | 0 ADRs in the set - nothing is decision-locked, so a future ADR can override any of them | - Pending |
 
 ---
-*Last updated: 2026-08-23 after Phase 2*
+*Last updated: 2026-08-26 after Phase 4*
