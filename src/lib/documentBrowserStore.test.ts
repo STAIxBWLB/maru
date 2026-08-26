@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
+import { buildDocumentIndex } from "./documentIndex";
 import {
   acknowledgeDocumentReveal,
   getDocumentBrowserSlice,
@@ -58,6 +59,17 @@ describe("documentBrowserStore", () => {
   it("drops document state and pending reveal intents when a workspace is removed", () => {
     publishDocumentBrowser(scope, {
       query: "stale query",
+      documentIndex: buildDocumentIndex([{
+        path: "/tmp/workspace/one.md",
+        relPath: "one.md",
+        title: "one",
+        frontmatter: {},
+        updatedAt: null,
+        wordCount: 0,
+        snippet: "",
+        fileKind: "markdown",
+        versionCount: 0,
+      }]),
       selectedPath: "/tmp/workspace/one.md",
       favorites: [{ kind: "file", relPath: "one.md", label: "one", addedAt: "2026-08-27T00:00:00Z" }],
     });
@@ -66,7 +78,9 @@ describe("documentBrowserStore", () => {
     cleanupDocumentBrowserWorkspace(scope.workspacePath);
 
     expect(getDocumentBrowserSlice(scope, "queryFilter")).toMatchObject({ query: "", loading: false });
+    expect(getDocumentBrowserSlice(scope, "queryFilter").documentIndex.entries).toEqual([]);
     expect(getDocumentBrowserSlice(scope, "selection").selectedPath).toBeNull();
+    expect(getDocumentBrowserSlice(scope, "favorites").favorites).toEqual([]);
     expect(getDocumentBrowserSlice(scope, "reveal").intent).toBeNull();
   });
 });
