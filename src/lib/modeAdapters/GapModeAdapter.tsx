@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useCallback, useEffect } from "react";
 
 import { GapPane } from "../../components/gap/GapPane";
 import { knowledgeModeController, useGapModeSlice } from "../knowledgeModeStore";
@@ -16,6 +16,15 @@ export function GapModeAdapter({ commands }: ModeAdapterProps) {
     null;
   const entries = useWorkspaceEntries(workPath);
   const slice = useGapModeSlice();
+  // GapPane uses this callback as a workspace-reset dependency. It must not
+  // change when consuming a nonce-bearing Drafts handoff, otherwise the reset
+  // races the selection and leaves no active report.
+  const exitReferenceFocus = useCallback(() => {
+    knowledgeModeController.clearGraphReference("gap");
+  }, []);
+  const consumeInitialDraft = useCallback(() => {
+    knowledgeModeController.consumeGapDraft(slice.initialDraftRequest);
+  }, [slice.initialDraftRequest]);
 
   useEffect(() => {
     knowledgeModeController.setGapWorkspace(workPath);
@@ -28,13 +37,13 @@ export function GapModeAdapter({ commands }: ModeAdapterProps) {
       entries={entries}
       initialDraftId={slice.initialDraftId}
       initialDraftRequest={slice.initialDraftRequest}
-      onConsumeInitialDraftId={() => knowledgeModeController.consumeGapDraft(slice.initialDraftRequest)}
+      onConsumeInitialDraftId={consumeInitialDraft}
       onOpenInGraph={(request) => {
         if (knowledgeModeController.openGraphReference("gap", request, workPath)) {
           commands.openGraphPanel?.();
         }
       }}
-      onExitReferenceFocus={() => knowledgeModeController.clearGraphReference("gap")}
+      onExitReferenceFocus={exitReferenceFocus}
     />
   );
 }

@@ -52,22 +52,22 @@ describe("modeRegistry", () => {
     expect(typeof getModeDescriptor("sites")?.load).toBe("function");
   });
 
-  it("registers Agents as a primary-only lazy surface", () => {
+  it("registers Agents as a lazy surface in both workbench placements", () => {
     expect(getModeDescriptor("agents")).toMatchObject({
       id: "agents",
-      placements: ["primary"],
+      placements: ["primary", "right"],
       fallback: "mode-loading",
     });
     expect(typeof getModeDescriptor("agents")?.load).toBe("function");
   });
 
-  it("registers Inbox as a dedicated primary lazy surface", () => {
-    expect(getModeDescriptor("inbox")).toMatchObject({ id: "inbox", placements: ["primary"] });
+  it("registers Inbox as a dedicated lazy surface in both workbench placements", () => {
+    expect(getModeDescriptor("inbox")).toMatchObject({ id: "inbox", placements: ["primary", "right"] });
     expect(typeof getModeDescriptor("inbox")?.load).toBe("function");
   });
 
-  it("registers Comms as a dedicated primary lazy surface", () => {
-    expect(getModeDescriptor("comms")).toMatchObject({ id: "comms", placements: ["primary"] });
+  it("registers Comms as a dedicated lazy surface in both workbench placements", () => {
+    expect(getModeDescriptor("comms")).toMatchObject({ id: "comms", placements: ["primary", "right"] });
     expect(typeof getModeDescriptor("comms")?.load).toBe("function");
   });
 
@@ -78,21 +78,24 @@ describe("modeRegistry", () => {
     }
   });
 
-  it("registers Drafts and Gap as dedicated primary lazy surfaces", () => {
-    expect(getModeDescriptor("drafts")).toMatchObject({ id: "drafts", placements: ["primary"] });
-    expect(getModeDescriptor("gap")).toMatchObject({ id: "gap", placements: ["primary"] });
+  it("registers Drafts and Gap as dedicated lazy surfaces in both workbench placements", () => {
+    expect(getModeDescriptor("drafts")).toMatchObject({ id: "drafts", placements: ["primary", "right"] });
+    expect(getModeDescriptor("gap")).toMatchObject({ id: "gap", placements: ["primary", "right"] });
     expect(typeof getModeDescriptor("drafts")?.load).toBe("function");
     expect(typeof getModeDescriptor("gap")?.load).toBe("function");
   });
 
-  it("registers Files as a dedicated primary lazy surface", () => {
-    expect(getModeDescriptor("files")).toMatchObject({ id: "files", placements: ["primary"] });
+  it("registers Files as a dedicated lazy surface in both workbench placements", () => {
+    expect(getModeDescriptor("files")).toMatchObject({
+      id: "files",
+      placements: ["primary", "right"],
+    });
     expect(typeof getModeDescriptor("files")?.load).toBe("function");
   });
 
-  it("registers Studio and Catalog as dedicated primary lazy surfaces", () => {
-    expect(getModeDescriptor("studio")).toMatchObject({ id: "studio", placements: ["primary"] });
-    expect(getModeDescriptor("catalog")).toMatchObject({ id: "catalog", placements: ["primary"] });
+  it("registers Studio and Catalog as dedicated lazy surfaces in both workbench placements", () => {
+    expect(getModeDescriptor("studio")).toMatchObject({ id: "studio", placements: ["primary", "right"] });
+    expect(getModeDescriptor("catalog")).toMatchObject({ id: "catalog", placements: ["primary", "right"] });
     expect(typeof getModeDescriptor("studio")?.load).toBe("function");
     expect(typeof getModeDescriptor("catalog")?.load).toBe("function");
   });

@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useCallback, useEffect } from "react";
 
 import { DraftsPane } from "../../components/drafts/DraftsPane";
 import { useAgentRegistrySlice } from "../agentRuntimeModeStore";
@@ -9,6 +9,7 @@ import { useWorkspaceEntries, useWorkspaceRegistry } from "../workspaceStore";
 
 /** Dedicated lazy Drafts surface composed from canonical workspace, agent, and visual owners. */
 export function DraftsModeAdapter({ commands }: ModeAdapterProps) {
+  const { openPrimaryMode } = commands;
   const workspaceRegistry = useWorkspaceRegistry();
   const workPath =
     workspaceRegistry.activeByVisibility.private ??
@@ -21,6 +22,17 @@ export function DraftsModeAdapter({ commands }: ModeAdapterProps) {
   const ai = useShellAiSlice();
   const { layout } = useShellLayoutSlice();
   const slice = useDraftsModeSlice();
+  // DraftsPane resets its selection when this callback changes because a
+  // graph-focus change is a new workspace context. Keep the adapter bridge
+  // stable across its own store publications so opening an item cannot reset
+  // the detail editor before its save action runs.
+  const exitReferenceFocus = useCallback(() => {
+    knowledgeModeController.clearGraphReference("drafts");
+  }, []);
+  const openGapAnalysis = useCallback((draftId: string) => {
+    knowledgeModeController.requestGapDraft(draftId);
+    openPrimaryMode?.("gap");
+  }, [openPrimaryMode]);
 
   useEffect(() => {
     knowledgeModeController.setDraftsWorkspace(workPath);
@@ -42,16 +54,13 @@ export function DraftsModeAdapter({ commands }: ModeAdapterProps) {
       }))}
       onConfirmApproval={(input) => commands.confirmApproval?.(input) ?? Promise.resolve(null)}
       onOpenAgents={() => commands.openPrimaryMode?.("agents")}
-      onOpenGapAnalysis={(draftId) => {
-        knowledgeModeController.requestGapDraft(draftId);
-        commands.openPrimaryMode?.("gap");
-      }}
+      onOpenGapAnalysis={openGapAnalysis}
       onOpenInGraph={(request) => {
         if (knowledgeModeController.openGraphReference("drafts", request, workPath)) {
           commands.openGraphPanel?.();
         }
       }}
-      onExitReferenceFocus={() => knowledgeModeController.clearGraphReference("drafts")}
+      onExitReferenceFocus={exitReferenceFocus}
       layout={{ draftsListWidth: layout.draftsListWidth }}
       onLayoutChange={(patch) => commands.updateSettings?.((current) => ({
         ...current,

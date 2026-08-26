@@ -53,9 +53,13 @@ describe("knowledge-mode adapters", () => {
 
     expect(drafts).toContain("useAgentRegistrySlice");
     expect(drafts).toContain("knowledgeModeController.requestGapDraft");
+    expect(drafts).toContain("const exitReferenceFocus = useCallback");
+    expect(drafts).toContain("onExitReferenceFocus={exitReferenceFocus}");
     expect(drafts).toContain("knowledgeModeController.openGraphReference");
     expect(gap).toContain("useGapModeSlice");
     expect(gap).toContain("knowledgeModeController.consumeGapDraft");
+    expect(gap).toContain("const exitReferenceFocus = useCallback");
+    expect(gap).toContain("onExitReferenceFocus={exitReferenceFocus}");
     expect(gap).toContain("knowledgeModeController.openGraphReference");
   });
 });
