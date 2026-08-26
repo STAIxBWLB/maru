@@ -365,6 +365,7 @@ import {
 import {
   documentOpsModeController,
   useFilesPresentationSlice,
+  type DocumentOpsModeHost,
 } from "./lib/documentOpsModeStore";
 import { ModeHostPublisher } from "./lib/modeHostLifecycle";
 import {
@@ -7998,7 +7999,7 @@ export function MainApp() {
   // The Files/Studio/Catalog adapters read this controller directly. MainApp
   // supplies only canonical owners and command ports; the registry selects the
   // surface without rebuilding a mode-specific prop graph in the render tree.
-  const documentOpsModeHost = useMemo(() => ({
+  const documentOpsModeHost = useMemo<DocumentOpsModeHost>(() => ({
     files: {
       props: {
         onIgnore: (relPath) => void ignoreEntry(relPath), entries: workspaceEntryNodes,

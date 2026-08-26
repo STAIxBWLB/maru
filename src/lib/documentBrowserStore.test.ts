@@ -59,7 +59,7 @@ describe("documentBrowserStore", () => {
     publishDocumentBrowser(scope, {
       query: "stale query",
       selectedPath: "/tmp/workspace/one.md",
-      favorites: [{ kind: "note", relPath: "one.md" }],
+      favorites: [{ kind: "file", relPath: "one.md", label: "one", addedAt: "2026-08-27T00:00:00Z" }],
     });
     requestDocumentReveal(scope, "/tmp/workspace/one.md");
 
