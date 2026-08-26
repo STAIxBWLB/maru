@@ -38,6 +38,12 @@ export interface CommsModeSlice {
   props: CommsModeProps | null;
 }
 
+/** Stable post-render projection for the two communications adapters. */
+export interface CommunicationsModeHost {
+  inbox: InboxModeProps;
+  comms: CommsModeProps;
+}
+
 export interface ProcessedItemsSlice {
   query: string;
 }
@@ -100,6 +106,7 @@ export interface CommunicationsModeController {
     generation: number,
     patch: Partial<Omit<CommsModeSlice, "workspacePath">>,
   ): boolean;
+  bind(host: CommunicationsModeHost): void;
   bindInbox(props: InboxModeProps): void;
   bindComms(props: CommsModeProps): void;
   getRuntimeSlice(): CommunicationsRuntimeSlice;
@@ -236,6 +243,26 @@ export function createCommunicationsModeController(): CommunicationsModeControll
       if (generation !== workspaceGeneration) return false;
       publishComms({ ...comms, ...patch });
       return true;
+    },
+    bind(host) {
+      const { inbox: inboxProps, comms: commsProps } = host;
+      publishInbox({
+        ...inbox,
+        workspacePath: inboxProps.workPath,
+        loading: inboxProps.loading,
+        sourceFilter: inboxProps.sourceFilter,
+        actionBusy: inboxProps.actionBusy ?? false,
+        focusRequest: inboxProps.focusRequest ?? 0,
+        props: inboxProps,
+      });
+      publishComms({
+        ...comms,
+        workspacePath: commsProps.workPath,
+        refreshing: commsProps.refreshing,
+        sourceFilter: commsProps.sourceFilter,
+        props: commsProps,
+      });
+      publishProcessed({ ...processed, query: commsProps.processedQuery });
     },
     bindInbox(props) {
       publishInbox({

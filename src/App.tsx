@@ -365,6 +365,7 @@ import {
   documentOpsModeController,
   useFilesPresentationSlice,
 } from "./lib/documentOpsModeStore";
+import { ModeHostPublisher } from "./lib/modeHostLifecycle";
 import {
   useFilesDocumentLifecycle,
   useInitialWorkspaceFilesScan,
@@ -7351,8 +7352,6 @@ export function MainApp() {
       processingLogLines,
     ],
   );
-  communicationsModeController.bindInbox(inboxModeProps);
-
   // Comms pane callbacks.
   const handleProcessCommsNow = useCallback(
     (channel: string) => void processCommsChannelNow(channel),
@@ -7453,8 +7452,6 @@ export function MainApp() {
       telegramPolling,
     ],
   );
-  communicationsModeController.bindComms(commsModeProps);
-
   // Meetings pane callbacks.
   const handleMeetingsOpenSkillCompose = useCallback(
     (skill: SkillRecord | null, context: SkillContextItem[], prompt?: string) =>
@@ -7547,7 +7544,14 @@ export function MainApp() {
     () => ({ workPath: inboxWorkspacePath, effectiveSettings: effectiveTasksSettings, listRows: maruSettings.ui.dashboardListRows, recentEntries, onOpenMode: openPrimaryWorkbenchMode, onOpenDocument: openDashboardDocument, onOpenSettings: openSettings }),
     [inboxWorkspacePath, effectiveTasksSettings, maruSettings.ui.dashboardListRows, recentEntries, openPrimaryWorkbenchMode, openDashboardDocument],
   );
-  planningModeController.bind({ meetings: meetingsModeHost, today: todayModeHost, tasks: tasksModeHost, dashboard: dashboardModeHost });
+  const communicationsModeHost = useMemo(
+    () => ({ inbox: inboxModeProps, comms: commsModeProps }),
+    [commsModeProps, inboxModeProps],
+  );
+  const planningModeHost = useMemo(
+    () => ({ meetings: meetingsModeHost, today: todayModeHost, tasks: tasksModeHost, dashboard: dashboardModeHost }),
+    [dashboardModeHost, meetingsModeHost, tasksModeHost, todayModeHost],
+  );
 
   // EditorPane callbacks. renderEditorPane is a plain function (hook calls
   // are not allowed inside it), so the per-group closures it used to build
@@ -7992,7 +7996,7 @@ export function MainApp() {
   // The Files/Studio/Catalog adapters read this controller directly. MainApp
   // supplies only canonical owners and command ports; the registry selects the
   // surface without rebuilding a mode-specific prop graph in the render tree.
-  documentOpsModeController.bind({
+  const documentOpsModeHost = useMemo(() => ({
     files: {
       props: {
         onIgnore: (relPath) => void ignoreEntry(relPath), entries: workspaceEntryNodes,
@@ -8064,7 +8068,76 @@ export function MainApp() {
         if (root) void revealInFileManager(root, path);
       },
     },
-  });
+  }), [
+    activeDocumentWorkspacePath,
+    activeWorkspaceCanCreate,
+    activeWorkspaceCanModify,
+    applySkillToFileTarget,
+    attachPathToTerminal,
+    booting,
+    collapsedFileFolders,
+    createDocumentAndOpen,
+    document,
+    explorerDirtyDocumentPaths,
+    explorerOpenDocumentPaths,
+    explorerVisibility,
+    explorerWorkspace,
+    explorerWorkspaceCaps,
+    explorerWorkspaceCaption,
+    explorerWorkspaceFilesState,
+    explorerWorkspacePath,
+    filesEditorErrors,
+    filesHtmlState,
+    filesPaneFilters,
+    filesPreviewTab,
+    filesSelectedDocumentNode,
+    handleAddPublicWorkspace,
+    handleFilesFilesystemMutated,
+    handleFilesHtmlModeChange,
+    handleFilesHtmlRiskAck,
+    ignoreEntry,
+    inboxWorkspacePath,
+    isFavorite,
+    isFavoriteMissing,
+    layoutSettings,
+    maruSettings,
+    openFavorite,
+    openFilesPreviewInDocuments,
+    pendingExplorerReveal,
+    prepareFilesPreviewDocument,
+    publicWorkspaceAvailable,
+    queuedSourcePaths,
+    refreshWorkspaceFiles,
+    reloadFilesPreviewDocument,
+    removeFavorite,
+    revealTargetInFinder,
+    savingTabId,
+    saveFilesPreviewDocument,
+    selectedFilePaths,
+    setCollapsedFileFolders,
+    setError,
+    setFilesEditorViewMode,
+    setFilesListAttributes,
+    setFilesPaneFilters,
+    setFilesSortKey,
+    setPendingExplorerReveal,
+    setWorkspaceFileFilter,
+    setWorkspaceFileQuery,
+    setWorkspaceFileSelection,
+    settingsWorkPath,
+    shouldScanExplorerWorkspaceFiles,
+    toggleFavorite,
+    updateLayoutSettings,
+    updateSettings,
+    updateTabDraft,
+    workspaceEntryNodes,
+    fileQuery,
+    handleExplorerWorkspaceVisibilityChange,
+    openWorkspaceFileEntry,
+    queueExternalFiles,
+    applyStudioBody,
+    freezeStudioPackage,
+  ]);
 
   // Gate first paint on the active locale dictionary: the dicts are lazy
   // chunks now, and rendering before load would flash raw i18n keys.
@@ -8072,6 +8145,9 @@ export function MainApp() {
 
   return (
     <LocaleContext.Provider value={localeValue}>
+      <ModeHostPublisher controller={communicationsModeController} host={communicationsModeHost} />
+      <ModeHostPublisher controller={planningModeController} host={planningModeHost} />
+      <ModeHostPublisher controller={documentOpsModeController} host={documentOpsModeHost} />
       <div className={shellClass} style={shellStyle} ref={appShellRef}>
         <header
           className="topbar"
