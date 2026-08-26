@@ -5,15 +5,15 @@ milestone_name: milestone
 current_phase: 05
 current_phase_name: Shell Decomposition Completion
 status: executing
-stopped_at: Completed 05-09-PLAN.md
-last_updated: "2026-08-26T15:56:27.402Z"
+stopped_at: Completed 05-10-PLAN.md
+last_updated: "2026-08-26T16:08:15.934Z"
 last_activity: 2026-08-26
 last_activity_desc: Phase 04 execution started
 progress:
   total_phases: 5
   completed_phases: 4
   total_plans: 32
-  completed_plans: 30
+  completed_plans: 31
 ---
 
 # Project State
@@ -28,11 +28,11 @@ See: .planning/PROJECT.md (updated 2026-08-23)
 ## Current Position
 
 Phase: 05 (Shell Decomposition Completion) — EXECUTING
-Plan: 10 of 11
+Plan: 11 of 11
 Status: Ready to execute
 Last activity: 2026-08-26 — Phase 05 execution started
 
-Progress: [█████████░] 94% (3/5 phases)
+Progress: [██████████] 97% (3/5 phases)
 
 ## Performance Metrics
 
@@ -89,6 +89,7 @@ Progress: [█████████░] 94% (3/5 phases)
 | Phase 05 P07 | 7min | 2 tasks | 7 files |
 | Phase 05 P08 | 13min | 2 tasks | 10 files |
 | Phase 05 P09 | 7min | 2 tasks | 8 files |
+| Phase 05 P10 | 9min | 3 tasks | 9 files |
 
 ## Accumulated Context
 
@@ -175,6 +176,8 @@ Recent decisions affecting current work:
 - [Phase ?]: Gap handoffs use a request nonce so repeated explicit selections of the same draft remain distinguishable after consumption.
 - [Phase ?]: Files preview state is transient and rejects responses by request sequence plus selected path.
 - [Phase ?]: Files, Studio, and Catalog preserve canonical drafts, capability and revision gates, settings keys, and filesystem commands behind lazy adapters.
+- [Phase ?]: Planning adapters use isolated controller slices while canonical task, agent, and settings owners remain external.
+- [Phase ?]: Mode registry IDs are typed as MaruAppMode and exhaustively tested across all 18 modes.
 
 ### Scope Exceptions
 
@@ -226,6 +229,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-08-26T15:56:27.394Z
-Stopped at: Completed 05-09-PLAN.md
+Last session: 2026-08-26T16:08:15.926Z
+Stopped at: Completed 05-10-PLAN.md
 Resume file: None

@@ -201,7 +201,7 @@ Notes for planning:
   3. Adding state to any decomposed pane is a change inside that pane's store and component, with no edit to `src/App.tsx`
   4. `make verify` and the e2e suite pass with no visible behavior change, and `MainApp`'s `useState`/`useEffect` count is a fraction of today's 68/50
 
-**Plans**: 9/11 plans executed
+**Plans**: 10/11 plans executed
 
 Plans:
 
@@ -240,7 +240,7 @@ Plans:
 
 **Wave 9** *(blocked on Wave 8)*
 
-- [ ] 05-10-PLAN.md - Migrate Meetings, Today, Tasks, and Dashboard and complete 18 descriptors
+- [x] 05-10-PLAN.md - Migrate Meetings, Today, Tasks, and Dashboard and complete 18 descriptors
 
 **Wave 10** *(blocked on Wave 9)*
 
@@ -265,7 +265,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5
 | 2. Shared Scanner and Path Invariants | 3/3 | Complete    | 2026-08-23 |
 | 3. Typed IPC Error Contract | 4/4 | Complete   | 2026-08-24 |
 | 4. Editor Surface State Extraction | 7/7 | Complete    | 2026-08-26 |
-| 5. Shell Decomposition Completion | 9/11 | In Progress|  |
+| 5. Shell Decomposition Completion | 10/11 | In Progress|  |
 
 ---
 *Roadmap created: 2026-08-22*
