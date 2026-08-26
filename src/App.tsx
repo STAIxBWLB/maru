@@ -429,6 +429,7 @@ import {
   updateShellSettings,
   useShellSettings,
 } from "./lib/shellSettingsStore";
+import { ModeSurfaceHost } from "./lib/modeRegistry";
 import {
   availableRightWorkbenchSurface,
   minimumWorkbenchWidth,
@@ -9338,6 +9339,12 @@ export function MainApp() {
             onOpenSettings={openSettings}
           />
         ) : (
+          <ModeSurfaceHost
+            mode="pkm"
+            placement="primary"
+            scope={{ workspacePath: explorerWorkspacePath, documentBrowserScope }}
+            commands={{
+              renderPrimarySurface: () => (
           <>
             {documentsPaneOpen ? (
               <DocumentList
@@ -9389,6 +9396,9 @@ export function MainApp() {
             </div>
 
           </>
+              ),
+            }}
+          />
         )}
         </div>
         </Suspense>
