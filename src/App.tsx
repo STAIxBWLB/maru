@@ -4,6 +4,7 @@ import {
   Suspense,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -262,6 +263,12 @@ import {
   type DocumentFilter,
   type DocumentIndex,
 } from "./lib/documentIndex";
+import {
+  publishDocumentBrowser,
+  requestDocumentReveal,
+  type DocumentBrowserScope,
+  type DocumentListCommands,
+} from "./lib/documentBrowserStore";
 import {
   buildGmailScanQuery,
   normalizeGmailScanLimit,
@@ -6319,7 +6326,11 @@ export function MainApp() {
         revealPathInFiles(workspacePath, visibility, targetPath);
       }
       selectTab(tabId, group);
-      setPendingExplorerReveal({ pane: binaryTab ? "files" : "documents", targetPath });
+      if (binaryTab) {
+        setPendingExplorerReveal({ pane: "files", targetPath });
+      } else {
+        requestDocumentReveal({ workspacePath, visibility }, targetPath);
+      }
     },
     [
       documentsPaneOpen,
@@ -8547,7 +8558,6 @@ export function MainApp() {
     () => updateLayoutSettings({ documentsPaneOpen: false }),
     [updateLayoutSettings],
   );
-  const handleExplorerRevealHandled = useCallback(() => setPendingExplorerReveal(null), []);
   const handleApplyFileQueueToDestination = useCallback(
     (
       targetPath: string,
@@ -8570,6 +8580,97 @@ export function MainApp() {
     },
     [applyExplorerDragSourcesToDestination],
   );
+
+  const documentBrowserScope = useMemo<DocumentBrowserScope>(
+    () => ({ workspacePath: explorerWorkspacePath ?? "", visibility: explorerVisibility }),
+    [explorerVisibility, explorerWorkspacePath],
+  );
+  const documentBrowserCommands = useMemo<DocumentListCommands>(
+    () => ({
+      setWorkspaceVisibility: handleExplorerWorkspaceVisibilityChange,
+      addPublicWorkspace: handleAddPublicWorkspace,
+      setQuery: setExplorerQuery,
+      setBrowserMode: setDocumentBrowserMode,
+      setSortKey: setDocumentSortKey,
+      setCollapsedTreeFolders,
+      selectEntry,
+      revealInFinder: revealTargetInFinder,
+      revealInFiles: handleRevealInFiles,
+      ignore: handleIgnoreExplorerEntry,
+      refresh: handleRefreshExplorer,
+      close: handleCloseDocumentsPane,
+      openFavorite,
+      removeFavorite,
+      toggleFavorite,
+      isFavorite,
+      isFavoriteMissing,
+      applyFileQueueToDestination: handleApplyFileQueueToDestination,
+      applyExplorerDragToDestination: handleApplyExplorerDragToDestination,
+    }),
+    [
+      handleAddPublicWorkspace,
+      handleApplyExplorerDragToDestination,
+      handleApplyFileQueueToDestination,
+      handleCloseDocumentsPane,
+      handleExplorerWorkspaceVisibilityChange,
+      handleIgnoreExplorerEntry,
+      handleRefreshExplorer,
+      handleRevealInFiles,
+      isFavorite,
+      isFavoriteMissing,
+      openFavorite,
+      removeFavorite,
+      revealTargetInFinder,
+      selectEntry,
+      setCollapsedTreeFolders,
+      setDocumentBrowserMode,
+      setDocumentSortKey,
+      setExplorerQuery,
+      toggleFavorite,
+    ],
+  );
+  useLayoutEffect(() => {
+    publishDocumentBrowser(documentBrowserScope, {
+      documentIndex,
+      selectedPath,
+      query,
+      loading: (booting || explorerWorkspaceState.loading) && entries.length === 0,
+      documentFilter,
+      documentViews: maruSettings.ui.documentViews,
+      workspaceVisibility: explorerVisibility,
+      publicWorkspaceAvailable,
+      activeWorkspaceLabel: explorerWorkspaceCaption,
+      browserMode: maruSettings.ui.documentBrowserMode,
+      sortKey: maruSettings.ui.documentSortKey,
+      documentLabelMode: maruSettings.ui.documentLabelMode,
+      collapsedTreeFolders,
+      refreshing: explorerWorkspaceState.refreshing,
+      vaultPath: explorerWorkspacePath,
+      favorites: maruSettings.ui.favorites,
+      selectedFileQueueCount: selectedQueuedFileQueueItems.length,
+    });
+  }, [
+    booting,
+    collapsedTreeFolders,
+    documentBrowserScope,
+    documentFilter,
+    documentIndex,
+    entries.length,
+    explorerVisibility,
+    explorerWorkspaceCaption,
+    explorerWorkspacePath,
+    explorerWorkspaceState.loading,
+    explorerWorkspaceState.refreshing,
+    maruSettings.ui.documentBrowserMode,
+    maruSettings.ui.documentLabelMode,
+    maruSettings.ui.documentSortKey,
+    maruSettings.ui.documentViews,
+    maruSettings.ui.favorites,
+    publicWorkspaceAvailable,
+    query,
+    selectedQueuedFileQueueItems.length,
+    selectedPath,
+  ]);
 
   // Gate first paint on the active locale dictionary: the dicts are lazy
   // chunks now, and rendering before load would flash raw i18n keys.
@@ -9187,50 +9288,10 @@ export function MainApp() {
           <>
             {documentsPaneOpen ? (
               <DocumentList
-                documentIndex={documentIndex}
-                selectedPath={selectedPath}
-                query={query}
-                loading={(booting || explorerWorkspaceState.loading) && entries.length === 0}
-                documentFilter={documentFilter}
-                documentViews={maruSettings.ui.documentViews}
-                workspaceVisibility={explorerVisibility}
-                publicWorkspaceAvailable={publicWorkspaceAvailable}
-                activeWorkspaceLabel={explorerWorkspaceCaption}
-                onWorkspaceVisibilityChange={handleExplorerWorkspaceVisibilityChange}
-                onAddPublicWorkspace={handleAddPublicWorkspace}
-                browserMode={maruSettings.ui.documentBrowserMode}
-                sortKey={maruSettings.ui.documentSortKey}
-                documentLabelMode={maruSettings.ui.documentLabelMode}
-                collapsedTreeFolders={collapsedTreeFolders}
-                onQueryChange={setExplorerQuery}
-                onBrowserModeChange={setDocumentBrowserMode}
-                onSortKeyChange={setDocumentSortKey}
-                onCollapsedTreeFoldersChange={setCollapsedTreeFolders}
-                onSelect={selectEntry}
-                onRevealInFinder={revealTargetInFinder}
-                onRevealInFiles={handleRevealInFiles}
-                onIgnore={handleIgnoreExplorerEntry}
-                onRefresh={handleRefreshExplorer}
-                refreshing={explorerWorkspaceState.refreshing}
-                onClose={handleCloseDocumentsPane}
+                scope={documentBrowserScope}
+                commands={documentBrowserCommands}
                 searchInputRef={searchInputRef}
                 paneRef={documentsPaneRef}
-                vaultPath={explorerWorkspacePath}
-                pendingRevealTargetPath={
-                  pendingExplorerReveal?.pane === "documents"
-                    ? pendingExplorerReveal.targetPath
-                    : null
-                }
-                onRevealHandled={handleExplorerRevealHandled}
-                favorites={maruSettings.ui.favorites}
-                onOpenFavorite={openFavorite}
-                onRemoveFavorite={removeFavorite}
-                onToggleFavorite={toggleFavorite}
-                isFavorite={isFavorite}
-                isFavoriteMissing={isFavoriteMissing}
-                selectedFileQueueCount={selectedQueuedFileQueueItems.length}
-                onApplyFileQueueToDestination={handleApplyFileQueueToDestination}
-                onApplyExplorerDragToDestination={handleApplyExplorerDragToDestination}
               />
             ) : null}
             {documentsPaneOpen ? (
