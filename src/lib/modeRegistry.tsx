@@ -5,10 +5,15 @@ import type { DocumentOpsModeHost } from "./documentOpsModeStore";
 import { isDiagramEnabled } from "./diagramFlag";
 import { isE2EFlowEnabled } from "./e2eFlow";
 import type { FavoriteTarget } from "../components/FavoritesSection";
-import type { FavoriteKind, MaruSettings } from "./settings";
+import type { FavoriteKind, MaruAppMode, MaruSettings } from "./settings";
 
 export type ModePlacement = "primary" | "right" | "panel";
-export type RegisteredModeId = "pkm" | "e2e" | "diagram" | "graph" | "sites" | "agents" | "inbox" | "comms" | "meetings" | "today" | "tasks" | "dashboard" | "scratchpad" | "drafts" | "gap" | "files" | "studio" | "catalog";
+export type RegisteredModeId = MaruAppMode;
+
+const registeredModeIds = [
+  "pkm", "scratchpad", "files", "inbox", "comms", "meetings", "today", "tasks", "dashboard",
+  "catalog", "studio", "e2e", "diagram", "sites", "graph", "drafts", "gap", "agents",
+] as const satisfies readonly RegisteredModeId[];
 
 /** Identifiers only: adapters subscribe to their own data instead of receiving shell snapshots. */
 export interface ModeHostScope {
@@ -202,6 +207,11 @@ const lazyAdapters: Record<RegisteredModeId, ReturnType<typeof lazy<ComponentTyp
 
 export function getModeDescriptor(mode: string): ModeDescriptor | null {
   return mode in modeRegistry ? modeRegistry[mode as RegisteredModeId] : null;
+}
+
+/** Exhaustive app-mode inventory for registry tests and descriptor consumers. */
+export function getRegisteredModeIds(): readonly RegisteredModeId[] {
+  return registeredModeIds;
 }
 
 export interface ModeSurfaceHostProps {
