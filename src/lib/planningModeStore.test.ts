@@ -33,4 +33,28 @@ describe("planningModeStore", () => {
     unsubscribeMeetings();
     unsubscribeToday();
   });
+
+  it("keeps Today route, logical-day, and refresh intents in one isolated slice", () => {
+    const controller = createPlanningModeController();
+    const today = vi.fn();
+    const tasks = vi.fn();
+    const stopToday = controller.subscribe("today", today);
+    const stopTasks = controller.subscribe("tasks", tasks);
+
+    controller.setTodayRoute("prepare");
+    controller.setLogicalDay("2026-08-27");
+    controller.requestTodayRollover();
+    controller.requestTodayRefresh();
+
+    expect(controller.getTodaySlice()).toMatchObject({
+      route: "prepare",
+      logicalDay: "2026-08-27",
+      rolloverEpoch: 1,
+      refreshRequestEpoch: 1,
+    });
+    expect(today).toHaveBeenCalledTimes(4);
+    expect(tasks).not.toHaveBeenCalled();
+    stopToday();
+    stopTasks();
+  });
 });
