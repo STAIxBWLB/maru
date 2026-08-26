@@ -354,6 +354,7 @@ import {
 } from "./lib/agentRuntimeModeStore";
 import { setError, useError } from "./lib/errorStore";
 import { setTelegramMessages, setTelegramPolling, useTelegramPolling } from "./lib/telegramEventsStore";
+import { communicationsModeController, type InboxModeProps } from "./lib/communicationsModeStore";
 import { useDestructiveActionGuard } from "./lib/useDestructiveActionGuard";
 import { useInboxEvents } from "./lib/useInboxEvents";
 import { useTelegramEvents } from "./lib/useTelegramEvents";
@@ -533,7 +534,6 @@ const MIN_OUTLINE_PANE_WIDTH = 240;
 const MAX_OUTLINE_PANE_WIDTH = 520;
 
 const LazyStudioMode = lazy(() => import("./components/studio/StudioMode").then((module) => ({ default: module.StudioMode })));
-const LazyInboxPane = lazy(() => import("./components/InboxPane").then((module) => ({ default: module.InboxPane })));
 const LazyDraftsPane = lazy(() => import("./components/drafts/DraftsPane").then((module) => ({ default: module.DraftsPane })));
 const LazyGapPane = lazy(() => import("./components/gap/GapPane").then((module) => ({ default: module.GapPane })));
 const LazyCommsPane = lazy(() => import("./components/CommsPane").then((module) => ({ default: module.CommsPane })));
@@ -7917,6 +7917,88 @@ export function MainApp() {
     void refreshInbox();
   }, [refreshProcessedItems, refreshInbox]);
 
+  const inboxModeProps = useMemo<InboxModeProps>(
+    () => ({
+      items: inboxItems,
+      entries: inboxEntries,
+      loading: inboxLoading,
+      processedItems,
+      processedLoading,
+      processedError,
+      processedStatusFilter,
+      processedQuery,
+      processedDetail,
+      processingMissions: inboxProcessingMissions,
+      processingLogLines,
+      sourceFilter: inboxSourceFilter,
+      onSourceFilter: setInboxSourceFilter,
+      sourceFolderKeys: inboxSourceFolderKeys,
+      fileDropTarget: inboxRuntimeConfig.file_drop,
+      focusRequest: inboxFocusTick,
+      actionBusy: inboxActionBusy,
+      onRefresh: handleInboxRefresh,
+      onOpenSettings: openInboxSettings,
+      onOpenInboxFolder: handleOpenInboxFolder,
+      onOpenSourceFolder: handleOpenSourceFolder,
+      onClassify: handleClassifyItem,
+      onDecide: decideInboxItem,
+      onBulkAccept: bulkAcceptInboxKeys,
+      onBulkReject: bulkRejectInboxKeys,
+      onBulkMoveFiles: bulkMoveInboxFiles,
+      onProcessEntries: handleProcessEntries,
+      onStageFiles: handleStageInboxFiles,
+      onProcessedStatusFilter: setProcessedStatusFilter,
+      onProcessedQuery: setProcessedQuery,
+      onRefreshProcessed: handleRefreshProcessed,
+      onSelectProcessedItem: handleSelectProcessedItem,
+      onRevealPath: handleRevealPath,
+      onTrashItems: handleTrashInboxTargets,
+      onStopProcessingMission: handleStopProcessingMission,
+      workPath: inboxWorkspacePath,
+      onConfirmApproval: approvalGate.confirmApproval,
+      onProcessApplied: handleInboxProcessApplied,
+      onShareSelectionChange: setInboxShareablePaths,
+    }),
+    [
+      approvalGate.confirmApproval,
+      bulkAcceptInboxKeys,
+      bulkMoveInboxFiles,
+      bulkRejectInboxKeys,
+      decideInboxItem,
+      handleClassifyItem,
+      handleInboxProcessApplied,
+      handleInboxRefresh,
+      handleOpenInboxFolder,
+      handleOpenSourceFolder,
+      handleProcessEntries,
+      handleRefreshProcessed,
+      handleRevealPath,
+      handleSelectProcessedItem,
+      handleStageInboxFiles,
+      handleStopProcessingMission,
+      handleTrashInboxTargets,
+      inboxActionBusy,
+      inboxEntries,
+      inboxFocusTick,
+      inboxItems,
+      inboxLoading,
+      inboxProcessingMissions,
+      inboxRuntimeConfig.file_drop,
+      inboxSourceFilter,
+      inboxSourceFolderKeys,
+      inboxWorkspacePath,
+      openInboxSettings,
+      processedDetail,
+      processedError,
+      processedItems,
+      processedLoading,
+      processedQuery,
+      processedStatusFilter,
+      processingLogLines,
+    ],
+  );
+  communicationsModeController.bindInbox(inboxModeProps);
+
   // Comms pane callbacks.
   const handleProcessCommsNow = useCallback(
     (channel: string) => void processCommsChannelNow(channel),
@@ -8893,46 +8975,11 @@ export function MainApp() {
             onExitReferenceFocus={exitKgReferenceFocus}
               />
         ) : surfaceMode === "inbox" ? (
-          <LazyInboxPane
-            items={inboxItems}
-            entries={inboxEntries}
-            loading={inboxLoading}
-            processedItems={processedItems}
-            processedLoading={processedLoading}
-            processedError={processedError}
-            processedStatusFilter={processedStatusFilter}
-            processedQuery={processedQuery}
-            processedDetail={processedDetail}
-            processingMissions={inboxProcessingMissions}
-            processingLogLines={processingLogLines}
-            sourceFilter={inboxSourceFilter}
-            onSourceFilter={setInboxSourceFilter}
-            sourceFolderKeys={inboxSourceFolderKeys}
-            fileDropTarget={inboxRuntimeConfig.file_drop}
-            focusRequest={inboxFocusTick}
-            actionBusy={inboxActionBusy}
-            onRefresh={handleInboxRefresh}
-            onOpenSettings={openInboxSettings}
-            onOpenInboxFolder={handleOpenInboxFolder}
-            onOpenSourceFolder={handleOpenSourceFolder}
-            onClassify={handleClassifyItem}
-            onDecide={decideInboxItem}
-            onBulkAccept={bulkAcceptInboxKeys}
-            onBulkReject={bulkRejectInboxKeys}
-            onBulkMoveFiles={bulkMoveInboxFiles}
-            onProcessEntries={handleProcessEntries}
-            onStageFiles={handleStageInboxFiles}
-            onProcessedStatusFilter={setProcessedStatusFilter}
-            onProcessedQuery={setProcessedQuery}
-            onRefreshProcessed={handleRefreshProcessed}
-            onSelectProcessedItem={handleSelectProcessedItem}
-            onRevealPath={handleRevealPath}
-            onTrashItems={handleTrashInboxTargets}
-            onStopProcessingMission={handleStopProcessingMission}
-            workPath={inboxWorkspacePath}
-            onConfirmApproval={approvalGate.confirmApproval}
-            onProcessApplied={handleInboxProcessApplied}
-            onShareSelectionChange={setInboxShareablePaths}
+          <ModeSurfaceHost
+            mode="inbox"
+            placement="primary"
+            scope={{ workspacePath: inboxWorkspacePath, documentBrowserScope }}
+            commands={{ renderPrimarySurface: () => null }}
           />
         ) : surfaceMode === "comms" ? (
           <LazyCommsPane

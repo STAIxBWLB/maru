@@ -60,4 +60,9 @@ describe("modeRegistry", () => {
     });
     expect(typeof getModeDescriptor("agents")?.load).toBe("function");
   });
+
+  it("registers Inbox as a dedicated primary lazy surface", () => {
+    expect(getModeDescriptor("inbox")).toMatchObject({ id: "inbox", placements: ["primary"] });
+    expect(typeof getModeDescriptor("inbox")?.load).toBe("function");
+  });
 });
