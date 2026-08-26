@@ -37,10 +37,12 @@ vi.mock("../../components/graph/GraphView", () => ({
 }));
 
 import { GraphModeAdapter } from "./GraphModeAdapter";
-import { scanAndApplyVaultDelta, setWorkspaceRegistry } from "../workspaceStore";
+import { listen as listenForTest } from "@tauri-apps/api/event";
+import { setWorkspaceRegistry } from "../workspaceStore";
 
 const parent = "/workspace";
 const nestedVault = "/workspace/vault";
+let resolveVaultGraphRoot: (root: string | null) => void;
 
 function entry(relPath: string): VaultEntry {
   return {
@@ -71,7 +73,9 @@ describe("GraphModeAdapter", () => {
     vaultGraphRoot.mockReset();
     startVaultWatcher.mockReset();
     stopVaultWatcher.mockReset();
-    vaultGraphRoot.mockResolvedValue(nestedVault);
+    vaultGraphRoot.mockImplementation(
+      () => new Promise<string | null>((resolve) => { resolveVaultGraphRoot = resolve; }),
+    );
     readVaultCache.mockResolvedValue([entry("cached.md")]);
     scanVault.mockResolvedValue([entry("initial.md")]);
     scanVaultPaths.mockResolvedValue([entry("changed.md")]);
@@ -105,6 +109,14 @@ describe("GraphModeAdapter", () => {
       await Promise.resolve();
       await Promise.resolve();
     });
+    await vi.waitFor(() => expect(listenForTest).toHaveBeenCalledTimes(1));
+
+    await act(async () => {
+      resolveVaultGraphRoot(nestedVault);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    await vi.waitFor(() => expect(listenForTest).toHaveBeenCalledTimes(2));
 
     expect(readVaultCache).toHaveBeenCalledWith(nestedVault);
     expect(scanVault).toHaveBeenCalledWith(nestedVault, { includeDotFolders: [] });
@@ -113,12 +125,16 @@ describe("GraphModeAdapter", () => {
     expect(graphProps?.entries?.map((item) => item.relPath)).toEqual(["initial.md"]);
     graphProps?.onGraphChanged?.();
     expect(onGraphChanged).toHaveBeenCalledWith(nestedVault);
+    expect(indexDeltaListeners.size).toBe(1);
 
     await act(async () => {
-      // This is the exact incremental action invoked by the adapter-owned
-      // watcher after its debounce; GraphView must receive the delta without
-      // the document shell ever loading the nested workspace.
-      await scanAndApplyVaultDelta(nestedVault, ["changed.md"], { includeDotFolders: [] });
+      // Exercise the adapter-owned watcher path: the Tauri listener receives
+      // a nested-vault delta, then dispatches the incremental scan after its
+      // trailing debounce. The document shell never opens this workspace.
+      for (const listener of indexDeltaListeners) {
+        listener({ payload: { workspacePath: nestedVault, paths: ["changed.md"] } });
+      }
+      await vi.advanceTimersByTimeAsync(151);
     });
 
     expect(scanVaultPaths).toHaveBeenCalledWith(nestedVault, ["changed.md"], { includeDotFolders: [] });
