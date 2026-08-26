@@ -1,13 +1,15 @@
 ---
 phase: 04-editor-surface-state-extraction
-reviewed: 2026-08-25T23:53:22Z
+reviewed: 2026-08-26T00:01:08Z
 depth: standard
-files_reviewed: 11
+files_reviewed: 13
 files_reviewed_list:
   - src/App.tsx
   - src/__tests__/editorSurfaceRenderIsolation.test.tsx
   - src/components/EditorPane.test.tsx
   - src/components/EditorPane.tsx
+  - src/components/EditorPaneFacade.tsx
+  - src/components/EditorPaneFacade.test.tsx
   - src/components/OutlinePane.tsx
   - src/lib/editorPaneStore.ts
   - src/lib/editorSurfaceAdapter.ts
@@ -17,36 +19,37 @@ files_reviewed_list:
   - src/lib/outlinePaneStore.ts
 findings:
   critical: 0
-  warning: 1
+  warning: 0
   info: 0
-  total: 1
-status: issues_found
+  total: 0
+status: clean
 ---
 
 # Phase 04: Code Review Report
 
-**Reviewed:** 2026-08-25T23:53:22Z
+**Reviewed:** 2026-08-26T00:01:08Z
 **Depth:** standard
-**Files Reviewed:** 11
-**Status:** issues_found
+**Files Reviewed:** 13
+**Status:** clean
 
 ## Summary
 
-The editor and outline facade migration was reviewed at standard depth, including its command ports, persistence bridge, and focused contract tests. The focused test suite passed (24 tests), but the App shell now publishes external-store updates while React is rendering. This can notify an already-mounted `EditorPane` from its parent render and produces unsupported render-phase updates.
+The Phase 04 editor and outline facade migration was re-reviewed at standard depth after `9b23e8f`. WR-01 is resolved: `MainApp` now passes pure props during render, while `EditorPaneFacade` publishes the presentation, operation, and group view-mode slices from `useLayoutEffect` after commit. The store's shallow no-op guards prevent that publication from creating repeat subscriber notifications, and its scope key continues to isolate workspace, split group, and tab state.
+
+The corrected flow was traced through the facade, editor store, persistence hydration, stable command ports, split-pane lifecycle cleanup, and the editor/outline consumers. No new render lag, stale facade read, hydration race, scope leakage, correctness, security, or maintainability defect was proven in the reviewed scope.
 
 ## Narrative Findings (AI reviewer)
 
-## Warnings
+No findings. The reviewed files meet the applicable correctness and maintainability bar.
 
-### WR-01: Editor facade is mutated during `MainApp` render
+## Verification
 
-**File:** `src/App.tsx:8310`
-**Issue:** `renderEditorPane` runs during `MainApp`'s render and calls `setEditorPanePresentation` plus `patchEditorPaneViewPreview`. Those functions synchronously notify `useSyncExternalStore` subscribers (`src/lib/editorPaneStore.ts:267-270` and `src/lib/editorPaneStore.ts:297-305`). When the same scope is already mounted, a change such as save/opening state, document label, or entries dispatches a subscriber update while React is rendering its parent. React may warn about updating `EditorPane` while rendering `MainApp`, and can defer the child snapshot so the editor briefly renders stale state.
-
-**Fix:** Publish facade presentation and view state in a `useLayoutEffect` (keyed by a stable scope identity and the individual slice values), or make the render-time facade read pure and defer notification until after commit. Do not invoke subscriber callbacks from `renderEditorPane`.
+- `pnpm exec vitest run src/components/EditorPaneFacade.test.tsx src/__tests__/editorSurfaceRenderIsolation.test.tsx src/components/EditorPane.test.tsx src/lib/editorSurfaceStore.test.ts src/lib/outlinePaneStore.test.ts` passed: 5 files, 25 tests.
+- `pnpm typecheck` passed.
+- `pnpm lint -- src/App.tsx src/components/EditorPane.tsx src/components/EditorPaneFacade.tsx src/components/OutlinePane.tsx src/lib/editorPaneStore.ts src/lib/editorSurfaceAdapter.ts src/lib/editorSurfacePersistence.ts src/lib/outlinePaneStore.ts` passed.
 
 ---
 
-_Reviewed: 2026-08-25T23:53:22Z_
+_Reviewed: 2026-08-26T00:01:08Z_
 _Reviewer: the agent (gsd-code-reviewer)_
 _Depth: standard_
