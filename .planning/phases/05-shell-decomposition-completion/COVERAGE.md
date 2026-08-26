@@ -1,0 +1,1 @@
+No external API integration: Phase 5 refactors Maru's internal React stores, Tauri IPC wrappers, Rust terminal commands, and lazy mode registry without adding or changing an external service or API capability.

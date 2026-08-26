@@ -201,7 +201,50 @@ Notes for planning:
   3. Adding state to any decomposed pane is a change inside that pane's store and component, with no edit to `src/App.tsx`
   4. `make verify` and the e2e suite pass with no visible behavior change, and `MainApp`'s `useState`/`useEffect` count is a fraction of today's 68/50
 
-**Plans**: TBD
+**Plans**: 11 plans
+
+Plans:
+
+**Wave 1**
+
+- [ ] 05-01-PLAN.md - Trace and complete the canonical four-input DocumentList browser facade
+- [ ] 05-02-PLAN.md - Make every terminal session command generation-handle-only
+
+**Wave 2** *(blocked on both Wave 1 plans)*
+
+- [ ] 05-03-PLAN.md - Extract the process-global terminal store/controller and four-input TerminalPanel
+
+**Wave 3** *(blocked on Wave 2)*
+
+- [ ] 05-04-PLAN.md - Move settings ownership and establish the registry host with PKM/E2E adapters
+
+**Wave 4** *(blocked on Wave 3)*
+
+- [ ] 05-05-PLAN.md - Migrate Diagram, Graph, and Sites into isolated lazy adapters
+
+**Wave 5** *(blocked on Wave 4)*
+
+- [ ] 05-06-PLAN.md - Extract the shared agent runtime and migrate Agents
+
+**Wave 6** *(blocked on Wave 5)*
+
+- [ ] 05-07-PLAN.md - Extract communications ownership and migrate Inbox/Comms
+
+**Wave 7** *(blocked on Wave 6)*
+
+- [ ] 05-08-PLAN.md - Migrate Scratchpad, Drafts, and Gap over canonical stores
+
+**Wave 8** *(blocked on Wave 7)*
+
+- [ ] 05-09-PLAN.md - Migrate Files, Studio, and Catalog over canonical document operations
+
+**Wave 9** *(blocked on Wave 8)*
+
+- [ ] 05-10-PLAN.md - Migrate Meetings, Today, Tasks, and Dashboard and complete 18 descriptors
+
+**Wave 10** *(blocked on Wave 9)*
+
+- [ ] 05-11-PLAN.md - Enforce hook/isolation contracts, run extensibility drills, and complete native smoke
 
 Notes for planning:
 
