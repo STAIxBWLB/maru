@@ -77,4 +77,9 @@ describe("modeRegistry", () => {
     expect(typeof getModeDescriptor("drafts")?.load).toBe("function");
     expect(typeof getModeDescriptor("gap")?.load).toBe("function");
   });
+
+  it("registers Files as a dedicated primary lazy surface", () => {
+    expect(getModeDescriptor("files")).toMatchObject({ id: "files", placements: ["primary"] });
+    expect(typeof getModeDescriptor("files")?.load).toBe("function");
+  });
 });
