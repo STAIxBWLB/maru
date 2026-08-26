@@ -5,6 +5,11 @@ import type { CatalogPane } from "../components/catalog/CatalogPane";
 import type { FilesWorkbench } from "../components/FilesWorkbench";
 import type { InlineDocumentEditor } from "../components/InlineDocumentEditor";
 import type { StudioMode } from "../components/studio/StudioMode";
+import type { ExplorerPaneMode } from "./settings";
+import {
+  EMPTY_WORKSPACE_FILES_PANE_FILTERS,
+  type WorkspaceFilesPaneFilters,
+} from "./workspaceFileTree";
 
 export type FilesWorkbenchModeProps = Omit<ComponentProps<typeof FilesWorkbench>, "documentEditorNode">;
 export type InlineDocumentEditorModeProps = ComponentProps<typeof InlineDocumentEditor>;
@@ -18,7 +23,7 @@ export interface DocumentOpsModeHost {
   catalog?: CatalogModeProps;
 }
 
-export type DocumentOpsModeDomain = "files" | "studio" | "catalog";
+export type DocumentOpsModeDomain = "files" | "studio" | "catalog" | "presentation";
 
 export interface FilesModeSlice {
   selectedPath: string | null;
@@ -37,22 +42,39 @@ export interface CatalogModeSlice {
   host: DocumentOpsModeHost["catalog"] | null;
 }
 
+export interface FilesPresentationSlice {
+  filters: WorkspaceFilesPaneFilters;
+  pendingReveal: { pane: ExplorerPaneMode; targetPath: string } | null;
+  editorErrors: Record<string, string | null>;
+  saving: boolean;
+  savingTabId: string | null;
+}
+
 export interface DocumentOpsModeController {
   subscribe(domain: DocumentOpsModeDomain, listener: () => void): () => void;
   getFilesSlice(): FilesModeSlice;
   getStudioSlice(): StudioModeSlice;
   getCatalogSlice(): CatalogModeSlice;
+  getPresentationSlice(): FilesPresentationSlice;
   beginFilesPreview(path: string): number;
   resolveFilesPreview(request: number, preview: { path: string; content: string }): boolean;
   publishFiles(patch: Partial<FilesModeSlice>): void;
   publishStudio(patch: Partial<StudioModeSlice>): void;
   publishCatalog(patch: Partial<CatalogModeSlice>): void;
   bind(host: DocumentOpsModeHost): void;
+  updatePresentation(update: (current: FilesPresentationSlice) => FilesPresentationSlice): void;
 }
 
 const EMPTY_FILES: FilesModeSlice = Object.freeze({ selectedPath: null, filter: "", preview: null, host: null });
 const EMPTY_STUDIO: StudioModeSlice = Object.freeze({ workspacePath: null, host: null });
 const EMPTY_CATALOG: CatalogModeSlice = Object.freeze({ workspacePath: null, host: null });
+const EMPTY_PRESENTATION: FilesPresentationSlice = Object.freeze({
+  filters: EMPTY_WORKSPACE_FILES_PANE_FILTERS,
+  pendingReveal: null,
+  editorErrors: {},
+  saving: false,
+  savingTabId: null,
+});
 
 /**
  * Scoped transient presentation state for document-operation modes. The controller
@@ -61,11 +83,12 @@ const EMPTY_CATALOG: CatalogModeSlice = Object.freeze({ workspacePath: null, hos
  */
 export function createDocumentOpsModeController(): DocumentOpsModeController {
   const listeners: Record<DocumentOpsModeDomain, Set<() => void>> = {
-    files: new Set(), studio: new Set(), catalog: new Set(),
+    files: new Set(), studio: new Set(), catalog: new Set(), presentation: new Set(),
   };
   let files = EMPTY_FILES;
   let studio = EMPTY_STUDIO;
   let catalog = EMPTY_CATALOG;
+  let presentation = EMPTY_PRESENTATION;
   let previewRequest = 0;
 
   const notify = (domain: DocumentOpsModeDomain) => {
@@ -86,6 +109,11 @@ export function createDocumentOpsModeController(): DocumentOpsModeController {
     catalog = Object.freeze(next);
     notify("catalog");
   };
+  const publishPresentation = (next: FilesPresentationSlice) => {
+    if (presentation === next) return;
+    presentation = Object.freeze(next);
+    notify("presentation");
+  };
 
   return {
     subscribe(domain, listener) {
@@ -95,6 +123,7 @@ export function createDocumentOpsModeController(): DocumentOpsModeController {
     getFilesSlice: () => files,
     getStudioSlice: () => studio,
     getCatalogSlice: () => catalog,
+    getPresentationSlice: () => presentation,
     beginFilesPreview(path) {
       previewRequest += 1;
       publishFiles({ ...files, selectedPath: path, preview: null });
@@ -113,6 +142,7 @@ export function createDocumentOpsModeController(): DocumentOpsModeController {
       publishStudio({ workspacePath: host.studio?.workspaceRoot ?? null, host: host.studio ?? null });
       publishCatalog({ workspacePath: host.catalog?.workspaceRoot ?? null, host: host.catalog ?? null });
     },
+    updatePresentation(update) { publishPresentation(update(presentation)); },
   };
 }
 
@@ -136,4 +166,8 @@ export function useStudioModeSlice(): StudioModeSlice {
 
 export function useCatalogModeSlice(): CatalogModeSlice {
   return useSlice("catalog", documentOpsModeController.getCatalogSlice);
+}
+
+export function useFilesPresentationSlice(): FilesPresentationSlice {
+  return useSlice("presentation", documentOpsModeController.getPresentationSlice);
 }

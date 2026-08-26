@@ -42,4 +42,27 @@ describe("documentOpsModeStore", () => {
     controller.publishCatalog({ workspacePath: "/workspace" });
     expect(catalog).toHaveBeenCalledOnce();
   });
+
+  it("owns Files filters, reveal lifecycle, and save errors in a separate presentation slice", () => {
+    const controller = createDocumentOpsModeController();
+    const presentation = vi.fn();
+    controller.subscribe("presentation", presentation);
+
+    controller.updatePresentation((current) => ({
+      ...current,
+      pendingReveal: { pane: "files", targetPath: "/workspace/notes.md" },
+      editorErrors: { "/workspace/notes.md": "conflict" },
+      saving: true,
+      savingTabId: "notes.md",
+    }));
+
+    expect(presentation).toHaveBeenCalledOnce();
+    expect(controller.getPresentationSlice()).toMatchObject({
+      pendingReveal: { pane: "files", targetPath: "/workspace/notes.md" },
+      editorErrors: { "/workspace/notes.md": "conflict" },
+      saving: true,
+      savingTabId: "notes.md",
+    });
+    expect(Object.isFrozen(controller.getPresentationSlice())).toBe(true);
+  });
 });

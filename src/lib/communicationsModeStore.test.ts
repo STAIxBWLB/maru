@@ -71,6 +71,27 @@ describe("communicationsModeStore", () => {
     expect(controller.getCommsSlice()).not.toBe(comms);
   });
 
+  it("owns Inbox and Comms runtime data outside the render-prop projections", () => {
+    const controller = createController();
+    const initial = controller.getRuntimeSlice();
+
+    controller.updateRuntime((current) => ({
+      ...current,
+      inboxLoading: true,
+      processedQuery: "invoice",
+      commsRefreshing: true,
+    }));
+
+    const runtime = controller.getRuntimeSlice();
+    expect(runtime).not.toBe(initial);
+    expect(Object.isFrozen(runtime)).toBe(true);
+    expect(runtime).toMatchObject({
+      inboxLoading: true,
+      processedQuery: "invoice",
+      commsRefreshing: true,
+    });
+  });
+
   it("keeps Comms behind a dedicated adapter instead of a MainApp render branch", () => {
     const app = readFileSync(resolve(import.meta.dirname, "../App.tsx"), "utf8");
     const adapter = readFileSync(

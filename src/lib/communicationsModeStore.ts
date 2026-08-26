@@ -2,6 +2,20 @@ import { useSyncExternalStore } from "react";
 
 import type { InboxPane } from "../components/InboxPane";
 import type { CommsPane } from "../components/CommsPane";
+import { DEFAULT_INBOX_RUNTIME_CONFIG, type LegacyLaunchdService } from "./api";
+import type { InboxDecision } from "./inbox";
+import type {
+  InboxClassification,
+  InboxDropItem,
+  InboxEntry,
+  InboxProcessedItem,
+  InboxProcessedItemDetail,
+  InboxProcessedStatus,
+  InboxRuntimeConfig,
+  InboxSourceRun,
+  ProviderAuthStatus,
+} from "./types";
+import type { KakaoRelayStatus } from "./kakaoRelay";
 
 export type CommunicationsModeDomain = "inbox" | "comms" | "processed";
 
@@ -28,6 +42,47 @@ export interface ProcessedItemsSlice {
   query: string;
 }
 
+export interface InboxCarryState {
+  decision: InboxDecision;
+  classification: InboxClassification | null;
+  classifying: boolean;
+  classifyError: string | null;
+}
+
+/**
+ * Canonical runtime data for the Inbox and Messages domains. This stays out of
+ * the shell so adapters can subscribe to their own stable snapshots while the
+ * current command ports remain installable by the app runtime.
+ */
+export interface CommunicationsRuntimeSlice {
+  inboxDrops: InboxDropItem[];
+  inboxEntries: InboxEntry[];
+  inboxRuntimeConfig: InboxRuntimeConfig;
+  inboxLoading: boolean;
+  inboxCarry: Map<string, InboxCarryState>;
+  processedItems: InboxProcessedItem[];
+  processedLoading: boolean;
+  processedRefreshing: boolean;
+  processedError: string | null;
+  processedStatusFilter: InboxProcessedStatus | "all";
+  processedQuery: string;
+  processedDeferredQuery: string;
+  processedDetail: InboxProcessedItemDetail | null;
+  sourceRuns: InboxSourceRun[];
+  processedCounts: Record<string, number>;
+  commsSourceFilter: string | null;
+  commsAuthStatuses: Record<string, ProviderAuthStatus | null>;
+  kakaoRelayStatus: KakaoRelayStatus | null;
+  commsRefreshing: boolean;
+  gmailError: string | null;
+  gmailDecisions: Map<string, InboxDecision>;
+  migrationServices: LegacyLaunchdService[];
+  migrationBusy: boolean;
+  inboxSourceFilter: string | null;
+  inboxFocusTick: number;
+  inboxActionBusy: boolean;
+}
+
 export interface CommunicationsModeController {
   subscribe(domain: CommunicationsModeDomain, listener: () => void): () => void;
   getInboxSlice(): InboxModeSlice;
@@ -47,6 +102,8 @@ export interface CommunicationsModeController {
   ): boolean;
   bindInbox(props: InboxModeProps): void;
   bindComms(props: CommsModeProps): void;
+  getRuntimeSlice(): CommunicationsRuntimeSlice;
+  updateRuntime(update: (current: CommunicationsRuntimeSlice) => CommunicationsRuntimeSlice): void;
 }
 
 const EMPTY_INBOX: InboxModeSlice = Object.freeze({
@@ -64,6 +121,34 @@ const EMPTY_COMMS: CommsModeSlice = Object.freeze({
   props: null,
 });
 const EMPTY_PROCESSED: ProcessedItemsSlice = Object.freeze({ query: "" });
+const EMPTY_RUNTIME: CommunicationsRuntimeSlice = Object.freeze({
+  inboxDrops: [],
+  inboxEntries: [],
+  inboxRuntimeConfig: DEFAULT_INBOX_RUNTIME_CONFIG,
+  inboxLoading: false,
+  inboxCarry: new Map(),
+  processedItems: [],
+  processedLoading: false,
+  processedRefreshing: false,
+  processedError: null,
+  processedStatusFilter: "all",
+  processedQuery: "",
+  processedDeferredQuery: "",
+  processedDetail: null,
+  sourceRuns: [],
+  processedCounts: {},
+  commsSourceFilter: null,
+  commsAuthStatuses: {},
+  kakaoRelayStatus: null,
+  commsRefreshing: false,
+  gmailError: null,
+  gmailDecisions: new Map(),
+  migrationServices: [],
+  migrationBusy: false,
+  inboxSourceFilter: null,
+  inboxFocusTick: 0,
+  inboxActionBusy: false,
+});
 
 /**
  * Canonical Inbox/Comms render slices. The controller deliberately publishes
@@ -78,6 +163,7 @@ export function createCommunicationsModeController(): CommunicationsModeControll
   let inbox = EMPTY_INBOX;
   let comms = EMPTY_COMMS;
   let processed = EMPTY_PROCESSED;
+  let runtime = EMPTY_RUNTIME;
   let workspaceGeneration = 0;
 
   const notify = (domain: CommunicationsModeDomain) => {
@@ -108,6 +194,13 @@ export function createCommunicationsModeController(): CommunicationsModeControll
   const publishProcessed = (next: ProcessedItemsSlice) => {
     if (processed.query === next.query) return;
     processed = Object.freeze(next);
+    notify("processed");
+  };
+  const publishRuntime = (next: CommunicationsRuntimeSlice) => {
+    if (runtime === next) return;
+    runtime = Object.freeze(next);
+    notify("inbox");
+    notify("comms");
     notify("processed");
   };
 
@@ -166,6 +259,10 @@ export function createCommunicationsModeController(): CommunicationsModeControll
       });
       publishProcessed({ ...processed, query: props.processedQuery });
     },
+    getRuntimeSlice: () => runtime,
+    updateRuntime(update) {
+      publishRuntime(update(runtime));
+    },
   };
 }
 
@@ -192,4 +289,18 @@ export function useCommsModeSlice(): CommsModeSlice {
 
 export function useProcessedItemsSlice(): ProcessedItemsSlice {
   return useSlice("processed", communicationsModeController.getProcessedSlice);
+}
+
+export function useCommunicationsRuntimeSlice(): CommunicationsRuntimeSlice {
+  return useSyncExternalStore(
+    (listener) => {
+      const stops = [
+        communicationsModeController.subscribe("inbox", listener),
+        communicationsModeController.subscribe("comms", listener),
+      ];
+      return () => stops.forEach((stop) => stop());
+    },
+    communicationsModeController.getRuntimeSlice,
+    communicationsModeController.getRuntimeSlice,
+  );
 }

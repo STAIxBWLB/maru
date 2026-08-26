@@ -353,9 +353,15 @@ import { setError, useError } from "./lib/errorStore";
 import { setTelegramMessages, setTelegramPolling, useTelegramPolling } from "./lib/telegramEventsStore";
 import {
   communicationsModeController,
+  useCommunicationsRuntimeSlice,
   type CommsModeProps,
+  type CommunicationsRuntimeSlice,
   type InboxModeProps,
 } from "./lib/communicationsModeStore";
+import {
+  documentOpsModeController,
+  useFilesPresentationSlice,
+} from "./lib/documentOpsModeStore";
 import { useDestructiveActionGuard } from "./lib/useDestructiveActionGuard";
 import { useInboxEvents } from "./lib/useInboxEvents";
 import { useTelegramEvents } from "./lib/useTelegramEvents";
@@ -543,6 +549,68 @@ type PendingExplorerReveal = {
   pane: ExplorerPaneMode;
   targetPath: string;
 };
+
+function applyExternalStateUpdate<T>(
+  current: T,
+  update: React.SetStateAction<T>,
+): T {
+  return typeof update === "function"
+    ? (update as (previous: T) => T)(current)
+    : update;
+}
+
+function updateCommunicationsRuntimeField<K extends keyof CommunicationsRuntimeSlice>(
+  key: K,
+  update: React.SetStateAction<CommunicationsRuntimeSlice[K]>,
+) {
+  communicationsModeController.updateRuntime((current) => ({
+    ...current,
+    [key]: applyExternalStateUpdate(current[key], update),
+  }));
+}
+
+const setInboxDrops = (update: React.SetStateAction<InboxDropItem[]>) => updateCommunicationsRuntimeField("inboxDrops", update);
+const setInboxEntries = (update: React.SetStateAction<InboxEntry[]>) => updateCommunicationsRuntimeField("inboxEntries", update);
+const setInboxRuntimeConfig = (update: React.SetStateAction<InboxRuntimeConfig>) => updateCommunicationsRuntimeField("inboxRuntimeConfig", update);
+const setInboxLoading = (update: React.SetStateAction<boolean>) => updateCommunicationsRuntimeField("inboxLoading", update);
+const setInboxCarry = (update: React.SetStateAction<Map<string, InboxCarry>>) => updateCommunicationsRuntimeField("inboxCarry", update);
+const setProcessedItems = (update: React.SetStateAction<InboxProcessedItem[]>) => updateCommunicationsRuntimeField("processedItems", update);
+const setProcessedLoading = (update: React.SetStateAction<boolean>) => updateCommunicationsRuntimeField("processedLoading", update);
+const setProcessedRefreshing = (update: React.SetStateAction<boolean>) => updateCommunicationsRuntimeField("processedRefreshing", update);
+const setProcessedError = (update: React.SetStateAction<string | null>) => updateCommunicationsRuntimeField("processedError", update);
+const setProcessedStatusFilter = (update: React.SetStateAction<InboxProcessedStatus | "all">) => updateCommunicationsRuntimeField("processedStatusFilter", update);
+const setProcessedQuery = (update: React.SetStateAction<string>) => updateCommunicationsRuntimeField("processedQuery", update);
+const setProcessedDeferredQuery = (update: React.SetStateAction<string>) => updateCommunicationsRuntimeField("processedDeferredQuery", update);
+const setProcessedDetail = (update: React.SetStateAction<InboxProcessedItemDetail | null>) => updateCommunicationsRuntimeField("processedDetail", update);
+const setSourceRuns = (update: React.SetStateAction<InboxSourceRun[]>) => updateCommunicationsRuntimeField("sourceRuns", update);
+const setProcessedCounts = (update: React.SetStateAction<Record<string, number>>) => updateCommunicationsRuntimeField("processedCounts", update);
+const setCommsSourceFilter = (update: React.SetStateAction<string | null>) => updateCommunicationsRuntimeField("commsSourceFilter", update);
+const setCommsAuthStatuses = (update: React.SetStateAction<Record<string, ProviderAuthStatus | null>>) => updateCommunicationsRuntimeField("commsAuthStatuses", update);
+const setKakaoRelayStatus = (update: React.SetStateAction<KakaoRelayStatus | null>) => updateCommunicationsRuntimeField("kakaoRelayStatus", update);
+const setCommsRefreshing = (update: React.SetStateAction<boolean>) => updateCommunicationsRuntimeField("commsRefreshing", update);
+const setGmailError = (update: React.SetStateAction<string | null>) => updateCommunicationsRuntimeField("gmailError", update);
+const setGmailDecisions = (update: React.SetStateAction<Map<string, InboxDecision>>) => updateCommunicationsRuntimeField("gmailDecisions", update);
+const setMigrationServices = (update: React.SetStateAction<LegacyLaunchdService[]>) => updateCommunicationsRuntimeField("migrationServices", update);
+const setMigrationBusy = (update: React.SetStateAction<boolean>) => updateCommunicationsRuntimeField("migrationBusy", update);
+const setInboxSourceFilter = (update: React.SetStateAction<string | null>) => updateCommunicationsRuntimeField("inboxSourceFilter", update);
+const setInboxFocusTick = (update: React.SetStateAction<number>) => updateCommunicationsRuntimeField("inboxFocusTick", update);
+const setInboxActionBusy = (update: React.SetStateAction<boolean>) => updateCommunicationsRuntimeField("inboxActionBusy", update);
+
+function updateFilesPresentationField<K extends "filters" | "pendingReveal" | "editorErrors" | "saving" | "savingTabId">(
+  key: K,
+  update: React.SetStateAction<ReturnType<typeof documentOpsModeController.getPresentationSlice>[K]>,
+) {
+  documentOpsModeController.updatePresentation((current) => ({
+    ...current,
+    [key]: applyExternalStateUpdate(current[key], update),
+  }));
+}
+
+const setFilesPaneFilters = (update: React.SetStateAction<WorkspaceFilesPaneFilters>) => updateFilesPresentationField("filters", update);
+const setPendingExplorerReveal = (update: React.SetStateAction<PendingExplorerReveal | null>) => updateFilesPresentationField("pendingReveal", update);
+const setFilesEditorErrors = (update: React.SetStateAction<Record<string, string | null>>) => updateFilesPresentationField("editorErrors", update);
+const setSaving = (update: React.SetStateAction<boolean>) => updateFilesPresentationField("saving", update);
+const setSavingTabId = (update: React.SetStateAction<string | null>) => updateFilesPresentationField("savingTabId", update);
 
 function isBinaryTab(tab: AnyTab | null | undefined): tab is BinaryTab {
   return Boolean(tab && (tab as BinaryTab).kind === "binary");
@@ -952,16 +1020,15 @@ export function MainApp() {
   const collapsedTreeFoldersByVisibility = useCollapsedTreeFoldersByVisibility();
   const collapsedFileFoldersByVisibility = useCollapsedFileFoldersByVisibility();
   const selectedFilePathsByWorkspace = useSelectedFilePathsByWorkspace();
-  const [filesPaneFilters, setFilesPaneFilters] = useState<WorkspaceFilesPaneFilters>(
-    EMPTY_WORKSPACE_FILES_PANE_FILTERS,
-  );
-  const [pendingExplorerReveal, setPendingExplorerReveal] = useState<PendingExplorerReveal | null>(
-    null,
-  );
+  const filesPresentation = useFilesPresentationSlice();
+  const {
+    filters: filesPaneFilters,
+    pendingReveal: pendingExplorerReveal,
+    editorErrors: filesEditorErrors,
+    saving,
+    savingTabId,
+  } = filesPresentation;
   const [booting, setBooting] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [savingTabId, setSavingTabId] = useState<string | null>(null);
-  const [filesEditorErrors, setFilesEditorErrors] = useState<Record<string, string | null>>({});
   // Global error toast lives in the error store (step 9); setError is a
   // module action now, so every call site below keeps its old shape.
   const error = useError();
@@ -1096,22 +1163,15 @@ export function MainApp() {
     docPath: string;
     refs: KgNodeRef[];
   } | null>(null);
-  const [inboxDrops, setInboxDrops] = useState<InboxDropItem[]>([]);
-  const [inboxEntries, setInboxEntries] = useState<InboxEntry[]>([]);
-  const [inboxRuntimeConfig, setInboxRuntimeConfig] = useState<InboxRuntimeConfig>(
-    DEFAULT_INBOX_RUNTIME_CONFIG,
-  );
-  const [inboxLoading, setInboxLoading] = useState(false);
-  const [inboxCarry, setInboxCarry] = useState<Map<string, InboxCarry>>(() => new Map());
-  const [processedItems, setProcessedItems] = useState<InboxProcessedItem[]>([]);
-  const [processedLoading, setProcessedLoading] = useState(false);
-  const [processedRefreshing, setProcessedRefreshing] = useState(false);
-  const [processedError, setProcessedError] = useState<string | null>(null);
-  const [processedStatusFilter, setProcessedStatusFilter] =
-    useState<InboxProcessedStatus | "all">("all");
-  const [processedQuery, setProcessedQuery] = useState("");
-  const [processedDeferredQuery, setProcessedDeferredQuery] = useState("");
-  const [processedDetail, setProcessedDetail] = useState<InboxProcessedItemDetail | null>(null);
+  const communicationsRuntime = useCommunicationsRuntimeSlice();
+  const {
+    inboxDrops, inboxEntries, inboxRuntimeConfig, inboxLoading, inboxCarry,
+    processedItems, processedLoading, processedRefreshing, processedError,
+    processedStatusFilter, processedQuery, processedDeferredQuery, processedDetail,
+    sourceRuns, processedCounts, commsSourceFilter, commsAuthStatuses,
+    kakaoRelayStatus, commsRefreshing, migrationServices, migrationBusy,
+    inboxSourceFilter, inboxFocusTick, inboxActionBusy,
+  } = communicationsRuntime;
   // Agent, skill, mission, and log state are stable external-store slices.
   // MainApp only composes them for still-inline downstream modes.
   const agentRegistry = useAgentRegistrySlice();
@@ -1121,33 +1181,17 @@ export function MainApp() {
   const skillsLoading = agentRegistry.skillsLoading;
   const processingMissions = agentMission.missions as MissionRecord[];
   const processingLogLines = agentMission.logLines as Record<string, string[]>;
-  // Per-source processing run state for the Messages dashboard.
-  const [sourceRuns, setSourceRuns] = useState<InboxSourceRun[]>([]);
-  const [processedCounts, setProcessedCounts] = useState<Record<string, number>>({});
-  const [commsSourceFilter, setCommsSourceFilter] = useState<string | null>(null);
-  const [commsAuthStatuses, setCommsAuthStatuses] = useState<
-    Record<string, ProviderAuthStatus | null>
-  >({});
-  const [kakaoRelayStatus, setKakaoRelayStatus] = useState<KakaoRelayStatus | null>(null);
-  const [commsRefreshing, setCommsRefreshing] = useState(false);
+  // Per-source processing run state for the Messages dashboard is owned by
+  // the communications store alongside the Inbox runtime.
 
   // Provider accept/reject decisions are memory-only (kept for the bulk
   // inbox flow and a future comms list); writes go through gws/mws CLIs.
-  const [, setGmailError] = useState<string | null>(null);
   // gmailDecisions itself is never read (kept for a future comms list); the
   // setter still drives the accept/reject flow below.
-  const [_gmailDecisions, setGmailDecisions] = useState<Map<string, InboxDecision>>(
-    () => new Map(),
-  );
   // Telegram messages/polling live in the telegram events store (step 9): the
   // listener hook writes them; refreshCommsDashboard and the polling toggles
   // write polling through the same store action names as before.
   const telegramPolling = useTelegramPolling();
-  const [migrationServices, setMigrationServices] = useState<LegacyLaunchdService[]>([]);
-  const [migrationBusy, setMigrationBusy] = useState(false);
-  const [inboxSourceFilter, setInboxSourceFilter] = useState<string | null>(null);
-  const [inboxFocusTick, setInboxFocusTick] = useState(0);
-  const [inboxActionBusy, setInboxActionBusy] = useState(false);
   // App-update + skills-bundle toast state and flows live in the updater
   // toasts hook (step 9); the JSX below only reads the returned values.
   const { updateToast, installPendingUpdate, dismissUpdateToast, checkForUpdates } =
@@ -6601,7 +6645,6 @@ export function MainApp() {
       selectEntry,
       setCollapsedFileFolders,
       setExplorerDocumentFilter,
-      setFilesPaneFilters,
       setPersistedRightPaneTab,
       updateDocumentViews,
       updateField,
