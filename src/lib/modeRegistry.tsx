@@ -7,7 +7,7 @@ import type { FavoriteTarget } from "../components/FavoritesSection";
 import type { FavoriteKind } from "./settings";
 
 export type ModePlacement = "primary" | "right" | "panel";
-export type RegisteredModeId = "pkm" | "e2e" | "diagram" | "graph" | "sites" | "agents" | "inbox";
+export type RegisteredModeId = "pkm" | "e2e" | "diagram" | "graph" | "sites" | "agents" | "inbox" | "comms";
 
 /** Identifiers only: adapters subscribe to their own data instead of receiving shell snapshots. */
 export interface ModeHostScope {
@@ -93,6 +93,13 @@ const modeRegistry: Record<RegisteredModeId, ModeDescriptor> = {
     isAvailable: () => true,
     fallback: "mode-loading",
   },
+  comms: {
+    id: "comms",
+    load: () => import("./modeAdapters/CommsModeAdapter").then((module) => ({ default: module.CommsModeAdapter })),
+    placements: ["primary"],
+    isAvailable: () => true,
+    fallback: "mode-loading",
+  },
 };
 
 const lazyAdapters: Record<RegisteredModeId, ReturnType<typeof lazy<ComponentType<ModeAdapterProps>>>> = {
@@ -103,6 +110,7 @@ const lazyAdapters: Record<RegisteredModeId, ReturnType<typeof lazy<ComponentTyp
   sites: lazy(modeRegistry.sites.load),
   agents: lazy(modeRegistry.agents.load),
   inbox: lazy(modeRegistry.inbox.load),
+  comms: lazy(modeRegistry.comms.load),
 };
 
 export function getModeDescriptor(mode: string): ModeDescriptor | null {

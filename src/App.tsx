@@ -354,7 +354,11 @@ import {
 } from "./lib/agentRuntimeModeStore";
 import { setError, useError } from "./lib/errorStore";
 import { setTelegramMessages, setTelegramPolling, useTelegramPolling } from "./lib/telegramEventsStore";
-import { communicationsModeController, type InboxModeProps } from "./lib/communicationsModeStore";
+import {
+  communicationsModeController,
+  type CommsModeProps,
+  type InboxModeProps,
+} from "./lib/communicationsModeStore";
 import { useDestructiveActionGuard } from "./lib/useDestructiveActionGuard";
 import { useInboxEvents } from "./lib/useInboxEvents";
 import { useTelegramEvents } from "./lib/useTelegramEvents";
@@ -536,7 +540,6 @@ const MAX_OUTLINE_PANE_WIDTH = 520;
 const LazyStudioMode = lazy(() => import("./components/studio/StudioMode").then((module) => ({ default: module.StudioMode })));
 const LazyDraftsPane = lazy(() => import("./components/drafts/DraftsPane").then((module) => ({ default: module.DraftsPane })));
 const LazyGapPane = lazy(() => import("./components/gap/GapPane").then((module) => ({ default: module.GapPane })));
-const LazyCommsPane = lazy(() => import("./components/CommsPane").then((module) => ({ default: module.CommsPane })));
 const LazyMeetingsPane = lazy(() => import("./components/meetings/MeetingsPane").then((module) => ({ default: module.MeetingsPane })));
 const LazyTodayPane = lazy(() => import("./components/today/TodayPane").then((module) => ({ default: module.TodayPane })));
 const LazyTasksPane = lazy(() => import("./components/tasks/TasksPane").then((module) => ({ default: module.TasksPane })));
@@ -8013,6 +8016,94 @@ export function MainApp() {
     [unloadMigrationServices],
   );
 
+  const commsModeProps = useMemo<CommsModeProps>(
+    () => ({
+      runtimeConfig: inboxRuntimeConfig,
+      sourceRuns,
+      processedCounts,
+      processedItems,
+      processedLoading,
+      processedRefreshing,
+      processedError,
+      processedStatusFilter,
+      processedQuery,
+      processedDetail,
+      processingMissions: inboxProcessingMissions,
+      processingLogLines,
+      sourceFilter: commsSourceFilter,
+      actionBusy: inboxActionBusy,
+      telegramPollingStatus: telegramPolling,
+      authStatuses: commsAuthStatuses,
+      kakaoRelayStatus,
+      workPath: inboxWorkspacePath,
+      onConfirmApproval: approvalGate.confirmApproval,
+      refreshing: commsRefreshing,
+      migrationServices,
+      migrationBusy,
+      onSourceFilter: setCommsSourceFilter,
+      onProcessNow: handleProcessCommsNow,
+      onRefresh: refreshActiveSurface,
+      onProcessedStatusFilter: setProcessedStatusFilter,
+      onProcessedQuery: setProcessedQuery,
+      onRefreshProcessed: handleRefreshProcessed,
+      onSelectProcessedItem: handleSelectProcessedItem,
+      onStopProcessingMission: handleStopProcessingMission,
+      onRevealPath: handleRevealPath,
+      onGwsReauth: startGwsAuth,
+      onMsoReauth: startMsoLogin,
+      msoReauthDisabled: !inboxWorkspaceConfigReady,
+      msoProcessDisabled: !inboxWorkspaceConfigReady,
+      onStartTelegramPolling: startTelegramPollingFromSettings,
+      onStopTelegramPolling: stopTelegramPollingFromSettings,
+      onTelegramLogin: startTelegramLogin,
+      onDeepProcess: handleDeepProcessComms,
+      onOpenCommsSettings: openCommsSettings,
+      onRefreshMigration: refreshMigrationServices,
+      onUnloadMigration: handleUnloadMigration,
+    }),
+    [
+      approvalGate.confirmApproval,
+      commsAuthStatuses,
+      commsRefreshing,
+      commsSourceFilter,
+      handleDeepProcessComms,
+      handleProcessCommsNow,
+      handleRefreshProcessed,
+      handleRevealPath,
+      handleSelectProcessedItem,
+      handleStopProcessingMission,
+      handleUnloadMigration,
+      inboxActionBusy,
+      inboxProcessingMissions,
+      inboxRuntimeConfig,
+      inboxWorkspaceConfigReady,
+      inboxWorkspacePath,
+      kakaoRelayStatus,
+      migrationBusy,
+      migrationServices,
+      openCommsSettings,
+      processedCounts,
+      processedDetail,
+      processedError,
+      processedItems,
+      processedLoading,
+      processedQuery,
+      processedRefreshing,
+      processedStatusFilter,
+      processingLogLines,
+      refreshActiveSurface,
+      refreshMigrationServices,
+      sourceRuns,
+      startGwsAuth,
+      startMsoLogin,
+      startTelegramLogin,
+      startTelegramPollingFromSettings,
+      stopTelegramPollingFromSettings,
+      telegramPolling,
+    ],
+  );
+  communicationsModeController.bindComms(commsModeProps);
+
   // Meetings pane callbacks.
   const handleMeetingsOpenSkillCompose = useCallback(
     (skill: SkillRecord | null, context: SkillContextItem[], prompt?: string) =>
@@ -8982,49 +9073,11 @@ export function MainApp() {
             commands={{ renderPrimarySurface: () => null }}
           />
         ) : surfaceMode === "comms" ? (
-          <LazyCommsPane
-            runtimeConfig={inboxRuntimeConfig}
-            sourceRuns={sourceRuns}
-            processedCounts={processedCounts}
-            processedItems={processedItems}
-            processedLoading={processedLoading}
-            processedRefreshing={processedRefreshing}
-            processedError={processedError}
-            processedStatusFilter={processedStatusFilter}
-            processedQuery={processedQuery}
-            processedDetail={processedDetail}
-            processingMissions={inboxProcessingMissions}
-            processingLogLines={processingLogLines}
-            sourceFilter={commsSourceFilter}
-            actionBusy={inboxActionBusy}
-            telegramPollingStatus={telegramPolling}
-            authStatuses={commsAuthStatuses}
-            kakaoRelayStatus={kakaoRelayStatus}
-            workPath={inboxWorkspacePath}
-            onConfirmApproval={approvalGate.confirmApproval}
-            refreshing={commsRefreshing}
-            migrationServices={migrationServices}
-            migrationBusy={migrationBusy}
-            onSourceFilter={setCommsSourceFilter}
-            onProcessNow={handleProcessCommsNow}
-            onRefresh={refreshActiveSurface}
-            onProcessedStatusFilter={setProcessedStatusFilter}
-            onProcessedQuery={setProcessedQuery}
-            onRefreshProcessed={handleRefreshProcessed}
-            onSelectProcessedItem={handleSelectProcessedItem}
-            onStopProcessingMission={handleStopProcessingMission}
-            onRevealPath={handleRevealPath}
-            onGwsReauth={startGwsAuth}
-            onMsoReauth={startMsoLogin}
-            msoReauthDisabled={!inboxWorkspaceConfigReady}
-            msoProcessDisabled={!inboxWorkspaceConfigReady}
-            onStartTelegramPolling={startTelegramPollingFromSettings}
-            onStopTelegramPolling={stopTelegramPollingFromSettings}
-            onTelegramLogin={startTelegramLogin}
-            onDeepProcess={handleDeepProcessComms}
-            onOpenCommsSettings={openCommsSettings}
-            onRefreshMigration={refreshMigrationServices}
-            onUnloadMigration={handleUnloadMigration}
+          <ModeSurfaceHost
+            mode="comms"
+            placement="primary"
+            scope={{ workspacePath: inboxWorkspacePath, documentBrowserScope }}
+            commands={{ renderPrimarySurface: () => null }}
           />
         ) : surfaceMode === "meetings" ? (
           <LazyMeetingsPane

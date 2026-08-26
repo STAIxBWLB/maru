@@ -65,4 +65,9 @@ describe("modeRegistry", () => {
     expect(getModeDescriptor("inbox")).toMatchObject({ id: "inbox", placements: ["primary"] });
     expect(typeof getModeDescriptor("inbox")?.load).toBe("function");
   });
+
+  it("registers Comms as a dedicated primary lazy surface", () => {
+    expect(getModeDescriptor("comms")).toMatchObject({ id: "comms", placements: ["primary"] });
+    expect(typeof getModeDescriptor("comms")?.load).toBe("function");
+  });
 });
