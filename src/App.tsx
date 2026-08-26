@@ -86,7 +86,6 @@ import {
   useOutlineFileQueueSlice,
   type OutlinePaneScope,
 } from "./lib/outlinePaneStore";
-import { InlineDocumentEditor } from "./components/InlineDocumentEditor";
 import type { TasksPaneProps } from "./components/tasks/TasksPane";
 import type {
   TerminalPanelHandle,
@@ -536,12 +535,10 @@ const MAX_DOCUMENTS_PANE_WIDTH = 560;
 const MIN_OUTLINE_PANE_WIDTH = 240;
 const MAX_OUTLINE_PANE_WIDTH = 520;
 
-const LazyStudioMode = lazy(() => import("./components/studio/StudioMode").then((module) => ({ default: module.StudioMode })));
 const LazyMeetingsPane = lazy(() => import("./components/meetings/MeetingsPane").then((module) => ({ default: module.MeetingsPane })));
 const LazyTodayPane = lazy(() => import("./components/today/TodayPane").then((module) => ({ default: module.TodayPane })));
 const LazyTasksPane = lazy(() => import("./components/tasks/TasksPane").then((module) => ({ default: module.TasksPane })));
 const LazyDashboardPane = lazy(() => import("./components/dashboard/DashboardPane").then((module) => ({ default: module.DashboardPane })));
-const LazyCatalogPane = lazy(() => import("./components/catalog/CatalogPane").then((module) => ({ default: module.CatalogPane })));
 const LazySettingsSurface = lazy(() => import("./components/settings/SettingsSurface"));
 
 type PendingExplorerReveal = {
@@ -8826,38 +8823,41 @@ export function MainApp() {
             }}
           />
         ) : surfaceMode === "studio" ? (
-          <LazyStudioMode
-            workspaceRoot={activeDocumentWorkspacePath ?? inboxWorkspacePath ?? settingsWorkPath}
-            activeDocument={document}
-            canCreateDocument={activeWorkspaceCanCreate}
-            canModifyDocument={activeWorkspaceCanModify}
-            onCreateDocument={createDocumentAndOpen}
-            onApplyBody={applyStudioBody}
-            onFreezePackage={freezeStudioPackage}
-            lintDismissalsByDoc={maruSettings.composer.lintDismissals}
-            onLintDismissalsChange={(docId, dismissedIds) => {
-              updateSettings((current) => ({
-                ...current,
-                composer: {
-                  ...current.composer,
-                  lintDismissals: {
-                    ...current.composer.lintDismissals,
-                    [docId]: dismissedIds,
-                  },
+          <ModeSurfaceHost
+            mode="studio"
+            placement="primary"
+            scope={{ workspacePath: activeDocumentWorkspacePath ?? inboxWorkspacePath ?? settingsWorkPath, documentBrowserScope }}
+            commands={{
+              renderPrimarySurface: () => null,
+              documentOps: { studio: {
+                workspaceRoot: activeDocumentWorkspacePath ?? inboxWorkspacePath ?? settingsWorkPath,
+                activeDocument: document, canCreateDocument: activeWorkspaceCanCreate, canModifyDocument: activeWorkspaceCanModify,
+                onCreateDocument: createDocumentAndOpen, onApplyBody: applyStudioBody, onFreezePackage: freezeStudioPackage,
+                lintDismissalsByDoc: maruSettings.composer.lintDismissals,
+                onLintDismissalsChange: (docId, dismissedIds) => updateSettings((current) => ({
+                  ...current, composer: { ...current.composer, lintDismissals: { ...current.composer.lintDismissals, [docId]: dismissedIds } },
+                })),
+                onRevealPath: (path) => {
+                  const root = activeDocumentWorkspacePath ?? inboxWorkspacePath ?? settingsWorkPath;
+                  if (root) void revealInFileManager(root, path);
                 },
-              }));
-            }}
-            onRevealPath={(path) => {
-              const root = activeDocumentWorkspacePath ?? inboxWorkspacePath ?? settingsWorkPath;
-              if (root) void revealInFileManager(root, path);
+              } },
             }}
           />
         ) : surfaceMode === "catalog" ? (
-          <LazyCatalogPane
-            workspaceRoot={inboxWorkspacePath ?? settingsWorkPath}
-            onReveal={(path) => {
-              const root = inboxWorkspacePath ?? settingsWorkPath;
-              if (root) void revealInFileManager(root, path);
+          <ModeSurfaceHost
+            mode="catalog"
+            placement="primary"
+            scope={{ workspacePath: inboxWorkspacePath ?? settingsWorkPath, documentBrowserScope }}
+            commands={{
+              renderPrimarySurface: () => null,
+              documentOps: { catalog: {
+                workspaceRoot: inboxWorkspacePath ?? settingsWorkPath,
+                onReveal: (path) => {
+                  const root = inboxWorkspacePath ?? settingsWorkPath;
+                  if (root) void revealInFileManager(root, path);
+                },
+              } },
             }}
           />
         ) : surfaceMode === "inbox" ? (

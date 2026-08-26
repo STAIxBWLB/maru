@@ -8,7 +8,7 @@ import type { FavoriteTarget } from "../components/FavoritesSection";
 import type { FavoriteKind, MaruSettings } from "./settings";
 
 export type ModePlacement = "primary" | "right" | "panel";
-export type RegisteredModeId = "pkm" | "e2e" | "diagram" | "graph" | "sites" | "agents" | "inbox" | "comms" | "scratchpad" | "drafts" | "gap" | "files";
+export type RegisteredModeId = "pkm" | "e2e" | "diagram" | "graph" | "sites" | "agents" | "inbox" | "comms" | "scratchpad" | "drafts" | "gap" | "files" | "studio" | "catalog";
 
 /** Identifiers only: adapters subscribe to their own data instead of receiving shell snapshots. */
 export interface ModeHostScope {
@@ -135,6 +135,20 @@ const modeRegistry: Record<RegisteredModeId, ModeDescriptor> = {
     isAvailable: () => true,
     fallback: "mode-loading",
   },
+  studio: {
+    id: "studio",
+    load: () => import("./modeAdapters/StudioModeAdapter").then((module) => ({ default: module.StudioModeAdapter })),
+    placements: ["primary"],
+    isAvailable: () => true,
+    fallback: "mode-loading",
+  },
+  catalog: {
+    id: "catalog",
+    load: () => import("./modeAdapters/CatalogModeAdapter").then((module) => ({ default: module.CatalogModeAdapter })),
+    placements: ["primary"],
+    isAvailable: () => true,
+    fallback: "mode-loading",
+  },
 };
 
 const lazyAdapters: Record<RegisteredModeId, ReturnType<typeof lazy<ComponentType<ModeAdapterProps>>>> = {
@@ -150,6 +164,8 @@ const lazyAdapters: Record<RegisteredModeId, ReturnType<typeof lazy<ComponentTyp
   drafts: lazy(modeRegistry.drafts.load),
   gap: lazy(modeRegistry.gap.load),
   files: lazy(modeRegistry.files.load),
+  studio: lazy(modeRegistry.studio.load),
+  catalog: lazy(modeRegistry.catalog.load),
 };
 
 export function getModeDescriptor(mode: string): ModeDescriptor | null {
