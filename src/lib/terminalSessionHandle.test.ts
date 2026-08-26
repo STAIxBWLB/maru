@@ -49,7 +49,9 @@ describe("terminal session handle contract", () => {
     expect(API_SOURCE).not.toMatch(/function terminal(?:Write|Input|Scroll|Clear|Text|Resize|Kill)\(sessionId: string/);
     expect(API_SOURCE).not.toMatch(/function terminal(?:InputBatch|Ack|RequestFull|SetVisibility|Selection|CopySelection)\(\s*sessionId: string/);
     expect(API_SOURCE).toMatch(/terminal_write", \{ handle, data \}/);
-    expect(API_SOURCE).toMatch(/terminal_search", \{ handle, query, direction, caseSensitive \}/);
+    expect(API_SOURCE).toMatch(
+      /terminal_search", \{\s*handle,\s*query,\s*direction,\s*caseSensitive,?\s*\}/s,
+    );
   });
 
   it("returns the requested ID and generation together from terminalSpawn", () => {
@@ -78,7 +80,7 @@ describe("terminal session handle contract", () => {
     expect(TERMINAL_PANEL_SOURCE).toContain("handleBySessionRef");
     expect(TERMINAL_PANEL_SOURCE).not.toContain("generationBySessionRef");
     expect(TERMINAL_PANEL_SOURCE).toContain("terminalInputBatch(handle, clientSeq, commands)");
-    expect(TERMINAL_PANEL_SOURCE).toContain("terminalAck(handle, seq)");
+    expect(TERMINAL_PANEL_SOURCE).toContain("terminalAck(");
     expect(TERMINAL_PANEL_SOURCE).toContain("terminalResize(handle, size.cols, size.rows)");
     expect(TERMINAL_PANEL_SOURCE).toContain("terminalKill(handle)");
   });

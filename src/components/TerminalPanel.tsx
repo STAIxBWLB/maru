@@ -43,8 +43,10 @@ import {
   terminalScroll,
   terminalSpawn,
   terminalText,
+  createTerminalSessionHandle,
   decodeTerminalWireFrame,
   type TerminalInputCommand,
+  type TerminalSessionHandle,
   type TerminalSpawnHandle,
   type TerminalStreamMessage,
   type TerminalSelectionCommand,
@@ -315,7 +317,7 @@ export const TerminalPanel = memo(
     const searchInputRef = useRef<HTMLInputElement | null>(null);
     const sessionByTabRef = useRef<Map<string, string>>(new Map());
     const tabBySessionRef = useRef<Map<string, string>>(new Map());
-    const generationBySessionRef = useRef<Map<string, string>>(new Map());
+    const handleBySessionRef = useRef<Map<string, TerminalSessionHandle>>(new Map());
     const channelsBySessionRef = useRef<Map<string, TerminalSpawnHandle["channel"]>>(new Map());
     const streamSeqBySessionRef = useRef<Map<string, { generation: string; lastSeq: number }>>(
       new Map(),
@@ -470,8 +472,9 @@ export const TerminalPanel = memo(
       ) => {
         const { sessionId, generation, seq, prevSeq } = message;
         const frame = decodeTerminalWireFrame(message.frame);
-        const expectedGeneration = generationBySessionRef.current.get(sessionId);
-        if (expectedGeneration && expectedGeneration !== generation) return;
+        const sessionHandle = handleBySessionRef.current.get(sessionId);
+        if (sessionHandle && sessionHandle.generation !== generation) return;
+        const messageHandle = sessionHandle ?? createTerminalSessionHandle(sessionId, generation);
         const current = streamSeqBySessionRef.current.get(sessionId);
         const disposition = terminalFrameDisposition(
           current,
@@ -481,7 +484,7 @@ export const TerminalPanel = memo(
           Boolean(frame.dirtyRows),
         );
         if (disposition === "duplicate") {
-          void terminalAck(sessionId, generation, seq).catch(() => {});
+          void terminalAck(messageHandle, seq).catch(() => {});
           return;
         }
         const applied = disposition === "apply" && handle.applyFrame(frame);
@@ -490,9 +493,9 @@ export const TerminalPanel = memo(
         // dropped patch followed by a failed requestFull would let the next
         // patch look contiguous and paper over the missing rows for good.
         if (applied) streamSeqBySessionRef.current.set(sessionId, { generation, lastSeq: seq });
-        void terminalAck(sessionId, generation, seq).catch(() => {});
+        void terminalAck(messageHandle, seq).catch(() => {});
         if (!applied) {
-          void terminalRequestFull(sessionId, generation).catch(() => {});
+          void terminalRequestFull(messageHandle).catch(() => {});
           return;
         }
         const mouse = frame.mouse;
@@ -512,18 +515,26 @@ export const TerminalPanel = memo(
       (message: TerminalStreamMessage) => {
         if (disposedRef.current) {
           if (message.kind === "frame") {
-            void terminalAck(message.sessionId, message.generation, message.seq).catch(() => {});
+            void terminalAck(
+              handleBySessionRef.current.get(message.sessionId) ??
+                createTerminalSessionHandle(message.sessionId, message.generation),
+              message.seq,
+            ).catch(() => {});
           }
           return;
         }
         const cancelled = cancelledSessionsRef.current.has(message.sessionId);
         if (cancelled && message.kind === "frame") {
-          void terminalAck(message.sessionId, message.generation, message.seq).catch(() => {});
+          void terminalAck(
+            handleBySessionRef.current.get(message.sessionId) ??
+              createTerminalSessionHandle(message.sessionId, message.generation),
+            message.seq,
+          ).catch(() => {});
           return;
         }
         if (cancelled && message.kind === "fault") return;
-        const expectedGeneration = generationBySessionRef.current.get(message.sessionId);
-        if (expectedGeneration && expectedGeneration !== message.generation) return;
+        const sessionHandle = handleBySessionRef.current.get(message.sessionId);
+        if (sessionHandle && sessionHandle.generation !== message.generation) return;
         if (message.kind === "frame") {
           const tabId = tabBySessionRef.current.get(message.sessionId);
           const handle = tabId ? handlesRef.current.get(tabId) : null;
@@ -534,7 +545,10 @@ export const TerminalPanel = memo(
             // Ack even while buffered: the backend only allows two unacked
             // frames, so withholding acks here stalls the emitter permanently
             // if the handle attaches late. A seq gap resyncs via requestFull.
-            void terminalAck(message.sessionId, message.generation, message.seq).catch(() => {});
+            void terminalAck(
+              sessionHandle ?? createTerminalSessionHandle(message.sessionId, message.generation),
+              message.seq,
+            ).catch(() => {});
             return;
           }
           applyStreamFrame(message, handle);
@@ -548,7 +562,7 @@ export const TerminalPanel = memo(
         const tabId = tabBySessionRef.current.get(message.sessionId);
         if (tabId) sessionByTabRef.current.delete(tabId);
         tabBySessionRef.current.delete(message.sessionId);
-        generationBySessionRef.current.delete(message.sessionId);
+        handleBySessionRef.current.delete(message.sessionId);
         channelsBySessionRef.current.delete(message.sessionId);
         streamSeqBySessionRef.current.delete(message.sessionId);
         pendingFramesRef.current.delete(message.sessionId);
@@ -605,20 +619,21 @@ export const TerminalPanel = memo(
 
     useEffect(() => {
       disposedRef.current = false;
+      const sessionHandles = handleBySessionRef.current;
       return () => {
         disposedRef.current = true;
         cancelTerminalLayoutRefresh(layoutRefreshRafRef);
         // eslint-disable-next-line react-hooks/exhaustive-deps -- unmount teardown reads each ref's live value on purpose; this effect has no deps and never re-runs mid-life
         for (const sessionId of sessionByTabRef.current.values()) {
-          void terminalKill(sessionId);
+          const handle = sessionHandles.get(sessionId);
+          if (handle) void terminalKill(handle);
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps -- unmount teardown reads each ref's live value on purpose; this effect has no deps and never re-runs mid-life
         for (const pump of inputPumpsRef.current.values()) pump.fail();
         inputPumpsRef.current.clear();
         // eslint-disable-next-line react-hooks/exhaustive-deps -- unmount teardown reads each ref's live value on purpose; this effect has no deps and never re-runs mid-life
         channelsBySessionRef.current.clear();
-        // eslint-disable-next-line react-hooks/exhaustive-deps -- unmount teardown reads each ref's live value on purpose; this effect has no deps and never re-runs mid-life
-        generationBySessionRef.current.clear();
+        sessionHandles.clear();
         // eslint-disable-next-line react-hooks/exhaustive-deps -- unmount teardown reads each ref's live value on purpose; this effect has no deps and never re-runs mid-life
         streamSeqBySessionRef.current.clear();
         // eslint-disable-next-line react-hooks/exhaustive-deps -- unmount teardown reads each ref's live value on purpose; this effect has no deps and never re-runs mid-life
@@ -699,9 +714,9 @@ export const TerminalPanel = memo(
         tabBySessionRef.current.set(sessionId, tabId);
         const inputPump = new TerminalInputPump(
           async (clientSeq, commands) => {
-            const generation = generationBySessionRef.current.get(sessionId);
-            if (!generation) throw new Error("terminal_session_not_ready");
-            await terminalInputBatch(sessionId, generation, clientSeq, commands);
+            const handle = handleBySessionRef.current.get(sessionId);
+            if (!handle) throw new Error("terminal_session_not_ready");
+            await terminalInputBatch(handle, clientSeq, commands);
           },
           (inputError) => {
             setError(inputError instanceof Error ? inputError.message : String(inputError));
@@ -764,11 +779,11 @@ export const TerminalPanel = memo(
             visibilityBySessionRef.current.delete(sessionId);
             inputPump.fail();
             inputPumpsRef.current.delete(sessionId);
-            await terminalSetVisibility(sessionId, spawn.generation, false).catch(() => {});
-            await terminalKill(sessionId).catch(() => {});
+            await terminalSetVisibility(spawn.handle, false).catch(() => {});
+            await terminalKill(spawn.handle).catch(() => {});
             return;
           }
-          generationBySessionRef.current.set(sessionId, spawn.generation);
+          handleBySessionRef.current.set(sessionId, spawn.handle);
           channelsBySessionRef.current.set(sessionId, spawn.channel);
           inputPump.ready();
           setResizeReadySessions((current) => ({
@@ -788,7 +803,7 @@ export const TerminalPanel = memo(
             disposedRef.current || cancelledSessionsRef.current.delete(sessionId);
           sessionByTabRef.current.delete(tabId);
           tabBySessionRef.current.delete(sessionId);
-          generationBySessionRef.current.delete(sessionId);
+          handleBySessionRef.current.delete(sessionId);
           channelsBySessionRef.current.delete(sessionId);
           visibilityBySessionRef.current.delete(sessionId);
           inputPumpsRef.current.get(sessionId)?.fail();
@@ -893,9 +908,9 @@ export const TerminalPanel = memo(
         const sessionId = sessionByTabRef.current.get(tabId);
         if (sessionId) {
           cancelledSessionsRef.current.add(sessionId);
-          const generation = generationBySessionRef.current.get(sessionId);
-          if (generation) void terminalSetVisibility(sessionId, generation, false).catch(() => {});
-          void terminalKill(sessionId).catch((killError) => {
+          const handle = handleBySessionRef.current.get(sessionId);
+          if (handle) void terminalSetVisibility(handle, false).catch(() => {});
+          if (handle) void terminalKill(handle).catch((killError) => {
             setError(killError instanceof Error ? killError.message : String(killError));
           });
           sessionByTabRef.current.delete(tabId);
@@ -930,9 +945,9 @@ export const TerminalPanel = memo(
         const sessionId = sessionByTabRef.current.get(tab.id);
         if (sessionId) {
           cancelledSessionsRef.current.add(sessionId);
-          const generation = generationBySessionRef.current.get(sessionId);
-          if (generation) void terminalSetVisibility(sessionId, generation, false).catch(() => {});
-          void terminalKill(sessionId).catch((killError) => {
+          const handle = handleBySessionRef.current.get(sessionId);
+          if (handle) void terminalSetVisibility(handle, false).catch(() => {});
+          if (handle) void terminalKill(handle).catch((killError) => {
             setError(killError instanceof Error ? killError.message : String(killError));
           });
           sessionByTabRef.current.delete(tab.id);
@@ -1168,8 +1183,8 @@ export const TerminalPanel = memo(
       for (const tab of state.tabs) {
         const sessionId = sessionByTabRef.current.get(tab.id);
         if (!sessionId) continue;
-        const generation = generationBySessionRef.current.get(sessionId);
-        if (!generation) continue;
+        const handle = handleBySessionRef.current.get(sessionId);
+        if (!handle) continue;
         const visible = visibleTabs.has(tab.id);
         if (visibilityBySessionRef.current.get(sessionId) === visible) continue;
         visibilityBySessionRef.current.set(sessionId, visible);
@@ -1178,7 +1193,7 @@ export const TerminalPanel = memo(
         // forever. Only uncache while the entry still holds the value this
         // send attempted — a late failure must not evict a newer success.
         // Retries stop once the session's generation is torn down.
-        void terminalSetVisibility(sessionId, generation, visible).catch(() => {
+        void terminalSetVisibility(handle, visible).catch(() => {
           if (visibilityBySessionRef.current.get(sessionId) !== visible) return;
           visibilityBySessionRef.current.delete(sessionId);
           window.setTimeout(() => setVisibilityRetryNonce((n) => n + 1), 250);
@@ -1537,11 +1552,12 @@ export const TerminalPanel = memo(
     const runTerminalSearch = useCallback(
       async (direction: TerminalSearchDirection) => {
         const sessionId = getFocusedSessionId();
+        const handle = sessionId ? handleBySessionRef.current.get(sessionId) ?? null : null;
         const query = searchQuery;
-        if (!sessionId || !query) return;
+        if (!sessionId || !handle || !query) return;
         try {
           const result = await terminalSearch(
-            sessionId,
+            handle,
             query,
             direction,
             searchCaseSensitive,
@@ -1576,14 +1592,14 @@ export const TerminalPanel = memo(
         if (action === "paste") {
           const tabId = focusedTabIdRef.current;
           const sessionId = tabId ? sessionByTabRef.current.get(tabId) ?? null : null;
-          const generation = sessionId
-            ? generationBySessionRef.current.get(sessionId) ?? null
+          const sessionHandle = sessionId
+            ? handleBySessionRef.current.get(sessionId) ?? null
             : null;
           const handle = tabId ? handlesRef.current.get(tabId) ?? null : null;
           void (async () => {
             const text = await readClipboardText();
-            if (!text || !sessionId || !generation) return;
-            if (generationBySessionRef.current.get(sessionId) !== generation) return;
+            if (!text || !sessionId || !sessionHandle) return;
+            if (handleBySessionRef.current.get(sessionId) !== sessionHandle) return;
             inputPumpsRef.current.get(sessionId)?.push({ type: "paste", text });
             handle?.focus();
           })();
@@ -1591,11 +1607,9 @@ export const TerminalPanel = memo(
         }
         if (action === "copy") {
           const sessionId = getFocusedSessionId();
-          const generation = sessionId
-            ? generationBySessionRef.current.get(sessionId) ?? null
-            : null;
-          if (sessionId && generation) {
-            void terminalCopySelection(sessionId, generation)
+          const handle = sessionId ? handleBySessionRef.current.get(sessionId) ?? null : null;
+          if (handle) {
+            void terminalCopySelection(handle)
               .then((text) => {
                 if (text) return writeClipboardText(text);
               })
@@ -1614,10 +1628,13 @@ export const TerminalPanel = memo(
             const handle = getFocusedTerminalHandle();
             if (!handle) return;
             const sessionId = getFocusedSessionId();
+            const sessionHandle = sessionId
+              ? handleBySessionRef.current.get(sessionId) ?? null
+              : null;
             let text: string | null = null;
-            if (sessionId) {
+            if (sessionHandle) {
               try {
-                text = await terminalText(sessionId);
+                text = await terminalText(sessionHandle);
               } catch {
                 text = null;
               }
@@ -1632,9 +1649,10 @@ export const TerminalPanel = memo(
         }
         if (action === "clear") {
           const sessionId = getFocusedSessionId();
-          if (sessionId) {
+          const handle = sessionId ? handleBySessionRef.current.get(sessionId) ?? null : null;
+          if (sessionId && handle) {
             setSearchMatchesBySession((current) => ({ ...current, [sessionId]: null }));
-            void terminalClear(sessionId).catch((err) =>
+            void terminalClear(handle).catch((err) =>
               setError(err instanceof Error ? err.message : String(err)),
             );
           }
@@ -1726,8 +1744,10 @@ export const TerminalPanel = memo(
               const size = pendingResize;
               pendingResize = null;
               if (!size) return;
+              const handle = handleBySessionRef.current.get(sessionId);
+              if (!handle) return;
               resizeTail = resizeTail.then(() =>
-                terminalResize(sessionId, size.cols, size.rows).catch((resizeError) => {
+                terminalResize(handle, size.cols, size.rows).catch((resizeError) => {
                   if (tabBySessionRef.current.has(sessionId)) {
                     setError(
                       resizeError instanceof Error ? resizeError.message : String(resizeError),
@@ -1745,7 +1765,9 @@ export const TerminalPanel = memo(
               const next = pendingScroll;
               pendingScroll = 0;
               if (next === 0) return;
-              void terminalScroll(sessionId, next).catch(() => {
+              const handle = handleBySessionRef.current.get(sessionId);
+              if (!handle) return;
+              void terminalScroll(handle, next).catch(() => {
                 // Session may exit before the scroll command lands.
               });
             });
@@ -1754,40 +1776,41 @@ export const TerminalPanel = memo(
             lastActualFocusTabRef.current = tabBySessionRef.current.get(sessionId) ?? null;
           },
           onSelection: async (command: TerminalSelectionCommand) => {
-            const generation = generationBySessionRef.current.get(sessionId);
-            if (!generation) return;
-            await terminalSelection(sessionId, generation, command);
+            const handle = handleBySessionRef.current.get(sessionId);
+            if (!handle) return;
+            await terminalSelection(handle, command);
           },
           onCopySelection: async () => {
-            const generation = generationBySessionRef.current.get(sessionId);
-            if (!generation) return "";
-            return terminalCopySelection(sessionId, generation);
+            const handle = handleBySessionRef.current.get(sessionId);
+            if (!handle) return "";
+            return terminalCopySelection(handle);
           },
           onContextCopy: () => {
-            const generation = generationBySessionRef.current.get(sessionId);
-            if (!generation) return;
-            void terminalCopySelection(sessionId, generation)
+            const handle = handleBySessionRef.current.get(sessionId);
+            if (!handle) return;
+            void terminalCopySelection(handle)
               .then((text) => {
                 if (text) return writeClipboardText(text);
               })
               .catch(() => {});
           },
           onContextPaste: () => {
-            const generation = generationBySessionRef.current.get(sessionId);
-            if (!generation) return;
+            const handle = handleBySessionRef.current.get(sessionId);
+            if (!handle) return;
             void readClipboardText().then((text) => {
-              if (!text || generationBySessionRef.current.get(sessionId) !== generation) return;
+              if (!text || handleBySessionRef.current.get(sessionId) !== handle) return;
               inputPumpsRef.current.get(sessionId)?.push({ type: "paste", text });
             });
           },
           onContextSelectAll: () => {
-            const generation = generationBySessionRef.current.get(sessionId);
-            if (!generation) return;
-            void terminalSelection(sessionId, generation, { type: "selectAll" }).catch(() => {});
+            const handle = handleBySessionRef.current.get(sessionId);
+            if (!handle) return;
+            void terminalSelection(handle, { type: "selectAll" }).catch(() => {});
           },
           onContextFind: () => openSearch(),
           onContextClear: () => {
-            void terminalClear(sessionId).catch(() => {});
+            const handle = handleBySessionRef.current.get(sessionId);
+            if (handle) void terminalClear(handle).catch(() => {});
           },
           canForwardMouse: () =>
             appActiveRef.current && performance.now() >= suppressTerminalMouseUntilRef.current,
