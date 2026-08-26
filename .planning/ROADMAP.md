@@ -201,13 +201,13 @@ Notes for planning:
   3. Adding state to any decomposed pane is a change inside that pane's store and component, with no edit to `src/App.tsx`
   4. `make verify` and the e2e suite pass with no visible behavior change, and `MainApp`'s `useState`/`useEffect` count is a fraction of today's 68/50
 
-**Plans**: 11 plans
+**Plans**: 1/11 plans executed
 
 Plans:
 
 **Wave 1**
 
-- [ ] 05-01-PLAN.md - Trace and complete the canonical four-input DocumentList browser facade
+- [x] 05-01-PLAN.md - Trace and complete the canonical four-input DocumentList browser facade
 - [ ] 05-02-PLAN.md - Make every terminal session command generation-handle-only
 
 **Wave 2** *(blocked on both Wave 1 plans)*
@@ -265,7 +265,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5
 | 2. Shared Scanner and Path Invariants | 3/3 | Complete    | 2026-08-23 |
 | 3. Typed IPC Error Contract | 4/4 | Complete   | 2026-08-24 |
 | 4. Editor Surface State Extraction | 7/7 | Complete    | 2026-08-26 |
-| 5. Shell Decomposition Completion | 0/TBD | Not started | - |
+| 5. Shell Decomposition Completion | 1/11 | In Progress|  |
 
 ---
 *Roadmap created: 2026-08-22*

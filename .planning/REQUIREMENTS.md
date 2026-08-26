@@ -57,10 +57,10 @@ milestone with no end-user-visible surface.
 - [x] **SHELL-02**: `EditorPane` reads its state from module stores instead of a ~55-prop bundle
 - [x] **SHELL-03**: Typing in the editor no longer re-renders unrelated panes
 - [x] **SHELL-04**: `EditorPane` has a component test covering the preview-mark path that regressed across #260/#262/#264
-- [ ] **SHELL-05**: `DocumentList` reads its state from module stores instead of a ~40-prop bundle
+- [x] **SHELL-05**: `DocumentList` reads its state from module stores instead of a ~40-prop bundle
 - [ ] **SHELL-06**: `TerminalPanel` reads its state from module stores instead of a ~25-prop bundle
 - [ ] **SHELL-07**: Adding a mode surface is a registry entry, not an added branch in a ~190-line nested ternary chain
-- [ ] **SHELL-08**: Adding state to a pane no longer requires editing `src/App.tsx`
+- [x] **SHELL-08**: Adding state to a pane no longer requires editing `src/App.tsx`
 
 ## v2 Requirements
 
@@ -144,10 +144,10 @@ in the contract Phase 3 established, deliberately not widened into that PR.
 | SHELL-02 | Phase 4 | Complete |
 | SHELL-03 | Phase 4 | Complete |
 | SHELL-04 | Phase 4 | Complete |
-| SHELL-05 | Phase 5 | Pending |
+| SHELL-05 | Phase 5 | Complete |
 | SHELL-06 | Phase 5 | Pending |
 | SHELL-07 | Phase 5 | Pending |
-| SHELL-08 | Phase 5 | Pending |
+| SHELL-08 | Phase 5 | Complete |
 
 **Coverage:**
 
