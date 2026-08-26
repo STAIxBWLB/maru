@@ -86,7 +86,6 @@ import {
   useOutlineFileQueueSlice,
   type OutlinePaneScope,
 } from "./lib/outlinePaneStore";
-import { ScratchpadPane } from "./components/ScratchpadPane";
 import { InlineDocumentEditor } from "./components/InlineDocumentEditor";
 import type { TasksPaneProps } from "./components/tasks/TasksPane";
 import type {
@@ -430,6 +429,7 @@ import {
   useShellSettings,
 } from "./lib/shellSettingsStore";
 import { getModeDescriptor, ModeSurfaceHost } from "./lib/modeRegistry";
+import { knowledgeModeController } from "./lib/knowledgeModeStore";
 import { SitesOpenRequestBridge, visualModeController } from "./lib/visualModeStore";
 import {
   availableRightWorkbenchSurface,
@@ -1088,7 +1088,6 @@ export function MainApp() {
   const [todayBannerVisible, setTodayBannerVisible] = useState(false);
   const [todayRolloverEpoch, setTodayRolloverEpoch] = useState(0);
   const [todayRefreshEpoch, setTodayRefreshEpoch] = useState(0);
-  const [scratchpadRefreshEpoch, setScratchpadRefreshEpoch] = useState(0);
   // Last logical day seen by the new-day watcher (boot seeds it too).
   const todayLogicalDayRef = useRef<string | null>(null);
   // Workspace whose boot auto-opened Today this launch. The settings-load
@@ -2500,44 +2499,11 @@ export function MainApp() {
     [updateSettings],
   );
 
-  const setScratchpadSortKey = useCallback(
-    (scratchpadSortKey: SortKey) => {
-      updateSettings((current) => ({
-        ...current,
-        ui: {
-          ...current.ui,
-          scratchpadSortKey,
-        },
-      }));
-    },
-    [updateSettings],
-  );
-
-  const setScratchpadEditorViewMode = useCallback(
-    (scratchpadEditorViewMode: EditorViewMode) => {
-      updateSettings((current) => ({
-        ...current,
-        ui: { ...current.ui, scratchpadEditorViewMode },
-      }));
-    },
-    [updateSettings],
-  );
-
   const setFilesEditorViewMode = useCallback(
     (filesEditorViewMode: EditorViewMode) => {
       updateSettings((current) => ({
         ...current,
         ui: { ...current.ui, filesEditorViewMode },
-      }));
-    },
-    [updateSettings],
-  );
-
-  const setScratchpadExpandedFolders = useCallback(
-    (scratchpadExpandedFolders: string[]) => {
-      updateSettings((current) => ({
-        ...current,
-        ui: { ...current.ui, scratchpadExpandedFolders },
       }));
     },
     [updateSettings],
@@ -5513,7 +5479,7 @@ export function MainApp() {
     } else if (surfaceMode === "today") {
       setTodayRefreshEpoch((epoch) => epoch + 1);
     } else if (surfaceMode === "scratchpad") {
-      setScratchpadRefreshEpoch((epoch) => epoch + 1);
+      knowledgeModeController.requestScratchpadRefresh();
     } else if (surfaceMode === "tasks") {
       // TasksPane owns its task-data refresh (in-pane Refresh button); the
       // shared surface refresh still re-pulls the AI runs feeding its panel.
@@ -8848,6 +8814,9 @@ export function MainApp() {
               sitesOverlayOpen,
               closeRightWorkbench: rightWorkbenchMode === "sites" ? closeRightWorkbench : undefined,
               confirmApproval: approvalGate.confirmApproval,
+              refreshCurrent: () => void refreshCurrent(),
+              updateSettings,
+              translate: t,
             }}
           />
         ) : surfaceMode === "files" ? (
@@ -9002,36 +8971,6 @@ export function MainApp() {
               const root = inboxWorkspacePath ?? settingsWorkPath;
               if (root) void revealInFileManager(root, path);
             }}
-          />
-        ) : surfaceMode === "scratchpad" ? (
-          <ScratchpadPane
-            key={primaryWorkspacePath ?? "scratchpad-unavailable"}
-            workPath={primaryWorkspacePath}
-            sortKey={maruSettings.ui.scratchpadSortKey}
-            listHeight={layoutSettings.scratchpadListHeight}
-            listWidth={layoutSettings.scratchpadListWidth}
-            treeOpen={layoutSettings.scratchpadTreeOpen}
-            treeWidth={layoutSettings.scratchpadTreeWidth}
-            expandedFolders={maruSettings.ui.scratchpadExpandedFolders}
-            editorViewMode={maruSettings.ui.scratchpadEditorViewMode}
-            refreshRequestEpoch={scratchpadRefreshEpoch}
-            onRefreshWorkspace={() => void refreshCurrent()}
-            onSortKeyChange={setScratchpadSortKey}
-            onListHeightChange={(scratchpadListHeight) =>
-              updateLayoutSettings({ scratchpadListHeight })
-            }
-            onListWidthChange={(scratchpadListWidth) =>
-              updateLayoutSettings({ scratchpadListWidth })
-            }
-            onTreeOpenChange={(scratchpadTreeOpen) =>
-              updateLayoutSettings({ scratchpadTreeOpen })
-            }
-            onTreeWidthChange={(scratchpadTreeWidth) =>
-              updateLayoutSettings({ scratchpadTreeWidth })
-            }
-            onExpandedFoldersChange={setScratchpadExpandedFolders}
-            onEditorViewModeChange={setScratchpadEditorViewMode}
-            t={t}
           />
         ) : surfaceMode === "drafts" ? (
           <LazyDraftsPane

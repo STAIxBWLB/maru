@@ -4,10 +4,10 @@ import type { DocumentBrowserScope } from "./documentBrowserStore";
 import { isDiagramEnabled } from "./diagramFlag";
 import { isE2EFlowEnabled } from "./e2eFlow";
 import type { FavoriteTarget } from "../components/FavoritesSection";
-import type { FavoriteKind } from "./settings";
+import type { FavoriteKind, MaruSettings } from "./settings";
 
 export type ModePlacement = "primary" | "right" | "panel";
-export type RegisteredModeId = "pkm" | "e2e" | "diagram" | "graph" | "sites" | "agents" | "inbox" | "comms";
+export type RegisteredModeId = "pkm" | "e2e" | "diagram" | "graph" | "sites" | "agents" | "inbox" | "comms" | "scratchpad";
 
 /** Identifiers only: adapters subscribe to their own data instead of receiving shell snapshots. */
 export interface ModeHostScope {
@@ -28,6 +28,9 @@ export interface ModeHostCommands {
   sitesOverlayOpen?: boolean;
   closeRightWorkbench?(): void;
   confirmApproval?(input: unknown): Promise<string | null>;
+  refreshCurrent?(): void;
+  updateSettings?(updater: MaruSettings | ((current: MaruSettings) => MaruSettings)): void;
+  translate?(key: string, vars?: Record<string, string | number>): string;
 }
 
 export interface ModeAdapterProps {
@@ -100,6 +103,13 @@ const modeRegistry: Record<RegisteredModeId, ModeDescriptor> = {
     isAvailable: () => true,
     fallback: "mode-loading",
   },
+  scratchpad: {
+    id: "scratchpad",
+    load: () => import("./modeAdapters/ScratchpadModeAdapter").then((module) => ({ default: module.ScratchpadModeAdapter })),
+    placements: ["primary"],
+    isAvailable: () => true,
+    fallback: "mode-loading",
+  },
 };
 
 const lazyAdapters: Record<RegisteredModeId, ReturnType<typeof lazy<ComponentType<ModeAdapterProps>>>> = {
@@ -111,6 +121,7 @@ const lazyAdapters: Record<RegisteredModeId, ReturnType<typeof lazy<ComponentTyp
   agents: lazy(modeRegistry.agents.load),
   inbox: lazy(modeRegistry.inbox.load),
   comms: lazy(modeRegistry.comms.load),
+  scratchpad: lazy(modeRegistry.scratchpad.load),
 };
 
 export function getModeDescriptor(mode: string): ModeDescriptor | null {

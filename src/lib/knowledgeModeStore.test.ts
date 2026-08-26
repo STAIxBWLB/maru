@@ -20,7 +20,7 @@ describe("knowledgeModeStore Scratchpad slice", () => {
 
     controller.setScratchpadWorkspace("/workspace");
     controller.setScratchpadSettings({
-      sortKey: "modified",
+      sortKey: "modifiedDesc",
       listHeight: 360,
       listWidth: 320,
       treeOpen: true,
@@ -34,7 +34,7 @@ describe("knowledgeModeStore Scratchpad slice", () => {
     expect(initial).not.toBe(configured);
     expect(configured).toMatchObject({
       workspacePath: "/workspace",
-      sortKey: "modified",
+      sortKey: "modifiedDesc",
       listHeight: 360,
       listWidth: 320,
       treeOpen: true,
