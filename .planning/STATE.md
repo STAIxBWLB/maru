@@ -5,15 +5,15 @@ milestone_name: milestone
 current_phase: 04
 current_phase_name: Editor Surface State Extraction
 status: executing
-stopped_at: Completed 04-06-PLAN.md
-last_updated: "2026-08-26T02:14:02.918Z"
+stopped_at: Completed 04-07-PLAN.md
+last_updated: "2026-08-26T02:37:19.317Z"
 last_activity: 2026-08-26
 last_activity_desc: Phase 04 execution started
 progress:
   total_phases: 4
   completed_phases: 4
   total_plans: 21
-  completed_plans: 20
+  completed_plans: 21
 ---
 
 # Project State
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-08-23)
 ## Current Position
 
 Phase: 04 (Editor Surface State Extraction) — EXECUTING
-Plan: 6 of 6
+Plan: 2 of 7
 Status: Ready to execute
 Last activity: 2026-08-26 — Phase 04 execution started
 
@@ -78,6 +78,7 @@ Progress: [██████████] 100% (3/5 phases)
 | Phase 04 P04 | 12min | 2 tasks | 4 files |
 | Phase 04 P05 | 15min | 2 tasks | 8 files |
 | Phase 04 P06 | 1h 40min | 2 tasks | 4 files |
+| Phase 04 P07 | 13min | 2 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -142,6 +143,8 @@ Recent decisions affecting current work:
 - [Phase ?]: Preview markup remains memoized solely on previewHtml and React remains the only preview DOM writer.
 - [Phase ?]: Keep HTML view/risk state facade-local so parent App renders cannot replay stale legacy values.
 - [Phase ?]: Require a distinct-bundle native WKWebView smoke after deterministic editor-surface gates pass.
+- [Phase ?]: MainApp may observe editor tab snapshots while unrelated shell surfaces stay behind stable production memo boundaries.
+- [Phase ?]: Render instrumentation observes static target names only and defaults to a no-op.
 
 ### Scope Exceptions
 
@@ -193,6 +196,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-08-25T23:42:52.569Z
-Stopped at: Completed 04-06-PLAN.md
+Last session: 2026-08-26T02:37:19.309Z
+Stopped at: Completed 04-07-PLAN.md
 Resume file: None

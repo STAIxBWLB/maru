@@ -154,11 +154,11 @@ Notes for planning:
   3. `EditorPane` has a component test that fails if a preview mark is lost to an unrelated re-render - the #260/#262/#264 failure mode
   4. The e2e suite, unit tests, and the startup/bundle budget gates pass unchanged, and no lazy mode pane has been pulled into the entry chunk
 
-**Plans**: 6/7 plans executed
+**Plans**: 7/7 plans executed
 
 Plans:
 
-- [ ] 04-07-PLAN.md
+- [x] 04-07-PLAN.md
 
 **Wave 1**
 
@@ -221,7 +221,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5
 | 1. Trustworthy Verify Signal | 7/7 | Complete    | 2026-08-23 |
 | 2. Shared Scanner and Path Invariants | 3/3 | Complete    | 2026-08-23 |
 | 3. Typed IPC Error Contract | 4/4 | Complete   | 2026-08-24 |
-| 4. Editor Surface State Extraction | 6/7 | In Progress|  |
+| 4. Editor Surface State Extraction | 7/7 | In Progress|  |
 | 5. Shell Decomposition Completion | 0/TBD | Not started | - |
 
 ---
