@@ -2,6 +2,7 @@
 
 import { act, useSyncExternalStore } from "react";
 import { createRoot, type Root } from "react-dom/client";
+import { readFile } from "node:fs/promises";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@tauri-apps/api/core", () => ({
@@ -194,5 +195,16 @@ describe("Editor surface render isolation", () => {
     expect(tabsRenders).toBe(before.tabsRenders);
     expect(viewRenders).toBe(before.viewRenders);
     expect(operationRenders).toBe(before.operationRenders + 1);
+  });
+
+  it("keeps TerminalPanel at the locked four-input shell boundary", async () => {
+    const source = await readFile("src/components/TerminalPanel.tsx", "utf8");
+    const props = source.match(/interface TerminalPanelProps \{([\s\S]*?)\n\}/)?.[1] ?? "";
+    expect(props.match(/^\s*\w+\??:/gm)?.map((line) => line.trim().split(/[?:]/)[0])).toEqual([
+      "scope",
+      "commands",
+      "graphNode",
+    ]);
+    expect(source).toContain("forwardRef<TerminalPanelHandle, TerminalPanelProps>");
   });
 });
