@@ -551,7 +551,6 @@ const LazyTasksPane = lazy(() => import("./components/tasks/TasksPane").then((mo
 const LazyDashboardPane = lazy(() => import("./components/dashboard/DashboardPane").then((module) => ({ default: module.DashboardPane })));
 const LazyCatalogPane = lazy(() => import("./components/catalog/CatalogPane").then((module) => ({ default: module.CatalogPane })));
 const LazySitesPane = lazy(() => import("./components/sites/SitesPane").then((module) => ({ default: module.SitesPane })));
-const LazyE2EFlowPane = lazy(() => import("./components/e2e/E2EFlowPane").then((module) => ({ default: module.E2EFlowPane })));
 const LazyFilesWorkbench = lazy(() =>
   import("./components/FilesWorkbench").then((module) => ({
     default: module.FilesWorkbench,
@@ -8930,12 +8929,17 @@ export function MainApp() {
           </header>
         ) : null}
         {surfaceMode === "e2e" ? (
-          <LazyE2EFlowPane
-            workPath={inboxWorkspacePath}
-            onRevealPath={(path) => {
-              if (inboxWorkspacePath) void revealInFileManager(inboxWorkspacePath, path);
+          <ModeSurfaceHost
+            mode="e2e"
+            placement={rightWorkbenchMode === "e2e" ? "right" : "primary"}
+            scope={{ workspacePath: inboxWorkspacePath, documentBrowserScope }}
+            commands={{
+              renderPrimarySurface: () => null,
+              revealPath: (path) => {
+                if (inboxWorkspacePath) void revealInFileManager(inboxWorkspacePath, path);
+              },
             }}
-              />
+          />
         ) : surfaceMode === "diagram" ? (
           <LazyDiagramMode
             workPath={inboxWorkspacePath ?? settingsWorkPath}

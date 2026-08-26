@@ -38,13 +38,22 @@ if (!files.some((file) => /^RichMarkdownEditor-.*\.js$/.test(file))) {
 if (!files.some((file) => /^PkmModeAdapter-.*\.js$/.test(file))) {
   throw new Error("bundle-budget: PkmModeAdapter must remain a lazy chunk");
 }
+if (!files.some((file) => /^E2EFlowModeAdapter-.*\.js$/.test(file))) {
+  throw new Error("bundle-budget: E2EFlowModeAdapter must remain a lazy chunk");
+}
 const modeRegistrySource = readFileSync(new URL("../src/lib/modeRegistry.tsx", import.meta.url), "utf8");
 if (!modeRegistrySource.includes('import("./modeAdapters/PkmModeAdapter")')) {
   throw new Error("bundle-budget: PKM adapter must use a dynamic registry import");
 }
+if (!modeRegistrySource.includes('import("./modeAdapters/E2EFlowModeAdapter")')) {
+  throw new Error("bundle-budget: E2E adapter must use a dynamic registry import");
+}
 const appSource = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
 if (appSource.includes('from "./lib/modeAdapters/PkmModeAdapter"')) {
   throw new Error("bundle-budget: App must not eagerly import the PKM adapter");
+}
+if (appSource.includes('from "./lib/modeAdapters/E2EFlowModeAdapter"')) {
+  throw new Error("bundle-budget: App must not eagerly import the E2E adapter");
 }
 if (!files.some((file) => /^ko-.*\.js$/.test(file)) || !files.some((file) => /^en-.*\.js$/.test(file))) {
   throw new Error("bundle-budget: i18n dictionaries must remain lazy chunks");

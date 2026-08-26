@@ -1,9 +1,10 @@
 import { lazy, Suspense, type ComponentType, type ReactNode } from "react";
 
 import type { DocumentBrowserScope } from "./documentBrowserStore";
+import { isE2EFlowEnabled } from "./e2eFlow";
 
 export type ModePlacement = "primary" | "right";
-export type RegisteredModeId = "pkm";
+export type RegisteredModeId = "pkm" | "e2e";
 
 /** Identifiers only: adapters subscribe to their own data instead of receiving shell snapshots. */
 export interface ModeHostScope {
@@ -38,10 +39,18 @@ const modeRegistry: Record<RegisteredModeId, ModeDescriptor> = {
     isAvailable: () => true,
     fallback: "mode-loading",
   },
+  e2e: {
+    id: "e2e",
+    load: () => import("./modeAdapters/E2EFlowModeAdapter").then((module) => ({ default: module.E2EFlowModeAdapter })),
+    placements: ["primary", "right"],
+    isAvailable: isE2EFlowEnabled,
+    fallback: "mode-loading",
+  },
 };
 
 const lazyAdapters: Record<RegisteredModeId, ReturnType<typeof lazy<ComponentType<ModeAdapterProps>>>> = {
   pkm: lazy(modeRegistry.pkm.load),
+  e2e: lazy(modeRegistry.e2e.load),
 };
 
 export function getModeDescriptor(mode: string): ModeDescriptor | null {
