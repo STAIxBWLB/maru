@@ -77,9 +77,7 @@ import {
 } from "./lib/editorPaneStore";
 import {
   getOutlinePaneState,
-  hydrateOutlinePaneState,
   replaceOutlineFileQueue,
-  setOutlineFileQueueCanApply,
   setOutlineFileQueueSelection,
   setOutlineOperation,
   updateOutlineFileQueueItem,
@@ -93,10 +91,21 @@ import type {
 import { TerminalPanel } from "./components/TerminalPanel";
 import { createTerminalPanelCommands } from "./lib/terminalSurfaceAdapter";
 import {
-  setTerminalPanelActiveContext,
-  setTerminalPanelLayout,
   setTerminalPanelRequest,
 } from "./lib/terminalPanelStore";
+import { useTerminalSurfaceLifecycle } from "./lib/terminalSurfaceLifecycle";
+import {
+  useActiveOutlineLine,
+  useOutlineFileQueueLifecycle,
+  useOutlinePaneHydration,
+} from "./lib/outlinePaneLifecycle";
+import {
+  useOpenTabsPersistence,
+  useWorkspaceModePersistence,
+} from "./lib/documentShellLifecycle";
+import { useShellSettingsHydration } from "./lib/shellSettingsLifecycle";
+import { useEditorKgLifecycle } from "./lib/editorDocumentLifecycle";
+import { useWorkspaceBootLifecycle } from "./lib/workspaceBootLifecycle";
 import { recordShellSurfaceRender } from "./lib/shellSurfaceRenderProbe";
 import {
   buildMaruBackgroundContextEnv,
@@ -136,7 +145,6 @@ import {
   getSampleWorkspacePath,
   gitStatus,
   kgDocumentRefs,
-  listWorkspaceRoots,
   moveDocument,
   readDocument,
   readAiMissionLog,
@@ -201,7 +209,6 @@ import {
   registerWorkspaceRoots,
   saveMaruSettings,
   listenMaruSettingsUpdated,
-  updateMaruWorkspace,
 } from "./lib/maruDir";
 import { classifyInboxItem } from "./lib/aiInvoke";
 import {
@@ -334,7 +341,6 @@ import type {
   VaultEntry,
   WorkspaceFileEntry,
   WorkspaceMutationOutcome,
-  WorkspaceRegistry,
   WorkspaceRootEntry,
   WorkspaceVisibility,
   WorkspaceWritePolicy,
@@ -435,10 +441,8 @@ import {
   type TerminalTheme,
   type ToolPanelSurface,
   type WorkspaceFileFilter,
-  type WorkspaceVisibilitySetting,
 } from "./lib/settings";
 import {
-  hydrateShellSettings,
   updateShellSettings,
   useShellSettings,
 } from "./lib/shellSettingsStore";
@@ -460,15 +464,11 @@ import { useWorkspaceConfigLoad } from "./lib/useWorkspaceConfigLoad";
 import { activeMeetingsMissions } from "./lib/meetings";
 import { activeTasksMissions } from "./lib/tasks";
 import {
-  todayLogicalDay,
   todayOpen,
-  todayRollover,
   type TodayRoute,
 } from "./lib/today";
 import {
-  resolveLaunchRoute,
   resolveRouteForDayState,
-  todayAutoOpenKey,
 } from "./lib/todayRouting";
 import {
   applyThemePreference,
@@ -867,44 +867,8 @@ function titleFromWikilinkTarget(target: string): string {
 // template / guideline metadata now flows into proper frontmatter via
 // `CreateDocumentExtras` in lib/api.ts and document::create_document.
 
-function visibilityAvailable(
-  registry: WorkspaceRegistry,
-  visibility: WorkspaceVisibilitySetting,
-): boolean {
-  return Boolean(
-    registry.activeByVisibility[visibility] ??
-      registry.workspaces.find((workspace) => workspace.visibility === visibility),
-  );
-}
-
-function defaultStartupVisibility(registry: WorkspaceRegistry): WorkspaceVisibility {
-  return registry.activeByVisibility.private ||
-    registry.workspaces.some((workspace) => workspace.visibility === "private")
-    ? "private"
-    : "public";
-}
-
-function startupSettingsPath(registry: WorkspaceRegistry): string | null {
-  return (
-    registry.activeByVisibility.private ??
-    registry.workspaces.find((workspace) => workspace.visibility === "private")?.path ??
-    registry.activeByVisibility.public ??
-    registry.workspaces.find((workspace) => workspace.visibility === "public")?.path ??
-    null
-  );
-}
-
 function matchesActiveMission(record: MissionRecord): boolean {
   return record.status === "running" || record.status === "idle";
-}
-
-function initialStartupVisibility(
-  registry: WorkspaceRegistry,
-  settings: MaruSettings | null,
-): WorkspaceVisibility {
-  const preferred = settings?.ui.activeWorkspaceVisibility;
-  if (preferred && visibilityAvailable(registry, preferred)) return preferred;
-  return defaultStartupVisibility(registry);
 }
 
 function fileQueueItemFromSource(
@@ -1533,21 +1497,7 @@ export function MainApp() {
     selectedEntry?.title,
     scratchpadRoot,
   ]);
-  useEffect(() => {
-    setTerminalPanelActiveContext(activeTerminalContext);
-    setTerminalPanelLayout({
-      open: maruSettings.ui.layout.terminalOpen,
-      height: maruSettings.ui.layout.terminalHeight,
-      dock: maruSettings.ui.layout.terminalDock,
-      width: maruSettings.ui.layout.terminalWidth,
-      splitOpen: maruSettings.ui.layout.terminalSplitOpen,
-      splitRatio: maruSettings.ui.layout.terminalSplitRatio,
-      maximized: maruSettings.ui.layout.terminalMaximized,
-      activeSurface: maruSettings.ui.layout.toolPanelSurface,
-      terminalTheme: maruSettings.terminal.theme,
-      graphTheme: maruSettings.graph.display.theme,
-    });
-  }, [activeTerminalContext, maruSettings]);
+  useTerminalSurfaceLifecycle(activeTerminalContext, maruSettings);
   const terminalPanelRef = useRef<TerminalPanelHandle | null>(null);
   const shouldScanExplorerWorkspaceFiles = shouldLazyScanWorkspaceFiles({
     paneMode: workspaceFileScanPaneMode({
@@ -1604,9 +1554,7 @@ export function MainApp() {
       return workspaceCan(owner, action);
     });
   }, [fileQueue, workspaceRegistry.workspaces]);
-  useEffect(() => {
-    setOutlineFileQueueCanApply(outlinePaneScope, canApplyFileQueue);
-  }, [canApplyFileQueue, outlinePaneScope]);
+  useOutlineFileQueueLifecycle(outlinePaneScope, fileQueue, canApplyFileQueue);
   const explorerWorkspaceCaption = useMemo(() => {
     if (!explorerWorkspace) return null;
     const status = workspaceWriteStatus(explorerWorkspace);
@@ -1831,49 +1779,30 @@ export function MainApp() {
     [leftResolvedTabId, rightResolvedTabId],
   );
 
-  useEffect(() => {
-    let cancelled = false;
-    const settingsRequestId = loadWorkspaceRequestRef.current;
-    setSettingsLoaded(false);
-    if (!settingsWorkPath) {
-      if (booting && workspaceRegistry.workspaces.length === 0) {
-        return () => {
-          cancelled = true;
-        };
-      }
-      setMaruSettings(normalizeMaruSettings(DEFAULT_MARU_SETTINGS));
-      setSettingsLoaded(true);
-      return;
-    }
-    void readMaruSettings(settingsWorkPath)
-      .then((settings) => {
-        if (!cancelled && hydrateShellSettings(settings, settingsRequestId, loadWorkspaceRequestRef.current)) {
-          // A boot-time Today auto-open beat this load; keep it instead of
-          // re-applying the persisted mode over it.
-          setAppMode(
-            bootAppMode({
-              storedMode:
-                todayAutoOpenPathRef.current === settingsWorkPath
-                  ? (todayAutoOpenModeRef.current ?? "today")
-                  : settings.ui.activeAppMode,
-              browserPasskeyBuild: browserPasskeyBuildRef.current,
-            }),
-          );
-          setEditorPaneViewModes(settings.ui.editorPaneViewModes);
-          setRightPaneTab(settings.ui.rightPaneTab);
-          setSettingsLoaded(true);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setMaruSettings(normalizeMaruSettings(DEFAULT_MARU_SETTINGS));
-          setSettingsLoaded(true);
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [booting, settingsWorkPath, setMaruSettings, workspaceRegistry.workspaces.length]);
+  const resolveHydratedAppMode = useCallback(
+    (settings: MaruSettings, preserveAutoOpen: boolean) =>
+      bootAppMode({
+        storedMode: preserveAutoOpen
+          ? (todayAutoOpenModeRef.current ?? "today")
+          : settings.ui.activeAppMode,
+        browserPasskeyBuild: browserPasskeyBuildRef.current,
+      }),
+    [],
+  );
+  useShellSettingsHydration({
+    settingsWorkPath,
+    booting,
+    workspaceCount: workspaceRegistry.workspaces.length,
+    requestRef: loadWorkspaceRequestRef,
+    autoOpenPathRef: todayAutoOpenPathRef,
+    autoOpenModeRef: todayAutoOpenModeRef,
+    setSettings: setMaruSettings,
+    setAppMode,
+    resolveMode: resolveHydratedAppMode,
+    setEditorPaneViewModes,
+    setRightPaneTab,
+    setLoaded: setSettingsLoaded,
+  });
 
   useEffect(() => {
     let dispose: (() => void) | null = null;
@@ -2443,13 +2372,6 @@ export function MainApp() {
     updateSettings,
   ]);
 
-  useEffect(() => {
-    const ids = new Set(fileQueue.map((item) => item.id));
-    const selected = getOutlinePaneState(outlinePaneScope).fileQueue.selectedFileQueueItemIds;
-    const next = selected.filter((id) => ids.has(id));
-    if (next.length !== selected.length) setOutlineFileQueueSelection(outlinePaneScope, next);
-  }, [fileQueue, outlinePaneScope]);
-
   const setDocumentBrowserMode = useCallback(
     (mode: DocumentBrowserMode) => {
       updateSettings((current) => ({
@@ -2593,58 +2515,18 @@ export function MainApp() {
     [updateSettings],
   );
 
-  // Best-effort persistence of the chosen mode into .maru/workspace.json.
-  // Failures are silent — this is a UX nicety, not a correctness concern.
-  useEffect(() => {
-    if (!systemWorkPath) return;
-    void updateMaruWorkspace(systemWorkPath, { lastActiveMode: appMode }).catch(() => {});
-  }, [appMode, systemWorkPath]);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const byWorkspace = new Map<string, EditorTab[]>();
-    for (const tab of tabs) {
-      const bucket = byWorkspace.get(tab.workspacePath) ?? [];
-      bucket.push(tab);
-      byWorkspace.set(tab.workspacePath, bucket);
-    }
-    for (const [workspacePath, workspaceTabs] of byWorkspace) {
-      const relPathForTabId = (tabId: string | null) =>
-        tabId
-          ? workspaceTabs.find((tab) => tab.id === tabId)?.entry.relPath ?? null
-          : null;
-      const activeDocForStorage =
-        activeTab && !isBinaryTab(activeTab) ? (activeTab as EditorTab) : null;
-      window.localStorage.setItem(
-        openTabsKeyForWorkspace(workspacePath),
-        JSON.stringify({
-          activeRelPath:
-            activeDocForStorage?.workspacePath === workspacePath
-              ? activeDocForStorage.entry.relPath
-              : null,
-          leftRelPath: relPathForTabId(leftActiveTabId),
-          rightRelPath: relPathForTabId(rightActiveTabId),
-          focusedGroup: focusedEditorGroup,
-          relPaths: workspaceTabs.map((tab) => tab.entry.relPath),
-        } satisfies StoredTabs),
-      );
-    }
-    if (activeTab && !isBinaryTab(activeTab)) {
-      const docTab = activeTab as EditorTab;
-      window.localStorage.setItem(
-        lastOpenKeyForWorkspace(docTab.workspacePath),
-        docTab.entry.relPath,
-      );
-    }
-  }, [
-    activeTab,
-    focusedEditorGroup,
-    lastOpenKeyForWorkspace,
-    leftActiveTabId,
-    openTabsKeyForWorkspace,
-    rightActiveTabId,
+  // Existing workspace metadata and tab session keys stay in their dedicated
+  // lifecycle owner; drafts themselves remain canonical editorTabsStore data.
+  useWorkspaceModePersistence(systemWorkPath, appMode);
+  useOpenTabsPersistence({
     tabs,
-  ]);
+    activeTab: activeTab && !isBinaryTab(activeTab) ? activeTab : null,
+    leftActiveTabId,
+    rightActiveTabId,
+    focusedGroup: focusedEditorGroup,
+    openTabsKey: openTabsKeyForWorkspace,
+    lastOpenKey: lastOpenKeyForWorkspace,
+  });
 
   const pushRecent = useCallback((path: string) => {
     setRecentPaths((prev) => {
@@ -3812,157 +3694,19 @@ export function MainApp() {
     [lastOpenKeyForWorkspace, loadWorkspace],
   );
 
-  // Boot: load registry, fall back to a private sample workspace if empty.
-  useEffect(() => {
-    async function boot() {
-      try {
-        markStartup("boot:start");
-        setBooting(true);
-        const registry = await measureStartup("workspace:registry-read", () =>
-          listWorkspaceRoots(),
-        );
-        if (registry.workspaces.length === 0) {
-          const samplePath = await getSampleWorkspacePath();
-          const seeded = await addWorkspaceRoot({
-            label: "Sample Workspace",
-            path: samplePath,
-            visibility: "private",
-            provider: "local",
-            providerId: null,
-            externalWriter: null,
-            writePolicy: "direct",
-            permissionSummary: null,
-          });
-          setWorkspaceRegistry(seeded);
-          if (seeded.activeByVisibility.private) {
-            activateWorkspace(seeded, "private");
-            await loadWorkspace(seeded.activeByVisibility.private, "private");
-            setBooting(false);
-            markStartup("boot:end", {
-              initialPath: seeded.activeByVisibility.private,
-              initialVisibility: "private",
-              seeded: true,
-            });
-          } else {
-            setBooting(false);
-            markStartup("boot:end", { initialPath: null, seeded: true });
-          }
-          return;
-        }
-        setWorkspaceRegistry(registry);
-        let bootSettings: MaruSettings | null = null;
-        const bootSettingsPath = startupSettingsPath(registry);
-        if (bootSettingsPath) {
-          try {
-            bootSettings = await measureStartup("settings:startup-read", () =>
-              readMaruSettings(bootSettingsPath),
-            );
-            setMaruSettings(bootSettings);
-            // A prior boot pass (StrictMode double-run) may already have
-            // auto-opened Today — keep that over the persisted mode.
-            if (todayAutoOpenPathRef.current === null) {
-              setAppMode(
-                bootAppMode({
-                  storedMode: bootSettings.ui.activeAppMode,
-                  browserPasskeyBuild: browserPasskeyBuildRef.current,
-                }),
-              );
-            }
-            setEditorPaneViewModes(bootSettings.ui.editorPaneViewModes);
-            setRightPaneTab(bootSettings.ui.rightPaneTab);
-          } catch {
-            bootSettings = null;
-          }
-        }
-        const initialVisibility = initialStartupVisibility(registry, bootSettings);
-        activateWorkspace(registry, initialVisibility);
-        const initialPath =
-          registry.activeByVisibility[initialVisibility] ??
-          registry.workspaces.find((workspace) => workspace.visibility === initialVisibility)?.path ??
-          null;
-        if (initialPath) {
-          // Maru Today: first-eligible-launch auto-open. Best-effort — any
-          // failure falls back to the normal persisted-mode restore above.
-          // A `?window=settings` deep link seeds the settings overlay at
-          // mount (this effect closes over the initial value), and explicit
-          // navigation wins without probing Today at all.
-          const todaySettings = bootSettings?.tasks.today;
-          if (
-            settingsOverlay === null &&
-            todaySettings?.enabled &&
-            todaySettings.autoOpenFirstDailyLaunch
-          ) {
-            try {
-              const tasksSettings = bootSettings!.tasks;
-              const timezone = tasksSettings.timezone ?? "Asia/Seoul";
-              const nowIso = new Date().toISOString();
-              const info = await todayLogicalDay(
-                initialPath,
-                nowIso,
-                timezone,
-                todaySettings.dayStart,
-              );
-              planningModeController.setLogicalDay(info.logicalDay);
-              const lastAutoOpenDay = window.localStorage.getItem(todayAutoOpenKey(initialPath));
-              if (lastAutoOpenDay !== info.logicalDay) {
-                // Close out a missed day boundary before inspecting the day.
-                await todayRollover(
-                  initialPath,
-                  nowIso,
-                  timezone,
-                  todaySettings.dayStart,
-                  todaySettings.sleepStart,
-                ).catch(() => null);
-                const snapshot = await todayOpen(
-                  initialPath,
-                  nowIso,
-                  timezone,
-                  todaySettings.dayStart,
-                  todaySettings.sleepStart,
-                );
-                const decision = resolveLaunchRoute({
-                  enabled: todaySettings.enabled,
-                  autoOpen: todaySettings.autoOpenFirstDailyLaunch,
-                  lastAutoOpenDay,
-                  logicalDay: info.logicalDay,
-                  dayState: snapshot.dayState,
-                  // The main-window boot has no explicit initial-mode
-                  // mechanism other than the settings-overlay seed, which is
-                  // already handled by skipping this block entirely.
-                  explicitMode: false,
-                });
-                if (decision) {
-                  planningModeController.setTodayRoute(decision.route);
-                  setAppMode(decision.mode);
-                  todayAutoOpenPathRef.current = initialPath;
-                  todayAutoOpenModeRef.current = decision.mode;
-                  window.localStorage.setItem(todayAutoOpenKey(initialPath), info.logicalDay);
-                }
-              }
-            } catch (err) {
-              console.warn("today auto-open skipped", err);
-            }
-          }
-          const lastRel =
-            typeof window !== "undefined"
-              ? window.localStorage.getItem(lastOpenKeyForWorkspace(initialPath))
-              : null;
-          await loadWorkspace(initialPath, initialVisibility, lastRel);
-          setBooting(false);
-          markStartup("boot:end", { initialPath, initialVisibility });
-        } else {
-          setBooting(false);
-          markStartup("boot:end", { initialPath: null, initialVisibility });
-        }
-      } catch (err) {
-        setError(err instanceof Error ? err.message : String(err));
-        setBooting(false);
-        markStartup("boot:error", { message: err instanceof Error ? err.message : String(err) });
-      }
-    }
-    void boot();
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- boot only once on mount
-  }, []);
+  useWorkspaceBootLifecycle({
+    settingsOverlayOpen: settingsOverlay !== null,
+    browserPasskeyBuildRef,
+    todayAutoOpenPathRef,
+    todayAutoOpenModeRef,
+    lastOpenKey: lastOpenKeyForWorkspace,
+    loadWorkspace,
+    setBooting,
+    setAppMode,
+    setEditorPaneViewModes,
+    setRightPaneTab,
+    setError,
+  });
 
   const handleAddWorkspace = useCallback(
     async (entry: WorkspaceRootEntry) => {
@@ -6224,18 +5968,14 @@ export function MainApp() {
 
   // Leaving the document exits both modes (both are per-document).
   const kgActiveDocPath = document?.relPath ?? null;
-  useEffect(() => {
-    if (kgHighlight && kgHighlight.docPath !== kgActiveDocPath) setKgHighlight(null);
-    if (kgRefOwnerRef.current === "editor") {
-      kgRefRequestRef.current += 1;
-      kgRefOwnerRef.current = null;
-    }
-    const referenceFocus = visualModeController.getGraphModeSlice().referenceFocus;
-    if (referenceFocus?.source === "editor" && referenceFocus.docPath !== kgActiveDocPath) {
-      visualModeController.setGraphReferenceFocus(null);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- kgHighlight/kgRefFocus are read only to decide whether to clear them; including them would re-run this effect every time it just cleared them itself
-  }, [activeDocumentWorkspacePath, kgActiveDocPath]);
+  useEditorKgLifecycle({
+    workspacePath: activeDocumentWorkspacePath,
+    documentPath: kgActiveDocPath,
+    highlight: kgHighlight,
+    setHighlight: (next) => setKgHighlight(next),
+    requestRef: kgRefRequestRef,
+    ownerRef: kgRefOwnerRef,
+  });
 
   const openGraphWorkspace = useCallback(() => {
     setPersistedAppMode("graph");
@@ -6626,43 +6366,15 @@ export function MainApp() {
     visibleAppMode,
   ]);
 
-  // Track which heading the source editor is scrolled to so the outline can
-  // highlight the active one. Source mode only — the textarea has a uniform
-  // line height, the same line↔scroll mapping jumpToOutlineLine relies on.
-  const [activeOutlineLine, setActiveOutlineLine] = useState<number | null>(null);
-  useEffect(() => {
-    if (!outlineOpen || rightPaneTab !== "outline" || editorViewMode !== "source") {
-      setActiveOutlineLine(null);
-      return;
-    }
-    const ta =
-      focusedEditorGroup === "right"
-        ? rightEditorTextareaRef.current
-        : editorTextareaRef.current;
-    if (!ta) {
-      setActiveOutlineLine(null);
-      return;
-    }
-    const lineHeight = parseFloat(getComputedStyle(ta).lineHeight || "20") || 20;
-    let raf = 0;
-    const compute = () => {
-      raf = 0;
-      // floor, not round: the active line is the one whose top edge has
-      // reached the viewport top — matching jumpToOutlineLine's
-      // scrollTop = line * lineHeight mapping. round would flip early.
-      setActiveOutlineLine(Math.floor(ta.scrollTop / lineHeight));
-    };
-    const onScroll = () => {
-      if (raf) return;
-      raf = window.requestAnimationFrame(compute);
-    };
-    compute();
-    ta.addEventListener("scroll", onScroll, { passive: true });
-    return () => {
-      ta.removeEventListener("scroll", onScroll);
-      if (raf) window.cancelAnimationFrame(raf);
-    };
-  }, [outlineOpen, rightPaneTab, editorViewMode, focusedEditorGroup, document?.path]);
+  const activeOutlineLine = useActiveOutlineLine({
+    outlineOpen,
+    rightPaneTab,
+    editorViewMode,
+    focusedEditorGroup,
+    documentPath: document?.path,
+    leftTextareaRef: editorTextareaRef,
+    rightTextareaRef: rightEditorTextareaRef,
+  });
 
   const outlineSidebarSlice = useMemo(
     () => ({
@@ -6733,12 +6445,7 @@ export function MainApp() {
     ],
   );
 
-  useEffect(() => {
-    hydrateOutlinePaneState(outlinePaneScope, {
-      sidebar: outlineSidebarSlice,
-      explorer: outlineExplorerSlice,
-    });
-  }, [outlineExplorerSlice, outlinePaneScope, outlineSidebarSlice]);
+  useOutlinePaneHydration(outlinePaneScope, outlineSidebarSlice, outlineExplorerSlice);
 
   const exportActiveDocumentBundle = useCallback(async (): Promise<void> => {
     const workspaceRoot = activeDocumentWorkspacePath;
