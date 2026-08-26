@@ -216,7 +216,6 @@ import {
 } from "./lib/debouncedSave";
 import { documentDisplayName } from "./lib/document";
 import { refStepsByParagraph, uniqueRefNodePaths } from "./lib/kgRefs";
-import type { DraftGraphFocusRequest } from "./lib/draftGraphRelations";
 import { isDiagramEnabled } from "./lib/diagramFlag";
 import { isE2EFlowEnabled } from "./lib/e2eFlow";
 import {
@@ -538,8 +537,6 @@ const MIN_OUTLINE_PANE_WIDTH = 240;
 const MAX_OUTLINE_PANE_WIDTH = 520;
 
 const LazyStudioMode = lazy(() => import("./components/studio/StudioMode").then((module) => ({ default: module.StudioMode })));
-const LazyDraftsPane = lazy(() => import("./components/drafts/DraftsPane").then((module) => ({ default: module.DraftsPane })));
-const LazyGapPane = lazy(() => import("./components/gap/GapPane").then((module) => ({ default: module.GapPane })));
 const LazyMeetingsPane = lazy(() => import("./components/meetings/MeetingsPane").then((module) => ({ default: module.MeetingsPane })));
 const LazyTodayPane = lazy(() => import("./components/today/TodayPane").then((module) => ({ default: module.TodayPane })));
 const LazyTasksPane = lazy(() => import("./components/tasks/TasksPane").then((module) => ({ default: module.TasksPane })));
@@ -778,12 +775,6 @@ interface InboxCarry {
   classifyError: string | null;
 }
 
-// Shared empty list so `?? NO_ENTRIES` keeps a stable identity: a fresh `[]`
-// every render re-keys the graph model, tears the canvas down, and restarts
-// FA2 on the rebuilt renderer — mid-flight camera math then lands wrong and,
-// with settle re-fit disabled, stays wrong (graph.spec.ts:342 flake, and
-// visible graph churn during a workspace scan).
-const NO_ENTRIES: VaultEntry[] = [];
 type KgReferenceSource = "editor" | "drafts" | "gap";
 
 interface KgEditorTabContext {
@@ -1550,9 +1541,6 @@ export function MainApp() {
     workspaceRegistry.activeByVisibility.public ??
     publicWorkspaces[0]?.path ??
     null;
-  const primaryWorkspaceEntries = primaryWorkspacePath
-    ? workspaceStates[primaryWorkspacePath]?.entries ?? NO_ENTRIES
-    : NO_ENTRIES;
   const inboxWorkspacePath = activeTab?.workspacePath ?? explorerWorkspacePath ?? primaryWorkspacePath;
   // Workspace root used by the Shared Outbox tab — the active document's
   // workspace in Docs, the inbox workspace otherwise.
@@ -2310,17 +2298,6 @@ export function MainApp() {
       editorSurfacePersistence.setRightPaneTab(rightPaneTab);
     },
     [editorSurfacePersistence],
-  );
-
-  // Draft handoff into gap mode: the pane consumes it once on mount, so a
-  // later rail-button revisit does not reselect the same draft.
-  const [gapDraftId, setGapDraftId] = useState<string | null>(null);
-  const openGapAnalysis = useCallback(
-    (draftId?: string) => {
-      setGapDraftId(draftId ?? null);
-      setPersistedAppMode("gap");
-    },
-    [setPersistedAppMode],
   );
 
   const restoredWindowKeyRef = useRef<string | null>(null);
@@ -6445,39 +6422,6 @@ export function MainApp() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- kgHighlight/kgRefFocus are read only to decide whether to clear them; including them would re-run this effect every time it just cleared them itself
   }, [activeDocumentWorkspacePath, kgActiveDocPath]);
 
-  const exitKgReferenceFocus = useCallback(() => {
-    kgRefRequestRef.current += 1;
-    kgRefOwnerRef.current = null;
-    visualModeController.setGraphReferenceFocus(null);
-  }, []);
-  const openDraftGraphFocus = useCallback(
-    (request: DraftGraphFocusRequest, source: "drafts" | "gap") => {
-      if (!primaryWorkspacePath || request.nodePaths.length === 0) return;
-      kgRefRequestRef.current += 1;
-      kgRefOwnerRef.current = source;
-      visualModeController.setGraphReferenceFocus({
-        source,
-        docPath: request.docPath,
-        docRoot: primaryWorkspacePath,
-        nodePaths: request.nodePaths,
-        steps: [{ paragraph: 0, nodePaths: request.nodePaths }],
-        nonce: Date.now(),
-      });
-      // Keep graph/workbench mutual exclusion and panel placement in the one
-      // existing opener used by editor reference visualization.
-      openGraphPanel();
-    },
-    [openGraphPanel, primaryWorkspacePath],
-  );
-  const openDraftsGraphFocus = useCallback(
-    (request: DraftGraphFocusRequest) => openDraftGraphFocus(request, "drafts"),
-    [openDraftGraphFocus],
-  );
-  const openGapGraphFocus = useCallback(
-    (request: DraftGraphFocusRequest) => openDraftGraphFocus(request, "gap"),
-    [openDraftGraphFocus],
-  );
-
   const openGraphWorkspace = useCallback(() => {
     setPersistedAppMode("graph");
     if (layoutSettings.toolPanelSurface === "graph") {
@@ -6511,7 +6455,7 @@ export function MainApp() {
           openSites();
           break;
         case "gap":
-          openGapAnalysis();
+          setPersistedAppMode("gap");
           break;
         case "graph":
           openGraphWorkspace();
@@ -6522,7 +6466,6 @@ export function MainApp() {
     },
     [
       openComms,
-      openGapAnalysis,
       openGraphWorkspace,
       openInboxAndFocus,
       openMeetings,
@@ -6535,7 +6478,7 @@ export function MainApp() {
   const openWorkbenchModeRight = useCallback(
     (mode: RightWorkbenchMode) => {
       if (mode === "inbox") setInboxFocusTick((value) => value + 1);
-      if (mode === "gap") setGapDraftId(null);
+      if (mode === "gap") knowledgeModeController.clearGapDraft();
       if (mode === "graph" && layoutSettings.toolPanelSurface === "graph") {
         updateLayoutSettings({
           terminalOpen: false,
@@ -8817,6 +8760,8 @@ export function MainApp() {
               refreshCurrent: () => void refreshCurrent(),
               updateSettings,
               translate: t,
+              openPrimaryMode: (mode) => openPrimaryWorkbenchMode(mode),
+              openGraphPanel,
             }}
           />
         ) : surfaceMode === "files" ? (
@@ -8972,38 +8917,6 @@ export function MainApp() {
               if (root) void revealInFileManager(root, path);
             }}
           />
-        ) : surfaceMode === "drafts" ? (
-          <LazyDraftsPane
-            workPath={primaryWorkspacePath}
-            entries={primaryWorkspaceEntries}
-            skills={skills}
-            defaultRuntime={maruSettings.ai.defaultRuntime}
-            agents={agents}
-            ai={maruSettings.ai}
-            taskIngestMinImportance={maruSettings.ai.taskIngestMinImportance}
-            onTaskIngestMinImportanceChange={(value) =>
-              updateSettings((current) => ({
-                ...current,
-                ai: { ...current.ai, taskIngestMinImportance: value },
-              }))
-            }
-            onConfirmApproval={approvalGate.confirmApproval}
-            onOpenAgents={() => setPersistedAppMode("agents")}
-            onOpenGapAnalysis={openGapAnalysis}
-            onOpenInGraph={openDraftsGraphFocus}
-            onExitReferenceFocus={exitKgReferenceFocus}
-            layout={layoutSettings}
-            onLayoutChange={updateLayoutSettings}
-          />
-        ) : surfaceMode === "gap" ? (
-          <LazyGapPane
-            workPath={primaryWorkspacePath}
-            entries={primaryWorkspaceEntries}
-            initialDraftId={gapDraftId}
-            onConsumeInitialDraftId={() => setGapDraftId(null)}
-            onOpenInGraph={openGapGraphFocus}
-            onExitReferenceFocus={exitKgReferenceFocus}
-              />
         ) : surfaceMode === "inbox" ? (
           <ModeSurfaceHost
             mode="inbox"

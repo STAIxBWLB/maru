@@ -7,7 +7,7 @@ import type { FavoriteTarget } from "../components/FavoritesSection";
 import type { FavoriteKind, MaruSettings } from "./settings";
 
 export type ModePlacement = "primary" | "right" | "panel";
-export type RegisteredModeId = "pkm" | "e2e" | "diagram" | "graph" | "sites" | "agents" | "inbox" | "comms" | "scratchpad";
+export type RegisteredModeId = "pkm" | "e2e" | "diagram" | "graph" | "sites" | "agents" | "inbox" | "comms" | "scratchpad" | "drafts" | "gap";
 
 /** Identifiers only: adapters subscribe to their own data instead of receiving shell snapshots. */
 export interface ModeHostScope {
@@ -31,6 +31,8 @@ export interface ModeHostCommands {
   refreshCurrent?(): void;
   updateSettings?(updater: MaruSettings | ((current: MaruSettings) => MaruSettings)): void;
   translate?(key: string, vars?: Record<string, string | number>): string;
+  openPrimaryMode?(mode: "agents" | "gap"): void;
+  openGraphPanel?(): void;
 }
 
 export interface ModeAdapterProps {
@@ -110,6 +112,20 @@ const modeRegistry: Record<RegisteredModeId, ModeDescriptor> = {
     isAvailable: () => true,
     fallback: "mode-loading",
   },
+  drafts: {
+    id: "drafts",
+    load: () => import("./modeAdapters/DraftsModeAdapter").then((module) => ({ default: module.DraftsModeAdapter })),
+    placements: ["primary"],
+    isAvailable: () => true,
+    fallback: "mode-loading",
+  },
+  gap: {
+    id: "gap",
+    load: () => import("./modeAdapters/GapModeAdapter").then((module) => ({ default: module.GapModeAdapter })),
+    placements: ["primary"],
+    isAvailable: () => true,
+    fallback: "mode-loading",
+  },
 };
 
 const lazyAdapters: Record<RegisteredModeId, ReturnType<typeof lazy<ComponentType<ModeAdapterProps>>>> = {
@@ -122,6 +138,8 @@ const lazyAdapters: Record<RegisteredModeId, ReturnType<typeof lazy<ComponentTyp
   inbox: lazy(modeRegistry.inbox.load),
   comms: lazy(modeRegistry.comms.load),
   scratchpad: lazy(modeRegistry.scratchpad.load),
+  drafts: lazy(modeRegistry.drafts.load),
+  gap: lazy(modeRegistry.gap.load),
 };
 
 export function getModeDescriptor(mode: string): ModeDescriptor | null {

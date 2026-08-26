@@ -44,6 +44,7 @@ export interface KnowledgeModeController {
   setDraftsWorkspace(workspacePath: string | null): void;
   setGapWorkspace(workspacePath: string | null): void;
   requestGapDraft(draftId: string): void;
+  clearGapDraft(): void;
   consumeGapDraft(request: number): void;
   openGraphReference(
     source: "drafts" | "gap",
@@ -154,6 +155,10 @@ export function createKnowledgeModeController(): KnowledgeModeController {
     },
     requestGapDraft(draftId) {
       publishGap({ ...gap, initialDraftId: draftId, initialDraftRequest: gap.initialDraftRequest + 1 });
+    },
+    clearGapDraft() {
+      if (gap.initialDraftId === null) return;
+      publishGap({ ...gap, initialDraftId: null });
     },
     consumeGapDraft(request) {
       if (request !== gap.initialDraftRequest || gap.initialDraftId === null) return;
