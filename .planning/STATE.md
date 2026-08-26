@@ -5,15 +5,15 @@ milestone_name: milestone
 current_phase: 05
 current_phase_name: Shell Decomposition Completion
 status: executing
-stopped_at: Completed 05-05-PLAN.md
-last_updated: "2026-08-26T15:01:53.208Z"
+stopped_at: Completed 05-06-PLAN.md
+last_updated: "2026-08-26T15:17:59.519Z"
 last_activity: 2026-08-26
 last_activity_desc: Phase 04 execution started
 progress:
   total_phases: 5
   completed_phases: 4
   total_plans: 32
-  completed_plans: 26
+  completed_plans: 27
 ---
 
 # Project State
@@ -28,11 +28,11 @@ See: .planning/PROJECT.md (updated 2026-08-23)
 ## Current Position
 
 Phase: 05 (Shell Decomposition Completion) — EXECUTING
-Plan: 6 of 11
+Plan: 7 of 11
 Status: Ready to execute
 Last activity: 2026-08-26 — Phase 05 execution started
 
-Progress: [████████░░] 81% (3/5 phases)
+Progress: [████████░░] 84% (3/5 phases)
 
 ## Performance Metrics
 
@@ -85,6 +85,7 @@ Progress: [████████░░] 81% (3/5 phases)
 | Phase 05 P03 | 14min | 2 tasks | 7 files |
 | Phase 05 P04 | 8min | 3 tasks | 8 files |
 | Phase 05 P05 | 11min | 2 tasks | 9 files |
+| Phase 05 P06 | 9m | 2 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -162,6 +163,8 @@ Recent decisions affecting current work:
 - [Phase ?]: PKM and E2E descriptors own dynamic loaders, placement, availability, and fallback identity; ActivityRail metadata remains in App.
 - [Phase ?]: Graph uses one adapter for primary, right, and terminal-panel placement.
 - [Phase ?]: Sites native URLs are ordered visual-mode intents acknowledged after consumption.
+- [Phase ?]: Compose canonical tracked missions instead of duplicating mission records in the agent runtime store.
+- [Phase ?]: Agents uses a dedicated lazy adapter with only ModeHostScope and ModeHostCommands.
 
 ### Scope Exceptions
 
@@ -213,6 +216,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-08-26T15:01:53.200Z
-Stopped at: Completed 05-05-PLAN.md
+Last session: 2026-08-26T15:17:59.511Z
+Stopped at: Completed 05-06-PLAN.md
 Resume file: None
