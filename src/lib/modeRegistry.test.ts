@@ -71,6 +71,13 @@ describe("modeRegistry", () => {
     expect(typeof getModeDescriptor("comms")?.load).toBe("function");
   });
 
+  it("registers Meetings, Today, Tasks, and Dashboard as dedicated lazy planning surfaces", () => {
+    for (const mode of ["meetings", "today", "tasks", "dashboard"] as const) {
+      expect(getModeDescriptor(mode)).toMatchObject({ id: mode, fallback: "mode-loading" });
+      expect(typeof getModeDescriptor(mode)?.load).toBe("function");
+    }
+  });
+
   it("registers Drafts and Gap as dedicated primary lazy surfaces", () => {
     expect(getModeDescriptor("drafts")).toMatchObject({ id: "drafts", placements: ["primary"] });
     expect(getModeDescriptor("gap")).toMatchObject({ id: "gap", placements: ["primary"] });

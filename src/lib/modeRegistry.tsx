@@ -8,7 +8,7 @@ import type { FavoriteTarget } from "../components/FavoritesSection";
 import type { FavoriteKind, MaruSettings } from "./settings";
 
 export type ModePlacement = "primary" | "right" | "panel";
-export type RegisteredModeId = "pkm" | "e2e" | "diagram" | "graph" | "sites" | "agents" | "inbox" | "comms" | "scratchpad" | "drafts" | "gap" | "files" | "studio" | "catalog";
+export type RegisteredModeId = "pkm" | "e2e" | "diagram" | "graph" | "sites" | "agents" | "inbox" | "comms" | "meetings" | "today" | "tasks" | "dashboard" | "scratchpad" | "drafts" | "gap" | "files" | "studio" | "catalog";
 
 /** Identifiers only: adapters subscribe to their own data instead of receiving shell snapshots. */
 export interface ModeHostScope {
@@ -107,6 +107,34 @@ const modeRegistry: Record<RegisteredModeId, ModeDescriptor> = {
     isAvailable: () => true,
     fallback: "mode-loading",
   },
+  meetings: {
+    id: "meetings",
+    load: () => import("./modeAdapters/MeetingsModeAdapter").then((module) => ({ default: module.MeetingsModeAdapter })),
+    placements: ["primary", "right"],
+    isAvailable: () => true,
+    fallback: "mode-loading",
+  },
+  today: {
+    id: "today",
+    load: () => import("./modeAdapters/TodayModeAdapter").then((module) => ({ default: module.TodayModeAdapter })),
+    placements: ["primary", "right"],
+    isAvailable: () => true,
+    fallback: "mode-loading",
+  },
+  tasks: {
+    id: "tasks",
+    load: () => import("./modeAdapters/TasksModeAdapter").then((module) => ({ default: module.TasksModeAdapter })),
+    placements: ["primary", "right"],
+    isAvailable: () => true,
+    fallback: "mode-loading",
+  },
+  dashboard: {
+    id: "dashboard",
+    load: () => import("./modeAdapters/DashboardModeAdapter").then((module) => ({ default: module.DashboardModeAdapter })),
+    placements: ["primary", "right"],
+    isAvailable: () => true,
+    fallback: "mode-loading",
+  },
   scratchpad: {
     id: "scratchpad",
     load: () => import("./modeAdapters/ScratchpadModeAdapter").then((module) => ({ default: module.ScratchpadModeAdapter })),
@@ -160,6 +188,10 @@ const lazyAdapters: Record<RegisteredModeId, ReturnType<typeof lazy<ComponentTyp
   agents: lazy(modeRegistry.agents.load),
   inbox: lazy(modeRegistry.inbox.load),
   comms: lazy(modeRegistry.comms.load),
+  meetings: lazy(modeRegistry.meetings.load),
+  today: lazy(modeRegistry.today.load),
+  tasks: lazy(modeRegistry.tasks.load),
+  dashboard: lazy(modeRegistry.dashboard.load),
   scratchpad: lazy(modeRegistry.scratchpad.load),
   drafts: lazy(modeRegistry.drafts.load),
   gap: lazy(modeRegistry.gap.load),

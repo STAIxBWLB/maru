@@ -427,6 +427,11 @@ import {
   useShellSettings,
 } from "./lib/shellSettingsStore";
 import { getModeDescriptor, ModeSurfaceHost } from "./lib/modeRegistry";
+import {
+  planningModeController,
+  TodayLifecycleBridge,
+  TodayNewDayBanner,
+} from "./lib/planningModeStore";
 import { knowledgeModeController } from "./lib/knowledgeModeStore";
 import { SitesOpenRequestBridge, visualModeController } from "./lib/visualModeStore";
 import {
@@ -440,18 +445,15 @@ import { activeMeetingsMissions } from "./lib/meetings";
 import { activeTasksMissions } from "./lib/tasks";
 import {
   todayLogicalDay,
-  todayNotifyNewDay,
   todayOpen,
   todayRollover,
   type TodayRoute,
 } from "./lib/today";
 import {
   resolveLaunchRoute,
-  resolveNewDayNotice,
   resolveRouteForDayState,
   todayAutoOpenKey,
 } from "./lib/todayRouting";
-import { onAction as onNotificationAction } from "@tauri-apps/plugin-notification";
 import {
   applyThemePreference,
   applyThemeVars,
@@ -535,10 +537,6 @@ const MAX_DOCUMENTS_PANE_WIDTH = 560;
 const MIN_OUTLINE_PANE_WIDTH = 240;
 const MAX_OUTLINE_PANE_WIDTH = 520;
 
-const LazyMeetingsPane = lazy(() => import("./components/meetings/MeetingsPane").then((module) => ({ default: module.MeetingsPane })));
-const LazyTodayPane = lazy(() => import("./components/today/TodayPane").then((module) => ({ default: module.TodayPane })));
-const LazyTasksPane = lazy(() => import("./components/tasks/TasksPane").then((module) => ({ default: module.TasksPane })));
-const LazyDashboardPane = lazy(() => import("./components/dashboard/DashboardPane").then((module) => ({ default: module.DashboardPane })));
 const LazySettingsSurface = lazy(() => import("./components/settings/SettingsSurface"));
 
 type PendingExplorerReveal = {
@@ -1064,15 +1062,6 @@ export function MainApp() {
   // Maru Today launch routing. "all" is the existing Tasks view; the Today
   // pane interprets the other routes and persists them into the day
   // snapshot (best-effort) once its snapshot is loaded.
-  const [todayRoute, setTodayRoute] = useState<TodayRoute>("all");
-  // New-day fallback banner: `pending` waits for the next window focus,
-  // `visible` renders the banner.
-  const [todayBannerPending, setTodayBannerPending] = useState(false);
-  const [todayBannerVisible, setTodayBannerVisible] = useState(false);
-  const [todayRolloverEpoch, setTodayRolloverEpoch] = useState(0);
-  const [todayRefreshEpoch, setTodayRefreshEpoch] = useState(0);
-  // Last logical day seen by the new-day watcher (boot seeds it too).
-  const todayLogicalDayRef = useRef<string | null>(null);
   // Workspace whose boot auto-opened Today this launch. The settings-load
   // effect re-applies the persisted mode after boot (and again when `booting`
   // flips) — it must keep the auto-open decision instead of clobbering it.
@@ -1164,9 +1153,6 @@ export function MainApp() {
   const { updateToast, installPendingUpdate, dismissUpdateToast, checkForUpdates } =
     useUpdaterToasts(t);
   const composeSeed = useComposeSeed();
-  const [meetingsRequestedView, setMeetingsRequestedView] = useState<
-    "transcript" | "external" | null
-  >(null);
   const maruSettings = useShellSettings();
   const setMaruSettings = updateShellSettings;
   const [settingsLoaded, setSettingsLoaded] = useState(false);
@@ -3958,7 +3944,7 @@ export function MainApp() {
                 timezone,
                 todaySettings.dayStart,
               );
-              todayLogicalDayRef.current = info.logicalDay;
+              planningModeController.setLogicalDay(info.logicalDay);
               const lastAutoOpenDay = window.localStorage.getItem(todayAutoOpenKey(initialPath));
               if (lastAutoOpenDay !== info.logicalDay) {
                 // Close out a missed day boundary before inspecting the day.
@@ -3988,7 +3974,7 @@ export function MainApp() {
                   explicitMode: false,
                 });
                 if (decision) {
-                  setTodayRoute(decision.route);
+                  planningModeController.setTodayRoute(decision.route);
                   setAppMode(decision.mode);
                   todayAutoOpenPathRef.current = initialPath;
                   todayAutoOpenModeRef.current = decision.mode;
@@ -4426,7 +4412,7 @@ export function MainApp() {
   // Meetings transcript workbench (step tracking + diff review + followups).
   const openMeetingsWorkbench = useCallback(() => {
     closeCompose();
-    setMeetingsRequestedView("transcript");
+    planningModeController.requestMeetingsView("transcript");
     setPersistedAppMode("meetings");
   }, [setPersistedAppMode]);
 
@@ -5125,7 +5111,7 @@ export function MainApp() {
 
   const openToday = useCallback(
     (route: TodayRoute) => {
-      setTodayRoute(route);
+      planningModeController.setTodayRoute(route);
       setPersistedAppMode("today");
     },
     [setPersistedAppMode],
@@ -5177,119 +5163,6 @@ export function MainApp() {
       openToday(route);
     })();
   }, [inboxWorkspacePath, effectiveTasksSettings, openToday]);
-
-  // Maru Today: logical-day (03:30) watcher. Recomputes the logical day every
-  // minute; on a boundary crossed while running, rolls the store over and
-  // surfaces the new day exactly once (native notification, else banner).
-  // Paused while the settings overlay is up — a `?window=settings` deep link
-  // session then records no Today probes at all.
-  useEffect(() => {
-    const workPath = inboxWorkspacePath;
-    const todaySettings = effectiveTasksSettings.today;
-    if (!workPath || !todaySettings.enabled || settingsOverlay !== null) return;
-    const timezone = effectiveTasksSettings.timezone ?? "Asia/Seoul";
-    let cancelled = false;
-    let rolloverInFlight = false;
-
-    const tick = async () => {
-      let info;
-      try {
-        info = await todayLogicalDay(
-          workPath,
-          new Date().toISOString(),
-          timezone,
-          todaySettings.dayStart,
-        );
-      } catch {
-        return; // non-desktop backend or workspace without .maru — stay silent
-      }
-      if (cancelled) return;
-      const previous = todayLogicalDayRef.current;
-      // First tick only seeds the ref; startup is handled by the boot path.
-      if (previous === null) {
-        todayLogicalDayRef.current = info.logicalDay;
-        return;
-      }
-      if (previous === info.logicalDay || rolloverInFlight) return;
-      rolloverInFlight = true;
-      const nowIso = new Date().toISOString();
-      try {
-        await todayRollover(
-          workPath,
-          nowIso,
-          timezone,
-          todaySettings.dayStart,
-          todaySettings.sleepStart,
-        );
-      } catch (err) {
-        console.warn("today rollover failed", err);
-        return;
-      } finally {
-        rolloverInFlight = false;
-      }
-      if (cancelled) return;
-      todayLogicalDayRef.current = info.logicalDay;
-      setTodayRolloverEpoch((epoch) => epoch + 1);
-      if (!todaySettings.notificationEnabled) return;
-      let sent = false;
-      try {
-        const outcome = await todayNotifyNewDay(
-          workPath,
-          info.logicalDay,
-          t("today.notify.newDayTitle"),
-          t("today.notify.newDayBody"),
-        );
-        sent = outcome.sent;
-      } catch (err) {
-        console.warn("today notification failed", err);
-      }
-      if (
-        resolveNewDayNotice({
-          notificationEnabled: todaySettings.notificationEnabled,
-          sent,
-        }) === "banner"
-      ) {
-        setTodayBannerPending(true);
-      }
-    };
-
-    void tick();
-    const timer = window.setInterval(() => void tick(), 60_000);
-    return () => {
-      cancelled = true;
-      window.clearInterval(timer);
-    };
-  }, [inboxWorkspacePath, effectiveTasksSettings, settingsOverlay, t]);
-
-  // Show the pending new-day banner on the next window focus.
-  useEffect(() => {
-    if (!todayBannerPending || todayBannerVisible) return;
-    const show = () => setTodayBannerVisible(true);
-    window.addEventListener("focus", show);
-    return () => window.removeEventListener("focus", show);
-  }, [todayBannerPending, todayBannerVisible]);
-
-  // Native notification click → open Today. Best-effort: the plugin listener
-  // only exists in the desktop backend; the banner covers everything else.
-  useEffect(() => {
-    let cancelled = false;
-    let unregister: (() => void) | null = null;
-    onNotificationAction(() => {
-      openTodayForCurrentDay();
-    })
-      .then((listener) => {
-        if (cancelled) {
-          void listener.unregister();
-          return;
-        }
-        unregister = () => void listener.unregister();
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-      unregister?.();
-    };
-  }, [openTodayForCurrentDay]);
 
   const openSites = useCallback(() => {
     setPersistedAppMode("sites");
@@ -5446,7 +5319,7 @@ export function MainApp() {
     } else if (surfaceMode === "meetings") {
       void refreshProcessingMissions();
     } else if (surfaceMode === "today") {
-      setTodayRefreshEpoch((epoch) => epoch + 1);
+      planningModeController.requestTodayRefresh();
     } else if (surfaceMode === "scratchpad") {
       knowledgeModeController.requestScratchpadRefresh();
     } else if (surfaceMode === "tasks") {
@@ -8011,8 +7884,6 @@ export function MainApp() {
       openSkillCompose(skill, context, prompt),
     [openSkillCompose],
   );
-  const handleMeetingsViewConsumed = useCallback(() => setMeetingsRequestedView(null), []);
-
   // Today pane: the whole tasksProps bundle, keyed on its members.
   const handleTasksOpenSkillCompose = useCallback(
     (
@@ -8063,6 +7934,43 @@ export function MainApp() {
       handleRevealPath,
     ],
   );
+
+  const meetingsModeHost = useMemo(
+    () => ({
+      workPath: inboxWorkspacePath,
+      settings: maruSettings.meetings,
+      effectiveSettings: effectiveMeetingsSettings,
+      labelMode: maruSettings.ui.documentLabelMode,
+      skills,
+      runtimeCommands: aiRuntimeCommands,
+      agents,
+      ai: maruSettings.ai,
+      permissionMode: maruSettings.ai.permissionMode,
+      processingMissions: meetingsProcessingMissions,
+      processingLogLines,
+      onRefreshMissions: refreshProcessingMissions,
+      onOpenSettings: openMeetingsSettings,
+      onOpenSkillCompose: handleMeetingsOpenSkillCompose,
+      onMissionStarted: handleMeetingsMissionStarted,
+      onStopMission: handleStopProcessingMission,
+      onConfirmApproval: approvalGate.confirmApproval,
+      onRevealPath: handleRevealPath,
+    }),
+    [inboxWorkspacePath, maruSettings, effectiveMeetingsSettings, skills, aiRuntimeCommands, agents, meetingsProcessingMissions, processingLogLines, refreshProcessingMissions, openMeetingsSettings, handleMeetingsOpenSkillCompose, handleMeetingsMissionStarted, handleStopProcessingMission, approvalGate.confirmApproval, handleRevealPath],
+  );
+  const todayModeHost = useMemo(
+    () => ({ workPath: inboxWorkspacePath, effectiveSettings: effectiveTasksSettings, layout: layoutSettings, onLayoutChange: updateLayoutSettings, onOpenTasksMode: openTasks }),
+    [inboxWorkspacePath, effectiveTasksSettings, layoutSettings, updateLayoutSettings, openTasks],
+  );
+  const tasksModeHost = useMemo(
+    () => ({ ...tasksProps, layout: layoutSettings, onLayoutChange: updateLayoutSettings }),
+    [tasksProps, layoutSettings, updateLayoutSettings],
+  );
+  const dashboardModeHost = useMemo(
+    () => ({ workPath: inboxWorkspacePath, effectiveSettings: effectiveTasksSettings, listRows: maruSettings.ui.dashboardListRows, recentEntries, onOpenMode: openPrimaryWorkbenchMode, onOpenDocument: openDashboardDocument, onOpenSettings: openSettings }),
+    [inboxWorkspacePath, effectiveTasksSettings, maruSettings.ui.dashboardListRows, recentEntries, openPrimaryWorkbenchMode, openDashboardDocument],
+  );
+  planningModeController.bind({ meetings: meetingsModeHost, today: todayModeHost, tasks: tasksModeHost, dashboard: dashboardModeHost });
 
   // EditorPane callbacks. renderEditorPane is a plain function (hook calls
   // are not allowed inside it), so the per-group closures it used to build
@@ -8595,35 +8503,7 @@ export function MainApp() {
           </button>
         </header>
 
-        {todayBannerVisible && (
-          <div className="today-banner" role="status">
-            <p>{t("today.banner.newDay")}</p>
-            <div className="today-banner-actions">
-              <button
-                type="button"
-                className="today-banner-open"
-                onClick={() => {
-                  setTodayBannerVisible(false);
-                  setTodayBannerPending(false);
-                  openTodayForCurrentDay();
-                }}
-              >
-                {t("today.banner.openToday")}
-              </button>
-              <button
-                type="button"
-                className="today-banner-dismiss"
-                aria-label={t("today.banner.dismiss")}
-                onClick={() => {
-                  setTodayBannerVisible(false);
-                  setTodayBannerPending(false);
-                }}
-              >
-                {t("today.banner.dismiss")}
-              </button>
-            </div>
-          </div>
-        )}
+        <TodayNewDayBanner translate={t} onOpenToday={openTodayForCurrentDay} />
 
         <SitesOpenRequestBridge
           booting={booting}
@@ -8638,6 +8518,14 @@ export function MainApp() {
           workspaceReady={settingsWorkspaceStartupReady}
         />
         <AgentRuntimeMissionBridge />
+        <TodayLifecycleBridge
+          workPath={inboxWorkspacePath}
+          settingsOverlay={settingsOverlay}
+          timezone={effectiveTasksSettings.timezone}
+          today={effectiveTasksSettings.today}
+          translate={t}
+          onOpenToday={openTodayForCurrentDay}
+        />
         <ActivityRail
           visibleAppMode={visibleAppMode}
           rightWorkbenchMode={rightWorkbenchMode}
@@ -8874,57 +8762,12 @@ export function MainApp() {
             scope={{ workspacePath: inboxWorkspacePath, documentBrowserScope }}
             commands={{ renderPrimarySurface: () => null }}
           />
-        ) : surfaceMode === "meetings" ? (
-          <LazyMeetingsPane
-            workPath={inboxWorkspacePath}
-            settings={maruSettings.meetings}
-            effectiveSettings={effectiveMeetingsSettings}
-            labelMode={maruSettings.ui.documentLabelMode}
-            skills={skills}
-            runtimeCommands={aiRuntimeCommands}
-            agents={agents}
-            ai={maruSettings.ai}
-            permissionMode={maruSettings.ai.permissionMode}
-            processingMissions={meetingsProcessingMissions}
-            processingLogLines={processingLogLines}
-            onRefreshMissions={refreshProcessingMissions}
-            onOpenSettings={openMeetingsSettings}
-            onOpenSkillCompose={handleMeetingsOpenSkillCompose}
-            onMissionStarted={handleMeetingsMissionStarted}
-            onStopMission={handleStopProcessingMission}
-            onConfirmApproval={approvalGate.confirmApproval}
-            onRevealPath={handleRevealPath}
-                requestedView={meetingsRequestedView}
-            onViewConsumed={handleMeetingsViewConsumed}
-          />
-        ) : surfaceMode === "today" ? (
-          <LazyTodayPane
-            route={todayRoute}
-            onRouteChange={setTodayRoute}
-            workPath={inboxWorkspacePath}
-            effectiveSettings={effectiveTasksSettings}
-            layout={layoutSettings}
-            onLayoutChange={updateLayoutSettings}
-            rolloverEpoch={todayRolloverEpoch}
-            refreshRequestEpoch={todayRefreshEpoch}
-            onOpenTasksMode={openTasks}
-          />
-        ) : surfaceMode === "tasks" ? (
-          <LazyTasksPane
-            {...tasksProps}
-            layout={layoutSettings}
-            onLayoutChange={updateLayoutSettings}
-            logicalDay={todayLogicalDayRef.current}
-          />
-        ) : surfaceMode === "dashboard" ? (
-          <LazyDashboardPane
-            workPath={inboxWorkspacePath}
-            effectiveSettings={effectiveTasksSettings}
-            listRows={maruSettings.ui.dashboardListRows}
-            recentEntries={recentEntries}
-            onOpenMode={openPrimaryWorkbenchMode}
-            onOpenDocument={openDashboardDocument}
-            onOpenSettings={openSettings}
+        ) : ["meetings", "today", "tasks", "dashboard"].includes(surfaceMode) ? (
+          <ModeSurfaceHost
+            mode={surfaceMode}
+            placement={rightWorkbenchMode === surfaceMode ? "right" : "primary"}
+            scope={{ workspacePath: inboxWorkspacePath, documentBrowserScope }}
+            commands={{ renderPrimarySurface: () => null }}
           />
         ) : (
           <ModeSurfaceHost
