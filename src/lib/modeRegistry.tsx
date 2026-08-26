@@ -1,10 +1,11 @@
 import { lazy, Suspense, type ComponentType, type ReactNode } from "react";
 
 import type { DocumentBrowserScope } from "./documentBrowserStore";
+import { isDiagramEnabled } from "./diagramFlag";
 import { isE2EFlowEnabled } from "./e2eFlow";
 
 export type ModePlacement = "primary" | "right";
-export type RegisteredModeId = "pkm" | "e2e";
+export type RegisteredModeId = "pkm" | "e2e" | "diagram";
 
 /** Identifiers only: adapters subscribe to their own data instead of receiving shell snapshots. */
 export interface ModeHostScope {
@@ -16,6 +17,7 @@ export interface ModeHostScope {
 export interface ModeHostCommands {
   renderPrimarySurface(): ReactNode;
   revealPath?(path: string): void;
+  saveDocument?(path: string, content: string, expectedRevision: string | null): Promise<unknown>;
 }
 
 export interface ModeAdapterProps {
@@ -46,11 +48,19 @@ const modeRegistry: Record<RegisteredModeId, ModeDescriptor> = {
     isAvailable: isE2EFlowEnabled,
     fallback: "mode-loading",
   },
+  diagram: {
+    id: "diagram",
+    load: () => import("./modeAdapters/DiagramModeAdapter").then((module) => ({ default: module.DiagramModeAdapter })),
+    placements: ["primary", "right"],
+    isAvailable: isDiagramEnabled,
+    fallback: "mode-loading",
+  },
 };
 
 const lazyAdapters: Record<RegisteredModeId, ReturnType<typeof lazy<ComponentType<ModeAdapterProps>>>> = {
   pkm: lazy(modeRegistry.pkm.load),
   e2e: lazy(modeRegistry.e2e.load),
+  diagram: lazy(modeRegistry.diagram.load),
 };
 
 export function getModeDescriptor(mode: string): ModeDescriptor | null {

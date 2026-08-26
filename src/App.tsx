@@ -429,7 +429,7 @@ import {
   updateShellSettings,
   useShellSettings,
 } from "./lib/shellSettingsStore";
-import { ModeSurfaceHost } from "./lib/modeRegistry";
+import { getModeDescriptor, ModeSurfaceHost } from "./lib/modeRegistry";
 import {
   availableRightWorkbenchSurface,
   minimumWorkbenchWidth,
@@ -538,7 +538,6 @@ const MIN_OUTLINE_PANE_WIDTH = 240;
 const MAX_OUTLINE_PANE_WIDTH = 520;
 
 const LazyGraphView = lazy(() => import("./components/graph/GraphView").then((module) => ({ default: module.GraphView })));
-const LazyDiagramMode = lazy(() => import("./components/diagram/DiagramMode").then((module) => ({ default: module.DiagramMode })));
 const LazyStudioMode = lazy(() => import("./components/studio/StudioMode").then((module) => ({ default: module.StudioMode })));
 const LazyInboxPane = lazy(() => import("./components/InboxPane").then((module) => ({ default: module.InboxPane })));
 const LazyDraftsPane = lazy(() => import("./components/drafts/DraftsPane").then((module) => ({ default: module.DraftsPane })));
@@ -8928,40 +8927,21 @@ export function MainApp() {
             </button>
           </header>
         ) : null}
-        {surfaceMode === "e2e" ? (
+        {getModeDescriptor(surfaceMode) && surfaceMode !== "pkm" ? (
           <ModeSurfaceHost
-            mode="e2e"
-            placement={rightWorkbenchMode === "e2e" ? "right" : "primary"}
-            scope={{ workspacePath: inboxWorkspacePath, documentBrowserScope }}
+            mode={surfaceMode}
+            placement={rightWorkbenchMode === surfaceMode ? "right" : "primary"}
+            scope={{ workspacePath: inboxWorkspacePath ?? settingsWorkPath, documentBrowserScope }}
             commands={{
               renderPrimarySurface: () => null,
               revealPath: (path) => {
                 if (inboxWorkspacePath) void revealInFileManager(inboxWorkspacePath, path);
               },
-            }}
-          />
-        ) : surfaceMode === "diagram" ? (
-          <LazyDiagramMode
-            workPath={inboxWorkspacePath ?? settingsWorkPath}
-                activeDocument={
-              activeDocTab &&
-              activeDocTab.workspacePath === (inboxWorkspacePath ?? settingsWorkPath)
-                ? {
-                    path: activeDocTab.document.path,
-                    title: activeDocTab.document.title,
-                    revision: activeDocTab.document.revision,
-                    fileKind: activeDocTab.document.fileKind,
-                  }
-                : null
-            }
-            recentDocuments={recentEntries.map((entry) => ({
-              path: entry.path,
-              title: entry.title,
-            }))}
-            onSaveDocument={(path, content, expectedRevision) => {
-              const root = inboxWorkspacePath ?? settingsWorkPath;
-              if (!root) return Promise.reject(new Error("workspace required"));
-              return saveDocument(root, path, content, expectedRevision);
+              saveDocument: (path, content, expectedRevision) => {
+                const root = inboxWorkspacePath ?? settingsWorkPath;
+                if (!root) return Promise.reject(new Error("workspace required"));
+                return saveDocument(root, path, content, expectedRevision);
+              },
             }}
           />
         ) : surfaceMode === "graph" ? (

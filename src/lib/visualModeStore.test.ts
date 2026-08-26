@@ -17,7 +17,7 @@ describe("visualModeStore", () => {
 
     controller.setDiagramActiveDocument({
       workPath: "/workspace",
-      activeDocument: { path: "notes/diagram.md", title: "Diagram", body: "# Diagram", revision: 1 },
+      activeDocument: { path: "notes/diagram.md", title: "Diagram", revision: "revision-1" },
       recentDocuments: [],
     });
 
