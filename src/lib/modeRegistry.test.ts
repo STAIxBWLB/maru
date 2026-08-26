@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { getModeDescriptor } from "./modeRegistry";
+import { getModeDescriptor, getRegisteredModeIds } from "./modeRegistry";
 
 describe("modeRegistry", () => {
   it("registers PKM as a primary-only lazy surface with a stable fallback identity", () => {
@@ -95,5 +95,12 @@ describe("modeRegistry", () => {
     expect(getModeDescriptor("catalog")).toMatchObject({ id: "catalog", placements: ["primary"] });
     expect(typeof getModeDescriptor("studio")?.load).toBe("function");
     expect(typeof getModeDescriptor("catalog")?.load).toBe("function");
+  });
+
+  it("covers every Maru app mode exactly once with a dedicated lazy descriptor", () => {
+    expect(getRegisteredModeIds()).toEqual([
+      "pkm", "scratchpad", "files", "inbox", "comms", "meetings", "today", "tasks", "dashboard",
+      "catalog", "studio", "e2e", "diagram", "sites", "graph", "drafts", "gap", "agents",
+    ]);
   });
 });
