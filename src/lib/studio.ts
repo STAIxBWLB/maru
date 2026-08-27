@@ -41,6 +41,7 @@ export interface StudioTemplateState {
   title: string;
   businessUnit: string | null;
   documentTypeCode: string | null;
+  source: "hwp_cli_skill" | "hwpx_skill" | "work_repo" | "vocational_ssot" | "manual" | null;
   hwpxTemplateKey: string | null;
 }
 
@@ -166,6 +167,28 @@ export interface TemplateFillResponse {
   warnings: string[];
 }
 
+export interface HwpCliTemplateFieldsRequest {
+  source: "hwp_cli_skill";
+  templateKey: string;
+}
+
+export interface HwpCliTemplateFieldsResponse {
+  templateAlias: string;
+  templateSlug: string;
+  fields: StudioHwpTemplateFieldState[];
+  warnings: string[];
+}
+
+export interface HwpCliTemplateFillRequest extends HwpCliTemplateFieldsRequest {
+  values: Record<string, string>;
+  outputPath?: string | null;
+}
+
+export interface HwpCliTemplateFillResponse extends TemplateFillResponse {
+  templateAlias: string;
+  templateSlug: string;
+}
+
 export interface GaejosikLintIssue {
   id: string;
   rule: "formalVerbEnding" | "declarativeEnding" | string;
@@ -263,6 +286,7 @@ export function normalizeStudioState(state: StudioState): StudioState {
     template: state.template
       ? {
           ...state.template,
+          source: state.template.source ?? null,
           hwpxTemplateKey: state.template.hwpxTemplateKey ?? null,
         }
       : null,
@@ -352,6 +376,21 @@ export async function templateFillHwpx(
 ): Promise<TemplateFillResponse> {
   if (!isTauri()) throw new Error("template_fill_requires_tauri");
   return invoke<TemplateFillResponse>("template_fill_hwpx", { workPath, request });
+}
+
+export async function hwpCliTemplateFields(
+  request: HwpCliTemplateFieldsRequest,
+): Promise<HwpCliTemplateFieldsResponse> {
+  if (!isTauri()) throw new Error("hwp_cli_template_requires_tauri");
+  return invoke<HwpCliTemplateFieldsResponse>("hwp_cli_template_fields", { request });
+}
+
+export async function hwpCliTemplateFill(
+  workPath: string,
+  request: HwpCliTemplateFillRequest,
+): Promise<HwpCliTemplateFillResponse> {
+  if (!isTauri()) throw new Error("hwp_cli_template_requires_tauri");
+  return invoke<HwpCliTemplateFillResponse>("hwp_cli_template_fill", { workPath, request });
 }
 
 export async function gaejosikLint(
