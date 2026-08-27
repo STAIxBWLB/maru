@@ -56,7 +56,7 @@ export interface TemplateSummary {
   document_type_code: string;
   document_type_category: DocumentCategory;
   business_unit_slug?: string | null;
-  source: "hwpx_skill" | "work_repo" | "vocational_ssot" | "manual";
+  source: "hwp_cli_skill" | "hwpx_skill" | "work_repo" | "vocational_ssot" | "manual";
   hwpx_template_key?: string | null;
   summary?: string | null;
   updated_at: string;

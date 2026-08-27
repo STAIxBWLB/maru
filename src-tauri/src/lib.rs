@@ -28,6 +28,7 @@ mod gmail_gws;
 mod graph_authoring;
 mod html_editor;
 mod hub_client;
+mod hwp_cli_template;
 mod hwped;
 mod inbox;
 mod inbox_classifier;
@@ -132,6 +133,7 @@ use gmail_gws::{
 use graph_authoring::{graph_link_apply, graph_link_preview};
 use html_editor::prepare_html_editor_assets;
 use hub_client::{hub_fetch_catalog, hub_poll_gate, hub_queue_drain, hub_status, hub_submit_gate};
+use hwp_cli_template::{hwp_cli_template_fields, hwp_cli_template_fill};
 use hwped::{
     hwped_capabilities, hwped_compose, hwped_edit, hwped_read, hwped_render, hwped_validate,
 };
@@ -650,6 +652,8 @@ pub fn run() {
             template_get_fields,
             template_prepare_hwpx_template,
             template_fill_hwpx,
+            hwp_cli_template_fields,
+            hwp_cli_template_fill,
             gaejosik_lint,
             // hwp-editor engine bridge (thin hwp-cli spawner; hwped.rs)
             hwped_read,

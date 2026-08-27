@@ -50,6 +50,8 @@ import {
   studioStateList,
   studioStateRead,
   studioStateSave,
+  hwpCliTemplateFields,
+  hwpCliTemplateFill,
   templateFillHwpx,
   templateGetFields,
   templatePrepareHwpxTemplate,
@@ -403,6 +405,7 @@ export function StudioMode({
           title: template.title,
           businessUnit: template.business_unit_slug ?? null,
           documentTypeCode: template.document_type_code ?? null,
+          source: template.source,
           hwpxTemplateKey: template.hwpx_template_key ?? null,
         },
         source: {
@@ -482,6 +485,38 @@ export function StudioMode({
 
     setBusyAction("hwp-scan");
     try {
+      if (state.template?.source === "hwp_cli_skill") {
+        if (!templateKey) {
+          throw new Error("hwp_cli_template_alias_missing");
+        }
+        const response = await hwpCliTemplateFields({
+          source: "hwp_cli_skill",
+          templateKey,
+        });
+        patchState((prev) => {
+          const values = { ...prev.hwpFields.values };
+          for (const field of response.fields) {
+            if (values[field.key] === undefined) values[field.key] = "";
+          }
+          return {
+            ...prev,
+            hwpFields: {
+              ...prev.hwpFields,
+              status: "ready",
+              templatePath: `hwp-cli:${response.templateSlug}`,
+              fields: response.fields,
+              values,
+              formFilledCount: 0,
+              unmatchedFields: [],
+              validationChecks: [],
+              warnings: response.fields.length === 0
+                ? [t("studio.hwp.warning.noFields"), ...response.warnings]
+                : response.warnings,
+            },
+          };
+        });
+        return;
+      }
       let scanPath = configuredPath;
       if (scanPath?.toLowerCase().endsWith(".hwp")) {
         const prepared = await templatePrepareHwpxTemplate(workspaceRoot, scanPath);
@@ -565,11 +600,17 @@ export function StudioMode({
       const values = Object.fromEntries(
         state.hwpFields.fields.map((field) => [field.key, state.hwpFields.values[field.key] ?? ""]),
       );
-      const response = await templateFillHwpx(workspaceRoot, {
-        templateKey,
-        templatePath,
-        values,
-      });
+      const response = state.template?.source === "hwp_cli_skill"
+        ? await hwpCliTemplateFill(workspaceRoot, {
+            source: "hwp_cli_skill",
+            templateKey: templateKey ?? "",
+            values,
+          })
+        : await templateFillHwpx(workspaceRoot, {
+            templateKey,
+            templatePath,
+            values,
+          });
       patchState((prev) => ({
         ...prev,
         hwpFields: {
