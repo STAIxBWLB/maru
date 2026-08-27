@@ -100,6 +100,21 @@ struct Slot {
     occurrences: u32,
 }
 
+/// The closed JSON contract emitted by `hwp fill --json` for placeholder fills.
+///
+/// This is deliberately not a loose `serde_json::Value`: Maru only publishes a
+/// staged document after the native tool has supplied an internally consistent
+/// report for every requested value.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct NativeFillReport {
+    output: String,
+    mode: String,
+    replaced: u32,
+    counts: BTreeMap<String, u32>,
+    warnings: Vec<String>,
+}
+
 struct CliRun {
     code: i32,
     stdout: Vec<u8>,
@@ -317,6 +332,73 @@ fn output_path(work_path: &str, alias: &str, requested: Option<String>) -> Resul
     Ok(resolved)
 }
 
+fn parse_native_fill_report(
+    stdout: &[u8],
+    values: &BTreeMap<String, String>,
+) -> Result<NativeFillReport, String> {
+    let report: NativeFillReport =
+        serde_json::from_slice(stdout).map_err(|err| format!("hwp_fill_invalid_json: {err}"))?;
+    if report.mode != "placeholders" {
+        return Err(format!(
+            "hwp_fill_invalid_report: expected placeholders mode, got {}",
+            report.mode
+        ));
+    }
+    if report.output.trim().is_empty() {
+        return Err("hwp_fill_invalid_report: native fill report omitted output".to_string());
+    }
+
+    let missing_counts = values
+        .keys()
+        .filter(|name| !report.counts.contains_key(*name))
+        .cloned()
+        .collect::<Vec<_>>();
+    if !missing_counts.is_empty() {
+        return Err(format!(
+            "hwp_fill_invalid_report: native fill report omitted counts for {}",
+            missing_counts.join(", ")
+        ));
+    }
+    let unexpected_counts = report
+        .counts
+        .keys()
+        .filter(|name| !values.contains_key(*name))
+        .cloned()
+        .collect::<Vec<_>>();
+    if !unexpected_counts.is_empty() {
+        return Err(format!(
+            "hwp_fill_invalid_report: native fill report included unexpected counts for {}",
+            unexpected_counts.join(", ")
+        ));
+    }
+
+    let unmatched = report
+        .counts
+        .iter()
+        .filter(|(_, count)| **count == 0)
+        .map(|(name, _)| name.clone())
+        .collect::<Vec<_>>();
+    if !unmatched.is_empty() {
+        return Err(format!(
+            "hwp_fill_unmatched_required: {}",
+            unmatched.join(", ")
+        ));
+    }
+
+    let counted_replacements = report.counts.values().try_fold(0u32, |total, count| {
+        total
+            .checked_add(*count)
+            .ok_or_else(|| "hwp_fill_invalid_report: replacement count overflow".to_string())
+    })?;
+    if report.replaced != counted_replacements {
+        return Err(format!(
+            "hwp_fill_invalid_report: replaced {} does not match counts total {}",
+            report.replaced, counted_replacements
+        ));
+    }
+    Ok(report)
+}
+
 fn fill_with_bin(
     bin: &Path,
     work_path: &str,
@@ -355,7 +437,7 @@ fn fill_with_bin(
     .map_err(|err| format!("hwp_stage_failed: {err}"))?;
     create_template(bin, alias, &template)?;
     validate_template(bin, &template)?;
-    run_hwp_ok(
+    let native_fill = run_hwp_ok(
         bin,
         &[
             OsString::from("fill"),
@@ -364,8 +446,10 @@ fn fill_with_bin(
             values_path.as_os_str().to_os_string(),
             OsString::from("-o"),
             staged_output.as_os_str().to_os_string(),
+            OsString::from("--json"),
         ],
     )?;
+    let native_report = parse_native_fill_report(&native_fill, values)?;
     validate_template(bin, &staged_output)?;
     let staged_bytes = fs::read(&staged_output)
         .map_err(|err| format!("hwp_publish_failed: cannot read staged output: {err}"))?;
@@ -374,18 +458,19 @@ fn fill_with_bin(
         output_path: output.to_string_lossy().to_string(),
         template_alias: alias.to_string(),
         template_slug: slug.to_string(),
-        replaced_count: values.len() as u32,
+        replaced_count: native_report.replaced,
         validation_ok: true,
-        command: "hwp new --template <alias> -> hwp fill --data <values.json> -> hwp validate"
-            .to_string(),
-        form_filled_count: 0,
+        command:
+            "hwp new --template <alias> -> hwp fill --data <values.json> --json -> hwp validate"
+                .to_string(),
+        form_filled_count: native_report.replaced,
         unmatched_fields: Vec::new(),
         validation_checks: vec![TemplateValidationCheck {
             name: "hwp-validate".to_string(),
             status: "pass".to_string(),
             reason: None,
         }],
-        warnings: Vec::new(),
+        warnings: native_report.warnings,
     })
 }
 
@@ -418,7 +503,7 @@ mod tests {
     use super::*;
 
     #[cfg(unix)]
-    fn fake_hwp(dir: &Path, fail_filled_validation: bool) -> PathBuf {
+    fn fake_hwp(dir: &Path, fail_filled_validation: bool, fill_stdout: &str) -> PathBuf {
         use std::os::unix::fs::PermissionsExt;
 
         let binary = dir.join("hwp");
@@ -440,11 +525,17 @@ case "$1" in
     exit 2 ;;
   slots) echo '{{"placeholders":[{{"name":"기관명","occurrences":1}}]}}' ;;
   fill)
+    output=""
+    json=false
     while [ "$#" -gt 0 ]; do
-      if [ "$1" = "-o" ]; then shift; printf 'filled' > "$1"; exit 0; fi
+      if [ "$1" = "-o" ]; then shift; output="$1"; fi
+      if [ "$1" = "--json" ]; then json=true; fi
       shift
     done
-    exit 2 ;;
+    [ -n "$output" ] && [ "$json" = true ] || exit 2
+    printf 'filled' > "$output"
+    printf '%s\n' '{fill_stdout}'
+    exit 0 ;;
   validate)
     case "$2" in *filled.hwpx) {validate_exit} ;; *) exit 0 ;; esac ;;
   *) exit 2 ;;
@@ -499,7 +590,11 @@ esac
     #[test]
     fn all_aliases_route_through_native_new_slots_and_validate() {
         let tmp = tempfile::tempdir().unwrap();
-        let binary = fake_hwp(tmp.path(), false);
+        let binary = fake_hwp(
+            tmp.path(),
+            false,
+            r#"{"output":"filled.hwpx","mode":"placeholders","replaced":1,"counts":{"기관명":1},"warnings":[]}"#,
+        );
         for (alias, slug) in hwp_cli_skill_aliases() {
             let response = fields_with_bin(&binary, "hwp_cli_skill", alias).unwrap();
             assert_eq!(response.template_alias, *alias);
@@ -512,7 +607,11 @@ esac
     #[test]
     fn failed_validation_never_publishes_a_native_template() {
         let tmp = tempfile::tempdir().unwrap();
-        let binary = fake_hwp(tmp.path(), true);
+        let binary = fake_hwp(
+            tmp.path(),
+            true,
+            r#"{"output":"filled.hwpx","mode":"placeholders","replaced":1,"counts":{"기관명":1},"warnings":[]}"#,
+        );
         let result = fill_with_bin(
             &binary,
             tmp.path().to_str().unwrap(),
@@ -529,7 +628,11 @@ esac
     #[test]
     fn replaces_an_existing_output_after_staging_and_validation() {
         let tmp = tempfile::tempdir().unwrap();
-        let binary = fake_hwp(tmp.path(), false);
+        let binary = fake_hwp(
+            tmp.path(),
+            false,
+            r#"{"output":"filled.hwpx","mode":"placeholders","replaced":1,"counts":{"기관명":1},"warnings":[]}"#,
+        );
         let output = tmp.path().join("published.hwpx");
         fs::write(&output, "old output").unwrap();
         let response = fill_with_bin(
@@ -546,5 +649,72 @@ esac
             fs::canonicalize(&output).unwrap()
         );
         assert_eq!(fs::read_to_string(&output).unwrap(), "filled");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn native_fill_report_preserves_multiplicity_and_warnings() {
+        let tmp = tempfile::tempdir().unwrap();
+        let binary = fake_hwp(
+            tmp.path(),
+            false,
+            r#"{"output":"filled.hwpx","mode":"placeholders","replaced":2,"counts":{"기관명":2},"warnings":["native warning"]}"#,
+        );
+        let response = fill_with_bin(
+            &binary,
+            tmp.path().to_str().unwrap(),
+            "hwp_cli_skill",
+            "보고서",
+            &BTreeMap::from([("기관명".to_string(), "제주한라대학교".to_string())]),
+            Some("published.hwpx".to_string()),
+        )
+        .unwrap();
+
+        assert_eq!(response.replaced_count, 2);
+        assert_eq!(response.form_filled_count, 2);
+        assert!(response.unmatched_fields.is_empty());
+        assert_eq!(response.warnings, vec!["native warning"]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unmatched_or_malformed_native_fill_report_never_publishes() {
+        let tmp = tempfile::tempdir().unwrap();
+        let values = BTreeMap::from([
+            ("기관명".to_string(), "제주한라대학교".to_string()),
+            ("없는필드".to_string(), "값".to_string()),
+        ]);
+        let output = tmp.path().join("published.hwpx");
+        fs::write(&output, "old output").unwrap();
+
+        let unmatched_binary = fake_hwp(
+            tmp.path(),
+            false,
+            r#"{"output":"filled.hwpx","mode":"placeholders","replaced":1,"counts":{"기관명":1,"없는필드":0},"warnings":["native unmatched"]}"#,
+        );
+        let unmatched = fill_with_bin(
+            &unmatched_binary,
+            tmp.path().to_str().unwrap(),
+            "hwp_cli_skill",
+            "보고서",
+            &values,
+            Some("published.hwpx".to_string()),
+        )
+        .unwrap_err();
+        assert!(unmatched.contains("hwp_fill_unmatched_required: 없는필드"));
+        assert_eq!(fs::read_to_string(&output).unwrap(), "old output");
+
+        let malformed_binary = fake_hwp(tmp.path(), false, "not json");
+        let malformed = fill_with_bin(
+            &malformed_binary,
+            tmp.path().to_str().unwrap(),
+            "hwp_cli_skill",
+            "보고서",
+            &BTreeMap::from([("기관명".to_string(), "제주한라대학교".to_string())]),
+            Some("published.hwpx".to_string()),
+        )
+        .unwrap_err();
+        assert!(malformed.contains("hwp_fill_invalid_json"));
+        assert_eq!(fs::read_to_string(&output).unwrap(), "old output");
     }
 }
