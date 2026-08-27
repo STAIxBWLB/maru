@@ -412,6 +412,17 @@ export function StudioMode({
           ...prev.source,
           docType: defaultMaruDocType(template),
         },
+        hwpFields: {
+          status: "placeholder",
+          templatePath: null,
+          fields: [],
+          values: {},
+          lastOutputPath: null,
+          formFilledCount: 0,
+          unmatchedFields: [],
+          validationChecks: [],
+          warnings: [],
+        },
         bodyDraft: renderTemplateBody(full, t("studio.template.slotHint")),
       }));
     } catch (err) {

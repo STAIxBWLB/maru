@@ -7,6 +7,7 @@
 //! unchanged. Outputs are built and validated in a sibling staging directory
 //! and only then atomically published into the workspace.
 
+use crate::atomic_file::write_atomic;
 use crate::cli_path::{augmented_path, is_executable, resolve_program};
 use crate::command_output::{
     run_command_with_timeout_and_limits, CommandTermination, OutputLimits,
@@ -366,7 +367,9 @@ fn fill_with_bin(
         ],
     )?;
     validate_template(bin, &staged_output)?;
-    fs::rename(&staged_output, &output).map_err(|err| format!("hwp_publish_failed: {err}"))?;
+    let staged_bytes = fs::read(&staged_output)
+        .map_err(|err| format!("hwp_publish_failed: cannot read staged output: {err}"))?;
+    write_atomic(&output, &staged_bytes).map_err(|err| format!("hwp_publish_failed: {err}"))?;
     Ok(HwpCliTemplateFillResponse {
         output_path: output.to_string_lossy().to_string(),
         template_alias: alias.to_string(),
@@ -520,5 +523,28 @@ esac
         );
         assert!(result.unwrap_err().contains("hwp_failed: hwp validate"));
         assert!(!tmp.path().join("published.hwpx").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn replaces_an_existing_output_after_staging_and_validation() {
+        let tmp = tempfile::tempdir().unwrap();
+        let binary = fake_hwp(tmp.path(), false);
+        let output = tmp.path().join("published.hwpx");
+        fs::write(&output, "old output").unwrap();
+        let response = fill_with_bin(
+            &binary,
+            tmp.path().to_str().unwrap(),
+            "hwp_cli_skill",
+            "보고서",
+            &BTreeMap::from([("기관명".to_string(), "제주한라대학교".to_string())]),
+            Some("published.hwpx".to_string()),
+        )
+        .unwrap();
+        assert_eq!(
+            PathBuf::from(response.output_path),
+            fs::canonicalize(&output).unwrap()
+        );
+        assert_eq!(fs::read_to_string(&output).unwrap(), "filled");
     }
 }
