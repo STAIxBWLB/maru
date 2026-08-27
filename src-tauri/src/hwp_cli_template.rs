@@ -166,13 +166,25 @@ fn select_compatible_hwp(candidates: impl IntoIterator<Item = PathBuf>) -> Resul
     }))
 }
 
-fn hwp_bin() -> Result<PathBuf, String> {
-    if let Some(path) = std::env::var_os("MARU_HWP_BIN").map(PathBuf::from) {
-        return is_executable(&path)
-            .then_some(path)
-            .ok_or_else(|| "cli_missing: MARU_HWP_BIN is not executable".to_string());
+fn select_hwp_bin(
+    override_path: Option<PathBuf>,
+    candidates: impl IntoIterator<Item = PathBuf>,
+) -> Result<PathBuf, String> {
+    if let Some(path) = override_path {
+        if !is_executable(&path) {
+            return Err("cli_missing: MARU_HWP_BIN is not executable".to_string());
+        }
+        ensure_released_version(&path)?;
+        return Ok(path);
     }
-    select_compatible_hwp(hwp_candidates())
+    select_compatible_hwp(candidates)
+}
+
+fn hwp_bin() -> Result<PathBuf, String> {
+    select_hwp_bin(
+        std::env::var_os("MARU_HWP_BIN").map(PathBuf::from),
+        hwp_candidates(),
+    )
 }
 
 fn run_hwp(bin: &Path, args: &[OsString]) -> Result<CliRun, String> {
@@ -638,6 +650,36 @@ esac
         assert_eq!(
             select_compatible_hwp(vec![old_path_binary, managed_binary.clone()]).unwrap(),
             managed_binary
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn explicit_override_is_authoritative_but_must_meet_the_version_floor() {
+        let tmp = tempfile::tempdir().unwrap();
+        let old_dir = tmp.path().join("old");
+        let released_dir = tmp.path().join("released");
+        fs::create_dir_all(&old_dir).unwrap();
+        fs::create_dir_all(&released_dir).unwrap();
+        let old_override = fake_hwp(
+            &old_dir,
+            "0.12.0",
+            false,
+            r#"{"output":"filled.hwpx","mode":"placeholders","replaced":1,"counts":{"기관명":1},"warnings":[]}"#,
+        );
+        let released_override = fake_hwp(
+            &released_dir,
+            "0.12.1",
+            false,
+            r#"{"output":"filled.hwpx","mode":"placeholders","replaced":1,"counts":{"기관명":1},"warnings":[]}"#,
+        );
+
+        let error =
+            select_hwp_bin(Some(old_override), vec![released_override.clone()]).unwrap_err();
+        assert!(error.contains("hwp 0.12.0 is too old"));
+        assert_eq!(
+            select_hwp_bin(Some(released_override.clone()), Vec::new()).unwrap(),
+            released_override
         );
     }
 
