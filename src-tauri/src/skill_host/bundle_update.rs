@@ -390,6 +390,17 @@ pub fn discover_remote_bundle(
         };
         urls.insert(name.to_string(), url.to_string());
     }
+    discover_from_channel_assets(&urls)
+}
+
+/// Resolve a channel's immutable asset list into its newest complete bundle.
+///
+/// Metadata is deliberately the discovery commit point: archives and their
+/// signatures may be visible while a publication is in progress, but a
+/// revision cannot be selected until its signed metadata JSON exists.
+fn discover_from_channel_assets(
+    urls: &BTreeMap<String, String>,
+) -> Result<Option<RemoteBundle>, String> {
     let Some(metadata_name) = urls
         .keys()
         .filter(|name| asset_revision(name).is_some())
@@ -731,7 +742,159 @@ pub fn hash_from_file_hashes(mut pairs: Vec<(String, String)>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Write;
+    use std::io::{Read, Write};
+    use std::net::{Shutdown, TcpListener, TcpStream};
+    use std::sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
+    };
+    use std::thread;
+    use std::time::Duration;
+
+    // A dedicated test key, not a production updater key. Fixtures are
+    // signed by this key so the test exercises the production signature and
+    // metadata verification path without contacting the public channel.
+    const FIXTURE_PUBKEY: &str = "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDhGMzFBMEFENkVBRkM1MTIKUldRU3hhOXVyYUF4anlTWmU1eHlLZkRvYlNkQlN1NjE4QjIycmMzb2FBc2FVclBSWTJ0UkVKR1UK";
+    const R42_ZIP: &str = "UEsDBBQAAAAIAGU+HF0izEIHEAAAAA4AAAAXAAAAc2tpbGxzL2ZpeHR1cmUvU0tJTEwubWRLTC7JLEtVSCrNS8lJ5QIAUEsBAhQDFAAAAAgAZT4cXSLMQgcQAAAADgAAABcAAAAAAAAAAAAAAIABAAAAAHNraWxscy9maXh0dXJlL1NLSUxMLm1kUEsFBgAAAAABAAEARQAAAEUAAAAAAA==";
+    const R43_ZIP: &str = "UEsDBBQAAAAIAGU+HF0n2w4QDwAAAA0AAAAXAAAAc2tpbGxzL2ZpeHR1cmUvU0tJTEwubWQrSi0pqlRIKs1LyUnlAgBQSwECFAMUAAAACABlPhxdJ9sOEA8AAAANAAAAFwAAAAAAAAAAAAAAgAEAAAAAc2tpbGxzL2ZpeHR1cmUvU0tJTEwubWRQSwUGAAAAAAEAAQBFAAAARAAAAAAA";
+    const R42_METADATA: &str = r#"{"schema":1,"revision":42,"displayVersion":"r42","commit":"fixture42","minAppVersion":"0.0.1","envHash":"env-42","archive":{"name":"maru-skills-r42-a42c42e42.zip","sha256":"e74c7ffb1817b5379d1763127a1521f4c151fbfae2e7f8fa444d9e4b59e4528e","size":160},"files":[{"path":"skills/fixture/SKILL.md","sha256":"20b7057e96bbda32ee298c6055705dc2206a260ff5ccf667f2f0209e783cd7ed","mode":"644"}]}"#;
+    const R43_METADATA: &str = r#"{"schema":1,"revision":43,"displayVersion":"r43","commit":"fixture43","minAppVersion":"0.0.1","envHash":"env-43","archive":{"name":"maru-skills-r43-a43c43e43.zip","sha256":"4b0a73167e805c9e9a21b63f95f9cd8b87f52cdb837332332c88dbaa63edae09","size":159},"files":[{"path":"skills/fixture/SKILL.md","sha256":"6aa4ef547c604d0d8db008da66bbfe46e2fd61496eff63b3be7343a170a12c8f","mode":"644"}]}"#;
+    const R42_METADATA_SIG: &str = "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRU3hhOXVyYUF4ajdBalA5eUp1d0M5TEoyeTVSVVhHT3lpSTNzcUlGWGxkSCtncGkveTNZZlBoUWl0VTVVMkdycTZjcEJ1Z0ZuSnB4VXdHdnRnRHVnQitKMkVvTXB6cFFjPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg3ODcxMDcyCWZpbGU6bWFydS1za2lsbHMtcjQyLWE0MmM0MmU0Mi5qc29uCk9HN0Z5QUpNTHZKeUxZOWxqUC92M3RPY3E1NGMvK1hiVzJUSStrSmU4clZjS0p5dW1NbmF2RENCQWhVMXB4eUptczZjMDRPUERGZm9LSHkrYXU4ckNnPT0K";
+    const R42_ZIP_SIG: &str = "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRU3hhOXVyYUF4ajJkMmk0M0JsYk9UVitvMGNyREMraEFEYS9QeVBpL2Z1Q0RBck1XcWV5Rmpad0syZ1VUQUpKdUZUTjdYNlpPMm10QVhHTG1WS0Rvc1lxdE1wNVM3dUFNPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg3ODcxMDcxCWZpbGU6bWFydS1za2lsbHMtcjQyLWE0MmM0MmU0Mi56aXAKRlRORFFIVjZ5ZFlyN1VqUGFIVGZBQStJNU9IUUdmK3RyK2FnQXJQM0IyVTZWM3h4K3o4ZUhRUExMOCswZ2dVMExBVG9uZG1Bbnk4WFRTdGRVTXZ2RFE9PQo=";
+    const R43_METADATA_SIG: &str = "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRU3hhOXVyYUF4ajZuMHR5Um5VeHhodjFZM3R5ZCtqQ1lXRlk3dy9ydWFhb2NoRmhwZzBzZFA2a3hkV3hucW1pd1Q0NHA2ZlYwSlR5b1pqa200VllPaTlSdTllTW1SOUFjPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg3ODcxMDcyCWZpbGU6bWFydS1za2lsbHMtcjQzLWE0M2M0M2U0My5qc29uCmdZWnNJQVZ0QUhwNDdBc0kvNWt6WFp1OUhHMnFFSlU5UkpVWjNoYXpJL3VtekI0R0NZZW1GWm9kTlcwMVhuaXBDM0dnbE04RkVZb1NxU1ArUitEb0JRPT0K";
+    const R43_ZIP_SIG: &str = "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRU3hhOXVyYUF4ai90ZE5EUVRQWXgzWkdaZTY3TWxXYWVFZE4vZFZGOWlIVFVjV1B4NmE2SlJUVnNwTEF2NEI0MU1ORXVKcy9McWg5OHIwbWpqTGo2bFV0cVgxLytVOHdNPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg3ODcxMzU3CWZpbGU6bWFydS1za2lsbHMtcjQzLWE0M2M0M2U0My56aXAKZy9wYTRwY0pRQUpZWTJnaGw0bGRERXdYK1BxZkl0RkZlVHdTYldNNWRFSVB0cVNhNW51M3BYQjdQZ1g0aDZBa0s3OE1IR1lZYkErQ1lhZHNNNHQ2REE9PQo=";
+
+    static FIXTURE_PUBKEY_LOCK: std::sync::OnceLock<Mutex<()>> = std::sync::OnceLock::new();
+
+    struct FixturePubkey {
+        previous: Option<std::ffi::OsString>,
+        _lock: std::sync::MutexGuard<'static, ()>,
+    }
+
+    impl FixturePubkey {
+        fn install() -> Self {
+            let lock = FIXTURE_PUBKEY_LOCK
+                .get_or_init(|| Mutex::new(()))
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let previous = std::env::var_os("MARU_SKILLS_PUBKEY");
+            std::env::set_var("MARU_SKILLS_PUBKEY", FIXTURE_PUBKEY);
+            Self {
+                previous,
+                _lock: lock,
+            }
+        }
+    }
+
+    impl Drop for FixturePubkey {
+        fn drop(&mut self) {
+            if let Some(previous) = self.previous.as_ref() {
+                std::env::set_var("MARU_SKILLS_PUBKEY", previous);
+            } else {
+                std::env::remove_var("MARU_SKILLS_PUBKEY");
+            }
+        }
+    }
+
+    struct FixtureChannel {
+        base_url: String,
+        assets: Arc<Mutex<BTreeMap<String, Vec<u8>>>>,
+        stop: Arc<AtomicBool>,
+        thread: Option<thread::JoinHandle<()>>,
+    }
+
+    impl FixtureChannel {
+        fn start() -> Self {
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            listener.set_nonblocking(true).unwrap();
+            let base_url = format!("http://{}", listener.local_addr().unwrap());
+            let assets = Arc::new(Mutex::new(BTreeMap::new()));
+            let stop = Arc::new(AtomicBool::new(false));
+            let server_assets = Arc::clone(&assets);
+            let server_stop = Arc::clone(&stop);
+            let thread = thread::spawn(move || {
+                while !server_stop.load(Ordering::Relaxed) {
+                    match listener.accept() {
+                        Ok((mut stream, _)) => serve_fixture_request(&mut stream, &server_assets),
+                        Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
+                            thread::sleep(Duration::from_millis(5));
+                        }
+                        Err(err) => panic!("fixture channel accept failed: {err}"),
+                    }
+                }
+            });
+            Self {
+                base_url,
+                assets,
+                stop,
+                thread: Some(thread),
+            }
+        }
+
+        fn upload(&self, name: &str, contents: impl AsRef<[u8]>) {
+            self.assets
+                .lock()
+                .unwrap()
+                .insert(name.to_string(), contents.as_ref().to_vec());
+        }
+
+        fn channel_assets(&self) -> BTreeMap<String, String> {
+            self.assets
+                .lock()
+                .unwrap()
+                .keys()
+                .map(|name| (name.clone(), format!("{}/{}", self.base_url, name)))
+                .collect()
+        }
+    }
+
+    impl Drop for FixtureChannel {
+        fn drop(&mut self) {
+            self.stop.store(true, Ordering::Relaxed);
+            if let Ok(stream) = TcpStream::connect(self.base_url.trim_start_matches("http://")) {
+                let _ = stream.shutdown(Shutdown::Both);
+            }
+            if let Some(thread) = self.thread.take() {
+                thread.join().unwrap();
+            }
+        }
+    }
+
+    fn serve_fixture_request(
+        stream: &mut TcpStream,
+        assets: &Arc<Mutex<BTreeMap<String, Vec<u8>>>>,
+    ) {
+        let mut request = [0u8; 4096];
+        let read = stream.read(&mut request).unwrap_or(0);
+        let path = std::str::from_utf8(&request[..read])
+            .ok()
+            .and_then(|request| request.lines().next())
+            .and_then(|line| line.split_whitespace().nth(1))
+            .unwrap_or("/")
+            .trim_start_matches('/');
+        let body = assets.lock().unwrap().get(path).cloned();
+        let (status, body) = match body {
+            Some(body) => ("200 OK", body),
+            None => ("404 Not Found", Vec::new()),
+        };
+        write!(
+            stream,
+            "HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+            body.len()
+        )
+        .unwrap();
+        stream.write_all(&body).unwrap();
+    }
+
+    fn signed_metadata(metadata: &str) -> String {
+        format!("{metadata}\n")
+    }
+
+    fn fixture_zip(encoded: &str) -> Vec<u8> {
+        base64::engine::general_purpose::STANDARD
+            .decode(encoded)
+            .unwrap()
+    }
 
     fn build_zip(entries: &[(&str, &[u8])]) -> Vec<u8> {
         let mut cursor = std::io::Cursor::new(Vec::new());
@@ -977,6 +1140,94 @@ mod tests {
         assert_eq!(
             asset_revision("maru-skills-r170000000-9e9b165.json"),
             Some(170000000)
+        );
+    }
+
+    #[test]
+    fn interrupted_channel_publication_keeps_active_revision_until_metadata_commit() {
+        let _pubkey = FixturePubkey::install();
+        let _home = crate::skill_host::fs::test_home_for_bundle_tests();
+        let channel = FixtureChannel::start();
+
+        // The active r42 publication is complete. The r43 retry is faulted
+        // immediately before its metadata JSON upload: all archive and
+        // signature assets are present, but there is no discovery commit.
+        for (name, contents) in [
+            ("maru-skills-r42-a42c42e42.zip.sig", R42_ZIP_SIG),
+            ("maru-skills-r42-a42c42e42.json.sig", R42_METADATA_SIG),
+            ("maru-skills-r43-a43c43e43.zip.sig", R43_ZIP_SIG),
+            ("maru-skills-r43-a43c43e43.json.sig", R43_METADATA_SIG),
+        ] {
+            channel.upload(name, contents);
+        }
+        channel.upload("maru-skills-r42-a42c42e42.zip", fixture_zip(R42_ZIP));
+        channel.upload("maru-skills-r43-a43c43e43.zip", fixture_zip(R43_ZIP));
+        channel.upload(
+            "maru-skills-r42-a42c42e42.json",
+            signed_metadata(R42_METADATA),
+        );
+        write_state(&BundleState {
+            schema: 1,
+            active: Some(SkillBundleRef {
+                bundle_id: "r42-a42c42e42".to_string(),
+                revision: 42,
+                display_version: "r42".to_string(),
+                commit: Some("fixture42".to_string()),
+                source: REMOTE_SOURCE.to_string(),
+                env_hash: "env-42".to_string(),
+                applied_at: "fixture".to_string(),
+            }),
+            previous: None,
+        })
+        .unwrap();
+
+        let partial = discover_from_channel_assets(&channel.channel_assets())
+            .unwrap()
+            .expect("the previous complete revision remains discoverable");
+        assert_eq!(partial.metadata.revision, 42);
+        assert!(partial
+            .archive_url
+            .ends_with("maru-skills-r42-a42c42e42.zip"));
+        assert_eq!(
+            read_state().unwrap().unwrap().active.unwrap().revision,
+            42,
+            "discovery must not disturb the active revision"
+        );
+
+        // Retrying the same immutable r43 publication adds only its metadata
+        // JSON. The exact archive/signature pair that was already uploaded is
+        // now atomically discoverable; r42 assets cannot be mixed in.
+        channel.upload(
+            "maru-skills-r43-a43c43e43.json",
+            signed_metadata(R43_METADATA),
+        );
+        let complete = discover_from_channel_assets(&channel.channel_assets())
+            .unwrap()
+            .expect("metadata publication makes the retry discoverable");
+        assert_eq!(complete.metadata.revision, 43);
+        assert!(complete
+            .archive_url
+            .ends_with("maru-skills-r43-a43c43e43.zip"));
+        assert!(complete
+            .archive_sig_url
+            .ends_with("maru-skills-r43-a43c43e43.zip.sig"));
+        assert_ne!(
+            complete.metadata.archive.name,
+            partial.metadata.archive.name
+        );
+
+        let archive = download_verified_archive(&complete).unwrap();
+        let staging = tempfile::TempDir::new().unwrap();
+        let target = staging.path().join("r43");
+        extract_bundle_to_staging(&archive, &complete.metadata, &target).unwrap();
+        assert_eq!(
+            fs::read_to_string(target.join("skills/fixture/SKILL.md")).unwrap(),
+            "retry bundle\n"
+        );
+        assert_eq!(
+            read_state().unwrap().unwrap().active.unwrap().revision,
+            42,
+            "checking a complete update must not apply it"
         );
     }
 
