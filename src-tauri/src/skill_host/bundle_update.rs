@@ -864,9 +864,16 @@ mod tests {
         stream: &mut TcpStream,
         assets: &Arc<Mutex<BTreeMap<String, Vec<u8>>>>,
     ) {
-        let mut request = [0u8; 4096];
-        let read = stream.read(&mut request).unwrap_or(0);
-        let path = std::str::from_utf8(&request[..read])
+        let mut request = Vec::new();
+        let mut chunk = [0u8; 1024];
+        while request.len() < 8192 && !request.ends_with(b"\r\n\r\n") {
+            let read = stream.read(&mut chunk).unwrap_or(0);
+            if read == 0 {
+                break;
+            }
+            request.extend_from_slice(&chunk[..read]);
+        }
+        let path = std::str::from_utf8(&request)
             .ok()
             .and_then(|request| request.lines().next())
             .and_then(|line| line.split_whitespace().nth(1))
