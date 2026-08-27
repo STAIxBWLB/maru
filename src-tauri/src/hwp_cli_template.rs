@@ -25,7 +25,7 @@ use std::process::Command;
 use std::time::Duration;
 
 const HWP_CLI_SKILL_SOURCE: &str = "hwp_cli_skill";
-const MIN_HWP_VERSION: (u64, u64, u64) = (0, 12, 0);
+const MIN_HWP_VERSION: (u64, u64, u64) = (0, 12, 1);
 const HWP_TIMEOUT: Duration = Duration::from_secs(60);
 const STDOUT_LIMIT: usize = 32 * 1024 * 1024;
 const STDERR_LIMIT: usize = 1024 * 1024;
@@ -160,7 +160,7 @@ fn find_hwp_tool() -> Option<PathBuf> {
 
 fn hwp_bin() -> Result<PathBuf, String> {
     find_hwp_tool().ok_or_else(|| {
-        "cli_missing: released hwp >= 0.12.0 binary not found; install/export the unified hwp skill or set MARU_HWP_BIN".to_string()
+        "cli_missing: released hwp >= 0.12.1 binary not found; install/export the unified hwp skill or set MARU_HWP_BIN".to_string()
     })
 }
 
@@ -503,7 +503,12 @@ mod tests {
     use super::*;
 
     #[cfg(unix)]
-    fn fake_hwp(dir: &Path, fail_filled_validation: bool, fill_stdout: &str) -> PathBuf {
+    fn fake_hwp(
+        dir: &Path,
+        version: &str,
+        fail_filled_validation: bool,
+        fill_stdout: &str,
+    ) -> PathBuf {
         use std::os::unix::fs::PermissionsExt;
 
         let binary = dir.join("hwp");
@@ -515,7 +520,7 @@ mod tests {
         let script = format!(
             r#"#!/bin/sh
 case "$1" in
-  --version) echo "hwp 0.12.0" ;;
+  --version) echo "hwp {version}" ;;
   new)
     shift
     while [ "$#" -gt 0 ]; do
@@ -569,8 +574,33 @@ esac
     #[test]
     fn version_parser_requires_the_released_floor() {
         assert_eq!(parse_version(b"hwp 0.12.0"), Some((0, 12, 0)));
+        assert_eq!(parse_version(b"hwp 0.12.1"), Some((0, 12, 1)));
         assert_eq!(parse_version(b"hwp 0.11.9"), Some((0, 11, 9)));
         assert_eq!(parse_version(b"broken"), None);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn released_version_floor_rejects_0120_and_accepts_0121() {
+        let too_old = tempfile::tempdir().unwrap();
+        let too_old_binary = fake_hwp(
+            too_old.path(),
+            "0.12.0",
+            false,
+            r#"{"output":"filled.hwpx","mode":"placeholders","replaced":1,"counts":{"기관명":1},"warnings":[]}"#,
+        );
+        let error = ensure_released_version(&too_old_binary).unwrap_err();
+        assert!(error.contains("hwp 0.12.0 is too old"));
+        assert!(error.contains("requires >= 0.12.1"));
+
+        let released = tempfile::tempdir().unwrap();
+        let released_binary = fake_hwp(
+            released.path(),
+            "0.12.1",
+            false,
+            r#"{"output":"filled.hwpx","mode":"placeholders","replaced":1,"counts":{"기관명":1},"warnings":[]}"#,
+        );
+        assert!(ensure_released_version(&released_binary).is_ok());
     }
 
     #[test]
@@ -592,6 +622,7 @@ esac
         let tmp = tempfile::tempdir().unwrap();
         let binary = fake_hwp(
             tmp.path(),
+            "0.12.1",
             false,
             r#"{"output":"filled.hwpx","mode":"placeholders","replaced":1,"counts":{"기관명":1},"warnings":[]}"#,
         );
@@ -609,6 +640,7 @@ esac
         let tmp = tempfile::tempdir().unwrap();
         let binary = fake_hwp(
             tmp.path(),
+            "0.12.1",
             true,
             r#"{"output":"filled.hwpx","mode":"placeholders","replaced":1,"counts":{"기관명":1},"warnings":[]}"#,
         );
@@ -630,6 +662,7 @@ esac
         let tmp = tempfile::tempdir().unwrap();
         let binary = fake_hwp(
             tmp.path(),
+            "0.12.1",
             false,
             r#"{"output":"filled.hwpx","mode":"placeholders","replaced":1,"counts":{"기관명":1},"warnings":[]}"#,
         );
@@ -657,6 +690,7 @@ esac
         let tmp = tempfile::tempdir().unwrap();
         let binary = fake_hwp(
             tmp.path(),
+            "0.12.1",
             false,
             r#"{"output":"filled.hwpx","mode":"placeholders","replaced":2,"counts":{"기관명":2},"warnings":["native warning"]}"#,
         );
@@ -689,6 +723,7 @@ esac
 
         let unmatched_binary = fake_hwp(
             tmp.path(),
+            "0.12.1",
             false,
             r#"{"output":"filled.hwpx","mode":"placeholders","replaced":1,"counts":{"기관명":1,"없는필드":0},"warnings":["native unmatched"]}"#,
         );
@@ -704,7 +739,7 @@ esac
         assert!(unmatched.contains("hwp_fill_unmatched_required: 없는필드"));
         assert_eq!(fs::read_to_string(&output).unwrap(), "old output");
 
-        let malformed_binary = fake_hwp(tmp.path(), false, "not json");
+        let malformed_binary = fake_hwp(tmp.path(), "0.12.1", false, "not json");
         let malformed = fill_with_bin(
             &malformed_binary,
             tmp.path().to_str().unwrap(),
