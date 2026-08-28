@@ -25,7 +25,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 2: Shared Scanner and Path Invariants** - Collapse five prune lists and ~20 containment checks into one of each (completed 2026-08-23)
 - [x] **Phase 3: Typed IPC Error Contract** - Give the errors the frontend branches on a machine-readable code (completed 2026-08-24)
 - [x] **Phase 4: Editor Surface State Extraction** - Move `OutlinePane` and `EditorPane` off their prop bundles onto module stores (completed 2026-08-26)
-- [ ] **Phase 5: Shell Decomposition Completion** - Move the remaining panes and mode routing out of `MainApp`
+- [x] **Phase 5: Shell Decomposition Completion** - Move the remaining panes and mode routing out of `MainApp` (completed 2026-08-28)
 
 ## Phase Details
 
@@ -265,7 +265,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5
 | 2. Shared Scanner and Path Invariants | 3/3 | Complete    | 2026-08-23 |
 | 3. Typed IPC Error Contract | 4/4 | Complete   | 2026-08-24 |
 | 4. Editor Surface State Extraction | 7/7 | Complete    | 2026-08-26 |
-| 5. Shell Decomposition Completion | 11/11 | In Progress|  |
+| 5. Shell Decomposition Completion | 11/11 | Complete    | 2026-08-28 |
 
 ---
 *Roadmap created: 2026-08-22*

@@ -3,42 +3,42 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 current_phase: 05
-current_phase_name: Shell Decomposition Completion
-status: verifying
+status: completed
 stopped_at: Completed 05-11-PLAN.md
-last_updated: "2026-08-26T21:58:45.490Z"
-last_activity: 2026-08-26
-last_activity_desc: Phase 04 execution started
+last_updated: "2026-08-28T08:46:34.503Z"
+last_activity: 2026-08-28
+last_activity_desc: Phase 05 complete
 progress:
   total_phases: 5
   completed_phases: 5
   total_plans: 32
   completed_plans: 32
+current_phase_name: Shell Decomposition Completion
 ---
 
 # Project State
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-08-23)
+See: .planning/PROJECT.md (updated 2026-08-28)
 
 **Core value:** The filesystem stays the source of truth - everything Maru shows is derived from real files the user owns, and nothing is lost if Maru is uninstalled.
-**Current focus:** Phase 05 — Shell Decomposition Completion
+**Current focus:** Milestone v1.0 complete — ready for milestone audit/archive
 
 ## Current Position
 
-Phase: 05 (Shell Decomposition Completion) — EXECUTING
-Plan: 11 of 11
-Status: Phase complete — ready for verification
-Last activity: 2026-08-26 — Phase 05 execution started
+Phase: 05
+Plan: 11 of 11 complete
+Status: All phases complete
+Last activity: 2026-08-28 — Phase 05 complete
 
-Progress: [██████████] 100% (3/5 phases)
+Progress: [██████████] 100% (5/5 phases)
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 17
+- Total plans completed: 32
 - Average duration: -
 - Total execution time: -
 
@@ -48,7 +48,9 @@ Progress: [██████████] 100% (3/5 phases)
 |-------|-------|-------|----------|
 | 1 | 7 | - | - |
 | 2 | 3 | - | - |
+| 03 | 4 | - | - |
 | 04 | 7 | - | - |
+| 05 | 11 | - | - |
 
 **Recent Trend:**
 
@@ -181,7 +183,7 @@ Recent decisions affecting current work:
 - [Phase ?]: Mode registry IDs are typed as MaruAppMode and exhaustively tested across all 18 modes.
 - [Phase ?]: MainApp stays below the D-13 ceiling at 15 useState and 24 useEffect calls, with lifecycle ownership in named modules.
 - [Phase ?]: Extensibility drills mutate real production source only inside a finally-restored boundary and assert App byte identity.
-- [Phase ?]: The 05-11 native checkpoint is approved; no per-flow observations were reported, so none are inferred.
+- [Phase 5]: Direct D-20 native UAT recorded five passed flows covering Documents/filesystem effects, live PTY lifecycle, lazy right/primary placement, stale/current generation coverage, and render isolation.
 
 ### Scope Exceptions
 
@@ -217,7 +219,6 @@ None yet.
 ### Blockers/Concerns
 
 - **Phase 3's ERR-04 count band is coupled to `hwped.rs`.** The pinned command reports 1,138, and `hwped.rs` contributes 19 of those matches; without it the tree reads 1,119 and the post-migration count lands at 1,109, below `03-04-PLAN.md`'s `[1118, 1138]` band. The baseline is now anchored to a commit rather than a date - re-confirmed 2026-08-23 on the committed tree at 34f96ee - and `03-02`/`03-04` cite that provenance. Residual risk: the hwp-editor track is still active, so `03-04` now requires a re-measurement at the start of the plan rather than treating drift as exceptional.
-- `src/App.tsx` has no test of any kind. Phases 4-5 depend on Phase 1's hook-dependency gate plus the per-pane tests written during extraction; there is no existing safety net for the decomposition.
 - `make verify` runs on ubuntu-22.04 only and e2e runs Chromium against Vite with mocked IPC. Nothing in CI exercises WKWebView, the real PTY, IME input, or the macOS menu - macOS-affecting changes need a real-app run.
 
 ## Deferred Items
