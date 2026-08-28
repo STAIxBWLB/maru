@@ -8,6 +8,20 @@ because releases cut frequently during active development. Versions before
 Dates are the release-tag dates. Only `feat`/`fix`-level changes are listed;
 `chore(release)` version bumps and merge commits are omitted.
 
+## v0.5.0 - 2026-08-28 - A Stronger Foundation
+
+- **The v1.0 Structural Debt Paydown milestone is complete.** Five phases and
+  32 plans established trustworthy verification, shared scanner and path
+  invariants, typed IPC errors, store-backed editor surfaces, and an 18-mode
+  lazy application shell. All 24 milestone requirements passed verification;
+  the GSD milestone archive remains tagged separately as `v1.0`.
+- **Conflict codes now survive every command boundary (#283).**
+  `today_apply_plan_result`, `task_calendar_set_sync`, and
+  `update_frontmatter_field` return structured `IpcError` values instead of
+  flattening reserved codes into strings. A recursive source guard covers every
+  Rust module, a red probe proves that a new unregistered caller is caught, and
+  the frontend normalizer preserves both typed conflicts and legacy messages.
+
 ## v0.4.64 - 2026-08-28 - A Lighter Shell, Native Templates
 
 - **The application shell is decomposed without changing visible behavior

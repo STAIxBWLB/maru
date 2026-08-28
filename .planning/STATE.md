@@ -3,17 +3,17 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: Structural Debt Paydown
 status: Awaiting next milestone
-stopped_at: Milestone v1.0 archived
-last_updated: "2026-08-28T09:09:07.868Z"
+stopped_at: Milestone v1.0 summary published with v0.5.0
+last_updated: "2026-08-28T11:19:14.000Z"
 last_activity: 2026-08-28
-last_activity_desc: Milestone v1.0 archived
+last_activity_desc: ERR-06 closed and v0.5.0 milestone release prepared
 progress:
-  total_phases: 5
-  completed_phases: 5
-  total_plans: 32
-  completed_plans: 32
-current_phase: 05
-current_phase_name: Shell Decomposition Completion
+  total_phases: 0
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+current_phase: null
+current_phase_name: null
 ---
 
 # Project State
@@ -208,7 +208,7 @@ Recent decisions affecting current work:
   `docs/semantica-adoption-plan.md`.
 
 - [Phase 3]: The real-app WKWebView smoke found two live defects nothing else could see - EvidenceBinderMutation lacked serde rename_all_fields so every camelCase mutation was rejected at the bridge, and evidence discovery blocked the UI thread for over 40s on a 64k-file workspace. Treat "no native gate" as a real coverage hole in later phases, not a formality
-- [Phase 3]: Codex adversarial review produced ERR-05 and ERR-06 (v2 requirements) - the contract pins declarations but not emission sites, and commands able to emit reserved codes still flatten to String
+- [Phase 3]: Codex adversarial review produced ERR-05 and ERR-06; ERR-06 was closed after milestone review in PR #283 and released in v0.5.0, while ERR-05 remains deferred
 
 ### Pending Todos
 
@@ -228,16 +228,23 @@ None yet.
 | Reliability | REL-01 SIGHUP-immortal terminal session | v2 | 2026-08-22 |
 | Testing | TEST-01..04 (native Tauri E2E runner, coverage, remaining component tests, app_menu smoke) | v2 | 2026-08-22 |
 | Product | HUB-01 Hub graph-metadata sync - the doc set's only explicit deferral | v2 | 2026-08-22 |
-| Typed IPC | ERR-05 closed-enum contract (emission sites unconstrained; guard checks declarations only), ERR-06 typed return for every conflict-emitting command (today_apply_plan_result, task_calendar_set_sync flatten to String) | v2 | 2026-08-23 |
+| Typed IPC | ERR-05 closed-enum contract (emission sites unconstrained; guard checks declarations only) | v2 | 2026-08-23 |
 | Evidence | Re-run a deliberate failing CI E2E against the shipped narrowed Playwright trace configuration | accepted at v1.0 closeout | 2026-08-28 |
 | Validation | Reconcile Phase 01-03 Nyquist metadata with `$gsd-validate-phase` | accepted at v1.0 closeout | 2026-08-28 |
-| Security | Add Phase 02-03 security reports if uniform milestone evidence is required | accepted at v1.0 closeout | 2026-08-28 |
+| Security | Add a Phase 02 security report if uniform milestone evidence is required | accepted at v1.0 closeout | 2026-08-28 |
+
+## Post-Close Resolutions
+
+| Item | Resolution | Release | Date |
+|------|------------|---------|------|
+| ERR-06 | All conflict-emitting commands preserve `IpcError`; recursive source guard and frontend normalization tests added in PR #283 | v0.5.0 | 2026-08-28 |
+| Phase 03 security evidence | Seven threats closed, accepted risks documented, `threats_open: 0` | v0.5.0 | 2026-08-28 |
 
 ## Session Continuity
 
-Last session: 2026-08-28T09:09:07.868Z
-Stopped at: Milestone v1.0 archived
-Resume file: None
+Last session: 2026-08-28T11:19:14.000Z
+Stopped at: Milestone v1.0 summary published with v0.5.0
+Resume file: .planning/reports/MILESTONE_SUMMARY-v1.0.md
 
 ## Operator Next Steps
 
