@@ -17,6 +17,14 @@ vi.mock("../lib/today", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../lib/today")>()),
   todayLogicalDay: vi.fn().mockResolvedValue({ logicalDay: "2026-08-26" }),
 }));
+vi.mock("../lib/workspaceBootLifecycle", async () => {
+  const { useEffect } = await import("react");
+  return {
+    useWorkspaceBootLifecycle: ({ setBooting }: { setBooting(booting: boolean): void }) => {
+      useEffect(() => setBooting(false), [setBooting]);
+    },
+  };
+});
 
 import { MainApp } from "../App";
 import {
@@ -54,6 +62,31 @@ type EditorPaneScope = {
   group: "left" | "right";
   tabId: string;
 };
+
+const observedShellTargets = ["MainApp", "DocumentList", "TerminalPanel", "ActivityRail"] as const;
+
+async function settleInitialShellRenders(renders: ReadonlyMap<string, number>): Promise<void> {
+  const snapshot = () => observedShellTargets.map((target) => renders.get(target) ?? 0).join(":");
+  let previous = snapshot();
+  let stableRounds = 0;
+
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    await act(async () => {
+      await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
+    });
+    const current = snapshot();
+    const allObserved = observedShellTargets.every((target) => (renders.get(target) ?? 0) > 0);
+    if (allObserved && current === previous) {
+      stableRounds += 1;
+      if (stableRounds >= 2) return;
+    } else {
+      stableRounds = 0;
+      previous = current;
+    }
+  }
+
+  throw new Error(`MainApp shell did not settle: ${snapshot()}`);
+}
 
 describe("Editor surface render isolation", () => {
   let container: HTMLDivElement;
@@ -123,7 +156,7 @@ describe("Editor surface render isolation", () => {
     await act(async () => {
       root?.render(<MainApp />);
     });
-    await act(async () => {});
+    await settleInitialShellRenders(renders);
     const shellTargets = ["DocumentList", "TerminalPanel", "ActivityRail"] as const;
     const before = new Map(shellTargets.map((target) => [target, renders.get(target) ?? 0]));
     const mainBefore = renders.get("MainApp") ?? 0;
@@ -135,7 +168,7 @@ describe("Editor surface render isolation", () => {
       for (const target of shellTargets) expect(renders.get(target) ?? 0).toBe(before.get(target));
     };
 
-    await act(async () => {
+    act(() => {
       updateTabDraft(left.id, "left dirty");
     });
     expect(getEditorTabsState().tabs.find((tab) => tab.id === left.id)?.draftContent).toBe("left dirty");
@@ -145,14 +178,14 @@ describe("Editor surface render isolation", () => {
     expect(renders.get("MainApp") ?? 0).toBeGreaterThan(mainBefore);
     expectShellStable();
 
-    await act(async () => {
+    act(() => {
       updateTabDraft(left.id, "left dirty again");
     });
     expect(getEditorTabsState().tabs.find((tab) => tab.id === left.id)?.draftContent).toBe("left dirty again");
     expect(getEditorPaneState({ workspacePath: "/workspace", group: "left", tabId: left.id }).document.draftContent).toBe("left dirty again");
     expectShellStable();
 
-    await act(async () => {
+    act(() => {
       updateTabDraft(right.id, "right dirty");
     });
     expect(getEditorTabsState().tabs.find((tab) => tab.id === right.id)?.draftContent).toBe("right dirty");
@@ -203,7 +236,7 @@ describe("Editor surface render isolation", () => {
     });
     const before = { documentRenders, tabsRenders, viewRenders, operationRenders };
 
-    await act(async () => {
+    act(() => {
       surface.patchEditorPaneOperation(scope, { saving: true });
     });
 
@@ -233,12 +266,12 @@ describe("Editor surface render isolation", () => {
     await act(async () => {
       root?.render(<MainApp />);
     });
-    await act(async () => {});
+    await settleInitialShellRenders(renders);
     const before = new Map(["MainApp", "DocumentList", "ActivityRail", "TerminalPanel"].map(
       (target) => [target, renders.get(target) ?? 0],
     ));
 
-    await act(async () => {
+    act(() => {
       dispatchTerminalPanelTabs({
         type: "createTask",
         task: createTerminalTask("terminal-task", "Terminal", "/workspace"),
@@ -283,14 +316,14 @@ describe("Editor surface render isolation", () => {
     await act(async () => {
       root?.render(<><MainApp /><BrowserSubscriber /></>);
     });
-    await act(async () => {});
+    await settleInitialShellRenders(renders);
 
     const before = new Map(["MainApp", "DocumentList", "ActivityRail", "TerminalPanel"].map(
       (target) => [target, renders.get(target) ?? 0],
     ));
     const browserBefore = browserSubscriberRenders;
 
-    await act(async () => {
+    act(() => {
       publishDocumentBrowser({ workspacePath: "", visibility: "private" }, { query: "phase-five" });
     });
 
@@ -315,15 +348,14 @@ describe("Editor surface render isolation", () => {
     await act(async () => {
       root?.render(<><MainApp /><GraphSubscriber /></>);
     });
-    await act(async () => {});
-    await act(async () => {});
+    await settleInitialShellRenders(renders);
 
     const before = new Map(["MainApp", "DocumentList", "ActivityRail", "TerminalPanel"].map(
       (target) => [target, renders.get(target) ?? 0],
     ));
     const graphBefore = graphSubscriberRenders;
 
-    await act(async () => {
+    act(() => {
       visualModeController.setGraphReferenceFocus({
         source: "editor",
         docPath: "/workspace/note.md",
