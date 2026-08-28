@@ -8,6 +8,27 @@ because releases cut frequently during active development. Versions before
 Dates are the release-tag dates. Only `feat`/`fix`-level changes are listed;
 `chore(release)` version bumps and merge commits are omitted.
 
+## v0.4.64 - 2026-08-28 - A Lighter Shell, Native Templates
+
+- **The application shell is decomposed without changing visible behavior
+  (#282).** Outline, Editor, Documents, and Terminal now read keyed module-store
+  state through small facades, while all 18 app modes load through typed lazy
+  registry adapters. `MainApp` is held to 15 state hooks and 24 effects, pane
+  updates no longer fan out into unrelated surfaces, and a production drill
+  proves a new mode or pane-local state can be added without editing `App.tsx`.
+- **Studio can publish Hub templates through the native HWP skill (#284,
+  #285).** Six released Korean aliases now route through `hwp new --template`,
+  bounded scan/fill/validate, and atomic HWPX publication. Native replacement
+  totals and warnings reach Studio, while malformed, inconsistent, unmatched,
+  or failed validation reports stop before publication.
+- **Native HWP execution now enforces the supported binary floor consistently
+  (#286, #288).** Studio requires hwp 0.12.1 or newer for native templates, and
+  an explicit `MARU_HWP_BIN` override can no longer bypass that policy.
+- **macOS cross-target release builds use the repository-pinned Rust toolchain
+  (#281).** Intel and Apple Silicon targets are installed into the same pinned
+  toolchain Cargo resolves, preventing a tag from entering the release pipeline
+  with no buildable macOS matrix.
+
 ## v0.4.63 - 2026-08-24 - Evidence Binder, Fixed and Fast
 
 - **Evidence Binder mutations reach the backend again (#279).** Linking,
