@@ -135,4 +135,3 @@ None - no external service configuration required.
 
 - All seven plan-owned source and test files exist.
 - All four task commits are present in git history.
-
