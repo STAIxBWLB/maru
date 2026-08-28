@@ -29,7 +29,18 @@
 
 - Re-run a deliberate failing CI E2E against the shipped narrowed Playwright trace configuration.
 - Reconcile Phase 1-3 Nyquist metadata with `$gsd-validate-phase`.
-- Add Phase 2-3 security reports if uniform milestone security evidence is required.
+- Add a Phase 2 security report if uniform milestone security evidence is required.
+
+### Post-close amendment: v0.5.0
+
+- Closed ERR-06 in PR #283 by preserving typed conflict codes across every
+  conflict-emitting command and normalizing the remaining frontend API funnel.
+- Added a recursive Rust source guard with direct red-probe evidence, plus a
+  Phase 3 security report with seven threats closed and `threats_open: 0`.
+- Published the milestone summary and rewrote README.md against the shipped
+  18-mode architecture, current safety contracts, and release pipeline.
+- Kept the planning milestone tag `v1.0` immutable at its archive commit;
+  product release `v0.5.0` is the commemorative distribution tag.
 
 **What's next:** No next milestone is selected. Start discovery with `$gsd-new-milestone`.
 

@@ -6,7 +6,7 @@ Local-first Maru Workspace and AI editing desktop app. A Tauri 2 desktop shell -
 React 19 + TypeScript frontend over a Rust core - where a folder on disk is the
 workspace: notes, documents, terminals, a knowledge graph, diagrams, skills, and
 AI agent runs all operate on real files the user owns. Shipped as signed bundles
-for macOS, Windows, and Linux; currently v0.4.63.
+for macOS, Windows, and Linux; currently v0.5.0.
 
 ## Core Value
 
@@ -17,7 +17,8 @@ real files the user owns, and nothing is lost if Maru is uninstalled.
 
 Milestone v1.0 Structural Debt Paydown shipped on 2026-08-28. All five phases,
 32 plans, and 24 v1 requirements are complete. The milestone archive and audit
-live under `.planning/milestones/`; no next milestone is active.
+live under `.planning/milestones/`; no next milestone is active. Product release
+v0.5.0 commemorates the milestone and includes the post-close ERR-06 hardening.
 
 ## Requirements
 
@@ -104,7 +105,7 @@ new milestone explicitly promotes them.
 No next milestone scope has been selected. Candidate inputs for
 `$gsd-new-milestone` include the deferred v2 reliability/security backlog and
 the accepted closeout evidence debt: GATE-04 trace reproduction, Phase 1-3
-Nyquist reconciliation, and Phase 2-3 security reports. These remain candidates,
+Nyquist reconciliation, and a Phase 2 security report. These remain candidates,
 not committed requirements.
 
 ## Context
@@ -200,10 +201,10 @@ ones this milestone can actually break are listed here.
 | Scope drawn from CONCERNS.md Tech Debt, not from the SPECs | 18 ingested docs describe shipped behavior; inventing forward work from them would be fabrication | ✓ Held throughout the milestone; one adopted parallel-track exception recorded in STATE.md |
 | Verification gates land before the decomposition (Phase 1) | Moving 68 `useState` / 50 `useEffect` without a hook-dependency gate reproduces #260/#262/#264 | ✓ Phase 1 — 7 gates live, deliberate-break proofs red-then-green, UAT 24/24 |
 | Continue the module-store precedent instead of adding a state library | `errorStore`/`workspaceStore`/`editorTabsStore` already prove the pattern here | ✓ Phases 4-5 complete with store-backed facades and no new state library |
-| Typed error contract covers only branched-on errors | Converting all ~1,138 signatures is cost without benefit; display-only errors read fine as strings | ✓ Phase 3 complete; residual hardening tracked as ERR-05/ERR-06 for v2 |
+| Typed error contract covers only branched-on errors | Converting all ~1,138 signatures is cost without benefit; display-only errors read fine as strings | ✓ Phase 3 complete; ERR-06 closed after milestone review in v0.5.0, ERR-05 remains deferred |
 | Promote `ensure_within`, do not retrofit all ~20 callers | Existing checks are individually sound; the problem is that a new author has no canonical example | ✓ Phase 2 — promoted to `crate::paths`, doc + tests as the example, zero retrofits |
 | Phases 4-5 get no `UI hint` annotation | They refactor UI state plumbing with pixel-identical output as the success criterion; a UI design spec would be the wrong downstream suggestion | ✓ Completed with behavior-preserving UAT and no visible redesign |
 | 64 SPEC constraints recorded as invariants, not decisions | 0 ADRs in the set - nothing is decision-locked, so a future ADR can override any of them | ✓ Preserved as the milestone verification baseline |
 
 ---
-*Last updated: 2026-08-28 after v1.0 milestone completion*
+*Last updated: 2026-08-28 after the v0.5.0 post-close release*
