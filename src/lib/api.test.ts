@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
 
 vi.mock("@tauri-apps/api/core", () => ({
@@ -10,7 +10,12 @@ vi.mock("@tauri-apps/plugin-dialog", () => ({
   save: vi.fn(),
 }));
 
-import { applyInboxDecisions, scanInboxProcessedSnapshot } from "./api";
+import { applyInboxDecisions, scanInboxProcessedSnapshot, updateFrontmatterField } from "./api";
+import { IpcError } from "./ipcError";
+
+beforeEach(() => {
+  vi.mocked(invoke).mockReset();
+});
 
 describe("applyInboxDecisions fallback", () => {
   it("returns the done item directory for accepted decisions", async () => {
@@ -85,6 +90,56 @@ describe("scanInboxProcessedSnapshot", () => {
         query: "budget",
         limit: 120,
       });
+    } finally {
+      delete (globalThis as { window?: unknown }).window;
+    }
+  });
+});
+
+describe("updateFrontmatterField", () => {
+  it("normalizes a document conflict into an IpcError", async () => {
+    (globalThis as { window?: unknown }).window = { __TAURI_INTERNALS__: {} };
+    vi.mocked(invoke).mockRejectedValueOnce({
+      code: "document_conflict",
+      message: "expected revision a, found b",
+    });
+
+    try {
+      let caught: unknown;
+      try {
+        await updateFrontmatterField("/workspace", "note.md", "status", "done", "rev-a");
+      } catch (err) {
+        caught = err;
+      }
+
+      expect(caught).toBeInstanceOf(IpcError);
+      expect(caught).toMatchObject({
+        code: "document_conflict",
+        message: "document_conflict: expected revision a, found b",
+      });
+      expect(invoke).toHaveBeenCalledWith("update_frontmatter_field", {
+        vaultPath: "/workspace",
+        documentPath: "note.md",
+        key: "status",
+        value: "done",
+        expectedRevision: "rev-a",
+      });
+    } finally {
+      delete (globalThis as { window?: unknown }).window;
+    }
+  });
+
+  it("preserves the message of an uncoded legacy error", async () => {
+    (globalThis as { window?: unknown }).window = { __TAURI_INTERNALS__: {} };
+    vi.mocked(invoke).mockRejectedValueOnce({
+      code: "",
+      message: "frontmatter editing is not supported for HTML documents",
+    });
+
+    try {
+      await expect(
+        updateFrontmatterField("/workspace", "page.html", "status", "done"),
+      ).rejects.toThrow("frontmatter editing is not supported for HTML documents");
     } finally {
       delete (globalThis as { window?: unknown }).window;
     }

@@ -7,6 +7,7 @@
 // own revision/day/plan checks remain the final authority.
 
 use crate::agent_host::contracts::{TODAY_CAPTURE_SCHEMA_VERSION, TODAY_PLAN_SCHEMA_VERSION};
+use crate::ipc_error::IpcError;
 use crate::today::{
     block_crosses_sleep, parse_sleep_start, parse_timezone, CalendarSyncStatus, CapacitySummary,
     CaptureCandidate, DailyPlanV1, PlanItemRef, TodayMutation, TodaySnapshot, TOP_LANE_MAX,
@@ -274,7 +275,7 @@ pub fn today_apply_plan_result(
     output_json: String,
     valid_refs: Vec<PlanItemRef>,
     sleep_start: String,
-) -> Result<TodaySnapshot, String> {
+) -> Result<TodaySnapshot, IpcError> {
     let raw: JsonValue = serde_json::from_str(&output_json)
         .map_err(|err| format!("today_ai_invalid_payload: {err}"))?;
     let valid: HashSet<PlanItemRef> = valid_refs.into_iter().collect();
@@ -296,7 +297,6 @@ pub fn today_apply_plan_result(
         expected_revision,
         TodayMutation::SetPlan { plan },
     )
-    .map_err(|e| e.to_string())
 }
 
 #[cfg(test)]
@@ -542,7 +542,7 @@ mod tests {
             SLEEP.to_string(),
         )
         .unwrap_err();
-        assert!(err.starts_with("today_conflict"));
+        assert_eq!(err.code, crate::ipc_error::TODAY_CONFLICT);
         // A draft computed against the newer revision but handed in with the
         // old expected_revision is caught by validation itself.
         let fresh = plan_output_json(&applied.revision, vec![top_item("a")], vec![]);
@@ -555,7 +555,7 @@ mod tests {
             SLEEP.to_string(),
         )
         .unwrap_err();
-        assert!(err.starts_with("today_ai_stale_revision"));
+        assert!(err.to_string().starts_with("today_ai_stale_revision"));
     }
 
     fn plan_validation_err(output: String, snapshot: &TodaySnapshot, refs: &[&str]) -> String {
@@ -801,7 +801,7 @@ mod tests {
             SLEEP.to_string(),
         )
         .unwrap_err();
-        assert!(err.starts_with("today_ai_invalid_payload"));
+        assert!(err.to_string().starts_with("today_ai_invalid_payload"));
         // deny_unknown_fields on the output wrapper: unexpected top-level
         // key is an invalid payload, not silently ignored.
         let mut raw: JsonValue = serde_json::from_str(&plan_output_json(

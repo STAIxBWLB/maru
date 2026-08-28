@@ -293,7 +293,7 @@ pub fn task_calendar_set_sync(
     item_ref: PlanItemRef,
     selected: bool,
     destination: Option<String>,
-) -> Result<TodaySnapshot, String> {
+) -> Result<TodaySnapshot, IpcError> {
     crate::today_store::today_mutate(
         work_path,
         logical_day,
@@ -304,7 +304,6 @@ pub fn task_calendar_set_sync(
             destination,
         },
     )
-    .map_err(|e| e.to_string())
 }
 
 // --- Publish ------------------------------------------------------------------
@@ -648,7 +647,7 @@ mod tests {
         snapshot: &TodaySnapshot,
         task_id: &str,
         selected: bool,
-    ) -> Result<TodaySnapshot, String> {
+    ) -> Result<TodaySnapshot, IpcError> {
         task_calendar_set_sync(
             work(tmp),
             snapshot.logical_day.clone(),
@@ -787,9 +786,9 @@ mod tests {
 
         // Stale revision conflicts; unknown item errors.
         let err = select(&tmp, &snapshot, "a", true).unwrap_err();
-        assert!(err.starts_with("today_conflict"));
+        assert_eq!(err.code, crate::ipc_error::TODAY_CONFLICT);
         let err = select(&tmp, &cleared, "nope", true).unwrap_err();
-        assert!(err.starts_with("today_plan_item_missing"));
+        assert!(err.to_string().starts_with("today_plan_item_missing"));
     }
 
     // --- Publish -----------------------------------------------------------------
