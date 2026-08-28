@@ -3,10 +3,10 @@ gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Felt Quality and Native Proof
 status: planning
-last_updated: "2026-08-28T14:00:06.460Z"
-last_activity: 2026-08-28
+last_updated: "2026-08-28T20:43:30.000Z"
+last_activity: 2026-08-29
 progress:
-  total_phases: 0
+  total_phases: 6
   completed_phases: 0
   total_plans: 0
   completed_plans: 0
@@ -19,15 +19,17 @@ progress:
 
 See: .planning/PROJECT.md (updated 2026-08-28)
 
-**Core value:** The filesystem stays the source of truth - everything Maru shows is derived from real files the user owns, and nothing is lost if Maru is uninstalled.
-**Current focus:** Planning the next milestone
+**Core value:** The filesystem stays the source of truth, everything Maru shows is derived from real files the user owns, and nothing is lost if Maru is uninstalled.
+**Current focus:** Phase 6: Native E2E Runner Foundation (v1.1)
 
 ## Current Position
 
-Phase: Not started (defining requirements)
-Plan: —
-Status: Defining requirements
-Last activity: 2026-08-28 — Milestone v1.1 started
+Phase: 6 of 11 overall (Phase 1 of 6 in milestone v1.1) - Native E2E Runner Foundation
+Plan: - (not yet planned)
+Status: Ready to plan
+Last activity: 2026-08-29 - ROADMAP.md created for v1.1: 6 phases (6-11), 15/15 requirements mapped
+
+Progress: [..........] 0%
 
 ## Performance Metrics
 
@@ -179,56 +181,33 @@ Recent decisions affecting current work:
 - [Phase ?]: MainApp stays below the D-13 ceiling at 15 useState and 24 useEffect calls, with lifecycle ownership in named modules.
 - [Phase ?]: Extensibility drills mutate real production source only inside a finally-restored boundary and assert App byte identity.
 - [Phase 5]: Direct D-20 native UAT recorded five passed flows covering Documents/filesystem effects, live PTY lifecycle, lazy right/primary placement, stale/current generation coverage, and render isolation.
-
-### Scope Exceptions
-
-- **hwp-editor bridge (`hwped_*`), recorded 2026-08-23.** Six Tauri commands
-  (`src-tauri/src/hwped.rs`, wrappers in `src/lib/hwped.ts`) spawning the `hwp`
-  binary landed from a parallel track while this milestone was running. They are a
-  new product feature, which the milestone charter excludes, so they are recorded
-  here as an adopted exception rather than milestone work: this milestone owns the
-  gate signal, not the feature. Phases 1 and 2 each reported `make verify` as
-  unprovable locally because this file failed `clippy` and `fmt-check` while
-  untracked (`01-06-SUMMARY.md`, `01-07-SUMMARY.md`, `02-02-SUMMARY.md`); those two
-  clippy findings and the formatting diffs are fixed in the same commit that adopts
-  it, so the composite gate runs against the same tree CI sees.
-
-- The bridge's error strings (`cli_missing:`, `hwp_timeout:`, `hwp_failed:`,
-  `hwp_parse_failed:`, `hwped_bad_request:`) stay `Result<T, String>` and are
-  **exempt from the Phase 3 typed contract**. `src/lib/hwped.ts` contains no error
-  branching at all, so they are display-only - exactly the class ERR-04 protects
-  from migration.
-
-- Still owed, deliberately deferred until the hwp-editor implementation track
-  reports complete: the Phase 2.1 planning artifacts, the HWPE-01..03 requirement
-  registration, and the Semantica Phases 6-9 roadmap entries drawn from
-  `docs/semantica-adoption-plan.md`.
-
-- [Phase 3]: The real-app WKWebView smoke found two live defects nothing else could see - EvidenceBinderMutation lacked serde rename_all_fields so every camelCase mutation was rejected at the bridge, and evidence discovery blocked the UI thread for over 40s on a 64k-file workspace. Treat "no native gate" as a real coverage hole in later phases, not a formality
-- [Phase 3]: Codex adversarial review produced ERR-05 and ERR-06; ERR-06 was closed after milestone review in PR #283 and released in v0.5.0, while ERR-05 remains deferred
+- [Roadmap]: v1.1 phases 6-11 sequenced with TEST-01 first (Phase 6, native runner - the only way to observe PERF-01/02/03's and REL-01's real behavioral claims), PERF-03/04 plus SEC-02 as early guardrails (Phase 7, no native dependency, SEC-02 landed early precisely because this milestone's own refactor churn produces new unsanitized-sink risk), PERF-02 before PERF-01 in the same phase (Phase 8, PERF-02 rewrites the store.rs region PERF-03 touches and must settle first), REL-01 after TEST-01 (Phase 9, only a real PTY can trap SIGHUP), and the remaining budget/evidence items grouped by no-dependency convenience (Phases 10-11). TEST-01 and REL-01 carry materially higher planning uncertainty and are flagged in ROADMAP.md pending their respective spikes.
 
 ### Pending Todos
+
+[From .planning/todos/pending/ - ideas captured during sessions]
 
 None yet.
 
 ### Blockers/Concerns
 
 - **Phase 3's ERR-04 count band is coupled to `hwped.rs`.** The pinned command reports 1,138, and `hwped.rs` contributes 19 of those matches; without it the tree reads 1,119 and the post-migration count lands at 1,109, below `03-04-PLAN.md`'s `[1118, 1138]` band. The baseline is now anchored to a commit rather than a date - re-confirmed 2026-08-23 on the committed tree at 34f96ee - and `03-02`/`03-04` cite that provenance. Residual risk: the hwp-editor track is still active, so `03-04` now requires a re-measurement at the start of the plan rather than treating drift as exceptional.
-- `make verify` runs on ubuntu-22.04 only and e2e runs Chromium against Vite with mocked IPC. Nothing in CI exercises WKWebView, the real PTY, IME input, or the macOS menu - macOS-affecting changes need a real-app run.
+- `make verify` runs on ubuntu-22.04 only and e2e runs Chromium against Vite with mocked IPC. Nothing in CI exercises WKWebView, the real PTY, IME input, or the macOS menu - macOS-affecting changes need a real-app run. Phase 6 (TEST-01) exists to close this gap; until its spike resolves, treat this as open.
 
 ## Deferred Items
 
 | Category | Item | Status | Deferred At |
 |----------|------|--------|-------------|
-| Concurrency/Perf | PERF-01..04 (sync-command main thread, lock-across-network, poison recovery, watcher pruning) | v2 | 2026-08-22 |
-| Security | SEC-01 CSP `script-src blob:` audit, SEC-02 sanitizer regression test | v2 | 2026-08-22 |
-| Reliability | REL-01 SIGHUP-immortal terminal session | v2 | 2026-08-22 |
-| Testing | TEST-01..04 (native Tauri E2E runner, coverage, remaining component tests, app_menu smoke) | v2 | 2026-08-22 |
+| Concurrency/Perf | PERF-01..04 (sync-command main thread, lock-across-network, poison recovery, watcher pruning) | Promoted to v1.1 (Phases 7-8) | 2026-08-22 |
+| Security | SEC-01 CSP `script-src blob:` audit, SEC-02 sanitizer regression test | Promoted to v1.1 (Phases 7, 10) | 2026-08-22 |
+| Reliability | REL-01 SIGHUP-immortal terminal session | Promoted to v1.1 (Phase 9) | 2026-08-22 |
+| Testing | TEST-01, TEST-02 (native Tauri E2E runner, coverage) | Promoted to v1.1 (Phases 6, 11) | 2026-08-22 |
+| Testing | TEST-03, TEST-04 (remaining component tests, app_menu smoke) | v2 | 2026-08-22 |
 | Product | HUB-01 Hub graph-metadata sync - the doc set's only explicit deferral | v2 | 2026-08-22 |
 | Typed IPC | ERR-05 closed-enum contract (emission sites unconstrained; guard checks declarations only) | v2 | 2026-08-23 |
-| Evidence | Re-run a deliberate failing CI E2E against the shipped narrowed Playwright trace configuration | accepted at v1.0 closeout | 2026-08-28 |
-| Validation | Reconcile Phase 01-03 Nyquist metadata with `$gsd-validate-phase` | accepted at v1.0 closeout | 2026-08-28 |
-| Security | Add a Phase 02 security report if uniform milestone evidence is required | accepted at v1.0 closeout | 2026-08-28 |
+| Evidence | Re-run a deliberate failing CI E2E against the shipped narrowed Playwright trace configuration | Promoted to v1.1 (GATE-08, Phase 11) | 2026-08-28 |
+| Validation | Reconcile Phase 01-03 Nyquist metadata with `$gsd-validate-phase` | Promoted to v1.1 (VALID-01, Phase 11) | 2026-08-28 |
+| Security | Add a Phase 02 security report if uniform milestone evidence is required | Promoted to v1.1 (SEC-03, Phase 11) | 2026-08-28 |
 
 ## Post-Close Resolutions
 
@@ -239,10 +218,10 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-08-28T11:19:14.000Z
-Stopped at: Milestone v1.0 summary published with v0.5.0
-Resume file: .planning/reports/MILESTONE_SUMMARY-v1.0.md
+Last session: 2026-08-28T20:43:30.000Z
+Stopped at: ROADMAP.md created for v1.1 (Phases 6-11); REQUIREMENTS.md traceability updated to 15/15 mapped
+Resume file: None
 
 ## Operator Next Steps
 
-- Start the next milestone with `$gsd-new-milestone`
+- Plan Phase 6 with `/gsd-plan-phase 6`
