@@ -1,27 +1,25 @@
 ---
 phase: 05-shell-decomposition-completion
-verified: 2026-08-26T23:03:56Z
-status: human_needed
-score: 7/8 must-haves verified
-behavior_unverified: 1
+verified: 2026-08-28T08:44:02Z
+status: passed
+score: 8/8 must-haves verified
+behavior_unverified: 0
 overrides_applied: 0
-behavior_unverified_items:
-  - truth: "The macOS native Tauri matrix confirms Documents, Terminal, registry placement/lazy loading, recycled-generation handling, and render isolation."
-    test: "Run a fresh `pnpm tauri:dev` process against a disposable workspace and perform the D-20 Documents, Terminal, representative primary/right mode, stale/current generation, and render-counter flows."
-    expected: "Each flow preserves behavior; stale generation fails while current generation succeeds; MainApp and unrelated panes do not re-render."
-    why_human: "The recorded checkpoint says only `approved`; no per-flow native observations were supplied, and Chromium E2E cannot prove WKWebView/PTTY/native filesystem behavior."
-human_verification:
-  - test: "Native D-20 completion matrix"
-    expected: "Record a pass/fail observation for each required Documents, Terminal, registry/lazy, generation, and render-isolation flow."
-    why_human: "Native approval exists but has no granular observations; this verifier does not invent them."
+re_verification:
+  previous_status: human_needed
+  previous_score: 7/8
+  gaps_closed:
+    - "Native D-20 completion matrix now has committed per-flow observations."
+  gaps_remaining: []
+  regressions: []
 ---
 
 # Phase 5: Shell Decomposition Completion Verification Report
 
 **Phase Goal:** `src/App.tsx` is a shell, not a state container - a new pane can be added without touching it.
-**Verified:** 2026-08-26T23:03:56Z
-**Status:** human_needed
-**Re-verification:** No - initial verification
+**Verified:** 2026-08-28T08:44:02Z
+**Status:** passed
+**Re-verification:** Yes - after native UAT evidence
 
 ## Goal Achievement
 
@@ -36,9 +34,9 @@ human_verification:
 | 5 | Pane and mode updates do not re-execute `MainApp`, and shell-owned target state is absent. | VERIFIED | Real-`MainApp` render tests cover editor, document-browser, terminal, and graph publications. AST guard enforces <=17 `useState`, <=25 `useEffect`, no target bindings, and no mode ternary; focused/current full Vitest passed. |
 | 6 | Adding real pane-local state or a real lazy mode leaves `src/App.tsx` unchanged and restores all sources. | VERIFIED | `node scripts/check-shell-extensibility.mjs` exited 0: state drill, production descriptor/adapter drill, focused tests, typecheck, build, and bundle checks all passed; post-run search found no drill residue. |
 | 7 | Persistence and lifecycle remain compatible without mutable runtime resources entering snapshots; Graph's nested workspace flow remains real. | VERIFIED | Existing `maru:terminal:v1` serializer remains; tests reject channels/generation/DOM fields in store snapshots; settings hydrate through existing-key guards. `GraphModeAdapter` resolves a nested vault, caches/scans it, registers the real watcher path, and tests its 150 ms delta/debounce flow. |
-| 8 | Native macOS behavior is observed across the complete D-20 matrix. | PRESENT_BEHAVIOR_UNVERIFIED | A native checkpoint was approved, but only `approved` was recorded. No detailed observations support each required native flow. |
+| 8 | Native macOS behavior is observed across the complete D-20 matrix. | VERIFIED | Committed `05-UAT.md` records five passed native flows: Documents data/file effects with byte-identical output, real PTY/dock/split/Graph/collapse/recreate, right/primary lazy placement, stale/current generation coverage, and visible render isolation. |
 
-**Score:** 7/8 truths verified (1 present, behavior-unverified)
+**Score:** 8/8 truths verified
 
 ### Locked Decision Coverage
 
@@ -50,7 +48,7 @@ human_verification:
 | D-13 to D-15 | VERIFIED | `shellDecomposition.test.ts` and the real `MainApp` render-isolation harness passed, enforcing hook ceilings, target ownership absence, and non-vacuous consumer isolation. |
 | D-16 to D-18 | VERIFIED | Current `make verify` exit 0; 211 Vitest files / 1,942 tests; Playwright 203/203; terminal matrix 76; current extensibility drill exit 0 with `App.tsx` restored. |
 | D-19 | VERIFIED | Existing terminal storage key and settings normalization/hydration paths remain; focused store tests verify stale hydration, same-key behavior, cleanup, and transient exclusion. |
-| D-20 | PRESENT_BEHAVIOR_UNVERIFIED | Native checkpoint approval exists, but it does not contain the required per-flow observations. Human verification remains required. |
+| D-20 | VERIFIED | Committed `05-UAT.md` (2967760) records all five required native flow results in a disposable Tauri workspace, including filesystem checksum, live PTY output, right/primary lazy placement, teardown/recreate continuity, and visible isolation. |
 
 ### Required Artifacts
 
@@ -106,7 +104,7 @@ Step 7c: SKIPPED. No Phase 5 probe script is declared; the production extensibil
 | SHELL-05 | 05-01, 05-11 | `DocumentList` uses a module store instead of the large prop bundle. | SATISFIED | Exact four-prop facade, canonical browser store, Outline composition, reveal/cleanup tests. |
 | SHELL-06 | 05-02, 05-03, 05-11 | `TerminalPanel` uses module store/controller ownership instead of the large prop bundle. | SATISFIED | Exact boundary, runtime separation, handle-only IPC, and 76-pass stale/current matrix. |
 | SHELL-07 | 05-04 through 05-11 | New mode surfaces use registry entries instead of a nested ternary branch. | SATISFIED | Exactly 18 dynamic descriptors/adapters, generic host, lazy emitted chunks, and drill proof. |
-| SHELL-08 | 05-01, 05-03 through 05-11 | Pane state no longer requires `App.tsx` edits. | SATISFIED (automated) | Store ownership extraction, zero target owner guard, non-vacuous render isolation, and byte-identical App drill. Native confirmation remains human-needed. |
+| SHELL-08 | 05-01, 05-03 through 05-11 | Pane state no longer requires `App.tsx` edits. | SATISFIED | Store ownership extraction, zero target owner guard, non-vacuous render isolation, byte-identical App drill, and completed native UAT. |
 
 No orphaned Phase 5 requirements were found, and there are no later milestone phases to which a gap could be deferred.
 
@@ -119,21 +117,11 @@ No orphaned Phase 5 requirements were found, and there are no later milestone ph
 
 No unreferenced `TBD`, `FIXME`, or `XXX` markers were found in the scoped production artifacts. The existing dirty files are unrelated design-QA images and `.planning/research/`; no Phase 5 source or drill residue is uncommitted.
 
-### Human Verification Required
-
-### 1. Native D-20 completion matrix
-
-**Test:** Start a fresh `pnpm tauri:dev` process with a disposable workspace. Exercise Documents query/filter/reveal twice/favorite/file-queue; Terminal spawn/input/output, dock, split, resize, Graph switch, hide/show, kill/recreate; representative primary/right registry modes; stale/current generation; render counters.
-
-**Expected:** Existing visible behavior remains intact, lazy placement/fallback works, stale generation rejects while current succeeds, and MainApp plus unrelated panes remain unchanged.
-
-**Why human:** Only a bare approval is recorded for the prior native checkpoint. Chromium E2E and mocked terminal tests cannot establish all native WebView, PTY, and filesystem behavior.
-
 ### Gaps Summary
 
-No automated implementation gap was found. This is an Escalation Gate: capture the missing native per-flow observations, then re-verify to move from `human_needed` to `passed`.
+No gaps found. The committed native UAT closes the only prior behavior-unverified truth; all four requirements and D-01 through D-20 are now verified.
 
 ---
 
-_Verified: 2026-08-26T23:03:56Z_
+_Verified: 2026-08-28T08:44:02Z_
 _Verifier: the agent (gsd-verifier)_
