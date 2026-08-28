@@ -1,18 +1,18 @@
 ---
 gsd_state_version: 1.0
 milestone: v1.0
-milestone_name: milestone
-current_phase: 05
-status: completed
-stopped_at: Completed 05-11-PLAN.md
-last_updated: "2026-08-28T08:46:34.503Z"
+milestone_name: Structural Debt Paydown
+status: Awaiting next milestone
+stopped_at: Milestone v1.0 archived
+last_updated: "2026-08-28T09:09:07.868Z"
 last_activity: 2026-08-28
-last_activity_desc: Phase 05 complete
+last_activity_desc: Milestone v1.0 archived
 progress:
   total_phases: 5
   completed_phases: 5
   total_plans: 32
   completed_plans: 32
+current_phase: 05
 current_phase_name: Shell Decomposition Completion
 ---
 
@@ -23,16 +23,14 @@ current_phase_name: Shell Decomposition Completion
 See: .planning/PROJECT.md (updated 2026-08-28)
 
 **Core value:** The filesystem stays the source of truth - everything Maru shows is derived from real files the user owns, and nothing is lost if Maru is uninstalled.
-**Current focus:** Milestone v1.0 complete — ready for milestone audit/archive
+**Current focus:** Planning the next milestone
 
 ## Current Position
 
-Phase: 05
-Plan: 11 of 11 complete
-Status: All phases complete
-Last activity: 2026-08-28 — Phase 05 complete
-
-Progress: [██████████] 100% (5/5 phases)
+Phase: Milestone v1.0 complete
+Plan: —
+Status: Awaiting next milestone
+Last activity: 2026-08-28 — Milestone v1.0 completed and archived
 
 ## Performance Metrics
 
@@ -231,9 +229,16 @@ None yet.
 | Testing | TEST-01..04 (native Tauri E2E runner, coverage, remaining component tests, app_menu smoke) | v2 | 2026-08-22 |
 | Product | HUB-01 Hub graph-metadata sync - the doc set's only explicit deferral | v2 | 2026-08-22 |
 | Typed IPC | ERR-05 closed-enum contract (emission sites unconstrained; guard checks declarations only), ERR-06 typed return for every conflict-emitting command (today_apply_plan_result, task_calendar_set_sync flatten to String) | v2 | 2026-08-23 |
+| Evidence | Re-run a deliberate failing CI E2E against the shipped narrowed Playwright trace configuration | accepted at v1.0 closeout | 2026-08-28 |
+| Validation | Reconcile Phase 01-03 Nyquist metadata with `$gsd-validate-phase` | accepted at v1.0 closeout | 2026-08-28 |
+| Security | Add Phase 02-03 security reports if uniform milestone evidence is required | accepted at v1.0 closeout | 2026-08-28 |
 
 ## Session Continuity
 
-Last session: 2026-08-26T21:58:45.482Z
-Stopped at: Completed 05-11-PLAN.md
+Last session: 2026-08-28T09:09:07.868Z
+Stopped at: Milestone v1.0 archived
 Resume file: None
+
+## Operator Next Steps
+
+- Start the next milestone with `$gsd-new-milestone`

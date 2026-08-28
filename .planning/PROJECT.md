@@ -6,12 +6,18 @@ Local-first Maru Workspace and AI editing desktop app. A Tauri 2 desktop shell -
 React 19 + TypeScript frontend over a Rust core - where a folder on disk is the
 workspace: notes, documents, terminals, a knowledge graph, diagrams, skills, and
 AI agent runs all operate on real files the user owns. Shipped as signed bundles
-for macOS, Windows, and Linux; currently v0.4.62.
+for macOS, Windows, and Linux; currently v0.4.63.
 
 ## Core Value
 
 The filesystem stays the source of truth - everything Maru shows is derived from
 real files the user owns, and nothing is lost if Maru is uninstalled.
+
+## Current State
+
+Milestone v1.0 Structural Debt Paydown shipped on 2026-08-28. All five phases,
+32 plans, and 24 v1 requirements are complete. The milestone archive and audit
+live under `.planning/milestones/`; no next milestone is active.
 
 ## Requirements
 
@@ -66,8 +72,8 @@ real files the user owns, and nothing is lost if Maru is uninstalled.
 ### Active
 
 Milestone 1 structural debt paydown is complete. No v1 requirement remains
-active; deferred v2 work stays in `REQUIREMENTS.md` and is not part of this
-milestone.
+active. Deferred candidates remain in the archived v1.0 requirements until a
+new milestone explicitly promotes them.
 
 ### Out of Scope
 
@@ -87,10 +93,19 @@ milestone.
   cleanup) - only the correctness rules that guard the decomposition
 - **Concurrency, security, and perf items from CONCERNS.md** (sync-command main
   thread blocking, lock poisoning recovery, CSP `script-src blob:` audit, SIGHUP
-  session escalation, native Tauri E2E runner) - real, tracked as v2 in
-  REQUIREMENTS.md, deliberately not competing with the structural work
+  session escalation, native Tauri E2E runner) - real, tracked as v2 candidates
+  in the archived milestone requirements, deliberately not competing with the
+  structural work
 - **Hub graph-metadata sync** - the one explicit deferral in the ingested doc
   set (`docs/graph.md`); held until a Hub consumer exists
+
+## Next Milestone Goals
+
+No next milestone scope has been selected. Candidate inputs for
+`$gsd-new-milestone` include the deferred v2 reliability/security backlog and
+the accepted closeout evidence debt: GATE-04 trace reproduction, Phase 1-3
+Nyquist reconciliation, and Phase 2-3 security reports. These remain candidates,
+not committed requirements.
 
 ## Context
 
@@ -191,4 +206,4 @@ ones this milestone can actually break are listed here.
 | 64 SPEC constraints recorded as invariants, not decisions | 0 ADRs in the set - nothing is decision-locked, so a future ADR can override any of them | ✓ Preserved as the milestone verification baseline |
 
 ---
-*Last updated: 2026-08-28 after Phase 5 completion*
+*Last updated: 2026-08-28 after v1.0 milestone completion*
