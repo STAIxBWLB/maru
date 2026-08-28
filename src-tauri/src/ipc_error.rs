@@ -55,6 +55,9 @@ impl From<String> for IpcError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
+    use std::path::{Path, PathBuf};
+    use walkdir::WalkDir;
 
     /// Name of the function a line sits in, found by walking back to the
     /// nearest `fn` declaration. Used both to match the allowlist precisely and
@@ -93,6 +96,37 @@ mod tests {
             .starts_with(&format!("{param}.to_string())"))
     }
 
+    /// Read every Rust source under this crate's `src/` tree. Keeping source
+    /// discovery automatic means a new module that calls an existing emitter
+    /// is covered without a second, easy-to-forget inventory edit.
+    fn rust_sources() -> Vec<(String, String)> {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut paths: Vec<PathBuf> = WalkDir::new(&root)
+            .into_iter()
+            .map(|entry| entry.expect("Rust source tree must be readable"))
+            .filter(|entry| {
+                entry.file_type().is_file()
+                    && entry.path().extension().and_then(|value| value.to_str()) == Some("rs")
+            })
+            .map(|entry| entry.into_path())
+            .collect();
+        paths.sort();
+
+        paths
+            .into_iter()
+            .map(|path| {
+                let name = path
+                    .strip_prefix(&root)
+                    .expect("walked source must stay below the crate src directory")
+                    .to_string_lossy()
+                    .replace('\\', "/");
+                let source = fs::read_to_string(&path)
+                    .unwrap_or_else(|err| panic!("Cannot read {}: {err}", path.display()));
+                (name, source)
+            })
+            .collect()
+    }
+
     /// ERR-06: a path that reaches a contract-code emitter must not flatten its
     /// error back to `String`. `.map_err(|e| e.to_string())` compiles fine and
     /// silently strips the code, so the frontend's `err instanceof IpcError`
@@ -121,19 +155,8 @@ mod tests {
             // never crosses the IPC boundary and no frontend branch can read a code.
             "apply_receipt",
         )];
-        const SOURCES: &[(&str, &str)] = &[
-            ("web_actions.rs", include_str!("web_actions.rs")),
-            ("today_store.rs", include_str!("today_store.rs")),
-            ("today_calendar.rs", include_str!("today_calendar.rs")),
-            ("today_lifecycle.rs", include_str!("today_lifecycle.rs")),
-            ("today_ai.rs", include_str!("today_ai.rs")),
-            ("evidence_binder.rs", include_str!("evidence_binder.rs")),
-            ("document.rs", include_str!("document.rs")),
-            ("diagram/mod.rs", include_str!("diagram/mod.rs")),
-        ];
-
         let mut offenders = Vec::new();
-        for (name, source) in SOURCES {
+        for (name, source) in rust_sources() {
             let lines: Vec<&str> = source.lines().collect();
             for (index, line) in lines.iter().enumerate() {
                 if !flattens_the_closure_argument(line) {
@@ -148,7 +171,7 @@ mod tests {
                 let enclosing = enclosing_fn_name(&lines, index).unwrap_or("<unknown>");
                 let allowed = ALLOWED
                     .iter()
-                    .any(|(file, func)| file == name && *func == enclosing);
+                    .any(|(file, func)| *file == name && *func == enclosing);
                 if !allowed {
                     offenders.push(format!(
                         "{name}:{} in {enclosing}() flattens {emitter}",
