@@ -352,6 +352,13 @@ pub struct TerminalSpawnArgs {
     rows: Option<u16>,
 }
 
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TerminalSessionHandle {
+    session_id: String,
+    generation: String,
+}
+
 #[tauri::command]
 pub async fn terminal_spawn(
     state: State<'_, TerminalState>,
@@ -493,20 +500,20 @@ pub async fn terminal_spawn(
 #[tauri::command]
 pub async fn terminal_write(
     state: State<'_, TerminalState>,
-    session_id: String,
+    handle: TerminalSessionHandle,
     data: String,
 ) -> Result<(), String> {
-    let session = get_session(&state, &session_id)?;
+    let session = get_session_generation(&state, &handle)?;
     write_shared(&session.writer, data.as_bytes())
 }
 
 #[tauri::command]
 pub async fn terminal_input(
     state: State<'_, TerminalState>,
-    session_id: String,
+    handle: TerminalSessionHandle,
     command: TerminalInputCommand,
 ) -> Result<(), String> {
-    let session = get_session(&state, &session_id)?;
+    let session = get_session_generation(&state, &handle)?;
     let is_mouse = matches!(
         command,
         TerminalInputCommand::Mouse { .. } | TerminalInputCommand::Wheel { .. }
@@ -540,12 +547,11 @@ pub async fn terminal_input(
 #[tauri::command]
 pub async fn terminal_input_batch(
     state: State<'_, TerminalState>,
-    session_id: String,
-    generation: String,
+    handle: TerminalSessionHandle,
     _client_seq: u64,
     commands: Vec<TerminalInputCommand>,
 ) -> Result<(), String> {
-    let session = get_session_generation(&state, &session_id, &generation)?;
+    let session = get_session_generation(&state, &handle)?;
     if commands.is_empty() {
         return Ok(());
     }
@@ -591,11 +597,10 @@ pub async fn terminal_input_batch(
 #[tauri::command]
 pub async fn terminal_ack(
     state: State<'_, TerminalState>,
-    session_id: String,
-    generation: String,
+    handle: TerminalSessionHandle,
     seq: u64,
 ) -> Result<(), String> {
-    let session = get_session_generation(&state, &session_id, &generation)?;
+    let session = get_session_generation(&state, &handle)?;
     session.stream.acknowledge(seq);
     Ok(())
 }
@@ -603,10 +608,9 @@ pub async fn terminal_ack(
 #[tauri::command]
 pub async fn terminal_request_full(
     state: State<'_, TerminalState>,
-    session_id: String,
-    generation: String,
+    handle: TerminalSessionHandle,
 ) -> Result<(), String> {
-    let session = get_session_generation(&state, &session_id, &generation)?;
+    let session = get_session_generation(&state, &handle)?;
     session.stream.request_full();
     Ok(())
 }
@@ -614,11 +618,10 @@ pub async fn terminal_request_full(
 #[tauri::command]
 pub async fn terminal_set_visibility(
     state: State<'_, TerminalState>,
-    session_id: String,
-    generation: String,
+    handle: TerminalSessionHandle,
     visible: bool,
 ) -> Result<(), String> {
-    let session = get_session_generation(&state, &session_id, &generation)?;
+    let session = get_session_generation(&state, &handle)?;
     session.stream.set_visible(visible);
     Ok(())
 }
@@ -626,14 +629,13 @@ pub async fn terminal_set_visibility(
 #[tauri::command]
 pub async fn terminal_selection(
     state: State<'_, TerminalState>,
-    session_id: String,
-    generation: String,
+    handle: TerminalSessionHandle,
     command: TerminalSelectionCommand,
 ) -> Result<(), String> {
     use alacritty_terminal::index::Side;
     use alacritty_terminal::selection::SelectionType;
 
-    let session = get_session_generation(&state, &session_id, &generation)?;
+    let session = get_session_generation(&state, &handle)?;
     let repaint = {
         let mut model = session
             .model
@@ -702,10 +704,9 @@ pub async fn terminal_selection(
 #[tauri::command]
 pub async fn terminal_copy_selection(
     state: State<'_, TerminalState>,
-    session_id: String,
-    generation: String,
+    handle: TerminalSessionHandle,
 ) -> Result<String, String> {
-    let session = get_session_generation(&state, &session_id, &generation)?;
+    let session = get_session_generation(&state, &handle)?;
     let model = session
         .model
         .lock()
@@ -718,10 +719,10 @@ pub async fn terminal_copy_selection(
 #[tauri::command]
 pub async fn terminal_scroll(
     state: State<'_, TerminalState>,
-    session_id: String,
+    handle: TerminalSessionHandle,
     delta: i32,
 ) -> Result<(), String> {
-    let session = get_session(&state, &session_id)?;
+    let session = get_session_generation(&state, &handle)?;
     {
         let mut model = session
             .model
@@ -740,9 +741,9 @@ pub async fn terminal_scroll(
 #[tauri::command]
 pub async fn terminal_clear(
     state: State<'_, TerminalState>,
-    session_id: String,
+    handle: TerminalSessionHandle,
 ) -> Result<(), String> {
-    let session = get_session(&state, &session_id)?;
+    let session = get_session_generation(&state, &handle)?;
     {
         let mut model = session
             .model
@@ -763,9 +764,9 @@ pub async fn terminal_clear(
 #[tauri::command]
 pub async fn terminal_text(
     state: State<'_, TerminalState>,
-    session_id: String,
+    handle: TerminalSessionHandle,
 ) -> Result<String, String> {
-    let session = get_session(&state, &session_id)?;
+    let session = get_session_generation(&state, &handle)?;
     let model = session
         .model
         .lock()
@@ -776,12 +777,12 @@ pub async fn terminal_text(
 #[tauri::command]
 pub async fn terminal_search(
     state: State<'_, TerminalState>,
-    session_id: String,
+    handle: TerminalSessionHandle,
     query: String,
     direction: Option<String>,
     case_sensitive: Option<bool>,
 ) -> Result<TerminalSearchResult, String> {
-    let session = get_session(&state, &session_id)?;
+    let session = get_session_generation(&state, &handle)?;
     let direction = match direction.as_deref() {
         Some("previous") => SearchDirection::Previous,
         _ => SearchDirection::Next,
@@ -802,7 +803,7 @@ pub async fn terminal_search(
         .unwrap_or(display_offset);
     session.stream.request_full();
     Ok(TerminalSearchResult {
-        session_id,
+        session_id: handle.session_id,
         query,
         found: hit.is_some(),
         row: hit.as_ref().map(|item| item.row),
@@ -815,11 +816,11 @@ pub async fn terminal_search(
 #[tauri::command]
 pub async fn terminal_resize(
     state: State<'_, TerminalState>,
-    session_id: String,
+    handle: TerminalSessionHandle,
     cols: u16,
     rows: u16,
 ) -> Result<(), String> {
-    let session = get_session(&state, &session_id)?;
+    let session = get_session_generation(&state, &handle)?;
     let cols = cols.clamp(2, MAX_COLS);
     let rows = rows.clamp(1, MAX_ROWS);
     let _resize = session
@@ -857,11 +858,14 @@ pub async fn terminal_resize(
 #[tauri::command]
 pub async fn terminal_kill(
     state: State<'_, TerminalState>,
-    session_id: String,
+    handle: TerminalSessionHandle,
 ) -> Result<(), String> {
-    let session = match get_session(&state, &session_id) {
+    let session = match get_session_generation(&state, &handle) {
         Ok(session) => session,
-        Err(_) => return Ok(()),
+        Err(error) if error == format!("Unknown terminal session: {}", handle.session_id) => {
+            return Ok(())
+        }
+        Err(error) => return Err(error),
     };
     if session.closing.swap(true, Ordering::AcqRel) {
         return Ok(());
@@ -884,19 +888,16 @@ pub async fn terminal_kill(
     // this removal safe if the child does exit later.
     if let Ok(mut guard) = state.sessions.lock() {
         if guard
-            .get(&session_id)
+            .get(&handle.session_id)
             .is_some_and(|current| Arc::ptr_eq(current, &session))
         {
-            guard.remove(&session_id);
+            guard.remove(&handle.session_id);
         }
     }
     Ok(())
 }
 
-fn get_session(
-    state: &State<'_, TerminalState>,
-    session_id: &str,
-) -> Result<Arc<TerminalSession>, String> {
+fn get_session(state: &TerminalState, session_id: &str) -> Result<Arc<TerminalSession>, String> {
     state
         .sessions
         .lock()
@@ -906,15 +907,23 @@ fn get_session(
         .ok_or_else(|| format!("Unknown terminal session: {session_id}"))
 }
 
-fn get_session_generation(
-    state: &State<'_, TerminalState>,
+fn handle_matches_generation(
     session_id: &str,
     generation: &str,
-) -> Result<Arc<TerminalSession>, String> {
-    let session = get_session(state, session_id)?;
-    if session.generation != generation {
+    handle: &TerminalSessionHandle,
+) -> Result<(), String> {
+    if generation != handle.generation {
         return Err(format!("Stale terminal session generation: {session_id}"));
     }
+    Ok(())
+}
+
+fn get_session_generation(
+    state: &TerminalState,
+    handle: &TerminalSessionHandle,
+) -> Result<Arc<TerminalSession>, String> {
+    let session = get_session(state, &handle.session_id)?;
+    handle_matches_generation(&handle.session_id, &session.generation, handle)?;
     Ok(session)
 }
 
@@ -1487,6 +1496,94 @@ mod tests {
             finish,
             TerminalSelectionCommand::Finish { include_all: true }
         ));
+    }
+
+    #[test]
+    fn terminal_session_handle_deserializes_the_frontend_camel_case_shape() {
+        let handle: TerminalSessionHandle = serde_json::from_value(json!({
+            "sessionId": "term-recycled",
+            "generation": "current-generation"
+        }))
+        .unwrap();
+        assert_eq!(handle.session_id, "term-recycled");
+        assert_eq!(handle.generation, "current-generation");
+    }
+
+    #[test]
+    fn every_session_command_uses_the_generation_checked_handle_gateway() {
+        let source = include_str!("mod.rs");
+        for command in [
+            "terminal_write",
+            "terminal_input",
+            "terminal_input_batch",
+            "terminal_ack",
+            "terminal_request_full",
+            "terminal_set_visibility",
+            "terminal_selection",
+            "terminal_copy_selection",
+            "terminal_scroll",
+            "terminal_clear",
+            "terminal_text",
+            "terminal_search",
+            "terminal_resize",
+            "terminal_kill",
+        ] {
+            let command_start = source.find(&format!("pub async fn {command}")).unwrap();
+            let command_source = &source[command_start..];
+            let command_end = command_source
+                .find("#[tauri::command]")
+                .unwrap_or(command_source.len());
+            let command_source = &command_source[..command_end];
+            assert!(
+                command_source.contains("handle: TerminalSessionHandle"),
+                "{command} must accept a generation-bearing handle"
+            );
+            let body_start = command_source.find('{').unwrap();
+            let first_lookup = command_source[body_start..]
+                .find("get_session_generation")
+                .unwrap();
+            assert!(
+                first_lookup < 600,
+                "{command} must validate its handle before mutation"
+            );
+        }
+    }
+
+    #[test]
+    fn recycled_session_matrix_rejects_stale_handles_and_accepts_current_handles() {
+        let stale = TerminalSessionHandle {
+            session_id: "term-recycled".to_string(),
+            generation: "old-generation".to_string(),
+        };
+        let current = TerminalSessionHandle {
+            session_id: "term-recycled".to_string(),
+            generation: "current-generation".to_string(),
+        };
+        for command in [
+            "write",
+            "input",
+            "input_batch",
+            "ack",
+            "request_full",
+            "set_visibility",
+            "selection",
+            "copy_selection",
+            "scroll",
+            "clear",
+            "text",
+            "search",
+            "resize",
+            "kill",
+        ] {
+            assert!(
+                handle_matches_generation("term-recycled", "current-generation", &stale).is_err(),
+                "{command} must reject a stale handle before its operation"
+            );
+            assert!(
+                handle_matches_generation("term-recycled", "current-generation", &current).is_ok(),
+                "{command} must accept the current handle"
+            );
+        }
     }
 
     #[test]

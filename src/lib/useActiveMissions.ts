@@ -164,6 +164,11 @@ function getTrackedSnapshot(): MissionRecord[] {
   return trackedMissions;
 }
 
+/** Stable process-global snapshot for module controllers that compose missions. */
+export function getTrackedMissionsSnapshot(): MissionRecord[] {
+  return trackedMissions;
+}
+
 export function useActiveMissions(): MissionRecord[] {
   return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 }

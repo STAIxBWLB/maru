@@ -6,12 +6,18 @@ Local-first Maru Workspace and AI editing desktop app. A Tauri 2 desktop shell -
 React 19 + TypeScript frontend over a Rust core - where a folder on disk is the
 workspace: notes, documents, terminals, a knowledge graph, diagrams, skills, and
 AI agent runs all operate on real files the user owns. Shipped as signed bundles
-for macOS, Windows, and Linux; currently v0.4.62.
+for macOS, Windows, and Linux; currently v0.4.63.
 
 ## Core Value
 
 The filesystem stays the source of truth - everything Maru shows is derived from
 real files the user owns, and nothing is lost if Maru is uninstalled.
+
+## Current State
+
+Milestone v1.0 Structural Debt Paydown shipped on 2026-08-28. All five phases,
+32 plans, and 24 v1 requirements are complete. The milestone archive and audit
+live under `.planning/milestones/`; no next milestone is active.
 
 ## Requirements
 
@@ -52,16 +58,22 @@ real files the user owns, and nothing is lost if Maru is uninstalled.
 - ✓ One shared path-containment helper is the canonical one for new commands —
   Phase 2 (`crate::paths::ensure_within`, lexical, plus `require_absolute`
   guarding `maru_home()`/`install_root_base()`)
+- ✓ Errors the frontend branches on carry a typed machine-readable `code` —
+  Phase 3 (cross-language rename drills, no residual string-prefix branches,
+  display-only errors left unchanged)
+- ✓ `OutlinePane` and `EditorPane` own keyed module-store state instead of
+  71/55-prop bundles — Phase 4 (four structural props each, real MainApp
+  render-isolation proof, preview marked-node identity, native WKWebView smoke)
+- ✓ Shell decomposition is complete — Phase 5 (`DocumentList` and
+  `TerminalPanel` use four-input facades, all 18 modes route through lazy
+  registry adapters, `MainApp` is 15 `useState` / 24 `useEffect`, D-20 native
+  UAT 5/5, verification 8/8)
 
 ### Active
 
-<!-- Milestone 1: structural debt paydown. Scoped to the Tech Debt section of
-     .planning/codebase/CONCERNS.md. -->
-
-- [ ] Errors the frontend branches on carry a typed `code`, not a string prefix
-- [ ] `src/App.tsx` no longer owns pane state - `OutlinePane`, `EditorPane`,
-      `DocumentList`, and `TerminalPanel` read module stores instead of 71/55/40/25-prop
-      bundles
+Milestone 1 structural debt paydown is complete. No v1 requirement remains
+active. Deferred candidates remain in the archived v1.0 requirements until a
+new milestone explicitly promotes them.
 
 ### Out of Scope
 
@@ -81,10 +93,19 @@ real files the user owns, and nothing is lost if Maru is uninstalled.
   cleanup) - only the correctness rules that guard the decomposition
 - **Concurrency, security, and perf items from CONCERNS.md** (sync-command main
   thread blocking, lock poisoning recovery, CSP `script-src blob:` audit, SIGHUP
-  session escalation, native Tauri E2E runner) - real, tracked as v2 in
-  REQUIREMENTS.md, deliberately not competing with the structural work
+  session escalation, native Tauri E2E runner) - real, tracked as v2 candidates
+  in the archived milestone requirements, deliberately not competing with the
+  structural work
 - **Hub graph-metadata sync** - the one explicit deferral in the ingested doc
   set (`docs/graph.md`); held until a Hub consumer exists
+
+## Next Milestone Goals
+
+No next milestone scope has been selected. Candidate inputs for
+`$gsd-new-milestone` include the deferred v2 reliability/security backlog and
+the accepted closeout evidence debt: GATE-04 trace reproduction, Phase 1-3
+Nyquist reconciliation, and Phase 2-3 security reports. These remain candidates,
+not committed requirements.
 
 ## Context
 
@@ -93,13 +114,11 @@ uses and zero `@ts-ignore`; Rust production code has 18 `.unwrap()` calls;
 deliberate simplifications carry `ponytail:` comments naming their ceiling. The
 debt below is the real remainder, not a symptom of neglect.
 
-**Where the debt bites.** `src/App.tsx` is 9,337 lines. `MainApp`
-(`src/App.tsx:774`) holds 68 `useState` and 50 `useEffect` and passes state down
-as prop bundles: `OutlinePane` ~71 props, `EditorPane` ~55, `DocumentList` ~40,
-`TerminalPanel` ~25. Every `MainApp` state change re-renders the whole tree. The
-preview-mark regressions in v0.4.57-v0.4.58 and #260/#262/#264 are a direct
-consequence of components re-rendering for reasons they cannot see. That is the
-concrete cost this milestone is paying down.
+**The shell debt is paid down.** `MainApp` now stays below its contract ceiling
+at 15 `useState` and 24 `useEffect` calls. `OutlinePane`, `EditorPane`,
+`DocumentList`, and `TerminalPanel` use small store-backed facades, all 18 modes
+route through lazy registry adapters, and real-`MainApp` isolation tests guard
+the preview-mark failure mode behind #260/#262/#264.
 
 **The extraction pattern already exists and works.** `src/lib/errorStore.ts`,
 `src/lib/editorTabsStore.ts`, `src/lib/appOverlayStore.ts`, and
@@ -119,11 +138,11 @@ Core, T2 Public, T3 Private, T4 Imported, T5 Managed Local - agreed across
 `~/workspace/work/_meta/rules/skills-ssot.md` as of 2026-08-22 (work commit
 de0b0f70). The earlier four-tier divergence is resolved.
 
-**No test coverage where the refactor lands.** `src/App.tsx` has no test of any
-kind. `EditorPane.tsx` (1,096 lines) has no component test, though
-`decoratePreviewHtml.test.ts` and `editorPreviewDebounce.test.tsx` cover part of
-the path. `src/lib/` is the opposite story - 183 test files against 375 source
-files - which is why the answer is to move logic into `src/lib/` stores.
+**The refactor boundary is now guarded.** Real-`MainApp` render-isolation tests,
+pane facade contracts, preview DOM-identity tests, terminal generation tests,
+mode-registry tests, and the production extensibility drill cover the extracted
+shell boundaries. Native-only behavior remains a manual macOS gate because CI
+still runs Chromium with mocked IPC.
 
 ## Constraints
 
@@ -177,14 +196,14 @@ ones this milestone can actually break are listed here.
 
 | Decision | Rationale | Outcome |
 |----------|-----------|---------|
-| Milestone 1 = structural debt paydown, no features | Behavior-preserving work is only verifiable if behavior is not also changing | - Pending |
-| Scope drawn from CONCERNS.md Tech Debt, not from the SPECs | 18 ingested docs describe shipped behavior; inventing forward work from them would be fabrication | - Pending |
+| Milestone 1 = structural debt paydown, no features | Behavior-preserving work is only verifiable if behavior is not also changing | ✓ Complete — all 5 phases and 24 v1 requirements verified |
+| Scope drawn from CONCERNS.md Tech Debt, not from the SPECs | 18 ingested docs describe shipped behavior; inventing forward work from them would be fabrication | ✓ Held throughout the milestone; one adopted parallel-track exception recorded in STATE.md |
 | Verification gates land before the decomposition (Phase 1) | Moving 68 `useState` / 50 `useEffect` without a hook-dependency gate reproduces #260/#262/#264 | ✓ Phase 1 — 7 gates live, deliberate-break proofs red-then-green, UAT 24/24 |
-| Continue the module-store precedent instead of adding a state library | `errorStore`/`workspaceStore`/`editorTabsStore` already prove the pattern here | - Pending |
-| Typed error contract covers only branched-on errors | Converting all ~1,138 signatures is cost without benefit; display-only errors read fine as strings | - Pending |
+| Continue the module-store precedent instead of adding a state library | `errorStore`/`workspaceStore`/`editorTabsStore` already prove the pattern here | ✓ Phases 4-5 complete with store-backed facades and no new state library |
+| Typed error contract covers only branched-on errors | Converting all ~1,138 signatures is cost without benefit; display-only errors read fine as strings | ✓ Phase 3 complete; residual hardening tracked as ERR-05/ERR-06 for v2 |
 | Promote `ensure_within`, do not retrofit all ~20 callers | Existing checks are individually sound; the problem is that a new author has no canonical example | ✓ Phase 2 — promoted to `crate::paths`, doc + tests as the example, zero retrofits |
-| Phases 4-5 get no `UI hint` annotation | They refactor UI state plumbing with pixel-identical output as the success criterion; a UI design spec would be the wrong downstream suggestion | - Pending |
-| 64 SPEC constraints recorded as invariants, not decisions | 0 ADRs in the set - nothing is decision-locked, so a future ADR can override any of them | - Pending |
+| Phases 4-5 get no `UI hint` annotation | They refactor UI state plumbing with pixel-identical output as the success criterion; a UI design spec would be the wrong downstream suggestion | ✓ Completed with behavior-preserving UAT and no visible redesign |
+| 64 SPEC constraints recorded as invariants, not decisions | 0 ADRs in the set - nothing is decision-locked, so a future ADR can override any of them | ✓ Preserved as the milestone verification baseline |
 
 ---
-*Last updated: 2026-08-23 after Phase 2*
+*Last updated: 2026-08-28 after v1.0 milestone completion*
