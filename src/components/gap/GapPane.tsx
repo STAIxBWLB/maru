@@ -40,6 +40,8 @@ interface GapPaneProps {
   entries?: VaultEntry[];
   /** Draft to preselect (set when arriving from the Drafts pane). */
   initialDraftId: string | null;
+  /** Nonce makes repeated explicit selections of the same draft distinguishable. */
+  initialDraftRequest?: number;
   /** Called once the initial selection has been consumed. */
   onConsumeInitialDraftId?: () => void;
   /** Opens the existing graph panel in reference-focus mode. */
@@ -58,6 +60,7 @@ export function GapPane({
   workPath,
   entries = [],
   initialDraftId,
+  initialDraftRequest = 0,
   onConsumeInitialDraftId,
   onOpenInGraph,
   onExitReferenceFocus,
@@ -83,7 +86,7 @@ export function GapPane({
   const [selectedDraft, setSelectedDraft] = useState<DraftDocument | null>(null);
   const [selectedDraftLoadState, setSelectedDraftLoadState] =
     useState<DraftLoadState>("idle");
-  const initialConsumedRef = useRef(false);
+  const initialConsumedRequestRef = useRef<number | null>(null);
   const draftLoadRequestRef = useRef(0);
   const analysisRequestRef = useRef(0);
   const selectedIdRef = useRef<string | null>(initialDraftId);
@@ -227,11 +230,11 @@ export function GapPane({
   // summary list is available. Missing promoted documents intentionally stop
   // at the relink panel and never invoke gap_analyze.
   useEffect(() => {
-    if (!initialDraftId || initialConsumedRef.current || reports.length === 0) return;
-    initialConsumedRef.current = true;
+    if (!initialDraftId || initialConsumedRequestRef.current === initialDraftRequest || reports.length === 0) return;
+    initialConsumedRequestRef.current = initialDraftRequest;
     onConsumeInitialDraftId?.();
     selectReport(initialDraftId);
-  }, [initialDraftId, onConsumeInitialDraftId, reports.length, selectReport]);
+  }, [initialDraftId, initialDraftRequest, onConsumeInitialDraftId, reports.length, selectReport]);
 
   const toggleType = (type: GapHunkType) => {
     // Expansion indexes track the filtered list, so a filter change would

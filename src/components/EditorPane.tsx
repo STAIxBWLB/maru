@@ -29,7 +29,18 @@ import {
 import { vaultValidateNote, type VaultSchemaReport } from "../lib/api";
 import { documentStats } from "../lib/document";
 import { EDITOR_FIND_OPEN_EVENT } from "../lib/editorFindEvents";
-import { getEditorTabsState, type EditorGroupId } from "../lib/editorTabsStore";
+import { getEditorTabsState } from "../lib/editorTabsStore";
+import {
+  patchEditorPaneViewPreview,
+  updateEditorPaneDraft,
+  useEditorDocumentSlice,
+  useEditorOperationSlice,
+  useEditorPresentationSlice,
+  useEditorTabsSlice,
+  useEditorViewPreviewSlice,
+  type EditorPaneScope,
+} from "../lib/editorPaneStore";
+import type { EditorPaneCommands } from "../lib/editorSurfaceAdapter";
 import {
   applyFindHighlights,
   cycleMatchIndex,
@@ -42,7 +53,7 @@ import {
   type KgCharSpan,
 } from "../lib/kgRefs";
 import type { HtmlEditorFlushHandle } from "./HtmlVisualEditor";
-import type { DocumentPayload, KgNodeRef, VaultEntry } from "../lib/types";
+import type { KgNodeRef, VaultEntry } from "../lib/types";
 import { useTranslation } from "../lib/i18n";
 import { useContextMenuKeyboard } from "../lib/useContextMenuKeyboard";
 import { useDebouncedValue } from "../lib/useDebouncedValue";
@@ -84,73 +95,11 @@ export interface EditorTabSummary {
   writeBlockedReason: string | null;
 }
 
-interface EditorPaneProps {
-  document: DocumentPayload | null;
-  openingEntry: VaultEntry | null;
-  draftContent: string;
-  saving: boolean;
-  dirty: boolean;
-  outlineOpen: boolean;
-  activeWorkspaceLabel: string | null;
-  documentLabel: string | null;
-  readOnly: boolean;
-  canSnapshot: boolean;
-  readOnlyReason: string | null;
-  viewMode: EditorViewMode;
-  tabs: EditorTabSummary[];
-  activeTabId: string | null;
-  entries: VaultEntry[];
-  bodyOverride?: React.ReactNode;
-  onChange: (content: string) => void;
-  onSelectTab: (tabId: string) => void;
-  onCloseTab: (tabId: string) => void;
-  onCloseOtherTabs: (tabId: string) => void;
-  onCloseTabsToRight: (tabId: string) => void;
-  onCloseSavedTabs: () => void;
-  onCloseAllTabs: () => void;
-  onCopyTabName: (tabId: string) => void;
-  onCopyTabPath: (tabId: string) => void;
-  onCopyTabRelativePath: (tabId: string) => void;
-  onRenameTab: (tabId: string) => void;
-  onMoveTab: (tabId: string) => void;
-  onDuplicateTab: (tabId: string) => void;
-  onDeleteTab: (tabId: string) => void;
-  onOpenTabPreview: (tabId: string) => void;
-  onRevealTabInFinder: (tabId: string) => void;
-  onRevealTabInExplorer: (tabId: string) => void;
-  onSave: () => void;
-  onSnapshot: () => void;
-  onSplitRight: () => void;
-  onOpenSourcePreview?: () => void;
-  onOpenGraphRight: () => void;
-  onFocusPane?: () => void;
-  onToggleOutline: () => void;
-  onViewModeChange: (mode: EditorViewMode) => void;
-  onWikilinkClick: (target: string) => void;
+export interface EditorPaneProps {
+  scope: EditorPaneScope;
+  commands: EditorPaneCommands;
   textareaRef?: React.RefObject<HTMLTextAreaElement | null>;
-  /** HTML document tabs: per-pane view mode (visual/source/preview), owned by
-   *  the caller — never persisted. */
-  htmlViewMode?: HtmlViewMode;
-  onHtmlViewModeChange?: (mode: HtmlViewMode) => void;
-  htmlRiskAckDigest?: string | null;
-  onHtmlRiskAck?: (digest: string) => void;
   htmlFlushRef?: React.RefObject<HtmlEditorFlushHandle | null>;
-  /** Workspace absolute path, used to prepare HTML editor assets. */
-  vaultPath?: string | null;
-  /** Managed vault note (write_policy managed + notes/**\/*.md) — arms the
-   *  schema validation strip (maru-vault-graph-spec §3 F1). */
-  isManagedVaultNote?: boolean;
-  /** KG reference visualization (kg_refs Phase 4). Trigger for the on-demand
-   *  "Visualize references" synthesis in the graph split. */
-  onVisualizeRefs?: () => void;
-  /** Reference map refs while the per-document highlight toggle is on. */
-  kgHighlightRefs?: KgNodeRef[] | null;
-  onToggleKgHighlight?: () => void;
-  /** Preview-mark click → focus the KG node in the graph split. */
-  onKgRefNodeClick?: (nodePath: string) => void;
-  /** Split-pane identity ("left" | "right"); the in-document find bar opens
-   *  only in the focused group. */
-  paneGroup?: EditorGroupId;
 }
 
 interface PreviewDecoration {
@@ -218,65 +167,86 @@ export function decoratePreviewHtml(baseHtml: string, decoration: PreviewDecorat
 }
 
 export const EditorPane = memo(forwardRef<HTMLDivElement, EditorPaneProps>(function EditorPane(
-  {
-    document,
-    openingEntry,
-    draftContent,
-    saving,
-    dirty,
+  { scope, commands, textareaRef, htmlFlushRef },
+  ref,
+) {
+  const documentSlice = useEditorDocumentSlice(scope);
+  const tabsSlice = useEditorTabsSlice(scope);
+  const viewPreview = useEditorViewPreviewSlice(scope);
+  const operation = useEditorOperationSlice(scope);
+  const presentation = useEditorPresentationSlice(scope);
+  const document = documentSlice.document;
+  const draftContent = documentSlice.draftContent;
+  const tabs = presentation.tabs;
+  const activeTabId = presentation.activeTabId ?? tabsSlice.activeTabId;
+  const openingEntry = operation.openingEntry;
+  const saving = operation.saving;
+  const dirty = Boolean(documentSlice.tab && draftContent !== document?.content);
+  const viewMode = viewPreview.viewMode;
+  const htmlViewMode = viewPreview.htmlViewMode;
+  const htmlRiskAckDigest = viewPreview.htmlRiskAckDigest;
+  const {
     outlineOpen,
     activeWorkspaceLabel,
     documentLabel,
     readOnly,
     canSnapshot,
     readOnlyReason,
-    viewMode,
-    tabs,
-    activeTabId,
-    entries,
+    entries: presentationEntries,
     bodyOverride,
-    onChange,
-    onSelectTab,
-    onCloseTab,
-    onCloseOtherTabs,
-    onCloseTabsToRight,
-    onCloseSavedTabs,
-    onCloseAllTabs,
-    onCopyTabName,
-    onCopyTabPath,
-    onCopyTabRelativePath,
-    onRenameTab,
-    onMoveTab,
-    onDuplicateTab,
-    onDeleteTab,
-    onOpenTabPreview,
-    onRevealTabInFinder,
-    onRevealTabInExplorer,
-    onSave,
-    onSnapshot,
-    onSplitRight,
-    onOpenSourcePreview,
-    onOpenGraphRight,
-    onFocusPane,
-    onToggleOutline,
-    onViewModeChange,
-    onWikilinkClick,
-    textareaRef,
-    htmlViewMode,
-    onHtmlViewModeChange,
-    htmlRiskAckDigest,
-    onHtmlRiskAck,
-    htmlFlushRef,
     vaultPath,
     isManagedVaultNote,
-    onVisualizeRefs,
-    kgHighlightRefs = null,
-    onToggleKgHighlight,
-    onKgRefNodeClick,
-    paneGroup,
-  },
-  ref,
-) {
+  } = presentation;
+  const entries = presentationEntries as VaultEntry[];
+  const kgHighlightRefs = presentation.kgHighlightRefs as KgNodeRef[] | null;
+  const paneGroup = scope.group;
+  const onChange = useCallback(
+    (content: string) => updateEditorPaneDraft(scope, content),
+    [scope],
+  );
+  const onSelectTab = (tabId: string) => void commands.selectTab(tabId);
+  const onCloseTab = (tabId: string) => void commands.closeTab(tabId);
+  const onCloseOtherTabs = (tabId: string) => void commands.closeOtherTabs(tabId);
+  const onCloseTabsToRight = (tabId: string) => void commands.closeTabsToRight(tabId);
+  const onCloseSavedTabs = () => void commands.closeSavedTabs();
+  const onCloseAllTabs = () => void commands.closeAllTabs();
+  const onCopyTabName = (tabId: string) => void commands.copyTabName(tabId);
+  const onCopyTabPath = (tabId: string) => void commands.copyTabPath(tabId);
+  const onCopyTabRelativePath = (tabId: string) => void commands.copyTabRelativePath(tabId);
+  const onRenameTab = (tabId: string) => void commands.renameTab(tabId);
+  const onMoveTab = (tabId: string) => void commands.moveTab(tabId);
+  const onDuplicateTab = (tabId: string) => void commands.duplicateTab(tabId);
+  const onDeleteTab = (tabId: string) => void commands.deleteTab(tabId);
+  const onOpenTabPreview = (tabId: string) => void commands.openTabPreview(tabId);
+  const onRevealTabInFinder = (tabId: string) => void commands.revealTabInFinder(tabId);
+  const onRevealTabInExplorer = (tabId: string) => void commands.revealTabInExplorer(tabId);
+  const onSave = () => void commands.save();
+  const onSnapshot = () => void commands.snapshot();
+  const onSplitRight = () => void commands.splitRight();
+  const onOpenSourcePreview = () => void commands.openSourcePreview();
+  const onOpenGraphRight = () => void commands.openGraphRight();
+  const onFocusPane = () => void commands.focusPane();
+  const onToggleOutline = () => void commands.toggleOutline();
+  const onViewModeChange = (mode: EditorViewMode) => {
+    patchEditorPaneViewPreview(scope, { viewMode: mode });
+    void commands.persistViewMode(mode);
+  };
+  const onHtmlViewModeChange = (mode: HtmlViewMode) => {
+    void commands.flushHtmlDraft();
+    patchEditorPaneViewPreview(scope, { htmlViewMode: mode });
+  };
+  const onHtmlRiskAck = (digest: string) =>
+    patchEditorPaneViewPreview(scope, { htmlRiskAckDigest: digest });
+  const onVisualizeRefs = () => void commands.visualizeRefs();
+  const onToggleKgHighlight = () => void commands.toggleKgHighlight();
+  const onKgRefNodeClick = useCallback(
+    (nodePath: string) => void commands.openKgRefNode(nodePath),
+    [commands],
+  );
+  const onWikilinkClick = useCallback(
+    (target: string) => void commands.openWikilink(target),
+    [commands],
+  );
   const { t, locale } = useTranslation();
   const isHtml = document ? isHtmlFileKind(document.fileKind) : false;
   const isMarkdown = document

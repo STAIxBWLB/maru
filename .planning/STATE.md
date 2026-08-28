@@ -1,44 +1,42 @@
 ---
 gsd_state_version: 1.0
 milestone: v1.0
-milestone_name: milestone
-current_phase: 03
-current_phase_name: typed-ipc-error-contract
-status: phase_complete
-stopped_at: Phase 03 complete and verified (passed); PR #279 open; Phase 4 not started
-last_updated: "2026-08-24T04:45:00.000Z"
-last_activity: 2026-08-24
-last_activity_desc: Phase 03 complete - verification passed after the real-app WKWebView smoke closed the last evidence gap
+milestone_name: Structural Debt Paydown
+status: Awaiting next milestone
+stopped_at: Milestone v1.0 archived
+last_updated: "2026-08-28T09:09:07.868Z"
+last_activity: 2026-08-28
+last_activity_desc: Milestone v1.0 archived
 progress:
-  total_phases: 3
-  completed_phases: 3
-  total_plans: 14
-  completed_plans: 14
+  total_phases: 5
+  completed_phases: 5
+  total_plans: 32
+  completed_plans: 32
+current_phase: 05
+current_phase_name: Shell Decomposition Completion
 ---
 
 # Project State
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-08-23)
+See: .planning/PROJECT.md (updated 2026-08-28)
 
 **Core value:** The filesystem stays the source of truth - everything Maru shows is derived from real files the user owns, and nothing is lost if Maru is uninstalled.
-**Current focus:** Phase 03 complete; Phase 4 (Editor Surface State Extraction) is next
+**Current focus:** Planning the next milestone
 
 ## Current Position
 
-Phase: 03 (Typed IPC Error Contract) - COMPLETE, verified passed
-Plan: 4 of 4 complete
-Status: Verified passed on branch gsd/phase-3-typed-ipc-error-contract (PR #279)
-Last activity: 2026-08-24 - real-app WKWebView smoke closed the last evidence gap and found two live defects
-
-Progress: [████████████░░░░░░░░] 60% (3/5 phases)
+Phase: Milestone v1.0 complete
+Plan: —
+Status: Awaiting next milestone
+Last activity: 2026-08-28 — Milestone v1.0 completed and archived
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 10
+- Total plans completed: 32
 - Average duration: -
 - Total execution time: -
 
@@ -48,6 +46,9 @@ Progress: [████████████░░░░░░░░] 60% (3/
 |-------|-------|-------|----------|
 | 1 | 7 | - | - |
 | 2 | 3 | - | - |
+| 03 | 4 | - | - |
+| 04 | 7 | - | - |
+| 05 | 11 | - | - |
 
 **Recent Trend:**
 
@@ -72,6 +73,24 @@ Progress: [████████████░░░░░░░░] 60% (3/
 | Phase 03 P02 | ~50min | 2 tasks | 6 files |
 | Phase 03 P03 | 15min | 2 tasks | 9 files |
 | Phase 03 P04 | ~35min | 2 tasks | 0 files |
+| Phase 04 P01 | 6min | 2 tasks | 4 files |
+| Phase 04 P02 | 13min | 2 tasks | 5 files |
+| Phase 04-editor-surface-state-extraction P03 | 9min | 2 tasks | 6 files |
+| Phase 04 P04 | 12min | 2 tasks | 4 files |
+| Phase 04 P05 | 15min | 2 tasks | 8 files |
+| Phase 04 P06 | 1h 40min | 2 tasks | 4 files |
+| Phase 04 P07 | 13min | 2 tasks | 5 files |
+| Phase 05 P01 | 1h 10m | 2 tasks | 8 files |
+| Phase 05 P02 | 10m | 2 tasks | 4 files |
+| Phase 05 P03 | 14min | 2 tasks | 7 files |
+| Phase 05 P04 | 8min | 3 tasks | 8 files |
+| Phase 05 P05 | 11min | 2 tasks | 9 files |
+| Phase 05 P06 | 9m | 2 tasks | 7 files |
+| Phase 05 P07 | 7min | 2 tasks | 7 files |
+| Phase 05 P08 | 13min | 2 tasks | 10 files |
+| Phase 05 P09 | 7min | 2 tasks | 8 files |
+| Phase 05 P10 | 9min | 3 tasks | 9 files |
+| Phase 05 P11 | 2h 7m | 3 tasks | 25 files |
 
 ## Accumulated Context
 
@@ -121,6 +140,48 @@ Recent decisions affecting current work:
 - [Phase ?]: All three today_conflict fixture throw sites migrated to raw wire shape (not just the two the plan named by line), keeping the one-normalization-point invariant intact
 - [Phase ?]: ERR-01 and ERR-03 marked complete after verifying all four contract codes have a frontend reader and the residual substring-matcher grep is zero; ERR-02 left open for 03-04's formal two-sided rename drill
 - [Phase ?]: ERR-02 drill extended to three sub-drills (Rust value pin, Rust name/build, TS union/tsc) so the web_actions.rs:860 branch site is proven build-protected, not just the pin test
+- [Phase ?]: Wave 0 contracts remain activation-gated until their owning production plan removes the condition.
+- [Phase ?]: Use workspace-keyed, per-domain subscriber maps so file-queue publishes cannot notify document consumers.
+- [Phase ?]: Keep queue update and selection transitions pure in outlinePaneStore; reserve OutlinePaneCommands for shell orchestration and persistence effects.
+- [Phase ?]: Keep queue progress and actionable failures in the operation slice while notification-only failures continue through errorStore.
+- [Phase ?]: OutlinePane now receives only scope, commands, pane ref, and render slots; sidebar and explorer values are facade slices.
+- [Phase ?]: The persistence adapter consumes App's existing loadWorkspace request id and never owns a second generation counter.
+- [Phase ?]: Workspace cleanup drops only facade-local Outline records, leaving editorTabsStore drafts and MaruSettings untouched.
+- [Phase ?]: Editor view modes are workspace and split-group scoped; HTML mode, risk acknowledgement, and operation state remain tab-local transient facade state.
+- [Phase ?]: Editor hydration reuses App loadWorkspaceRequestRef and the normalized settings writer; no second generation counter or settings key exists.
+- [Phase ?]: Facade cleanup runs after canonical editorTabsStore closes, so it never deletes an unsaved draft itself.
+- [Phase ?]: EditorPane now receives only scope, commands, and optional editor refs; all render values are read from keyed facade slices.
+- [Phase ?]: EditorPaneCommands objects are stable across App renders and dispatch against current keyed scope and current shell handlers.
+- [Phase ?]: Preview markup remains memoized solely on previewHtml and React remains the only preview DOM writer.
+- [Phase ?]: Keep HTML view/risk state facade-local so parent App renders cannot replay stale legacy values.
+- [Phase ?]: Require a distinct-bundle native WKWebView smoke after deterministic editor-surface gates pass.
+- [Phase ?]: MainApp may observe editor tab snapshots while unrelated shell surfaces stay behind stable production memo boundaries.
+- [Phase ?]: Render instrumentation observes static target names only and defaults to a no-op.
+- [Phase ?]: DocumentList now exposes only scope, commands, searchInputRef, and paneRef; browser state publishes through keyed external-store slices.
+- [Phase ?]: Outline composes document selection and filters from documentBrowserStore instead of mirroring browser state.
+- [Phase ?]: TerminalSessionHandle is the only frontend identity accepted by session-scoped terminal wrappers.
+- [Phase ?]: Rust validates terminal handles against the authoritative registry before every read or mutation.
+- [Phase ?]: Unknown terminal kills remain idempotent, but stale recycled handles are rejected.
+- [Phase ?]: Terminal reducer state is process-global while launch context is a separate slice.
+- [Phase ?]: TerminalPanel accepts only scope, commands, graphNode, and its forwarded ref.
+- [Phase ?]: Normalized MaruSettings now has one module-store owner, while MainApp subscribes to its current snapshot.
+- [Phase ?]: PKM and E2E descriptors own dynamic loaders, placement, availability, and fallback identity; ActivityRail metadata remains in App.
+- [Phase ?]: Graph uses one adapter for primary, right, and terminal-panel placement.
+- [Phase ?]: Sites native URLs are ordered visual-mode intents acknowledged after consumption.
+- [Phase ?]: Compose canonical tracked missions instead of duplicating mission records in the agent runtime store.
+- [Phase ?]: Agents uses a dedicated lazy adapter with only ModeHostScope and ModeHostCommands.
+- [Phase ?]: Inbox and Comms render through registry-loaded adapters while retaining their existing typed action and approval ports.
+- [Phase ?]: Processed-item state is one controller domain shared by both adapters rather than synchronized copies.
+- [Phase ?]: Scratchpad keeps document, autosave, watcher, recovery, and editor state in ScratchpadPane; only shell refresh and settings projections move to knowledgeModeStore.
+- [Phase ?]: Drafts and Gap compose canonical workspace, agent-runtime, shell-settings, and visual-mode ownership instead of copying filesystem or approval state.
+- [Phase ?]: Gap handoffs use a request nonce so repeated explicit selections of the same draft remain distinguishable after consumption.
+- [Phase ?]: Files preview state is transient and rejects responses by request sequence plus selected path.
+- [Phase ?]: Files, Studio, and Catalog preserve canonical drafts, capability and revision gates, settings keys, and filesystem commands behind lazy adapters.
+- [Phase ?]: Planning adapters use isolated controller slices while canonical task, agent, and settings owners remain external.
+- [Phase ?]: Mode registry IDs are typed as MaruAppMode and exhaustively tested across all 18 modes.
+- [Phase ?]: MainApp stays below the D-13 ceiling at 15 useState and 24 useEffect calls, with lifecycle ownership in named modules.
+- [Phase ?]: Extensibility drills mutate real production source only inside a finally-restored boundary and assert App byte identity.
+- [Phase 5]: Direct D-20 native UAT recorded five passed flows covering Documents/filesystem effects, live PTY lifecycle, lazy right/primary placement, stale/current generation coverage, and render isolation.
 
 ### Scope Exceptions
 
@@ -145,6 +206,7 @@ Recent decisions affecting current work:
   reports complete: the Phase 2.1 planning artifacts, the HWPE-01..03 requirement
   registration, and the Semantica Phases 6-9 roadmap entries drawn from
   `docs/semantica-adoption-plan.md`.
+
 - [Phase 3]: The real-app WKWebView smoke found two live defects nothing else could see - EvidenceBinderMutation lacked serde rename_all_fields so every camelCase mutation was rejected at the bridge, and evidence discovery blocked the UI thread for over 40s on a 64k-file workspace. Treat "no native gate" as a real coverage hole in later phases, not a formality
 - [Phase 3]: Codex adversarial review produced ERR-05 and ERR-06 (v2 requirements) - the contract pins declarations but not emission sites, and commands able to emit reserved codes still flatten to String
 
@@ -155,7 +217,6 @@ None yet.
 ### Blockers/Concerns
 
 - **Phase 3's ERR-04 count band is coupled to `hwped.rs`.** The pinned command reports 1,138, and `hwped.rs` contributes 19 of those matches; without it the tree reads 1,119 and the post-migration count lands at 1,109, below `03-04-PLAN.md`'s `[1118, 1138]` band. The baseline is now anchored to a commit rather than a date - re-confirmed 2026-08-23 on the committed tree at 34f96ee - and `03-02`/`03-04` cite that provenance. Residual risk: the hwp-editor track is still active, so `03-04` now requires a re-measurement at the start of the plan rather than treating drift as exceptional.
-- `src/App.tsx` has no test of any kind. Phases 4-5 depend on Phase 1's hook-dependency gate plus the per-pane tests written during extraction; there is no existing safety net for the decomposition.
 - `make verify` runs on ubuntu-22.04 only and e2e runs Chromium against Vite with mocked IPC. Nothing in CI exercises WKWebView, the real PTY, IME input, or the macOS menu - macOS-affecting changes need a real-app run.
 
 ## Deferred Items
@@ -168,9 +229,16 @@ None yet.
 | Testing | TEST-01..04 (native Tauri E2E runner, coverage, remaining component tests, app_menu smoke) | v2 | 2026-08-22 |
 | Product | HUB-01 Hub graph-metadata sync - the doc set's only explicit deferral | v2 | 2026-08-22 |
 | Typed IPC | ERR-05 closed-enum contract (emission sites unconstrained; guard checks declarations only), ERR-06 typed return for every conflict-emitting command (today_apply_plan_result, task_calendar_set_sync flatten to String) | v2 | 2026-08-23 |
+| Evidence | Re-run a deliberate failing CI E2E against the shipped narrowed Playwright trace configuration | accepted at v1.0 closeout | 2026-08-28 |
+| Validation | Reconcile Phase 01-03 Nyquist metadata with `$gsd-validate-phase` | accepted at v1.0 closeout | 2026-08-28 |
+| Security | Add Phase 02-03 security reports if uniform milestone evidence is required | accepted at v1.0 closeout | 2026-08-28 |
 
 ## Session Continuity
 
-Last session: 2026-08-24T04:45:00.000Z
-Stopped at: Phase 03 complete and verified; PR #279 open, Phase 4 not started
-Resume file: .planning/phases/03-typed-ipc-error-contract/03-VERIFICATION.md
+Last session: 2026-08-28T09:09:07.868Z
+Stopped at: Milestone v1.0 archived
+Resume file: None
+
+## Operator Next Steps
+
+- Start the next milestone with `$gsd-new-milestone`

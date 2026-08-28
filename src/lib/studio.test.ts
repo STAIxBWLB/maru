@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createInitialStudioState,
+  normalizeStudioState,
   nextStudioStep,
   previousStudioStep,
   sanitizeStudioDocId,
@@ -63,6 +64,25 @@ describe("studio helpers", () => {
     expect(state.docId).toBe("studio-1234");
     expect(state.source.mode).toBe("newDocument");
     expect(state.bodyDraft).toBe("");
+  });
+
+  it("preserves the hwp_cli_skill source for native template routing", () => {
+    const initial = createInitialStudioState(document());
+    const state = normalizeStudioState({
+      ...initial,
+      template: {
+        id: "hwp-template",
+        slug: "report",
+        version: 1,
+        title: "Report",
+        businessUnit: null,
+        documentTypeCode: "report",
+        source: "hwp_cli_skill",
+        hwpxTemplateKey: "보고서",
+      },
+    });
+    expect(state.template?.source).toBe("hwp_cli_skill");
+    expect(state.template?.hwpxTemplateKey).toBe("보고서");
   });
 
   it("steps forward and backward within the fixed wizard bounds", () => {

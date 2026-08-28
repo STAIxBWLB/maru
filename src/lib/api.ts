@@ -1940,8 +1940,20 @@ export type TerminalStreamMessage =
       message: string;
     };
 
+export interface TerminalSessionHandle {
+  readonly sessionId: string;
+  readonly generation: string;
+}
+
+export function createTerminalSessionHandle(
+  sessionId: string,
+  generation: string,
+): TerminalSessionHandle {
+  return { sessionId, generation };
+}
+
 export interface TerminalSpawnHandle {
-  generation: string;
+  handle: TerminalSessionHandle;
   channel: Channel<TerminalStreamMessage>;
 }
 
@@ -2043,112 +2055,102 @@ export async function terminalSpawn(
     },
     onEvent: channel,
   });
-  return { generation, channel };
+  return { handle: createTerminalSessionHandle(sessionId, generation), channel };
 }
 
-export async function terminalWrite(sessionId: string, data: string): Promise<void> {
+export async function terminalWrite(handle: TerminalSessionHandle, data: string): Promise<void> {
   if (!isTauri()) return;
-  await invoke("terminal_write", { sessionId, data });
+  await invoke("terminal_write", { handle, data });
 }
 
 export async function terminalInput(
-  sessionId: string,
+  handle: TerminalSessionHandle,
   command: TerminalInputCommand,
 ): Promise<void> {
   if (!isTauri()) return;
-  await invoke("terminal_input", { sessionId, command });
+  await invoke("terminal_input", { handle, command });
 }
 
 export async function terminalInputBatch(
-  sessionId: string,
-  generation: string,
+  handle: TerminalSessionHandle,
   clientSeq: number,
   commands: TerminalInputCommand[],
 ): Promise<void> {
   if (!isTauri() || commands.length === 0) return;
-  await invoke("terminal_input_batch", { sessionId, generation, clientSeq, commands });
+  await invoke("terminal_input_batch", { handle, clientSeq, commands });
 }
 
 export async function terminalAck(
-  sessionId: string,
-  generation: string,
+  handle: TerminalSessionHandle,
   seq: number,
 ): Promise<void> {
   if (!isTauri()) return;
-  await invoke("terminal_ack", { sessionId, generation, seq });
+  await invoke("terminal_ack", { handle, seq });
 }
 
-export async function terminalRequestFull(
-  sessionId: string,
-  generation: string,
-): Promise<void> {
+export async function terminalRequestFull(handle: TerminalSessionHandle): Promise<void> {
   if (!isTauri()) return;
-  await invoke("terminal_request_full", { sessionId, generation });
+  await invoke("terminal_request_full", { handle });
 }
 
 export async function terminalSetVisibility(
-  sessionId: string,
-  generation: string,
+  handle: TerminalSessionHandle,
   visible: boolean,
 ): Promise<void> {
   if (!isTauri()) return;
-  await invoke("terminal_set_visibility", { sessionId, generation, visible });
+  await invoke("terminal_set_visibility", { handle, visible });
 }
 
 export async function terminalSelection(
-  sessionId: string,
-  generation: string,
+  handle: TerminalSessionHandle,
   command: TerminalSelectionCommand,
 ): Promise<void> {
   if (!isTauri()) return;
-  await invoke("terminal_selection", { sessionId, generation, command });
+  await invoke("terminal_selection", { handle, command });
 }
 
-export async function terminalCopySelection(
-  sessionId: string,
-  generation: string,
-): Promise<string> {
+export async function terminalCopySelection(handle: TerminalSessionHandle): Promise<string> {
   if (!isTauri()) return "";
-  return invoke<string>("terminal_copy_selection", { sessionId, generation });
+  return invoke<string>("terminal_copy_selection", { handle });
 }
 
 export async function terminalResize(
-  sessionId: string,
+  handle: TerminalSessionHandle,
   cols: number,
   rows: number,
 ): Promise<void> {
   if (!isTauri()) return;
-  await invoke("terminal_resize", { sessionId, cols, rows });
+  await invoke("terminal_resize", { handle, cols, rows });
 }
 
 /** Scroll the viewport through scrollback by `delta` lines (positive = toward
  *  history). The backend emits a fresh frame reflecting the scrolled view. */
-export async function terminalScroll(sessionId: string, delta: number): Promise<void> {
+export async function terminalScroll(handle: TerminalSessionHandle, delta: number): Promise<void> {
   if (!isTauri()) return;
-  await invoke("terminal_scroll", { sessionId, delta });
+  await invoke("terminal_scroll", { handle, delta });
 }
 
 /** Clear the visible screen and scrollback (Cmd+K). No-op while the
  *  alternate screen is active; the backend emits a fresh cleared frame. */
-export async function terminalClear(sessionId: string): Promise<void> {
+export async function terminalClear(handle: TerminalSessionHandle): Promise<void> {
   if (!isTauri()) return;
-  await invoke("terminal_clear", { sessionId });
+  await invoke("terminal_clear", { handle });
 }
 
-export async function terminalText(sessionId: string): Promise<string> {
+export async function terminalText(handle: TerminalSessionHandle): Promise<string> {
   if (!isTauri()) return "";
-  return invoke<string>("terminal_text", { sessionId });
+  return invoke<string>("terminal_text", { handle });
 }
 
 export async function terminalSearch(
-  sessionId: string,
+  handle: TerminalSessionHandle,
   query: string,
   direction: TerminalSearchDirection = "next",
   caseSensitive = false,
 ): Promise<TerminalSearchResult> {
   if (!isTauri()) {
     return {
-      sessionId,
+      sessionId: handle.sessionId,
       query,
       found: false,
       row: null,
@@ -2158,16 +2160,16 @@ export async function terminalSearch(
     };
   }
   return invoke<TerminalSearchResult>("terminal_search", {
-    sessionId,
+    handle,
     query,
     direction,
     caseSensitive,
   });
 }
 
-export async function terminalKill(sessionId: string): Promise<void> {
+export async function terminalKill(handle: TerminalSessionHandle): Promise<void> {
   if (!isTauri()) return;
-  await invoke("terminal_kill", { sessionId });
+  await invoke("terminal_kill", { handle });
 }
 
 export interface TerminalHooksStatus {

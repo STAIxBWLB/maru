@@ -49,6 +49,8 @@ pub struct StudioTemplateState {
     pub business_unit: Option<String>,
     pub document_type_code: Option<String>,
     #[serde(default)]
+    pub source: Option<String>,
+    #[serde(default)]
     pub hwpx_template_key: Option<String>,
 }
 
@@ -364,6 +366,7 @@ mod tests {
                 title: "Business Plan".to_string(),
                 business_unit: Some("koica-tiu".to_string()),
                 document_type_code: Some("business-plan".to_string()),
+                source: Some("hwpx_skill".to_string()),
                 hwpx_template_key: Some("사업계획서_기본".to_string()),
             }),
             guideline_ids: vec!["guideline-1".to_string()],

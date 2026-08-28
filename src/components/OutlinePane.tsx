@@ -48,23 +48,27 @@ import {
 } from "../lib/fileDrag";
 import { extractOutline } from "../lib/markdown";
 import { setError } from "../lib/errorStore";
+import type { OutlinePaneCommands } from "../lib/editorSurfaceAdapter";
 import { useTranslation } from "../lib/i18n";
+import {
+  replaceOutlineFileQueue,
+  selectOutlineFileQueueItem,
+  setOutlineFileQueueSelection,
+  useOutlineDocumentSlice,
+  useOutlineBrowserSlice,
+  useOutlineExplorerSlice,
+  useOutlineFileQueueSlice,
+  useOutlineOperationSlice,
+  useOutlineSidebarSlice,
+  type OutlinePaneScope,
+} from "../lib/outlinePaneStore";
 import { useContextMenuKeyboard } from "../lib/useContextMenuKeyboard";
+import type { RightPaneTab } from "../lib/settings";
 import type {
-  MaruAppMode,
-  DocumentViewDefinition,
-  ExplorerPaneMode,
-  RightPaneTab,
-} from "../lib/settings";
-import type { BuiltInDocumentView, DocumentFilter } from "../lib/documentIndex";
-import type {
-  DocumentPayload,
   FileQueueItem,
   FileQueueSourceInfo,
-  VaultEntry,
   WorkspaceFileEntry,
 } from "../lib/types";
-import type { GraphLocalTarget } from "../lib/settings";
 import {
   collectWorkspaceFileExtensionCounts,
   type WorkspaceFilesPaneFilters,
@@ -74,60 +78,7 @@ import { ExplorerPane } from "./ExplorerPane";
 import { SharedOutboxPane } from "./SharedOutboxPane";
 import { Sidebar } from "./Sidebar";
 
-interface OutlinePaneProps {
-  document: DocumentPayload | null;
-  draftContent: string;
-  entries: VaultEntry[];
-  readOnly: boolean;
-  workspacePath: string | null;
-  /** Editor line currently scrolled to the top (source mode); highlights the
-   *  matching outline heading. Null when tracking is inactive. */
-  activeLine?: number | null;
-  onJumpToLine: (line: number) => void;
-  onClose: () => void;
-  onUpdateField: (
-    key: string,
-    value: string | string[] | number | boolean | null,
-  ) => Promise<void>;
-  onSelectEntry: (entry: VaultEntry) => void;
-  onMissingWikilink?: (target: string) => void;
-  onOpenGraph?: (target: GraphLocalTarget) => void;
-  /** Managed vault note — swaps the free-form type input for the schema form
-   *  (description 카운터·type/domain select·topics 칩, spec §3 F1). */
-  isManagedVaultNote?: boolean;
-  fileQueue: FileQueueItem[];
-  canApplyFileQueue: boolean;
-  onUpdateFileQueueItem: (
-    id: string,
-    patch: Partial<Pick<FileQueueItem, "targetDir" | "operation">>,
-  ) => void;
-  selectedFileQueueItemIds: string[];
-  onSelectFileQueueItem: (id: string, additive: boolean) => void;
-  onQueueExternalFiles: (paths: string[]) => Promise<void>;
-  onQueueFileSources: (sources: FileQueueSourceInfo[], targetDir: string) => void;
-  onApplyFileQueue: () => Promise<unknown>;
-  onClearFileQueue: () => void;
-  onClearSelectedFileQueueItems: () => void;
-  workspaceFileEntries: WorkspaceFileEntry[];
-  explorerWorkspacePath: string | null;
-  explorerExpandedFolders: string[];
-  onExplorerExpandedFoldersChange: (paths: string[]) => void;
-  explorerSelectedPath: string | null;
-  explorerLoading: boolean;
-  explorerReady: boolean;
-  explorerRefreshing: boolean;
-  onExplorerRefresh: () => void;
-  onOpenWorkspaceFile: (entry: WorkspaceFileEntry, line?: number) => void;
-  explorerIncludeDotFolders: string[];
-  onIgnoreWorkspaceEntry?: (relPath: string, kind: "file" | "directory") => void;
-  selectedWorkspaceFileEntries: WorkspaceFileEntry[];
-  filesPaneFilters: WorkspaceFilesPaneFilters;
-  onFilesPaneFiltersChange: (filters: WorkspaceFilesPaneFilters) => void;
-  explorerPaneMode: ExplorerPaneMode;
-  onRevealFileInFinder: (targetPath: string) => void;
-  activeTab: RightPaneTab;
-  onTabChange: (tab: RightPaneTab) => void;
-  paneRef?: React.RefObject<HTMLElement | null>;
+interface OutlinePaneSlots {
   skillsNode?: React.ReactNode;
   guidelineNode?: React.ReactNode;
   evidenceNode?: React.ReactNode;
@@ -137,21 +88,13 @@ interface OutlinePaneProps {
   shareDocumentDirty: boolean;
   /** Shareable absolute file paths reported by the Inbox selection. */
   inboxShareablePaths: string[];
-  appMode: MaruAppMode;
-  contentCount: number;
-  typeCounts: Array<[string, number]>;
-  documentViews: DocumentViewDefinition[];
-  viewCounts: Record<BuiltInDocumentView, number>;
-  customViewCounts: Record<string, number>;
-  recentEntries: VaultEntry[];
-  selectedPath: string | null;
-  documentFilter: DocumentFilter;
-  onDocumentFilter: (filter: DocumentFilter) => void;
-  onDocumentViewsChange: (views: DocumentViewDefinition[]) => void;
-  onNewDocument: (docType?: string) => void;
-  canCreateDocument: boolean;
-  onSelectRecent: (entry: VaultEntry) => void;
-  onOpenCommandPalette: () => void;
+}
+
+interface OutlinePaneProps {
+  scope: OutlinePaneScope;
+  commands: OutlinePaneCommands;
+  paneRef?: React.RefObject<HTMLElement | null>;
+  slots: OutlinePaneSlots;
 }
 
 const STANDARD_TYPES = [
@@ -212,70 +155,54 @@ const AUDIO_EXTENSIONS = new Set(["aac", "aiff", "flac", "m4a", "mp3", "ogg", "w
 const VIDEO_EXTENSIONS = new Set(["avi", "m4v", "mkv", "mov", "mp4", "webm", "wmv"]);
 
 export function OutlinePane({
-  document,
-  draftContent,
-  entries,
-  readOnly,
-  activeLine = null,
-  onJumpToLine,
-  onClose,
-  onUpdateField,
-  onSelectEntry,
-  onMissingWikilink,
-  onOpenGraph,
-  isManagedVaultNote,
-  fileQueue,
-  canApplyFileQueue,
-  onUpdateFileQueueItem,
-  selectedFileQueueItemIds,
-  onSelectFileQueueItem,
-  onQueueExternalFiles,
-  onQueueFileSources,
-  onApplyFileQueue,
-  onClearFileQueue,
-  onClearSelectedFileQueueItems,
-  workspaceFileEntries,
-  explorerWorkspacePath,
-  explorerExpandedFolders,
-  onExplorerExpandedFoldersChange,
-  explorerSelectedPath,
-  explorerLoading,
-  explorerReady,
-  explorerRefreshing,
-  onExplorerRefresh,
-  onOpenWorkspaceFile,
-  explorerIncludeDotFolders,
-  onIgnoreWorkspaceEntry,
-  selectedWorkspaceFileEntries,
-  filesPaneFilters,
-  onFilesPaneFiltersChange,
-  explorerPaneMode,
-  onRevealFileInFinder,
-  activeTab,
-  onTabChange,
+  scope,
+  commands,
   paneRef,
-  skillsNode,
-  guidelineNode,
-  evidenceNode,
-  shareWorkspacePath,
-  shareDocumentDirty,
-  inboxShareablePaths,
-  appMode,
-  contentCount,
-  typeCounts,
-  documentViews,
-  viewCounts,
-  customViewCounts,
-  recentEntries,
-  selectedPath,
-  documentFilter,
-  onDocumentFilter,
-  onDocumentViewsChange,
-  onNewDocument,
-  canCreateDocument,
-  onSelectRecent,
-  onOpenCommandPalette,
+  slots,
 }: OutlinePaneProps) {
+  const { document, draftContent } = useOutlineDocumentSlice(scope);
+  const { fileQueue, canApplyFileQueue, selectedFileQueueItemIds } = useOutlineFileQueueSlice(scope);
+  const { applyingFileQueue } = useOutlineOperationSlice(scope);
+  const sidebar = useOutlineSidebarSlice(scope);
+  const browser = useOutlineBrowserSlice(scope);
+  const explorer = useOutlineExplorerSlice(scope);
+  const {
+    entries,
+    readOnly,
+    isManagedVaultNote,
+    activeTab,
+    activeLine,
+    appMode,
+    contentCount,
+    typeCounts,
+    documentViews,
+    viewCounts,
+    customViewCounts,
+    recentEntries,
+    canCreateDocument,
+  } = sidebar;
+  const { selectedPath, documentFilter } = browser;
+  const {
+    workspaceFileEntries,
+    explorerWorkspacePath,
+    explorerExpandedFolders,
+    explorerSelectedPath,
+    explorerLoading,
+    explorerReady,
+    explorerRefreshing,
+    explorerIncludeDotFolders,
+    selectedWorkspaceFileEntries,
+    filesPaneFilters,
+    explorerPaneMode,
+  } = explorer;
+  const {
+    skillsNode,
+    guidelineNode,
+    evidenceNode,
+    shareWorkspacePath,
+    shareDocumentDirty,
+    inboxShareablePaths,
+  } = slots;
   const { t } = useTranslation();
   const isPkm = appMode === "pkm";
   // Shared Outbox is reachable in PKM (Docs) and Inbox only; other modes keep
@@ -343,7 +270,7 @@ export function OutlinePane({
   }, [entries]);
   const queueExplorerPayload = useCallback(
     (payload: ExplorerDragPayload) => {
-      onQueueFileSources(
+      void commands.queueFileSources(
         payload.items.map((item) => ({
           path: item.path,
           sourceRelPath: item.relPath,
@@ -353,7 +280,7 @@ export function OutlinePane({
         payload.workspacePath,
       );
     },
-    [onQueueFileSources],
+    [commands],
   );
 
   return (
@@ -363,7 +290,7 @@ export function OutlinePane({
         <button
           type="button"
           className="icon-button"
-          onClick={onClose}
+          onClick={() => void commands.closeOutline()}
           title={t("outline.close")}
           aria-label={t("outline.close")}
         >
@@ -379,7 +306,7 @@ export function OutlinePane({
               role="tab"
               aria-selected={tab === id}
               className={tab === id ? "active" : ""}
-              onClick={() => onTabChange(id)}
+              onClick={() => void commands.setRightPaneTab(id)}
               onDragOver={
                 id === "files"
                   ? (event) => {
@@ -396,7 +323,7 @@ export function OutlinePane({
                       if (!payload) return;
                       event.preventDefault();
                       clearExplorerDragPayload();
-                      onTabChange("files");
+                      void commands.setRightPaneTab("files");
                       queueExplorerPayload(payload);
                     }
                   : undefined
@@ -438,12 +365,12 @@ export function OutlinePane({
               recentEntries={recentEntries}
               selectedPath={selectedPath}
               documentFilter={documentFilter}
-              onDocumentFilter={onDocumentFilter}
-              onDocumentViewsChange={onDocumentViewsChange}
-              onNewDocument={onNewDocument}
+              onDocumentFilter={commands.setDocumentFilter}
+              onDocumentViewsChange={commands.updateDocumentViews}
+              onNewDocument={commands.openNewDocument}
               canCreateDocument={canCreateDocument}
-              onSelectRecent={onSelectRecent}
-              onOpenCommandPalette={onOpenCommandPalette}
+              onSelectRecent={commands.selectEntry}
+              onOpenCommandPalette={commands.openCommandPalette}
             />
           ) : null}
 
@@ -464,7 +391,7 @@ export function OutlinePane({
                         }
                         data-level={heading.level}
                         aria-current={i === activeHeadingIndex ? "true" : undefined}
-                        onClick={() => onJumpToLine(heading.line)}
+                        onClick={() => void commands.jumpToLine(heading.line)}
                         title={heading.text}
                       >
                         {heading.text}
@@ -486,9 +413,9 @@ export function OutlinePane({
                   document={document}
                   draftContent={draftContent}
                   entries={entries}
-                  onSelectEntry={onSelectEntry}
-                  onMissingTarget={onMissingWikilink}
-                  onOpenGraph={onOpenGraph}
+                  onSelectEntry={commands.selectEntry}
+                  onMissingTarget={commands.openMissingWikilink}
+                  onOpenGraph={commands.openGraph}
                 />
               ) : null}
             </>
@@ -499,15 +426,15 @@ export function OutlinePane({
               workspacePath={explorerWorkspacePath}
               entries={workspaceFileEntries}
               expandedFolders={explorerExpandedFolders}
-              onExpandedFoldersChange={onExplorerExpandedFoldersChange}
+              onExpandedFoldersChange={commands.setExplorerExpandedFolders}
               selectedPath={explorerSelectedPath}
               loading={explorerLoading}
               ready={explorerReady}
               refreshing={explorerRefreshing}
-              onRefresh={onExplorerRefresh}
-              onOpenFile={onOpenWorkspaceFile}
+              onRefresh={commands.refreshExplorer}
+              onOpenFile={commands.openWorkspaceFile}
               includeDotFolders={explorerIncludeDotFolders}
-              onIgnore={onIgnoreWorkspaceEntry}
+              onIgnore={commands.ignoreWorkspaceEntry}
             />
           ) : null}
 
@@ -516,7 +443,7 @@ export function OutlinePane({
               <FilesPaneFilterPanel
                 entries={workspaceFileEntries}
                 filters={filesPaneFilters}
-                onChange={onFilesPaneFiltersChange}
+                onChange={commands.setFilesPaneFilters}
                 queueSize={fileQueue.length}
                 t={t}
               />
@@ -524,13 +451,25 @@ export function OutlinePane({
                 queue={fileQueue}
                 canApplyFileQueue={canApplyFileQueue}
                 selectedIds={selectedFileQueueItemIds}
-                onUpdateItem={onUpdateFileQueueItem}
-                onSelectItem={onSelectFileQueueItem}
-                onQueueExternalFiles={onQueueExternalFiles}
-                onQueueFileSources={onQueueFileSources}
-                onApply={onApplyFileQueue}
-                onClear={onClearFileQueue}
-                onClearSelected={onClearSelectedFileQueueItems}
+                working={applyingFileQueue}
+                onUpdateItem={commands.updateFileQueueItem}
+                onSelectItem={(id, additive) => selectOutlineFileQueueItem(scope, id, additive)}
+                onQueueExternalFiles={commands.queueExternalFiles}
+                onQueueFileSources={commands.queueFileSources}
+                onApply={commands.applyFileQueue}
+                onClear={() => {
+                  replaceOutlineFileQueue(scope, []);
+                  setOutlineFileQueueSelection(scope, []);
+                }}
+                onClearSelected={() => {
+                  const selected = new Set(selectedFileQueueItemIds);
+                  if (selected.size === 0) return;
+                  replaceOutlineFileQueue(
+                    scope,
+                    fileQueue.filter((item) => !selected.has(item.id)),
+                  );
+                  setOutlineFileQueueSelection(scope, []);
+                }}
                 t={t}
               />
             </>
@@ -546,7 +485,7 @@ export function OutlinePane({
               }
               selectedFileEntries={selectedWorkspaceFileEntries}
               inboxShareablePaths={inboxShareablePaths}
-              onRevealFileInFinder={onRevealFileInFinder}
+              onRevealFileInFinder={commands.revealFileInFinder}
             />
           ) : null}
 
@@ -561,7 +500,7 @@ export function OutlinePane({
           selectedWorkspaceFileEntries.length > 0 ? (
             <FilesInfoPane
               entries={selectedWorkspaceFileEntries}
-              onRevealInFinder={onRevealFileInFinder}
+              onRevealInFinder={commands.revealFileInFinder}
               t={t}
             />
           ) : null}
@@ -578,7 +517,7 @@ export function OutlinePane({
                     <DescriptionInput
                       value={fmDescription}
                       readOnly={readOnly}
-                      onCommit={(next) => onUpdateField("description", next || null)}
+                      onCommit={(next) => commands.updateField("description", next || null)}
                     />
                   </InspectorRow>
                   <InspectorRow label="type">
@@ -587,7 +526,7 @@ export function OutlinePane({
                       value={fmType ?? ""}
                       disabled={readOnly}
                       onChange={(event) =>
-                        void onUpdateField("type", event.target.value || null)
+                        void commands.updateField("type", event.target.value || null)
                       }
                     >
                       <option value="">{t("inspector.empty")}</option>
@@ -604,7 +543,7 @@ export function OutlinePane({
                       value={fmDomain ?? ""}
                       disabled={readOnly}
                       onChange={(event) =>
-                        void onUpdateField("domain", event.target.value || null)
+                        void commands.updateField("domain", event.target.value || null)
                       }
                     >
                       <option value="">{t("inspector.empty")}</option>
@@ -621,7 +560,7 @@ export function OutlinePane({
                       suggestions={mocStems}
                       readOnly={readOnly}
                       onCommit={(next) =>
-                        onUpdateField("topics", next.length === 0 ? null : next)
+                        commands.updateField("topics", next.length === 0 ? null : next)
                       }
                     />
                   </InspectorRow>
@@ -631,7 +570,7 @@ export function OutlinePane({
                   <ComboInput
                     value={fmType ?? ""}
                     suggestions={observedTypes}
-                    onCommit={(next) => onUpdateField("type", next || null)}
+                    onCommit={(next) => commands.updateField("type", next || null)}
                     placeholder={t("inspector.empty")}
                     datalistId="maru-type-list"
                     readOnly={readOnly}
@@ -643,7 +582,7 @@ export function OutlinePane({
                 <ComboInput
                   value={fmStatus ?? ""}
                   suggestions={STANDARD_STATUSES}
-                  onCommit={(next) => onUpdateField("status", next || null)}
+                  onCommit={(next) => commands.updateField("status", next || null)}
                   placeholder={t("inspector.empty")}
                   datalistId="maru-status-list"
                   readOnly={readOnly}
@@ -654,7 +593,7 @@ export function OutlinePane({
                 <ComboInput
                   value={fmProject ?? ""}
                   suggestions={[]}
-                  onCommit={(next) => onUpdateField("project", next || null)}
+                  onCommit={(next) => commands.updateField("project", next || null)}
                   placeholder={t("outline.project.placeholder")}
                   readOnly={readOnly}
                 />
@@ -663,7 +602,7 @@ export function OutlinePane({
               <InspectorRow label="tags">
                 <TagsInput
                   value={tagList}
-                  onCommit={(next) => onUpdateField("tags", next.length === 0 ? null : next)}
+                  onCommit={(next) => commands.updateField("tags", next.length === 0 ? null : next)}
                   readOnly={readOnly}
                 />
               </InspectorRow>
@@ -706,6 +645,7 @@ function FilesQueuePane({
   queue,
   canApplyFileQueue,
   selectedIds,
+  working,
   onUpdateItem,
   onSelectItem,
   onQueueExternalFiles,
@@ -718,6 +658,7 @@ function FilesQueuePane({
   queue: FileQueueItem[];
   canApplyFileQueue: boolean;
   selectedIds: string[];
+  working: boolean;
   onUpdateItem: (
     id: string,
     patch: Partial<Pick<FileQueueItem, "targetDir" | "operation">>,
@@ -730,7 +671,6 @@ function FilesQueuePane({
   onClearSelected: () => void;
   t: (key: string, vars?: Record<string, string | number>) => string;
 }) {
-  const [working, setWorking] = useState(false);
   const [viewMode, setViewMode] = useState<"list" | "icons">("icons");
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
   const contextMenuRef = useRef<HTMLDivElement>(null);
@@ -810,14 +750,11 @@ function FilesQueuePane({
   };
 
   const apply = async () => {
-    setWorking(true);
     setError(null);
     try {
       await onApply();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setWorking(false);
     }
   };
 

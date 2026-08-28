@@ -21,7 +21,7 @@ import {
   useState,
   useTransition,
 } from "react";
-import type { FileStoreOperation, VaultEntry, WorkspaceVisibility } from "../lib/types";
+import type { FileStoreOperation, VaultEntry } from "../lib/types";
 import { documentDisplayName, formatRelativeDate, frontmatterScalar } from "../lib/document";
 import {
   clearExplorerDragPayload,
@@ -48,19 +48,22 @@ import {
   isAllDocumentFilter,
   sortDocumentEntries,
   type DocumentFilter,
-  type DocumentIndex,
 } from "../lib/documentIndex";
+import {
+  acknowledgeDocumentReveal,
+  useDocumentBrowserSlice,
+  type DocumentBrowserScope,
+  type DocumentListCommands,
+} from "../lib/documentBrowserStore";
 import { useTranslation } from "../lib/i18n";
+import { recordShellSurfaceRender } from "../lib/shellSurfaceRenderProbe";
 import { clampMenuPosition } from "../lib/menu";
 import { useContextMenuKeyboard } from "../lib/useContextMenuKeyboard";
 import type {
-  DocumentBrowserMode,
   DocumentLabelMode,
   DocumentViewDefinition,
-  FavoriteItem,
-  SortKey,
 } from "../lib/settings";
-import { FavoritesSection, type FavoriteTarget } from "./FavoritesSection";
+import { FavoritesSection } from "./FavoritesSection";
 import { SortModeToggle } from "./ui/SortModeToggle";
 
 const GROUP_ROW_HEIGHT = 28;
@@ -80,96 +83,67 @@ type ApplyFileQueueToDestination = (
 ) => void;
 
 interface DocumentListProps {
-  documentIndex: DocumentIndex;
-  selectedPath: string | null;
-  query: string;
-  loading: boolean;
-  documentFilter: DocumentFilter;
-  documentViews: DocumentViewDefinition[];
-  workspaceVisibility: WorkspaceVisibility;
-  publicWorkspaceAvailable: boolean;
-  activeWorkspaceLabel: string | null;
-  onWorkspaceVisibilityChange: (visibility: WorkspaceVisibility) => void;
-  onAddPublicWorkspace: () => void;
-  browserMode: DocumentBrowserMode;
-  sortKey: SortKey;
-  documentLabelMode: DocumentLabelMode;
-  collapsedTreeFolders: string[];
-  onQueryChange: (query: string) => void;
-  onBrowserModeChange: (mode: DocumentBrowserMode) => void;
-  onSortKeyChange: (key: SortKey) => void;
-  onCollapsedTreeFoldersChange: (paths: string[]) => void;
-  onSelect: (entry: VaultEntry) => void;
-  onRevealInFinder: (targetPath: string) => void;
-  onRevealInFiles: (targetPath: string) => void;
-  /** Hide this entry from the list by adding it to `.maruignore`. */
-  onIgnore?: (relPath: string, kind: "file" | "directory") => void;
-  onRefresh: () => void;
-  refreshing?: boolean;
-  onClose?: () => void;
-  searchInputRef?: React.RefObject<HTMLInputElement | null>;
-  paneRef?: React.RefObject<HTMLElement | null>;
-  vaultPath?: string | null;
-  pendingRevealTargetPath?: string | null;
-  onRevealHandled?: () => void;
-  favorites: FavoriteItem[];
-  onOpenFavorite: (favorite: FavoriteItem) => void;
-  onRemoveFavorite: (favorite: FavoriteItem) => void;
-  onToggleFavorite: (target: FavoriteTarget) => void;
-  isFavorite: (kind: FavoriteItem["kind"], relPath: string) => boolean;
-  isFavoriteMissing: (favorite: FavoriteItem) => boolean;
-  selectedFileQueueCount?: number;
-  onApplyFileQueueToDestination?: ApplyFileQueueToDestination;
-  onApplyExplorerDragToDestination?: (
-    payload: ExplorerDragPayload,
-    targetPath: string,
-    targetKind: "file" | "directory",
-    operation: FileStoreOperation,
-  ) => void;
+  scope: DocumentBrowserScope;
+  commands: DocumentListCommands;
+  searchInputRef: React.RefObject<HTMLInputElement | null>;
+  paneRef: React.RefObject<HTMLElement | null>;
 }
 
 export const DocumentList = memo(function DocumentList({
-  documentIndex,
-  selectedPath,
-  query,
-  loading,
-  documentFilter,
-  documentViews,
-  workspaceVisibility,
-  publicWorkspaceAvailable,
-  activeWorkspaceLabel,
-  onWorkspaceVisibilityChange,
-  onAddPublicWorkspace,
-  browserMode,
-  sortKey,
-  documentLabelMode,
-  collapsedTreeFolders,
-  onQueryChange,
-  onBrowserModeChange,
-  onSortKeyChange,
-  onCollapsedTreeFoldersChange,
-  onSelect,
-  onRevealInFinder,
-  onRevealInFiles,
-  onIgnore,
-  onRefresh,
-  refreshing = false,
-  onClose,
+  scope,
+  commands,
   searchInputRef,
   paneRef,
-  vaultPath,
-  pendingRevealTargetPath = null,
-  onRevealHandled,
-  favorites,
-  onOpenFavorite,
-  onRemoveFavorite,
-  onToggleFavorite,
-  isFavorite,
-  isFavoriteMissing,
-  selectedFileQueueCount = 0,
-  onApplyFileQueueToDestination,
-  onApplyExplorerDragToDestination,
 }: DocumentListProps) {
+  recordShellSurfaceRender("DocumentList");
+  const queryFilter = useDocumentBrowserSlice(scope, "queryFilter");
+  const workspace = useDocumentBrowserSlice(scope, "workspace");
+  const selection = useDocumentBrowserSlice(scope, "selection");
+  const favoritesSlice = useDocumentBrowserSlice(scope, "favorites");
+  const fileQueue = useDocumentBrowserSlice(scope, "fileQueue");
+  const reveal = useDocumentBrowserSlice(scope, "reveal");
+  const {
+    documentIndex,
+    query,
+    loading,
+    documentFilter,
+    documentViews,
+    browserMode,
+    sortKey,
+    documentLabelMode,
+    collapsedTreeFolders,
+  } = queryFilter;
+  const {
+    workspaceVisibility,
+    publicWorkspaceAvailable,
+    activeWorkspaceLabel,
+    refreshing,
+    vaultPath,
+  } = workspace;
+  const { selectedPath } = selection;
+  const { favorites } = favoritesSlice;
+  const { selectedFileQueueCount } = fileQueue;
+  const {
+    setWorkspaceVisibility: onWorkspaceVisibilityChange,
+    addPublicWorkspace: onAddPublicWorkspace,
+    setQuery: onQueryChange,
+    setBrowserMode: onBrowserModeChange,
+    setSortKey: onSortKeyChange,
+    setCollapsedTreeFolders: onCollapsedTreeFoldersChange,
+    selectEntry: onSelect,
+    revealInFinder: onRevealInFinder,
+    revealInFiles: onRevealInFiles,
+    ignore: onIgnore,
+    refresh: onRefresh,
+    close: onClose,
+    openFavorite: onOpenFavorite,
+    removeFavorite: onRemoveFavorite,
+    toggleFavorite: onToggleFavorite,
+    isFavorite,
+    isFavoriteMissing,
+    applyFileQueueToDestination: onApplyFileQueueToDestination,
+    applyExplorerDragToDestination: onApplyExplorerDragToDestination,
+  } = commands;
   const { t, locale } = useTranslation();
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const lastSentQueryRef = useRef(query);
@@ -351,12 +325,13 @@ export const DocumentList = memo(function DocumentList({
   }, [deferredQuery, deferredFilterKey]);
 
   useEffect(() => {
-    if (!pendingRevealTargetPath || browserMode !== "tree") return;
+    const intent = reveal.intent;
+    if (!intent || browserMode !== "tree") return;
     const index = treeRows.findIndex(
-      (row) => row.kind === "entry" && row.entry.path === pendingRevealTargetPath,
+      (row) => row.kind === "entry" && row.entry.path === intent.targetPath,
     );
     if (index < 0) {
-      if (!loading) onRevealHandled?.();
+      if (!loading) acknowledgeDocumentReveal(scope, intent.nonce);
       return;
     }
     const node = scrollRef.current;
@@ -366,13 +341,13 @@ export const DocumentList = memo(function DocumentList({
     setViewport({ scrollTop: node.scrollTop, height: node.clientHeight || 720 });
     window.requestAnimationFrame(() => {
       window.requestAnimationFrame(() => {
-        const selector = `[data-tree-target-path="${CSS.escape(pendingRevealTargetPath)}"]`;
+        const selector = `[data-tree-target-path="${CSS.escape(intent.targetPath)}"]`;
         const target = scrollRef.current?.querySelector<HTMLButtonElement>(selector);
         target?.focus({ preventScroll: true });
-        onRevealHandled?.();
+        acknowledgeDocumentReveal(scope, intent.nonce);
       });
     });
-  }, [browserMode, loading, onRevealHandled, pendingRevealTargetPath, treeRows]);
+  }, [browserMode, loading, reveal.intent, scope, treeRows]);
 
   const headerCaption = documentFilterTitle(documentFilter, documentViews, t);
   const copyContextText = (value: string) => {
