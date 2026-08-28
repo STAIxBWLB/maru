@@ -494,7 +494,24 @@ export const config = {
 
 **None of these are compliance, retention, or performance-target claims** - all are technical/mechanical and self-revealing on first attempt (a wrong package name fails `cargo add`; a wrong env mechanism fails the first fixture-read assertion).
 
-## Open Questions
+## Open Questions (RESOLVED at plan time - answered by this phase's own spike and by plan 06-01)
+
+**Disposition, recorded 2026-08-29 when the phase plans were written.** None of the three is
+left hanging for a later phase; each has a named home in the plan set.
+
+- **Q1 is structurally answerable only by running the spike**, which is what D-01/D-02 already
+  scope and what plan 06-01 Task 3 executes on a hosted `macos-14` runner under a cap of 3
+  runs. Every plan's `<flagged_assumptions>` block records that TEST-01's edge stays
+  `unresolved` until that spike returns, and plan 06-05 Task 3 ratifies the answer. No source
+  could have closed this one; the phase exists to close it.
+- **Q2 (the crate's real version and `rust-version`) is answered operationally** by plan 06-01
+  Task 1, whose blocking-human checkpoint resolves `tauri-plugin-wdio-webdriver` live against
+  crates.io as the phase's literal first action and records the resolved values. A wrong crate
+  name fails there, before any npm install.
+- **Q3 (whether `tauri:options` can pass environment variables)** is answered operationally by
+  plan 06-01 Task 2, which implements the inherited-`process.env` path this document
+  recommends and instructs the executor to prefer a real `env` key and record the correction
+  if the spike shows one exists.
 
 1. **Does the embedded WebDriver session establish on a hosted `macos-14`/`macos-15` GitHub Actions runner with no interactive permission prompt?**
    - What we know: `tauri-driver` definitively cannot (no macOS support, ever). The embedded provider *can* drive a real WKWebView locally on macOS with "zero config" per vendor docs. No source located this session shows it running unattended in a hosted CI environment - the vendor's own CI example explicitly skips the test step on its `macos-latest` leg.
