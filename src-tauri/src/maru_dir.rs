@@ -21,7 +21,7 @@
 // migration via `ensure_maru_dir`.
 
 use crate::atomic_file::write_atomic;
-use crate::paths::ensure_within;
+use crate::paths::{ensure_within, native_e2e_dir_override, require_absolute, NATIVE_E2E_HOME_VAR};
 use crate::vault::{parse_frontmatter, title_from_content};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
@@ -156,9 +156,15 @@ fn maruignore_path(work: &Path) -> PathBuf {
 }
 
 fn maru_home_dir() -> Result<PathBuf, String> {
-    dirs::home_dir()
-        .map(|home| home.join(".maru"))
-        .ok_or_else(|| "Could not determine home directory for ~/.maru".to_string())
+    // Single exit through require_absolute (mirrors skill_host/fs.rs's
+    // maru_home()), so a later early return cannot bypass the native-e2e
+    // fail-closed guard without restructuring this exit (T-06-03).
+    let base = match native_e2e_dir_override(NATIVE_E2E_HOME_VAR)? {
+        Some(override_base) => override_base,
+        None => dirs::home_dir()
+            .ok_or_else(|| "Could not determine home directory for ~/.maru".to_string())?,
+    };
+    require_absolute(base.join(".maru"))
 }
 
 #[cfg(test)]

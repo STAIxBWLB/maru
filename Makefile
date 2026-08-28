@@ -208,6 +208,18 @@ test-cli: $(ICON_PATH) ## Compile and test standalone Maru CLI binary
 test-e2e: node_modules ## Playwright e2e (requires browsers; run `pnpm playwright install` first)
 	$(PNPM) test:e2e
 
+# Deliberately NOT part of `verify`: it builds and launches a real macOS
+# .app under WebDriver and cannot be hermetic (TEST-01, D-15). Not wired
+# into `release-preflight` yet either - 06-05 does that once all four
+# D-13 surfaces exist. This target's frontend build is VITE_NATIVE_E2E=1
+# and is deliberately not shippable - re-run `pnpm build:frontend` before
+# inspecting a production artifact.
+.PHONY: test-e2e-native
+test-e2e-native: node_modules ## Native WebDriver e2e against the real app (macOS; builds with the native-e2e feature)
+	$(PNPM) build:frontend:native-e2e
+	cd $(TAURI_DIR) && $(CARGO) build --features native-e2e
+	$(PNPM) test:e2e:native
+
 .PHONY: bench-scan
 bench-scan: $(ICON_PATH) ## Bench workspace scan (default: ~/workspace/work; override BENCH_WORKSPACE=/path)
 	cd $(TAURI_DIR) && MARU_BENCH_WORKSPACE=$(BENCH_WORKSPACE) \

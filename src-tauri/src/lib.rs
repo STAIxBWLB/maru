@@ -280,12 +280,19 @@ use workspace_files::{
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let builder = tauri::Builder::default()
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_process::init())
-        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_updater::Builder::new().build());
+    // Behind the default-off `native-e2e` feature so this plugin, and the
+    // in-app WebDriver server it starts, never compile into a build a
+    // user can install (D-10, T-06-01). Placed after tauri_plugin_updater
+    // so the shipped plugin order is unchanged when the feature is off.
+    #[cfg(feature = "native-e2e")]
+    let builder = builder.plugin(tauri_plugin_wdio_webdriver::init());
+    builder
         .menu(app_menu::build_app_menu)
         .on_menu_event(app_menu::handle_menu_event)
         // No Rust-side CloseRequested handler: force-destroying the window
