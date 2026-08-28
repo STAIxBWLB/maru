@@ -14,12 +14,13 @@ and M4 export subsystems. Shipped in Phase 4 W11–W12.
    decorations (source) or a BlockNote `gaejosikLint` mark (rich). Dismissals
    persist under workspace-state `composer.lintDismissals` with a per-document
    Studio fallback.
-5. **HWP fields** — HWPX `{{field}}` placeholder map. `template_get_fields` calls
-   `hwpx slots <template> --format json` and merges the result with `kordoc_lite`
-   HWPX label / inline-label detection (each field carries source + confidence);
-   `template_fill_hwpx` writes filled artifacts to `.maru/studio/filled/`,
-   preserves form-label fills, and validates with `hwpx validate` + lightweight
-   structure checks.
+5. **HWP fields** — HWPX `{{field}}` placeholder map. Legacy `hwpx_skill`
+   templates continue through `template_get_fields` / `template_fill_hwpx`.
+   Hub records with `source: hwp_cli_skill` keep the compatibility
+   `hwpx_template_key` field, but its value is one of the six released Korean
+   aliases. They resolve only through `hwp new --template`, then native slot
+   scan/fill and `hwp validate`; output is staged and validated before it is
+   published to `.maru/studio/filled/`.
 6. **Export** — wraps `export_plan` + the M4 dispatch pipeline (docx / hwpx / pdf
    with a sha256 manifest; see below).
 7. **Package** — applies the local body and freezes a version snapshot.
