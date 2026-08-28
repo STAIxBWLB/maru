@@ -37,7 +37,14 @@
   3. A full run of whatever subset the spike proves out completes with no human present; if the spike fails instead, exactly one local-only runner target exists and is wired into `release-preflight`.
   4. A separate IME-composition sub-spike shows whether synthetic key events can substitute for real OS-level IME input, or whether that surface also needs human attendance.
   5. The runner's CI-vs-local scope is recorded as a settled fact that Phase 8 and Phase 9 plan their own verification against, not an assumption carried forward.
-**Plans**: TBD
+**Plans**: 5 plans in 4 waves
+
+Plans:
+- [ ] 06-01-PLAN.md - Runner dependencies, fail-closed workspace isolation, and the CI-viability tracer (wave 1)
+- [ ] 06-02-PLAN.md - Real PTY: build-gated text mirror and canvas ink check (wave 2)
+- [ ] 06-03-PLAN.md - OS-owned input surfaces: IME sub-spike and the macOS menu-command path (wave 3)
+- [ ] 06-04-PLAN.md - Ship-isolation guard and the e2e-native TypeScript project (wave 3)
+- [ ] 06-05-PLAN.md - Recorded verdict, release-preflight gate, and CI placement (wave 4)
 
 ### Phase 7: Guardrails Before Churn
 **Goal**: The locks, watchers, and sanitizer boundary that this milestone's own later work will stress are hardened first, so those later phases inherit a safety net instead of a race to add one after an incident.
@@ -99,7 +106,7 @@ Phases execute in numeric order: 6 → 7 → 8 → 9 → 10 → 11
 
 | Phase | Plans Complete | Status | Completed |
 |-------|-----------------|--------|-----------|
-| 6. Native E2E Runner Foundation | 0/TBD | Not started | - |
+| 6. Native E2E Runner Foundation | 0/5 | Planned | - |
 | 7. Guardrails Before Churn | 0/TBD | Not started | - |
 | 8. Main-Thread Responsiveness | 0/TBD | Not started | - |
 | 9. Durability and Session Lifecycle | 0/TBD | Not started | - |

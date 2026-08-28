@@ -44,14 +44,24 @@ created: 2026-08-29
 
 | Task ID | Plan | Wave | Requirement | Threat Ref | Secure Behavior | Test Type | Automated Command | File Exists | Status |
 |---------|------|------|-------------|------------|-----------------|-----------|-------------------|-------------|--------|
-| TBD | TBD | TBD | TEST-01 | T-06-01 | Debug global and WebDriver plugin absent from release artifacts | static guard | `node scripts/check-native-e2e-isolation.mjs` | ❌ W0 | ⬜ pending |
-| TBD | TBD | TBD | TEST-01 | T-06-02 | Fixture workspace writes stay inside the per-run tempdir | unit (Rust) | `cargo test --offline -p maru fixture_workspace` | ❌ W0 | ⬜ pending |
-| TBD | TBD | TBD | TEST-01 | T-06-03 | Home/config override fails closed when the env var is absent under the gating feature | unit (Rust) | `cargo test --offline -p maru maru_home_dir_override` | ❌ W0 | ⬜ pending |
-| TBD | TBD | TBD | TEST-01 | - | Real PTY output asserted by text mirror + canvas ink check | native e2e | `make test-e2e-native -- specs/pty.spec.ts` | ❌ W0 | ⬜ pending |
-| TBD | TBD | TBD | TEST-01 | - | Synthetic composition on terminal textarea and rich editor | native e2e | `make test-e2e-native -- specs/ime.spec.ts` | ❌ W0 | ⬜ pending |
+| 06-01 T1 | 06-01 | 1 | TEST-01 | T-06-SC | Six `SUS` npm packages and one `[ASSUMED]` crate cleared by a human before install | blocking checkpoint | manual (blocking-human; `cargo add ... --dry-run` resolves the crate first) | n/a | ⬜ pending |
+| 06-01 T2 | 06-01 | 1 | TEST-01 | T-06-03 | Home/config override fails closed when the env var is absent under the gating feature | unit (Rust) | `cd src-tauri && cargo test --offline --features native-e2e paths::` | ❌ W0 | ⬜ pending |
+| 06-01 T2 | 06-01 | 1 | TEST-01 | T-06-02 | Fixture workspace writes stay inside the per-run mkdtemp root; both override values pass `require_absolute` | unit (Rust) + native e2e | `cd src-tauri && cargo test --offline --features native-e2e paths::` then `make test-e2e-native` | ❌ W0 | ⬜ pending |
+| 06-01 T2 | 06-01 | 1 | TEST-01 | - | D-13 surface 1: one WKWebView DOM assertion against the real app | native e2e | `make test-e2e-native` | ❌ W0 | ⬜ pending |
+| 06-01 T3 | 06-01 | 1 | TEST-01 | T-06-05 | Hosted-macOS session attempt classified by D-02, cap and failure class recorded | CI job + doc assertion | `gh workflow run native-e2e-spike.yml` then the `docs/native-e2e.md` node assertion in the plan | ❌ W0 | ⬜ pending |
+| 06-02 T1 | 06-02 | 2 | TEST-01 | T-06-01 | Terminal-text bridge present in a runner build, absent from a production build | unit (Vitest) + post-build assertion | `pnpm test -- nativeE2eBridge` then `pnpm build:frontend` + the dist assertion in the plan | ❌ W0 | ⬜ pending |
+| 06-02 T2 | 06-02 | 2 | TEST-01 | T-06-07 | Real PTY output asserted by text mirror + canvas ink check, on a shell-produced string | native e2e | `make test-e2e-native` (`e2e-native/specs/pty.spec.ts`) | ❌ W0 | ⬜ pending |
+| 06-03 T1 | 06-03 | 3 | TEST-01 | T-06-08 | Synthetic composition judged on terminal textarea and rich editor; unreachable cases pending-with-reason | native e2e + doc assertion | `make test-e2e-native` (`e2e-native/specs/ime.spec.ts`) | ❌ W0 | ⬜ pending |
+| 06-03 T2 | 06-03 | 3 | TEST-01 | T-06-01 | Menu command ids driven through the app's own handler; every id declared in `app_menu.rs` | native e2e + source cross-check | `make test-e2e-native` (`e2e-native/specs/menu.spec.ts`) + the id cross-check in the plan | ❌ W0 | ⬜ pending |
+| 06-04 T1 | 06-04 | 3 | TEST-01 | - | `e2e-native/` inside the typecheck and lint gates, proven by a deliberate break in each | typecheck + lint | `pnpm typecheck && pnpm lint` | ❌ W0 | ⬜ pending |
+| 06-04 T2 | 06-04 | 3 | TEST-01 | T-06-01 | Debug bridge and WebDriver plugin absent from release artifacts, proven fail-first | static guard | `pnpm build:frontend && pnpm check:native-e2e-isolation` (red case: `pnpm build:frontend:native-e2e && ! pnpm check:native-e2e-isolation`) | ❌ W0 | ⬜ pending |
+| 06-05 T1 | 06-05 | 4 | TEST-01 | T-06-11 | CI placement matches the verdict; PR job compiles only; `release-preflight` blocks | workflow + Makefile assertion | the three node assertions in the plan, plus `make release-preflight` | ❌ W0 | ⬜ pending |
+| 06-05 T2 | 06-05 | 4 | TEST-01 | T-06-04 | Verdict recorded in both `docs/native-e2e.md` and `.planning/PROJECT.md`, no overstatement | doc assertion | the three node assertions in the plan | ❌ W0 | ⬜ pending |
+| 06-05 T3 | 06-05 | 4 | TEST-01 | T-06-04, T-06-08 | D-01's three conditions answered individually with named evidence; per-item human checklist observations | blocking checkpoint | manual (blocking; `make release-preflight` exit code recorded) | n/a | ⬜ pending |
 
-*Task IDs, plan numbers, and waves are assigned by the planner; rows above are the
-requirement-level obligations those tasks must satisfy.*
+*Task IDs, plan numbers, and waves assigned by the planner on 2026-08-29. Rows are the
+requirement-level obligations those tasks must satisfy. Threat IDs refer to each plan's own
+`<threat_model>` register.*
 
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
 
