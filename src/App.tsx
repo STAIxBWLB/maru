@@ -260,7 +260,9 @@ import { EDITOR_FIND_OPEN_EVENT } from "./lib/editorFindEvents";
 import {
   buildDocumentIndex,
   countDocumentFilter,
+  countEntriesBySubmodule,
   documentFilterDefaultDocType,
+  filterEntriesBySubmoduleScope,
   getRecentEntries,
   RECENT_PATHS_LIMIT,
   type BuiltInDocumentView,
@@ -552,6 +554,9 @@ import {
 const LAST_OPEN_KEY = "maru:lastOpenedNote:v1";
 const OPEN_TABS_KEY = "maru:openTabs:v1";
 const RECENT_KEY = "maru:recent:v1";
+/** Stable identity for a workspace with no submodules (or none fetched yet),
+ *  so the scoped-entries memo does not rebuild on every render. */
+const EMPTY_SUBMODULE_PATHS: string[] = [];
 const MIN_DOCUMENTS_PANE_WIDTH = 260;
 const MAX_DOCUMENTS_PANE_WIDTH = 560;
 const MIN_OUTLINE_PANE_WIDTH = 240;
@@ -1269,7 +1274,30 @@ export function MainApp() {
     [maruSettings.ui.fileTreeStateInitialized, explorerVisibility],
   );
   const collapsedFileFolders = defaultCollapsedFileFolders ?? savedCollapsedFileFolders;
-  const documentIndex = useMemo<DocumentIndex>(() => buildDocumentIndex(entries), [entries]);
+  const submodulePaths = explorerWorkspaceState.submodulePaths ?? EMPTY_SUBMODULE_PATHS;
+  const excludedSubmodules = useMemo(
+    () =>
+      (explorerWorkspacePath
+        ? maruSettings.ui.documentSubmoduleScope[explorerWorkspacePath]
+        : null) ?? EMPTY_SUBMODULE_PATHS,
+    [explorerWorkspacePath, maruSettings.ui.documentSubmoduleScope],
+  );
+  // Scoping the entries here rather than at each read site keeps the list,
+  // tree, sidebar counts, recents and the command palette on one scope. Raw
+  // `entries` stays unscoped, so a wikilink into a hidden submodule still
+  // resolves.
+  const scopedEntries = useMemo(
+    () => filterEntriesBySubmoduleScope(entries, submodulePaths, excludedSubmodules),
+    [entries, submodulePaths, excludedSubmodules],
+  );
+  const documentIndex = useMemo<DocumentIndex>(
+    () => buildDocumentIndex(scopedEntries),
+    [scopedEntries],
+  );
+  const submoduleCounts = useMemo(
+    () => countEntriesBySubmodule(entries, submodulePaths),
+    [entries, submodulePaths],
+  );
   const builtInDocumentViewCounts = useMemo<Record<BuiltInDocumentView, number>>(
     () => ({
       inbox: countDocumentFilter(documentIndex, { kind: "view", view: "inbox" }),
@@ -2509,6 +2537,23 @@ export function MainApp() {
     [explorerVisibility, startExplorerTransition],
   );
 
+  /** Persists the Documents-pane submodule scope for the explorer workspace.
+   *  Stores the excluded ids only, and drops the key entirely once nothing is
+   *  excluded so the map does not accumulate entries for one-off workspaces. */
+  const setDocumentSubmoduleScope = useCallback(
+    (excluded: string[]) => {
+      if (!explorerWorkspacePath) return;
+      const workspacePath = explorerWorkspacePath;
+      updateSettings((current) => {
+        const documentSubmoduleScope = { ...current.ui.documentSubmoduleScope };
+        if (excluded.length === 0) delete documentSubmoduleScope[workspacePath];
+        else documentSubmoduleScope[workspacePath] = excluded;
+        return { ...current, ui: { ...current.ui, documentSubmoduleScope } };
+      });
+    },
+    [explorerWorkspacePath, updateSettings],
+  );
+
   const updateDocumentViews = useCallback(
     (documentViews: DocumentViewDefinition[]) => {
       updateSettings((current) => ({
@@ -3521,6 +3566,9 @@ export function MainApp() {
         loading: true,
         refreshing: false,
         startupIoReady: false,
+        // Re-reads the submodule list on boot, workspace switch and Refresh;
+        // every other rescan hits the fetch-once latch and spawns no git.
+        submodulePaths: null,
       });
       setError(null);
       const storedTabs = readStoredTabsForWorkspace(path);
@@ -6267,6 +6315,7 @@ export function MainApp() {
         }),
         setDocumentFilter: setExplorerDocumentFilter,
         updateDocumentViews,
+        setDocumentSubmoduleScope,
         openNewDocument: openNewDocumentDialog,
         openCommandPalette,
         setExplorerExpandedFolders: setCollapsedFileFolders,
@@ -6298,6 +6347,7 @@ export function MainApp() {
       revealTargetInFinder,
       selectEntry,
       setCollapsedFileFolders,
+      setDocumentSubmoduleScope,
       setExplorerDocumentFilter,
       setPersistedRightPaneTab,
       updateDocumentViews,
@@ -6401,6 +6451,9 @@ export function MainApp() {
       documentViews: maruSettings.ui.documentViews,
       viewCounts: builtInDocumentViewCounts,
       customViewCounts: customDocumentViewCounts,
+      submodulePaths,
+      submoduleCounts,
+      excludedSubmodules,
       recentEntries,
       canCreateDocument: activeWorkspaceCanCreate,
     }),
@@ -6415,9 +6468,12 @@ export function MainApp() {
       document?.relPath,
       documentIndex.contentCount,
       documentIndex.typeCounts,
+      excludedSubmodules,
       maruSettings.ui.documentViews,
       recentEntries,
       rightPaneTab,
+      submoduleCounts,
+      submodulePaths,
       visibleAppMode,
     ],
   );

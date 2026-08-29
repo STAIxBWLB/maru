@@ -3,16 +3,21 @@ import {
   Archive,
   Clock,
   FileText,
+  FolderGit2,
   Inbox,
   Layers,
   Pencil,
   Plus,
+  Square,
+  SquareCheck,
+  SquareMinus,
   Trash2,
 } from "lucide-react";
 import { memo, useMemo, useState, type CSSProperties } from "react";
 import {
   documentFilterDefaultDocType,
   documentFilterKey,
+  WORKSPACE_ROOT_SCOPE_ID,
   type BuiltInDocumentView,
   type DocumentFilter,
 } from "../lib/documentIndex";
@@ -28,6 +33,10 @@ interface SidebarProps {
   documentViews: DocumentViewDefinition[];
   viewCounts: Record<BuiltInDocumentView, number>;
   customViewCounts: Record<string, number>;
+  submodulePaths: string[];
+  submoduleCounts: Record<string, number>;
+  excludedSubmodules: string[];
+  onSubmoduleScopeChange: (excluded: string[]) => void;
   recentEntries: VaultEntry[];
   selectedPath: string | null;
   documentFilter: DocumentFilter;
@@ -45,6 +54,10 @@ export const Sidebar = memo(function Sidebar({
   documentViews,
   viewCounts,
   customViewCounts,
+  submodulePaths,
+  submoduleCounts,
+  excludedSubmodules,
+  onSubmoduleScopeChange,
   recentEntries,
   selectedPath,
   documentFilter,
@@ -82,6 +95,33 @@ export const Sidebar = memo(function Sidebar({
       ],
     [],
   );
+
+  const excludedSubmoduleSet = useMemo(
+    () => new Set(excludedSubmodules),
+    [excludedSubmodules],
+  );
+  // Workspace root first, then git's own sorted order. Every write rebuilds the
+  // excluded list from this live array, which also prunes ids for submodules
+  // that no longer exist.
+  const scopeIds = useMemo(
+    () => [WORKSPACE_ROOT_SCOPE_ID, ...submodulePaths],
+    [submodulePaths],
+  );
+  const scopeLabel = (id: string) =>
+    id === WORKSPACE_ROOT_SCOPE_ID ? t("sidebar.submodules.root") : id;
+  const setScope = (isVisible: (id: string) => boolean) => {
+    onSubmoduleScopeChange(scopeIds.filter((id) => !isVisible(id)));
+  };
+  // Tri-state header checkbox over the submodule rows only; the workspace root
+  // row stays independent. Checked = all submodules on, unchecked = root only,
+  // mixed = partial. Clicking checks everything unless everything is already
+  // on, in which case it drops back to root only -- so the document list can
+  // never end up empty.
+  const visibleSubmoduleCount = submodulePaths.filter(
+    (id) => !excludedSubmoduleSet.has(id),
+  ).length;
+  const allSubmodulesOn = visibleSubmoduleCount === submodulePaths.length;
+  const noSubmodulesOn = visibleSubmoduleCount === 0;
 
   const openNewView = () => {
     setEditingView(null);
@@ -252,6 +292,72 @@ export const Sidebar = memo(function Sidebar({
           })}
         </div>
       </div>
+
+      {submodulePaths.length > 0 ? (
+        <div className="sidebar-section">
+          <div className="sidebar-section-heading">
+            <h3 title={t("sidebar.submodules")}>
+              <FolderGit2 size={11} className="sidebar-section-title-icon" />
+              {t("sidebar.submodules")}
+            </h3>
+            <button
+              type="button"
+              role="checkbox"
+              aria-checked={allSubmodulesOn ? "true" : noSubmodulesOn ? "false" : "mixed"}
+              className="sidebar-section-tool"
+              onClick={() =>
+                allSubmodulesOn
+                  ? setScope((id) => id === WORKSPACE_ROOT_SCOPE_ID)
+                  : setScope(() => true)
+              }
+              title={t(
+                allSubmodulesOn
+                  ? "sidebar.submodules.rootOnly"
+                  : "sidebar.submodules.selectAll",
+              )}
+              aria-label={t(
+                allSubmodulesOn
+                  ? "sidebar.submodules.rootOnly"
+                  : "sidebar.submodules.selectAll",
+              )}
+            >
+              {allSubmodulesOn ? (
+                <SquareCheck size={12} />
+              ) : noSubmodulesOn ? (
+                <Square size={12} />
+              ) : (
+                <SquareMinus size={12} />
+              )}
+            </button>
+          </div>
+          <div className="type-filters">
+            {scopeIds.map((id) => {
+              const included = !excludedSubmoduleSet.has(id);
+              return (
+                <button
+                  key={id}
+                  type="button"
+                  role="checkbox"
+                  aria-checked={included}
+                  className={included ? "type-filter active" : "type-filter"}
+                  onClick={() =>
+                    setScope((scopeId) =>
+                      scopeId === id ? !included : !excludedSubmoduleSet.has(scopeId),
+                    )
+                  }
+                  title={scopeLabel(id)}
+                >
+                  <span className="sidebar-inline-icon">
+                    {included ? <SquareCheck size={12} /> : <Square size={12} />}
+                  </span>
+                  <span>{scopeLabel(id)}</span>
+                  <span className="count">{submoduleCounts[id] ?? 0}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      ) : null}
 
       <div className="sidebar-section">
         <h3 title={t("sidebar.types")}>

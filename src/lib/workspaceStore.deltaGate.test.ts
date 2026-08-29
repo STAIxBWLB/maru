@@ -7,6 +7,7 @@ const scanVaultPaths = vi.fn(async (): Promise<VaultEntry[]> => []);
 
 vi.mock("./api", () => ({
   isTauri: () => false,
+  listWorkspaceSubmodules: async (): Promise<string[]> => [],
   scanVault: (...args: unknown[]) => scanVault(...(args as [])),
   scanVaultPaths: (...args: unknown[]) => scanVaultPaths(...(args as [])),
   startVaultWatcher: async () => undefined,

@@ -54,6 +54,11 @@ export interface OutlineSidebarSlice {
   documentViews: DocumentViewDefinition[];
   viewCounts: Record<BuiltInDocumentView, number>;
   customViewCounts: Record<string, number>;
+  /** Documents-pane submodule scope: the workspace's submodule paths, the
+   *  per-scope document counts, and the currently excluded scope ids. */
+  submodulePaths: string[];
+  submoduleCounts: Record<string, number>;
+  excludedSubmodules: string[];
   recentEntries: VaultEntry[];
   canCreateDocument: boolean;
 }
@@ -107,6 +112,9 @@ const EMPTY_SIDEBAR_SLICE: OutlineSidebarSlice = {
   documentViews: [],
   viewCounts: { inbox: 0, drafts: 0, archive: 0, recentlyUpdated: 0 },
   customViewCounts: {},
+  submodulePaths: [],
+  submoduleCounts: {},
+  excludedSubmodules: [],
   recentEntries: [],
   canCreateDocument: false,
 };

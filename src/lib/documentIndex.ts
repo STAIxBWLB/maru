@@ -190,6 +190,59 @@ export function getCommandPaletteDocs(
     : index.entries.slice(0, limit);
 }
 
+/** Scope id for documents outside every submodule. "." is never a git
+ *  $displaypath, so the workspace root shares one exclusion list with them. */
+export const WORKSPACE_ROOT_SCOPE_ID = ".";
+
+/** Owning submodule of a workspace-relative path, or WORKSPACE_ROOT_SCOPE_ID
+ *  when it sits outside every submodule. `git submodule foreach --recursive`
+ *  reports a nested submodule as both "a" and "a/b", so the longest prefix
+ *  wins; the boundary check keeps "deps/childish/x.md" out of "deps/child".
+ *  VaultEntry.relPath carries native separators (backslashes on Windows) while
+ *  $displaypath is always slash-delimited, so relPath is normalized first. */
+export function submoduleScopeId(relPath: string, submodulePaths: readonly string[]): string {
+  const normalized = relPath.replace(/\\/g, "/");
+  let owner: string | null = null;
+  for (const submodule of submodulePaths) {
+    if (!normalized.startsWith(submodule)) continue;
+    if (normalized.length > submodule.length && normalized[submodule.length] !== "/") continue;
+    if (owner === null || submodule.length > owner.length) owner = submodule;
+  }
+  return owner ?? WORKSPACE_ROOT_SCOPE_ID;
+}
+
+/** Documents-pane submodule scope. Returns the input array untouched on the
+ *  default path, and when the workspace has no submodules at all -- the latter
+ *  guard is what stops a stale ["."] exclusion from hiding everything after the
+ *  last submodule is removed. */
+export function filterEntriesBySubmoduleScope(
+  entries: VaultEntry[],
+  submodulePaths: readonly string[],
+  excluded: readonly string[],
+): VaultEntry[] {
+  if (excluded.length === 0 || submodulePaths.length === 0) return entries;
+  const hidden = new Set(excluded);
+  return entries.filter((entry) => !hidden.has(submoduleScopeId(entry.relPath, submodulePaths)));
+}
+
+/** Per-scope counts for the sidebar chips, over the UNSCOPED entries so a
+ *  hidden submodule still advertises what it holds. Counts content documents
+ *  only, matching the "All" chip.
+ *  ponytail: O(entries x submodules) prefix scan, fine for a few thousand
+ *  entries against ~20 submodules; precompute per-entry scope ids if it bites. */
+export function countEntriesBySubmodule(
+  entries: readonly VaultEntry[],
+  submodulePaths: readonly string[],
+): Record<string, number> {
+  const counts: Record<string, number> = { [WORKSPACE_ROOT_SCOPE_ID]: 0 };
+  for (const submodule of submodulePaths) counts[submodule] = 0;
+  for (const entry of entries) {
+    if (!isContentEntry(entry)) continue;
+    counts[submoduleScopeId(entry.relPath, submodulePaths)] += 1;
+  }
+  return counts;
+}
+
 function matchesDocumentFilter(
   record: IndexedDocument,
   filter: DocumentFilter,

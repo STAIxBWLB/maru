@@ -324,6 +324,14 @@ export async function scanVaultPaths(
   });
 }
 
+/** Git submodule display paths under a workspace root, relative to it. Feeds
+ *  the Documents pane submodule scope filter. Web/e2e mode has no git, which
+ *  reads as "no submodules" and hides the scope section. */
+export async function listWorkspaceSubmodules(workspacePath: string): Promise<string[]> {
+  if (!isTauri()) return [];
+  return invoke<string[]>("list_workspace_submodules", { workspacePath });
+}
+
 export async function startVaultWatcher(workspacePath: string): Promise<void> {
   if (!isTauri()) return;
   await invoke("start_vault_watcher", { workspacePath });
