@@ -8,6 +8,21 @@ because releases cut frequently during active development. Versions before
 Dates are the release-tag dates. Only `feat`/`fix`-level changes are listed;
 `chore(release)` version bumps and merge commits are omitted.
 
+## v0.6.0 - 2026-08-30 - Native Proof
+
+- **A native end-to-end runner now proves the real app instead of a mock
+  (#293, #294, #296).** A build-gated WebDriverIO runner launches the actual
+  Tauri app on macOS, with dual PTY assertions against a real shell, living
+  specs for the IME and menu-command surfaces, and a terminal text-mirror
+  bridge for reading rendered output.
+- **Native e2e code is structurally kept out of production bundles (#296).**
+  An artifact-level ship-isolation guard scans the built frontend, and the
+  e2e-native tree is registered in the `tsc -b` and ESLint gates.
+- **The runner is gated in CI without running the suite per PR (#294, #296).**
+  A hosted-macOS spike settled the ci-viable verdict with a full-suite run,
+  and a blocking compile check keeps the native-e2e feature building on every
+  full CI run.
+
 ## v0.5.0 - 2026-08-28 - A Stronger Foundation
 
 - **The v1.0 Structural Debt Paydown milestone is complete.** Five phases and

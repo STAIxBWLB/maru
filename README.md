@@ -4,7 +4,7 @@ Maru is a local-first desktop workspace for Korean knowledge and document
 operations. It combines a React 19 and TypeScript interface with a Tauri 2 Rust
 core, and treats the filesystem as the source of truth.
 
-The current product release is **v0.5.0, A Stronger Foundation**. Releases
+The current product release is **v0.6.0, Native Proof**. Releases
 before v0.3.0 shipped under the name Anchor; v0.3.0 completed the application
 identifier and on-disk migration to Maru.
 
@@ -12,7 +12,7 @@ identifier and on-disk migration to Maru.
 
 | Area | State | Evidence |
 |------|-------|----------|
-| Product release | v0.5.0 | Signed desktop bundles and standalone CLI for macOS, Windows, and Linux |
+| Product release | v0.6.0 | Signed desktop bundles and standalone CLI for macOS, Windows, and Linux |
 | Planning milestone | v1.0 Structural Debt Paydown complete | 5 phases, 32 plans, 24/24 requirements |
 | Application shell | Complete | 18 lazy modes; `MainApp` held to 15 `useState` and 24 `useEffect` calls |
 | Verification | Passing | Typecheck, ESLint, unit tests, Rust fmt/clippy, E2E, build, and bundle budgets |
@@ -251,7 +251,7 @@ Scratchpad structure:
 Only `temp/` is disposable. Ideation, memos, and drafts are durable and may be
 Git-tracked. Cleanup is explicit and moves selected files to system Trash.
 
-Public workspace configuration is registry-only in v0.5.0. Provider metadata
+Public workspace configuration is registry-only in v0.6.0. Provider metadata
 is non-secret, manually entered roles map to coarse capabilities, and filesystem
 writability is probed again before granting direct writes. OAuth and live cloud
 role checks are not implied by this metadata.
@@ -476,7 +476,7 @@ Start the next cycle with `$gsd-new-milestone`.
 
 ## Scope Boundaries
 
-Maru v0.5.0 intentionally does not include:
+Maru v0.6.0 intentionally does not include:
 
 - semantic or embedding search
 - a Maru account or default telemetry
