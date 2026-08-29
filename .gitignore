@@ -69,3 +69,6 @@ skills/**/.pytest_cache/
 
 # GSD run-scoped runtime state (isolation sentinel)
 .gsd/
+
+# GSD research tooling cache (not an artifact)
+.planning/research/.cache/

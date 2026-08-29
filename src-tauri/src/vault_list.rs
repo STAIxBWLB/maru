@@ -185,6 +185,11 @@ fn app_config_dir() -> Result<PathBuf, String> {
     if let Some(dir) = test_config_dir_override() {
         return Ok(dir);
     }
+    if let Some(dir) =
+        crate::paths::native_e2e_dir_override(crate::paths::NATIVE_E2E_CONFIG_DIR_VAR)?
+    {
+        return Ok(dir);
+    }
     dirs::config_dir().ok_or_else(|| "Could not determine config directory".to_string())
 }
 

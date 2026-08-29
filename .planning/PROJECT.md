@@ -17,8 +17,11 @@ real files the user owns, and nothing is lost if Maru is uninstalled.
 
 Milestone v1.0 Structural Debt Paydown shipped on 2026-08-28. All five phases,
 32 plans, and 24 v1 requirements are complete. The milestone archive and audit
-live under `.planning/milestones/`; no next milestone is active. Product release
-v0.5.0 commemorates the milestone and includes the post-close ERR-06 hardening.
+live under `.planning/milestones/`. Product release v0.5.0 commemorates the
+milestone and includes the post-close ERR-06 hardening.
+
+Milestone v1.1 Felt Quality and Native Proof is active as of 2026-08-28 and
+continues phase numbering at Phase 6.
 
 ## Requirements
 
@@ -72,9 +75,11 @@ v0.5.0 commemorates the milestone and includes the post-close ERR-06 hardening.
 
 ### Active
 
-Milestone 1 structural debt paydown is complete. No v1 requirement remains
-active. Deferred candidates remain in the archived v1.0 requirements until a
-new milestone explicitly promotes them.
+Milestone v1.1 promotes the deferred reliability, performance, security, and
+native-verification backlog into committed requirements. REQ-IDs are assigned in
+`.planning/REQUIREMENTS.md` and the scope is summarised under Current Milestone
+below. Candidates deliberately left unpromoted - HWPE-01..03 registration,
+Semantica S1-S4, HUB-01, and ERR-05 - stay in the archived v1.0 requirements.
 
 ### Out of Scope
 
@@ -88,25 +93,58 @@ new milestone explicitly promotes them.
   checks are individually sound; promoting the canonical helper is the goal
 - **Changing `.maruignore` defaults** (`src-tauri/src/maru_dir.rs:79`) - that is a
   user-facing file format, not a scanner constant
-- **Any visible UI change during decomposition** - a refactor that alters output
-  cannot be verified against the existing e2e suite
+- **New user-facing product features** - v1.1 changes how the existing surfaces
+  behave under load, not what they do. Note the difference from v1.0: this
+  milestone deliberately alters observable behavior (a pane that froze must stop
+  freezing), so "the e2e suite still passes" is necessary but no longer
+  sufficient evidence
 - **A full lint style campaign** (formatting rules, import ordering, `console`
   cleanup) - only the correctness rules that guard the decomposition
-- **Concurrency, security, and perf items from CONCERNS.md** (sync-command main
-  thread blocking, lock poisoning recovery, CSP `script-src blob:` audit, SIGHUP
-  session escalation, native Tauri E2E runner) - real, tracked as v2 candidates
-  in the archived milestone requirements, deliberately not competing with the
-  structural work
+- **ERR-05's closed-enum contract** - the typed IPC guard checks declarations
+  but not emission sites. Real, but it is a developer-facing correctness gap
+  rather than something a user feels; deferred again rather than diluting a
+  felt-quality milestone
 - **Hub graph-metadata sync** - the one explicit deferral in the ingested doc
   set (`docs/graph.md`); held until a Hub consumer exists
 
-## Next Milestone Goals
+## Current Milestone: v1.1 Felt Quality and Native Proof
 
-No next milestone scope has been selected. Candidate inputs for
-`$gsd-new-milestone` include the deferred v2 reliability/security backlog and
-the accepted closeout evidence debt: GATE-04 trace reproduction, Phase 1-3
-Nyquist reconciliation, and a Phase 2 security report. These remain candidates,
-not committed requirements.
+**Goal:** Maru stops freezing, stops losing terminal sessions and unsaved text,
+and proves it in the runtime users actually run rather than through a human
+driving the app by hand.
+
+**Target features:**
+
+- Heavy-IO IPC commands leave the main thread - the 37 sync commands that reach
+  `WalkDir`, `read_dir`, a subprocess, or the network within their first 80
+  lines move to `async fn` or to the invocation-id + event-streaming pattern
+  (PERF-01)
+- `skills_sync_source` stops holding `REGISTRY_LOCK` across a network round-trip,
+  so a slow remote no longer freezes both the UI thread and every other skills
+  operation (PERF-02)
+- The six process-global locks recover from poisoning instead of bricking their
+  feature until app restart (PERF-03)
+- Recursive filesystem watchers prune through the shared `GENERATED_DIRS` list
+  (PERF-04)
+- A PTY child that traps SIGHUP can still be killed, via process-group
+  escalation (REL-01)
+- Scratchpad flushes its debounced save on unmount instead of only clearing the
+  timer, closing the 700 ms window where localStorage is the sole durable path
+- CSP drops `script-src blob:` if the Vite build no longer requires it (SEC-01),
+  and `verify` asserts every `dangerouslySetInnerHTML` value traces to a
+  DOMPurify-backed helper (SEC-02)
+- A native E2E runner exercises WKWebView, a real PTY, IME input, and the macOS
+  menu - the four surfaces CI has never touched (TEST-01)
+- `src/styles.css` splits per mode into the lazy chunks those modes already have,
+  restoring the CSS budget headroom spent since v0.4.46
+- Coverage is measured rather than inferred from file presence, as a non-gating
+  report (TEST-02)
+- The v1.0 closeout evidence debt is settled: GATE-04 trace reproduction, Phase
+  01-03 Nyquist reconciliation, and the Phase 02 security report
+
+**Out of scope:** HWPE-01..03 requirement registration, Semantica S1-S4, HUB-01
+Hub graph-metadata sync, and ERR-05's closed-enum contract. All four remain
+candidates for the milestone after this one.
 
 ## Context
 
@@ -152,9 +190,11 @@ invariants for this milestone. There are no ADRs in the ingested set, so none of
 them is decision-locked - **any of them is overridable by a future ADR**. The
 ones this milestone can actually break are listed here.
 
-- **Behavior**: The refactor must be output-identical - `make verify` (typecheck,
-  unit, e2e, startup/bundle budget gates) is the developer-facing success metric,
-  and it must stay green throughout
+- **Behavior**: `make verify` must stay green throughout, but for v1.1 it is a
+  floor rather than the success metric. The milestone's own changes are
+  observable (work moves off the main thread, a trapped-SIGHUP session dies, a
+  flush lands before unmount), so each one needs evidence that the behavior
+  changed in the intended direction - not only that nothing else did
 - **Frontend architecture**: New shared state is a module store read via
   `useSyncExternalStore`, never a new prop threaded through `MainApp` and never a
   Context-provider tree - matches the existing precedent
@@ -205,6 +245,26 @@ ones this milestone can actually break are listed here.
 | Promote `ensure_within`, do not retrofit all ~20 callers | Existing checks are individually sound; the problem is that a new author has no canonical example | ✓ Phase 2 — promoted to `crate::paths`, doc + tests as the example, zero retrofits |
 | Phases 4-5 get no `UI hint` annotation | They refactor UI state plumbing with pixel-identical output as the success criterion; a UI design spec would be the wrong downstream suggestion | ✓ Completed with behavior-preserving UAT and no visible redesign |
 | 64 SPEC constraints recorded as invariants, not decisions | 0 ADRs in the set - nothing is decision-locked, so a future ADR can override any of them | ✓ Preserved as the milestone verification baseline |
+| Milestone v1.1 = felt quality, synthesised from the carried-over backlog | The deferred items are not equal in weight: a 40s main-thread block measured on a 64k-file workspace is a product defect, while Nyquist metadata drift is a bookkeeping one. Grouping them by what a user experiences gives the milestone one goal instead of nine chores | Pending |
+| The native E2E runner lands early, not as closeout | v1.1's success condition is that observable behavior changed for the better; the mocked-IPC Chromium suite cannot see that, and v1.0's retrospective already ruled that a human approval marker is not reusable evidence | Pending |
+| Features stay out for a second consecutive milestone | HWPE-01..03, Semantica S1-S4, and HUB-01 all add surface area to panes whose responsiveness this milestone is trying to fix; shipping them first would move the target | Pending |
+
+## Evolution
+
+This document evolves at phase transitions and milestone boundaries.
+
+**After each phase transition** (via `/gsd-transition`):
+1. Requirements invalidated? → Move to Out of Scope with reason
+2. Requirements validated? → Move to Validated with phase reference
+3. New requirements emerged? → Add to Active
+4. Decisions to log? → Add to Key Decisions
+5. "What This Is" still accurate? → Update if drifted
+
+**After each milestone** (via `/gsd-complete-milestone`):
+1. Full review of all sections
+2. Core Value check — still the right priority?
+3. Audit Out of Scope — reasons still valid?
+4. Update Context with current state
 
 ---
-*Last updated: 2026-08-28 after the v0.5.0 post-close release*
+*Last updated: 2026-08-28 at the start of milestone v1.1*
