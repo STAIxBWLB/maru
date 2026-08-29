@@ -2,11 +2,11 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Felt Quality and Native Proof
-current_phase: 6
-current_phase_name: Phase 1 of 6 in milestone v1.1
+current_phase: 06
+current_phase_name: native-e2e-runner-foundation
 status: executing
 stopped_at: Phase 6 context gathered
-last_updated: "2026-08-28T23:03:53.662Z"
+last_updated: "2026-08-28T23:21:29.565Z"
 last_activity: 2026-08-29
 last_activity_desc: "ROADMAP.md created for v1.1: 6 phases (6-11), 15/15 requirements mapped"
 progress:
@@ -24,14 +24,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-08-28)
 
 **Core value:** The filesystem stays the source of truth, everything Maru shows is derived from real files the user owns, and nothing is lost if Maru is uninstalled.
-**Current focus:** Phase 6: Native E2E Runner Foundation (v1.1)
+**Current focus:** Phase 06 — native-e2e-runner-foundation
 
 ## Current Position
 
-Phase: 6 of 11 overall (Phase 1 of 6 in milestone v1.1) - Native E2E Runner Foundation
-Plan: - (not yet planned)
-Status: Ready to execute
-Last activity: 2026-08-29 - ROADMAP.md created for v1.1: 6 phases (6-11), 15/15 requirements mapped
+Phase: 06 (native-e2e-runner-foundation) — EXECUTING
+Plan: 1 of 5
+Status: Executing Phase 06
+Last activity: 2026-08-29 — Phase 06 execution started
 
 Progress: [..........] 0%
 
