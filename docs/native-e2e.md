@@ -1,8 +1,121 @@
 # Native e2e runner
 
 Runbook and evidence log for the native WebDriver e2e runner (`e2e-native/`,
-`make test-e2e-native`). This file currently carries only the spike log;
-plan 06-05 completes the rest of the document.
+`make test-e2e-native`).
+
+The native runner drives the real Maru application — the real WKWebView DOM, a
+real PTY, and IME input — against the real Rust backend. It is macOS-only and
+lives in `e2e-native/`, separate from the Playwright suite in `e2e/`. Nothing
+it adds reaches a shipped build: every runner-only affordance sits behind the
+default-off `native-e2e` cargo feature and the `VITE_NATIVE_E2E` build flag,
+and `scripts/check-native-e2e-isolation.mjs` proves against the produced
+artifacts (the JS bundle inside `make verify`, the built binary inside
+`make release-checks`) that neither leaks into a production build.
+
+## How to run
+
+```bash
+make test-e2e-native
+```
+
+The target builds the frontend with `VITE_NATIVE_E2E=1`
+(`pnpm build:frontend:native-e2e`), forces the maru crate to re-embed that
+frontend (cargo does not track `dist/` as a build input, so the target touches
+`src-tauri/build.rs` between the two builds), builds the app with
+`--features native-e2e`, then runs WebdriverIO (`e2e-native/wdio.conf.ts`)
+against it. Each run seeds a fresh temporary fixture workspace and points the
+app at it through `MARU_NATIVE_E2E_HOME` / `MARU_NATIVE_E2E_CONFIG_DIR`; the
+developer's real workspace is never opened (D-09), and the app's outbound
+providers stay unconfigured for the whole run (D-11).
+
+The `dist/` the run leaves behind is deliberately **not shippable** — it
+carries the debug bridge. Re-run `pnpm build:frontend` before inspecting a
+production artifact; the ship-isolation guard inside `make verify` fails the
+build on a runner bundle.
+
+To run a single spec file, use
+`pnpm exec wdio run e2e-native/wdio.conf.ts --spec e2e-native/specs/pty.spec.ts`.
+Passing `-- --spec …` through `pnpm test:e2e:native` does **not** work — pnpm
+forwards a literal `--` and wdio silently runs the whole suite.
+
+**Which target runs which suite:** `make test-e2e` is the Playwright suite —
+Chromium against the Vite dev server with mocked IPC. `make test-e2e-native`
+is WebdriverIO against the real backend in the real app. They share no runner
+and no premise, so a green result from one says nothing about the other.
+
+## CI placement
+
+Verdict: **ci-viable** (per-condition evidence in `## Spike log` below).
+Consequences:
+
+- **Every pull request:** the `native-e2e-compile` job in
+  `.github/workflows/ci.yml` runs on `macos-14` — install, `pnpm typecheck`,
+  `pnpm lint`, and `cargo check --locked --features native-e2e`. It compiles
+  and typechecks the runner so it cannot rot between releases; it never
+  executes the suite (D-03).
+- **Pushes to `main` and release tags (`v*`):** the `native-e2e-suite` job in
+  `.github/workflows/native-e2e.yml` runs the full suite unattended and
+  uploads failure evidence (run log plus a screencapture of the runner's
+  screen). Per-PR execution was rejected on macOS runner cost and
+  early-flakiness grounds; release-tag-only was rejected because it finds
+  regressions at the worst possible moment (D-16).
+- **A human must run:** `make release-preflight`, which blocks on
+  `make test-e2e-native` on every machine regardless of the verdict (D-03),
+  and the checklist below.
+
+## Human-attended checklist
+
+D-08's split, stated plainly: the synthetic-composition specs inside the
+runner guard the app's own composition-handling logic at the native level,
+and this checklist covers the OS input method itself — the half no synthetic
+event stream can exercise (per-surface evidence in `## IME sub-spike`). Work
+every item and record a per-item observation, not a single overall yes.
+
+**macOS menu bar.** Clicking a menu item is outside the webview and needs an
+Accessibility grant no unattended runner can give itself; the command path the
+menu emits into is covered by `e2e-native/specs/menu.spec.ts` (see
+`## macOS menu bar`).
+
+1. Open the View menu, click **Documents**. Expected: the document list
+   opens.
+2. Open the Terminal menu, click **New Shell**. Expected: a terminal pane
+   opens with a live shell.
+3. With the terminal focused, click **Split Terminal** (or press ⌘D).
+   Expected: a second terminal pane appears to the right of the first.
+
+**Korean IME, two-set (두벌식) input source.** On both surfaces the sub-spike
+showed WebDriver key input never composes, so real OS-IME behavior is checked
+by a human:
+
+4. In a native terminal, switch to the macOS Korean 2-set input source and
+   type `한글` (six raw jamo: ㅎㅏㄴㄱㅡㄹ). Expected: the jamo compose into
+   syllables as you type, and the committed word appears **exactly once** —
+   no trailing duplicate syllable after composition ends (the
+   `isTrailingCompositionDuplicate` window).
+5. Still in the terminal, type one syllable and press Enter mid-composition.
+   Expected: the in-progress syllable commits and no command executes; a
+   second Enter sends the line. Then start a composition and click elsewhere
+   to abandon it. Expected: no residue or doubled text on the screen when
+   focus returns.
+6. In a rich editor document (open a document, switch to Rich mode), type
+   `한글` with the same input source. Expected: the composed word lands in
+   the document, and undo during/after composition plus mark/selection
+   interaction behave as the engine specifies.
+
+## Known limits
+
+- The runner targets **debug builds** (`cargo build --features native-e2e`).
+  A hardened-runtime, notarized `.app` restricts automation mechanisms a
+  debug build permits, so a green run does not transfer to a signed release
+  artifact without re-verification against that artifact.
+- The four D-13 surface specs are minimum-size proofs that each surface can
+  be driven at all, not suite breadth; phases that need more (Phase 8's load
+  test, Phase 9's SIGHUP test) attach their own specs to this runner (D-14).
+- IME coverage is the app's own composition handlers only; the OS input
+  method itself is the human checklist above (D-08).
+- Cross-spec-file fixture state is not reset (resets are between tests inside
+  a spec file, D-12); a spec that needs a fresh per-file workspace must
+  re-seed at the launcher level.
 
 ## Spike log
 
@@ -99,11 +212,5 @@ ids and their asserted DOM consequences:
 
 **Human-attended half** — that the OS menu bar actually delivers the id.
 Clicking a menu item (or pressing a key equivalent the menu owns) is outside
-the webview and unscriptable here. Fixed checklist, to be folded into this
-document's checklist section by plan 06-05:
-
-1. Open the View menu, click **Documents**; confirm the document list opens.
-2. Open the Terminal menu, click **New Shell**; confirm a terminal pane opens
-   with a live shell.
-3. With the terminal focused, click **Split Terminal** (or press ⌘D); confirm
-   a second terminal pane appears to the right.
+the webview and unscriptable here. The fixed checklist lives in
+`## Human-attended checklist` above (items 1-3), folded in by plan 06-05.

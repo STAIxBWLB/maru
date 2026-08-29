@@ -229,9 +229,9 @@ ones this milestone can actually break are listed here.
   repositories' boundary documents in the same change set
 - **Tech stack**: Tauri 2.10 / React 19.2 / Vite 7.3 / Rust MSRV 1.77.2, Node
   >= 22 + pnpm 9.15.0. No new frontend state library, no CSS framework
-- **CI reality**: `make verify` runs on `ubuntu-22.04` only, and e2e runs
-  Chromium against Vite with mocked IPC. macOS-native changes ship unverified by
-  CI - validate them by running the real app
+- **CI reality**: `make verify` runs on `ubuntu-22.04` only; e2e runs Chromium
+  against Vite with mocked IPC. A macOS job compile-checks the runner per PR;
+  the suite runs unattended on `main`/tags and gates `make release-preflight` - `docs/native-e2e.md`
 
 ## Key Decisions
 
