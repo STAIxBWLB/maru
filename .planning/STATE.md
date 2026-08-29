@@ -5,15 +5,15 @@ milestone_name: Felt Quality and Native Proof
 current_phase: 06
 current_phase_name: native-e2e-runner-foundation
 status: executing
-stopped_at: Completed 06-03-PLAN.md
-last_updated: "2026-08-29T10:48:03.468Z"
+stopped_at: Completed 06-04-PLAN.md
+last_updated: "2026-08-29T11:27:54.076Z"
 last_activity: 2026-08-29
 last_activity_desc: "ROADMAP.md created for v1.1: 6 phases (6-11), 15/15 requirements mapped"
 progress:
   total_phases: 6
   completed_phases: 0
   total_plans: 5
-  completed_plans: 3
+  completed_plans: 4
   percent: 0
 ---
 
@@ -29,11 +29,11 @@ See: .planning/PROJECT.md (updated 2026-08-28)
 ## Current Position
 
 Phase: 06 (native-e2e-runner-foundation) — EXECUTING
-Plan: 3 of 5
+Plan: 4 of 5
 Status: Ready to execute
 Last activity: 2026-08-29 — Phase 06 execution resumed (wave continue)
 
-Progress: [██████░░░░] 60%
+Progress: [████████░░] 80%
 
 ## Performance Metrics
 
@@ -96,6 +96,7 @@ Progress: [██████░░░░] 60%
 | Phase 05 P11 | 2h 7m | 3 tasks | 25 files |
 | Phase 06 P02 | 55min | 2 tasks | 7 files |
 | Phase 06 P03 | 50min | 2 tasks | 4 files |
+| Phase 06 P04 | 32min | 2 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -194,6 +195,8 @@ Recent decisions affecting current work:
 - [Phase ?]: [Phase 6]: 06-02 fixture lifecycle fixes - cleanup only in onComplete (afterSession deleted the shared root under the next spec's app), first per-worker reset skipped (races app boot into Sample Workspace seeding), reset clears contents never watched dirs, mocha timeout 120s
 - [Phase ?]: [Phase 6]: 06-03 IME verdicts settled empirically - WebDriver keys never compose on either surface (terminal: literal jamo via insertText; rich editor: no change); synthetic composition events drive both surfaces' real handlers (rich editor needs the engine's DOM mutation paired in), so those halves stay as native regression tests and OS-level IME stays human-attended (D-08)
 - [Phase ?]: [Phase 6]: 06-03 Radix Tabs triggers activate on mousedown not click, and ProseMirror adopts synthetic composition only with the DOM mutation paired - both mechanics now encoded in ime.spec.ts
+- [Phase ?]: [Phase 6]: 06-04 ship-isolation guard reads produced artifacts only - dist/assets/*.js for the bridge namespace inside make verify, the unstripped debug no-bundle binary for the plugin crate name inside release-checks; cargo metadata manifest assertions kept as cheap early warning only (--no-deps cannot see dependency-propagated features)
+- [Phase ?]: [Phase 6]: 06-04 both red cases proven with real builds (VITE_NATIVE_E2E=1 bundle, --features native-e2e binary) and the binary scan's two crate-name strings confirmed present in the feature-on binary before the default-build green was accepted
 
 ### Pending Todos
 
@@ -230,8 +233,8 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-08-29T10:48:03.459Z
-Stopped at: Completed 06-03-PLAN.md
+Last session: 2026-08-29T11:27:54.064Z
+Stopped at: Completed 06-04-PLAN.md
 Resume file: None
 
 ## Operator Next Steps
