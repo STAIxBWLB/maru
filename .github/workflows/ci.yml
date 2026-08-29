@@ -263,6 +263,11 @@ jobs:
       - name: Lint (includes e2e-native/)
         run: pnpm lint
 
+      # generate_context!() requires frontendDist (../dist) at compile time
+      # once native-e2e turns on tauri/custom-protocol; build it first.
+      - name: Build frontend for native-e2e
+        run: pnpm build:frontend:native-e2e
+
       # --locked, not --offline: a hosted runner has no warm registry cache on
       # a cold job, so --offline would fail for a reason unrelated to the code.
       - name: Cargo check with the native-e2e feature on
