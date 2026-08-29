@@ -197,12 +197,15 @@ export const WORKSPACE_ROOT_SCOPE_ID = ".";
 /** Owning submodule of a workspace-relative path, or WORKSPACE_ROOT_SCOPE_ID
  *  when it sits outside every submodule. `git submodule foreach --recursive`
  *  reports a nested submodule as both "a" and "a/b", so the longest prefix
- *  wins; the boundary check keeps "deps/childish/x.md" out of "deps/child". */
+ *  wins; the boundary check keeps "deps/childish/x.md" out of "deps/child".
+ *  VaultEntry.relPath carries native separators (backslashes on Windows) while
+ *  $displaypath is always slash-delimited, so relPath is normalized first. */
 export function submoduleScopeId(relPath: string, submodulePaths: readonly string[]): string {
+  const normalized = relPath.replace(/\\/g, "/");
   let owner: string | null = null;
   for (const submodule of submodulePaths) {
-    if (!relPath.startsWith(submodule)) continue;
-    if (relPath.length > submodule.length && relPath[submodule.length] !== "/") continue;
+    if (!normalized.startsWith(submodule)) continue;
+    if (normalized.length > submodule.length && normalized[submodule.length] !== "/") continue;
     if (owner === null || submodule.length > owner.length) owner = submodule;
   }
   return owner ?? WORKSPACE_ROOT_SCOPE_ID;

@@ -200,6 +200,13 @@ describe("submodule scope", () => {
     expect(submoduleScopeId("deps/childish/a.md", submodules)).toBe("deps/childish");
   });
 
+  it("matches native Windows separators against slash-delimited submodule paths", () => {
+    // VaultEntry.relPath uses the OS separator; git $displaypath always "/".
+    expect(submoduleScopeId("deps\\child\\a.md", submodules)).toBe("deps/child");
+    expect(submoduleScopeId("deps\\child\\nested\\a.md", submodules)).toBe("deps/child/nested");
+    expect(submoduleScopeId("notes\\a.md", submodules)).toBe(WORKSPACE_ROOT_SCOPE_ID);
+  });
+
   it("hides excluded scopes and counts every scope unscoped", () => {
     const subs = ["deps/child"];
     const entries = [entry("notes/a.md"), entry("deps/child/b.md"), entry("_sys/x.md")];
