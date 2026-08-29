@@ -6,36 +6,50 @@ plan 06-05 completes the rest of the document.
 
 ## Spike log
 
-Scope of this section: **session establishment only** — whether the embedded
-WebDriver provider establishes a session on a hosted macOS runner with no
-interactive permission prompt. This is D-01's first condition only, not the
-full three-condition CI-viability verdict (the PTY condition comes from plan
-06-02).
+Scope of this section: the D-01 CI-viability verdict and the hosted evidence
+behind it. Attempt 1 (plan 06-01) covered session establishment only; attempt 2
+(plan 06-05) ran the full four-spec suite on the hosted runner, covering D-01's
+remaining two conditions (PTY readability through the canvas surface, and a
+full run completed with no human present).
 
-Rules (06-CONTEXT.md D-02): an observed interactive/TCC permission prompt
-settles the verdict as local-only on the spot, with no further attempts. Every
-other failure class is retried within a cap of **3** hosted macOS job runs
-total. The cap and the observed failure class are both recorded here.
+Rules (06-CONTEXT.md D-02): an observed interactive/TCC permission prompt would
+have settled the verdict as human-attended on the spot, with no further
+attempts. Every other failure class was retried within a cap of **3** hosted
+macOS job runs total. The cap and the observed failure class are both recorded
+here.
 
-Retry cap: 3 hosted runs. Runs used: 1.
+Retry cap: 3 hosted runs. Runs used: 2.
 
 ### Attempts
 
 | # | Date | Run URL | Result | Failure class | What changed before next attempt |
 |---|------|---------|--------|---------------|----------------------------------|
-| 1 | 2026-08-29 | https://github.com/STAIxBWLB/maru/actions/runs/33243419439 | pass | — (no failure; no permission prompt) | — (cap not needed) |
+| 1 | 2026-08-29 | https://github.com/STAIxBWLB/maru/actions/runs/33243419439 | pass | — (no failure; no permission prompt) | The three remaining D-13 surface specs landed (plans 06-02/06-03), so the suite grew from 1 spec to 4 |
+| 2 | 2026-08-29 | https://github.com/STAIxBWLB/maru/actions/runs/33250704926 | pass | — (no failure; no permission prompt) | — (verdict settled; cap not needed) |
 
-### Running verdict
+### Verdict
 
-`ci-viable-pending-full-suite`
+`ci-viable` — settled 2026-08-29; all three D-01 conditions held on hosted
+`macos-14` runs:
 
-Attempt 1 passed on the first hosted run: the embedded WebDriver provider
-established a session on `macos-14` with no interactive permission prompt and
-the suite ran green (`1 passing (46s)`, 1 spec). No TCC dialog appeared in the
-log, and the failure-path screencapture step never fired. This settles only
-session establishment; D-01's remaining conditions (PTY readability via the
-canvas ink check from plan 06-02, and a full unattended run) are still open, so
-this is not yet the phase verdict.
+1. **Session establishment with no interactive prompt** — attempts 1 and 2
+   both established a WebDriver session with no interactive or TCC prompt: no
+   dialog text appears in either run log, and the failure-path screencapture
+   step never fired in either run.
+2. **Real PTY output read through the canvas surface** — attempt 2 ran
+   `e2e-native/specs/pty.spec.ts` green on the hosted runner (`1 passing
+   (4.7s)`): the shell-produced marker was read through the text mirror and
+   the canvas ink check proved paint, under hosted WebKit rendering.
+3. **A full run completed with no human present** — attempt 2 ran the whole
+   suite unattended: `4 passed, 4 total` (webview 45.8s, pty 4.7s, ime 7.2s,
+   menu 2.7s) inside a `workflow_dispatch` job, start to finish with no human
+   present.
+
+Consequence: the full suite runs in CI on pushes to `main` and on release tags
+(`.github/workflows/native-e2e.yml`, plan 06-05), pull requests get the
+compile-and-typecheck job only (D-16), and the spike workflow is retired. The
+human checkpoint in plan 06-05 ratifies this verdict item by item before the
+phase closes.
 
 ## IME sub-spike
 
