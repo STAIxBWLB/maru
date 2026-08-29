@@ -10,6 +10,7 @@ import {
   Plus,
   Square,
   SquareCheck,
+  SquareMinus,
   Trash2,
 } from "lucide-react";
 import { memo, useMemo, useState, type CSSProperties } from "react";
@@ -111,6 +112,16 @@ export const Sidebar = memo(function Sidebar({
   const setScope = (isVisible: (id: string) => boolean) => {
     onSubmoduleScopeChange(scopeIds.filter((id) => !isVisible(id)));
   };
+  // Tri-state header checkbox over the submodule rows only; the workspace root
+  // row stays independent. Checked = all submodules on, unchecked = root only,
+  // mixed = partial. Clicking checks everything unless everything is already
+  // on, in which case it drops back to root only -- so the document list can
+  // never end up empty.
+  const visibleSubmoduleCount = submodulePaths.filter(
+    (id) => !excludedSubmoduleSet.has(id),
+  ).length;
+  const allSubmodulesOn = visibleSubmoduleCount === submodulePaths.length;
+  const noSubmodulesOn = visibleSubmoduleCount === 0;
 
   const openNewView = () => {
     setEditingView(null);
@@ -291,21 +302,32 @@ export const Sidebar = memo(function Sidebar({
             </h3>
             <button
               type="button"
+              role="checkbox"
+              aria-checked={allSubmodulesOn ? "true" : noSubmodulesOn ? "false" : "mixed"}
               className="sidebar-section-tool"
-              onClick={() => setScope(() => true)}
-              title={t("sidebar.submodules.selectAll")}
-              aria-label={t("sidebar.submodules.selectAll")}
+              onClick={() =>
+                allSubmodulesOn
+                  ? setScope((id) => id === WORKSPACE_ROOT_SCOPE_ID)
+                  : setScope(() => true)
+              }
+              title={t(
+                allSubmodulesOn
+                  ? "sidebar.submodules.rootOnly"
+                  : "sidebar.submodules.selectAll",
+              )}
+              aria-label={t(
+                allSubmodulesOn
+                  ? "sidebar.submodules.rootOnly"
+                  : "sidebar.submodules.selectAll",
+              )}
             >
-              <SquareCheck size={12} />
-            </button>
-            <button
-              type="button"
-              className="sidebar-section-tool"
-              onClick={() => setScope((id) => id === WORKSPACE_ROOT_SCOPE_ID)}
-              title={t("sidebar.submodules.rootOnly")}
-              aria-label={t("sidebar.submodules.rootOnly")}
-            >
-              <Square size={12} />
+              {allSubmodulesOn ? (
+                <SquareCheck size={12} />
+              ) : noSubmodulesOn ? (
+                <Square size={12} />
+              ) : (
+                <SquareMinus size={12} />
+              )}
             </button>
           </div>
           <div className="type-filters">
