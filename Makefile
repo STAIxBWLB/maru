@@ -217,6 +217,13 @@ test-e2e: node_modules ## Playwright e2e (requires browsers; run `pnpm playwrigh
 .PHONY: test-e2e-native
 test-e2e-native: node_modules ## Native WebDriver e2e against the real app (macOS; builds with the native-e2e feature)
 	$(PNPM) build:frontend:native-e2e
+	@# The native-e2e feature enables tauri/custom-protocol, so dist/ is
+	@# embedded at compile time - but cargo does not track dist/ as a build
+	@# input and will happily reuse a stale binary (observed: 0.89s no-op
+	@# build against a dist rebuilt seconds earlier, webview then stuck on
+	@# about:blank). Touching build.rs forces the maru crate to recompile
+	@# and re-embed the fresh frontend.
+	touch $(TAURI_DIR)/build.rs
 	cd $(TAURI_DIR) && $(CARGO) build --features native-e2e
 	$(PNPM) test:e2e:native
 

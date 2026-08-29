@@ -39,9 +39,17 @@ function fixturePaths(root: string) {
 
 function requireFixtureRoot(): string {
   if (!fixtureRoot) {
-    throw new Error(
-      "fixtureWorkspace: seedFixtureWorkspace() has not run yet (or cleanupFixtureWorkspace() already ran)",
-    );
+    // Worker-process path: seeding ran in the launcher (wdio.conf onPrepare),
+    // so module state here is empty, but the launcher forked this worker with
+    // the isolation env vars set. homeDir is <root>/home, so the root is its
+    // parent. Only beforeTest's reset takes this path.
+    const home = process.env.MARU_NATIVE_E2E_HOME;
+    if (!home) {
+      throw new Error(
+        "fixtureWorkspace: no fixture root in this process and MARU_NATIVE_E2E_HOME is unset",
+      );
+    }
+    fixtureRoot = path.dirname(home);
   }
   return fixtureRoot;
 }
@@ -79,10 +87,14 @@ async function writeFixtureContent(root: string): Promise<void> {
 
 /**
  * Creates a fresh mkdtemp root, seeds it, and points this Node process's
- * own environment at it. Call from `beforeSession` - RESEARCH Pitfall 8
- * found no documented `env` key on wdio's `tauri:options`, so the launched
- * app must inherit these two vars from the wdio worker process that spawns
- * it, set before that spawn happens.
+ * own environment at it. Call from the config's `onPrepare` hook: it runs
+ * in the launcher process before the tauri-service's own onPrepare spawns
+ * the app (@wdio/cli runs config onPrepare first), and the service's
+ * startEmbeddedDriver spreads process.env into the app spawn - so the two
+ * vars reach the app. Workers forked afterwards inherit them too.
+ * (RESEARCH Pitfall 8 said `tauri:options` has no env key; that is right,
+ * but the service-level `env` option exists and process.env inheritance
+ * covers this without it.)
  */
 export async function seedFixtureWorkspace(): Promise<{
   homeDir: string;

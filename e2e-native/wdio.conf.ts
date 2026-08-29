@@ -75,7 +75,14 @@ export const config = {
   // config's).
   connectionRetryCount: 1,
 
-  beforeSession: async () => {
+  // Seeding happens in onPrepare, not beforeSession: beforeSession runs in
+  // the worker process (@wdio/runner), but the tauri-service spawns the app
+  // in the launcher's service onPrepare. @wdio/cli runs the config's own
+  // onPrepare first, so env vars set here are in the launcher process.env
+  // before the app spawn - and startEmbeddedDriver spreads process.env into
+  // the app. Seeding in beforeSession left the app pointed at the real
+  // ~/.maru (the 06-01 fixture-isolation bug).
+  onPrepare: async () => {
     await seedFixtureWorkspace();
   },
   beforeTest: async () => {
