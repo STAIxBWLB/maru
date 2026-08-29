@@ -51,6 +51,41 @@ function killSurvivingAppProcesses(): void {
   }
 }
 
+/**
+ * Local-run focus fix: the canvas ink check (pty.spec) reads painted pixels,
+ * and WKWebView throttles painting on an occluded/backgrounded window
+ * (`backgroundThrottling: "throttle"` in tauri.conf.json). The tauri-service's
+ * own focus-recovery helper cannot run here (`withGlobalTauri: false`), so a
+ * local run where the terminal keeps focus flakes on an unpainted canvas while
+ * hosted CI - where the spawned window is the only thing on screen - stays
+ * green. Bring the just-spawned app to the front once per session. Uses the
+ * same escaped, anchored pgrep pattern as the teardown backstop so only a
+ * process spawned exactly the way this runner spawns its app is touched, and
+ * PID-targeted activation sidesteps the debug binary sharing the process name
+ * with an installed Maru.app.
+ */
+function activateAppWindow(): boolean {
+  const escaped = APP_BINARY.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  try {
+    const pids = execFileSync("pgrep", ["-f", `^${escaped}$`], { encoding: "utf8" })
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean);
+    const pid = pids[pids.length - 1];
+    if (!pid) return false;
+    execFileSync("osascript", [
+      "-e",
+      `tell application "System Events" to set frontmost of (first process whose unix id is ${pid}) to true`,
+    ]);
+    return true;
+  } catch {
+    // Activation is best-effort: no accessibility grant, or the app not yet
+    // spawned, must never fail the run - the ink check only needs the common
+    // case covered.
+    return false;
+  }
+}
+
 export const config = {
   runner: "local",
   specs: ["./specs/**/*.spec.ts"],
@@ -98,6 +133,16 @@ export const config = {
   // ~/.maru (the 06-01 fixture-isolation bug).
   onPrepare: async () => {
     await seedFixtureWorkspace();
+  },
+  beforeSession: async () => {
+    // The session's app instance may still be booting when this hook runs;
+    // retry briefly until the activation lands. Best-effort by design (see
+    // the helper's comment): a miss leaves the old flaky behavior, never a
+    // failure.
+    for (let attempt = 0; attempt < 15; attempt++) {
+      if (activateAppWindow()) break;
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
   },
   beforeTest: async () => {
     await resetFixtureWorkspace();
