@@ -60,7 +60,12 @@ export const config = {
   framework: "mocha",
   mochaOpts: {
     ui: "bdd",
-    timeout: 60_000,
+    // 120s, not a lean default: withGlobalTauri is false, so the service's
+    // per-command window-state helper times out (~5s, twice) around every
+    // wdio element command — each click/waitForDisplayed costs ~10-15s, and
+    // 06-01's webview.spec alone needs ~50-70s across runs. 60s was observed
+    // flaking on it; 120s still bounds a genuinely hung test.
+    timeout: 120_000,
   },
   reporters: ["spec"],
   logLevel: "info",
@@ -89,7 +94,15 @@ export const config = {
     await resetFixtureWorkspace();
   },
   afterSession: async () => {
-    await cleanupFixtureWorkspace();
+    // Kill only. Do NOT clean the fixture root here: afterSession runs per
+    // worker, i.e. per spec file, but the app for the NEXT spec file is
+    // spawned by the launcher pointed at the same fixture root — a cleanup
+    // here deletes that root from under it, and the next app boots into an
+    // empty registry and first-run-seeds its Sample Workspace instead
+    // (observed: webview.spec failing with the sample workspace on screen
+    // whenever it ran after another spec). The root is per-RUN state (D-09);
+    // onComplete, which runs once per run on both the pass and the fail
+    // path, owns its cleanup.
     killSurvivingAppProcesses();
   },
   onComplete: async () => {

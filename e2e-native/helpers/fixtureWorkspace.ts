@@ -28,6 +28,9 @@ const APP_CONFIG_DIR = "com.maru.app";
 const WORKSPACE_REGISTRY_FILE = "workspaces.json";
 
 let fixtureRoot: string | null = null;
+/** Per-worker latch: the first beforeTest sees the just-seeded state (the
+ *  app launched after onPrepare), so only later tests need a real reset. */
+let fixtureDirty = false;
 
 function fixturePaths(root: string) {
   return {
@@ -115,12 +118,36 @@ export async function seedFixtureWorkspace(): Promise<{
  * in-place, without touching the already-launched app's env (D-12: the
  * app is relaunched once per spec file, reset between the tests inside
  * it). Call from `beforeTest`.
+ *
+ * Two deliberate properties:
+ *
+ * - The FIRST call in a worker is a no-op. The app for this spec file was
+ *   launched after onPrepare seeded the fixture, so its boot already read
+ *   the fresh registry. Resetting at that moment races the boot read:
+ *   deleting workspaces.json under a booting app makes
+ *   listWorkspaceRoots() see zero workspaces, and the frontend then seeds
+ *   its first-run Sample Workspace instead (observed: webview.spec's
+ *   "Welcome" assertion failing with the sample workspace on screen
+ *   whenever the reset landed mid-boot). Resets matter from the second
+ *   test on.
+ * - The reset removes the CONTENTS of each seeded directory, never the
+ *   directories themselves: deleting a watched directory kills the running
+ *   app's filesystem watcher on it, and the re-created directory is not
+ *   re-watched, so the app never sees the re-seeded files.
  */
 export async function resetFixtureWorkspace(): Promise<void> {
   const root = requireFixtureRoot();
+  if (!fixtureDirty) {
+    fixtureDirty = true;
+    return;
+  }
   const { workspaceDir, configDir } = fixturePaths(root);
-  await fs.rm(workspaceDir, { recursive: true, force: true });
-  await fs.rm(configDir, { recursive: true, force: true });
+  for (const dir of [workspaceDir, configDir]) {
+    const entries = await fs.readdir(dir).catch(() => [] as string[]);
+    for (const entry of entries) {
+      await fs.rm(path.join(dir, entry), { recursive: true, force: true });
+    }
+  }
   await writeFixtureContent(root);
 }
 
