@@ -5,15 +5,15 @@ milestone_name: Felt Quality and Native Proof
 current_phase: 06
 current_phase_name: native-e2e-runner-foundation
 status: executing
-stopped_at: Completed 06-02-PLAN.md
-last_updated: "2026-08-29T09:46:16.126Z"
+stopped_at: Completed 06-03-PLAN.md
+last_updated: "2026-08-29T10:48:03.468Z"
 last_activity: 2026-08-29
 last_activity_desc: "ROADMAP.md created for v1.1: 6 phases (6-11), 15/15 requirements mapped"
 progress:
   total_phases: 6
   completed_phases: 0
   total_plans: 5
-  completed_plans: 2
+  completed_plans: 3
   percent: 0
 ---
 
@@ -29,11 +29,11 @@ See: .planning/PROJECT.md (updated 2026-08-28)
 ## Current Position
 
 Phase: 06 (native-e2e-runner-foundation) — EXECUTING
-Plan: 2 of 5
+Plan: 3 of 5
 Status: Ready to execute
 Last activity: 2026-08-29 — Phase 06 execution resumed (wave continue)
 
-Progress: [████░░░░░░] 40%
+Progress: [██████░░░░] 60%
 
 ## Performance Metrics
 
@@ -95,6 +95,7 @@ Progress: [████░░░░░░] 40%
 | Phase 05 P10 | 9min | 3 tasks | 9 files |
 | Phase 05 P11 | 2h 7m | 3 tasks | 25 files |
 | Phase 06 P02 | 55min | 2 tasks | 7 files |
+| Phase 06 P03 | 50min | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -191,6 +192,8 @@ Recent decisions affecting current work:
 - [Phase ?]: [Phase 6]: 06-02 pty.spec clicks the Shell launcher specifically, not the plan's literal first enabled button (Claude), because only a real shell makes the shell-produced-marker assertion meaningful
 - [Phase ?]: [Phase 6]: 06-02 native specs use in-page clicks + executeAsync inline poll loops - wdio element commands cost ~10-15s each with withGlobalTauri:false, and probe functions cannot cross the WebDriver boundary
 - [Phase ?]: [Phase 6]: 06-02 fixture lifecycle fixes - cleanup only in onComplete (afterSession deleted the shared root under the next spec's app), first per-worker reset skipped (races app boot into Sample Workspace seeding), reset clears contents never watched dirs, mocha timeout 120s
+- [Phase ?]: [Phase 6]: 06-03 IME verdicts settled empirically - WebDriver keys never compose on either surface (terminal: literal jamo via insertText; rich editor: no change); synthetic composition events drive both surfaces' real handlers (rich editor needs the engine's DOM mutation paired in), so those halves stay as native regression tests and OS-level IME stays human-attended (D-08)
+- [Phase ?]: [Phase 6]: 06-03 Radix Tabs triggers activate on mousedown not click, and ProseMirror adopts synthetic composition only with the DOM mutation paired - both mechanics now encoded in ime.spec.ts
 
 ### Pending Todos
 
@@ -227,8 +230,8 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-08-29T09:46:16.117Z
-Stopped at: Completed 06-02-PLAN.md
+Last session: 2026-08-29T10:48:03.459Z
+Stopped at: Completed 06-03-PLAN.md
 Resume file: None
 
 ## Operator Next Steps
