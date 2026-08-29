@@ -25,8 +25,17 @@ const APP_BINARY = "./src-tauri/target/debug/maru";
  * how the session ended.
  */
 function killSurvivingAppProcesses(): void {
+  // pgrep -f treats the pattern as an unanchored ERE: the literal dots in
+  // APP_BINARY are regex wildcards, so the bare pattern matches ANY command
+  // line containing "<any char>/src-tauri/target/debug/maru" — including a
+  // developer's own `tauri dev` or debug instance launched by absolute path
+  // from this or any other checkout, which this backstop would then SIGKILL.
+  // Escape every metacharacter and anchor the match to the exact relative
+  // argv the tauri-service spawns, so teardown can only reach a process
+  // started the same way this run starts its app.
+  const escaped = APP_BINARY.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   try {
-    const pids = execFileSync("pgrep", ["-f", APP_BINARY], { encoding: "utf8" })
+    const pids = execFileSync("pgrep", ["-f", `^${escaped}$`], { encoding: "utf8" })
       .split("\n")
       .map((line) => line.trim())
       .filter(Boolean);
