@@ -15,6 +15,14 @@ describe("native webview shell", () => {
     await activityRail.waitForDisplayed({ timeout: 30_000 });
     assert.equal(await activityRail.isDisplayed(), true, ".activity-rail must be displayed");
 
+    // A fresh profile lands on the Today view, so the document list does
+    // not exist until the documents (pkm) view is opened. The Korean
+    // aria-label follows the Playwright suite's convention
+    // (e2e/binary-viewer.spec.ts clicks "파일" the same way).
+    const documentsButton = await browser.$('.activity-rail button[aria-label="문서"]');
+    await documentsButton.waitForDisplayed({ timeout: 30_000 });
+    await documentsButton.click();
+
     const documentList = await browser.$(".document-list");
     await documentList.waitForDisplayed({ timeout: 30_000 });
     await browser.waitUntil(async () => (await documentList.getText()).includes(FIXTURE_DOC_NAME), {
