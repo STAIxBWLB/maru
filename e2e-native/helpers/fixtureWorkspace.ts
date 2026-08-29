@@ -81,11 +81,14 @@ async function writeFixtureContent(root: string): Promise<void> {
     activeByVisibility: { private: workspaceDir },
     hiddenDefaults: [],
   };
-  await fs.writeFile(
-    path.join(registryDir, WORKSPACE_REGISTRY_FILE),
-    JSON.stringify(registry, null, 2),
-    "utf8",
-  );
+  // Write the registry atomically (tmp file + rename, mirroring the app's
+  // own write_atomic): a plain writeFile during a between-test reset lets an
+  // app-side read land between delete and rewrite and observe a MISSING
+  // registry — the zero-workspace state that makes the frontend first-run-
+  // seed its Sample Workspace.
+  const tmp = path.join(registryDir, `.${WORKSPACE_REGISTRY_FILE}.tmp`);
+  await fs.writeFile(tmp, JSON.stringify(registry, null, 2), "utf8");
+  await fs.rename(tmp, path.join(registryDir, WORKSPACE_REGISTRY_FILE));
 }
 
 /**
@@ -142,7 +145,13 @@ export async function resetFixtureWorkspace(): Promise<void> {
     return;
   }
   const { workspaceDir, configDir } = fixturePaths(root);
-  for (const dir of [workspaceDir, configDir]) {
+  // Contents only, never the directories themselves — for BOTH the workspace
+  // dir and the registry dir. Deleting configDir's com.maru.app entry
+  // wholesale would break the same watcher-survival invariant the docstring
+  // states for the workspace: the reset removes what is INSIDE
+  // config/com.maru.app/, never the registry directory itself.
+  const registryDir = path.join(configDir, APP_CONFIG_DIR);
+  for (const dir of [workspaceDir, registryDir]) {
     const entries = await fs.readdir(dir).catch(() => [] as string[]);
     for (const entry of entries) {
       await fs.rm(path.join(dir, entry), { recursive: true, force: true });
