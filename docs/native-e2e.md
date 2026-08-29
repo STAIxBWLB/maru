@@ -61,3 +61,35 @@ the native suite as regression tests for the app's handler logic (D-08). The
 OS-level half — that a real macOS Korean IME composes correctly into both
 surfaces — is human-attended and is not claimed as covered anywhere in this
 document.
+
+## macOS menu bar
+
+Recorded 2026-08-29 with `e2e-native/specs/menu.spec.ts` (D-13 surface 4).
+
+The menu bar lives outside the webview and WebDriver cannot reach it; driving
+it needs an Accessibility grant no unattended runner can give itself. The
+surface therefore splits in two:
+
+**Automated half** — the command path the menu emits into. The spec dispatches
+real `command_item` ids from `src-tauri/src/app_menu.rs` through
+`window.__MARU_NATIVE_E2E__.menuCommand`, which App.tsx registers into the
+same `runMenuCommand` the Tauri `maru://menu-command` listener calls — so the
+test exercises the handler the real menu reaches, not a parallel copy. Covered
+ids and their asserted DOM consequences:
+
+| Menu id | Menu item | Asserted DOM consequence |
+|---------|-----------|--------------------------|
+| `view.documents` | View → Documents | The document list opens and shows the seeded document |
+| `terminal.shell` | Terminal → New Shell | A native terminal view mounts with a live session |
+| `terminal.split` | Terminal → Split Terminal (⌘D) | The terminal body enters split mode with a second, distinct session in the right pane |
+
+**Human-attended half** — that the OS menu bar actually delivers the id.
+Clicking a menu item (or pressing a key equivalent the menu owns) is outside
+the webview and unscriptable here. Fixed checklist, to be folded into this
+document's checklist section by plan 06-05:
+
+1. Open the View menu, click **Documents**; confirm the document list opens.
+2. Open the Terminal menu, click **New Shell**; confirm a terminal pane opens
+   with a live shell.
+3. With the terminal focused, click **Split Terminal** (or press ⌘D); confirm
+   a second terminal pane appears to the right.
