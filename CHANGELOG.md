@@ -8,6 +8,17 @@ because releases cut frequently during active development. Versions before
 Dates are the release-tag dates. Only `feat`/`fix`-level changes are listed;
 `chore(release)` version bumps and merge commits are omitted.
 
+## v0.6.1 - 2026-08-30 - Submodule Scope
+
+- **The Documents pane can now scope itself by git submodule (#297).** A
+  Submodules section in the sidebar lists every submodule with its document
+  count and toggles which ones feed the list, tree, counts, type chips, and
+  the command palette; the scope persists per workspace. A tri-state header
+  checkbox covers check-all, root-only, and partial selection, and the
+  prefix matching normalizes Windows path separators.
+- Wikilinks into a hidden submodule still resolve, because only the index is
+  scoped while the raw entries stay intact.
+
 ## v0.6.0 - 2026-08-30 - Native Proof
 
 - **A native end-to-end runner now proves the real app instead of a mock
