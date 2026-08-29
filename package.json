@@ -17,7 +17,7 @@
     "icons:generate": "node scripts/generate-icons.mjs",
     "icons:check": "node scripts/generate-icons.mjs --check",
     "check:select-chrome": "node scripts/check-select-chrome.mjs",
-    "lint": "eslint src e2e --max-warnings 0",
+    "lint": "eslint src e2e e2e-native --max-warnings 0",
     "lint:i18n": "node scripts/lint-i18n.mjs",
     "preview": "vite preview --host 127.0.0.1 --port 5308",
     "tauri": "tauri",
