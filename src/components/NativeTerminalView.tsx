@@ -21,6 +21,7 @@ import type {
   TerminalSearchMatch,
 } from "../lib/api";
 import type { TerminalTheme } from "../lib/settings";
+import { nativeE2eEnabled, registerTerminalTextReader } from "../lib/nativeE2eBridge";
 
 export interface NativeTerminalViewHandle {
   focus: () => void;
@@ -855,6 +856,20 @@ export const NativeTerminalView = memo(
       rafRef.current = null;
       pendingPaintRef.current = null;
     }, [active]);
+
+    // D-06: expose the whole terminal screen as exact text to the native e2e
+    // runner through the build-gated debug bridge. The reader serializes the
+    // retained grid with the same expression selectAll's whole-grid fallback
+    // uses below, so the mirror reads the same grid the paint path reads. It
+    // reads state and mutates none of it — selection, scroll position and
+    // cursor are deliberately untouched so a read cannot contaminate a later
+    // assertion (T-06-06).
+    useEffect(() => {
+      if (!nativeE2eEnabled()) return;
+      return registerTerminalTextReader(sessionId, () =>
+        gridRef.current.map(frameLineToText).join("\n"),
+      );
+    }, [sessionId]);
 
     const paint = useCallback((which: "all" | number[]) => {
       const canvas = canvasRef.current;
