@@ -216,6 +216,10 @@ export interface MaruSettings {
     filesListAttributes: FilesListAttribute[];
     binaryFileIncludePatterns: string[];
     documentViews: DocumentViewDefinition[];
+    /** Documents-pane submodule scope, keyed by workspace path. Holds the
+     *  EXCLUDED scope ids only ("." = workspace root, i.e. documents outside
+     *  every submodule), so a newly added submodule stays visible. */
+    documentSubmoduleScope: Record<string, string[]>;
     favorites: FavoriteItem[];
     // Both "collapsed*" keys have always stored the *expanded* folder set, so
     // an empty array means fully collapsed and new folders stay closed.
@@ -518,6 +522,7 @@ export const DEFAULT_MARU_SETTINGS: MaruSettings = {
     filesListAttributes: [...DEFAULT_FILES_LIST_ATTRIBUTES],
     binaryFileIncludePatterns: [...DEFAULT_BINARY_FILE_INCLUDE_PATTERNS],
     documentViews: [],
+    documentSubmoduleScope: {},
     favorites: [],
     collapsedTreeFolders: [],
     collapsedFileFolders: [],
@@ -744,6 +749,7 @@ export function normalizeMaruSettings(value: unknown): MaruSettings {
         ui.binaryFileIncludePatterns,
       ),
       documentViews: normalizeDocumentViews(ui.documentViews),
+      documentSubmoduleScope: normalizePathKeyedStringLists(ui.documentSubmoduleScope),
       favorites: normalizeFavoriteItems(ui.favorites),
       collapsedTreeFolders: parseStringArray(ui.collapsedTreeFolders),
       collapsedFileFolders: parseStringArray(ui.collapsedFileFolders),
@@ -1115,6 +1121,7 @@ function cloneDefaultSettings(): MaruSettings {
       ],
       filesListAttributes: [...DEFAULT_MARU_SETTINGS.ui.filesListAttributes],
       documentViews: DEFAULT_MARU_SETTINGS.ui.documentViews.map((view) => ({ ...view })),
+      documentSubmoduleScope: { ...DEFAULT_MARU_SETTINGS.ui.documentSubmoduleScope },
       favorites: DEFAULT_MARU_SETTINGS.ui.favorites.map((favorite) => ({ ...favorite })),
       collapsedTreeFolders: [...DEFAULT_MARU_SETTINGS.ui.collapsedTreeFolders],
       collapsedFileFolders: [...DEFAULT_MARU_SETTINGS.ui.collapsedFileFolders],
@@ -1196,15 +1203,21 @@ function cloneDefaultSettings(): MaruSettings {
   };
 }
 
+/** Path-keyed string lists (composer lint dismissals, Documents submodule
+ *  scope): junk becomes {}, and an empty list is dropped rather than stored. */
+function normalizePathKeyedStringLists(value: unknown): Record<string, string[]> {
+  const source = isRecord(value) ? value : {};
+  const out: Record<string, string[]> = {};
+  for (const [key, ids] of Object.entries(source)) {
+    const cleanIds = parseStringArray(ids);
+    if (cleanIds.length > 0) out[key] = cleanIds;
+  }
+  return out;
+}
+
 function normalizeComposerSettings(value: unknown): ComposerSettings {
   const composer = isRecord(value) ? value : {};
-  const rawDismissals = isRecord(composer.lintDismissals) ? composer.lintDismissals : {};
-  const lintDismissals: Record<string, string[]> = {};
-  for (const [docId, ids] of Object.entries(rawDismissals)) {
-    const cleanIds = parseStringArray(ids);
-    if (cleanIds.length > 0) lintDismissals[docId] = cleanIds;
-  }
-  return { lintDismissals };
+  return { lintDismissals: normalizePathKeyedStringLists(composer.lintDismissals) };
 }
 
 function normalizePatternIdList(value: unknown, cap: number): string[] {

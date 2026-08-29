@@ -591,6 +591,10 @@ export const en: Record<string, string> = {
 
   "sidebar.commandPalette": "Command palette",
   "sidebar.views": "Views",
+  "sidebar.submodules": "Submodules",
+  "sidebar.submodules.root": "Workspace root",
+  "sidebar.submodules.selectAll": "Show all submodules",
+  "sidebar.submodules.rootOnly": "Workspace root only",
   "sidebar.types": "Document types",
   "sidebar.types.all": "All documents",
   "sidebar.types.untyped": "Untyped",

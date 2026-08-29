@@ -16,6 +16,7 @@ const indexDeltaListeners = new Set<(event: { payload: { workspacePath: string; 
 let graphProps: { workspacePath?: string | null; entries?: VaultEntry[]; onGraphChanged?(): void } | null = null;
 
 vi.mock("../api", () => ({
+  listWorkspaceSubmodules: async (): Promise<string[]> => [],
   readVaultCache: (...args: []) => readVaultCache(...args),
   scanVault: (...args: []) => scanVault(...args),
   scanVaultPaths: (...args: []) => scanVaultPaths(...args),

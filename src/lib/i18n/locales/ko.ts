@@ -544,6 +544,10 @@ export const ko: Record<string, string> = {
 
   "sidebar.commandPalette": "명령 팔레트",
   "sidebar.views": "Views",
+  "sidebar.submodules": "서브모듈",
+  "sidebar.submodules.root": "워크스페이스 루트",
+  "sidebar.submodules.selectAll": "서브모듈 모두 표시",
+  "sidebar.submodules.rootOnly": "워크스페이스 루트만",
   "sidebar.types": "문서 타입",
   "sidebar.types.all": "전체",
   "sidebar.types.untyped": "타입 없음",

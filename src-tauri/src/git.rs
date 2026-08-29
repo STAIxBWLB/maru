@@ -570,6 +570,25 @@ pub fn git_sync_scan(
     })
 }
 
+/// Submodule display paths under a workspace root, for the Documents pane scope
+/// filter. `git submodule foreach` reports `$displaypath` relative to the cwd,
+/// so running it at the workspace root yields paths that line up with
+/// `VaultEntry.rel_path`.
+#[tauri::command(async)]
+pub fn list_workspace_submodules(workspace_path: String) -> Result<Vec<String>, String> {
+    let root = Path::new(&workspace_path);
+    if !root.is_dir() {
+        return Err(format!(
+            "Workspace path is not a directory: {workspace_path}"
+        ));
+    }
+    let mut paths = list_submodule_paths(root)?;
+    // A workspace nested inside a bigger repo also sees the superproject's other
+    // submodules; those come back as "../..." and sit outside this workspace.
+    paths.retain(|path| !path.starts_with("../") && !Path::new(path).is_absolute());
+    Ok(paths)
+}
+
 #[tauri::command(async)]
 pub fn git_sync_pull_rebase(repo_path: String) -> Result<GitSyncPullResult, String> {
     let repo = Path::new(&repo_path);
@@ -1297,6 +1316,39 @@ mod tests {
         assert!(scan.repos.iter().all(|repo| repo.rel_path != "deps/child"));
         let root_repo = scan.repos.iter().find(|repo| repo.is_root).unwrap();
         assert!(!root_repo.paths.iter().any(|path| path == "deps/child"));
+    }
+
+    #[test]
+    fn list_workspace_submodules_reports_workspace_relative_paths() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().join("root");
+        let child_src = tmp.path().join("child-src");
+        fs::create_dir_all(&root).unwrap();
+        fs::create_dir_all(&child_src).unwrap();
+        init_repo(&child_src);
+        fs::write(child_src.join("child.md"), "child\n").unwrap();
+        run_git(&child_src, &["add", "."]);
+        run_git(&child_src, &["commit", "-m", "child initial"]);
+
+        init_repo(&root);
+        run_git(
+            &root,
+            &[
+                "-c",
+                "protocol.file.allow=always",
+                "submodule",
+                "add",
+                child_src.to_str().unwrap(),
+                "deps/child",
+            ],
+        );
+        run_git(&root, &["commit", "-am", "add child"]);
+
+        let paths = list_workspace_submodules(root.to_string_lossy().to_string()).unwrap();
+
+        // The Documents scope filter matches these against VaultEntry.rel_path,
+        // so they must be workspace-relative, not absolute and not "../"-prefixed.
+        assert_eq!(paths, vec!["deps/child".to_string()]);
     }
 
     #[test]

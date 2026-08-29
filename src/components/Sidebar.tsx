@@ -3,16 +3,20 @@ import {
   Archive,
   Clock,
   FileText,
+  FolderGit2,
   Inbox,
   Layers,
   Pencil,
   Plus,
+  Square,
+  SquareCheck,
   Trash2,
 } from "lucide-react";
 import { memo, useMemo, useState, type CSSProperties } from "react";
 import {
   documentFilterDefaultDocType,
   documentFilterKey,
+  WORKSPACE_ROOT_SCOPE_ID,
   type BuiltInDocumentView,
   type DocumentFilter,
 } from "../lib/documentIndex";
@@ -28,6 +32,10 @@ interface SidebarProps {
   documentViews: DocumentViewDefinition[];
   viewCounts: Record<BuiltInDocumentView, number>;
   customViewCounts: Record<string, number>;
+  submodulePaths: string[];
+  submoduleCounts: Record<string, number>;
+  excludedSubmodules: string[];
+  onSubmoduleScopeChange: (excluded: string[]) => void;
   recentEntries: VaultEntry[];
   selectedPath: string | null;
   documentFilter: DocumentFilter;
@@ -45,6 +53,10 @@ export const Sidebar = memo(function Sidebar({
   documentViews,
   viewCounts,
   customViewCounts,
+  submodulePaths,
+  submoduleCounts,
+  excludedSubmodules,
+  onSubmoduleScopeChange,
   recentEntries,
   selectedPath,
   documentFilter,
@@ -82,6 +94,23 @@ export const Sidebar = memo(function Sidebar({
       ],
     [],
   );
+
+  const excludedSubmoduleSet = useMemo(
+    () => new Set(excludedSubmodules),
+    [excludedSubmodules],
+  );
+  // Workspace root first, then git's own sorted order. Every write rebuilds the
+  // excluded list from this live array, which also prunes ids for submodules
+  // that no longer exist.
+  const scopeIds = useMemo(
+    () => [WORKSPACE_ROOT_SCOPE_ID, ...submodulePaths],
+    [submodulePaths],
+  );
+  const scopeLabel = (id: string) =>
+    id === WORKSPACE_ROOT_SCOPE_ID ? t("sidebar.submodules.root") : id;
+  const setScope = (isVisible: (id: string) => boolean) => {
+    onSubmoduleScopeChange(scopeIds.filter((id) => !isVisible(id)));
+  };
 
   const openNewView = () => {
     setEditingView(null);
@@ -252,6 +281,61 @@ export const Sidebar = memo(function Sidebar({
           })}
         </div>
       </div>
+
+      {submodulePaths.length > 0 ? (
+        <div className="sidebar-section">
+          <div className="sidebar-section-heading">
+            <h3 title={t("sidebar.submodules")}>
+              <FolderGit2 size={11} className="sidebar-section-title-icon" />
+              {t("sidebar.submodules")}
+            </h3>
+            <button
+              type="button"
+              className="sidebar-section-tool"
+              onClick={() => setScope(() => true)}
+              title={t("sidebar.submodules.selectAll")}
+              aria-label={t("sidebar.submodules.selectAll")}
+            >
+              <SquareCheck size={12} />
+            </button>
+            <button
+              type="button"
+              className="sidebar-section-tool"
+              onClick={() => setScope((id) => id === WORKSPACE_ROOT_SCOPE_ID)}
+              title={t("sidebar.submodules.rootOnly")}
+              aria-label={t("sidebar.submodules.rootOnly")}
+            >
+              <Square size={12} />
+            </button>
+          </div>
+          <div className="type-filters">
+            {scopeIds.map((id) => {
+              const included = !excludedSubmoduleSet.has(id);
+              return (
+                <button
+                  key={id}
+                  type="button"
+                  role="checkbox"
+                  aria-checked={included}
+                  className={included ? "type-filter active" : "type-filter"}
+                  onClick={() =>
+                    setScope((scopeId) =>
+                      scopeId === id ? !included : !excludedSubmoduleSet.has(scopeId),
+                    )
+                  }
+                  title={scopeLabel(id)}
+                >
+                  <span className="sidebar-inline-icon">
+                    {included ? <SquareCheck size={12} /> : <Square size={12} />}
+                  </span>
+                  <span>{scopeLabel(id)}</span>
+                  <span className="count">{submoduleCounts[id] ?? 0}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      ) : null}
 
       <div className="sidebar-section">
         <h3 title={t("sidebar.types")}>

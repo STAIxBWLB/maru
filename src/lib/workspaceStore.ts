@@ -1,6 +1,12 @@
 import { useEffect, useSyncExternalStore } from "react";
 
-import { scanVault, scanVaultPaths, startVaultWatcher, stopVaultWatcher } from "./api";
+import {
+  listWorkspaceSubmodules,
+  scanVault,
+  scanVaultPaths,
+  startVaultWatcher,
+  stopVaultWatcher,
+} from "./api";
 import { ALL_DOCUMENTS_FILTER, type DocumentFilter } from "./documentIndex";
 import type {
   ScanOptions,
@@ -26,6 +32,9 @@ export interface WorkspaceEntriesState {
   loading: boolean;
   refreshing: boolean;
   startupIoReady: boolean;
+  /** Git submodule paths relative to this workspace root, sorted. null = not
+   *  fetched yet (also the fetch-once latch); [] = none, or not a git repo. */
+  submodulePaths: string[] | null;
 }
 
 export const EMPTY_WORKSPACE_STATE: WorkspaceEntriesState = {
@@ -33,6 +42,7 @@ export const EMPTY_WORKSPACE_STATE: WorkspaceEntriesState = {
   loading: false,
   refreshing: false,
   startupIoReady: false,
+  submodulePaths: null,
 };
 
 export interface WorkspaceFilesState {
@@ -460,10 +470,23 @@ export async function rescanWorkspaceEntries(
   scanOptions?: ScanOptions,
 ): Promise<VaultEntry[] | null> {
   const seq = nextWorkspaceScanSeq(path);
+  void refreshWorkspaceSubmodules(path);
   const fresh = await scanVault(path, scanOptions);
   if (!isCurrentWorkspaceScan(path, seq)) return null;
   updateWorkspaceState(path, { entries: fresh, loading: false, refreshing: false });
   return fresh;
+}
+
+/** Submodule scope source for the Documents pane. Fetched once per workspace
+ *  (the set only changes on an explicit `git submodule add`); loadWorkspace
+ *  resets it to null, so a workspace switch and the pane's Refresh both re-read
+ *  it. Never throws and never blocks the scan: a non-git workspace or a failing
+ *  git binary is just "no submodules", i.e. everything visible, no error. */
+export async function refreshWorkspaceSubmodules(path: string): Promise<void> {
+  if (workspaceStoreState.states[path]?.submodulePaths) return;
+  const submodulePaths = await listWorkspaceSubmodules(path).catch(() => [] as string[]);
+  if (workspaceStoreState.states[path]?.submodulePaths) return;
+  updateWorkspaceState(path, { submodulePaths });
 }
 
 /** Publishes an incremental watcher delta (see applyVaultDeltaInState). */

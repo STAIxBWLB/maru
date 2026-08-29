@@ -22,6 +22,17 @@ describe("normalizeMaruSettings", () => {
     expect(normalizeMaruSettings("not-json")).toEqual(DEFAULT_MARU_SETTINGS);
   });
 
+  it("normalizes the per-workspace document submodule scope", () => {
+    const settings = normalizeMaruSettings({
+      ui: {
+        documentSubmoduleScope: { "/w": ["deps/child", 7], "/empty": [], "/junk": "x" },
+      },
+    });
+
+    expect(settings.ui.documentSubmoduleScope).toEqual({ "/w": ["deps/child"] });
+    expect(normalizeMaruSettings({}).ui.documentSubmoduleScope).toEqual({});
+  });
+
   it("migrates the legacy Files explorer pane into the standalone Files mode", () => {
     const settings = normalizeMaruSettings({
       ui: {

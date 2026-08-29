@@ -4,10 +4,14 @@ import {
   ALL_DOCUMENTS_FILTER,
   buildDocumentIndex,
   countDocumentFilter,
+  countEntriesBySubmodule,
   filterDocumentIndex,
+  filterEntriesBySubmoduleScope,
   getCommandPaletteDocs,
   getRecentEntries,
   sortDocumentEntries,
+  submoduleScopeId,
+  WORKSPACE_ROOT_SCOPE_ID,
 } from "./documentIndex";
 import type { VaultEntry } from "./types";
 
@@ -183,5 +187,35 @@ describe("sortDocumentEntries", () => {
     const input = [newer, older];
     sortDocumentEntries(input, "modifiedAsc");
     expect(input).toEqual([newer, older]);
+  });
+});
+
+describe("submodule scope", () => {
+  const submodules = ["deps/child", "deps/child/nested", "deps/childish"];
+
+  it("resolves the owning submodule by longest prefix", () => {
+    expect(submoduleScopeId("notes/a.md", submodules)).toBe(WORKSPACE_ROOT_SCOPE_ID);
+    expect(submoduleScopeId("deps/child/a.md", submodules)).toBe("deps/child");
+    expect(submoduleScopeId("deps/child/nested/a.md", submodules)).toBe("deps/child/nested");
+    expect(submoduleScopeId("deps/childish/a.md", submodules)).toBe("deps/childish");
+  });
+
+  it("hides excluded scopes and counts every scope unscoped", () => {
+    const subs = ["deps/child"];
+    const entries = [entry("notes/a.md"), entry("deps/child/b.md"), entry("_sys/x.md")];
+
+    expect(
+      filterEntriesBySubmoduleScope(entries, subs, ["deps/child"]).map((item) => item.relPath),
+    ).toEqual(["notes/a.md", "_sys/x.md"]);
+    expect(
+      filterEntriesBySubmoduleScope(entries, subs, [WORKSPACE_ROOT_SCOPE_ID]).map(
+        (item) => item.relPath,
+      ),
+    ).toEqual(["deps/child/b.md"]);
+    // Default path and the no-submodules guard both return the input untouched;
+    // the latter is what stops a stale ["."] from hiding the whole workspace.
+    expect(filterEntriesBySubmoduleScope(entries, subs, [])).toBe(entries);
+    expect(filterEntriesBySubmoduleScope(entries, [], [WORKSPACE_ROOT_SCOPE_ID])).toBe(entries);
+    expect(countEntriesBySubmodule(entries, subs)).toEqual({ ".": 1, "deps/child": 1 });
   });
 });

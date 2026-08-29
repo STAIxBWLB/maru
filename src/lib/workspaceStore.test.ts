@@ -54,7 +54,13 @@ function registry(paths: string[] = []): WorkspaceRegistry {
 }
 
 function entriesState(entries: VaultEntry[]): WorkspaceEntriesState {
-  return { entries, loading: false, refreshing: false, startupIoReady: true };
+  return {
+    entries,
+    loading: false,
+    refreshing: false,
+    startupIoReady: true,
+    submodulePaths: null,
+  };
 }
 
 function stateOf(partial: Partial<WorkspaceStoreState> = {}): WorkspaceStoreState {

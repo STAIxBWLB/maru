@@ -178,6 +178,9 @@ export function OutlinePane({
     documentViews,
     viewCounts,
     customViewCounts,
+    submodulePaths,
+    submoduleCounts,
+    excludedSubmodules,
     recentEntries,
     canCreateDocument,
   } = sidebar;
@@ -362,6 +365,10 @@ export function OutlinePane({
               documentViews={documentViews}
               viewCounts={viewCounts}
               customViewCounts={customViewCounts}
+              submodulePaths={submodulePaths}
+              submoduleCounts={submoduleCounts}
+              excludedSubmodules={excludedSubmodules}
+              onSubmoduleScopeChange={commands.setDocumentSubmoduleScope}
               recentEntries={recentEntries}
               selectedPath={selectedPath}
               documentFilter={documentFilter}

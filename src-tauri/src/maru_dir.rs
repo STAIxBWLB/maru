@@ -47,6 +47,7 @@ const GLOBAL_SETTINGS_PATHS: &[&[&str]] = &[
     &["ui", "filesBrowserMode"],
     &["ui", "filesSortKey"],
     &["ui", "documentSortKey"],
+    &["ui", "documentSubmoduleScope"],
     &["ui", "scratchpadSortKey"],
     &["ui", "filesListAttributes"],
     &["ui", "fileQueueDefaultOperation"],
@@ -407,6 +408,7 @@ fn default_settings_json() -> JsonValue {
                 "*.html"
             ],
             "documentViews": [],
+            "documentSubmoduleScope": {},
             "collapsedTreeFolders": [],
             "collapsedFileFolders": [],
             "documentTreeStateInitialized": false,

@@ -19,6 +19,7 @@ export interface OutlinePaneCommands {
   openGraph(target: GraphLocalTarget): Promise<void>;
   setDocumentFilter(filter: DocumentFilter): Promise<void>;
   updateDocumentViews(views: DocumentViewDefinition[]): Promise<void>;
+  setDocumentSubmoduleScope(excluded: string[]): Promise<void>;
   openNewDocument(docType?: string): Promise<void>;
   openCommandPalette(): Promise<void>;
   setExplorerExpandedFolders(paths: string[]): Promise<void>;
@@ -54,6 +55,7 @@ export interface CreateOutlinePaneCommandsOptions {
   openGraph?: (target: GraphLocalTarget) => void | Promise<void>;
   setDocumentFilter?: (filter: DocumentFilter) => void | Promise<void>;
   updateDocumentViews?: (views: DocumentViewDefinition[]) => void | Promise<void>;
+  setDocumentSubmoduleScope?: (excluded: string[]) => void | Promise<void>;
   openNewDocument?: (docType?: string) => void | Promise<void>;
   openCommandPalette?: () => void | Promise<void>;
   setExplorerExpandedFolders?: (paths: string[]) => void | Promise<void>;
@@ -100,6 +102,9 @@ export function createOutlinePaneCommands(
     },
     async updateDocumentViews(views): Promise<void> {
       await options.updateDocumentViews?.(views);
+    },
+    async setDocumentSubmoduleScope(excluded): Promise<void> {
+      await options.setDocumentSubmoduleScope?.(excluded);
     },
     async openNewDocument(docType?: string): Promise<void> {
       await options.openNewDocument?.(docType);
