@@ -17,7 +17,7 @@
 
 ## Phases
 
-- [ ] **Phase 6: Native E2E Runner Foundation** - A native runner drives the real app against the real backend, and the CI-vs-local question is settled by a spike rather than assumed.
+- [x] **Phase 6: Native E2E Runner Foundation** - A native runner drives the real app against the real backend, and the CI-vs-local question is settled by a spike rather than assumed. (completed 2026-08-29)
 - [ ] **Phase 7: Guardrails Before Churn** - Lock poisoning recovers, watchers prune generated directories, and a sanitizer guard lands before the milestone's own later work can trip it.
 - [ ] **Phase 8: Main-Thread Responsiveness** - The skills registry lock narrows and the main-thread-blocking commands move off it, proven by a concurrency load test rather than the absence of a visible freeze.
 - [ ] **Phase 9: Durability and Session Lifecycle** - A SIGHUP-trapping terminal can still be killed, and a pending edit is saved (or its failure surfaced) on unmount and app quit.
@@ -135,7 +135,7 @@ Phases execute in numeric order: 6 → 7 → 8 → 9 → 10 → 11
 
 | Phase | Plans Complete | Status | Completed |
 |-------|-----------------|--------|-----------|
-| 6. Native E2E Runner Foundation | 5/5 | In Progress|  |
+| 6. Native E2E Runner Foundation | 5/5 | Complete    | 2026-08-29 |
 | 7. Guardrails Before Churn | 0/TBD | Not started | - |
 | 8. Main-Thread Responsiveness | 0/TBD | Not started | - |
 | 9. Durability and Session Lifecycle | 0/TBD | Not started | - |
