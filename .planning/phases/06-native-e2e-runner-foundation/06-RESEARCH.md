@@ -354,6 +354,8 @@ import { readFileSync, readdirSync } from "node:fs";
 
 Every fetched capabilities example this session showed only `application` and `args`; none showed an `env` field for passing environment variables to the launched app process `[CITED: WebSearch aggregate + github.com/webdriverio/desktop-mobile README excerpt fetched this session]`. D-09's "points the app at it through an environment variable at launch" may need to rely on the wdio Node process's own inherited environment (setting the var before the service spawns the child) rather than a config key - confirm this mechanism works during the spike itself, before D-09's implementation is written into the phase plan as settled.
 
+RESOLVED 2026-08-29 (verified against installed sources and a live run): inherited env is the mechanism, but hook placement is load-bearing. `beforeSession` runs in the worker process (`@wdio/runner` build/index.js executes it), while the tauri-service spawns the app earlier, in the launcher's service `onPrepare` - seeding in `beforeSession` left the app pointed at the real `~/.maru`. `@wdio/cli` runs the config's own `onPrepare` before the services' `onPrepare`, and the service's `startEmbeddedDriver` spawns the app with `{...process.env, ...options.env, ...}`, so setting the isolation vars in the config's `onPrepare` reaches the app. `tauri:options` indeed has no env key, but a service-level `TauriServiceOptions.env` does exist and merges into the same spawn env; process.env inheritance covers D-09 without it.
+
 ## Code Examples
 
 ### Existing text-serialization the D-06 mirror should reuse verbatim
