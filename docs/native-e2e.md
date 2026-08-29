@@ -102,6 +102,33 @@ by a human:
    the document, and undo during/after composition plus mark/selection
    interaction behave as the engine specifies.
 
+### Observations — 2026-08-29 (plan 06-05 ratification)
+
+Worked end to end on the current debug build under fixture isolation.
+Measurement note applying to all items: the debug binary and the installed
+Maru.app share a process name, and early probes that targeted the process by
+name hit the wrong app — every recorded result below used PID-targeted
+accessibility calls.
+
+1. **View > Documents — PASS.** Before the OS menu click: active mode 오늘,
+   no `.document-list`. After: active mode 문서, `.document-list` present.
+2. **Terminal > New Shell — PASS.** Terminal canvas created; the text mirror
+   shows a real zsh prompt running in the fixture workspace's cwd.
+3. **Split Terminal — PASS.** Panes 1 → 2, distinct session IDs.
+4. **Terminal, Korean 2-set, 한글 — PASS WITH KNOWN ISSUE.** Composition
+   works and the committed word lands exactly once, BUT the first syllable
+   typed immediately after switching the input source from English to Korean
+   2-set arrives decomposed (ㅎㅏㄴ as raw jamo instead of composed 한); from
+   the second character onward composition is normal. Recorded as a known
+   issue — suspected WKWebView IME-context attach race on input-source
+   switch. Not a runner defect: the app's composition handlers are guarded by
+   the 06-03 specs.
+5. **Terminal, Enter mid-composition / abandon-by-click — PASS.** No command
+   executed on composition Enter; no residue or doubled text after abandoning
+   a composition (user-observed).
+6. **Rich editor, Korean 2-set, 한글 + undo/mark interactions — PASS.** No
+   anomalies (user-observed).
+
 ## Known limits
 
 - The runner targets **debug builds** (`cargo build --features native-e2e`).
@@ -160,9 +187,34 @@ Retry cap: 3 hosted runs. Runs used: 2.
 
 Consequence: the full suite runs in CI on pushes to `main` and on release tags
 (`.github/workflows/native-e2e.yml`, plan 06-05), pull requests get the
-compile-and-typecheck job only (D-16), and the spike workflow is retired. The
-human checkpoint in plan 06-05 ratifies this verdict item by item before the
-phase closes.
+compile-and-typecheck job only (D-16), and the spike workflow is retired.
+
+### Ratification
+
+The plan 06-05 blocking human checkpoint ratified this verdict item by item on
+2026-08-29, with the evidence named per condition:
+
+1. **Session establishment with no interactive prompt — YES.** Runs
+   33243419439 (1 spec) and 33250704926 (4 specs) both show zero
+   TCC/permission lines; the failure-screencapture step was `skipped` in both
+   (it only fires on failure/timeout), and timings were normal (4m47s and
+   4m09s). A modal would have surfaced as a hang-to-timeout.
+2. **Real PTY output read through the canvas surface — YES.** Run
+   33250704926's log shows `pty.spec.ts 1 passing (4.7s)` — the
+   shell-produced marker (echo-spoof-proof) plus the canvas ink check.
+3. **A full run completed with no human present — YES.** Run 33250704926:
+   `4 passed, 4 total` in a `workflow_dispatch` job with no human present; the
+   merged `native-e2e-suite` job carries ongoing proof.
+
+Blocking local gate: `make release-preflight` exited **0** on macOS
+(2026-08-29, attempt 4; attempts 1-3 failed only on two pre-existing flaky
+tests — the editorSurfaceRenderIsolation vitest timing test and the
+graph.spec ghost-node test under parallel load — plus a missing Playwright
+browser install; each passed on rerun, and none implicate phase 06 changes).
+
+CI placement reconfirmed at ratification: the `ci.yml` diff is purely additive
+(0 deleted lines, new `native-e2e-compile` job), `native-e2e.yml` exists, and
+`native-e2e-spike.yml` is deleted.
 
 ## IME sub-spike
 
