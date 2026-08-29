@@ -219,3 +219,51 @@ jobs:
             playwright-report/
             test-results/
           retention-days: 7
+
+  # D-03: keep the native runner compiling on every PR without executing the
+  # suite - launching the real app per PR is rejected on cost and early-flake
+  # grounds (D-16). The gated suite lives in native-e2e.yml.
+  native-e2e-compile:
+    name: native e2e compile check
+    needs: decision
+    if: needs.decision.outputs.run_full == 'true'
+    runs-on: macos-14
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 9.15.0
+
+      - name: Setup Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22.22.3
+          cache: pnpm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+          shared-key: macos-14-native-e2e-compile
+
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck (includes e2e-native/)
+        run: pnpm typecheck
+
+      - name: Lint (includes e2e-native/)
+        run: pnpm lint
+
+      # --locked, not --offline: a hosted runner has no warm registry cache on
+      # a cold job, so --offline would fail for a reason unrelated to the code.
+      - name: Cargo check with the native-e2e feature on
+        run: cd src-tauri && cargo check --locked --features native-e2e

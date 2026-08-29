@@ -1,0 +1,96 @@
+# Gated full native e2e suite (Phase 06, plan 06-05; verdict ci-viable, D-16).
+#
+# Runs the REAL Maru application under WebDriver on a hosted macOS runner:
+# `make test-e2e-native` builds the app with the default-off native-e2e cargo
+# feature and drives its WKWebView DOM, a real PTY, IME composition, and the
+# menu-command path (docs/native-e2e.md).
+#
+# Trigger scope is deliberate (D-16): pushes to `main` and release tags, plus
+# manual dispatch. Pull requests get only the compile-and-typecheck job in
+# ci.yml (`native-e2e-compile`) - running the full suite per PR was rejected on
+# macOS runner cost and early-flakiness grounds, and release-tag-only was
+# rejected because it finds regressions at the worst possible moment.
+#
+# This file is separate from ci.yml because ci.yml's push trigger is scoped to
+# `branches: [main]`; adding a tag trigger there would change when the entire
+# pipeline runs.
+#
+# This workflow supersedes the 06-01 spike workflow (native-e2e-spike.yml),
+# which established the CI-viability verdict recorded in docs/native-e2e.md.
+
+name: native-e2e
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  native-e2e-suite:
+    name: native e2e suite (real app, macOS)
+    runs-on: macos-14
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 9.15.0
+
+      - name: Setup Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22.22.3
+          cache: pnpm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+          shared-key: macos-14-native-e2e
+
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run the native e2e suite
+        id: suite
+        run: make test-e2e-native 2>&1 | tee /tmp/native-e2e-run.log
+
+      # Evidence on failure: the wdio/make log and a screencapture of the
+      # runner's screen, so a modal-permission hang is diagnosable from the
+      # artifact alone (D-02's failure classification depends on it).
+      - name: Capture failure evidence
+        if: failure() || cancelled()
+        run: |
+          mkdir -p /tmp/native-e2e-evidence
+          screencapture -x /tmp/native-e2e-evidence/screen.png 2>&1 || echo "screencapture failed (itself telling): $?"
+          cp /tmp/native-e2e-run.log /tmp/native-e2e-evidence/run.log 2>/dev/null || true
+          ls -la /tmp/native-e2e-evidence
+
+      - name: Upload wdio output on failure
+        if: failure() || cancelled()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-e2e-evidence
+          path: /tmp/native-e2e-evidence/
+          if-no-files-found: warn
+          retention-days: 7

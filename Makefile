@@ -213,9 +213,10 @@ test-e2e: node_modules ## Playwright e2e (requires browsers; run `pnpm playwrigh
 	$(PNPM) test:e2e
 
 # Deliberately NOT part of `verify`: it builds and launches a real macOS
-# .app under WebDriver and cannot be hermetic (TEST-01, D-15). Not wired
-# into `release-preflight` yet either - 06-05 does that once all four
-# D-13 surfaces exist. This target's frontend build is VITE_NATIVE_E2E=1
+# .app under WebDriver and cannot be hermetic (TEST-01, D-15) - the same
+# reason verify-integration sits outside verify. It IS part of
+# `release-preflight` (D-03, wired in 06-05), which is human-run on macOS.
+# This target's frontend build is VITE_NATIVE_E2E=1
 # and is deliberately not shippable - re-run `pnpm build:frontend` before
 # inspecting a production artifact.
 .PHONY: test-e2e-native
@@ -293,10 +294,11 @@ release-preflight-core: ## Release preflight core: diff, verify, and debug no-bu
 	$(MAKE) release-checks
 
 .PHONY: release-preflight
-release-preflight: ## Complete local release preflight: core checks, release CLI smoke, and e2e
+release-preflight: ## Complete local release preflight: core checks, release CLI smoke, e2e, and the native suite (macOS)
 	$(MAKE) release-preflight-core
 	$(MAKE) cli-smoke
 	$(MAKE) test-e2e
+	$(MAKE) test-e2e-native
 
 .PHONY: macos-distribution-check
 macos-distribution-check: ## Check repo config and GitHub secrets for notarized macOS direct distribution
