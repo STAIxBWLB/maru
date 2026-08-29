@@ -5,15 +5,15 @@ milestone_name: Felt Quality and Native Proof
 current_phase: 06
 current_phase_name: native-e2e-runner-foundation
 status: executing
-stopped_at: Phase 10 context gathered
-last_updated: "2026-08-29T08:10:46.734Z"
+stopped_at: Completed 06-02-PLAN.md
+last_updated: "2026-08-29T09:46:16.126Z"
 last_activity: 2026-08-29
 last_activity_desc: "ROADMAP.md created for v1.1: 6 phases (6-11), 15/15 requirements mapped"
 progress:
   total_phases: 6
   completed_phases: 0
   total_plans: 5
-  completed_plans: 0
+  completed_plans: 2
   percent: 0
 ---
 
@@ -29,11 +29,11 @@ See: .planning/PROJECT.md (updated 2026-08-28)
 ## Current Position
 
 Phase: 06 (native-e2e-runner-foundation) — EXECUTING
-Plan: 1 of 5
-Status: Executing Phase 06
-Last activity: 2026-08-29 — Phase 06 execution started
+Plan: 2 of 5
+Status: Ready to execute
+Last activity: 2026-08-29 — Phase 06 execution resumed (wave continue)
 
-Progress: [..........] 0%
+Progress: [████░░░░░░] 40%
 
 ## Performance Metrics
 
@@ -94,6 +94,7 @@ Progress: [..........] 0%
 | Phase 05 P09 | 7min | 2 tasks | 8 files |
 | Phase 05 P10 | 9min | 3 tasks | 9 files |
 | Phase 05 P11 | 2h 7m | 3 tasks | 25 files |
+| Phase 06 P02 | 55min | 2 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -186,6 +187,10 @@ Recent decisions affecting current work:
 - [Phase ?]: Extensibility drills mutate real production source only inside a finally-restored boundary and assert App byte identity.
 - [Phase 5]: Direct D-20 native UAT recorded five passed flows covering Documents/filesystem effects, live PTY lifecycle, lazy right/primary placement, stale/current generation coverage, and render isolation.
 - [Roadmap]: v1.1 phases 6-11 sequenced with TEST-01 first (Phase 6, native runner - the only way to observe PERF-01/02/03's and REL-01's real behavioral claims), PERF-03/04 plus SEC-02 as early guardrails (Phase 7, no native dependency, SEC-02 landed early precisely because this milestone's own refactor churn produces new unsanitized-sink risk), PERF-02 before PERF-01 in the same phase (Phase 8, PERF-02 rewrites the store.rs region PERF-03 touches and must settle first), REL-01 after TEST-01 (Phase 9, only a real PTY can trap SIGHUP), and the remaining budget/evidence items grouped by no-dependency convenience (Phases 10-11). TEST-01 and REL-01 carry materially higher planning uncertainty and are flagged in ROADMAP.md pending their respective spikes.
+- [Phase ?]: [Phase 6]: 06-02 VITE_NATIVE_E2E gate repeated as a literal expression at each register entry point - esbuild folds the statically replaced expression but does not inline a helper call across functions, so calling nativeE2eEnabled() would leak __MARU_NATIVE_E2E__ into production bundles (verified empirically both ways)
+- [Phase ?]: [Phase 6]: 06-02 pty.spec clicks the Shell launcher specifically, not the plan's literal first enabled button (Claude), because only a real shell makes the shell-produced-marker assertion meaningful
+- [Phase ?]: [Phase 6]: 06-02 native specs use in-page clicks + executeAsync inline poll loops - wdio element commands cost ~10-15s each with withGlobalTauri:false, and probe functions cannot cross the WebDriver boundary
+- [Phase ?]: [Phase 6]: 06-02 fixture lifecycle fixes - cleanup only in onComplete (afterSession deleted the shared root under the next spec's app), first per-worker reset skipped (races app boot into Sample Workspace seeding), reset clears contents never watched dirs, mocha timeout 120s
 
 ### Pending Todos
 
@@ -222,9 +227,9 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-08-29T08:10:46.704Z
-Stopped at: Phase 10 context gathered
-Resume file: .planning/phases/10-bundle-and-build-hardening/10-CONTEXT.md
+Last session: 2026-08-29T09:46:16.117Z
+Stopped at: Completed 06-02-PLAN.md
+Resume file: None
 
 ## Operator Next Steps
 
