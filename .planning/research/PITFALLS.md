@@ -297,7 +297,7 @@ leader (typical for PTY slaves), the escalation may only need "send SIGKILL to
 
 **Warning signs:**
 A `kill(-pgid, SIGKILL)` call that returns `ESRCH` unexpectedly in testing (no such
-process group) is the signal that the assumed group setup doesn't match reality - 
+process group) is the signal that the assumed group setup doesn't match reality -
 check this in the phase's own manual macOS/Linux verification, since CI never
 exercises PTY spawn depth this way (`ubuntu-22.04` runs the mocked-IPC e2e suite).
 
