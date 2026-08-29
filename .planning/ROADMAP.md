@@ -40,12 +40,12 @@
   4. A separate IME-composition sub-spike shows whether synthetic key events can substitute for real OS-level IME input, or whether that surface also needs human attendance.
   5. The runner's CI-vs-local scope is recorded as a settled fact that Phase 8 and Phase 9 plan their own verification against, not an assumption carried forward.
 
-**Plans**: 5 plans in 4 waves
+**Plans**: 1/5 plans executed in 4 waves
 
 Plans:
 **Wave 1**
 
-- [ ] 06-01-PLAN.md - Runner dependencies, fail-closed workspace isolation, and the CI-viability tracer (wave 1)
+- [x] 06-01-PLAN.md - Runner dependencies, fail-closed workspace isolation, and the CI-viability tracer (wave 1)
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
@@ -135,7 +135,7 @@ Phases execute in numeric order: 6 → 7 → 8 → 9 → 10 → 11
 
 | Phase | Plans Complete | Status | Completed |
 |-------|-----------------|--------|-----------|
-| 6. Native E2E Runner Foundation | 0/5 | Planned | - |
+| 6. Native E2E Runner Foundation | 1/5 | In Progress|  |
 | 7. Guardrails Before Churn | 0/TBD | Not started | - |
 | 8. Main-Thread Responsiveness | 0/TBD | Not started | - |
 | 9. Durability and Session Lifecycle | 0/TBD | Not started | - |
