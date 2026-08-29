@@ -11,9 +11,10 @@
   "scripts": {
     "dev": "vite --host 127.0.0.1 --port 5307",
     "build": "pnpm typecheck && pnpm build:frontend",
-    "build:frontend": "vite build && node scripts/check-bundle-budget.mjs",
+    "build:frontend": "vite build && node scripts/check-bundle-budget.mjs && node scripts/check-native-e2e-isolation.mjs",
     "build:frontend:native-e2e": "VITE_NATIVE_E2E=1 vite build",
     "check:bundle-budget": "node scripts/check-bundle-budget.mjs",
+    "check:native-e2e-isolation": "node scripts/check-native-e2e-isolation.mjs",
     "icons:generate": "node scripts/generate-icons.mjs",
     "icons:check": "node scripts/generate-icons.mjs --check",
     "check:select-chrome": "node scripts/check-select-chrome.mjs",
