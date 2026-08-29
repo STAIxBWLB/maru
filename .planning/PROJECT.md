@@ -21,7 +21,11 @@ live under `.planning/milestones/`. Product release v0.5.0 commemorates the
 milestone and includes the post-close ERR-06 hardening.
 
 Milestone v1.1 Felt Quality and Native Proof is active as of 2026-08-28 and
-continues phase numbering at Phase 6.
+continues phase numbering at Phase 6. Phase 6 (Native E2E Runner Foundation)
+completed 2026-08-29: the native WebDriver runner drives the real app's
+WKWebView DOM, PTY output, synthetic IME composition, and menu commands; the
+CI verdict is ci-viable (hosted macOS evidence in docs/native-e2e.md), the
+suite runs from `release-preflight`, and ship isolation is guard-enforced.
 
 ## Requirements
 
@@ -229,9 +233,9 @@ ones this milestone can actually break are listed here.
   repositories' boundary documents in the same change set
 - **Tech stack**: Tauri 2.10 / React 19.2 / Vite 7.3 / Rust MSRV 1.77.2, Node
   >= 22 + pnpm 9.15.0. No new frontend state library, no CSS framework
-- **CI reality**: `make verify` runs on `ubuntu-22.04` only, and e2e runs
-  Chromium against Vite with mocked IPC. macOS-native changes ship unverified by
-  CI - validate them by running the real app
+- **CI reality**: `make verify` runs on `ubuntu-22.04` only; e2e runs Chromium
+  against Vite with mocked IPC. A macOS job compile-checks the runner per PR;
+  the suite runs unattended on `main`/tags and gates `make release-preflight` - `docs/native-e2e.md`
 
 ## Key Decisions
 
@@ -267,4 +271,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-08-28 at the start of milestone v1.1*
+*Last updated: 2026-08-29 — Phase 6 complete*

@@ -2,19 +2,19 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Felt Quality and Native Proof
-current_phase: 06
-current_phase_name: native-e2e-runner-foundation
-status: executing
-stopped_at: Phase 6 context gathered
-last_updated: "2026-08-28T23:21:29.565Z"
+current_phase: 10
+current_phase_name: Bundle and Build Hardening
+status: planning
+stopped_at: Completed 06-05-PLAN.md
+last_updated: "2026-08-29T14:22:56.678Z"
 last_activity: 2026-08-29
 last_activity_desc: "ROADMAP.md created for v1.1: 6 phases (6-11), 15/15 requirements mapped"
 progress:
   total_phases: 6
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 5
-  completed_plans: 0
-  percent: 0
+  completed_plans: 5
+  percent: 17
 ---
 
 # Project State
@@ -28,18 +28,18 @@ See: .planning/PROJECT.md (updated 2026-08-28)
 
 ## Current Position
 
-Phase: 06 (native-e2e-runner-foundation) — EXECUTING
-Plan: 1 of 5
-Status: Executing Phase 06
-Last activity: 2026-08-29 — Phase 06 execution started
+Phase: 10 — Bundle and Build Hardening
+Plan: Not started
+Status: Ready to plan
+Last activity: 2026-08-29 — Phase 06 complete, transitioned to Phase 10
 
-Progress: [..........] 0%
+Progress: [██████████] 100%
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 32
+- Total plans completed: 37
 - Average duration: -
 - Total execution time: -
 
@@ -52,6 +52,7 @@ Progress: [..........] 0%
 | 03 | 4 | - | - |
 | 04 | 7 | - | - |
 | 05 | 11 | - | - |
+| 06 | 5 | - | - |
 
 **Recent Trend:**
 
@@ -94,6 +95,10 @@ Progress: [..........] 0%
 | Phase 05 P09 | 7min | 2 tasks | 8 files |
 | Phase 05 P10 | 9min | 3 tasks | 9 files |
 | Phase 05 P11 | 2h 7m | 3 tasks | 25 files |
+| Phase 06 P02 | 55min | 2 tasks | 7 files |
+| Phase 06 P03 | 50min | 2 tasks | 4 files |
+| Phase 06 P04 | 32min | 2 tasks | 6 files |
+| Phase 06 P05 | cross-session (checkpoint-gated) | 3 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -186,6 +191,15 @@ Recent decisions affecting current work:
 - [Phase ?]: Extensibility drills mutate real production source only inside a finally-restored boundary and assert App byte identity.
 - [Phase 5]: Direct D-20 native UAT recorded five passed flows covering Documents/filesystem effects, live PTY lifecycle, lazy right/primary placement, stale/current generation coverage, and render isolation.
 - [Roadmap]: v1.1 phases 6-11 sequenced with TEST-01 first (Phase 6, native runner - the only way to observe PERF-01/02/03's and REL-01's real behavioral claims), PERF-03/04 plus SEC-02 as early guardrails (Phase 7, no native dependency, SEC-02 landed early precisely because this milestone's own refactor churn produces new unsanitized-sink risk), PERF-02 before PERF-01 in the same phase (Phase 8, PERF-02 rewrites the store.rs region PERF-03 touches and must settle first), REL-01 after TEST-01 (Phase 9, only a real PTY can trap SIGHUP), and the remaining budget/evidence items grouped by no-dependency convenience (Phases 10-11). TEST-01 and REL-01 carry materially higher planning uncertainty and are flagged in ROADMAP.md pending their respective spikes.
+- [Phase ?]: [Phase 6]: 06-02 VITE_NATIVE_E2E gate repeated as a literal expression at each register entry point - esbuild folds the statically replaced expression but does not inline a helper call across functions, so calling nativeE2eEnabled() would leak __MARU_NATIVE_E2E__ into production bundles (verified empirically both ways)
+- [Phase ?]: [Phase 6]: 06-02 pty.spec clicks the Shell launcher specifically, not the plan's literal first enabled button (Claude), because only a real shell makes the shell-produced-marker assertion meaningful
+- [Phase ?]: [Phase 6]: 06-02 native specs use in-page clicks + executeAsync inline poll loops - wdio element commands cost ~10-15s each with withGlobalTauri:false, and probe functions cannot cross the WebDriver boundary
+- [Phase ?]: [Phase 6]: 06-02 fixture lifecycle fixes - cleanup only in onComplete (afterSession deleted the shared root under the next spec's app), first per-worker reset skipped (races app boot into Sample Workspace seeding), reset clears contents never watched dirs, mocha timeout 120s
+- [Phase ?]: [Phase 6]: 06-03 IME verdicts settled empirically - WebDriver keys never compose on either surface (terminal: literal jamo via insertText; rich editor: no change); synthetic composition events drive both surfaces' real handlers (rich editor needs the engine's DOM mutation paired in), so those halves stay as native regression tests and OS-level IME stays human-attended (D-08)
+- [Phase ?]: [Phase 6]: 06-03 Radix Tabs triggers activate on mousedown not click, and ProseMirror adopts synthetic composition only with the DOM mutation paired - both mechanics now encoded in ime.spec.ts
+- [Phase ?]: [Phase 6]: 06-04 ship-isolation guard reads produced artifacts only - dist/assets/*.js for the bridge namespace inside make verify, the unstripped debug no-bundle binary for the plugin crate name inside release-checks; cargo metadata manifest assertions kept as cheap early warning only (--no-deps cannot see dependency-propagated features)
+- [Phase ?]: [Phase 6]: 06-04 both red cases proven with real builds (VITE_NATIVE_E2E=1 bundle, --features native-e2e binary) and the binary scan's two crate-name strings confirmed present in the feature-on binary before the default-build green was accepted
+- [Phase ?]: [Phase 6]: 06-05 verdict ratified ci-viable - all three D-01 conditions evidenced on hosted macos-14 runs 33243419439/33250704926 (no TCC prompt, pty.spec green through canvas, 4/4 unattended); release-preflight exit 0 recorded; known IME first-syllable decomposition on input-source switch classified app-side, not a runner defect
 
 ### Pending Todos
 
@@ -222,9 +236,9 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-08-28T21:55:36.215Z
-Stopped at: Phase 6 context gathered
-Resume file: .planning/phases/06-native-e2e-runner-foundation/06-CONTEXT.md
+Last session: 2026-08-29T13:12:56.691Z
+Stopped at: Completed 06-05-PLAN.md
+Resume file: None
 
 ## Operator Next Steps
 

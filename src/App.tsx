@@ -280,6 +280,10 @@ import {
 } from "./lib/gmail";
 import { LocaleContext, useLocaleState, useTranslation } from "./lib/i18n";
 import { listenForMenuCommand } from "./lib/menu";
+import {
+  nativeE2eEnabled,
+  registerMenuCommandDispatcher,
+} from "./lib/nativeE2eBridge";
 import { currentPlatform, isMacPlatform } from "./lib/platform";
 import {
   buildInboxProcessPrompt,
@@ -6913,6 +6917,21 @@ export function MainApp() {
       disposed = true;
       unlisten?.();
     };
+  }, [runMenuCommand]);
+
+  // D-13 surface 4 (plan 06-03): expose the menu-command path to the native
+  // e2e runner through the build-gated debug bridge. The dispatcher delegates
+  // to the same runMenuCommand the Tauri listener above calls — deliberately
+  // not a parallel copy of the switch, which would let the native spec pass
+  // against logic the real menu never reaches. registerMenuCommandDispatcher
+  // is itself build-gated (the VITE_NATIVE_E2E literal inside it tree-shakes
+  // the bridge from production bundles); the outer guard keeps this effect
+  // inert without registering anything.
+  useEffect(() => {
+    if (!nativeE2eEnabled()) return;
+    return registerMenuCommandDispatcher((id) => {
+      runMenuCommand(id);
+    });
   }, [runMenuCommand]);
 
   const modeClassByAppMode: Partial<Record<AppMode, string>> = {

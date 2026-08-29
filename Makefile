@@ -175,6 +175,10 @@ lint-i18n: ## i18n lint: ko/en key parity + hardcoded UI string scan
 check-select-chrome: ## Static guard: select rules must not wipe the base chevron via background shorthand
 	$(NODE) scripts/check-select-chrome.mjs
 
+.PHONY: check-native-e2e-isolation
+check-native-e2e-isolation: ## Static guard: no native-e2e runner affordances in the production bundle or Cargo manifest (D-10)
+	$(NODE) scripts/check-native-e2e-isolation.mjs
+
 # The type scale is the single source of truth (PR #137). A raw px font-size in
 # styles.css silently opts that rule out of any future --type-* retune, so the
 # pane drifts away from the rest of the app. graph.css/diagram.css still carry
@@ -209,9 +213,10 @@ test-e2e: node_modules ## Playwright e2e (requires browsers; run `pnpm playwrigh
 	$(PNPM) test:e2e
 
 # Deliberately NOT part of `verify`: it builds and launches a real macOS
-# .app under WebDriver and cannot be hermetic (TEST-01, D-15). Not wired
-# into `release-preflight` yet either - 06-05 does that once all four
-# D-13 surfaces exist. This target's frontend build is VITE_NATIVE_E2E=1
+# .app under WebDriver and cannot be hermetic (TEST-01, D-15) - the same
+# reason verify-integration sits outside verify. It IS part of
+# `release-preflight` (D-03, wired in 06-05), which is human-run on macOS.
+# This target's frontend build is VITE_NATIVE_E2E=1
 # and is deliberately not shippable - re-run `pnpm build:frontend` before
 # inspecting a production artifact.
 .PHONY: test-e2e-native
@@ -276,6 +281,11 @@ release-version-check: ## Check every release version surface and optional RELEA
 .PHONY: release-checks
 release-checks: verify test-cli cli-smoke-debug ## Full verify plus release-only CLI and debug Tauri checks
 	$(PNPM) tauri build --debug --no-bundle --config '{"build":{"beforeBuildCommand":null}}'
+	@# D-10 artifact-level scan: the unstripped debug binary carries the same
+	@# default feature set the release build uses, so a native-e2e plugin that
+	@# arrived through a stray flag or a dependency is caught here. Must run
+	@# BEFORE the debug-artifact prune below, which deletes the binary.
+	$(NODE) scripts/check-native-e2e-isolation.mjs --binary $(TAURI_DIR)/target/debug/maru
 	$(PNPM) clean:tauri-debug -- --force
 
 .PHONY: release-preflight-core
@@ -284,10 +294,11 @@ release-preflight-core: ## Release preflight core: diff, verify, and debug no-bu
 	$(MAKE) release-checks
 
 .PHONY: release-preflight
-release-preflight: ## Complete local release preflight: core checks, release CLI smoke, and e2e
+release-preflight: ## Complete local release preflight: core checks, release CLI smoke, e2e, and the native suite (macOS)
 	$(MAKE) release-preflight-core
 	$(MAKE) cli-smoke
 	$(MAKE) test-e2e
+	$(MAKE) test-e2e-native
 
 .PHONY: macos-distribution-check
 macos-distribution-check: ## Check repo config and GitHub secrets for notarized macOS direct distribution

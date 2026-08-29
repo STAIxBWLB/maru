@@ -28,6 +28,9 @@ const APP_CONFIG_DIR = "com.maru.app";
 const WORKSPACE_REGISTRY_FILE = "workspaces.json";
 
 let fixtureRoot: string | null = null;
+/** Per-worker latch: the first beforeTest sees the just-seeded state (the
+ *  app launched after onPrepare), so only later tests need a real reset. */
+let fixtureDirty = false;
 
 function fixturePaths(root: string) {
   return {
@@ -78,11 +81,14 @@ async function writeFixtureContent(root: string): Promise<void> {
     activeByVisibility: { private: workspaceDir },
     hiddenDefaults: [],
   };
-  await fs.writeFile(
-    path.join(registryDir, WORKSPACE_REGISTRY_FILE),
-    JSON.stringify(registry, null, 2),
-    "utf8",
-  );
+  // Write the registry atomically (tmp file + rename, mirroring the app's
+  // own write_atomic): a plain writeFile during a between-test reset lets an
+  // app-side read land between delete and rewrite and observe a MISSING
+  // registry — the zero-workspace state that makes the frontend first-run-
+  // seed its Sample Workspace.
+  const tmp = path.join(registryDir, `.${WORKSPACE_REGISTRY_FILE}.tmp`);
+  await fs.writeFile(tmp, JSON.stringify(registry, null, 2), "utf8");
+  await fs.rename(tmp, path.join(registryDir, WORKSPACE_REGISTRY_FILE));
 }
 
 /**
@@ -115,12 +121,42 @@ export async function seedFixtureWorkspace(): Promise<{
  * in-place, without touching the already-launched app's env (D-12: the
  * app is relaunched once per spec file, reset between the tests inside
  * it). Call from `beforeTest`.
+ *
+ * Two deliberate properties:
+ *
+ * - The FIRST call in a worker is a no-op. The app for this spec file was
+ *   launched after onPrepare seeded the fixture, so its boot already read
+ *   the fresh registry. Resetting at that moment races the boot read:
+ *   deleting workspaces.json under a booting app makes
+ *   listWorkspaceRoots() see zero workspaces, and the frontend then seeds
+ *   its first-run Sample Workspace instead (observed: webview.spec's
+ *   "Welcome" assertion failing with the sample workspace on screen
+ *   whenever the reset landed mid-boot). Resets matter from the second
+ *   test on.
+ * - The reset removes the CONTENTS of each seeded directory, never the
+ *   directories themselves: deleting a watched directory kills the running
+ *   app's filesystem watcher on it, and the re-created directory is not
+ *   re-watched, so the app never sees the re-seeded files.
  */
 export async function resetFixtureWorkspace(): Promise<void> {
   const root = requireFixtureRoot();
+  if (!fixtureDirty) {
+    fixtureDirty = true;
+    return;
+  }
   const { workspaceDir, configDir } = fixturePaths(root);
-  await fs.rm(workspaceDir, { recursive: true, force: true });
-  await fs.rm(configDir, { recursive: true, force: true });
+  // Contents only, never the directories themselves — for BOTH the workspace
+  // dir and the registry dir. Deleting configDir's com.maru.app entry
+  // wholesale would break the same watcher-survival invariant the docstring
+  // states for the workspace: the reset removes what is INSIDE
+  // config/com.maru.app/, never the registry directory itself.
+  const registryDir = path.join(configDir, APP_CONFIG_DIR);
+  for (const dir of [workspaceDir, registryDir]) {
+    const entries = await fs.readdir(dir).catch(() => [] as string[]);
+    for (const entry of entries) {
+      await fs.rm(path.join(dir, entry), { recursive: true, force: true });
+    }
+  }
   await writeFixtureContent(root);
 }
 

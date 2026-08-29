@@ -25,8 +25,17 @@ const APP_BINARY = "./src-tauri/target/debug/maru";
  * how the session ended.
  */
 function killSurvivingAppProcesses(): void {
+  // pgrep -f treats the pattern as an unanchored ERE: the literal dots in
+  // APP_BINARY are regex wildcards, so the bare pattern matches ANY command
+  // line containing "<any char>/src-tauri/target/debug/maru" — including a
+  // developer's own `tauri dev` or debug instance launched by absolute path
+  // from this or any other checkout, which this backstop would then SIGKILL.
+  // Escape every metacharacter and anchor the match to the exact relative
+  // argv the tauri-service spawns, so teardown can only reach a process
+  // started the same way this run starts its app.
+  const escaped = APP_BINARY.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   try {
-    const pids = execFileSync("pgrep", ["-f", APP_BINARY], { encoding: "utf8" })
+    const pids = execFileSync("pgrep", ["-f", `^${escaped}$`], { encoding: "utf8" })
       .split("\n")
       .map((line) => line.trim())
       .filter(Boolean);
@@ -39,6 +48,41 @@ function killSurvivingAppProcesses(): void {
     }
   } catch {
     // pgrep exits non-zero when it finds nothing; that is the common case.
+  }
+}
+
+/**
+ * Local-run focus fix: the canvas ink check (pty.spec) reads painted pixels,
+ * and WKWebView throttles painting on an occluded/backgrounded window
+ * (`backgroundThrottling: "throttle"` in tauri.conf.json). The tauri-service's
+ * own focus-recovery helper cannot run here (`withGlobalTauri: false`), so a
+ * local run where the terminal keeps focus flakes on an unpainted canvas while
+ * hosted CI - where the spawned window is the only thing on screen - stays
+ * green. Bring the just-spawned app to the front once per session. Uses the
+ * same escaped, anchored pgrep pattern as the teardown backstop so only a
+ * process spawned exactly the way this runner spawns its app is touched, and
+ * PID-targeted activation sidesteps the debug binary sharing the process name
+ * with an installed Maru.app.
+ */
+function activateAppWindow(): boolean {
+  const escaped = APP_BINARY.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  try {
+    const pids = execFileSync("pgrep", ["-f", `^${escaped}$`], { encoding: "utf8" })
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean);
+    const pid = pids[pids.length - 1];
+    if (!pid) return false;
+    execFileSync("osascript", [
+      "-e",
+      `tell application "System Events" to set frontmost of (first process whose unix id is ${pid}) to true`,
+    ]);
+    return true;
+  } catch {
+    // Activation is best-effort: no accessibility grant, or the app not yet
+    // spawned, must never fail the run - the ink check only needs the common
+    // case covered.
+    return false;
   }
 }
 
@@ -60,7 +104,12 @@ export const config = {
   framework: "mocha",
   mochaOpts: {
     ui: "bdd",
-    timeout: 60_000,
+    // 120s, not a lean default: withGlobalTauri is false, so the service's
+    // per-command window-state helper times out (~5s, twice) around every
+    // wdio element command — each click/waitForDisplayed costs ~10-15s, and
+    // 06-01's webview.spec alone needs ~50-70s across runs. 60s was observed
+    // flaking on it; 120s still bounds a genuinely hung test.
+    timeout: 120_000,
   },
   reporters: ["spec"],
   logLevel: "info",
@@ -85,11 +134,29 @@ export const config = {
   onPrepare: async () => {
     await seedFixtureWorkspace();
   },
+  beforeSession: async () => {
+    // The session's app instance may still be booting when this hook runs;
+    // retry briefly until the activation lands. Best-effort by design (see
+    // the helper's comment): a miss leaves the old flaky behavior, never a
+    // failure.
+    for (let attempt = 0; attempt < 15; attempt++) {
+      if (activateAppWindow()) break;
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
+  },
   beforeTest: async () => {
     await resetFixtureWorkspace();
   },
   afterSession: async () => {
-    await cleanupFixtureWorkspace();
+    // Kill only. Do NOT clean the fixture root here: afterSession runs per
+    // worker, i.e. per spec file, but the app for the NEXT spec file is
+    // spawned by the launcher pointed at the same fixture root — a cleanup
+    // here deletes that root from under it, and the next app boots into an
+    // empty registry and first-run-seeds its Sample Workspace instead
+    // (observed: webview.spec failing with the sample workspace on screen
+    // whenever it ran after another spec). The root is per-RUN state (D-09);
+    // onComplete, which runs once per run on both the pass and the fail
+    // path, owns its cleanup.
     killSurvivingAppProcesses();
   },
   onComplete: async () => {
