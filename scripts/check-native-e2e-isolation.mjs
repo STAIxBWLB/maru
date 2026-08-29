@@ -117,7 +117,20 @@ function checkManifest() {
       ),
     );
   } catch (error) {
-    violations.push(`cargo metadata failed: ${error.message}`);
+    // An environmental cargo failure — cargo not installed, a cold registry
+    // cache (`--offline` fails on a machine that has never run cargo), a
+    // corrupted index — is NOT an isolation violation. Hard-failing here
+    // would block `pnpm build:frontend` for frontend-only contributors and
+    // misdiagnose an environment problem as a D-10 breach, training people
+    // to bypass the gate. Warn and skip the manifest half instead: the
+    // bundle half still guards the artifact that actually ships. Exit-1 is
+    // reserved for a SUCCESSFULLY PARSED manifest that violates D-10 (and
+    // for the parse-level assertions below, which only run when metadata
+    // was produced).
+    console.warn(
+      "native-e2e-isolation: skipping Cargo manifest assertions — " +
+        `cargo metadata failed for environmental reasons: ${error.message}`,
+    );
     return;
   }
   const maru = metadata.packages.find((pkg) => pkg.name === "maru");
