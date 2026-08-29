@@ -40,7 +40,7 @@
   4. A separate IME-composition sub-spike shows whether synthetic key events can substitute for real OS-level IME input, or whether that surface also needs human attendance.
   5. The runner's CI-vs-local scope is recorded as a settled fact that Phase 8 and Phase 9 plan their own verification against, not an assumption carried forward.
 
-**Plans**: 4/5 plans executed in 4 waves
+**Plans**: 5/5 plans executed in 4 waves
 
 Plans:
 **Wave 1**
@@ -58,7 +58,7 @@ Plans:
 
 **Wave 4** *(blocked on Wave 3 completion)*
 
-- [ ] 06-05-PLAN.md - Recorded verdict, release-preflight gate, and CI placement (wave 4)
+- [x] 06-05-PLAN.md - Recorded verdict, release-preflight gate, and CI placement (wave 4)
 
 ### Phase 7: Guardrails Before Churn
 
@@ -135,7 +135,7 @@ Phases execute in numeric order: 6 → 7 → 8 → 9 → 10 → 11
 
 | Phase | Plans Complete | Status | Completed |
 |-------|-----------------|--------|-----------|
-| 6. Native E2E Runner Foundation | 4/5 | In Progress|  |
+| 6. Native E2E Runner Foundation | 5/5 | In Progress|  |
 | 7. Guardrails Before Churn | 0/TBD | Not started | - |
 | 8. Main-Thread Responsiveness | 0/TBD | Not started | - |
 | 9. Durability and Session Lifecycle | 0/TBD | Not started | - |

@@ -5,16 +5,16 @@ milestone_name: Felt Quality and Native Proof
 current_phase: 06
 current_phase_name: native-e2e-runner-foundation
 status: executing
-stopped_at: Completed 06-04-PLAN.md
-last_updated: "2026-08-29T11:27:54.076Z"
+stopped_at: Completed 06-05-PLAN.md
+last_updated: "2026-08-29T13:12:56.700Z"
 last_activity: 2026-08-29
 last_activity_desc: "ROADMAP.md created for v1.1: 6 phases (6-11), 15/15 requirements mapped"
 progress:
   total_phases: 6
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 5
-  completed_plans: 4
-  percent: 0
+  completed_plans: 5
+  percent: 17
 ---
 
 # Project State
@@ -29,11 +29,11 @@ See: .planning/PROJECT.md (updated 2026-08-28)
 ## Current Position
 
 Phase: 06 (native-e2e-runner-foundation) — EXECUTING
-Plan: 4 of 5
+Plan: 5 of 5
 Status: Ready to execute
 Last activity: 2026-08-29 — Phase 06 execution resumed (wave continue)
 
-Progress: [████████░░] 80%
+Progress: [██████████] 100%
 
 ## Performance Metrics
 
@@ -97,6 +97,7 @@ Progress: [████████░░] 80%
 | Phase 06 P02 | 55min | 2 tasks | 7 files |
 | Phase 06 P03 | 50min | 2 tasks | 4 files |
 | Phase 06 P04 | 32min | 2 tasks | 6 files |
+| Phase 06 P05 | cross-session (checkpoint-gated) | 3 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -197,6 +198,7 @@ Recent decisions affecting current work:
 - [Phase ?]: [Phase 6]: 06-03 Radix Tabs triggers activate on mousedown not click, and ProseMirror adopts synthetic composition only with the DOM mutation paired - both mechanics now encoded in ime.spec.ts
 - [Phase ?]: [Phase 6]: 06-04 ship-isolation guard reads produced artifacts only - dist/assets/*.js for the bridge namespace inside make verify, the unstripped debug no-bundle binary for the plugin crate name inside release-checks; cargo metadata manifest assertions kept as cheap early warning only (--no-deps cannot see dependency-propagated features)
 - [Phase ?]: [Phase 6]: 06-04 both red cases proven with real builds (VITE_NATIVE_E2E=1 bundle, --features native-e2e binary) and the binary scan's two crate-name strings confirmed present in the feature-on binary before the default-build green was accepted
+- [Phase ?]: [Phase 6]: 06-05 verdict ratified ci-viable - all three D-01 conditions evidenced on hosted macos-14 runs 33243419439/33250704926 (no TCC prompt, pty.spec green through canvas, 4/4 unattended); release-preflight exit 0 recorded; known IME first-syllable decomposition on input-source switch classified app-side, not a runner defect
 
 ### Pending Todos
 
@@ -233,8 +235,8 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-08-29T11:27:54.064Z
-Stopped at: Completed 06-04-PLAN.md
+Last session: 2026-08-29T13:12:56.691Z
+Stopped at: Completed 06-05-PLAN.md
 Resume file: None
 
 ## Operator Next Steps
