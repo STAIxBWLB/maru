@@ -17,6 +17,7 @@ vi.mock("../../lib/today", async (importOriginal) => {
     ...original,
     readTaskIntegrations: vi.fn(),
     taskIntegrationsRetry: vi.fn(),
+    webActionRepairTaskListLinkage: vi.fn(),
     taskIntegrationsDrain: vi.fn(),
     webActionsScan: vi.fn(),
     webActionsApply: vi.fn(),
@@ -28,6 +29,7 @@ import {
   readTaskIntegrations,
   taskIntegrationsDrain,
   taskIntegrationsRetry,
+  webActionRepairTaskListLinkage,
   webActionsApply,
   webActionsImportTop,
   webActionsScan,
@@ -48,6 +50,7 @@ function record(overrides: Partial<OutboxRecord>): OutboxRecord {
     lastError: null,
     createdAt: "2026-07-21T00:00:00Z",
     updatedAt: "2026-07-21T00:01:00Z",
+    recordRevision: "record-revision-1",
     ...overrides,
   };
 }
@@ -249,6 +252,122 @@ describe("TodaySyncStatus", () => {
     // In-flight states (prepared/ready/syncing) all read as "syncing".
     expect(rows[1].textContent).toContain("다시 열기");
     expect(rows[1].textContent).toContain("동기화 중");
+  });
+
+  it("shows the guarded repair only for one blocked web upsert, then leaves provider work to Retry", async () => {
+    const blocked = record({
+      op: "upsert",
+      status: "authBlocked",
+      googleTaskId: "",
+      googleTaskListId: "invalid-list",
+      webActionId: "wa-1",
+      lastError: "Invalid task list",
+    });
+    const container = await renderSection([blocked]);
+    await act(async () => {
+      headerButton(container).click();
+    });
+    const repair = Array.from(container.querySelectorAll<HTMLButtonElement>("button")).find(
+      (button) => button.textContent?.includes(translate("ko", "today.sync.repairTaskList")),
+    );
+    expect(repair).toBeDefined();
+    expect(container.textContent).toContain(translate("ko", "today.sync.repairTaskListHint"));
+    vi.mocked(webActionRepairTaskListLinkage).mockResolvedValue({ changed: true });
+    await act(async () => {
+      repair!.click();
+    });
+    expect(webActionRepairTaskListLinkage).toHaveBeenCalledWith("/tmp/work", blocked, "list-default");
+    expect(taskIntegrationsRetry).not.toHaveBeenCalled();
+    expect(taskIntegrationsDrain).not.toHaveBeenCalled();
+    expect(container.textContent).toContain(translate("ko", "today.sync.repairTaskListSuccess"));
+
+    const retry = Array.from(container.querySelectorAll<HTMLButtonElement>("button")).find(
+      (button) => button.textContent?.includes(translate("ko", "today.sync.retry")),
+    );
+    vi.mocked(taskIntegrationsRetry).mockResolvedValue({ requeued: 1 });
+    vi.mocked(taskIntegrationsDrain).mockResolvedValue({ drained: 0, failed: 0, blocked: 1 });
+    await act(async () => {
+      retry!.click();
+    });
+    expect(taskIntegrationsRetry).toHaveBeenCalledWith("/tmp/work", ["ob-1"], expect.any(String));
+    expect(taskIntegrationsDrain).toHaveBeenCalledWith("/tmp/work", expect.any(String), "/opt/gws");
+  });
+
+  it("disables the guarded repair and Retry while the local repair is busy", async () => {
+    const container = await renderSection([
+      record({
+        op: "upsert",
+        status: "authBlocked",
+        googleTaskId: "",
+        googleTaskListId: null,
+        webActionId: "wa-1",
+      }),
+    ]);
+    await act(async () => {
+      headerButton(container).click();
+    });
+    let finish: ((value: { changed: boolean }) => void) | undefined;
+    vi.mocked(webActionRepairTaskListLinkage).mockImplementation(
+      () => new Promise((resolve) => { finish = resolve; }),
+    );
+    const repair = Array.from(container.querySelectorAll<HTMLButtonElement>("button")).find(
+      (button) => button.textContent?.includes(translate("ko", "today.sync.repairTaskList")),
+    )!;
+    const retry = Array.from(container.querySelectorAll<HTMLButtonElement>("button")).find(
+      (button) => button.textContent?.includes(translate("ko", "today.sync.retry")),
+    )!;
+    await act(async () => {
+      repair.click();
+      await Promise.resolve();
+    });
+    expect(repair.disabled).toBe(true);
+    expect(retry.disabled).toBe(true);
+    await act(async () => {
+      finish?.({ changed: true });
+      await Promise.resolve();
+    });
+    expect(repair.disabled).toBe(false);
+  });
+
+  it("hides repair for non-matching states and reports a typed repair failure without retrying", async () => {
+    const notRepairable = record({
+      op: "upsert",
+      status: "authBlocked",
+      googleTaskId: "provider-task",
+      webActionId: "wa-1",
+      lastError: "Invalid task list",
+    });
+    const container = await renderSection([notRepairable]);
+    await act(async () => {
+      headerButton(container).click();
+    });
+    expect(container.textContent).not.toContain(translate("ko", "today.sync.repairTaskList"));
+
+    const errorContainer = await renderSection([
+      record({
+        op: "upsert",
+        status: "authBlocked",
+        googleTaskId: "",
+        googleTaskListId: null,
+        webActionId: "wa-1",
+      }),
+    ]);
+    await act(async () => {
+      headerButton(errorContainer).click();
+    });
+    const repair = Array.from(errorContainer.querySelectorAll<HTMLButtonElement>("button")).find(
+      (button) => button.textContent?.includes(translate("ko", "today.sync.repairTaskList")),
+    );
+    vi.mocked(webActionRepairTaskListLinkage).mockRejectedValue({
+      code: "web_action_repair_conflict",
+      message: "changed",
+    });
+    await act(async () => {
+      repair?.click();
+    });
+    expect(errorContainer.textContent).toContain(translate("ko", "today.sync.repairTaskListError"));
+    expect(taskIntegrationsRetry).not.toHaveBeenCalled();
+    expect(taskIntegrationsDrain).not.toHaveBeenCalled();
   });
 
   it("shows a problem count badge on the collapsed header", async () => {

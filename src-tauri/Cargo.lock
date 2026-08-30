@@ -2560,7 +2560,7 @@ dependencies = [
 
 [[package]]
 name = "maru"
-version = "1.1.0"
+version = "1.1.1"
 dependencies = [
  "alacritty_terminal",
  "base64 0.22.1",
@@ -2604,7 +2604,7 @@ dependencies = [
 
 [[package]]
 name = "maru-cli"
-version = "1.1.0"
+version = "1.1.1"
 dependencies = [
  "maru",
 ]

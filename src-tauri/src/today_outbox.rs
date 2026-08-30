@@ -96,6 +96,11 @@ pub struct OutboxRecord {
     pub last_error: Option<String>,
     pub created_at: String,
     pub updated_at: String,
+    /// Canonical identity returned to the UI only. It is never persisted in
+    /// the durable JSON record, so a rendered revision cannot become mutable
+    /// outbox state by accident.
+    #[serde(default, skip_deserializing, skip_serializing_if = "Option::is_none")]
+    pub record_revision: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -129,10 +134,74 @@ fn record_path(work: &Path, id: &str) -> PathBuf {
     outbox_dir_for(work).join(format!("{id}.json"))
 }
 
+fn validate_record_id(id: &str) -> Result<(), String> {
+    if id.is_empty()
+        || !id
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')
+    {
+        return Err("outbox record id is invalid".to_string());
+    }
+    Ok(())
+}
+
+/// Read one exact outbox record for a guarded operation. Unlike `list_records`,
+/// malformed JSON is an error rather than an entry silently omitted from a UI
+/// listing.
+pub(crate) fn read_record(work: &Path, id: &str) -> Result<OutboxRecord, String> {
+    validate_record_id(id)?;
+    let raw = fs::read_to_string(record_path(work, id))
+        .map_err(|err| format!("Cannot read outbox record: {err}"))?;
+    let mut record = serde_json::from_str::<OutboxRecord>(&raw)
+        .map_err(|err| format!("Cannot parse outbox record: {err}"))?;
+    if record.id != id {
+        return Err("outbox record identity does not match its file".to_string());
+    }
+    record.record_revision = Some(record_revision(&record));
+    Ok(record)
+}
+
+/// The only linkage shapes the one-off web-action repair may replace. A
+/// populated linkage is accepted only when the durable provider error itself
+/// identifies it as unusable; this avoids turning the action into a generic
+/// list selector for ordinary `authBlocked` records.
+pub(crate) fn has_unusable_task_list_linkage(record: &OutboxRecord) -> bool {
+    if record
+        .google_task_list_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .is_none()
+    {
+        return true;
+    }
+    let detail = record
+        .last_error
+        .as_deref()
+        .unwrap_or_default()
+        .to_lowercase();
+    (detail.contains("invalid task list")
+        || detail.contains("invalid tasklist")
+        || detail.contains("task list not found")
+        || detail.contains("tasklist not found"))
+        && (detail.contains("task list") || detail.contains("tasklist"))
+}
+
 pub(crate) fn write_record(work: &Path, record: &OutboxRecord) -> Result<(), String> {
-    let json = serde_json::to_string_pretty(record)
+    let mut stored = record.clone();
+    stored.record_revision = None;
+    let json = serde_json::to_string_pretty(&stored)
         .map_err(|err| format!("Cannot serialize outbox record: {err}"))?;
     write_atomic(&record_path(work, &record.id), json.as_bytes())
+}
+
+/// Stable identity for an outbox record as rendered to Today. The transient
+/// wire-only field is excluded so the revision describes only durable state.
+pub(crate) fn record_revision(record: &OutboxRecord) -> String {
+    let mut stable = record.clone();
+    stable.record_revision = None;
+    let json = serde_json::to_string(&stable).expect("OutboxRecord must serialize");
+    crate::document::revision_for(&json)
 }
 
 pub(crate) fn list_records(work: &Path) -> Result<Vec<OutboxRecord>, String> {
@@ -149,7 +218,8 @@ pub(crate) fn list_records(work: &Path) -> Result<Vec<OutboxRecord>, String> {
         let Ok(raw) = fs::read_to_string(&path) else {
             continue;
         };
-        if let Ok(record) = serde_json::from_str::<OutboxRecord>(&raw) {
+        if let Ok(mut record) = serde_json::from_str::<OutboxRecord>(&raw) {
+            record.record_revision = Some(record_revision(&record));
             records.push(record);
         }
     }
@@ -202,6 +272,7 @@ pub(crate) fn enqueue_record(
         last_error: None,
         created_at: now_iso.to_string(),
         updated_at: now_iso.to_string(),
+        record_revision: None,
     };
     write_record(work, &record)?;
     Ok(record)

@@ -71,6 +71,7 @@ export const IPC_ERROR_CODES = [
   "task_conflict",
   "document_conflict",
   "evidence_binder_revision_conflict",
+  "web_action_repair_conflict",
 ] as const;
 export type IpcErrorCode = (typeof IPC_ERROR_CODES)[number];
 
