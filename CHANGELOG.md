@@ -8,6 +8,13 @@ because releases cut frequently during active development. Versions before
 Dates are the release-tag dates. Only `feat`/`fix`-level changes are listed;
 `chore(release)` version bumps and merge commits are omitted.
 
+## v1.1.1 - 2026-08-30 - Guarded Link Repair
+
+- **Repaired one safely-scoped web-task recovery path (#303).** Today can now
+  repair an invalid task-list link for one exact `authBlocked` web upsert,
+  with receipt, note, provider-ID, and optimistic-revision guards. The repair
+  is local-only; the existing Retry control remains the only Google actuator.
+
 ## v1.1.0 - 2026-08-30 - Aligned Numbering
 
 - **Release versions now follow the planning milestone.** Milestone `vN.M` owns
