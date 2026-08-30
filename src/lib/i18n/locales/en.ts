@@ -2130,6 +2130,8 @@ export const en: Record<string, string> = {
   "today.sync.title": "Sync status",
   "today.sync.refresh": "Refresh all",
   "today.sync.retry": "Retry",
+  "today.sync.retrySuccess": "Retry sequence finished. The latest sync state was reloaded.",
+  "today.sync.retryError": "Sync retry did not finish. The latest state was reloaded; review it before trying again.",
   "today.sync.repairTaskList": "Repair task-list link",
   "today.sync.repairTaskListHint": "This web task is blocked by an unusable task-list link. Repair the local link, then choose Retry to contact Google.",
   "today.sync.repairTaskListSuccess": "Task-list link repaired locally. Choose Retry when you are ready to retry Google sync.",

@@ -18,7 +18,7 @@ import {
   RefreshCw,
   TriangleAlert,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "../../lib/i18n";
 import type {
   OutboxRecord,
@@ -118,6 +118,10 @@ export function TodaySyncStatus() {
   const [expanded, setExpanded] = useState(false);
   const [busy, setBusy] = useState(false);
   const [repairResult, setRepairResult] = useState<"success" | "error" | null>(null);
+  const [retryResult, setRetryResult] = useState<"success" | "error" | null>(null);
+  // State updates do not disable a button until React commits. Keep the
+  // provider boundary single-flight across rapid clicks in that short window.
+  const busyRef = useRef(false);
 
   const load = useCallback(async () => {
     if (!workPath) return;
@@ -157,23 +161,31 @@ export function TodaySyncStatus() {
 
   /** Per-row recovery: requeue this record, drain, then reload the truth. */
   const retryRecord = async (id: string) => {
-    if (!workPath || busy) return;
+    if (!workPath || busyRef.current) return;
+    busyRef.current = true;
     setBusy(true);
+    setRetryResult(null);
     try {
       await taskIntegrationsRetry(workPath, [id], new Date().toISOString());
       await taskIntegrationsDrain(workPath, new Date().toISOString(), gwsBinary);
+      setRetryResult("success");
     } catch {
-      // The reload below surfaces the real state either way.
+      // Never imply that a rejected IPC call reached the provider. Reload the
+      // authoritative row, then make the failed explicit retry visible.
+      setRetryResult("error");
+    } finally {
+      await load();
+      busyRef.current = false;
+      setBusy(false);
     }
-    await load();
-    setBusy(false);
   };
 
   /** Local-only repair. A successful repair deliberately stops before Retry:
    * Retry is the single control that can requeue and drain the provider op. */
   const repairTaskListLinkage = async (record: OutboxRecord) => {
     const taskListId = defaultTaskList?.trim();
-    if (!workPath || !taskListId || busy) return;
+    if (!workPath || !taskListId || busyRef.current) return;
+    busyRef.current = true;
     setBusy(true);
     setRepairResult(null);
     try {
@@ -181,23 +193,29 @@ export function TodaySyncStatus() {
       setRepairResult("success");
     } catch {
       setRepairResult("error");
+    } finally {
+      await load();
+      busyRef.current = false;
+      setBusy(false);
     }
-    await load();
-    setBusy(false);
   };
 
   /** Section-level refresh: requeue everything failed, drain, reload. */
   const refreshAll = async () => {
-    if (!workPath || busy) return;
+    if (!workPath || busyRef.current) return;
+    busyRef.current = true;
     setBusy(true);
     try {
       await taskIntegrationsRetry(workPath, null, new Date().toISOString());
       await taskIntegrationsDrain(workPath, new Date().toISOString(), gwsBinary);
     } catch {
-      // The reload below surfaces the real state either way.
+      // This control remains a best-effort refresh; the authoritative reload
+      // below is what updates its rows.
+    } finally {
+      await load();
+      busyRef.current = false;
+      setBusy(false);
     }
-    await load();
-    setBusy(false);
   };
 
   /**
@@ -207,27 +225,32 @@ export function TodaySyncStatus() {
    * pushes.
    */
   const applyWebActions = async () => {
-    if (!workPath || busy) return;
+    if (!workPath || busyRef.current) return;
+    busyRef.current = true;
     setBusy(true);
     try {
-      setWebOutcome(
-        await webActionsApply(workPath, new Date().toISOString(), defaultTaskList),
-      );
-      await taskIntegrationsDrain(workPath, new Date().toISOString(), gwsBinary);
-    } catch {
-      // The reload below surfaces the real state either way.
-    }
-    if (logicalDay) {
       try {
-        const top = await webActionsImportTop(workPath, logicalDay, false, topLaneSize);
-        setTopTruncated(top.truncated);
-        if (top.changed) await reload();
+        setWebOutcome(
+          await webActionsApply(workPath, new Date().toISOString(), defaultTaskList),
+        );
+        await taskIntegrationsDrain(workPath, new Date().toISOString(), gwsBinary);
       } catch {
-        // A failed import leaves the snapshot untouched by construction.
+        // The authoritative reload below surfaces the current state either way.
       }
+      if (logicalDay) {
+        try {
+          const top = await webActionsImportTop(workPath, logicalDay, false, topLaneSize);
+          setTopTruncated(top.truncated);
+          if (top.changed) await reload();
+        } catch {
+          // A failed import leaves the snapshot untouched by construction.
+        }
+      }
+    } finally {
+      await load();
+      busyRef.current = false;
+      setBusy(false);
     }
-    await load();
-    setBusy(false);
   };
 
   const webPending = webActions.length > 0 || topPending;
@@ -369,6 +392,15 @@ export function TodaySyncStatus() {
                 repairResult === "success"
                   ? "today.sync.repairTaskListSuccess"
                   : "today.sync.repairTaskListError",
+              )}
+            </p>
+          ) : null}
+          {retryResult ? (
+            <p className="today-sync-web-result" role="status">
+              {t(
+                retryResult === "success"
+                  ? "today.sync.retrySuccess"
+                  : "today.sync.retryError",
               )}
             </p>
           ) : null}
