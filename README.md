@@ -381,7 +381,8 @@ Release sequence:
 2. Verify exact-tree `main` CI.
 3. Dispatch and pass Release Preflight.
 4. Publish a GitHub Release whose tag is exactly `v<package version>` and whose
-   target is the verified `main` commit.
+   target is the verified `main` commit. `Validate release inputs` enforces the
+   prefix and fails before release lookup or bundle creation.
 5. Wait for Release Bundles to finish across macOS ARM, macOS Intel, Linux, and
    Windows.
 6. Verify the public artifacts, updater manifest, signatures, and Homebrew tap.
