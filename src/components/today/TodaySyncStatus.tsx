@@ -30,6 +30,7 @@ import {
   readTaskIntegrations,
   taskIntegrationsDrain,
   taskIntegrationsRetry,
+  webActionRepairTaskListLinkage,
   webActionsApply,
   webActionsImportTop,
   webActionsScan,
@@ -76,6 +77,30 @@ function StatusBadge({ status }: { status: OutboxStatus }) {
   );
 }
 
+/** Keep the local affordance as narrow as the Rust guard. This is only a
+ * discoverability check; the command always re-validates every condition. */
+function canRepairTaskListLinkage(record: OutboxRecord, defaultTaskList: string | null | undefined) {
+  const list = defaultTaskList?.trim();
+  if (
+    !list ||
+    record.op !== "upsert" ||
+    record.status !== "authBlocked" ||
+    Boolean(record.googleTaskId.trim()) ||
+    !record.webActionId?.trim() ||
+    !record.recordRevision?.trim()
+  ) {
+    return false;
+  }
+  if (!record.googleTaskListId?.trim()) return true;
+  const error = record.lastError?.toLowerCase() ?? "";
+  return (
+    error.includes("invalid task list") ||
+    error.includes("invalid tasklist") ||
+    error.includes("task list not found") ||
+    error.includes("tasklist not found")
+  );
+}
+
 export function TodaySyncStatus() {
   const { t } = useTranslation();
   const { workPath, gwsBinary, defaultTaskList, snapshot, reload, settings } = useToday();
@@ -92,6 +117,7 @@ export function TodaySyncStatus() {
   const [topTruncated, setTopTruncated] = useState(0);
   const [expanded, setExpanded] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [repairResult, setRepairResult] = useState<"success" | "error" | null>(null);
 
   const load = useCallback(async () => {
     if (!workPath) return;
@@ -138,6 +164,23 @@ export function TodaySyncStatus() {
       await taskIntegrationsDrain(workPath, new Date().toISOString(), gwsBinary);
     } catch {
       // The reload below surfaces the real state either way.
+    }
+    await load();
+    setBusy(false);
+  };
+
+  /** Local-only repair. A successful repair deliberately stops before Retry:
+   * Retry is the single control that can requeue and drain the provider op. */
+  const repairTaskListLinkage = async (record: OutboxRecord) => {
+    const taskListId = defaultTaskList?.trim();
+    if (!workPath || !taskListId || busy) return;
+    setBusy(true);
+    setRepairResult(null);
+    try {
+      await webActionRepairTaskListLinkage(workPath, record, taskListId);
+      setRepairResult("success");
+    } catch {
+      setRepairResult("error");
     }
     await load();
     setBusy(false);
@@ -277,6 +320,7 @@ export function TodaySyncStatus() {
           <ul className="today-sync-status-list" aria-live="polite">
             {records.map((record) => {
               const problem = PROBLEM_STATUSES.has(record.status);
+              const repairable = canRepairTaskListLinkage(record, defaultTaskList);
               return (
                 <li
                   key={record.id}
@@ -299,13 +343,35 @@ export function TodaySyncStatus() {
                       {t("today.sync.retry")}
                     </button>
                   ) : null}
+                  {repairable ? (
+                    <button
+                      type="button"
+                      className="today-panel-link"
+                      disabled={busy}
+                      onClick={() => void repairTaskListLinkage(record)}
+                    >
+                      {t("today.sync.repairTaskList")}
+                    </button>
+                  ) : null}
                   {record.status === "authBlocked" ? (
                     <p className="today-sync-status-hint">{t("today.sync.authHint")}</p>
+                  ) : null}
+                  {repairable ? (
+                    <p className="today-sync-status-hint">{t("today.sync.repairTaskListHint")}</p>
                   ) : null}
                 </li>
               );
             })}
           </ul>
+          {repairResult ? (
+            <p className="today-sync-web-result" role="status">
+              {t(
+                repairResult === "success"
+                  ? "today.sync.repairTaskListSuccess"
+                  : "today.sync.repairTaskListError",
+              )}
+            </p>
+          ) : null}
         </div>
       ) : null}
     </section>

@@ -268,7 +268,10 @@ use vault_list::{
     remove_workspace_root, set_active_workspace_root,
 };
 use vault_watcher::{start_vault_watcher, stop_vault_watcher, VaultWatcherState};
-use web_actions::{web_actions_apply, web_actions_import_top, web_actions_scan};
+use web_actions::{
+    web_action_repair_task_list_linkage, web_actions_apply, web_actions_import_top,
+    web_actions_scan,
+};
 use workspace::{
     detect_workspace, list_workspaces, read_workspace_config, register_workspace_roots,
 };
@@ -429,6 +432,7 @@ pub fn run() {
             // Web action receipts (maru.web-task-action.v1)
             web_actions_scan,
             web_actions_apply,
+            web_action_repair_task_list_linkage,
             web_actions_import_top,
             store_shelf_files,
             store_shelf_files_as,

@@ -19,6 +19,9 @@ pub const TASK_CONFLICT: &str = "task_conflict";
 pub const DOCUMENT_CONFLICT: &str = "document_conflict";
 /// Optimistic-concurrency conflict from `evidence_binder_mutate`.
 pub const EVIDENCE_BINDER_REVISION_CONFLICT: &str = "evidence_binder_revision_conflict";
+/// A guarded web-action linkage repair no longer matches the record or note
+/// the Today surface rendered. The frontend can refresh without guessing.
+pub const WEB_ACTION_REPAIR_CONFLICT: &str = "web_action_repair_conflict";
 
 /// Error crossing the Tauri bridge. `code` is empty for legacy errors
 /// converted via `From<String>` (the whole original string lands in

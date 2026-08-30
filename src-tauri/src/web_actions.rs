@@ -23,7 +23,8 @@
 
 use crate::atomic_file::write_atomic;
 use crate::document::revision_for;
-use crate::ipc_error::TODAY_CONFLICT;
+use crate::frontmatter::{update_frontmatter_content, FrontmatterValue};
+use crate::ipc_error::{IpcError, TODAY_CONFLICT, WEB_ACTION_REPAIR_CONFLICT};
 use crate::tasks::{
     normalize_task_frontmatter_aliases, string_field, task_display_title, yaml_to_json, TaskBucket,
 };
@@ -33,7 +34,8 @@ use crate::today::{
 };
 use crate::today_lifecycle::{move_file, task_transition};
 use crate::today_outbox::{
-    enqueue_record, has_web_action, OutboxOp, OutboxRecordDraft, OutboxStatus, UpsertPayload,
+    enqueue_record, has_unusable_task_list_linkage, has_web_action, read_record, record_revision,
+    write_record, OutboxOp, OutboxRecordDraft, OutboxStatus, UpsertPayload,
 };
 use crate::today_store::{load_snapshot, today_mutate, JOURNAL_END_MARKER, JOURNAL_START_MARKER};
 use crate::vault::{normalize_existing_dir, parse_frontmatter, resolve_inside_vault};
@@ -231,7 +233,11 @@ fn validate_receipt(raw: &RawReceipt) -> Result<Receipt, String> {
 /// directory is an empty scan, never an error — most workspaces have no
 /// `shared/web/` at all.
 fn pending_receipt_files(work: &Path) -> Vec<PathBuf> {
-    let root = work.join(PENDING_ROOT);
+    receipt_files_under(work, PENDING_ROOT)
+}
+
+fn receipt_files_under(work: &Path, root: &str) -> Vec<PathBuf> {
+    let root = work.join(root);
     let mut files = Vec::new();
     let Ok(months) = fs::read_dir(&root) else {
         return files;
@@ -249,6 +255,151 @@ fn pending_receipt_files(work: &Path) -> Vec<PathBuf> {
     }
     files.sort();
     files
+}
+
+fn receipt_for_web_action(work: &Path, id: &str) -> Result<Receipt, String> {
+    for path in receipt_files_under(work, PENDING_ROOT)
+        .into_iter()
+        .chain(receipt_files_under(work, APPLIED_ROOT))
+    {
+        let Ok(receipt) = load_receipt(work, &path) else {
+            continue;
+        };
+        if receipt.id == id {
+            return Ok(receipt);
+        }
+    }
+    Err("matching web-action receipt is missing or invalid".to_string())
+}
+
+fn repair_conflict(message: impl Into<String>) -> IpcError {
+    IpcError {
+        code: WEB_ACTION_REPAIR_CONFLICT.to_string(),
+        message: message.into(),
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct WebActionLinkageRepairOutcome {
+    /// True only when the record or note linkage was changed. An exact repeat
+    /// is intentionally a no-op so the user can safely retry after a UI race.
+    pub changed: bool,
+}
+
+/// Repair the task-list linkage for one failed web-originated first upsert.
+///
+/// This is deliberately not an outbox editor. It never resolves a provider,
+/// starts a drain, changes an outbox status, stages Git work, or moves a
+/// receipt. The only possible writes are the record's `googleTaskListId` and
+/// the matching note's `googleTaskListId` through the byte-preserving
+/// frontmatter editor. The existing Retry control remains the sole provider
+/// actuator.
+#[tauri::command]
+pub fn web_action_repair_task_list_linkage(
+    work_path: String,
+    record_id: String,
+    expected_record_revision: String,
+    expected_updated_at: String,
+    expected_web_action_id: String,
+    expected_task_path: String,
+    default_task_list_id: String,
+) -> Result<WebActionLinkageRepairOutcome, IpcError> {
+    assert_maru_can_write(&work_path, WorkspaceWriteAction::Modify)?;
+    let work = normalize_existing_dir(&work_path)?;
+    let default_task_list_id = default_task_list_id.trim();
+    if default_task_list_id.is_empty() {
+        return Err(repair_conflict("A current default task list is required."));
+    }
+
+    let mut record = read_record(&work, &record_id).map_err(repair_conflict)?;
+    if record_revision(&record) != expected_record_revision
+        || record.updated_at != expected_updated_at
+        || record.web_action_id.as_deref() != Some(expected_web_action_id.as_str())
+        || record.task_path != expected_task_path
+    {
+        return Err(repair_conflict(
+            "This blocked sync record changed. Refresh Today before repairing it.",
+        ));
+    }
+    if record.op != OutboxOp::Upsert
+        || record.status != OutboxStatus::AuthBlocked
+        || !record.google_task_id.trim().is_empty()
+        || record
+            .web_action_id
+            .as_deref()
+            .unwrap_or_default()
+            .is_empty()
+    {
+        return Err(repair_conflict(
+            "This sync record is not eligible for task-list linkage repair.",
+        ));
+    }
+
+    let receipt =
+        receipt_for_web_action(&work, &expected_web_action_id).map_err(repair_conflict)?;
+    if receipt.operation != WebActionOperation::Upsert || receipt.task_path != record.task_path {
+        return Err(repair_conflict(
+            "The matching web action no longer describes this task upsert.",
+        ));
+    }
+    let note = resolve_inside_vault(&work_path, &receipt.task_path).map_err(repair_conflict)?;
+    if !note.is_file() {
+        return Err(repair_conflict("The matching task note is missing."));
+    }
+    let raw = fs::read_to_string(&note)
+        .map_err(|err| repair_conflict(format!("Cannot read task note: {err}")))?;
+    let frontmatter =
+        normalize_task_frontmatter_aliases(yaml_to_json(&parse_frontmatter(&raw).meta));
+    if string_field(&frontmatter, "googleTaskId").is_some() {
+        return Err(repair_conflict(
+            "The matching task is already linked to a provider task.",
+        ));
+    }
+
+    let note_list_id = string_field(&frontmatter, "googleTaskListId");
+    let current_list_id = record
+        .google_task_list_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let already_repaired = current_list_id == Some(default_task_list_id)
+        && note_list_id.as_deref() == Some(default_task_list_id);
+    if already_repaired {
+        return Ok(WebActionLinkageRepairOutcome { changed: false });
+    }
+    if !has_unusable_task_list_linkage(&record) {
+        return Err(repair_conflict(
+            "The stored task-list linkage is no longer eligible for repair.",
+        ));
+    }
+    if let Some(note_list_id) = note_list_id.as_deref().filter(|value| !value.is_empty()) {
+        if note_list_id != default_task_list_id && Some(note_list_id) != current_list_id {
+            return Err(repair_conflict(
+                "The task note has a different task-list linkage. Repair was not applied.",
+            ));
+        }
+    }
+
+    let updated_note = if note_list_id.as_deref() == Some(default_task_list_id) {
+        raw.clone()
+    } else {
+        update_frontmatter_content(
+            &raw,
+            "googleTaskListId",
+            Some(FrontmatterValue::String(default_task_list_id.to_string())),
+        )
+        .map_err(repair_conflict)?
+    };
+    record.google_task_list_id = Some(default_task_list_id.to_string());
+    // Write the note first: a record must never advertise a linkage that the
+    // task note did not receive. `write_atomic` leaves all unrelated bytes
+    // exactly as the shared frontmatter implementation produced them.
+    if updated_note != raw {
+        write_atomic(&note, updated_note.as_bytes()).map_err(repair_conflict)?;
+    }
+    write_record(&work, &record).map_err(repair_conflict)?;
+    Ok(WebActionLinkageRepairOutcome { changed: true })
 }
 
 fn rel_path_for(work: &Path, path: &Path) -> String {
@@ -985,6 +1136,31 @@ mod tests {
         web_actions_apply(work_path(tmp), NOW.to_string(), Some(list.to_string())).unwrap()
     }
 
+    fn blocked_web_upsert(tmp: &tempfile::TempDir) -> crate::today_outbox::OutboxRecord {
+        apply_with_list(tmp, "invalid-list");
+        let mut record = list_records(tmp.path()).unwrap().pop().unwrap();
+        record.status = OutboxStatus::AuthBlocked;
+        record.last_error = Some("Invalid task list".to_string());
+        write_record(tmp.path(), &record).unwrap();
+        read_record(tmp.path(), &record.id).unwrap()
+    }
+
+    fn repair(
+        tmp: &tempfile::TempDir,
+        record: &crate::today_outbox::OutboxRecord,
+        list: &str,
+    ) -> Result<WebActionLinkageRepairOutcome, IpcError> {
+        web_action_repair_task_list_linkage(
+            work_path(tmp),
+            record.id.clone(),
+            record.record_revision.clone().unwrap_or_default(),
+            record.updated_at.clone(),
+            record.web_action_id.clone().unwrap_or_default(),
+            record.task_path.clone(),
+            list.to_string(),
+        )
+    }
+
     // --- Validation ---------------------------------------------------------
 
     #[test]
@@ -1091,6 +1267,168 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         assert!(web_actions_scan(work_path(&tmp)).unwrap().is_empty());
         assert_eq!(apply(&tmp), WebActionsOutcome::default());
+    }
+
+    // --- guarded task-list linkage repair ---------------------------------
+
+    #[test]
+    fn repair_changes_only_the_blocked_linkage_and_preserves_note_bytes() {
+        let note = "---\nstatus: active\ngoogleTaskListId: invalid-list\nowner: Luca # keep\n---\n# Keep this body byte-for-byte\n";
+        let (tmp, _) = setup("upsert", "tasks/active/task.md", note);
+        let original = blocked_web_upsert(&tmp);
+        let receipt = tmp
+            .path()
+            .join(APPLIED_ROOT)
+            .join("2026-08")
+            .join(format!("{ID}.yaml"));
+        let receipt_before = fs::read_to_string(&receipt).unwrap();
+        let ledger = tmp.path().join(".maru/today/web-actions/applied.jsonl");
+        let ledger_before = fs::read_to_string(&ledger).unwrap();
+        let expected_note = update_frontmatter_content(
+            note,
+            "googleTaskListId",
+            Some(FrontmatterValue::String("current-list".to_string())),
+        )
+        .unwrap();
+
+        assert!(repair(&tmp, &original, " current-list ").unwrap().changed);
+
+        assert_eq!(
+            fs::read_to_string(tmp.path().join("tasks/active/task.md")).unwrap(),
+            expected_note
+        );
+        let repaired = read_record(tmp.path(), &original.id).unwrap();
+        let mut expected = original.clone();
+        expected.google_task_list_id = Some("current-list".to_string());
+        expected.record_revision = None;
+        expected.record_revision = Some(record_revision(&expected));
+        assert_eq!(repaired, expected, "all other outbox fields stay intact");
+        assert_eq!(fs::read_to_string(&receipt).unwrap(), receipt_before);
+        assert_eq!(fs::read_to_string(&ledger).unwrap(), ledger_before);
+    }
+
+    #[test]
+    fn repair_is_an_idempotent_local_noop_after_the_linkage_is_fixed() {
+        let (tmp, _) = setup(
+            "upsert",
+            "tasks/active/task.md",
+            "---\nstatus: active\ngoogleTaskListId: invalid-list\n---\n# Body\n",
+        );
+        let original = blocked_web_upsert(&tmp);
+        assert!(repair(&tmp, &original, "current-list").unwrap().changed);
+        let repaired = read_record(tmp.path(), &original.id).unwrap();
+        let note_before = fs::read_to_string(tmp.path().join("tasks/active/task.md")).unwrap();
+
+        assert!(!repair(&tmp, &repaired, "current-list").unwrap().changed);
+        assert_eq!(
+            fs::read_to_string(tmp.path().join("tasks/active/task.md")).unwrap(),
+            note_before
+        );
+        assert_eq!(read_record(tmp.path(), &original.id).unwrap(), repaired);
+    }
+
+    #[test]
+    fn repair_refuses_stale_or_non_matching_guards_without_writing() {
+        let (tmp, _) = setup(
+            "upsert",
+            "tasks/active/task.md",
+            "---\nstatus: active\ngoogleTaskListId: invalid-list\n---\n# Body\n",
+        );
+        let original = blocked_web_upsert(&tmp);
+        let note_path = tmp.path().join("tasks/active/task.md");
+        let record_path = crate::today_store::today_dir(tmp.path())
+            .join("outbox")
+            .join(format!("{}.json", original.id));
+        let note_before = fs::read_to_string(&note_path).unwrap();
+        let record_before = fs::read_to_string(&record_path).unwrap();
+
+        let stale = web_action_repair_task_list_linkage(
+            work_path(&tmp),
+            original.id.clone(),
+            "old-rendered-revision".to_string(),
+            "old-rendered-revision".to_string(),
+            original.web_action_id.clone().unwrap(),
+            original.task_path.clone(),
+            "current-list".to_string(),
+        )
+        .unwrap_err();
+        assert_eq!(stale.code, WEB_ACTION_REPAIR_CONFLICT);
+
+        for (mut record, list, expected) in [
+            (
+                {
+                    let mut record = original.clone();
+                    record.status = OutboxStatus::Ready;
+                    record
+                },
+                "current-list",
+                "not eligible",
+            ),
+            (
+                {
+                    let mut record = original.clone();
+                    record.google_task_id = "provider-task".to_string();
+                    record
+                },
+                "current-list",
+                "not eligible",
+            ),
+            (original.clone(), " ", "default task list"),
+        ] {
+            write_record(tmp.path(), &record).unwrap();
+            let current = read_record(tmp.path(), &record.id).unwrap();
+            let err = repair(&tmp, &current, list).unwrap_err();
+            assert_eq!(err.code, WEB_ACTION_REPAIR_CONFLICT);
+            assert!(
+                err.message.to_lowercase().contains(expected),
+                "{}",
+                err.message
+            );
+            record = original.clone();
+            write_record(tmp.path(), &record).unwrap();
+        }
+        assert_eq!(fs::read_to_string(&note_path).unwrap(), note_before);
+        assert_eq!(fs::read_to_string(&record_path).unwrap(), record_before);
+    }
+
+    #[test]
+    fn repair_refuses_missing_or_mismatched_receipt_and_provider_linked_note() {
+        let (tmp, _) = setup(
+            "upsert",
+            "tasks/active/task.md",
+            "---\nstatus: active\ngoogleTaskListId: invalid-list\n---\n# Body\n",
+        );
+        let original = blocked_web_upsert(&tmp);
+        let receipt = tmp
+            .path()
+            .join(APPLIED_ROOT)
+            .join("2026-08")
+            .join(format!("{ID}.yaml"));
+        fs::remove_file(&receipt).unwrap();
+        let err = repair(&tmp, &original, "current-list").unwrap_err();
+        assert_eq!(err.code, WEB_ACTION_REPAIR_CONFLICT);
+        assert!(err.message.contains("receipt"));
+
+        let receipt_body = format!(
+            "schemaVersion: {WEB_ACTION_SCHEMA_VERSION}\nid: {ID}\noperation: complete\ntaskPath: tasks/active/task.md\nexpectedTaskBlobSha: any\nrequestedAt: \"{NOW}\"\nrequestedBy: web:owner\n"
+        );
+        fs::create_dir_all(receipt.parent().unwrap()).unwrap();
+        fs::write(&receipt, receipt_body).unwrap();
+        let err = repair(&tmp, &original, "current-list").unwrap_err();
+        assert!(err.message.contains("upsert"));
+
+        let note = tmp.path().join("tasks/active/task.md");
+        fs::write(
+            &note,
+            "---\nstatus: active\ngoogleTaskId: already-linked\ngoogleTaskListId: invalid-list\n---\n# Body\n",
+        )
+        .unwrap();
+        let receipt_body = format!(
+            "schemaVersion: {WEB_ACTION_SCHEMA_VERSION}\nid: {ID}\noperation: upsert\ntaskPath: tasks/active/task.md\nexpectedTaskBlobSha: any\nrequestedAt: \"{NOW}\"\nrequestedBy: web:owner\n"
+        );
+        fs::write(&receipt, receipt_body).unwrap();
+        let err = repair(&tmp, &original, "current-list").unwrap_err();
+        assert!(err.message.contains("already linked"));
     }
 
     // --- Staleness ----------------------------------------------------------

@@ -359,6 +359,8 @@ export interface OutboxRecord {
   lastError?: string | null;
   createdAt: string;
   updatedAt: string;
+  /** Canonical durable-record identity, supplied by Rust for guarded writes. */
+  recordRevision?: string | null;
 }
 
 export type WebActionOperation = "upsert" | "complete";
@@ -392,6 +394,11 @@ export interface WebActionsOutcome {
   stale: number;
   invalid: number;
   items: WebActionSummary[];
+}
+
+/** Result of the narrow local-only repair for one blocked web task upsert. */
+export interface WebActionLinkageRepairOutcome {
+  changed: boolean;
 }
 
 export interface DrainOutcome {
@@ -554,6 +561,30 @@ export async function webActionsApply(
     workPath,
     nowIso,
     defaultTaskListId: defaultTaskListId ?? null,
+  });
+}
+
+/**
+ * Changes only the task-list linkage for one guarded, web-originated blocked
+ * upsert. It never calls Google, drains the outbox, commits, or moves a
+ * receipt; callers must use the existing Retry action for provider work.
+ */
+export async function webActionRepairTaskListLinkage(
+  workPath: string,
+  record: Pick<
+    OutboxRecord,
+    "id" | "updatedAt" | "webActionId" | "taskPath" | "recordRevision"
+  >,
+  defaultTaskListId: string,
+): Promise<WebActionLinkageRepairOutcome> {
+  return todayInvoke<WebActionLinkageRepairOutcome>("web_action_repair_task_list_linkage", {
+    workPath,
+    recordId: record.id,
+    expectedRecordRevision: record.recordRevision ?? "",
+    expectedUpdatedAt: record.updatedAt,
+    expectedWebActionId: record.webActionId ?? "",
+    expectedTaskPath: record.taskPath,
+    defaultTaskListId,
   });
 }
 
