@@ -2130,6 +2130,8 @@ export const ko: Record<string, string> = {
   "today.sync.title": "동기화 상태",
   "today.sync.refresh": "모두 새로고침",
   "today.sync.retry": "다시 시도",
+  "today.sync.retrySuccess": "재시도 순서를 마쳤습니다. 최신 동기화 상태를 다시 불러왔습니다.",
+  "today.sync.retryError": "동기화 재시도를 마치지 못했습니다. 최신 상태를 다시 불러왔으니 확인한 뒤 다시 시도해 주세요.",
   "today.sync.repairTaskList": "작업 목록 연결 복구",
   "today.sync.repairTaskListHint": "이 웹 작업은 사용할 수 없는 작업 목록 연결로 차단되었습니다. 로컬 연결을 복구한 뒤 Google 동기화는 다시 시도를 선택해 진행하세요.",
   "today.sync.repairTaskListSuccess": "작업 목록 연결을 로컬에서 복구했습니다. Google 동기화는 준비되면 다시 시도를 선택하세요.",

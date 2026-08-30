@@ -293,6 +293,90 @@ describe("TodaySyncStatus", () => {
     expect(taskIntegrationsDrain).toHaveBeenCalledWith("/tmp/work", expect.any(String), "/opt/gws");
   });
 
+  it("retries a repaired auth-blocked row once, drains once, and reloads the one authoritative record", async () => {
+    const repaired = record({
+      id: "ob-repaired",
+      op: "upsert",
+      status: "authBlocked",
+      googleTaskId: "",
+      googleTaskListId: "list-default",
+      webActionId: "wa-repaired",
+      attempts: 0,
+    });
+    const container = await renderSection([repaired]);
+    vi.mocked(taskIntegrationsRetry).mockResolvedValue({ requeued: 1 });
+    vi.mocked(taskIntegrationsDrain).mockResolvedValue({ drained: 1, failed: 0, blocked: 0 });
+    await act(async () => {
+      headerButton(container).click();
+    });
+    const retry = Array.from(container.querySelectorAll<HTMLButtonElement>("button")).find(
+      (button) => button.textContent?.includes(translate("ko", "today.sync.retry")),
+    )!;
+    const loadsBefore = vi.mocked(readTaskIntegrations).mock.calls.length;
+    await act(async () => {
+      retry.click();
+    });
+    expect(taskIntegrationsRetry).toHaveBeenCalledTimes(1);
+    expect(taskIntegrationsRetry).toHaveBeenCalledWith(
+      "/tmp/work",
+      ["ob-repaired"],
+      expect.any(String),
+    );
+    expect(taskIntegrationsDrain).toHaveBeenCalledTimes(1);
+    expect(taskIntegrationsDrain).toHaveBeenCalledWith(
+      "/tmp/work",
+      expect.any(String),
+      "/opt/gws",
+    );
+    expect(vi.mocked(readTaskIntegrations).mock.calls.length).toBe(loadsBefore + 1);
+    expect(container.querySelectorAll(".today-sync-status-row")).toHaveLength(1);
+    expect(container.textContent).toContain(translate("ko", "today.sync.retrySuccess"));
+  });
+
+  it("locks a retry against rapid double activation", async () => {
+    const failing = record({ id: "ob-double", status: "authBlocked", attempts: 0 });
+    const container = await renderSection([failing]);
+    let finishRetry: ((value: { requeued: number }) => void) | undefined;
+    vi.mocked(taskIntegrationsRetry).mockImplementation(
+      () => new Promise((resolve) => { finishRetry = resolve; }),
+    );
+    vi.mocked(taskIntegrationsDrain).mockResolvedValue({ drained: 1, failed: 0, blocked: 0 });
+    await act(async () => {
+      headerButton(container).click();
+    });
+    const retry = container.querySelector<HTMLButtonElement>(".today-sync-status-row .today-panel-link")!;
+    await act(async () => {
+      retry.click();
+      retry.click();
+      await Promise.resolve();
+    });
+    expect(retry.disabled).toBe(true);
+    expect(taskIntegrationsRetry).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      finishRetry?.({ requeued: 1 });
+      await Promise.resolve();
+    });
+    expect(taskIntegrationsDrain).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows a retry IPC failure, reloads the row, and does not drain", async () => {
+    const failing = record({ id: "ob-error", status: "authBlocked", attempts: 0 });
+    const container = await renderSection([failing]);
+    vi.mocked(taskIntegrationsRetry).mockRejectedValue(new Error("write denied"));
+    await act(async () => {
+      headerButton(container).click();
+    });
+    const retry = container.querySelector<HTMLButtonElement>(".today-sync-status-row .today-panel-link")!;
+    const loadsBefore = vi.mocked(readTaskIntegrations).mock.calls.length;
+    await act(async () => {
+      retry.click();
+    });
+    expect(taskIntegrationsRetry).toHaveBeenCalledWith("/tmp/work", ["ob-error"], expect.any(String));
+    expect(taskIntegrationsDrain).not.toHaveBeenCalled();
+    expect(vi.mocked(readTaskIntegrations).mock.calls.length).toBe(loadsBefore + 1);
+    expect(container.textContent).toContain(translate("ko", "today.sync.retryError"));
+  });
+
   it("disables the guarded repair and Retry while the local repair is busy", async () => {
     const container = await renderSection([
       record({

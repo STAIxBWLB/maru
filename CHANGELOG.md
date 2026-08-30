@@ -8,6 +8,14 @@ because releases cut frequently during active development. Versions before
 Dates are the release-tag dates. Only `feat`/`fix`-level changes are listed;
 `chore(release)` version bumps and merge commits are omitted.
 
+## v1.1.2 - 2026-08-30 - Truthful Retry
+
+- **Made Today Sync Retry single-flight and truthful (#305).** A repaired,
+  blocked web-action row now sends one exact requeue request, one drain, and
+  reloads the authoritative outbox state. Rapid repeat clicks cannot create a
+  second provider attempt, and rejected IPC calls now remain visible instead
+  of looking like a successful no-op.
+
 ## v1.1.1 - 2026-08-30 - Guarded Link Repair
 
 - **Repaired one safely-scoped web-task recovery path (#303).** Today can now
