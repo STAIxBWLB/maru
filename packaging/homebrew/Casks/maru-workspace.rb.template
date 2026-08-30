@@ -10,6 +10,11 @@ cask "maru-workspace" do
   desc "Local-first AI workspace desktop app"
   homepage "https://github.com/STAIxBWLB/maru"
 
+  livecheck do
+    url :url
+    strategy :github_latest
+  end
+
   depends_on :macos
 
   app "Maru.app"
