@@ -1,8 +1,8 @@
 # Maru Roadmap
 
-**Status date:** 2026-08-28
-**Current product release:** v0.5.0 - A Stronger Foundation
-**Planning state:** GSD v1.0 complete; no active milestone
+**Status date:** 2026-08-30
+**Current product release:** v1.1.0 - Aligned Numbering
+**Planning state:** Milestone v1.1 Felt Quality and Native Proof active, phases 6-11
 
 Maru brings Korean knowledge work, document operations, evidence, tasks,
 communications, and AI-assisted workflows into one local-first desktop
@@ -18,7 +18,7 @@ ownership or bypass approval gates.
   is incomplete.
 - **Candidate** means the work is documented but is not an active commitment.
 - The canonical active delivery plan is `.planning/ROADMAP.md`. It currently
-  contains no active milestone.
+  carries milestone v1.1, phases 6-11.
 - A candidate becomes committed work only after `$gsd-new-milestone` promotes
   it into requirements and a phase roadmap.
 
@@ -29,8 +29,8 @@ plans and issues. They no longer imply an active weekly schedule.
 
 | Area | Current state | Evidence |
 |------|---------------|----------|
-| Product distribution | v0.5.0 shipped for macOS ARM/Intel, Linux, and Windows | 21 non-empty release assets, 11-platform updater manifest, Homebrew cask and CLI formula |
-| Planning milestone | v1.0 Structural Debt Paydown complete | 5 phases, 32 plans, 24/24 requirements |
+| Product distribution | v1.1.0 shipped for macOS ARM/Intel, Linux, and Windows | 21 non-empty release assets, 11-platform updater manifest, Homebrew cask and CLI formula |
+| Planning milestone | v1.1 Felt Quality and Native Proof active | Phases 6-11; v1.0 closed at 5 phases, 32 plans, 24/24 requirements |
 | Application surface | 18 top-level modes plus Settings overlay | Typed lazy mode registry on `main` |
 | Application shell | Store-backed facades; `MainApp` at 15 `useState` and 24 `useEffect` | Static ceilings and render-isolation tests |
 | Verification | Authoritative local and CI gates | Typecheck, ESLint, frontend/Rust tests, E2E, rustfmt, clippy, build, bundle budgets |
@@ -38,8 +38,8 @@ plans and issues. They no longer imply an active weekly schedule.
 | Security evidence | Phase 1, 3, 4, and 5 reports present; Phase 2 remains optional evidence debt | Phase 3 audit: seven threats closed, `threats_open: 0` |
 
 The detailed milestone record is
-`.planning/reports/MILESTONE_SUMMARY-v1.0.md`; the historical planning tag
-`v1.0` remains separate from the product release tag `v0.5.0`.
+`.planning/reports/MILESTONE_SUMMARY-v1.0.md`. Milestone numbering and release
+versions are aligned: see the numbering rule in README's Release Process.
 
 ## Product Capability Map
 

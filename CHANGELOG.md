@@ -8,6 +8,26 @@ because releases cut frequently during active development. Versions before
 Dates are the release-tag dates. Only `feat`/`fix`-level changes are listed;
 `chore(release)` version bumps and merge commits are omitted.
 
+## v1.1.0 - 2026-08-30 - Aligned Numbering
+
+- **Release versions now follow the planning milestone.** Milestone `vN.M` owns
+  the release major and minor and releases own the patch, so the open milestone
+  v1.1 ships as 1.1.x. This is why the version jumps from 0.6.1 to 1.1.0 rather
+  than to 0.6.2. Milestone v1.1 already shipped v0.6.0 and v0.6.1 before the
+  alignment; those keep their numbers. The rule is documented in README's
+  Release Process section.
+- **The `v1.0` milestone tag was deleted.** Milestone tags and release tags
+  shared the `v*` namespace, and `v1.0` sorted above every real release under
+  version sort. Anyone with an existing clone can drop the stale tag with
+  `git fetch --prune --prune-tags origin`. The v1.0 milestone archive is
+  unaffected and remains under `.planning/milestones/`.
+- **Fixed the Homebrew tap audit, which had failed on four consecutive
+  releases (#298).** Both the cask and the CLI formula now pin
+  `livecheck strategy :github_latest`, so the tap reads the latest GitHub
+  release instead of scanning git tags. The formula also drops its explicit
+  `version`, which recent Homebrew rejects as redundant with the version
+  scanned from the URL.
+
 ## v0.6.1 - 2026-08-30 - Submodule Scope
 
 - **The Documents pane can now scope itself by git submodule (#297).** A

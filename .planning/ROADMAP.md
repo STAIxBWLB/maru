@@ -2,8 +2,11 @@
 
 ## Milestones
 
-- [x] **v1.0 Structural Debt Paydown** - Phases 1-5, 32 plans, shipped 2026-08-28. [Archive](milestones/v1.0-ROADMAP.md)
-- [ ] **v1.1 Felt Quality and Native Proof** - Phases 6-11, in progress (started 2026-08-29).
+- [x] **v1.0 Structural Debt Paydown** - Phases 1-5, 32 plans, shipped 2026-08-28 as release v0.5.0, before milestone and release numbering were aligned. [Archive](milestones/v1.0-ROADMAP.md)
+- [ ] **v1.1 Felt Quality and Native Proof** - Phases 6-11, in progress (started 2026-08-29). Releases ship as `1.1.x`.
+
+Milestone `vN.M` owns the release major and minor; releases own the patch. The
+operative rule is in README's Release Process section.
 
 ## Active Milestone
 
