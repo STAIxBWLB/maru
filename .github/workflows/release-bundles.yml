@@ -26,7 +26,6 @@ jobs:
     name: Validate release inputs
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    if: ${{ startsWith(github.event.release.tag_name || inputs.tag, 'v') }}
     outputs:
       tag: ${{ steps.release.outputs.tag }}
       id: ${{ steps.release.outputs.id }}
@@ -42,11 +41,18 @@ jobs:
           INPUT_TAG: ${{ inputs.tag }}
         run: |
           set -euo pipefail
-          if [ -n "$EVENT_ID" ]; then
+          if [ -n "$EVENT_TAG" ]; then
             tag="$EVENT_TAG"
-            id="$EVENT_ID"
           else
             tag="$INPUT_TAG"
+          fi
+          case "$tag" in
+            v*) ;;
+            *) echo "::error::release tag must start with 'v' (got '$tag')"; exit 1 ;;
+          esac
+          if [ -n "$EVENT_ID" ]; then
+            id="$EVENT_ID"
+          else
             id=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$tag" --jq .id)
           fi
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
