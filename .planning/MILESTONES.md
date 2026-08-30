@@ -42,6 +42,23 @@
 - Kept the planning milestone tag `v1.0` immutable at its archive commit;
   product release `v0.5.0` is the commemorative distribution tag.
 
-**What's next:** No next milestone is selected. Start discovery with `$gsd-new-milestone`.
+### Post-close amendment: numbering realignment (2026-08-30)
+
+- Superseded the line above about keeping `v1.0` immutable. The tag was deleted
+  from origin and locally, because milestone tags and release tags shared the
+  `v*` namespace and `v1.0` sorted above every real release, which broke the
+  Homebrew tap audit on four consecutive releases.
+- Milestone numbering and release versions are now aligned: milestone `vN.M`
+  owns major and minor, releases own patch. Milestone v1.1 ships as `1.1.x`.
+  The rule lives in README's Release Process section.
+- Milestone completion no longer creates a git tag
+  (`.planning/config.json` sets `git.create_tag: false`).
+- Nothing unique was lost. The full v1.0 archive is on `main` under
+  `.planning/milestones/v1.0-*`, and the tag annotation duplicated this entry.
+- Note for anyone following the Git range above: `363f8a6` is not on `main`
+  either. It lived on the deleted `ci/parallel-workflow-validation` branch.
+  This predates the realignment.
+
+**What's next:** Milestone v1.1 Felt Quality and Native Proof, phases 6-11.
 
 ---

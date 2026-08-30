@@ -6,7 +6,7 @@ Local-first Maru Workspace and AI editing desktop app. A Tauri 2 desktop shell -
 React 19 + TypeScript frontend over a Rust core - where a folder on disk is the
 workspace: notes, documents, terminals, a knowledge graph, diagrams, skills, and
 AI agent runs all operate on real files the user owns. Shipped as signed bundles
-for macOS, Windows, and Linux; currently v0.5.0.
+for macOS, Windows, and Linux; currently v1.1.0.
 
 ## Core Value
 
@@ -249,6 +249,7 @@ ones this milestone can actually break are listed here.
 | Promote `ensure_within`, do not retrofit all ~20 callers | Existing checks are individually sound; the problem is that a new author has no canonical example | ✓ Phase 2 — promoted to `crate::paths`, doc + tests as the example, zero retrofits |
 | Phases 4-5 get no `UI hint` annotation | They refactor UI state plumbing with pixel-identical output as the success criterion; a UI design spec would be the wrong downstream suggestion | ✓ Completed with behavior-preserving UAT and no visible redesign |
 | 64 SPEC constraints recorded as invariants, not decisions | 0 ADRs in the set - nothing is decision-locked, so a future ADR can override any of them | ✓ Preserved as the milestone verification baseline |
+| Milestone numbers own the release major.minor | Two numbering systems sharing the `v*` tag namespace put `v1.0` above every real release in version sort, breaking the Homebrew tap audit four releases running; aligning the bands removes the ambiguity instead of patching each consumer | Adopted 2026-08-30 in v1.1.0 - operative rule in README's Release Process; milestone tags no longer created |
 | Milestone v1.1 = felt quality, synthesised from the carried-over backlog | The deferred items are not equal in weight: a 40s main-thread block measured on a 64k-file workspace is a product defect, while Nyquist metadata drift is a bookkeeping one. Grouping them by what a user experiences gives the milestone one goal instead of nine chores | Pending |
 | The native E2E runner lands early, not as closeout | v1.1's success condition is that observable behavior changed for the better; the mocked-IPC Chromium suite cannot see that, and v1.0's retrospective already ruled that a human approval marker is not reusable evidence | Pending |
 | Features stay out for a second consecutive milestone | HWPE-01..03, Semantica S1-S4, and HUB-01 all add surface area to panes whose responsiveness this milestone is trying to fix; shipping them first would move the target | Pending |

@@ -13,16 +13,15 @@ identifier and on-disk migration to Maru.
 | Area | State | Evidence |
 |------|-------|----------|
 | Product release | v0.6.1 | Signed desktop bundles and standalone CLI for macOS, Windows, and Linux |
-| Planning milestone | v1.0 Structural Debt Paydown complete | 5 phases, 32 plans, 24/24 requirements |
+| Planning milestone | v1.1 Felt Quality and Native Proof | Phases 6-11; phase 6 complete with 5 plans |
 | Application shell | Complete | 18 lazy modes; `MainApp` held to 15 `useState` and 24 `useEffect` calls |
 | Verification | Passing | Typecheck, ESLint, unit tests, Rust fmt/clippy, E2E, build, and bundle budgets |
 | Typed IPC | ERR-06 closed | Every conflict-emitting command preserves `{ code, message }`; recursive source guard active |
-| Active milestone | None | Start the next cycle with `$gsd-new-milestone` |
+| Active milestone | v1.1, planning phase 10 | Releases ship as 1.1.x while v1.1 is open |
 
 The milestone archive, audit, retrospective, and summary live under
 `.planning/milestones/`, `.planning/RETROSPECTIVE.md`, and
-`.planning/reports/`. The planning tag `v1.0` and product tag `v0.5.0` are
-separate contracts.
+`.planning/reports/`.
 
 ## Core Principles
 
@@ -360,6 +359,12 @@ macOS-affecting changes require a real-app or release-artifact check.
 
 ## Release Process
 
+The release version's major and minor come from the active GSD milestone in
+`.planning/STATE.md`; releases only increment the patch. Milestone v1.1 ships as
+1.1.x, and opening milestone v1.2 moves releases to 1.2.0. There is one tag
+namespace and it belongs to releases: milestone completion no longer creates a
+git tag.
+
 Version sources must remain synchronized:
 
 ```text
@@ -459,20 +464,17 @@ an application release must carry a newer offline bootstrap.
 
 ## Roadmap
 
-The GSD v1.0 Structural Debt Paydown milestone is complete and archived. No
-delivery milestone is active. The long-range product plan remains in
-[ROADMAP.md](ROADMAP.md), but planned items there are not active commitments
-until a new GSD milestone promotes them into requirements.
+The GSD v1.0 Structural Debt Paydown milestone is complete and archived. The
+active milestone is v1.1 Felt Quality and Native Proof, spanning phases 6-11.
+The long-range product plan remains in [ROADMAP.md](ROADMAP.md), but planned
+items there are not active commitments until a GSD milestone promotes them into
+requirements.
 
-Candidate inputs for the next milestone include:
+Milestone v1.1 promoted part of the carried-over backlog into requirements. The
+remaining candidates are:
 
 - ERR-05 closed-enum IPC construction
-- concurrency and performance debt from `.planning/codebase/CONCERNS.md`
-- CSP and sanitizer hardening
-- native Tauri E2E and remaining evidence gaps
 - Hub evidence index, approval/finalize, certification, and Deck Studio tracks
-
-Start the next cycle with `$gsd-new-milestone`.
 
 ## Scope Boundaries
 

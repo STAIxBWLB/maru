@@ -132,6 +132,14 @@ jobs:
             | node -e 'let data=""; process.stdin.on("data", chunk => data += chunk); process.stdin.on("end", () => console.log(JSON.parse(data).version));')
           current_version=$(node -p "require('./package.json').version")
           if [ "$base_version" != "$current_version" ]; then
+            # The version band follows the active milestone (README, Release
+            # Process), so a bump can jump minor. It must never go backwards:
+            # a lower version overwrites latest.json and strands updaters.
+            newest=$(printf '%s\n%s\n' "$base_version" "$current_version" | sort -V | tail -1)
+            if [ "$newest" != "$current_version" ]; then
+              echo "::error::release version went backwards: $base_version -> $current_version"
+              exit 1
+            fi
             echo "release=true" >> "$GITHUB_OUTPUT"
             echo "Release version changed: $base_version -> $current_version"
           fi
