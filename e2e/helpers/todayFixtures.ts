@@ -67,8 +67,8 @@ export interface TodaySeedOverrides {
   catalogReport?: unknown;
   /** Rows for catalog_query; filtered by req.kinds, capped by req.limit. */
   catalogEntries?: unknown[];
-  /** First N catalog_scan calls reject before serving the report. */
-  catalogScanFailures?: number;
+  /** Reject catalog_scan calls until the test explicitly recovers the mock. */
+  catalogScanFailUntilRecovery?: boolean;
   documents?: Record<string, { content: string; revision?: string }>;
   brainDump?: string;
   rolloverFailures?: number;
@@ -569,7 +569,7 @@ export function buildTodaySeed(overrides: TodaySeedOverrides = {}) {
     rolloverFailures: overrides.rolloverFailures ?? 0,
     catalogReport: overrides.catalogReport ?? defaultCatalogReport(),
     catalogEntries: overrides.catalogEntries ?? defaultCatalogEntries(),
-    catalogScanFailures: overrides.catalogScanFailures ?? 0,
+    catalogScanFailUntilRecovery: overrides.catalogScanFailUntilRecovery ?? false,
     taskRows: overrides.taskRows ?? defaultTaskRows(),
     workspaceProjects: overrides.workspaceProjects ?? defaultWorkspaceProjects(),
     projectActivity: overrides.projectActivity ?? defaultProjectActivity(),
@@ -632,7 +632,7 @@ export async function installTodayMocks(page: Page, seed: TodaySeed): Promise<vo
       documents: clone(injected.documents) as Record<string, { content: string; revision?: string }>,
       transitionCounter: 0,
       rolloverFailures: injected.rolloverFailures,
-      catalogScanFailures: injected.catalogScanFailures,
+      catalogScanFailUntilRecovery: injected.catalogScanFailUntilRecovery,
     };
 
     const calls: Array<{ command: string; args: Record<string, unknown> }> = [];
@@ -927,8 +927,7 @@ export async function installTodayMocks(page: Page, seed: TodaySeed): Promise<vo
       read_task_integrations: () => clone(state.outbox),
       today_calendar_commitments: () => clone(state.commitments),
       catalog_scan: () => {
-        if (state.catalogScanFailures > 0) {
-          state.catalogScanFailures -= 1;
+        if (state.catalogScanFailUntilRecovery) {
           throw new Error("mock catalog scan failure");
         }
         return clone(injected.catalogReport);
@@ -1018,6 +1017,7 @@ export async function installTodayMocks(page: Page, seed: TodaySeed): Promise<vo
         __MARU_TODAY_MOCK__: {
           calls: typeof calls;
           setLogicalDay: (day: string) => void;
+          recoverCatalogScan: () => void;
         };
       }
     ).__MARU_TODAY_MOCK__ = {
@@ -1025,6 +1025,9 @@ export async function installTodayMocks(page: Page, seed: TodaySeed): Promise<vo
       setLogicalDay: (day: string) => {
         state.previousLogicalDay = state.logicalDay;
         state.logicalDay = day;
+      },
+      recoverCatalogScan: () => {
+        state.catalogScanFailUntilRecovery = false;
       },
     };
   }, seed);

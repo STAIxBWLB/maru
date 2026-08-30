@@ -239,13 +239,9 @@ test("attention widget renders seeded catalog counts and drills into kind entrie
 });
 
 test("a failing widget renders its own error and retry recovers it", async ({ page }) => {
-  // React StrictMode double-runs the mount effect in dev, and the cancelled
-  // first fetch still consumes one injected failure — so failing twice is
-  // what leaves the live second fetch rejected. Every other command resolves
-  // normally.
   await installTodayMocks(
     page,
-    buildTodaySeed({ ...DASHBOARD_BOOT_SEED, catalogScanFailures: 2 }),
+    buildTodaySeed({ ...DASHBOARD_BOOT_SEED, catalogScanFailUntilRecovery: true }),
   );
   await gotoDashboard(page);
 
@@ -259,11 +255,24 @@ test("a failing widget renders its own error and retry recovers it", async ({ pa
   await expect(catalog.locator(".dashboard-chip", { hasText: "오늘" })).toBeVisible();
   await expect(widget(page, "inbox")).toContainText("공유대학 예산안 검토 요청");
 
+  await page.evaluate(() =>
+    (
+      window as unknown as {
+        __MARU_TODAY_MOCK__: { recoverCatalogScan: () => void };
+      }
+    ).__MARU_TODAY_MOCK__.recoverCatalogScan(),
+  );
+  const catalogScanCallCount = async () =>
+    (await readTodayCalls(page)).filter((call) => call.command === "catalog_scan").length;
+  const callsBeforeRetry = await catalogScanCallCount();
+
   await catalog.locator(".dashboard-widget-retry").click();
+  await expect.poll(catalogScanCallCount).toBe(callsBeforeRetry + 1);
   await expect(catalog.locator(".dashboard-widget-error")).toHaveCount(0);
-  await expect(
-    catalog.locator(".dashboard-chip", { hasText: "마감 임박" }),
-  ).toBeVisible();
+  const dueSoon = catalog.locator(".dashboard-chip", { hasText: "마감 임박" });
+  await expect(dueSoon).toBeVisible();
+  await expect(dueSoon.locator(".dashboard-chip-count")).toHaveText("2");
+  expect(await catalogScanCallCount()).toBe(callsBeforeRetry + 1);
 });
 
 test("widget actions deep-link into the owning modes", async ({ page }) => {
@@ -430,7 +439,11 @@ test("attention card surfaces a catalog failure even with no tasks", async ({ pa
   // and its retry button, leaving no way back.
   await installTodayMocks(
     page,
-    buildTodaySeed({ ...DASHBOARD_BOOT_SEED, taskRows: [], catalogScanFailures: 2 }),
+    buildTodaySeed({
+      ...DASHBOARD_BOOT_SEED,
+      taskRows: [],
+      catalogScanFailUntilRecovery: true,
+    }),
   );
   await gotoDashboard(page);
 
