@@ -1363,6 +1363,44 @@ mod tests {
     }
 
     #[test]
+    fn vault_cache_rejects_version_three_and_rebuilds_semantic_titles() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        write_file(root, "note.md", "---\ntitle: Fresh title\n---\nNo heading.\n");
+
+        let mut stale_entries = scan_vault(root.to_string_lossy().to_string(), None).unwrap();
+        stale_entries[0].title = "note".to_string();
+        let legacy_path = root.join(".maru/cache/workspace-index-v3.json");
+        fs::create_dir_all(legacy_path.parent().unwrap()).unwrap();
+        fs::write(
+            legacy_path,
+            serde_json::to_string(&VaultCacheEnvelope {
+                version: 3,
+                entries: stale_entries,
+                fingerprints: BTreeMap::new(),
+            })
+            .unwrap(),
+        )
+        .unwrap();
+
+        assert!(
+            read_vault_cache(root.to_string_lossy().to_string())
+                .unwrap()
+                .is_none(),
+            "version 3 cache must not be served"
+        );
+
+        let rebuilt = scan_vault(root.to_string_lossy().to_string(), None).unwrap();
+        assert_eq!(rebuilt[0].title, "Fresh title");
+
+        let cache_path = root.join(".maru/cache/workspace-index-v4.json");
+        let envelope: VaultCacheEnvelope =
+            serde_json::from_str(&fs::read_to_string(cache_path).unwrap()).unwrap();
+        assert_eq!(envelope.version, 4);
+        assert_eq!(envelope.entries[0].title, "Fresh title");
+    }
+
+    #[test]
     fn semantic_title_prefers_markdown_and_html_h1_over_frontmatter() {
         assert_eq!(
             title_from_content("---\ntitle: Frontmatter title\n---\n# Markdown title\n", "fallback"),

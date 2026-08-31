@@ -57,6 +57,24 @@ describe("resolveDisplayLabel", () => {
     });
   });
 
+  it("keeps a semantic frontmatter title distinct from its filename in every mode", () => {
+    const semanticTitle = "2026 제주한라대 RISE 실행계획";
+    const semanticFileName = "260831-rise-plan.md";
+
+    expect(resolveDisplayLabel(semanticTitle, semanticFileName, "title")).toEqual({
+      primary: semanticTitle,
+      secondary: null,
+    });
+    expect(resolveDisplayLabel(semanticTitle, semanticFileName, "filename")).toEqual({
+      primary: "260831-rise-plan",
+      secondary: null,
+    });
+    expect(resolveDisplayLabel(semanticTitle, semanticFileName, "both")).toEqual({
+      primary: semanticTitle,
+      secondary: "260831-rise-plan",
+    });
+  });
+
   it("falls back to the filename stem when the title is empty", () => {
     expect(resolveDisplayLabel("", fileName, "title")).toEqual({
       primary: "260529-1530-rise-y2",
