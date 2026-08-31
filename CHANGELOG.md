@@ -8,6 +8,16 @@ because releases cut frequently during active development. Versions before
 Dates are the release-tag dates. Only `feat`/`fix`-level changes are listed;
 `chore(release)` version bumps and merge commits are omitted.
 
+## v1.1.3 - 2026-08-31 - Semantic Titles
+
+- **Documents now use YAML frontmatter titles when no usable H1 exists
+  (#307).** Markdown and HTML H1 values remain authoritative, followed by a
+  trimmed non-empty string `title`, then the filename stem. Vault scans and
+  opened documents share the same resolver, including markup-only H1 fallback.
+- **Workspace title caches now rebuild as schema v4.** Older v2/v3 indexes are
+  ignored so unchanged documents receive fresh semantic titles, and the KG
+  cache documentation now points at the active v4 identity source.
+
 ## v1.1.2 - 2026-08-30 - Truthful Retry
 
 - **Made Today Sync Retry single-flight and truthful (#305).** A repaired,
