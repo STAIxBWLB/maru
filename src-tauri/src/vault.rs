@@ -677,12 +677,16 @@ fn json_safe_value(value: Value) -> Value {
 }
 
 pub fn title_from_content(content: &str, fallback: &str) -> String {
-    let body = parse_frontmatter(content).body;
-    title_from_body(&body, fallback)
+    let parts = parse_frontmatter(content);
+    semantic_title_from_parts(&parts, fallback)
 }
 
-fn title_from_body(body: &str, fallback: &str) -> String {
-    if let Some(capture) = h1_re().captures(body) {
+/// Resolve the document's semantic title from parsed frontmatter and body.
+/// Headings always take priority; a non-empty YAML string title is the
+/// fallback before the filename stem. Keeping this over parsed data lets scan
+/// and open paths share the exact same precedence without reparsing content.
+pub fn semantic_title_from_parts(parts: &FrontmatterParts, fallback: &str) -> String {
+    if let Some(capture) = h1_re().captures(&parts.body) {
         return capture
             .get(1)
             .map(|m| clean_text(m.as_str()))
@@ -690,12 +694,24 @@ fn title_from_body(body: &str, fallback: &str) -> String {
             .unwrap_or_else(|| fallback.to_string());
     }
 
-    if let Some(capture) = html_h1_re().captures(body) {
+    if let Some(capture) = html_h1_re().captures(&parts.body) {
         return capture
             .get(1)
             .map(|m| clean_text(m.as_str()))
             .filter(|s| !s.is_empty())
             .unwrap_or_else(|| fallback.to_string());
+    }
+
+    if let Some(title) = parts
+        .meta
+        .get("title")
+        .and_then(|value| match value {
+            Value::String(title) => Some(title.trim()),
+            _ => None,
+        })
+        .filter(|title| !title.is_empty())
+    {
+        return title.to_string();
     }
 
     fallback.to_string()
@@ -733,7 +749,7 @@ fn read_entry(path: &Path, vault: &Path, version_names: &[String]) -> Result<Vau
         .file_stem()
         .and_then(|s| s.to_str())
         .unwrap_or("Untitled");
-    let title = title_from_body(&parts.body, fallback);
+    let title = semantic_title_from_parts(&parts, fallback);
     let rel_path = path
         .strip_prefix(vault)
         .unwrap_or(path)
