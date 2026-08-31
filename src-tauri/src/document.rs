@@ -728,6 +728,24 @@ mod tests {
     }
 
     #[test]
+    fn semantic_title_matches_vault_scan_for_frontmatter_only_document() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().to_string_lossy().to_string();
+        let original = "---\ntitle: '  Frontmatter title  '\nstatus: draft\n---\nNo heading here.\n";
+        fs::write(tmp.path().join("note.md"), original).unwrap();
+
+        let scanned = crate::vault::scan_vault(root.clone(), None).unwrap();
+        let opened = read_document(root, "note.md".to_string()).unwrap();
+
+        assert_eq!(scanned[0].title, "Frontmatter title");
+        assert_eq!(opened.title, scanned[0].title);
+        assert_eq!(opened.content, original);
+        assert_eq!(opened.body, "No heading here.\n");
+        assert_eq!(opened.meta.get("status").and_then(Value::as_str), Some("draft"));
+        assert_eq!(opened.file_kind, "md");
+    }
+
+    #[test]
     fn save_rejects_stale_revision() {
         let tmp = TempDir::new().unwrap();
         let root = tmp.path().to_string_lossy().to_string();

@@ -1347,6 +1347,39 @@ mod tests {
     }
 
     #[test]
+    fn semantic_title_prefers_markdown_and_html_h1_over_frontmatter() {
+        assert_eq!(
+            title_from_content("---\ntitle: Frontmatter title\n---\n# Markdown title\n", "fallback"),
+            "Markdown title"
+        );
+        assert_eq!(
+            title_from_content(
+                "---\ntitle: Frontmatter title\n---\n<html><h1>HTML title</h1></html>\n",
+                "fallback"
+            ),
+            "HTML title"
+        );
+    }
+
+    #[test]
+    fn semantic_title_uses_only_trimmed_nonempty_frontmatter_strings() {
+        assert_eq!(
+            title_from_content("---\ntitle: '  Frontmatter title  '\n---\nBody\n", "fallback"),
+            "Frontmatter title"
+        );
+
+        for content in [
+            "---\ntitle: '   '\n---\nBody\n",
+            "---\ntitle: 42\n---\nBody\n",
+            "---\ntitle: true\n---\nBody\n",
+            "---\ntitle:\n  - item\n---\nBody\n",
+            "---\ntitle:\n  key: value\n---\nBody\n",
+        ] {
+            assert_eq!(title_from_content(content, "fallback"), "fallback", "{content}");
+        }
+    }
+
+    #[test]
     fn read_vault_cache_returns_none_for_missing_or_malformed_cache() {
         let tmp = TempDir::new().unwrap();
         let root = tmp.path();
