@@ -676,20 +676,22 @@ pub fn title_from_content(content: &str, fallback: &str) -> String {
 /// fallback before the filename stem. Keeping this over parsed data lets scan
 /// and open paths share the exact same precedence without reparsing content.
 pub fn semantic_title_from_parts(parts: &FrontmatterParts, fallback: &str) -> String {
-    if let Some(capture) = h1_re().captures(&parts.body) {
-        return capture
+    if let Some(title) = h1_re().captures(&parts.body).and_then(|capture| {
+        capture
             .get(1)
             .map(|m| clean_text(m.as_str()))
-            .filter(|s| !s.is_empty())
-            .unwrap_or_else(|| fallback.to_string());
+            .filter(|title| !title.is_empty())
+    }) {
+        return title;
     }
 
-    if let Some(capture) = html_h1_re().captures(&parts.body) {
-        return capture
+    if let Some(title) = html_h1_re().captures(&parts.body).and_then(|capture| {
+        capture
             .get(1)
             .map(|m| clean_text(m.as_str()))
-            .filter(|s| !s.is_empty())
-            .unwrap_or_else(|| fallback.to_string());
+            .filter(|title| !title.is_empty())
+    }) {
+        return title;
     }
 
     if let Some(title) = parts
@@ -1410,6 +1412,24 @@ mod tests {
                 "fallback"
             ),
             "HTML title"
+        );
+    }
+
+    #[test]
+    fn semantic_title_uses_frontmatter_after_empty_cleaned_h1() {
+        assert_eq!(
+            title_from_content(
+                "---\ntitle: Frontmatter title\n---\n# <img alt=\"\">\n",
+                "fallback"
+            ),
+            "Frontmatter title"
+        );
+        assert_eq!(
+            title_from_content(
+                "---\ntitle: Frontmatter title\n---\n<html><h1><img alt=\"\"></h1></html>\n",
+                "fallback"
+            ),
+            "Frontmatter title"
         );
     }
 
