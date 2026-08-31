@@ -31,7 +31,7 @@ See: .planning/PROJECT.md (updated 2026-08-28)
 Phase: 10 — Bundle and Build Hardening
 Plan: Not started
 Status: Ready to plan
-Last activity: 2026-08-31 - Completed quick task 260831-h9f: 제목이 없을 경우 yaml frontmatter의 title로 목록에 나타나게 하라.
+Last activity: 2026-08-29 — Phase 06 complete, transitioned to Phase 10
 
 Progress: [██████████] 100%
 
@@ -211,12 +211,6 @@ None yet.
 
 - **Phase 3's ERR-04 count band is coupled to `hwped.rs`.** The pinned command reports 1,138, and `hwped.rs` contributes 19 of those matches; without it the tree reads 1,119 and the post-migration count lands at 1,109, below `03-04-PLAN.md`'s `[1118, 1138]` band. The baseline is now anchored to a commit rather than a date - re-confirmed 2026-08-23 on the committed tree at 34f96ee - and `03-02`/`03-04` cite that provenance. Residual risk: the hwp-editor track is still active, so `03-04` now requires a re-measurement at the start of the plan rather than treating drift as exceptional.
 - `make verify` runs on ubuntu-22.04 only and e2e runs Chromium against Vite with mocked IPC. Nothing in CI exercises WKWebView, the real PTY, IME input, or the macOS menu - macOS-affecting changes need a real-app run. Phase 6 (TEST-01) exists to close this gap; until its spike resolves, treat this as open.
-
-### Quick Tasks Completed
-
-| # | Description | Date | Commit | Directory |
-|---|-------------|------|--------|-----------|
-| 260831-h9f | 제목이 없을 경우 yaml frontmatter의 title로 목록에 나타나게 하라. | 2026-08-31 | 0ad40193 | [260831-h9f-yaml-frontmatter-title](./quick/260831-h9f-yaml-frontmatter-title/) |
 
 ## Deferred Items
 
