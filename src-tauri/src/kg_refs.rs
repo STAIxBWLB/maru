@@ -17,7 +17,7 @@
 // disk at <work>/.maru/kg-cache/<sha256(docRelPath)>.json. A cached entry is
 // valid iff the document content hash matches AND the vault stamp matches.
 // The vault stamp hashes the note *identities* in the vault scan cache
-// (.maru/cache/workspace-index-v3.json) — rel_path + title + aliases, sorted —
+// (.maru/cache/workspace-index-v4.json) — rel_path + title + aliases, sorted —
 // so it changes only when a note is added, removed, renamed, retitled or
 // re-aliased. Identical identity sets stamp equal, so no-change rescans do NOT
 // invalidate this cache, and neither does editing the body of an unrelated

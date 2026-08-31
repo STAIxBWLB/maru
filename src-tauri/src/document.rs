@@ -2,7 +2,8 @@ use crate::filename_rules::{validate_filename_stem, validate_folder_name};
 use crate::frontmatter::{build_frontmatter, update_frontmatter_content, FrontmatterValue};
 use crate::ipc_error::{IpcError, DOCUMENT_CONFLICT};
 use crate::vault::{
-    is_document_extension, parse_frontmatter, resolve_inside_vault, slugify, title_from_content,
+    is_document_extension, parse_frontmatter, resolve_inside_vault, semantic_title_from_parts,
+    slugify,
 };
 use crate::vault_guard::{is_managed_root, validate_managed_write};
 use crate::vault_list::{assert_document_owner, assert_maru_can_write, WorkspaceWriteAction};
@@ -91,7 +92,7 @@ pub fn read_document(vault_path: String, document_path: String) -> Result<Docume
         .file_stem()
         .and_then(|s| s.to_str())
         .unwrap_or("Untitled");
-    let title = title_from_content(&content, fallback);
+    let title = semantic_title_from_parts(&parts, fallback);
     let rel_path = path
         .strip_prefix(vault)
         .unwrap_or(&path)
@@ -725,6 +726,28 @@ mod tests {
             after, original,
             "read→save with unchanged content must be byte-identical (frontmatter order, comments, trailing newline all preserved)"
         );
+    }
+
+    #[test]
+    fn semantic_title_matches_vault_scan_for_frontmatter_only_document() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().to_string_lossy().to_string();
+        let original =
+            "---\ntitle: '  Frontmatter title  '\nstatus: draft\n---\nNo heading here.\n";
+        fs::write(tmp.path().join("note.md"), original).unwrap();
+
+        let scanned = crate::vault::scan_vault(root.clone(), None).unwrap();
+        let opened = read_document(root, "note.md".to_string()).unwrap();
+
+        assert_eq!(scanned[0].title, "Frontmatter title");
+        assert_eq!(opened.title, scanned[0].title);
+        assert_eq!(opened.content, original);
+        assert_eq!(opened.body, "No heading here.\n");
+        assert_eq!(
+            opened.meta.get("status").and_then(Value::as_str),
+            Some("draft")
+        );
+        assert_eq!(opened.file_kind, "md");
     }
 
     #[test]

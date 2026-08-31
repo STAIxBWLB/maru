@@ -18,8 +18,12 @@ use crate::scratchpad::{assert_scratchpad_workspace_access, resolve_scratchpad_r
 use crate::skill_host::fs as host_fs;
 use crate::vault_list::registered_nested_roots;
 
-const VAULT_CACHE_REL: &[&str] = &[".maru", "cache", "workspace-index-v3.json"];
-const LEGACY_VAULT_CACHE_REL: &[&str] = &[".maru", "cache", "workspace-index-v2.json"];
+const VAULT_CACHE_VERSION: u32 = 4;
+const VAULT_CACHE_REL: &[&str] = &[".maru", "cache", "workspace-index-v4.json"];
+const LEGACY_VAULT_CACHE_RELS: &[&[&str]] = &[
+    &[".maru", "cache", "workspace-index-v3.json"],
+    &[".maru", "cache", "workspace-index-v2.json"],
+];
 
 /// The curated sample workspace, embedded into the binary at compile time so it
 /// ships inside the installer on every platform (same mechanism as the builtin
@@ -132,13 +136,6 @@ struct VaultCacheEnvelope {
     entries: Vec<VaultEntry>,
     #[serde(default)]
     fingerprints: BTreeMap<String, FileFingerprint>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(untagged)]
-enum VaultCacheOnDisk {
-    Envelope(VaultCacheEnvelope),
-    Legacy(Vec<VaultEntry>),
 }
 
 fn file_fingerprint(path: &Path) -> Option<FileFingerprint> {
@@ -510,32 +507,25 @@ pub fn read_vault_cache(vault_path: String) -> Result<Option<Vec<VaultEntry>>, S
 
 fn read_vault_cache_envelope(vault: &Path) -> Result<Option<VaultCacheEnvelope>, String> {
     let preferred = vault_cache_path(vault);
-    let legacy = LEGACY_VAULT_CACHE_REL
-        .iter()
-        .fold(vault.to_path_buf(), |acc, part| acc.join(part));
-    let path = if preferred.exists() {
-        preferred
-    } else {
-        legacy
-    };
-    if !path.exists() {
+    if !preferred.exists() {
+        // Older cache paths are deliberately discovery-only: their schema can
+        // contain stale semantic titles, so callers must rebuild from disk.
+        let _has_legacy_cache = LEGACY_VAULT_CACHE_RELS.iter().any(|rel| {
+            rel.iter()
+                .fold(vault.to_path_buf(), |path, part| path.join(part))
+                .exists()
+        });
         return Ok(None);
     }
-    let Ok(content) = fs::read_to_string(&path) else {
+    let Ok(content) = fs::read_to_string(&preferred) else {
         return Ok(None);
     };
     if content.trim().is_empty() {
         return Ok(None);
     }
-    match serde_json::from_str::<VaultCacheOnDisk>(&content) {
-        Ok(VaultCacheOnDisk::Envelope(cache)) => Ok(Some(cache)),
-        Ok(VaultCacheOnDisk::Legacy(entries)) => Ok(Some(VaultCacheEnvelope {
-            version: 2,
-            entries,
-            fingerprints: BTreeMap::new(),
-        })),
-        Err(_) => Ok(None),
-    }
+    Ok(serde_json::from_str::<VaultCacheEnvelope>(&content)
+        .ok()
+        .filter(|cache| cache.version == VAULT_CACHE_VERSION))
 }
 
 /// Case-insensitive check for extensions maru treats as documents.
@@ -677,25 +667,43 @@ fn json_safe_value(value: Value) -> Value {
 }
 
 pub fn title_from_content(content: &str, fallback: &str) -> String {
-    let body = parse_frontmatter(content).body;
-    title_from_body(&body, fallback)
+    let parts = parse_frontmatter(content);
+    semantic_title_from_parts(&parts, fallback)
 }
 
-fn title_from_body(body: &str, fallback: &str) -> String {
-    if let Some(capture) = h1_re().captures(body) {
-        return capture
+/// Resolve the document's semantic title from parsed frontmatter and body.
+/// Headings always take priority; a non-empty YAML string title is the
+/// fallback before the filename stem. Keeping this over parsed data lets scan
+/// and open paths share the exact same precedence without reparsing content.
+pub fn semantic_title_from_parts(parts: &FrontmatterParts, fallback: &str) -> String {
+    if let Some(title) = h1_re().captures(&parts.body).and_then(|capture| {
+        capture
             .get(1)
             .map(|m| clean_text(m.as_str()))
-            .filter(|s| !s.is_empty())
-            .unwrap_or_else(|| fallback.to_string());
+            .filter(|title| !title.is_empty())
+    }) {
+        return title;
     }
 
-    if let Some(capture) = html_h1_re().captures(body) {
-        return capture
+    if let Some(title) = html_h1_re().captures(&parts.body).and_then(|capture| {
+        capture
             .get(1)
             .map(|m| clean_text(m.as_str()))
-            .filter(|s| !s.is_empty())
-            .unwrap_or_else(|| fallback.to_string());
+            .filter(|title| !title.is_empty())
+    }) {
+        return title;
+    }
+
+    if let Some(title) = parts
+        .meta
+        .get("title")
+        .and_then(|value| match value {
+            Value::String(title) => Some(title.trim()),
+            _ => None,
+        })
+        .filter(|title| !title.is_empty())
+    {
+        return title.to_string();
     }
 
     fallback.to_string()
@@ -733,7 +741,7 @@ fn read_entry(path: &Path, vault: &Path, version_names: &[String]) -> Result<Vau
         .file_stem()
         .and_then(|s| s.to_str())
         .unwrap_or("Untitled");
-    let title = title_from_body(&parts.body, fallback);
+    let title = semantic_title_from_parts(&parts, fallback);
     let rel_path = path
         .strip_prefix(vault)
         .unwrap_or(path)
@@ -944,7 +952,7 @@ fn write_vault_cache(vault: &Path, entries: &[VaultEntry]) -> Result<(), String>
         })
         .collect();
     let envelope = VaultCacheEnvelope {
-        version: 3,
+        version: VAULT_CACHE_VERSION,
         entries: entries.to_vec(),
         fingerprints,
     };
@@ -1344,6 +1352,110 @@ mod tests {
             .expect("cache should exist after scan");
         assert_eq!(cached.len(), scanned.len());
         assert_eq!(cached[0].rel_path, "note.md");
+    }
+
+    #[test]
+    fn vault_cache_rejects_version_three_and_rebuilds_semantic_titles() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        write_file(
+            root,
+            "note.md",
+            "---\ntitle: Fresh title\n---\nNo heading.\n",
+        );
+
+        let mut stale_entries = scan_vault(root.to_string_lossy().to_string(), None).unwrap();
+        stale_entries[0].title = "note".to_string();
+        fs::remove_file(vault_cache_path(root)).unwrap();
+        let legacy_path = root.join(".maru/cache/workspace-index-v3.json");
+        fs::create_dir_all(legacy_path.parent().unwrap()).unwrap();
+        fs::write(
+            legacy_path,
+            serde_json::to_string(&VaultCacheEnvelope {
+                version: 3,
+                entries: stale_entries,
+                fingerprints: BTreeMap::new(),
+            })
+            .unwrap(),
+        )
+        .unwrap();
+
+        assert!(
+            read_vault_cache(root.to_string_lossy().to_string())
+                .unwrap()
+                .is_none(),
+            "version 3 cache must not be served"
+        );
+
+        let rebuilt = scan_vault(root.to_string_lossy().to_string(), None).unwrap();
+        assert_eq!(rebuilt[0].title, "Fresh title");
+
+        let cache_path = root.join(".maru/cache/workspace-index-v4.json");
+        let envelope: VaultCacheEnvelope =
+            serde_json::from_str(&fs::read_to_string(cache_path).unwrap()).unwrap();
+        assert_eq!(envelope.version, 4);
+        assert_eq!(envelope.entries[0].title, "Fresh title");
+    }
+
+    #[test]
+    fn semantic_title_prefers_markdown_and_html_h1_over_frontmatter() {
+        assert_eq!(
+            title_from_content(
+                "---\ntitle: Frontmatter title\n---\n# Markdown title\n",
+                "fallback"
+            ),
+            "Markdown title"
+        );
+        assert_eq!(
+            title_from_content(
+                "---\ntitle: Frontmatter title\n---\n<html><h1>HTML title</h1></html>\n",
+                "fallback"
+            ),
+            "HTML title"
+        );
+    }
+
+    #[test]
+    fn semantic_title_uses_frontmatter_after_empty_cleaned_h1() {
+        assert_eq!(
+            title_from_content(
+                "---\ntitle: Frontmatter title\n---\n# <img alt=\"\">\n",
+                "fallback"
+            ),
+            "Frontmatter title"
+        );
+        assert_eq!(
+            title_from_content(
+                "---\ntitle: Frontmatter title\n---\n<html><h1><img alt=\"\"></h1></html>\n",
+                "fallback"
+            ),
+            "Frontmatter title"
+        );
+    }
+
+    #[test]
+    fn semantic_title_uses_only_trimmed_nonempty_frontmatter_strings() {
+        assert_eq!(
+            title_from_content(
+                "---\ntitle: '  Frontmatter title  '\n---\nBody\n",
+                "fallback"
+            ),
+            "Frontmatter title"
+        );
+
+        for content in [
+            "---\ntitle: '   '\n---\nBody\n",
+            "---\ntitle: 42\n---\nBody\n",
+            "---\ntitle: true\n---\nBody\n",
+            "---\ntitle:\n  - item\n---\nBody\n",
+            "---\ntitle:\n  key: value\n---\nBody\n",
+        ] {
+            assert_eq!(
+                title_from_content(content, "fallback"),
+                "fallback",
+                "{content}"
+            );
+        }
     }
 
     #[test]

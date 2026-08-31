@@ -138,7 +138,7 @@ mod tests {
         assert!(relevant_path(Path::new("/work/notes/a.md"), root));
         assert!(relevant_path(Path::new("/work/.maruignore"), root));
         assert!(!relevant_path(
-            Path::new("/work/.maru/cache/workspace-index-v3.json"),
+            Path::new("/work/.maru/cache/workspace-index-v4.json"),
             root
         ));
         assert!(!relevant_path(

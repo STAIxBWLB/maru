@@ -40,7 +40,7 @@ Results are cached on disk at
 
 1. the document content hash (sha256 of the raw bytes) matches, AND
 2. the vault stamp matches: a sha256 over the *identity* of every note in the
-   vault scan cache (`.maru/cache/workspace-index-v3.json`): rel path, title and
+   vault scan cache (`.maru/cache/workspace-index-v4.json`): rel path, title and
    aliases, which is exactly what wikilink resolution and entity matching key
    on. Bodies, fingerprints and timestamps are deliberately excluded, so editing
    an unrelated note cannot invalidate this document's map. Entries are sorted
