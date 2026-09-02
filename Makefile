@@ -314,8 +314,12 @@ macos-passkey-readiness-check: ## Validate opt-in macOS browser-passkey packagin
 	$(NODE) scripts/check-macos-direct-distribution.mjs --passkeys --require-local-identity
 
 .PHONY: macos-passkey-build
-macos-passkey-build: ## Build a locally provisioned macOS browser-passkey bundle
+macos-passkey-build: ## Build a locally provisioned macOS browser-passkey bundle (not notarized)
 	$(NODE) scripts/build-macos-passkeys.mjs
+
+.PHONY: macos-passkey-notarized-build
+macos-passkey-notarized-build: ## Build, notarize, and staple the browser-passkey bundle for distribution
+	$(NODE) scripts/build-macos-passkeys.mjs --notarize
 
 .PHONY: macos-notarize-local
 macos-notarize-local: ## Build, sign, and notarize locally with secrets from ~/workspace/work/.maru/secrets/apple

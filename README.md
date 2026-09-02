@@ -1,9 +1,8 @@
 # Maru
 
-Local-first AI workspace desktop app for Korean knowledge/document operations.
-Tauri 2 + Rust + React 19 + TypeScript. The current version is defined by the
-synced app manifests (`package.json`, `src-tauri/tauri.conf.json`,
-`src-tauri/Cargo.toml`, and `src-tauri/maru-cli/Cargo.toml`).
+Maru is a local-first desktop workspace for Korean knowledge and document
+operations. It combines a React 19 and TypeScript interface with a Tauri 2 Rust
+core, and treats the filesystem as the source of truth.
 
 The current product release is **v1.1.3, Semantic Titles**. Releases
 before v0.3.0 shipped under the name Anchor; v0.3.0 completed the application
@@ -221,299 +220,24 @@ Global user state:
 
 Workspace-local state:
 
-After Phase 6 W21 ships, the same operator procedure will also exercise the `POST /api/v1/documents/{id}/finalize` round-trip — Maru pushes the approved markdown body + rendered artifacts + linked evidence binaries to Hub, and the document then appears under the Hub Finalized tab inside Catalog mode.
-
-## Roadmap
-
-The active plan lives in [ROADMAP.md](ROADMAP.md) — a 7-module (M1–M7)
-decomposition with weekly deliverables (W1–W34+) plus the Diagram and Graph side
-tracks. Phases 0–5, the Diagram mode, and the Phase 8 graph mode (8a/8b/8c) are
-shipped. See [CHANGELOG.md](CHANGELOG.md) for the release-by-release history.
-
-Each phase is defined in **outcomes the user actually exercises**. No phase
-exists just to grow infrastructure. The entry gate for each phase is the
-verification of the previous one.
-
-### Next up
-
-Git has run ahead of the linear W-plan: Phase 8 (graph mode) shipped before the
-remaining Phase 5 evidence work. The nearest pending items:
-
-1. **W15 Evidence index** — use the W14 full-sha binding identity for Hub `evidence_index` lookup and reuse hints. Keep binaries local; send only sha256 and metadata through the approval-gated Hub path. Entry files: `src-tauri/src/evidence_binder.rs`, `src-tauri/src/hub_client/*`, `src/components/evidence/*`.
-2. **W16–W18 Deck Studio (M6)** — a `Decks` mode wrapping the gpt-images-deck wizard with the bundled 14-style catalog (`skills/docs/slide-decks/`).
-3. **Phase 6 (W19–W22) Approval + Finalize-to-Hub** — submission gates, gate-state polling, and the approval-gated `POST /api/v1/documents/{id}/finalize` write path (the only Maru client path allowed to carry body/binary payloads). Requires a matching `hub_client/safety.rs` pre-flight.
-4. **Phase 7 (W23–W26) Certification & KPI bundle** — Hub-backed certification vault, KPI composer, and PDF bundle assembly.
-
-## Hub as published-document SSOT
-
-Maru stays the **author SSOT** — drafting and editing always happen under
-`~/workspace/work/`. Maru Hub becomes the **published SSOT** the moment an
-approval route closes. Two write paths land on Hub from Maru:
-
-1. **`POST /api/v1/documents/sync`** (planned M7 caller) — drafting metadata only: `document_uri`, `body_sha256`, `frontmatter`, and the evidence link graph. **No body, no binary.** Used for cross-BU lookups and "이미 동기화된 초안" hints.
-2. **`POST /api/v1/documents/{id}/finalize`** (Phase 6 W21) — approval-gated canonical push. The instant `submission_gate.state` flips to `approved`, Maru auto-calls finalize with the full markdown body, every rendered artifact in the M4 manifest (docx/hwpx/pdf), and the binary bytes of every evidence file linked via `frontmatter.evidence_links`. On `201`, the local frontmatter `status` flips to `archived-hub:<finalized_id>@v<N>`.
-
-Gate submits made while the Hub is disabled or unreachable persist in
-`<workspace>/.maru/queue/hub/` (one JSON per request) and drain FIFO via
-the `hub_queue_drain` command — exposed in the Catalog footer as a queue
-depth badge with a retry action.
-
-## Development
-
-```bash
-pnpm install
-
-# Browser dev (mocked Tauri):
-pnpm dev
-
-# Native Tauri dev (cleans stale local app bundles first):
-pnpm tauri:dev
-
-# Type check:
-pnpm typecheck
-
-# i18n lint (ko/en parity + hardcoded UI string scan; also in make verify):
-pnpm lint:i18n
-
-# Production build:
-pnpm build
-
-# Full verification (typecheck + vitest + cargo test --lib + build):
-make verify
-
-# Signed native release build:
-make tauri-build
-
-# Raw pnpm build still requires explicit updater signing env:
-export TAURI_SIGNING_PRIVATE_KEY="$(cat ~/.tauri/maru-updater.key)"
-export TAURI_SIGNING_PRIVATE_KEY_PASSWORD="$(cat ~/.tauri/maru-updater.key.password)"
-pnpm tauri:build
-
-# Prune oversized local Tauri debug artifacts (also runs from tauri:dev/build):
-pnpm clean:tauri-debug
-# Checks once every 24h and prunes src-tauri/target/debug when artifacts exceed 4GiB.
-
-# Rust unit + integration tests:
-cd src-tauri && cargo test
-# or: make test-rust  (cargo test --lib)
-
-# Frontend unit tests:
-pnpm test
-# End-to-end:
-pnpm test:e2e
-
-# Local Maru MCP sidecar smoke:
-MARU_MCP_WORKSPACE="$PWD" node sidecars/maru-mcp/index.mjs
-
-# Skills registry doctor / reconcile:
-cargo run --manifest-path src-tauri/Cargo.toml -p maru-cli --bin maru-cli -- --version
-cargo run --manifest-path src-tauri/Cargo.toml -p maru-cli --bin maru-cli -- doctor --json
-cargo run --manifest-path src-tauri/Cargo.toml -p maru-cli --bin maru-cli -- skills dirty --json
-cargo run --manifest-path src-tauri/Cargo.toml -p maru-cli --bin maru-cli -- skills reconcile <name-or-id> --accept --dry-run
-cargo run --manifest-path src-tauri/Cargo.toml -p maru-cli --bin maru-cli -- skills import /path/to/skill --copy
-
-# Bench workspace scan on a real workspace:
-cd src-tauri && cargo test --release bench_scan_real_workspace \
-    -- --ignored --nocapture --test-threads=1
-# → MARU_BENCH_WORKSPACE=/some/path overrides the default ~/workspace/work
+```text
+<workspace>/
+  .maruignore
+  .maru/
+    cache/                  # disposable workspace index and Hub cache
+    workspace-state.json   # collapsed folders and workspace UI state
+    versions/               # explicit document snapshots
+    studio/                 # per-document Studio state
+    binder/                 # per-document Evidence Binder state
+    diagrams/               # diagram history and backups
+    drafts/                 # draft index and frozen promotion baselines
+    queue/                   # recoverable provider/Hub work queues
 ```
 
-Codex skill sync writes to `$CODEX_HOME/skills` when `CODEX_HOME` is set, as
-it is for isolated Orca account profiles. Without that variable, it uses the
-standard `~/.codex/skills` directory.
+`<workspace>/.maru/settings.json` is a legacy migration input only. New
+workspaces use global settings plus `workspace-state.json`.
 
-CI runs `make verify` (typecheck + vitest + cargo test --lib + build) and
-`make test-e2e` on every pull request and push to `main` via
-`.github/workflows/ci.yml`. The heavier
-`release-preflight` repeats both and adds diff checks, CLI tests/smoke, and a
-debug Tauri build on version tags.
-
-## Skills Bundle Channel (OTA)
-
-Skills deploy independently of app releases and live in their own repo,
-[`STAIxBWLB/skills`](https://github.com/STAIxBWLB/skills). Every push there
-that touches bundle content verifies, packages, signs (same minisign key as
-the app updater), and uploads immutable assets to that repo's
-`skills-channel` prerelease. The app checks that channel after launch and
-every 6 hours, applies new bundles automatically when the local skills are
-clean and runtime-compatible, and shows an update-available notification
-otherwise; `maru skills update --check|--apply [--repair-env]` and the
-Skills UI cover manual flows. The binary embeds only a frozen
-`src-tauri/skills-bootstrap/` snapshot as the offline first-run fallback;
-refresh it from the newest bundle with `make skills-bootstrap-refresh` when
-cutting an app release.
-
-## Release Bundles
-
-Publishing a GitHub Release (a `v*` tag; the skills channel is excluded)
-triggers `.github/workflows/release-bundles.yml`.
-The workflow builds native Tauri bundles on macOS, Ubuntu, and Windows, then
-uploads the generated `.app` / `.dmg`, `.deb` / `.rpm` / `.AppImage`, `.exe`,
-and `.msi` assets to that same release. It also uploads signed updater
-metadata consumed by the startup auto-updater and native `Check for Updates...`
-menu action. A separate macOS CLI job builds `maru-cli`, packages it as a
-tarball containing an `maru` executable, and uploads
-`maru-cli_<version>_darwin_{aarch64,x86_64}.tar.gz` plus SHA256 files to the
-same release.
-
-macOS bundles must be code signed before publishing. Until Apple Developer ID
-secrets are configured, Maru uses explicit ad-hoc bundle signing
-(`bundle.macOS.signingIdentity = "-"`) so Apple Silicon downloads are not
-shipped as unsigned/broken app bundles. For fully trusted Gatekeeper launches,
-configure these GitHub Secrets and publish a new release:
-
-- `APPLE_CERTIFICATE` — base64 encoded Developer ID Application `.p12`
-- `APPLE_CERTIFICATE_PASSWORD`
-- `KEYCHAIN_PASSWORD`
-- `APPLE_ID`
-- `APPLE_PASSWORD` — app-specific password
-- `APPLE_TEAM_ID`
-
-The release workflow imports `APPLE_CERTIFICATE` only inside the macOS signing
-prep step, and it sends Apple notarization env vars only to the Developer ID
-build branch. It intentionally does not pass unset Apple secrets into
-`tauri-apps/tauri-action`, because empty environment variables make Tauri try
-to import or notarize with blank credentials.
-
-Minimum Apple Developer setup for direct distribution:
-
-1. Create a `Developer ID Application` certificate. The default Maru bundle
-   intentionally has no managed entitlement or HTTP/HTTPS browser-role
-   declaration, so it does not require an App ID or provisioning profile.
-2. Install the downloaded `.cer` into Keychain Access, then export it with its
-   private key as a password-protected `.p12`.
-3. Encode the `.p12` and set the release secrets:
-
-   ```bash
-   tmp_cert_b64="$(mktemp)"
-   openssl base64 -A -in DeveloperIDApplication.p12 -out "$tmp_cert_b64"
-   gh secret set APPLE_CERTIFICATE --repo STAIxBWLB/maru --body-file "$tmp_cert_b64"
-   rm "$tmp_cert_b64"
-
-   gh secret set APPLE_CERTIFICATE_PASSWORD --repo STAIxBWLB/maru
-   gh secret set KEYCHAIN_PASSWORD --repo STAIxBWLB/maru
-   gh secret set APPLE_ID --repo STAIxBWLB/maru
-   gh secret set APPLE_PASSWORD --repo STAIxBWLB/maru
-   gh secret set APPLE_TEAM_ID --repo STAIxBWLB/maru
-   ```
-
-4. Confirm release readiness without printing secret values:
-
-   ```bash
-   make macos-distribution-check
-   make macos-distribution-local-check
-   ```
-
-For a local notarization smoke test, keep Apple files under
-`~/workspace/work/.maru/secrets/apple/`:
-
-- `DeveloperIDApplication.p12`
-- `AuthKey_<APPLE_API_KEY_ID>.p8`
-- `certificate-password`
-- `api-issuer-id`
-- optional `api-key-id` (defaults to the `AuthKey_<id>.p8` filename)
-- optional `keychain-password` (generated locally if missing)
-
-Then run:
-
-```bash
-make macos-notarize-local TARGET=aarch64-apple-darwin
-```
-
-Keep the Tauri updater secrets (`TAURI_SIGNING_PRIVATE_KEY`,
-`TAURI_SIGNING_PRIVATE_KEY_PASSWORD`) in place; they sign updater metadata and
-are separate from Apple Developer ID signing. The workflow fails on partial
-Apple signing configuration instead of silently producing an unintended ad-hoc
-macOS release.
-
-Browser-passkey packaging is a separate, fail-closed opt-in. The default
-`src-tauri/tauri.conf.json` omits both the managed entitlement and HTTP/HTTPS
-browser-role metadata; the runtime checks the effective code signature with
-`SecTaskCopyValueForEntitlement` and returns `unsupported` before loading or
-constructing Apple's browser passkey manager. This keeps `tauri dev`, CI,
-ad-hoc bundles, and older supported macOS releases launchable.
-
-`src-tauri/tauri.passkeys.conf.json` is an active, opt-in overlay. The app
-bundle contains one Mach-O executable (`maru`) plus an executable
-`Contents/Resources/maru-cli` shell wrapper that dispatches to
-`../MacOS/maru --maru-cli`; the standalone/Homebrew `maru-cli` Mach-O lives in
-the separate `src-tauri/maru-cli` workspace package, outside the app package's
-binary targets. This prevents Tauri from applying the
-managed entitlement to an unprovisioned helper. Incoming HTTP/HTTPS open
-events are filtered into a bounded memory queue, emitted as
-`sites://open-requested`, and can be drained after cold start. The Safari
-fallback opens `com.apple.Safari` directly so Maru cannot recursively invoke
-itself when registered as the default HTTP/HTTPS handler.
-
-Passkey-enabled distribution additionally requires:
-
-1. Register the explicit App ID `kr.maru.desktop` and request Apple's managed
-   `com.apple.developer.web-browser.public-key-credential` capability.
-2. Confirm that Apple approves the capability for Developer ID distribution.
-   If Apple does not offer it for that distribution channel, keep the
-   system-browser fallback and do not enable the overlay.
-3. Create a Developer ID provisioning profile containing the approved
-   entitlement and supply its absolute path through
-   `MARU_MACOS_PROVISIONING_PROFILE`.
-
-Validate the profile and build a local provisioned app with:
-
-```bash
-export MARU_MACOS_PROVISIONING_PROFILE=/absolute/path/to/Maru.provisionprofile
-export APPLE_SIGNING_IDENTITY='Developer ID Application: Example (TEAMID)'
-export APPLE_TEAM_ID=TEAMID
-make macos-passkey-readiness-check
-make macos-passkey-build
-```
-
-The probe validates profile expiration, team and application identifiers, the
-managed passkey entitlement, the non-Mach-O helper wrapper, and the opened-URL
-backend. The build command temporarily stages the ignored fixed profile source,
-embeds it as `Maru.app/Contents/embedded.provisionprofile`, builds with the
-overlay, verifies the app signature and entitlement, then removes or restores
-the staged source. The normal release workflow does not select this overlay;
-enable it there only after the approved profile and explicit release variable
-are configured. Calling `tauri build` with the overlay directly, without the
-staging and readiness checks, is unsupported.
-
-Release asset versions come from `package.json`, `src-tauri/tauri.conf.json`,
-the root and CLI Cargo manifests, and their package entries in
-`src-tauri/Cargo.lock`; keep them in sync before tagging or publishing a
-release. `make macos-distribution-check` asserts the four manifests agree but
-does not read the lock file, and nothing checks the tag against the manifests: if the
-tag names a version the manifests do not, the bundle jobs still succeed with the
-old asset names and `latest.json` advertises the old version, so no installed
-client is ever offered the update.
-
-The `homebrew-tap` job in `release-bundles.yml` pushes the tap update
-automatically once the bundle and CLI jobs finish. The `make homebrew-*` targets
-below are for verifying that result, or for recovering by hand if that job
-failed:
-
-```bash
-make homebrew-update-commit RELEASE_TAG=v$(node -p "require('./package.json').version") HOMEBREW_TAP_DIR=../homebrew-cask
-make homebrew-audit HOMEBREW_TAP_DIR=../homebrew-cask
-make homebrew-fetch HOMEBREW_TAP_DIR=../homebrew-cask
-```
-
-After downloading the release DMG, verify Gatekeeper-facing state on macOS:
-
-```bash
-xcrun stapler validate Maru_*.dmg
-spctl -a -vv -t open --context context:primary-signature Maru_*.dmg
-codesign --verify --deep --strict --verbose=4 /Applications/Maru.app
-spctl -a -vv -t exec /Applications/Maru.app
-```
-
-## Workspace Layout
-
-An AI workspace is any folder containing `.md` (or `.markdown`, `.html`, `.htm`) files.
-
-### Scratchpad
-
-The primary private workspace owns one Scratchpad root. `ideation/` and
-`memos/` are durable, Git-tracked content; only `temp/` is disposable and
-Git-ignored.
+Scratchpad structure:
 
 ```text
 <work>/scratchpad/

@@ -264,9 +264,9 @@ jobs:
           set -euo pipefail
           version="${RELEASE_TAG#v}"
           cargo build --manifest-path src-tauri/Cargo.toml --release -p maru-cli --bin maru-cli --target "$TARGET"
-          rm -rf dist-cli
-          mkdir -p dist-cli
-          install -m 0755 "src-tauri/target/$TARGET/release/maru-cli" dist-cli/maru
+          staging="$RUNNER_TEMP/maru-cli-$ASSET_ARCH"
+          mkdir -p "$staging"
+          install -m 0755 "src-tauri/target/$TARGET/release/maru-cli" "$staging/maru"
           asset="maru-cli_${version}_darwin_${ASSET_ARCH}.tar.gz"
           tar -czf "$asset" -C "$staging" maru
           shasum -a 256 "$asset" | awk '{print $1}' > "$asset.sha256"
