@@ -18,15 +18,6 @@ use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 use walkdir::WalkDir;
 
-pub(crate) const GENERATED_DIRS: &[&str] = &[
-    "node_modules",
-    "target",
-    "dist",
-    "build",
-    ".next",
-    ".turbo",
-    ".cache",
-];
 const BINARY_SAMPLE_BYTES: usize = 8 * 1024;
 const KNOWN_BINARY_EXTENSIONS: &[&str] = &[
     "7z", "app", "bin", "db", "dmg", "doc", "docx", "gif", "gz", "heic", "hwp", "hwpx", "icns",

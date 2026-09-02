@@ -206,10 +206,10 @@ use shelf::{
 #[cfg(target_os = "macos")]
 use site_view::queue_opened_urls;
 use site_view::{
-    queue_opened_urls, site_view_back, site_view_close, site_view_close_all, site_view_forward,
-    site_view_hide, site_view_navigate, site_view_open, site_view_open_external,
-    site_view_open_safari, site_view_reload, site_view_set_bounds, site_view_show,
-    site_view_take_opened_urls, SiteOpenedUrlState,
+    site_view_back, site_view_close, site_view_close_all, site_view_forward, site_view_hide,
+    site_view_navigate, site_view_open, site_view_open_external, site_view_open_safari,
+    site_view_reload, site_view_set_bounds, site_view_show, site_view_take_opened_urls,
+    SiteOpenedUrlState,
 };
 use sites::{read_sites, save_sites, scan_work_sites};
 use skill_host::{

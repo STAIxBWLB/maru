@@ -21,6 +21,20 @@ members = [".", "maru-cli"]
 default-members = ["."]
 resolver = "2"
 
+[features]
+default = []
+# Default-off: gates the embedded WebDriver plugin so it never compiles
+# into a release build (D-10, T-06-01). Enabled only by
+# `make test-e2e-native` / `cargo build --features native-e2e`.
+#
+# `tauri/custom-protocol` is load-bearing, not incidental: tauri's build
+# script compiles the crate in dev mode whenever custom-protocol is off
+# (`let dev = !custom_protocol` in tauri's build.rs), so a plain
+# `cargo build` binary points its window at devUrl and embeds no assets.
+# The runner has no vite dev server; without this feature the webview
+# stays on about:blank forever (the 06-01 white-screen bug).
+native-e2e = ["dep:tauri-plugin-wdio-webdriver", "tauri/custom-protocol"]
+
 [build-dependencies]
 tauri-build = { version = "2.5.4", features = [] }
 
