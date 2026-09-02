@@ -41,7 +41,8 @@ export type MaruAppMode =
   | "drafts"
   | "gap"
   | "agents";
-export type RightWorkbenchSurface = "editor" | Exclude<MaruAppMode, "pkm">;
+export type RightWorkbenchMode = Exclude<MaruAppMode, "pkm" | "scratchpad">;
+export type RightWorkbenchSurface = "editor" | RightWorkbenchMode;
 export type WorkspaceVisibilitySetting = "private" | "public";
 export type EditorViewModeSetting = "rich" | "source" | "preview";
 export interface EditorPaneViewModes {
@@ -1933,7 +1934,7 @@ function parseMaruAppMode(value: unknown): MaruAppMode | null {
 function parseRightWorkbenchSurface(value: unknown): RightWorkbenchSurface | null {
   if (value === "editor") return value;
   const mode = parseMaruAppMode(value);
-  return mode && mode !== "pkm" ? mode : null;
+  return mode && mode !== "pkm" && mode !== "scratchpad" ? mode : null;
 }
 
 function normalizeActiveAppMode(ui: Record<string, unknown>): MaruAppMode {
@@ -1974,7 +1975,7 @@ function normalizeEditorPaneViewModes(
 }
 
 function parseRightPaneTab(value: unknown): RightPaneTab | null {
-  return value === "workspace" || value === "outline" || value === "explorer" || value === "files" || value === "memo"
+  return value === "workspace" || value === "outline" || value === "explorer" || value === "files"
     || value === "info" || value === "skills" || value === "guideline" || value === "evidence"
     || value === "shareOutbox"
     ? value

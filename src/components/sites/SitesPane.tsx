@@ -88,7 +88,6 @@ interface SitesPaneProps {
    *  (command palette, dialogs, approval gate). The native webview cannot
    *  stack under DOM modals, so we hide it for the duration. */
   overlayOpen: boolean;
-  onError: (message: string | null) => void;
   onEmptyClose?: () => void;
   openedUrls?: readonly SiteViewOpenRequest[];
   onOpenedUrlsHandled?: (ids: readonly number[]) => void;
@@ -96,7 +95,6 @@ interface SitesPaneProps {
 
 export function SitesPane({
   overlayOpen,
-  onError,
   onEmptyClose,
   openedUrls = EMPTY_OPENED_URLS,
   onOpenedUrlsHandled,
@@ -312,7 +310,7 @@ export function SitesPane({
   const openInNewTab = useCallback(
     (url: string, siteId: string | null): boolean => {
       if (tabs.length >= MAX_BROWSER_TABS) {
-        onError(t("sites.tabs.limit"));
+        setError(t("sites.tabs.limit"));
         return false;
       }
       setTabs((current) => {
@@ -335,7 +333,7 @@ export function SitesPane({
       });
       return true;
     },
-    [loadInTab, onError, t, tabs.length, tauri],
+    [loadInTab, t, tabs.length, tauri],
   );
 
   // App owns the launch/open-event queue. Each accepted URL becomes a new

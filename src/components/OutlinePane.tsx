@@ -75,70 +75,10 @@ import {
 } from "../lib/workspaceFileTree";
 import { NeighborhoodPane } from "./NeighborhoodPane";
 import { ExplorerPane } from "./ExplorerPane";
-import { ScratchpadPane } from "./ScratchpadPane";
 import { SharedOutboxPane } from "./SharedOutboxPane";
 import { Sidebar } from "./Sidebar";
 
-interface OutlinePaneProps {
-  document: DocumentPayload | null;
-  draftContent: string;
-  entries: VaultEntry[];
-  readOnly: boolean;
-  workspacePath: string | null;
-  scratchpadWorkPath: string | null;
-  scratchpadSortKey: SortKey;
-  scratchpadListHeight: number;
-  onScratchpadSortKeyChange: (key: SortKey) => void;
-  onScratchpadListHeightChange: (height: number) => void;
-  /** Editor line currently scrolled to the top (source mode); highlights the
-   *  matching outline heading. Null when tracking is inactive. */
-  activeLine?: number | null;
-  onJumpToLine: (line: number) => void;
-  onClose: () => void;
-  onError: (message: string | null) => void;
-  onRefreshWorkspace: () => void;
-  onUpdateField: (
-    key: string,
-    value: string | string[] | number | boolean | null,
-  ) => Promise<void>;
-  onSelectEntry: (entry: VaultEntry) => void;
-  onMissingWikilink?: (target: string) => void;
-  onOpenGraph?: (target: GraphLocalTarget) => void;
-  /** Managed vault note — swaps the free-form type input for the schema form
-   *  (description 카운터·type/domain select·topics 칩, spec §3 F1). */
-  isManagedVaultNote?: boolean;
-  fileQueue: FileQueueItem[];
-  canApplyFileQueue: boolean;
-  onUpdateFileQueueItem: (
-    id: string,
-    patch: Partial<Pick<FileQueueItem, "targetDir" | "operation">>,
-  ) => void;
-  selectedFileQueueItemIds: string[];
-  onSelectFileQueueItem: (id: string, additive: boolean) => void;
-  onQueueExternalFiles: (paths: string[]) => Promise<void>;
-  onQueueFileSources: (sources: FileQueueSourceInfo[], targetDir: string) => void;
-  onApplyFileQueue: () => Promise<unknown>;
-  onClearFileQueue: () => void;
-  onClearSelectedFileQueueItems: () => void;
-  workspaceFileEntries: WorkspaceFileEntry[];
-  explorerWorkspacePath: string | null;
-  explorerExpandedFolders: string[];
-  onExplorerExpandedFoldersChange: (paths: string[]) => void;
-  explorerSelectedPath: string | null;
-  explorerLoading: boolean;
-  explorerReady: boolean;
-  explorerRefreshing: boolean;
-  onExplorerRefresh: () => void;
-  onOpenWorkspaceFile: (entry: WorkspaceFileEntry, line?: number) => void;
-  explorerIncludeDotFolders: string[];
-  selectedWorkspaceFileEntries: WorkspaceFileEntry[];
-  filesPaneFilters: WorkspaceFilesPaneFilters;
-  onFilesPaneFiltersChange: (filters: WorkspaceFilesPaneFilters) => void;
-  explorerPaneMode: ExplorerPaneMode;
-  onRevealFileInFinder: (targetPath: string) => void;
-  activeTab: RightPaneTab;
-  onTabChange: (tab: RightPaneTab) => void;
-  paneRef?: React.RefObject<HTMLElement | null>;
+interface OutlinePaneSlots {
   skillsNode?: React.ReactNode;
   guidelineNode?: React.ReactNode;
   evidenceNode?: React.ReactNode;
@@ -215,54 +155,8 @@ const AUDIO_EXTENSIONS = new Set(["aac", "aiff", "flac", "m4a", "mp3", "ogg", "w
 const VIDEO_EXTENSIONS = new Set(["avi", "m4v", "mkv", "mov", "mp4", "webm", "wmv"]);
 
 export function OutlinePane({
-  document,
-  draftContent,
-  entries,
-  readOnly,
-  workspacePath,
-  scratchpadWorkPath,
-  scratchpadSortKey,
-  scratchpadListHeight,
-  onScratchpadSortKeyChange,
-  onScratchpadListHeightChange,
-  activeLine = null,
-  onJumpToLine,
-  onClose,
-  onError,
-  onRefreshWorkspace,
-  onUpdateField,
-  onSelectEntry,
-  onMissingWikilink,
-  onOpenGraph,
-  isManagedVaultNote,
-  fileQueue,
-  canApplyFileQueue,
-  onUpdateFileQueueItem,
-  selectedFileQueueItemIds,
-  onSelectFileQueueItem,
-  onQueueExternalFiles,
-  onQueueFileSources,
-  onApplyFileQueue,
-  onClearFileQueue,
-  onClearSelectedFileQueueItems,
-  workspaceFileEntries,
-  explorerWorkspacePath,
-  explorerExpandedFolders,
-  onExplorerExpandedFoldersChange,
-  explorerSelectedPath,
-  explorerLoading,
-  explorerReady,
-  explorerRefreshing,
-  onExplorerRefresh,
-  onOpenWorkspaceFile,
-  explorerIncludeDotFolders,
-  selectedWorkspaceFileEntries,
-  filesPaneFilters,
-  onFilesPaneFiltersChange,
-  explorerPaneMode,
-  onRevealFileInFinder,
-  activeTab,
-  onTabChange,
+  scope,
+  commands,
   paneRef,
   slots,
 }: OutlinePaneProps) {
@@ -318,7 +212,7 @@ export function OutlinePane({
   // the workspace tab. Fall back to the first valid tab when the persisted
   // tab is not available in the current mode.
   const visibleTabs: readonly RightPaneTab[] = isPkm
-    ? ["workspace", "outline", "explorer", "files", "memo", "shareOutbox", "skills", "guideline", "evidence", "info"]
+    ? ["workspace", "outline", "explorer", "files", "shareOutbox", "skills", "guideline", "evidence", "info"]
     : appMode === "inbox"
       ? ["workspace", "shareOutbox"]
       : ["workspace"];
@@ -539,14 +433,15 @@ export function OutlinePane({
               workspacePath={explorerWorkspacePath}
               entries={workspaceFileEntries}
               expandedFolders={explorerExpandedFolders}
-              onExpandedFoldersChange={onExplorerExpandedFoldersChange}
+              onExpandedFoldersChange={commands.setExplorerExpandedFolders}
               selectedPath={explorerSelectedPath}
               loading={explorerLoading}
               ready={explorerReady}
               refreshing={explorerRefreshing}
-              onRefresh={onExplorerRefresh}
-              onOpenFile={onOpenWorkspaceFile}
+              onRefresh={commands.refreshExplorer}
+              onOpenFile={commands.openWorkspaceFile}
               includeDotFolders={explorerIncludeDotFolders}
+              onIgnore={commands.ignoreWorkspaceEntry}
             />
           ) : null}
 

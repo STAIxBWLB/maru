@@ -120,7 +120,7 @@ describe("SitesPane passkey and opened URL integration", () => {
     await act(async () => {
       root?.render(
         <LocaleContext.Provider value={{ locale: "en", setLocale: () => {}, t }}>
-          <SitesPane overlayOpen={false} onError={() => {}} />
+          <SitesPane overlayOpen={false} />
         </LocaleContext.Provider>,
       );
     });
@@ -139,7 +139,7 @@ describe("SitesPane passkey and opened URL integration", () => {
     await act(async () => {
       root?.render(
         <LocaleContext.Provider value={{ locale: "en", setLocale: () => {}, t }}>
-          <SitesPane overlayOpen={false} onError={() => {}} />
+          <SitesPane overlayOpen={false} />
         </LocaleContext.Provider>,
       );
     });
@@ -157,7 +157,6 @@ describe("SitesPane passkey and opened URL integration", () => {
           <LocaleContext.Provider value={{ locale: "en", setLocale: () => {}, t }}>
             <SitesPane
               overlayOpen={false}
-              onError={() => {}}
               openedUrls={[
                 { id: 1, url: "https://jeju.ai/" },
                 { id: 2, url: "https://jeju.ai/" },
@@ -203,7 +202,7 @@ describe("SitesPane passkey and opened URL integration", () => {
     await act(async () => {
       root?.render(
         <LocaleContext.Provider value={{ locale: "en", setLocale: () => {}, t }}>
-          <SitesPane overlayOpen={false} onError={() => {}} />
+          <SitesPane overlayOpen={false} />
         </LocaleContext.Provider>,
       );
     });
@@ -229,7 +228,7 @@ describe("SitesPane passkey and opened URL integration", () => {
     await act(async () => {
       root?.render(
         <LocaleContext.Provider value={{ locale: "en", setLocale: () => {}, t }}>
-          <SitesPane overlayOpen={false} onError={() => {}} />
+          <SitesPane overlayOpen={false} />
         </LocaleContext.Provider>,
       );
     });
@@ -258,7 +257,7 @@ describe("SitesPane passkey and opened URL integration", () => {
     await act(async () => {
       root?.render(
         <LocaleContext.Provider value={{ locale: "en", setLocale: () => {}, t }}>
-          <SitesPane overlayOpen={false} onError={() => {}} />
+          <SitesPane overlayOpen={false} />
         </LocaleContext.Provider>,
       );
     });
