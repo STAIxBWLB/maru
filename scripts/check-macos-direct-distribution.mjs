@@ -77,18 +77,28 @@ const cliCargoToml = readText("src-tauri/maru-cli/Cargo.toml");
 const workflow = readText(".github/workflows/release-bundles.yml");
 
 if (packageJson && tauriConfig) {
-  const cargoVersion = firstCargoPackageVersion(cargoToml);
-  const versions = [
-    ["package.json", packageJson.version],
-    ["src-tauri/tauri.conf.json", tauriConfig.version],
-    ["src-tauri/Cargo.toml", cargoVersion],
-    ["src-tauri/maru-cli/Cargo.toml", firstCargoPackageVersion(cliCargoToml)],
-  ];
-  const uniqueVersions = new Set(versions.map(([, version]) => version).filter(Boolean));
-  if (uniqueVersions.size === 1 && uniqueVersions.has(packageJson.version)) {
-    ok(`version surfaces are synced at ${packageJson.version}`);
-  } else {
-    fail(`version surfaces are not synced: ${versions.map(([name, version]) => `${name}=${version ?? "missing"}`).join(", ")}`);
+  let cargoMetadata = null;
+  try {
+    cargoMetadata = JSON.parse(execFileSync(
+      "cargo",
+      ["metadata", "--manifest-path", "src-tauri/Cargo.toml", "--locked", "--no-deps", "--format-version", "1"],
+      { cwd: repoRoot, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
+    ));
+  } catch (error) {
+    const stderr = error?.stderr?.toString().trim();
+    fail(`cargo metadata failed: ${stderr || error.message}`);
+  }
+
+  if (cargoMetadata) {
+    const versionResult = validateReleaseVersions({
+      packageJson,
+      tauriConfig,
+      rootCargoPackage: parseCargoPackage(cargoToml),
+      maruCliCargoPackage: parseCargoPackage(cliCargoToml),
+      cargoMetadata,
+    });
+    versionResult.successes.forEach(ok);
+    versionResult.errors.forEach(fail);
   }
 
   if (tauriConfig.identifier === expectedBundleId) {
@@ -224,11 +234,14 @@ function checkPasskeyPackaging() {
 
   const siteViewSource = readText("src-tauri/src/site_view.rs");
   const libSource = readText("src-tauri/src/lib.rs");
+  const appSource = readText("src/App.tsx");
   for (const [description, needle, source] of [
     ["opened-URL drain command", "site_view_take_opened_urls", siteViewSource],
     ["opened-URL event", "sites://open-requested", siteViewSource],
     ["HTTP/HTTPS RunEvent handler", "tauri::RunEvent::Opened { urls }", libSource],
     ["Safari passkey fallback", "site_view_open_safari", siteViewSource],
+    // Apple requires a browser surface on launch; see docs/macos-passkeys.md.
+    ["launch browser surface", "bootAppMode", appSource],
   ]) {
     if (source.includes(needle)) {
       ok(`passkey backend contains ${description}`);
@@ -255,32 +268,13 @@ function checkPasskeyPackaging() {
           encoding: "utf8",
           input: decodedXml,
         }));
-        const entitlements = profile.Entitlements ?? {};
-        if (entitlements["com.apple.developer.web-browser.public-key-credential"] === true) {
-          ok("provisioning profile contains the managed passkey entitlement");
-        } else {
-          fail("provisioning profile does not contain the managed passkey entitlement");
-        }
-
-        const expiration = new Date(profile.ExpirationDate ?? "");
-        if (Number.isFinite(expiration.getTime()) && expiration.getTime() > Date.now()) {
-          ok(`provisioning profile is valid until ${expiration.toISOString()}`);
-        } else {
-          fail("provisioning profile is expired or has no valid ExpirationDate");
-        }
-
-        const teamIdentifiers = Array.isArray(profile.TeamIdentifier) ? profile.TeamIdentifier : [];
-        const entitlementTeam = entitlements["com.apple.developer.team-identifier"];
-        const teamIdentifier = entitlementTeam ?? teamIdentifiers[0];
-        if (typeof teamIdentifier !== "string" || !teamIdentifiers.includes(teamIdentifier)) {
-          fail("provisioning profile TeamIdentifier and entitlement team identifier do not match");
-        } else if (entitlements["com.apple.application-identifier"] !== `${teamIdentifier}.${expectedBundleId}`) {
-          fail(`provisioning profile com.apple.application-identifier must be ${teamIdentifier}.${expectedBundleId}`);
-        } else if (process.env.APPLE_TEAM_ID && process.env.APPLE_TEAM_ID !== teamIdentifier) {
-          fail(`APPLE_TEAM_ID does not match provisioning profile team ${teamIdentifier}`);
-        } else {
-          ok(`provisioning profile matches team ${teamIdentifier} and ${expectedBundleId}`);
-        }
+        const evaluation = evaluateProvisioningProfile(profile, {
+          expectedBundleId,
+          appleTeamId: process.env.APPLE_TEAM_ID ?? null,
+        });
+        evaluation.successes.forEach(ok);
+        evaluation.warnings.forEach(warn);
+        evaluation.errors.forEach(fail);
 
         const selectedIdentity = process.env.APPLE_SIGNING_IDENTITY?.trim();
         const certificates = Array.isArray(profile.DeveloperCertificates)
@@ -344,6 +338,47 @@ for (const needle of [
     ok(`release workflow contains ${needle}`);
   } else {
     fail(`release workflow does not contain ${needle}`);
+  }
+}
+
+const manifestPublishers = workflow.match(/node scripts\/publish-updater-manifest\.mjs/g) ?? [];
+if (manifestPublishers.length === 1 && !workflow.includes("includeUpdaterJson: true")) {
+  ok("release workflow has exactly one updater-manifest writer");
+} else {
+  fail(`release workflow must have one updater-manifest writer; found ${manifestPublishers.length}`);
+}
+
+const disabledAutomaticNodeCaches = workflow.match(/package-manager-cache: false/g) ?? [];
+if (disabledAutomaticNodeCaches.length === 2) {
+  ok("release workflow disables automatic package-manager caching in non-pnpm jobs");
+} else {
+  fail(
+    `release workflow must disable automatic package-manager caching in two non-pnpm jobs; found ${disabledAutomaticNodeCaches.length}`,
+  );
+}
+
+const tauriUploadStep = workflow.indexOf("- name: Build and upload Tauri bundles");
+const dmgNotarizationStep = workflow.indexOf("- name: Build, notarize, staple, and upload macOS disk image");
+if (tauriUploadStep >= 0 && dmgNotarizationStep > tauriUploadStep) {
+  ok("release workflow stages the DMG after the app and updater artifacts");
+} else {
+  fail("release workflow must stage the DMG after the app and updater artifacts");
+}
+
+for (const [description, needle] of [
+  ["keep macOS DMGs out of tauri-action uploads", "--target aarch64-apple-darwin --bundles app"],
+  ["keep Intel DMGs out of tauri-action uploads", "--target x86_64-apple-darwin --bundles app"],
+  ["build the DMG without uploading it", "pnpm tauri bundle --target \"$TARGET\" --bundles dmg --ci"],
+  ["submit the DMG to Apple notary service", "notarytool submit \"$dmg\""],
+  ["staple the DMG ticket", "stapler staple \"$dmg\""],
+  ["validate the stapled DMG ticket", "stapler validate \"$dmg\""],
+  ["verify the DMG with Gatekeeper", "context:primary-signature \"$dmg\""],
+  ["upload the DMG after validation", "gh release upload \"$RELEASE_TAG\" \"$asset\""],
+]) {
+  if (workflow.includes(needle)) {
+    ok(`release workflow will ${description}`);
+  } else {
+    fail(`release workflow does not ${description}`);
   }
 }
 

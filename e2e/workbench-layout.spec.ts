@@ -17,12 +17,15 @@ async function dockTerminalRight(page: Page) {
 }
 
 const PRIMARY_MODES = [
+  ["스크래치패드", ".scratchpad-workspace"],
   ["파일", ".files-workbench"],
   ["인박스", ".inbox-pane"],
   ["메시지", ".comms-pane"],
   ["회의록", ".meetings-pane"],
   ["오늘", ".today-pane"],
-  ["초안", ".drafts-pane"],
+  ["태스크", ".tasks-pane"],
+  ["대시보드", ".dashboard-pane"],
+  ["아이디어", ".drafts-pane"],
   ["갭 분석", ".gap-pane"],
   ["에이전트", ".agents-pane"],
   ["카탈로그", ".catalog-pane"],
@@ -232,6 +235,11 @@ for (const width of [1024, 1280, 1440]) {
       expect(workbenchBox.height).toBeGreaterThan(200);
       expect(terminalBox.x).toBeGreaterThanOrEqual(workbenchBox.x + workbenchBox.width - 1);
       expect(statusBox.y).toBeGreaterThanOrEqual(workbenchBox.y + workbenchBox.height - 1);
+      // Per mode: the bar must span the shell. Several legacy mode templates
+      // define no `status` area, and a bar that falls back to auto-placement
+      // lands in the 48px activity column with every chip clipped.
+      expect(statusBox.x).toBeLessThanOrEqual(1);
+      expect(statusBox.width).toBeGreaterThanOrEqual(width - 1);
       expect(
         await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1),
       ).toBe(true);
@@ -247,7 +255,9 @@ for (const width of [1024, 1280]) {
     await page.goto("/");
     await dockTerminalRight(page);
 
-    for (const [label, selector] of PRIMARY_MODES) {
+    for (const [label, selector] of PRIMARY_MODES.filter(
+      ([modeLabel]) => modeLabel !== "스크래치패드",
+    )) {
       await page.getByRole("button", {
         name: `${label} 오른쪽에 열기 (Option-click)`,
       }).click();
@@ -285,6 +295,155 @@ for (const width of [1024, 1280]) {
     }
   });
 }
+
+test("gives Scratchpad a resizable main navigator and editor", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/");
+  await page.getByRole("button", { name: "스크래치패드", exact: true }).click();
+
+  const workspace = page.locator(".scratchpad-workspace");
+  const tree = workspace.locator(".scratchpad-tree-pane");
+  const navigator = workspace.locator(".scratchpad-navigator");
+  const editor = workspace.locator(".scratchpad-editor-region");
+  const treeResize = workspace.getByRole("separator", {
+    name: "스크래치패드 폴더 트리 너비 조절",
+  });
+  const resize = workspace.getByRole("separator", {
+    name: "스크래치패드 목록 너비 조절",
+  });
+  await expect(workspace).toBeVisible();
+  await expect(tree).toBeVisible();
+  await expect(treeResize).toBeVisible();
+  await expect(resize).toBeVisible();
+
+  const [workspaceBox, treeBox, navigatorBox, editorBox] = await Promise.all([
+    workspace.boundingBox(),
+    tree.boundingBox(),
+    navigator.boundingBox(),
+    editor.boundingBox(),
+  ]);
+  expect(workspaceBox).not.toBeNull();
+  expect(treeBox).not.toBeNull();
+  expect(navigatorBox).not.toBeNull();
+  expect(editorBox).not.toBeNull();
+  if (!workspaceBox || !treeBox || !navigatorBox || !editorBox) return;
+  expect(treeBox.width).toBeGreaterThanOrEqual(200);
+  expect(navigatorBox.width).toBeGreaterThanOrEqual(260);
+  expect(editorBox.width).toBeGreaterThan(navigatorBox.width);
+  expect(editorBox.x).toBeGreaterThanOrEqual(navigatorBox.x + navigatorBox.width);
+  expect(workspaceBox.width).toBeGreaterThanOrEqual(900);
+
+  await resize.focus();
+  await resize.press("ArrowRight");
+  await treeResize.focus();
+  await treeResize.press("ArrowRight");
+  await expect
+    .poll(async () => (await navigator.boundingBox())?.width ?? 0)
+    .toBeGreaterThan(navigatorBox.width);
+  await expect
+    .poll(() => readPersistedLayout(page))
+    .toMatchObject({ scratchpadListWidth: 332, scratchpadTreeWidth: 252 });
+});
+
+test("stacks the Scratchpad navigator above the editor in a compact workbench", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 720, height: 800 });
+  await page.goto("/");
+  await page.getByRole("button", { name: "스크래치패드", exact: true }).click();
+
+  const workspace = page.locator(".scratchpad-workspace");
+  const navigator = workspace.locator(".scratchpad-navigator");
+  const editor = workspace.locator(".scratchpad-editor-region");
+  await expect(workspace.locator(".scratchpad-resize-wide")).toBeHidden();
+  await expect(workspace.locator(".scratchpad-resize-compact")).toBeVisible();
+  const [navigatorBox, editorBox] = await Promise.all([
+    navigator.boundingBox(),
+    editor.boundingBox(),
+  ]);
+  expect(navigatorBox).not.toBeNull();
+  expect(editorBox).not.toBeNull();
+  if (!navigatorBox || !editorBox) return;
+  expect(editorBox.y).toBeGreaterThanOrEqual(navigatorBox.y + navigatorBox.height);
+  expect(
+    await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1),
+  ).toBe(true);
+});
+
+test("keeps Scratchpad text and primary action legible in dark mode", async ({ page }) => {
+  await page.emulateMedia({ colorScheme: "dark" });
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/");
+  await page.getByRole("button", { name: "스크래치패드", exact: true }).click();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+
+  const ratios = await page.locator(".scratchpad-workspace").evaluate((workspace) => {
+    const parseRgb = (value: string) => {
+      const channels = value.match(/[\d.]+/g)?.slice(0, 3).map(Number) ?? [0, 0, 0];
+      return channels.map((channel) => {
+        const normalized = channel / 255;
+        return normalized <= 0.04045
+          ? normalized / 12.92
+          : ((normalized + 0.055) / 1.055) ** 2.4;
+      });
+    };
+    const luminance = (value: string) => {
+      const [red, green, blue] = parseRgb(value);
+      return 0.2126 * red + 0.7152 * green + 0.0722 * blue;
+    };
+    const contrast = (foreground: string, background: string) => {
+      const lighter = Math.max(luminance(foreground), luminance(background));
+      const darker = Math.min(luminance(foreground), luminance(background));
+      return (lighter + 0.05) / (darker + 0.05);
+    };
+    const title = workspace.querySelector<HTMLElement>(".mode-header-title");
+    const header = workspace.querySelector<HTMLElement>(".scratchpad-mode-header");
+    const primary = workspace.querySelector<HTMLElement>(".scratchpad-actions > button:first-child");
+    if (!title || !header || !primary) return { title: 0, primary: 0 };
+    const titleStyle = getComputedStyle(title);
+    const headerStyle = getComputedStyle(header);
+    const primaryStyle = getComputedStyle(primary);
+    return {
+      title: contrast(titleStyle.color, headerStyle.backgroundColor),
+      primary: contrast(primaryStyle.color, primaryStyle.backgroundColor),
+    };
+  });
+  expect(ratios.title).toBeGreaterThanOrEqual(4.5);
+  expect(ratios.primary).toBeGreaterThanOrEqual(4.5);
+});
+
+test("keeps every status bar control inside the status row", async ({ page }) => {
+  // A screenshot of the bar element itself renders content the parent grid
+  // clips, so this asserts geometry instead: the row must contain its own
+  // content, and no control may cross the window edge.
+  for (const height of [720, 900]) {
+    await page.setViewportSize({ width: 1280, height });
+    await page.goto("/");
+    const bar = page.locator(".agent-usage-bar");
+    await expect(bar).toBeVisible();
+    await expect(bar.locator(".agent-usage-chip").first()).toBeVisible();
+
+    const measured = await bar.evaluate((node) => ({
+      scrollHeight: node.scrollHeight,
+      clientHeight: node.clientHeight,
+      bottom: node.getBoundingClientRect().bottom,
+      width: node.getBoundingClientRect().width,
+      shellWidth:
+        document.querySelector(".app-shell")?.getBoundingClientRect().width ?? 0,
+      overflowing: Array.from(node.querySelectorAll("button")).filter((child) => {
+        const rect = child.getBoundingClientRect();
+        const box = node.getBoundingClientRect();
+        return rect.top < box.top - 0.5 || rect.bottom > box.bottom + 0.5;
+      }).length,
+    }));
+    // The bar must span the shell, not land in the activity column: a bad
+    // grid placement left it 48px wide with every chip overflowing unseen.
+    expect(measured.width).toBeGreaterThanOrEqual(measured.shellWidth - 1);
+    expect(measured.scrollHeight).toBeLessThanOrEqual(measured.clientHeight + 1);
+    expect(measured.overflowing).toBe(0);
+    expect(measured.bottom).toBeLessThanOrEqual(height + 0.5);
+  }
+});
 
 test("keeps terminal and status inside a 720x800 viewport", async ({ page }) => {
   await page.setViewportSize({ width: 720, height: 800 });
