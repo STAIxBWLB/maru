@@ -50,7 +50,7 @@ Tests are split into four layers: TypeScript unit tests, Rust unit/integration t
 
 ### Spec scope
 
-24 spec files cover work surfaces including dashboard, today, tasks, drafts, inbox, agents, comms, meetings, diagram, graph, HTML editor, binary viewer, workbench layout, brand assets, and the internal `e2e` flow console.
+23 spec files cover work surfaces including dashboard, today, tasks, drafts, inbox, agents, comms, meetings, diagram, graph, HTML editor, binary viewer, workbench layout, brand assets, and the internal `e2e` flow console.
 
 ## Native E2E Tests (WebdriverIO)
 

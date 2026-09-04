@@ -9,7 +9,7 @@ last_mapped_commit: 293cd8e
 
 Scope: Maru is a Tauri 2 desktop app (React 19 + TypeScript frontend, Rust backend).
 Current tree has ~93,000 lines of Rust in `src-tauri/src/`, ~172,000 lines of `.ts`/`.tsx` in `src/`,
-287 `#[tauri::command]` entry points (240 synchronous, 47 asynchronous), and `src/styles.css`
+365 `#[tauri::command]` entry points (287 synchronous, 78 asynchronous), and `src/styles.css`
 at 26,434 lines. The concerns below are ordered by how much they will cost the next person
 who touches this code.
 
@@ -104,7 +104,7 @@ who touches this code.
   - `src/components/ScratchpadPane.tsx:1360`
   - `src/components/InlineDocumentEditor.tsx:228`
   - `src/components/binaryViewers/HwpxViewer.tsx:95`
-- The same webview can call all 287 IPC commands, including filesystem writes and subprocess
+- The same webview can call all 365 IPC commands, including filesystem writes and subprocess
   invocation. A single sanitizer bypass is therefore a local-code-execution path.
 - Current mitigations are strong: every sink routes through DOMPurify
   (`src/lib/markdown.ts:50`, `src/lib/scratchpad.ts:188`, `src/lib/diagram/richText.ts:21`,
@@ -160,7 +160,7 @@ who touches this code.
   CSS/JS and by thinning `App.tsx`'s direct imports.
 
 **Long-running work on synchronous IPC commands blocks the UI.**
-- 240 of 287 commands are synchronous `fn` commands, which Tauri runs on the main thread.
+- 287 of 365 commands are synchronous `fn` commands, which Tauri runs on the main thread.
   Heavy offenders include `skills_sync_source` (`src-tauri/src/skill_host/store.rs:567`, git
   clone/pull), `today_calendar_commitments` (`src-tauri/src/today_calendar.rs`, `WalkDir`),
   `prepare_share_outbox_files` (`src-tauri/src/share_outbox.rs`, spawns Python), and

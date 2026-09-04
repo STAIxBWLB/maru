@@ -68,7 +68,7 @@ Every rendered surface. Flat `.tsx` files at the top are shell-level; subdirecto
 - `CommandPalette.tsx`, `CommitDialog.tsx`, `NewDocumentDialog.tsx`, `AddWorkspaceDialog.tsx`, `WorkspaceSwitcher.tsx`.
 - `ui/` — shared primitives: `Button`, `Field`, `Toggle`, `DialogSurface`, `ModeChrome`, `PaneResizeHandle`, `SortModeToggle`.
 
-**Per-mode subdirectories (22):**
+**Per-mode subdirectories (21, plus the shared `ui/` above):**
 
 - `agents/`, `binaryViewers/`, `calendar/`, `catalog/`, `comms/`, `dashboard/`, `diagram/` (`canvas/`, `modals/`, `panels/`, `ribbon/`), `drafts/`, `e2e/`, `evidence/`, `gap/`, `graph/`, `inbox/`, `jobs/`, `meetings/`, `settings/` (`tabs/`), `sites/`, `skills/`, `studio/`, `tasks/`, `today/`.
 
