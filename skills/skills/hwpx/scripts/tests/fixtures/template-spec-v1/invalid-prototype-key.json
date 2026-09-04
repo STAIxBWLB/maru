@@ -1,0 +1,20 @@
+{
+  "version": "1.0",
+  "variables": {
+    "constructor": {
+      "type": "string",
+      "default": "blocked"
+    }
+  },
+  "source": {
+    "mode": "compose",
+    "document": {
+      "version": "1.0",
+      "sections": [
+        {
+          "blocks": []
+        }
+      ]
+    }
+  }
+}

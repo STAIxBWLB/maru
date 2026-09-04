@@ -1,0 +1,19 @@
+{
+  "version": "1.0",
+  "sections": [
+    {
+      "blocks": [
+        {
+          "type": "paragraph",
+          "runs": [
+            {
+              "type": "text",
+              "text": "unknown field must fail",
+              "font_weight": 700
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

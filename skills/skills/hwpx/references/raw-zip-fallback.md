@@ -4,11 +4,19 @@ HWPX를 zip과 XML로 직접 다루는 방법.
 
 ## 언제 사용?
 
-1. 단순 CLI가 커버하지 않는 구조 변경 (복잡한 매니페스트 재배치, 암호화 처리)
+1. 단순 CLI가 커버하지 않는 plain HWPX 구조 변경 (복잡한 매니페스트 재배치)
 2. 런 경계를 넘는 치환처럼 텍스트 치환만으로 부족한 문서
 3. 이해·학습용 (실제 구조 확인)
 
-대부분의 경우 `./hwpx unpack` → `Edit` 도구 → `./hwpx repack` 흐름이 더 안전하고 짧다.
+대부분의 경우 `./hwpx unpack` → 편집 → `./hwpx repack` 흐름이 더 안전하고 짧다.
+암호화·DRM·전자서명 문서는 이 fallback의 지원 대상이 아니다. 해석·보존을 보장할 수 없으면
+출력 전에 실패하며, 보호를 제거하거나 다시 서명하는 절차를 제공하지 않는다.
+
+아래 코드는 구조 학습용 최소 예제다. 운영 성공 경로는 `scripts/hwpx_xml.py`의 bounded
+stream-copy와 `./hwpx` 명령을 사용한다. `ZipFile.read`/`extractall`로 모든 payload를
+무제한 확장하는 코드를 자동화에 사용하지 않는다.
+구조 편집과 repack은 package regeneration이므로 byte identity를 보장하지 않는다.
+미수정 part의 바이트 보존이 필요한 경우 replace-only HWPX package patch 경로를 사용한다.
 
 ## 최소 읽기
 
@@ -77,9 +85,9 @@ shutil.rmtree(workdir)
 
 ## 절대 하면 안 되는 것
 
-❌ `zip -r output.hwpx dir/` 셸 명령 — mimetype이 첫 엔트리·STORED 보장 안 됨.
-❌ `zipfile.ZipFile("out.hwpx", "w")`에 mimetype을 나중에 추가 — 순서가 어긋나면 Hancom Office에서 안 열림.
-❌ XML 재직렬화 시 `xml_declaration=False` — OWPML 파일은 XML 선언 필수.
+- 금지: `zip -r output.hwpx dir/` 셸 명령. mimetype이 첫 엔트리·STORED임을 보장하지 못함.
+- 금지: `zipfile.ZipFile("out.hwpx", "w")`에 mimetype을 나중에 추가. 소비자가 포맷을 인식하지 못할 수 있음.
+- 금지: XML 재직렬화 시 `xml_declaration=False`. OWPML 파일은 XML 선언 필수.
 
 ## Manifest(`Contents/content.hpf`) 갱신
 
@@ -133,13 +141,16 @@ lxml에서는 `xpath(..., namespaces=...)` 형태가 가장 깔끔하다.
 
 ## 검증
 
-직접 만든 zip은 반드시:
+직접 실험한 zip도 성공으로 게시하기 전에 자동 검증해야 한다:
 
 ```bash
 ./hwpx validate output.hwpx
-unzip -l output.hwpx | head -5   # mimetype이 첫 줄인지
-unzip -p output.hwpx mimetype     # application/hwp+zip
 ```
+
+`styled` 경로는 최종 staging 파일에 대해 중복 이름, entry count, 단일·전체 uncompressed
+크기, 압축률, XML 크기와 parse를 bounded 로컬 검사한 뒤 실제 resolved
+`hwp validate --json`까지 통과해야 publish한다. 사람이 압축 목록을 보거나 한/글에서 파일을
+여는 것은 성공 판정의 대체 수단이 아니다.
 
 ## 참고 구현
 

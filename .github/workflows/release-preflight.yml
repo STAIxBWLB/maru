@@ -15,6 +15,10 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
+  HWP_CLI_VERSION: "0.4.1"
+  HWP_CLI_SHA256: "61db250203d40d8aa528b14c380be0cf08e6bfdbecc0cd99748c0d7ec95326d5"
+  HWP_CLI: ${{ github.workspace }}/.cache/hwp-cli/hwp
+  HWPX_EXPECT_HWP_VERSION: "0.4.1"
 
 jobs:
   release-preflight:
@@ -36,6 +40,29 @@ jobs:
         with:
           node-version: 22.22.3
           cache: pnpm
+
+      - name: Setup Python for live HWPX skill tests
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12.13"
+          cache: pip
+          cache-dependency-path: skills/skills/hwpx/requirements-test.txt
+
+      - name: Install pinned hwp-cli for live HWPX skill tests
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/hwp-${HWP_CLI_VERSION}-linux.tar.gz"
+          mkdir -p "$(dirname "$HWP_CLI")"
+          curl -fsSL --retry 3 \
+            "https://github.com/STAIxBWLB/hwp-cli/releases/download/v${HWP_CLI_VERSION}/hwp-v${HWP_CLI_VERSION}-x86_64-unknown-linux-gnu.tar.gz" \
+            -o "$archive"
+          printf '%s  %s\n' "$HWP_CLI_SHA256" "$archive" | sha256sum -c -
+          tar -xzf "$archive" -C "$(dirname "$HWP_CLI")"
+          test "$("$HWP_CLI" --version)" = "hwp ${HWP_CLI_VERSION}"
+          "$HWP_CLI" new --help | grep -F -- "--preset"
+          "$HWP_CLI" validate --help | grep -F -- "--json"
+          "$HWP_CLI" fill --help >/dev/null
+          "$HWP_CLI" slots --help >/dev/null
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable

@@ -1,0 +1,31 @@
+{
+  "version": "1.0",
+  "sections": [
+    {
+      "blocks": [
+        {
+          "type": "paragraph",
+          "runs": [
+            {
+              "type": "text",
+              "text": "인라인 이미지: "
+            },
+            {
+              "type": "image",
+              "path": "fixture.png",
+              "width_mm": 20,
+              "height_mm": 10
+            }
+          ]
+        },
+        {
+          "type": "image",
+          "path": "fixture.png",
+          "width_mm": 40,
+          "height_mm": 20,
+          "placement": "floating"
+        }
+      ]
+    }
+  ]
+}

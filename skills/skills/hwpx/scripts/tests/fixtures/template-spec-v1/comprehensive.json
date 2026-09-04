@@ -1,0 +1,142 @@
+{
+  "version": "1.0",
+  "variables": {
+    "title": {
+      "type": "string",
+      "required": true,
+      "min_length": 1,
+      "max_length": 80
+    },
+    "count": {
+      "type": "number",
+      "required": true,
+      "min": 0,
+      "max": 100
+    },
+    "published_on": {
+      "type": "date",
+      "required": true,
+      "min": "2026-01-01",
+      "max": "2026-12-31"
+    },
+    "status": {
+      "type": "enum",
+      "values": [
+        "draft",
+        "final"
+      ],
+      "default": "draft"
+    },
+    "show_details": {
+      "type": "bool",
+      "default": true
+    },
+    "details": {
+      "type": "rich_blocks",
+      "required": true,
+      "max_items": 4
+    },
+    "items": {
+      "type": "list",
+      "required": true,
+      "max_items": 10,
+      "fields": {
+        "label": {
+          "type": "string",
+          "required": true
+        },
+        "enabled": {
+          "type": "bool",
+          "default": true
+        }
+      }
+    }
+  },
+  "source": {
+    "mode": "compose",
+    "document": {
+      "version": "1.0",
+      "sections": [
+        {
+          "blocks": [
+            {
+              "type": "paragraph",
+              "runs": [
+                {
+                  "type": "text",
+                  "text": {
+                    "node": "value",
+                    "pointer": "/values/title",
+                    "as": "text"
+                  }
+                }
+              ]
+            },
+            {
+              "node": "if",
+              "condition": "/values/show_details",
+              "region": "details_condition",
+              "then": [
+                {
+                  "node": "value",
+                  "pointer": "/values/details",
+                  "as": "native",
+                  "region": "details_blocks"
+                }
+              ]
+            },
+            {
+              "node": "each",
+              "items": "/values/items",
+              "region": "item_rows",
+              "body": [
+                {
+                  "type": "paragraph",
+                  "runs": [
+                    {
+                      "type": "text",
+                      "text": {
+                        "node": "value",
+                        "pointer": "/item/label",
+                        "as": "text"
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "paragraph",
+              "runs": [
+                {
+                  "type": "text",
+                  "text": {
+                    "node": "value",
+                    "pointer": "/values/count",
+                    "as": "text"
+                  }
+                },
+                {
+                  "type": "text",
+                  "text": {
+                    "node": "value",
+                    "pointer": "/values/published_on",
+                    "as": "text"
+                  }
+                },
+                {
+                  "type": "text",
+                  "text": {
+                    "node": "value",
+                    "pointer": "/values/status",
+                    "as": "text"
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

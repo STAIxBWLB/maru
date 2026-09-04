@@ -16,8 +16,13 @@ Subcommands:
         (전체 표 폭 유지하며 열 추가 — 기존 열 균등 축소, 병합 표는 거부)
   fill-table <file> --data tables.json [-o out]   (행 자동 증식 + 셀 채우기)
   create <out.hwpx> [--markdown md_file | --title T --body B | --json j_file] [--plain]
-  styled -o <out.hwpx> [--preset gongmun|bogoseo|gian|report] [--reference form.hwpx]
-         [--markdown md | --json j | --stdin-markdown | --stdin-json] [--header H] [--footer F] [--plain]
+  compose --spec document.json|document.yaml --output out.hwpx [--dry-run] [--report]
+  template <template.json|yaml> --data <data.json|yaml> --output out.hwpx [--dry-run] [--report]
+  certify <file.hwp[x]> --policy policy.json|yaml --report <new-directory>
+  corpus --manifest manifest.json --report <new-directory>
+  styled -o <out.hwpx> [--preset gongmun|bogoseo|gian|report] [--reference form.hwp[x]]
+         [--markdown md | --json j | --stdin-markdown | --stdin-json] [--plain]
+         [--header H | --footer F]  # 예약 플래그: 현재는 출력 전 오류
   beautify <in.hwpx> [-o out.hwpx] [--header-fill "#F2F2F2"] [--no-title-center]
   validate <file.hwpx>
   analyze <file.hwpx> [--section-file section0.xml] [--format text|json]
@@ -41,17 +46,26 @@ All commands: exit 0 success, 1 arg/IO error, 2 parse failure, 3 not found.
 from __future__ import annotations
 
 import argparse
+import codecs
+import contextlib
 import functools
+import hashlib
 import json
 import os
 import re
 import shutil
+import stat
 import subprocess
 import sys
+import tempfile
 import zipfile
+from dataclasses import dataclass
 from pathlib import Path
 
 from lxml import etree
+import certification_contract as certification
+import corpus_contract as corpus
+import hwpx_xml as hx
 
 
 HP_NS = "http://www.hancom.co.kr/hwpml/2011/paragraph"
@@ -68,6 +82,25 @@ STYLED_PRESET_ALIASES = {
     "bogoseo": "report",
     "report": "report",
 }
+HWP_CLI_TIMEOUT_ENV = "HWP_CLI_TIMEOUT_SECONDS"
+DEFAULT_HWP_CLI_TIMEOUT_SECONDS = 120
+MAX_HWP_CLI_TIMEOUT_SECONDS = 3_600
+MAX_HWP_CAPTURE_CHARS = 32_768
+# TemplateSpec v1 may report up to 100,000 bounded region instances twice
+# (expansion plus changed/generated regions). Keep control output bounded while
+# admitting every valid native report at the frozen expansion limits.
+MAX_HWP_CONTROL_OUTPUT_BYTES = 64 * 1024 * 1024
+CERTIFICATION_POLICY_SCHEMA_SHA256 = certification.POLICY_SCHEMA_SHA256
+CERTIFICATION_REPORT_SCHEMA_SHA256 = certification.REPORT_SCHEMA_SHA256
+CERTIFICATION_ORACLE_SCHEMA_SHA256 = certification.ORACLE_SCHEMA_SHA256
+MAX_CERTIFICATION_REPORT_BYTES = certification.MAX_REPORT_BYTES
+MAX_CERTIFICATION_MANIFEST_BYTES = certification.MAX_MANIFEST_BYTES
+MAX_CERTIFICATION_ARTIFACT_BYTES = certification.MAX_ARTIFACT_BYTES
+MAX_CERTIFICATION_TREE_FILES = certification.MAX_TREE_FILES
+CORPUS_MANIFEST_SCHEMA_SHA256 = corpus.MANIFEST_SCHEMA_SHA256
+CORPUS_RUN_SCHEMA_SHA256 = corpus.RUN_SCHEMA_SHA256
+CORPUS_ARTIFACTS_SCHEMA_SHA256 = corpus.ARTIFACTS_SCHEMA_SHA256
+CORPUS_MANIFEST_SHA256 = corpus.FROZEN_MANIFEST_SHA256
 
 
 # helpers
@@ -156,10 +189,13 @@ def _parse_section(name: str, data: bytes) -> dict:
 
 def _extract_structure(path: Path) -> dict:
     try:
-        with zipfile.ZipFile(path) as zf:
+        with hx.open_bounded_zip(path) as zf:
             names = zf.namelist()
             sections = [
-                {"index": idx, **_parse_section(name, zf.read(name))}
+                {
+                    "index": idx,
+                    **_parse_section(name, hx.read_bounded_entry(zf, name)),
+                }
                 for idx, name in enumerate(_section_names(names))
             ]
             images = [
@@ -170,7 +206,7 @@ def _extract_structure(path: Path) -> dict:
             ]
             header_counts = _header_counts(zf) if "Contents/header.xml" in names else {}
             version = _version_info(zf) if "version.xml" in names else {}
-    except zipfile.BadZipFile as e:
+    except (zipfile.BadZipFile, ValueError) as e:
         _die(2, f"HWPX(zip) 파싱 실패: {e}")
 
     return {
@@ -184,7 +220,9 @@ def _extract_structure(path: Path) -> dict:
 
 def _header_counts(zf: zipfile.ZipFile) -> dict:
     try:
-        root = etree.fromstring(zf.read("Contents/header.xml"))
+        root = etree.fromstring(
+            hx.read_bounded_entry(zf, "Contents/header.xml")
+        )
     except etree.XMLSyntaxError:
         return {}
     counts: dict[str, int] = {"styles": 0, "char_properties": 0, "para_properties": 0}
@@ -201,7 +239,7 @@ def _header_counts(zf: zipfile.ZipFile) -> dict:
 
 def _version_info(zf: zipfile.ZipFile) -> dict:
     try:
-        root = etree.fromstring(zf.read("version.xml"))
+        root = etree.fromstring(hx.read_bounded_entry(zf, "version.xml"))
     except etree.XMLSyntaxError:
         return {}
     return {k: v for k, v in root.attrib.items()}
@@ -302,15 +340,39 @@ def _json_payload_to_markdown(payload) -> list[str]:
 
 # subcommand implementations
 
+def _run_external_bounded(
+    command: list[str],
+    *,
+    timeout: int,
+    limit: int = MAX_HWP_CAPTURE_CHARS,
+) -> subprocess.CompletedProcess:
+    """Bound probe/converter diagnostics without capture_output allocation."""
+    with tempfile.TemporaryFile() as stdout_file, tempfile.TemporaryFile() as stderr_file:
+        completed = subprocess.run(
+            command,
+            stdout=stdout_file,
+            stderr=stderr_file,
+            timeout=timeout,
+        )
+        stdout, _ = _read_capture_file(stdout_file, limit=limit)
+        stderr, _ = _read_capture_file(stderr_file, limit=limit)
+    return subprocess.CompletedProcess(
+        command,
+        completed.returncode,
+        stdout,
+        stderr,
+    )
+
+
 def _hwp_version(binary: str) -> tuple[int, int, int] | None:
     """`hwp --version`이 `hwp X.Y.Z`를 내면 버전 튜플, 아니면 None. 동명이인(구
     hwp-toolkit 래퍼처럼 `hwp`라는 이름을 공유하지만 hwp-cli가 아닌 것)을
     걸러내는 판별자를 겸한다."""
     try:
-        proc = subprocess.run([binary, "--version"], capture_output=True, timeout=5)
-    except OSError:
+        proc = _run_external_bounded([binary, "--version"], timeout=5)
+    except (OSError, subprocess.SubprocessError):
         return None
-    m = re.match(r"hwp (\d+)\.(\d+)\.(\d+)", proc.stdout.decode("utf-8", "ignore").strip())
+    m = re.match(r"hwp (\d+)\.(\d+)\.(\d+)", proc.stdout.strip())
     return (int(m[1]), int(m[2]), int(m[3])) if m else None
 
 
@@ -370,19 +432,107 @@ def _supports_new_preset(binary: str) -> bool:
     워크스페이스에 함께 있을 수 있기 때문이다.
     """
     try:
-        proc = subprocess.run(
+        proc = _run_external_bounded(
             [binary, "new", "--help"],
-            capture_output=True,
             timeout=5,
         )
     except (OSError, subprocess.SubprocessError):
         return False
-    help_text = (
-        proc.stdout.decode("utf-8", "ignore")
-        + "\n"
-        + proc.stderr.decode("utf-8", "ignore")
-    )
+    help_text = proc.stdout + "\n" + proc.stderr
     return proc.returncode == 0 and "--preset" in help_text
+
+
+@functools.lru_cache(maxsize=None)
+def _supports_compose(binary: str) -> bool:
+    """DocumentSpec v1/v2 handoff에 필요한 native CLI surface를 확인한다.
+
+    버전 번호로 추측하지 않고 실제 help의 exact flags를 확인한다. DocumentSpec의
+    schema 자체는 hwp-cli가 SSOT이며 이 Python 계층에서 재정의하지 않는다.
+    """
+    try:
+        proc = _run_external_bounded(
+            [binary, "compose", "--help"],
+            timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    help_text = proc.stdout + "\n" + proc.stderr
+    return (
+        proc.returncode == 0
+        and "compose" in help_text
+        and ("<SPEC>" in help_text or "[SPEC]" in help_text)
+        and "--output" in help_text
+        and "--dry-run" in help_text
+        and "--report" in help_text
+    )
+
+
+@functools.lru_cache(maxsize=None)
+def _supports_template(binary: str) -> bool:
+    """TemplateSpec v1 handoff에 필요한 native CLI surface를 확인한다."""
+    try:
+        proc = _run_external_bounded(
+            [binary, "template", "--help"],
+            timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    help_text = proc.stdout + "\n" + proc.stderr
+    return (
+        proc.returncode == 0
+        and "template" in help_text
+        and ("<TEMPLATE>" in help_text or "[TEMPLATE]" in help_text)
+        and "--data" in help_text
+        and "--output" in help_text
+        and "--dry-run" in help_text
+        and "--report" in help_text
+    )
+
+
+@functools.lru_cache(maxsize=None)
+def _supports_certify(binary: str) -> bool:
+    """Frozen certification v1 handoff surface; version strings are not capabilities."""
+    try:
+        proc = _run_external_bounded(
+            [binary, "certify", "--help"],
+            timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    help_text = proc.stdout + "\n" + proc.stderr
+    usage = next(
+        (line.strip() for line in help_text.splitlines() if line.startswith("Usage:")),
+        "",
+    )
+    return (
+        proc.returncode == 0
+        and usage == "Usage: hwp certify --policy <POLICY> --report <REPORT> <INPUT>"
+        and "--policy" in help_text
+        and "--report" in help_text
+    )
+
+
+@functools.lru_cache(maxsize=None)
+def _supports_corpus(binary: str) -> bool:
+    """Frozen structured corpus v1 handoff surface."""
+    try:
+        proc = _run_external_bounded(
+            [binary, "corpus", "--help"],
+            timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    help_text = proc.stdout + "\n" + proc.stderr
+    usage = next(
+        (line.strip() for line in help_text.splitlines() if line.startswith("Usage:")),
+        "",
+    )
+    return (
+        proc.returncode == 0
+        and usage == "Usage: hwp corpus --manifest <MANIFEST> --report <REPORT>"
+        and "--manifest" in help_text
+        and "--report" in help_text
+    )
 
 
 @functools.lru_cache(maxsize=1)
@@ -423,33 +573,294 @@ def _find_hwp_cli_with_new_preset() -> str | None:
     return chosen[1] if chosen else None
 
 
-def _hwp_cat(path: Path, fmt: str = "markdown") -> str:
-    """hwp-cli `cat` 텍스트 추출 (stdout만, 경고는 stderr). fmt: plain|markdown|json|html."""
-    tool = _find_hwp_cli()
-    if not tool:
-        raise FileNotFoundError("hwp-cli('hwp') 미발견")
-    proc = subprocess.run(
-        [tool, "cat", str(path), "--format", fmt], capture_output=True, timeout=120
-    )
-    if proc.returncode != 0:
-        raise RuntimeError(f"hwp cat 실패: {proc.stderr.decode('utf-8', 'ignore').strip()}")
-    return proc.stdout.decode("utf-8", "ignore")
+@functools.lru_cache(maxsize=1)
+def _find_hwp_cli_with_compose() -> str | None:
+    """`hwp compose SPEC -o OUTPUT`을 제공하는 가장 높은 hwp-cli 선택."""
+    explicit = os.environ.get("HWP_CLI")
+    if explicit and Path(explicit).is_file() and os.access(explicit, os.X_OK):
+        return explicit if _supports_compose(explicit) else None
+
+    chosen: tuple[tuple[int, int, int], str] | None = None
+    seen: set[str] = set()
+    for candidate in (
+        shutil.which("hwp"),
+        str(Path.home() / ".cargo" / "bin" / "hwp"),
+        str(Path.home() / "workspace/work/dev/hwp-cli/target/release/hwp"),
+    ):
+        if (
+            not candidate
+            or not Path(candidate).is_file()
+            or not os.access(candidate, os.X_OK)
+        ):
+            continue
+        real = os.path.realpath(candidate)
+        if real in seen:
+            continue
+        seen.add(real)
+        version = _hwp_version(candidate)
+        if (
+            version
+            and _supports_compose(candidate)
+            and (chosen is None or version > chosen[0])
+        ):
+            chosen = (version, candidate)
+    return chosen[1] if chosen else None
 
 
-def _hwpx_text_via_cli(path: Path, cli_fmt: str) -> str | None:
-    """.hwpx 텍스트 추출을 hwp-cli `cat`으로 우선 시도. hwp-cli 미발견/실패 시
-    None 을 돌려 호출부가 lxml 추출로 폴백하도록 함. cli_fmt: plain|markdown|json."""
-    if not _find_hwp_cli():
-        return None
+@functools.lru_cache(maxsize=1)
+def _find_hwp_cli_with_template() -> str | None:
+    """`hwp template TEMPLATE --data DATA -o OUTPUT`을 제공하는 hwp-cli 선택."""
+    explicit = os.environ.get("HWP_CLI")
+    if explicit and Path(explicit).is_file() and os.access(explicit, os.X_OK):
+        return explicit if _supports_template(explicit) else None
+
+    chosen: tuple[tuple[int, int, int], str] | None = None
+    seen: set[str] = set()
+    for candidate in (
+        shutil.which("hwp"),
+        str(Path.home() / ".cargo" / "bin" / "hwp"),
+        str(Path.home() / "workspace/work/dev/hwp-cli/target/release/hwp"),
+    ):
+        if (
+            not candidate
+            or not Path(candidate).is_file()
+            or not os.access(candidate, os.X_OK)
+        ):
+            continue
+        real = os.path.realpath(candidate)
+        if real in seen:
+            continue
+        seen.add(real)
+        version = _hwp_version(candidate)
+        if (
+            version
+            and _supports_template(candidate)
+            and (chosen is None or version > chosen[0])
+        ):
+            chosen = (version, candidate)
+    return chosen[1] if chosen else None
+
+
+@functools.lru_cache(maxsize=1)
+def _find_hwp_cli_with_certify() -> str | None:
+    """Select the highest hwp-cli with the exact `certify` surface.
+
+    An explicit HWP_CLI is authoritative: never fall through to another binary.
+    """
+    explicit = os.environ.get("HWP_CLI")
+    if explicit and Path(explicit).is_file() and os.access(explicit, os.X_OK):
+        return explicit if _supports_certify(explicit) else None
+
+    chosen: tuple[tuple[int, int, int], str] | None = None
+    seen: set[str] = set()
+    for candidate in (
+        shutil.which("hwp"),
+        str(Path.home() / ".cargo" / "bin" / "hwp"),
+        str(Path.home() / "workspace/work/dev/hwp-cli/target/release/hwp"),
+    ):
+        if (
+            not candidate
+            or not Path(candidate).is_file()
+            or not os.access(candidate, os.X_OK)
+        ):
+            continue
+        real = os.path.realpath(candidate)
+        if real in seen:
+            continue
+        seen.add(real)
+        version = _hwp_version(candidate)
+        if (
+            version
+            and _supports_certify(candidate)
+            and (chosen is None or version > chosen[0])
+        ):
+            chosen = (version, candidate)
+    return chosen[1] if chosen else None
+
+
+@functools.lru_cache(maxsize=1)
+def _find_hwp_cli_with_corpus() -> str | None:
+    """Select the highest hwp-cli with the exact `corpus` surface."""
+    explicit = os.environ.get("HWP_CLI")
+    if explicit and Path(explicit).is_file() and os.access(explicit, os.X_OK):
+        return explicit if _supports_corpus(explicit) else None
+
+    chosen: tuple[tuple[int, int, int], str] | None = None
+    seen: set[str] = set()
+    for candidate in (
+        shutil.which("hwp"),
+        str(Path.home() / ".cargo" / "bin" / "hwp"),
+        str(Path.home() / "workspace/work/dev/hwp-cli/target/release/hwp"),
+    ):
+        if (
+            not candidate
+            or not Path(candidate).is_file()
+            or not os.access(candidate, os.X_OK)
+        ):
+            continue
+        real = os.path.realpath(candidate)
+        if real in seen:
+            continue
+        seen.add(real)
+        version = _hwp_version(candidate)
+        if version and _supports_corpus(candidate) and (chosen is None or version > chosen[0]):
+            chosen = (version, candidate)
+    return chosen[1] if chosen else None
+
+
+def _copy_utf8_text(source, destination) -> None:
+    decoder = codecs.getincrementaldecoder("utf-8")("replace")
+    while True:
+        chunk = source.read(64 * 1024)
+        if not chunk:
+            break
+        destination.write(decoder.decode(chunk))
+    destination.write(decoder.decode(b"", final=True))
+
+
+@dataclass(frozen=True)
+class _TextDestinationSnapshot:
+    exists: bool
+    st_dev: int | None = None
+    st_ino: int | None = None
+    st_nlink: int | None = None
+    mode: int | None = None
+    size: int | None = None
+    mtime_ns: int | None = None
+    ctime_ns: int | None = None
+
+
+def _snapshot_text_destination(path: Path) -> _TextDestinationSnapshot:
     try:
-        return _hwp_cat(path, cli_fmt)
+        status = path.lstat()
+    except FileNotFoundError:
+        return _TextDestinationSnapshot(exists=False)
+    if stat.S_ISLNK(status.st_mode):
+        raise ValueError(f"to-md 출력 경로가 심볼릭 링크임: {path}")
+    if not stat.S_ISREG(status.st_mode):
+        raise ValueError(f"to-md 출력 경로가 일반 파일이 아님: {path}")
+    if status.st_nlink > 1:
+        raise ValueError(
+            f"to-md 출력 경로의 하드링크 수가 1보다 큼 "
+            f"(st_nlink={status.st_nlink}): {path}"
+        )
+    return _TextDestinationSnapshot(
+        exists=True,
+        st_dev=status.st_dev,
+        st_ino=status.st_ino,
+        st_nlink=status.st_nlink,
+        mode=stat.S_IMODE(status.st_mode),
+        size=status.st_size,
+        mtime_ns=status.st_mtime_ns,
+        ctime_ns=status.st_ctime_ns,
+    )
+
+
+def _recheck_text_destination(
+    path: Path,
+    expected: _TextDestinationSnapshot,
+) -> None:
+    current = _snapshot_text_destination(path)
+    if current != expected:
+        raise RuntimeError(f"to-md 출력 경로가 변환 시작 후 변경됨: {path}")
+
+
+def _publish_text_stage(
+    staged: Path,
+    destination: Path,
+    expected: _TextDestinationSnapshot,
+) -> None:
+    if expected.mode is not None:
+        staged.chmod(expected.mode)
+    with staged.open("rb") as stream:
+        os.fsync(stream.fileno())
+    _recheck_text_destination(destination, expected)
+    os.replace(staged, destination)
+    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+    try:
+        directory_fd = os.open(destination.parent, flags)
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
+    except OSError as exc:
+        print(
+            f"[hwpx] 경고: Markdown은 게시되었지만 부모 디렉터리 fsync 실패 "
+            f"({destination.parent}): {exc}",
+            file=sys.stderr,
+        )
+
+
+def _write_text_output_atomically(path: Path, producer) -> object:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    expected = _snapshot_text_destination(path)
+    with tempfile.TemporaryDirectory(
+        prefix=f".{path.name}.to-md-",
+        dir=path.parent,
+    ) as workspace_name:
+        workspace = Path(workspace_name)
+        workspace.chmod(0o700)
+        staged = workspace / path.name
+        result = producer(staged)
+        status = staged.lstat()
+        if not stat.S_ISREG(status.st_mode) or stat.S_ISLNK(status.st_mode):
+            raise RuntimeError(f"to-md staging 결과가 일반 파일이 아님: {staged}")
+        _publish_text_stage(staged, path, expected)
+        return result
+
+
+def _hwpx_text_via_cli(path: Path, cli_fmt: str, destination) -> bool:
+    """.hwpx `cat` output to a text consumer without materializing it in RAM."""
+    if not _find_hwp_cli():
+        return False
+    try:
+        with tempfile.TemporaryFile() as output:
+            proc = _run_hwp_stream(
+                ["cat", str(path), "--format", cli_fmt],
+                stdout=output,
+            )
+            if proc.returncode != 0:
+                raise RuntimeError(
+                    f"hwp cat 실패: {proc.stderr.strip() or '상세 오류 없음'}"
+                )
+            output.seek(0)
+            _copy_utf8_text(output, destination)
+        return True
     except Exception as e:  # noqa: BLE001 — 어떤 실패든 lxml 폴백
         print(f"[hwpx] hwp-cli cat 폴백 → lxml: {e}", file=sys.stderr)
-        return None
+        return False
 
 
-def _hwp_cli_or_die(*, require_new_preset: bool = False) -> str:
-    tool = _find_hwp_cli_with_new_preset() if require_new_preset else _find_hwp_cli()
+def _hwp_cli_or_die(
+    *,
+    require_new_preset: bool = False,
+    require_compose: bool = False,
+    require_template: bool = False,
+    require_certify: bool = False,
+    require_corpus: bool = False,
+) -> str:
+    if sum(
+        (
+            require_new_preset,
+            require_compose,
+            require_template,
+            require_certify,
+            require_corpus,
+        )
+    ) > 1:
+        raise ValueError("native capability 요구는 한 번에 하나만 지정해야 함")
+    if require_new_preset:
+        tool = _find_hwp_cli_with_new_preset()
+    elif require_compose:
+        tool = _find_hwp_cli_with_compose()
+    elif require_template:
+        tool = _find_hwp_cli_with_template()
+    elif require_certify:
+        tool = _find_hwp_cli_with_certify()
+    elif require_corpus:
+        tool = _find_hwp_cli_with_corpus()
+    else:
+        tool = _find_hwp_cli()
     if not tool:
         if require_new_preset:
             explicit = os.environ.get("HWP_CLI")
@@ -460,14 +871,52 @@ def _hwp_cli_or_die(*, require_new_preset: bool = False) -> str:
                 "hwp-cli v0.4.1 이상으로 `brew update && brew upgrade hwp`하거나 "
                 "preset 지원 바이너리를 HWP_CLI로 지정할 것",
             )
+        if require_compose:
+            explicit = os.environ.get("HWP_CLI")
+            pinned = f" 지정된 HWP_CLI({explicit})가" if explicit else " 설치된 hwp-cli가"
+            _die(
+                1,
+                f"{pinned} `hwp compose SPEC -o OUTPUT --dry-run --report`을 "
+                "지원하지 않음. DocumentSpec v1/v2 compose 지원 바이너리를 "
+                "HWP_CLI로 지정할 것",
+            )
+        if require_template:
+            explicit = os.environ.get("HWP_CLI")
+            pinned = f" 지정된 HWP_CLI({explicit})가" if explicit else " 설치된 hwp-cli가"
+            _die(
+                1,
+                f"{pinned} `hwp template TEMPLATE --data DATA -o OUTPUT`을 지원하지 않음. "
+                "TemplateSpec v1 지원 바이너리를 HWP_CLI로 지정할 것",
+            )
+        if require_certify:
+            explicit = os.environ.get("HWP_CLI")
+            pinned = f" 지정된 HWP_CLI({explicit})가" if explicit else " 설치된 hwp-cli가"
+            _die(
+                1,
+                f"{pinned} `hwp certify INPUT --policy POLICY --report REPORT`를 "
+                "지원하지 않음. certification v1 지원 source build 또는 이후 "
+                "release 바이너리를 HWP_CLI로 지정할 것",
+            )
+        if require_corpus:
+            explicit = os.environ.get("HWP_CLI")
+            pinned = f" 지정된 HWP_CLI({explicit})가" if explicit else " 설치된 hwp-cli가"
+            _die(
+                1,
+                f"{pinned} `hwp corpus --manifest MANIFEST --report REPORT`를 "
+                "지원하지 않음. structured corpus v1 지원 source build 또는 이후 "
+                "release 바이너리를 HWP_CLI로 지정할 것",
+            )
         _die(1, "hwp-cli('hwp') 미발견 — `cargo install --path crates/hwp-cli` 또는 HWP_CLI 지정")
     return tool
 
 
-def _hwp_env() -> dict:
+def _hwp_env(*, isolated_fonts: bool = False) -> dict:
     """hwp-cli 서브프로세스 환경 — PDF 폰트 임베드를 위해 HWP_FONT_DIR 보강."""
     env = dict(os.environ)
-    if "HWP_FONT_DIR" not in env:
+    if isolated_fonts:
+        for name in ("HWP_FONT_DIR", "FONTCONFIG_FILE", "FONTCONFIG_PATH"):
+            env.pop(name, None)
+    elif "HWP_FONT_DIR" not in env:
         for cand in (Path.home() / ".maru/env/fonts", Path.home() / "Library/Fonts"):
             if cand.is_dir():
                 env["HWP_FONT_DIR"] = str(cand)
@@ -475,12 +924,271 @@ def _hwp_env() -> dict:
     return env
 
 
+def _hwp_timeout_seconds() -> int:
+    raw_timeout = os.environ.get(HWP_CLI_TIMEOUT_ENV)
+    if raw_timeout is None:
+        return DEFAULT_HWP_CLI_TIMEOUT_SECONDS
+    try:
+        timeout = int(raw_timeout)
+    except ValueError:
+        _die(
+            2,
+            f"{HWP_CLI_TIMEOUT_ENV}는 1~{MAX_HWP_CLI_TIMEOUT_SECONDS} "
+            f"범위의 정수여야 함: {raw_timeout!r}",
+        )
+    if not 1 <= timeout <= MAX_HWP_CLI_TIMEOUT_SECONDS:
+        _die(
+            2,
+            f"{HWP_CLI_TIMEOUT_ENV}는 1~{MAX_HWP_CLI_TIMEOUT_SECONDS} "
+            f"범위여야 함: {timeout}",
+        )
+    return timeout
+
+
 def _run_hwp(
-    argv: list, *, require_new_preset: bool = False
+    argv: list,
+    *,
+    require_new_preset: bool = False,
+    require_compose: bool = False,
+    require_template: bool = False,
+    require_certify: bool = False,
+    require_corpus: bool = False,
+    redact_failure_output: bool = False,
+    isolated_fonts: bool = False,
+    binary: str | None = None,
 ) -> subprocess.CompletedProcess:
-    """확장된 hwp-cli에 위임 실행 (capture)."""
+    """Run a control command with bounded stdout/stderr and a deadline."""
+    if binary is not None:
+        if (
+            require_new_preset
+            or require_compose
+            or require_template
+            or require_certify
+            or require_corpus
+        ):
+            raise ValueError("explicit binary와 capability resolver를 함께 지정할 수 없음")
+        tool = binary
+    else:
+        tool = _hwp_cli_or_die(
+            require_new_preset=require_new_preset,
+            require_compose=require_compose,
+            require_template=require_template,
+            require_certify=require_certify,
+            require_corpus=require_corpus,
+        )
+    timeout = _hwp_timeout_seconds()
+
+    command = [tool, *argv]
+    with tempfile.TemporaryFile() as stdout_file, tempfile.TemporaryFile() as stderr_file:
+        try:
+            completed = subprocess.run(
+                command,
+                stdout=stdout_file,
+                stderr=stderr_file,
+                env=_hwp_env(isolated_fonts=isolated_fonts),
+                timeout=timeout,
+            )
+        except subprocess.TimeoutExpired as exc:
+            captured_stdout, _ = _read_capture_file(
+                stdout_file,
+                limit=MAX_HWP_CAPTURE_CHARS,
+            )
+            captured_stderr, _ = _read_capture_file(
+                stderr_file,
+                limit=MAX_HWP_CAPTURE_CHARS,
+            )
+            stdout = _bounded_subprocess_text(exc.stdout) or captured_stdout
+            stderr = _bounded_subprocess_text(exc.stderr) or captured_stderr
+            detail = (
+                "진단 생략됨(민감한 입력 보호)"
+                if redact_failure_output
+                else stderr or stdout or "부분 출력 없음"
+            )
+            _die(
+                2,
+                f"hwp-cli {argv[0] if argv else '<명령>'} 타임아웃 ({timeout}s). "
+                f"{HWP_CLI_TIMEOUT_ENV}로 제한을 조정할 수 있음. 진단: {detail}",
+            )
+        except OSError as exc:
+            _die(
+                2,
+                f"hwp-cli {argv[0] if argv else '<명령>'} 실행 실패 "
+                f"({tool}): {type(exc).__name__}: {exc}",
+            )
+
+        stdout, stdout_truncated = _read_capture_file(
+            stdout_file,
+            limit=(
+                MAX_HWP_CONTROL_OUTPUT_BYTES
+                if completed.returncode == 0
+                else MAX_HWP_CAPTURE_CHARS
+            ),
+        )
+        stderr, _ = _read_capture_file(
+            stderr_file,
+            limit=MAX_HWP_CAPTURE_CHARS,
+        )
+        if completed.returncode == 0 and stdout_truncated:
+            _die(
+                2,
+                f"hwp-cli {argv[0] if argv else '<명령>'} 제어 출력이 "
+                f"{MAX_HWP_CONTROL_OUTPUT_BYTES} bytes 제한을 초과함. "
+                "`cat` 본문 출력은 streaming 경로를 사용할 것",
+            )
+    return subprocess.CompletedProcess(
+        command,
+        completed.returncode,
+        stdout,
+        stderr,
+    )
+
+
+def _bounded_subprocess_text(value: str | bytes | None) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        value = value.decode("utf-8", "replace")
+    if len(value) <= MAX_HWP_CAPTURE_CHARS:
+        return value
+    omitted = len(value) - MAX_HWP_CAPTURE_CHARS
+    return (
+        value[:MAX_HWP_CAPTURE_CHARS]
+        + f"\n...[hwp-cli 출력 {omitted}자 생략]"
+    )
+
+
+def _read_capture_file(stream, *, limit: int) -> tuple[str, bool]:
+    stream.flush()
+    stream.seek(0, os.SEEK_END)
+    size = stream.tell()
+    stream.seek(0)
+    raw = stream.read(limit)
+    text = raw.decode("utf-8", "replace")
+    truncated = size > len(raw)
+    if truncated:
+        text += f"\n...[hwp-cli 출력 {size - len(raw)} bytes 생략]"
+    return text, truncated
+
+
+def _run_hwp_stream(
+    argv: list,
+    *,
+    stdout,
+    require_new_preset: bool = False,
+) -> subprocess.CompletedProcess:
+    """Run a content command with stdout streamed to a caller-owned file."""
     tool = _hwp_cli_or_die(require_new_preset=require_new_preset)
-    return subprocess.run([tool, *argv], capture_output=True, text=True, env=_hwp_env())
+    timeout = _hwp_timeout_seconds()
+    command = [tool, *argv]
+    with tempfile.TemporaryFile() as stderr_file:
+        try:
+            completed = subprocess.run(
+                command,
+                stdout=stdout,
+                stderr=stderr_file,
+                env=_hwp_env(),
+                timeout=timeout,
+            )
+        except subprocess.TimeoutExpired:
+            stderr, _ = _read_capture_file(
+                stderr_file,
+                limit=MAX_HWP_CAPTURE_CHARS,
+            )
+            _die(
+                2,
+                f"hwp-cli {argv[0] if argv else '<명령>'} 타임아웃 ({timeout}s). "
+                f"{HWP_CLI_TIMEOUT_ENV}로 제한을 조정할 수 있음. "
+                f"진단: {stderr or '부분 출력 없음'}",
+            )
+        except OSError as exc:
+            _die(
+                2,
+                f"hwp-cli {argv[0] if argv else '<명령>'} 실행 실패 "
+                f"({tool}): {type(exc).__name__}: {exc}",
+            )
+        stderr, _ = _read_capture_file(
+            stderr_file,
+            limit=MAX_HWP_CAPTURE_CHARS,
+        )
+    return subprocess.CompletedProcess(
+        command,
+        completed.returncode,
+        "",
+        stderr,
+    )
+
+
+def _validate_styled_output_path(
+    output: str | Path,
+    reference: str | Path | None = None,
+) -> Path:
+    """Fail before staging unless styled can atomically publish a real HWPX."""
+    destination = Path(output)
+    import styled as styled_mod
+
+    styled_mod.snapshot_destination(destination, source=reference)
+    return destination
+
+
+def _validate_hwp_json(
+    path: Path,
+    *,
+    context: str,
+    binary: str | None = None,
+    redact_diagnostics: bool = False,
+) -> dict:
+    """Run the resolved Rust validator and require its JSON `valid` contract."""
+    argv = ["validate", str(path), "--json"]
+    run_options = {}
+    if redact_diagnostics:
+        run_options["redact_failure_output"] = True
+    if binary is not None:
+        run_options["binary"] = binary
+    proc = _run_hwp(argv, **run_options)
+    try:
+        payload = json.loads(proc.stdout)
+    except json.JSONDecodeError as exc:
+        detail = (
+            "진단 생략됨(TemplateData 비밀값 보호)"
+            if redact_diagnostics
+            else proc.stderr.strip() or proc.stdout.strip() or "출력 없음"
+        )
+        raise RuntimeError(
+            f"{context} hwp validate --json 응답 파싱 실패: {detail}"
+        ) from exc
+
+    warnings = payload.get("warnings")
+    if isinstance(warnings, list):
+        if redact_diagnostics and warnings:
+            print(
+                f"[hwpx] {context} 검증 경고 {len(warnings)}건 "
+                "(내용 생략: TemplateData 비밀값 보호)",
+                file=sys.stderr,
+            )
+        else:
+            for warning in warnings:
+                print(f"[hwpx] {context} 검증 경고: {warning}", file=sys.stderr)
+
+    errors = payload.get("errors")
+    error_text = (
+        "; ".join(str(error) for error in errors)
+        if isinstance(errors, list) and errors
+        else ""
+    )
+    if (
+        proc.returncode != 0
+        or payload.get("valid") is not True
+        or payload.get("format") != "hwpx"
+    ):
+        detail = (
+            "진단 생략됨(TemplateData 비밀값 보호)"
+            if redact_diagnostics
+            else error_text or proc.stderr.strip() or proc.stdout.strip()
+        )
+        raise RuntimeError(f"{context} hwp validate 실패: {detail or '상세 오류 없음'}")
+    if proc.stderr.strip() and not redact_diagnostics:
+        print(f"[hwpx] {context} 검증 진단: {proc.stderr.strip()}", file=sys.stderr)
+    return payload
 
 
 def _new_from_markdown(
@@ -532,6 +1240,52 @@ def _new_from_markdown(
     return 0
 
 
+def _styled_new_from_markdown_atomic(
+    md_text: str,
+    out: Path,
+    preset: str | None = None,
+    *,
+    plain: bool = False,
+    base_dir: Path | None = None,
+    destination_snapshot=None,
+) -> int:
+    """Generate, style, and validate in a private sibling directory, then publish."""
+    destination = _validate_styled_output_path(out)
+    import styled as styled_mod
+
+    if destination_snapshot is None:
+        destination_snapshot = styled_mod.snapshot_destination(destination)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(
+        prefix=f".{destination.name}.staging-",
+        dir=destination.parent,
+    ) as temp_dir:
+        staging_dir = Path(temp_dir)
+        staging_dir.chmod(0o700)
+        staged = staging_dir / "output.hwpx"
+        rc = _new_from_markdown(
+            md_text,
+            staged,
+            preset,
+            plain=plain,
+            base_dir=base_dir,
+        )
+        if rc != 0:
+            return rc
+        if not staged.is_file():
+            raise RuntimeError(
+                f"hwp new가 성공 코드를 반환했지만 출력 파일이 없음: {staged}"
+            )
+        styled_mod.validate_hwpx_package(staged)
+        _validate_hwp_json(staged, context="styled 생성 결과")
+        styled_mod.publish_staged_file(
+            staged,
+            destination,
+            destination_snapshot=destination_snapshot,
+        )
+    return 0
+
+
 def _tagged_lines_to_markdown(text: str) -> str:
     """레거시 write-java 태그 라인(H1:/P:)을 markdown으로 환원."""
     out: list[str] = []
@@ -547,25 +1301,23 @@ def _tagged_lines_to_markdown(text: str) -> str:
 
 def _delegate_hwp_read(path: Path, fmt: str) -> int:
     """Binary .hwp(v5 OLE2) is not parsed here — delegate read to hwp-cli (`hwp cat`)."""
-    tool = _find_hwp_cli()
-    if not tool:
+    if not _find_hwp_cli():
         _die(
             1,
             ".hwp(바이너리)는 이 스킬이 직접 처리하지 않음. hwp-cli 미발견 — "
             "`cargo install --path crates/hwp-cli`로 설치하거나 HWP_CLI=<.../hwp> 지정",
         )
     cli_fmt = {"text": "plain", "md": "markdown", "json": "json"}.get(fmt, "markdown")
-    try:
-        proc = subprocess.run(
-            [tool, "cat", str(path), "--format", cli_fmt],
-            capture_output=True, text=True, timeout=120,
+    with tempfile.TemporaryFile() as output:
+        proc = _run_hwp_stream(
+            ["cat", str(path), "--format", cli_fmt],
+            stdout=output,
         )
-    except (subprocess.TimeoutExpired, OSError) as e:
-        _die(2, f"hwp-cli 위임 실패: {e}")
-    if proc.returncode != 0:
-        _die(2, f"hwp-cli cat 실패: {(proc.stderr or proc.stdout).strip()}")
-    sys.stdout.write(proc.stdout)
-    print(f"[hwpx] .hwp → hwp-cli 위임 ({tool})", file=sys.stderr)
+        if proc.returncode != 0:
+            _die(2, f"hwp-cli cat 실패: {proc.stderr.strip()}")
+        output.seek(0)
+        _copy_utf8_text(output, sys.stdout)
+    print("[hwpx] .hwp → hwp-cli 위임", file=sys.stderr)
     return 0
 
 
@@ -577,9 +1329,7 @@ def cmd_read(args) -> int:
     # .hwpx text/markdown: hwp-cli `cat` 우선 (섹션 선택 없을 때), 실패 시 lxml 폴백
     if args.format in ("text", "md") and args.section is None and engine != "lxml":
         cli_fmt = "plain" if args.format == "text" else "markdown"
-        text = _hwpx_text_via_cli(path, cli_fmt)
-        if text is not None:
-            sys.stdout.write(text)
+        if _hwpx_text_via_cli(path, cli_fmt, sys.stdout):
             return 0
         if engine == "hwp":
             _die(1, "hwp-cli('hwp') 미발견/실패 — cargo install --path crates/hwp-cli 또는 HWP_CLI 지정")
@@ -634,19 +1384,44 @@ def cmd_to_md(args) -> int:
             print(f"[hwpx] convert(→md) -> {out} (이미지: {media}/)", file=sys.stderr)
             return 0
         print(f"[hwpx] hwp convert 폴백 → cat: {proc.stderr.strip()}", file=sys.stderr)
-    md = None
-    # hwp-cli `cat` markdown 우선 (섹션 선택 없을 때), 실패 시 lxml 폴백
-    if args.section is None and engine != "lxml":
-        md = _hwpx_text_via_cli(path, "markdown")
-        if md is None and engine == "hwp":
-            _die(1, "hwp-cli('hwp') 미발견/실패 — cargo install --path crates/hwp-cli 또는 HWP_CLI 지정")
-    if md is None:
-        md = _markdown_from_structure(_extract_structure(path), args.section)
     if args.output:
-        Path(args.output).write_text(md, encoding="utf-8")
-        print(f"[hwpx] wrote {len(md)} chars -> {args.output}", file=sys.stderr)
-    else:
-        sys.stdout.write(md)
+        output_path = Path(args.output)
+
+        def produce(staged: Path) -> tuple[bool, int]:
+            if args.section is None and engine != "lxml":
+                with staged.open("w", encoding="utf-8") as destination:
+                    delegated = _hwpx_text_via_cli(path, "markdown", destination)
+                if delegated:
+                    return True, 0
+                staged.unlink()
+                if engine == "hwp":
+                    _die(
+                        1,
+                        "hwp-cli('hwp') 미발견/실패 — cargo install "
+                        "--path crates/hwp-cli 또는 HWP_CLI 지정",
+                    )
+            md = _markdown_from_structure(_extract_structure(path), args.section)
+            staged.write_text(md, encoding="utf-8")
+            return False, len(md)
+
+        delegated, length = _write_text_output_atomically(output_path, produce)
+        if delegated:
+            print(f"[hwpx] wrote streamed markdown -> {args.output}", file=sys.stderr)
+        else:
+            print(f"[hwpx] wrote {length} chars -> {args.output}", file=sys.stderr)
+        return 0
+
+    # stdout에는 공개할 파일이 없으므로 기존 streaming/fallback 경로를 유지한다.
+    if args.section is None and engine != "lxml":
+        if _hwpx_text_via_cli(path, "markdown", sys.stdout):
+            return 0
+        if engine == "hwp":
+            _die(
+                1,
+                "hwp-cli('hwp') 미발견/실패 — cargo install "
+                "--path crates/hwp-cli 또는 HWP_CLI 지정",
+            )
+    sys.stdout.write(_markdown_from_structure(_extract_structure(path), args.section))
     return 0
 
 
@@ -657,9 +1432,8 @@ def cmd_unpack(args) -> int:
         _die(1, f"대상 디렉토리 비어있지 않음 (--force로 덮어쓰기): {dst}")
     dst.mkdir(parents=True, exist_ok=True)
     try:
-        with zipfile.ZipFile(src) as zf:
-            zf.extractall(dst)
-    except zipfile.BadZipFile as e:
+        hx.extract_bounded_zip(src, dst)
+    except (zipfile.BadZipFile, ValueError) as e:
         _die(2, f"HWPX(zip) 파싱 실패: {e}")
     print(f"[hwpx] unpacked -> {dst}", file=sys.stderr)
     return 0
@@ -668,19 +1442,10 @@ def cmd_unpack(args) -> int:
 def cmd_repack(args) -> int:
     src = Path(args.in_dir)
     dst = Path(args.out_file)
-    mimetype_path = src / "mimetype"
-    if not mimetype_path.is_file():
-        _die(1, f"mimetype 없음: {mimetype_path} (HWPX unpack 결과 아님)")
-
-    with zipfile.ZipFile(dst, "w") as zf:
-        info = zipfile.ZipInfo("mimetype")
-        info.compress_type = zipfile.ZIP_STORED
-        zf.writestr(info, mimetype_path.read_bytes())
-        for path in sorted(src.rglob("*")):
-            if path.is_dir() or path == mimetype_path:
-                continue
-            arcname = str(path.relative_to(src))
-            zf.write(path, arcname, compress_type=zipfile.ZIP_DEFLATED)
+    try:
+        hx.pack_dir(src, dst)
+    except (OSError, ValueError, zipfile.BadZipFile) as exc:
+        _die(2, f"HWPX repack 실패: {exc}")
     print(f"[hwpx] repacked -> {dst}", file=sys.stderr)
     return 0
 
@@ -847,6 +1612,369 @@ def cmd_create(args) -> int:
     return rc
 
 
+def cmd_compose(args) -> int:
+    """DocumentSpec v1/v2를 native `hwp compose`에 넘겨 HWPX를 처리한다.
+
+    이 wrapper는 schema를 다시 해석하거나 묵시적으로 보정하지 않는다. hwp-cli가
+    versioned schema의 유일한 validator/author이며, Maru는 dry-run/report 전달,
+    private sibling staging, package 재검증, native 재검증, destination race 방지만
+    담당한다.
+    """
+    spec = _ensure_file(args.spec)
+    destination = Path(args.output)
+    dry_run = bool(getattr(args, "dry_run", False))
+    print_report = bool(getattr(args, "report", False))
+    import styled as styled_mod
+
+    try:
+        if destination.suffix.lower() != ".hwpx":
+            raise ValueError(
+                f"compose 출력 형식은 .hwpx여야 함: {destination.name}"
+            )
+        if dry_run:
+            with tempfile.TemporaryDirectory(prefix="hwpx-compose-dry-run-") as temp_dir:
+                staged = Path(temp_dir) / "output.hwpx"
+                proc = _run_hwp(
+                    [
+                        "compose",
+                        str(spec),
+                        "--output",
+                        str(staged),
+                        "--dry-run",
+                    ],
+                    require_compose=True,
+                )
+                if proc.returncode != 0:
+                    detail = proc.stderr.strip() or proc.stdout.strip() or "상세 오류 없음"
+                    raise RuntimeError(f"hwp compose 실패: {detail}")
+                if staged.exists():
+                    raise RuntimeError("hwp compose --dry-run이 출력 파일을 생성함")
+                try:
+                    report_payload = json.loads(proc.stdout)
+                except json.JSONDecodeError as exc:
+                    raise RuntimeError(f"hwp compose dry-run report가 JSON이 아님: {exc}") from exc
+                if not isinstance(report_payload, dict) or report_payload.get("dry_run") is not True:
+                    raise RuntimeError("hwp compose dry-run report 계약이 올바르지 않음")
+                sys.stdout.write(proc.stdout)
+                if proc.stdout and not proc.stdout.endswith("\n"):
+                    sys.stdout.write("\n")
+            print("[hwpx] compose dry-run 완료 (출력 미게시)", file=sys.stderr)
+            return 0
+
+        destination_snapshot = styled_mod.snapshot_destination(destination)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(
+            prefix=f".{destination.name}.compose-",
+            dir=destination.parent,
+        ) as temp_dir:
+            staging_dir = Path(temp_dir)
+            staging_dir.chmod(0o700)
+            staged = staging_dir / "output.hwpx"
+            native_argv = [
+                "compose",
+                str(spec),
+                "--output",
+                str(staged),
+            ]
+            if print_report:
+                native_argv.append("--report")
+            proc = _run_hwp(native_argv, require_compose=True)
+            if proc.returncode != 0:
+                detail = proc.stderr.strip() or proc.stdout.strip() or "상세 오류 없음"
+                raise RuntimeError(f"hwp compose 실패: {detail}")
+            if not staged.is_file():
+                raise RuntimeError(
+                    f"hwp compose가 성공 코드를 반환했지만 출력 파일이 없음: {staged}"
+                )
+            styled_mod.validate_hwpx_package(staged)
+            native_binary = proc.args[0]
+            _validate_hwp_json(
+                staged,
+                context="compose 생성 결과",
+                binary=native_binary,
+            )
+            if print_report:
+                try:
+                    report_payload = json.loads(proc.stdout)
+                except json.JSONDecodeError as exc:
+                    raise RuntimeError(f"hwp compose report가 JSON이 아님: {exc}") from exc
+                if not isinstance(report_payload, dict):
+                    raise RuntimeError("hwp compose report root는 object여야 함")
+            styled_mod.publish_staged_file(
+                staged,
+                destination,
+                destination_snapshot=destination_snapshot,
+            )
+            if print_report:
+                sys.stdout.write(proc.stdout)
+                if proc.stdout and not proc.stdout.endswith("\n"):
+                    sys.stdout.write("\n")
+    except Exception as exc:
+        _die(2, f"compose 실패: {type(exc).__name__}: {exc}")
+    print(f"[hwpx] composed(DocumentSpec v1/v2) -> {destination}", file=sys.stderr)
+    return 0
+
+
+_TEMPLATE_REPORT_FIELDS = {
+    "schema_version",
+    "data_schema_version",
+    "output",
+    "dry_run",
+    "deterministic",
+    "mode",
+    "template_sha256",
+    "data_sha256",
+    "reference_sha256",
+    "output_sha256",
+    "provided_variables",
+    "defaulted_variables",
+    "expansion",
+    "changed_regions",
+    "generated_regions",
+    "unsupported",
+    "fallback",
+    "dropped",
+    "template_validation",
+    "data_validation",
+    "semantic_validation",
+    "package_validation",
+    "compose",
+}
+
+
+def _template_failure_summary(proc: subprocess.CompletedProcess) -> str:
+    """Native failure에서 값이 될 수 있는 message를 제거한 JSON 요약만 반환한다."""
+    for raw in (proc.stderr, proc.stdout):
+        candidates = [raw]
+        if isinstance(raw, str) and raw.lstrip().startswith("Error: "):
+            candidates.append(raw.lstrip()[len("Error: "):].strip())
+        payload = None
+        for candidate in candidates:
+            try:
+                parsed = json.loads(candidate)
+            except (TypeError, json.JSONDecodeError):
+                continue
+            if isinstance(parsed, dict):
+                payload = parsed
+                break
+        if not isinstance(payload, dict):
+            continue
+        error = payload.get("error")
+        if not isinstance(error, str) or not re.fullmatch(r"[A-Za-z0-9_.-]{1,64}", error):
+            error = "template_spec"
+        safe_issues = []
+        issues = payload.get("issues")
+        if isinstance(issues, list):
+            for item in issues[:100]:
+                if not isinstance(item, dict):
+                    continue
+                code = item.get("code")
+                pointer = item.get("pointer")
+                if not isinstance(code, str) or not re.fullmatch(
+                    r"[A-Za-z0-9_.-]{1,64}", code
+                ):
+                    continue
+                if (
+                    not isinstance(pointer, str)
+                    or len(pointer) > 512
+                    or any(not character.isprintable() for character in pointer)
+                ):
+                    pointer = ""
+                safe_issues.append({"code": code, "pointer": pointer})
+        return json.dumps(
+            {
+                "error": error,
+                "issues": safe_issues,
+                "truncated": bool(payload.get("truncated")),
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+    return (
+        f"native template가 exit {proc.returncode}을 반환함; "
+        "진단은 TemplateData 비밀값 보호를 위해 생략함"
+    )
+
+
+def _normalized_template_report(
+    stdout: str,
+    *,
+    required: bool,
+    published_output: Path,
+) -> str | None:
+    if not stdout.strip():
+        if required:
+            raise RuntimeError("native template가 report JSON을 반환하지 않음")
+        return None
+    try:
+        payload = json.loads(stdout)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("native template report가 유효한 JSON object가 아님") from exc
+    if not isinstance(payload, dict):
+        raise RuntimeError("native template report가 JSON object가 아님")
+    unknown = set(payload) - _TEMPLATE_REPORT_FIELDS
+    if unknown:
+        raise RuntimeError("native template report에 알 수 없는 top-level field가 있음")
+    # Native execution always targets a private sibling staging file.  Never
+    # expose that ephemeral path as the durable output in a user-facing report.
+    payload["output"] = str(published_output)
+    compose = payload.get("compose")
+    if isinstance(compose, dict) and "output" in compose:
+        compose["output"] = str(published_output)
+    return json.dumps(payload, ensure_ascii=False, sort_keys=True)
+
+
+def cmd_template(args) -> int:
+    """TemplateSpec/Data v1을 native executor에 위임하고 HWPX만 원자적으로 게시한다."""
+    template = _ensure_file(args.template)
+    data = _ensure_file(args.data)
+    destination = Path(args.output)
+    import styled as styled_mod
+
+    try:
+        if destination.suffix.lower() != ".hwpx":
+            raise ValueError(
+                f"template 출력 형식은 .hwpx여야 함: {destination.name}"
+            )
+        destination_snapshot = styled_mod.snapshot_destination(destination)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(
+            prefix=f".{destination.name}.template-",
+            dir=destination.parent,
+        ) as temp_dir:
+            staging_dir = Path(temp_dir)
+            staging_dir.chmod(0o700)
+            staged = staging_dir / "output.hwpx"
+            argv = [
+                "template",
+                str(template),
+                "--data",
+                str(data),
+                "--output",
+                str(staged),
+            ]
+            if args.template_format:
+                argv.extend(["--template-format", args.template_format])
+            if args.data_format:
+                argv.extend(["--data-format", args.data_format])
+            if args.dry_run:
+                argv.append("--dry-run")
+            if args.report:
+                argv.append("--report")
+            proc = _run_hwp(
+                argv,
+                require_template=True,
+                redact_failure_output=True,
+            )
+            if proc.returncode != 0:
+                raise RuntimeError(_template_failure_summary(proc))
+            report_json = _normalized_template_report(
+                proc.stdout,
+                required=args.report or args.dry_run,
+                published_output=destination,
+            )
+            if args.dry_run:
+                if staged.exists():
+                    raise RuntimeError(
+                        "native template --dry-run이 출력 파일을 생성함"
+                    )
+                print(report_json)
+                return 0
+            if not staged.is_file():
+                raise RuntimeError(
+                    "hwp template가 성공 코드를 반환했지만 출력 파일이 없음"
+                )
+            styled_mod.validate_hwpx_package(staged)
+            native_binary = proc.args[0]
+            _validate_hwp_json(
+                staged,
+                context="template 생성 결과",
+                binary=native_binary,
+                redact_diagnostics=True,
+            )
+            styled_mod.publish_staged_file(
+                staged,
+                destination,
+                destination_snapshot=destination_snapshot,
+            )
+            if report_json is not None:
+                print(report_json)
+    except Exception as exc:
+        _die(2, f"template 실패: {type(exc).__name__}: {exc}")
+    print(f"[hwpx] templated(TemplateSpec v1) -> {destination}", file=sys.stderr)
+    return 0
+
+
+def cmd_certify(args) -> int:
+    """Delegate certification and publish only a fully validated native report."""
+    source = _ensure_file(args.file)
+    policy = _ensure_file(args.policy)
+    report_directory = Path(args.report)
+    if os.path.lexists(report_directory):
+        _die(2, "certification report 경로는 존재하지 않는 새 경로여야 함")
+
+    proc = _run_hwp(
+        [
+            "certify",
+            str(source),
+            "--policy",
+            str(policy),
+            "--report",
+            str(report_directory),
+        ],
+        require_certify=True,
+        redact_failure_output=True,
+    )
+    try:
+        report = certification.validate_certification_directory(report_directory)
+    except Exception:
+        _die(2, "native certification report contract validation failed")
+
+    native_passed = proc.returncode == 0
+    report_passed = report["overall"] == "passed"
+    if native_passed != report_passed:
+        _die(2, "native certification exit/report consistency validation failed")
+
+    print(json.dumps(report, ensure_ascii=False, sort_keys=True))
+    return proc.returncode
+
+
+def cmd_corpus(args) -> int:
+    """Run and independently audit the frozen native structured corpus."""
+    manifest = _ensure_file(args.manifest)
+    report_directory = Path(args.report)
+    if os.path.lexists(report_directory):
+        _die(2, "corpus report 경로는 존재하지 않는 새 경로여야 함")
+
+    proc = _run_hwp(
+        [
+            "corpus",
+            "--manifest",
+            str(manifest),
+            "--report",
+            str(report_directory),
+        ],
+        require_corpus=True,
+        redact_failure_output=True,
+        isolated_fonts=True,
+    )
+    if not os.path.lexists(report_directory):
+        if proc.returncode != 0:
+            return proc.returncode
+        _die(2, "hwp corpus가 성공 코드를 반환했지만 report 디렉터리가 없음")
+    try:
+        report = corpus.validate_corpus_directory(report_directory, manifest)
+    except Exception:
+        _die(2, "native structured corpus report contract validation failed")
+
+    native_passed = proc.returncode == 0
+    report_passed = report["status"] == "passed"
+    if native_passed != report_passed:
+        _die(2, "native structured corpus exit/report consistency validation failed")
+    print(json.dumps(report, ensure_ascii=False, sort_keys=True))
+    return proc.returncode
+
+
 def cmd_write_java(args) -> int:
     """레거시 호환 별칭 — markdown/텍스트 → HWPX (이제 hwp-cli new 위임, Java 미사용)."""
     out = Path(args.out_file)
@@ -866,25 +1994,124 @@ def cmd_write_java(args) -> int:
 def cmd_styled(args) -> int:
     """비참조 생성은 hwp-cli `new` + 공문서 스타일 후처리(--plain 시 생략);
     --reference(슬롯 채우기)는 lxml 코어 유지. --preset은 비참조 생성에만 적용."""
+    unsupported = [
+        flag
+        for flag, value in (
+            ("--header", getattr(args, "header", None)),
+            ("--footer", getattr(args, "footer", None)),
+        )
+        if value is not None
+    ]
+    if unsupported:
+        _die(
+            2,
+            "styled "
+            + "/".join(unsupported)
+            + "는 실제 HWPX 머리말/꼬리말을 생성하지 않아 현재 지원하지 않음. "
+            "본문에 대신 삽입하거나 무시하지 않으며 출력 전에 중단함. "
+            "옵션을 제거하거나 필요한 머리말/꼬리말이 이미 포함된 참조 양식을 사용할 것",
+        )
+    try:
+        out = _validate_styled_output_path(args.output, args.reference)
+    except ValueError as exc:
+        _die(2, str(exc))
+    import styled as styled_mod
+
+    try:
+        destination_snapshot = styled_mod.snapshot_destination(
+            out,
+            source=args.reference,
+        )
+    except ValueError as exc:
+        _die(2, str(exc))
     if not args.reference and (args.markdown or args.stdin_markdown):
         md_text = (
             Path(args.markdown).read_text(encoding="utf-8")
             if args.markdown
             else sys.stdin.read()
         )
-        out = Path(args.output)  # styled는 -o 필수
         base = Path(args.markdown).parent if args.markdown else None
-        rc = _new_from_markdown(
-            md_text, out, args.preset, plain=args.plain, base_dir=base
-        )
+        try:
+            rc = _styled_new_from_markdown_atomic(
+                md_text,
+                out,
+                args.preset,
+                plain=args.plain,
+                base_dir=base,
+                destination_snapshot=destination_snapshot,
+            )
+        except SystemExit:
+            raise
+        except Exception as exc:
+            _die(2, f"styled 생성 실패: {type(exc).__name__}: {exc}")
         if rc == 0:
             print(f"[hwpx] styled(hwp-cli) -> {out}", file=sys.stderr)
         return rc
-    return _styled_legacy(args)
+    return _styled_legacy(args, destination_snapshot=destination_snapshot)
 
 
-def _styled_legacy(args) -> int:
-    """참조 템플릿 슬롯 채우기(lxml) + 비참조 JSON 생성(hwp-cli new). Java 미사용."""
+@contextlib.contextmanager
+def _resolved_styled_reference(reference: str | Path, output: str | Path):
+    """Yield a validated HWPX reference, converting binary HWP when necessary."""
+    source = _ensure_file(reference)
+    _validate_styled_output_path(output, source)
+    suffix = source.suffix.lower()
+    if suffix == ".hwpx":
+        yield source
+        return
+    if suffix != ".hwp":
+        raise ValueError(
+            f"참조 양식 확장자를 지원하지 않음: {source.suffix or '<없음>'} "
+            "(.hwp 또는 .hwpx 필요)"
+        )
+
+    import styled as styled_mod
+
+    destination = Path(output)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(
+        prefix=f".{destination.name}.reference-",
+        dir=destination.parent,
+    ) as temp_dir:
+        staging_dir = Path(temp_dir)
+        staging_dir.chmod(0o700)
+        converted = staging_dir / f"{source.stem}.hwpx"
+        proc = _run_hwp(
+            [
+                "convert",
+                str(source),
+                "--to",
+                "hwpx",
+                "-o",
+                str(converted),
+                "--strict",
+                "--preserve-layout",
+            ]
+        )
+        if proc.returncode != 0:
+            detail = proc.stderr.strip() or proc.stdout.strip() or "상세 오류 없음"
+            raise RuntimeError(
+                f"HWP 참조 양식 변환 실패: {source} ({detail}). "
+                "hwp-cli가 읽을 수 있는 HWP v5 파일인지 확인"
+            )
+        if not converted.is_file():
+            raise RuntimeError(
+                f"HWP 참조 양식 변환이 성공 코드를 반환했지만 출력 파일이 없음: {converted}"
+            )
+        if proc.stderr.strip():
+            print(f"[hwpx] HWP 참조 양식 변환 진단: {proc.stderr.strip()}", file=sys.stderr)
+        try:
+            styled_mod.validate_hwpx_package(converted)
+        except ValueError as exc:
+            raise RuntimeError(
+                f"HWP 참조 양식 변환 결과 검증 실패: {source}: {exc}"
+            ) from exc
+        _validate_hwp_json(converted, context="HWP 참조 양식 변환 결과")
+        yield converted
+
+
+def _styled_legacy(args, *, destination_snapshot=None) -> int:
+    """참조 HWP(X) 변환/슬롯 채우기 + 비참조 JSON 생성. Java 미사용."""
     if args.reference:
         import styled as styled_mod
 
@@ -901,13 +2128,18 @@ def _styled_legacy(args) -> int:
         else:
             _die(1, "소스 없음: --markdown / --json / --stdin-markdown / --stdin-json 중 하나 필요")
         try:
-            out = styled_mod.follow_template(
-                blocks,
-                reference=args.reference,
-                output=args.output,
-                header=args.header,
-                footer=args.footer,
-            )
+            with _resolved_styled_reference(args.reference, args.output) as reference:
+                out = styled_mod.follow_template(
+                    blocks,
+                    reference=reference,
+                    output=args.output,
+                    header=args.header,
+                    footer=args.footer,
+                    native_validate=lambda path: _validate_hwp_json(
+                        path, context="styled 참조 결과"
+                    ),
+                    destination_snapshot=destination_snapshot,
+                )
         except Exception as e:
             _die(2, f"styled --reference 실패: {type(e).__name__}: {e}")
         print(f"[hwpx] styled(reference, lxml) -> {out}", file=sys.stderr)
@@ -921,12 +2153,18 @@ def _styled_legacy(args) -> int:
     else:
         _die(1, "소스 없음: --markdown / --json / --stdin-markdown / --stdin-json 중 하나 필요")
     md = "\n\n".join(_json_payload_to_markdown(payload))
-    _new_from_markdown(
-        md,
-        Path(args.output),
-        args.preset,
-        plain=getattr(args, "plain", False),
-    )
+    try:
+        _styled_new_from_markdown_atomic(
+            md,
+            Path(args.output),
+            args.preset,
+            plain=getattr(args, "plain", False),
+            destination_snapshot=destination_snapshot,
+        )
+    except SystemExit:
+        raise
+    except Exception as exc:
+        _die(2, f"styled 생성 실패: {type(exc).__name__}: {exc}")
     print(f"[hwpx] styled(hwp-cli) -> {args.output}", file=sys.stderr)
     return 0
 
@@ -996,42 +2234,15 @@ def cmd_validate(args) -> int:
 
 
 def _validate_lxml(path: Path) -> int:
-    errors = []
+    """Bounded fallback used only when the Rust `hwp validate` binary is absent."""
+    import styled as styled_mod
+
     try:
-        with zipfile.ZipFile(path) as zf:
-            names = zf.namelist()
-            if not names or names[0] != "mimetype":
-                errors.append(f"mimetype이 첫 엔트리 아님 (실제: {names[0] if names else '<empty>'})")
-            try:
-                info = zf.getinfo("mimetype")
-                if info.compress_type != zipfile.ZIP_STORED:
-                    errors.append(f"mimetype이 STORED 아님 (compress_type={info.compress_type})")
-                mimetype = zf.read("mimetype").decode("ascii", errors="replace").strip()
-                if mimetype != "application/hwp+zip":
-                    errors.append(f"mimetype 값 부정확: '{mimetype}' (기대: 'application/hwp+zip')")
-            except KeyError:
-                errors.append("mimetype 파일 누락")
-
-            required = ["Contents/content.hpf", "Contents/header.xml", "Contents/section0.xml"]
-            for req in required:
-                if req not in names:
-                    errors.append(f"필수 파일 누락: {req}")
-
-            for name in names:
-                if not _xml_entry(name):
-                    continue
-                try:
-                    etree.fromstring(zf.read(name))
-                except etree.XMLSyntaxError as e:
-                    errors.append(f"XML 파싱 실패 {name}: {e}")
-    except zipfile.BadZipFile as e:
-        _die(2, f"zip 파싱 실패: {e}")
-
-    if errors:
-        print(f"[hwpx] validate FAIL ({len(errors)}건)", file=sys.stderr)
-        for err in errors:
-            print(f"  - {err}", file=sys.stderr)
-        sys.exit(2)
+        styled_mod.validate_hwpx_package(path)
+    except (OSError, ValueError) as exc:
+        print("[hwpx] validate FAIL (bounded lxml fallback)", file=sys.stderr)
+        print(f"  - {exc}", file=sys.stderr)
+        return 2
     print(f"[hwpx] validate OK: {path}", file=sys.stderr)
     return 0
 
@@ -1050,15 +2261,12 @@ def _to_pdf_soffice(args, out: Path) -> int:
     out_dir.mkdir(parents=True, exist_ok=True)
 
     try:
-        subprocess.run(
+        proc = _run_external_bounded(
             [soffice, "--headless", "--convert-to", "pdf", "--outdir", str(out_dir), str(args.file)],
-            check=True,
-            capture_output=True,
-            text=True,
             timeout=120,
         )
-    except subprocess.CalledProcessError as e:
-        _die(2, f"soffice 변환 실패: {e.stderr or e.stdout}")
+        if proc.returncode != 0:
+            _die(2, f"soffice 변환 실패: {proc.stderr or proc.stdout}")
     except subprocess.TimeoutExpired:
         _die(2, "soffice 변환 타임아웃 (120s)")
 
@@ -1104,10 +2312,24 @@ def cmd_to_html(args) -> int:
     """HWP/HWPX → HTML via hwp-cli 네이티브 (`hwp cat --format html`)."""
     src = _ensure_file(args.file)
     out = Path(args.output) if args.output else src.with_suffix(".html")
-    proc = _run_hwp(["cat", str(src), "--format", "html"])
-    if proc.returncode != 0:
-        _die(2, f"to-html 실패: {proc.stderr.strip()}")
-    out.write_text(proc.stdout, encoding="utf-8")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    fd, temp_name = tempfile.mkstemp(
+        prefix=f".{out.name}.cat-",
+        suffix=".tmp",
+        dir=out.parent,
+    )
+    try:
+        with os.fdopen(fd, "wb") as destination:
+            proc = _run_hwp_stream(
+                ["cat", str(src), "--format", "html"],
+                stdout=destination,
+            )
+        if proc.returncode != 0:
+            _die(2, f"to-html 실패: {proc.stderr.strip()}")
+        os.replace(temp_name, out)
+    finally:
+        with contextlib.suppress(FileNotFoundError):
+            Path(temp_name).unlink()
     print(f"[hwpx] to-html -> {out}", file=sys.stderr)
     return 0
 
@@ -1186,8 +2408,6 @@ def cmd_analyze(args) -> int:
     edit-section 의 start/end 인덱스와 사용할 paraPr/charPr ID를 여기서 확인한다.
     (텍스트가 아닌 인덱스로 섹션 경계를 잡는다 — new_hwpx_master 2단계.)
     """
-    import hwpx_xml as hx
-
     path = _ensure_file(args.file)
     sec_names = hx.section_entry_names(path)
     if not sec_names:
@@ -1195,10 +2415,14 @@ def cmd_analyze(args) -> int:
     target = _resolve_section_entry(args.section_file, sec_names)
     if target is None:
         _die(2, f"section XML 없음: {args.section_file}")
-    with zipfile.ZipFile(path) as zf:
+    with hx.open_bounded_zip(path) as zf:
         names = zf.namelist()
-        data = zf.read(target)
-        header = zf.read("Contents/header.xml") if "Contents/header.xml" in names else None
+        data = hx.read_bounded_entry(zf, target)
+        header = (
+            hx.read_bounded_entry(zf, "Contents/header.xml")
+            if "Contents/header.xml" in names
+            else None
+        )
 
     root = hx.parse_xml(data).getroot()
     sec = hx.find_sec(root)
@@ -1273,16 +2497,14 @@ def cmd_edit_section(args) -> int:
     ref-index 단락을 deepcopy 템플릿으로 삼아 한 줄당 한 단락 생성 → 인덱스
     범위를 통째 치환. 인덱스는 `analyze`로 확인한다. linesegarray 자동 정리.
     """
-    import hwpx_xml as hx
-
     path = _ensure_file(args.file)
     secs = hx.section_entry_names(path)
     target = _resolve_section_entry(args.section_file, secs)
-    with zipfile.ZipFile(path) as zf:
+    with hx.open_bounded_zip(path) as zf:
         names = zf.namelist()
         if target is None or target not in names:
             _die(2, f"section XML 없음: {args.section_file or '<default>'}")
-        data = zf.read(target)
+        data = hx.read_bounded_entry(zf, target)
 
     tree = hx.parse_xml(data)
     sec = hx.find_sec(tree.getroot())
@@ -1433,6 +2655,106 @@ def _build_parser() -> argparse.ArgumentParser:
     s.add_argument("--plain", action="store_true", help="스타일 후처리(표/제목) 생략")
     s.set_defaults(func=cmd_create)
 
+    s = sub.add_parser(
+        "compose",
+        help="DocumentSpec v1/v2 JSON/YAML -> HWPX (native hwp compose, atomic)",
+    )
+    s.add_argument(
+        "--spec",
+        required=True,
+        help="hwp-cli DocumentSpec v1/v2 JSON/YAML 파일",
+    )
+    s.add_argument(
+        "-o",
+        "--output",
+        required=True,
+        help="출력 HWPX 파일",
+    )
+    s.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="검증·컴파일 report만 출력하고 파일은 게시하지 않음",
+    )
+    s.add_argument(
+        "--report",
+        action="store_true",
+        help="native compose report JSON 출력",
+    )
+    s.set_defaults(func=cmd_compose)
+
+    s = sub.add_parser(
+        "template",
+        help="TemplateSpec/Data v1 -> HWPX (native hwp template, atomic)",
+    )
+    s.add_argument("template", help="hwp-cli TemplateSpec v1 JSON/YAML 파일")
+    s.add_argument(
+        "--data",
+        required=True,
+        help="hwp-cli TemplateData v1 JSON/YAML 파일",
+    )
+    s.add_argument(
+        "-o",
+        "--output",
+        required=True,
+        help="출력 HWPX 파일",
+    )
+    s.add_argument(
+        "--template-format",
+        choices=["json", "yaml"],
+        default=None,
+        help="TemplateSpec 입력 형식 강제",
+    )
+    s.add_argument(
+        "--data-format",
+        choices=["json", "yaml"],
+        default=None,
+        help="TemplateData 입력 형식 강제",
+    )
+    s.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="검증·확장·compile만 수행하고 출력 게시 안 함",
+    )
+    s.add_argument(
+        "--report",
+        action="store_true",
+        help="value-free native preservation report JSON 출력",
+    )
+    s.set_defaults(func=cmd_template)
+
+    s = sub.add_parser(
+        "certify",
+        help="HWP/HWPX certification v1 (native atomic artifact directory)",
+    )
+    s.add_argument("file", help="인증할 HWP/HWPX 입력")
+    s.add_argument(
+        "--policy",
+        required=True,
+        help="hwp-certification-policy-v1 JSON/YAML",
+    )
+    s.add_argument(
+        "--report",
+        required=True,
+        help="native가 새로 만들 원자적 artifact 디렉터리",
+    )
+    s.set_defaults(func=cmd_certify)
+
+    s = sub.add_parser(
+        "corpus",
+        help="frozen structured corpus v1 (native run + independent report audit)",
+    )
+    s.add_argument(
+        "--manifest",
+        required=True,
+        help="frozen hwp-structured-corpus-v1 manifest",
+    )
+    s.add_argument(
+        "--report",
+        required=True,
+        help="native가 새로 만들 원자적 bounded report 디렉터리",
+    )
+    s.set_defaults(func=cmd_corpus)
+
     s = sub.add_parser("styled", help="HWPX 생성 (공문서 스타일 후처리 / --reference 슬롯 채우기)")
     s.add_argument("-o", "--output", required=True, help="출력 파일 경로")
     s.add_argument(
@@ -1441,16 +2763,22 @@ def _build_parser() -> argparse.ArgumentParser:
         default="gongmun",
         help="문서 프리셋: gongmun|gian=기안문, bogoseo|report=보고서",
     )
-    s.add_argument("--reference", help="양식 파일 (slot이 있으면 raw ZIP/XML 치환)")
+    s.add_argument(
+        "--reference",
+        help="양식 파일 (.hwpx 슬롯 치환, .hwp는 hwp-cli로 임시 변환 후 검증)",
+    )
     s.add_argument("--markdown", help="markdown 파일")
     s.add_argument("--json", dest="json", help="JSON 파일 (title/subtitle/blocks)")
     s.add_argument("--stdin-markdown", action="store_true")
     s.add_argument("--stdin-json", action="store_true")
-    s.add_argument("--header", help="머리글 텍스트")
+    s.add_argument(
+        "--header",
+        help="예약 플래그: 실제 HWPX 머리말 저작 미지원으로 지정 시 출력 전에 실패",
+    )
     s.add_argument(
         "--footer",
         default=None,
-        help="바닥글 템플릿 (# = 현재 쪽, ## = 전체 쪽). 기본 '- # / ## -'. 'none' 또는 빈 값으로 비활성화",
+        help="예약 플래그: 실제 HWPX 꼬리말 저작 미지원으로 지정 시 출력 전에 실패",
     )
     s.add_argument("--plain", action="store_true", help="스타일 후처리(표/제목) 생략")
     s.set_defaults(func=cmd_styled)

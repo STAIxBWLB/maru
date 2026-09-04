@@ -1,0 +1,42 @@
+{
+  "version": "1.0",
+  "styles": {
+    "heading": {
+      "keep_with_next": true
+    }
+  },
+  "sections": [
+    {
+      "header": {
+        "first": [
+          {
+            "type": "paragraph",
+            "runs": [
+              {
+                "type": "text",
+                "text": "첫 쪽 전용"
+              }
+            ]
+          }
+        ]
+      },
+      "page_number": {
+        "position": "bottom_center",
+        "format": "roman_lower",
+        "start": 1
+      },
+      "blocks": [
+        {
+          "type": "paragraph",
+          "keep_with_next": true,
+          "runs": [
+            {
+              "type": "text",
+              "text": "지원하지 않는 native 요청은 typed error로 실패해야 한다"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

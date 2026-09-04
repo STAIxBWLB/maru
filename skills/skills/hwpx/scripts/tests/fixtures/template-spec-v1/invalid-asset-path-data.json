@@ -1,0 +1,12 @@
+{
+  "version": "1.0",
+  "values": {
+    "content": [
+      {
+        "type": "image",
+        "path": "/tmp/TOPSECRET_CANARY.png",
+        "width_mm": 20
+      }
+    ]
+  }
+}

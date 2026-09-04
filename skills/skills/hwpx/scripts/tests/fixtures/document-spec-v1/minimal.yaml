@@ -1,0 +1,11 @@
+version: "1.0"
+metadata:
+  title: DocumentSpec v1 YAML fixture
+sections:
+  - id: main
+    blocks:
+      - type: paragraph
+        runs:
+          - type: text
+            text: YAML 구조화 문서
+            bold: true

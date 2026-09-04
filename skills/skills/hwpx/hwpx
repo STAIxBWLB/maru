@@ -11,6 +11,7 @@
 #   ./hwpx slots <template.hwpx> [--format text|json]
 #   ./hwpx edit <in.hwpx> <out.hwpx> --replace OLD NEW
 #   ./hwpx create <out.hwpx> [--markdown md | --title T --body B | --json j]
+#   ./hwpx certify <file.hwp[x]> --policy policy.json --report <new-directory>
 #   ./hwpx validate <file.hwpx>
 #   ./hwpx to-pdf <file.hwpx> [-o out.pdf]
 
@@ -89,9 +90,12 @@ Commands:
   fill-form  라벨-값 표 양식 채우기 (라벨|값 셀 / 헤더+데이터행, 서식 보존)
   guard      레퍼런스 대비 페이지 드리프트 게이트 (레이아웃 보존 검증)
   create     markdown/JSON으로 신규 HWPX 생성 (단순형)
-  styled     보기 좋은 HWPX 생성 (폰트·여백·줄간격·헤더/푸터·페이지번호)
+  compose    DocumentSpec v1/v2 JSON/YAML로 구조화 HWPX 생성 (native, atomic/report/dry-run)
+  template   TemplateSpec/Data v1 JSON/YAML로 typed data HWPX 생성 (native, atomic/report)
+  certify    package/policy/render/선택적 독립 import 자동 인증 (source-built native 필요)
+  styled     보기 좋은 HWPX 생성 (폰트·여백·줄간격·페이지번호; header/footer 저작 미지원)
   write-java markdown/텍스트 → HWPX (hwp-cli new 위임, 레거시 별칭)
-  validate   mimetype·필수엔트리·XML 검증 (hwp-cli)
+  validate   hwp-cli package/readability 검증 (부재 시 bounded lxml fallback)
   to-pdf     PDF 변환 (기본 hwp-cli 네이티브 선택가능; --engine soffice)
   render-pdf hwp-cli 렌더 → PDF (레이아웃 정확, .hwp/.hwpx 모두)
   render     페이지 이미지 렌더 png/svg (--pages/--dpi/--format; PDF는 render-pdf)
@@ -103,7 +107,7 @@ Commands:
   (수식은 render/to-pdf에서 자동 조판 — references/equation-syntax.md)
 
 Note: read/render/render-pdf/to-html/convert accept legacy binary .hwp (auto-delegates to hwp-cli).
-Native edit (hwp edit, .hwp/.hwpx 바이트보존): --create-field/--set-field, --create-bookmark,
+Native structural edit (semantic regeneration; byte identity 미보장): --create-field/--set-field, --create-bookmark,
   --create-hyperlink, --insert-image, --set-format, --set-align, --insert-para[-before],
   --delete-para, --delete-row, --set-meta, --verify. hwp new --set-meta. 상세: SKILL.md §4.
 Native table (v0.2.0, 병합 셀 표 지원): --add-col "표[:위치]", --delete-col "표:열",
@@ -126,12 +130,20 @@ Examples:
     ./hwpx fill templates/공문서_기본.hwpx --stdin-json -o /tmp/out.hwpx
 
   # 보기 좋은 문서 (hwp new --preset + 공문서 스타일 후처리)
-  ./hwpx styled --preset bogoseo --markdown report.md \\
-    --header "예시대학교" --footer "- # / ## -" -o styled.hwpx
+  ./hwpx styled --preset bogoseo --markdown report.md -o styled.hwpx
   # gongmun|gian=기안문, bogoseo|report=보고서. --plain은 후처리만 생략.
+  # --header/--footer는 예약 플래그이며 현재는 출력 전에 실패.
+
+  # native DocumentSpec v1/v2 구조화 저작
+  ./hwpx compose --spec document.json --output composed.hwpx --report
+  ./hwpx compose --spec document.json --output composed.hwpx --dry-run
+
+  # frozen certification v1. report는 존재하지 않는 새 디렉터리여야 함.
+  ./hwpx certify composed.hwpx --policy policy.json --report certification-report
 
   # 주어진 양식 따라가기 (기관 지정 양식 파일 있을 때)
   ./hwpx styled --reference 양식.hwpx --markdown 본문.md -o final.hwpx
+  # 출력은 대소문자 구분 없이 .hwpx만 허용. binary .hwp 입력은 strict 변환·검증 후 사용.
 
 References (references/):
   hwpx-structure.md        zip/OWPML 구조

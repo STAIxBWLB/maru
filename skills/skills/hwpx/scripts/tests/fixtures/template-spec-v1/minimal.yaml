@@ -1,0 +1,43 @@
+version: "1.0"
+variables:
+  title:
+    type: string
+    required: true
+  show_summary:
+    type: bool
+    default: true
+  items:
+    type: list
+    required: true
+    fields:
+      label:
+        type: string
+        required: true
+source:
+  mode: compose
+  document:
+    version: "1.0"
+    sections:
+      - blocks:
+          - node: if
+            condition: /values/show_summary
+            region: summary
+            then:
+              - type: paragraph
+                runs:
+                  - type: text
+                    text:
+                      node: value
+                      pointer: /values/title
+                      as: text
+          - node: each
+            items: /values/items
+            region: items
+            body:
+              - type: paragraph
+                runs:
+                  - type: text
+                    text:
+                      node: value
+                      pointer: /item/label
+                      as: text

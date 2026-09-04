@@ -5,7 +5,7 @@
 멱등성(2회 적용 byte-stable), --plain 시 순정과 동일.
 
 Hermetic: pytest tmp dir. hwp-cli 부재 시 skip.
-Run: ~/.maru/env/.venv/bin/python3 -m pytest scripts/tests/test_style_pass.py
+Run: make test-hwpx-skill
 """
 from __future__ import annotations
 

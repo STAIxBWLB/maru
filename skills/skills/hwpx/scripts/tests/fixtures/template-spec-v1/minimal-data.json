@@ -1,0 +1,14 @@
+{
+  "version": "1.0",
+  "values": {
+    "title": "TemplateSpec v1 보고서",
+    "items": [
+      {
+        "label": "첫 번째 항목"
+      },
+      {
+        "label": "두 번째 항목"
+      }
+    ]
+  }
+}

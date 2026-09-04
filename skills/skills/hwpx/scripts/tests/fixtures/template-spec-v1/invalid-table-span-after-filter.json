@@ -1,0 +1,90 @@
+{
+  "version": "1.0",
+  "variables": {
+    "keep_second_row": {
+      "type": "bool",
+      "required": true
+    }
+  },
+  "source": {
+    "mode": "compose",
+    "document": {
+      "version": "1.0",
+      "sections": [
+        {
+          "blocks": [
+            {
+              "type": "table",
+              "width_mm": 100,
+              "columns": [
+                {
+                  "width_mm": 50
+                },
+                {
+                  "width_mm": 50
+                }
+              ],
+              "rows": [
+                {
+                  "cells": [
+                    {
+                      "row_span": 2,
+                      "blocks": [
+                        {
+                          "type": "paragraph",
+                          "runs": [
+                            {
+                              "type": "text",
+                              "text": "병합"
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "blocks": [
+                        {
+                          "type": "paragraph",
+                          "runs": [
+                            {
+                              "type": "text",
+                              "text": "첫 행"
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "node": "if",
+                  "condition": "/values/keep_second_row",
+                  "region": "second_row",
+                  "then": [
+                    {
+                      "cells": [
+                        {
+                          "blocks": [
+                            {
+                              "type": "paragraph",
+                              "runs": [
+                                {
+                                  "type": "text",
+                                  "text": "둘째 행"
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

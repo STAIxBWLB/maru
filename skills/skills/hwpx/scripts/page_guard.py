@@ -18,7 +18,6 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-import zipfile
 from dataclasses import dataclass, asdict
 from io import BytesIO
 from pathlib import Path
@@ -26,6 +25,7 @@ import re
 from typing import List, Tuple
 
 from lxml import etree
+import hwpx_xml as hx
 
 NS = {
     "hp": "http://www.hancom.co.kr/hwpml/2011/paragraph",
@@ -47,7 +47,7 @@ class Metrics:
 
 
 def _section_entry_names(hwpx_path: Path) -> List[str]:
-    with zipfile.ZipFile(hwpx_path, "r") as zf:
+    with hx.open_bounded_zip(hwpx_path) as zf:
         names = [n for n in zf.namelist() if _SECTION_RE.search(n)]
     return sorted(names, key=lambda n: int(_SECTION_RE.search(n).group(1)))
 
@@ -69,8 +69,11 @@ def collect_metrics(hwpx_path: Path) -> Metrics:
     text_char_total_nospace = 0
     paragraph_text_lengths: List[int] = []
 
-    with zipfile.ZipFile(hwpx_path, "r") as zf:
-        section_bytes = [zf.read(name) for name in section_names]
+    with hx.open_bounded_zip(hwpx_path) as zf:
+        section_bytes = [
+            hx.read_bounded_entry(zf, name)
+            for name in section_names
+        ]
 
     for data in section_bytes:
         root = etree.parse(BytesIO(data)).getroot()

@@ -1,0 +1,18 @@
+{
+  "version": "2.0",
+  "document": {
+    "version": "1.0",
+    "sections": [{ "blocks": [{ "type": "paragraph", "runs": [{ "type": "text", "text": "anchor" }] }] }]
+  },
+  "visuals": [
+    {
+      "id": "transparent",
+      "location": { "section": 0, "paragraph": 0 },
+      "policy": { "hwpx": "force_visual_fallback" },
+      "alt": "transparent SVG",
+      "width_mm": 20,
+      "height_mm": 20,
+      "content": { "type": "svg", "path": "transparent.svg" }
+    }
+  ]
+}

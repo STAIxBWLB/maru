@@ -1,0 +1,34 @@
+{
+  "version": "1.0",
+  "variables": {
+    "title": {
+      "type": "string",
+      "required": true
+    }
+  },
+  "source": {
+    "mode": "compose",
+    "document": {
+      "version": "1.0",
+      "sections": [
+        {
+          "blocks": [
+            {
+              "type": "paragraph",
+              "runs": [
+                {
+                  "type": "text",
+                  "text": {
+                    "node": "value",
+                    "pointer": "/values/title",
+                    "as": "text"
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

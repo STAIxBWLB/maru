@@ -30,6 +30,15 @@ RELEASE_TAG ?= v$(VERSION)
 MACOS_RELEASE_REPO ?= STAIxBWLB/maru
 TAURI_SIGNING_PRIVATE_KEY_FILE ?= $(HOME)/.tauri/maru-updater.key
 TAURI_SIGNING_PRIVATE_KEY_PASSWORD_FILE ?= $(HOME)/.tauri/maru-updater.key.password
+HWPX_TEST_BASE_PYTHON ?= python3.12
+HWPX_TEST_VENV := .cache/hwpx-skill-venv
+HWPX_TEST_REQUIREMENTS := skills/skills/hwpx/requirements-test.txt
+HWPX_TEST_STAMP := $(HWPX_TEST_VENV)/.requirements-installed
+HWPX_EXPECT_HWP_VERSION ?=
+HWPX_REQUIRE_COMPOSE ?= 0
+HWPX_REQUIRE_TEMPLATE ?= 0
+HWPX_REQUIRE_CERTIFY ?= 0
+HWPX_REQUIRE_CORPUS ?= 0
 
 # ---------------------------------------------------------------------------
 # Help (default target)
@@ -189,12 +198,32 @@ skills-doctor-json: ## Run Maru skills doctor and print JSON
 skills-dirty: ## List dirty Maru skills as JSON
 	$(CARGO) run --manifest-path $(TAURI_DIR)/Cargo.toml --bin maru-cli -- skills dirty --json
 
+.PHONY: test-hwpx-skill
+test-hwpx-skill: $(HWPX_TEST_STAMP) ## Run live HWPX skill tests in the pinned Python environment
+	HWPX_REQUIRE_NATIVE=1 \
+	HWPX_EXPECT_HWP_VERSION="$(HWPX_EXPECT_HWP_VERSION)" \
+	HWPX_REQUIRE_COMPOSE="$(HWPX_REQUIRE_COMPOSE)" \
+	HWPX_REQUIRE_TEMPLATE="$(HWPX_REQUIRE_TEMPLATE)" \
+	HWPX_REQUIRE_CERTIFY="$(HWPX_REQUIRE_CERTIFY)" \
+	HWPX_REQUIRE_CORPUS="$(HWPX_REQUIRE_CORPUS)" \
+	$(HWPX_TEST_VENV)/bin/python -m pytest -q skills/skills/hwpx/scripts/tests
+
+$(HWPX_TEST_STAMP): $(HWPX_TEST_REQUIREMENTS)
+	@command -v $(HWPX_TEST_BASE_PYTHON) >/dev/null || { \
+		printf "error: %s is required for the HWPX skill gate\\n" "$(HWPX_TEST_BASE_PYTHON)" >&2; \
+		exit 1; \
+	}
+	@mkdir -p .cache
+	$(HWPX_TEST_BASE_PYTHON) -m venv --clear $(HWPX_TEST_VENV)
+	$(HWPX_TEST_VENV)/bin/python -m pip install --disable-pip-version-check -r $(HWPX_TEST_REQUIREMENTS)
+	@touch $(HWPX_TEST_STAMP)
+
 .PHONY: skills-verify
-skills-verify: ## Validate skills/ manifest, frontmatter, and tracked inventory
+skills-verify: test-hwpx-skill ## Validate live skill tests, manifest, frontmatter, and tracked inventory
 	$(NODE) scripts/skills-bundle.mjs verify
 
 .PHONY: skills-package
-skills-package: ## Package skills bundle + metadata into dist-skills/ (REVISION=<n>)
+skills-package: test-hwpx-skill ## Package verified skills bundle + metadata into dist-skills/ (REVISION=<n>)
 	$(NODE) scripts/skills-bundle.mjs package --revision $(or $(REVISION),0)
 
 .PHONY: diff-check
@@ -204,6 +233,7 @@ diff-check: ## Check working tree diff for whitespace errors
 .PHONY: release-preflight
 release-preflight: ## Release preflight: diff, verify, CLI smoke, e2e, and debug no-bundle Tauri build
 	$(MAKE) diff-check
+	$(MAKE) skills-verify
 	$(MAKE) verify
 	$(MAKE) test-cli
 	$(MAKE) cli-smoke

@@ -1,0 +1,17 @@
+{
+  "version": "1.0",
+  "values": {
+    "content": [
+      {
+        "type": "paragraph",
+        "style": "TOPSECRET_CANARY",
+        "runs": [
+          {
+            "type": "text",
+            "text": "본문"
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "version": "1.0",
+  "variables": {
+    "content": {
+      "type": "rich_blocks",
+      "required": true
+    }
+  },
+  "source": {
+    "mode": "compose",
+    "document": {
+      "version": "1.0",
+      "sections": [
+        {
+          "blocks": [
+            {
+              "node": "value",
+              "pointer": "/values/content",
+              "as": "native",
+              "region": "content"
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

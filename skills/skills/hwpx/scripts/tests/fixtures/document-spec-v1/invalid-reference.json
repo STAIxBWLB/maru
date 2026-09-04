@@ -1,0 +1,19 @@
+{
+  "version": "1.0",
+  "sections": [
+    {
+      "blocks": [
+        {
+          "type": "paragraph",
+          "style": "missing-style",
+          "runs": [
+            {
+              "type": "text",
+              "text": "undefined style must fail"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

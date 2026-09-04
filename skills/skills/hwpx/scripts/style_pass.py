@@ -15,7 +15,6 @@ hwp-cli `new`가 생성한 HWPX(또는 임의 HWPX)에 workspace corpus 관례�
 from __future__ import annotations
 
 import unicodedata
-import zipfile
 from copy import deepcopy
 from pathlib import Path
 
@@ -458,11 +457,16 @@ def apply_default_style(
     src = Path(path)
     dst = Path(out) if out is not None else src
     sec_names = hx.section_entry_names(src)
-    with zipfile.ZipFile(src) as z:
+    with hx.open_bounded_zip(src) as z:
         if "Contents/header.xml" not in z.namelist():
             raise ValueError(f"header.xml 없음 — HWPX 아님: {src}")
-        head_tree = hx.parse_xml(z.read("Contents/header.xml"))
-        sec_trees = {n: hx.parse_xml(z.read(n)) for n in sec_names}
+        head_tree = hx.parse_xml(
+            hx.read_bounded_entry(z, "Contents/header.xml")
+        )
+        sec_trees = {
+            n: hx.parse_xml(hx.read_bounded_entry(z, n))
+            for n in sec_names
+        }
 
     head_root = head_tree.getroot()
     stats = {

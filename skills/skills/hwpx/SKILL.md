@@ -44,6 +44,10 @@ HWPX는 한/글(Hancom Office)의 **XML 기반 공식 포맷**이며, 2021년부
 | 읽기 (markdown) | `./hwpx read <file.hwpx>` (text/md는 hwp-cli `cat` 우선·lxml 폴백) |
 | 메타 요약 | `./hwpx summary <file.hwpx>` |
 | 구조화 JSON | `./hwpx read <file.hwpx> --format json` |
+| **구조화 문서 저작 (native capability 필요)** | `./hwpx compose --spec <document-spec-v1-or-v2.json|yaml> --output <out.hwpx> [--dry-run] [--report]` |
+| **typed data 문서 저작 (native capability 필요)** | `./hwpx template <template-spec-v1.json|yaml> --data <template-data-v1.json|yaml> --output <out.hwpx> [--report]` |
+| **자동 인증 (source-built native capability 필요)** | `./hwpx certify <file.hwp[x]> --policy <policy.json|yaml> --report <new-directory>` |
+| **구조 문서 corpus (source-built native capability 필요)** | `./hwpx corpus --manifest <structured-v1/manifest.json> --report <new-directory>` |
 | **보기 좋은 생성 (양식 없음)** | `./hwpx styled --preset gongmun|bogoseo --markdown <md> -o <out>` (`gian|report`도 허용, `--plain`은 후처리만 생략) |
 | **양식 따라가기** | `./hwpx styled --reference <양식.hwpx> --markdown <md> -o <out>` |
 | **기존 파일 표/제목 다듬기** | `./hwpx beautify <file.hwpx> [-o out] [--header-fill "#D9E2F3"]` |
@@ -69,7 +73,7 @@ HWPX는 한/글(Hancom Office)의 **XML 기반 공식 포맷**이며, 2021년부
 | unpack → XML 직접 편집 | `./hwpx unpack <file> <dir>` → `./hwpx repack <dir> <out>` |
 | 단순 신규 생성 | `./hwpx create <out> --title T --body "1줄\n2줄"` (→ hwp-cli new) |
 | markdown → HWPX (레거시 별칭) | `./hwpx write-java <out> --markdown <md>` (→ hwp-cli new) |
-| 검증 | `./hwpx validate <file.hwpx>` |
+| 검증 | `./hwpx validate <file.hwpx>` (hwp-cli 구조 검증 우선, 부재 시 bounded lxml fallback) |
 | PDF 변환 | `./hwpx to-pdf <file.hwpx>` (기본 hwp-cli 네이티브 **텍스트 선택가능** PDF; `--engine soffice` 폴백) |
 
 경로 기준: `~/.maru/skills/hwpx/hwpx`
@@ -115,7 +119,9 @@ hwpx 열의 불릿 사다리는 **목표 계약**이다. 현재 릴리스 동작
 
 ## 1. 보기 좋은 문서 생성 (`styled`) — 권장 기본 경로
 
-사용자가 공문서·결재문서·사업계획서·보고서를 "**만들어달라**"고 요청할 때의 기본 명령. `docx` 스킬처럼 폰트·여백·줄간격·헤더/푸터·페이지번호가 설정된 완성형 HWPX를 생성한다.
+사용자가 공문서·결재문서·사업계획서·보고서를 "**만들어달라**"고 요청할 때의 기본 명령.
+프리셋이 지원하는 폰트·여백·줄간격·페이지 번호와 공문서 스타일 후처리를 적용한다.
+머리말·꼬리말 신규 저작은 현재 지원하지 않으며, 필수 요청이면 출력 전에 실패한다.
 
 ### 1-A. 양식 파일이 주어진 경우 (`--reference`)
 
@@ -125,27 +131,228 @@ hwpx 열의 불릿 사다리는 **목표 계약**이다. 현재 릴리스 동작
 ./hwpx styled \
   --reference 2026_사업계획서_양식.hwpx \
   --markdown 사업계획.md \
-  --footer "- # / ## -" \
   -o 최종_사업계획서.hwpx
 ```
 
-양식이 `.hwp` (바이너리)이면 먼저 Hancom Office에서 열어 `.hwpx`로 저장해달라 요청하거나, `hwp convert 양식.hwp -o 양식.hwpx --to hwpx`로 변환 후 사용.
+`-o` 출력 경로는 대소문자 구분 없이 `.hwpx` 확장자만 허용한다. `.hwp`, 다른 확장자,
+참조 파일과 같은 파일을 가리키는 경로, 심볼릭 링크, 링크 수가 1보다 큰 기존 파일은
+staging 전에 거부한다. 생성 시작 시 목적지의 존재 여부와 device/inode/link-count/mode를
+기록하고 publish 직전 다시 비교하므로 중간 생성·교체·hard-link 추가도 출력 전에 실패한다.
+
+양식이 `.hwp`(바이너리)이면 resolved hwp-cli의
+`hwp convert --to hwpx --strict --preserve-layout`으로 private sibling staging 디렉터리에서
+자동 변환한다. `--strict`가 보존 불가 `DROP:` 경고를 실패로 처리한다. 변환 파일과 슬롯을
+채운 최종 staging 파일은 모두 bounded 로컬 package 검증과 실제 resolved
+`hwp validate --json`의 `format=hwpx`, `valid=true`를 통과해야 한다.
+`--preserve-layout`은 무수정 변환의 줄 배치 캐시 보존 옵션이며 일반적인 무손실 보장을
+추가하지 않는다. 변환·검증 경고는 stderr에 표면화하며 실패하면 원본과 기존 출력을 보존한다.
 
 ### 1-B. 양식이 없는 경우 (`styled`)
 
 양식 파일이 없으면 `styled --markdown`으로 생성한다. hwp-cli `new --preset`으로 문서 기본 스타일을 만든 뒤 공문서 style_pass 후처리(표 칼럼 폭 비례, 헤더행 음영, 제목 가운데)를 적용한다.
 
 ```bash
-./hwpx styled --preset gongmun --markdown 기안문.md \
-  --header "예시대학교 AI학과" \
-  --footer "- # / ## -" \
-  -o out.hwpx
+./hwpx styled --preset gongmun --markdown 기안문.md -o out.hwpx
 ```
 
 - `gongmun`과 `gian`은 hwp-cli의 `gian` 프리셋(기안문·공문), `bogoseo`와 `report`는 `report` 프리셋(보고서·사업계획서)에 매핑됨.
 - `--plain`은 style_pass 후처리만 생략하며 preset은 그대로 적용됨.
 - `--reference` 경로는 참조 양식을 보존하므로 preset을 적용하지 않음.
 - preset 생성에는 `hwp new --preset` 지원 바이너리(hwp-cli v0.4.1 이상)가 필요함. 자동 탐색은 지원 바이너리 중 최고 버전을 선택하며, `HWP_CLI` 명시 지정본이 미지원이면 다른 설치본으로 조용히 우회하지 않고 갱신 방법을 안내함.
+
+### 1-C. 구조화 문서 spec (`compose`)
+
+섹션·스타일·머리말/꼬리말·표·그림·수식 등을 versioned JSON/YAML로 조합하는 경로는
+`hwp-cli`의 DocumentSpec v1/v2를 그대로 사용한다. v2는 v1 문서를 `document`에 중첩하고
+타깃별 정책을 가진 접근 가능한 visual을 추가한다.
+
+```bash
+./hwpx compose --spec document.json --output out.hwpx --report
+./hwpx compose --spec document.json --output planned.hwpx --dry-run
+```
+
+Maru는 schema를 복제하거나 알 수 없는 필드를 Markdown으로 낮추지 않는다. 실제
+`hwp compose --help`에서 positional `SPEC`, `-o/--output`, `--dry-run`, `--report`를 확인한
+native 바이너리만 사용하며,
+명시한 `HWP_CLI`가 미지원이면 다른 설치본으로 우회하지 않고 출력 전에 실패한다. 생성은
+출력과 같은 부모의 mode `0700` private staging 디렉터리에서 수행한다. bounded package
+검증과 실제 `hwp validate --json`의 `format=hwpx`, `valid=true`를 통과한 뒤에만 기존 mode를
+승계해 atomic publish한다. compose와 native validate는 capability 확인에서 선택한 동일
+binary를 사용한다. native 실패, timeout, malformed package, validation 실패,
+destination race, malformed report에서는 기존 출력을 보존한다. `--dry-run`은 private 임시
+경로만 target hint로 사용하고 destination과 그 부모를 만들거나 변경하지 않는다.
+
+DocumentSpec의 정확한 version 값, 필수 필드, block 종류와 제약은 hwp-cli schema가 SSOT다.
+이 문서나 Python wrapper에서 독립 schema를 추측하지 않는다. 현재 frozen contract는 다음과 같다.
+
+- normative schema: `schemas/document-spec-v1.schema.json`
+  (`$id=https://hwp-cli.dev/schemas/document-spec-v1.schema.json`,
+  SHA-256 `1607cb19c9068306da8c76ba6ebee4ae8e5c6d650490fc0737dadd1a08b9ed1b`)
+- root: `version: "1.0"`, `sections` 필수. `metadata`, `page`, named `styles`, named `lists`
+- section: page override, default/first/odd/even header/footer, page number, ordered blocks
+- block: `paragraph`, `table`, `image`, `equation`, `field`, `break`
+- paragraph run: `text`, `field`, `equation`, `image`, `line_break`
+- 표: left-to-right column widths, cell `col_span`/`row_span`, cell 내부 nested blocks
+- 단위: 물리 치수 `*_mm`, 글꼴·문단 간격 `*_pt`, 줄높이 percent, 색 `#RRGGBB`,
+  list use-site level은 0-based
+- 모든 object는 closed contract이며 unknown field, 잘못된 reference, 지원하지 않는 값·asset은
+  fallback 없이 typed error로 실패
+
+DocumentSpec v2의 frozen visual contract:
+
+- normative schema: `schemas/document-spec-v2.schema.json`
+  (`$id=https://hwp-cli.dev/schemas/document-spec-v2.schema.json`,
+  SHA-256 `d14b6f7bc8a3753a8a2c0e39431ac20ae86be38ceffdf649c804dec3905be746`)
+- normative report: `schemas/document-report-v2.schema.json`
+  (`$id=https://hwp-cli.dev/schemas/document-report-v2.schema.json`,
+  SHA-256 `0474ac0a6c3c5cfff4d33bd11259b26169a676a078be5952ab83e2839f54090b`)
+- content: raster `image`, closed geometry-only `svg`, HWPX native `text_box`; placement는
+  `inline`만 지원
+- `alt` 필수. embedded description은 distinct title이 있으면 `title + "\n\n" + alt`,
+  아니면 trimmed alt. report에는 title·alt·description·asset/output path를 기록하지 않음
+- policy: 타깃별 `required_native`(기본), `prefer_native`, `force_visual_fallback`.
+  deprecated global `--allow-visual-fallback`은 v1 호환 전용이며 v2와 함께 사용하면
+  `policy_conflict`
+- HWP/HWPX raster embedding은 native. crop/rotation은 명시한 정책에서 deterministic PNG.
+  SVG는 script·text·font·`<path>`·transform·외부 참조를 거부하는 closed subset을 sanitize한 뒤
+  두 타깃 모두 PNG로만 삽입. fully transparent 결과는 실패
+- HWPX `text_box`는 native, HWP `text_box`는 unsupported. 차트·다이어그램·임의 도형·floating·
+  SVG text는 v2 외부이며 묵시적 근사 없음
+
+### 1-D. typed data template (`template`)
+
+반복되는 공문·보고서·명단을 수작업 없이 만들 때는 TemplateSpec/Data v1을 사용한다.
+Maru는 schema나 expansion을 Python으로 다시 구현하지 않고 같은 native executor에 위임한다.
+
+```bash
+./hwpx template template.json \
+  --data data.json \
+  --output out.hwpx \
+  --report
+
+./hwpx template template.yaml \
+  --data data.yaml \
+  --output planned.hwpx \
+  --dry-run
+```
+
+실제 `hwp template --help`에서 positional `TEMPLATE`, `--data`, `-o/--output`,
+`--dry-run`, `--report`를 모두 확인한 바이너리만 사용한다. 명시한 `HWP_CLI`가 이 surface를
+제공하지 않으면 다른 설치본으로 우회하지 않고 출력 전에 실패한다. 현재 Maru release pin은
+이 capability를 필수로 선언하지 않으므로, source 구현과 설치된 release capability를 구분한다.
+
+TemplateSpec은 다음만 허용한다.
+
+- 변수: `string`, `number`, `bool`, `date`, `enum`, `list`, `rich_blocks`
+- 정책: `required`, typed `default`, 길이·범위·정규식·항목 수 제약
+- AST: exact JSON Pointer 기반 `value`, boolean `if`, bounded `each`
+- source: 신규 합성 `compose`, 참조 보존 `reference_hwpx`, 명시적 재생성
+  `reference_regenerate`
+
+암묵적 YAML/JSON type coercion, `${...}`·임의 표현식·동적 속성 조회·include·macro·실행 코드는
+없다. data가 image path 같은 asset 선택권을 갖지 못하며, asset은 TemplateSpec 쪽 정적
+DocumentSpec에만 둔다. unknown field, prototype 예약 key, 경로 이탈·symlink reference,
+10,000건을 넘는 단일 반복, 전체 100,000회 반복, 16 MiB를 넘는 expanded JSON은 실패한다.
+
+`reference_hwpx`는 scalar를 HWP paragraph namespace의 text placeholder 또는 단일 simple
+text field에만 바인딩한다. placeholder가 attribute·control metadata·foreign namespace
+text에 있거나 field가 표·그림·수식·중첩 control을 포함하면 실패한다. 대상이 없는 section과
+그 밖의 package entry는 압축 bytes와 ZIP metadata를 보존하며, 선택된 text region만 바꾼다.
+조건·반복 같은 구조 변경은 이 모드로 낮추지 않고, `reference_regenerate`와
+`strict_unsupported_objects: true`가 있어야 한다.
+
+생성은 출력 옆 mode `0700` private staging에서 수행하고, 같은 native binary의 package·semantic
+검증 뒤에만 기존 mode를 승계해 atomic publish한다. 시작 후 destination 교체, symlink·hardlink,
+native failure, timeout, malformed report, 후속 validation 실패에서는 기존 출력을 보존한다.
+`--dry-run`은 파일을 게시하지 않으며 compose/regeneration의 `semantic_validation`과
+`package_validation`을 `not_run`으로 명시한다. reference package dry-run은 실제 patch stage를
+검증하므로 두 상태가 `passed`다.
+
+`--report`는 data 값을 싣지 않고 입력·출력 SHA-256, 제공/default 변수 이름, bounded expansion
+count와 region, mode, `passed|not_run` validation status를 반환한다. Maru는 private staging
+경로를 최종 destination으로 정규화한 뒤 출력하며 native 오류의 data-derived message는 버리고
+code와 JSON Pointer만 제한적으로 전달한다.
+
+frozen native contract:
+
+- `schemas/template-spec-v1.schema.json`
+  (`$id=https://hwp-cli.dev/schemas/template-spec-v1.schema.json`,
+  SHA-256 `590b9ac7dd2b30d1f8fafc4e087adf3117a831f9e38de39267a102141c549039`)
+- `schemas/template-data-v1.schema.json`
+  (`$id=https://hwp-cli.dev/schemas/template-data-v1.schema.json`,
+  SHA-256 `484bc86d01dcba17122507fad250791f88235be4dd933c12c721ef7b46eea298`)
+- `schemas/template-report-v1.schema.json`
+  (`$id=https://hwp-cli.dev/schemas/template-report-v1.schema.json`,
+  SHA-256 `aa2f011e02a52b29d07a458f84875e512cf1b1c80e6f2edea40ce756d436f705`)
+
+### 1-E. 자동 인증 (`certify`)
+
+`certify`는 package·repeat import·정책 규칙·native render와 선택적 독립 import를 한 번에
+검사하고, native가 원자적으로 게시한 새 artifact directory를 반환한다.
+
+```bash
+./hwpx certify output.hwpx \
+  --policy policy.json \
+  --report certification-report
+```
+
+report 경로는 존재하지 않아야 한다. Maru는 native stdout/stderr를 인증 결과로 신뢰하거나
+그대로 전달하지 않는다. `report.json`, `manifest.json`, 페이지 PNG와 선택적 oracle PDF의
+closed contract, bytes/SHA-256, manifest self-entry, 전체 artifact tree(최대 259 files),
+symlink·hardlink, report 상태와 native exit code의 일치를 모두 확인한 뒤 정규화된 report만
+stdout에 출력한다. `passed`는 exit 0, `partial`·`failed`는 native nonzero를 그대로 보존한다.
+malformed/missing report는 exit 2다.
+
+현재 이 capability는 source workspace의 미출시 구현이다. Maru의 배포 pin인 hwp-cli v0.4.1에는
+`certify`가 없으므로 실제 `hwp certify --help`의 frozen surface를 확인한 source build 또는 이후
+release를 `HWP_CLI`로 지정해야 한다. 명시한 바이너리가 미지원이면 다른 설치본으로 우회하지
+않는다.
+
+frozen certification v1 schema SHA-256:
+
+- policy: `b3ba583032d12385b8cfe6994d6736bd8c22138c020465d1d3e01d66505a0cca`
+- report: `438a34903c99385cdc7791e57991b397171912d8ce0991d68e3f03e0b2b39681`
+- oracle result: `caa5523a7259048632e706a77dabc448d64c8482a1f3e6fbfccc19764b0f2086`
+
+oracle `disabled` 또는 optional unavailable의 `passed/native_only`는 native 알고리즘 범위의
+통과이며 한컴 렌더링 parity나 독립 import 통과를 뜻하지 않는다. 독립 import까지 성공한
+`passed/native_plus_independent_import`만 그 범위를 주장할 수 있다. 현재 공개된 trusted oracle
+image는 없으며 required oracle은 운영자가 고정 digest/runtime/extension attestation을 제공하지
+않으면 `partial`과 nonzero로 종료한다.
+
+### 1-F. 구조 문서 자동 corpus (`corpus`)
+
+`corpus`는 자체 작성한 7개 대표 문서 유형을 HWPX/HWP로 각각 두 번 생성하고 package reopen,
+target-neutral semantic digest, native certification, 페이지 PNG와 typed issue/font identity를
+자동 대조한다.
+
+```bash
+./hwpx corpus \
+  --manifest /path/to/hwp-cli/corpus/structured-v1/manifest.json \
+  --report corpus-report
+```
+
+report 경로는 존재하지 않아야 한다. Maru는 ambient `HWP_FONT_DIR`/fontconfig override를 제거하고,
+native가 manifest에 hash-pinned OFL 폰트를 직접 snapshot하도록 한다. 이후 `summary.json`,
+`artifacts.json`, 14개 문서, 28개 certification tree의 closed shape, 전체 bytes/SHA-256,
+symlink·hardlink·reparse point, 경로·파일·트리 제한, 두 실행 및 nested certification 상관관계,
+native exit code를 독립 검증한다. 수작업 확인이나 외부 네트워크는 성공 조건이 아니다.
+
+이 corpus는 bounded representative smoke이며 7개 category 이름이 해당 유형의 모든 기능 지원을
+뜻하지 않는다. advanced drawing/chart, comments/revisions/security control, 독립 office import와
+한컴 parity를 주장하지 않으며 HWP5의 모호한 strike/underline 표현과 target-specific raw payload는
+공통 semantic digest에서 제외 사실을 machine limitations로 공개한다.
+
+현재 배포 pin v0.4.1에는 `corpus`가 없다. 실제
+`Usage: hwp corpus --manifest <MANIFEST> --report <REPORT>` surface를 제공하는 source build 또는 이후
+release를 `HWP_CLI`로 지정해야 하며, 명시한 바이너리가 미지원이면 다른 설치본으로 우회하지 않는다.
+
+frozen structured corpus v1 SHA-256:
+
+- manifest: `03ef22e59a45a03d49de5e611f95edebb268a76665feaa63e8fc5d2e92f30dc5`
+- manifest schema: `b8057de94b15deebceb58f014071d57d96fd9bb61603d9cbc2fd94a4398b3b3a`
+- run schema: `416466f0c197ec31c64ed76035d3a7b34dbb694c08c459605c9eccfface22706`
+- artifacts schema: `3f9effe9df788304ae39bd3f1f460a40bf4b979016d5bc4c5599db386d577c23`
 
 ### 입력 markdown 규칙
 
@@ -179,12 +386,13 @@ hwpx 열의 불릿 사다리는 **목표 계약**이다. 현재 릴리스 동작
 
 ### 머리글 / 바닥글 (header / footer)
 
-- `--header "텍스트"` — 상단 머리글 (가운데 정렬)
-- `--footer "템플릿"` — 하단 바닥글. `#`는 현재 쪽, `##`는 전체 쪽수 placeholder
-- 기본 footer: `- # / ## -` (예: "- 1 / 3 -")
-- footer 끄기: `--footer ""`
+`--header`와 `--footer`는 향후 structured header/footer 저작을 위한 예약 플래그다. 현재는
+비참조·`--reference` 경로 모두 실제 HWPX 머리말/꼬리말을 만들지 못하므로, 옵션을 지정하면
+본문에 대신 넣거나 무시하지 않고 출력 전에 exit 2로 실패한다. 머리말·꼬리말이 필수이면 이미
+해당 구조를 가진 참조 양식을 수정 없이 보존하는 슬롯 채우기만 사용한다.
 
-**페이지 번호 동작**: `#` / `##`는 플레이스홀더다. Hancom Office에서 파일을 연 후 **삽입 → 쪽 번호** 메뉴로 변환하면 자동 갱신된다. LibreOffice+H2Orestart로 렌더하면 리터럴 "#" / "##"로 표시되므로 PDF 변환 전에는 Hancom에서 한 번 열어 변환을 권장.
+페이지 번호는 `hwp new --preset`이 생성하는 native 페이지 번호만 지원한다. `#`/`##`
+문자열 footer 변환 절차는 지원하지 않는다.
 
 ### JSON 입력
 
@@ -211,12 +419,22 @@ stdin으로도 가능: `... | ./hwpx styled --preset gongmun --stdin-json -o out
 
 ### 폰트 커스터마이징 / 기관 양식 준수
 
-프리셋 폰트가 기관 요건에 맞지 않으면 두 가지 경로:
+프리셋 폰트가 기관 요건에 맞지 않으면 다음 경로를 사용한다:
 
 1. **양식 따라가기** (권장): 기관의 정식 양식 `.hwpx`에 `{{본문}}`, `{{제목}}` 같은 slot을 넣고 `--reference`로 넘김
-2. **생성 후 수정**: Hancom Office에서 열어 `서식 → 글자 모양`으로 수정
 
-현재 hwp-cli `new` 생성 경로는 단락 중심 MVP다. 정교한 표·이미지·기관별 폰트/여백은 기관 양식 파일을 기준으로 slot 치환하거나 Hancom Office에서 최종 검수한다.
+현재 hwp-cli `new` 생성 경로는 단락 중심 MVP다. 정교한 표·이미지·기관별 폰트/여백을
+현재 프리셋이나 참조 양식으로 자동 충족할 수 없으면 에이전트가 명령 실행 전에 요청을
+preflight하고 지원 불가를 명시적으로 알려야 한다. 현재 CLI에는 요청 요구사항과 실제 능력을
+대조해 자동 거부하는 capability schema가 없다.
+
+비참조 `styled`도 출력과 같은 부모의 mode `0700` private staging 디렉터리에서 `hwp new`,
+선택적 style pass, bounded 로컬 package 검증, 실제 `hwp validate --json`을 모두 통과한 뒤
+staged 파일을 fsync하고 `os.replace` 한 번으로 publish한다. 실패 시 기존 목적지는 유지한다.
+기존 목적지를 교체하면 기존 permission mode를 보존하고, 새 목적지는 프로세스 umask를
+따른다. 목적지 identity는 staging 직전과 replace 직전에 다시 검사한다. replace 이후 부모
+디렉터리 fsync가 실패하면 이미 게시된 성공 결과를 실패로 되돌릴 수 없으므로 stderr
+durability 경고만 반환한다.
 
 ## 2. 템플릿 채우기 (`fill`)
 
@@ -233,7 +451,8 @@ stdin으로도 가능: `... | ./hwpx styled --preset gongmun --stdin-json -o out
 
 > `templates/사업계획서_기본.hwpx`의 대항목 번호는 ASCII `I./II./III.`로 되어 있으나, 제출용
 > 한국어 공식 문서는 전각 로마자 `Ⅰ./Ⅱ./Ⅲ.`(U+2160 계열)를 쓴다. 템플릿 재생성은 별도
-> 후속 과제이며, 이 템플릿으로 제출본을 만들 때는 해당 번호를 전각으로 바꿔 채운다.
+> 후속 과제다. 전각 로마자가 필수인 제출본에는 이 템플릿을 성공 경로로 사용하지 않고,
+> 해당 번호를 이미 가진 참조 양식이나 지원되는 신규 생성 경로를 사용한다.
 
 ### 공통 maru 명
 
@@ -333,9 +552,11 @@ hwp cat report.hwpx --format markdown --with-segments  # md + 추출근거 좌�
 lxml 엔진이 `<hp:t>` 텍스트를 연결해 치환하므로 **run 경계를 넘나드는 텍스트도 매칭**되고, 수정 단락의 `linesegarray`는 자동 정리된다(이전의 "한 run으로 저장" 제약 해소).
 
 > **바이트 보존이 최우선인 단순 치환**에는 hwp-cli 고속 경로도 있다:
-> `hwp edit in.hwpx -o out.hwpx --replace "구=>신"` (치환만 있을 때) — 미리보기·`hp:switch`
-> 호환 블록·미모델 엔트리를 **바이트 그대로** 보존한다. 단 `<hp:t>` 런 분절을 가로지르는
-> 문자열은 매칭되지 않으므로, 분할 가능성이 있으면 위 lxml `edit`을 쓴다.
+> `hwp edit in.hwpx -o out.hwpx --replace "구=>신"`처럼 **HWPX에서 `--replace`만 사용한
+> package patch 경로**는 수정하지 않은 ZIP part를 바이트 그대로 복사한다. 다른 편집
+> 플래그를 섞거나 lxml 구조 편집, semantic IR 왕복을 수행하면 package가 재생성되며
+> byte identity를 보장하지 않는다. `<hp:t>` 런 분절을 가로지르는 문자열은 고속 경로에서
+> 매칭되지 않으므로, 분할 가능성이 있으면 위 lxml `edit`을 쓰되 재생성 결과를 검증한다.
 
 ### 표 행/열 추가 (hwp-cli 위임)
 
@@ -360,9 +581,11 @@ lxml 엔진이 `<hp:t>` 텍스트를 연결해 치환하므로 **run 경계를 �
 
 ### 구조 편집 프리미티브 (`hwp edit` 네이티브)
 
-`hwp edit`은 `.hwp`·`.hwpx` 모두에서 아래 편집을 **바이트 보존**(미리보기·`hp:switch`
-호환 블록·미모델 엔트리 그대로)하며 IR 왕복으로 적용한다. 앵커는 텍스트 매칭이고, 여러
-플래그를 한 호출에 조합할 수 있다. 적용 후 `--verify`로 재읽기 검증(`검증: 재읽기 OK`).
+`hwp edit`의 아래 구조 편집은 semantic IR 왕복 또는 XML 재생성을 수행한다. 앵커는 텍스트
+매칭이고 여러 플래그를 한 호출에 조합할 수 있지만, 미모델 개체·호환 블록이 보존되지 않을
+수 있다. 성공 로그를 byte-preservation 증거로 해석하지 말고, 적용 후 `--verify`, `validate`,
+필요 시 render/guard로 재검증한다. 바이트 보존 계약은 위의 replace-only HWPX patch에만
+적용한다.
 
 ```bash
 # 누름틀(필드) 생성·채우기 — 앵커 뒤에 %clk 필드 삽입, 이후 이름으로 값 채움
@@ -479,8 +702,9 @@ hwp edit 결재.hwpx -o 날인.hwpx --seal "(인)=>seal.png@18mm"     # 크기 �
 사다리」). hwp-cli 쪽 변경으로 반영 예정이며, 그 전까지는 위 현재 동작을 전제로 판단한다.
 
 **현재 한계**:
-- 복잡한 헤더/푸터(다단·이미지 머리말 등)는 미지원 — raw ZIP/XML 편집 또는 Hancom Office
-  기반 양식 보정이 필요하다. (markdown `[^n]` 각주는 이제 `hp:footNote`로 들여온다 — 아래 참조.)
+- 머리말/꼬리말 신규 저작은 미지원이다. `styled --header/--footer`는 출력 전에 실패하며,
+  다단·이미지 머리말 등이 필수이면 해당 구조를 가진 참조 양식을 보존하는 슬롯 채우기만
+  사용한다. (markdown `[^n]` 각주는 이제 `hp:footNote`로 들여온다. 아래 참조.)
 - 병합 표·기관별 폰트/여백 조정이 필요한 복잡한 공문서는 템플릿 채우기 또는
   레퍼런스 양식 편집(§4) 경로를 쓸 것.
 
@@ -488,11 +712,13 @@ hwp edit 결재.hwpx -o 날인.hwpx --seal "(인)=>seal.png@18mm"     # 크기 �
 본문 크기에 맞춰 삽입), `[^n]` 각주(한글 저장본 동형 `hp:footNote`로 들여옴, §7-B),
 `` `인라인 코드` ``(모노스페이스 글자 모양), 취소선(`~~`), GFM 표·개조식 리스트(위 사다리).
 
-## 5-A. 문서 생성 (`create`, `styled`, `write-java`)
+## 5-A. 문서 생성 (`create`, `styled`, `compose`, `template`, `write-java`)
 
 문서 생성은 모두 **hwp-cli `new`**에 위임한다 (번들 Java writer·JRE 제거됨).
 
 - `create` / `write-java` — markdown(또는 title/body/JSON 블록)을 받아 `hwp new --from`으로 HWPX 생성. `write-java`는 레거시 별칭(앵커 export 폴백 계약 유지, 더 이상 Java 미사용).
+- `compose` — hwp-cli DocumentSpec v1/v2 JSON/YAML을 native `hwp compose`에 그대로 위임. target-aware visual policy, report/dry-run, private staging, package/native validation, atomic publish 적용. schema 해석은 hwp-cli가 소유.
+- `template` — hwp-cli TemplateSpec/Data v1 JSON/YAML을 native `hwp template`에 그대로 위임. typed validation·bounded AST expansion, private staging, secret-redacted error, normalized report, package/native validation, atomic publish 적용.
 - **문서 메타데이터**: `hwp new`는 `--set-meta "키=값"`(키: `title`/`author`/`subject`/`keywords`, 반복 가능)으로 제목·작성자 등을 지정한다. 기존 문서는 `hwp edit --set-meta`로 갱신(§4).
 - `styled --markdown <md> -o <out>` — `hwp new --preset` 생성 후 공문서 스타일 후처리. `gongmun|gian`은 `gian`, `bogoseo|report`는 `report`로 전달. `--plain`은 후처리만 생략.
 - `styled --reference <양식> ...` — 참조 템플릿의 `{{슬롯}}`을 lxml 엔진(`hwpx_xml.edit_text`)으로 채움(충실도 보존).
@@ -502,6 +728,8 @@ hwp edit 결재.hwpx -o 날인.hwpx --seal "(인)=>seal.png@18mm"     # 크기 �
 ./hwpx create out.hwpx --title "제목" --body "본문"
 ./hwpx write-java out.hwpx --markdown report.md
 ./hwpx styled --preset bogoseo --markdown report.md -o out.hwpx
+./hwpx compose --spec document.json --output composed.hwpx --report
+./hwpx template template.json --data data.json --output templated.hwpx --report
 ```
 
 `export-html`(HTML→HWPX)은 소비자가 없어 제거됨. PDF/HTML 출력은 §1·§7의 hwp-cli 네이티브 경로 사용.
@@ -572,7 +800,8 @@ hwp-cli 표면을 그대로 위임하는 얇은 커맨드. `.hwp`·`.hwpx` 모�
 ./hwpx convert doc.hwpx --to md -o d.md  # 범용 변환 (hwp|hwpx|md|json|html|pdf|odt; --strict). md는 이미지 추출(--media-dir 지정 가능)
 ```
 
-**JSON IR 재생성(regen)** — 기존 문서를 편집이 아니라 처음부터 똑같이 신규 생성할 수 있다:
+**JSON IR 재생성(regen)** — 기존 문서에서 지원되는 semantic model을 추출해 새
+package를 생성한다:
 
 ```bash
 hwp convert doc.hwpx -o doc.json      # JSON IR (--embed-bin: 이미지까지 임베드)
@@ -580,9 +809,11 @@ hwp new --from doc.json -o regen.hwpx # 텍스트·표 지도(병합 포함)·se
 ```
 
 줄 배치 캐시(linesegarray)·미리보기 이미지·settings.xml은 재생성된다(한글이 열 때 재계산).
+미모델 개체와 호환 블록이 drop될 수 있으므로 원본과 동일하거나 무손실이라고 간주하지 않는다.
 
 **각주/미주**는 렌더뿐 아니라 hwpx 쓰기에서도 보존한다(한글 저장본과 동형의
-`number/suffixChar/instId` 속성 + 본문 자동 번호). JSON IR 경유 왕복도 무손실이다.
+`number/suffixChar/instId` 속성 + 본문 자동 번호). 이 문장은 지원되는 각주/미주 semantic
+구조에 한정되며, JSON IR 왕복 전체의 byte identity나 unsupported-object 보존을 뜻하지 않는다.
 
 - `info`(hwp-cli 메타: 포맷·버전·스트림)와 `summary`(lxml 구조요약: 섹션·단락·이미지 수)는 관점이 다르다.
 - `render`는 이미지(png/svg) 미리보기용이다. 선택가능 PDF는 `to-pdf`/`render-pdf`를 쓴다.
@@ -600,7 +831,11 @@ hwp render doc.hwpx -o page.png --font-dir ~/.maru/env/fonts
 
 ### 수식(Equation)
 
-수식은 `render`·`to-pdf`·`render-pdf`에서 **자동 조판**된다(별도 옵션·서브커맨드 없음). HWPX `<hp:equation>`와 HWP5 바이너리 `eqed` 모두 렌더된다. 지원 문법(`over`/`sqrt`/첨자/그리스/변수 이탤릭)과 근사 한계(행렬·큰연산자 극한·복잡 구분자)는 `references/equation-syntax.md` 참조. 수식을 새로 쓰는 저작 CLI는 없다(스크립트 입력 플래그 없음).
+수식은 `render`·`to-pdf`·`render-pdf`에서 **자동 조판**된다(별도 옵션·서브커맨드 없음).
+HWPX `<hp:equation>`와 HWP5 바이너리 `eqed` 모두 렌더된다. 지원 문법과 근사 한계는
+`references/equation-syntax.md` 참조. 안정적인 전용 수식 저작 플래그는 없지만,
+`hwp new --from document.json`의 내부 serde JSON IR로 script를 전달하는 저수준 경로는
+존재한다. 이 IR은 안정적인 authoring API가 아니므로 버전 고정·재검증 없이 자동화에 쓰지 않는다.
 
 **hwpx 쓰기 보존은 v0.3.0부터** (GE-14). 그 전 버전은 hwpx writer에 수식 arm이 없어
 `hwp edit`·`convert`·JSON IR 왕복 등 **편집·변환만 해도 수식이 경고 없이 통째로 사라졌다**.
@@ -610,10 +845,12 @@ v0.3.0에서 `<hp:equation>` + `hp:sz`/`hp:pos`/`hp:script` 방출로 스크립�
 반드시 확인할 것**. 스킬 경유(`./hwpx`)는 구버전이면 자동 경고하지만, `hwp`를 직접 호출할
 때는 경고가 없다 (§10).
 
-> ⚠ 합성 경로(hwp5→hwpx 등 새로 만드는 `<hp:equation>`)의 수식 전용 상수
-> (`version`·`baseLine`·`baseUnit`·`font`)는 정답지 미확보 **표준 추정값**이다. 한글 실기에서
-> 수식 표시가 깨지면 정품 저장본 속성으로 교체가 필요하므로, 중요한 수식 문서는 한글에서
-> 한 번 열어 확인할 것.
+> 주의: 합성 경로(hwp5→hwpx 등 새로 만드는 `<hp:equation>`)의 수식 전용 상수
+> (`version`·`baseLine`·`baseUnit`·`font`)는 정답지 미확보 **표준 추정값**이다. 해당 속성의
+> 정밀 호환성이 필수인 생성 요청은 현재 보장 범위를 벗어난다. 에이전트는 변환·생성 명령
+> 실행 전에 이를 preflight해 명시적으로 거부해야 한다. 이 판단은 현재 CLI가 자동 집행하는
+> 요청-capability 검사가 아니다. 기존 수식의 읽기·왕복·근사 렌더 범위는
+> `references/equation-syntax.md`를 따른다.
 
 ## 8. 통합
 
@@ -664,9 +901,39 @@ v0.3.0에서 `<hp:equation>` + `hp:sz`/`hp:pos`/`hp:script` 방출로 스크립�
   (clap 정의에서 자동 생성, CI가 코드-문서 동기화를 강제). 플래그가 이 SKILL.md와 어긋나면
   그쪽이 맞다.
 - **선택**: LibreOffice + H2Orestart 확장 (`to-pdf --engine soffice` 벡터 PDF용; 기본 hwp-cli 경로엔 불필요)
-- **선택**: Hancom Office 한/글 (템플릿 편집/검수용)
+- **선택적 외부 진단만**: Hancom Office 한/글. 자동 성공 판정이나 필수 검수 단계로 사용하지
+  않으며, 사람이 열어 본 결과만으로 `validate` 실패를 덮어쓰거나 호환성을 인증하지 않음.
+
+`./hwpx validate`는 resolved hwp-cli가 있으면 실제 `hwp validate`를 호출한다. 이 검증은
+패키지 형식 감지, HWPX 필수 엔트리와 XML parse, HWP5 parse 중심이며 XSD, 정책, 폰트,
+접근성, overflow/clipping, 전 페이지 visual 검증은 포함하지 않는다. hwp-cli가 없을 때만
+Python fallback을 사용한다. fallback은 중복 이름을 거부하고 ZIP 엔트리 4,096개, 단일
+엔트리 이름 64 KiB, 이름 합계 16 MiB, 단일 엔트리 512 MiB, 전체 uncompressed 2 GiB,
+단일 XML 64 MiB, 압축률 1,000:1 한도를 적용한다. 이는 native
+`hwp-cli-native-v1` public defaults와 같다. raw EOCD/central-directory에서 이 값을
+`ZipFile` 객체 생성 전에 검사하고, 실제 압축 해제 크기와 모든 엔트리 CRC를 다시 검사한다.
+`unpack`은 같은 aggregate budget과 path containment를 강제한다. `mimetype`은 별도로
+256 bytes로 제한한다. 필수 part는 현재 resolved `hwp validate`와 맞춘 `mimetype`,
+`version.xml`, `Contents/header.xml`, `META-INF/container.xml`, 하나 이상의
+`Contents/section*.xml`이다. 이 fallback 통과도 상위 검증을 대신하지 않는다.
+
+모든 `hwp-cli` 위임은 기본 120초 제한을 사용하고, 실패·timeout 진단과 stderr는
+32,768자로 제한한다. 성공한 JSON·상태 등 control stdout은 TemplateSpec v1의
+최대 region report를 수용하는 64 MiB를 넘으면 실패한다.
+본문 `cat`과 HTML 출력은 stdout을 메모리에 전부 담지 않고 임시 파일/최종 소비자로
+stream한다.
+로컬 대형 문서에서 시간이 더 필요하면 `HWP_CLI_TIMEOUT_SECONDS`를 1~3,600 범위의 정수로
+설정한다. 잘못된 값, timeout, 실행 OS 오류는 actionable stderr와 exit 2로 끝나며 기존
+`styled` 목적지를 게시하지 않는다.
 
 CLI 진입점은 `./hwpx` 래퍼가 자동으로 venv python을 사용한다.
+개발·release gate는 `make test-hwpx-skill`이 Python 3.12와
+`requirements-test.txt`의 exact pins로 live suite를 실행하며 `make skills-verify`에
+필수로 포함된다. CI와 release workflow는 hwp-cli v0.4.1 Linux release asset을
+SHA-256 `61db250203d40d8aa528b14c380be0cf08e6bfdbecc0cd99748c0d7ec95326d5`로
+검증해 설치하고 `new --preset`, `validate --json`, `fill`, `slots` capability를 먼저
+확인한다. 이 native gate는 설치본이 없거나 capability가 부족할 때 skip하지 않고
+실패한다. 사용자 홈의 `~/.maru` venv나 사전 설치된 `hwp`에는 의존하지 않는다.
 
 ## 11. 참고 문서
 

@@ -1,0 +1,42 @@
+{
+  "schema_version": "1.0",
+  "document": {
+    "fonts": {
+      "manifest": [],
+      "forbid_substitution": false
+    },
+    "macros": "deny",
+    "external_references": "deny"
+  },
+  "render": {
+    "dpi": 96,
+    "pages": [1],
+    "page_count": {
+      "exact": 1
+    },
+    "allowed_blank_pages": [1],
+    "fail_on_outside_page_bounds": true,
+    "fail_on_potential_collision": false,
+    "fail_on_unresolved_fields": true
+  },
+  "oracle": {
+    "mode": "required",
+    "configuration": {
+      "runtime": {
+        "version": "frozen-test-runtime",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "libreoffice": {
+        "version": "frozen-test-libreoffice",
+        "executable_sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "extension": {
+        "version": "frozen-test-extension",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "image": {
+        "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+      }
+    }
+  }
+}

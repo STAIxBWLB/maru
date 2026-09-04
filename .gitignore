@@ -41,6 +41,7 @@ lerna-debug.log*
 !.env.example
 
 # === Test / Coverage ===
+/.cache/
 coverage/
 .nyc_output/
 playwright-report/

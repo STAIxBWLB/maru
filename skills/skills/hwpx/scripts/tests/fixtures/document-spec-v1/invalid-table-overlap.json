@@ -1,0 +1,41 @@
+{
+  "version": "1.0",
+  "sections": [
+    {
+      "blocks": [
+        {
+          "type": "table",
+          "columns": [
+            {
+              "width_mm": 50
+            },
+            {
+              "width_mm": 50
+            }
+          ],
+          "rows": [
+            {
+              "cells": [
+                {
+                  "row_span": 2,
+                  "blocks": []
+                },
+                {
+                  "blocks": []
+                }
+              ]
+            },
+            {
+              "cells": [
+                {
+                  "col_span": 2,
+                  "blocks": []
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

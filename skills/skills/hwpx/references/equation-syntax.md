@@ -45,14 +45,32 @@ alpha + beta over 2      # α + (β/2)  ← over는 앞뒤 원자만 결합
 
 ## 근사·미지원 (doc12 §4 GD-1~3)
 
-정품 렌더 대비 다음은 근사 처리된다. 정밀 수식이 필요하면 한컴오피스에서 확인.
+기준 구현과 비교하여 다음은 근사 처리된다. 해당 표현의 정밀 조판이 필수인 생성 요청은 현재
+지원 범위를 벗어난다. 에이전트는 명령 실행 전에 요청을 preflight해 명시적으로 거부해야
+한다. 현재 CLI에는 요청의 정밀도 요구를 해석해 자동 거부하는 capability schema가 없다.
+기존 문서의 읽기·렌더 요청에서는 아래 근사 결과를 반환할 수 있으나 pixel parity를 보장하지
+않는다.
 
 - **GD-1 행렬(matrix)**: 열 정렬 문자 `&`를 조판하지 않고 공백으로 취급.
 - **GD-2 큰연산자 극한**: `sum`·`int` 심볼은 나오나 위·아래 극한을 연산자에 붙여 배치하지 못함(첨자 배치로 근사).
 - **GD-3 복잡 구분자**: 크기 자동조절 괄호 등 미지원.
 
-## 한계: 읽기·렌더 전용
+## writer와 public 저작 표면
 
-수식을 **저작·편집하는 CLI 표면은 없다**. `new`/`edit`로 수식을 삽입·수정할 수 없고, 수식 스크립트는 왕복 시 원본 바이트로만 보존된다(cross-format 합성 대상 아님). 수식이 포함된 문서를 렌더/추출하는 것만 지원한다.
+HWPX writer는 semantic IR에 이미 들어 있는 수식 script를 `<hp:equation>`으로 합성할 수 있고,
+기존 HWPX 수식의 script와 지원 속성을 왕복한다. 따라서 HWP5→HWPX나 JSON IR 재생성 같은
+semantic write 경로의 수식은 writer 대상이다.
+
+안정적인 전용 수식 저작·편집 플래그는 없다. 다만
+`hwp new --from document.json -o output.hwpx`가 받는 내부 serde JSON IR의
+`GenericControl.equation.script`를 통해 신규 수식을 전달하는 저수준 경로는 존재한다.
+이 구조는 디버그·왕복용 내부 모델이며 versioned authoring schema가 아니다. 필드명과 표현이
+릴리스 사이에 바뀔 수 있고, 고수준 유효성 검사도 제공하지 않으므로 "수식 저작 API 지원"으로
+표시하거나 장기 자동화 계약으로 사용하지 않는다.
+
+전용 authoring API가 필요한 요청은 지원되지 않는 것으로 preflight한다. 내부 JSON IR을
+명시적으로 선택한 작업은 hwp-cli 버전을 고정하고, 생성 파일에 대해 `hwp validate --json`,
+semantic reopen, 전 페이지 render를 자동 실행해야 한다. 실패 시 본문 텍스트나 이미지로
+조용히 대체하지 않는다.
 
 전체 능력·한계: `capability-matrix.md`. 갭 SSOT: `dev/hwp-cli/docs/design/12-feature-gaps.md`.

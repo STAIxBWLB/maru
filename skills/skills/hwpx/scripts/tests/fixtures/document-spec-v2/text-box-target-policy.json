@@ -1,0 +1,36 @@
+{
+  "version": "2.0",
+  "document": {
+    "version": "1.0",
+    "sections": [
+      {
+        "blocks": [
+          {
+            "type": "paragraph",
+            "runs": [{ "type": "text", "text": "text box anchor" }]
+          }
+        ]
+      }
+    ]
+  },
+  "visuals": [
+    {
+      "id": "native_box",
+      "location": { "section": 0, "paragraph": 0 },
+      "policy": {
+        "hwp": "required_native",
+        "hwpx": "required_native"
+      },
+      "title": "Summary",
+      "alt": "Two-line summary box",
+      "width_mm": 60,
+      "height_mm": 25,
+      "content": {
+        "type": "text_box",
+        "text": "first line\nsecond line",
+        "fill": "#F2F4F7",
+        "border": "#344054"
+      }
+    }
+  ]
+}

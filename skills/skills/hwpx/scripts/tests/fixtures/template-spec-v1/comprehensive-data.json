@@ -1,0 +1,29 @@
+{
+  "version": "1.0",
+  "values": {
+    "title": "TemplateSpec v1 종합 보고서",
+    "count": 2,
+    "published_on": "2026-07-31",
+    "show_details": true,
+    "details": [
+      {
+        "type": "paragraph",
+        "runs": [
+          {
+            "type": "text",
+            "text": "검증된 rich block"
+          }
+        ]
+      }
+    ],
+    "items": [
+      {
+        "label": "첫 번째 항목"
+      },
+      {
+        "label": "두 번째 항목",
+        "enabled": false
+      }
+    ]
+  }
+}

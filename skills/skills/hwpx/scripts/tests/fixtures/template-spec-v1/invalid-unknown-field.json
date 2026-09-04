@@ -1,0 +1,16 @@
+{
+  "version": "1.0",
+  "variables": {},
+  "source": {
+    "mode": "compose",
+    "document": {
+      "version": "1.0",
+      "sections": [
+        {
+          "blocks": []
+        }
+      ]
+    }
+  },
+  "unknown": "must fail closed"
+}
