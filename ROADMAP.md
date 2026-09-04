@@ -1,7 +1,7 @@
 # Maru Roadmap
 
-**Status date:** 2026-08-30
-**Current product release:** v1.1.0 - Aligned Numbering
+**Status date:** 2026-09-04
+**Current product release:** v1.1.3 - Semantic Titles
 **Planning state:** Milestone v1.1 Felt Quality and Native Proof active, phases 6-11
 
 Maru brings Korean knowledge work, document operations, evidence, tasks,
@@ -29,10 +29,10 @@ plans and issues. They no longer imply an active weekly schedule.
 
 | Area | Current state | Evidence |
 |------|---------------|----------|
-| Product distribution | v1.1.0 shipped for macOS ARM/Intel, Linux, and Windows | 21 non-empty release assets, 11-platform updater manifest, Homebrew cask and CLI formula |
+| Product distribution | v1.1.3 shipped for macOS ARM/Intel, Linux, and Windows | 21 non-empty release assets, 11-platform updater manifest, Homebrew cask and CLI formula |
 | Planning milestone | v1.1 Felt Quality and Native Proof active | Phases 6-11; v1.0 closed at 5 phases, 32 plans, 24/24 requirements |
-| Application surface | 18 top-level modes plus Settings overlay | Typed lazy mode registry on `main` |
-| Application shell | Store-backed facades; `MainApp` at 15 `useState` and 24 `useEffect` | Static ceilings and render-isolation tests |
+| Application surface | 18 top-level modes plus Settings overlay; Explorer is a right-pane tab, not a mode | Typed lazy mode registry on `main`; `RightPaneTab` in `src/lib/settings.ts` |
+| Application shell | Store-backed facades; the flexible split workbench and the fail-closed macOS passkey path shipped in v0.4.41 | Static ceilings and render-isolation tests |
 | Verification | Authoritative local and CI gates | Typecheck, ESLint, frontend/Rust tests, E2E, rustfmt, clippy, build, bundle budgets |
 | Typed IPC | ERR-06 closed after milestone review | Conflict codes preserved across every emitting command; recursive Rust source guard |
 | Security evidence | Phase 1, 3, 4, and 5 reports present; Phase 2 remains optional evidence debt | Phase 3 audit: seven threats closed, `threats_open: 0` |
@@ -45,6 +45,7 @@ versions are aligned: see the numbering rule in README's Release Process.
 
 | Module | Status | Shipped now | Remaining candidate work |
 |--------|--------|-------------|--------------------------|
+| M0 Application Shell and Workbench | Partial | 18 typed lazy modes, store-backed pane facades, editor/outline/terminal state extraction, mode adapters, render-isolation tests, the Explorer right-pane tab, the flexible split workbench, and the macOS passkey path (all v0.4.41) | Workbench render isolation for the surfaces added since the extraction |
 | M1 Operations Catalog | Shipped | Workspace/BU scan, deadlines and approval signals, watcher refresh, Hub read/cache, drilldown, Reveal, queue status | Expand only when a new operational consumer requires it |
 | M2 Document Studio | Shipped locally | Seven-step source, template, guideline, sections, HWP fields, export, and package flow; persistent state and frontmatter-safe body apply | Submission workflow, approval drawer, and finalize-to-Hub user flow |
 | M3 Template and Form Filling | Partial | Workspace/Hub templates, HWPX slots, label detection, validated native fill, released `hwp` 0.12.1+ enforcement | Decide whether binary `.hwp` conversion and embedded HWP editor UI belong in a future milestone |
@@ -98,9 +99,9 @@ than a best-effort developer habit:
 
 ## Shipped Product and Side Tracks
 
-| Track | State on v0.5.0 |
+| Track | State on v1.1.3 |
 |-------|-----------------|
-| Documents and Files | Markdown Rich/Source/Preview, HTML Visual/Source/Preview, multi-tabs, split panes, optimistic concurrency, snapshots, safe file operations |
+| Documents and Files | Markdown Rich/Source/Preview, HTML Visual/Source/Preview, multi-tabs, split panes, optimistic concurrency, snapshots, safe file operations, virtualized Explorer tree with in-file search |
 | Inbox and communications | File drops, Gmail, Outlook/Microsoft 365, Telegram, Kakao staging/relay surfaces, classification, approval, processing, bounded provider commands |
 | Today and Tasks | File-backed lifecycle, prepare/execute/review, capacity, explicit calendar selection/publish, provider outbox and recovery |
 | Drafts and Gap | Durable ideation, scheduled draft production, approval-gated promotion, frozen baselines, revision-pattern logging |
@@ -109,7 +110,7 @@ than a best-effort developer habit:
 | Graph | Sigma/Graphology canvas, worker layout, saved views, local focus controls, reviewed relationship writes, dense-graph LOD |
 | HWP engine bridge | Backend read/render/edit/compose/validate/capabilities through `hwped_*`; UI embedding remains undecided |
 | Skills OTA | Five ownership tiers, doctor/dirty/reconcile/sync, minisign-verified independent bundle channel |
-| Sites and HTML | Embedded native browser, safe HTML editing/preview sandbox, scoped local assets, passkey distribution kept opt-in |
+| Sites and HTML | Embedded native browser, safe HTML editing/preview sandbox, scoped local assets, passkey distribution kept opt-in behind a separately provisioned entitled build |
 
 ## Historical W-Sequence
 
@@ -270,7 +271,7 @@ Additional deferred decisions:
 |--------|-----------|
 | `README.md` | Current product, architecture, storage, safety, development, and release contracts |
 | `CHANGELOG.md` | Release-by-release shipped changes |
-| `.planning/ROADMAP.md` | Active GSD milestone and phases; currently none |
+| `.planning/ROADMAP.md` | Active GSD milestone and phases; currently v1.1 phases 6-11 |
 | `.planning/MILESTONES.md` | Completed milestone record and post-close amendments |
 | `.planning/reports/MILESTONE_SUMMARY-v1.0.md` | v1.0 outcome, decisions, evidence, and deferred work |
 | `.planning/milestones/v1.0-*` | Archived requirements, roadmap, audit, and phase artifacts |

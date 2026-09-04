@@ -6,9 +6,9 @@ current_phase: 10
 current_phase_name: Bundle and Build Hardening
 status: planning
 stopped_at: Completed 06-05-PLAN.md
-last_updated: "2026-08-29T14:22:56.678Z"
-last_activity: 2026-08-29
-last_activity_desc: "ROADMAP.md created for v1.1: 6 phases (6-11), 15/15 requirements mapped"
+last_updated: "2026-09-04T00:00:00.000Z"
+last_activity: 2026-09-04
+last_activity_desc: "PERF-06 (issue #309, inbox out of the document index) and REL-04 (issue #295, per-segment tilde expansion in job env) added mid-milestone to Phases 7 and 9: 17/17 requirements mapped"
 progress:
   total_phases: 6
   completed_phases: 1
