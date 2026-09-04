@@ -1,6 +1,6 @@
 # Maru Roadmap
 
-**Status date:** 2026-09-02
+**Status date:** 2026-09-04
 **Current product release:** v1.1.3 - Semantic Titles
 **Planning state:** Milestone v1.1 Felt Quality and Native Proof active, phases 6-11
 
