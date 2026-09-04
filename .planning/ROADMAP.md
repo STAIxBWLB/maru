@@ -21,9 +21,9 @@ operative rule is in README's Release Process section.
 ## Phases
 
 - [x] **Phase 6: Native E2E Runner Foundation** - A native runner drives the real app against the real backend, and the CI-vs-local question is settled by a spike rather than assumed. (completed 2026-08-29)
-- [ ] **Phase 7: Guardrails Before Churn** - Lock poisoning recovers, watchers prune generated directories, and a sanitizer guard lands before the milestone's own later work can trip it.
+- [ ] **Phase 7: Guardrails Before Churn** - Lock poisoning recovers, the watcher and the document index stop carrying trees they never serve, and a sanitizer guard lands before the milestone's own later work can trip it.
 - [ ] **Phase 8: Main-Thread Responsiveness** - The skills registry lock narrows and the main-thread-blocking commands move off it, proven by a concurrency load test rather than the absence of a visible freeze.
-- [ ] **Phase 9: Durability and Session Lifecycle** - A SIGHUP-trapping terminal can still be killed, and a pending edit is saved (or its failure surfaced) on unmount and app quit.
+- [ ] **Phase 9: Durability and Session Lifecycle** - A SIGHUP-trapping terminal can still be killed, a pending edit is saved (or its failure surfaced) on unmount and app quit, and a scheduled job's own PATH resolves as written.
 - [ ] **Phase 10: Bundle and Build Hardening** - The packaged CSP drops an unused directive and per-mode CSS restores the budget headroom spent since v0.4.46.
 - [ ] **Phase 11: Milestone Verification & Evidence** - Coverage is measured, the narrowed CI trace configuration is proven, and v1.0's closeout evidence debt is retired.
 
@@ -65,16 +65,18 @@ Plans:
 
 ### Phase 7: Guardrails Before Churn
 
-**Goal**: The locks, watchers, and sanitizer boundary that this milestone's own later work will stress are hardened first, so those later phases inherit a safety net instead of a race to add one after an incident.
+**Goal**: The locks, watchers, and sanitizer boundary that this milestone's own later work will stress are hardened first, so those later phases inherit a safety net instead of a race to add one after an incident. PERF-06 rides along: it narrows what the scanner layer carries, the same shape of change as PERF-04's watcher prune and in the same `vault.rs` / `ScanFilter` region.
 **Depends on**: Nothing (independent of Phase 6; sequenced early so SEC-02 is in place before the refactor churn in Phases 8-10)
-**Requirements**: PERF-03, PERF-04, SEC-02
+**Requirements**: PERF-03, PERF-04, SEC-02, PERF-06
 **Success Criteria** (what must be TRUE):
 
   1. A panic while holding any of the six named process-global locks (`REGISTRY_LOCK`, `JOBS_LOCK`, `DOT_ACTION_LOCK`, `BINDER_WRITE_LOCK`, and the terminal registry and killer locks) leaves that lock's feature usable on the next call instead of bricked until app restart, with each lock's recovery justified on its own terms rather than a blanket copy-paste.
   2. A recursive filesystem watcher generates no events for paths under the shared `GENERATED_DIRS` prune list, so a watched root that grows a heavy generated subtree does not become an event-volume bottleneck.
   3. `make verify` fails the moment a new `dangerouslySetInnerHTML` value in `src/` does not trace to a DOMPurify-backed helper, proven by a deliberate red-then-green break of the guard itself.
+  4. The document index holds zero `inbox/...` entries through every path that produces one - full scan, targeted rescan, and cache read - while the Inbox pane still lists pending items and drop/auto arrivals, and the Files browser and content search still resolve `inbox/` paths. The Inbox view is gone from the documents view switcher rather than left permanently empty.
 
 **Plans**: TBD
+**Note**: The scratchpad exclusion PERF-06 mirrors lives at three call sites, not the two the issue's design names (`scan_vault`, `scan_vault_paths`, and the `read_vault_cache` rel-prefix filter). Covering only the first and third leaves a targeted rescan able to re-inject inbox rows the full scan just pruned.
 
 ### Phase 8: Main-Thread Responsiveness
 
@@ -91,15 +93,16 @@ Plans:
 
 ### Phase 9: Durability and Session Lifecycle
 
-**Goal**: A terminal child that traps SIGHUP can still be killed, and no pending edit is silently lost when a pane unmounts or the app quits.
-**Depends on**: Phase 6 (REL-01's SIGHUP-trap-and-kill claim is only verifiable against a real PTY; the mocked-IPC suite cannot spawn one)
-**Requirements**: REL-01, REL-02, REL-03
+**Goal**: A terminal child that traps SIGHUP can still be killed, no pending edit is silently lost when a pane unmounts or the app quits, and a scheduled job stops failing silently because its own PATH never resolved. All three are the same failure class: work that disappears with no signal.
+**Depends on**: Phase 6 (REL-01's SIGHUP-trap-and-kill claim is only verifiable against a real PTY; the mocked-IPC suite cannot spawn one). REL-04 depends on nothing and can lead the phase - it is a contained `jobs.rs` change with unit-test-only verification.
+**Requirements**: REL-01, REL-02, REL-03, REL-04
 **Uncertainty**: MEDIUM on REL-01. Research could not verify `portable_pty`'s spawn-time process-group setup, and the existing `command_output.rs` escalation pattern targets `std::process::Command`, so it cannot be assumed to port unchanged; needs a source-level confirmation before implementation.
 **Success Criteria** (what must be TRUE):
 
   1. A terminal child that traps SIGHUP is still killed, via a timeout-gated process-group escalation, while a deliberately backgrounded grandchild still survives tab close and the generation-token invariant still holds.
   2. A pending debounced editor save is performed (not merely cancelled) both when its pane unmounts and when the application quits, with the quit path driven from the Rust side rather than a webview unload handler.
   3. A save that fails on a teardown path produces a visible signal to the user (log, toast, or equivalent) instead of disappearing with no trace.
+  4. A job whose `program.env.PATH` carries several tilde entries installs a launchd plist in which every one of them is absolute, so the child process resolves the same tools the job's shell guard found. A colon-bearing non-path value and a single-path value are byte-identical to today's output.
 
 **Plans**: TBD
 

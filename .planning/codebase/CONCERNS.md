@@ -4,8 +4,8 @@ last_mapped_commit: 293cd8e
 
 # Codebase Concerns
 
-**Analysis Date:** 2026-09-02  
-**Commit:** `293cd8e` (`v1.1.3-10-g293cd8e`)
+- **Analysis Date:** 2026-09-02
+- **Commit:** `293cd8e` (`v1.1.3-10-g293cd8e`)
 
 Scope: Maru is a Tauri 2 desktop app (React 19 + TypeScript frontend, Rust backend).
 Current tree has ~93,000 lines of Rust in `src-tauri/src/`, ~172,000 lines of `.ts`/`.tsx` in `src/`,

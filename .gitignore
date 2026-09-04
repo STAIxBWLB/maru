@@ -59,6 +59,7 @@ test-results/
 # === Claude Code / OMC state ===
 .claude/settings.local.json
 .claude/scheduled_tasks.lock
+.claude/RESUME.md
 .omc/
 .omx/
 .gstack/
