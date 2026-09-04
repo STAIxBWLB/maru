@@ -1,10 +1,11 @@
 ---
 phase: 7
 slug: guardrails-before-churn
-status: draft
+status: approved
 shadcn_initialized: false
 preset: none
 created: 2026-09-05
+reviewed_at: 2026-09-05
 ---
 
 # Phase 7 — UI Design Contract
@@ -142,3 +143,45 @@ Remove the `sidebar.view.inbox` key from both `src/lib/i18n/locales/en.ts:601` a
 | third-party | none | not applicable |
 
 No registry usage; no third-party blocks. shadcn gate: `components.json` absent and the stack is intentionally token-based hand-rolled CSS — no initialization this phase, consistent with all prior phases.
+
+---
+
+## UI Considerations
+
+> State-coverage resolutions from the ui-consideration probe (2026-09-05). Per the plan-phase lift rule: explicit truths lift to `must_haves.truths`; backstop items lift as `{ statement, verification: backstop }`. Empty/error copy stays in `## Copywriting Contract` above — this section covers shape-rooted state only. Zero unresolved items.
+
+### Resolved (explicit verification)
+
+- E1/populated: After removal, the documents view switcher renders exactly All → Drafts → Archive → Recently Updated → custom views, in that order, with no Inbox row, icon, label, or count anywhere in the switcher.
+- E2/populated: `builtInDocumentViewCounts` carries exactly the three remaining built-in entries; no `inbox` key exists in the counts map or in the `BuiltInDocumentView` union.
+- E3 (probe-unclassified, resolved by contract §2): A persisted document filter of shape `{ kind: "view", view: "inbox" }` (or any built-in view outside the post-removal union) is reset to `{ kind: "all" }` at load, silently — no banner, toast, or first-run notice.
+- E5 (probe-unclassified, resolved by contract §4): The Files browser and content search continue to resolve and open `inbox/` paths exactly as before the removal.
+
+### Resolved (backstop — held-out/visual UI-state test)
+
+- { statement: "The switcher's static rows (All, Drafts, Archive, Recently Updated) are visible and clickable while document counts are still settling after app load.", verification: backstop }
+- { statement: "Count badges render correctly at zero, one, and many documents for each remaining built-in view (0 → 1 → reference-workload volume).", verification: backstop }
+- { statement: "The Inbox pane lists pending items and drop/auto arrivals with its pre-removal row layout and actions intact (covered by the existing e2e/inbox*.spec.ts surface).", verification: backstop }
+- { statement: "The Inbox pane renders its existing empty state (no pending items) unchanged.", verification: backstop }
+
+### Dismissed (recorded with reason — no silent drops)
+
+| Element/Category | Reason |
+|------------------|--------|
+| E1/empty | The switcher is never empty — built-in rows are static and always render. |
+| E1/error | The switcher has no error path; rows are static UI and counts degrade silently as today. |
+| E1/partial | Static rows cannot be partially present. |
+| E1/overflow | Custom-view overflow scrolling is unchanged existing CSS. |
+| E1/zero-one-many | Rows are static; only badge numerals vary, and badge rendering is unchanged. |
+| E1/long-text | Custom-view name truncation is unchanged existing behavior. |
+| E2/empty | Badge-with-zero-items behavior is existing logic, unchanged. |
+| E2/loading | Badges populate with counts as today; no new loading state is introduced. |
+| E2/error | Count computation has no user-facing error state, unchanged. |
+| E2/partial | Badges are single numerals; no partial-data shape exists. |
+| E2/overflow | Badge width handling at large numerals is unchanged. |
+| E2/long-text | Numerals do not truncate; badge min-width is unchanged. |
+| E4/loading | Inbox pane load behavior is unchanged this phase. |
+| E4/error | The pane has no error UI today; none is added. |
+| E4/partial | Queue rows are uniform; no partial row shape exists. |
+| E4/overflow | Pane scroll behavior is unchanged. |
+| E4/zero-one-many | Empty/copy states for zero, one, and many pending items are unchanged. |
