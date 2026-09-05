@@ -67,10 +67,9 @@ pub struct AgentUsageStatus {
     pub message: Option<String>,
 }
 
-// Plain sync commands: Tauri runs them on a blocking-safe thread. Do NOT
-// mark them `command(async)` — the body would then run inline on an async
-// runtime worker, and `reqwest::blocking` deadlocks in that context.
-#[tauri::command]
+/// Synchronous domain entry points, retained for Rust/CLI callers. The IPC
+/// surface is `ipc::agents_account_status` / `ipc::agents_usage_status`, which
+/// offload these bodies to blocking workers.
 pub fn agents_account_status(
     command_overrides: Option<HashMap<String, String>>,
 ) -> Vec<AgentAccountStatus> {
@@ -80,7 +79,6 @@ pub fn agents_account_status(
         .collect()
 }
 
-#[tauri::command]
 pub fn agents_usage_status(
     command_overrides: Option<HashMap<String, String>>,
     force: Option<bool>,
@@ -90,6 +88,47 @@ pub fn agents_usage_status(
         .iter()
         .map(|provider| usage_status(*provider, command_overrides.as_ref(), force))
         .collect()
+}
+
+pub mod ipc {
+    use super::*;
+
+    #[tauri::command]
+    pub async fn agents_account_status(
+        command_overrides: Option<HashMap<String, String>>,
+    ) -> Result<Vec<AgentAccountStatus>, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            if let Some(home) = super::credentials_home() {
+                crate::atomic_file::PathTransactionLease::test_stage(
+                    &[home],
+                    "worker:agents_account_status",
+                );
+            }
+            Ok(super::agents_account_status(command_overrides))
+        })
+        .await
+        .map_err(|err| format!("agents_account_status_task_failed: {err}"))?
+    }
+
+    #[tauri::command]
+    pub async fn agents_usage_status(
+        command_overrides: Option<HashMap<String, String>>,
+        force: Option<bool>,
+    ) -> Result<Vec<AgentUsageStatus>, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            if let Some(home) = super::credentials_home() {
+                crate::atomic_file::PathTransactionLease::test_stage(
+                    &[home],
+                    "worker:agents_usage_status",
+                );
+            }
+            Ok(super::agents_usage_status(command_overrides, force))
+        })
+        .await
+        .map_err(|err| format!("agents_usage_status_task_failed: {err}"))?
+    }
 }
 
 fn account_status(
@@ -390,7 +429,7 @@ fn codex_usage_windows() -> Result<Vec<UsageWindow>, UsageProbeError> {
             "No codex auth.json found; run `codex login`.".to_string(),
         ));
     }
-    let sessions_root = dirs::home_dir()
+    let sessions_root = credentials_home()
         .ok_or_else(|| UsageProbeError::Other("home directory unavailable".to_string()))?
         .join(".codex")
         .join("sessions");
@@ -665,9 +704,8 @@ fn parse_codex_rollout_usage(text: &str) -> Option<Vec<UsageWindow>> {
 /// Claude OAuth access token: macOS Keychain item "Claude Code-credentials",
 /// falling back to `~/.claude/.credentials.json`. Never logged or returned.
 fn claude_oauth_token() -> Option<String> {
-    let json = keychain_claude_credentials()
-        .or_else(|| home_file(&[".claude", ".credentials.json"]))
-        .and_then(|text| serde_json::from_str::<JsonValue>(&text).ok())?;
+    let json =
+        claude_credentials_json().and_then(|text| serde_json::from_str::<JsonValue>(&text).ok())?;
     json.get("claudeAiOauth")?
         .get("accessToken")?
         .as_str()
@@ -675,7 +713,17 @@ fn claude_oauth_token() -> Option<String> {
         .filter(|token| !token.is_empty())
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(not(test))]
+fn claude_credentials_json() -> Option<String> {
+    keychain_claude_credentials().or_else(|| home_file(&[".claude", ".credentials.json"]))
+}
+
+#[cfg(test)]
+fn claude_credentials_json() -> Option<String> {
+    home_file(&[".claude", ".credentials.json"])
+}
+
+#[cfg(all(target_os = "macos", not(test)))]
 fn keychain_claude_credentials() -> Option<String> {
     let output = run_cli(
         Path::new("/usr/bin/security"),
@@ -693,7 +741,7 @@ fn keychain_claude_credentials() -> Option<String> {
         .filter(|value| !value.is_empty())
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(all(not(target_os = "macos"), not(test)))]
 fn keychain_claude_credentials() -> Option<String> {
     None
 }
@@ -715,8 +763,23 @@ pub(crate) fn kimi_credentials_valid() -> bool {
         .unwrap_or(false)
 }
 
+/// Credential stores resolve from the real home directory. Tests re-point
+/// MARU_TEST_HOME so unit fixtures never read the developer's Keychain-backed
+/// or home-directory credentials.
+#[cfg(not(test))]
+fn credentials_home() -> Option<PathBuf> {
+    dirs::home_dir()
+}
+
+#[cfg(test)]
+fn credentials_home() -> Option<PathBuf> {
+    std::env::var_os("MARU_TEST_HOME")
+        .map(PathBuf::from)
+        .or_else(dirs::home_dir)
+}
+
 fn home_file(segments: &[&str]) -> Option<String> {
-    let mut path = dirs::home_dir()?;
+    let mut path = credentials_home()?;
     for segment in segments {
         path.push(segment);
     }
@@ -819,9 +882,16 @@ fn override_for(
 /// 8s in production. Tests tighten it to 500ms so the sleeping-fake-CLI test
 /// stays fast — except under `MARU_CLI_SMOKE`, where the test drives the real
 /// binaries and a real `--version` can take most of that 500ms on its own.
+/// Full-suite runs may override the test budget with
+/// `MARU_TEST_CLI_PROBE_TIMEOUT_MS` when process-spawn contention makes the
+/// 500ms default flaky.
 fn cli_probe_timeout() -> Duration {
     if cfg!(test) && std::env::var_os("MARU_CLI_SMOKE").is_none() {
-        return Duration::from_millis(500);
+        return std::env::var("MARU_TEST_CLI_PROBE_TIMEOUT_MS")
+            .ok()
+            .and_then(|value| value.parse::<u64>().ok())
+            .map(Duration::from_millis)
+            .unwrap_or(Duration::from_millis(500));
     }
     Duration::from_secs(8)
 }
@@ -1133,12 +1203,13 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn run_cli_times_out_on_sleeping_process() {
-        // CLI_PROBE_TIMEOUT is 500ms under cfg(test); the sleeper must be
-        // killed and reaped well before its own 30s sleep ends.
+        // The test probe timeout is 500ms by default (MARU_TEST_CLI_PROBE_TIMEOUT_MS
+        // may widen it for loaded full-suite runs); the sleeper must be killed
+        // and reaped well before its own 30s sleep ends.
         let start = Instant::now();
         let output = run_cli(Path::new("/bin/sh"), &["-c", "sleep 30"]);
         assert!(output.is_none());
-        assert!(start.elapsed() < Duration::from_secs(5));
+        assert!(start.elapsed() < cli_probe_timeout() + Duration::from_secs(4));
     }
 
     #[test]
@@ -1356,5 +1427,180 @@ mod tests {
                 ),
             ],
         }
+    }
+}
+
+#[cfg(test)]
+mod phase08_17 {
+    use super::ipc;
+    use super::*;
+    use crate::atomic_file::phase08_06::{boundary, run, Home};
+
+    fn write_fake_cli(dir: &Path, name: &str, script: &str) -> PathBuf {
+        let path = dir.join(name);
+        std::fs::write(&path, script).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = std::fs::metadata(&path).unwrap().permissions();
+            perms.set_mode(0o755);
+            std::fs::set_permissions(&path, perms).unwrap();
+        }
+        path
+    }
+
+    fn fake_overrides(home: &Path) -> HashMap<String, String> {
+        let bin = home.join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let claude = write_fake_cli(
+            &bin,
+            "fake-claude",
+            r#"#!/bin/sh
+case "$1" in
+  --version) echo "claude 1.2.3" ;;
+  auth) echo '{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"firstParty","email":"dev@example.com","orgName":"Example Org"}' ;;
+esac
+exit 0
+"#,
+        );
+        let codex = write_fake_cli(
+            &bin,
+            "fake-codex",
+            r#"#!/bin/sh
+case "$1" in
+  --version) echo "codex 1.0.0" ;;
+  login) echo "Logged in using ChatGPT" ;;
+esac
+exit 0
+"#,
+        );
+        let kimi = write_fake_cli(&bin, "fake-kimi", "#!/bin/sh\necho 'kimi 1.0.0'\nexit 0\n");
+        let kiro = write_fake_cli(
+            &bin,
+            "fake-kiro",
+            r#"#!/bin/sh
+case "$1" in
+  --version) echo "kiro 1.0.0" ;;
+  whoami) printf 'Logged in with IAM Identity Center\nEmail: dev@example.com\nProfile:\nwork\n' ;;
+esac
+exit 0
+"#,
+        );
+        HashMap::from([
+            ("claude".to_string(), claude.to_string_lossy().into_owned()),
+            ("codex".to_string(), codex.to_string_lossy().into_owned()),
+            ("kimi".to_string(), kimi.to_string_lossy().into_owned()),
+            ("kiro".to_string(), kiro.to_string_lossy().into_owned()),
+        ])
+    }
+
+    fn unsigned_jwt(payload: &str) -> String {
+        let engine = base64::engine::general_purpose::URL_SAFE_NO_PAD;
+        format!(
+            "{}.{}.signature",
+            engine.encode(br#"{"alg":"none"}"#),
+            engine.encode(payload.as_bytes())
+        )
+    }
+
+    struct CliTimeoutGuard(Option<std::ffi::OsString>);
+    impl CliTimeoutGuard {
+        fn new() -> Self {
+            let prior = std::env::var_os("MARU_TEST_CLI_PROBE_TIMEOUT_MS");
+            std::env::set_var("MARU_TEST_CLI_PROBE_TIMEOUT_MS", "5000");
+            Self(prior)
+        }
+    }
+    impl Drop for CliTimeoutGuard {
+        fn drop(&mut self) {
+            match &self.0 {
+                Some(value) => std::env::set_var("MARU_TEST_CLI_PROBE_TIMEOUT_MS", value),
+                None => std::env::remove_var("MARU_TEST_CLI_PROBE_TIMEOUT_MS"),
+            }
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn phase08_17_status_account_and_usage_fixture_results_and_legacy_rejections() {
+        let _cli_timeout = CliTimeoutGuard::new();
+        let home = Home::new();
+        let overrides = Some(fake_overrides(home.root.path()));
+
+        let accounts = run(ipc::agents_account_status(overrides.clone())).unwrap();
+        assert_eq!(accounts.len(), AGENTS.len());
+        let by_id = |id: &str| accounts.iter().find(|a| a.id == id).unwrap();
+        let claude = by_id("claude");
+        assert!(claude.installed);
+        assert_eq!(claude.version.as_deref(), Some("claude 1.2.3"));
+        assert_eq!(claude.auth_status, "authenticated");
+        assert_eq!(claude.email.as_deref(), Some("dev@example.com"));
+        assert_eq!(claude.organization.as_deref(), Some("Example Org"));
+        assert_eq!(by_id("codex").auth_status, "authenticated");
+        assert_eq!(by_id("kiro").auth_status, "authenticated");
+        assert_eq!(
+            by_id("kiro").login_method.as_deref(),
+            Some("IAM Identity Center")
+        );
+
+        // kimi authenticates from the fixture credentials file under the
+        // re-pointed test home; nothing touches the real Keychain or ~/.codex.
+        let cred_dir = home.root.path().join(".kimi-code/credentials");
+        std::fs::create_dir_all(&cred_dir).unwrap();
+        let jwt = unsigned_jwt(r#"{"sub":"kimi-user"}"#);
+        std::fs::write(
+            cred_dir.join("kimi-code.json"),
+            format!(
+                r#"{{"access_token":"{jwt}","expires_at":{}}}"#,
+                unix_now() + 3600
+            ),
+        )
+        .unwrap();
+        let accounts = run(ipc::agents_account_status(overrides.clone())).unwrap();
+        let kimi = accounts.iter().find(|a| a.id == "kimi").unwrap();
+        assert_eq!(kimi.auth_status, "authenticated");
+        assert_eq!(kimi.email.as_deref(), Some("kimi-user"));
+
+        // Malformed fixture credentials fail closed instead of erroring.
+        std::fs::write(cred_dir.join("kimi-code.json"), "{not json").unwrap();
+        let accounts = run(ipc::agents_account_status(overrides.clone())).unwrap();
+        assert_eq!(
+            accounts
+                .iter()
+                .find(|a| a.id == "kimi")
+                .unwrap()
+                .auth_status,
+            "unknown"
+        );
+
+        // Usage: no fixture OAuth token or codex auth.json exists, so both
+        // stay unauthenticated without any network call; kimi/kiro report
+        // unsupported from their own capability match.
+        let usage = run(ipc::agents_usage_status(overrides.clone(), Some(true))).unwrap();
+        assert_eq!(usage.len(), AGENTS.len());
+        let by_id = |id: &str| usage.iter().find(|u| u.id == id).unwrap();
+        assert_eq!(by_id("claude").state, "unauthenticated");
+        assert_eq!(by_id("codex").state, "unauthenticated");
+        assert_eq!(by_id("kimi").state, "unsupported");
+        assert_eq!(by_id("kiro").state, "unsupported");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn phase08_17_status_each_wrapper_yields_same_poll_and_maps_join_failure() {
+        let _cli_timeout = CliTimeoutGuard::new();
+        let home = Home::new();
+        let overrides = Some(fake_overrides(home.root.path()));
+        let home_path = home.root.path().to_path_buf();
+        boundary(
+            home_path.clone(),
+            "agents_account_status",
+            ipc::agents_account_status(overrides.clone()),
+        );
+        boundary(
+            home_path,
+            "agents_usage_status",
+            ipc::agents_usage_status(overrides, Some(true)),
+        );
     }
 }

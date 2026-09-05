@@ -85,12 +85,13 @@ mod win_process;
 mod workspace;
 mod workspace_files;
 
-use agent_host::proposal::ipc::{agent_apply_skill_proposal, agent_parse_skill_proposal};
-use agent_host::structured_loop::ipc::agent_run_structured_loop;
-use agent_host::{
-    agent_export_redacted_run_summary, agent_read_run_events, agent_replay_run_summary,
-    agent_write_redacted_run_summary, agents_account_status, agents_usage_status,
+use agent_host::cloud_dashboard::ipc::{
+    agent_export_redacted_run_summary, agent_write_redacted_run_summary,
 };
+use agent_host::event_store::ipc::{agent_read_run_events, agent_replay_run_summary};
+use agent_host::proposal::ipc::{agent_apply_skill_proposal, agent_parse_skill_proposal};
+use agent_host::status::ipc::{agents_account_status, agents_usage_status};
+use agent_host::structured_loop::ipc::agent_run_structured_loop;
 use agents::ipc::{agents_delete, agents_list, agents_reset, agents_upsert};
 use ai_router::ipc::{start_agent_cli_invocation, start_claude_cli_invocation};
 use approval::{prepare_approval, record_approval, ApprovalState};
@@ -109,7 +110,9 @@ use e2e_flow::{maru_e2e_read, maru_e2e_run};
 use export::{export_dispatch, export_plan, export_validate};
 use gmail_gws::check_gws_auth;
 use html_editor::prepare_html_editor_assets;
-use hub_client::{hub_fetch_catalog, hub_poll_gate, hub_queue_drain, hub_status, hub_submit_gate};
+use hub_client::ipc::{
+    hub_fetch_catalog, hub_poll_gate, hub_queue_drain, hub_status, hub_submit_gate,
+};
 use hwp_cli_template::{hwp_cli_template_fields, hwp_cli_template_fill};
 use hwped::{
     hwped_capabilities, hwped_compose, hwped_edit, hwped_read, hwped_render, hwped_validate,

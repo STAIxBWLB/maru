@@ -99,14 +99,48 @@ pub(crate) fn append_run_event_payload_in_transaction(
     Ok(event)
 }
 
-#[tauri::command]
 pub fn agent_read_run_events(cwd: String, run_id: String) -> Result<Vec<AgentRunEvent>, String> {
     read_run_events(&cwd, &run_id)
 }
 
-#[tauri::command]
 pub fn agent_replay_run_summary(cwd: String, run_id: String) -> Result<RunReplaySummary, String> {
     replay_run_summary(&cwd, &run_id)
+}
+
+pub mod ipc {
+    use super::*;
+
+    #[tauri::command]
+    pub async fn agent_read_run_events(
+        cwd: String,
+        run_id: String,
+    ) -> Result<Vec<AgentRunEvent>, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            if let Ok(path) = super::run_events_path(&cwd, &run_id) {
+                PathTransactionLease::test_stage(&[path], "worker:agent_read_run_events");
+            }
+            super::agent_read_run_events(cwd, run_id)
+        })
+        .await
+        .map_err(|err| format!("agent_read_run_events_task_failed: {err}"))?
+    }
+
+    #[tauri::command]
+    pub async fn agent_replay_run_summary(
+        cwd: String,
+        run_id: String,
+    ) -> Result<RunReplaySummary, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            if let Ok(path) = super::run_events_path(&cwd, &run_id) {
+                PathTransactionLease::test_stage(&[path], "worker:agent_replay_run_summary");
+            }
+            super::agent_replay_run_summary(cwd, run_id)
+        })
+        .await
+        .map_err(|err| format!("agent_replay_run_summary_task_failed: {err}"))?
+    }
 }
 
 pub fn read_run_events(cwd: &str, run_id: &str) -> Result<Vec<AgentRunEvent>, String> {
@@ -209,5 +243,69 @@ mod tests {
         let summary = replay_run_summary(&cwd, "ai-test").unwrap();
         assert_eq!(summary.proposal_count, 1);
         assert_eq!(summary.last_type.as_deref(), Some("proposal.created"));
+    }
+}
+
+#[cfg(test)]
+mod phase08_17 {
+    use super::ipc;
+    use super::*;
+    use crate::atomic_file::phase08_06::{boundary, run};
+    use serde_json::json;
+
+    fn fixture_cwd() -> (tempfile::TempDir, String) {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let cwd = tmp.path().to_string_lossy().to_string();
+        for (index, event_type) in ["run.started", "proposal.created", "write.committed"]
+            .iter()
+            .copied()
+            .enumerate()
+        {
+            let event = new_run_event("run-1", event_type, "test", json!({"seq": index}), None);
+            append_run_event(&cwd, &event).unwrap();
+        }
+        (tmp, cwd)
+    }
+
+    #[test]
+    fn phase08_17_event_store_wrappers_round_trip_and_legacy_rejections() {
+        let (_tmp, cwd) = fixture_cwd();
+
+        let events = run(ipc::agent_read_run_events(cwd.clone(), "run-1".into())).unwrap();
+        assert_eq!(events.len(), 3);
+        assert_eq!(events[0].event_type, "run.started");
+        assert_eq!(events[2].event_type, "write.committed");
+
+        let summary = run(ipc::agent_replay_run_summary(cwd.clone(), "run-1".into())).unwrap();
+        assert_eq!(summary.event_count, 3);
+        assert_eq!(summary.proposal_count, 1);
+        assert_eq!(summary.write_committed_count, 1);
+        assert_eq!(summary.last_type.as_deref(), Some("write.committed"));
+
+        // Legacy rejection paths are unchanged through the async boundary.
+        assert_eq!(
+            run(ipc::agent_read_run_events(cwd.clone(), "bad id".into())).unwrap_err(),
+            "agent_run_id_invalid"
+        );
+        assert_eq!(
+            run(ipc::agent_replay_run_summary(cwd, "bad id".into())).unwrap_err(),
+            "agent_run_id_invalid"
+        );
+    }
+
+    #[test]
+    fn phase08_17_event_store_wrappers_yield_same_poll_and_map_join_failure() {
+        let (_tmp, cwd) = fixture_cwd();
+        let events_path = run_events_path(&cwd, "run-1").unwrap();
+        boundary(
+            events_path.clone(),
+            "agent_read_run_events",
+            ipc::agent_read_run_events(cwd.clone(), "run-1".into()),
+        );
+        boundary(
+            events_path,
+            "agent_replay_run_summary",
+            ipc::agent_replay_run_summary(cwd, "run-1".into()),
+        );
     }
 }
