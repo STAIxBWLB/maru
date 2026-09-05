@@ -46,6 +46,17 @@ pub fn scan_catalog_impl(
     workspace_root: &Path,
     force_refresh: bool,
 ) -> io::Result<CatalogScanReport> {
+    super::scan_catalog_with_transaction(workspace_root, force_refresh)
+}
+
+pub(crate) fn scan_catalog_impl_in_transaction(
+    lease: &crate::atomic_file::PathTransactionLease,
+    workspace_root: &Path,
+    force_refresh: bool,
+) -> io::Result<CatalogScanReport> {
+    lease
+        .ensure_covered(super::catalog_mutation_paths(workspace_root)?)
+        .map_err(io::Error::other)?;
     let started = std::time::Instant::now();
     let mut warnings = Vec::new();
     let mut entries: Vec<CatalogEntry> = Vec::new();
@@ -110,12 +121,8 @@ pub fn scan_catalog_impl(
         entries: entries.clone(),
         bus_seen: bus_seen.clone(),
     };
-    let cache_path = catalog_cache_path(workspace_root);
-    if let Some(parent) = cache_path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
     let json = serde_json::to_string_pretty(&index).map_err(io::Error::other)?;
-    std::fs::write(&cache_path, json)?;
+    super::write_catalog_cache(lease, workspace_root, json.as_bytes())?;
 
     Ok(CatalogScanReport {
         scanned_at: index.generated_at.clone(),

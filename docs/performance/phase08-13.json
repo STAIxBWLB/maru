@@ -1,0 +1,622 @@
+{
+  "plan": "08-13",
+  "moduleIntegrationOwner": "08-13",
+  "commands": [
+    {
+      "name": "vault_graph_read",
+      "module": "src-tauri/src/vault_graph.rs",
+      "registrationPath": "src-tauri/src/lib.rs::vault_graph::ipc::vault_graph_read",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/vault_graph.rs::vault_graph_read resolves preferred root/nested report paths and reads/parses the entire JSON graph; graph size is not an IPC scheduling bound.",
+        "src-tauri/src/vault.rs::resolve_inside_vault preserves existing lexical containment."
+      ],
+      "workerBoundary": "src-tauri/src/vault_graph.rs::ipc::vault_graph_read owns vault_path: String, source: Option<String> and awaits tauri::async_runtime::spawn_blocking before any filesystem operation or admission wait. Inner legacy String errors pass through; JoinError adds vault_graph_read_task_failed context.",
+      "syncCallers": [
+        "src-tauri/src/vault_graph.rs::vault_graph_read preserves its public synchronous signature for existing Rust callers; IPC passes owned values directly."
+      ],
+      "mutationKey": {
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "sharedAdmissionEntry": "Read-only command; no filesystem mutation, cache repair or registry migration.",
+        "postAdmissionPreconditions": [
+          "Read-only local metadata or file parsing; no command-owned write."
+        ],
+        "domainLockOrder": "No mutation admission or domain guard required.",
+        "readOnly": true
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_13",
+          "passed": 23,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/components/graph/GraphView.tsx"
+        ],
+        "payload": "vaultGraphRead and GraphView loadOverlay own refreshing, enrichment and failure hint. overlayRequestRef prevents superseded publication; missing report degrades to live graph.",
+        "terminalNoticeOwner": "Existing initiating UI owner is recorded here. Navigation-safe completion lifetime, fulfilled-payload classification and exactly-one terminal notice remain Plan25/26 work; this shard does not claim that frontend contract is complete."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_13_graph_wrappers_yield_same_task_and_report_join_failure",
+          "phase08_13_graph_wrappers_preserve_nonempty_outputs_and_legacy_errors"
+        ],
+        "workerProof": "Actual wrappers are manually polled, then yield on their polling task while a distinct blocking worker is held; controlled worker panic proves contextual JoinError. Nonempty synthetic fixtures verify original output and rejection contracts.",
+        "platformScope": "Executed on macOS with disposable Home/config/workspace fixtures. Exact-path TrashFixture captures Files Trash without native Trash effects. No live workspace, provider, network or subprocess exercised. Native saturation, Windows execution and feature-off release proof remain their designated later gates.",
+        "readOnlyEvidence": "This command reads local metadata/content only; no implicit cache/registry write is reached."
+      }
+    },
+    {
+      "name": "vault_graph_root",
+      "module": "src-tauri/src/vault_graph.rs",
+      "registrationPath": "src-tauri/src/lib.rs::vault_graph::ipc::vault_graph_root",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/vault_graph.rs::vault_graph_root performs filesystem metadata probes for root report and nested managed-vault directories."
+      ],
+      "workerBoundary": "src-tauri/src/vault_graph.rs::ipc::vault_graph_root owns workspace: String and awaits tauri::async_runtime::spawn_blocking before any filesystem operation or admission wait. Inner legacy String errors pass through; JoinError adds vault_graph_root_task_failed context. The synchronous Option<String> API is unchanged; IPC adds outer Result only for JoinError, retaining successful string/null wire payload.",
+      "syncCallers": [
+        "src-tauri/src/vault_graph.rs::vault_graph_root preserves its public synchronous signature for existing Rust callers; IPC passes owned values directly."
+      ],
+      "mutationKey": {
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "sharedAdmissionEntry": "Read-only command; no filesystem mutation, cache repair or registry migration.",
+        "postAdmissionPreconditions": [
+          "Read-only local metadata or file parsing; no command-owned write."
+        ],
+        "domainLockOrder": "No mutation admission or domain guard required.",
+        "readOnly": true
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_13",
+          "passed": 23,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/lib/modeAdapters/GraphModeAdapter.tsx"
+        ],
+        "payload": "vaultGraphRoot feeds nestedVault selection; GraphModeAdapter effect guards stale completion with cancelled and keeps existing workspace fallback on null/error.",
+        "terminalNoticeOwner": "Existing initiating UI owner is recorded here. Navigation-safe completion lifetime, fulfilled-payload classification and exactly-one terminal notice remain Plan25/26 work; this shard does not claim that frontend contract is complete."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_13_graph_wrappers_yield_same_task_and_report_join_failure",
+          "phase08_13_graph_wrappers_preserve_nonempty_outputs_and_legacy_errors"
+        ],
+        "workerProof": "Actual wrappers are manually polled, then yield on their polling task while a distinct blocking worker is held; controlled worker panic proves contextual JoinError. Nonempty synthetic fixtures verify original output and rejection contracts.",
+        "platformScope": "Executed on macOS with disposable Home/config/workspace fixtures. Exact-path TrashFixture captures Files Trash without native Trash effects. No live workspace, provider, network or subprocess exercised. Native saturation, Windows execution and feature-off release proof remain their designated later gates.",
+        "readOnlyEvidence": "This command reads local metadata/content only; no implicit cache/registry write is reached."
+      }
+    },
+    {
+      "name": "vault_graph_layout_read",
+      "module": "src-tauri/src/vault_graph.rs",
+      "registrationPath": "src-tauri/src/lib.rs::vault_graph::ipc::vault_graph_layout_read",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/vault_graph.rs::vault_graph_layout_read reads and parses the complete layout JSON, upgrades version in memory and degrades corrupt data to None.",
+        "src-tauri/src/vault_graph.rs::layout_cache_path selects the existing disposable cache."
+      ],
+      "workerBoundary": "src-tauri/src/vault_graph.rs::ipc::vault_graph_layout_read owns workspace: String and awaits tauri::async_runtime::spawn_blocking before any filesystem operation or admission wait. Inner legacy String errors pass through; JoinError adds vault_graph_layout_read_task_failed context.",
+      "syncCallers": [
+        "src-tauri/src/vault_graph.rs::vault_graph_layout_read preserves its public synchronous signature for existing Rust callers; IPC passes owned values directly."
+      ],
+      "mutationKey": {
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "sharedAdmissionEntry": "Read-only command; no filesystem mutation, cache repair or registry migration.",
+        "postAdmissionPreconditions": [
+          "Read-only local metadata or file parsing; no command-owned write."
+        ],
+        "domainLockOrder": "No mutation admission or domain guard required.",
+        "readOnly": true
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_13",
+          "passed": 23,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/components/graph/GraphView.tsx"
+        ],
+        "payload": "vaultGraphLayoutRead catches read failure as null. GraphView effect owns sanitized seeds, pinned ids and layoutCacheReady with cancelled guard.",
+        "terminalNoticeOwner": "Existing initiating UI owner is recorded here. Navigation-safe completion lifetime, fulfilled-payload classification and exactly-one terminal notice remain Plan25/26 work; this shard does not claim that frontend contract is complete."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_13_graph_wrappers_yield_same_task_and_report_join_failure",
+          "phase08_13_graph_wrappers_preserve_nonempty_outputs_and_legacy_errors"
+        ],
+        "workerProof": "Actual wrappers are manually polled, then yield on their polling task while a distinct blocking worker is held; controlled worker panic proves contextual JoinError. Nonempty synthetic fixtures verify original output and rejection contracts.",
+        "platformScope": "Executed on macOS with disposable Home/config/workspace fixtures. Exact-path TrashFixture captures Files Trash without native Trash effects. No live workspace, provider, network or subprocess exercised. Native saturation, Windows execution and feature-off release proof remain their designated later gates.",
+        "readOnlyEvidence": "This command reads local metadata/content only; no implicit cache/registry write is reached."
+      }
+    },
+    {
+      "name": "vault_graph_layout_save",
+      "module": "src-tauri/src/vault_graph.rs",
+      "registrationPath": "src-tauri/src/lib.rs::vault_graph::ipc::vault_graph_layout_save",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/vault_graph.rs::vault_graph_layout_save captures complete cache admission.",
+        "src-tauri/src/vault_graph.rs::vault_graph_layout_save_in_transaction forces version 2 and replaces the complete supplied node set with atomic JSON publication.",
+        "src-tauri/src/atomic_file.rs::write_atomic performs temporary-file flush and replacement."
+      ],
+      "workerBoundary": "src-tauri/src/vault_graph.rs::ipc::vault_graph_layout_save owns workspace: String, cache: GraphLayoutCache and awaits tauri::async_runtime::spawn_blocking before any filesystem operation or admission wait. Inner legacy String errors pass through; JoinError adds vault_graph_layout_save_task_failed context.",
+      "syncCallers": [
+        "src-tauri/src/vault_graph.rs::vault_graph_layout_save preserves its public synchronous signature for existing Rust callers; IPC passes owned values directly."
+      ],
+      "mutationKey": {
+        "lexicalPaths": [
+          "Selected workspace .maru/cache/graph-layout.json and its complete .maru/cache allocation directory, normalized workspace cache path, and existing canonical endpoints. Atomic temporary publication and complete replacement share this set. Initially missing .maru creation ancestor is explicitly included."
+        ],
+        "aliasPaths": [
+          "src-tauri/src/atomic_file.rs::PathTransactionRequest records normalized lexical and physical alias keys, component-wise ancestor conflicts and original directory handles. Admission and first-effect checks reject changed aliases and missing or replaced parents."
+        ],
+        "sharedAdmissionEntry": "src-tauri/src/vault_graph.rs::vault_graph_layout_save enters src-tauri/src/atomic_file.rs::with_path_transactions and passes the lease to src-tauri/src/vault_graph.rs::vault_graph_layout_save_in_transaction.",
+        "postAdmissionPreconditions": [
+          "Original selected and normalized workspace directory identities remain present; normalize_existing_dir and ensure_covered run inside admission; before_effect precedes cache directory creation and atomic publication."
+        ],
+        "domainLockOrder": "Shared complete path admission before serialization and write; no separate layout domain mutex. Existing sync API and IPC wrapper reach the same admitted entry."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_13",
+          "passed": 23,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/components/graph/GraphView.tsx"
+        ],
+        "payload": "GraphView debounced complete-node-set save is fire-and-forget after node identity/finite coordinate checks. vaultGraphLayoutSave deliberately swallows disposable-cache failures; no visible terminal notice exists.",
+        "terminalNoticeOwner": "Existing initiating UI owner is recorded here. Navigation-safe completion lifetime, fulfilled-payload classification and exactly-one terminal notice remain Plan25/26 work; this shard does not claim that frontend contract is complete."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_13_graph_wrappers_yield_same_task_and_report_join_failure",
+          "phase08_13_graph_wrappers_preserve_nonempty_outputs_and_legacy_errors"
+        ],
+        "workerProof": "Actual wrappers are manually polled, then yield on their polling task while a distinct blocking worker is held; controlled worker panic proves contextual JoinError. Nonempty synthetic fixtures verify original output and rejection contracts.",
+        "platformScope": "Executed on macOS with disposable Home/config/workspace fixtures. Exact-path TrashFixture captures Files Trash without native Trash effects. No live workspace, provider, network or subprocess exercised. Native saturation, Windows execution and feature-off release proof remain their designated later gates.",
+        "crossDomainConsumers": [
+          "src-tauri/src/kg_refs.rs phase08_13_each_cache_writer_serializes_and_releases_on_error_and_unwind",
+          "src-tauri/src/kg_refs.rs phase08_13_cache_files_parent_rename_trash_both_orders_and_workspace_aliases",
+          "src-tauri/src/kg_refs.rs phase08_13_cache_file_alias_document_and_physical_parent_races_both_orders"
+        ],
+        "aliasPublication": "Existing layout write_atomic behavior intentionally replaces a final-file symlink; lexical and physical endpoints still participate in contention. Catalog scan separately preserves its original fs::write final-file-link following semantics."
+      }
+    },
+    {
+      "name": "kg_document_refs",
+      "module": "src-tauri/src/kg_refs.rs",
+      "registrationPath": "src-tauri/src/lib.rs::kg_refs::ipc::kg_document_refs",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/kg_refs.rs::kg_document_refs and src-tauri/src/kg_refs.rs::kg_document_refs_in_transaction own the current document/cache transaction.",
+        "src-tauri/src/kg_refs.rs::vault_stamp reads the borrowed vault cache; src-tauri/src/kg_refs.rs::compute_document_refs calls src-tauri/src/vault.rs::scan_vault_in_transaction before regex/entity mapping and KG cache publication. Entity result caps do not bound full scanner and per-note matching cost."
+      ],
+      "workerBoundary": "src-tauri/src/kg_refs.rs::ipc::kg_document_refs owns work_path: String, doc_path: String and awaits tauri::async_runtime::spawn_blocking before any filesystem operation or admission wait. Inner legacy String errors pass through; JoinError adds kg_document_refs_task_failed context.",
+      "syncCallers": [
+        "src-tauri/src/kg_refs.rs::kg_document_refs preserves its public synchronous signature for existing Rust callers; IPC passes owned values directly."
+      ],
+      "mutationKey": {
+        "lexicalPaths": [
+          "Requested lexical workspace and normalized workspace subtree; selected document; .maru/kg-cache/<document-hash>.json and kg-cache directory; vault_cache_path and .maru/cache; workspace registry and legacy vault-list paths. Whole workspace reservation includes reached scanner metadata and cache work."
+        ],
+        "aliasPaths": [
+          "src-tauri/src/atomic_file.rs::PathTransactionRequest records normalized lexical and physical alias keys, component-wise ancestor conflicts and original directory handles. Admission and first-effect checks reject changed aliases and missing or replaced parents.",
+          "Canonical existing workspace, document, cache files, directories and registry endpoints join the request, including symlink targets outside the lexical workspace."
+        ],
+        "sharedAdmissionEntry": "src-tauri/src/kg_refs.rs::kg_document_refs enters src-tauri/src/atomic_file.rs::with_path_transactions; src-tauri/src/kg_refs.rs::kg_document_refs_in_transaction passes the same lease to src-tauri/src/vault.rs::read_vault_cache_in_transaction and src-tauri/src/vault.rs::scan_vault_in_transaction.",
+        "postAdmissionPreconditions": [
+          "Revalidate original lexical/normalized workspace parents, current containment, complete lease coverage, document bytes/hash and vault stamp. Nested scanner validates registry coverage and before_effect; cache publication retains the original best-effort write-error behavior."
+        ],
+        "domainLockOrder": "Shared complete path admission before filesystem scan, registry loading and cache publication; nested scanner/cache helpers borrow the admitted lease without reacquiring admission. No separate KG domain mutex."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_13",
+          "passed": 23,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/App.tsx"
+        ],
+        "payload": "kgDocumentRefs callers in App own graph focus and highlight. Focus request verifies request/owner/tab/editor identities before publication or panel opening; highlight toggle directly sets highlight. Failures use App setError; highlight lifetime still needs Plan25/26 review.",
+        "terminalNoticeOwner": "Existing initiating UI owner is recorded here. Navigation-safe completion lifetime, fulfilled-payload classification and exactly-one terminal notice remain Plan25/26 work; this shard does not claim that frontend contract is complete."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_13_refs_wrappers_yield_same_task_and_report_join_failure",
+          "phase08_13_refs_wrappers_preserve_payload_cache_hits_clear_counts_and_errors",
+          "phase08_13_each_cache_writer_serializes_and_releases_on_error_and_unwind",
+          "phase08_13_cache_files_parent_rename_trash_both_orders_and_workspace_aliases",
+          "phase08_13_refs_and_document_save_both_orders_preserve_current_bytes_and_typed_conflict",
+          "phase08_13_cache_file_alias_document_and_physical_parent_races_both_orders"
+        ],
+        "workerProof": "Actual wrappers are manually polled, then yield on their polling task while a distinct blocking worker is held; controlled worker panic proves contextual JoinError. Nonempty synthetic fixtures verify original output and rejection contracts.",
+        "platformScope": "Executed on macOS with disposable Home/config/workspace fixtures. Exact-path TrashFixture captures Files Trash without native Trash effects. No live workspace, provider, network or subprocess exercised. Native saturation, Windows execution and feature-off release proof remain their designated later gates."
+      }
+    },
+    {
+      "name": "kg_refs_clear",
+      "module": "src-tauri/src/kg_refs.rs",
+      "registrationPath": "src-tauri/src/lib.rs::kg_refs::ipc::kg_refs_clear",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/kg_refs.rs::kg_refs_clear captures single/all cache endpoints.",
+        "src-tauri/src/kg_refs.rs::kg_refs_clear_in_transaction enumerates and removes matching JSON entries under admission; directory size is not bounded."
+      ],
+      "workerBoundary": "src-tauri/src/kg_refs.rs::ipc::kg_refs_clear owns work_path: String, doc_path: Option<String> and awaits tauri::async_runtime::spawn_blocking before any filesystem operation or admission wait. Inner legacy String errors pass through; JoinError adds kg_refs_clear_task_failed context.",
+      "syncCallers": [
+        "src-tauri/src/kg_refs.rs::kg_refs_clear preserves its public synchronous signature for existing Rust callers; IPC passes owned values directly."
+      ],
+      "mutationKey": {
+        "lexicalPaths": [
+          "Requested and normalized .maru/kg-cache subtree; for one document, selected document and its hashed cache file; for full clear, every currently selected JSON cache endpoint. Existing canonical endpoints are declared too."
+        ],
+        "aliasPaths": [
+          "src-tauri/src/atomic_file.rs::PathTransactionRequest records normalized lexical and physical alias keys, component-wise ancestor conflicts and original directory handles. Admission and first-effect checks reject changed aliases and missing or replaced parents."
+        ],
+        "sharedAdmissionEntry": "src-tauri/src/kg_refs.rs::kg_refs_clear enters src-tauri/src/atomic_file.rs::with_path_transactions before src-tauri/src/kg_refs.rs::kg_refs_clear_in_transaction.",
+        "postAdmissionPreconditions": [
+          "Original workspace identities, current lexical document containment and covered JSON cache entries are checked inside admission; before_effect precedes removals; empty or missing entries retain 0 removal result."
+        ],
+        "domainLockOrder": "Shared complete path admission before any cache deletion; no independent domain mutex. Individual and full clear use the same admitted public synchronous producer."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_13",
+          "passed": 23,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts"
+        ],
+        "payload": "kgRefsClear is an exported API returning removal count. Current source search found no production UI invocation, so no initiating UI notice owner exists for this API.",
+        "terminalNoticeOwner": "Existing initiating UI owner is recorded here. Navigation-safe completion lifetime, fulfilled-payload classification and exactly-one terminal notice remain Plan25/26 work; this shard does not claim that frontend contract is complete."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_13_refs_wrappers_yield_same_task_and_report_join_failure",
+          "phase08_13_refs_wrappers_preserve_payload_cache_hits_clear_counts_and_errors",
+          "phase08_13_each_cache_writer_serializes_and_releases_on_error_and_unwind",
+          "phase08_13_cache_files_parent_rename_trash_both_orders_and_workspace_aliases",
+          "phase08_13_refs_and_document_save_both_orders_preserve_current_bytes_and_typed_conflict",
+          "phase08_13_cache_file_alias_document_and_physical_parent_races_both_orders"
+        ],
+        "workerProof": "Actual wrappers are manually polled, then yield on their polling task while a distinct blocking worker is held; controlled worker panic proves contextual JoinError. Nonempty synthetic fixtures verify original output and rejection contracts.",
+        "platformScope": "Executed on macOS with disposable Home/config/workspace fixtures. Exact-path TrashFixture captures Files Trash without native Trash effects. No live workspace, provider, network or subprocess exercised. Native saturation, Windows execution and feature-off release proof remain their designated later gates."
+      }
+    },
+    {
+      "name": "graph_link_preview",
+      "module": "src-tauri/src/graph_authoring.rs",
+      "registrationPath": "src-tauri/src/lib.rs::graph_authoring::ipc::graph_link_preview",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/graph_authoring.rs::graph_link_preview and src-tauri/src/graph_authoring.rs::graph_link_preview_in_transaction admit potential registry migration.",
+        "src-tauri/src/graph_authoring.rs::build_proposal and src-tauri/src/graph_authoring.rs::patch_preview read document bytes and enforce relation, current permission/schema and revision-preview contracts."
+      ],
+      "workerBoundary": "src-tauri/src/graph_authoring.rs::ipc::graph_link_preview owns request: GraphLinkRequest and awaits tauri::async_runtime::spawn_blocking before any filesystem operation or admission wait. Inner legacy String errors pass through; JoinError adds graph_link_preview_task_failed context.",
+      "syncCallers": [
+        "src-tauri/src/graph_authoring.rs::graph_link_preview preserves its public synchronous signature for existing Rust callers; IPC passes owned values directly."
+      ],
+      "mutationKey": {
+        "lexicalPaths": [
+          "Source document and its workspace .maru/versions subtree; reciprocal target document and target workspace .maru/versions subtree when requested. Preserve both lexical workspace selections and resolved paths, existing canonical endpoints, and conditional current/legacy registry migration paths. Initially missing .maru ancestors for each snapshot root are included before admission."
+        ],
+        "aliasPaths": [
+          "src-tauri/src/atomic_file.rs::PathTransactionRequest records normalized lexical and physical alias keys, component-wise ancestor conflicts and original directory handles. Admission and first-effect checks reject changed aliases and missing or replaced parents."
+        ],
+        "sharedAdmissionEntry": "src-tauri/src/graph_authoring.rs::graph_link_preview and src-tauri/src/graph_authoring.rs::graph_link_apply independently enter src-tauri/src/atomic_file.rs::with_path_transactions; their in_transaction adapters retain that lease through proposal validation, optional snapshots, complete reciprocal publication and rollback.",
+        "postAdmissionPreconditions": [
+          "Re-read document ownership, current alias-aware write policy, controlled relation/schema, managed-write validation and document bytes. Apply rebuilds the proposal and compares expected revisions before any document publication. Both selected workspaces retain original pinned identities.",
+          "Preview does not publish document or version bytes; its permission loaders can migrate the workspace registry, so preview is admitted as a potentially mutating entry."
+        ],
+        "domainLockOrder": "Shared complete path admission before permission/registry loaders and before snapshot/document writes. src-tauri/src/document.rs::write_version_snapshot_in_transaction borrows the existing lease. No separate graph domain mutex or nested admission; retain lease through reciprocal rollback."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_13",
+          "passed": 23,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/components/graph/GraphRelationReviewDialog.tsx"
+        ],
+        "payload": "GraphRelationReviewDialog effect owns proposal/loading/error, guards stale result with cancelled, and requires user review before Apply.",
+        "terminalNoticeOwner": "Existing initiating UI owner is recorded here. Navigation-safe completion lifetime, fulfilled-payload classification and exactly-one terminal notice remain Plan25/26 work; this shard does not claim that frontend contract is complete."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_13_graph_all_wrappers_same_polling_task_yield_joinerror",
+          "phase08_13_graph_nonempty_reciprocal_payload_legacy_errors_and_snapshots",
+          "phase08_13_graph_same_target_contention_error_and_unwind_release",
+          "phase08_13_graph_reciprocal_rollback_keeps_both_originals_and_snapshots",
+          "phase08_13_graph_cross_workspace_reciprocal_target_and_snapshot_admission",
+          "phase08_13_graph_document_races_both_orders_and_aliases",
+          "phase08_13_graph_files_parent_races_both_orders_aliases_and_no_recreation",
+          "phase08_13_graph_parent_replacement_and_alias_retarget_reject_before_effect",
+          "phase08_13_graph_current_readonly_policy_alias_directions_and_duplicates"
+        ],
+        "workerProof": "Actual wrappers are manually polled, then yield on their polling task while a distinct blocking worker is held; controlled worker panic proves contextual JoinError. Nonempty synthetic fixtures verify original output and rejection contracts.",
+        "platformScope": "Executed on macOS with disposable Home/config/workspace fixtures. Exact-path TrashFixture captures Files Trash without native Trash effects. No live workspace, provider, network or subprocess exercised. Native saturation, Windows execution and feature-off release proof remain their designated later gates."
+      }
+    },
+    {
+      "name": "graph_link_apply",
+      "module": "src-tauri/src/graph_authoring.rs",
+      "registrationPath": "src-tauri/src/lib.rs::graph_authoring::ipc::graph_link_apply",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/graph_authoring.rs::graph_link_apply and src-tauri/src/graph_authoring.rs::graph_link_apply_in_transaction validate a fresh proposal under complete admission.",
+        "src-tauri/src/graph_authoring.rs::snapshot_if_managed calls src-tauri/src/document.rs::write_version_snapshot_in_transaction with the same lease.",
+        "src-tauri/src/atomic_file.rs::write_atomic publishes reciprocal patches; graph_link_apply_in_transaction restores previously written original bytes on a later write failure, then reads complete document payloads."
+      ],
+      "workerBoundary": "src-tauri/src/graph_authoring.rs::ipc::graph_link_apply owns proposal: GraphLinkProposal and awaits tauri::async_runtime::spawn_blocking before any filesystem operation or admission wait. Inner legacy String errors pass through; JoinError adds graph_link_apply_task_failed context.",
+      "syncCallers": [
+        "src-tauri/src/graph_authoring.rs::graph_link_apply preserves its public synchronous signature for existing Rust callers; IPC passes owned values directly."
+      ],
+      "mutationKey": {
+        "lexicalPaths": [
+          "Source document and its workspace .maru/versions subtree; reciprocal target document and target workspace .maru/versions subtree when requested. Preserve both lexical workspace selections and resolved paths, existing canonical endpoints, and conditional current/legacy registry migration paths. Initially missing .maru ancestors for each snapshot root are included before admission."
+        ],
+        "aliasPaths": [
+          "src-tauri/src/atomic_file.rs::PathTransactionRequest records normalized lexical and physical alias keys, component-wise ancestor conflicts and original directory handles. Admission and first-effect checks reject changed aliases and missing or replaced parents."
+        ],
+        "sharedAdmissionEntry": "src-tauri/src/graph_authoring.rs::graph_link_preview and src-tauri/src/graph_authoring.rs::graph_link_apply independently enter src-tauri/src/atomic_file.rs::with_path_transactions; their in_transaction adapters retain that lease through proposal validation, optional snapshots, complete reciprocal publication and rollback.",
+        "postAdmissionPreconditions": [
+          "Re-read document ownership, current alias-aware write policy, controlled relation/schema, managed-write validation and document bytes. Apply rebuilds the proposal and compares expected revisions before any document publication. Both selected workspaces retain original pinned identities."
+        ],
+        "domainLockOrder": "Shared complete path admission before permission/registry loaders and before snapshot/document writes. src-tauri/src/document.rs::write_version_snapshot_in_transaction borrows the existing lease. No separate graph domain mutex or nested admission; retain lease through reciprocal rollback."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_13",
+          "passed": 23,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/components/graph/GraphRelationReviewDialog.tsx"
+        ],
+        "payload": "Dialog apply owns applying/error; success calls onApplied and closes dialog, failure preserves dialog and shows String reason, finally clears applying. Returned documents are not separately classified or retained by this caller.",
+        "terminalNoticeOwner": "Existing initiating UI owner is recorded here. Navigation-safe completion lifetime, fulfilled-payload classification and exactly-one terminal notice remain Plan25/26 work; this shard does not claim that frontend contract is complete."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_13_graph_all_wrappers_same_polling_task_yield_joinerror",
+          "phase08_13_graph_nonempty_reciprocal_payload_legacy_errors_and_snapshots",
+          "phase08_13_graph_same_target_contention_error_and_unwind_release",
+          "phase08_13_graph_reciprocal_rollback_keeps_both_originals_and_snapshots",
+          "phase08_13_graph_cross_workspace_reciprocal_target_and_snapshot_admission",
+          "phase08_13_graph_document_races_both_orders_and_aliases",
+          "phase08_13_graph_files_parent_races_both_orders_aliases_and_no_recreation",
+          "phase08_13_graph_parent_replacement_and_alias_retarget_reject_before_effect",
+          "phase08_13_graph_current_readonly_policy_alias_directions_and_duplicates"
+        ],
+        "workerProof": "Actual wrappers are manually polled, then yield on their polling task while a distinct blocking worker is held; controlled worker panic proves contextual JoinError. Nonempty synthetic fixtures verify original output and rejection contracts.",
+        "platformScope": "Executed on macOS with disposable Home/config/workspace fixtures. Exact-path TrashFixture captures Files Trash without native Trash effects. No live workspace, provider, network or subprocess exercised. Native saturation, Windows execution and feature-off release proof remain their designated later gates.",
+        "rollbackScope": "Reciprocal failure test proves prior document bytes restored and managed originals snapshotted under the same lease. Existing best-effort rollback error handling remains unchanged; no cross-process transaction guarantee is asserted.",
+        "selfAliasRejection": "Both lexical self-relations and different lexical selections resolving to the same physical note reject graph_relation_self before reciprocal publication."
+      }
+    },
+    {
+      "name": "catalog_scan",
+      "module": "src-tauri/src/ops_catalog/mod.rs",
+      "registrationPath": "src-tauri/src/lib.rs::ops_catalog::ipc::catalog_scan",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/ops_catalog/mod.rs::catalog_scan calls src-tauri/src/ops_catalog/scan.rs::scan_catalog_impl, whose public producer obtains shared admission.",
+        "src-tauri/src/ops_catalog/scan.rs::scan_catalog_impl_in_transaction traverses BU configs, inbox, task and markdown/binary sources and sorts entries before src-tauri/src/ops_catalog/mod.rs::write_catalog_cache. Final entry cap does not bound traversal/parse cost."
+      ],
+      "workerBoundary": "src-tauri/src/ops_catalog/mod.rs::ipc::catalog_scan owns req: CatalogScanRequest and awaits tauri::async_runtime::spawn_blocking before any filesystem operation or admission wait. Inner legacy String errors pass through; JoinError adds catalog_scan_task_failed context.",
+      "syncCallers": [
+        "src-tauri/src/ops_catalog/mod.rs::catalog_scan preserves its public synchronous signature for existing Rust callers; IPC passes owned values directly."
+      ],
+      "mutationKey": {
+        "lexicalPaths": [
+          "Workspace .maru/cache/catalog.json and complete .maru/cache directory, including atomic temporary files; each initially missing creation ancestor through .maru. A final cache-file symlink adds its resolved target and existing publication parent."
+        ],
+        "aliasPaths": [
+          "src-tauri/src/atomic_file.rs::PathTransactionRequest records normalized lexical and physical alias keys, component-wise ancestor conflicts and original directory handles. Admission and first-effect checks reject changed aliases and missing or replaced parents.",
+          "Final cache-file symlinks are followed for publication, preserving the lexical link, including dangling target files whose original publication parent still exists."
+        ],
+        "sharedAdmissionEntry": "src-tauri/src/ops_catalog/scan.rs::scan_catalog_impl delegates to src-tauri/src/ops_catalog/mod.rs::scan_catalog_with_transaction and src-tauri/src/atomic_file.rs::with_path_transactions; src-tauri/src/ops_catalog/scan.rs::scan_catalog_impl_in_transaction borrows the lease through src-tauri/src/ops_catalog/mod.rs::write_catalog_cache.",
+        "postAdmissionPreconditions": [
+          "Missing workspace retains existing rejection. Lexical root, original workspace/cache parents, alias resolutions and complete publication coverage are checked before effects. Missing external link parent cannot be recreated; normal initial cache directory creation remains supported."
+        ],
+        "domainLockOrder": "Shared complete path admission before scan/cache processing and atomic publication; no domain mutex. Public synchronous producer and command wrapper share admission. Watcher only emits catalog://refresh; its frontend callback invokes the same catalog_scan command."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_13",
+          "passed": 23,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/catalog.ts",
+          "src/components/catalog/CatalogPane.tsx"
+        ],
+        "payload": "CatalogPane refresh owns report/entries/error/loading for initial, watcher and manual refresh. Scan report including warnings is set before query, retaining that successful scan if query fails; no navigation-safe terminal notice yet.",
+        "terminalNoticeOwner": "Existing initiating UI owner is recorded here. Navigation-safe completion lifetime, fulfilled-payload classification and exactly-one terminal notice remain Plan25/26 work; this shard does not claim that frontend contract is complete."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_13_catalog_all_wrappers_same_poll_task_yield_and_join_errors",
+          "phase08_13_catalog_actual_payloads_cache_and_legacy_errors",
+          "phase08_13_catalog_sync_producer_contends_and_error_unwind_release",
+          "phase08_13_catalog_files_parent_both_orders_alias_and_replacement",
+          "phase08_13_catalog_document_cache_both_orders_alias_and_conflict_release",
+          "phase08_13_catalog_final_file_alias_preserved_and_document_contention"
+        ],
+        "workerProof": "Actual wrappers are manually polled, then yield on their polling task while a distinct blocking worker is held; controlled worker panic proves contextual JoinError. Nonempty synthetic fixtures verify original output and rejection contracts.",
+        "platformScope": "Executed on macOS with disposable Home/config/workspace fixtures. Exact-path TrashFixture captures Files Trash without native Trash effects. No live workspace, provider, network or subprocess exercised. Native saturation, Windows execution and feature-off release proof remain their designated later gates."
+      }
+    },
+    {
+      "name": "catalog_query",
+      "module": "src-tauri/src/ops_catalog/mod.rs",
+      "registrationPath": "src-tauri/src/lib.rs::ops_catalog::ipc::catalog_query",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/ops_catalog/mod.rs::catalog_query calls src-tauri/src/ops_catalog/index.rs::load_or_empty to read/deserialize the full catalog JSON, then CatalogIndex query filters and sorts before applying limit. Output limit does not bound index work."
+      ],
+      "workerBoundary": "src-tauri/src/ops_catalog/mod.rs::ipc::catalog_query owns req: CatalogQueryRequest and awaits tauri::async_runtime::spawn_blocking before any filesystem operation or admission wait. Inner legacy String errors pass through; JoinError adds catalog_query_task_failed context.",
+      "syncCallers": [
+        "src-tauri/src/ops_catalog/mod.rs::catalog_query preserves its public synchronous signature for existing Rust callers; IPC passes owned values directly."
+      ],
+      "mutationKey": {
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "sharedAdmissionEntry": "Read-only command; no filesystem mutation, cache repair or registry migration.",
+        "postAdmissionPreconditions": [
+          "Read-only local metadata or file parsing; no command-owned write."
+        ],
+        "domainLockOrder": "No mutation admission or domain guard required.",
+        "readOnly": true
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_13",
+          "passed": 23,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/catalog.ts",
+          "src/components/catalog/CatalogPane.tsx"
+        ],
+        "payload": "CatalogPane refresh publishes query entries after scan, displays failure through error and clears loading in finally. Existing entries remain until a successful replacement.",
+        "terminalNoticeOwner": "Existing initiating UI owner is recorded here. Navigation-safe completion lifetime, fulfilled-payload classification and exactly-one terminal notice remain Plan25/26 work; this shard does not claim that frontend contract is complete."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_13_catalog_all_wrappers_same_poll_task_yield_and_join_errors",
+          "phase08_13_catalog_actual_payloads_cache_and_legacy_errors",
+          "phase08_13_catalog_sync_producer_contends_and_error_unwind_release",
+          "phase08_13_catalog_files_parent_both_orders_alias_and_replacement",
+          "phase08_13_catalog_document_cache_both_orders_alias_and_conflict_release",
+          "phase08_13_catalog_final_file_alias_preserved_and_document_contention"
+        ],
+        "workerProof": "Actual wrappers are manually polled, then yield on their polling task while a distinct blocking worker is held; controlled worker panic proves contextual JoinError. Nonempty synthetic fixtures verify original output and rejection contracts.",
+        "platformScope": "Executed on macOS with disposable Home/config/workspace fixtures. Exact-path TrashFixture captures Files Trash without native Trash effects. No live workspace, provider, network or subprocess exercised. Native saturation, Windows execution and feature-off release proof remain their designated later gates.",
+        "readOnlyEvidence": "This command reads local metadata/content only; no implicit cache/registry write is reached."
+      }
+    },
+    {
+      "name": "catalog_drilldown",
+      "module": "src-tauri/src/ops_catalog/mod.rs",
+      "registrationPath": "src-tauri/src/lib.rs::ops_catalog::ipc::catalog_drilldown",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/ops_catalog/mod.rs::catalog_drilldown calls src-tauri/src/ops_catalog/index.rs::drilldown_impl to read entry/manifest/README text and enumerate siblings. Excerpt line count does not bound source read or sibling count."
+      ],
+      "workerBoundary": "src-tauri/src/ops_catalog/mod.rs::ipc::catalog_drilldown owns req: CatalogDrilldownRequest and awaits tauri::async_runtime::spawn_blocking before any filesystem operation or admission wait. Inner legacy String errors pass through; JoinError adds catalog_drilldown_task_failed context.",
+      "syncCallers": [
+        "src-tauri/src/ops_catalog/mod.rs::catalog_drilldown preserves its public synchronous signature for existing Rust callers; IPC passes owned values directly."
+      ],
+      "mutationKey": {
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "sharedAdmissionEntry": "Read-only command; no filesystem mutation, cache repair or registry migration.",
+        "postAdmissionPreconditions": [
+          "Read-only local metadata or file parsing; no command-owned write."
+        ],
+        "domainLockOrder": "No mutation admission or domain guard required.",
+        "readOnly": true
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_13",
+          "passed": 23,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/catalog.ts",
+          "src/components/catalog/DrilldownDialog.tsx"
+        ],
+        "payload": "DrilldownDialog effect owns data/error/loading with cancelled guard. Missing entry remains empty-success; closing or replacing entry suppresses stale publication.",
+        "terminalNoticeOwner": "Existing initiating UI owner is recorded here. Navigation-safe completion lifetime, fulfilled-payload classification and exactly-one terminal notice remain Plan25/26 work; this shard does not claim that frontend contract is complete."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_13_catalog_all_wrappers_same_poll_task_yield_and_join_errors",
+          "phase08_13_catalog_actual_payloads_cache_and_legacy_errors",
+          "phase08_13_catalog_sync_producer_contends_and_error_unwind_release",
+          "phase08_13_catalog_files_parent_both_orders_alias_and_replacement",
+          "phase08_13_catalog_document_cache_both_orders_alias_and_conflict_release",
+          "phase08_13_catalog_final_file_alias_preserved_and_document_contention"
+        ],
+        "workerProof": "Actual wrappers are manually polled, then yield on their polling task while a distinct blocking worker is held; controlled worker panic proves contextual JoinError. Nonempty synthetic fixtures verify original output and rejection contracts.",
+        "platformScope": "Executed on macOS with disposable Home/config/workspace fixtures. Exact-path TrashFixture captures Files Trash without native Trash effects. No live workspace, provider, network or subprocess exercised. Native saturation, Windows execution and feature-off release proof remain their designated later gates.",
+        "readOnlyEvidence": "This command reads local metadata/content only; no implicit cache/registry write is reached."
+      }
+    }
+  ]
+}

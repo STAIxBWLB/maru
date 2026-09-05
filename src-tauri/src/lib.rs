@@ -137,10 +137,7 @@ use maru_dir::{
     save_maru_settings, save_maru_template, update_maru_workspace,
 };
 use mission_state::{list_ai_missions, read_ai_mission_log, stop_ai_mission, MissionState};
-use ops_catalog::{
-    catalog_drilldown, catalog_query, catalog_scan,
-    watcher::{catalog_watcher_start, catalog_watcher_stop, CatalogWatcherState},
-};
+use ops_catalog::watcher::{catalog_watcher_start, catalog_watcher_stop, CatalogWatcherState};
 use outlook_mso::{
     check_mso_auth, decide_outlook_item, decide_outlook_items, fetch_outlook_unread,
     stage_outlook_items,
@@ -548,9 +545,9 @@ pub fn run() {
             evidence_binder::ipc::evidence_binder_read,
             evidence_binder::ipc::evidence_binder_mutate,
             // M1 Operations Catalog (Phase 3)
-            catalog_scan,
-            catalog_query,
-            catalog_drilldown,
+            ops_catalog::ipc::catalog_scan,
+            ops_catalog::ipc::catalog_query,
+            ops_catalog::ipc::catalog_drilldown,
             catalog_watcher_start,
             catalog_watcher_stop,
             // Dashboard project portfolio (issue #256)
