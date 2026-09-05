@@ -334,6 +334,8 @@ export async function skillsSyncSource(
   progressId: string | null = null,
 ): Promise<SkillRecord[]> {
   if (!isTauri()) return [];
+  // The Rust worker owns operation lifetime. Preserve its result/error and
+  // progress ID; a failure is retried only by another explicit user action.
   return invoke<SkillRecord[]>("skills_sync_source", { sourceId, progressId });
 }
 

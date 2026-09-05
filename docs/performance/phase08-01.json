@@ -1,0 +1,76 @@
+{
+  "plan": "08-01",
+  "moduleIntegrationOwner": "08-29",
+  "integrationRequired": "08-29",
+  "commands": [
+    {
+      "name": "skills_sync_source",
+      "module": "src-tauri/src/skill_host/store.rs",
+      "registrationPath": "src-tauri/src/lib.rs::skill_host::store::skills_sync_source",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/skill_host/store.rs::skills_sync_source moves AppHandle, source_id and progress_id into spawn_blocking",
+        "src-tauri/src/skill_host/store.rs::skills_sync_source_impl remains synchronous and constructs fixed-argv git pull --ff-only work",
+        "src-tauri/src/skill_host/store.rs::sync_source_transaction captures current source generation, admits source/worktree reservations, releases registry guard for Git, then reloads and rescans before saving",
+        "src-tauri/src/skill_host/store.rs::admit_source_operation resolves canonical Git worktree identity outside all guards; aliases and nested source roots contend atomically",
+        "src-tauri/src/skill_host/store.rs::save_registry_unlocked observes committed source configurations; reset and bundle replacement explicitly invalidate unchanged identities"
+      ],
+      "workerBoundary": "src-tauri/src/skill_host/store.rs::skills_sync_source -> tauri::async_runtime::spawn_blocking; both lock acquisition and blocking subprocess/scan work run inside the worker",
+      "syncCallers": [
+        "skills_sync_source_impl is retained as a synchronous Result-returning helper",
+        "The existing synchronous sync_one_source_in_registry batch helper is retained for Plan 08-02",
+        "cargo check -p maru-cli passed with the shared store module"
+      ],
+      "mutationKey": {
+        "sourceReservation": "(registry_path, source_id) plus canonical Git --show-toplevel checkout key in one fail-closed mutex-protected set",
+        "lexicalPaths": ["configured source.path and skills_subdir", "skills_root/registry.json"],
+        "aliasPaths": ["canonical source path", "canonical Git worktree root for nested and symlink aliases"],
+        "postAdmissionPreconditions": ["source still exists", "incarnation and config_revision UUID equality", "fresh disk configuration equality excluding last_synced_at", "original canonical source path still resolves identically"],
+        "domainLockOrder": "lease bookkeeping released before registry_guard; no registry guard during Git; fresh registry guard held through scan and atomic save",
+        "sharedAdmissionEntry": "integrationRequired: 08-29; shared path admission is produced by 08-06",
+        "deletionScope": "metadata removal leaves checkout files intact; missing/retargeted checkout rejects sync commit without recreating files; cross-command destructive exclusion remains mandatory in 08-29"
+      },
+      "tests": [
+        { "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_source_transactions", "passed": 12, "failed": 0, "ignored": 0 },
+        { "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib skill_host::store::tests", "passed": 92, "failed": 0, "ignored": 0, "scope": "full store regression before the final additional checkout-deletion test; that test passed in the final focused 12-case run" },
+        { "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_01", "passed": 2, "failed": 0, "scope": "Task 01-1 registry availability and normal-build native override exclusion" },
+        { "command": "pnpm exec vitest run src/lib/skills.test.ts", "passed": 10, "failed": 0 },
+        { "command": "make test-e2e-native", "passed": 11, "specsPassed": 5, "failed": 0, "runs": 3, "tracerGate": "second run completed before Task 01-2 expansion" },
+        { "command": "pnpm test:e2e:native --spec ./e2e-native/specs/skills-sync.spec.ts", "passed": 1, "failed": 0, "scope": "final fixture additionally asserts valid persisted skill and every discovered source inside disposable native home" },
+        { "command": "cargo check --manifest-path src-tauri/Cargo.toml -p maru-cli", "exitCode": 0 },
+        { "command": "cargo clippy --manifest-path src-tauri/Cargo.toml --lib -- -D warnings", "exitCode": 0 },
+        { "command": "pnpm exec tsc --noEmit -p tsconfig.e2e-native.json", "exitCode": 0 },
+        { "command": "pnpm exec eslint src/lib/skills.ts src/lib/skills.test.ts e2e-native/helpers/fixtureWorkspace.ts e2e-native/specs/skills-sync.spec.ts", "exitCode": 0 }
+      ],
+      "processingCaller": {
+        "path": "src/components/settings/tabs/SkillsTab.tsx::syncSource -> src/lib/skills.ts::skillsSyncSource",
+        "payload": "returns real SkillRecord[]; raw String errors preserved unchanged at this stage",
+        "terminalNoticeOwner": "existing runBackendProgressOperation and Skills operation progress surface",
+        "retry": "manual only; wrapper failure tests assert exactly one invocation",
+        "lifetime": "started Rust blocking closure owns AppHandle and progress ID until settlement; frontend screen-survival changes belong to 08-02"
+      },
+      "evidence": {
+        "nativeArtifact": "test-results/native-e2e/phase08-01-skills-sync.json",
+        "nativeResult": { "sourceId": "native-local-git", "title": "Native synced skill", "realGit": true, "persisted": true, "validSkill": true, "fixtureHomeOnly": true },
+        "nativeProgress": ["Resolving source native-local-git", "Pulling latest changes for native-local-git", "Git pull complete for native-local-git", "Found 1 skill root(s) in native-local-git", "Updated registry for native-local-git: 1 skill(s)", "Sync complete for native-local-git: 1 skill(s)"],
+        "raceCases": [
+          "phase08_01_registry_read_and_edit_progress_while_network_is_held",
+          "phase08_01_deleted_source_never_returns_at_all_three_edges",
+          "phase08_01_identical_remove_readd_rejects_old_incarnation",
+          "phase08_01_actual_upsert_config_change_and_revert_reject_old_revision",
+          "phase08_01_duplicate_is_immediate_and_independent_source_progresses",
+          "phase08_01_failure_and_unwind_release_lease_for_explicit_retry",
+          "phase08_01_alias_ids_nested_skills_and_symlinks_share_one_checkout",
+          "phase08_01_empty_path_and_absent_source_reject_before_network",
+          "phase08_01_fresh_disk_config_and_timestamp_only_edits",
+          "phase08_01_reset_reincarnates_identical_default_sources",
+          "phase08_01_changed_symlink_target_rejects_stale_commit",
+          "phase08_01_removed_checkout_is_not_recreated_or_committed"
+        ],
+        "identityScope": "Process-local app mutations plus fresh disk comparison. No cross-process serialization or detection of identical offline ABA is claimed.",
+        "safety": "Native Skills paths use the existing build-gated home override, ignore ambient CODEX_HOME in native builds, and disable Git global/system configuration and terminal prompts. No IPC hook, service credential, installed-app mutation, automatic retry or persisted registry schema change was introduced."
+      }
+    }
+  ]
+}

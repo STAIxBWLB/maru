@@ -6,8 +6,8 @@
 // path.join, never from a caller-supplied absolute path (T-06-02).
 //
 // No credentials are seeded here, and the updater / provider IO paths are
-// left unconfigured (D-11) - the fixture registers exactly one local
-// workspace with one markdown document, nothing else.
+// left unconfigured (D-11). The fixture registers one local workspace and
+// a skill source backed by a disposable local Git remote.
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -21,7 +21,9 @@ async function seedSkillSource(root: string): Promise<void> {
   const skillsRoot = path.join(homeDir, ".maru", "skills");
   const remote = path.join(root, "skills-remote.git");
   const author = path.join(root, "skills-author");
-  const checkout = path.join(skillsRoot, "_sources", FIXTURE_SKILL_SOURCE);
+  // Honor the existing public-tier placement rule without using the default
+  // stai-public location, which ensure_catalog_sources would convert to linked.
+  const checkout = path.join(skillsRoot, "_sources", FIXTURE_SKILL_SOURCE, "_sources", "skills-public");
   const git = (...args: string[]) => execFileSync("git", args, {
     encoding: "utf8",
     env: { ...process.env, GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: os.devNull, GIT_TERMINAL_PROMPT: "0" },
@@ -36,6 +38,7 @@ async function seedSkillSource(root: string): Promise<void> {
   git("-C", author, "add", ".");
   git("-C", author, "-c", "user.name=Native Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-m", "Seed local source");
   git("-C", author, "push", "origin", "HEAD");
+  await fs.mkdir(path.dirname(checkout), { recursive: true });
   git("clone", remote, checkout);
   await fs.writeFile(skillFile, `---\nname: ${FIXTURE_SKILL_TITLE}\ndescription: Native local Git fixture updated\n---\n# Synced\n`);
   git("-C", author, "add", ".");
@@ -47,7 +50,7 @@ async function seedSkillSource(root: string): Promise<void> {
   }, null, 2));
 }
 
-export async function readFixtureSkillRegistry(): Promise<{ sources: { id: string; lastSyncedAt?: string }[]; skills: { sourceId: string; title: string }[] }> {
+export async function readFixtureSkillRegistry(): Promise<{ sources: { id: string; path?: string; lastSyncedAt?: string }[]; skills: { sourceId: string; title: string; valid: boolean; absPath: string }[] }> {
   return JSON.parse(await fs.readFile(path.join(fixturePaths(requireFixtureRoot()).homeDir, ".maru", "skills", "registry.json"), "utf8"));
 }
 

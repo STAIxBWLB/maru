@@ -6,7 +6,7 @@ vi.mock("@tauri-apps/api/core", () => ({
   invoke: (cmd: string, args?: unknown) => invoke(cmd, args),
 }));
 
-import { skillsInstallSkill, skillsListSkills, skillsSyncAllSources } from "./skills";
+import { skillsInstallSkill, skillsListSkills, skillsSyncAllSources, skillsSyncSource } from "./skills";
 
 function enterTauri() {
   (globalThis as { window?: unknown }).window = { __TAURI_INTERNALS__: {} };
@@ -20,6 +20,15 @@ describe("skills invoke wrappers", () => {
   afterEach(() => {
     delete (globalThis as { window?: unknown }).window;
   });
+
+  it.each(["source_busy: tracer is already syncing", "source_changed: tracer; sync again manually", "local network failed"])(
+    "phase08_01 preserves source sync error text without retry: %s", async (message) => {
+      enterTauri();
+      invoke.mockRejectedValueOnce(message);
+      await expect(skillsSyncSource("tracer", "sync-progress")).rejects.toBe(message);
+      expect(invoke).toHaveBeenCalledExactlyOnceWith("skills_sync_source", { sourceId: "tracer", progressId: "sync-progress" });
+    },
+  );
 
   it("threads the install mode through to skills_install_skill", async () => {
     enterTauri();

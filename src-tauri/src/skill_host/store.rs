@@ -51,9 +51,8 @@ static REGISTRY_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 // These maps carry process-local invariants: poisoning fails closed. The lease
 // mutex is held only for bookkeeping, never while acquiring REGISTRY_LOCK.
 static SOURCE_OPERATIONS: OnceLock<Mutex<HashSet<(PathBuf, String)>>> = OnceLock::new();
-static SOURCE_GENERATIONS: OnceLock<
-    Mutex<BTreeMap<(PathBuf, String), (SourceGeneration, SkillSource)>>,
-> = OnceLock::new();
+static SOURCE_GENERATIONS: OnceLock<Mutex<BTreeMap<(PathBuf, String), SourceSnapshot>>> =
+    OnceLock::new();
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct SourceGeneration {
@@ -70,6 +69,7 @@ struct SourceSnapshot {
 struct SourceOperationLease {
     source_key: (PathBuf, String),
     checkout_key: (PathBuf, String),
+    source_path: PathBuf,
 }
 
 impl Drop for SourceOperationLease {
@@ -95,18 +95,17 @@ fn ensure_source_generation(registry: &SkillsRegistry) -> Result<(), String> {
         configuration.last_synced_at = None;
         let entry = generations
             .entry((path.clone(), source.id.clone()))
-            .or_insert_with(|| {
-                (
-                    SourceGeneration {
-                        incarnation: Uuid::new_v4(),
-                        config_revision: Uuid::new_v4(),
-                    },
-                    configuration.clone(),
-                )
+            .or_insert_with(|| SourceSnapshot {
+                generation: SourceGeneration {
+                    incarnation: Uuid::new_v4(),
+                    config_revision: Uuid::new_v4(),
+                },
+                registry_path: path.clone(),
+                source: configuration.clone(),
             });
-        if entry.1 != configuration {
-            entry.0.config_revision = Uuid::new_v4();
-            entry.1 = configuration;
+        if entry.source != configuration {
+            entry.generation.config_revision = Uuid::new_v4();
+            entry.source = configuration;
         }
     }
     Ok(())
@@ -132,7 +131,7 @@ fn capture_source_snapshot(
     let generation = generations
         .get(&(registry_path.clone(), source_id.to_string()))
         .ok_or_else(|| format!("source_changed: {source_id}"))?
-        .0;
+        .generation;
     Ok(SourceSnapshot {
         registry_path,
         source,
@@ -166,7 +165,7 @@ fn admit_source_operation(snapshot: &SourceSnapshot) -> Result<SourceOperationLe
     } else if snapshot.source.kind == "cloned" {
         return Err("source_checkout_identity_failed: not a Git worktree".to_string());
     } else {
-        path
+        path.clone()
     };
     let source_key = (snapshot.registry_path.clone(), snapshot.source.id.clone());
     let checkout_key = (checkout, String::new());
@@ -185,6 +184,7 @@ fn admit_source_operation(snapshot: &SourceSnapshot) -> Result<SourceOperationLe
     Ok(SourceOperationLease {
         source_key,
         checkout_key,
+        source_path: path,
     })
 }
 
@@ -750,24 +750,35 @@ fn sync_source_transaction(
     network: impl FnOnce(&SkillSource, ProgressReporter<'_>) -> Result<(), String>,
 ) -> Result<Vec<SkillRecord>, String> {
     progress.info(format!("Resolving source {source_id}"));
-    let snapshot = {
+    let (snapshot, original_path) = {
         let _guard = registry_guard()?;
-        capture_source_snapshot(&load_registry_unlocked()?, &source_id)?
+        let snapshot = capture_source_snapshot(&load_registry_unlocked()?, &source_id)?;
+        let path = source_path(&snapshot.source)?;
+        (snapshot, path)
     };
-    let _lease = admit_source_operation(&snapshot)?;
+    #[cfg(test)]
+    tests::phase08_source_transactions::at_edge("before_admission");
+    let lease = admit_source_operation(&snapshot)?;
     // Revalidate after checkout discovery/admission, before the network edge.
     {
         let _guard = registry_guard()?;
         let current = capture_source_snapshot(&load_registry_unlocked()?, &source_id)?;
-        if current.generation != snapshot.generation {
+        if current.generation != snapshot.generation
+            || lease.source_path != original_path
+            || source_path(&current.source)? != original_path
+        {
             return Err(format!("source_changed: {source_id}; sync again manually"));
         }
     }
     network(&snapshot.source, progress)?;
+    #[cfg(test)]
+    tests::phase08_source_transactions::at_edge("before_commit");
     let _guard = registry_guard()?;
     let mut registry = load_registry_unlocked()?;
     let current = capture_source_snapshot(&registry, &source_id)?;
-    if current.registry_path != snapshot.registry_path || current.generation != snapshot.generation
+    if current.registry_path != snapshot.registry_path
+        || current.generation != snapshot.generation
+        || source_path(&current.source)? != original_path
     {
         return Err(format!("source_changed: {source_id}; sync again manually"));
     }
@@ -5638,10 +5649,373 @@ mod tests {
         path.to_string_lossy().to_string()
     }
 
-    mod phase08_source_transactions {
+    pub(super) mod phase08_source_transactions {
         use super::*;
+        use std::cell::RefCell;
+        use std::sync::atomic::{AtomicUsize, Ordering};
         use std::sync::mpsc;
+        use std::sync::Arc;
         use std::time::Duration;
+
+        type EdgeHook = Box<dyn FnMut(&str)>;
+        thread_local! { static EDGE_HOOK: RefCell<Option<EdgeHook>> = RefCell::new(None); }
+
+        pub(crate) fn at_edge(edge: &str) {
+            EDGE_HOOK.with(|hook| {
+                if let Some(hook) = hook.borrow_mut().as_mut() {
+                    hook(edge);
+                }
+            });
+        }
+
+        fn add_source(id: &str, path: &Path) {
+            skills_add_source(
+                id.into(),
+                "linked".into(),
+                Some(path_string(path)),
+                None,
+                Some("skills".into()),
+            )
+            .unwrap();
+        }
+
+        fn race(
+            edge: &'static str,
+            mutation: impl FnOnce(&Path),
+        ) -> (Result<Vec<SkillRecord>, String>, SkillsRegistry, usize) {
+            let _home = test_home();
+            let root = TempDir::new().unwrap();
+            write_skill(root.path(), "tracer");
+            run_command(
+                Command::new("git")
+                    .args(["init", "--quiet"])
+                    .arg(root.path()),
+            )
+            .unwrap();
+            add_source("tracer", root.path());
+            let (entered_tx, entered_rx) = mpsc::channel();
+            let (release_tx, release_rx) = mpsc::channel();
+            let calls = Arc::new(AtomicUsize::new(0));
+            let worker_calls = calls.clone();
+            let worker = std::thread::spawn(move || {
+                EDGE_HOOK.with(|hook| {
+                    *hook.borrow_mut() = Some(Box::new(move |at| {
+                        if at == edge {
+                            entered_tx.send(()).unwrap();
+                            release_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+                        }
+                    }))
+                });
+                sync_source_transaction("tracer".into(), ProgressReporter::noop(), |_, _| {
+                    worker_calls.fetch_add(1, Ordering::SeqCst);
+                    at_edge("network");
+                    Ok(())
+                })
+            });
+            entered_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+            mutation(root.path());
+            release_tx.send(()).unwrap();
+            let result = worker.join().unwrap();
+            (
+                result,
+                load_registry().unwrap(),
+                calls.load(Ordering::SeqCst),
+            )
+        }
+
+        fn replace_config(path: &Path) {
+            let _guard = registry_guard().unwrap();
+            let mut registry = load_registry_unlocked().unwrap();
+            upsert_linked_source(&mut registry, "tracer", &path_string(path), "skills".into());
+            save_registry_unlocked(&registry).unwrap();
+        }
+
+        #[test]
+        fn phase08_01_deleted_source_never_returns_at_all_three_edges() {
+            for edge in ["before_admission", "network", "before_commit"] {
+                let (result, registry, calls) =
+                    race(edge, |_| skills_remove_source("tracer".into()).unwrap());
+                assert_eq!(result.unwrap_err(), "unknown_source: tracer", "{edge}");
+                assert!(!registry.sources.iter().any(|source| source.id == "tracer"));
+                assert!(!registry
+                    .skills
+                    .iter()
+                    .any(|skill| skill.source_id == "tracer"));
+                assert_eq!(calls, usize::from(edge != "before_admission"));
+            }
+        }
+
+        #[test]
+        fn phase08_01_identical_remove_readd_rejects_old_incarnation() {
+            for edge in ["before_admission", "network", "before_commit"] {
+                let (result, registry, _) = race(edge, |path| {
+                    skills_remove_source("tracer".into()).unwrap();
+                    add_source("tracer", path);
+                });
+                assert!(result.unwrap_err().starts_with("source_changed:"), "{edge}");
+                assert!(registry.sources.iter().any(|source| source.id == "tracer"));
+            }
+        }
+
+        #[test]
+        fn phase08_01_actual_upsert_config_change_and_revert_reject_old_revision() {
+            for revert in [false, true] {
+                for edge in ["before_admission", "network", "before_commit"] {
+                    let alternate = TempDir::new().unwrap();
+                    write_skill(alternate.path(), "alternate");
+                    let (result, registry, _) = race(edge, |path| {
+                        replace_config(alternate.path());
+                        if revert {
+                            replace_config(path);
+                        }
+                    });
+                    assert!(
+                        result.unwrap_err().starts_with("source_changed:"),
+                        "{edge} revert={revert}"
+                    );
+                    if !revert {
+                        assert_eq!(
+                            registry.sources[0].path.as_deref(),
+                            Some(path_string(&alternate.path().canonicalize().unwrap()).as_str())
+                        );
+                    }
+                }
+            }
+        }
+
+        #[test]
+        fn phase08_01_duplicate_is_immediate_and_independent_source_progresses() {
+            let (result, registry, calls) = race("network", |_| {
+                let duplicate =
+                    sync_source_transaction("tracer".into(), ProgressReporter::noop(), |_, _| {
+                        panic!("duplicate network call")
+                    });
+                assert_eq!(
+                    duplicate.unwrap_err(),
+                    "source_busy: tracer is already syncing"
+                );
+                let other = TempDir::new().unwrap();
+                write_skill(other.path(), "other");
+                add_source("other", other.path());
+                assert_eq!(
+                    skills_sync_source_impl("other".into(), ProgressReporter::noop())
+                        .unwrap()
+                        .len(),
+                    1
+                );
+            });
+            assert!(result.is_ok());
+            assert_eq!(calls, 1);
+            assert!(registry
+                .sources
+                .iter()
+                .find(|source| source.id == "other")
+                .unwrap()
+                .last_synced_at
+                .is_some());
+        }
+
+        #[test]
+        fn phase08_01_failure_and_unwind_release_lease_for_explicit_retry() {
+            let _home = test_home();
+            let root = TempDir::new().unwrap();
+            write_skill(root.path(), "retry");
+            add_source("retry", root.path());
+            let calls = AtomicUsize::new(0);
+            let error =
+                sync_source_transaction("retry".into(), ProgressReporter::noop(), |_, _| {
+                    calls.fetch_add(1, Ordering::SeqCst);
+                    Err("local network failed".into())
+                })
+                .unwrap_err();
+            assert_eq!(error, "local network failed");
+            assert_eq!(calls.load(Ordering::SeqCst), 1);
+            assert!(std::panic::catch_unwind(|| sync_source_transaction(
+                "retry".into(),
+                ProgressReporter::noop(),
+                |_, _| panic!("injected worker panic")
+            ))
+            .is_err());
+            assert_eq!(
+                skills_sync_source_impl("retry".into(), ProgressReporter::noop())
+                    .unwrap()
+                    .len(),
+                1
+            );
+            assert!(SOURCE_OPERATIONS.get().unwrap().lock().unwrap().is_empty());
+        }
+
+        #[test]
+        fn phase08_01_alias_ids_nested_skills_and_symlinks_share_one_checkout() {
+            let (result, _, calls) = race("network", |path| {
+                add_source("alias", path);
+                add_source("nested", &path.join("skills"));
+                #[cfg(unix)]
+                let symlink_root = TempDir::new().unwrap();
+                #[cfg(unix)]
+                {
+                    let link = symlink_root.path().join("link");
+                    std::os::unix::fs::symlink(path, &link).unwrap();
+                    add_source("symlink", &link);
+                    let _guard = registry_guard().unwrap();
+                    let mut registry = load_registry_unlocked().unwrap();
+                    registry
+                        .sources
+                        .iter_mut()
+                        .find(|source| source.id == "symlink")
+                        .unwrap()
+                        .path = Some(path_string(&link));
+                    save_registry_unlocked(&registry).unwrap();
+                }
+                for id in ["alias", "nested"] {
+                    let error =
+                        sync_source_transaction(id.into(), ProgressReporter::noop(), |_, _| {
+                            panic!("alias network call")
+                        })
+                        .unwrap_err();
+                    assert!(error.starts_with("source_busy:"));
+                }
+                #[cfg(unix)]
+                assert!(
+                    skills_sync_source_impl("symlink".into(), ProgressReporter::noop())
+                        .unwrap_err()
+                        .starts_with("source_busy:")
+                );
+            });
+            assert!(result.is_ok());
+            assert_eq!(calls, 1);
+        }
+
+        #[test]
+        fn phase08_01_empty_path_and_absent_source_reject_before_network() {
+            let _home = test_home();
+            assert_eq!(
+                skills_sync_source_impl("absent".into(), ProgressReporter::noop()).unwrap_err(),
+                "unknown_source: absent"
+            );
+            let root = TempDir::new().unwrap();
+            add_source("empty", root.path());
+            let _guard = registry_guard().unwrap();
+            let mut registry = load_registry_unlocked().unwrap();
+            registry.sources[0].path = Some(String::new());
+            save_registry_unlocked(&registry).unwrap();
+            let snapshot = capture_source_snapshot(&registry, "empty").unwrap();
+            assert!(
+                matches!(admit_source_operation(&snapshot), Err(error) if error == "source_path_required")
+            );
+        }
+
+        #[test]
+        fn phase08_01_fresh_disk_config_and_timestamp_only_edits() {
+            let (result, _, _) = race("before_commit", |_| {
+                let _guard = registry_guard().unwrap();
+                let mut registry = load_registry_unlocked().unwrap();
+                registry.sources[0].last_synced_at = Some("timestamp-only".into());
+                save_registry_unlocked(&registry).unwrap();
+            });
+            assert!(result.is_ok());
+            let (result, _, _) = race("before_commit", |_| {
+                let _guard = registry_guard().unwrap();
+                let mut registry = load_registry_unlocked().unwrap();
+                registry.sources[0].branch = Some("external-change".into());
+                // Bypass the app generation writer: fresh disk comparison must
+                // still notice a different configuration at commit.
+                host_fs::write_json_pretty(&registry_path().unwrap(), &registry).unwrap();
+            });
+            assert!(result.unwrap_err().starts_with("source_changed:"));
+        }
+
+        #[test]
+        fn phase08_01_reset_reincarnates_identical_default_sources() {
+            let _home = test_home();
+            skills_list_sources(None).unwrap();
+            let before = {
+                let _guard = registry_guard().unwrap();
+                capture_source_snapshot(&load_registry_unlocked().unwrap(), MANAGED_SOURCE_ID)
+                    .unwrap()
+            };
+            skills_reset_registry_impl(None, ProgressReporter::noop()).unwrap();
+            let _guard = registry_guard().unwrap();
+            let after =
+                capture_source_snapshot(&load_registry_unlocked().unwrap(), MANAGED_SOURCE_ID)
+                    .unwrap();
+            assert_eq!(before.source.path, after.source.path);
+            assert_ne!(before.generation.incarnation, after.generation.incarnation);
+        }
+
+        #[test]
+        fn phase08_01_removed_checkout_is_not_recreated_or_committed() {
+            let _home = test_home();
+            let root = TempDir::new().unwrap();
+            let checkout = root.path().join("checkout");
+            write_skill(&checkout, "deleted");
+            add_source("deleted", &checkout);
+            let before = fs::read(registry_path().unwrap()).unwrap();
+            let (entered_tx, entered_rx) = mpsc::channel();
+            let (release_tx, release_rx) = mpsc::channel();
+            let worker = std::thread::spawn(move || {
+                sync_source_transaction("deleted".into(), ProgressReporter::noop(), |_, _| {
+                    entered_tx.send(()).unwrap();
+                    release_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+                    Ok(())
+                })
+            });
+            entered_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+            // External deletion is not serialized by source reservations.
+            // Cross-command path exclusion is owned by Plan 08-29.
+            fs::remove_dir_all(&checkout).unwrap();
+            release_tx.send(()).unwrap();
+            assert!(worker
+                .join()
+                .unwrap()
+                .unwrap_err()
+                .starts_with("source_path_invalid:"));
+            assert_eq!(fs::read(registry_path().unwrap()).unwrap(), before);
+            assert!(!checkout.exists());
+        }
+
+        #[test]
+        #[cfg(unix)]
+        fn phase08_01_changed_symlink_target_rejects_stale_commit() {
+            let _home = test_home();
+            let root = TempDir::new().unwrap();
+            let first = root.path().join("first");
+            let second = root.path().join("second");
+            write_skill(&first, "first");
+            write_skill(&second, "second");
+            let link = root.path().join("link");
+            std::os::unix::fs::symlink(&first, &link).unwrap();
+            add_source("alias", &link);
+            {
+                let _guard = registry_guard().unwrap();
+                let mut registry = load_registry_unlocked().unwrap();
+                registry.sources[0].path = Some(path_string(&link));
+                save_registry_unlocked(&registry).unwrap();
+            }
+            let (entered_tx, entered_rx) = mpsc::channel();
+            let (release_tx, release_rx) = mpsc::channel();
+            let worker = std::thread::spawn(move || {
+                sync_source_transaction("alias".into(), ProgressReporter::noop(), |_, _| {
+                    entered_tx.send(()).unwrap();
+                    release_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+                    Ok(())
+                })
+            });
+            entered_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+            fs::remove_file(&link).unwrap();
+            std::os::unix::fs::symlink(&second, &link).unwrap();
+            release_tx.send(()).unwrap();
+            assert!(worker
+                .join()
+                .unwrap()
+                .unwrap_err()
+                .starts_with("source_changed:"));
+            assert!(load_registry()
+                .unwrap()
+                .skills
+                .iter()
+                .all(|skill| skill.name != "second"));
+        }
 
         #[test]
         fn phase08_01_registry_read_and_edit_progress_while_network_is_held() {

@@ -42,13 +42,21 @@ describe("native Skills synchronization", () => {
     assert.equal(result.ok, true, JSON.stringify(result));
     const after = await readFixtureSkillRegistry();
     assert.ok(after.sources.find((source) => source.id === FIXTURE_SKILL_SOURCE)?.lastSyncedAt);
-    assert.ok(after.skills.some((skill) => skill.sourceId === FIXTURE_SKILL_SOURCE && skill.title === FIXTURE_SKILL_TITLE));
+    assert.ok(after.skills.some((skill) => skill.sourceId === FIXTURE_SKILL_SOURCE && skill.title === FIXTURE_SKILL_TITLE && skill.valid));
+    const home = process.env.MARU_NATIVE_E2E_HOME;
+    assert.ok(home);
+    const realHome = await fs.realpath(home);
+    for (const source of after.sources) {
+      assert.ok(source.path);
+      const relative = path.relative(realHome, await fs.realpath(source.path));
+      assert.ok(!relative.startsWith("..") && !path.isAbsolute(relative), "every discovered source must stay inside the native fixture home");
+    }
     // Preserve synthetic evidence outside the disposable run root.
     const evidenceDir = path.resolve("test-results/native-e2e");
     await fs.mkdir(evidenceDir, { recursive: true });
     await fs.writeFile(path.join(evidenceDir, "phase08-01-skills-sync.json"), JSON.stringify({
       sourceId: FIXTURE_SKILL_SOURCE, title: FIXTURE_SKILL_TITLE,
-      realGit: true, persisted: true, progress: result.log,
+      realGit: true, persisted: true, fixtureHomeOnly: true, progress: result.log,
     }, null, 2));
   });
 });
