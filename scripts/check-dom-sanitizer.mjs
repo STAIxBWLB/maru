@@ -169,6 +169,45 @@ function sinkTraces(fileRel, expr, imports, defs, source) {
   return tracesToAllowedCall(fileRel, target, imports, defs, source, 1);
 }
 
+// CR-01: blank out comments and string/template literals so the raw
+// occurrence count below only sees real attribute usages (doc comments in
+// HwpxViewer.tsx and EditorPane.tsx name the attribute without using it).
+// Small char scanner, not an AST parser (D-07).
+function stripCommentsAndStrings(source) {
+  let out = "";
+  let i = 0;
+  const n = source.length;
+  while (i < n) {
+    const ch = source[i];
+    const next = source[i + 1];
+    if (ch === "/" && next === "/") {
+      while (i < n && source[i] !== "\n") i++;
+    } else if (ch === "/" && next === "*") {
+      i += 2;
+      while (i < n && !(source[i] === "*" && source[i + 1] === "/")) i++;
+      i = Math.min(i + 2, n);
+    } else if (ch === '"' || ch === "'" || ch === "`") {
+      const quote = ch;
+      i++;
+      while (i < n) {
+        if (source[i] === "\\") {
+          i += 2;
+          continue;
+        }
+        if (source[i] === quote) break;
+        if (quote !== "`" && source[i] === "\n") break;
+        i++;
+      }
+      i = Math.min(i + 1, n);
+      out += " ";
+    } else {
+      out += ch;
+      i++;
+    }
+  }
+  return out;
+}
+
 const violations = [];
 let sinkCount = 0;
 for (const { abs, rel } of collectTsFiles(srcRoot, "src")) {
@@ -176,6 +215,7 @@ for (const { abs, rel } of collectTsFiles(srcRoot, "src")) {
   const imports = collectImports(source);
   const defs = collectDefinitions(source);
   const lines = source.split("\n");
+  let matchedInThisFile = 0;
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     const inline = line.match(
@@ -185,9 +225,22 @@ for (const { abs, rel } of collectTsFiles(srcRoot, "src")) {
     const expr = inline?.[1] ?? bare?.[1];
     if (expr === undefined) continue;
     sinkCount += 1;
+    matchedInThisFile += 1;
     if (!sinkTraces(rel, expr, imports, defs, source)) {
       violations.push(`${rel}:${i + 1} (__html: ${expr.trim()})`);
     }
+  }
+  // CR-01 reconciliation: the per-line scan above only recognizes sink
+  // shapes whose __html expression fits on one line. Prettier wraps long
+  // JSX attributes, so a multi-line sink would otherwise pass untraced.
+  // Count raw attribute usages and fail closed when they exceed the traced
+  // sinks — a multi-line sink must be reshaped or traced explicitly.
+  const rawOccurrences = (stripCommentsAndStrings(source).match(/dangerouslySetInnerHTML/g) ?? [])
+    .length;
+  if (rawOccurrences > matchedInThisFile) {
+    violations.push(
+      `${rel}: dangerouslySetInnerHTML occurrences (${rawOccurrences}) exceed traced sinks (${matchedInThisFile}); multi-line or unrecognized sink shape must be traced explicitly`,
+    );
   }
 }
 

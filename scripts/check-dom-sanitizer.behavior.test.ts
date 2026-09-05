@@ -43,6 +43,29 @@ describe("check-dom-sanitizer.mjs behavior", () => {
     expect(result.stderr).toContain("__dom_sanitizer_probe__.tsx");
   });
 
+  it("fails closed on a multi-line untraced sink (CR-01)", () => {
+    // Prettier wraps the attribute once the expression exceeds the print
+    // width; the line-based scan must not silently skip that shape.
+    writeFileSync(
+      probeFile,
+      [
+        "export function Probe({ untrustedInput }: { untrustedInput: string }) {",
+        "  return (",
+        "    <div",
+        "      dangerouslySetInnerHTML={{",
+        "        __html: untrustedInput,",
+        "      }}",
+        "    />",
+        "  );",
+        "}",
+        "",
+      ].join("\n"),
+    );
+    const result = runGuard();
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("__dom_sanitizer_probe__.tsx");
+  });
+
   it("never scans test files that assert the sink literal as source text", () => {
     const result = runGuard();
     expect(result.status).toBe(0);
