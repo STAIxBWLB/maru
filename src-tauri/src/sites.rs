@@ -14,6 +14,7 @@
 // best-effort per child directory: a malformed project never fails the
 // scan, it just yields a sparser candidate.
 
+use crate::atomic_file::{with_path_transactions, PathTransactionRequest};
 use crate::skill_host::fs as host_fs;
 use regex::Regex;
 use serde::Serialize;
@@ -92,14 +93,73 @@ fn save_sites_internal(path: &Path, mut value: JsonValue) -> Result<(), String> 
     write_sites_file(path, &value)
 }
 
-#[tauri::command]
 pub fn read_sites() -> Result<JsonValue, String> {
-    read_sites_internal(&sites_json_path()?)
+    let path = sites_json_path()?;
+    with_path_transactions(sites_registry_admission()?, |lease| {
+        lease.before_effect()?;
+        read_sites_internal(&path)
+    })
 }
 
-#[tauri::command]
 pub fn save_sites(value: JsonValue) -> Result<(), String> {
-    save_sites_internal(&sites_json_path()?, value)
+    let path = sites_json_path()?;
+    with_path_transactions(sites_registry_admission()?, |lease| {
+        lease.before_effect()?;
+        save_sites_internal(&path, value)
+    })
+}
+
+fn sites_registry_admission() -> Result<PathTransactionRequest, String> {
+    PathTransactionRequest::new(vec![sites_json_path()?])
+}
+
+/// Owned IPC boundaries; the synchronous entry points remain available to
+/// Rust callers.
+pub mod ipc {
+    use super::*;
+
+    #[cfg(test)]
+    use crate::atomic_file::PathTransactionLease;
+
+    #[tauri::command]
+    pub async fn read_sites() -> Result<JsonValue, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            if let Ok(key) = super::sites_json_path() {
+                PathTransactionLease::test_stage(&[key], "worker:read_sites");
+            }
+            super::read_sites()
+        })
+        .await
+        .map_err(|err| format!("read_sites_task_failed: {err}"))?
+    }
+
+    #[tauri::command]
+    pub async fn save_sites(value: JsonValue) -> Result<(), String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            if let Ok(key) = super::sites_json_path() {
+                PathTransactionLease::test_stage(&[key], "worker:save_sites");
+            }
+            super::save_sites(value)
+        })
+        .await
+        .map_err(|err| format!("save_sites_task_failed: {err}"))?
+    }
+
+    #[tauri::command]
+    pub async fn scan_work_sites(dir: String) -> Result<Vec<SiteCandidate>, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            {
+                let key = host_fs::expand_tilde(&dir);
+                PathTransactionLease::test_stage(&[key], "worker:scan_work_sites");
+            }
+            super::scan_work_sites(dir)
+        })
+        .await
+        .map_err(|err| format!("scan_work_sites_task_failed: {err}"))?
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -155,7 +215,6 @@ fn port_flag_re() -> &'static Regex {
     RE.get_or_init(|| Regex::new(r"(?:--port|-p)[ =]+(\d{2,5})").unwrap())
 }
 
-#[tauri::command]
 pub fn scan_work_sites(dir: String) -> Result<Vec<SiteCandidate>, String> {
     let root = host_fs::expand_tilde(&dir);
     if !root.is_dir() {
@@ -622,5 +681,143 @@ mod tests {
         );
         assert_eq!(dev_url_from_package(&unknown), None);
         assert_eq!(dev_url_from_package(&none), None);
+    }
+
+    mod phase08_23 {
+        use super::*;
+        use crate::atomic_file::phase08_06::{boundary, run, Held, Home};
+        use std::sync::mpsc;
+        use std::time::Duration;
+
+        fn start<F>(future: F) -> mpsc::Receiver<F::Output>
+        where
+            F: std::future::Future + Send + 'static,
+            F::Output: Send + 'static,
+        {
+            let (tx, rx) = mpsc::channel();
+            tauri::async_runtime::spawn(async move {
+                let _ = tx.send(future.await);
+            });
+            rx
+        }
+
+        fn done<T>(rx: mpsc::Receiver<T>) -> T {
+            rx.recv_timeout(Duration::from_secs(10))
+                .expect("fixture completion")
+        }
+
+        fn payload(label: &str) -> JsonValue {
+            json!({
+                "version": 1,
+                "sites": [ { "label": label, "url": "https://example.com" } ]
+            })
+        }
+
+        #[test]
+        fn phase08_23_sites_wrappers_yield_same_poll_and_map_join_failure() {
+            let home = Home::new();
+            let registry = sites_json_path().unwrap();
+            boundary(registry.clone(), "read_sites", ipc::read_sites());
+            boundary(registry, "save_sites", ipc::save_sites(payload("boundary")));
+            let scan_dir = home.root.path().join("scan-root");
+            fs::create_dir_all(&scan_dir).unwrap();
+            boundary(
+                scan_dir.clone(),
+                "scan_work_sites",
+                ipc::scan_work_sites(scan_dir.to_string_lossy().to_string()),
+            );
+        }
+
+        #[test]
+        fn phase08_23_sites_real_fixture_results_and_rejections() {
+            let _home = Home::new();
+            let seeded = run(ipc::read_sites()).unwrap();
+            assert_eq!(seeded, json!({ "version": 1, "sites": [] }));
+            let registry = sites_json_path().unwrap();
+            assert!(registry.exists());
+
+            run(ipc::save_sites(payload("Fixture"))).unwrap();
+            let reloaded = run(ipc::read_sites()).unwrap();
+            assert_eq!(reloaded, payload("Fixture"));
+
+            let err = run(ipc::save_sites(json!({ "sites": "nope" }))).unwrap_err();
+            assert!(err.contains("\"sites\" array"));
+
+            let scan_root = tempfile::tempdir().unwrap();
+            write(&scan_root.path().join("alpha/CNAME"), "alpha.example\n");
+            let scanned = run(ipc::scan_work_sites(
+                scan_root.path().to_string_lossy().to_string(),
+            ))
+            .unwrap();
+            let alpha = candidate_for(&scanned, "alpha");
+            assert_eq!(alpha.url.as_deref(), Some("https://alpha.example"));
+
+            let err = run(ipc::scan_work_sites(
+                "/definitely/not/a/real/dir-xyz".to_string(),
+            ))
+            .unwrap_err();
+            assert!(err.contains("Not a directory"));
+        }
+
+        #[test]
+        fn phase08_23_sites_serializes_registry_both_orders() {
+            for read_first in [false, true] {
+                let home = Home::new();
+                let registry = sites_json_path().unwrap();
+                let admitted = Held::new(registry.clone(), "admitted");
+                if read_first {
+                    let first = start(ipc::read_sites());
+                    admitted.wait();
+                    let waiting = Held::new(registry.clone(), "before-admission");
+                    let second = start(ipc::save_sites(payload("Writer")));
+                    waiting.wait();
+                    waiting.release();
+                    assert!(
+                        second.recv_timeout(Duration::from_millis(30)).is_err(),
+                        "sites writer must wait while the seeding reader holds admission"
+                    );
+                    admitted.release();
+                    done(first).unwrap();
+                    done(second).unwrap();
+                } else {
+                    let first = start(ipc::save_sites(payload("Writer")));
+                    admitted.wait();
+                    let waiting = Held::new(registry.clone(), "before-admission");
+                    let second = start(ipc::read_sites());
+                    waiting.wait();
+                    waiting.release();
+                    assert!(
+                        second.recv_timeout(Duration::from_millis(30)).is_err(),
+                        "seeding reader must wait while the sites writer holds admission"
+                    );
+                    admitted.release();
+                    done(first).unwrap();
+                    done(second).unwrap();
+                }
+                let final_value = read_sites_internal(&registry).unwrap();
+                assert_eq!(
+                    final_value,
+                    payload("Writer"),
+                    "serialized writer payload must survive the reader in either order"
+                );
+            }
+        }
+
+        #[test]
+        fn phase08_23_sites_error_releases_admission_and_retry_recovers() {
+            let _home = Home::new();
+            let registry = sites_json_path().unwrap();
+            let err = run(ipc::save_sites(json!({ "version": 1 }))).unwrap_err();
+            assert!(err.contains("\"sites\" array"));
+            assert!(
+                !registry.exists(),
+                "rejected save must not create the registry file"
+            );
+            run(ipc::save_sites(payload("Recovered"))).unwrap();
+            assert_eq!(
+                read_sites_internal(&registry).unwrap(),
+                payload("Recovered")
+            );
+        }
     }
 }

@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use serde_yaml::Value as YamlValue;
 use tauri::{AppHandle, Emitter};
 
+use crate::atomic_file::{with_path_transactions, PathTransactionRequest};
 use crate::inbox_settings::{expand_tilde, lexical_normalize_path};
 use crate::secrets;
 use crate::vault::resolve_inside_vault;
@@ -189,7 +190,6 @@ fn default_true() -> bool {
     true
 }
 
-#[tauri::command]
 pub fn read_telegram_monitor_config(
     work_path: Option<String>,
     monitor_config_path: Option<String>,
@@ -200,33 +200,94 @@ pub fn read_telegram_monitor_config(
     Ok(redacted_view(&work, &path, config, exists))
 }
 
-#[tauri::command]
-pub fn save_telegram_monitor_config(
-    app: AppHandle,
+pub fn save_telegram_monitor_config<R: tauri::Runtime>(
+    app: AppHandle<R>,
     work_path: Option<String>,
     monitor_config_path: Option<String>,
     config: TelegramMonitorConfigSave,
 ) -> Result<TelegramMonitorConfigView, String> {
     let (work, path) =
         resolve_monitor_config_path(work_path.as_deref(), monitor_config_path.as_deref())?;
-    ensure_secret_config_path(&work, &path)?;
-    let (mut current, _) = read_config_or_default(&path)?;
-    apply_save(&mut current, config);
-    validate_config(&work, &current)?;
-    write_config_blocks(
-        &path,
-        &current,
-        &["telegram", "polling", "chats", "notification"],
-    )?;
-    set_secret_file_mode(&path)?;
-    let (saved, exists) = read_config_or_default(&path)?;
+    let admission = telegram_monitor_admission(&path)?;
+    let view = with_path_transactions(admission, |lease| {
+        lease.before_effect()?;
+        ensure_secret_config_path(&work, &path)?;
+        let (mut current, _) = read_config_or_default(&path)?;
+        apply_save(&mut current, config);
+        validate_config(&work, &current)?;
+        write_config_blocks(
+            &path,
+            &current,
+            &["telegram", "polling", "chats", "notification"],
+        )?;
+        set_secret_file_mode(&path)?;
+        let (saved, exists) = read_config_or_default(&path)?;
+        Ok(redacted_view(&work, &path, saved, exists))
+    })?;
     let _ = app.emit(
         "telegram://monitor_config_updated",
         TelegramMonitorConfigUpdated {
             path: path.to_string_lossy().to_string(),
         },
     );
-    Ok(redacted_view(&work, &path, saved, exists))
+    Ok(view)
+}
+
+fn telegram_monitor_admission(path: &Path) -> Result<PathTransactionRequest, String> {
+    PathTransactionRequest::new(vec![path.to_path_buf()])
+}
+
+/// Owned IPC boundaries; the synchronous entry points remain available to
+/// Rust callers.
+pub mod ipc {
+    use super::*;
+
+    #[cfg(test)]
+    use crate::atomic_file::PathTransactionLease;
+
+    #[cfg(test)]
+    fn monitor_stage_key(
+        work_path: &Option<String>,
+        monitor_config_path: &Option<String>,
+    ) -> Option<PathBuf> {
+        super::resolve_monitor_config_path(work_path.as_deref(), monitor_config_path.as_deref())
+            .ok()
+            .map(|(_, path)| path)
+    }
+
+    #[tauri::command]
+    pub async fn read_telegram_monitor_config(
+        work_path: Option<String>,
+        monitor_config_path: Option<String>,
+    ) -> Result<TelegramMonitorConfigView, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            if let Some(key) = monitor_stage_key(&work_path, &monitor_config_path) {
+                PathTransactionLease::test_stage(&[key], "worker:read_telegram_monitor_config");
+            }
+            super::read_telegram_monitor_config(work_path, monitor_config_path)
+        })
+        .await
+        .map_err(|err| format!("read_telegram_monitor_config_task_failed: {err}"))?
+    }
+
+    #[tauri::command]
+    pub async fn save_telegram_monitor_config<R: tauri::Runtime>(
+        app: AppHandle<R>,
+        work_path: Option<String>,
+        monitor_config_path: Option<String>,
+        config: TelegramMonitorConfigSave,
+    ) -> Result<TelegramMonitorConfigView, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            if let Some(key) = monitor_stage_key(&work_path, &monitor_config_path) {
+                PathTransactionLease::test_stage(&[key], "worker:save_telegram_monitor_config");
+            }
+            super::save_telegram_monitor_config(app, work_path, monitor_config_path, config)
+        })
+        .await
+        .map_err(|err| format!("save_telegram_monitor_config_task_failed: {err}"))?
+    }
 }
 
 fn resolve_monitor_config_path(
@@ -832,5 +893,250 @@ chats:
             validate_config(&None, &config).unwrap_err(),
             "chat_id_required"
         );
+    }
+
+    mod phase08_23 {
+        use super::*;
+        use crate::atomic_file::phase08_06::{boundary, run, Held};
+        use std::sync::mpsc;
+        use std::time::Duration;
+
+        fn text(path: &Path) -> String {
+            path.to_string_lossy().to_string()
+        }
+
+        fn monitor_fixture(tmp: &TempDir) -> PathBuf {
+            let path = tmp
+                .path()
+                .join(".secrets/services/telegram-monitor.config.yaml");
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(
+                &path,
+                r#"# header comment
+telegram:
+  api_id: "123"
+  api_hash: "abcdef123456"
+  phone: "+8210"
+notification:
+  telegram:
+    bot_token: "token123456"
+    chat_id: "999"
+"#,
+            )
+            .unwrap();
+            path
+        }
+
+        fn stage_key(work_path: Option<String>, monitor_config_path: Option<String>) -> PathBuf {
+            resolve_monitor_config_path(work_path.as_deref(), monitor_config_path.as_deref())
+                .unwrap()
+                .1
+        }
+
+        fn save_with_api_id(api_id: &str) -> TelegramMonitorConfigSave {
+            TelegramMonitorConfigSave {
+                telegram: TelegramAuthConfigSave {
+                    api_id: Some(api_id.to_string()),
+                    api_hash: Some(SECRET_UNCHANGED.to_string()),
+                    phone: None,
+                    self_id: None,
+                },
+                polling: TelegramPollingConfig {
+                    interval_seconds: Some(60),
+                    extra: BTreeMap::new(),
+                },
+                chats: vec![],
+                notification: TelegramNotificationConfigSave {
+                    telegram: TelegramNotificationTelegramConfigSave {
+                        bot_token: Some(SECRET_UNCHANGED.to_string()),
+                        chat_id: None,
+                    },
+                },
+            }
+        }
+
+        fn start<F>(future: F) -> mpsc::Receiver<F::Output>
+        where
+            F: std::future::Future + Send + 'static,
+            F::Output: Send + 'static,
+        {
+            let (tx, rx) = mpsc::channel();
+            tauri::async_runtime::spawn(async move {
+                let _ = tx.send(future.await);
+            });
+            rx
+        }
+
+        fn done<T>(rx: mpsc::Receiver<T>) -> T {
+            rx.recv_timeout(Duration::from_secs(10))
+                .expect("fixture completion")
+        }
+
+        #[test]
+        fn phase08_23_telegram_wrappers_yield_same_poll_and_map_join_failure() {
+            let tmp = TempDir::new().unwrap();
+            let work = text(tmp.path());
+            let monitor = monitor_fixture(&tmp);
+            let key = stage_key(Some(work.clone()), Some(text(&monitor)));
+            boundary(
+                key.clone(),
+                "read_telegram_monitor_config",
+                ipc::read_telegram_monitor_config(Some(work.clone()), Some(text(&monitor))),
+            );
+            boundary(
+                key,
+                "save_telegram_monitor_config",
+                ipc::save_telegram_monitor_config(
+                    tauri::test::mock_app().handle().clone(),
+                    Some(work),
+                    Some(text(&monitor)),
+                    save_with_api_id("boundary"),
+                ),
+            );
+        }
+
+        #[test]
+        fn phase08_23_telegram_real_fixture_results_and_rejections() {
+            let tmp = TempDir::new().unwrap();
+            let work = text(tmp.path());
+            let monitor = monitor_fixture(&tmp);
+            let monitor_text = text(&monitor);
+
+            let view = run(ipc::read_telegram_monitor_config(
+                Some(work.clone()),
+                Some(monitor_text.clone()),
+            ))
+            .unwrap();
+            assert!(view.exists);
+            assert_eq!(view.telegram.api_id.as_deref(), Some("123"));
+            assert_eq!(view.telegram.api_hash.as_deref(), Some("****3456"));
+            assert_eq!(
+                view.notification.telegram.bot_token.as_deref(),
+                Some("****3456")
+            );
+            assert!(view.warnings.is_empty());
+
+            let saved = run(ipc::save_telegram_monitor_config(
+                tauri::test::mock_app().handle().clone(),
+                Some(work.clone()),
+                Some(monitor_text.clone()),
+                save_with_api_id("456"),
+            ))
+            .unwrap();
+            assert_eq!(saved.telegram.api_id.as_deref(), Some("456"));
+            let raw = fs::read_to_string(&monitor).unwrap();
+            assert!(raw.contains("# header comment"));
+            assert!(
+                raw.contains("api_hash: abcdef123456")
+                    || raw.contains("api_hash: \"abcdef123456\"")
+            );
+            assert!(
+                raw.contains("bot_token: token123456")
+                    || raw.contains("bot_token: \"token123456\"")
+            );
+
+            let mut invalid = save_with_api_id("789");
+            invalid.polling.interval_seconds = Some(10);
+            let err = run(ipc::save_telegram_monitor_config(
+                tauri::test::mock_app().handle().clone(),
+                Some(work.clone()),
+                Some(monitor_text.clone()),
+                invalid,
+            ))
+            .unwrap_err();
+            assert_eq!(err, "interval_seconds_too_low");
+
+            let outside = tmp.path().join("outside.config.yaml");
+            fs::write(&outside, "telegram: {}\n").unwrap();
+            let err = run(ipc::save_telegram_monitor_config(
+                tauri::test::mock_app().handle().clone(),
+                Some(work.clone()),
+                Some(text(&outside)),
+                save_with_api_id("999"),
+            ))
+            .unwrap_err();
+            assert_eq!(err, "monitor_config_not_under_secrets");
+        }
+
+        #[test]
+        fn phase08_23_telegram_save_serializes_same_target_both_orders() {
+            for swap in [false, true] {
+                let tmp = TempDir::new().unwrap();
+                let work = text(tmp.path());
+                let monitor = monitor_fixture(&tmp);
+                let monitor_text = text(&monitor);
+                let key = stage_key(Some(work.clone()), Some(monitor_text.clone()));
+                let first_id = if swap { "second" } else { "first" };
+                let second_id = if swap { "first" } else { "second" };
+                let admitted = Held::new(key.clone(), "admitted");
+                let first = start(ipc::save_telegram_monitor_config(
+                    tauri::test::mock_app().handle().clone(),
+                    Some(work.clone()),
+                    Some(monitor_text.clone()),
+                    save_with_api_id(first_id),
+                ));
+                admitted.wait();
+                let waiting = Held::new(key.clone(), "before-admission");
+                let second = start(ipc::save_telegram_monitor_config(
+                    tauri::test::mock_app().handle().clone(),
+                    Some(work.clone()),
+                    Some(monitor_text.clone()),
+                    save_with_api_id(second_id),
+                ));
+                waiting.wait();
+                waiting.release();
+                assert!(
+                    second.recv_timeout(Duration::from_millis(30)).is_err(),
+                    "second monitor-config writer must wait while the first holds admission"
+                );
+                admitted.release();
+                done(first).unwrap();
+                done(second).unwrap();
+                let raw = fs::read_to_string(&monitor).unwrap();
+                assert!(
+                    raw.contains(&format!("api_id: {second_id}"))
+                        || raw.contains(&format!("api_id: \"{second_id}\"")),
+                    "serialized second writer must own the final file"
+                );
+                assert!(
+                    raw.contains("api_hash: abcdef123456")
+                        || raw.contains("api_hash: \"abcdef123456\""),
+                    "secret sentinel must survive the serialized writes"
+                );
+            }
+        }
+
+        #[test]
+        fn phase08_23_telegram_error_releases_admission_and_retry_recovers() {
+            let tmp = TempDir::new().unwrap();
+            let work = text(tmp.path());
+            let monitor = monitor_fixture(&tmp);
+            let monitor_text = text(&monitor);
+
+            let mut invalid = save_with_api_id("456");
+            invalid.chats.push(TelegramChatConfig::default());
+            let err = run(ipc::save_telegram_monitor_config(
+                tauri::test::mock_app().handle().clone(),
+                Some(work.clone()),
+                Some(monitor_text.clone()),
+                invalid,
+            ))
+            .unwrap_err();
+            assert_eq!(err, "chat_id_required");
+            let raw = fs::read_to_string(&monitor).unwrap();
+            assert!(
+                !raw.contains("api_id: 456"),
+                "rejected save must leave the file untouched"
+            );
+
+            let recovered = run(ipc::save_telegram_monitor_config(
+                tauri::test::mock_app().handle().clone(),
+                Some(work.clone()),
+                Some(monitor_text.clone()),
+                save_with_api_id("456"),
+            ))
+            .unwrap();
+            assert_eq!(recovered.telegram.api_id.as_deref(), Some("456"));
+        }
     }
 }

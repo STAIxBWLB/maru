@@ -106,7 +106,7 @@ use diagram::ipc::{
     diagram_write_report_asset,
 };
 use dot_sync::{dot_sync_overview, dot_sync_run};
-use e2e_flow::{maru_e2e_read, maru_e2e_run};
+use e2e_flow::ipc::{maru_e2e_read, maru_e2e_run};
 use export::dispatch::ipc::export_dispatch;
 use export::ipc::{export_plan, export_validate};
 use gmail_gws::check_gws_auth;
@@ -118,7 +118,7 @@ use hwp_cli_template::ipc::{hwp_cli_template_fields, hwp_cli_template_fill};
 use hwped::{
     hwped_capabilities, hwped_compose, hwped_edit, hwped_read, hwped_render, hwped_validate,
 };
-use inbox_settings::{
+use inbox_settings::ipc::{
     read_inbox_runtime_config, read_inbox_settings, save_inbox_runtime_config, save_inbox_settings,
 };
 use inbox_watcher::InboxWatcherState;
@@ -150,13 +150,13 @@ use site_view::{
     site_view_reload, site_view_set_bounds, site_view_show, site_view_take_opened_urls,
     SiteOpenedUrlState,
 };
-use sites::{read_sites, save_sites, scan_work_sites};
+use sites::ipc::{read_sites, save_sites, scan_work_sites};
 use skill_host::{skills_sync_all_sources, skills_sync_source};
 use studio::ipc::{
     studio_apply_body, studio_state_delete, studio_state_list, studio_state_read, studio_state_save,
 };
 use tauri::Manager;
-use telegram_config::{read_telegram_monitor_config, save_telegram_monitor_config};
+use telegram_config::ipc::{read_telegram_monitor_config, save_telegram_monitor_config};
 use telegram_io::{check_telegram_auth, stop_poller_on_exit, TelegramIoState};
 use template_fill::ipc::{template_fill_hwpx, template_get_fields, template_prepare_hwpx_template};
 use terminal::TerminalState;

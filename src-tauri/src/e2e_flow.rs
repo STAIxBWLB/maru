@@ -3,9 +3,12 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::fs;
 use std::path::Path;
+#[cfg(test)]
+use std::path::PathBuf;
 use std::time::Instant;
 
 use crate::agent_host::event_store::append_run_event_payload;
+use crate::atomic_file::{with_path_transactions, PathTransactionRequest};
 use crate::maru_dir::{ensure_maru_dir, read_maru_template, save_maru_template};
 use crate::skill_host::{skills_create_skill, skills_list_skills, skills_save_skill_file};
 use crate::vault::normalize_existing_dir;
@@ -163,7 +166,6 @@ pub struct E2EFlowTimingGate {
     pub baseline_status: String,
 }
 
-#[tauri::command]
 pub fn maru_e2e_run(
     work_path: String,
     baseline_average_ms: Option<f64>,
@@ -230,52 +232,58 @@ pub fn maru_e2e_run(
     };
     let storage_rel = format!(".maru/e2e-runs/{run_id}");
     let storage_dir = work.join(".maru").join("e2e-runs").join(&run_id);
-    fs::create_dir_all(&storage_dir)
-        .map_err(|err| format!("Cannot create E2E artifact directory: {err}"))?;
-    let local_storage_result = E2EFlowLocalStorageResult {
-        id: run_id.clone(),
-        status: "saved".to_string(),
-        directory: storage_rel.clone(),
-        metadata_path: format!("{storage_rel}/metadata.json"),
-    };
-    let total_ms_placeholder = elapsed_ms(total_start);
-    let mut timings = E2EFlowTimings {
-        total_ms: total_ms_placeholder,
-        stages: timings_without_total.stages,
-    };
-    timings.stages.local_save_ms = elapsed_ms(save_start);
-    let comparison = compare_timings(&baseline, &timings);
-    let metadata = build_metadata(
-        &run_id,
-        &sample,
-        &local_storage_result,
-        baseline,
-        timings.clone(),
-        comparison,
-        todos.clone(),
-    );
-    write_text(&storage_dir.join("report.md"), &report_markdown)?;
-    write_text(&storage_dir.join("slides.html"), &slides_html)?;
-    write_json(&storage_dir.join("todos.json"), &todos)?;
-    write_json(&storage_dir.join("timings.json"), &timings)?;
-    write_json(&storage_dir.join("metadata.json"), &metadata)?;
+    let admission = e2e_run_admission(&work)?;
+    let (_, timings, metadata) = with_path_transactions(admission, |lease| {
+        lease.before_effect()?;
+        fs::create_dir_all(&storage_dir)
+            .map_err(|err| format!("Cannot create E2E artifact directory: {err}"))?;
+        let local_storage_result = E2EFlowLocalStorageResult {
+            id: run_id.clone(),
+            status: "saved".to_string(),
+            directory: storage_rel.clone(),
+            metadata_path: format!("{storage_rel}/metadata.json"),
+        };
+        let total_ms_placeholder = elapsed_ms(total_start);
+        let mut timings = E2EFlowTimings {
+            total_ms: total_ms_placeholder,
+            stages: timings_without_total.stages,
+        };
+        timings.stages.local_save_ms = elapsed_ms(save_start);
+        let comparison = compare_timings(&baseline, &timings);
+        let metadata = build_metadata(
+            &run_id,
+            &sample,
+            &local_storage_result,
+            baseline,
+            timings.clone(),
+            comparison,
+            todos.clone(),
+        );
+        write_text(&storage_dir.join("report.md"), &report_markdown)?;
+        write_text(&storage_dir.join("slides.html"), &slides_html)?;
+        write_json(&storage_dir.join("todos.json"), &todos)?;
+        write_json(&storage_dir.join("timings.json"), &timings)?;
+        write_json(&storage_dir.join("metadata.json"), &metadata)?;
 
-    let requery_start = Instant::now();
-    let _metadata_check: E2EFlowMetadata = read_json(&storage_dir.join("metadata.json"))?;
-    timings.stages.requery_ms = elapsed_ms(requery_start);
-    timings.total_ms = elapsed_ms(total_start);
-    let comparison = compare_timings(&metadata.performance_baseline, &timings);
-    let metadata = build_metadata(
-        &run_id,
-        &sample,
-        &local_storage_result,
-        metadata.performance_baseline,
-        timings.clone(),
-        comparison,
-        todos.clone(),
-    );
-    write_json(&storage_dir.join("timings.json"), &timings)?;
-    write_json(&storage_dir.join("metadata.json"), &metadata)?;
+        let requery_start = Instant::now();
+        let _metadata_check: E2EFlowMetadata = read_json(&storage_dir.join("metadata.json"))?;
+        timings.stages.requery_ms = elapsed_ms(requery_start);
+        timings.total_ms = elapsed_ms(total_start);
+        let comparison = compare_timings(&metadata.performance_baseline, &timings);
+        let metadata = build_metadata(
+            &run_id,
+            &sample,
+            &local_storage_result,
+            metadata.performance_baseline,
+            timings.clone(),
+            comparison,
+            todos.clone(),
+        );
+        write_json(&storage_dir.join("timings.json"), &timings)?;
+        write_json(&storage_dir.join("metadata.json"), &metadata)?;
+        Ok((local_storage_result, timings, metadata))
+    })?;
+
     append_run_event_payload(
         &work_path,
         &run_id,
@@ -296,7 +304,58 @@ pub fn maru_e2e_run(
     })
 }
 
-#[tauri::command]
+fn e2e_run_admission(work: &Path) -> Result<PathTransactionRequest, String> {
+    PathTransactionRequest::new(vec![work.join(".maru").join("e2e-runs")])
+}
+
+/// Owned IPC boundaries; the synchronous entry points remain available to
+/// Rust callers.
+pub mod ipc {
+    use super::*;
+
+    #[cfg(test)]
+    use crate::atomic_file::PathTransactionLease;
+
+    #[cfg(test)]
+    fn e2e_runs_stage_key(work_path: &str, run_id: Option<&str>) -> Option<PathBuf> {
+        let work = crate::vault::normalize_existing_dir(work_path).ok()?;
+        let mut key = work.join(".maru").join("e2e-runs");
+        if let Some(run_id) = run_id {
+            key = key.join(run_id);
+        }
+        Some(crate::vault::lexical_normalize(&key))
+    }
+
+    #[tauri::command]
+    pub async fn maru_e2e_run(
+        work_path: String,
+        baseline_average_ms: Option<f64>,
+    ) -> Result<E2EFlowRun, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            if let Some(key) = e2e_runs_stage_key(&work_path, None) {
+                PathTransactionLease::test_stage(&[key], "worker:maru_e2e_run");
+            }
+            super::maru_e2e_run(work_path, baseline_average_ms)
+        })
+        .await
+        .map_err(|err| format!("maru_e2e_run_task_failed: {err}"))?
+    }
+
+    #[tauri::command]
+    pub async fn maru_e2e_read(work_path: String, run_id: String) -> Result<E2EFlowRun, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            if let Some(key) = e2e_runs_stage_key(&work_path, Some(&run_id)) {
+                PathTransactionLease::test_stage(&[key], "worker:maru_e2e_read");
+            }
+            super::maru_e2e_read(work_path, run_id)
+        })
+        .await
+        .map_err(|err| format!("maru_e2e_read_task_failed: {err}"))?
+    }
+}
+
 pub fn maru_e2e_read(work_path: String, run_id: String) -> Result<E2EFlowRun, String> {
     let work = normalize_existing_dir(&work_path)?;
     validate_run_id(&run_id)?;
@@ -728,5 +787,239 @@ mod tests {
             reread.metadata.local_storage_result.id,
             result.metadata.local_storage_result.id
         );
+    }
+
+    mod phase08_23 {
+        use super::*;
+        use crate::atomic_file::phase08_06::{boundary, run, Held};
+        use std::sync::mpsc;
+        use std::time::Duration;
+
+        fn text(path: &Path) -> String {
+            path.to_string_lossy().to_string()
+        }
+
+        fn e2e_runs_key(work_path: &str, run_id: Option<&str>) -> PathBuf {
+            let work = normalize_existing_dir(work_path).unwrap();
+            let mut key = work.join(".maru").join("e2e-runs");
+            if let Some(run_id) = run_id {
+                key = key.join(run_id);
+            }
+            crate::vault::lexical_normalize(&key)
+        }
+
+        fn fixture_workspace() -> TempDir {
+            let workspace = TempDir::new().unwrap();
+            fs::write(
+                workspace.path().join("maru-weekly-meeting.md"),
+                "# Maru 사업 주간 점검 회의\n\nSkills 관리와 문서 템플릿을 확인했다.\n",
+            )
+            .unwrap();
+            workspace
+        }
+
+        fn start<F>(future: F) -> mpsc::Receiver<F::Output>
+        where
+            F: std::future::Future + Send + 'static,
+            F::Output: Send + 'static,
+        {
+            let (tx, rx) = mpsc::channel();
+            tauri::async_runtime::spawn(async move {
+                let _ = tx.send(future.await);
+            });
+            rx
+        }
+
+        fn done<T>(rx: mpsc::Receiver<T>) -> T {
+            rx.recv_timeout(Duration::from_secs(10))
+                .expect("fixture completion")
+        }
+
+        #[test]
+        fn phase08_23_e2e_wrappers_yield_same_poll_and_map_join_failure() {
+            let workspace = fixture_workspace();
+            let path = text(workspace.path());
+            boundary(
+                e2e_runs_key(&path, None),
+                "maru_e2e_run",
+                ipc::maru_e2e_run(path.clone(), Some(4019.88)),
+            );
+            boundary(
+                e2e_runs_key(&path, Some("boundary-run")),
+                "maru_e2e_read",
+                ipc::maru_e2e_read(path, "boundary-run".to_string()),
+            );
+        }
+
+        #[test]
+        fn phase08_23_e2e_run_and_read_real_fixture_and_rejections() {
+            let _home = test_home();
+            let workspace = fixture_workspace();
+            let path = text(workspace.path());
+
+            let result = run(ipc::maru_e2e_run(path.clone(), Some(4019.88))).unwrap();
+            assert_eq!(result.metadata.source_of_truth, "README.md");
+            assert!(result
+                .report_markdown
+                .contains("Maru E2E Development Report"));
+            assert!(result.slides_html.contains("<!doctype html>"));
+            assert!(workspace
+                .path()
+                .join(&result.metadata.local_storage_result.metadata_path)
+                .exists());
+
+            let run_id = result.metadata.local_storage_result.id.clone();
+            let reread = run(ipc::maru_e2e_read(path.clone(), run_id.clone())).unwrap();
+            assert_eq!(reread.metadata.local_storage_result.id, run_id);
+
+            let err = run(ipc::maru_e2e_read(path.clone(), "bad id!".to_string())).unwrap_err();
+            assert_eq!(err, "maru_e2e_run_id_invalid");
+            let err = run(ipc::maru_e2e_read(path, "missing-run".to_string())).unwrap_err();
+            assert!(err.contains("Cannot read"), "{err}");
+        }
+
+        #[test]
+        fn phase08_23_e2e_run_serializes_with_template_writer_both_orders() {
+            for template_first in [false, true] {
+                let _home = test_home();
+                let workspace = fixture_workspace();
+                let path = text(workspace.path());
+                let work = normalize_existing_dir(&path).unwrap();
+                let maru_key = crate::vault::lexical_normalize(&work.join(".maru"));
+                let runs_key = e2e_runs_key(&path, None);
+                let launch_template = || {
+                    start(tauri::async_runtime::spawn_blocking({
+                        let path = path.clone();
+                        move || {
+                            crate::maru_dir::save_maru_template(
+                                path,
+                                "phase08-23-order-template".to_string(),
+                                "order fixture".to_string(),
+                            )
+                        }
+                    }))
+                };
+                let (run_rx, template_rx) = if template_first {
+                    let admitted = Held::new(maru_key.clone(), "admitted");
+                    let template = launch_template();
+                    admitted.wait();
+                    // While the template writer holds the `work/.maru` lease,
+                    // the run's first `.maru`-area acquisition is its run-event
+                    // store at `.maru/runs/skills/maru-e2e-<millis>/events.jsonl`
+                    // (generated inside the command once its blocking task is
+                    // scheduled), so the waiting hooks must cover candidate
+                    // run ids; extend the window until one fires.
+                    let (entered_tx, entered) = mpsc::channel();
+                    let (release_tx, release_rx) = mpsc::channel::<()>();
+                    let release_rx = std::sync::Arc::new(std::sync::Mutex::new(release_rx));
+                    let mut hooks = Vec::new();
+                    let start_ms = Utc::now().timestamp_millis();
+                    let mut covered_until = start_ms;
+                    let mut register_candidates = |covered_until: &mut i64, hooks: &mut Vec<_>| {
+                        let target = Utc::now().timestamp_millis() + 50;
+                        for ms in *covered_until..=target {
+                            let event_path = crate::vault::lexical_normalize(
+                                &work
+                                    .join(".maru")
+                                    .join("runs")
+                                    .join("skills")
+                                    .join(format!("maru-e2e-{ms}"))
+                                    .join("events.jsonl"),
+                            );
+                            let entered_tx = entered_tx.clone();
+                            let release_rx = release_rx.clone();
+                            let used =
+                                std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+                            hooks.push(crate::atomic_file::PathTransactionTestHook::new(
+                                event_path,
+                                "before-admission",
+                                move || {
+                                    if used.swap(true, std::sync::atomic::Ordering::SeqCst) {
+                                        return;
+                                    }
+                                    let _ = entered_tx.send(());
+                                    let _ = release_rx
+                                        .lock()
+                                        .unwrap()
+                                        .recv_timeout(Duration::from_secs(15));
+                                },
+                            ));
+                        }
+                        *covered_until = target + 1;
+                    };
+                    let run = start(ipc::maru_e2e_run(path.clone(), None));
+                    loop {
+                        register_candidates(&mut covered_until, &mut hooks);
+                        if entered.recv_timeout(Duration::from_millis(25)).is_ok() {
+                            break;
+                        }
+                        assert!(
+                            Utc::now().timestamp_millis() - start_ms < 15_000,
+                            "e2e run reached its run-event admission"
+                        );
+                    }
+                    release_tx.send(()).unwrap();
+                    assert!(
+                        run.recv_timeout(Duration::from_millis(30)).is_err(),
+                        "e2e run must wait while the template writer holds the .maru lease"
+                    );
+                    admitted.release();
+                    drop(hooks);
+                    (run, template)
+                } else {
+                    let admitted = Held::new(runs_key.clone(), "admitted");
+                    let run = start(ipc::maru_e2e_run(path.clone(), None));
+                    admitted.wait();
+                    let waiting = Held::new(maru_key.clone(), "before-admission");
+                    let template = launch_template();
+                    waiting.wait();
+                    waiting.release();
+                    assert!(
+                        template.recv_timeout(Duration::from_millis(30)).is_err(),
+                        "template writer must wait while the e2e run holds the e2e-runs lease"
+                    );
+                    admitted.release();
+                    (run, template)
+                };
+                let run = done(run_rx).unwrap();
+                done(template_rx).unwrap().unwrap();
+                assert!(workspace
+                    .path()
+                    .join(&run.metadata.local_storage_result.metadata_path)
+                    .exists());
+                assert!(workspace
+                    .path()
+                    .join(".maru/templates/phase08-23-order-template.md")
+                    .exists());
+            }
+        }
+
+        #[test]
+        fn phase08_23_e2e_run_error_releases_admission_and_retry_recovers() {
+            let _home = test_home();
+            let workspace = fixture_workspace();
+            let path = text(workspace.path());
+            fs::create_dir_all(workspace.path().join(".maru")).unwrap();
+            let blocked = workspace.path().join(".maru/e2e-runs");
+            fs::write(&blocked, "not a directory").unwrap();
+
+            let err = run(ipc::maru_e2e_run(path.clone(), None)).unwrap_err();
+            assert!(
+                err.contains("Cannot create E2E artifact directory"),
+                "{err}"
+            );
+            assert!(workspace
+                .path()
+                .join(".maru/templates/maru-e2e-report-template.md")
+                .exists());
+
+            fs::remove_file(&blocked).unwrap();
+            let recovered = run(ipc::maru_e2e_run(path, None)).unwrap();
+            assert_eq!(recovered.metadata.schema_version, SCHEMA_VERSION);
+            assert!(workspace
+                .path()
+                .join(&recovered.metadata.local_storage_result.metadata_path)
+                .exists());
+        }
     }
 }

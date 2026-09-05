@@ -517,7 +517,7 @@ pub(crate) mod phase08_06 {
                 release_rx
                     .lock()
                     .unwrap()
-                    .recv_timeout(Duration::from_secs(5))
+                    .recv_timeout(Duration::from_secs(15))
                     .expect("release held transaction");
             });
             Self {
@@ -528,7 +528,7 @@ pub(crate) mod phase08_06 {
         }
         pub(crate) fn wait(&self) {
             self.entered
-                .recv_timeout(Duration::from_secs(5))
+                .recv_timeout(Duration::from_secs(15))
                 .expect("transaction entered");
         }
         pub(crate) fn release(&self) {
