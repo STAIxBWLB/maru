@@ -51,6 +51,17 @@ export function registerDictionaries(entries: Partial<Record<Locale, Dictionary>
   Object.assign(dictionaries, entries);
 }
 
+/** Locale for plain-TS module owners (e.g. processing operations publishing a
+ *  terminal notice after the initiating component unmounted). Reads the same
+ *  storage key and detection rules as `useLocaleState`. */
+export function activeLocale(): Locale {
+  try {
+    return detectInitialLocale();
+  } catch {
+    return "ko";
+  }
+}
+
 /** Translate `key` for the given locale, with optional `{var}` interpolation.
  *  Returns the key itself if missing — useful as a development signal that a
  *  translation has not been authored yet. Requires the locale to be loaded

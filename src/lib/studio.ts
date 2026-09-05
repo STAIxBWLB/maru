@@ -1,6 +1,11 @@
 import { invoke } from "@tauri-apps/api/core";
 import { frontmatterScalar } from "./document";
 import type { CreateDocumentExtras } from "./api";
+import {
+  runProcessingOperation,
+  type ProcessingCompletion,
+  type ProcessingWrapperOptions,
+} from "./processingOperations";
 import type { DocumentPayload } from "./types";
 
 declare global {
@@ -359,23 +364,96 @@ export async function templateGetFields(
   return invoke<TemplateFieldResponse>("template_get_fields", { workPath, request });
 }
 
+export function classifyTemplatePrepareCompletion(
+  response: TemplatePrepareResponse,
+): ProcessingCompletion {
+  if (response.status === "manualFallback") {
+    return {
+      status: "manual",
+      succeeded: [],
+      failed: [],
+      detail: response.reason?.trim() ?? "",
+    };
+  }
+  if (response.status !== "ready" || !response.preparedPath) {
+    return {
+      status: "all-failed",
+      succeeded: [],
+      failed: [
+        {
+          label: response.inputPath,
+          reason: response.reason?.trim() || "template prepare failed",
+        },
+      ],
+    };
+  }
+  return { status: "all-success", succeeded: [response.preparedPath], failed: [] };
+}
+
+export function classifyTemplateFillCompletion(
+  response: TemplateFillResponse,
+): ProcessingCompletion {
+  const failed = [
+    ...response.validationChecks
+      .filter((check) => check.status === "fail")
+      .map((check) => ({ label: check.name, reason: check.reason?.trim() || "validation failed" })),
+    ...response.unmatchedFields.map((field) => ({
+      label: field,
+      reason: "unmatched field",
+    })),
+  ];
+  const succeeded = response.outputPath ? [response.outputPath] : [];
+  if (failed.length === 0 && response.validationOk) {
+    return { status: "all-success", succeeded, failed: [] };
+  }
+  if (failed.length === 0) {
+    failed.push({ label: "validation", reason: "validation failed" });
+  }
+  if (succeeded.length === 0 && failed.length === 0) {
+    return { status: "empty", succeeded, failed };
+  }
+  if (succeeded.length === 0) return { status: "all-failed", succeeded, failed };
+  return { status: "partial-success", succeeded, failed };
+}
+
 export async function templatePrepareHwpxTemplate(
   workPath: string,
   sourcePath: string,
+  options?: ProcessingWrapperOptions,
 ): Promise<TemplatePrepareResponse> {
   if (!isTauri()) throw new Error("template_prepare_requires_tauri");
-  return invoke<TemplatePrepareResponse>("template_prepare_hwpx_template", {
-    workPath,
-    sourcePath,
-  });
+  return runProcessingOperation(
+    {
+      operationId: options?.operationId ?? crypto.randomUUID(),
+      workspace: workPath,
+      labelKey: "processing.label.templatePrepare",
+      outerOperationId: options?.outerOperationId ?? null,
+    },
+    () =>
+      invoke<TemplatePrepareResponse>("template_prepare_hwpx_template", {
+        workPath,
+        sourcePath,
+      }),
+    classifyTemplatePrepareCompletion,
+  );
 }
 
 export async function templateFillHwpx(
   workPath: string,
   request: TemplateFillRequest,
+  options?: ProcessingWrapperOptions,
 ): Promise<TemplateFillResponse> {
   if (!isTauri()) throw new Error("template_fill_requires_tauri");
-  return invoke<TemplateFillResponse>("template_fill_hwpx", { workPath, request });
+  return runProcessingOperation(
+    {
+      operationId: options?.operationId ?? crypto.randomUUID(),
+      workspace: workPath,
+      labelKey: "processing.label.templateFill",
+      outerOperationId: options?.outerOperationId ?? null,
+    },
+    () => invoke<TemplateFillResponse>("template_fill_hwpx", { workPath, request }),
+    classifyTemplateFillCompletion,
+  );
 }
 
 export async function hwpCliTemplateFields(

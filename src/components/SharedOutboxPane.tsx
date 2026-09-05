@@ -11,7 +11,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { setError } from "../lib/errorStore";
-import { chooseFiles, chooseWorkspaceDirectory } from "../lib/api";
+import { chooseFiles, chooseWorkspaceDirectory, prepareShareOutboxFiles } from "../lib/api";
 import { useTranslation } from "../lib/i18n";
 import {
   basenameOf,
@@ -162,10 +162,10 @@ export function SharedOutboxPane({
     setApplying(true);
     setError(null);
     try {
-      const res = await invoke<ShareOutboxResult[]>("prepare_share_outbox_files", {
-        workPath: workspacePath,
-        sources,
-        options: { author: author || null, replace, dryRun: false },
+      const res = await prepareShareOutboxFiles(workspacePath, sources, {
+        author: author || null,
+        replace,
+        dryRun: false,
       });
       setResults(res);
       await loadRecent();
