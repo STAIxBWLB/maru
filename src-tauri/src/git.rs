@@ -67,6 +67,7 @@ fn git_status_with_mode(vault_path: String, include_untracked: bool) -> Result<G
     let untracked_arg = if include_untracked { "-uall" } else { "-uno" };
     let output = git_command()
         .args(["status", "--porcelain=v1", untracked_arg, "--branch"])
+        .env("GIT_OPTIONAL_LOCKS", "0")
         .current_dir(path)
         .no_window()
         .output()
@@ -226,6 +227,7 @@ pub fn git_changes(vault_path: String) -> Result<Vec<GitFileChange>, String> {
     }
     let output = git_command()
         .args(["status", "--porcelain=v1", "-uall"])
+        .env("GIT_OPTIONAL_LOCKS", "0")
         .current_dir(path)
         .no_window()
         .output()
@@ -787,6 +789,7 @@ fn git_toplevel(start: &Path) -> Result<PathBuf, String> {
 fn repo_status(repo: &Path) -> Result<RepoStatus, String> {
     let output = git_command()
         .args(["status", "--porcelain=v1", "-uall", "--branch"])
+        .env("GIT_OPTIONAL_LOCKS", "0")
         .current_dir(repo)
         .no_window()
         .output()
@@ -1188,6 +1191,7 @@ mod tests {
 
     #[test]
     fn selected_commit_leaves_unselected_changes_dirty() {
+        let _home = phase08_05::Home::new();
         let tmp = TempDir::new().unwrap();
         let root = tmp.path();
         run_git(root, &["init"]);
@@ -1223,6 +1227,7 @@ mod tests {
 
     #[test]
     fn selected_commit_rejects_unsafe_paths() {
+        let _home = phase08_05::Home::new();
         let result = git_commit(
             "/tmp".to_string(),
             "msg".to_string(),
@@ -1618,13 +1623,13 @@ mod phase08_05 {
             hook("process");
         }
     }
-    struct Home {
+    pub(super) struct Home {
         _dir: TempDir,
         previous: Option<std::ffi::OsString>,
         _guard: std::sync::MutexGuard<'static, ()>,
     }
     impl Home {
-        fn new() -> Self {
+        pub(super) fn new() -> Self {
             let guard = crate::skill_host::fs::test_maru_home_lock();
             let dir = TempDir::new().unwrap();
             let previous = std::env::var_os("MARU_TEST_CONFIG_DIR");
@@ -1982,6 +1987,157 @@ mod phase08_05 {
         assert_eq!(
             std::fs::read_to_string(root.path().join("note.md")).unwrap(),
             "dirty preserved\n"
+        );
+    }
+    #[test]
+    fn permission_is_reread_under_transaction_before_any_process() {
+        let home = Home::new();
+        let root = repo();
+        let path = root.path().to_string_lossy().into_owned();
+        let config = home
+            ._dir
+            .path()
+            .join("com.maru.app")
+            .join("workspaces.json");
+        std::fs::create_dir_all(config.parent().unwrap()).unwrap();
+        let registry = json!({"workspaces":[{"label":"fixture","path":path,"visibility":"private","provider":"local","writePolicy":"readOnly"}]});
+        let (tx, rx) = mpsc::channel();
+        let _reset = enter(
+            Some(Arc::new(move |edge| {
+                if edge == "transaction" {
+                    std::fs::write(&config, registry.to_string()).unwrap();
+                }
+                if edge == "process" {
+                    tx.send(()).unwrap();
+                }
+            })),
+            "caller",
+        );
+        let error =
+            tauri::async_runtime::block_on(ipc::git_commit(path.clone(), "denied".into(), None))
+                .unwrap_err();
+        assert!(error.starts_with("Workspace writes are blocked"), "{error}");
+        let error = tauri::async_runtime::block_on(ipc::git_sync_pull_rebase(path)).unwrap_err();
+        assert!(error.starts_with("Workspace writes are blocked"));
+        assert!(rx.try_recv().is_err(), "permission denial launched Git");
+    }
+    #[cfg(unix)]
+    #[test]
+    fn fake_commit_provider_preserves_readonly_argv_stdin_and_exit_error() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = repo();
+        std::fs::write(root.path().join("note.md"), "provider fixture\n").unwrap();
+        let script = root.path().join("fixture-provider");
+        std::fs::write(&script, "#!/bin/sh\nprintf '%s\\n' \"$@\" > provider-args\ncat > provider-input\nprintf '%s\\n' 'feat(fixture): generated subject'\n").unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let path = root.path().to_string_lossy().into_owned();
+        let result = tauri::async_runtime::block_on(ipc::git_generate_commit_message(
+            path.clone(),
+            vec!["note.md".into()],
+            "codex".into(),
+            Some(script.to_string_lossy().into_owned()),
+        ))
+        .unwrap();
+        assert_eq!(result, "feat(fixture): generated subject");
+        let args = std::fs::read_to_string(root.path().join("provider-args")).unwrap();
+        assert!(args.starts_with("exec\n--sandbox\nread-only\n--cd\n"));
+        assert!(args.ends_with("-\n"));
+        assert!(std::fs::read_to_string(root.path().join("provider-input"))
+            .unwrap()
+            .contains("+provider fixture"));
+        std::fs::write(
+            &script,
+            "#!/bin/sh\ncat >/dev/null\necho fixture failure >&2\nexit 7\n",
+        )
+        .unwrap();
+        let error = tauri::async_runtime::block_on(ipc::git_generate_commit_message(
+            path,
+            vec!["note.md".into()],
+            "codex".into(),
+            Some(script.to_string_lossy().into_owned()),
+        ))
+        .unwrap_err();
+        assert_eq!(error, "commit_message_provider_failed: fixture failure");
+    }
+    #[test]
+    fn rebase_conflict_preserves_stash_and_does_not_automatically_retry() {
+        let _home = Home::new();
+        let root = repo();
+        let remote = TempDir::new().unwrap();
+        let peer = TempDir::new().unwrap();
+        run(remote.path(), &["init", "--bare", "-b", "main"]);
+        run(
+            root.path(),
+            &["remote", "add", "origin", remote.path().to_str().unwrap()],
+        );
+        run(root.path(), &["push", "-u", "origin", "main"]);
+        run(
+            peer.path(),
+            &["clone", remote.path().to_str().unwrap(), "."],
+        );
+        std::fs::write(peer.path().join("note.md"), "remote conflict\n").unwrap();
+        run(peer.path(), &["commit", "-am", "remote"]);
+        run(peer.path(), &["push", "origin", "HEAD"]);
+        std::fs::write(root.path().join("note.md"), "local conflict\n").unwrap();
+        run(root.path(), &["commit", "-am", "local"]);
+        std::fs::write(root.path().join("retain.md"), "stash fixture\n").unwrap();
+        let error = tauri::async_runtime::block_on(ipc::git_sync_pull_rebase(
+            root.path().to_string_lossy().into_owned(),
+        ))
+        .unwrap_err();
+        assert!(error.starts_with("git pull --rebase failed:"));
+        assert!(run(root.path(), &["status", "--porcelain"]).contains("UU note.md"));
+        assert_eq!(run(root.path(), &["stash", "list"]).lines().count(), 1);
+        assert!(GIT_ACTION_LOCK.try_lock().is_ok());
+    }
+    #[test]
+    fn pull_and_commit_push_wait_for_transaction_before_validation_or_process() {
+        let _home = Home::new();
+        let root = repo();
+        let app = app();
+        // Hold the same domain gate as git_commit. Both other writer entry
+        // points must queue in blocking workers, before even consuming approval.
+        let guard = GIT_ACTION_LOCK.lock().unwrap();
+        let (entered_tx, entered_rx) = mpsc::channel();
+        let (effect_tx, effect_rx) = mpsc::channel();
+        let hook: Hook = Arc::new(move |edge| {
+            if edge == "git_sync_pull_rebase" || edge == "git_sync_commit_push" {
+                entered_tx.send(()).unwrap();
+            }
+            if edge == "transaction" || edge == "process" {
+                effect_tx.send(()).unwrap();
+            }
+        });
+        let pull_path = root.path().to_string_lossy().into_owned();
+        let push_path = pull_path.clone();
+        let pull_hook = hook.clone();
+        let pull = std::thread::spawn(move || {
+            let _reset = enter(Some(pull_hook), "caller");
+            tauri::async_runtime::block_on(ipc::git_sync_pull_rebase(pull_path))
+        });
+        let handle = app.handle().clone();
+        let push = std::thread::spawn(move || {
+            let _reset = enter(Some(hook), "caller");
+            tauri::async_runtime::block_on(ipc::git_sync_commit_push(
+                handle,
+                push_path,
+                "denied".into(),
+                None,
+                None,
+            ))
+        });
+        entered_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        entered_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        assert!(effect_rx.try_recv().is_err());
+        drop(guard);
+        assert!(pull
+            .join()
+            .unwrap()
+            .unwrap_err()
+            .starts_with("git pull --rebase failed:"));
+        assert_eq!(
+            push.join().unwrap().unwrap_err(),
+            "approval_required: git.sync.commit_push"
         );
     }
 }

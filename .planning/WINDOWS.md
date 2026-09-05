@@ -2,9 +2,9 @@
 schema_version: 1
 open_count: 0
 waived_count: 0
-fixed_count: 3
-total_count: 3
-last_updated: 2026-08-25T22:00:10.739Z
+fixed_count: 4
+total_count: 4
+last_updated: 2026-09-05T05:40:54.363Z
 ---
 
 # Broken Windows Ledger
@@ -18,6 +18,7 @@ last_updated: 2026-08-25T22:00:10.739Z
 | 1 | 02 | todo | src-tauri/src/paths.rs |  | require_absolute keeps #[allow(dead_code)] until plan 02-03 wires the SCAN-04 guard in skill_host/fs.rs | fixed |  | 2026-08-22T21:43:44.468Z | 2026-08-22T22:00:52.150Z |
 | 2 | 04 | deviation | src/App.tsx |  | Kept EditorPane command ports stable across App renders with current-scope dispatch. | fixed |  | 2026-08-25T21:59:50.997Z | 2026-08-25T22:00:10.661Z |
 | 3 | 04 | deviation | src/__tests__/editorSurfaceRenderIsolation.test.tsx |  | Separated render-domain probes so changed-slice counters measure independent subscribers. | fixed |  | 2026-08-25T21:59:51.076Z | 2026-08-25T22:00:10.739Z |
+| 4 | 08 | deviation | src-tauri/src/git.rs |  | Plan05 uses owned AppHandle and real worker-local State lookup to preserve ApprovalState ownership without changing its representation. | fixed |  | 2026-09-05T05:40:43.884Z | 2026-09-05T05:40:54.363Z |
 
 ````json
 [
@@ -56,6 +57,18 @@ last_updated: 2026-08-25T22:00:10.739Z
     "reason": "",
     "recorded_at": "2026-08-25T21:59:51.076Z",
     "resolved_at": "2026-08-25T22:00:10.739Z"
+  },
+  {
+    "id": 4,
+    "kind": "deviation",
+    "phase": "08",
+    "file": "src-tauri/src/git.rs",
+    "line": null,
+    "description": "Plan05 uses owned AppHandle and real worker-local State lookup to preserve ApprovalState ownership without changing its representation.",
+    "status": "fixed",
+    "reason": "",
+    "recorded_at": "2026-09-05T05:40:43.884Z",
+    "resolved_at": "2026-09-05T05:40:54.363Z"
   }
 ]
 ````

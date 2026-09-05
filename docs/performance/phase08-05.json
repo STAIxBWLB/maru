@@ -1,0 +1,548 @@
+{
+  "plan": "08-05",
+  "moduleIntegrationOwner": "08-29",
+  "integrationRequired": "08-29",
+  "commands": [
+    {
+      "name": "git_status",
+      "module": "src-tauri/src/git.rs",
+      "registrationPath": "src-tauri/src/lib.rs::git::ipc::git_status",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/git.rs::ipc::git_status -> src-tauri/src/git.rs::git_status retains the synchronous domain entry point.",
+        "git_status_with_mode: directory stat, fixed git status process and parse; GIT_OPTIONAL_LOCKS=0 prevents optional index refresh.",
+        "src-tauri/src/git.rs::git_command constructs unchanged fixed Git argv; src-tauri/src/win_process.rs only adjusts Windows process creation flags."
+      ],
+      "workerBoundary": "src-tauri/src/git.rs::ipc::git_status owns String/Vec/Option inputs and awaits spawn_blocking before all process/filesystem/lock work; contextual git_status_task_failed handles JoinError, inner Result<T,String> untouched.",
+      "syncCallers": [
+        "src-tauri/src/git.rs::git_status remains public synchronous; no direct CLI imports were found; CLI build remains green.",
+        "src-tauri/src/git.rs::git_commit calls synchronous git_status while holding its transaction; helper does not reacquire GIT_ACTION_LOCK."
+      ],
+      "mutationKey": {
+        "readOnly": true,
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "reason": "Read-only repository/config inspection: no filesystem mutation by Maru; status sites disable optional Git index refresh with GIT_OPTIONAL_LOCKS=0. No mutation admission for these reads."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_05",
+          "passed": 13,
+          "failed": 0,
+          "ignored": 0
+        }
+      ],
+      "processingCaller": {
+        "path": "src/lib/api.ts::gitStatus; src/components/GitStatusBadge.tsx; src/components/dashboard/useDashboardData.ts",
+        "payload": "Existing nonempty/empty read result is a view refresh, not a user-started processing completion.",
+        "terminalNoticeOwner": "Existing badge/dashboard/CommitDialog/workspaceStore view refresh owner; scan participates in CommitDialog runGitSync without an independent completion notice.",
+        "lifetime": "Awaited worker continues after view unmount; it does not provide app-quit durability. Manual retry only. The initiating workspace remains the caller's existing scope; final shared notice/retained partial successes classification belongs25/26."
+      },
+      "evidence": {
+        "boundaryCase": "phase08_05::every_git_wrapper_holds_a_distinct_worker_and_same_task_yields",
+        "behaviorCases": [
+          "phase08_05::read_wrappers_return_real_nonempty_payloads_and_legacy_errors"
+        ],
+        "bounds": "All transitive filesystem/subprocess work and lock waits occur in spawn_blocking; payload caps are not runtime bounds. Same-task async probe and worker thread IDs prevent spare async workers from producing a false pass. Native saturation remains08-27.",
+        "platform": "Executed on macOS. Fixed NoWindow cfg on Windows retains behavior; Windows runtime not claimed. Git children disable inherited global/system config, signing, hooks, credentials and non-file transports only under cfg(test). No live repository/remote or dot service invoked."
+      }
+    },
+    {
+      "name": "git_changes",
+      "module": "src-tauri/src/git.rs",
+      "registrationPath": "src-tauri/src/lib.rs::git::ipc::git_changes",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/git.rs::ipc::git_changes -> src-tauri/src/git.rs::git_changes retains the synchronous domain entry point.",
+        "git_changes: directory stat, fixed git status process; GIT_OPTIONAL_LOCKS=0 and MAX_CHANGE_ROWS=200 payload cap.",
+        "src-tauri/src/git.rs::git_command constructs unchanged fixed Git argv; src-tauri/src/win_process.rs only adjusts Windows process creation flags."
+      ],
+      "workerBoundary": "src-tauri/src/git.rs::ipc::git_changes owns String/Vec/Option inputs and awaits spawn_blocking before all process/filesystem/lock work; contextual git_changes_task_failed handles JoinError, inner Result<T,String> untouched.",
+      "syncCallers": [
+        "src-tauri/src/git.rs::git_changes remains public synchronous; no direct CLI imports were found; CLI build remains green."
+      ],
+      "mutationKey": {
+        "readOnly": true,
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "reason": "Read-only repository/config inspection: no filesystem mutation by Maru; status sites disable optional Git index refresh with GIT_OPTIONAL_LOCKS=0. No mutation admission for these reads."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_05",
+          "passed": 13,
+          "failed": 0,
+          "ignored": 0
+        }
+      ],
+      "processingCaller": {
+        "path": "src/lib/api.ts; src/components/CommitDialog.tsx",
+        "payload": "Existing nonempty/empty read result is a view refresh, not a user-started processing completion.",
+        "terminalNoticeOwner": "Existing badge/dashboard/CommitDialog/workspaceStore view refresh owner; scan participates in CommitDialog runGitSync without an independent completion notice.",
+        "lifetime": "Awaited worker continues after view unmount; it does not provide app-quit durability. Manual retry only. The initiating workspace remains the caller's existing scope; final shared notice/retained partial successes classification belongs25/26."
+      },
+      "evidence": {
+        "boundaryCase": "phase08_05::every_git_wrapper_holds_a_distinct_worker_and_same_task_yields",
+        "behaviorCases": [
+          "phase08_05::read_wrappers_return_real_nonempty_payloads_and_legacy_errors"
+        ],
+        "bounds": "All transitive filesystem/subprocess work and lock waits occur in spawn_blocking; payload caps are not runtime bounds. Same-task async probe and worker thread IDs prevent spare async workers from producing a false pass. Native saturation remains08-27.",
+        "platform": "Executed on macOS. Fixed NoWindow cfg on Windows retains behavior; Windows runtime not claimed. Git children disable inherited global/system config, signing, hooks, credentials and non-file transports only under cfg(test). No live repository/remote or dot service invoked."
+      }
+    },
+    {
+      "name": "git_diff",
+      "module": "src-tauri/src/git.rs",
+      "registrationPath": "src-tauri/src/lib.rs::git::ipc::git_diff",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/git.rs::ipc::git_diff -> src-tauri/src/git.rs::git_diff retains the synchronous domain entry point.",
+        "git_diff_for_path: fixed git diff HEAD -- path -U2, raw untracked-file fallback read_to_string, MAX_DIFF_BYTES truncation.",
+        "src-tauri/src/git.rs::git_command constructs unchanged fixed Git argv; src-tauri/src/win_process.rs only adjusts Windows process creation flags."
+      ],
+      "workerBoundary": "src-tauri/src/git.rs::ipc::git_diff owns String/Vec/Option inputs and awaits spawn_blocking before all process/filesystem/lock work; contextual git_diff_task_failed handles JoinError, inner Result<T,String> untouched.",
+      "syncCallers": [
+        "src-tauri/src/git.rs::git_diff remains public synchronous; no direct CLI imports were found; CLI build remains green."
+      ],
+      "mutationKey": {
+        "readOnly": true,
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "reason": "Read-only repository/config inspection: no filesystem mutation by Maru; status sites disable optional Git index refresh with GIT_OPTIONAL_LOCKS=0. No mutation admission for these reads."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_05",
+          "passed": 13,
+          "failed": 0,
+          "ignored": 0
+        }
+      ],
+      "processingCaller": {
+        "path": "src/lib/api.ts; src/components/CommitDialog.tsx",
+        "payload": "Existing nonempty/empty read result is a view refresh, not a user-started processing completion.",
+        "terminalNoticeOwner": "Existing badge/dashboard/CommitDialog/workspaceStore view refresh owner; scan participates in CommitDialog runGitSync without an independent completion notice.",
+        "lifetime": "Awaited worker continues after view unmount; it does not provide app-quit durability. Manual retry only. The initiating workspace remains the caller's existing scope; final shared notice/retained partial successes classification belongs25/26."
+      },
+      "evidence": {
+        "boundaryCase": "phase08_05::every_git_wrapper_holds_a_distinct_worker_and_same_task_yields",
+        "behaviorCases": [
+          "phase08_05::read_wrappers_return_real_nonempty_payloads_and_legacy_errors"
+        ],
+        "bounds": "All transitive filesystem/subprocess work and lock waits occur in spawn_blocking; payload caps are not runtime bounds. Same-task async probe and worker thread IDs prevent spare async workers from producing a false pass. Native saturation remains08-27.",
+        "platform": "Executed on macOS. Fixed NoWindow cfg on Windows retains behavior; Windows runtime not claimed. Git children disable inherited global/system config, signing, hooks, credentials and non-file transports only under cfg(test). No live repository/remote or dot service invoked."
+      }
+    },
+    {
+      "name": "git_generate_commit_message",
+      "module": "src-tauri/src/git.rs",
+      "registrationPath": "src-tauri/src/lib.rs::git::ipc::git_generate_commit_message",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/git.rs::ipc::git_generate_commit_message -> src-tauri/src/git.rs::git_generate_commit_message retains the synchronous domain entry point.",
+        "build_commit_message_prompt: reject_sensitive_paths_for_commit_message before git log/diff/read, bounded prompt/diff output; sanitize_commit_message parses provider output.",
+        "src-tauri/src/agent_host/provider.rs::build_cli_command -> resolve_provider_binary; augmented PATH, owned CompletionRequest and fixed provider plan/read-only argv; stdin write, spawn and wait_with_output all inside Git worker.",
+        "src-tauri/src/agent_runtime_env.rs::apply_to_command -> reserved_runtime_env -> runtime_work_root; registry/config and scratchpad path resolution are reached before provider spawn. External provider logs/cache are existing delegated effects, not a claim of arbitrary-program containment.",
+        "src-tauri/src/git.rs::git_command constructs unchanged fixed Git argv; src-tauri/src/win_process.rs only adjusts Windows process creation flags."
+      ],
+      "workerBoundary": "src-tauri/src/git.rs::ipc::git_generate_commit_message owns String/Vec/Option inputs and awaits spawn_blocking before all process/filesystem/lock work; contextual git_generate_commit_message_task_failed handles JoinError, inner Result<T,String> untouched.",
+      "syncCallers": [
+        "src-tauri/src/git.rs::git_generate_commit_message remains public synchronous; no direct CLI imports were found; CLI build remains green."
+      ],
+      "mutationKey": {
+        "lexicalPaths": [
+          "Selected repository checkout and existing provider cwd; selected paths used for prompt reads.",
+          "Provider environment routes MARU_SCRATCHPAD, MARU_DRAFTS, MARU_TEMP and CLAUDE_CODE_TMPDIR via runtime_work_root and scratchpad resolvers. Existing plan/read-only provider is delegated; arbitrary command_override logs/cache locations are external effects and are not confined by this migration."
+        ],
+        "aliasPaths": [
+          "Absolute lexical checkout plus canonical/symlink aliases, actual git directory and git-common-dir aliases and nearest existing ancestors. Current conservative GIT_ACTION_LOCK serializes all Git domain writers, including aliases; 08-29 adds cross-domain ancestry exclusion."
+        ],
+        "postAdmissionPreconditions": [
+          "Re-read directory existence, current workspace write policy, approval/path/message/secret validation and repo status inside worker/domain transaction. Plan29 must additionally revalidate lexical/physical aliases and originally selected parent identity after shared admission."
+        ],
+        "domainLockOrder": "Plan29 shared admission before GIT_ACTION_LOCK, then ApprovalState only during consume and permission reads; no skills registry lock during network or admission wait. Current GIT_ACTION_LOCK is fail-closed on poison and covers the entire transaction.",
+        "sharedAdmissionEntry": "integrationRequired: 08-29; Plan06 produces shared path admission and Plan29 integrates these preserved synchronous entry points."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_05",
+          "passed": 13,
+          "failed": 0,
+          "ignored": 0
+        }
+      ],
+      "processingCaller": {
+        "path": "src/lib/api.ts; src/components/CommitDialog.tsx",
+        "payload": "Nonempty subject String populates commit message; rejected provider has existing actionable legacy failure.",
+        "terminalNoticeOwner": "Existing CommitDialog handleCommit/handleAutoCommit/runGitSync owns onCommitted/onClose and setError/syncReport; component-unmount notification lifetime closes in08-25/08-26.",
+        "lifetime": "Awaited worker continues after view unmount; it does not provide app-quit durability. Manual retry only. The initiating workspace remains the caller's existing scope; final shared notice/retained partial successes classification belongs25/26."
+      },
+      "evidence": {
+        "boundaryCase": "phase08_05::every_git_wrapper_holds_a_distinct_worker_and_same_task_yields",
+        "behaviorCases": [
+          "phase08_05::fake_commit_provider_preserves_readonly_argv_stdin_and_exit_error"
+        ],
+        "bounds": "All transitive filesystem/subprocess work and lock waits occur in spawn_blocking; payload caps are not runtime bounds. Same-task async probe and worker thread IDs prevent spare async workers from producing a false pass. Native saturation remains08-27.",
+        "platform": "Executed on macOS. Fixed NoWindow cfg on Windows retains behavior; Windows runtime not claimed. Git children disable inherited global/system config, signing, hooks, credentials and non-file transports only under cfg(test). No live repository/remote or dot service invoked."
+      }
+    },
+    {
+      "name": "git_sync_scan",
+      "module": "src-tauri/src/git.rs",
+      "registrationPath": "src-tauri/src/lib.rs::git::ipc::git_sync_scan",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/git.rs::ipc::git_sync_scan -> src-tauri/src/git.rs::git_sync_scan retains the synchronous domain entry point.",
+        "git_toplevel -> canonicalize -> find_workspace_config -> read_git_sync_config -> expand_home -> list_submodule_paths -> repo_status; parent config traversal, recursive subprocess and each repo status stay in worker; optional status index refresh disabled.",
+        "src-tauri/src/git.rs::git_command constructs unchanged fixed Git argv; src-tauri/src/win_process.rs only adjusts Windows process creation flags."
+      ],
+      "workerBoundary": "src-tauri/src/git.rs::ipc::git_sync_scan owns String/Vec/Option inputs and awaits spawn_blocking before all process/filesystem/lock work; contextual git_sync_scan_task_failed handles JoinError, inner Result<T,String> untouched.",
+      "syncCallers": [
+        "src-tauri/src/git.rs::git_sync_scan remains public synchronous; no direct CLI imports were found; CLI build remains green."
+      ],
+      "mutationKey": {
+        "readOnly": true,
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "reason": "Read-only repository/config inspection: no filesystem mutation by Maru; status sites disable optional Git index refresh with GIT_OPTIONAL_LOCKS=0. No mutation admission for these reads."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_05",
+          "passed": 13,
+          "failed": 0,
+          "ignored": 0
+        }
+      ],
+      "processingCaller": {
+        "path": "src/lib/api.ts; src/components/CommitDialog.tsx",
+        "payload": "Existing nonempty/empty read result is a view refresh, not a user-started processing completion.",
+        "terminalNoticeOwner": "Existing badge/dashboard/CommitDialog/workspaceStore view refresh owner; scan participates in CommitDialog runGitSync without an independent completion notice.",
+        "lifetime": "Awaited worker continues after view unmount; it does not provide app-quit durability. Manual retry only. The initiating workspace remains the caller's existing scope; final shared notice/retained partial successes classification belongs25/26."
+      },
+      "evidence": {
+        "boundaryCase": "phase08_05::every_git_wrapper_holds_a_distinct_worker_and_same_task_yields",
+        "behaviorCases": [
+          "phase08_05::read_wrappers_return_real_nonempty_payloads_and_legacy_errors"
+        ],
+        "bounds": "All transitive filesystem/subprocess work and lock waits occur in spawn_blocking; payload caps are not runtime bounds. Same-task async probe and worker thread IDs prevent spare async workers from producing a false pass. Native saturation remains08-27.",
+        "platform": "Executed on macOS. Fixed NoWindow cfg on Windows retains behavior; Windows runtime not claimed. Git children disable inherited global/system config, signing, hooks, credentials and non-file transports only under cfg(test). No live repository/remote or dot service invoked."
+      }
+    },
+    {
+      "name": "list_workspace_submodules",
+      "module": "src-tauri/src/git.rs",
+      "registrationPath": "src-tauri/src/lib.rs::git::ipc::list_workspace_submodules",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/git.rs::ipc::list_workspace_submodules -> src-tauri/src/git.rs::list_workspace_submodules retains the synchronous domain entry point.",
+        "list_submodule_paths: fixed submodule foreach --recursive --quiet with a constant printf expression; filtering excludes ../ and absolute paths.",
+        "src-tauri/src/git.rs::git_command constructs unchanged fixed Git argv; src-tauri/src/win_process.rs only adjusts Windows process creation flags."
+      ],
+      "workerBoundary": "src-tauri/src/git.rs::ipc::list_workspace_submodules owns String/Vec/Option inputs and awaits spawn_blocking before all process/filesystem/lock work; contextual list_workspace_submodules_task_failed handles JoinError, inner Result<T,String> untouched.",
+      "syncCallers": [
+        "src-tauri/src/git.rs::list_workspace_submodules remains public synchronous; no direct CLI imports were found; CLI build remains green."
+      ],
+      "mutationKey": {
+        "readOnly": true,
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "reason": "Read-only repository/config inspection: no filesystem mutation by Maru; status sites disable optional Git index refresh with GIT_OPTIONAL_LOCKS=0. No mutation admission for these reads."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_05",
+          "passed": 13,
+          "failed": 0,
+          "ignored": 0
+        }
+      ],
+      "processingCaller": {
+        "path": "src/lib/api.ts::listWorkspaceSubmodules; src/lib/workspaceStore.ts",
+        "payload": "Existing nonempty/empty read result is a view refresh, not a user-started processing completion.",
+        "terminalNoticeOwner": "Existing badge/dashboard/CommitDialog/workspaceStore view refresh owner; scan participates in CommitDialog runGitSync without an independent completion notice.",
+        "lifetime": "Awaited worker continues after view unmount; it does not provide app-quit durability. Manual retry only. The initiating workspace remains the caller's existing scope; final shared notice/retained partial successes classification belongs25/26."
+      },
+      "evidence": {
+        "boundaryCase": "phase08_05::every_git_wrapper_holds_a_distinct_worker_and_same_task_yields",
+        "behaviorCases": [
+          "phase08_05::read_wrappers_return_real_nonempty_payloads_and_legacy_errors"
+        ],
+        "bounds": "All transitive filesystem/subprocess work and lock waits occur in spawn_blocking; payload caps are not runtime bounds. Same-task async probe and worker thread IDs prevent spare async workers from producing a false pass. Native saturation remains08-27.",
+        "platform": "Executed on macOS. Fixed NoWindow cfg on Windows retains behavior; Windows runtime not claimed. Git children disable inherited global/system config, signing, hooks, credentials and non-file transports only under cfg(test). No live repository/remote or dot service invoked."
+      }
+    },
+    {
+      "name": "git_sync_pull_rebase",
+      "module": "src-tauri/src/git.rs",
+      "registrationPath": "src-tauri/src/lib.rs::git::ipc::git_sync_pull_rebase",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/git.rs::ipc::git_sync_pull_rebase -> src-tauri/src/git.rs::git_sync_pull_rebase retains the synchronous domain entry point.",
+        "git_sync_pull_rebase: GIT_ACTION_LOCK then current directory/write policy -> repo_status -> optional stash push -u -> pull --rebase -> pop only on successful pull; failures preserve stash and rebase conflict state.",
+        "src-tauri/src/git.rs::git_command constructs unchanged fixed Git argv; src-tauri/src/win_process.rs only adjusts Windows process creation flags."
+      ],
+      "workerBoundary": "src-tauri/src/git.rs::ipc::git_sync_pull_rebase owns String/Vec/Option inputs and awaits spawn_blocking before all process/filesystem/lock work; contextual git_sync_pull_rebase_task_failed handles JoinError, inner Result<T,String> untouched.",
+      "syncCallers": [
+        "src-tauri/src/git.rs::git_sync_pull_rebase remains public synchronous; no direct CLI imports were found; CLI build remains green."
+      ],
+      "mutationKey": {
+        "lexicalPaths": [
+          "Whole selected checkout, including tracked/untracked files, submodule gitlinks and .git file or directory.",
+          "Actual per-worktree git directory plus common git directory (linked worktrees share refs/stash, objects, refs and reflogs). Include index/index.lock, HEAD, FETCH_HEAD, ORIG_HEAD, rebase-merge/rebase-apply, stash/pull/pop/add/commit/push staging and rollback state.",
+          "Permission loader may migrate legacy <config>/com.maru.app/vaults.json to workspaces.json through src-tauri/src/vault_list.rs; include config parent and output file."
+        ],
+        "aliasPaths": [
+          "Absolute lexical checkout plus canonical/symlink aliases, actual git directory and git-common-dir aliases and nearest existing ancestors. Current conservative GIT_ACTION_LOCK serializes all Git domain writers, including aliases; 08-29 adds cross-domain ancestry exclusion."
+        ],
+        "postAdmissionPreconditions": [
+          "Re-read directory existence, current workspace write policy, approval/path/message/secret validation and repo status inside worker/domain transaction. Plan29 must additionally revalidate lexical/physical aliases and originally selected parent identity after shared admission."
+        ],
+        "domainLockOrder": "Plan29 shared admission before GIT_ACTION_LOCK, then ApprovalState only during consume and permission reads; no skills registry lock during network or admission wait. Current GIT_ACTION_LOCK is fail-closed on poison and covers the entire transaction.",
+        "sharedAdmissionEntry": "integrationRequired: 08-29; Plan06 produces shared path admission and Plan29 integrates these preserved synchronous entry points."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_05",
+          "passed": 13,
+          "failed": 0,
+          "ignored": 0
+        }
+      ],
+      "processingCaller": {
+        "path": "src/lib/api.ts; src/components/CommitDialog.tsx",
+        "payload": "GitSyncPullResult stashed flag and stdout/stderr report completed pull; rejection retains stash/conflict state and prior repository successes.",
+        "terminalNoticeOwner": "Existing CommitDialog handleCommit/handleAutoCommit/runGitSync owns onCommitted/onClose and setError/syncReport; component-unmount notification lifetime closes in08-25/08-26.",
+        "lifetime": "Awaited worker continues after view unmount; it does not provide app-quit durability. Manual retry only. The initiating workspace remains the caller's existing scope; final shared notice/retained partial successes classification belongs25/26."
+      },
+      "evidence": {
+        "boundaryCase": "phase08_05::every_git_wrapper_holds_a_distinct_worker_and_same_task_yields",
+        "behaviorCases": [
+          "phase08_05::approved_commit_push_and_dirty_pull_use_only_local_remote",
+          "phase08_05::local_pull_failure_retains_stash_and_releases_transaction",
+          "phase08_05::rebase_conflict_preserves_stash_and_does_not_automatically_retry",
+          "phase08_05::pull_and_commit_push_wait_for_transaction_before_validation_or_process"
+        ],
+        "bounds": "All transitive filesystem/subprocess work and lock waits occur in spawn_blocking; payload caps are not runtime bounds. Same-task async probe and worker thread IDs prevent spare async workers from producing a false pass. Native saturation remains08-27.",
+        "platform": "Executed on macOS. Fixed NoWindow cfg on Windows retains behavior; Windows runtime not claimed. Git children disable inherited global/system config, signing, hooks, credentials and non-file transports only under cfg(test). No live repository/remote or dot service invoked."
+      }
+    },
+    {
+      "name": "git_sync_commit_push",
+      "module": "src-tauri/src/git.rs",
+      "registrationPath": "src-tauri/src/lib.rs::git::ipc::git_sync_commit_push",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/git.rs::ipc::git_sync_commit_push -> src-tauri/src/git.rs::git_sync_commit_push retains the synchronous domain entry point.",
+        "git_sync_commit_push: GIT_ACTION_LOCK -> require_git_sync_commit_push_approval -> directory/write policy -> validate_git_paths -> repo_status -> reject_sensitive_paths -> add -> commit -> git_push_args; single-use approval consumed under worker guard.",
+        "src-tauri/src/git.rs::git_command constructs unchanged fixed Git argv; src-tauri/src/win_process.rs only adjusts Windows process creation flags."
+      ],
+      "workerBoundary": "src-tauri/src/git.rs::ipc::git_sync_commit_push owns String/Vec/Option inputs and awaits spawn_blocking before all process/filesystem/lock work; contextual git_sync_commit_push_task_failed handles JoinError, inner Result<T,String> untouched. Owned AppHandle<R> retrieves real State<ApprovalState> using Manager inside worker; borrowed State never crosses await.",
+      "syncCallers": [
+        "src-tauri/src/git.rs::git_sync_commit_push remains public synchronous; no direct CLI imports were found; CLI build remains green."
+      ],
+      "mutationKey": {
+        "lexicalPaths": [
+          "Whole selected checkout, including tracked/untracked files, submodule gitlinks and .git file or directory.",
+          "Actual per-worktree git directory plus common git directory (linked worktrees share refs/stash, objects, refs and reflogs). Include index/index.lock, HEAD, FETCH_HEAD, ORIG_HEAD, rebase-merge/rebase-apply, stash/pull/pop/add/commit/push staging and rollback state.",
+          "Permission loader may migrate legacy <config>/com.maru.app/vaults.json to workspaces.json through src-tauri/src/vault_list.rs; include config parent and output file."
+        ],
+        "aliasPaths": [
+          "Absolute lexical checkout plus canonical/symlink aliases, actual git directory and git-common-dir aliases and nearest existing ancestors. Current conservative GIT_ACTION_LOCK serializes all Git domain writers, including aliases; 08-29 adds cross-domain ancestry exclusion."
+        ],
+        "postAdmissionPreconditions": [
+          "Re-read directory existence, current workspace write policy, approval/path/message/secret validation and repo status inside worker/domain transaction. Plan29 must additionally revalidate lexical/physical aliases and originally selected parent identity after shared admission."
+        ],
+        "domainLockOrder": "Plan29 shared admission before GIT_ACTION_LOCK, then ApprovalState only during consume and permission reads; no skills registry lock during network or admission wait. Current GIT_ACTION_LOCK is fail-closed on poison and covers the entire transaction.",
+        "sharedAdmissionEntry": "integrationRequired: 08-29; Plan06 produces shared path admission and Plan29 integrates these preserved synchronous entry points."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_05",
+          "passed": 13,
+          "failed": 0,
+          "ignored": 0
+        }
+      ],
+      "processingCaller": {
+        "path": "src/lib/api.ts; src/components/CommitDialog.tsx",
+        "payload": "GitSyncCommitPushResult committed/pushed and stdout fields mean completed local commit+push; rejected push may follow retained local commit.",
+        "terminalNoticeOwner": "Existing CommitDialog handleCommit/handleAutoCommit/runGitSync owns onCommitted/onClose and setError/syncReport; component-unmount notification lifetime closes in08-25/08-26.",
+        "lifetime": "Awaited worker continues after view unmount; it does not provide app-quit durability. Manual retry only. The initiating workspace remains the caller's existing scope; final shared notice/retained partial successes classification belongs25/26."
+      },
+      "evidence": {
+        "boundaryCase": "phase08_05::every_git_wrapper_holds_a_distinct_worker_and_same_task_yields",
+        "behaviorCases": [
+          "phase08_05::approved_commit_push_and_dirty_pull_use_only_local_remote",
+          "phase08_05::selected_commit_and_denied_approval_preserve_disk_and_contract",
+          "phase08_05::pull_and_commit_push_wait_for_transaction_before_validation_or_process"
+        ],
+        "bounds": "All transitive filesystem/subprocess work and lock waits occur in spawn_blocking; payload caps are not runtime bounds. Same-task async probe and worker thread IDs prevent spare async workers from producing a false pass. Native saturation remains08-27.",
+        "platform": "Executed on macOS. Fixed NoWindow cfg on Windows retains behavior; Windows runtime not claimed. Git children disable inherited global/system config, signing, hooks, credentials and non-file transports only under cfg(test). No live repository/remote or dot service invoked."
+      }
+    },
+    {
+      "name": "git_commit",
+      "module": "src-tauri/src/git.rs",
+      "registrationPath": "src-tauri/src/lib.rs::git::ipc::git_commit",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/git.rs::ipc::git_commit -> src-tauri/src/git.rs::git_commit retains the synchronous domain entry point.",
+        "git_commit: GIT_ACTION_LOCK -> message/directory/current write policy -> validate_git_paths -> add -> commit -> git_status. Selected-path scope and no --no-verify behavior preserved.",
+        "src-tauri/src/git.rs::git_command constructs unchanged fixed Git argv; src-tauri/src/win_process.rs only adjusts Windows process creation flags."
+      ],
+      "workerBoundary": "src-tauri/src/git.rs::ipc::git_commit owns String/Vec/Option inputs and awaits spawn_blocking before all process/filesystem/lock work; contextual git_commit_task_failed handles JoinError, inner Result<T,String> untouched.",
+      "syncCallers": [
+        "src-tauri/src/git.rs::git_commit remains public synchronous; no direct CLI imports were found; CLI build remains green."
+      ],
+      "mutationKey": {
+        "lexicalPaths": [
+          "Whole selected checkout, including tracked/untracked files, submodule gitlinks and .git file or directory.",
+          "Actual per-worktree git directory plus common git directory (linked worktrees share refs/stash, objects, refs and reflogs). Include index/index.lock, HEAD, FETCH_HEAD, ORIG_HEAD, rebase-merge/rebase-apply, stash/pull/pop/add/commit/push staging and rollback state.",
+          "Permission loader may migrate legacy <config>/com.maru.app/vaults.json to workspaces.json through src-tauri/src/vault_list.rs; include config parent and output file."
+        ],
+        "aliasPaths": [
+          "Absolute lexical checkout plus canonical/symlink aliases, actual git directory and git-common-dir aliases and nearest existing ancestors. Current conservative GIT_ACTION_LOCK serializes all Git domain writers, including aliases; 08-29 adds cross-domain ancestry exclusion."
+        ],
+        "postAdmissionPreconditions": [
+          "Re-read directory existence, current workspace write policy, approval/path/message/secret validation and repo status inside worker/domain transaction. Plan29 must additionally revalidate lexical/physical aliases and originally selected parent identity after shared admission."
+        ],
+        "domainLockOrder": "Plan29 shared admission before GIT_ACTION_LOCK, then ApprovalState only during consume and permission reads; no skills registry lock during network or admission wait. Current GIT_ACTION_LOCK is fail-closed on poison and covers the entire transaction.",
+        "sharedAdmissionEntry": "integrationRequired: 08-29; Plan06 produces shared path admission and Plan29 integrates these preserved synchronous entry points."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_05",
+          "passed": 13,
+          "failed": 0,
+          "ignored": 0
+        }
+      ],
+      "processingCaller": {
+        "path": "src/lib/api.ts; src/components/CommitDialog.tsx",
+        "payload": "GitStatus reflects post-commit current disk; unselected changes remain dirty.",
+        "terminalNoticeOwner": "Existing CommitDialog handleCommit/handleAutoCommit/runGitSync owns onCommitted/onClose and setError/syncReport; component-unmount notification lifetime closes in08-25/08-26.",
+        "lifetime": "Awaited worker continues after view unmount; it does not provide app-quit durability. Manual retry only. The initiating workspace remains the caller's existing scope; final shared notice/retained partial successes classification belongs25/26."
+      },
+      "evidence": {
+        "boundaryCase": "phase08_05::every_git_wrapper_holds_a_distinct_worker_and_same_task_yields",
+        "behaviorCases": [
+          "phase08_05::selected_commit_and_denied_approval_preserve_disk_and_contract",
+          "phase08_05::permission_is_reread_under_transaction_before_any_process",
+          "phase08_05::alias_commits_wait_inside_worker_and_keep_both_selected_updates"
+        ],
+        "bounds": "All transitive filesystem/subprocess work and lock waits occur in spawn_blocking; payload caps are not runtime bounds. Same-task async probe and worker thread IDs prevent spare async workers from producing a false pass. Native saturation remains08-27.",
+        "platform": "Executed on macOS. Fixed NoWindow cfg on Windows retains behavior; Windows runtime not claimed. Git children disable inherited global/system config, signing, hooks, credentials and non-file transports only under cfg(test). No live repository/remote or dot service invoked."
+      }
+    },
+    {
+      "name": "dot_sync_overview",
+      "module": "src-tauri/src/dot_sync.rs",
+      "registrationPath": "src-tauri/src/lib.rs::dot_sync::dot_sync_overview",
+      "originalDisposition": "ISOLATED",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/dot_sync.rs::dot_sync_overview awaits its existing spawn_blocking boundary with owned inputs.",
+        "src-tauri/src/dot_sync.rs::overview_sync -> dot_binary -> dot_candidates -> select_dot_binary -> run_program -> parse_dot_version -> version_compatible -> parse_status_json; binary resolution/version probes and mirror/peer status subprocesses stay in worker.",
+        "src-tauri/src/dot_sync.rs::run_program owns spawn, optional stdin writes, wait_with_output, output byte cap and legacy exit errors; NoWindow preserves platform process flags."
+      ],
+      "workerBoundary": "src-tauri/src/dot_sync.rs::dot_sync_overview awaits spawn_blocking before all work; no inputs, dot_status_join_failed preserves contextual JoinError and inner String.",
+      "syncCallers": [
+        "src-tauri/src/dot_sync.rs::overview_sync remains synchronous and is called by run_dot_action after each action; run_dot_action stays synchronous. Both public dot command functions were already async; registration paths unchanged."
+      ],
+      "mutationKey": {
+        "readOnly": true,
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "reason": "Read-only local CLI version and sync/peer status queries with fixed argv. Maru changes no files; supported external status schema is version1 and incompatible schema fails closed."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_05",
+          "passed": 13,
+          "failed": 0,
+          "ignored": 0
+        }
+      ],
+      "processingCaller": {
+        "path": "src/lib/api.ts; src/components/jobs/DotSyncPanel.tsx",
+        "payload": "DotSyncOverview available/compatible, mirror/peer status is read refresh; unavailable CLI is not a successful sync.",
+        "terminalNoticeOwner": "Existing DotSyncPanel refresh/applyOverview read owner.",
+        "lifetime": "Existing backend worker continues after component unmount; no retry, duplicate queue or new job service. Final retained-success/actionable-failure classification belongs25/26."
+      },
+      "evidence": {
+        "boundaryCase": "phase08_05::dot_wrappers_hold_distinct_workers_and_same_task_yields",
+        "behaviorCases": [
+          "phase08_05::injected_dot_preserves_fixed_argv_stdin_payload_and_denied_no_launch"
+        ],
+        "bounds": "Both actual wrappers hold a distinct blocking worker while one same-runtime invoking task yields; fake injected subprocess returns nonempty schema1 fixture payload. Existing512KiB output tail cap is a payload bound, not process-duration bound.",
+        "platform": "All new dot fixtures are cfg(test) injected subprocesses; no actual dot binary, Homebrew, scheduler, sync config, live peer or credentials used."
+      }
+    },
+    {
+      "name": "dot_sync_run",
+      "module": "src-tauri/src/dot_sync.rs",
+      "registrationPath": "src-tauri/src/lib.rs::dot_sync::dot_sync_run",
+      "originalDisposition": "ISOLATED",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/dot_sync.rs::dot_sync_run awaits its existing spawn_blocking boundary with owned inputs.",
+        "src-tauri/src/dot_sync.rs::overview_sync -> dot_binary -> dot_candidates -> select_dot_binary -> run_program -> parse_dot_version -> version_compatible -> parse_status_json; binary resolution/version probes and mirror/peer status subprocesses stay in worker.",
+        "src-tauri/src/dot_sync.rs::run_dot_action -> DOT_ACTION_LOCK recover_guard -> validate_dot_action before dot_binary -> match all DotSyncActionRequest branches -> run_program -> overview_sync while guard held. InstallCli runs fixed brew tap/trust/install; UpdateCli chooses brew upgrade or dot update. ConfigureMirror/Peer, pause/resume/run, filters, home paths and log branches preserve fixed argv/stdin and acknowledgement semantics.",
+        "src-tauri/src/dot_sync.rs::run_program owns spawn, optional stdin writes, wait_with_output, output byte cap and legacy exit errors; NoWindow preserves platform process flags."
+      ],
+      "workerBoundary": "src-tauri/src/dot_sync.rs::dot_sync_run awaits spawn_blocking before all work; owned DotSyncActionRequest and DOT_ACTION_LOCK wait are inside worker; dot_action_join_failed preserves contextual JoinError and inner String.",
+      "syncCallers": [
+        "src-tauri/src/dot_sync.rs::overview_sync remains synchronous and is called by run_dot_action after each action; run_dot_action stays synchronous. Both public dot command functions were already async; registration paths unchanged."
+      ],
+      "mutationKey": {
+        "lexicalPaths": [
+          "CLI-selected workspacePath whole local tree, request ConfigureMirror.target or supported status target.path local destination; remote host/path is a delegated external target, not local path exclusion.",
+          "CLI storeDir and workspace .dotfiles/{sync,peer}; config.yaml, state.yaml, include.txt, exclude.txt, ignore.txt, allow.txt, shared-excludes.dyn.conf, submodules.dyn.conf, tracked-includes.dyn.conf, baseline.manifest, imports.manifest, tombstones.log, log/sync.log, peer home-paths.txt, peer-conflicts.log and peer-plan-files.dyn; legacy .dotfiles/gdrive-sync migration and workspace .gitignore.",
+          "CLI-selected config root (XDG_CONFIG_HOME or ~/.config)/dotfiles/config.yaml, scheduler ~/Library/LaunchAgents/com.dotfiles.{sync,sync-intake,peer}.plist or ~/.config/systemd/user profile units, cache lock directories and CLI logs.",
+          "Install/update delegates to Homebrew prefix/cache or dot update target. Peer home-path allowlist delegates additional local home source paths/remote destinations. These existing external side effects are outside a claim of universal app-owned filesystem exclusion."
+        ],
+        "aliasPaths": [
+          "Plan29 must resolve current supported status/config paths, local target aliases, source/destination ancestors and migration parents; a requested Maru workspace alone is insufficient because dot chooses its own configured workspace."
+        ],
+        "postAdmissionPreconditions": [
+          "Existing request/token/interval/secret-ack validation executes before any process launch, inside recovered DOT_ACTION_LOCK. Plan29 captures supported configuration and required parent identities then revalidates after admission, retaining current denied-action behavior."
+        ],
+        "domainLockOrder": "Shared path admission must precede DOT_ACTION_LOCK in08-29. Current DOT_ACTION_LOCK serializes complete external command sequences and overview refresh; original scoped poison recovery retained.",
+        "sharedAdmissionEntry": "integrationRequired: 08-29; consume Plan06 admission with current CLI-resolved local paths and explicit external effect limits, without executing live dot during tests."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_05",
+          "passed": 13,
+          "failed": 0,
+          "ignored": 0
+        }
+      ],
+      "processingCaller": {
+        "path": "src/lib/api.ts; src/components/jobs/DotSyncPanel.tsx",
+        "payload": "DotSyncActionResult stdout/stderr plus refreshed overview only resolves after command sequence and refresh. A refresh failure can follow retained action effects; final classifier must not assume rollback.",
+        "terminalNoticeOwner": "Existing DotSyncPanel execute owns busy/error/output/applyOverview and confirmations. Screen-independent terminal notice closure belongs08-25/08-26.",
+        "lifetime": "Existing backend worker continues after component unmount; no retry, duplicate queue or new job service. Final retained-success/actionable-failure classification belongs25/26."
+      },
+      "evidence": {
+        "boundaryCase": "phase08_05::dot_wrappers_hold_distinct_workers_and_same_task_yields",
+        "behaviorCases": [
+          "phase08_05::injected_dot_preserves_fixed_argv_stdin_payload_and_denied_no_launch",
+          "phase08_05::dot_action_lock_holds_through_action_failure_then_releases"
+        ],
+        "bounds": "Both actual wrappers hold a distinct blocking worker while one same-runtime invoking task yields; fake injected subprocess returns nonempty schema1 fixture payload. Existing512KiB output tail cap is a payload bound, not process-duration bound.",
+        "platform": "All new dot fixtures are cfg(test) injected subprocesses; no actual dot binary, Homebrew, scheduler, sync config, live peer or credentials used."
+      }
+    }
+  ]
+}

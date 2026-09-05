@@ -791,10 +791,8 @@ fn validate_dot_action(request: &DotSyncActionRequest) -> Result<(), String> {
                 return Err("dot_filter_kind_invalid".into());
             }
         }
-        DotSyncActionRequest::ReadLog { profile } => {
-            if profile != "sync" && profile != "peer" {
-                return Err("dot_profile_invalid".into());
-            }
+        DotSyncActionRequest::ReadLog { profile } if profile != "sync" && profile != "peer" => {
+            return Err("dot_profile_invalid".into());
         }
         _ => {}
     }
