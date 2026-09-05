@@ -8,10 +8,49 @@ use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::PathBuf;
 use std::process::Command;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex, Weak};
 use std::thread;
 use std::time::Duration as StdDuration;
 use tauri::{AppHandle, Emitter, Manager};
+
+use crate::atomic_file::{
+    with_path_transactions, PathTransactionLease, PathTransactionParent, PathTransactionRequest,
+};
+
+pub(crate) fn mission_mutation_paths(id: &str) -> Result<Vec<PathBuf>, String> {
+    let json = mission_json_path(id)?;
+    Ok(vec![
+        json.with_extension("json.tmp"),
+        json,
+        mission_log_path(id)?,
+    ])
+}
+
+pub(crate) fn mission_parent_snapshot() -> Result<PathTransactionParent, String> {
+    let mut parent = mission_dir()?;
+    while !parent.is_dir() {
+        parent = parent
+            .parent()
+            .ok_or("Mission parent does not exist")?
+            .to_path_buf();
+    }
+    PathTransactionParent::capture(&parent)
+}
+
+fn mission_transaction<T>(
+    id: &str,
+    work: impl FnOnce(&PathTransactionLease) -> Result<T, String>,
+) -> Result<T, String> {
+    with_path_transactions(
+        PathTransactionRequest::new(mission_mutation_paths(id)?)?,
+        work,
+    )
+}
+
+fn check_mission_lease(id: &str, lease: &PathTransactionLease) -> Result<(), String> {
+    lease.ensure_covered(mission_mutation_paths(id)?)?;
+    lease.before_effect()
+}
 
 const IDLE_AFTER_SECONDS: i64 = 60;
 
@@ -46,10 +85,41 @@ pub struct MissionLogTail {
     pub lines: Vec<String>,
 }
 
-#[derive(Debug, Default)]
+type ExecutionLease = (Weak<PathTransactionLease>, Weak<Mutex<()>>);
+
+#[derive(Default)]
 pub struct MissionState {
     missions: Mutex<HashMap<String, MissionRecord>>,
     pids: Mutex<HashMap<String, u32>>,
+    execution_leases: Mutex<HashMap<String, ExecutionLease>>,
+}
+
+impl std::fmt::Debug for MissionState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MissionState")
+            .field("missions", &self.missions)
+            .field("pids", &self.pids)
+            .finish_non_exhaustive()
+    }
+}
+
+/// Stops are part of the already-admitted owned child transaction. Weak handles
+/// do not keep an execution reservation alive after its stream/exit callbacks.
+pub(crate) fn bind_execution_lease<R: tauri::Runtime>(
+    app: &AppHandle<R>,
+    id: &str,
+    lease: &Arc<PathTransactionLease>,
+    serial: &Arc<Mutex<()>>,
+) -> Result<(), String> {
+    app.state::<MissionState>()
+        .execution_leases
+        .lock()
+        .map_err(|_| "mission_state_poisoned".to_string())?
+        .insert(
+            id.to_string(),
+            (Arc::downgrade(lease), Arc::downgrade(serial)),
+        );
+    Ok(())
 }
 
 impl Drop for MissionState {
@@ -147,6 +217,63 @@ pub fn fail_mission<R: tauri::Runtime>(app: &AppHandle<R>, id: &str, message: &s
     }
 }
 
+pub(crate) fn register_mission_with_metadata_in_transaction<R: tauri::Runtime>(
+    app: &AppHandle<R>,
+    id: &str,
+    kind: &str,
+    pid: u32,
+    metadata: Option<JsonValue>,
+    lease: &PathTransactionLease,
+) -> Result<(), String> {
+    let record = app
+        .state::<MissionState>()
+        .start_in_transaction(id, kind, pid, metadata, lease)?;
+    emit_update(app, &record);
+    spawn_idle_watch(app.clone(), id.to_string());
+    Ok(())
+}
+
+pub(crate) fn touch_output_in_transaction<R: tauri::Runtime>(
+    app: &AppHandle<R>,
+    id: &str,
+    stream: &str,
+    line: &str,
+    lease: &PathTransactionLease,
+) -> Result<(), String> {
+    let record = app
+        .state::<MissionState>()
+        .touch_in_transaction(id, stream, line, lease)?;
+    emit_update(app, &record);
+    Ok(())
+}
+
+pub(crate) fn finish_mission_in_transaction<R: tauri::Runtime>(
+    app: &AppHandle<R>,
+    id: &str,
+    exit_code: Option<i32>,
+    success: bool,
+    lease: &PathTransactionLease,
+) -> Result<(), String> {
+    let record = app
+        .state::<MissionState>()
+        .finish_in_transaction(id, exit_code, success, lease)?;
+    emit_update(app, &record);
+    Ok(())
+}
+
+pub(crate) fn fail_mission_in_transaction<R: tauri::Runtime>(
+    app: &AppHandle<R>,
+    id: &str,
+    message: &str,
+    lease: &PathTransactionLease,
+) -> Result<(), String> {
+    let record = app
+        .state::<MissionState>()
+        .fail_in_transaction(id, message, lease)?;
+    emit_update(app, &record);
+    Ok(())
+}
+
 impl MissionState {
     fn start(
         &self,
@@ -155,6 +282,20 @@ impl MissionState {
         pid: u32,
         metadata: Option<JsonValue>,
     ) -> Result<MissionRecord, String> {
+        mission_transaction(id, |lease| {
+            self.start_in_transaction(id, kind, pid, metadata, lease)
+        })
+    }
+
+    fn start_in_transaction(
+        &self,
+        id: &str,
+        kind: &str,
+        pid: u32,
+        metadata: Option<JsonValue>,
+        lease: &PathTransactionLease,
+    ) -> Result<MissionRecord, String> {
+        check_mission_lease(id, lease)?;
         let now = Utc::now().to_rfc3339();
         let log_path = mission_log_path(id)?;
         let record = MissionRecord {
@@ -171,7 +312,7 @@ impl MissionState {
             .lock()
             .map_err(|_| "mission_state_poisoned".to_string())?
             .insert(id.to_string(), pid);
-        self.store_record(record.clone())?;
+        self.store_record_in_transaction(record.clone(), lease)?;
         Ok(record)
     }
 
@@ -181,6 +322,19 @@ impl MissionState {
         kind: &str,
         metadata: Option<JsonValue>,
     ) -> Result<MissionRecord, String> {
+        mission_transaction(id, |lease| {
+            self.start_logical_in_transaction(id, kind, metadata, lease)
+        })
+    }
+
+    fn start_logical_in_transaction(
+        &self,
+        id: &str,
+        kind: &str,
+        metadata: Option<JsonValue>,
+        lease: &PathTransactionLease,
+    ) -> Result<MissionRecord, String> {
+        check_mission_lease(id, lease)?;
         let now = Utc::now().to_rfc3339();
         let log_path = mission_log_path(id)?;
         let record = MissionRecord {
@@ -194,12 +348,25 @@ impl MissionState {
             metadata,
         };
         // Intentionally no pid registered — see `register_mission_logical`.
-        self.store_record(record.clone())?;
+        self.store_record_in_transaction(record.clone(), lease)?;
         Ok(record)
     }
 
     fn touch(&self, id: &str, stream: &str, line: &str) -> Result<MissionRecord, String> {
-        append_output(id, stream, line)?;
+        mission_transaction(id, |lease| {
+            self.touch_in_transaction(id, stream, line, lease)
+        })
+    }
+
+    fn touch_in_transaction(
+        &self,
+        id: &str,
+        stream: &str,
+        line: &str,
+        lease: &PathTransactionLease,
+    ) -> Result<MissionRecord, String> {
+        check_mission_lease(id, lease)?;
+        append_output_in_transaction(id, stream, line, lease)?;
         let mut missions = self
             .missions
             .lock()
@@ -213,7 +380,7 @@ impl MissionState {
         }
         let record = record.clone();
         drop(missions);
-        persist_record(&record)?;
+        persist_record_in_transaction(&record, lease)?;
         Ok(record)
     }
 
@@ -223,6 +390,19 @@ impl MissionState {
         exit_code: Option<i32>,
         success: bool,
     ) -> Result<MissionRecord, String> {
+        mission_transaction(id, |lease| {
+            self.finish_in_transaction(id, exit_code, success, lease)
+        })
+    }
+
+    fn finish_in_transaction(
+        &self,
+        id: &str,
+        exit_code: Option<i32>,
+        success: bool,
+        lease: &PathTransactionLease,
+    ) -> Result<MissionRecord, String> {
+        check_mission_lease(id, lease)?;
         self.pids
             .lock()
             .map_err(|_| "mission_state_poisoned".to_string())?
@@ -244,16 +424,55 @@ impl MissionState {
         record.exit_code = exit_code;
         let record = record.clone();
         drop(missions);
-        persist_record(&record)?;
+        persist_record_in_transaction(&record, lease)?;
         Ok(record)
     }
 
     fn fail(&self, id: &str, message: &str) -> Result<MissionRecord, String> {
-        append_output(id, "error", message)?;
-        self.finish(id, None, false)
+        mission_transaction(id, |lease| self.fail_in_transaction(id, message, lease))
     }
 
-    fn stop(&self, app: AppHandle, id: &str) -> Result<MissionRecord, String> {
+    fn fail_in_transaction(
+        &self,
+        id: &str,
+        message: &str,
+        lease: &PathTransactionLease,
+    ) -> Result<MissionRecord, String> {
+        check_mission_lease(id, lease)?;
+        append_output_in_transaction(id, "error", message, lease)?;
+        self.finish_in_transaction(id, None, false, lease)
+    }
+
+    fn stop<R: tauri::Runtime>(
+        &self,
+        app: AppHandle<R>,
+        id: &str,
+    ) -> Result<MissionRecord, String> {
+        // This lookup is bookkeeping only, released before waiting for either
+        // admission or the owner's finite callback serialization guard.
+        let execution = self
+            .execution_leases
+            .lock()
+            .map_err(|_| "mission_state_poisoned".to_string())?
+            .get(id)
+            .and_then(|(lease, serial)| Some((lease.upgrade()?, serial.upgrade()?)));
+        if let Some((lease, serial)) = execution {
+            let _guard = serial
+                .lock()
+                .map_err(|_| "mission_state_poisoned".to_string())?;
+            self.stop_in_transaction(app, id, &lease)
+        } else {
+            mission_transaction(id, |lease| self.stop_in_transaction(app, id, lease))
+        }
+    }
+
+    fn stop_in_transaction<R: tauri::Runtime>(
+        &self,
+        app: AppHandle<R>,
+        id: &str,
+        lease: &PathTransactionLease,
+    ) -> Result<MissionRecord, String> {
+        check_mission_lease(id, lease)?;
         let pid = self
             .pids
             .lock()
@@ -287,7 +506,7 @@ impl MissionState {
         record.status = MissionStatus::Stopped;
         let record = record.clone();
         drop(missions);
-        persist_record(&record)?;
+        persist_record_in_transaction(&record, lease)?;
         Ok(record)
     }
 
@@ -305,6 +524,15 @@ impl MissionState {
     }
 
     fn hydrate_from_disk(&self) -> Result<(), String> {
+        with_path_transactions(
+            PathTransactionRequest::new(vec![mission_dir()?])?,
+            |lease| self.hydrate_from_disk_in_transaction(lease),
+        )
+    }
+
+    fn hydrate_from_disk_in_transaction(&self, lease: &PathTransactionLease) -> Result<(), String> {
+        lease.ensure_covered(vec![mission_dir()?])?;
+        lease.before_effect()?;
         let dir = mission_dir()?;
         if !dir.is_dir() {
             return Ok(());
@@ -337,18 +565,31 @@ impl MissionState {
                 && !pids.contains_key(&record.id)
             {
                 record.status = MissionStatus::Stopped;
-                let _ = persist_record(&record);
+                let _ = persist_record_in_transaction(&record, lease);
             }
             missions.insert(record.id.clone(), record);
         }
         Ok(())
     }
 
+    #[cfg(test)]
     fn mark_idle_if_stale(
         &self,
         id: &str,
         now: DateTime<Utc>,
     ) -> Result<Option<MissionRecord>, String> {
+        mission_transaction(id, |lease| {
+            self.mark_idle_if_stale_in_transaction(id, now, lease)
+        })
+    }
+
+    fn mark_idle_if_stale_in_transaction(
+        &self,
+        id: &str,
+        now: DateTime<Utc>,
+        lease: &PathTransactionLease,
+    ) -> Result<Option<MissionRecord>, String> {
+        check_mission_lease(id, lease)?;
         let mut missions = self
             .missions
             .lock()
@@ -368,12 +609,17 @@ impl MissionState {
         record.status = MissionStatus::Idle;
         let record = record.clone();
         drop(missions);
-        persist_record(&record)?;
+        persist_record_in_transaction(&record, lease)?;
         Ok(Some(record))
     }
 
-    fn store_record(&self, record: MissionRecord) -> Result<(), String> {
-        persist_record(&record)?;
+    fn store_record_in_transaction(
+        &self,
+        record: MissionRecord,
+        lease: &PathTransactionLease,
+    ) -> Result<(), String> {
+        check_mission_lease(&record.id, lease)?;
+        persist_record_in_transaction(&record, lease)?;
         self.missions
             .lock()
             .map_err(|_| "mission_state_poisoned".to_string())?
@@ -383,10 +629,20 @@ impl MissionState {
 }
 
 fn spawn_idle_watch<R: tauri::Runtime>(app: AppHandle<R>, id: String) {
+    let Ok(parent) = mission_parent_snapshot() else {
+        return;
+    };
     thread::spawn(move || loop {
         thread::sleep(StdDuration::from_secs(5));
         let state = app.state::<MissionState>();
-        match state.mark_idle_if_stale(&id, Utc::now()) {
+        let result = (|| {
+            let request = PathTransactionRequest::new(mission_mutation_paths(&id)?)?
+                .require_parent_snapshot(&parent)?;
+            with_path_transactions(request, |lease| {
+                state.mark_idle_if_stale_in_transaction(&id, Utc::now(), lease)
+            })
+        })();
+        match result {
             Ok(Some(record)) => {
                 let _ = app.emit("ai://idle", &record);
                 emit_update(&app, &record);
@@ -418,8 +674,9 @@ fn mission_dir() -> Result<PathBuf, String> {
             return Ok(PathBuf::from(dir));
         }
     }
-    let home = dirs::home_dir().ok_or_else(|| "Cannot resolve home directory".to_string())?;
-    Ok(home.join(".maru").join("state").join("missions"))
+    Ok(crate::skill_host::fs::maru_home()?
+        .join("state")
+        .join("missions"))
 }
 
 fn mission_json_path(id: &str) -> Result<PathBuf, String> {
@@ -463,7 +720,11 @@ fn read_mission_log_tail(id: &str, max_lines: usize) -> Result<MissionLogTail, S
     })
 }
 
-fn persist_record(record: &MissionRecord) -> Result<(), String> {
+fn persist_record_in_transaction(
+    record: &MissionRecord,
+    lease: &PathTransactionLease,
+) -> Result<(), String> {
+    check_mission_lease(&record.id, lease)?;
     let path = mission_json_path(&record.id)?;
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
@@ -476,7 +737,20 @@ fn persist_record(record: &MissionRecord) -> Result<(), String> {
     fs::rename(&tmp, &path).map_err(|err| format!("Cannot finalize mission state: {err}"))
 }
 
+#[cfg(test)]
 fn append_output(id: &str, stream: &str, line: &str) -> Result<(), String> {
+    mission_transaction(id, |lease| {
+        append_output_in_transaction(id, stream, line, lease)
+    })
+}
+
+fn append_output_in_transaction(
+    id: &str,
+    stream: &str,
+    line: &str,
+    lease: &PathTransactionLease,
+) -> Result<(), String> {
+    check_mission_lease(id, lease)?;
     let path = mission_log_path(id)?;
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
@@ -527,17 +801,15 @@ fn kill_pid(pid: u32, force: bool) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::{Mutex as TestMutex, OnceLock};
     use tempfile::TempDir;
 
-    fn test_env_lock() -> &'static TestMutex<()> {
-        static LOCK: OnceLock<TestMutex<()>> = OnceLock::new();
-        LOCK.get_or_init(|| TestMutex::new(()))
+    fn test_env_lock() -> std::sync::MutexGuard<'static, ()> {
+        crate::skill_host::fs::test_maru_home_lock()
     }
 
     #[test]
     fn idle_transition_marks_stale_running_record() {
-        let _guard = test_env_lock().lock().unwrap();
+        let _guard = test_env_lock();
         let tmp = TempDir::new().unwrap();
         std::env::set_var("MARU_MISSION_STATE_DIR", tmp.path());
         let state = MissionState::default();
@@ -556,7 +828,7 @@ mod tests {
 
     #[test]
     fn finish_keeps_stopped_status() {
-        let _guard = test_env_lock().lock().unwrap();
+        let _guard = test_env_lock();
         let tmp = TempDir::new().unwrap();
         std::env::set_var("MARU_MISSION_STATE_DIR", tmp.path());
         let state = MissionState::default();
@@ -575,7 +847,7 @@ mod tests {
 
     #[test]
     fn list_sorts_newest_first() {
-        let _guard = test_env_lock().lock().unwrap();
+        let _guard = test_env_lock();
         let tmp = TempDir::new().unwrap();
         std::env::set_var("MARU_MISSION_STATE_DIR", tmp.path());
         let state = MissionState::default();
@@ -589,7 +861,7 @@ mod tests {
 
     #[test]
     fn metadata_persists_and_log_tail_reads_recent_lines() {
-        let _guard = test_env_lock().lock().unwrap();
+        let _guard = test_env_lock();
         let tmp = TempDir::new().unwrap();
         std::env::set_var("MARU_MISSION_STATE_DIR", tmp.path());
         let state = MissionState::default();
@@ -617,5 +889,50 @@ mod tests {
         assert_eq!(tail.lines, vec!["[stdout] two"]);
         state.pids.lock().unwrap().clear();
         std::env::remove_var("MARU_MISSION_STATE_DIR");
+    }
+}
+
+#[cfg(all(test, unix))]
+mod phase08_29_dispatch_missions {
+    use super::*;
+    use crate::atomic_file::phase08_06::Home;
+
+    #[test]
+    fn phase08_29_dispatch_stop_reuses_owned_child_lease_without_waiting_for_exit() {
+        let _home = Home::new();
+        let app = tauri::test::mock_app();
+        app.manage(MissionState::default());
+        let id = "owned-stop";
+        let lease = Arc::new(
+            PathTransactionRequest::new(mission_mutation_paths(id).unwrap())
+                .unwrap()
+                .acquire()
+                .unwrap(),
+        );
+        let serial = Arc::new(Mutex::new(()));
+        let mut child = Command::new("sleep").arg("10").spawn().unwrap();
+        let pid = child.id();
+        bind_execution_lease(app.handle(), id, &lease, &serial).unwrap();
+        app.state::<MissionState>()
+            .start_in_transaction(id, "fixture", pid, None, &lease)
+            .unwrap();
+        let handle = app.handle().clone();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let worker = thread::spawn(move || {
+            let result = handle.state::<MissionState>().stop(handle.clone(), id);
+            let _ = tx.send(result);
+        });
+        let stopped = rx.recv_timeout(StdDuration::from_secs(2));
+        // Reap the fixture even on assertion failure; never leave a real pid in
+        // the test MissionState's drop handler.
+        let _ = child.kill();
+        let _ = child.wait();
+        app.state::<MissionState>().pids.lock().unwrap().clear();
+        drop(lease);
+        let record = stopped
+            .expect("stop must borrow the child transaction")
+            .unwrap();
+        worker.join().unwrap();
+        assert_eq!(record.status, MissionStatus::Stopped);
     }
 }

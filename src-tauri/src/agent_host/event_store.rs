@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use crate::agent_host::contracts::{new_run_event, AgentRunEvent};
+use crate::atomic_file::{with_path_transactions, PathTransactionLease, PathTransactionRequest};
 use crate::vault::normalize_existing_dir;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -39,6 +40,19 @@ pub fn append_run_event(cwd: &str, event: &AgentRunEvent) -> Result<(), String> 
 }
 
 pub fn append_run_event_at(path: &Path, event: &AgentRunEvent) -> Result<(), String> {
+    with_path_transactions(
+        PathTransactionRequest::new(vec![path.to_path_buf()])?,
+        |lease| append_run_event_at_in_transaction(path, event, lease),
+    )
+}
+
+pub(crate) fn append_run_event_at_in_transaction(
+    path: &Path,
+    event: &AgentRunEvent,
+    lease: &PathTransactionLease,
+) -> Result<(), String> {
+    lease.ensure_covered(vec![path.to_path_buf()])?;
+    lease.before_effect()?;
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
             .map_err(|err| format!("Cannot create run event directory: {err}"))?;
@@ -68,6 +82,20 @@ pub fn append_run_event_payload(
 ) -> Result<AgentRunEvent, String> {
     let event = new_run_event(run_id, event_type, actor, payload, None);
     append_run_event(cwd, &event)?;
+    Ok(event)
+}
+
+pub(crate) fn append_run_event_payload_in_transaction(
+    cwd: &str,
+    run_id: &str,
+    event_type: &str,
+    actor: &str,
+    payload: serde_json::Value,
+    lease: &PathTransactionLease,
+) -> Result<AgentRunEvent, String> {
+    let event = new_run_event(run_id, event_type, actor, payload, None);
+    let path = run_events_path(cwd, run_id)?;
+    append_run_event_at_in_transaction(&path, &event, lease)?;
     Ok(event)
 }
 
