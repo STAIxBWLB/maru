@@ -10,6 +10,9 @@
 
 use serde::{Deserialize, Serialize};
 
+pub const SKILLS_SOURCE_BUSY: &str = "skills_source_busy";
+pub const SKILLS_SOURCE_STALE: &str = "skills_source_stale";
+
 /// Optimistic-concurrency conflict from `today_mutate` / `today_finalize_setup`
 /// / `today_calendar_publish`.
 pub const TODAY_CONFLICT: &str = "today_conflict";
@@ -141,6 +144,9 @@ mod tests {
     #[test]
     fn no_code_emitting_path_flattens_its_error_to_string() {
         const EMITTERS: &[&str] = &[
+            "sync_source_transaction(",
+            "skills_sync_source_impl(",
+            "skills_sync_all_sources_impl(",
             "today_mutate(",
             "task_transition(",
             "task_trash(",
@@ -193,6 +199,8 @@ mod tests {
 
     #[test]
     fn ipc_error_codes_are_stable() {
+        assert_eq!(SKILLS_SOURCE_BUSY, "skills_source_busy");
+        assert_eq!(SKILLS_SOURCE_STALE, "skills_source_stale");
         assert_eq!(TODAY_CONFLICT, "today_conflict");
         assert_eq!(TASK_CONFLICT, "task_conflict");
         assert_eq!(DOCUMENT_CONFLICT, "document_conflict");

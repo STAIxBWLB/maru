@@ -17,6 +17,7 @@ use walkdir::WalkDir;
 use std::os::unix::fs::PermissionsExt;
 
 use crate::cli_path::merge_path_env;
+use crate::ipc_error::{IpcError, SKILLS_SOURCE_BUSY, SKILLS_SOURCE_STALE};
 use crate::skill_host::bundle_update as bundle;
 use crate::skill_host::bundle_update::{BundleState, SkillBundleRef, SwapJournal};
 use crate::skill_host::fs as host_fs;
@@ -60,6 +61,7 @@ struct SourceGeneration {
     config_revision: Uuid,
 }
 
+#[derive(Clone)]
 struct SourceSnapshot {
     registry_path: PathBuf,
     source: SkillSource,
@@ -139,7 +141,7 @@ fn capture_source_snapshot(
     })
 }
 
-fn admit_source_operation(snapshot: &SourceSnapshot) -> Result<SourceOperationLease, String> {
+fn admit_source_operation(snapshot: &SourceSnapshot) -> Result<SourceOperationLease, IpcError> {
     let raw = snapshot
         .source
         .path
@@ -163,7 +165,9 @@ fn admit_source_operation(snapshot: &SourceSnapshot) -> Result<SourceOperationLe
             .canonicalize()
             .map_err(|err| format!("source_checkout_identity_failed: {err}"))?
     } else if snapshot.source.kind == "cloned" {
-        return Err("source_checkout_identity_failed: not a Git worktree".to_string());
+        return Err("source_checkout_identity_failed: not a Git worktree"
+            .to_string()
+            .into());
     } else {
         path.clone()
     };
@@ -174,10 +178,10 @@ fn admit_source_operation(snapshot: &SourceSnapshot) -> Result<SourceOperationLe
         .lock()
         .map_err(|_| "source_operation_lock_poisoned".to_string())?;
     if operations.contains(&source_key) || operations.contains(&checkout_key) {
-        return Err(format!(
-            "source_busy: {} is already syncing",
-            snapshot.source.id
-        ));
+        return Err(IpcError {
+            code: SKILLS_SOURCE_BUSY.into(),
+            message: format!("source_busy: {} is already syncing", snapshot.source.id),
+        });
     }
     operations.insert(source_key.clone());
     operations.insert(checkout_key.clone());
@@ -296,6 +300,10 @@ pub struct SyncSourceResult {
     pub source_id: String,
     pub kind: String,
     pub ok: bool,
+    #[serde(default)]
+    pub skipped: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error_code: Option<String>,
     pub skills: usize,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_synced_at: Option<String>,
@@ -309,6 +317,8 @@ pub struct SyncAllOutcome {
     pub total: usize,
     pub succeeded: usize,
     pub failed: usize,
+    #[serde(default)]
+    pub skipped: usize,
     pub results: Vec<SyncSourceResult>,
 }
 
@@ -455,9 +465,18 @@ struct ManifestSkillRoot {
     tier: Option<String>,
 }
 
+trait SkillProgressEmitter {
+    fn emit_progress(&self, event: SkillProgressEvent);
+}
+impl<R: tauri::Runtime> SkillProgressEmitter for AppHandle<R> {
+    fn emit_progress(&self, event: SkillProgressEvent) {
+        let _ = self.emit("skills-op://progress", event);
+    }
+}
+
 #[derive(Clone, Copy)]
 struct ProgressReporter<'a> {
-    app: Option<&'a AppHandle>,
+    app: Option<&'a dyn SkillProgressEmitter>,
     progress_id: Option<&'a str>,
 }
 
@@ -502,7 +521,7 @@ impl Default for SkillsRegistry {
 }
 
 impl<'a> ProgressReporter<'a> {
-    fn new(app: &'a AppHandle, progress_id: Option<&'a str>) -> Self {
+    fn new<R: tauri::Runtime>(app: &'a AppHandle<R>, progress_id: Option<&'a str>) -> Self {
         Self {
             app: Some(app),
             progress_id,
@@ -526,16 +545,13 @@ impl<'a> ProgressReporter<'a> {
         let (Some(app), Some(progress_id)) = (self.app, self.progress_id) else {
             return;
         };
-        let _ = app.emit(
-            "skills-op://progress",
-            SkillProgressEvent {
-                progress_id: progress_id.to_string(),
-                level: level.to_string(),
-                message: message.into(),
-                completed,
-                total,
-            },
-        );
+        app.emit_progress(SkillProgressEvent {
+            progress_id: progress_id.to_string(),
+            level: level.to_string(),
+            message: message.into(),
+            completed,
+            total,
+        });
     }
 
     fn info(self, message: impl Into<String>) {
@@ -712,7 +728,7 @@ pub async fn skills_sync_source(
     app: AppHandle,
     source_id: String,
     progress_id: Option<String>,
-) -> Result<Vec<SkillRecord>, String> {
+) -> Result<Vec<SkillRecord>, IpcError> {
     tauri::async_runtime::spawn_blocking(move || {
         skills_sync_source_impl(
             source_id,
@@ -720,14 +736,14 @@ pub async fn skills_sync_source(
         )
     })
     .await
-    .map_err(|err| format!("skills_sync_source_task_failed: {err}"))?
+    .map_err(|err| IpcError::from(format!("skills_sync_source_task_failed: {err}")))?
 }
 
 fn skills_sync_source_impl(
     source_id: String,
     progress: ProgressReporter<'_>,
-) -> Result<Vec<SkillRecord>, String> {
-    sync_source_transaction(source_id, progress, |source, progress| {
+) -> Result<Vec<SkillRecord>, IpcError> {
+    sync_source_transaction(source_id, None, progress, |source, progress| {
         if source.kind == "cloned" {
             progress.info(format!("Pulling latest changes for {}", source.id));
             run_command(
@@ -746,13 +762,18 @@ fn skills_sync_source_impl(
 
 fn sync_source_transaction(
     source_id: String,
+    expected: Option<SourceSnapshot>,
     progress: ProgressReporter<'_>,
     network: impl FnOnce(&SkillSource, ProgressReporter<'_>) -> Result<(), String>,
-) -> Result<Vec<SkillRecord>, String> {
+) -> Result<Vec<SkillRecord>, IpcError> {
     progress.info(format!("Resolving source {source_id}"));
     let (snapshot, original_path) = {
         let _guard = registry_guard()?;
-        let snapshot = capture_source_snapshot(&load_registry_unlocked()?, &source_id)?;
+        let registry = load_registry_unlocked()?;
+        let snapshot = match expected {
+            Some(snapshot) => snapshot,
+            None => capture_source_snapshot(&registry, &source_id)?,
+        };
         let path = source_path(&snapshot.source)?;
         (snapshot, path)
     };
@@ -762,25 +783,42 @@ fn sync_source_transaction(
     // Revalidate after checkout discovery/admission, before the network edge.
     {
         let _guard = registry_guard()?;
-        let current = capture_source_snapshot(&load_registry_unlocked()?, &source_id)?;
+        let current =
+            capture_source_snapshot(&load_registry_unlocked()?, &source_id).map_err(|message| {
+                IpcError {
+                    code: SKILLS_SOURCE_STALE.into(),
+                    message,
+                }
+            })?;
         if current.generation != snapshot.generation
             || lease.source_path != original_path
             || source_path(&current.source)? != original_path
         {
-            return Err(format!("source_changed: {source_id}; sync again manually"));
+            return Err(IpcError {
+                code: SKILLS_SOURCE_STALE.into(),
+                message: format!("source_changed: {source_id}; sync again manually"),
+            });
         }
     }
+    #[cfg(test)]
+    tests::phase08_batch_transactions::at_edge("work");
     network(&snapshot.source, progress)?;
     #[cfg(test)]
     tests::phase08_source_transactions::at_edge("before_commit");
     let _guard = registry_guard()?;
     let mut registry = load_registry_unlocked()?;
-    let current = capture_source_snapshot(&registry, &source_id)?;
+    let current = capture_source_snapshot(&registry, &source_id).map_err(|message| IpcError {
+        code: SKILLS_SOURCE_STALE.into(),
+        message,
+    })?;
     if current.registry_path != snapshot.registry_path
         || current.generation != snapshot.generation
         || source_path(&current.source)? != original_path
     {
-        return Err(format!("source_changed: {source_id}; sync again manually"));
+        return Err(IpcError {
+            code: SKILLS_SOURCE_STALE.into(),
+            message: format!("source_changed: {source_id}; sync again manually"),
+        });
     }
     // Scan and merge into the freshly loaded registry under its existing guard.
     let skills = rescan_source_in_registry_with_progress(&mut registry, &source_id, progress)?;
@@ -792,109 +830,132 @@ fn sync_source_transaction(
     Ok(skills)
 }
 
-/// Pull (if `cloned`) then rescan a single source, operating on the
-/// already-loaded registry under a guard the caller holds. Never re-enters
-/// `registry_guard()` (the lock is not reentrant) and never saves — callers
-/// save once after they are done mutating.
-fn sync_one_source_in_registry(
-    registry: &mut SkillsRegistry,
-    source: &SkillSource,
-    progress: ProgressReporter<'_>,
-) -> Result<Vec<SkillRecord>, String> {
-    if source.kind == "cloned" {
-        let path = source_path(source)?;
-        progress.info(format!("Pulling latest changes for {}", source.id));
-        run_command(
-            Command::new("git")
-                .arg("-C")
-                .arg(path)
-                .arg("pull")
-                .arg("--ff-only"),
-        )?;
-        progress.success(format!("Git pull complete for {}", source.id));
-    } else {
-        progress.info(format!("Source {} is linked; skipping git pull", source.id));
-    }
-    rescan_source_in_registry_with_progress(registry, &source.id, progress)
-}
-
 #[tauri::command]
-pub fn skills_sync_all_sources(
-    app: AppHandle,
+pub async fn skills_sync_all_sources<R: tauri::Runtime>(
+    app: AppHandle<R>,
     work_path: Option<String>,
     progress_id: Option<String>,
-) -> Result<SyncAllOutcome, String> {
-    skills_sync_all_sources_impl(
-        work_path,
-        ProgressReporter::new(&app, progress_id.as_deref()),
-    )
+) -> Result<SyncAllOutcome, IpcError> {
+    tauri::async_runtime::spawn_blocking(move || {
+        skills_sync_all_sources_impl(
+            work_path,
+            ProgressReporter::new(&app, progress_id.as_deref()),
+        )
+    })
+    .await
+    .map_err(|err| IpcError::from(format!("skills_sync_all_sources_task_failed: {err}")))?
 }
 
 fn skills_sync_all_sources_impl(
     work_path: Option<String>,
     progress: ProgressReporter<'_>,
-) -> Result<SyncAllOutcome, String> {
-    let _guard = registry_guard()?;
-    let mut registry = load_registry_unlocked()?;
-    ensure_default_sources(&mut registry, work_path.as_deref())?;
-    let ids = source_ids(&registry);
-    let total = ids.len();
-    let mut results: Vec<SyncSourceResult> = Vec::new();
-    for (index, source_id) in ids.into_iter().enumerate() {
-        progress.progress("info", format!("Syncing {source_id}"), index, total);
-        let Some(source) = registry
-            .sources
+) -> Result<SyncAllOutcome, IpcError> {
+    #[cfg(test)]
+    tests::phase08_batch_transactions::at_edge("defaults");
+    let snapshots = {
+        let _guard = registry_guard()?;
+        let mut registry = load_registry_unlocked()?;
+        ensure_default_sources(&mut registry, work_path.as_deref())?;
+        save_registry_unlocked(&registry)?;
+        source_ids(&registry)
             .iter()
-            .find(|source| source.id == source_id)
-            .cloned()
-        else {
-            continue;
-        };
-        match sync_one_source_in_registry(&mut registry, &source, progress) {
+            .map(|id| capture_source_snapshot(&registry, id))
+            .collect::<Result<Vec<_>, _>>()?
+    };
+    #[cfg(test)]
+    tests::phase08_batch_transactions::at_edge("snapshot");
+    skills_sync_all_sources_blocking(snapshots, progress)
+}
+
+fn skills_sync_all_sources_blocking(
+    snapshots: Vec<SourceSnapshot>,
+    progress: ProgressReporter<'_>,
+) -> Result<SyncAllOutcome, IpcError> {
+    let total = snapshots.len();
+    let mut results = Vec::with_capacity(total);
+    for (index, snapshot) in snapshots.into_iter().enumerate() {
+        let source_id = snapshot.source.id.clone();
+        let kind = snapshot.source.kind.clone();
+        progress.progress("info", format!("Syncing {source_id}"), index, total);
+        let result = sync_source_transaction(
+            source_id.clone(),
+            Some(snapshot),
+            progress,
+            |source, progress| {
+                if source.kind == "cloned" {
+                    progress.info(format!("Pulling latest changes for {}", source.id));
+                    run_command(
+                        Command::new("git")
+                            .arg("-C")
+                            .arg(source_path(source)?)
+                            .args(["pull", "--ff-only"]),
+                    )?;
+                }
+                Ok(())
+            },
+        );
+        match result {
             Ok(skills) => {
-                let last_synced_at = registry
-                    .sources
-                    .iter()
-                    .find(|item| item.id == source_id)
-                    .and_then(|item| item.last_synced_at.clone());
+                let last_synced_at = {
+                    let _guard = registry_guard()?;
+                    load_registry_unlocked()?
+                        .sources
+                        .iter()
+                        .find(|s| s.id == source_id)
+                        .and_then(|s| s.last_synced_at.clone())
+                };
                 results.push(SyncSourceResult {
                     source_id: source_id.clone(),
-                    kind: source.kind.clone(),
+                    kind,
                     ok: true,
+                    skipped: false,
                     skills: skills.len(),
                     last_synced_at,
                     error: None,
+                    error_code: None,
                 });
                 progress.progress("success", format!("Synced {source_id}"), index + 1, total);
             }
             Err(error) => {
+                let skipped = error.code == SKILLS_SOURCE_BUSY;
                 progress.progress(
-                    "error",
-                    format!("Failed {source_id}: {error}"),
+                    if skipped { "info" } else { "error" },
+                    format!(
+                        "{} {source_id}: {}",
+                        if skipped { "Skipped" } else { "Failed" },
+                        error.message
+                    ),
                     index + 1,
                     total,
                 );
                 results.push(SyncSourceResult {
-                    source_id: source_id.clone(),
-                    kind: source.kind.clone(),
+                    source_id,
+                    kind,
                     ok: false,
+                    skipped,
                     skills: 0,
                     last_synced_at: None,
-                    error: Some(error),
+                    error: Some(error.message),
+                    error_code: if error.code.is_empty() {
+                        None
+                    } else {
+                        Some(error.code)
+                    },
                 });
             }
         }
     }
-    save_registry_unlocked(&registry)?;
-    let failed = results.iter().filter(|result| !result.ok).count();
-    let succeeded = results.len() - failed;
-    progress.success(format!(
-        "Sync all complete: {succeeded} ok, {failed} failed"
+    let succeeded = results.iter().filter(|r| r.ok).count();
+    let skipped = results.iter().filter(|r| r.skipped).count();
+    let failed = total - succeeded - skipped;
+    progress.info(format!(
+        "Sync all complete: {succeeded} ok, {failed} failed, {skipped} skipped"
     ));
     Ok(SyncAllOutcome {
         total,
         succeeded,
         failed,
+        skipped,
         results,
     })
 }
@@ -5649,6 +5710,187 @@ mod tests {
         path.to_string_lossy().to_string()
     }
 
+    pub(super) mod phase08_batch_transactions {
+        use super::*;
+        use std::sync::{mpsc, Arc};
+        use std::time::Duration;
+        type Hook = Arc<dyn Fn(&str) + Send + Sync>;
+        static HOOK: Mutex<Option<Hook>> = Mutex::new(None);
+        pub(crate) fn at_edge(edge: &str) {
+            let hook = HOOK.lock().unwrap().clone();
+            if let Some(hook) = hook {
+                hook(edge);
+            }
+        }
+        struct ResetHook;
+        impl Drop for ResetHook {
+            fn drop(&mut self) {
+                *HOOK.lock().unwrap() = None;
+            }
+        }
+        fn seed(id: &str, path: &Path) {
+            write_skill(path, id);
+            skills_add_source(
+                id.into(),
+                "linked".into(),
+                Some(path_string(path)),
+                None,
+                Some("skills".into()),
+            )
+            .unwrap();
+        }
+        fn snapshots() -> Vec<SourceSnapshot> {
+            let _guard = registry_guard().unwrap();
+            let registry = load_registry_unlocked().unwrap();
+            registry
+                .sources
+                .iter()
+                .map(|s| capture_source_snapshot(&registry, &s.id).unwrap())
+                .collect()
+        }
+        fn reconcile(outcome: &SyncAllOutcome) {
+            assert_eq!(outcome.total, outcome.results.len());
+            assert_eq!(
+                outcome.total,
+                outcome.succeeded + outcome.failed + outcome.skipped
+            );
+        }
+        #[test]
+        fn empty_and_single_source_counters_reconcile() {
+            let _home = test_home();
+            let empty = skills_sync_all_sources_blocking(vec![], ProgressReporter::noop()).unwrap();
+            reconcile(&empty);
+            assert_eq!(empty.total, 0);
+            let root = TempDir::new().unwrap();
+            seed("one", root.path());
+            let one =
+                skills_sync_all_sources_blocking(snapshots(), ProgressReporter::noop()).unwrap();
+            reconcile(&one);
+            assert_eq!(one.total, 1);
+            assert_eq!(one.succeeded, 1);
+        }
+        #[test]
+        fn busy_a_skips_while_b_persists_and_c_fails_then_manual_retry() {
+            let _home = test_home();
+            let root = TempDir::new().unwrap();
+            for id in ["a", "b", "c"] {
+                seed(id, &root.path().join(id));
+            }
+            let initial = snapshots();
+            let lease = admit_source_operation(&initial[0]).unwrap();
+            fs::remove_dir_all(root.path().join("c")).unwrap();
+            let outcome =
+                skills_sync_all_sources_blocking(initial, ProgressReporter::noop()).unwrap();
+            reconcile(&outcome);
+            assert_eq!(
+                (outcome.succeeded, outcome.failed, outcome.skipped),
+                (1, 1, 1)
+            );
+            let a = &outcome.results[0];
+            assert!(!a.ok);
+            assert!(a.skipped);
+            assert_eq!(a.skills, 0);
+            assert!(a.last_synced_at.is_none());
+            assert_eq!(a.error_code.as_deref(), Some(SKILLS_SOURCE_BUSY));
+            assert!(load_registry()
+                .unwrap()
+                .sources
+                .iter()
+                .find(|s| s.id == "b")
+                .unwrap()
+                .last_synced_at
+                .is_some());
+            drop(lease);
+            write_skill(&root.path().join("c"), "c");
+            let retry =
+                skills_sync_all_sources_blocking(snapshots(), ProgressReporter::noop()).unwrap();
+            reconcile(&retry);
+            assert_eq!(retry.succeeded, 3);
+            assert!(SOURCE_OPERATIONS.get().unwrap().lock().unwrap().is_empty());
+        }
+        #[test]
+        fn missing_and_replaced_snapshot_identity_never_syncs_replacement() {
+            for replace in [false, true] {
+                let _home = test_home();
+                let root = TempDir::new().unwrap();
+                seed("source", root.path());
+                let before = snapshots();
+                skills_remove_source("source".into()).unwrap();
+                if replace {
+                    seed("source", root.path());
+                }
+                let disk = fs::read(registry_path().unwrap()).unwrap();
+                let result =
+                    skills_sync_all_sources_blocking(before, ProgressReporter::noop()).unwrap();
+                reconcile(&result);
+                assert_eq!(result.failed, 1);
+                assert_eq!(
+                    result.results[0].error_code.as_deref(),
+                    Some(SKILLS_SOURCE_STALE)
+                );
+                assert_eq!(fs::read(registry_path().unwrap()).unwrap(), disk);
+            }
+        }
+        #[test]
+        fn actual_wrapper_allows_async_progress() {
+            let _home = test_home();
+            let root = TempDir::new().unwrap();
+            seed("wrapper", root.path());
+            let app = tauri::test::mock_app();
+            for edge in ["defaults", "work"] {
+                let (entered_tx, entered_rx) = mpsc::channel();
+                let (release_tx, release_rx) = mpsc::channel();
+                let release_rx = Mutex::new(Some(release_rx));
+                *HOOK.lock().unwrap() = Some(Arc::new(move |at| {
+                    if at == edge {
+                        let rx = release_rx.lock().unwrap().take();
+                        if let Some(rx) = rx {
+                            entered_tx.send(std::thread::current().id()).unwrap();
+                            let _ = rx.recv_timeout(Duration::from_secs(5));
+                        }
+                    }
+                }));
+                let _reset = ResetHook;
+                let handle = app.handle().clone();
+                let (caller_tx, caller_rx) = mpsc::channel();
+                let task = tauri::async_runtime::spawn(async move {
+                    caller_tx.send(std::thread::current().id()).unwrap();
+                    skills_sync_all_sources(handle, None, None).await
+                });
+                let held_thread = entered_rx.recv_timeout(Duration::from_secs(5));
+                let caller = caller_rx.recv_timeout(Duration::from_secs(5));
+                let (probe_tx, probe_rx) = mpsc::channel();
+                tauri::async_runtime::spawn(async move {
+                    // This yielding future executes on the same Tauri runtime.
+                    let mut yielded = false;
+                    std::future::poll_fn(|cx| {
+                        if yielded {
+                            std::task::Poll::Ready(())
+                        } else {
+                            yielded = true;
+                            cx.waker().wake_by_ref();
+                            std::task::Poll::Pending
+                        }
+                    })
+                    .await;
+                    probe_tx.send(()).unwrap();
+                });
+                let progressed = probe_rx.recv_timeout(Duration::from_secs(2));
+                // Always release before assertions, including timeout failures.
+                let _ = release_tx.send(());
+                let outcome = tauri::async_runtime::block_on(task).unwrap().unwrap();
+                assert!(progressed.is_ok(), "{edge}: async probe starved");
+                assert_ne!(
+                    held_thread.unwrap(),
+                    caller.unwrap(),
+                    "{edge}: blocking work ran on invoking async worker"
+                );
+                assert!(outcome.total > 0);
+                reconcile(&outcome);
+            }
+        }
+    }
+
     pub(super) mod phase08_source_transactions {
         use super::*;
         use std::cell::RefCell;
@@ -5682,7 +5924,7 @@ mod tests {
         fn race(
             edge: &'static str,
             mutation: impl FnOnce(&Path),
-        ) -> (Result<Vec<SkillRecord>, String>, SkillsRegistry, usize) {
+        ) -> (Result<Vec<SkillRecord>, IpcError>, SkillsRegistry, usize) {
             let _home = test_home();
             let root = TempDir::new().unwrap();
             write_skill(root.path(), "tracer");
@@ -5706,7 +5948,7 @@ mod tests {
                         }
                     }))
                 });
-                sync_source_transaction("tracer".into(), ProgressReporter::noop(), |_, _| {
+                sync_source_transaction("tracer".into(), None, ProgressReporter::noop(), |_, _| {
                     worker_calls.fetch_add(1, Ordering::SeqCst);
                     at_edge("network");
                     Ok(())
@@ -5735,7 +5977,11 @@ mod tests {
             for edge in ["before_admission", "network", "before_commit"] {
                 let (result, registry, calls) =
                     race(edge, |_| skills_remove_source("tracer".into()).unwrap());
-                assert_eq!(result.unwrap_err(), "unknown_source: tracer", "{edge}");
+                assert_eq!(
+                    result.unwrap_err().message,
+                    "unknown_source: tracer",
+                    "{edge}"
+                );
                 assert!(!registry.sources.iter().any(|source| source.id == "tracer"));
                 assert!(!registry
                     .skills
@@ -5752,7 +5998,10 @@ mod tests {
                     skills_remove_source("tracer".into()).unwrap();
                     add_source("tracer", path);
                 });
-                assert!(result.unwrap_err().starts_with("source_changed:"), "{edge}");
+                assert!(
+                    result.unwrap_err().message.starts_with("source_changed:"),
+                    "{edge}"
+                );
                 assert!(registry.sources.iter().any(|source| source.id == "tracer"));
             }
         }
@@ -5770,7 +6019,7 @@ mod tests {
                         }
                     });
                     assert!(
-                        result.unwrap_err().starts_with("source_changed:"),
+                        result.unwrap_err().message.starts_with("source_changed:"),
                         "{edge} revert={revert}"
                     );
                     if !revert {
@@ -5786,12 +6035,14 @@ mod tests {
         #[test]
         fn phase08_01_duplicate_is_immediate_and_independent_source_progresses() {
             let (result, registry, calls) = race("network", |_| {
-                let duplicate =
-                    sync_source_transaction("tracer".into(), ProgressReporter::noop(), |_, _| {
-                        panic!("duplicate network call")
-                    });
+                let duplicate = sync_source_transaction(
+                    "tracer".into(),
+                    None,
+                    ProgressReporter::noop(),
+                    |_, _| panic!("duplicate network call"),
+                );
                 assert_eq!(
-                    duplicate.unwrap_err(),
+                    duplicate.unwrap_err().message,
                     "source_busy: tracer is already syncing"
                 );
                 let other = TempDir::new().unwrap();
@@ -5823,15 +6074,17 @@ mod tests {
             add_source("retry", root.path());
             let calls = AtomicUsize::new(0);
             let error =
-                sync_source_transaction("retry".into(), ProgressReporter::noop(), |_, _| {
+                sync_source_transaction("retry".into(), None, ProgressReporter::noop(), |_, _| {
                     calls.fetch_add(1, Ordering::SeqCst);
                     Err("local network failed".into())
                 })
-                .unwrap_err();
+                .unwrap_err()
+                .message;
             assert_eq!(error, "local network failed");
             assert_eq!(calls.load(Ordering::SeqCst), 1);
             assert!(std::panic::catch_unwind(|| sync_source_transaction(
                 "retry".into(),
+                None,
                 ProgressReporter::noop(),
                 |_, _| panic!("injected worker panic")
             ))
@@ -5868,17 +6121,21 @@ mod tests {
                     save_registry_unlocked(&registry).unwrap();
                 }
                 for id in ["alias", "nested"] {
-                    let error =
-                        sync_source_transaction(id.into(), ProgressReporter::noop(), |_, _| {
-                            panic!("alias network call")
-                        })
-                        .unwrap_err();
+                    let error = sync_source_transaction(
+                        id.into(),
+                        None,
+                        ProgressReporter::noop(),
+                        |_, _| panic!("alias network call"),
+                    )
+                    .unwrap_err()
+                    .message;
                     assert!(error.starts_with("source_busy:"));
                 }
                 #[cfg(unix)]
                 assert!(
                     skills_sync_source_impl("symlink".into(), ProgressReporter::noop())
                         .unwrap_err()
+                        .message
                         .starts_with("source_busy:")
                 );
             });
@@ -5890,7 +6147,9 @@ mod tests {
         fn phase08_01_empty_path_and_absent_source_reject_before_network() {
             let _home = test_home();
             assert_eq!(
-                skills_sync_source_impl("absent".into(), ProgressReporter::noop()).unwrap_err(),
+                skills_sync_source_impl("absent".into(), ProgressReporter::noop())
+                    .unwrap_err()
+                    .message,
                 "unknown_source: absent"
             );
             let root = TempDir::new().unwrap();
@@ -5901,7 +6160,7 @@ mod tests {
             save_registry_unlocked(&registry).unwrap();
             let snapshot = capture_source_snapshot(&registry, "empty").unwrap();
             assert!(
-                matches!(admit_source_operation(&snapshot), Err(error) if error == "source_path_required")
+                matches!(admit_source_operation(&snapshot), Err(error) if error.message == "source_path_required")
             );
         }
 
@@ -5922,7 +6181,7 @@ mod tests {
                 // still notice a different configuration at commit.
                 host_fs::write_json_pretty(&registry_path().unwrap(), &registry).unwrap();
             });
-            assert!(result.unwrap_err().starts_with("source_changed:"));
+            assert!(result.unwrap_err().message.starts_with("source_changed:"));
         }
 
         #[test]
@@ -5954,7 +6213,7 @@ mod tests {
             let (entered_tx, entered_rx) = mpsc::channel();
             let (release_tx, release_rx) = mpsc::channel();
             let worker = std::thread::spawn(move || {
-                sync_source_transaction("deleted".into(), ProgressReporter::noop(), |_, _| {
+                sync_source_transaction("deleted".into(), None, ProgressReporter::noop(), |_, _| {
                     entered_tx.send(()).unwrap();
                     release_rx.recv_timeout(Duration::from_secs(5)).unwrap();
                     Ok(())
@@ -5969,6 +6228,7 @@ mod tests {
                 .join()
                 .unwrap()
                 .unwrap_err()
+                .message
                 .starts_with("source_path_invalid:"));
             assert_eq!(fs::read(registry_path().unwrap()).unwrap(), before);
             assert!(!checkout.exists());
@@ -5995,7 +6255,7 @@ mod tests {
             let (entered_tx, entered_rx) = mpsc::channel();
             let (release_tx, release_rx) = mpsc::channel();
             let worker = std::thread::spawn(move || {
-                sync_source_transaction("alias".into(), ProgressReporter::noop(), |_, _| {
+                sync_source_transaction("alias".into(), None, ProgressReporter::noop(), |_, _| {
                     entered_tx.send(()).unwrap();
                     release_rx.recv_timeout(Duration::from_secs(5)).unwrap();
                     Ok(())
@@ -6009,6 +6269,7 @@ mod tests {
                 .join()
                 .unwrap()
                 .unwrap_err()
+                .message
                 .starts_with("source_changed:"));
             assert!(load_registry()
                 .unwrap()
@@ -6033,7 +6294,7 @@ mod tests {
             let (entered_tx, entered_rx) = mpsc::channel();
             let (release_tx, release_rx) = mpsc::channel();
             let worker = std::thread::spawn(move || {
-                sync_source_transaction("tracer".into(), ProgressReporter::noop(), |_, _| {
+                sync_source_transaction("tracer".into(), None, ProgressReporter::noop(), |_, _| {
                     entered_tx.send(()).unwrap();
                     release_rx.recv_timeout(Duration::from_secs(5)).unwrap();
                     Ok(())

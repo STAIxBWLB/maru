@@ -85,3 +85,6 @@ windows-sys = { version = "0.59", features = [
     "Win32_System_JobObjects",
     "Win32_System_Threading",
 ] }
+
+[dev-dependencies]
+tauri = { version = "2.10.0", features = ["test"] }

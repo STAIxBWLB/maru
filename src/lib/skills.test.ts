@@ -6,6 +6,8 @@ vi.mock("@tauri-apps/api/core", () => ({
   invoke: (cmd: string, args?: unknown) => invoke(cmd, args),
 }));
 
+import { IpcError } from "./ipcError";
+
 import { skillsInstallSkill, skillsListSkills, skillsSyncAllSources, skillsSyncSource } from "./skills";
 
 function enterTauri() {
@@ -29,6 +31,23 @@ describe("skills invoke wrappers", () => {
       expect(invoke).toHaveBeenCalledExactlyOnceWith("skills_sync_source", { sourceId: "tracer", progressId: "sync-progress" });
     },
   );
+
+  it.each(["skills_source_busy", "skills_source_stale"])("normalizes known source contract %s without retry", async (code) => {
+    enterTauri(); invoke.mockRejectedValueOnce({ code, message: "original reason" });
+    const error = await skillsSyncSource("source").catch((reason: unknown) => reason);
+    expect(error).toBeInstanceOf(IpcError); expect(error).toMatchObject({ code });
+    expect(invoke).toHaveBeenCalledTimes(1);
+  });
+  it.each(["", "skills_source_forged"])("keeps unknown/empty code %s display-only", async (code) => {
+    enterTauri(); invoke.mockRejectedValueOnce({ code, message: "original reason" });
+    const error = await skillsSyncAllSources().catch((reason: unknown) => reason);
+    expect(error).toBeInstanceOf(Error); expect(error).not.toBeInstanceOf(IpcError);
+    expect((error as Error).message).toContain("original reason"); expect(invoke).toHaveBeenCalledTimes(1);
+  });
+  it("preserves batch skipped outcomes", async () => {
+    enterTauri(); const result = { total: 1, succeeded: 0, failed: 0, skipped: 1, results: [{ sourceId: "a", kind: "linked", ok: false, skipped: true, skills: 0, errorCode: "skills_source_busy", error: "already syncing" }] };
+    invoke.mockResolvedValueOnce(result); expect(await skillsSyncAllSources()).toEqual(result);
+  });
 
   it("threads the install mode through to skills_install_skill", async () => {
     enterTauri();
@@ -54,7 +73,7 @@ describe("skills invoke wrappers", () => {
 
   it("invokes skills_sync_all_sources with workPath and progressId", async () => {
     enterTauri();
-    invoke.mockResolvedValue({ total: 1, succeeded: 1, failed: 0, results: [] });
+    invoke.mockResolvedValue({ total: 1, succeeded: 1, failed: 0, skipped: 0, results: [] });
     const outcome = await skillsSyncAllSources("/work", "pid-1");
     expect(invoke).toHaveBeenCalledWith("skills_sync_all_sources", {
       workPath: "/work",
@@ -86,7 +105,7 @@ describe("skills invoke wrappers", () => {
   it("returns an empty sync outcome outside Tauri without invoking", async () => {
     const outcome = await skillsSyncAllSources();
     expect(invoke).not.toHaveBeenCalled();
-    expect(outcome).toEqual({ total: 0, succeeded: 0, failed: 0, results: [] });
+    expect(outcome).toEqual({ total: 0, succeeded: 0, failed: 0, skipped: 0, results: [] });
   });
 
   it("throws for install outside the Tauri shell", async () => {
