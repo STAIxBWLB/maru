@@ -3,7 +3,7 @@ use include_dir::{include_dir, Dir};
 use serde::{Deserialize, Serialize};
 use serde_yaml::Value as YamlValue;
 use sha2::{Digest, Sha256};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
@@ -47,6 +47,146 @@ static BUILTIN_DIR: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/skills-bootstrap
 // in-memory unit carries no invariant and recovering the guard cannot serve
 // tainted state.
 static REGISTRY_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
+// These maps carry process-local invariants: poisoning fails closed. The lease
+// mutex is held only for bookkeeping, never while acquiring REGISTRY_LOCK.
+static SOURCE_OPERATIONS: OnceLock<Mutex<HashSet<(PathBuf, String)>>> = OnceLock::new();
+static SOURCE_GENERATIONS: OnceLock<
+    Mutex<BTreeMap<(PathBuf, String), (SourceGeneration, SkillSource)>>,
+> = OnceLock::new();
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct SourceGeneration {
+    incarnation: Uuid,
+    config_revision: Uuid,
+}
+
+struct SourceSnapshot {
+    registry_path: PathBuf,
+    source: SkillSource,
+    generation: SourceGeneration,
+}
+
+struct SourceOperationLease {
+    source_key: (PathBuf, String),
+    checkout_key: (PathBuf, String),
+}
+
+impl Drop for SourceOperationLease {
+    fn drop(&mut self) {
+        if let Ok(mut operations) = SOURCE_OPERATIONS.get_or_init(Default::default).lock() {
+            operations.remove(&self.source_key);
+            operations.remove(&self.checkout_key);
+        }
+    }
+}
+
+fn ensure_source_generation(registry: &SkillsRegistry) -> Result<(), String> {
+    let path = registry_path()?;
+    let mut generations = SOURCE_GENERATIONS
+        .get_or_init(Default::default)
+        .lock()
+        .map_err(|_| "source_generation_lock_poisoned".to_string())?;
+    generations.retain(|(root, id), _| {
+        root != &path || registry.sources.iter().any(|source| &source.id == id)
+    });
+    for source in &registry.sources {
+        let mut configuration = source.clone();
+        configuration.last_synced_at = None;
+        let entry = generations
+            .entry((path.clone(), source.id.clone()))
+            .or_insert_with(|| {
+                (
+                    SourceGeneration {
+                        incarnation: Uuid::new_v4(),
+                        config_revision: Uuid::new_v4(),
+                    },
+                    configuration.clone(),
+                )
+            });
+        if entry.1 != configuration {
+            entry.0.config_revision = Uuid::new_v4();
+            entry.1 = configuration;
+        }
+    }
+    Ok(())
+}
+
+// Caller holds registry_guard; refresh from the latest disk load before capture.
+fn capture_source_snapshot(
+    registry: &SkillsRegistry,
+    source_id: &str,
+) -> Result<SourceSnapshot, String> {
+    ensure_source_generation(registry)?;
+    let source = registry
+        .sources
+        .iter()
+        .find(|source| source.id == source_id)
+        .cloned()
+        .ok_or_else(|| format!("unknown_source: {source_id}"))?;
+    let registry_path = registry_path()?;
+    let generations = SOURCE_GENERATIONS
+        .get_or_init(Default::default)
+        .lock()
+        .map_err(|_| "source_generation_lock_poisoned".to_string())?;
+    let generation = generations
+        .get(&(registry_path.clone(), source_id.to_string()))
+        .ok_or_else(|| format!("source_changed: {source_id}"))?
+        .0;
+    Ok(SourceSnapshot {
+        registry_path,
+        source,
+        generation,
+    })
+}
+
+fn admit_source_operation(snapshot: &SourceSnapshot) -> Result<SourceOperationLease, String> {
+    let raw = snapshot
+        .source
+        .path
+        .as_deref()
+        .filter(|path| !path.trim().is_empty())
+        .ok_or_else(|| "source_path_required".to_string())?;
+    let path = host_fs::expand_tilde(raw)
+        .canonicalize()
+        .map_err(|err| format!("source_path_invalid: {err}"))?;
+    // Resolve nested source roots and symlink aliases to the same worktree.
+    // No registry or lease guard is held during this subprocess.
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(&path)
+        .args(["rev-parse", "--show-toplevel"])
+        .no_window()
+        .output()
+        .map_err(|err| format!("source_checkout_identity_failed: {err}"))?;
+    let checkout = if output.status.success() {
+        PathBuf::from(String::from_utf8_lossy(&output.stdout).trim())
+            .canonicalize()
+            .map_err(|err| format!("source_checkout_identity_failed: {err}"))?
+    } else if snapshot.source.kind == "cloned" {
+        return Err("source_checkout_identity_failed: not a Git worktree".to_string());
+    } else {
+        path
+    };
+    let source_key = (snapshot.registry_path.clone(), snapshot.source.id.clone());
+    let checkout_key = (checkout, String::new());
+    let mut operations = SOURCE_OPERATIONS
+        .get_or_init(Default::default)
+        .lock()
+        .map_err(|_| "source_operation_lock_poisoned".to_string())?;
+    if operations.contains(&source_key) || operations.contains(&checkout_key) {
+        return Err(format!(
+            "source_busy: {} is already syncing",
+            snapshot.source.id
+        ));
+    }
+    operations.insert(source_key.clone());
+    operations.insert(checkout_key.clone());
+    Ok(SourceOperationLease {
+        source_key,
+        checkout_key,
+    })
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -568,31 +708,71 @@ pub fn skills_remove_source(source_id: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn skills_sync_source(
+pub async fn skills_sync_source(
     app: AppHandle,
     source_id: String,
     progress_id: Option<String>,
 ) -> Result<Vec<SkillRecord>, String> {
-    skills_sync_source_impl(
-        source_id,
-        ProgressReporter::new(&app, progress_id.as_deref()),
-    )
+    tauri::async_runtime::spawn_blocking(move || {
+        skills_sync_source_impl(
+            source_id,
+            ProgressReporter::new(&app, progress_id.as_deref()),
+        )
+    })
+    .await
+    .map_err(|err| format!("skills_sync_source_task_failed: {err}"))?
 }
 
 fn skills_sync_source_impl(
     source_id: String,
     progress: ProgressReporter<'_>,
 ) -> Result<Vec<SkillRecord>, String> {
+    sync_source_transaction(source_id, progress, |source, progress| {
+        if source.kind == "cloned" {
+            progress.info(format!("Pulling latest changes for {}", source.id));
+            run_command(
+                Command::new("git")
+                    .arg("-C")
+                    .arg(source_path(source)?)
+                    .args(["pull", "--ff-only"]),
+            )?;
+            progress.success(format!("Git pull complete for {}", source.id));
+        } else {
+            progress.info(format!("Source {} is linked; skipping git pull", source.id));
+        }
+        Ok(())
+    })
+}
+
+fn sync_source_transaction(
+    source_id: String,
+    progress: ProgressReporter<'_>,
+    network: impl FnOnce(&SkillSource, ProgressReporter<'_>) -> Result<(), String>,
+) -> Result<Vec<SkillRecord>, String> {
+    progress.info(format!("Resolving source {source_id}"));
+    let snapshot = {
+        let _guard = registry_guard()?;
+        capture_source_snapshot(&load_registry_unlocked()?, &source_id)?
+    };
+    let _lease = admit_source_operation(&snapshot)?;
+    // Revalidate after checkout discovery/admission, before the network edge.
+    {
+        let _guard = registry_guard()?;
+        let current = capture_source_snapshot(&load_registry_unlocked()?, &source_id)?;
+        if current.generation != snapshot.generation {
+            return Err(format!("source_changed: {source_id}; sync again manually"));
+        }
+    }
+    network(&snapshot.source, progress)?;
     let _guard = registry_guard()?;
     let mut registry = load_registry_unlocked()?;
-    progress.info(format!("Resolving source {source_id}"));
-    let source = registry
-        .sources
-        .iter()
-        .find(|source| source.id == source_id)
-        .cloned()
-        .ok_or_else(|| format!("unknown_source: {source_id}"))?;
-    let skills = sync_one_source_in_registry(&mut registry, &source, progress)?;
+    let current = capture_source_snapshot(&registry, &source_id)?;
+    if current.registry_path != snapshot.registry_path || current.generation != snapshot.generation
+    {
+        return Err(format!("source_changed: {source_id}; sync again manually"));
+    }
+    // Scan and merge into the freshly loaded registry under its existing guard.
+    let skills = rescan_source_in_registry_with_progress(&mut registry, &source_id, progress)?;
     save_registry_unlocked(&registry)?;
     progress.success(format!(
         "Sync complete for {source_id}: {} skill(s)",
@@ -1275,6 +1455,8 @@ fn skills_reset_registry_impl(
         installs: preserved_installs,
         ..SkillsRegistry::default()
     };
+    // Reset is a new incarnation even when rebuilt defaults are identical.
+    ensure_source_generation(&registry)?;
     progress.info("Recreating default sources");
     ensure_default_sources(&mut registry, work_path.as_deref())?;
     let source_ids: Vec<String> = registry
@@ -2731,6 +2913,10 @@ fn migrate_legacy_skill_tiers(registry: &mut SkillsRegistry) {
 }
 
 fn save_registry_unlocked(registry: &SkillsRegistry) -> Result<(), String> {
+    // Every application registry writer passes this seam, including default
+    // sources, linked config replacement, adoption and imports. Observe each
+    // committed mutation so identical remove/re-add and change/revert are ABA-safe.
+    ensure_source_generation(registry)?;
     host_fs::write_json_pretty(&registry_path()?, registry)
 }
 
@@ -4112,6 +4298,15 @@ fn skills_apply_bundle_update_impl(
     let _ = fs::remove_dir_all(&backup);
     prune_bundle_dirs(&[current.bundle_id.as_str(), active.bundle_id.as_str()])?;
 
+    // The bundle replaces content at an unchanged configured path. Invalidate
+    // captured readers even when its source settings have not changed.
+    {
+        let mut generations = SOURCE_GENERATIONS
+            .get_or_init(Default::default)
+            .lock()
+            .map_err(|_| "source_generation_lock_poisoned".to_string())?;
+        generations.remove(&(registry_path()?, BUILTIN_SOURCE_ID.to_string()));
+    }
     rescan_source_in_registry_with_progress(&mut registry, BUILTIN_SOURCE_ID, progress)?;
     let removed_installs = cleanup_removed_builtin_installs(&mut registry, &removed_skills)?;
     save_registry_unlocked(&registry)?;
@@ -5441,6 +5636,51 @@ mod tests {
 
     fn path_string(path: &Path) -> String {
         path.to_string_lossy().to_string()
+    }
+
+    mod phase08_source_transactions {
+        use super::*;
+        use std::sync::mpsc;
+        use std::time::Duration;
+
+        #[test]
+        fn phase08_01_registry_read_and_edit_progress_while_network_is_held() {
+            let _home = test_home();
+            let root = TempDir::new().unwrap();
+            write_skill(root.path(), "tracer");
+            skills_add_source(
+                "tracer".into(),
+                "linked".into(),
+                Some(path_string(root.path())),
+                None,
+                Some("skills".into()),
+            )
+            .unwrap();
+            let (entered_tx, entered_rx) = mpsc::channel();
+            let (release_tx, release_rx) = mpsc::channel();
+            let worker = std::thread::spawn(move || {
+                sync_source_transaction("tracer".into(), ProgressReporter::noop(), |_, _| {
+                    entered_tx.send(()).unwrap();
+                    release_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+                    Ok(())
+                })
+            });
+            entered_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+            let reader = std::thread::spawn(|| {
+                let _guard = registry_guard().unwrap();
+                let mut registry = load_registry_unlocked().unwrap();
+                registry.removed_source_ids.push("unrelated-edit".into());
+                save_registry_unlocked(&registry).unwrap();
+                registry.sources.len()
+            });
+            assert_eq!(reader.join().unwrap(), 1);
+            release_tx.send(()).unwrap();
+            assert_eq!(worker.join().unwrap().unwrap().len(), 1);
+            assert!(load_registry()
+                .unwrap()
+                .removed_source_ids
+                .contains(&"unrelated-edit".into()));
+        }
     }
 
     #[test]

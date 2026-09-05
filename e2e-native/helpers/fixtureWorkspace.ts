@@ -11,6 +11,45 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
+
+export const FIXTURE_SKILL_SOURCE = "native-local-git";
+export const FIXTURE_SKILL_TITLE = "Native synced skill";
+
+async function seedSkillSource(root: string): Promise<void> {
+  const { homeDir } = fixturePaths(root);
+  const skillsRoot = path.join(homeDir, ".maru", "skills");
+  const remote = path.join(root, "skills-remote.git");
+  const author = path.join(root, "skills-author");
+  const checkout = path.join(skillsRoot, "_sources", FIXTURE_SKILL_SOURCE);
+  const git = (...args: string[]) => execFileSync("git", args, {
+    encoding: "utf8",
+    env: { ...process.env, GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: os.devNull, GIT_TERMINAL_PROMPT: "0" },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  await fs.mkdir(skillsRoot, { recursive: true });
+  git("init", "--bare", remote);
+  git("clone", remote, author);
+  await fs.mkdir(path.join(author, "skills", "native-sync"), { recursive: true });
+  const skillFile = path.join(author, "skills", "native-sync", "SKILL.md");
+  await fs.writeFile(skillFile, "---\nname: Native initial skill\ndescription: Native local Git fixture\n---\n# Initial\n");
+  git("-C", author, "add", ".");
+  git("-C", author, "-c", "user.name=Native Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-m", "Seed local source");
+  git("-C", author, "push", "origin", "HEAD");
+  git("clone", remote, checkout);
+  await fs.writeFile(skillFile, `---\nname: ${FIXTURE_SKILL_TITLE}\ndescription: Native local Git fixture updated\n---\n# Synced\n`);
+  git("-C", author, "add", ".");
+  git("-C", author, "-c", "user.name=Native Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-m", "Update local source");
+  git("-C", author, "push", "origin", "HEAD");
+  await fs.writeFile(path.join(skillsRoot, "registry.json"), JSON.stringify({
+    version: 3, sources: [{ id: FIXTURE_SKILL_SOURCE, kind: "cloned", ownershipClass: "owned-catalog", path: checkout, repoUrl: remote, skillsSubdir: "skills" }],
+    skills: [], installs: [], removedSourceIds: [],
+  }, null, 2));
+}
+
+export async function readFixtureSkillRegistry(): Promise<{ sources: { id: string; lastSyncedAt?: string }[]; skills: { sourceId: string; title: string }[] }> {
+  return JSON.parse(await fs.readFile(path.join(fixturePaths(requireFixtureRoot()).homeDir, ".maru", "skills", "registry.json"), "utf8"));
+}
 
 /** Stem of the one seeded markdown document, exported so specs assert
  * against the same literal rather than duplicating it. */
@@ -31,6 +70,7 @@ let fixtureRoot: string | null = null;
 /** Per-worker latch: the first beforeTest sees the just-seeded state (the
  *  app launched after onPrepare), so only later tests need a real reset. */
 let fixtureDirty = false;
+const previousGitEnv = new Map<string, string | undefined>();
 
 function fixturePaths(root: string) {
   return {
@@ -110,9 +150,14 @@ export async function seedFixtureWorkspace(): Promise<{
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "maru-native-e2e-"));
   fixtureRoot = root;
   await writeFixtureContent(root);
+  await seedSkillSource(root);
   const resolved = fixturePaths(root);
   process.env.MARU_NATIVE_E2E_HOME = resolved.homeDir;
   process.env.MARU_NATIVE_E2E_CONFIG_DIR = resolved.configDir;
+  for (const [key, value] of Object.entries({ GIT_CONFIG_GLOBAL: os.devNull, GIT_CONFIG_NOSYSTEM: "1", GIT_TERMINAL_PROMPT: "0" })) {
+    previousGitEnv.set(key, process.env[key]);
+    process.env[key] = value;
+  }
   return resolved;
 }
 
@@ -171,5 +216,10 @@ export async function cleanupFixtureWorkspace(): Promise<void> {
   fixtureRoot = null;
   delete process.env.MARU_NATIVE_E2E_HOME;
   delete process.env.MARU_NATIVE_E2E_CONFIG_DIR;
+  for (const [key, value] of previousGitEnv) {
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
+  previousGitEnv.clear();
   await fs.rm(root, { recursive: true, force: true });
 }
