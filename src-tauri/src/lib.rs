@@ -108,10 +108,6 @@ use diagram::{
     diagram_restore_snapshot, diagram_save_document, diagram_save_snapshot,
     diagram_write_report_asset,
 };
-use document::{
-    create_document, create_version, duplicate_document, move_document, read_document,
-    save_document, trash_document, update_frontmatter_field,
-};
 use dot_sync::{dot_sync_overview, dot_sync_run};
 use drafts::{
     drafts_create, drafts_discard, drafts_list, drafts_promote, drafts_promote_default_dir,
@@ -120,7 +116,6 @@ use drafts::{
 use e2e_flow::{maru_e2e_read, maru_e2e_run};
 use evidence_binder::{evidence_binder_mutate, evidence_binder_read};
 use export::{export_dispatch, export_plan, export_validate};
-use file_manager::{open_in_file_manager, reveal_in_file_manager};
 use gap::{gap_analyze, gap_append_log, gap_log_list, gap_reports_list};
 use gmail_gws::{
     check_gws_auth, decide_gmail_item, decide_gmail_items, fetch_gmail_unread, stage_gmail_items,
@@ -246,7 +241,6 @@ use today_store::{
 use vault_graph::{
     vault_graph_layout_read, vault_graph_layout_save, vault_graph_read, vault_graph_root,
 };
-use vault_guard::vault_validate_note;
 use vault_list::{
     add_workspace_root, list_workspace_roots, refresh_workspace_capabilities,
     remove_workspace_root, set_active_workspace_root,
@@ -320,15 +314,15 @@ pub fn run() {
             vault_graph_layout_save,
             graph_link_preview,
             graph_link_apply,
-            vault_validate_note,
-            read_document,
-            save_document,
-            create_document,
-            move_document,
-            duplicate_document,
-            trash_document,
-            create_version,
-            update_frontmatter_field,
+            vault_guard::ipc::vault_validate_note,
+            document::ipc::read_document,
+            document::ipc::save_document,
+            document::ipc::create_document,
+            document::ipc::move_document,
+            document::ipc::duplicate_document,
+            document::ipc::trash_document,
+            document::ipc::create_version,
+            document::ipc::update_frontmatter_field,
             list_workspace_roots,
             add_workspace_root,
             remove_workspace_root,
@@ -343,8 +337,8 @@ pub fn run() {
             git::ipc::git_changes,
             git::ipc::git_diff,
             git::ipc::list_workspace_submodules,
-            open_in_file_manager,
-            reveal_in_file_manager,
+            file_manager::ipc::open_in_file_manager,
+            file_manager::ipc::reveal_in_file_manager,
             scan_inbox_drop,
             scan_inbox_entries,
             scan_inbox_processed_items,

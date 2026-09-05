@@ -16,7 +16,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
-use crate::atomic_file::write_atomic;
+use crate::atomic_file::{
+    with_path_transactions, write_atomic, PathTransactionLease, PathTransactionRequest,
+};
 use crate::evidence_binder::rekey_document_states;
 
 /// Frontend-supplied value for a single frontmatter field. Untagged so React
@@ -81,7 +83,6 @@ pub struct DeletedDocument {
     pub trash_rel_path: String,
 }
 
-#[tauri::command]
 pub fn read_document(vault_path: String, document_path: String) -> Result<DocumentPayload, String> {
     let path = resolve_inside_vault(&vault_path, &document_path)?;
     let vault = resolve_inside_vault(&vault_path, ".")?;
@@ -134,14 +135,40 @@ fn assert_expected_revision(current: &str, expected: Option<&str>) -> Result<(),
     Ok(())
 }
 
-#[tauri::command]
 pub fn save_document(
     vault_path: String,
     document_path: String,
     content: String,
     expected_revision: Option<String>,
 ) -> Result<DocumentPayload, IpcError> {
+    let vault = resolve_inside_vault(&vault_path, ".")?;
     let path = resolve_inside_vault(&vault_path, &document_path)?;
+    let request = PathTransactionRequest::new(vec![path, vault.join(".maru/versions")])?
+        .with_workspace_registry()?
+        .require_parent(&vault)?;
+    // Keep structured inner conflicts; admission failures remain display-only.
+    with_path_transactions(request, |lease| {
+        Ok(save_document_in_transaction(
+            lease,
+            vault_path,
+            document_path,
+            content,
+            expected_revision,
+        ))
+    })?
+}
+
+pub(crate) fn save_document_in_transaction(
+    lease: &PathTransactionLease,
+    vault_path: String,
+    document_path: String,
+    content: String,
+    expected_revision: Option<String>,
+) -> Result<DocumentPayload, IpcError> {
+    lease.ensure_workspace_registry()?;
+    let path = resolve_inside_vault(&vault_path, &document_path)?;
+    let vault = resolve_inside_vault(&vault_path, ".")?;
+    lease.ensure_covered(vec![path.clone(), vault.join(".maru/versions")])?;
     assert_document_owner(&vault_path, &path)?;
     assert_maru_can_write(&vault_path, WorkspaceWriteAction::Modify)?;
     validate_managed_write(&vault_path, &document_path, &content)?;
@@ -155,6 +182,7 @@ pub fn save_document(
             message: format!("expected revision {expected}, file is missing"),
         });
     }
+    lease.before_effect()?;
     // Managed roots snapshot the on-disk content before every overwrite
     // (maru-vault-graph-spec §2.4 가드 불변식) — conflict safety vs MCP co-writes.
     if is_managed_root(&vault_path) && path.is_file() {
@@ -163,7 +191,8 @@ pub fn save_document(
                 .file_stem()
                 .and_then(|s| s.to_str())
                 .unwrap_or("document");
-            write_version_snapshot(
+            write_version_snapshot_in_transaction(
+                lease,
                 &vault_path,
                 &document_path,
                 stem,
@@ -202,7 +231,6 @@ pub fn save_document(
 /// Patch a single frontmatter field on disk while preserving the order and
 /// comments of every other key. Sending `value: null` deletes the field.
 /// This is the load-bearing primitive for the InspectorPane inline editors.
-#[tauri::command]
 pub fn update_frontmatter_field(
     vault_path: String,
     document_path: String,
@@ -210,6 +238,33 @@ pub fn update_frontmatter_field(
     value: Option<FieldInput>,
     expected_revision: Option<String>,
 ) -> Result<DocumentPayload, IpcError> {
+    let vault = resolve_inside_vault(&vault_path, ".")?;
+    let path = resolve_inside_vault(&vault_path, &document_path)?;
+    let request = PathTransactionRequest::new(vec![path, vault.join(".maru/versions")])?
+        .with_workspace_registry()?
+        .require_parent(&vault)?;
+    // Keep structured inner conflicts; admission failures remain display-only.
+    with_path_transactions(request, |lease| {
+        Ok(update_frontmatter_field_in_transaction(
+            lease,
+            vault_path,
+            document_path,
+            key,
+            value,
+            expected_revision,
+        ))
+    })?
+}
+
+pub(crate) fn update_frontmatter_field_in_transaction(
+    lease: &PathTransactionLease,
+    vault_path: String,
+    document_path: String,
+    key: String,
+    value: Option<FieldInput>,
+    expected_revision: Option<String>,
+) -> Result<DocumentPayload, IpcError> {
+    lease.ensure_workspace_registry()?;
     let path = resolve_inside_vault(&vault_path, &document_path)?;
     let is_html = path
         .extension()
@@ -221,6 +276,8 @@ pub fn update_frontmatter_field(
             .to_string()
             .into());
     }
+    let vault = resolve_inside_vault(&vault_path, ".")?;
+    lease.ensure_covered(vec![path.clone(), vault.join(".maru/versions")])?;
     assert_document_owner(&vault_path, &path)?;
     assert_maru_can_write(&vault_path, WorkspaceWriteAction::Modify)?;
     let original =
@@ -230,12 +287,14 @@ pub fn update_frontmatter_field(
     let updated = update_frontmatter_content(&original, &key, mapped)?;
     if updated != original {
         validate_managed_write(&vault_path, &document_path, &updated)?;
+        lease.before_effect()?;
         if is_managed_root(&vault_path) {
             let stem = path
                 .file_stem()
                 .and_then(|s| s.to_str())
                 .unwrap_or("document");
-            write_version_snapshot(
+            write_version_snapshot_in_transaction(
+                lease,
                 &vault_path,
                 &document_path,
                 stem,
@@ -269,7 +328,6 @@ pub struct CreateDocumentExtras {
     pub program_id: Option<String>,
 }
 
-#[tauri::command]
 pub fn create_document(
     vault_path: String,
     title: String,
@@ -278,6 +336,46 @@ pub fn create_document(
     target_rel_path: Option<String>,
     #[allow(non_snake_case)] extras: Option<CreateDocumentExtras>,
 ) -> Result<CreatedDocument, String> {
+    let vault = resolve_inside_vault(&vault_path, ".")?;
+    let rel_path = match target_rel_path
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        Some(target) => validate_target_rel_path(target, None)?,
+        None => {
+            let slug = slugify(&title);
+            validate_filename_stem(&slug)?;
+            format!("{slug}.md")
+        }
+    };
+    let path = resolve_inside_vault(&vault_path, &rel_path)?;
+    let request = PathTransactionRequest::new(vec![path])?
+        .with_workspace_registry()?
+        .require_parent(&vault)?;
+    with_path_transactions(request, |lease| {
+        create_document_in_transaction(
+            lease,
+            vault_path,
+            title,
+            doc_type,
+            body,
+            target_rel_path,
+            extras,
+        )
+    })
+}
+
+pub(crate) fn create_document_in_transaction(
+    lease: &PathTransactionLease,
+    vault_path: String,
+    title: String,
+    doc_type: String,
+    body: String,
+    target_rel_path: Option<String>,
+    #[allow(non_snake_case)] extras: Option<CreateDocumentExtras>,
+) -> Result<CreatedDocument, String> {
+    lease.ensure_workspace_registry()?;
     let now = Utc::now().to_rfc3339();
     let rel_path = match target_rel_path
         .as_deref()
@@ -292,6 +390,7 @@ pub fn create_document(
         }
     };
     let path = resolve_inside_vault(&vault_path, &rel_path)?;
+    lease.ensure_covered(vec![path.clone()])?;
     assert_document_owner(&vault_path, &path)?;
     assert_maru_can_write(&vault_path, WorkspaceWriteAction::Create)?;
     if path.exists() {
@@ -351,6 +450,7 @@ pub fn create_document(
     let content = build_frontmatter(&fields, &body_with_heading);
     validate_managed_write(&vault_path, &rel_path, &content)?;
 
+    lease.before_effect()?;
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
             .map_err(|err| format!("Cannot create parent directory: {err}"))?;
@@ -409,12 +509,33 @@ fn validate_target_rel_path(target: &str, fallback_ext: Option<&str>) -> Result<
     Ok(format!("{without_ext}.{ext}"))
 }
 
-#[tauri::command]
 pub fn move_document(
     vault_path: String,
     document_path: String,
     target_rel_path: String,
 ) -> Result<DocumentPayload, String> {
+    let vault = resolve_inside_vault(&vault_path, ".")?;
+    let source = resolve_inside_vault(&vault_path, &document_path)?;
+    let target = validate_target_rel_path(
+        &target_rel_path,
+        source.extension().and_then(|s| s.to_str()),
+    )?;
+    let target = resolve_inside_vault(&vault_path, &target)?;
+    let request = PathTransactionRequest::new(vec![source, target, vault.join(".maru/binder")])?
+        .with_workspace_registry()?
+        .require_parent(&vault)?;
+    with_path_transactions(request, |lease| {
+        move_document_in_transaction(lease, vault_path, document_path, target_rel_path)
+    })
+}
+
+pub(crate) fn move_document_in_transaction(
+    lease: &PathTransactionLease,
+    vault_path: String,
+    document_path: String,
+    target_rel_path: String,
+) -> Result<DocumentPayload, String> {
+    lease.ensure_workspace_registry()?;
     let source_path = resolve_inside_vault(&vault_path, &document_path)?;
     let vault = resolve_inside_vault(&vault_path, ".")?;
     ensure_existing_document(&source_path)?;
@@ -422,6 +543,11 @@ pub fn move_document(
     let source_ext = source_path.extension().and_then(|value| value.to_str());
     let rel_path = validate_target_rel_path(&target_rel_path, source_ext)?;
     let target_path = resolve_inside_vault(&vault_path, &rel_path)?;
+    lease.ensure_covered(vec![
+        source_path.clone(),
+        target_path.clone(),
+        vault.join(".maru/binder"),
+    ])?;
     assert_document_owner(&vault_path, &source_path)?;
     assert_document_owner(&vault_path, &target_path)?;
     assert_maru_can_write(&vault_path, WorkspaceWriteAction::RenameMove)?;
@@ -432,6 +558,7 @@ pub fn move_document(
         return Err("A document already exists at that path".to_string());
     }
 
+    lease.before_effect()?;
     if let Some(parent) = target_path.parent() {
         fs::create_dir_all(parent)
             .map_err(|err| format!("Cannot create target directory: {err}"))?;
@@ -455,12 +582,39 @@ pub fn move_document(
     Ok(payload)
 }
 
-#[tauri::command]
 pub fn duplicate_document(
     vault_path: String,
     document_path: String,
 ) -> Result<DocumentPayload, String> {
+    let vault = resolve_inside_vault(&vault_path, ".")?;
+    let source = resolve_inside_vault(&vault_path, &document_path)?;
+    // Reserve the allocation directory plus the exact source's physical alias.
+    let parent = source
+        .parent()
+        .ok_or("Document has no parent")?
+        .to_path_buf();
+    let request = PathTransactionRequest::new(vec![source, parent])?
+        .with_workspace_registry()?
+        .require_parent(&vault)?;
+    with_path_transactions(request, |lease| {
+        duplicate_document_in_transaction(lease, vault_path, document_path)
+    })
+}
+
+pub(crate) fn duplicate_document_in_transaction(
+    lease: &PathTransactionLease,
+    vault_path: String,
+    document_path: String,
+) -> Result<DocumentPayload, String> {
+    lease.ensure_workspace_registry()?;
     let source_path = resolve_inside_vault(&vault_path, &document_path)?;
+    lease.ensure_covered(vec![
+        source_path.clone(),
+        source_path
+            .parent()
+            .ok_or("Document has no parent")?
+            .to_path_buf(),
+    ])?;
     assert_document_owner(&vault_path, &source_path)?;
     assert_maru_can_write(&vault_path, WorkspaceWriteAction::Create)?;
     ensure_existing_document(&source_path)?;
@@ -471,23 +625,47 @@ pub fn duplicate_document(
             .map_err(|err| format!("Cannot read document: {err}"))?;
         validate_managed_write(&vault_path, &relative(&target_path, &vault), &content)?;
     }
+    lease.ensure_covered(vec![target_path.clone()])?;
+    lease.before_effect()?;
     fs::copy(&source_path, &target_path)
         .map_err(|err| format!("Cannot duplicate document: {err}"))?;
     read_document(vault_path, target_path.to_string_lossy().to_string())
 }
 
-#[tauri::command]
 pub fn trash_document(
     vault_path: String,
     document_path: String,
 ) -> Result<DeletedDocument, String> {
+    let vault = resolve_inside_vault(&vault_path, ".")?;
+    let source = resolve_inside_vault(&vault_path, &document_path)?;
+    let request = PathTransactionRequest::new(vec![source, vault.join(".maru/trash/documents")])?
+        .with_workspace_registry()?
+        .require_parent(&vault)?;
+    with_path_transactions(request, |lease| {
+        trash_document_in_transaction(lease, vault_path, document_path)
+    })
+}
+
+pub(crate) fn trash_document_in_transaction(
+    lease: &PathTransactionLease,
+    vault_path: String,
+    document_path: String,
+) -> Result<DeletedDocument, String> {
+    lease.ensure_workspace_registry()?;
     let source_path = resolve_inside_vault(&vault_path, &document_path)?;
+    let vault = resolve_inside_vault(&vault_path, ".")?;
+    lease.ensure_covered(vec![
+        source_path.clone(),
+        vault.join(".maru/trash/documents"),
+    ])?;
     assert_document_owner(&vault_path, &source_path)?;
     assert_maru_can_write(&vault_path, WorkspaceWriteAction::Delete)?;
     let vault = resolve_inside_vault(&vault_path, ".")?;
     ensure_existing_document(&source_path)?;
     let original_rel_path = relative(&source_path, &vault);
     let trash_path = unique_trash_path(&source_path, &vault)?;
+    lease.ensure_covered(vec![trash_path.clone()])?;
+    lease.before_effect()?;
     if let Some(parent) = trash_path.parent() {
         fs::create_dir_all(parent)
             .map_err(|err| format!("Cannot create trash directory: {err}"))?;
@@ -591,7 +769,6 @@ fn unique_trash_path(source_path: &Path, vault: &Path) -> Result<PathBuf, String
     Err("Cannot allocate trash path".to_string())
 }
 
-#[tauri::command]
 pub fn create_version(
     vault_path: String,
     document_path: String,
@@ -599,10 +776,38 @@ pub fn create_version(
     content: String,
     summary: String,
 ) -> Result<VersionSnapshot, String> {
+    let vault = resolve_inside_vault(&vault_path, ".")?;
+    let path = resolve_inside_vault(&vault_path, &document_path)?;
+    let request = PathTransactionRequest::new(vec![path, vault.join(".maru/versions")])?
+        .with_workspace_registry()?
+        .require_parent(&vault)?;
+    with_path_transactions(request, |lease| {
+        create_version_in_transaction(lease, vault_path, document_path, title, content, summary)
+    })
+}
+
+pub(crate) fn create_version_in_transaction(
+    lease: &PathTransactionLease,
+    vault_path: String,
+    document_path: String,
+    title: String,
+    content: String,
+    summary: String,
+) -> Result<VersionSnapshot, String> {
+    lease.ensure_workspace_registry()?;
     let source_path = resolve_inside_vault(&vault_path, &document_path)?;
+    let vault = resolve_inside_vault(&vault_path, ".")?;
+    lease.ensure_covered(vec![source_path.clone(), vault.join(".maru/versions")])?;
     assert_document_owner(&vault_path, &source_path)?;
     assert_maru_can_write(&vault_path, WorkspaceWriteAction::Create)?;
-    write_version_snapshot(&vault_path, &document_path, &title, &content, &summary)
+    write_version_snapshot_in_transaction(
+        lease,
+        &vault_path,
+        &document_path,
+        &title,
+        &content,
+        &summary,
+    )
 }
 
 /// Snapshot-writing body of create_version, shared with the managed-write
@@ -610,6 +815,30 @@ pub fn create_version(
 /// maru-vault-graph-spec §2.4 가드 불변식). No capability assert here; the
 /// command wrapper and the managed gate each own their own checks.
 pub(crate) fn write_version_snapshot(
+    vault_path: &str,
+    document_path: &str,
+    title: &str,
+    content: &str,
+    summary: &str,
+) -> Result<VersionSnapshot, String> {
+    let vault = resolve_inside_vault(vault_path, ".")?;
+    let source = resolve_inside_vault(vault_path, document_path)?;
+    let request = PathTransactionRequest::new(vec![source, vault.join(".maru/versions")])?
+        .require_parent(&vault)?;
+    with_path_transactions(request, |lease| {
+        write_version_snapshot_in_transaction(
+            lease,
+            vault_path,
+            document_path,
+            title,
+            content,
+            summary,
+        )
+    })
+}
+
+pub(crate) fn write_version_snapshot_in_transaction(
+    lease: &PathTransactionLease,
     vault_path: &str,
     document_path: &str,
     title: &str,
@@ -628,6 +857,8 @@ pub(crate) fn write_version_snapshot(
         .unwrap_or("md");
     let timestamp = Utc::now();
     let version_dir = vault.join(".maru").join("versions");
+    lease.ensure_covered(vec![source_path.clone(), version_dir.clone()])?;
+    lease.before_effect()?;
     fs::create_dir_all(&version_dir)
         .map_err(|err| format!("Cannot create version directory: {err}"))?;
     let file_name = format!(
@@ -676,6 +907,149 @@ fn relative(path: &Path, vault: &Path) -> String {
         .unwrap_or(path)
         .to_string_lossy()
         .to_string()
+}
+
+/// IPC scheduling boundary; synchronous domain/CLI APIs remain available.
+pub mod ipc {
+    use super::*;
+    #[tauri::command]
+    pub async fn read_document(
+        vault_path: String,
+        document_path: String,
+    ) -> Result<DocumentPayload, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(&[PathBuf::from(&vault_path)], "worker:read_document");
+            super::read_document(vault_path, document_path)
+        })
+        .await
+        .map_err(|err| format!("read_document_task_failed: {err}"))?
+    }
+    #[tauri::command]
+    pub async fn save_document(
+        vault_path: String,
+        document_path: String,
+        content: String,
+        expected_revision: Option<String>,
+    ) -> Result<DocumentPayload, IpcError> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(&[PathBuf::from(&vault_path)], "worker:save_document");
+            super::save_document(vault_path, document_path, content, expected_revision)
+        })
+        .await
+        .map_err(|err| IpcError::from(format!("save_document_task_failed: {err}")))?
+    }
+    #[tauri::command]
+    pub async fn update_frontmatter_field(
+        vault_path: String,
+        document_path: String,
+        key: String,
+        value: Option<FieldInput>,
+        expected_revision: Option<String>,
+    ) -> Result<DocumentPayload, IpcError> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(
+                &[PathBuf::from(&vault_path)],
+                "worker:update_frontmatter_field",
+            );
+            super::update_frontmatter_field(
+                vault_path,
+                document_path,
+                key,
+                value,
+                expected_revision,
+            )
+        })
+        .await
+        .map_err(|err| IpcError::from(format!("update_frontmatter_field_task_failed: {err}")))?
+    }
+    #[tauri::command]
+    pub async fn create_document(
+        vault_path: String,
+        title: String,
+        doc_type: String,
+        body: String,
+        target_rel_path: Option<String>,
+        #[allow(non_snake_case)] extras: Option<CreateDocumentExtras>,
+    ) -> Result<CreatedDocument, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(
+                &[PathBuf::from(&vault_path)],
+                "worker:create_document",
+            );
+            super::create_document(vault_path, title, doc_type, body, target_rel_path, extras)
+        })
+        .await
+        .map_err(|err| format!("create_document_task_failed: {err}"))?
+    }
+    #[tauri::command]
+    pub async fn move_document(
+        vault_path: String,
+        document_path: String,
+        target_rel_path: String,
+    ) -> Result<DocumentPayload, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(&[PathBuf::from(&vault_path)], "worker:move_document");
+            super::move_document(vault_path, document_path, target_rel_path)
+        })
+        .await
+        .map_err(|err| format!("move_document_task_failed: {err}"))?
+    }
+    #[tauri::command]
+    pub async fn duplicate_document(
+        vault_path: String,
+        document_path: String,
+    ) -> Result<DocumentPayload, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(
+                &[PathBuf::from(&vault_path)],
+                "worker:duplicate_document",
+            );
+            super::duplicate_document(vault_path, document_path)
+        })
+        .await
+        .map_err(|err| format!("duplicate_document_task_failed: {err}"))?
+    }
+    #[tauri::command]
+    pub async fn trash_document(
+        vault_path: String,
+        document_path: String,
+    ) -> Result<DeletedDocument, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(
+                &[PathBuf::from(&vault_path)],
+                "worker:trash_document",
+            );
+            super::trash_document(vault_path, document_path)
+        })
+        .await
+        .map_err(|err| format!("trash_document_task_failed: {err}"))?
+    }
+    #[tauri::command]
+    pub async fn create_version(
+        vault_path: String,
+        document_path: String,
+        title: String,
+        content: String,
+        summary: String,
+    ) -> Result<VersionSnapshot, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(
+                &[PathBuf::from(&vault_path)],
+                "worker:create_version",
+            );
+            super::create_version(vault_path, document_path, title, content, summary)
+        })
+        .await
+        .map_err(|err| format!("create_version_task_failed: {err}"))?
+    }
 }
 
 #[cfg(test)]
@@ -1260,5 +1634,509 @@ mod tests {
             "document_conflict: expected revision abc123, file is missing"
         );
         assert!(!tmp.path().join("ghost.md").exists());
+    }
+}
+
+#[cfg(test)]
+mod phase08_07 {
+    use super::*;
+    use crate::atomic_file::phase08_06::{boundary, run, Held, Home};
+    use crate::workspace_files::phase08_06::TrashFixture;
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    fn text(path: &Path) -> String {
+        path.to_string_lossy().into_owned()
+    }
+    fn start<F>(future: F) -> mpsc::Receiver<F::Output>
+    where
+        F: std::future::Future + Send + 'static,
+        F::Output: Send + 'static,
+    {
+        let (tx, rx) = mpsc::channel();
+        tauri::async_runtime::spawn(async move {
+            let _ = tx.send(future.await);
+        });
+        rx
+    }
+    fn done<T>(rx: mpsc::Receiver<T>) -> T {
+        rx.recv_timeout(Duration::from_secs(10))
+            .expect("bounded real command completion")
+    }
+    fn binder(root: &Path, rel: &str, id: &str) {
+        fs::create_dir_all(root.join(".maru/binder")).unwrap();
+        fs::write(
+            root.join(format!(".maru/binder/{id}.json")),
+            serde_json::json!({
+                "schemaVersion": 2, "docId": id, "documentPath": text(&root.join(rel)),
+                "bindings": [], "updatedAt": "2026-09-05T00:00:00Z"
+            })
+            .to_string(),
+        )
+        .unwrap();
+    }
+    fn assert_binder(root: &Path, rel: &str, id: &str) {
+        let value: serde_json::Value = serde_json::from_slice(
+            &fs::read(root.join(format!(".maru/binder/{id}.json"))).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(value["docId"], id);
+        assert_eq!(value["documentPath"], text(&root.join(rel)));
+    }
+
+    #[test]
+    fn phase08_07_all_document_wrappers_yield_on_same_polling_task() {
+        let home = Home::new();
+        let root = home.root.path();
+        let s = text(root);
+        boundary(
+            root.into(),
+            "read_document",
+            ipc::read_document(s.clone(), "note.md".into()),
+        );
+        let t = s.clone();
+        boundary(root.into(), "save_document", async move {
+            ipc::save_document(t, "note.md".into(), "body".into(), None)
+                .await
+                .map_err(|e| e.to_string())
+        });
+        let t = s.clone();
+        boundary(root.into(), "update_frontmatter_field", async move {
+            ipc::update_frontmatter_field(t, "note.md".into(), "status".into(), None, None)
+                .await
+                .map_err(|e| e.to_string())
+        });
+        boundary(
+            root.into(),
+            "create_document",
+            ipc::create_document(
+                s.clone(),
+                "new".into(),
+                "reference".into(),
+                "body".into(),
+                None,
+                None,
+            ),
+        );
+        boundary(
+            root.into(),
+            "move_document",
+            ipc::move_document(s.clone(), "note.md".into(), "next.md".into()),
+        );
+        boundary(
+            root.into(),
+            "duplicate_document",
+            ipc::duplicate_document(s.clone(), "note.md".into()),
+        );
+        boundary(
+            root.into(),
+            "trash_document",
+            ipc::trash_document(s.clone(), "note.md".into()),
+        );
+        boundary(
+            root.into(),
+            "create_version",
+            ipc::create_version(
+                s,
+                "note.md".into(),
+                "title".into(),
+                "body".into(),
+                "snapshot".into(),
+            ),
+        );
+    }
+
+    #[test]
+    fn phase08_07_actual_wrappers_preserve_nonempty_payloads_and_typed_conflicts() {
+        let home = Home::new();
+        let root = home.root.path();
+        let s = text(root);
+        let created = run(ipc::create_document(
+            s.clone(),
+            "note".into(),
+            "reference".into(),
+            "본문 bytes".into(),
+            None,
+            None,
+        ))
+        .unwrap();
+        let opened = run(ipc::read_document(s.clone(), created.rel_path.clone())).unwrap();
+        assert!(opened.body.contains("본문 bytes"));
+        let patched = run(ipc::update_frontmatter_field(
+            s.clone(),
+            created.rel_path.clone(),
+            "status".into(),
+            Some(FieldInput::Str("done".into())),
+            Some(opened.revision.clone()),
+        ))
+        .unwrap();
+        assert_eq!(opened.body.as_bytes(), patched.body.as_bytes());
+        let error = run(ipc::save_document(
+            s.clone(),
+            created.rel_path.clone(),
+            "stale".into(),
+            Some(opened.revision),
+        ))
+        .unwrap_err();
+        assert_eq!(error.code, DOCUMENT_CONFLICT);
+        assert_eq!(fs::read_to_string(&created.path).unwrap(), patched.content);
+        let saved = run(ipc::save_document(
+            s.clone(),
+            created.rel_path.clone(),
+            "# saved\nbody\n".into(),
+            Some(patched.revision),
+        ))
+        .unwrap();
+        let copy = run(ipc::duplicate_document(s.clone(), saved.rel_path.clone())).unwrap();
+        assert_eq!(copy.content, saved.content);
+        binder(root, &copy.rel_path, "note-copy");
+        let moved = run(ipc::move_document(
+            s.clone(),
+            copy.rel_path,
+            "nested/moved.md".into(),
+        ))
+        .unwrap();
+        assert_binder(root, "nested/moved.md", "nested-moved");
+        assert!(!root.join(".maru/binder/note-copy.json").exists());
+        let snap = run(ipc::create_version(
+            s.clone(),
+            moved.rel_path.clone(),
+            "title".into(),
+            moved.content.clone(),
+            "reason".into(),
+        ))
+        .unwrap();
+        assert!(fs::read_to_string(snap.path).unwrap().contains("reason"));
+        let trash = run(ipc::trash_document(s.clone(), moved.rel_path)).unwrap();
+        assert_eq!(fs::read_to_string(trash.trash_path).unwrap(), saved.content);
+        assert!(!Path::new(&trash.original_path).exists());
+        let missing = run(ipc::save_document(
+            s,
+            "missing.md".into(),
+            "new".into(),
+            Some("previous".into()),
+        ))
+        .unwrap_err();
+        assert_eq!(missing.code, DOCUMENT_CONFLICT);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn phase08_07_parent_child_races_all_pairs_both_orders_and_aliases() {
+        let home = Home::new();
+        for parent in ["rename", "trash"] {
+            for child in ["save", "create"] {
+                for parent_first in [false, true] {
+                    for alias in ["lexical", "symlink", "ancestor"] {
+                        let fixture = tempfile::tempdir_in(home.root.path()).unwrap();
+                        let root = fixture.path();
+                        let s = text(root);
+                        let a = root.join("a");
+                        fs::create_dir(&a).unwrap();
+                        fs::write(a.join("note.md"), "# original\nbody\n").unwrap();
+                        binder(root, "a/note.md", "a-note");
+                        let child_rel = match alias {
+                            "symlink" => {
+                                std::os::unix::fs::symlink(&a, root.join("alias")).unwrap();
+                                "alias"
+                            }
+                            "ancestor" => {
+                                std::os::unix::fs::symlink(root, root.join("ancestor")).unwrap();
+                                "ancestor/a"
+                            }
+                            _ => "a",
+                        };
+                        let name = if child == "save" { "note.md" } else { "new.md" };
+                        let rel = format!("{child_rel}/{name}");
+                        let target = root.join(&rel);
+                        let moved = root.join("b");
+                        let trashed = root.join("fixture-trash");
+                        let _trash = TrashFixture::new(a.clone(), trashed.clone());
+                        let parent_future = async move {
+                            if parent == "rename" {
+                                crate::workspace_files::ipc::rename_workspace_entry(
+                                    s,
+                                    "a".into(),
+                                    "b".into(),
+                                )
+                                .await
+                                .map(|o| assert!(o.error.is_none()))
+                            } else {
+                                crate::workspace_files::ipc::trash_workspace_entries(
+                                    s,
+                                    vec!["a".into()],
+                                )
+                                .await
+                                .map(|o| {
+                                    assert_eq!(o.len(), 1);
+                                    assert!(o[0].error.is_none());
+                                })
+                            }
+                        };
+                        let s = text(root);
+                        let revision = revision_for("# original\nbody\n");
+                        let child_future = async move {
+                            if child == "save" {
+                                ipc::save_document(
+                                    s,
+                                    rel,
+                                    "# child committed\nbody\n".into(),
+                                    Some(revision),
+                                )
+                                .await
+                                .map(|_| ())
+                                .map_err(|e| e.to_string())
+                            } else {
+                                ipc::create_document(
+                                    s,
+                                    "child committed".into(),
+                                    "reference".into(),
+                                    "body".into(),
+                                    Some(rel),
+                                    None,
+                                )
+                                .await
+                                .map(|_| ())
+                            }
+                        };
+                        if parent_first {
+                            let held = Held::new(a.clone(), "pre-effect");
+                            let p = start(parent_future);
+                            held.wait();
+                            let wait = Held::new(target, "before-admission");
+                            let c = start(child_future);
+                            wait.wait();
+                            wait.release();
+                            assert!(c.recv_timeout(Duration::from_millis(30)).is_err());
+                            held.release();
+                            done(p).unwrap();
+                            assert!(
+                                done(c).is_err(),
+                                "{parent}/{child}/{alias}: old child must fail"
+                            );
+                        } else {
+                            let held = Held::new(target, "pre-effect");
+                            let c = start(child_future);
+                            held.wait();
+                            let wait = Held::new(a.clone(), "before-admission");
+                            let p = start(parent_future);
+                            wait.wait();
+                            wait.release();
+                            assert!(p.recv_timeout(Duration::from_millis(30)).is_err());
+                            held.release();
+                            done(c).unwrap();
+                            done(p).unwrap();
+                            let final_root = if parent == "rename" { &moved } else { &trashed };
+                            assert!(fs::read_to_string(final_root.join(name))
+                                .unwrap()
+                                .contains("child committed"));
+                        }
+                        assert!(
+                            !a.exists(),
+                            "{parent}/{child}/{alias}: original tree resurrected"
+                        );
+                        if parent == "rename" {
+                            assert_binder(root, "b/note.md", "b-note");
+                            assert!(!root.join(".maru/binder/a-note.json").exists());
+                        } else {
+                            assert_binder(root, "a/note.md", "a-note");
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn phase08_07_frontmatter_save_same_revision_is_serial_and_preserves_body() {
+        let home = Home::new();
+        let root = home.root.path();
+        let s = text(root);
+        let original = "---\n# keep comment\nstatus: draft\ntitle: keep\n---\n# 한글\n\nbody  \n";
+        for patch_first in [false, true] {
+            fs::write(root.join("note.md"), original).unwrap();
+            let revision = revision_for(original);
+            let held = Held::new(root.join("note.md"), "pre-effect");
+            let patch = ipc::update_frontmatter_field(
+                s.clone(),
+                "note.md".into(),
+                "status".into(),
+                Some(FieldInput::Str("done".into())),
+                Some(revision.clone()),
+            );
+            let save = ipc::save_document(
+                s.clone(),
+                "note.md".into(),
+                "# saved body\n".into(),
+                Some(revision),
+            );
+            if patch_first {
+                let first = start(patch);
+                held.wait();
+                let wait = Held::new(root.join("note.md"), "before-admission");
+                let second = start(save);
+                wait.wait();
+                wait.release();
+                assert!(second.recv_timeout(Duration::from_millis(30)).is_err());
+                held.release();
+                let result = done(first).unwrap();
+                assert_eq!(result.body, parse_frontmatter(original).body);
+                assert!(result.content.contains("# keep comment"));
+                assert_eq!(done(second).unwrap_err().code, DOCUMENT_CONFLICT);
+            } else {
+                let first = start(save);
+                held.wait();
+                let wait = Held::new(root.join("note.md"), "before-admission");
+                let second = start(patch);
+                wait.wait();
+                wait.release();
+                assert!(second.recv_timeout(Duration::from_millis(30)).is_err());
+                held.release();
+                done(first).unwrap();
+                assert_eq!(done(second).unwrap_err().code, DOCUMENT_CONFLICT);
+                assert_eq!(
+                    fs::read_to_string(root.join("note.md")).unwrap(),
+                    "# saved body\n"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn phase08_07_each_mutation_same_target_contention_and_error_release() {
+        let home = Home::new();
+        for command in [
+            "save",
+            "frontmatter",
+            "create",
+            "move",
+            "duplicate",
+            "trash",
+            "version",
+        ] {
+            let fixture = tempfile::tempdir_in(home.root.path()).unwrap();
+            let root = fixture.path();
+            let s = text(root);
+            fs::write(root.join("note.md"), "---\nstatus: draft\n---\n# body\n").unwrap();
+            let target = root.join(if command == "create" {
+                "new.md"
+            } else {
+                "note.md"
+            });
+            let invoke = |root: String| async move {
+                match command {
+                    "save" => ipc::save_document(root, "note.md".into(), "# saved".into(), None)
+                        .await
+                        .map(|_| ())
+                        .map_err(|e| e.to_string()),
+                    "frontmatter" => ipc::update_frontmatter_field(
+                        root,
+                        "note.md".into(),
+                        "status".into(),
+                        Some(FieldInput::Str("done".into())),
+                        None,
+                    )
+                    .await
+                    .map(|_| ())
+                    .map_err(|e| e.to_string()),
+                    "create" => ipc::create_document(
+                        root,
+                        "new".into(),
+                        "reference".into(),
+                        "body".into(),
+                        None,
+                        None,
+                    )
+                    .await
+                    .map(|_| ()),
+                    "move" => ipc::move_document(root, "note.md".into(), "moved.md".into())
+                        .await
+                        .map(|_| ()),
+                    "duplicate" => ipc::duplicate_document(root, "note.md".into())
+                        .await
+                        .map(|_| ()),
+                    "trash" => ipc::trash_document(root, "note.md".into())
+                        .await
+                        .map(|_| ()),
+                    _ => ipc::create_version(
+                        root,
+                        "note.md".into(),
+                        "title".into(),
+                        "body".into(),
+                        "snapshot".into(),
+                    )
+                    .await
+                    .map(|_| ()),
+                }
+            };
+            let held = Held::new(target.clone(), "pre-effect");
+            let first = start(invoke(s.clone()));
+            held.wait();
+            let wait = Held::new(target.clone(), "before-admission");
+            let second = start(invoke(s.clone()));
+            wait.wait();
+            wait.release();
+            assert!(
+                second.recv_timeout(Duration::from_millis(30)).is_err(),
+                "{command}: overlap bypassed admission"
+            );
+            held.release();
+            done(first).unwrap();
+            let second = done(second);
+            if matches!(command, "move" | "trash" | "create") {
+                assert!(second.is_err());
+            } else {
+                second.unwrap();
+            }
+            // Every mutation gets a real denied write, then a successful fresh operation.
+            fs::write(root.join("note.md"), "# reset body\n").unwrap();
+            if root.join("new.md").exists() {
+                fs::remove_file(root.join("new.md")).unwrap();
+            }
+            if root.join("moved.md").exists() {
+                fs::remove_file(root.join("moved.md")).unwrap();
+            }
+            let registry = crate::vault_list::workspace_registry_path().unwrap();
+            fs::create_dir_all(registry.parent().unwrap()).unwrap();
+            fs::write(&registry,serde_json::json!({"workspaces":[{"label":"fixture","visibility":"private","path":s,"writePolicy":"readOnly"}]}).to_string()).unwrap();
+            assert!(
+                run(invoke(text(root))).unwrap_err().contains("blocked"),
+                "{command}"
+            );
+            fs::write(registry, r#"{"workspaces":[]}"#).unwrap();
+            run(invoke(text(root))).unwrap();
+        }
+    }
+
+    #[test]
+    fn phase08_07_move_rekey_collision_rolls_back_every_binder_and_releases() {
+        let home = Home::new();
+        let root = home.root.path();
+        let s = text(root);
+        fs::write(root.join("note.md"), "# source bytes\n").unwrap();
+        binder(root, "note.md", "note");
+        let original = fs::read(root.join(".maru/binder/note.json")).unwrap();
+        fs::write(root.join(".maru/binder/moved.json"), "collision bytes").unwrap();
+        let error = run(ipc::move_document(
+            s.clone(),
+            "note.md".into(),
+            "moved.md".into(),
+        ))
+        .unwrap_err();
+        assert!(error.contains("rolled back"));
+        assert!(!root.join("moved.md").exists());
+        assert_eq!(fs::read(root.join("note.md")).unwrap(), b"# source bytes\n");
+        assert_eq!(
+            fs::read(root.join(".maru/binder/note.json")).unwrap(),
+            original
+        );
+        assert_eq!(
+            fs::read(root.join(".maru/binder/moved.json")).unwrap(),
+            b"collision bytes"
+        );
+        fs::remove_file(root.join(".maru/binder/moved.json")).unwrap();
+        run(ipc::move_document(s, "note.md".into(), "moved.md".into())).unwrap();
+        assert_binder(root, "moved.md", "moved");
+        assert!(!root.join(".maru/binder/note.json").exists());
     }
 }
