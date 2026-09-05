@@ -94,10 +94,10 @@ use agent_host::status::ipc::{agents_account_status, agents_usage_status};
 use agent_host::structured_loop::ipc::agent_run_structured_loop;
 use agents::ipc::{agents_delete, agents_list, agents_reset, agents_upsert};
 use ai_router::ipc::{start_agent_cli_invocation, start_claude_cli_invocation};
-use approval::{prepare_approval, record_approval, ApprovalState};
-use browser_passkeys::{
-    browser_passkey_request_authorization, browser_passkey_status, BrowserPasskeyState,
-};
+use approval::ipc::{prepare_approval, record_approval};
+use approval::ApprovalState;
+use browser_passkeys::ipc::{browser_passkey_request_authorization, browser_passkey_status};
+use browser_passkeys::BrowserPasskeyState;
 use diagram::ipc::{
     diagram_backup_document, diagram_delete_document, diagram_export_blob,
     diagram_export_blob_to_path, diagram_list_documents, diagram_list_snapshots,
@@ -110,7 +110,7 @@ use e2e_flow::ipc::{maru_e2e_read, maru_e2e_run};
 use export::dispatch::ipc::export_dispatch;
 use export::ipc::{export_plan, export_validate};
 use gmail_gws::check_gws_auth;
-use html_editor::prepare_html_editor_assets;
+use html_editor::ipc::prepare_html_editor_assets;
 use hub_client::ipc::{
     hub_fetch_catalog, hub_poll_gate, hub_queue_drain, hub_status, hub_submit_gate,
 };
@@ -126,7 +126,7 @@ use kakao_relay::{
     enqueue_kakao_send, read_kakao_relay_messages, read_kakao_relay_status,
     read_kakao_send_results, stage_kakao_relay_new,
 };
-use korean_date::parse_korean_date_cmd;
+use korean_date::ipc::parse_korean_date_cmd;
 use linter::gaejosik_lint;
 use maru_dir::ipc::{
     bootstrap_maru_dir, delete_maru_rule, delete_maru_template, list_maru_rules,
@@ -142,13 +142,14 @@ use outlook_mso::{
     check_mso_auth, decide_outlook_item, decide_outlook_items, fetch_outlook_unread,
 };
 use scratchpad_watcher::ScratchpadWatcherState;
+use site_view::ipc::{
+    site_view_open, site_view_open_external, site_view_open_safari, site_view_take_opened_urls,
+};
 #[cfg(target_os = "macos")]
 use site_view::queue_opened_urls;
 use site_view::{
     site_view_back, site_view_close, site_view_close_all, site_view_forward, site_view_hide,
-    site_view_navigate, site_view_open, site_view_open_external, site_view_open_safari,
-    site_view_reload, site_view_set_bounds, site_view_show, site_view_take_opened_urls,
-    SiteOpenedUrlState,
+    site_view_navigate, site_view_reload, site_view_set_bounds, site_view_show, SiteOpenedUrlState,
 };
 use sites::ipc::{read_sites, save_sites, scan_work_sites};
 use skill_host::{skills_sync_all_sources, skills_sync_source};
@@ -161,7 +162,7 @@ use telegram_io::{check_telegram_auth, stop_poller_on_exit, TelegramIoState};
 use template_fill::ipc::{template_fill_hwpx, template_get_fields, template_prepare_hwpx_template};
 use terminal::TerminalState;
 use terminal_hooks::{start_terminal_hook_watcher, TerminalHookWatcherState};
-use today_notify::today_notify_new_day;
+use today_notify::ipc::today_notify_new_day;
 use vault_list::ipc::{
     add_workspace_root, list_workspace_roots, refresh_workspace_capabilities,
     remove_workspace_root, set_active_workspace_root,

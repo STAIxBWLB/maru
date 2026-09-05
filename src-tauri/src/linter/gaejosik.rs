@@ -33,7 +33,6 @@ struct RuleMatch {
     suffix: String,
 }
 
-#[tauri::command]
 pub fn gaejosik_lint(
     work_path: String,
     body_markdown: String,
@@ -41,6 +40,31 @@ pub fn gaejosik_lint(
 ) -> Result<GaejosikLintResponse, String> {
     let _workspace = normalize_existing_dir(&work_path)?;
     Ok(lint_markdown(&body_markdown, &dismissed_ids))
+}
+
+/// Owned IPC boundary; the synchronous linter command remains the Rust/CLI
+/// API and the workspace stat plus the per-line scan run on a finite blocking
+/// worker instead of the main thread.
+pub mod ipc {
+    use super::*;
+
+    #[tauri::command]
+    pub async fn gaejosik_lint(
+        work_path: String,
+        body_markdown: String,
+        #[allow(non_snake_case)] dismissed_ids: Vec<String>,
+    ) -> Result<GaejosikLintResponse, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            crate::atomic_file::PathTransactionLease::test_stage(
+                &[std::path::PathBuf::from(&work_path)],
+                "worker:gaejosik_lint",
+            );
+            super::gaejosik_lint(work_path, body_markdown, dismissed_ids)
+        })
+        .await
+        .map_err(|err| format!("gaejosik_lint_task_failed: {err}"))?
+    }
 }
 
 fn lint_markdown(markdown: &str, dismissed_ids: &[String]) -> GaejosikLintResponse {
@@ -237,5 +261,59 @@ mod tests {
         assert_eq!(report.issues.len(), 1);
         assert_eq!(report.issues[0].column, 5);
         assert_eq!(report.issues[0].end_column, 8);
+    }
+
+    mod phase08_24 {
+        use super::*;
+        use crate::atomic_file::phase08_06::{boundary, run};
+
+        #[test]
+        fn phase08_24_gaejosik_wrappers_yield_same_poll_and_map_join_failure() {
+            let tmp = tempfile::tempdir().unwrap();
+            let work = tmp.path().to_string_lossy().to_string();
+            boundary(
+                tmp.path().to_path_buf(),
+                "gaejosik_lint",
+                ipc::gaejosik_lint(work, "- 완료됨\n".into(), Vec::new()),
+            );
+        }
+
+        #[test]
+        fn phase08_24_gaejosik_real_fixture_results_and_rejections() {
+            let tmp = tempfile::tempdir().unwrap();
+            let work = tmp.path().to_string_lossy().to_string();
+            run(async move {
+                let body = "- 추진합니다.\n- 완료됨\n문장이다\n";
+                let report = ipc::gaejosik_lint(work.clone(), body.into(), Vec::new())
+                    .await
+                    .unwrap();
+                assert_eq!(report.issues.len(), 2);
+                assert_eq!(report.issues[0].rule, "formalVerbEnding");
+                assert_eq!(report.issues[1].rule, "declarativeEnding");
+                assert_eq!(report.dismissed_count, 0);
+
+                let dismissed = ipc::gaejosik_lint(
+                    work.clone(),
+                    body.into(),
+                    vec![report.issues[0].id.clone()],
+                )
+                .await
+                .unwrap();
+                assert_eq!(dismissed.issues.len(), 1);
+                assert_eq!(dismissed.dismissed_count, 1);
+
+                let error = ipc::gaejosik_lint(
+                    "/definitely/not/a/real/work-dir-xyz".into(),
+                    body.into(),
+                    Vec::new(),
+                )
+                .await
+                .unwrap_err();
+                assert!(
+                    error.contains("Cannot open workspace directory"),
+                    "unexpected error: {error}"
+                );
+            });
+        }
     }
 }

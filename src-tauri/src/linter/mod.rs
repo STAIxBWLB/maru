@@ -1,3 +1,3 @@
 mod gaejosik;
 
-pub use gaejosik::gaejosik_lint;
+pub use gaejosik::ipc::gaejosik_lint;

@@ -21,7 +21,7 @@ use crate::win_process::NoWindow;
 use serde::Serialize;
 use std::collections::VecDeque;
 use std::process::Command;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use tauri::webview::{NewWindowResponse, PageLoadEvent, WebviewBuilder};
 use tauri::{
     AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, Position, Rect, Size, Url, Webview,
@@ -42,9 +42,9 @@ const EVENT_OPEN_REQUESTED: &str = "sites://open-requested";
 #[cfg(any(target_os = "macos", test))]
 const MAX_OPENED_URLS: usize = 64;
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct SiteOpenedUrlState {
-    queue: Mutex<VecDeque<String>>,
+    queue: Arc<Mutex<VecDeque<String>>>,
 }
 
 impl SiteOpenedUrlState {
@@ -155,20 +155,24 @@ fn embed_label(tab_id: &str) -> Result<String, String> {
     Ok(format!("{SITES_EMBED_PREFIX}{trimmed}"))
 }
 
-fn get_embed(app: &AppHandle, tab_id: &str) -> Result<Webview, String> {
+fn get_embed<R: tauri::Runtime>(app: &AppHandle<R>, tab_id: &str) -> Result<Webview<R>, String> {
     let label = embed_label(tab_id)?;
     app.get_webview(&label)
         .ok_or_else(|| format!("Browser tab {tab_id} is not open"))
 }
 
-fn embed_labels(app: &AppHandle) -> Vec<String> {
+fn embed_labels<R: tauri::Runtime>(app: &AppHandle<R>) -> Vec<String> {
     app.webviews()
         .into_keys()
         .filter(|label| label.starts_with(SITES_EMBED_PREFIX))
         .collect()
 }
 
-fn emit_to_main<S: Serialize + Clone>(app: &AppHandle, event: &str, payload: S) {
+fn emit_to_main<R: tauri::Runtime, S: Serialize + Clone>(
+    app: &AppHandle<R>,
+    event: &str,
+    payload: S,
+) {
     // Best-effort: an event the frontend missed is not an error.
     let _ = app.emit_to(MAIN_WINDOW_LABEL, event, payload);
 }
@@ -177,13 +181,20 @@ fn emit_to_main<S: Serialize + Clone>(app: &AppHandle, event: &str, payload: S) 
 // Commands
 // ---------------------------------------------------------------------------
 //
-// All commands are async so they run on the tokio pool: `add_child`
-// internally posts to the main thread and blocks on the result, which
-// would deadlock if the command itself ran on the main thread.
+// The per-tab lifecycle commands below (`site_view_navigate` through
+// `site_view_forward`) are async so they run on the tokio pool: each webview
+// call internally posts to the main thread and blocks on the result, which
+// would deadlock if the command itself ran on the main thread. They keep
+// their registrations because they are pure platform dispatch with no
+// blocking substep of their own.
+//
+// `site_view_open`, the external-browser launches and the opened-URL drain
+// run their lock waits and process spawns in owned blocking workers via
+// `ipc` below; `add_child` and the webview methods post to the main thread
+// internally, so calling them from a blocking worker is safe.
 
-#[tauri::command]
-pub async fn site_view_open(
-    app: AppHandle,
+pub fn site_view_open<R: tauri::Runtime>(
+    app: AppHandle<R>,
     tab_id: String,
     url: String,
     x: f64,
@@ -195,7 +206,9 @@ pub async fn site_view_open(
     let label = embed_label(&tab_id)?;
 
     // Serialize concurrent opens so two racing calls never both reach
-    // add_child for the same label.
+    // add_child for the same label. The lock is only ever taken on a
+    // dedicated blocking worker, so a slow native creation never stalls
+    // the shared async runtime.
     static OPEN_LOCK: Mutex<()> = Mutex::new(());
     let _guard = OPEN_LOCK
         .lock()
@@ -301,7 +314,11 @@ pub async fn site_view_open(
 }
 
 #[tauri::command]
-pub async fn site_view_navigate(app: AppHandle, tab_id: String, url: String) -> Result<(), String> {
+pub async fn site_view_navigate<R: tauri::Runtime>(
+    app: AppHandle<R>,
+    tab_id: String,
+    url: String,
+) -> Result<(), String> {
     let target = parse_http_url(&url)?;
     get_embed(&app, &tab_id)?
         .navigate(target)
@@ -309,8 +326,8 @@ pub async fn site_view_navigate(app: AppHandle, tab_id: String, url: String) -> 
 }
 
 #[tauri::command]
-pub async fn site_view_set_bounds(
-    app: AppHandle,
+pub async fn site_view_set_bounds<R: tauri::Runtime>(
+    app: AppHandle<R>,
     tab_id: String,
     x: f64,
     y: f64,
@@ -325,7 +342,10 @@ pub async fn site_view_set_bounds(
 /// Show one tab and hide every other embed, so switching tabs never leaves
 /// two webviews stacked on the same bounds.
 #[tauri::command]
-pub async fn site_view_show(app: AppHandle, tab_id: String) -> Result<(), String> {
+pub async fn site_view_show<R: tauri::Runtime>(
+    app: AppHandle<R>,
+    tab_id: String,
+) -> Result<(), String> {
     let label = embed_label(&tab_id)?;
     for other in embed_labels(&app) {
         if other == label {
@@ -342,7 +362,7 @@ pub async fn site_view_show(app: AppHandle, tab_id: String) -> Result<(), String
 
 /// Hide every embed. Used when the browser surface itself goes away.
 #[tauri::command]
-pub async fn site_view_hide(app: AppHandle) -> Result<(), String> {
+pub async fn site_view_hide<R: tauri::Runtime>(app: AppHandle<R>) -> Result<(), String> {
     for label in embed_labels(&app) {
         if let Some(webview) = app.get_webview(&label) {
             let _ = webview.hide();
@@ -352,7 +372,10 @@ pub async fn site_view_hide(app: AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub async fn site_view_close(app: AppHandle, tab_id: String) -> Result<(), String> {
+pub async fn site_view_close<R: tauri::Runtime>(
+    app: AppHandle<R>,
+    tab_id: String,
+) -> Result<(), String> {
     // Idempotent: closing an absent tab is a no-op. A leaked child webview
     // would float over the UI forever, so failures are surfaced.
     let label = embed_label(&tab_id)?;
@@ -365,7 +388,7 @@ pub async fn site_view_close(app: AppHandle, tab_id: String) -> Result<(), Strin
 }
 
 #[tauri::command]
-pub async fn site_view_close_all(app: AppHandle) -> Result<(), String> {
+pub async fn site_view_close_all<R: tauri::Runtime>(app: AppHandle<R>) -> Result<(), String> {
     for label in embed_labels(&app) {
         if let Some(webview) = app.get_webview(&label) {
             let _ = webview.close();
@@ -375,14 +398,20 @@ pub async fn site_view_close_all(app: AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub async fn site_view_reload(app: AppHandle, tab_id: String) -> Result<(), String> {
+pub async fn site_view_reload<R: tauri::Runtime>(
+    app: AppHandle<R>,
+    tab_id: String,
+) -> Result<(), String> {
     get_embed(&app, &tab_id)?
         .reload()
         .map_err(|err| format!("Cannot reload browser tab: {err}"))
 }
 
 #[tauri::command]
-pub async fn site_view_back(app: AppHandle, tab_id: String) -> Result<(), String> {
+pub async fn site_view_back<R: tauri::Runtime>(
+    app: AppHandle<R>,
+    tab_id: String,
+) -> Result<(), String> {
     // Webview<R> exposes no native history API; history.back() in the
     // page context is the supported equivalent.
     get_embed(&app, &tab_id)?
@@ -391,14 +420,16 @@ pub async fn site_view_back(app: AppHandle, tab_id: String) -> Result<(), String
 }
 
 #[tauri::command]
-pub async fn site_view_forward(app: AppHandle, tab_id: String) -> Result<(), String> {
+pub async fn site_view_forward<R: tauri::Runtime>(
+    app: AppHandle<R>,
+    tab_id: String,
+) -> Result<(), String> {
     get_embed(&app, &tab_id)?
         .eval("history.forward()")
         .map_err(|err| format!("Cannot go forward: {err}"))
 }
 
-#[tauri::command]
-pub async fn site_view_open_external(url: String) -> Result<(), String> {
+pub fn site_view_open_external(url: String) -> Result<(), String> {
     // Validate before shelling out: http/https only, so this can never be
     // abused to `open` a local path or custom scheme.
     let target = parse_http_url(&url)?;
@@ -407,8 +438,7 @@ pub async fn site_view_open_external(url: String) -> Result<(), String> {
 
 /// Open the URL specifically in Safari. This avoids recursively reopening
 /// Maru when its provisioned passkey build is registered for HTTP/HTTPS.
-#[tauri::command]
-pub async fn site_view_open_safari(url: String) -> Result<(), String> {
+pub fn site_view_open_safari(url: String) -> Result<(), String> {
     let target = parse_http_url(&url)?;
     #[cfg(target_os = "macos")]
     {
@@ -424,8 +454,7 @@ pub async fn site_view_open_safari(url: String) -> Result<(), String> {
     }
 }
 
-#[tauri::command]
-pub fn site_view_take_opened_urls(state: tauri::State<'_, SiteOpenedUrlState>) -> Vec<String> {
+pub fn site_view_take_opened_urls(state: &SiteOpenedUrlState) -> Vec<String> {
     state.take()
 }
 
@@ -456,6 +485,85 @@ fn open_in_system_browser(url: &str) -> Result<(), String> {
         .spawn()
         .map_err(|err| format!("Cannot open system browser: {err}"))?;
     Ok(())
+}
+
+#[cfg(test)]
+fn worker_hook_key(command: &str) -> std::path::PathBuf {
+    std::path::PathBuf::from(format!("/maru/phase08_24/site_view/{command}"))
+}
+
+/// Owned IPC boundaries for the commands that wait on locks or spawn
+/// processes; the synchronous functions remain the Rust/CLI API. The
+/// per-tab async UI dispatch commands above keep their registrations.
+pub mod ipc {
+    use super::*;
+
+    #[tauri::command]
+    pub async fn site_view_open<R: tauri::Runtime>(
+        app: AppHandle<R>,
+        tab_id: String,
+        url: String,
+        x: f64,
+        y: f64,
+        width: f64,
+        height: f64,
+    ) -> Result<(), String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            crate::atomic_file::PathTransactionLease::test_stage(
+                &[super::worker_hook_key("site_view_open")],
+                "worker:site_view_open",
+            );
+            super::site_view_open(app, tab_id, url, x, y, width, height)
+        })
+        .await
+        .map_err(|err| format!("site_view_open_task_failed: {err}"))?
+    }
+
+    #[tauri::command]
+    pub async fn site_view_open_external(url: String) -> Result<(), String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            crate::atomic_file::PathTransactionLease::test_stage(
+                &[super::worker_hook_key("site_view_open_external")],
+                "worker:site_view_open_external",
+            );
+            super::site_view_open_external(url)
+        })
+        .await
+        .map_err(|err| format!("site_view_open_external_task_failed: {err}"))?
+    }
+
+    #[tauri::command]
+    pub async fn site_view_open_safari(url: String) -> Result<(), String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            crate::atomic_file::PathTransactionLease::test_stage(
+                &[super::worker_hook_key("site_view_open_safari")],
+                "worker:site_view_open_safari",
+            );
+            super::site_view_open_safari(url)
+        })
+        .await
+        .map_err(|err| format!("site_view_open_safari_task_failed: {err}"))?
+    }
+
+    #[tauri::command]
+    pub async fn site_view_take_opened_urls(
+        state: tauri::State<'_, SiteOpenedUrlState>,
+    ) -> Result<Vec<String>, String> {
+        let state = state.inner().clone();
+        tauri::async_runtime::spawn_blocking(move || -> Result<Vec<String>, String> {
+            #[cfg(test)]
+            crate::atomic_file::PathTransactionLease::test_stage(
+                &[super::worker_hook_key("site_view_take_opened_urls")],
+                "worker:site_view_take_opened_urls",
+            );
+            Ok(super::site_view_take_opened_urls(&state))
+        })
+        .await
+        .map_err(|err| format!("site_view_take_opened_urls_task_failed: {err}"))?
+    }
 }
 
 #[cfg(test)]
@@ -515,5 +623,190 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["-b", "com.apple.Safari", "https://example.com/passkey"]
         );
+    }
+
+    mod phase08_24 {
+        use super::*;
+        use crate::atomic_file::phase08_06::{boundary, run};
+        use std::sync::{Mutex, MutexGuard};
+
+        // Synthetic worker-hook keys are module-global; serialize these tests
+        // so a stage hook registered by one test cannot intercept a parallel
+        // test's worker for the same command stage.
+        static TEST_LOCK: Mutex<()> = Mutex::new(());
+        fn serialized() -> MutexGuard<'static, ()> {
+            TEST_LOCK
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+        }
+
+        fn mock_app() -> tauri::App<tauri::test::MockRuntime> {
+            let app = tauri::test::mock_app();
+            app.manage(SiteOpenedUrlState::default());
+            app
+        }
+
+        #[test]
+        fn phase08_24_site_view_workers_yield_same_poll_and_map_join_failure() {
+            let _guard = serialized();
+            let app = mock_app();
+            let open_app = app.handle().clone();
+            boundary(
+                worker_hook_key("site_view_open"),
+                "site_view_open",
+                async move {
+                    ipc::site_view_open(
+                        open_app,
+                        "docs".into(),
+                        "https://example.com".into(),
+                        0.0,
+                        0.0,
+                        100.0,
+                        100.0,
+                    )
+                    .await
+                },
+            );
+            boundary(
+                worker_hook_key("site_view_open_external"),
+                "site_view_open_external",
+                ipc::site_view_open_external("https://example.com".into()),
+            );
+            boundary(
+                worker_hook_key("site_view_open_safari"),
+                "site_view_open_safari",
+                ipc::site_view_open_safari("https://example.com".into()),
+            );
+            let take_app = app.handle().clone();
+            boundary(
+                worker_hook_key("site_view_take_opened_urls"),
+                "site_view_take_opened_urls",
+                async move { ipc::site_view_take_opened_urls(take_app.state()).await },
+            );
+        }
+
+        #[test]
+        fn phase08_24_site_view_owned_results_and_rejections() {
+            let _guard = serialized();
+            let app = mock_app();
+            let app = app.handle().clone();
+            run(async move {
+                let error = ipc::site_view_open(
+                    app.clone(),
+                    "docs".into(),
+                    "ftp://example.com".into(),
+                    0.0,
+                    0.0,
+                    100.0,
+                    100.0,
+                )
+                .await
+                .unwrap_err();
+                assert!(
+                    error.contains("Unsupported URL scheme"),
+                    "unexpected error: {error}"
+                );
+
+                let error = ipc::site_view_open(
+                    app.clone(),
+                    "bad id!".into(),
+                    "https://example.com".into(),
+                    0.0,
+                    0.0,
+                    100.0,
+                    100.0,
+                )
+                .await
+                .unwrap_err();
+                assert_eq!(error, "Invalid browser tab id");
+
+                let error = ipc::site_view_open(
+                    app.clone(),
+                    "docs".into(),
+                    "https://example.com".into(),
+                    0.0,
+                    0.0,
+                    100.0,
+                    100.0,
+                )
+                .await
+                .unwrap_err();
+                assert_eq!(error, "main window not found");
+
+                let error = ipc::site_view_open_external("file:///etc/passwd".into())
+                    .await
+                    .unwrap_err();
+                assert!(
+                    error.contains("Unsupported URL scheme"),
+                    "unexpected error: {error}"
+                );
+
+                let error = ipc::site_view_open_safari("maru://x".into())
+                    .await
+                    .unwrap_err();
+                assert!(
+                    error.contains("Unsupported URL scheme"),
+                    "unexpected error: {error}"
+                );
+
+                let queued = app.state::<SiteOpenedUrlState>();
+                let accepted = queued.enqueue(vec![
+                    url("https://example.com/a"),
+                    url("file:///tmp/private"),
+                ]);
+                assert_eq!(accepted, vec!["https://example.com/a".to_string()]);
+                let drained = ipc::site_view_take_opened_urls(app.state()).await.unwrap();
+                assert_eq!(drained, vec!["https://example.com/a".to_string()]);
+                assert!(ipc::site_view_take_opened_urls(app.state())
+                    .await
+                    .unwrap()
+                    .is_empty());
+            });
+        }
+
+        #[test]
+        fn phase08_24_site_view_ui_rows_dispatch_with_typed_rejections() {
+            let _guard = serialized();
+            let app = mock_app();
+            let app = app.handle().clone();
+            run(async move {
+                let not_open = |error: &str| {
+                    assert!(error.contains("is not open"), "unexpected error: {error}");
+                };
+                not_open(
+                    &site_view_navigate(app.clone(), "docs".into(), "https://example.com".into())
+                        .await
+                        .unwrap_err(),
+                );
+                not_open(
+                    &site_view_set_bounds(app.clone(), "docs".into(), 0.0, 0.0, 1.0, 1.0)
+                        .await
+                        .unwrap_err(),
+                );
+                not_open(
+                    &site_view_show(app.clone(), "docs".into())
+                        .await
+                        .unwrap_err(),
+                );
+                not_open(
+                    &site_view_reload(app.clone(), "docs".into())
+                        .await
+                        .unwrap_err(),
+                );
+                not_open(
+                    &site_view_back(app.clone(), "docs".into())
+                        .await
+                        .unwrap_err(),
+                );
+                not_open(
+                    &site_view_forward(app.clone(), "docs".into())
+                        .await
+                        .unwrap_err(),
+                );
+                site_view_hide(app.clone()).await.unwrap();
+                site_view_close_all(app.clone()).await.unwrap();
+                site_view_close(app, "docs".into()).await.unwrap();
+            });
+        }
     }
 }

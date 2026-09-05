@@ -1,0 +1,1088 @@
+{
+  "plan": "08-24",
+  "moduleIntegrationOwner": "08-24",
+  "commands": [
+    {
+      "name": "prepare_html_editor_assets",
+      "module": "src-tauri/src/html_editor.rs",
+      "registrationPath": "src-tauri/src/lib.rs::html_editor::ipc::prepare_html_editor_assets",
+      "originalDisposition": "UI",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/html_editor.rs::ipc::prepare_html_editor_assets owns its AppHandle, vault_path and document_path inputs and awaits tauri::async_runtime::spawn_blocking calling src-tauri/src/html_editor.rs::prepare_html_editor_assets inside the worker; a JoinError becomes the display-only prepare_html_editor_assets_task_failed String.",
+        "src-tauri/src/html_editor.rs::prepare_html_editor_assets delegates containment to src-tauri/src/html_editor.rs::resolve_html_editor_document_directory, which lexically pins the document under the vault and rejects non-html extensions, missing files, workspace-root documents, secret-holding directories and symlink escapes before the in-process asset_protocol_scope grant, so the converted chain reaches no network call, process wait or unbounded walk."
+      ],
+      "workerBoundary": "src-tauri/src/html_editor.rs::ipc::prepare_html_editor_assets awaits tauri::async_runtime::spawn_blocking before the scope grant or any filesystem check runs; only a JoinError maps to the display-only prepare_html_editor_assets_task_failed String while the typed PrepareHtmlEditorAssetsResponse and every domain error string pass through unchanged; owned AppHandle and Strings cross the await, never a borrowed State or guard.",
+      "syncCallers": [
+        "No Rust or CLI caller invokes prepare_html_editor_assets synchronously today; src-tauri/src/lib.rs registers only html_editor::ipc::prepare_html_editor_assets, and the original synchronous src-tauri/src/html_editor.rs::prepare_html_editor_assets keeps its name and generic-R signature for Rust callers (the phase08_24 tests exercise it through the wrapper)."
+      ],
+      "mutationKey": {
+        "readOnly": true,
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "sharedAdmissionEntry": "prepare_html_editor_assets performs no filesystem mutation: src-tauri/src/html_editor.rs::resolve_html_editor_document_directory only validates the document path, and asset_protocol_scope().allow_directory is an in-process runtime grant, so the command is read-only and needs no mutation admission.",
+        "postAdmissionPreconditions": [
+          "No mutation admission is required: the command performs no filesystem mutation, so there is no transaction key to admit and nothing to release."
+        ],
+        "domainLockOrder": "No path admission exists; the command takes no domain lock, so there is no admission-before-domain-lock order to record."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_24",
+          "passed": 16,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts"
+        ],
+        "payload": "prepareHtmlEditorAssets (src/lib/api.ts:3670) invokes prepare_html_editor_assets with vaultPath and documentPath; the HTML editor surface keeps owning the asset-preparation flow regardless of screen changes.",
+        "terminalNoticeOwner": "The HTML editor surface that calls this api.ts helper owns busy state, the returned document directory and error toasts. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_24_html_editor_wrappers_yield_same_poll_and_map_join_failure",
+          "phase08_24_html_editor_real_fixture_results_and_rejections"
+        ],
+        "workerProof": "html_editor::tests::phase08_24::phase08_24_html_editor_wrappers_yield_same_poll_and_map_join_failure drives ipc::prepare_html_editor_assets through atomic_file::phase08_06::boundary with the worker-stage hook staged at the disposable tempdir vault path: the future is manually polled on the same async task, proves progress while a distinct worker thread stays blocked, and a panicked worker maps to the display-only prepare_html_editor_assets_task_failed String.",
+        "platformScope": "macOS unit fixtures only: atomic_file::phase08_06::Home isolation (MARU_TEST_HOME), a disposable tempdir vault and the test-only worker-stage hook; no live workspace, credential, network endpoint or native test hook is touched.",
+        "limits": "The in-process asset scope grant constrains the asset protocol for this app instance only; external editors are outside that guarantee. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
+        "contract": "The PrepareHtmlEditorAssetsResponse payload and every containment error string (extension, missing file, workspace root, secrets directory, symlink escape) are unchanged; the only new failure path is the JoinError-to-String mapping at the worker boundary."
+      }
+    },
+    {
+      "name": "browser_passkey_status",
+      "module": "src-tauri/src/browser_passkeys.rs",
+      "registrationPath": "src-tauri/src/lib.rs::browser_passkeys::ipc::browser_passkey_status",
+      "originalDisposition": "UI",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/browser_passkeys.rs::ipc::browser_passkey_status owns its AppHandle input and awaits tauri::async_runtime::spawn_blocking calling src-tauri/src/browser_passkeys.rs::browser_passkey_status inside the worker; a JoinError becomes the display-only browser_passkey_status_task_failed String.",
+        "src-tauri/src/browser_passkeys.rs::browser_passkey_status dispatches through src-tauri/src/browser_passkeys.rs::status_on_main_thread, which posts src-tauri/src/browser_passkeys.rs::native_status to the main thread via run_on_main_thread and blocks the worker on an mpsc recv; native_status gates on src-tauri/src/browser_passkeys.rs::has_browser_passkey_entitlement and src-tauri/src/browser_passkeys.rs::manager_is_available before touching src-tauri/src/browser_passkeys.rs::shared_manager, and maps the raw state through src-tauri/src/browser_passkeys.rs::status_from_runtime_capabilities, so the platform main-thread affinity is preserved while the wait runs on the owned worker."
+      ],
+      "workerBoundary": "src-tauri/src/browser_passkeys.rs::ipc::browser_passkey_status awaits tauri::async_runtime::spawn_blocking before any entitlement check or framework load runs; the closure owns the AppHandle, posts the inspection to the main thread and blocks on an mpsc recv inside the worker, so the shared async runtime never waits; only a JoinError maps to the display-only browser_passkey_status_task_failed String while the typed BrowserPasskeyStatus payload passes through unchanged.",
+      "syncCallers": [
+        "No Rust or CLI caller invokes browser_passkey_status synchronously today; src-tauri/src/lib.rs registers only browser_passkeys::ipc::browser_passkey_status, and the original synchronous src-tauri/src/browser_passkeys.rs::browser_passkey_status keeps its name and generic-R signature for Rust callers (the phase08_24 tests exercise it through the wrapper)."
+      ],
+      "mutationKey": {
+        "readOnly": true,
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "sharedAdmissionEntry": "browser_passkey_status performs no filesystem mutation: src-tauri/src/browser_passkeys.rs::has_browser_passkey_entitlement reads process entitlements and src-tauri/src/browser_passkeys.rs::manager_is_available probes an in-memory framework handle, so the command is read-only and needs no mutation admission.",
+        "postAdmissionPreconditions": [
+          "No mutation admission is required: the command performs no filesystem mutation, so there is no transaction key to admit and nothing to release."
+        ],
+        "domainLockOrder": "No path admission exists; the command takes no domain lock, so there is no admission-before-domain-lock order to record."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_24",
+          "passed": 16,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/browserPasskeys.ts"
+        ],
+        "payload": "browserPasskeyStatus (src/lib/browserPasskeys.ts:35) invokes browser_passkey_status; the passkey settings surface keeps owning the status display flow regardless of screen changes.",
+        "terminalNoticeOwner": "The browser passkey settings surface that calls this helper owns busy state, the returned status and error toasts. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_24_browser_passkey_wrappers_yield_same_poll_and_map_join_failure",
+          "phase08_24_browser_passkey_real_results_and_in_flight_rejection"
+        ],
+        "workerProof": "browser_passkeys::tests::phase08_24::phase08_24_browser_passkey_wrappers_yield_same_poll_and_map_join_failure drives ipc::browser_passkey_status through atomic_file::phase08_06::boundary with the worker-stage hook staged at the synthetic browser_passkeys key: the future is manually polled on the same async task, proves progress while a distinct worker thread stays blocked, and a panicked worker maps to the display-only browser_passkey_status_task_failed String.",
+        "platformScope": "macOS unit fixtures only: the test binary lacks the browser passkey entitlement, so src-tauri/src/browser_passkeys.rs::native_status answers through the unsupported_status path and no Objective-C message is sent; MockRuntime runs run_on_main_thread inline; no live credential, network endpoint or native test hook is touched.",
+        "limits": "The unsupported-status fixture proves scheduling and error mapping only; the entitled managed-device prompt path needs the provisioned passkey build and stays outside the unit proof. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
+        "contract": "The BrowserPasskeyStatus payload, the requires-managed-entitlement classification and every error string are unchanged; the only new failure path is the JoinError-to-String mapping at the worker boundary."
+      }
+    },
+    {
+      "name": "browser_passkey_request_authorization",
+      "module": "src-tauri/src/browser_passkeys.rs",
+      "registrationPath": "src-tauri/src/lib.rs::browser_passkeys::ipc::browser_passkey_request_authorization",
+      "originalDisposition": "UI",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/browser_passkeys.rs::ipc::browser_passkey_request_authorization clones the owned request_in_flight Arc<AtomicBool> out of State and awaits tauri::async_runtime::spawn_blocking calling src-tauri/src/browser_passkeys.rs::browser_passkey_request_authorization inside the worker; a JoinError becomes the display-only browser_passkey_request_authorization_task_failed String.",
+        "src-tauri/src/browser_passkeys.rs::browser_passkey_request_authorization claims the in-flight slot with a compare_exchange on the owned Arc<AtomicBool> (released by the InFlightGuard drop on every exit), then posts the request to the main thread via run_on_main_thread and blocks the worker on an mpsc recv; the main-thread closure re-checks src-tauri/src/browser_passkeys.rs::has_browser_passkey_entitlement and src-tauri/src/browser_passkeys.rs::manager_is_available, resolves src-tauri/src/browser_passkeys.rs::shared_manager and maps the completion value through src-tauri/src/browser_passkeys.rs::authorization_from_raw, so the user-prompt platform affinity is preserved while the wait runs on the owned worker."
+      ],
+      "workerBoundary": "src-tauri/src/browser_passkeys.rs::ipc::browser_passkey_request_authorization awaits tauri::async_runtime::spawn_blocking before the in-flight claim or any framework call runs; the closure owns the AppHandle and the Arc<AtomicBool>, never a borrowed State; the main-thread post and the mpsc recv both happen inside the worker, so the shared async runtime never waits; only a JoinError maps to the display-only browser_passkey_request_authorization_task_failed String.",
+      "syncCallers": [
+        "No Rust or CLI caller invokes browser_passkey_request_authorization synchronously today; src-tauri/src/lib.rs registers only browser_passkeys::ipc::browser_passkey_request_authorization, and the original synchronous src-tauri/src/browser_passkeys.rs::browser_passkey_request_authorization keeps its name and takes the owned Arc<AtomicBool> directly for Rust callers (the phase08_24 tests exercise it through the wrapper)."
+      ],
+      "mutationKey": {
+        "readOnly": true,
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "sharedAdmissionEntry": "browser_passkey_request_authorization performs no filesystem mutation: the in-flight claim is an in-memory compare_exchange on an Arc<AtomicBool> and the framework request posts to the main thread, so the command is read-only and needs no mutation admission.",
+        "postAdmissionPreconditions": [
+          "No mutation admission is required: the command performs no filesystem mutation, so there is no transaction key to admit and nothing to release."
+        ],
+        "domainLockOrder": "No path admission exists; the command takes no domain lock, so there is no admission-before-domain-lock order to record."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_24",
+          "passed": 16,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/browserPasskeys.ts"
+        ],
+        "payload": "browserPasskeyRequestAuthorization (src/lib/browserPasskeys.ts:56) invokes browser_passkey_request_authorization; the passkey settings surface keeps owning the authorization prompt flow regardless of screen changes.",
+        "terminalNoticeOwner": "The browser passkey settings surface that calls this helper owns busy state, the returned status and error toasts, including the already-in-progress rejection. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_24_browser_passkey_wrappers_yield_same_poll_and_map_join_failure",
+          "phase08_24_browser_passkey_real_results_and_in_flight_rejection"
+        ],
+        "workerProof": "browser_passkeys::tests::phase08_24::phase08_24_browser_passkey_wrappers_yield_same_poll_and_map_join_failure drives ipc::browser_passkey_request_authorization through atomic_file::phase08_06::boundary with the worker-stage hook staged at the synthetic browser_passkeys key: the future is manually polled on the same async task, proves progress while a distinct worker thread stays blocked, and a panicked worker maps to the display-only browser_passkey_request_authorization_task_failed String.",
+        "platformScope": "macOS unit fixtures only: the test binary lacks the browser passkey entitlement, so the request path answers through the unsupported_status branch with no Objective-C prompt; MockRuntime runs run_on_main_thread inline; the in-flight rejection and slot-recovery assertions run entirely in memory; no live credential, network endpoint or native test hook is touched.",
+        "limits": "The unsupported-status fixture proves scheduling, the single-flight claim and error mapping only; the entitled managed-device prompt path needs the provisioned passkey build and stays outside the unit proof. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
+        "contract": "The BrowserPasskeyStatus payload, the single-flight rejection string and every framework error string are unchanged; the only new failure path is the JoinError-to-String mapping at the worker boundary."
+      }
+    },
+    {
+      "name": "site_view_open",
+      "module": "src-tauri/src/site_view.rs",
+      "registrationPath": "src-tauri/src/lib.rs::site_view::ipc::site_view_open",
+      "originalDisposition": "UI",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/site_view.rs::ipc::site_view_open owns its AppHandle, tab_id, url and bounds inputs and awaits tauri::async_runtime::spawn_blocking calling src-tauri/src/site_view.rs::site_view_open inside the worker; a JoinError becomes the display-only site_view_open_task_failed String.",
+        "src-tauri/src/site_view.rs::site_view_open validates the URL through src-tauri/src/site_view.rs::parse_http_url and the label through src-tauri/src/site_view.rs::embed_label, then serializes concurrent opens on the module-local OPEN_LOCK static so two racing calls never both reach add_child for the same label; the lock wait and the slow native webview creation run on the dedicated blocking worker, never on the main thread or the shared async runtime."
+      ],
+      "workerBoundary": "src-tauri/src/site_view.rs::ipc::site_view_open awaits tauri::async_runtime::spawn_blocking before the OPEN_LOCK lock wait or any webview call runs; the closure owns the AppHandle and all Strings, never a borrowed State or registry guard; only a JoinError maps to the display-only site_view_open_task_failed String while the unit Result and every Cannot-set/navigate/show error string pass through unchanged.",
+      "syncCallers": [
+        "No Rust or CLI caller invokes site_view_open synchronously today; src-tauri/src/lib.rs registers only site_view::ipc::site_view_open, and the original synchronous src-tauri/src/site_view.rs::site_view_open keeps its name and generic-R signature for Rust callers (the phase08_24 tests exercise it through the wrapper)."
+      ],
+      "mutationKey": {
+        "readOnly": true,
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "sharedAdmissionEntry": "site_view_open performs no filesystem mutation: src-tauri/src/site_view.rs::parse_http_url and src-tauri/src/site_view.rs::embed_label only validate inputs, and webview creation is an in-process runtime effect, so the command is read-only and needs no mutation admission.",
+        "postAdmissionPreconditions": [
+          "No mutation admission is required: the command performs no filesystem mutation, so there is no transaction key to admit and nothing to release."
+        ],
+        "domainLockOrder": "No path admission exists; the OPEN_LOCK serialization is an in-process mutex taken inside the worker, so there is no admission-before-domain-lock order to record."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_24",
+          "passed": 16,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/siteView.ts"
+        ],
+        "payload": "openSiteView (src/lib/siteView.ts:71) invokes site_view_open with tabId, url and bounds; the Sites surface keeps owning the tab lifecycle flow regardless of screen changes.",
+        "terminalNoticeOwner": "The Sites surface that calls this helper owns busy state, tab display and error toasts. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_24_site_view_workers_yield_same_poll_and_map_join_failure",
+          "phase08_24_site_view_owned_results_and_rejections"
+        ],
+        "workerProof": "site_view::tests::phase08_24::phase08_24_site_view_workers_yield_same_poll_and_map_join_failure drives ipc::site_view_open through atomic_file::phase08_06::boundary with the worker-stage hook staged at the synthetic site_view/site_view_open key: the future is manually polled on the same async task, proves progress while a distinct worker thread stays blocked, and a panicked worker maps to the display-only site_view_open_task_failed String.",
+        "platformScope": "macOS unit fixtures only: tauri::test::mock_app drives the generic-R command on MockRuntime, worker-stage keys are synthetic /maru/phase08_24 paths and the phase08_24 tests serialize on a module-local TEST_LOCK because the hook registry is global; no live workspace, credential, network endpoint or native test hook is touched.",
+        "limits": "The webview creation itself is a platform call outside the unit proof; this shard proves the lock wait and validation moved off the shared async runtime. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
+        "contract": "The unit Result and every validation and webview error string are unchanged; the only new failure path is the JoinError-to-String mapping at the worker boundary."
+      }
+    },
+    {
+      "name": "site_view_navigate",
+      "module": "src-tauri/src/site_view.rs",
+      "registrationPath": "src-tauri/src/lib.rs::site_view::site_view_navigate",
+      "originalDisposition": "UI",
+      "disposition": "UI",
+      "helperChain": [
+        "src-tauri/src/site_view.rs::site_view_navigate stays a registered async UI command: it validates the URL through src-tauri/src/site_view.rs::parse_http_url, resolves the webview through src-tauri/src/site_view.rs::get_embed (label via src-tauri/src/site_view.rs::embed_label) and posts the navigation to the webview, which internally dispatches to the main thread; the chain contains no filesystem access, process spawn or lock wait."
+      ],
+      "workerBoundary": "Pure platform dispatch: src-tauri/src/site_view.rs::site_view_navigate runs on the shared async runtime and every webview call posts to the main thread through Tauri's own platform dispatch, so the command keeps its main-thread affinity with no blocking substep of its own and no spawn_blocking worker is needed.",
+      "syncCallers": [
+        "No Rust or CLI caller invokes site_view_navigate synchronously today; src-tauri/src/lib.rs registers only site_view::site_view_navigate and the command keeps its original async registration path."
+      ],
+      "mutationKey": {
+        "readOnly": true,
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "sharedAdmissionEntry": "site_view_navigate performs no filesystem mutation: src-tauri/src/site_view.rs::parse_http_url and src-tauri/src/site_view.rs::embed_label only validate inputs and the navigation is an in-process webview post, so the command is read-only and needs no mutation admission.",
+        "postAdmissionPreconditions": [
+          "No mutation admission is required: the command performs no filesystem mutation, so there is no transaction key to admit and nothing to release."
+        ],
+        "domainLockOrder": "No path admission exists; the command takes no domain lock, so there is no admission-before-domain-lock order to record."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_24",
+          "passed": 16,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/siteView.ts"
+        ],
+        "payload": "navigateSiteView (src/lib/siteView.ts:82) invokes site_view_navigate with tabId and url; the Sites surface keeps owning the tab lifecycle flow regardless of screen changes.",
+        "terminalNoticeOwner": "The Sites surface that calls this helper owns busy state, tab display and error toasts. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_24_site_view_ui_rows_dispatch_with_typed_rejections"
+        ],
+        "workerProof": "site_view::tests::phase08_24::phase08_24_site_view_ui_rows_dispatch_with_typed_rejections drives all nine per-tab UI commands on a MockRuntime app and asserts each dispatch reaches the platform boundary and each typed rejection (label validation, missing tab) is unchanged.",
+        "platformScope": "macOS unit fixtures only: tauri::test::mock_app drives the generic-R commands on MockRuntime; no live workspace, credential, network endpoint or native test hook is touched.",
+        "bounds": "Bounded per call: one URL parse, one label check and one webview post; no loop over user data and no unbounded scan.",
+        "affinity": "Main-thread platform dispatch: Tauri webview operations are required to run on the main thread and the webview performs that dispatch internally, so the command keeps platform affinity on the shared async runtime.",
+        "lifetime": "Command lifetime is one request/response: the future completes when the platform answers and holds no guard, lease or background callback afterward.",
+        "limits": "The actual webview navigation is a platform call outside the unit proof; this row claims scheduling affinity only. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
+        "contract": "The unit Result and every validation and webview error string are unchanged on the wire."
+      }
+    },
+    {
+      "name": "site_view_set_bounds",
+      "module": "src-tauri/src/site_view.rs",
+      "registrationPath": "src-tauri/src/lib.rs::site_view::site_view_set_bounds",
+      "originalDisposition": "UI",
+      "disposition": "UI",
+      "helperChain": [
+        "src-tauri/src/site_view.rs::site_view_set_bounds stays a registered async UI command: it resolves the webview through src-tauri/src/site_view.rs::get_embed (label via src-tauri/src/site_view.rs::embed_label) and posts the bounds through src-tauri/src/site_view.rs::embed_rect to the webview, which internally dispatches to the main thread; the chain contains no filesystem access, process spawn or lock wait."
+      ],
+      "workerBoundary": "Pure platform dispatch: src-tauri/src/site_view.rs::site_view_set_bounds runs on the shared async runtime and every webview call posts to the main thread through Tauri's own platform dispatch, so the command keeps its main-thread affinity with no blocking substep of its own and no spawn_blocking worker is needed.",
+      "syncCallers": [
+        "No Rust or CLI caller invokes site_view_set_bounds synchronously today; src-tauri/src/lib.rs registers only site_view::site_view_set_bounds and the command keeps its original async registration path."
+      ],
+      "mutationKey": {
+        "readOnly": true,
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "sharedAdmissionEntry": "site_view_set_bounds performs no filesystem mutation: src-tauri/src/site_view.rs::embed_label and src-tauri/src/site_view.rs::embed_rect only validate and package inputs and the bounds update is an in-process webview post, so the command is read-only and needs no mutation admission.",
+        "postAdmissionPreconditions": [
+          "No mutation admission is required: the command performs no filesystem mutation, so there is no transaction key to admit and nothing to release."
+        ],
+        "domainLockOrder": "No path admission exists; the command takes no domain lock, so there is no admission-before-domain-lock order to record."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_24",
+          "passed": 16,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/siteView.ts"
+        ],
+        "payload": "setSiteViewBounds (src/lib/siteView.ts:91) invokes site_view_set_bounds with tabId and bounds; the Sites surface keeps owning the tab lifecycle flow regardless of screen changes.",
+        "terminalNoticeOwner": "The Sites surface that calls this helper owns busy state, tab display and error toasts. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_24_site_view_ui_rows_dispatch_with_typed_rejections"
+        ],
+        "workerProof": "site_view::tests::phase08_24::phase08_24_site_view_ui_rows_dispatch_with_typed_rejections drives all nine per-tab UI commands on a MockRuntime app and asserts each dispatch reaches the platform boundary and each typed rejection (label validation, missing tab) is unchanged.",
+        "platformScope": "macOS unit fixtures only: tauri::test::mock_app drives the generic-R commands on MockRuntime; no live workspace, credential, network endpoint or native test hook is touched.",
+        "bounds": "Bounded per call: one label check and one webview bounds post; no loop over user data and no unbounded scan.",
+        "affinity": "Main-thread platform dispatch: Tauri webview operations are required to run on the main thread and the webview performs that dispatch internally, so the command keeps platform affinity on the shared async runtime.",
+        "lifetime": "Command lifetime is one request/response: the future completes when the platform answers and holds no guard, lease or background callback afterward.",
+        "limits": "The actual bounds application is a platform call outside the unit proof; this row claims scheduling affinity only. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
+        "contract": "The unit Result and every validation and webview error string are unchanged on the wire."
+      }
+    },
+    {
+      "name": "site_view_show",
+      "module": "src-tauri/src/site_view.rs",
+      "registrationPath": "src-tauri/src/lib.rs::site_view::site_view_show",
+      "originalDisposition": "UI",
+      "disposition": "UI",
+      "helperChain": [
+        "src-tauri/src/site_view.rs::site_view_show stays a registered async UI command: it enumerates embed labels through src-tauri/src/site_view.rs::embed_labels, validates the target through src-tauri/src/site_view.rs::embed_label, hides the other webviews and shows the target via src-tauri/src/site_view.rs::get_embed, and every webview call internally dispatches to the main thread; the chain contains no filesystem access, process spawn or lock wait."
+      ],
+      "workerBoundary": "Pure platform dispatch: src-tauri/src/site_view.rs::site_view_show runs on the shared async runtime and every webview call posts to the main thread through Tauri's own platform dispatch, so the command keeps its main-thread affinity with no blocking substep of its own and no spawn_blocking worker is needed.",
+      "syncCallers": [
+        "No Rust or CLI caller invokes site_view_show synchronously today; src-tauri/src/lib.rs registers only site_view::site_view_show and the command keeps its original async registration path."
+      ],
+      "mutationKey": {
+        "readOnly": true,
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "sharedAdmissionEntry": "site_view_show performs no filesystem mutation: src-tauri/src/site_view.rs::embed_label and src-tauri/src/site_view.rs::embed_labels only enumerate and validate in-process webview labels, so the command is read-only and needs no mutation admission.",
+        "postAdmissionPreconditions": [
+          "No mutation admission is required: the command performs no filesystem mutation, so there is no transaction key to admit and nothing to release."
+        ],
+        "domainLockOrder": "No path admission exists; the command takes no domain lock, so there is no admission-before-domain-lock order to record."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_24",
+          "passed": 16,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/siteView.ts"
+        ],
+        "payload": "showSiteView (src/lib/siteView.ts:102) invokes site_view_show with tabId; the Sites surface keeps owning the tab lifecycle flow regardless of screen changes.",
+        "terminalNoticeOwner": "The Sites surface that calls this helper owns busy state, tab display and error toasts. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_24_site_view_ui_rows_dispatch_with_typed_rejections"
+        ],
+        "workerProof": "site_view::tests::phase08_24::phase08_24_site_view_ui_rows_dispatch_with_typed_rejections drives all nine per-tab UI commands on a MockRuntime app and asserts each dispatch reaches the platform boundary and each typed rejection (label validation, missing tab) is unchanged.",
+        "platformScope": "macOS unit fixtures only: tauri::test::mock_app drives the generic-R commands on MockRuntime; no live workspace, credential, network endpoint or native test hook is touched.",
+        "bounds": "Bounded per call: one pass over the open embed labels, which is itself bounded by the finite webview registry, plus one show post; no unbounded scan.",
+        "affinity": "Main-thread platform dispatch: Tauri webview operations are required to run on the main thread and the webview performs that dispatch internally, so the command keeps platform affinity on the shared async runtime.",
+        "lifetime": "Command lifetime is one request/response: the future completes when the platform answers and holds no guard, lease or background callback afterward.",
+        "limits": "The actual show/hide application is a platform call outside the unit proof; this row claims scheduling affinity only. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
+        "contract": "The unit Result and every validation and webview error string are unchanged on the wire."
+      }
+    },
+    {
+      "name": "site_view_hide",
+      "module": "src-tauri/src/site_view.rs",
+      "registrationPath": "src-tauri/src/lib.rs::site_view::site_view_hide",
+      "originalDisposition": "UI",
+      "disposition": "UI",
+      "helperChain": [
+        "src-tauri/src/site_view.rs::site_view_hide stays a registered async UI command: it enumerates embed labels through src-tauri/src/site_view.rs::embed_labels and hides each webview, and every webview call internally dispatches to the main thread; the chain contains no filesystem access, process spawn or lock wait."
+      ],
+      "workerBoundary": "Pure platform dispatch: src-tauri/src/site_view.rs::site_view_hide runs on the shared async runtime and every webview call posts to the main thread through Tauri's own platform dispatch, so the command keeps its main-thread affinity with no blocking substep of its own and no spawn_blocking worker is needed.",
+      "syncCallers": [
+        "No Rust or CLI caller invokes site_view_hide synchronously today; src-tauri/src/lib.rs registers only site_view::site_view_hide and the command keeps its original async registration path."
+      ],
+      "mutationKey": {
+        "readOnly": true,
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "sharedAdmissionEntry": "site_view_hide performs no filesystem mutation: src-tauri/src/site_view.rs::embed_labels only enumerates in-process webview labels, so the command is read-only and needs no mutation admission.",
+        "postAdmissionPreconditions": [
+          "No mutation admission is required: the command performs no filesystem mutation, so there is no transaction key to admit and nothing to release."
+        ],
+        "domainLockOrder": "No path admission exists; the command takes no domain lock, so there is no admission-before-domain-lock order to record."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_24",
+          "passed": 16,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/siteView.ts"
+        ],
+        "payload": "hideSiteView (src/lib/siteView.ts:119) invokes site_view_hide; the Sites surface keeps owning the tab lifecycle flow regardless of screen changes.",
+        "terminalNoticeOwner": "The Sites surface that calls this helper owns busy state, tab display and error toasts. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_24_site_view_ui_rows_dispatch_with_typed_rejections"
+        ],
+        "workerProof": "site_view::tests::phase08_24::phase08_24_site_view_ui_rows_dispatch_with_typed_rejections drives all nine per-tab UI commands on a MockRuntime app and asserts each dispatch reaches the platform boundary and each typed rejection (label validation, missing tab) is unchanged.",
+        "platformScope": "macOS unit fixtures only: tauri::test::mock_app drives the generic-R commands on MockRuntime; no live workspace, credential, network endpoint or native test hook is touched.",
+        "bounds": "Bounded per call: one pass over the open embed labels, which is itself bounded by the finite webview registry; no unbounded scan.",
+        "affinity": "Main-thread platform dispatch: Tauri webview operations are required to run on the main thread and the webview performs that dispatch internally, so the command keeps platform affinity on the shared async runtime.",
+        "lifetime": "Command lifetime is one request/response: the future completes when the platform answers and holds no guard, lease or background callback afterward.",
+        "limits": "The actual hide application is a platform call outside the unit proof; this row claims scheduling affinity only. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
+        "contract": "The unit Result is unchanged on the wire."
+      }
+    },
+    {
+      "name": "site_view_close",
+      "module": "src-tauri/src/site_view.rs",
+      "registrationPath": "src-tauri/src/lib.rs::site_view::site_view_close",
+      "originalDisposition": "UI",
+      "disposition": "UI",
+      "helperChain": [
+        "src-tauri/src/site_view.rs::site_view_close stays a registered async UI command: it validates the label through src-tauri/src/site_view.rs::embed_label and closes the matching webview, which internally dispatches to the main thread; closing an absent tab is an explicit no-op, and the chain contains no filesystem access, process spawn or lock wait."
+      ],
+      "workerBoundary": "Pure platform dispatch: src-tauri/src/site_view.rs::site_view_close runs on the shared async runtime and every webview call posts to the main thread through Tauri's own platform dispatch, so the command keeps its main-thread affinity with no blocking substep of its own and no spawn_blocking worker is needed.",
+      "syncCallers": [
+        "No Rust or CLI caller invokes site_view_close synchronously today; src-tauri/src/lib.rs registers only site_view::site_view_close and the command keeps its original async registration path."
+      ],
+      "mutationKey": {
+        "readOnly": true,
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "sharedAdmissionEntry": "site_view_close performs no filesystem mutation: src-tauri/src/site_view.rs::embed_label only validates the in-process webview label, so the command is read-only and needs no mutation admission.",
+        "postAdmissionPreconditions": [
+          "No mutation admission is required: the command performs no filesystem mutation, so there is no transaction key to admit and nothing to release."
+        ],
+        "domainLockOrder": "No path admission exists; the command takes no domain lock, so there is no admission-before-domain-lock order to record."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_24",
+          "passed": 16,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/siteView.ts"
+        ],
+        "payload": "closeSiteView (src/lib/siteView.ts:129) invokes site_view_close with tabId; the Sites surface keeps owning the tab lifecycle flow regardless of screen changes.",
+        "terminalNoticeOwner": "The Sites surface that calls this helper owns busy state, tab display and error toasts. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_24_site_view_ui_rows_dispatch_with_typed_rejections"
+        ],
+        "workerProof": "site_view::tests::phase08_24::phase08_24_site_view_ui_rows_dispatch_with_typed_rejections drives all nine per-tab UI commands on a MockRuntime app and asserts each dispatch reaches the platform boundary and each typed rejection (label validation, missing tab) is unchanged.",
+        "platformScope": "macOS unit fixtures only: tauri::test::mock_app drives the generic-R commands on MockRuntime; no live workspace, credential, network endpoint or native test hook is touched.",
+        "bounds": "Bounded per call: one label check and at most one webview close; no loop over user data and no unbounded scan.",
+        "affinity": "Main-thread platform dispatch: Tauri webview operations are required to run on the main thread and the webview performs that dispatch internally, so the command keeps platform affinity on the shared async runtime.",
+        "lifetime": "Command lifetime is one request/response: the future completes when the platform answers and holds no guard, lease or background callback afterward.",
+        "limits": "The actual close is a platform call outside the unit proof; this row claims scheduling affinity only. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
+        "contract": "The unit Result and the label validation error string are unchanged on the wire; closing an absent tab stays an explicit no-op."
+      }
+    },
+    {
+      "name": "site_view_close_all",
+      "module": "src-tauri/src/site_view.rs",
+      "registrationPath": "src-tauri/src/lib.rs::site_view::site_view_close_all",
+      "originalDisposition": "UI",
+      "disposition": "UI",
+      "helperChain": [
+        "src-tauri/src/site_view.rs::site_view_close_all stays a registered async UI command: it enumerates embed labels through src-tauri/src/site_view.rs::embed_labels and closes each webview, and every webview call internally dispatches to the main thread; the chain contains no filesystem access, process spawn or lock wait."
+      ],
+      "workerBoundary": "Pure platform dispatch: src-tauri/src/site_view.rs::site_view_close_all runs on the shared async runtime and every webview call posts to the main thread through Tauri's own platform dispatch, so the command keeps its main-thread affinity with no blocking substep of its own and no spawn_blocking worker is needed.",
+      "syncCallers": [
+        "No Rust or CLI caller invokes site_view_close_all synchronously today; src-tauri/src/lib.rs registers only site_view::site_view_close_all and the command keeps its original async registration path."
+      ],
+      "mutationKey": {
+        "readOnly": true,
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "sharedAdmissionEntry": "site_view_close_all performs no filesystem mutation: src-tauri/src/site_view.rs::embed_labels only enumerates in-process webview labels, so the command is read-only and needs no mutation admission.",
+        "postAdmissionPreconditions": [
+          "No mutation admission is required: the command performs no filesystem mutation, so there is no transaction key to admit and nothing to release."
+        ],
+        "domainLockOrder": "No path admission exists; the command takes no domain lock, so there is no admission-before-domain-lock order to record."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_24",
+          "passed": 16,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/siteView.ts"
+        ],
+        "payload": "closeAllSiteViews (src/lib/siteView.ts:136) invokes site_view_close_all; the Sites surface keeps owning the tab lifecycle flow regardless of screen changes.",
+        "terminalNoticeOwner": "The Sites surface that calls this helper owns busy state, tab display and error toasts. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_24_site_view_ui_rows_dispatch_with_typed_rejections"
+        ],
+        "workerProof": "site_view::tests::phase08_24::phase08_24_site_view_ui_rows_dispatch_with_typed_rejections drives all nine per-tab UI commands on a MockRuntime app and asserts each dispatch reaches the platform boundary and each typed rejection (label validation, missing tab) is unchanged.",
+        "platformScope": "macOS unit fixtures only: tauri::test::mock_app drives the generic-R commands on MockRuntime; no live workspace, credential, network endpoint or native test hook is touched.",
+        "bounds": "Bounded per call: one pass over the open embed labels, which is itself bounded by the finite webview registry; no unbounded scan.",
+        "affinity": "Main-thread platform dispatch: Tauri webview operations are required to run on the main thread and the webview performs that dispatch internally, so the command keeps platform affinity on the shared async runtime.",
+        "lifetime": "Command lifetime is one request/response: the future completes when the platform answers and holds no guard, lease or background callback afterward.",
+        "limits": "The actual closes are platform calls outside the unit proof; this row claims scheduling affinity only. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
+        "contract": "The unit Result is unchanged on the wire."
+      }
+    },
+    {
+      "name": "site_view_reload",
+      "module": "src-tauri/src/site_view.rs",
+      "registrationPath": "src-tauri/src/lib.rs::site_view::site_view_reload",
+      "originalDisposition": "UI",
+      "disposition": "UI",
+      "helperChain": [
+        "src-tauri/src/site_view.rs::site_view_reload stays a registered async UI command: it resolves the webview through src-tauri/src/site_view.rs::get_embed (label via src-tauri/src/site_view.rs::embed_label) and posts the reload to the webview, which internally dispatches to the main thread; the chain contains no filesystem access, process spawn or lock wait."
+      ],
+      "workerBoundary": "Pure platform dispatch: src-tauri/src/site_view.rs::site_view_reload runs on the shared async runtime and every webview call posts to the main thread through Tauri's own platform dispatch, so the command keeps its main-thread affinity with no blocking substep of its own and no spawn_blocking worker is needed.",
+      "syncCallers": [
+        "No Rust or CLI caller invokes site_view_reload synchronously today; src-tauri/src/lib.rs registers only site_view::site_view_reload and the command keeps its original async registration path."
+      ],
+      "mutationKey": {
+        "readOnly": true,
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "sharedAdmissionEntry": "site_view_reload performs no filesystem mutation: src-tauri/src/site_view.rs::embed_label only validates the in-process webview label and the reload is an in-process webview post, so the command is read-only and needs no mutation admission.",
+        "postAdmissionPreconditions": [
+          "No mutation admission is required: the command performs no filesystem mutation, so there is no transaction key to admit and nothing to release."
+        ],
+        "domainLockOrder": "No path admission exists; the command takes no domain lock, so there is no admission-before-domain-lock order to record."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_24",
+          "passed": 16,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/siteView.ts"
+        ],
+        "payload": "reloadSiteView (src/lib/siteView.ts:141) invokes site_view_reload with tabId; the Sites surface keeps owning the tab lifecycle flow regardless of screen changes.",
+        "terminalNoticeOwner": "The Sites surface that calls this helper owns busy state, tab display and error toasts. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_24_site_view_ui_rows_dispatch_with_typed_rejections"
+        ],
+        "workerProof": "site_view::tests::phase08_24::phase08_24_site_view_ui_rows_dispatch_with_typed_rejections drives all nine per-tab UI commands on a MockRuntime app and asserts each dispatch reaches the platform boundary and each typed rejection (label validation, missing tab) is unchanged.",
+        "platformScope": "macOS unit fixtures only: tauri::test::mock_app drives the generic-R commands on MockRuntime; no live workspace, credential, network endpoint or native test hook is touched.",
+        "bounds": "Bounded per call: one label check and one webview reload post; no loop over user data and no unbounded scan.",
+        "affinity": "Main-thread platform dispatch: Tauri webview operations are required to run on the main thread and the webview performs that dispatch internally, so the command keeps platform affinity on the shared async runtime.",
+        "lifetime": "Command lifetime is one request/response: the future completes when the platform answers and holds no guard, lease or background callback afterward.",
+        "limits": "The actual reload is a platform call outside the unit proof; this row claims scheduling affinity only. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
+        "contract": "The unit Result and every validation and webview error string are unchanged on the wire."
+      }
+    },
+    {
+      "name": "site_view_back",
+      "module": "src-tauri/src/site_view.rs",
+      "registrationPath": "src-tauri/src/lib.rs::site_view::site_view_back",
+      "originalDisposition": "UI",
+      "disposition": "UI",
+      "helperChain": [
+        "src-tauri/src/site_view.rs::site_view_back stays a registered async UI command: it resolves the webview through src-tauri/src/site_view.rs::get_embed (label via src-tauri/src/site_view.rs::embed_label) and evaluates history.back() in the page context, which internally dispatches to the main thread; the chain contains no filesystem access, process spawn or lock wait."
+      ],
+      "workerBoundary": "Pure platform dispatch: src-tauri/src/site_view.rs::site_view_back runs on the shared async runtime and every webview call posts to the main thread through Tauri's own platform dispatch, so the command keeps its main-thread affinity with no blocking substep of its own and no spawn_blocking worker is needed.",
+      "syncCallers": [
+        "No Rust or CLI caller invokes site_view_back synchronously today; src-tauri/src/lib.rs registers only site_view::site_view_back and the command keeps its original async registration path."
+      ],
+      "mutationKey": {
+        "readOnly": true,
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "sharedAdmissionEntry": "site_view_back performs no filesystem mutation: src-tauri/src/site_view.rs::embed_label only validates the in-process webview label and the script evaluation is an in-process webview post, so the command is read-only and needs no mutation admission.",
+        "postAdmissionPreconditions": [
+          "No mutation admission is required: the command performs no filesystem mutation, so there is no transaction key to admit and nothing to release."
+        ],
+        "domainLockOrder": "No path admission exists; the command takes no domain lock, so there is no admission-before-domain-lock order to record."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_24",
+          "passed": 16,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/siteView.ts"
+        ],
+        "payload": "siteViewBack (src/lib/siteView.ts:146) invokes site_view_back with tabId; the Sites surface keeps owning the tab lifecycle flow regardless of screen changes.",
+        "terminalNoticeOwner": "The Sites surface that calls this helper owns busy state, tab display and error toasts. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_24_site_view_ui_rows_dispatch_with_typed_rejections"
+        ],
+        "workerProof": "site_view::tests::phase08_24::phase08_24_site_view_ui_rows_dispatch_with_typed_rejections drives all nine per-tab UI commands on a MockRuntime app and asserts each dispatch reaches the platform boundary and each typed rejection (label validation, missing tab) is unchanged.",
+        "platformScope": "macOS unit fixtures only: tauri::test::mock_app drives the generic-R commands on MockRuntime; no live workspace, credential, network endpoint or native test hook is touched.",
+        "bounds": "Bounded per call: one label check and one scripted history.back() post; no loop over user data and no unbounded scan.",
+        "affinity": "Main-thread platform dispatch: Tauri webview operations are required to run on the main thread and the webview performs that dispatch internally, so the command keeps platform affinity on the shared async runtime.",
+        "lifetime": "Command lifetime is one request/response: the future completes when the platform answers and holds no guard, lease or background callback afterward.",
+        "limits": "The actual script evaluation is a platform call outside the unit proof; this row claims scheduling affinity only. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
+        "contract": "The unit Result and every validation and webview error string are unchanged on the wire."
+      }
+    },
+    {
+      "name": "site_view_forward",
+      "module": "src-tauri/src/site_view.rs",
+      "registrationPath": "src-tauri/src/lib.rs::site_view::site_view_forward",
+      "originalDisposition": "UI",
+      "disposition": "UI",
+      "helperChain": [
+        "src-tauri/src/site_view.rs::site_view_forward stays a registered async UI command: it resolves the webview through src-tauri/src/site_view.rs::get_embed (label via src-tauri/src/site_view.rs::embed_label) and evaluates history.forward() in the page context, which internally dispatches to the main thread; the chain contains no filesystem access, process spawn or lock wait."
+      ],
+      "workerBoundary": "Pure platform dispatch: src-tauri/src/site_view.rs::site_view_forward runs on the shared async runtime and every webview call posts to the main thread through Tauri's own platform dispatch, so the command keeps its main-thread affinity with no blocking substep of its own and no spawn_blocking worker is needed.",
+      "syncCallers": [
+        "No Rust or CLI caller invokes site_view_forward synchronously today; src-tauri/src/lib.rs registers only site_view::site_view_forward and the command keeps its original async registration path."
+      ],
+      "mutationKey": {
+        "readOnly": true,
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "sharedAdmissionEntry": "site_view_forward performs no filesystem mutation: src-tauri/src/site_view.rs::embed_label only validates the in-process webview label and the script evaluation is an in-process webview post, so the command is read-only and needs no mutation admission.",
+        "postAdmissionPreconditions": [
+          "No mutation admission is required: the command performs no filesystem mutation, so there is no transaction key to admit and nothing to release."
+        ],
+        "domainLockOrder": "No path admission exists; the command takes no domain lock, so there is no admission-before-domain-lock order to record."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_24",
+          "passed": 16,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/siteView.ts"
+        ],
+        "payload": "siteViewForward (src/lib/siteView.ts:151) invokes site_view_forward with tabId; the Sites surface keeps owning the tab lifecycle flow regardless of screen changes.",
+        "terminalNoticeOwner": "The Sites surface that calls this helper owns busy state, tab display and error toasts. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_24_site_view_ui_rows_dispatch_with_typed_rejections"
+        ],
+        "workerProof": "site_view::tests::phase08_24::phase08_24_site_view_ui_rows_dispatch_with_typed_rejections drives all nine per-tab UI commands on a MockRuntime app and asserts each dispatch reaches the platform boundary and each typed rejection (label validation, missing tab) is unchanged.",
+        "platformScope": "macOS unit fixtures only: tauri::test::mock_app drives the generic-R commands on MockRuntime; no live workspace, credential, network endpoint or native test hook is touched.",
+        "bounds": "Bounded per call: one label check and one scripted history.forward() post; no loop over user data and no unbounded scan.",
+        "affinity": "Main-thread platform dispatch: Tauri webview operations are required to run on the main thread and the webview performs that dispatch internally, so the command keeps platform affinity on the shared async runtime.",
+        "lifetime": "Command lifetime is one request/response: the future completes when the platform answers and holds no guard, lease or background callback afterward.",
+        "limits": "The actual script evaluation is a platform call outside the unit proof; this row claims scheduling affinity only. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
+        "contract": "The unit Result and every validation and webview error string are unchanged on the wire."
+      }
+    },
+    {
+      "name": "site_view_open_external",
+      "module": "src-tauri/src/site_view.rs",
+      "registrationPath": "src-tauri/src/lib.rs::site_view::ipc::site_view_open_external",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/site_view.rs::ipc::site_view_open_external owns its url input and awaits tauri::async_runtime::spawn_blocking calling src-tauri/src/site_view.rs::site_view_open_external inside the worker; a JoinError becomes the display-only site_view_open_external_task_failed String.",
+        "src-tauri/src/site_view.rs::site_view_open_external validates the URL through src-tauri/src/site_view.rs::parse_http_url (http/https only, so the spawn can never target a local path or custom scheme) and hands off to src-tauri/src/site_view.rs::open_in_system_browser, which spawns the platform opener with fixed argv on the worker; the process spawn no longer runs on the shared async runtime."
+      ],
+      "workerBoundary": "src-tauri/src/site_view.rs::ipc::site_view_open_external awaits tauri::async_runtime::spawn_blocking before the URL validation or the platform opener spawn runs; the closure owns the String, never a borrowed State; only a JoinError maps to the display-only site_view_open_external_task_failed String while the unit Result and the scheme validation error pass through unchanged.",
+      "syncCallers": [
+        "No Rust or CLI caller invokes site_view_open_external synchronously today; src-tauri/src/lib.rs registers only site_view::ipc::site_view_open_external, and the original synchronous src-tauri/src/site_view.rs::site_view_open_external keeps its name and signature for Rust callers (the phase08_24 tests exercise it through the wrapper)."
+      ],
+      "mutationKey": {
+        "readOnly": true,
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "sharedAdmissionEntry": "site_view_open_external performs no filesystem mutation: src-tauri/src/site_view.rs::parse_http_url only validates the URL and src-tauri/src/site_view.rs::open_in_system_browser only spawns the platform opener with fixed argv, so the command is read-only and needs no mutation admission.",
+        "postAdmissionPreconditions": [
+          "No mutation admission is required: the command performs no filesystem mutation, so there is no transaction key to admit and nothing to release."
+        ],
+        "domainLockOrder": "No path admission exists; the command takes no domain lock, so there is no admission-before-domain-lock order to record."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_24",
+          "passed": 16,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/siteView.ts"
+        ],
+        "payload": "openSiteViewExternal (src/lib/siteView.ts:159) invokes site_view_open_external with url; the Sites surface keeps owning the external-open flow regardless of screen changes.",
+        "terminalNoticeOwner": "The Sites surface that calls this helper owns busy state and error toasts. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_24_site_view_workers_yield_same_poll_and_map_join_failure",
+          "phase08_24_site_view_owned_results_and_rejections"
+        ],
+        "workerProof": "site_view::tests::phase08_24::phase08_24_site_view_workers_yield_same_poll_and_map_join_failure drives ipc::site_view_open_external through atomic_file::phase08_06::boundary with the worker-stage hook staged at the synthetic site_view/site_view_open_external key: the future is manually polled on the same async task, proves progress while a distinct worker thread stays blocked, and a panicked worker maps to the display-only site_view_open_external_task_failed String.",
+        "platformScope": "macOS unit fixtures only: worker-stage keys are synthetic /maru/phase08_24 paths and the phase08_24 tests serialize on a module-local TEST_LOCK because the hook registry is global; no live workspace, credential, network endpoint or native test hook is touched.",
+        "limits": "The actual opener process is spawned only in production; the unit proof covers scheduling, validation and error mapping. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
+        "contract": "The unit Result, the http/https-only scheme validation and the Cannot-open error string are unchanged; the only new failure path is the JoinError-to-String mapping at the worker boundary."
+      }
+    },
+    {
+      "name": "site_view_open_safari",
+      "module": "src-tauri/src/site_view.rs",
+      "registrationPath": "src-tauri/src/lib.rs::site_view::ipc::site_view_open_safari",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/site_view.rs::ipc::site_view_open_safari owns its url input and awaits tauri::async_runtime::spawn_blocking calling src-tauri/src/site_view.rs::site_view_open_safari inside the worker; a JoinError becomes the display-only site_view_open_safari_task_failed String.",
+        "src-tauri/src/site_view.rs::site_view_open_safari validates the URL through src-tauri/src/site_view.rs::parse_http_url and, on macOS, builds the fixed-argv Safari launch through src-tauri/src/site_view.rs::safari_command (falling back to src-tauri/src/site_view.rs::open_in_system_browser off macOS); the spawn runs on the worker, so the process launch no longer runs on the shared async runtime."
+      ],
+      "workerBoundary": "src-tauri/src/site_view.rs::ipc::site_view_open_safari awaits tauri::async_runtime::spawn_blocking before the URL validation or the Safari launch runs; the closure owns the String, never a borrowed State; only a JoinError maps to the display-only site_view_open_safari_task_failed String while the unit Result and the scheme validation error pass through unchanged.",
+      "syncCallers": [
+        "No Rust or CLI caller invokes site_view_open_safari synchronously today; src-tauri/src/lib.rs registers only site_view::ipc::site_view_open_safari, and the original synchronous src-tauri/src/site_view.rs::site_view_open_safari keeps its name and signature for Rust callers (the phase08_24 tests exercise it through the wrapper)."
+      ],
+      "mutationKey": {
+        "readOnly": true,
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "sharedAdmissionEntry": "site_view_open_safari performs no filesystem mutation: src-tauri/src/site_view.rs::parse_http_url only validates the URL and src-tauri/src/site_view.rs::safari_command only builds the fixed-argv platform launch, so the command is read-only and needs no mutation admission.",
+        "postAdmissionPreconditions": [
+          "No mutation admission is required: the command performs no filesystem mutation, so there is no transaction key to admit and nothing to release."
+        ],
+        "domainLockOrder": "No path admission exists; the command takes no domain lock, so there is no admission-before-domain-lock order to record."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_24",
+          "passed": 16,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/siteView.ts"
+        ],
+        "payload": "openSiteViewInSafari (src/lib/siteView.ts:169) invokes site_view_open_safari with url; the Sites surface keeps owning the Safari-open flow regardless of screen changes.",
+        "terminalNoticeOwner": "The Sites surface that calls this helper owns busy state and error toasts. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_24_site_view_workers_yield_same_poll_and_map_join_failure",
+          "phase08_24_site_view_owned_results_and_rejections"
+        ],
+        "workerProof": "site_view::tests::phase08_24::phase08_24_site_view_workers_yield_same_poll_and_map_join_failure drives ipc::site_view_open_safari through atomic_file::phase08_06::boundary with the worker-stage hook staged at the synthetic site_view/site_view_open_safari key: the future is manually polled on the same async task, proves progress while a distinct worker thread stays blocked, and a panicked worker maps to the display-only site_view_open_safari_task_failed String.",
+        "platformScope": "macOS unit fixtures only: worker-stage keys are synthetic /maru/phase08_24 paths and the phase08_24 tests serialize on a module-local TEST_LOCK because the hook registry is global; no live workspace, credential, network endpoint or native test hook is touched.",
+        "limits": "The actual Safari launch is spawned only in production; the unit proof covers scheduling, validation and error mapping. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
+        "contract": "The unit Result, the http/https-only scheme validation and the Cannot-open-Safari error string are unchanged; the only new failure path is the JoinError-to-String mapping at the worker boundary."
+      }
+    },
+    {
+      "name": "site_view_take_opened_urls",
+      "module": "src-tauri/src/site_view.rs",
+      "registrationPath": "src-tauri/src/lib.rs::site_view::ipc::site_view_take_opened_urls",
+      "originalDisposition": "RETAIN",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/site_view.rs::ipc::site_view_take_opened_urls clones the owned Arc<Mutex<VecDeque<String>>> out of State and awaits tauri::async_runtime::spawn_blocking, which drains the queue through src-tauri/src/site_view.rs::take inside the worker; a JoinError becomes the display-only site_view_take_opened_urls_task_failed String.",
+        "src-tauri/src/site_view.rs::take bounds the drain by the finite MAX_OPENED_URLS queue, so the mutex wait and the VecDeque drain run on the owned worker and the command never blocks the shared async runtime on the lock."
+      ],
+      "workerBoundary": "src-tauri/src/site_view.rs::ipc::site_view_take_opened_urls awaits tauri::async_runtime::spawn_blocking before the queue lock is taken; the closure owns the cloned SiteOpenedUrlState, never a borrowed State; the Ok(Vec<String>) payload passes through unchanged and only a JoinError maps to the display-only site_view_take_opened_urls_task_failed String.",
+      "syncCallers": [
+        "No Rust or CLI caller invokes site_view_take_opened_urls synchronously today; src-tauri/src/lib.rs registers only site_view::ipc::site_view_take_opened_urls, and the original synchronous src-tauri/src/site_view.rs::site_view_take_opened_urls keeps its name and signature for Rust callers (the phase08_24 tests exercise it through the wrapper)."
+      ],
+      "mutationKey": {
+        "readOnly": true,
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "sharedAdmissionEntry": "site_view_take_opened_urls performs no filesystem mutation: src-tauri/src/site_view.rs::take only drains the in-memory opened-URL queue, so the command is read-only and needs no mutation admission.",
+        "postAdmissionPreconditions": [
+          "No mutation admission is required: the command performs no filesystem mutation, so there is no transaction key to admit and nothing to release."
+        ],
+        "domainLockOrder": "No path admission exists; the queue mutex is an in-process lock taken inside the worker, so there is no admission-before-domain-lock order to record."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_24",
+          "passed": 16,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/siteView.ts"
+        ],
+        "payload": "takeOpenedSiteUrls (src/lib/siteView.ts:174) invokes site_view_take_opened_urls and receives the drained URL list; the Sites surface keeps owning the opened-URL handoff flow regardless of screen changes.",
+        "terminalNoticeOwner": "The Sites surface that calls this helper owns the drained-list consumption and error toasts. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_24_site_view_workers_yield_same_poll_and_map_join_failure",
+          "phase08_24_site_view_owned_results_and_rejections"
+        ],
+        "workerProof": "site_view::tests::phase08_24::phase08_24_site_view_workers_yield_same_poll_and_map_join_failure drives ipc::site_view_take_opened_urls through atomic_file::phase08_06::boundary with the worker-stage hook staged at the synthetic site_view/site_view_take_opened_urls key: the future is manually polled on the same async task, proves progress while a distinct worker thread stays blocked, and a panicked worker maps to the display-only site_view_take_opened_urls_task_failed String.",
+        "platformScope": "macOS unit fixtures only: worker-stage keys are synthetic /maru/phase08_24 paths and the phase08_24 tests serialize on a module-local TEST_LOCK because the hook registry is global; no live workspace, credential, network endpoint or native test hook is touched.",
+        "limits": "The queue is per-app-instance memory; a restarted app loses unclaimed URLs by design. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
+        "contract": "The drained String list is unchanged on the wire (the Ok payload serializes as the bare array); the wrapper returns Result<Vec<String>, String> because Tauri requires owned-Result returns for State-referencing async commands, and the only new failure path is the JoinError-to-String mapping at the worker boundary."
+      }
+    },
+    {
+      "name": "today_notify_new_day",
+      "module": "src-tauri/src/today_notify.rs",
+      "registrationPath": "src-tauri/src/lib.rs::today_notify::ipc::today_notify_new_day",
+      "originalDisposition": "UI",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/today_notify.rs::ipc::today_notify_new_day owns its AppHandle, work_path, logical_day and optional title/body inputs and awaits tauri::async_runtime::spawn_blocking calling src-tauri/src/today_notify.rs::today_notify_new_day inside the worker; a JoinError becomes the display-only today_notify_new_day_task_failed String.",
+        "src-tauri/src/today_notify.rs::today_notify_new_day validates the workspace directory, resolves the notification permission (requesting it only while Prompt), short-circuits denials into the not-sent outcome with the src-tauri/src/today_notify.rs::permission_label classification, and fires the notify-rust show() call; the workspace check and the native notification dispatch run on the finite blocking worker, never on the main thread or the shared async runtime."
+      ],
+      "workerBoundary": "src-tauri/src/today_notify.rs::ipc::today_notify_new_day awaits tauri::async_runtime::spawn_blocking before the workspace check or any notification call runs; the closure owns the AppHandle and Strings, never a borrowed State; only a JoinError maps to the display-only today_notify_new_day_task_failed String while the typed TodayNotifyOutcome payload and the today_notify_permission_failed/today_notify_failed strings pass through unchanged.",
+      "syncCallers": [
+        "No Rust or CLI caller invokes today_notify_new_day synchronously today; src-tauri/src/lib.rs registers only today_notify::ipc::today_notify_new_day, and the original synchronous src-tauri/src/today_notify.rs::today_notify_new_day keeps its name and generic-R signature for Rust callers (the phase08_24 tests exercise it through the wrapper)."
+      ],
+      "mutationKey": {
+        "readOnly": true,
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "sharedAdmissionEntry": "today_notify_new_day performs no filesystem mutation: the workspace argument is only validated as an existing directory and the notification is dispatched through the native notification center, so the command is read-only and needs no mutation admission.",
+        "postAdmissionPreconditions": [
+          "No mutation admission is required: the command performs no filesystem mutation, so there is no transaction key to admit and nothing to release."
+        ],
+        "domainLockOrder": "No path admission exists; the command takes no domain lock, so there is no admission-before-domain-lock order to record."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_24",
+          "passed": 16,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/today.ts"
+        ],
+        "payload": "notifyNewDay (src/lib/today.ts:617) invokes today_notify_new_day with the work path, logical day and optional title/body; the Today surface keeps owning the new-day notification flow regardless of screen changes.",
+        "terminalNoticeOwner": "The Today surface that calls this helper owns busy state, the sent/permission outcome display and error toasts. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_24_today_notify_wrappers_yield_same_poll_and_map_join_failure",
+          "phase08_24_today_notify_real_fixture_results_and_rejections"
+        ],
+        "workerProof": "today_notify::tests::phase08_24_today_notify_wrappers_yield_same_poll_and_map_join_failure drives ipc::today_notify_new_day through atomic_file::phase08_06::boundary with the worker-stage hook staged at the disposable tempdir workspace path: the future is manually polled on the same async task, proves progress while a distinct worker thread stays blocked, and a panicked worker maps to the display-only today_notify_new_day_task_failed String.",
+        "platformScope": "macOS unit fixtures only: the app is built with tauri_plugin_notification on a MockRuntime context, desktop permission_state reports Granted and notify-rust show() is fire-and-forget, so the real sent:true/granted success path runs without a live notification center; no live workspace, credential, network endpoint or native test hook is touched.",
+        "limits": "The permission prompt path (Prompt state) needs a live desktop session and stays outside the unit proof; the granted and denied-after-request outcomes share the same worker boundary. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
+        "contract": "The TodayNotifyOutcome payload (sent flag plus permission label) and the today_notify_permission_failed/today_notify_failed error strings are unchanged; the only new failure path is the JoinError-to-String mapping at the worker boundary."
+      }
+    },
+    {
+      "name": "prepare_approval",
+      "module": "src-tauri/src/approval.rs",
+      "registrationPath": "src-tauri/src/lib.rs::approval::ipc::prepare_approval",
+      "originalDisposition": "RETAIN",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/approval.rs::ipc::prepare_approval clones the owned ApprovalState (an Arc<Mutex<ApprovalStore>>) out of State and awaits tauri::async_runtime::spawn_blocking, which inserts the request through src-tauri/src/approval.rs::prepare on the owned state inside the worker; a JoinError becomes the display-only prepare_approval_task_failed String.",
+        "src-tauri/src/approval.rs::prepare validates the trimmed kind, generates the approval id and inserts the stored request under the store mutex, applying the session-allowed auto-approve classification; the store lock wait runs on the worker. The original synchronous src-tauri/src/approval.rs::prepare_approval keeps its tauri::State signature for Rust callers and delegates to the same src-tauri/src/approval.rs::prepare, so the two entry points cannot drift."
+      ],
+      "workerBoundary": "src-tauri/src/approval.rs::ipc::prepare_approval awaits tauri::async_runtime::spawn_blocking before the store lock is taken; the closure owns the cloned ApprovalState plus the kind, summary, target and payload Strings, never a borrowed State; only a JoinError maps to the display-only prepare_approval_task_failed String while the typed ApprovalRequest payload and every approval_kind_required/approval_state_poisoned error pass through unchanged.",
+      "syncCallers": [
+        "No production Rust or CLI caller invokes prepare_approval synchronously today; src-tauri/src/lib.rs registers only approval::ipc::prepare_approval. The original synchronous src-tauri/src/approval.rs::prepare_approval keeps its tauri::State signature and remains the stable Rust/test API: the telegram_io, git, gmail_gws, proposal, scheduler, outlook_mso, drafts, inbox and kakao_relay test modules call it through app.state(), which keeps working unchanged."
+      ],
+      "mutationKey": {
+        "readOnly": true,
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "sharedAdmissionEntry": "prepare_approval performs no filesystem mutation: src-tauri/src/approval.rs::prepare only inserts into the in-memory ApprovalStore behind its mutex, so the command is read-only with respect to the filesystem and needs no mutation admission.",
+        "postAdmissionPreconditions": [
+          "No mutation admission is required: the command performs no filesystem mutation, so there is no transaction key to admit and nothing to release."
+        ],
+        "domainLockOrder": "No path admission exists; the store mutex is an in-process lock taken inside the worker, so there is no admission-before-domain-lock order to record."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_24",
+          "passed": 16,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts"
+        ],
+        "payload": "prepareApproval (src/lib/api.ts:939) invokes prepare_approval with kind, summary, target and payloadPreview; the approval-gated surfaces keep owning the prompt flow regardless of screen changes.",
+        "terminalNoticeOwner": "The approval-gated surfaces that call this api.ts helper own busy state, the returned request display and error toasts. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_24_approval_wrappers_yield_same_poll_and_map_join_failure",
+          "phase08_24_approval_real_fixture_results_and_rejections",
+          "phase08_24_approval_record_serializes_same_target_both_orders"
+        ],
+        "workerProof": "approval::tests::phase08_24::phase08_24_approval_wrappers_yield_same_poll_and_map_join_failure drives ipc::prepare_approval through atomic_file::phase08_06::boundary with the worker-stage hook staged at the synthetic approval key: the future is manually polled on the same async task, proves progress while a distinct worker thread stays blocked, and a panicked worker maps to the display-only prepare_approval_task_failed String.",
+        "platformScope": "macOS unit fixtures only: tauri::test::mock_app drives the wrappers on MockRuntime, the worker-stage key is a synthetic /maru/phase08_24 path and the phase08_24 tests serialize on a module-local TEST_LOCK because the hook registry is global; no live workspace, credential, network endpoint or native test hook is touched.",
+        "limits": "Approval state is per-app-instance memory; a restarted app loses unconsumed approvals by design. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
+        "contract": "The ApprovalRequest payload, the approval_kind_required/approval_state_poisoned error strings and the auto-approve classification are unchanged; the only new failure path is the JoinError-to-String mapping at the worker boundary."
+      }
+    },
+    {
+      "name": "record_approval",
+      "module": "src-tauri/src/approval.rs",
+      "registrationPath": "src-tauri/src/lib.rs::approval::ipc::record_approval",
+      "originalDisposition": "RETAIN",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/approval.rs::ipc::record_approval clones the owned ApprovalState (an Arc<Mutex<ApprovalStore>>) out of State and awaits tauri::async_runtime::spawn_blocking, which records the decision through src-tauri/src/approval.rs::record on the owned state inside the worker; a JoinError becomes the display-only record_approval_task_failed String.",
+        "src-tauri/src/approval.rs::record updates the stored decision under the store mutex, clears the auto-approved flag, and remembers the kind into session_allowed_kinds only on an approved+remember decision, so whichever worker completes last owns a consistent store with no mixed state. The original synchronous src-tauri/src/approval.rs::record_approval keeps its tauri::State signature for Rust callers and delegates to the same src-tauri/src/approval.rs::record, so the two entry points cannot drift."
+      ],
+      "workerBoundary": "src-tauri/src/approval.rs::ipc::record_approval awaits tauri::async_runtime::spawn_blocking before the store lock is taken; the closure owns the cloned ApprovalState plus the id String and decision, never a borrowed State; only a JoinError maps to the display-only record_approval_task_failed String while the typed ApprovalRequest payload and every approval_not_found/approval_state_poisoned error pass through unchanged.",
+      "syncCallers": [
+        "No production Rust or CLI caller invokes record_approval synchronously today; src-tauri/src/lib.rs registers only approval::ipc::record_approval. The original synchronous src-tauri/src/approval.rs::record_approval keeps its tauri::State signature and remains the stable Rust/test API: the telegram_io, git, gmail_gws, proposal, scheduler, outlook_mso, drafts, inbox and kakao_relay test modules call it through app.state(), which keeps working unchanged."
+      ],
+      "mutationKey": {
+        "readOnly": true,
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "sharedAdmissionEntry": "record_approval performs no filesystem mutation: src-tauri/src/approval.rs::record only mutates the in-memory ApprovalStore behind its mutex, so the command is read-only with respect to the filesystem and needs no mutation admission.",
+        "postAdmissionPreconditions": [
+          "No mutation admission is required: the command performs no filesystem mutation, so there is no transaction key to admit and nothing to release."
+        ],
+        "domainLockOrder": "No path admission exists; the store mutex is an in-process lock taken inside the worker, so there is no admission-before-domain-lock order to record."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_24",
+          "passed": 16,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts"
+        ],
+        "payload": "recordApproval (src/lib/api.ts:962) invokes record_approval with id, decision and rememberKind; the approval-gated surfaces keep owning the decision flow regardless of screen changes.",
+        "terminalNoticeOwner": "The approval-gated surfaces that call this api.ts helper own busy state, the recorded-request display and error toasts. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_24_approval_wrappers_yield_same_poll_and_map_join_failure",
+          "phase08_24_approval_real_fixture_results_and_rejections",
+          "phase08_24_approval_record_serializes_same_target_both_orders"
+        ],
+        "workerProof": "approval::tests::phase08_24::phase08_24_approval_wrappers_yield_same_poll_and_map_join_failure drives ipc::record_approval through atomic_file::phase08_06::boundary with the worker-stage hook staged at the synthetic approval key: the future is manually polled on the same async task, proves progress while a distinct worker thread stays blocked, and a panicked worker maps to the display-only record_approval_task_failed String.",
+        "platformScope": "macOS unit fixtures only: tauri::test::mock_app drives the wrappers on MockRuntime, the worker-stage key is a synthetic /maru/phase08_24 path and the phase08_24 tests serialize on a module-local TEST_LOCK because the hook registry is global; no live workspace, credential, network endpoint or native test hook is touched.",
+        "limits": "Approval state is per-app-instance memory; a restarted app loses unconsumed approvals by design. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
+        "contract": "The ApprovalRequest payload, the approval_not_found/approval_state_poisoned error strings and the remember-kind session classification are unchanged; the only new failure path is the JoinError-to-String mapping at the worker boundary."
+      }
+    },
+    {
+      "name": "parse_korean_date_cmd",
+      "module": "src-tauri/src/korean_date.rs",
+      "registrationPath": "src-tauri/src/lib.rs::korean_date::ipc::parse_korean_date_cmd",
+      "originalDisposition": "RETAIN",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/korean_date.rs::ipc::parse_korean_date_cmd owns its input and now_iso Strings and awaits tauri::async_runtime::spawn_blocking calling src-tauri/src/korean_date.rs::parse_korean_date_cmd inside the worker; a JoinError becomes the display-only parse_korean_date_cmd_task_failed String.",
+        "src-tauri/src/korean_date.rs::parse_korean_date_cmd parses the RFC3339 anchor and delegates to src-tauri/src/korean_date.rs::parse_korean_date, whose bounded scans (src-tauri/src/korean_date.rs::extract_date, src-tauri/src/korean_date.rs::extract_time and src-tauri/src/korean_date.rs::korean_weekday over a handful of fixed Korean phrase patterns) are proportional to the input length; the unbounded-in-size input scan no longer runs on the main thread."
+      ],
+      "workerBoundary": "src-tauri/src/korean_date.rs::ipc::parse_korean_date_cmd awaits tauri::async_runtime::spawn_blocking before any regex scan runs; the closure owns both Strings, never a borrowed State; only a JoinError maps to the display-only parse_korean_date_cmd_task_failed String while the Option<String> payload and the now_iso validation error pass through unchanged.",
+      "syncCallers": [
+        "No Rust or CLI caller invokes parse_korean_date_cmd synchronously today; src-tauri/src/lib.rs registers only korean_date::ipc::parse_korean_date_cmd, and the original synchronous src-tauri/src/korean_date.rs::parse_korean_date_cmd keeps its name and signature for Rust callers (the phase08_24 tests exercise it through the wrapper)."
+      ],
+      "mutationKey": {
+        "readOnly": true,
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "sharedAdmissionEntry": "parse_korean_date_cmd performs no filesystem mutation: src-tauri/src/korean_date.rs::parse_korean_date and its extract helpers only scan the owned input string, so the command is read-only and needs no mutation admission.",
+        "postAdmissionPreconditions": [
+          "No mutation admission is required: the command performs no filesystem mutation, so there is no transaction key to admit and nothing to release."
+        ],
+        "domainLockOrder": "No path admission exists; the command takes no domain lock, so there is no admission-before-domain-lock order to record."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_24",
+          "passed": 16,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/koreanDate.ts"
+        ],
+        "payload": "parseKoreanDate (src/lib/koreanDate.ts:34) invokes parse_korean_date_cmd with the trimmed input and the current clock as RFC3339; the scheduling and editor surfaces keep owning the parse flow regardless of screen changes.",
+        "terminalNoticeOwner": "The scheduling and editor surfaces that call this helper own busy state, the parsed-date display and error toasts. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_24_korean_date_wrappers_yield_same_poll_and_map_join_failure",
+          "phase08_24_korean_date_real_fixture_results_and_rejections"
+        ],
+        "workerProof": "korean_date::tests::phase08_24::phase08_24_korean_date_wrappers_yield_same_poll_and_map_join_failure drives ipc::parse_korean_date_cmd through atomic_file::phase08_06::boundary with the worker-stage hook staged at the synthetic korean_date key: the future is manually polled on the same async task, proves progress while a distinct worker thread stays blocked, and a panicked worker maps to the display-only parse_korean_date_cmd_task_failed String.",
+        "platformScope": "macOS unit fixtures only: the worker-stage key is a synthetic /maru/phase08_24 path and the phase08_24 tests serialize on a module-local TEST_LOCK because the hook registry is global; no live workspace, credential, network endpoint or native test hook is touched.",
+        "limits": "The parser is a bounded phrase scan, not a full Korean NLP model; unrecognized phrases keep returning null as before. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
+        "contract": "The Option<String> RFC3339 payload, the 09:00 default-time rule and the now_iso validation error are unchanged; the only new failure path is the JoinError-to-String mapping at the worker boundary."
+      }
+    },
+    {
+      "name": "gaejosik_lint",
+      "module": "src-tauri/src/linter/gaejosik.rs",
+      "registrationPath": "src-tauri/src/lib.rs::linter::gaejosik::ipc::gaejosik_lint",
+      "originalDisposition": "RETAIN",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/linter/gaejosik.rs::ipc::gaejosik_lint owns its markdown String and dismissed-ids list and awaits tauri::async_runtime::spawn_blocking calling src-tauri/src/linter/gaejosik.rs::gaejosik_lint inside the worker; a JoinError becomes the display-only gaejosik_lint_task_failed String.",
+        "src-tauri/src/linter/gaejosik.rs::gaejosik_lint delegates to src-tauri/src/linter/gaejosik.rs::lint_markdown, a line-bounded scan that skips code fences and frontmatter through src-tauri/src/linter/gaejosik.rs::should_skip_line, matches each line through src-tauri/src/linter/gaejosik.rs::match_line (with src-tauri/src/linter/gaejosik.rs::strip_markdown_prefix, src-tauri/src/linter/gaejosik.rs::matched_span and src-tauri/src/linter/gaejosik.rs::issue_id helpers) and honors the dismissed-ids set; the whole-document scan is proportional to the document size and no longer runs on the main thread."
+      ],
+      "workerBoundary": "src-tauri/src/linter/gaejosik.rs::ipc::gaejosik_lint awaits tauri::async_runtime::spawn_blocking before the document scan runs; the closure owns the markdown String and dismissed-ids Vec, never a borrowed State; only a JoinError maps to the display-only gaejosik_lint_task_failed String while the typed GaejosikLintResponse payload passes through unchanged.",
+      "syncCallers": [
+        "No Rust or CLI caller invokes gaejosik_lint synchronously today; src-tauri/src/lib.rs registers the re-exported linter::gaejosik_lint (src-tauri/src/linter/mod.rs re-exports linter::gaejosik::ipc::gaejosik_lint), and the original synchronous src-tauri/src/linter/gaejosik.rs::gaejosik_lint keeps its name and signature for Rust callers (the phase08_24 tests exercise it through the wrapper)."
+      ],
+      "mutationKey": {
+        "readOnly": true,
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "sharedAdmissionEntry": "gaejosik_lint performs no filesystem mutation: src-tauri/src/linter/gaejosik.rs::lint_markdown only scans the owned markdown string, so the command is read-only and needs no mutation admission.",
+        "postAdmissionPreconditions": [
+          "No mutation admission is required: the command performs no filesystem mutation, so there is no transaction key to admit and nothing to release."
+        ],
+        "domainLockOrder": "No path admission exists; the command takes no domain lock, so there is no admission-before-domain-lock order to record."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_24",
+          "passed": 16,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/studio.ts"
+        ],
+        "payload": "gaejosikLint (src/lib/studio.ts:402) invokes gaejosik_lint with the markdown text and dismissed ids; the Studio lint surface keeps owning the lint flow regardless of screen changes.",
+        "terminalNoticeOwner": "The Studio lint surface that calls this helper owns busy state, the issue-list display and error toasts. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_24_gaejosik_wrappers_yield_same_poll_and_map_join_failure",
+          "phase08_24_gaejosik_real_fixture_results_and_rejections"
+        ],
+        "workerProof": "gaejosik::tests::phase08_24::phase08_24_gaejosik_wrappers_yield_same_poll_and_map_join_failure drives ipc::gaejosik_lint through atomic_file::phase08_06::boundary with the worker-stage hook staged at the disposable synthetic fixture key: the future is manually polled on the same async task, proves progress while a distinct worker thread stays blocked, and a panicked worker maps to the display-only gaejosik_lint_task_failed String.",
+        "platformScope": "macOS unit fixtures only: fixtures are synthetic in-memory markdown documents and the worker-stage keys are natural per-test paths, so no module-level test lock is needed; no live workspace, credential, network endpoint or native test hook is touched.",
+        "limits": "The linter checks a fixed rule set for Korean official-document style; documents are scanned whole, so very large documents still pay an O(n) pass on the worker. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
+        "contract": "The GaejosikLintResponse payload, the rule ids, the span reporting and the dismissal semantics are unchanged; the only new failure path is the JoinError-to-String mapping at the worker boundary."
+      }
+    }
+  ]
+}

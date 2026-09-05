@@ -61,9 +61,8 @@ fn resolve_html_editor_document_directory(
     Ok(dir)
 }
 
-#[tauri::command]
-pub fn prepare_html_editor_assets(
-    app: tauri::AppHandle,
+pub fn prepare_html_editor_assets<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
     vault_path: String,
     document_path: String,
 ) -> Result<PrepareHtmlEditorAssetsResponse, String> {
@@ -74,6 +73,30 @@ pub fn prepare_html_editor_assets(
     Ok(PrepareHtmlEditorAssetsResponse {
         document_directory: dir.to_string_lossy().to_string(),
     })
+}
+
+/// Owned IPC boundary; the synchronous function remains the Rust/CLI API and
+/// the in-process asset scope grant is confined to the blocking worker.
+pub mod ipc {
+    use super::*;
+
+    #[tauri::command]
+    pub async fn prepare_html_editor_assets<R: tauri::Runtime>(
+        app: tauri::AppHandle<R>,
+        vault_path: String,
+        document_path: String,
+    ) -> Result<PrepareHtmlEditorAssetsResponse, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            crate::atomic_file::PathTransactionLease::test_stage(
+                &[std::path::PathBuf::from(&vault_path)],
+                "worker:prepare_html_editor_assets",
+            );
+            super::prepare_html_editor_assets(app, vault_path, document_path)
+        })
+        .await
+        .map_err(|err| format!("prepare_html_editor_assets_task_failed: {err}"))?
+    }
 }
 
 #[cfg(test)]
@@ -182,5 +205,79 @@ mod tests {
         let error = resolve_html_editor_document_directory(&root, "link/x.html").unwrap_err();
 
         assert!(error.contains("escapes"), "unexpected error: {error}");
+    }
+
+    mod phase08_24 {
+        use super::*;
+        use crate::atomic_file::phase08_06::{boundary, run};
+
+        #[test]
+        fn phase08_24_html_editor_wrappers_yield_same_poll_and_map_join_failure() {
+            let tmp = TempDir::new().unwrap();
+            fs::write(tmp.path().join("page.html"), "<html></html>").unwrap();
+            let root = tmp.path().to_string_lossy().to_string();
+            let app = tauri::test::mock_app();
+            boundary(
+                tmp.path().to_path_buf(),
+                "prepare_html_editor_assets",
+                ipc::prepare_html_editor_assets(app.handle().clone(), root, "page.html".into()),
+            );
+        }
+
+        #[test]
+        fn phase08_24_html_editor_real_fixture_results_and_rejections() {
+            let tmp = TempDir::new().unwrap();
+            let root = tmp.path().to_string_lossy().to_string();
+            let docs = tmp.path().join("docs");
+            fs::create_dir_all(&docs).unwrap();
+            fs::write(docs.join("page.html"), "<html></html>").unwrap();
+            fs::write(docs.join("note.md"), "# Note\n").unwrap();
+            fs::write(tmp.path().join("index.html"), "<html></html>").unwrap();
+            let app = tauri::test::mock_app();
+
+            let response = run(ipc::prepare_html_editor_assets(
+                app.handle().clone(),
+                root.clone(),
+                "docs/page.html".into(),
+            ))
+            .unwrap();
+            assert_eq!(
+                response.document_directory,
+                docs.canonicalize().unwrap().to_string_lossy()
+            );
+
+            let error = run(ipc::prepare_html_editor_assets(
+                app.handle().clone(),
+                root.clone(),
+                "docs/note.md".into(),
+            ))
+            .unwrap_err();
+            assert_eq!(
+                error,
+                "prepare_html_editor_assets only supports .html/.htm documents"
+            );
+
+            let error = run(ipc::prepare_html_editor_assets(
+                app.handle().clone(),
+                root.clone(),
+                "index.html".into(),
+            ))
+            .unwrap_err();
+            assert!(
+                error.contains("workspace root"),
+                "unexpected error: {error}"
+            );
+
+            let error = run(ipc::prepare_html_editor_assets(
+                app.handle().clone(),
+                root,
+                "docs/gone.html".into(),
+            ))
+            .unwrap_err();
+            assert!(
+                error.contains("does not exist"),
+                "unexpected error: {error}"
+            );
+        }
     }
 }
