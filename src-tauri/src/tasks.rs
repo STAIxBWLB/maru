@@ -130,7 +130,21 @@ pub(crate) struct MaterializedTaskWrite {
 
 #[derive(Clone)]
 pub(crate) struct PreparedCaptureTask {
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "Pinned snapshot retained for independent delayed capture consumers"
+        )
+    )]
     parent: PathTransactionParent,
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "Pinned snapshot retained for independent delayed capture consumers"
+        )
+    )]
     workspace_parent: PathTransactionParent,
     path: PathBuf,
     pub rel_path: String,
@@ -420,6 +434,13 @@ pub(crate) fn prepare_capture_task_materialization(
 /// Commit a prepared capture-derived task note. Replaying the same capture
 /// returns the original row; an unrelated file at that path is never
 /// overwritten.
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "Retained synchronous delayed capture API; Today borrows its outer lease"
+    )
+)]
 pub(crate) fn materialize_capture_task(
     work: &Path,
     prepared: &PreparedCaptureTask,

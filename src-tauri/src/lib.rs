@@ -186,15 +186,10 @@ use terminal_hooks::{
     terminal_hooks_status, terminal_hooks_uninstall, write_agent_context_hint,
     TerminalHookWatcherState,
 };
-use today::today_logical_day;
 use today_ai::{today_apply_plan_result, today_build_plan_request};
 use today_calendar::{task_calendar_set_sync, today_calendar_commitments, today_calendar_publish};
-use today_lifecycle::{task_transition, task_trash};
 use today_notify::today_notify_new_day;
 use today_outbox::{read_task_integrations, task_integrations_drain, task_integrations_retry};
-use today_store::{
-    read_task_events, today_finalize_setup, today_mutate, today_open, today_rollover,
-};
 use vault_graph::{
     vault_graph_layout_read, vault_graph_layout_save, vault_graph_read, vault_graph_root,
 };
@@ -339,18 +334,18 @@ pub fn run() {
             tasks::ipc::append_tasks_log,
             tasks::ipc::read_tasks_log,
             // Maru Today (morning ritual core)
-            today_logical_day,
-            today_open,
-            today_mutate,
-            today_finalize_setup,
-            today_rollover,
-            read_task_events,
+            today::ipc::today_logical_day,
+            today_store::ipc::today_open,
+            today_store::ipc::today_mutate,
+            today_store::ipc::today_finalize_setup,
+            today_store::ipc::today_rollover,
+            today_store::ipc::read_task_events,
             // Maru Today (AI planning contracts)
             today_build_plan_request,
             today_apply_plan_result,
             // Maru Today (task lifecycle + integrations)
-            task_transition,
-            task_trash,
+            today_lifecycle::ipc::task_transition,
+            today_lifecycle::ipc::task_trash,
             task_integrations_drain,
             task_integrations_retry,
             read_task_integrations,
