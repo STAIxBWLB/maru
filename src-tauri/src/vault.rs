@@ -1256,6 +1256,66 @@ mod tests {
     }
 
     #[test]
+    fn scan_vault_skips_inbox_root() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        write_file(root, "kept.md", "# Kept\n");
+        write_file(root, "inbox/downloads/dropped.md", "# Dropped\n");
+        write_file(root, "inbox-backup/kept2.md", "# Kept2\n");
+        let entries = scan_vault(root.to_string_lossy().to_string(), None).unwrap();
+        let titles: Vec<&str> = entries.iter().map(|e| e.title.as_str()).collect();
+        assert!(titles.contains(&"Kept"));
+        assert!(
+            !titles.contains(&"Dropped"),
+            "the settings-driven inbox root must be excluded from the document index"
+        );
+        assert!(
+            titles.contains(&"Kept2"),
+            "a prefix sibling (inbox-backup/) is authored content and must stay indexed"
+        );
+    }
+
+    #[test]
+    fn read_vault_cache_drops_stale_inbox_entries() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        write_file(root, "kept.md", "# Kept\n");
+        // Simulate a cache written before inbox exclusion existed.
+        let mut stale = scan_vault(root.to_string_lossy().to_string(), None).unwrap();
+        stale.push(VaultEntry {
+            rel_path: "inbox/downloads/dropped.md".to_string(),
+            title: "Dropped".to_string(),
+            ..stale[0].clone()
+        });
+        write_vault_cache(root, &stale).unwrap();
+
+        let cached = read_vault_cache(root.to_string_lossy().to_string())
+            .unwrap()
+            .unwrap();
+        let titles: Vec<&str> = cached.iter().map(|e| e.title.as_str()).collect();
+        assert!(titles.contains(&"Kept"));
+        assert!(
+            !titles.contains(&"Dropped"),
+            "stale cache rows under the inbox root must self-heal at read time"
+        );
+    }
+
+    #[test]
+    fn scan_vault_fails_open_when_inbox_root_unresolvable() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        write_file(root, "kept.md", "# Kept\n");
+        write_file(root, "notes/inner.md", "# Inner\n");
+        // An inbox root that escapes the vault fails resolution; scanning must
+        // keep listing everything instead of erroring.
+        write_file(root, ".maru/inbox.json", "{\"inboxRoot\": \"../outside\"}");
+        let entries = scan_vault(root.to_string_lossy().to_string(), None).unwrap();
+        let titles: Vec<&str> = entries.iter().map(|e| e.title.as_str()).collect();
+        assert!(titles.contains(&"Kept"));
+        assert!(titles.contains(&"Inner"));
+    }
+
+    #[test]
     fn scan_vault_includes_dot_folder_only_when_allowlisted() {
         let tmp = TempDir::new().unwrap();
         let root = tmp.path();
