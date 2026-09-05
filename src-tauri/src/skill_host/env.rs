@@ -44,14 +44,12 @@ struct EnvDoneEvent {
     exit_code: Option<i32>,
 }
 
-#[tauri::command]
 pub fn skills_env_status(work_path: Option<String>) -> Result<SkillsEnvStatus, String> {
     env_status(work_path.as_deref(), None)
 }
 
-#[tauri::command]
-pub fn skills_env_bootstrap(
-    app: AppHandle,
+pub fn skills_env_bootstrap<R: tauri::Runtime>(
+    app: AppHandle<R>,
     work_path: Option<String>,
     dry_run: Option<bool>,
 ) -> Result<String, String> {
@@ -142,8 +140,10 @@ pub fn skills_env_bootstrap(
     Ok(invocation_id)
 }
 
-#[tauri::command]
-pub fn skills_env_repair(app: AppHandle, work_path: Option<String>) -> Result<String, String> {
+pub fn skills_env_repair<R: tauri::Runtime>(
+    app: AppHandle<R>,
+    work_path: Option<String>,
+) -> Result<String, String> {
     skills_env_bootstrap(app, work_path, Some(false))
 }
 
@@ -176,9 +176,9 @@ fn env_status(
     })
 }
 
-fn pump<R>(app: AppHandle, invocation_id: String, stream: &str, source: R)
+fn pump<R: tauri::Runtime, S>(app: AppHandle<R>, invocation_id: String, stream: &str, source: S)
 where
-    R: std::io::Read + Send + 'static,
+    S: std::io::Read + Send + 'static,
 {
     let stream = stream.to_string();
     thread::spawn(move || {
@@ -252,5 +252,191 @@ mod tests {
         let json = serde_json::to_string(&status).unwrap();
         assert!(json.contains("venvExists"));
         assert!(json.contains("statusPath"));
+    }
+}
+
+/// Only finite setup occupies the blocking pool; readers and child waits own dedicated threads.
+pub mod ipc {
+    use super::*;
+    #[tauri::command]
+    pub async fn skills_env_status(work_path: Option<String>) -> Result<SkillsEnvStatus, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            phase08_04::at_edge("skills_env_status");
+            crate::skill_host::skills_env_status(work_path)
+        })
+        .await
+        .map_err(|err| format!("skills_env_status_task_failed: {err}"))?
+    }
+
+    #[tauri::command]
+    pub async fn skills_env_bootstrap<R: tauri::Runtime>(
+        app: AppHandle<R>,
+        work_path: Option<String>,
+        dry_run: Option<bool>,
+    ) -> Result<String, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            phase08_04::at_edge("skills_env_bootstrap");
+            crate::skill_host::skills_env_bootstrap(app, work_path, dry_run)
+        })
+        .await
+        .map_err(|err| format!("skills_env_bootstrap_task_failed: {err}"))?
+    }
+
+    #[tauri::command]
+    pub async fn skills_env_repair<R: tauri::Runtime>(
+        app: AppHandle<R>,
+        work_path: Option<String>,
+    ) -> Result<String, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            phase08_04::at_edge("skills_env_repair");
+            crate::skill_host::skills_env_repair(app, work_path)
+        })
+        .await
+        .map_err(|err| format!("skills_env_repair_task_failed: {err}"))?
+    }
+}
+
+#[cfg(test)]
+mod phase08_04 {
+    use super::*;
+    use std::sync::{mpsc, Arc, Mutex};
+    use std::time::Duration;
+    type Hook = Arc<dyn Fn(&str) + Send + Sync>;
+    static HOOK: Mutex<Option<Hook>> = Mutex::new(None);
+    pub(super) fn at_edge(name: &str) {
+        let hook = HOOK.lock().unwrap().clone();
+        if let Some(hook) = hook {
+            hook(name);
+        }
+    }
+    struct Reset;
+    impl Drop for Reset {
+        fn drop(&mut self) {
+            *HOOK.lock().unwrap() = None;
+        }
+    }
+    fn worker<T: Send + 'static>(
+        name: &'static str,
+        future: impl std::future::Future<Output = Result<T, String>> + Send + 'static,
+    ) {
+        let (entered_tx, entered_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let release_rx = Mutex::new(release_rx);
+        *HOOK.lock().unwrap() = Some(Arc::new(move |edge| {
+            if edge == name {
+                entered_tx.send(std::thread::current().id()).unwrap();
+                release_rx
+                    .lock()
+                    .unwrap()
+                    .recv_timeout(Duration::from_secs(5))
+                    .unwrap();
+                panic!("fixture boundary panic");
+            }
+        }));
+        let _reset = Reset;
+        let (caller_tx, caller_rx) = mpsc::channel();
+        let task = tauri::async_runtime::spawn(async move {
+            caller_tx.send(std::thread::current().id()).unwrap();
+            future.await
+        });
+        let entered = entered_rx.recv_timeout(Duration::from_secs(5));
+        let caller = caller_rx.recv_timeout(Duration::from_secs(5));
+        let (probe_tx, probe_rx) = mpsc::channel();
+        tauri::async_runtime::spawn(async move {
+            let mut yielded = false;
+            std::future::poll_fn(|cx| {
+                if yielded {
+                    std::task::Poll::Ready(())
+                } else {
+                    yielded = true;
+                    cx.waker().wake_by_ref();
+                    std::task::Poll::Pending
+                }
+            })
+            .await;
+            probe_tx.send(()).unwrap();
+        });
+        let progress = probe_rx.recv_timeout(Duration::from_secs(2));
+        let _ = release_tx.send(());
+        let result = tauri::async_runtime::block_on(task).unwrap();
+        assert!(progress.is_ok(), "{name}: async progress stalled");
+        assert_ne!(
+            entered.unwrap(),
+            caller.unwrap(),
+            "{name}: shared async thread"
+        );
+        assert!(matches!(result, Err(ref e) if e.starts_with(&format!("{name}_task_failed:"))));
+    }
+
+    #[test]
+    fn every_environment_wrapper_uses_blocking_worker_and_preserves_join_error() {
+        let _home = host_fs::test_home_for_bundle_tests();
+        let app = tauri::test::mock_app();
+        worker("skills_env_status", ipc::skills_env_status(None));
+        worker(
+            "skills_env_bootstrap",
+            ipc::skills_env_bootstrap(app.handle().clone(), None, Some(true)),
+        );
+        worker(
+            "skills_env_repair",
+            ipc::skills_env_repair(app.handle().clone(), None),
+        );
+    }
+    #[test]
+    fn successful_local_dry_run_preserves_status_and_done_payload() {
+        use tauri::Listener;
+        let _home = host_fs::test_home_for_bundle_tests();
+        let app = tauri::test::mock_app();
+        let (tx, rx) = mpsc::channel();
+        app.listen("skills-env://done", move |e| {
+            tx.send(e.payload().to_string()).unwrap();
+        });
+        let id = tauri::async_runtime::block_on(ipc::skills_env_bootstrap(
+            app.handle().clone(),
+            None,
+            Some(true),
+        ))
+        .unwrap();
+        let done: serde_json::Value =
+            serde_json::from_str(&rx.recv_timeout(Duration::from_secs(5)).unwrap()).unwrap();
+        assert_eq!(done["invocationId"], id);
+        assert_eq!(done["success"], true);
+        assert_eq!(done["exitCode"], 0);
+        let status = tauri::async_runtime::block_on(ipc::skills_env_status(None)).unwrap();
+        assert!(status.last_bootstrap_at.is_some());
+        assert!(status.last_error.is_none());
+        assert!(std::path::Path::new(&status.root).starts_with(host_fs::maru_home().unwrap()));
+    }
+    #[cfg(unix)]
+    #[test]
+    fn repair_worker_survives_return_and_failure_persists_before_done() {
+        use tauri::Listener;
+        let _home = host_fs::test_home_for_bundle_tests();
+        let setup = default_public_env_setup(None).unwrap().unwrap();
+        // Replace only the disposable materialized script. No package installer runs.
+        fs::write(
+            &setup,
+            "#!/bin/sh\ni=0\nwhile [ ! -f \"$2/release\" ] && [ $i -lt 500 ]; do sleep 0.01; i=$((i+1)); done\nexit 7\n",
+        )
+        .unwrap();
+        let app = tauri::test::mock_app();
+        let (tx, rx) = mpsc::channel();
+        app.listen("skills-env://done", move |e| {
+            tx.send(e.payload().to_string()).unwrap();
+        });
+        let id = tauri::async_runtime::block_on(ipc::skills_env_repair(app.handle().clone(), None))
+            .unwrap();
+        assert!(rx.try_recv().is_err(), "launch is not completion");
+        fs::write(host_fs::env_root().unwrap().join("release"), "release").unwrap();
+        let done: serde_json::Value =
+            serde_json::from_str(&rx.recv_timeout(Duration::from_secs(5)).unwrap()).unwrap();
+        assert_eq!(done["invocationId"], id);
+        assert_eq!(done["success"], false);
+        assert_eq!(done["exitCode"], 7);
+        let status = skills_env_status(None).unwrap();
+        assert!(status.last_error.unwrap().contains("env_bootstrap_exit"));
     }
 }

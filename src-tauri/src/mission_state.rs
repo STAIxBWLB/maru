@@ -89,8 +89,8 @@ pub fn register_mission(app: &AppHandle, id: &str, kind: &str, pid: u32) -> Resu
     register_mission_with_metadata(app, id, kind, pid, None)
 }
 
-pub fn register_mission_with_metadata(
-    app: &AppHandle,
+pub fn register_mission_with_metadata<R: tauri::Runtime>(
+    app: &AppHandle<R>,
     id: &str,
     kind: &str,
     pid: u32,
@@ -121,21 +121,26 @@ pub fn register_mission_logical(
     Ok(())
 }
 
-pub fn touch_output(app: &AppHandle, id: &str, stream: &str, line: &str) {
+pub fn touch_output<R: tauri::Runtime>(app: &AppHandle<R>, id: &str, stream: &str, line: &str) {
     let state = app.state::<MissionState>();
     if let Ok(record) = state.touch(id, stream, line) {
         emit_update(app, &record);
     }
 }
 
-pub fn finish_mission(app: &AppHandle, id: &str, exit_code: Option<i32>, success: bool) {
+pub fn finish_mission<R: tauri::Runtime>(
+    app: &AppHandle<R>,
+    id: &str,
+    exit_code: Option<i32>,
+    success: bool,
+) {
     let state = app.state::<MissionState>();
     if let Ok(record) = state.finish(id, exit_code, success) {
         emit_update(app, &record);
     }
 }
 
-pub fn fail_mission(app: &AppHandle, id: &str, message: &str) {
+pub fn fail_mission<R: tauri::Runtime>(app: &AppHandle<R>, id: &str, message: &str) {
     let state = app.state::<MissionState>();
     if let Ok(record) = state.fail(id, message) {
         emit_update(app, &record);
@@ -377,7 +382,7 @@ impl MissionState {
     }
 }
 
-fn spawn_idle_watch(app: AppHandle, id: String) {
+fn spawn_idle_watch<R: tauri::Runtime>(app: AppHandle<R>, id: String) {
     thread::spawn(move || loop {
         thread::sleep(StdDuration::from_secs(5));
         let state = app.state::<MissionState>();
@@ -403,7 +408,7 @@ fn spawn_idle_watch(app: AppHandle, id: String) {
     });
 }
 
-fn emit_update(app: &AppHandle, record: &MissionRecord) {
+fn emit_update<R: tauri::Runtime>(app: &AppHandle<R>, record: &MissionRecord) {
     let _ = app.emit("ai://mission_update", record);
 }
 

@@ -70,7 +70,6 @@ pub struct SkillRuntimeStatus {
     pub suggested_action: Option<String>,
 }
 
-#[tauri::command]
 pub fn skills_runtime_status(
     runtime: String,
     command_override: Option<String>,
@@ -78,7 +77,6 @@ pub fn skills_runtime_status(
     runtime_status(runtime, command_override.as_deref())
 }
 
-#[tauri::command]
 pub fn skills_dispatch_compose(
     skill_id: String,
     prompt: String,
@@ -88,7 +86,6 @@ pub fn skills_dispatch_compose(
     compose(skill_id, prompt, cwd, context.unwrap_or_default())
 }
 
-#[tauri::command]
 pub fn skills_dispatch_terminal(
     skill_id: String,
     runtime: String,
@@ -218,9 +215,8 @@ pub struct SkillDispatchBackgroundArgs {
     pub permission_mode: Option<String>,
 }
 
-#[tauri::command]
-pub fn skills_dispatch_background(
-    app: AppHandle,
+pub fn skills_dispatch_background<R: tauri::Runtime>(
+    app: AppHandle<R>,
     args: SkillDispatchBackgroundArgs,
 ) -> Result<String, String> {
     let SkillDispatchBackgroundArgs {
@@ -443,8 +439,8 @@ struct BackgroundRunInfo {
     retry_payload: JsonValue,
 }
 
-fn spawn_background(
-    app: AppHandle,
+fn spawn_background<R: tauri::Runtime>(
+    app: AppHandle<R>,
     invocation_id: String,
     mut cmd: Command,
     cwd: String,
@@ -831,15 +827,15 @@ fn metadata_bool(metadata: &Option<JsonValue>, key: &str) -> bool {
         .unwrap_or(false)
 }
 
-fn spawn_line_pump<R>(
-    app: AppHandle,
+fn spawn_line_pump<R: tauri::Runtime, S>(
+    app: AppHandle<R>,
     invocation_id: String,
     cwd: String,
     stream_name: String,
-    source: R,
+    source: S,
     buffer: Option<Arc<Mutex<String>>>,
 ) where
-    R: Read + Send + 'static,
+    S: Read + Send + 'static,
 {
     thread::spawn(move || {
         let reader = BufReader::new(source);
@@ -1061,5 +1057,291 @@ exit 1
         perms.set_mode(0o755);
         fs::set_permissions(&path, perms).unwrap();
         path
+    }
+}
+
+/// Only finite setup occupies the blocking pool; readers and child waits own dedicated threads.
+pub mod ipc {
+    use super::*;
+    #[tauri::command]
+    pub async fn skills_runtime_status(
+        runtime: String,
+        command_override: Option<String>,
+    ) -> Result<SkillRuntimeStatus, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            phase08_04::at_edge("skills_runtime_status");
+            crate::skill_host::skills_runtime_status(runtime, command_override)
+        })
+        .await
+        .map_err(|err| format!("skills_runtime_status_task_failed: {err}"))?
+    }
+
+    #[tauri::command]
+    pub async fn skills_dispatch_compose(
+        skill_id: String,
+        prompt: String,
+        cwd: Option<String>,
+        context: Option<Vec<SkillContextItem>>,
+    ) -> Result<DispatchComposition, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            phase08_04::at_edge("skills_dispatch_compose");
+            crate::skill_host::skills_dispatch_compose(skill_id, prompt, cwd, context)
+        })
+        .await
+        .map_err(|err| format!("skills_dispatch_compose_task_failed: {err}"))?
+    }
+
+    #[tauri::command]
+    pub async fn skills_dispatch_terminal(
+        skill_id: String,
+        runtime: String,
+        prompt: String,
+        cwd: Option<String>,
+        context: Option<Vec<SkillContextItem>>,
+        command_override: Option<String>,
+    ) -> Result<TerminalDispatchSpec, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            phase08_04::at_edge("skills_dispatch_terminal");
+            crate::skill_host::skills_dispatch_terminal(
+                skill_id,
+                runtime,
+                prompt,
+                cwd,
+                context,
+                command_override,
+            )
+        })
+        .await
+        .map_err(|err| format!("skills_dispatch_terminal_task_failed: {err}"))?
+    }
+
+    #[tauri::command]
+    pub async fn skills_dispatch_background<R: tauri::Runtime>(
+        app: AppHandle<R>,
+        args: SkillDispatchBackgroundArgs,
+    ) -> Result<String, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            phase08_04::at_edge("skills_dispatch_background");
+            crate::skill_host::skills_dispatch_background(app, args)
+        })
+        .await
+        .map_err(|err| format!("skills_dispatch_background_task_failed: {err}"))?
+    }
+}
+
+#[cfg(test)]
+mod phase08_04 {
+    use super::*;
+    use std::sync::{mpsc, Arc, Mutex};
+    use std::time::Duration;
+    type Hook = Arc<dyn Fn(&str) + Send + Sync>;
+    static HOOK: Mutex<Option<Hook>> = Mutex::new(None);
+    pub(super) fn at_edge(name: &str) {
+        let hook = HOOK.lock().unwrap().clone();
+        if let Some(hook) = hook {
+            hook(name);
+        }
+    }
+    struct Reset;
+    impl Drop for Reset {
+        fn drop(&mut self) {
+            *HOOK.lock().unwrap() = None;
+        }
+    }
+    fn worker<T: Send + 'static>(
+        name: &'static str,
+        future: impl std::future::Future<Output = Result<T, String>> + Send + 'static,
+    ) {
+        let (entered_tx, entered_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let release_rx = Mutex::new(release_rx);
+        *HOOK.lock().unwrap() = Some(Arc::new(move |edge| {
+            if edge == name {
+                entered_tx.send(std::thread::current().id()).unwrap();
+                release_rx
+                    .lock()
+                    .unwrap()
+                    .recv_timeout(Duration::from_secs(5))
+                    .unwrap();
+                panic!("fixture boundary panic");
+            }
+        }));
+        let _reset = Reset;
+        let (caller_tx, caller_rx) = mpsc::channel();
+        let task = tauri::async_runtime::spawn(async move {
+            caller_tx.send(std::thread::current().id()).unwrap();
+            future.await
+        });
+        let entered = entered_rx.recv_timeout(Duration::from_secs(5));
+        let caller = caller_rx.recv_timeout(Duration::from_secs(5));
+        let (probe_tx, probe_rx) = mpsc::channel();
+        tauri::async_runtime::spawn(async move {
+            let mut yielded = false;
+            std::future::poll_fn(|cx| {
+                if yielded {
+                    std::task::Poll::Ready(())
+                } else {
+                    yielded = true;
+                    cx.waker().wake_by_ref();
+                    std::task::Poll::Pending
+                }
+            })
+            .await;
+            probe_tx.send(()).unwrap();
+        });
+        let progress = probe_rx.recv_timeout(Duration::from_secs(2));
+        let _ = release_tx.send(());
+        let result = tauri::async_runtime::block_on(task).unwrap();
+        assert!(progress.is_ok(), "{name}: async progress stalled");
+        assert_ne!(
+            entered.unwrap(),
+            caller.unwrap(),
+            "{name}: shared async thread"
+        );
+        assert!(matches!(result, Err(ref e) if e.starts_with(&format!("{name}_task_failed:"))));
+    }
+
+    fn denied_args(command_override: Option<String>) -> SkillDispatchBackgroundArgs {
+        SkillDispatchBackgroundArgs {
+            skill_id: "missing::denied".into(),
+            runtime: "claude".into(),
+            prompt: "".into(),
+            cwd: None,
+            context: None,
+            metadata: None,
+            command_override,
+            permission_mode: Some("plan".into()),
+        }
+    }
+    #[test]
+    fn every_dispatch_wrapper_uses_blocking_worker_and_preserves_join_error() {
+        let _home = host_fs::test_home_for_bundle_tests();
+        let app = tauri::test::mock_app();
+        worker(
+            "skills_runtime_status",
+            ipc::skills_runtime_status("invalid".into(), None),
+        );
+        worker(
+            "skills_dispatch_compose",
+            ipc::skills_dispatch_compose("id".into(), "".into(), None, None),
+        );
+        worker(
+            "skills_dispatch_terminal",
+            ipc::skills_dispatch_terminal(
+                "id".into(),
+                "claude".into(),
+                "".into(),
+                None,
+                None,
+                None,
+            ),
+        );
+        worker(
+            "skills_dispatch_background",
+            ipc::skills_dispatch_background(app.handle().clone(), denied_args(None)),
+        );
+    }
+    #[test]
+    fn denied_dispatch_has_zero_process_launch_and_preserves_inner_error() {
+        let _home = host_fs::test_home_for_bundle_tests();
+        let app = tauri::test::mock_app();
+        let root = tempfile::tempdir().unwrap();
+        let marker = root.path().join("launched");
+        let cli = root.path().join("provider");
+        std::fs::write(&cli, format!("#!/bin/sh\ntouch '{}'\n", marker.display())).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&cli, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let result = tauri::async_runtime::block_on(ipc::skills_dispatch_background(
+            app.handle().clone(),
+            denied_args(Some(cli.to_string_lossy().into())),
+        ));
+        assert_eq!(result.unwrap_err(), "skill_prompt_required");
+        let mut missing = denied_args(Some(cli.to_string_lossy().into()));
+        missing.prompt = "Summarize".into();
+        let result = tauri::async_runtime::block_on(ipc::skills_dispatch_background(
+            app.handle().clone(),
+            missing,
+        ));
+        assert_eq!(result.unwrap_err(), "unknown_skill: missing::denied");
+        assert!(!marker.exists());
+        assert!(!root.path().join(".maru").exists());
+    }
+    #[test]
+    fn successful_local_composition_preserves_plan_argv_and_owned_environment() {
+        let _home = host_fs::test_home_for_bundle_tests();
+        let skill = crate::skill_host::store::skills_create_skill("phase04".into(), None).unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let cwd = root.path().to_string_lossy().to_string();
+        let composition = tauri::async_runtime::block_on(ipc::skills_dispatch_compose(
+            skill.id.clone(),
+            "Summarize".into(),
+            Some(cwd.clone()),
+            None,
+        ))
+        .unwrap();
+        assert!(composition.prompt.contains("Summarize"));
+        assert!(!composition.extra_env.is_empty());
+        let spec = tauri::async_runtime::block_on(ipc::skills_dispatch_terminal(
+            skill.id,
+            "claude".into(),
+            "Summarize".into(),
+            Some(cwd),
+            None,
+            None,
+        ))
+        .unwrap();
+        assert!(spec
+            .extra_args
+            .windows(2)
+            .any(|p| p == ["--permission-mode", "plan"]));
+        assert_eq!(spec.extra_env, composition.extra_env);
+    }
+    #[test]
+    fn spawn_failure_records_failure_without_mission_or_completion() {
+        use tauri::{Listener, Manager};
+        let _home = host_fs::test_home_for_bundle_tests();
+        let app = tauri::test::mock_app();
+        app.manage(mission_state::MissionState::default());
+        let root = tempfile::tempdir().unwrap();
+        let cwd = root.path().to_string_lossy().to_string();
+        let (tx, rx) = mpsc::channel();
+        app.listen("ai://done", move |_| {
+            tx.send(()).unwrap();
+        });
+        let composition = DispatchComposition {
+            skill_id: "test::skill".into(),
+            skill_name: "skill".into(),
+            cwd: cwd.clone(),
+            prompt: "test".into(),
+            context: vec![],
+            extra_env: BTreeMap::new(),
+        };
+        let result = spawn_background(
+            app.handle().clone(),
+            "phase04-failed".into(),
+            Command::new(root.path().join("absent-cli")),
+            cwd.clone(),
+            BTreeMap::new(),
+            None,
+            BackgroundRunInfo {
+                metadata: None,
+                run_request: build_agent_run_request(&composition, "claude", "background", None)
+                    .unwrap(),
+                retry_payload: serde_json::json!({}),
+            },
+        );
+        assert!(result.unwrap_err().starts_with("cli_missing:"));
+        assert!(rx.try_recv().is_err());
+        let path = crate::agent_host::event_store::run_events_path(&cwd, "phase04-failed").unwrap();
+        let log = std::fs::read_to_string(path).unwrap();
+        assert!(log.contains("run.failed"));
+        assert!(!log.contains("run.completed"));
     }
 }

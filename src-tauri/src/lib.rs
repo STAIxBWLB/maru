@@ -213,11 +213,7 @@ use site_view::{
     SiteOpenedUrlState,
 };
 use sites::{read_sites, save_sites, scan_work_sites};
-use skill_host::{
-    skills_dispatch_background, skills_dispatch_compose, skills_dispatch_terminal,
-    skills_env_bootstrap, skills_env_repair, skills_env_status, skills_runtime_status,
-    skills_sync_all_sources, skills_sync_source,
-};
+use skill_host::{skills_sync_all_sources, skills_sync_source};
 use studio::{
     studio_apply_body, studio_state_delete, studio_state_list, studio_state_read, studio_state_save,
 };
@@ -607,16 +603,16 @@ pub fn run() {
             skill_host::store::ipc::skills_reconcile_skill,
             skill_host::store::ipc::skills_import_external,
             skill_host::store::ipc::skills_import_unmanage,
-            skills_env_status,
-            skills_env_bootstrap,
-            skills_env_repair,
+            skill_host::env::ipc::skills_env_status,
+            skill_host::env::ipc::skills_env_bootstrap,
+            skill_host::env::ipc::skills_env_repair,
             skill_host::store::ipc::skills_bundle_status,
             skill_host::store::ipc::skills_check_bundle_update,
             skill_host::store::ipc::skills_apply_bundle_update,
-            skills_dispatch_compose,
-            skills_dispatch_terminal,
-            skills_dispatch_background,
-            skills_runtime_status,
+            skill_host::dispatch::ipc::skills_dispatch_compose,
+            skill_host::dispatch::ipc::skills_dispatch_terminal,
+            skill_host::dispatch::ipc::skills_dispatch_background,
+            skill_host::dispatch::ipc::skills_runtime_status,
             agent_read_run_events,
             agent_replay_run_summary,
             agent_export_redacted_run_summary,

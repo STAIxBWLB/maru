@@ -1,0 +1,451 @@
+{
+  "plan": "08-04",
+  "moduleIntegrationOwner": "08-29",
+  "integrationRequired": "08-29",
+  "commands": [
+    {
+      "name": "skills_env_status",
+      "module": "src-tauri/src/skill_host/env.rs",
+      "registrationPath": "src-tauri/src/lib.rs::skill_host::env::ipc::skills_env_status",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/skill_host/env.rs::ipc::skills_env_status -> crate::skill_host::skills_env_status synchronous reexport in src-tauri/src/skill_host/mod.rs",
+        "src-tauri/src/skill_host/env.rs::skills_env_status -> env_status -> read_status -> default_public_env_setup; registry defaults, bundle recovery, local materialization and status file access execute off async workers.",
+        "src-tauri/src/skill_host/store.rs::default_public_env_setup -> registry_guard -> load_registry_unlocked -> ensure_default_sources -> save_registry_unlocked -> builtin_env_setup_path; built-in bundle/cache/default source effects are writes even for env status.",
+        "src-tauri/src/skill_host/bundle_update.rs::recover_interrupted_swap; local bundle restoration/copy and manifest scans reached through ensure_active_bundle.",
+        "src-tauri/src/skill_host/fs.rs::write_json_pretty; env root status atomic replacement. Bootstrap/repair use dedicated thread::spawn for fixed bash setup --target root, pump threads for output, child.wait then status and skills-env://done; invocation ID is acceptance, not completion."
+      ],
+      "workerBoundary": "src-tauri/src/skill_host/env.rs::ipc::skills_env_status -> tauri::async_runtime::spawn_blocking(move || synchronous domain(...)).await; only contextual skills_env_status_task_failed wraps JoinError, inner String preserved",
+      "syncCallers": [
+        "Synchronous exports preserved in src-tauri/src/skill_host/mod.rs; scheduler and CLI/domain consumers remain synchronous"
+      ],
+      "mutationKey": {
+        "lexicalPaths": [
+          "env_root/{.venv,node_modules,status.json} and setup-script-defined descendants",
+          "skills_root/{registry.json,_builtin,_cache,_managed,_imported,_sources} including default/bundle recovery effects"
+        ],
+        "aliasPaths": [
+          "Canonical resolved cwd and existing ancestor/source aliases must join lexical path set in 08-29; exact-target/domain-only exclusion is not claimed"
+        ],
+        "postAdmissionPreconditions": [
+          "Current synchronous validation, registry guard, valid skill frontmatter, current SKILL.md, canonical cwd and existing permission mode remain inside finite worker; 08-29 adds shared-path validation and callback lifetime coverage"
+        ],
+        "sourceReservation": "No new source reservation or cross-domain mutex; default store operations retain their existing guards/generations",
+        "domainLockOrder": "Existing registry/event/mission guards acquired inside worker or dedicated callback, none across await. Plan29 supplies shared admission before domain guards and retains reservation for actual callback lifetime.",
+        "sharedAdmissionEntry": "integrationRequired: 08-29; actual shared admission produced by06 and integrated by29"
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_04",
+          "passed": 7,
+          "failed": 0,
+          "ignored": 0
+        }
+      ],
+      "processingCaller": {
+        "path": "src/lib/skills.ts::skillsEnvStatus",
+        "payload": "Original payload and String failures unchanged. Bootstrap/repair/background return invocation ID for accepted work, completion remains event-driven.",
+        "terminalNoticeOwner": "Existing SkillsTab handleDone for skills-env://done or AI mission/run consumer for ai://done and ai://error; no extra notifier",
+        "lifetime": "Dedicated worker owns child and stream lifetime after IPC return. Existing screen refresh/notice lifetime closure remains25/26; no app-quit durability claim.",
+        "retry": "Manual only; wrapper invokes one domain operation, no replay"
+      },
+      "evidence": {
+        "boundaryCase": "phase08_04::every_environment_wrapper_uses_blocking_worker_and_preserves_join_error invokes every actual owned wrapper, holds work until same-runtime yielded probe succeeds, compares blocking vs invoking thread and asserts contextual panic JoinError",
+        "behaviorCases": [
+          "phase08_04::successful_local_dry_run_preserves_status_and_done_payload",
+          "phase08_04::repair_worker_survives_return_and_failure_persists_before_done"
+        ],
+        "bounds": "Finite setup/probes isolated; file counts/child run durations not constant bounds. Long-lived pumps/waits remain dedicated threads; no static scan claim of runtime safety.",
+        "platform": "macOS tests executed. Windows NoWindow only adjusts process creation flags; no Windows runtime claim. All fixtures disposable, synthetic script or missing executable, no provider credentials accessed."
+      }
+    },
+    {
+      "name": "skills_env_bootstrap",
+      "module": "src-tauri/src/skill_host/env.rs",
+      "registrationPath": "src-tauri/src/lib.rs::skill_host::env::ipc::skills_env_bootstrap",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/skill_host/env.rs::ipc::skills_env_bootstrap -> crate::skill_host::skills_env_bootstrap synchronous reexport in src-tauri/src/skill_host/mod.rs",
+        "src-tauri/src/skill_host/env.rs::skills_env_bootstrap -> skills_env_bootstrap -> write_status -> default_public_env_setup; registry defaults, bundle recovery, local materialization and status file access execute off async workers.",
+        "src-tauri/src/skill_host/store.rs::default_public_env_setup -> registry_guard -> load_registry_unlocked -> ensure_default_sources -> save_registry_unlocked -> builtin_env_setup_path; built-in bundle/cache/default source effects are writes even for env status.",
+        "src-tauri/src/skill_host/bundle_update.rs::recover_interrupted_swap; local bundle restoration/copy and manifest scans reached through ensure_active_bundle.",
+        "src-tauri/src/skill_host/fs.rs::write_json_pretty; env root status atomic replacement. Bootstrap/repair use dedicated thread::spawn for fixed bash setup --target root, pump threads for output, child.wait then status and skills-env://done; invocation ID is acceptance, not completion."
+      ],
+      "workerBoundary": "src-tauri/src/skill_host/env.rs::ipc::skills_env_bootstrap -> tauri::async_runtime::spawn_blocking(move || synchronous domain(...)).await; only contextual skills_env_bootstrap_task_failed wraps JoinError, inner String preserved",
+      "syncCallers": [
+        "Synchronous exports preserved in src-tauri/src/skill_host/mod.rs; scheduler and CLI/domain consumers remain synchronous"
+      ],
+      "mutationKey": {
+        "lexicalPaths": [
+          "env_root/{.venv,node_modules,status.json} and setup-script-defined descendants",
+          "skills_root/{registry.json,_builtin,_cache,_managed,_imported,_sources} including default/bundle recovery effects"
+        ],
+        "aliasPaths": [
+          "Canonical resolved cwd and existing ancestor/source aliases must join lexical path set in 08-29; exact-target/domain-only exclusion is not claimed"
+        ],
+        "postAdmissionPreconditions": [
+          "Current synchronous validation, registry guard, valid skill frontmatter, current SKILL.md, canonical cwd and existing permission mode remain inside finite worker; 08-29 adds shared-path validation and callback lifetime coverage"
+        ],
+        "sourceReservation": "No new source reservation or cross-domain mutex; default store operations retain their existing guards/generations",
+        "domainLockOrder": "Existing registry/event/mission guards acquired inside worker or dedicated callback, none across await. Plan29 supplies shared admission before domain guards and retains reservation for actual callback lifetime.",
+        "sharedAdmissionEntry": "integrationRequired: 08-29; actual shared admission produced by06 and integrated by29"
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_04",
+          "passed": 7,
+          "failed": 0,
+          "ignored": 0
+        }
+      ],
+      "processingCaller": {
+        "path": "src/lib/skills.ts::skillsEnvBootstrap",
+        "payload": "Original payload and String failures unchanged. Bootstrap/repair/background return invocation ID for accepted work, completion remains event-driven.",
+        "terminalNoticeOwner": "Existing SkillsTab handleDone for skills-env://done or AI mission/run consumer for ai://done and ai://error; no extra notifier",
+        "lifetime": "Dedicated worker owns child and stream lifetime after IPC return. Existing screen refresh/notice lifetime closure remains25/26; no app-quit durability claim.",
+        "retry": "Manual only; wrapper invokes one domain operation, no replay"
+      },
+      "evidence": {
+        "boundaryCase": "phase08_04::every_environment_wrapper_uses_blocking_worker_and_preserves_join_error invokes every actual owned wrapper, holds work until same-runtime yielded probe succeeds, compares blocking vs invoking thread and asserts contextual panic JoinError",
+        "behaviorCases": [
+          "phase08_04::successful_local_dry_run_preserves_status_and_done_payload",
+          "phase08_04::repair_worker_survives_return_and_failure_persists_before_done"
+        ],
+        "bounds": "Finite setup/probes isolated; file counts/child run durations not constant bounds. Long-lived pumps/waits remain dedicated threads; no static scan claim of runtime safety.",
+        "platform": "macOS tests executed. Windows NoWindow only adjusts process creation flags; no Windows runtime claim. All fixtures disposable, synthetic script or missing executable, no provider credentials accessed."
+      }
+    },
+    {
+      "name": "skills_env_repair",
+      "module": "src-tauri/src/skill_host/env.rs",
+      "registrationPath": "src-tauri/src/lib.rs::skill_host::env::ipc::skills_env_repair",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/skill_host/env.rs::ipc::skills_env_repair -> crate::skill_host::skills_env_repair synchronous reexport in src-tauri/src/skill_host/mod.rs",
+        "src-tauri/src/skill_host/env.rs::skills_env_repair -> skills_env_bootstrap -> write_status -> default_public_env_setup; registry defaults, bundle recovery, local materialization and status file access execute off async workers.",
+        "src-tauri/src/skill_host/store.rs::default_public_env_setup -> registry_guard -> load_registry_unlocked -> ensure_default_sources -> save_registry_unlocked -> builtin_env_setup_path; built-in bundle/cache/default source effects are writes even for env status.",
+        "src-tauri/src/skill_host/bundle_update.rs::recover_interrupted_swap; local bundle restoration/copy and manifest scans reached through ensure_active_bundle.",
+        "src-tauri/src/skill_host/fs.rs::write_json_pretty; env root status atomic replacement. Bootstrap/repair use dedicated thread::spawn for fixed bash setup --target root, pump threads for output, child.wait then status and skills-env://done; invocation ID is acceptance, not completion."
+      ],
+      "workerBoundary": "src-tauri/src/skill_host/env.rs::ipc::skills_env_repair -> tauri::async_runtime::spawn_blocking(move || synchronous domain(...)).await; only contextual skills_env_repair_task_failed wraps JoinError, inner String preserved",
+      "syncCallers": [
+        "Synchronous exports preserved in src-tauri/src/skill_host/mod.rs; scheduler and CLI/domain consumers remain synchronous"
+      ],
+      "mutationKey": {
+        "lexicalPaths": [
+          "env_root/{.venv,node_modules,status.json} and setup-script-defined descendants",
+          "skills_root/{registry.json,_builtin,_cache,_managed,_imported,_sources} including default/bundle recovery effects"
+        ],
+        "aliasPaths": [
+          "Canonical resolved cwd and existing ancestor/source aliases must join lexical path set in 08-29; exact-target/domain-only exclusion is not claimed"
+        ],
+        "postAdmissionPreconditions": [
+          "Current synchronous validation, registry guard, valid skill frontmatter, current SKILL.md, canonical cwd and existing permission mode remain inside finite worker; 08-29 adds shared-path validation and callback lifetime coverage"
+        ],
+        "sourceReservation": "No new source reservation or cross-domain mutex; default store operations retain their existing guards/generations",
+        "domainLockOrder": "Existing registry/event/mission guards acquired inside worker or dedicated callback, none across await. Plan29 supplies shared admission before domain guards and retains reservation for actual callback lifetime.",
+        "sharedAdmissionEntry": "integrationRequired: 08-29; actual shared admission produced by06 and integrated by29"
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_04",
+          "passed": 7,
+          "failed": 0,
+          "ignored": 0
+        }
+      ],
+      "processingCaller": {
+        "path": "src/lib/skills.ts::skillsEnvRepair",
+        "payload": "Original payload and String failures unchanged. Bootstrap/repair/background return invocation ID for accepted work, completion remains event-driven.",
+        "terminalNoticeOwner": "Existing SkillsTab handleDone for skills-env://done or AI mission/run consumer for ai://done and ai://error; no extra notifier",
+        "lifetime": "Dedicated worker owns child and stream lifetime after IPC return. Existing screen refresh/notice lifetime closure remains25/26; no app-quit durability claim.",
+        "retry": "Manual only; wrapper invokes one domain operation, no replay"
+      },
+      "evidence": {
+        "boundaryCase": "phase08_04::every_environment_wrapper_uses_blocking_worker_and_preserves_join_error invokes every actual owned wrapper, holds work until same-runtime yielded probe succeeds, compares blocking vs invoking thread and asserts contextual panic JoinError",
+        "behaviorCases": [
+          "phase08_04::successful_local_dry_run_preserves_status_and_done_payload",
+          "phase08_04::repair_worker_survives_return_and_failure_persists_before_done"
+        ],
+        "bounds": "Finite setup/probes isolated; file counts/child run durations not constant bounds. Long-lived pumps/waits remain dedicated threads; no static scan claim of runtime safety.",
+        "platform": "macOS tests executed. Windows NoWindow only adjusts process creation flags; no Windows runtime claim. All fixtures disposable, synthetic script or missing executable, no provider credentials accessed."
+      }
+    },
+    {
+      "name": "skills_runtime_status",
+      "module": "src-tauri/src/skill_host/dispatch.rs",
+      "registrationPath": "src-tauri/src/lib.rs::skill_host::dispatch::ipc::skills_runtime_status",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/skill_host/dispatch.rs::ipc::skills_runtime_status -> crate::skill_host::skills_runtime_status synchronous reexport in src-tauri/src/skill_host/mod.rs",
+        "src-tauri/src/skill_host/dispatch.rs::skills_runtime_status -> runtime_status -> resolve_provider_binary -> run_status_command; local executable resolution, fixed argv version/auth status subprocess probes.",
+        "src-tauri/src/agent_host/provider.rs::resolve_provider_binary -> resolve_cli_binary; override or PATH/common-install checks followed by fixed argv subprocess probes.",
+        "src-tauri/src/agent_host/status.rs::claude_auth_logged_in; local JSON parsing. Kimi branch calls kimi_credentials_valid for boolean-only credential validity, Kiro whoami checks Email marker. No credentials exposed by evidence or fixture tests."
+      ],
+      "workerBoundary": "src-tauri/src/skill_host/dispatch.rs::ipc::skills_runtime_status -> tauri::async_runtime::spawn_blocking(move || synchronous domain(...)).await; only contextual skills_runtime_status_task_failed wraps JoinError, inner String preserved",
+      "syncCallers": [
+        "Synchronous exports preserved in src-tauri/src/skill_host/mod.rs; scheduler and CLI/domain consumers remain synchronous"
+      ],
+      "mutationKey": {
+        "lexicalPaths": [
+          "No application filesystem mutation. Explicit provider --version and auth/login/status probes inherit existing CLI behavior and bounded request intent."
+        ],
+        "aliasPaths": [
+          "Canonical resolved cwd and existing ancestor/source aliases must join lexical path set in 08-29; exact-target/domain-only exclusion is not claimed"
+        ],
+        "postAdmissionPreconditions": [
+          "Current synchronous validation, registry guard, valid skill frontmatter, current SKILL.md, canonical cwd and existing permission mode remain inside finite worker; 08-29 adds shared-path validation and callback lifetime coverage"
+        ],
+        "sourceReservation": "No new source reservation or cross-domain mutex; default store operations retain their existing guards/generations",
+        "domainLockOrder": "Existing registry/event/mission guards acquired inside worker or dedicated callback, none across await. Plan29 supplies shared admission before domain guards and retains reservation for actual callback lifetime.",
+        "sharedAdmissionEntry": "integrationRequired: 08-29; actual shared admission produced by06 and integrated by29"
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_04",
+          "passed": 7,
+          "failed": 0,
+          "ignored": 0
+        }
+      ],
+      "processingCaller": {
+        "path": "src/lib/skills.ts::skillsRuntimeStatus",
+        "payload": "Original payload and String failures unchanged. Bootstrap/repair/background return invocation ID for accepted work, completion remains event-driven.",
+        "terminalNoticeOwner": "Existing SkillsTab handleDone for skills-env://done or AI mission/run consumer for ai://done and ai://error; no extra notifier",
+        "lifetime": "Dedicated worker owns child and stream lifetime after IPC return. Existing screen refresh/notice lifetime closure remains25/26; no app-quit durability claim.",
+        "retry": "Manual only; wrapper invokes one domain operation, no replay"
+      },
+      "evidence": {
+        "boundaryCase": "phase08_04::every_dispatch_wrapper_uses_blocking_worker_and_preserves_join_error invokes every actual owned wrapper, holds work until same-runtime yielded probe succeeds, compares blocking vs invoking thread and asserts contextual panic JoinError",
+        "behaviorCases": [
+          "phase08_04::denied_dispatch_has_zero_process_launch_and_preserves_inner_error",
+          "phase08_04::successful_local_composition_preserves_plan_argv_and_owned_environment",
+          "phase08_04::spawn_failure_records_failure_without_mission_or_completion"
+        ],
+        "bounds": "Finite setup/probes isolated; file counts/child run durations not constant bounds. Long-lived pumps/waits remain dedicated threads; no static scan claim of runtime safety.",
+        "platform": "macOS tests executed. Windows NoWindow only adjusts process creation flags; no Windows runtime claim. All fixtures disposable, synthetic script or missing executable, no provider credentials accessed."
+      }
+    },
+    {
+      "name": "skills_dispatch_compose",
+      "module": "src-tauri/src/skill_host/dispatch.rs",
+      "registrationPath": "src-tauri/src/lib.rs::skill_host::dispatch::ipc::skills_dispatch_compose",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/skill_host/dispatch.rs::ipc::skills_dispatch_compose -> crate::skill_host::skills_dispatch_compose synchronous reexport in src-tauri/src/skill_host/mod.rs",
+        "src-tauri/src/skill_host/dispatch.rs::skills_dispatch_compose -> compose -> get_skill -> read SKILL.md -> resolve_cwd -> env_vars_for_runs; guarded registry lookup, canonical cwd and environment path construction; validation happens inside the worker before launch.",
+        "src-tauri/src/skill_host/store.rs::get_skill -> load_registry -> load_registry_unlocked; guarded read also ensures skills_root/{_sources,_managed,_imported,_cache}. src-tauri/src/skill_host/store.rs::env_vars_for_runs -> reserve_btree_env -> reserved_runtime_env; reads workspace registry/config and validates scratchpad routes.",
+        "src-tauri/src/agent_runtime_env.rs::reserve_btree_env -> reserved_runtime_env -> runtime_work_root; production reads vault_list registry, selects owning private workspace, validates scratchpad containment via src-tauri/src/scratchpad.rs::resolve_scratchpad_root. Tests deliberately bypass live workspace registry; existing runtime-env ownership tests cover explicit fixtures."
+      ],
+      "workerBoundary": "src-tauri/src/skill_host/dispatch.rs::ipc::skills_dispatch_compose -> tauri::async_runtime::spawn_blocking(move || synchronous domain(...)).await; only contextual skills_dispatch_compose_task_failed wraps JoinError, inner String preserved",
+      "syncCallers": [
+        "Synchronous exports preserved in src-tauri/src/skill_host/mod.rs; scheduler and CLI/domain consumers remain synchronous"
+      ],
+      "mutationKey": {
+        "lexicalPaths": [
+          "skills_root/{_sources,_managed,_imported,_cache} directory materialization via get_skill -> load_registry_unlocked",
+          "Registry/SKILL.md/cwd/workspace/scratchpad configuration read after directory materialization; no provider launch for composition or terminal specification"
+        ],
+        "aliasPaths": [
+          "Canonical resolved cwd and existing ancestor/source aliases must join lexical path set in 08-29; exact-target/domain-only exclusion is not claimed"
+        ],
+        "postAdmissionPreconditions": [
+          "Current synchronous validation, registry guard, valid skill frontmatter, current SKILL.md, canonical cwd and existing permission mode remain inside finite worker; 08-29 adds shared-path validation and callback lifetime coverage"
+        ],
+        "sourceReservation": "No new source reservation or cross-domain mutex; default store operations retain their existing guards/generations",
+        "domainLockOrder": "Existing registry/event/mission guards acquired inside worker or dedicated callback, none across await. Plan29 supplies shared admission before domain guards and retains reservation for actual callback lifetime.",
+        "sharedAdmissionEntry": "integrationRequired: 08-29; actual shared admission produced by06 and integrated by29"
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_04",
+          "passed": 7,
+          "failed": 0,
+          "ignored": 0
+        }
+      ],
+      "processingCaller": {
+        "path": "src/lib/skills.ts::skillsDispatchCompose",
+        "payload": "Original payload and String failures unchanged. Bootstrap/repair/background return invocation ID for accepted work, completion remains event-driven.",
+        "terminalNoticeOwner": "Existing SkillsTab handleDone for skills-env://done or AI mission/run consumer for ai://done and ai://error; no extra notifier",
+        "lifetime": "Dedicated worker owns child and stream lifetime after IPC return. Existing screen refresh/notice lifetime closure remains25/26; no app-quit durability claim.",
+        "retry": "Manual only; wrapper invokes one domain operation, no replay"
+      },
+      "evidence": {
+        "boundaryCase": "phase08_04::every_dispatch_wrapper_uses_blocking_worker_and_preserves_join_error invokes every actual owned wrapper, holds work until same-runtime yielded probe succeeds, compares blocking vs invoking thread and asserts contextual panic JoinError",
+        "behaviorCases": [
+          "phase08_04::denied_dispatch_has_zero_process_launch_and_preserves_inner_error",
+          "phase08_04::successful_local_composition_preserves_plan_argv_and_owned_environment",
+          "phase08_04::spawn_failure_records_failure_without_mission_or_completion"
+        ],
+        "bounds": "Finite setup/probes isolated; file counts/child run durations not constant bounds. Long-lived pumps/waits remain dedicated threads; no static scan claim of runtime safety.",
+        "platform": "macOS tests executed. Windows NoWindow only adjusts process creation flags; no Windows runtime claim. All fixtures disposable, synthetic script or missing executable, no provider credentials accessed."
+      }
+    },
+    {
+      "name": "skills_dispatch_terminal",
+      "module": "src-tauri/src/skill_host/dispatch.rs",
+      "registrationPath": "src-tauri/src/lib.rs::skill_host::dispatch::ipc::skills_dispatch_terminal",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/skill_host/dispatch.rs::ipc::skills_dispatch_terminal -> crate::skill_host::skills_dispatch_terminal synchronous reexport in src-tauri/src/skill_host/mod.rs",
+        "src-tauri/src/skill_host/dispatch.rs::skills_dispatch_terminal -> compose -> get_skill -> read SKILL.md -> resolve_cwd -> env_vars_for_runs; guarded registry lookup, canonical cwd and environment path construction; validation happens inside the worker before launch.",
+        "src-tauri/src/skill_host/store.rs::get_skill -> load_registry -> load_registry_unlocked; guarded read also ensures skills_root/{_sources,_managed,_imported,_cache}. src-tauri/src/skill_host/store.rs::env_vars_for_runs -> reserve_btree_env -> reserved_runtime_env; reads workspace registry/config and validates scratchpad routes.",
+        "src-tauri/src/agent_runtime_env.rs::reserve_btree_env -> reserved_runtime_env -> runtime_work_root; production reads vault_list registry, selects owning private workspace, validates scratchpad containment via src-tauri/src/scratchpad.rs::resolve_scratchpad_root. Tests deliberately bypass live workspace registry; existing runtime-env ownership tests cover explicit fixtures.",
+        "src-tauri/src/skill_host/dispatch.rs::terminal_dispatch_spec -> add_dirs -> shell_quote; builds argv/spec only, launches no process. Codex existing shell-quoted pipe and explicit MARU_SKILL_PROMPT; other providers direct argv with plan/read-only flags."
+      ],
+      "workerBoundary": "src-tauri/src/skill_host/dispatch.rs::ipc::skills_dispatch_terminal -> tauri::async_runtime::spawn_blocking(move || synchronous domain(...)).await; only contextual skills_dispatch_terminal_task_failed wraps JoinError, inner String preserved",
+      "syncCallers": [
+        "Synchronous exports preserved in src-tauri/src/skill_host/mod.rs; scheduler and CLI/domain consumers remain synchronous"
+      ],
+      "mutationKey": {
+        "lexicalPaths": [
+          "skills_root/{_sources,_managed,_imported,_cache} directory materialization via get_skill -> load_registry_unlocked",
+          "Registry/SKILL.md/cwd/workspace/scratchpad configuration read after directory materialization; no provider launch for composition or terminal specification"
+        ],
+        "aliasPaths": [
+          "Canonical resolved cwd and existing ancestor/source aliases must join lexical path set in 08-29; exact-target/domain-only exclusion is not claimed"
+        ],
+        "postAdmissionPreconditions": [
+          "Current synchronous validation, registry guard, valid skill frontmatter, current SKILL.md, canonical cwd and existing permission mode remain inside finite worker; 08-29 adds shared-path validation and callback lifetime coverage"
+        ],
+        "sourceReservation": "No new source reservation or cross-domain mutex; default store operations retain their existing guards/generations",
+        "domainLockOrder": "Existing registry/event/mission guards acquired inside worker or dedicated callback, none across await. Plan29 supplies shared admission before domain guards and retains reservation for actual callback lifetime.",
+        "sharedAdmissionEntry": "integrationRequired: 08-29; actual shared admission produced by06 and integrated by29"
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_04",
+          "passed": 7,
+          "failed": 0,
+          "ignored": 0
+        }
+      ],
+      "processingCaller": {
+        "path": "src/lib/skills.ts::skillsDispatchTerminal",
+        "payload": "Original payload and String failures unchanged. Bootstrap/repair/background return invocation ID for accepted work, completion remains event-driven.",
+        "terminalNoticeOwner": "Existing SkillsTab handleDone for skills-env://done or AI mission/run consumer for ai://done and ai://error; no extra notifier",
+        "lifetime": "Dedicated worker owns child and stream lifetime after IPC return. Existing screen refresh/notice lifetime closure remains25/26; no app-quit durability claim.",
+        "retry": "Manual only; wrapper invokes one domain operation, no replay"
+      },
+      "evidence": {
+        "boundaryCase": "phase08_04::every_dispatch_wrapper_uses_blocking_worker_and_preserves_join_error invokes every actual owned wrapper, holds work until same-runtime yielded probe succeeds, compares blocking vs invoking thread and asserts contextual panic JoinError",
+        "behaviorCases": [
+          "phase08_04::denied_dispatch_has_zero_process_launch_and_preserves_inner_error",
+          "phase08_04::successful_local_composition_preserves_plan_argv_and_owned_environment",
+          "phase08_04::spawn_failure_records_failure_without_mission_or_completion"
+        ],
+        "bounds": "Finite setup/probes isolated; file counts/child run durations not constant bounds. Long-lived pumps/waits remain dedicated threads; no static scan claim of runtime safety.",
+        "platform": "macOS tests executed. Windows NoWindow only adjusts process creation flags; no Windows runtime claim. All fixtures disposable, synthetic script or missing executable, no provider credentials accessed."
+      }
+    },
+    {
+      "name": "skills_dispatch_background",
+      "module": "src-tauri/src/skill_host/dispatch.rs",
+      "registrationPath": "src-tauri/src/lib.rs::skill_host::dispatch::ipc::skills_dispatch_background",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/skill_host/dispatch.rs::ipc::skills_dispatch_background -> crate::skill_host::skills_dispatch_background synchronous reexport in src-tauri/src/skill_host/mod.rs",
+        "src-tauri/src/skill_host/dispatch.rs::skills_dispatch_background -> compose -> get_skill -> read SKILL.md -> resolve_cwd -> env_vars_for_runs; guarded registry lookup, canonical cwd and environment path construction; validation happens inside the worker before launch.",
+        "src-tauri/src/skill_host/store.rs::get_skill -> load_registry -> load_registry_unlocked; guarded read also ensures skills_root/{_sources,_managed,_imported,_cache}. src-tauri/src/skill_host/store.rs::env_vars_for_runs -> reserve_btree_env -> reserved_runtime_env; reads workspace registry/config and validates scratchpad routes.",
+        "src-tauri/src/agent_runtime_env.rs::reserve_btree_env -> reserved_runtime_env -> runtime_work_root; production reads vault_list registry, selects owning private workspace, validates scratchpad containment via src-tauri/src/scratchpad.rs::resolve_scratchpad_root. Tests deliberately bypass live workspace registry; existing runtime-env ownership tests cover explicit fixtures.",
+        "src-tauri/src/agent_host/provider.rs::build_cli_command; fixed provider argv with normalized permission_mode and explicit cwd/env. Existing terminal_dispatch_spec shell-quoted Codex pipe contract preserved; other providers use direct argv.",
+        "src-tauri/src/skill_host/dispatch.rs::spawn_background -> append_run_event_payload -> child spawn -> spawn_line_pump -> register_mission_with_metadata; stdin writer, stdout/stderr readers and child wait use dedicated threads, never indefinite blocking-pool tasks.",
+        "src-tauri/src/agent_host/event_store.rs::append_run_event_payload -> run_events_path; workspace .maru/runs/skills/<invocation>/events.jsonl; background output/proposal/failure/completion callbacks write through existing event-store lock.",
+        "src-tauri/src/mission_state.rs::register_mission_with_metadata -> spawn_idle_watch; touch_output/finish_mission/fail_mission update mission JSON/log under MARU_MISSION_STATE_DIR or home/.maru/state/missions and existing managed state. Stop control remains stop_ai_mission owned by 08-16."
+      ],
+      "workerBoundary": "src-tauri/src/skill_host/dispatch.rs::ipc::skills_dispatch_background -> tauri::async_runtime::spawn_blocking(move || synchronous domain(...)).await; only contextual skills_dispatch_background_task_failed wraps JoinError, inner String preserved",
+      "syncCallers": [
+        "Synchronous exports preserved in src-tauri/src/skill_host/mod.rs; scheduler and CLI/domain consumers remain synchronous"
+      ],
+      "mutationKey": {
+        "lexicalPaths": [
+          "skills_root/{_sources,_managed,_imported,_cache} directory materialization via get_skill -> load_registry_unlocked",
+          "cwd/.maru/runs/skills/<invocation>/events.jsonl",
+          "MARU_MISSION_STATE_DIR or home/.maru/state/missions/{<invocation>.json,<invocation>.log}",
+          "explicitly approved provider execution targets from original request; proposal-only default retained"
+        ],
+        "aliasPaths": [
+          "Canonical resolved cwd and existing ancestor/source aliases must join lexical path set in 08-29; exact-target/domain-only exclusion is not claimed"
+        ],
+        "postAdmissionPreconditions": [
+          "Current synchronous validation, registry guard, valid skill frontmatter, current SKILL.md, canonical cwd and existing permission mode remain inside finite worker; 08-29 adds shared-path validation and callback lifetime coverage"
+        ],
+        "sourceReservation": "No new source reservation or cross-domain mutex; default store operations retain their existing guards/generations",
+        "domainLockOrder": "Existing registry/event/mission guards acquired inside worker or dedicated callback, none across await. Plan29 supplies shared admission before domain guards and retains reservation for actual callback lifetime.",
+        "sharedAdmissionEntry": "integrationRequired: 08-29; actual shared admission produced by06 and integrated by29"
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_04",
+          "passed": 7,
+          "failed": 0,
+          "ignored": 0
+        }
+      ],
+      "processingCaller": {
+        "path": "src/lib/skills.ts::skillsDispatchBackground",
+        "payload": "Original payload and String failures unchanged. Bootstrap/repair/background return invocation ID for accepted work, completion remains event-driven.",
+        "terminalNoticeOwner": "Existing SkillsTab handleDone for skills-env://done or AI mission/run consumer for ai://done and ai://error; no extra notifier",
+        "lifetime": "Dedicated worker owns child and stream lifetime after IPC return. Existing screen refresh/notice lifetime closure remains25/26; no app-quit durability claim.",
+        "retry": "Manual only; wrapper invokes one domain operation, no replay"
+      },
+      "evidence": {
+        "boundaryCase": "phase08_04::every_dispatch_wrapper_uses_blocking_worker_and_preserves_join_error invokes every actual owned wrapper, holds work until same-runtime yielded probe succeeds, compares blocking vs invoking thread and asserts contextual panic JoinError",
+        "behaviorCases": [
+          "phase08_04::denied_dispatch_has_zero_process_launch_and_preserves_inner_error",
+          "phase08_04::successful_local_composition_preserves_plan_argv_and_owned_environment",
+          "phase08_04::spawn_failure_records_failure_without_mission_or_completion"
+        ],
+        "bounds": "Finite setup/probes isolated; file counts/child run durations not constant bounds. Long-lived pumps/waits remain dedicated threads; no static scan claim of runtime safety.",
+        "platform": "macOS tests executed. Windows NoWindow only adjusts process creation flags; no Windows runtime claim. All fixtures disposable, synthetic script or missing executable, no provider credentials accessed."
+      }
+    }
+  ],
+  "evidence": {
+    "checks": [
+      {
+        "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_04",
+        "passed": 7,
+        "failed": 0,
+        "ignored": 0
+      },
+      {
+        "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib mission_state::tests",
+        "passed": 4,
+        "failed": 0,
+        "ignored": 0
+      },
+      {
+        "command": "cargo check --manifest-path src-tauri/Cargo.toml -p maru-cli",
+        "exitCode": 0
+      },
+      {
+        "command": "cargo check --manifest-path src-tauri/Cargo.toml --lib",
+        "exitCode": 0
+      },
+      {
+        "command": "cargo clippy --manifest-path src-tauri/Cargo.toml --lib -- -D warnings",
+        "exitCode": 0
+      },
+      {
+        "command": "cargo fmt --manifest-path src-tauri/Cargo.toml -- --check",
+        "exitCode": 0
+      },
+      {
+        "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib skill_host::dispatch::tests",
+        "passed": 9,
+        "failed": 0,
+        "ignored": 0
+      }
+    ],
+    "integrationHandoff": "Plan29 owns env/dispatch lexical+alias+parent admission for finite setup AND dedicated worker callbacks. mission_state final command ownership16 and event_store17 remain unchanged. Runtime-generic helper signatures only enable same-code MockRuntime testing; no scheduling changes outside owned commands."
+  }
+}
