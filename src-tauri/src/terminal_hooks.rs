@@ -196,6 +196,7 @@ pub fn start_terminal_hook_watcher(app: &AppHandle) -> Result<(), String> {
     let offsets: Arc<Mutex<HashMap<PathBuf, u64>>> = Arc::new(Mutex::new(HashMap::new()));
     let app_handle = app.clone();
     let offsets_for_handler = offsets.clone();
+    let dir_for_handler = dir.clone();
 
     let mut watcher = recommended_watcher(move |res: notify::Result<Event>| {
         let Ok(event) = res else {
@@ -205,7 +206,15 @@ pub fn start_terminal_hook_watcher(app: &AppHandle) -> Result<(), String> {
             return;
         }
         for path in event.paths {
-            if crate::paths::is_under_generated_dir(&path) {
+            // PERF-04 prune runs on the watch-dir-relative path (WR-01): the
+            // runtime dir can live under an ancestor named like a generated
+            // dir (e.g. a home directory literally named `dist`), which must
+            // not silence every hook event.
+            if path
+                .strip_prefix(&dir_for_handler)
+                .map(|rel| crate::paths::is_under_generated_dir(rel))
+                .unwrap_or(true)
+            {
                 continue;
             }
             if path.file_name().and_then(|n| n.to_str()) != Some("events.jsonl") {

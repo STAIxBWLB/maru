@@ -208,7 +208,14 @@ pub fn start_scratchpad_watcher(
             }
             let mut relative_paths: Vec<String> = paths
                 .into_iter()
-                .filter(|path| !crate::paths::is_under_generated_dir(path))
+                // PERF-04 prune runs on the root-relative path (WR-01): a
+                // scratchpad root itself named like a generated dir must not
+                // prune 100% of its own events.
+                .filter(|path| {
+                    path.strip_prefix(&root_for_thread)
+                        .map(|rel| !crate::paths::is_under_generated_dir(rel))
+                        .unwrap_or(false)
+                })
                 .filter(|path| relevant_path(path, &root_for_thread))
                 .filter_map(|path| {
                     path.strip_prefix(&root_for_thread)
@@ -296,9 +303,10 @@ mod tests {
 
     #[test]
     fn drain_filter_drops_generated_dir_paths_but_keeps_siblings() {
-        // Mirrors the drain-thread chain: generated-dir prune ahead of
-        // relevant_path — a generated path in the batch must not drop its
-        // legitimate siblings (per-path D-04 semantics, Pitfall 7).
+        // Mirrors the drain-thread chain: generated-dir prune (on the
+        // root-relative path, WR-01) ahead of relevant_path — a generated
+        // path in the batch must not drop its legitimate siblings (per-path
+        // D-04 semantics, Pitfall 7).
         let root = Path::new("/work/scratchpad");
         let batch = vec![
             PathBuf::from("/work/scratchpad/node_modules/pkg/index.js"),
@@ -306,7 +314,38 @@ mod tests {
         ];
         let kept: Vec<String> = batch
             .iter()
-            .filter(|path| !crate::paths::is_under_generated_dir(path))
+            .filter(|path| {
+                path.strip_prefix(root)
+                    .map(|rel| !crate::paths::is_under_generated_dir(rel))
+                    .unwrap_or(false)
+            })
+            .filter(|path| relevant_path(path, root))
+            .filter_map(|path| {
+                path.strip_prefix(root)
+                    .ok()
+                    .map(|relative| relative.to_string_lossy().replace('\\', "/"))
+            })
+            .collect();
+        assert_eq!(kept, vec!["ideation/seeds/a.md"]);
+    }
+
+    #[test]
+    fn drain_filter_still_dispatches_when_root_name_is_generated_dir() {
+        // WR-01: a scratchpad root literally named `dist` must keep
+        // dispatching while a nested generated dir stays pruned.
+        let root = Path::new("/work/dist");
+        let batch = vec![
+            PathBuf::from("/work/dist/dist/out.js"),
+            PathBuf::from("/work/dist/node_modules/pkg/index.js"),
+            PathBuf::from("/work/dist/ideation/seeds/a.md"),
+        ];
+        let kept: Vec<String> = batch
+            .iter()
+            .filter(|path| {
+                path.strip_prefix(root)
+                    .map(|rel| !crate::paths::is_under_generated_dir(rel))
+                    .unwrap_or(false)
+            })
             .filter(|path| relevant_path(path, root))
             .filter_map(|path| {
                 path.strip_prefix(root)

@@ -22,7 +22,10 @@ fn relevant_path(path: &Path, root: &Path) -> bool {
     let Ok(rel) = path.strip_prefix(root) else {
         return false;
     };
-    if crate::paths::is_under_generated_dir(path) {
+    // PERF-04 prune runs on the root-relative path (WR-01): a vault
+    // directory itself named like a generated dir (dist, build, ...) must
+    // not prune 100% of its own events.
+    if crate::paths::is_under_generated_dir(rel) {
         return false;
     }
     if rel.starts_with(".maru/cache") || rel.starts_with(".maru/versions") {
@@ -170,6 +173,18 @@ mod tests {
             Path::new("/work/node_modules_backup/notes.md"),
             root
         ));
+    }
+
+    #[test]
+    fn root_named_generated_dir_still_dispatches() {
+        // WR-01: the prune runs on the root-relative path, so a vault
+        // directory literally named `dist` keeps dispatching its events
+        // while a nested generated dir is still pruned.
+        let root = Path::new("/work/dist");
+        assert!(relevant_path(Path::new("/work/dist/notes/a.md"), root));
+        assert!(relevant_path(Path::new("/work/dist/.maruignore"), root));
+        assert!(!relevant_path(Path::new("/work/dist/dist/a.md"), root));
+        assert!(!relevant_path(Path::new("/work/dist/node_modules/pkg/index.js"), root));
     }
 
     #[test]

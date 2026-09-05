@@ -126,9 +126,6 @@ pub fn start_inbox_watcher(
             _ => return,
         };
         for path in event.paths {
-            if crate::paths::is_under_generated_dir(&path) {
-                continue;
-            }
             if kind_label != "removed" && !path.is_file() {
                 continue;
             }
@@ -142,6 +139,12 @@ pub fn start_inbox_watcher(
                 Ok(rel) => rel,
                 Err(_) => continue,
             };
+            // PERF-04 prune runs on the root-relative path (WR-01): an inbox
+            // drop dir itself named like a generated dir (dist, build, ...)
+            // must not prune 100% of its own events.
+            if crate::paths::is_under_generated_dir(rel_to_downloads) {
+                continue;
+            }
             let source = rel_to_downloads
                 .components()
                 .next()
