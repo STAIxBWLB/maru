@@ -98,7 +98,7 @@ use approval::{prepare_approval, record_approval, ApprovalState};
 use browser_passkeys::{
     browser_passkey_request_authorization, browser_passkey_status, BrowserPasskeyState,
 };
-use diagram::{
+use diagram::ipc::{
     diagram_backup_document, diagram_delete_document, diagram_export_blob,
     diagram_export_blob_to_path, diagram_list_documents, diagram_list_snapshots,
     diagram_load_document, diagram_pattern_delete, diagram_pattern_list, diagram_pattern_save,
@@ -151,7 +151,7 @@ use site_view::{
 };
 use sites::{read_sites, save_sites, scan_work_sites};
 use skill_host::{skills_sync_all_sources, skills_sync_source};
-use studio::{
+use studio::ipc::{
     studio_apply_body, studio_state_delete, studio_state_list, studio_state_read, studio_state_save,
 };
 use tauri::Manager;

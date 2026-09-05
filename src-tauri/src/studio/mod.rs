@@ -1,3 +1,4 @@
+use crate::atomic_file::{with_path_transactions, PathTransactionLease, PathTransactionRequest};
 use crate::document::{read_document, DocumentPayload};
 use crate::kordoc_lite::KordocLiteCheck;
 use crate::vault::{lexical_normalize, resolve_inside_vault};
@@ -138,7 +139,6 @@ pub struct StudioStateSummary {
     pub updated_at: String,
 }
 
-#[tauri::command]
 pub fn studio_state_list(work_path: String) -> Result<Vec<StudioStateSummary>, String> {
     let root = studio_root(&work_path)?;
     if !root.exists() {
@@ -169,7 +169,6 @@ pub fn studio_state_list(work_path: String) -> Result<Vec<StudioStateSummary>, S
     Ok(states)
 }
 
-#[tauri::command]
 pub fn studio_state_read(
     work_path: String,
     #[allow(non_snake_case)] doc_id: String,
@@ -181,19 +180,39 @@ pub fn studio_state_read(
     read_state_file(&path).map(Some)
 }
 
-#[tauri::command]
-pub fn studio_state_save(work_path: String, mut state: StudioState) -> Result<StudioState, String> {
+pub fn studio_state_save(work_path: String, state: StudioState) -> Result<StudioState, String> {
     validate_doc_id(&state.doc_id)?;
+    let path = state_path(&work_path, &state.doc_id)?;
+    let dir = path
+        .parent()
+        .ok_or_else(|| "Studio state path has no parent".to_string())?
+        .to_path_buf();
+    let root = resolve_inside_vault(&work_path, ".")?;
+    let request = PathTransactionRequest::new(vec![dir, path])?
+        .require_parent(&root)?
+        .with_workspace_registry()?;
+    with_path_transactions(request, |lease| {
+        studio_state_save_in_transaction(work_path, state, lease)
+    })
+}
+
+fn studio_state_save_in_transaction(
+    work_path: String,
+    mut state: StudioState,
+    lease: &PathTransactionLease,
+) -> Result<StudioState, String> {
+    lease.ensure_workspace_registry()?;
+    let path = state_path(&work_path, &state.doc_id)?;
+    lease.ensure_covered(vec![path.clone()])?;
     state.schema_version = STUDIO_SCHEMA_VERSION;
     state.updated_at = Utc::now().to_rfc3339();
-
-    let path = state_path(&work_path, &state.doc_id)?;
     let write_action = if path.is_file() {
         WorkspaceWriteAction::Modify
     } else {
         WorkspaceWriteAction::Create
     };
     assert_maru_can_write(&work_path, write_action)?;
+    lease.before_effect()?;
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
             .map_err(|err| format!("Cannot create Studio state directory: {err}"))?;
@@ -205,13 +224,30 @@ pub fn studio_state_save(work_path: String, mut state: StudioState) -> Result<St
     Ok(state)
 }
 
-#[tauri::command]
 pub fn studio_state_delete(
     work_path: String,
     #[allow(non_snake_case)] doc_id: String,
 ) -> Result<bool, String> {
-    assert_maru_can_write(&work_path, WorkspaceWriteAction::Delete)?;
     let dir = state_dir(&work_path, &doc_id)?;
+    let root = resolve_inside_vault(&work_path, ".")?;
+    let request = PathTransactionRequest::new(vec![dir])?
+        .require_parent(&root)?
+        .with_workspace_registry()?;
+    with_path_transactions(request, |lease| {
+        studio_state_delete_in_transaction(work_path, doc_id, lease)
+    })
+}
+
+fn studio_state_delete_in_transaction(
+    work_path: String,
+    #[allow(non_snake_case)] doc_id: String,
+    lease: &PathTransactionLease,
+) -> Result<bool, String> {
+    lease.ensure_workspace_registry()?;
+    let dir = state_dir(&work_path, &doc_id)?;
+    lease.ensure_covered(vec![dir.clone()])?;
+    assert_maru_can_write(&work_path, WorkspaceWriteAction::Delete)?;
+    lease.before_effect()?;
     if !dir.exists() {
         return Ok(false);
     }
@@ -219,14 +255,32 @@ pub fn studio_state_delete(
     Ok(true)
 }
 
-#[tauri::command]
 pub fn studio_apply_body(
     work_path: String,
     document_path: String,
     body_markdown: String,
 ) -> Result<DocumentPayload, String> {
-    assert_maru_can_write(&work_path, WorkspaceWriteAction::Modify)?;
     let path = resolve_inside_vault(&work_path, &document_path)?;
+    let root = resolve_inside_vault(&work_path, ".")?;
+    let request = PathTransactionRequest::new(vec![path])?
+        .require_parent(&root)?
+        .with_workspace_registry()?;
+    with_path_transactions(request, |lease| {
+        studio_apply_body_in_transaction(work_path, document_path, body_markdown, lease)
+    })
+}
+
+fn studio_apply_body_in_transaction(
+    work_path: String,
+    document_path: String,
+    body_markdown: String,
+    lease: &PathTransactionLease,
+) -> Result<DocumentPayload, String> {
+    lease.ensure_workspace_registry()?;
+    let path = resolve_inside_vault(&work_path, &document_path)?;
+    lease.ensure_covered(vec![path.clone()])?;
+    assert_maru_can_write(&work_path, WorkspaceWriteAction::Modify)?;
+    lease.before_effect()?;
     if !path.is_file() {
         return Err("Document file does not exist".to_string());
     }
@@ -235,6 +289,89 @@ pub fn studio_apply_body(
     let updated = replace_body_preserving_frontmatter(&original, &body_markdown);
     fs::write(&path, updated).map_err(|err| format!("Cannot save document: {err}"))?;
     read_document(work_path, path.to_string_lossy().to_string())
+}
+
+/// Owned IPC boundaries; synchronous entry points remain available to Rust callers.
+pub mod ipc {
+    use super::*;
+    #[tauri::command]
+    pub async fn studio_state_list(work_path: String) -> Result<Vec<StudioStateSummary>, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(
+                &[PathBuf::from(&work_path)],
+                "worker:studio_state_list",
+            );
+            super::studio_state_list(work_path)
+        })
+        .await
+        .map_err(|err| format!("studio_state_list_task_failed: {err}"))?
+    }
+    #[tauri::command]
+    pub async fn studio_state_read(
+        work_path: String,
+        #[allow(non_snake_case)] doc_id: String,
+    ) -> Result<Option<StudioState>, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(
+                &[PathBuf::from(&work_path)],
+                "worker:studio_state_read",
+            );
+            super::studio_state_read(work_path, doc_id)
+        })
+        .await
+        .map_err(|err| format!("studio_state_read_task_failed: {err}"))?
+    }
+    #[tauri::command]
+    pub async fn studio_state_save(
+        work_path: String,
+        state: StudioState,
+    ) -> Result<StudioState, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(
+                &[PathBuf::from(&work_path)],
+                "worker:studio_state_save",
+            );
+            super::studio_state_save(work_path, state)
+        })
+        .await
+        .map_err(|err| format!("studio_state_save_task_failed: {err}"))?
+    }
+    #[tauri::command]
+    pub async fn studio_state_delete(
+        work_path: String,
+        #[allow(non_snake_case)] doc_id: String,
+    ) -> Result<bool, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(
+                &[PathBuf::from(&work_path)],
+                "worker:studio_state_delete",
+            );
+            super::studio_state_delete(work_path, doc_id)
+        })
+        .await
+        .map_err(|err| format!("studio_state_delete_task_failed: {err}"))?
+    }
+    #[tauri::command]
+    pub async fn studio_apply_body(
+        work_path: String,
+        document_path: String,
+        body_markdown: String,
+    ) -> Result<DocumentPayload, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(
+                &[PathBuf::from(&work_path)],
+                "worker:studio_apply_body",
+            );
+            super::studio_apply_body(work_path, document_path, body_markdown)
+        })
+        .await
+        .map_err(|err| format!("studio_apply_body_task_failed: {err}"))?
+    }
 }
 
 fn studio_root(work_path: &str) -> Result<PathBuf, String> {
@@ -479,5 +616,303 @@ mod tests {
 
         studio_apply_body(root, "note.md".to_string(), "# New".to_string()).unwrap();
         assert_eq!(fs::read_to_string(doc).unwrap(), "# New\n");
+    }
+}
+
+#[cfg(test)]
+mod phase08_20 {
+    use super::*;
+    use crate::atomic_file::phase08_06::{boundary, run, Held, Home};
+    use std::future::Future;
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    fn text(path: &Path) -> String {
+        path.to_string_lossy().into_owned()
+    }
+
+    fn sample(doc_id: &str, title: &str) -> StudioState {
+        StudioState {
+            schema_version: 1,
+            doc_id: doc_id.to_string(),
+            current_step: StudioStep::Sections,
+            source: StudioSourceState {
+                mode: StudioSourceMode::ActiveDocument,
+                document_path: Some("docs/report.md".to_string()),
+                title: title.to_string(),
+                doc_type: "report".to_string(),
+                target_rel_path: Some("docs/report.md".to_string()),
+            },
+            template: None,
+            guideline_ids: Vec::new(),
+            body_draft: String::new(),
+            lint_dismissals: Vec::new(),
+            hwp_fields: StudioHwpFieldsState {
+                status: "placeholder".to_string(),
+                template_path: None,
+                fields: Vec::new(),
+                values: BTreeMap::new(),
+                last_output_path: None,
+                form_filled_count: 0,
+                unmatched_fields: Vec::new(),
+                validation_checks: Vec::new(),
+                warnings: Vec::new(),
+            },
+            export: StudioExportState {
+                formats: Vec::new(),
+                manifest_path: None,
+                summary: None,
+                last_run_at: None,
+            },
+            package: StudioPackageState {
+                frozen: false,
+                frozen_at: None,
+                snapshot_path: None,
+            },
+            updated_at: String::new(),
+        }
+    }
+
+    fn start<F, T>(future: F) -> mpsc::Receiver<T>
+    where
+        F: Future<Output = T> + Send + 'static,
+        T: Send + 'static,
+    {
+        let (tx, rx) = mpsc::channel();
+        tauri::async_runtime::spawn(async move {
+            let _ = tx.send(future.await);
+        });
+        rx
+    }
+
+    fn done<T>(rx: mpsc::Receiver<T>) -> T {
+        rx.recv_timeout(Duration::from_secs(10))
+            .expect("studio fixture completion")
+    }
+
+    #[test]
+    fn phase08_20_studio_each_wrapper_yields_same_poll_and_maps_join_failure() {
+        let home = Home::new();
+        let root = home.root.path();
+        boundary(
+            root.into(),
+            "studio_state_list",
+            ipc::studio_state_list(text(root)),
+        );
+        boundary(
+            root.into(),
+            "studio_state_read",
+            ipc::studio_state_read(text(root), "doc".into()),
+        );
+        boundary(
+            root.into(),
+            "studio_state_save",
+            ipc::studio_state_save(text(root), sample("doc", "title")),
+        );
+        boundary(
+            root.into(),
+            "studio_state_delete",
+            ipc::studio_state_delete(text(root), "doc".into()),
+        );
+        boundary(
+            root.into(),
+            "studio_apply_body",
+            ipc::studio_apply_body(text(root), "docs/report.md".into(), "# Body".into()),
+        );
+    }
+
+    #[test]
+    fn phase08_20_studio_real_fixture_results_and_legacy_rejections() {
+        let home = Home::new();
+        let root = home.root.path().join("work");
+        fs::create_dir_all(root.join("docs")).unwrap();
+        let work = text(&root);
+
+        let saved = run(ipc::studio_state_save(
+            work.clone(),
+            sample("doc-1", "Report"),
+        ))
+        .unwrap();
+        assert_eq!(saved.doc_id, "doc-1");
+        assert_eq!(saved.schema_version, STUDIO_SCHEMA_VERSION);
+        assert!(!saved.updated_at.is_empty());
+        let read = run(ipc::studio_state_read(work.clone(), "doc-1".into()))
+            .unwrap()
+            .unwrap();
+        assert_eq!(read.source.title, "Report");
+        let listed = run(ipc::studio_state_list(work.clone())).unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].doc_id, "doc-1");
+
+        fs::write(
+            root.join("docs/report.md"),
+            "---\ntype: report\n---\n# Old\n\nBody\n",
+        )
+        .unwrap();
+        let payload = run(ipc::studio_apply_body(
+            work.clone(),
+            "docs/report.md".into(),
+            "# New\n\nUpdated".into(),
+        ))
+        .unwrap();
+        assert_eq!(payload.body, "# New\n\nUpdated\n");
+        assert_eq!(
+            fs::read_to_string(root.join("docs/report.md")).unwrap(),
+            "---\ntype: report\n---\n# New\n\nUpdated\n"
+        );
+
+        assert!(run(ipc::studio_state_delete(work.clone(), "doc-1".into())).unwrap());
+        assert!(run(ipc::studio_state_read(work.clone(), "doc-1".into()))
+            .unwrap()
+            .is_none());
+
+        assert_eq!(
+            run(ipc::studio_state_save(work.clone(), sample("../bad", "x"))).unwrap_err(),
+            "Invalid Studio doc id: ../bad"
+        );
+        assert!(run(ipc::studio_state_read(work.clone(), "bad/path".into())).is_err());
+        assert_eq!(
+            run(ipc::studio_apply_body(
+                work.clone(),
+                "docs/missing.md".into(),
+                "# x".into()
+            ))
+            .unwrap_err(),
+            "Document file does not exist"
+        );
+    }
+
+    #[test]
+    fn phase08_20_studio_save_serializes_same_target_both_orders() {
+        let home = Home::new();
+        for swap in [false, true] {
+            let root = home.root.path().join(format!("save-{swap}"));
+            fs::create_dir_all(&root).unwrap();
+            let work = text(&root);
+            let target = root.join(".maru/studio/doc-a/state.json");
+            let first_state = sample("doc-a", if swap { "second" } else { "first" });
+            let second_state = sample("doc-a", if swap { "first" } else { "second" });
+            let expected = if swap { "first" } else { "second" };
+            let held = Held::new(target.clone(), "admitted");
+            let first = start(ipc::studio_state_save(work.clone(), first_state));
+            held.wait();
+            let waiting = Held::new(target.clone(), "before-admission");
+            let second = start(ipc::studio_state_save(work.clone(), second_state));
+            waiting.wait();
+            waiting.release();
+            assert!(second.recv_timeout(Duration::from_millis(30)).is_err());
+            held.release();
+            done(first).unwrap();
+            let written = done(second).unwrap();
+            assert_eq!(written.source.title, expected);
+            let read = run(ipc::studio_state_read(work, "doc-a".into()))
+                .unwrap()
+                .unwrap();
+            assert_eq!(read.source.title, expected);
+            assert_eq!(
+                fs::read_to_string(target).unwrap(),
+                format!("{}\n", serde_json::to_string_pretty(&written).unwrap())
+            );
+        }
+    }
+
+    #[test]
+    fn phase08_20_studio_apply_body_contends_with_document_save_both_orders() {
+        let home = Home::new();
+        for document_first in [false, true] {
+            let root = home.root.path().join(format!("apply-{document_first}"));
+            fs::create_dir_all(root.join("docs")).unwrap();
+            fs::write(root.join("docs/report.md"), "original").unwrap();
+            let work = text(&root);
+            let target = root.join("docs/report.md");
+            let revision = crate::document::revision_for("original");
+            if document_first {
+                let held = Held::new(target.clone(), "admitted");
+                let first = start(crate::document::ipc::save_document(
+                    work.clone(),
+                    "docs/report.md".into(),
+                    "from document".into(),
+                    Some(revision),
+                ));
+                held.wait();
+                let waiting = Held::new(target.clone(), "before-admission");
+                let second = start(ipc::studio_apply_body(
+                    work.clone(),
+                    "docs/report.md".into(),
+                    "from studio".into(),
+                ));
+                waiting.wait();
+                waiting.release();
+                assert!(second.recv_timeout(Duration::from_millis(30)).is_err());
+                held.release();
+                done(first).unwrap();
+                let payload = done(second).unwrap();
+                assert_eq!(payload.body, "from studio\n");
+            } else {
+                let held = Held::new(target.clone(), "admitted");
+                let first = start(ipc::studio_apply_body(
+                    work.clone(),
+                    "docs/report.md".into(),
+                    "from studio".into(),
+                ));
+                held.wait();
+                let waiting = Held::new(target.clone(), "before-admission");
+                let second = start(crate::document::ipc::save_document(
+                    work.clone(),
+                    "docs/report.md".into(),
+                    "from document".into(),
+                    Some(revision),
+                ));
+                waiting.wait();
+                waiting.release();
+                assert!(second.recv_timeout(Duration::from_millis(30)).is_err());
+                held.release();
+                done(first).unwrap();
+                let err = done(second).unwrap_err();
+                assert_eq!(err.code, crate::ipc_error::DOCUMENT_CONFLICT);
+            }
+            assert_eq!(fs::read_to_string(&target).unwrap(), "from studio\n");
+        }
+    }
+
+    #[test]
+    fn phase08_20_studio_denied_and_error_release_admission() {
+        let home = Home::new();
+        let root = home.root.path().join("policy");
+        fs::create_dir_all(&root).unwrap();
+        let work = text(&root);
+        crate::scratchpad::phase08_08::registry(&root, "readOnly");
+        assert!(run(ipc::studio_state_save(
+            work.clone(),
+            sample("doc", "denied")
+        ))
+        .unwrap_err()
+        .contains("Workspace writes are blocked"));
+        assert!(!root.join(".maru/studio").exists());
+        crate::scratchpad::phase08_08::registry(&root, "direct");
+        run(ipc::studio_state_save(
+            work.clone(),
+            sample("doc", "allowed"),
+        ))
+        .unwrap();
+
+        let target = root.join(".maru/studio/doc/state.json");
+        fs::remove_file(&target).unwrap();
+        fs::create_dir(&target).unwrap();
+        assert!(
+            run(ipc::studio_state_save(work.clone(), sample("doc", "error")))
+                .unwrap_err()
+                .starts_with("Cannot write Studio state:")
+        );
+        fs::remove_dir(&target).unwrap();
+        run(ipc::studio_state_save(work, sample("doc", "recovered"))).unwrap();
+        assert_eq!(
+            run(ipc::studio_state_read(text(&root), "doc".into()))
+                .unwrap()
+                .unwrap()
+                .source
+                .title,
+            "recovered"
+        );
     }
 }
