@@ -13,10 +13,13 @@
 // <work>/.maru/gap-log.jsonl — and only through the explicit gap_append_log
 // command, never as a side effect of analysis.
 
-use crate::atomic_file::write_atomic;
+use crate::atomic_file::{
+    with_path_transactions, write_atomic, PathTransactionLease, PathTransactionRequest,
+};
 use crate::drafts::{load_index, validate_draft_id, DraftEntry, DraftStatus};
 use crate::scratchpad::assert_scratchpad_workspace_access;
 use crate::vault::{lexical_normalize, normalize_existing_dir, resolve_inside_vault};
+use crate::vault_list::{assert_maru_can_write, WorkspaceWriteAction};
 use chrono::Utc;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -603,15 +606,68 @@ fn analyze_impl(work_path: &str, draft_id: &str) -> Result<GapReport, String> {
     Ok(build_report(&entry, &baseline, &current))
 }
 
-#[tauri::command]
 pub fn gap_analyze(work_path: String, draft_id: String) -> Result<GapReport, String> {
+    let work = normalize_existing_dir(&work_path)?;
+    // Index-selected promoted paths are only known after admission. Reserving
+    // the workspace holds a consistent index/baseline/document snapshot and
+    // includes conditional registry migration before any loader/domain guard.
+    let lexical_work = if Path::new(&work_path).is_absolute() {
+        PathBuf::from(&work_path)
+    } else {
+        std::env::current_dir()
+            .map_err(|err| err.to_string())?
+            .join(&work_path)
+    };
+    let request = PathTransactionRequest::new(vec![lexical_work, work.clone()])?
+        .with_workspace_registry()?
+        .require_parent(&work)?;
+    with_path_transactions(request, |lease| {
+        gap_analyze_in_transaction(lease, work_path, draft_id)
+    })
+}
+
+fn gap_analyze_in_transaction(
+    lease: &PathTransactionLease,
+    work_path: String,
+    draft_id: String,
+) -> Result<GapReport, String> {
+    lease.ensure_covered(vec![normalize_existing_dir(&work_path)?])?;
+    lease.ensure_workspace_registry()?;
+    lease.before_effect()?;
     analyze_impl(&work_path, &draft_id)
 }
 
 /// Explicit, frontend-triggered log append: analysis itself stays read-only.
 /// The UI calls this after an analysis has been viewed/confirmed.
-#[tauri::command]
 pub fn gap_append_log(work_path: String, draft_id: String) -> Result<GapLogEntry, String> {
+    let work = normalize_existing_dir(&work_path)?;
+    // Index-selected promoted paths are only known after admission. Reserving
+    // the workspace holds a consistent index/baseline/document snapshot and
+    // includes conditional registry migration before any loader/domain guard.
+    let lexical_work = if Path::new(&work_path).is_absolute() {
+        PathBuf::from(&work_path)
+    } else {
+        std::env::current_dir()
+            .map_err(|err| err.to_string())?
+            .join(&work_path)
+    };
+    let request = PathTransactionRequest::new(vec![lexical_work, work.clone()])?
+        .with_workspace_registry()?
+        .require_parent(&work)?;
+    with_path_transactions(request, |lease| {
+        gap_append_log_in_transaction(lease, work_path, draft_id)
+    })
+}
+
+fn gap_append_log_in_transaction(
+    lease: &PathTransactionLease,
+    work_path: String,
+    draft_id: String,
+) -> Result<GapLogEntry, String> {
+    lease.ensure_covered(vec![normalize_existing_dir(&work_path)?])?;
+    lease.ensure_workspace_registry()?;
+    lease.before_effect()?;
+    assert_maru_can_write(&work_path, WorkspaceWriteAction::Modify)?;
     let report = analyze_impl(&work_path, &draft_id)?;
     let work = normalize_existing_dir(&work_path)?;
     let draft = load_promoted_entry(&work, &draft_id)?;
@@ -698,8 +754,34 @@ pub(crate) fn read_gap_log_entries(work: &Path) -> Result<Vec<GapLogEntry>, Stri
     Ok(entries)
 }
 
-#[tauri::command]
 pub fn gap_log_list(work_path: String, limit: Option<u32>) -> Result<Vec<GapLogEntry>, String> {
+    let work = normalize_existing_dir(&work_path)?;
+    // Index-selected promoted paths are only known after admission. Reserving
+    // the workspace holds a consistent index/baseline/document snapshot and
+    // includes conditional registry migration before any loader/domain guard.
+    let lexical_work = if Path::new(&work_path).is_absolute() {
+        PathBuf::from(&work_path)
+    } else {
+        std::env::current_dir()
+            .map_err(|err| err.to_string())?
+            .join(&work_path)
+    };
+    let request = PathTransactionRequest::new(vec![lexical_work, work.clone()])?
+        .with_workspace_registry()?
+        .require_parent(&work)?;
+    with_path_transactions(request, |lease| {
+        gap_log_list_in_transaction(lease, work_path, limit)
+    })
+}
+
+fn gap_log_list_in_transaction(
+    lease: &PathTransactionLease,
+    work_path: String,
+    limit: Option<u32>,
+) -> Result<Vec<GapLogEntry>, String> {
+    lease.ensure_covered(vec![normalize_existing_dir(&work_path)?])?;
+    lease.ensure_workspace_registry()?;
+    lease.before_effect()?;
     assert_scratchpad_workspace_access(Path::new(&work_path))?;
     let work = normalize_existing_dir(&work_path)?;
     let mut entries = read_gap_log_entries(&work)?;
@@ -707,8 +789,33 @@ pub fn gap_log_list(work_path: String, limit: Option<u32>) -> Result<Vec<GapLogE
     Ok(entries)
 }
 
-#[tauri::command]
 pub fn gap_reports_list(work_path: String) -> Result<Vec<GapReportSummary>, String> {
+    let work = normalize_existing_dir(&work_path)?;
+    // Index-selected promoted paths are only known after admission. Reserving
+    // the workspace holds a consistent index/baseline/document snapshot and
+    // includes conditional registry migration before any loader/domain guard.
+    let lexical_work = if Path::new(&work_path).is_absolute() {
+        PathBuf::from(&work_path)
+    } else {
+        std::env::current_dir()
+            .map_err(|err| err.to_string())?
+            .join(&work_path)
+    };
+    let request = PathTransactionRequest::new(vec![lexical_work, work.clone()])?
+        .with_workspace_registry()?
+        .require_parent(&work)?;
+    with_path_transactions(request, |lease| {
+        gap_reports_list_in_transaction(lease, work_path)
+    })
+}
+
+fn gap_reports_list_in_transaction(
+    lease: &PathTransactionLease,
+    work_path: String,
+) -> Result<Vec<GapReportSummary>, String> {
+    lease.ensure_covered(vec![normalize_existing_dir(&work_path)?])?;
+    lease.ensure_workspace_registry()?;
+    lease.before_effect()?;
     assert_scratchpad_workspace_access(Path::new(&work_path))?;
     let work = normalize_existing_dir(&work_path)?;
     let entries = load_index(&work)?;
@@ -743,7 +850,66 @@ fn rewrite_gap_log(work: &Path, entries: &[GapLogEntry]) -> Result<(), String> {
         body.push_str(&line);
         body.push('\n');
     }
-    write_atomic(&gap_log_path(work), body.as_bytes())
+    let request = PathTransactionRequest::new(vec![gap_log_path(work)])?.require_parent(work)?;
+    with_path_transactions(request, |lease| {
+        lease.ensure_covered(vec![gap_log_path(work)])?;
+        lease.before_effect()?;
+        write_atomic(&gap_log_path(work), body.as_bytes())
+    })
+}
+
+/// Owned IPC scheduling; all filesystem work and admission waits start in the worker.
+pub mod ipc {
+    use super::*;
+    #[tauri::command]
+    pub async fn gap_analyze(work_path: String, draft_id: String) -> Result<GapReport, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(&[PathBuf::from(&work_path)], "worker:gap_analyze");
+            super::gap_analyze(work_path, draft_id)
+        })
+        .await
+        .map_err(|err| format!("gap_analyze_task_failed: {err}"))?
+    }
+    #[tauri::command]
+    pub async fn gap_append_log(
+        work_path: String,
+        draft_id: String,
+    ) -> Result<GapLogEntry, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(&[PathBuf::from(&work_path)], "worker:gap_append_log");
+            super::gap_append_log(work_path, draft_id)
+        })
+        .await
+        .map_err(|err| format!("gap_append_log_task_failed: {err}"))?
+    }
+    #[tauri::command]
+    pub async fn gap_log_list(
+        work_path: String,
+        limit: Option<u32>,
+    ) -> Result<Vec<GapLogEntry>, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(&[PathBuf::from(&work_path)], "worker:gap_log_list");
+            super::gap_log_list(work_path, limit)
+        })
+        .await
+        .map_err(|err| format!("gap_log_list_task_failed: {err}"))?
+    }
+    #[tauri::command]
+    pub async fn gap_reports_list(work_path: String) -> Result<Vec<GapReportSummary>, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(
+                &[PathBuf::from(&work_path)],
+                "worker:gap_reports_list",
+            );
+            super::gap_reports_list(work_path)
+        })
+        .await
+        .map_err(|err| format!("gap_reports_list_task_failed: {err}"))?
+    }
 }
 
 // === Feedback digest (gap → scheduler prompt loop) ===
@@ -1067,7 +1233,7 @@ mod tests {
 
     /// Seed a draft index + baseline + promoted doc the way drafts_promote
     /// leaves them, without invoking the full promote flow.
-    fn seed_promoted_draft(
+    pub(super) fn seed_promoted_draft(
         work: &str,
         id: &str,
         promoted_to: &str,
@@ -1477,5 +1643,318 @@ mod tests {
             strip_gap_feedback_section(&format!("{GAP_FEEDBACK_SECTION_HEADER}\n\nstale")),
             ""
         );
+    }
+}
+
+#[cfg(test)]
+mod phase08_08 {
+    use super::*;
+    use crate::atomic_file::phase08_06::{boundary, run, Held, Home};
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    fn text(path: &Path) -> String {
+        path.to_string_lossy().into_owned()
+    }
+    fn start<F>(future: F) -> mpsc::Receiver<F::Output>
+    where
+        F: std::future::Future + Send + 'static,
+        F::Output: Send + 'static,
+    {
+        let (tx, rx) = mpsc::channel();
+        tauri::async_runtime::spawn(async move {
+            let _ = tx.send(future.await);
+        });
+        rx
+    }
+    fn done<T>(rx: mpsc::Receiver<T>) -> T {
+        rx.recv_timeout(Duration::from_secs(10))
+            .expect("real gap command completed")
+    }
+    fn seed(root: &Path) {
+        tests::seed_promoted_draft(
+            &text(root),
+            "draft-gap-1",
+            "notes/note.md",
+            "# Report\n\nold body\n",
+            Some("# Report\n\nnew body 42\n"),
+        );
+    }
+
+    #[test]
+    fn phase08_08_gap_all_wrappers_yield_same_polling_task_and_contextual_join_error() {
+        let home = Home::new();
+        let root = home.root.path();
+        let s = text(root);
+        boundary(
+            root.into(),
+            "gap_analyze",
+            ipc::gap_analyze(s.clone(), "draft-gap-1".into()),
+        );
+        boundary(
+            root.into(),
+            "gap_append_log",
+            ipc::gap_append_log(s.clone(), "draft-gap-1".into()),
+        );
+        boundary(
+            root.into(),
+            "gap_log_list",
+            ipc::gap_log_list(s.clone(), None),
+        );
+        boundary(root.into(), "gap_reports_list", ipc::gap_reports_list(s));
+    }
+
+    #[test]
+    fn phase08_08_gap_nonempty_wrappers_and_exact_legacy_errors() {
+        let home = Home::new();
+        let root = home.root.path();
+        let s = text(root);
+        seed(root);
+        let report = run(ipc::gap_analyze(s.clone(), "draft-gap-1".into())).unwrap();
+        assert_eq!(report.draft_id, "draft-gap-1");
+        assert!(report.summary.total_hunks > 0);
+        assert!(!gap_log_path(root).exists(), "analysis never appends");
+        let entry = run(ipc::gap_append_log(s.clone(), "draft-gap-1".into())).unwrap();
+        assert_eq!(entry.hunk_count, report.summary.total_hunks);
+        assert_eq!(
+            run(ipc::gap_log_list(s.clone(), None)).unwrap(),
+            vec![entry]
+        );
+        let reports = run(ipc::gap_reports_list(s.clone())).unwrap();
+        assert_eq!(reports.len(), 1);
+        assert!(reports[0].has_baseline && reports[0].has_document);
+        let direct = gap_analyze(s.clone(), "missing".into()).unwrap_err();
+        assert_eq!(
+            run(ipc::gap_analyze(s.clone(), "missing".into())).unwrap_err(),
+            direct
+        );
+        fs::remove_file(baseline_path(root, "draft-gap-1")).unwrap();
+        assert_eq!(
+            run(ipc::gap_append_log(s, "draft-gap-1".into())).unwrap_err(),
+            "gap_baseline_missing"
+        );
+    }
+
+    #[test]
+    fn phase08_08_gap_append_same_target_deduplicates_and_failure_releases() {
+        let home = Home::new();
+        let root = home.root.path();
+        let s = text(root);
+        seed(root);
+        let held = Held::new(root.into(), "pre-effect");
+        let first = start(ipc::gap_append_log(s.clone(), "draft-gap-1".into()));
+        held.wait();
+        let waiting = Held::new(root.into(), "before-admission");
+        let second = start(ipc::gap_append_log(s.clone(), "draft-gap-1".into()));
+        waiting.wait();
+        waiting.release();
+        assert!(second.recv_timeout(Duration::from_millis(30)).is_err());
+        held.release();
+        let a = done(first).unwrap();
+        let b = done(second).unwrap();
+        assert_eq!(a, b);
+        assert_eq!(
+            fs::read_to_string(gap_log_path(root))
+                .unwrap()
+                .lines()
+                .count(),
+            1
+        );
+        drop(held);
+        drop(waiting);
+        let held = Held::new(root.into(), "pre-effect");
+        let denied = start(ipc::gap_append_log(s.clone(), "missing".into()));
+        held.wait();
+        let waiting = Held::new(root.join("notes/note.md"), "before-admission");
+        let saved = start(crate::document::ipc::save_document(
+            s.clone(),
+            "notes/note.md".into(),
+            "# committed after rejection\n".into(),
+            None,
+        ));
+        waiting.wait();
+        waiting.release();
+        assert!(saved.recv_timeout(Duration::from_millis(30)).is_err());
+        held.release();
+        assert!(done(denied).is_err());
+        done(saved).unwrap();
+        assert_eq!(
+            fs::read_to_string(root.join("notes/note.md")).unwrap(),
+            "# committed after rejection\n"
+        );
+    }
+
+    #[test]
+    fn phase08_08_gap_real_document_save_and_append_both_orders_and_aliases() {
+        let home = Home::new();
+        for gap_first in [true, false] {
+            for alias in ["lexical", "child", "ancestor"] {
+                let temp = tempfile::tempdir_in(home.root.path()).unwrap();
+                let root = temp.path().join("workspace");
+                fs::create_dir(&root).unwrap();
+                seed(&root);
+                let gap_root = if alias == "lexical" {
+                    root.clone()
+                } else {
+                    #[cfg(unix)]
+                    {
+                        let link = temp.path().join("alias");
+                        if alias == "child" {
+                            std::os::unix::fs::symlink(&root, &link).unwrap();
+                            link
+                        } else {
+                            let parent = temp.path().join("parent");
+                            std::os::unix::fs::symlink(temp.path(), &parent).unwrap();
+                            parent.join("workspace")
+                        }
+                    }
+                    #[cfg(not(unix))]
+                    {
+                        root.clone()
+                    }
+                };
+                let gap = ipc::gap_append_log(text(&gap_root), "draft-gap-1".into());
+                let save = crate::document::ipc::save_document(
+                    text(&root),
+                    "notes/note.md".into(),
+                    "# Report\n\nold body\n".into(),
+                    None,
+                );
+                if gap_first {
+                    let held = Held::new(gap_root.clone(), "pre-effect");
+                    let first = start(gap);
+                    held.wait();
+                    let waiting = Held::new(root.join("notes/note.md"), "before-admission");
+                    let second = start(save);
+                    waiting.wait();
+                    waiting.release();
+                    assert!(second.recv_timeout(Duration::from_millis(30)).is_err());
+                    held.release();
+                    assert!(done(first).unwrap().hunk_count > 0);
+                    done(second).unwrap();
+                } else {
+                    let held = Held::new(root.join("notes/note.md"), "pre-effect");
+                    let first = start(save);
+                    held.wait();
+                    let waiting = Held::new(gap_root, "before-admission");
+                    let second = start(gap);
+                    waiting.wait();
+                    waiting.release();
+                    assert!(second.recv_timeout(Duration::from_millis(30)).is_err());
+                    held.release();
+                    done(first).unwrap();
+                    assert_eq!(done(second).unwrap().hunk_count, 0);
+                }
+                assert_eq!(
+                    fs::read_to_string(root.join("notes/note.md")).unwrap(),
+                    "# Report\n\nold body\n"
+                );
+                assert_eq!(read_gap_log_entries(&root).unwrap().len(), 1);
+            }
+        }
+    }
+
+    #[test]
+    fn phase08_08_gap_parent_rename_during_read_and_append_never_recreates() {
+        let home = Home::new();
+        for parent_first in [true, false] {
+            for append in [false, true] {
+                let temp = tempfile::tempdir_in(home.root.path()).unwrap();
+                let parent = temp.path();
+                let root = parent.join("work");
+                fs::create_dir(&root).unwrap();
+                seed(&root);
+                let gap_root = text(&root);
+                let child = async move {
+                    if append {
+                        ipc::gap_append_log(gap_root, "draft-gap-1".into())
+                            .await
+                            .map(|_| ())
+                    } else {
+                        ipc::gap_analyze(gap_root, "draft-gap-1".into())
+                            .await
+                            .map(|_| ())
+                    }
+                };
+                let rename = crate::workspace_files::ipc::rename_workspace_entry(
+                    text(parent),
+                    "work".into(),
+                    "moved".into(),
+                );
+                // Both requests include root; install the second hook only once
+                // the first command has already passed before-admission.
+                let held = Held::new(root.clone(), "pre-effect");
+                if parent_first {
+                    let first = start(rename);
+                    held.wait();
+                    let waiting = Held::new(root.clone(), "before-admission");
+                    let second = start(child);
+                    waiting.wait();
+                    waiting.release();
+                    assert!(second.recv_timeout(Duration::from_millis(30)).is_err());
+                    held.release();
+                    done(first).unwrap();
+                    assert!(done(second).is_err());
+                    assert!(!parent.join("moved/.maru/gap-log.jsonl").exists());
+                } else {
+                    let first = start(child);
+                    held.wait();
+                    let waiting = Held::new(root.clone(), "before-admission");
+                    let second = start(rename);
+                    waiting.wait();
+                    waiting.release();
+                    assert!(second.recv_timeout(Duration::from_millis(30)).is_err());
+                    held.release();
+                    done(first).unwrap();
+                    done(second).unwrap();
+                    assert_eq!(parent.join("moved/.maru/gap-log.jsonl").exists(), append);
+                }
+                assert!(!root.exists());
+                assert!(parent.join("moved/notes/note.md").is_file());
+            }
+        }
+    }
+    #[test]
+    fn phase08_08_gap_actual_foreign_readonly_and_post_admission_permissions() {
+        use crate::scratchpad::phase08_08::{registry, PrimaryWorkspaceAccessFixture};
+        let home = Home::new();
+        let fixture = tempfile::tempdir_in(home.root.path()).unwrap();
+        let root = fixture.path();
+        let s = text(root);
+        seed(root);
+        let _policy = PrimaryWorkspaceAccessFixture::new(root.into());
+        registry(home.root.path(), "direct");
+        assert!(run(ipc::gap_analyze(s.clone(), "draft-gap-1".into()))
+            .unwrap_err()
+            .starts_with("scratchpad_workspace_denied:"));
+        assert!(run(ipc::gap_reports_list(s.clone()))
+            .unwrap_err()
+            .starts_with("scratchpad_workspace_denied:"));
+        assert!(run(ipc::gap_log_list(s.clone(), None))
+            .unwrap_err()
+            .starts_with("scratchpad_workspace_denied:"));
+        assert!(run(ipc::gap_append_log(s.clone(), "draft-gap-1".into())).is_err());
+        registry(root, "readOnly");
+        assert!(run(ipc::gap_analyze(s.clone(), "draft-gap-1".into())).is_ok());
+        assert!(run(ipc::gap_append_log(s.clone(), "draft-gap-1".into()))
+            .unwrap_err()
+            .contains("Workspace writes are blocked"));
+        for foreign in [false, true] {
+            registry(root, "direct");
+            let held = Held::new(root.into(), "admitted");
+            let append = start(ipc::gap_append_log(s.clone(), "draft-gap-1".into()));
+            held.wait();
+            if foreign {
+                registry(home.root.path(), "direct");
+            } else {
+                registry(root, "readOnly");
+            }
+            held.release();
+            assert!(done(append).is_err());
+            assert!(!gap_log_path(root).exists());
+        }
+        registry(root, "direct");
+        run(ipc::gap_append_log(s, "draft-gap-1".into())).unwrap();
+        assert_eq!(read_gap_log_entries(root).unwrap().len(), 1);
     }
 }
