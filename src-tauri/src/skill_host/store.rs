@@ -75,6 +75,70 @@ struct SourceOperationLease {
     source_path: PathBuf,
 }
 
+impl SourceOperationLease {
+    // Also admits not-yet-created clone destinations. Existing ancestors are
+    // canonicalized so aliases cannot reserve the same destination twice.
+    fn reserve(registry: PathBuf, id: &str, path: &Path) -> Result<Self, String> {
+        let mut ancestor = path;
+        let mut suffix = Vec::new();
+        while !ancestor.exists() {
+            suffix.push(ancestor.file_name().ok_or("source_path_invalid")?);
+            ancestor = ancestor.parent().ok_or("source_path_invalid")?;
+        }
+        let mut canonical = ancestor.canonicalize().map_err(|err| err.to_string())?;
+        for part in suffix.into_iter().rev() {
+            canonical.push(part);
+        }
+        let output = Command::new("git")
+            .arg("-C")
+            .arg(ancestor)
+            .args(["rev-parse", "--show-toplevel"])
+            .no_window()
+            .output()
+            .map_err(|err| err.to_string())?;
+        let checkout = if output.status.success() {
+            PathBuf::from(String::from_utf8_lossy(&output.stdout).trim())
+                .canonicalize()
+                .map_err(|err| err.to_string())?
+        } else {
+            canonical.clone()
+        };
+        let source_key = (registry, id.to_string());
+        let checkout_key = (checkout, String::new());
+        let mut operations = SOURCE_OPERATIONS
+            .get_or_init(Default::default)
+            .lock()
+            .map_err(|_| "source_operation_lock_poisoned".to_string())?;
+        if operations.contains(&source_key) || operations.contains(&checkout_key) {
+            return Err(format!("source_busy: {id} is already in use"));
+        }
+        operations.insert(source_key.clone());
+        operations.insert(checkout_key.clone());
+        Ok(Self {
+            source_key,
+            checkout_key,
+            source_path: canonical,
+        })
+    }
+}
+
+impl SourceSnapshot {
+    fn validate(&self, registry: &SkillsRegistry) -> Result<(), String> {
+        let current = capture_source_snapshot(registry, &self.source.id)
+            .map_err(|_| format!("source_changed: {}", self.source.id))?;
+        if current.generation != self.generation
+            || current.registry_path != self.registry_path
+            || current.canonical_path != self.canonical_path
+        {
+            return Err(format!(
+                "source_changed: {}; retry manually",
+                self.source.id
+            ));
+        }
+        Ok(())
+    }
+}
+
 impl Drop for SourceOperationLease {
     fn drop(&mut self) {
         if let Ok(mut operations) = SOURCE_OPERATIONS.get_or_init(Default::default).lock() {
@@ -90,8 +154,14 @@ fn ensure_source_generation(registry: &SkillsRegistry) -> Result<(), String> {
         .get_or_init(Default::default)
         .lock()
         .map_err(|_| "source_generation_lock_poisoned".to_string())?;
-    generations.retain(|(root, id), _| {
-        root != &path || registry.sources.iter().any(|source| &source.id == id)
+    let operations = SOURCE_OPERATIONS
+        .get_or_init(Default::default)
+        .lock()
+        .map_err(|_| "source_operation_lock_poisoned".to_string())?;
+    generations.retain(|key @ (root, id), _| {
+        root != &path
+            || registry.sources.iter().any(|source| &source.id == id)
+            || operations.contains(key)
     });
     for source in &registry.sources {
         let mut configuration = source.clone();
@@ -571,7 +641,6 @@ impl<'a> ProgressReporter<'a> {
     }
 }
 
-#[tauri::command]
 pub fn skills_list_sources(work_path: Option<String>) -> Result<Vec<SkillSource>, String> {
     let _guard = registry_guard()?;
     let mut registry = load_registry_unlocked()?;
@@ -580,7 +649,6 @@ pub fn skills_list_sources(work_path: Option<String>) -> Result<Vec<SkillSource>
     Ok(registry.sources)
 }
 
-#[tauri::command]
 pub fn skills_add_source(
     id: String,
     kind: String,
@@ -605,12 +673,15 @@ pub fn skills_add_source(
     if kind == "managed" {
         return Err("source_kind_reserved: managed".to_string());
     }
+    if kind == "cloned" {
+        return skills_add_source_blocking(id, repo_url, skills_subdir);
+    }
     let _guard = registry_guard()?;
     let mut registry = load_registry_unlocked()?;
     if registry.sources.iter().any(|source| source.id == id) {
         return Err(format!("source_exists: {id}"));
     }
-    let mut resolved_skills_subdir = normalize_skills_subdir(skills_subdir.as_deref())?;
+    let resolved_skills_subdir = normalize_skills_subdir(skills_subdir.as_deref())?;
 
     let source_path = match kind.as_str() {
         "linked" | "external-managed" | "tool-native" => {
@@ -623,31 +694,6 @@ pub fn skills_add_source(
                 ));
             }
             Some(host_fs::display_path(&canonicalize_or_self(&p)))
-        }
-        "cloned" => {
-            let url = repo_url
-                .clone()
-                .ok_or_else(|| "source_repo_url_required".to_string())?;
-            let checkout = host_fs::skills_root()?.join("_sources").join(&id);
-            if checkout.exists() {
-                return Err(format!(
-                    "source_checkout_exists: {}",
-                    host_fs::display_path(&checkout)
-                ));
-            }
-            host_fs::ensure_dir(checkout.parent().unwrap())?;
-            run_command(Command::new("git").arg("clone").arg(&url).arg(&checkout))?;
-            // A checkout carrying a marketplace manifest opts into the
-            // registry contract: validate before the source is admitted and
-            // roll the clone back on failure. Checkouts without a manifest
-            // keep the legacy trust-the-URL behavior.
-            if let Some(manifest) = validate_cloned_source_manifest(&checkout, &id)? {
-                // A manifest-bearing source owns its catalog layout. Using a
-                // caller-supplied default instead would validate one tree and
-                // then scan a different one.
-                resolved_skills_subdir = manifest.skills_subdir.trim().to_string();
-            }
-            Some(host_fs::display_path(&checkout))
         }
         "imported" | "managed" | "adopted" => {
             path.map(|raw| host_fs::display_path(&host_fs::expand_tilde(&raw)))
@@ -671,6 +717,100 @@ pub fn skills_add_source(
     rescan_source_in_registry(&mut registry, &source.id)?;
     save_registry_unlocked(&registry)?;
     Ok(source)
+}
+
+fn skills_add_source_blocking(
+    id: String,
+    repo_url: Option<String>,
+    skills_subdir: Option<String>,
+) -> Result<SkillSource, String> {
+    let url = repo_url.ok_or("source_repo_url_required")?;
+    let checkout = host_fs::skills_root()?.join("_sources").join(&id);
+    let _lease = SourceOperationLease::reserve(registry_path()?, &id, &checkout)?;
+    let mut source = SkillSource {
+        id: id.clone(),
+        kind: "cloned".into(),
+        ownership_class: "owned-catalog".into(),
+        path: Some(host_fs::display_path(&checkout)),
+        repo_url: Some(url.clone()),
+        skills_subdir: normalize_skills_subdir(skills_subdir.as_deref())?,
+        branch: None,
+        last_synced_at: None,
+    };
+    let generation = SourceGeneration {
+        incarnation: Uuid::new_v4(),
+        config_revision: Uuid::new_v4(),
+    };
+    let key = (registry_path()?, id.clone());
+    {
+        let _guard = registry_guard()?;
+        let registry = load_registry_unlocked()?;
+        if registry.sources.iter().any(|source| source.id == id) {
+            return Err(format!("source_exists: {id}"));
+        }
+        if path_occupied(&checkout) {
+            return Err(format!(
+                "source_checkout_exists: {}",
+                host_fs::display_path(&checkout)
+            ));
+        }
+        SOURCE_GENERATIONS
+            .get_or_init(Default::default)
+            .lock()
+            .map_err(|_| "source_generation_lock_poisoned".to_string())?
+            .insert(
+                key.clone(),
+                SourceSnapshot {
+                    registry_path: key.0.clone(),
+                    source: source.clone(),
+                    generation,
+                    canonical_path: None,
+                },
+            );
+    }
+    let staging = checkout.with_file_name(format!(".{id}.clone-{}", Uuid::new_v4()));
+    let result = (|| {
+        host_fs::ensure_dir(staging.parent().ok_or("source_path_invalid")?)?;
+        #[cfg(test)]
+        tests::phase08_03_network_lock::at_edge("clone");
+        run_command(
+            Command::new("git")
+                .arg("clone")
+                .arg("--")
+                .arg(&url)
+                .arg(&staging),
+        )?;
+        if let Some(manifest) = validate_cloned_source_manifest(&staging, &id)? {
+            source.skills_subdir = manifest.skills_subdir.trim().to_string();
+        }
+        let _guard = registry_guard()?;
+        let mut registry = load_registry_unlocked()?;
+        let current = SOURCE_GENERATIONS
+            .get_or_init(Default::default)
+            .lock()
+            .map_err(|_| "source_generation_lock_poisoned".to_string())?
+            .get(&key)
+            .map(|snapshot| snapshot.generation);
+        if current != Some(generation) || registry.sources.iter().any(|source| source.id == id) {
+            return Err(format!("source_changed: {id}; retry manually"));
+        }
+        if path_occupied(&checkout) {
+            return Err(format!(
+                "source_checkout_exists: {}",
+                host_fs::display_path(&checkout)
+            ));
+        }
+        fs::rename(&staging, &checkout).map_err(|err| err.to_string())?;
+        clear_removed_source(&mut registry, &id);
+        registry.sources.push(source.clone());
+        rescan_source_in_registry(&mut registry, &id)?;
+        save_registry_unlocked(&registry)?;
+        Ok(source)
+    })();
+    if staging.exists() {
+        let _ = fs::remove_dir_all(&staging);
+    }
+    result
 }
 
 /// Marketplace manifest filename a cloned source may carry at its root.
@@ -718,7 +858,6 @@ fn validate_cloned_source_manifest(
     result
 }
 
-#[tauri::command]
 pub fn skills_remove_source(source_id: String) -> Result<(), String> {
     let source_id = normalize_source_id(&source_id)?;
     let _guard = registry_guard()?;
@@ -969,9 +1108,8 @@ fn skills_sync_all_sources_blocking(
     })
 }
 
-#[tauri::command]
-pub fn skills_rescan_source(
-    app: AppHandle,
+pub fn skills_rescan_source<R: tauri::Runtime>(
+    app: AppHandle<R>,
     source_id: String,
     progress_id: Option<String>,
 ) -> Result<Vec<SkillRecord>, String> {
@@ -996,7 +1134,6 @@ fn skills_rescan_source_impl(
     Ok(skills)
 }
 
-#[tauri::command]
 pub fn skills_list_skills(
     work_path: Option<String>,
     refresh: Option<bool>,
@@ -1018,7 +1155,6 @@ pub fn skills_list_skills(
     Ok(registry.skills)
 }
 
-#[tauri::command]
 pub fn skills_read_skill(skill_id: String) -> Result<SkillDocument, String> {
     let registry = load_registry()?;
     let skill = registry
@@ -1032,14 +1168,12 @@ pub fn skills_read_skill(skill_id: String) -> Result<SkillDocument, String> {
     Ok(SkillDocument { skill, content })
 }
 
-#[tauri::command]
 pub fn skills_read_skill_file(skill_id: String, file_path: String) -> Result<String, String> {
     let path = resolve_skill_file(&skill_id, &file_path)?;
     fs::read_to_string(&path)
         .map_err(|err| format!("Cannot read {}: {err}", host_fs::display_path(&path)))
 }
 
-#[tauri::command]
 pub fn skills_save_skill_file(
     skill_id: String,
     file_path: String,
@@ -1078,7 +1212,6 @@ pub fn skills_save_skill_file(
     Ok(refreshed)
 }
 
-#[tauri::command]
 pub fn skills_save_skill_as(
     skill_id: String,
     name: String,
@@ -1117,7 +1250,6 @@ pub fn skills_save_skill_as(
     Ok(created)
 }
 
-#[tauri::command]
 pub fn skills_create_skill(name: String, title: Option<String>) -> Result<SkillRecord, String> {
     let name = host_fs::safe_entry_name(&name)?;
     let _guard = registry_guard()?;
@@ -1146,7 +1278,6 @@ pub fn skills_create_skill(name: String, title: Option<String>) -> Result<SkillR
     Ok(created)
 }
 
-#[tauri::command]
 pub fn skills_delete_skill(skill_id: String) -> Result<(), String> {
     let _guard = registry_guard()?;
     let mut registry = load_registry_unlocked()?;
@@ -1172,7 +1303,6 @@ pub fn skills_delete_skill(skill_id: String) -> Result<(), String> {
     save_registry_unlocked(&registry)
 }
 
-#[tauri::command]
 pub fn skills_list_installs(work_path: Option<String>) -> Result<Vec<SkillInstall>, String> {
     let _guard = registry_guard()?;
     let mut registry = load_registry_unlocked()?;
@@ -1181,7 +1311,6 @@ pub fn skills_list_installs(work_path: Option<String>) -> Result<Vec<SkillInstal
     Ok(registry.installs)
 }
 
-#[tauri::command]
 pub fn skills_install_skill(
     skill_id: String,
     target: String,
@@ -1255,7 +1384,6 @@ pub fn skills_install_skill(
     })
 }
 
-#[tauri::command]
 pub fn skills_uninstall_skill(target: String, installed_as: String) -> Result<(), String> {
     let target = normalize_install_target(&target)?;
     let installed_as = host_fs::safe_entry_name(&installed_as)?;
@@ -1313,9 +1441,8 @@ pub fn skills_uninstall_skill(target: String, installed_as: String) -> Result<()
     save_registry_unlocked(&registry)
 }
 
-#[tauri::command]
-pub fn skills_adopt_external_links(
-    app: AppHandle,
+pub fn skills_adopt_external_links<R: tauri::Runtime>(
+    app: AppHandle<R>,
     progress_id: Option<String>,
 ) -> Result<AdoptOutcome, String> {
     skills_adopt_external_links_impl(ProgressReporter::new(&app, progress_id.as_deref()))
@@ -1477,9 +1604,8 @@ fn skills_adopt_external_links_impl(
     })
 }
 
-#[tauri::command]
-pub fn skills_reset_registry(
-    app: AppHandle,
+pub fn skills_reset_registry<R: tauri::Runtime>(
+    app: AppHandle<R>,
     work_path: Option<String>,
     progress_id: Option<String>,
 ) -> Result<ResetOutcome, String> {
@@ -1536,6 +1662,12 @@ fn skills_reset_registry_impl(
         installs: preserved_installs,
         ..SkillsRegistry::default()
     };
+    // Reset invalidates pending clones as well as identical rebuilt defaults.
+    SOURCE_GENERATIONS
+        .get_or_init(Default::default)
+        .lock()
+        .map_err(|_| "source_generation_lock_poisoned".to_string())?
+        .retain(|(root, _), _| root != &path);
     // Reset is a new incarnation even when rebuilt defaults are identical.
     ensure_source_generation(&registry)?;
     progress.info("Recreating default sources");
@@ -1574,7 +1706,6 @@ fn skills_reset_registry_impl(
     Ok(outcome)
 }
 
-#[tauri::command]
 pub fn skills_doctor(work_path: Option<String>) -> Result<SkillDoctorReport, String> {
     let _guard = registry_guard()?;
     // Doctor is a diagnostic command. It must never create directories,
@@ -2076,7 +2207,6 @@ fn plan_tool_sync(
     Ok(actions)
 }
 
-#[tauri::command]
 pub fn skills_list_dirty(work_path: Option<String>) -> Result<Vec<DirtyRecord>, String> {
     let _guard = registry_guard()?;
     let mut registry = load_registry_unlocked()?;
@@ -2086,7 +2216,6 @@ pub fn skills_list_dirty(work_path: Option<String>) -> Result<Vec<DirtyRecord>, 
     Ok(dirty)
 }
 
-#[tauri::command]
 pub fn skills_reconcile_skill(
     work_path: Option<String>,
     skill: String,
@@ -2106,6 +2235,23 @@ pub fn skills_reconcile_skill(
         .find(|source| source.id == skill_record.source_id)
         .cloned()
         .ok_or_else(|| format!("unknown_source: {}", skill_record.source_id))?;
+    if !source_is_maru_owned(&source) {
+        return Err(format!("source_not_maru_owned: {}", source.id));
+    }
+    save_registry_unlocked(&registry)?;
+    let snapshot = capture_source_snapshot(&registry, &source.id)?;
+    drop(_guard);
+    let _lease = SourceOperationLease::reserve(
+        snapshot.registry_path.clone(),
+        &source.id,
+        &source_path(&source)?,
+    )?;
+    let _guard = registry_guard()?;
+    let mut registry = load_registry_unlocked()?;
+    snapshot.validate(&registry)?;
+    if Some(hash_directory(Path::new(&skill_record.abs_path))?) != skill_record.content_hash {
+        return Err("skill_changed: retry manually".into());
+    }
     let mut commands = Vec::new();
     let mut outcome = ReconcileOutcome {
         skill_id: skill_record.id.clone(),
@@ -2122,6 +2268,9 @@ pub fn skills_reconcile_skill(
     };
 
     if let Some(repo_root) = source_git_repo_root(&source)? {
+        drop(_guard);
+        #[cfg(test)]
+        tests::phase08_03_network_lock::at_edge("reconcile");
         outcome.git_repo_root = Some(host_fs::display_path(&repo_root));
         outcome.commands_shell = Some("posix".to_string());
         let skill_path = PathBuf::from(&skill_record.abs_path);
@@ -2162,8 +2311,6 @@ pub fn skills_reconcile_skill(
                         }
                     }
                 }
-                mark_skill_saved(&mut registry, &skill_record.id)?;
-                outcome.hash_updated = true;
             } else {
                 outcome.message = "dry_run".to_string();
             }
@@ -2174,13 +2321,25 @@ pub fn skills_reconcile_skill(
             ));
             if !dry_run {
                 run_git(&repo_root, &["checkout", "--", &rel])?;
-                rescan_source_in_registry(&mut registry, &source.id)?;
-                mark_skill_saved(&mut registry, &skill_record.id)?;
-                outcome.hash_updated = true;
+
                 outcome.message = "discarded".to_string();
             } else {
                 outcome.message = "dry_run".to_string();
             }
+        }
+        let _guard = registry_guard()?;
+        let mut registry = load_registry_unlocked()?;
+        snapshot.validate(&registry)?;
+        if !dry_run {
+            // Accept must not mark edits made while Git was running as saved.
+            if action == "accept"
+                && Some(hash_directory(Path::new(&skill_record.abs_path))?)
+                    != skill_record.content_hash
+            {
+                return Err("skill_changed: retry manually".into());
+            }
+            mark_skill_saved(&mut registry, &skill_record.id)?;
+            outcome.hash_updated = true;
         }
         outcome.commands = commands;
         save_registry_unlocked(&registry)?;
@@ -2223,7 +2382,6 @@ pub fn skills_reconcile_skill(
     }
 }
 
-#[tauri::command]
 pub fn skills_import_external(
     work_path: Option<String>,
     source_path: String,
@@ -2295,7 +2453,6 @@ pub fn skills_import_external(
     })
 }
 
-#[tauri::command]
 pub fn skills_import_unmanage(
     work_path: Option<String>,
     name: String,
@@ -3735,6 +3892,16 @@ fn write_bootstrap_pristine(pristine: &Path) -> Result<(), String> {
 /// between journal clear and cleanup can strand. Only safe with no journal
 /// present, which recover_interrupted_swap guarantees before this runs.
 fn sweep_swap_orphans() -> Result<(), String> {
+    // A live apply may be preparing/repairing a next tree without a journal.
+    // Its source lease owns cleanup; only crash leftovers may be swept here.
+    if SOURCE_OPERATIONS
+        .get_or_init(Default::default)
+        .lock()
+        .map_err(|_| "source_operation_lock_poisoned".to_string())?
+        .contains(&(registry_path()?, BUILTIN_SOURCE_ID.to_string()))
+    {
+        return Ok(());
+    }
     let root = host_fs::skills_root()?;
     if !root.is_dir() {
         return Ok(());
@@ -4087,13 +4254,20 @@ fn bundle_id_for(metadata: &bundle::BundleMetadata) -> String {
         .to_string()
 }
 
-#[tauri::command]
 pub fn skills_bundle_status() -> Result<SkillBundleStatus, String> {
     skills_bundle_status_impl(None)
 }
 
-#[tauri::command]
 pub fn skills_check_bundle_update(force: Option<bool>) -> Result<SkillBundleStatus, String> {
+    skills_check_bundle_update_blocking(force, bundle::discover_remote_bundle)
+}
+
+fn skills_check_bundle_update_blocking(
+    force: Option<bool>,
+    discover: impl FnOnce(&str, &str) -> Result<Option<bundle::RemoteBundle>, String>,
+) -> Result<SkillBundleStatus, String> {
+    let builtin = builtin_materialized_root()?;
+    let _lease = SourceOperationLease::reserve(registry_path()?, BUILTIN_SOURCE_ID, &builtin)?;
     // No response caching yet, so every check hits the channel; the flag is
     // accepted for API stability.
     let _ = force;
@@ -4105,7 +4279,9 @@ pub fn skills_check_bundle_update(force: Option<bool>) -> Result<SkillBundleStat
         ensure_active_bundle(&builtin_materialized_root()?)?;
     }
     let (repo, tag) = embedded_channel();
-    let remote = bundle::discover_remote_bundle(&repo, &tag)?;
+    #[cfg(test)]
+    tests::phase08_03_network_lock::at_edge("bundle_check");
+    let remote = discover(&repo, &tag)?;
     skills_bundle_status_impl(remote.as_ref())
 }
 
@@ -4171,9 +4347,8 @@ fn skills_bundle_status_impl(
     })
 }
 
-#[tauri::command]
-pub fn skills_apply_bundle_update(
-    app: AppHandle,
+pub fn skills_apply_bundle_update<R: tauri::Runtime>(
+    app: AppHandle<R>,
     bundle_id: Option<String>,
     repair_env: Option<bool>,
     progress_id: Option<String>,
@@ -4199,19 +4374,53 @@ fn skills_apply_bundle_update_impl(
     repair_env: bool,
     progress: ProgressReporter<'_>,
 ) -> Result<SkillBundleApplyOutcome, String> {
+    skills_apply_bundle_update_blocking(
+        requested_bundle_id,
+        repair_env,
+        progress,
+        bundle::discover_remote_bundle,
+        bundle::download_verified_archive,
+        run_env_repair_blocking,
+    )
+}
+
+fn skills_apply_bundle_update_blocking(
+    requested_bundle_id: Option<String>,
+    repair_env: bool,
+    progress: ProgressReporter<'_>,
+    discover: impl FnOnce(&str, &str) -> Result<Option<bundle::RemoteBundle>, String>,
+    download: impl FnOnce(&bundle::RemoteBundle) -> Result<Vec<u8>, String>,
+    repair: impl FnOnce(ProgressReporter<'_>, &Path) -> Result<(), String>,
+) -> Result<SkillBundleApplyOutcome, String> {
     let builtin_root = builtin_materialized_root()?;
-    let active = {
+    let _lease = SourceOperationLease::reserve(registry_path()?, BUILTIN_SOURCE_ID, &builtin_root)?;
+    let (active, snapshot) = {
         let _guard = registry_guard()?;
-        ensure_active_bundle(&builtin_root)?
+        let mut registry = load_registry_unlocked()?;
+        ensure_default_sources(&mut registry, None)?;
+        let active = ensure_active_bundle(&builtin_root)?
             .active
-            .ok_or_else(|| "bundle_state_missing".to_string())?
+            .ok_or("bundle_state_missing")?;
+        let pristine = bundle::bundle_pristine_dir(&active.bundle_id)?;
+        if !pristine.is_dir() {
+            return Err("bundle_pristine_missing: cannot prove _builtin is clean".into());
+        }
+        if !bundle_dirty_areas(&builtin_root, &pristine)?.is_empty() {
+            return Err("bundle_dirty_blocked: promote or discard local edits, then retry".into());
+        }
+        save_registry_unlocked(&registry)?;
+        (
+            active,
+            capture_source_snapshot(&registry, BUILTIN_SOURCE_ID)?,
+        )
     };
 
     // Everything network-bound happens outside the registry lock.
     progress.info("Checking skills channel");
     let (repo, tag) = embedded_channel();
-    let remote = bundle::discover_remote_bundle(&repo, &tag)?
-        .ok_or_else(|| "bundle_update_not_available".to_string())?;
+    #[cfg(test)]
+    tests::phase08_03_network_lock::at_edge("bundle_apply");
+    let remote = discover(&repo, &tag)?.ok_or_else(|| "bundle_update_not_available".to_string())?;
     let metadata = remote.metadata.clone();
     let new_bundle_id = bundle_id_for(&metadata);
     if let Some(requested) = &requested_bundle_id {
@@ -4243,7 +4452,7 @@ fn skills_apply_bundle_update_impl(
         "Downloading skills bundle {} ({} bytes)",
         metadata.display_version, metadata.archive.size
     ));
-    let archive = bundle::download_verified_archive(&remote)?;
+    let archive = download(&remote)?;
     progress.info("Verifying and staging bundle");
     // Unique staging dir: a concurrent apply must never share (or clobber)
     // another request's staging tree.
@@ -4253,6 +4462,10 @@ fn skills_apply_bundle_update_impl(
     // Swap under the registry lock.
     let _guard = registry_guard()?;
     let mut registry = load_registry_unlocked()?;
+    if let Err(err) = snapshot.validate(&registry) {
+        let _ = fs::remove_dir_all(&staging);
+        return Err(err);
+    }
     // Fresh installs (e.g. CLI-first use) have an empty registry; the builtin
     // source must exist before the post-swap rescan.
     ensure_default_sources(&mut registry, None)?;
@@ -4313,6 +4526,7 @@ fn skills_apply_bundle_update_impl(
     // repair from it BEFORE any swap: failures up to here touch nothing, and
     // the actual swap shrinks to two renames instead of a full tree copy
     // (minimizing the window where ~/.claude/skills/* symlinks dangle).
+    drop(_guard);
     progress.info("Preparing bundle");
     let next_builtin = host_fs::skills_root()?.join(format!("_builtin.next-{}", Uuid::new_v4()));
     if let Err(err) = copy_dir_all(&new_pristine, &next_builtin) {
@@ -4324,13 +4538,30 @@ fn skills_apply_bundle_update_impl(
         // ponytail: setup.sh mutations to ~/.maru/env are NOT rolled back on
         // failure — the script is idempotent by contract and the next repair
         // reconverges; the bundle itself has not been applied yet.
-        if let Err(err) = run_env_repair_blocking(progress, &next_builtin) {
+        if let Err(err) = repair(progress, &next_builtin) {
             let _ = fs::remove_dir_all(&next_builtin);
             let _ = fs::remove_dir_all(&new_pristine);
             return Err(err);
         }
     }
 
+    let _guard = registry_guard()?;
+    let mut registry = load_registry_unlocked()?;
+    let validation = (|| {
+        snapshot.validate(&registry)?;
+        if bundle::read_state()?.and_then(|state| state.active) != Some(active.clone()) {
+            return Err("bundle_state_changed: retry manually".to_string());
+        }
+        if !bundle_dirty_areas(&builtin_root, &old_pristine)?.is_empty() {
+            return Err("bundle_dirty_blocked: local edits during preparation".to_string());
+        }
+        Ok(())
+    })();
+    if let Err(err) = validation {
+        let _ = fs::remove_dir_all(&next_builtin);
+        let _ = fs::remove_dir_all(&new_pristine);
+        return Err(err);
+    }
     progress.info("Applying bundle");
     let backup = host_fs::skills_root()?
         .join("_cache")
@@ -4482,6 +4713,11 @@ fn remove_source_from_registry(
     }
     registry.sources.retain(|source| source.id != source_id);
     registry.skills.retain(|skill| skill.source_id != source_id);
+    SOURCE_GENERATIONS
+        .get_or_init(Default::default)
+        .lock()
+        .map_err(|_| "source_generation_lock_poisoned".to_string())?
+        .remove(&(registry_path()?, source_id.to_string()));
     mark_source_removed(registry, source_id);
     Ok(())
 }
@@ -5676,6 +5912,343 @@ impl IfEmpty for str {
     }
 }
 
+/// IPC owns scheduling; synchronous domain entry points remain shared with the CLI.
+pub mod ipc {
+    use super::*;
+
+    #[tauri::command]
+    pub async fn skills_list_sources(
+        work_path: Option<String>,
+    ) -> Result<Vec<SkillSource>, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            super::tests::phase08_03_network_lock::at_edge("ipc:skills_list_sources");
+            crate::skill_host::skills_list_sources(work_path)
+        })
+        .await
+        .map_err(|err| format!("skills_list_sources_task_failed: {err}"))?
+    }
+
+    #[tauri::command]
+    pub async fn skills_add_source(
+        id: String,
+        kind: String,
+        path: Option<String>,
+        repo_url: Option<String>,
+        skills_subdir: Option<String>,
+    ) -> Result<SkillSource, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            super::tests::phase08_03_network_lock::at_edge("ipc:skills_add_source");
+            crate::skill_host::skills_add_source(id, kind, path, repo_url, skills_subdir)
+        })
+        .await
+        .map_err(|err| format!("skills_add_source_task_failed: {err}"))?
+    }
+
+    #[tauri::command]
+    pub async fn skills_remove_source(source_id: String) -> Result<(), String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            super::tests::phase08_03_network_lock::at_edge("ipc:skills_remove_source");
+            crate::skill_host::skills_remove_source(source_id)
+        })
+        .await
+        .map_err(|err| format!("skills_remove_source_task_failed: {err}"))?
+    }
+
+    #[tauri::command]
+    pub async fn skills_rescan_source<R: tauri::Runtime>(
+        app: AppHandle<R>,
+        source_id: String,
+        progress_id: Option<String>,
+    ) -> Result<Vec<SkillRecord>, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            super::tests::phase08_03_network_lock::at_edge("ipc:skills_rescan_source");
+            crate::skill_host::skills_rescan_source(app, source_id, progress_id)
+        })
+        .await
+        .map_err(|err| format!("skills_rescan_source_task_failed: {err}"))?
+    }
+
+    #[tauri::command]
+    pub async fn skills_list_skills(
+        work_path: Option<String>,
+        refresh: Option<bool>,
+    ) -> Result<Vec<SkillRecord>, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            super::tests::phase08_03_network_lock::at_edge("ipc:skills_list_skills");
+            crate::skill_host::skills_list_skills(work_path, refresh)
+        })
+        .await
+        .map_err(|err| format!("skills_list_skills_task_failed: {err}"))?
+    }
+
+    #[tauri::command]
+    pub async fn skills_read_skill(skill_id: String) -> Result<SkillDocument, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            super::tests::phase08_03_network_lock::at_edge("ipc:skills_read_skill");
+            crate::skill_host::skills_read_skill(skill_id)
+        })
+        .await
+        .map_err(|err| format!("skills_read_skill_task_failed: {err}"))?
+    }
+
+    #[tauri::command]
+    pub async fn skills_read_skill_file(
+        skill_id: String,
+        file_path: String,
+    ) -> Result<String, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            super::tests::phase08_03_network_lock::at_edge("ipc:skills_read_skill_file");
+            crate::skill_host::skills_read_skill_file(skill_id, file_path)
+        })
+        .await
+        .map_err(|err| format!("skills_read_skill_file_task_failed: {err}"))?
+    }
+
+    #[tauri::command]
+    pub async fn skills_save_skill_file(
+        skill_id: String,
+        file_path: String,
+        content: String,
+    ) -> Result<SkillRecord, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            super::tests::phase08_03_network_lock::at_edge("ipc:skills_save_skill_file");
+            crate::skill_host::skills_save_skill_file(skill_id, file_path, content)
+        })
+        .await
+        .map_err(|err| format!("skills_save_skill_file_task_failed: {err}"))?
+    }
+
+    #[tauri::command]
+    pub async fn skills_save_skill_as(
+        skill_id: String,
+        name: String,
+        content: String,
+    ) -> Result<SkillRecord, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            super::tests::phase08_03_network_lock::at_edge("ipc:skills_save_skill_as");
+            crate::skill_host::skills_save_skill_as(skill_id, name, content)
+        })
+        .await
+        .map_err(|err| format!("skills_save_skill_as_task_failed: {err}"))?
+    }
+
+    #[tauri::command]
+    pub async fn skills_create_skill(
+        name: String,
+        title: Option<String>,
+    ) -> Result<SkillRecord, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            super::tests::phase08_03_network_lock::at_edge("ipc:skills_create_skill");
+            crate::skill_host::skills_create_skill(name, title)
+        })
+        .await
+        .map_err(|err| format!("skills_create_skill_task_failed: {err}"))?
+    }
+
+    #[tauri::command]
+    pub async fn skills_delete_skill(skill_id: String) -> Result<(), String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            super::tests::phase08_03_network_lock::at_edge("ipc:skills_delete_skill");
+            crate::skill_host::skills_delete_skill(skill_id)
+        })
+        .await
+        .map_err(|err| format!("skills_delete_skill_task_failed: {err}"))?
+    }
+
+    #[tauri::command]
+    pub async fn skills_list_installs(
+        work_path: Option<String>,
+    ) -> Result<Vec<SkillInstall>, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            super::tests::phase08_03_network_lock::at_edge("ipc:skills_list_installs");
+            crate::skill_host::skills_list_installs(work_path)
+        })
+        .await
+        .map_err(|err| format!("skills_list_installs_task_failed: {err}"))?
+    }
+
+    #[tauri::command]
+    pub async fn skills_install_skill(
+        skill_id: String,
+        target: String,
+        installed_as: Option<String>,
+        mode: Option<String>,
+    ) -> Result<InstallOutcome, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            super::tests::phase08_03_network_lock::at_edge("ipc:skills_install_skill");
+            crate::skill_host::skills_install_skill(skill_id, target, installed_as, mode)
+        })
+        .await
+        .map_err(|err| format!("skills_install_skill_task_failed: {err}"))?
+    }
+
+    #[tauri::command]
+    pub async fn skills_uninstall_skill(
+        target: String,
+        installed_as: String,
+    ) -> Result<(), String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            super::tests::phase08_03_network_lock::at_edge("ipc:skills_uninstall_skill");
+            crate::skill_host::skills_uninstall_skill(target, installed_as)
+        })
+        .await
+        .map_err(|err| format!("skills_uninstall_skill_task_failed: {err}"))?
+    }
+
+    #[tauri::command]
+    pub async fn skills_adopt_external_links<R: tauri::Runtime>(
+        app: AppHandle<R>,
+        progress_id: Option<String>,
+    ) -> Result<AdoptOutcome, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            super::tests::phase08_03_network_lock::at_edge("ipc:skills_adopt_external_links");
+            crate::skill_host::skills_adopt_external_links(app, progress_id)
+        })
+        .await
+        .map_err(|err| format!("skills_adopt_external_links_task_failed: {err}"))?
+    }
+
+    #[tauri::command]
+    pub async fn skills_reset_registry<R: tauri::Runtime>(
+        app: AppHandle<R>,
+        work_path: Option<String>,
+        progress_id: Option<String>,
+    ) -> Result<ResetOutcome, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            super::tests::phase08_03_network_lock::at_edge("ipc:skills_reset_registry");
+            crate::skill_host::skills_reset_registry(app, work_path, progress_id)
+        })
+        .await
+        .map_err(|err| format!("skills_reset_registry_task_failed: {err}"))?
+    }
+
+    #[tauri::command]
+    pub async fn skills_doctor(work_path: Option<String>) -> Result<SkillDoctorReport, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            super::tests::phase08_03_network_lock::at_edge("ipc:skills_doctor");
+            crate::skill_host::skills_doctor(work_path)
+        })
+        .await
+        .map_err(|err| format!("skills_doctor_task_failed: {err}"))?
+    }
+
+    #[tauri::command]
+    pub async fn skills_list_dirty(work_path: Option<String>) -> Result<Vec<DirtyRecord>, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            super::tests::phase08_03_network_lock::at_edge("ipc:skills_list_dirty");
+            crate::skill_host::skills_list_dirty(work_path)
+        })
+        .await
+        .map_err(|err| format!("skills_list_dirty_task_failed: {err}"))?
+    }
+
+    #[tauri::command]
+    pub async fn skills_reconcile_skill(
+        work_path: Option<String>,
+        skill: String,
+        action: String,
+        message: Option<String>,
+        dry_run: Option<bool>,
+    ) -> Result<ReconcileOutcome, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            super::tests::phase08_03_network_lock::at_edge("ipc:skills_reconcile_skill");
+            crate::skill_host::skills_reconcile_skill(work_path, skill, action, message, dry_run)
+        })
+        .await
+        .map_err(|err| format!("skills_reconcile_skill_task_failed: {err}"))?
+    }
+
+    #[tauri::command]
+    pub async fn skills_import_external(
+        work_path: Option<String>,
+        source_path: String,
+        name: Option<String>,
+        mode: Option<String>,
+    ) -> Result<ImportOutcome, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            super::tests::phase08_03_network_lock::at_edge("ipc:skills_import_external");
+            crate::skill_host::skills_import_external(work_path, source_path, name, mode)
+        })
+        .await
+        .map_err(|err| format!("skills_import_external_task_failed: {err}"))?
+    }
+
+    #[tauri::command]
+    pub async fn skills_import_unmanage(
+        work_path: Option<String>,
+        name: String,
+        delete_files: Option<bool>,
+    ) -> Result<ImportUnmanageOutcome, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            super::tests::phase08_03_network_lock::at_edge("ipc:skills_import_unmanage");
+            crate::skill_host::skills_import_unmanage(work_path, name, delete_files)
+        })
+        .await
+        .map_err(|err| format!("skills_import_unmanage_task_failed: {err}"))?
+    }
+
+    #[tauri::command]
+    pub async fn skills_bundle_status() -> Result<SkillBundleStatus, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            super::tests::phase08_03_network_lock::at_edge("ipc:skills_bundle_status");
+            crate::skill_host::skills_bundle_status()
+        })
+        .await
+        .map_err(|err| format!("skills_bundle_status_task_failed: {err}"))?
+    }
+
+    #[tauri::command]
+    pub async fn skills_check_bundle_update(
+        force: Option<bool>,
+    ) -> Result<SkillBundleStatus, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            super::tests::phase08_03_network_lock::at_edge("ipc:skills_check_bundle_update");
+            crate::skill_host::skills_check_bundle_update(force)
+        })
+        .await
+        .map_err(|err| format!("skills_check_bundle_update_task_failed: {err}"))?
+    }
+
+    #[tauri::command]
+    pub async fn skills_apply_bundle_update<R: tauri::Runtime>(
+        app: AppHandle<R>,
+        bundle_id: Option<String>,
+        repair_env: Option<bool>,
+        progress_id: Option<String>,
+    ) -> Result<SkillBundleApplyOutcome, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            super::tests::phase08_03_network_lock::at_edge("ipc:skills_apply_bundle_update");
+            crate::skill_host::skills_apply_bundle_update(app, bundle_id, repair_env, progress_id)
+        })
+        .await
+        .map_err(|err| format!("skills_apply_bundle_update_task_failed: {err}"))?
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -5717,6 +6290,351 @@ mod tests {
 
     fn path_string(path: &Path) -> String {
         path.to_string_lossy().to_string()
+    }
+
+    pub(super) mod phase08_03_network_lock {
+        use super::*;
+        use std::sync::{mpsc, Arc};
+        use std::time::Duration;
+        type Hook = Arc<dyn Fn(&str) + Send + Sync>;
+        static HOOK: Mutex<Option<Hook>> = Mutex::new(None);
+        pub(crate) fn at_edge(edge: &str) {
+            let hook = HOOK.lock().unwrap().clone();
+            if let Some(hook) = hook {
+                hook(edge);
+            }
+        }
+        struct ResetHook;
+        impl Drop for ResetHook {
+            fn drop(&mut self) {
+                *HOOK.lock().unwrap() = None;
+            }
+        }
+        fn held<T: Send + 'static>(
+            edge: &'static str,
+            operation: impl FnOnce() -> T + Send + 'static,
+            edit: impl FnOnce(),
+        ) -> T {
+            let (entered_tx, entered_rx) = mpsc::channel();
+            let (release_tx, release_rx) = mpsc::channel();
+            let release_rx = Mutex::new(release_rx);
+            *HOOK.lock().unwrap() = Some(Arc::new(move |actual| {
+                if actual == edge {
+                    entered_tx.send(()).unwrap();
+                    release_rx
+                        .lock()
+                        .unwrap()
+                        .recv_timeout(Duration::from_secs(10))
+                        .unwrap();
+                }
+            }));
+            let _reset = ResetHook;
+            let worker = std::thread::spawn(operation);
+            entered_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+            // try_lock proves availability without a deadlocking test on regressions.
+            assert!(REGISTRY_LOCK.get().unwrap().try_lock().is_ok());
+            edit();
+            release_tx.send(()).unwrap();
+            worker.join().unwrap()
+        }
+        fn git_fixture() -> PathBuf {
+            let repo = host_fs::skills_root().unwrap().join("_sources/fixture");
+            write_skill(&repo, "fixture");
+            run_git(&repo, &["init", "--quiet"]).unwrap();
+            run_git(&repo, &["config", "user.name", "Fixture"]).unwrap();
+            run_git(&repo, &["config", "user.email", "fixture@example.invalid"]).unwrap();
+            run_git(&repo, &["add", "."]).unwrap();
+            run_git(
+                &repo,
+                &["-c", "core.hooksPath=/dev/null", "commit", "-m", "initial"],
+            )
+            .unwrap();
+            repo
+        }
+        #[test]
+        fn clone_keeps_registry_available_and_removal_wins() {
+            let _home = test_home();
+            let repo = git_fixture();
+            let result = held(
+                "clone",
+                move || {
+                    skills_add_source(
+                        "new".into(),
+                        "cloned".into(),
+                        None,
+                        Some(path_string(&repo)),
+                        Some("skills".into()),
+                    )
+                },
+                || {
+                    skills_create_skill("unrelated".into(), None).unwrap();
+                    skills_remove_source("new".into()).unwrap();
+                },
+            );
+            assert!(result.unwrap_err().contains("source_changed"));
+            let registry = load_registry().unwrap();
+            assert!(registry.skills.iter().any(|s| s.name == "unrelated"));
+            assert!(!registry.sources.iter().any(|s| s.id == "new"));
+            assert!(!host_fs::skills_root()
+                .unwrap()
+                .join("_sources/new")
+                .exists());
+        }
+        #[test]
+        fn clone_preserves_unrelated_commit_and_reset_rejects_pending_generation() {
+            let _home = test_home();
+            let repo = git_fixture();
+            let url = path_string(&repo);
+            let result = held(
+                "clone",
+                move || {
+                    skills_add_source(
+                        "new".into(),
+                        "cloned".into(),
+                        None,
+                        Some(url),
+                        Some("skills".into()),
+                    )
+                },
+                || {
+                    skills_create_skill("unrelated".into(), None).unwrap();
+                },
+            );
+            assert_eq!(result.unwrap().id, "new");
+            assert!(load_registry()
+                .unwrap()
+                .skills
+                .iter()
+                .any(|s| s.name == "unrelated"));
+            let url = path_string(&repo);
+            let result = held(
+                "clone",
+                move || {
+                    skills_add_source(
+                        "reset-pending".into(),
+                        "cloned".into(),
+                        None,
+                        Some(url),
+                        Some("skills".into()),
+                    )
+                },
+                || {
+                    skills_reset_registry_impl(None, ProgressReporter::noop()).unwrap();
+                },
+            );
+            assert!(result.unwrap_err().contains("source_changed"));
+        }
+        #[test]
+        fn reconcile_git_releases_registry_and_rejects_removed_source() {
+            let _home = test_home();
+            let repo = git_fixture();
+            skills_add_source(
+                "fixture".into(),
+                "linked".into(),
+                Some(path_string(&repo)),
+                None,
+                Some("skills".into()),
+            )
+            .unwrap();
+            fs::write(repo.join("skills/fixture/SKILL.md"), "# edited\n").unwrap();
+            let result = held(
+                "reconcile",
+                || {
+                    skills_reconcile_skill(
+                        None,
+                        "fixture::fixture".into(),
+                        "discard".into(),
+                        None,
+                        None,
+                    )
+                },
+                || {
+                    skills_remove_source("fixture".into()).unwrap();
+                    skills_create_skill("kept".into(), None).unwrap();
+                },
+            );
+            assert!(result.unwrap_err().contains("source_changed"));
+            let registry = load_registry().unwrap();
+            assert!(!registry.sources.iter().any(|s| s.id == "fixture"));
+            assert!(registry.skills.iter().any(|s| s.name == "kept"));
+            assert!(fs::read_to_string(repo.join("skills/fixture/SKILL.md"))
+                .unwrap()
+                .contains("name: fixture"));
+        }
+        #[test]
+        fn denied_owner_and_dirty_bundle_fail_before_network() {
+            let _home = test_home();
+            let repo = git_fixture();
+            skills_add_source(
+                "foreign".into(),
+                "external-managed".into(),
+                Some(path_string(&repo)),
+                None,
+                Some("skills".into()),
+            )
+            .unwrap();
+            let err = skills_reconcile_skill(
+                None,
+                "foreign::fixture".into(),
+                "discard".into(),
+                None,
+                None,
+            )
+            .unwrap_err();
+            assert!(err.contains("source_not_maru_owned"));
+            skills_list_sources(None).unwrap();
+            let root = builtin_materialized_root().unwrap();
+            fs::write(root.join("user-edit.txt"), "preserve").unwrap();
+            let result = skills_apply_bundle_update_blocking(
+                None,
+                false,
+                ProgressReporter::noop(),
+                |_, _| panic!("dirty preflight must precede network"),
+                |_| panic!("download"),
+                |_, _| panic!("repair"),
+            );
+            assert!(result.unwrap_err().contains("bundle_dirty_blocked"));
+            assert_eq!(
+                fs::read_to_string(root.join("user-edit.txt")).unwrap(),
+                "preserve"
+            );
+        }
+        #[test]
+        fn bundle_check_and_apply_release_registry_during_discovery() {
+            let _home = test_home();
+            held(
+                "bundle_check",
+                || skills_check_bundle_update_blocking(None, |_, _| Ok(None)),
+                || {
+                    skills_create_skill("check-kept".into(), None).unwrap();
+                },
+            )
+            .unwrap();
+            let err = held(
+                "bundle_apply",
+                || {
+                    skills_apply_bundle_update_blocking(
+                        None,
+                        false,
+                        ProgressReporter::noop(),
+                        |_, _| Err("fixture_network_failure".into()),
+                        |_| panic!("download"),
+                        |_, _| panic!("repair"),
+                    )
+                },
+                || {
+                    skills_create_skill("apply-kept".into(), None).unwrap();
+                },
+            )
+            .unwrap_err();
+            assert_eq!(err, "fixture_network_failure");
+            assert!(load_registry()
+                .unwrap()
+                .skills
+                .iter()
+                .any(|s| s.name == "apply-kept"));
+        }
+        fn bundle_fixture() -> (bundle::RemoteBundle, Vec<u8>) {
+            use std::io::Write;
+            let bytes = b"---\nname: updated\ndescription: fixture\ntier: core\n---\n# updated\n";
+            let mut zip = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+            zip.start_file(
+                "skills/updated/SKILL.md",
+                zip::write::SimpleFileOptions::default(),
+            )
+            .unwrap();
+            zip.write_all(bytes).unwrap();
+            let archive = zip.finish().unwrap().into_inner();
+            let active = bundle::read_state().unwrap().unwrap().active.unwrap();
+            let remote = bundle::RemoteBundle {
+                metadata: bundle::BundleMetadata {
+                    schema: 1,
+                    revision: active.revision + 1,
+                    display_version: "fixture".into(),
+                    commit: None,
+                    published_at: None,
+                    min_app_version: "0.0.1".into(),
+                    env_hash: "fixture-env".into(),
+                    archive: bundle::BundleArchiveInfo {
+                        name: "fixture.zip".into(),
+                        sha256: bundle::sha256_hex(&archive),
+                        size: archive.len() as u64,
+                    },
+                    files: vec![bundle::BundleFileEntry {
+                        path: "skills/updated/SKILL.md".into(),
+                        sha256: bundle::sha256_hex(bytes),
+                        mode: "644".into(),
+                    }],
+                },
+                archive_url: "fixture".into(),
+                archive_sig_url: "fixture".into(),
+            };
+            (remote, archive)
+        }
+        #[test]
+        fn bundle_env_repair_releases_registry_and_preserves_active_preparation() {
+            let _home = test_home();
+            skills_list_sources(None).unwrap();
+            let (remote, archive) = bundle_fixture();
+            let result = skills_apply_bundle_update_blocking(
+                None,
+                true,
+                ProgressReporter::noop(),
+                |_, _| Ok(Some(remote)),
+                |_| Ok(archive),
+                |_, next| {
+                    assert!(REGISTRY_LOCK.get().unwrap().try_lock().is_ok());
+                    skills_list_sources(None).unwrap();
+                    assert!(next.join("skills/updated/SKILL.md").is_file());
+                    skills_create_skill("repair-kept".into(), None).unwrap();
+                    Ok(())
+                },
+            )
+            .unwrap();
+            assert_eq!(result.current.display_version, "fixture");
+            let registry = load_registry().unwrap();
+            assert!(registry.skills.iter().any(|s| s.name == "repair-kept"));
+            assert!(registry.skills.iter().any(|s| s.name == "updated"));
+        }
+        #[test]
+        fn bundle_reset_or_dirty_edits_during_repair_reject_swap() {
+            let _home = test_home();
+            for reset in [false, true] {
+                skills_list_sources(None).unwrap();
+                let before = bundle::read_state().unwrap().unwrap().active;
+                let (remote, archive) = bundle_fixture();
+                let result = skills_apply_bundle_update_blocking(
+                    None,
+                    true,
+                    ProgressReporter::noop(),
+                    |_, _| Ok(Some(remote)),
+                    |_| Ok(archive),
+                    |_, _| {
+                        if reset {
+                            skills_reset_registry_impl(None, ProgressReporter::noop())?;
+                        } else {
+                            fs::write(builtin_materialized_root()?.join("edited.txt"), "keep")
+                                .unwrap();
+                        }
+                        Ok(())
+                    },
+                );
+                let err = result.unwrap_err();
+                assert!(
+                    err.contains(if reset {
+                        "source_changed"
+                    } else {
+                        "bundle_dirty_blocked"
+                    }),
+                    "{err}"
+                );
+                assert_eq!(bundle::read_state().unwrap().unwrap().active, before);
+                let edited = builtin_materialized_root().unwrap().join("edited.txt");
+                if edited.exists() {
+                    fs::remove_file(edited).unwrap();
+                }
+            }
+        }
     }
 
     pub(super) mod phase08_batch_transactions {

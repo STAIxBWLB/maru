@@ -1,6 +1,7 @@
 use std::env;
 
 use crate::secrets::{secrets_doctor, secrets_migrate, secrets_scan};
+// The CLI shares synchronous transactions; async scheduling belongs to desktop IPC.
 use crate::skill_host::{
     skills_apply_bundle_update_headless, skills_check_bundle_update, skills_doctor,
     skills_import_external, skills_import_unmanage, skills_list_dirty, skills_reconcile_skill,
