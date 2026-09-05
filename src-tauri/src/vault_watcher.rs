@@ -184,7 +184,10 @@ mod tests {
         assert!(relevant_path(Path::new("/work/dist/notes/a.md"), root));
         assert!(relevant_path(Path::new("/work/dist/.maruignore"), root));
         assert!(!relevant_path(Path::new("/work/dist/dist/a.md"), root));
-        assert!(!relevant_path(Path::new("/work/dist/node_modules/pkg/index.js"), root));
+        assert!(!relevant_path(
+            Path::new("/work/dist/node_modules/pkg/index.js"),
+            root
+        ));
     }
 
     #[test]

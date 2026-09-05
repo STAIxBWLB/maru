@@ -212,7 +212,7 @@ pub fn start_terminal_hook_watcher(app: &AppHandle) -> Result<(), String> {
             // not silence every hook event.
             if path
                 .strip_prefix(&dir_for_handler)
-                .map(|rel| crate::paths::is_under_generated_dir(rel))
+                .map(crate::paths::is_under_generated_dir)
                 .unwrap_or(true)
             {
                 continue;
