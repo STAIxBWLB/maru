@@ -1,0 +1,43 @@
+{
+  "contract": "1.0.0",
+  "flavor": "core",
+  "milestone": "v1.1 — Felt Quality and Native Proof",
+  "phases": [
+    {
+      "number": "6",
+      "name": "Native E2E Runner Foundation",
+      "status": "complete"
+    },
+    {
+      "number": "7",
+      "name": "Guardrails Before Churn",
+      "status": "complete"
+    },
+    {
+      "number": "8",
+      "name": "Main-Thread Responsiveness",
+      "status": "in_progress"
+    },
+    {
+      "number": "9",
+      "name": "Durability and Session Lifecycle",
+      "status": "pending"
+    },
+    {
+      "number": "10",
+      "name": "Bundle and Build Hardening",
+      "status": "pending"
+    },
+    {
+      "number": "11",
+      "name": "Milestone Verification & Evidence",
+      "status": "pending"
+    }
+  ],
+  "next": {
+    "command": "/gsd:progress --next",
+    "label": "Advance to the next step",
+    "reason": "Phase 8 of 6 · 33% · executing"
+  },
+  "updated_at": "2026-09-05T11:57:12.000Z"
+}
