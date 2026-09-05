@@ -5,16 +5,16 @@ milestone_name: Felt Quality and Native Proof
 current_phase: 7
 current_phase_name: Guardrails Before Churn
 status: executing
-stopped_at: Phase 7 UI-SPEC approved
-last_updated: "2026-09-05T00:05:00.242Z"
-last_activity: 2026-09-04
-last_activity_desc: "PERF-06 (issue #309, inbox out of the document index) and REL-04 (issue #295, per-segment tilde expansion in job env) added mid-milestone to Phases 7 and 9: 17/17 requirements mapped"
-state_head: 2a94273da3859368a5990f2fa4a6292db82f6d6f
+stopped_at: Completed 07-01-PLAN.md
+last_updated: "2026-09-05T00:34:16.476Z"
+last_activity: 2026-09-05
+last_activity_desc: Phase 7 execution started
+state_head: e933a355f7d5e136222949cd9215cc9c67a02a73
 progress:
   total_phases: 6
   completed_phases: 1
   total_plans: 10
-  completed_plans: 5
+  completed_plans: 6
   percent: 17
 ---
 
@@ -25,16 +25,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-08-28)
 
 **Core value:** The filesystem stays the source of truth, everything Maru shows is derived from real files the user owns, and nothing is lost if Maru is uninstalled.
-**Current focus:** Phase 06 — native-e2e-runner-foundation
+**Current focus:** Phase 7 — Guardrails Before Churn
 
 ## Current Position
 
-Phase: 7 (Guardrails Before Churn) — READY TO EXECUTE
-Plan: Not started
+Phase: 7 (Guardrails Before Churn) — EXECUTING
+Plan: 2 of 5
 Status: Ready to execute
-Last activity: 2026-08-29 — Phase 06 complete, transitioned to Phase 10
+Last activity: 2026-09-05 — Phase 7 execution started
 
-Progress: [██████████] 100%
+Progress: [██░░░░░░░░] 17%
 
 ## Performance Metrics
 
@@ -100,6 +100,7 @@ Progress: [██████████] 100%
 | Phase 06 P03 | 50min | 2 tasks | 4 files |
 | Phase 06 P04 | 32min | 2 tasks | 6 files |
 | Phase 06 P05 | cross-session (checkpoint-gated) | 3 tasks | 6 files |
+| Phase 07 P01 | 10min | 3 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -201,6 +202,9 @@ Recent decisions affecting current work:
 - [Phase ?]: [Phase 6]: 06-04 ship-isolation guard reads produced artifacts only - dist/assets/*.js for the bridge namespace inside make verify, the unstripped debug no-bundle binary for the plugin crate name inside release-checks; cargo metadata manifest assertions kept as cheap early warning only (--no-deps cannot see dependency-propagated features)
 - [Phase ?]: [Phase 6]: 06-04 both red cases proven with real builds (VITE_NATIVE_E2E=1 bundle, --features native-e2e binary) and the binary scan's two crate-name strings confirmed present in the feature-on binary before the default-build green was accepted
 - [Phase ?]: [Phase 6]: 06-05 verdict ratified ci-viable - all three D-01 conditions evidenced on hosted macos-14 runs 33243419439/33250704926 (no TCC prompt, pty.spec green through canvas, 4/4 unattended); release-preflight exit 0 recorded; known IME first-syllable decomposition on input-source switch classified app-side, not a runner defect
+- [Phase 7]: [Phase 7]: 07-01 authored a permanent behavioral test (scripts/check-dom-sanitizer.behavior.test.ts) for the tdd=true tracer beyond the plan files list; the TDD gate requires a committed RED test and the live red/green proof complements Task 3 hermetic policy pin
+- [Phase 7]: [Phase 7]: 07-01 EditorPane dynamic-import provenance regex matches previewBaseHtml case-insensitively (setter setPreviewBaseHtml is capital P); pattern stays narrow and file-scoped
+- [Phase 7]: [Phase 7]: SEC-02 unclassified edge row resolves fail-closed, drill-proven via the Task 1 probe and Task 2 red fixture, both exercising the no-match path
 
 ### Pending Todos
 
@@ -237,9 +241,9 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-09-04T23:28:37.738Z
-Stopped at: Phase 7 UI-SPEC approved
-Resume file: .planning/phases/07-guardrails-before-churn/07-UI-SPEC.md
+Last session: 2026-09-05T00:34:16.446Z
+Stopped at: Completed 07-01-PLAN.md
+Resume file: None
 
 ## Operator Next Steps
 

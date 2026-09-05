@@ -103,7 +103,7 @@ nothing in the existing suite would notice.
   rather than a dev server, since this class of removal can pass in development
   and fail only in the shipped bundle.
 
-- [ ] **SEC-02**: `make verify` fails when a `dangerouslySetInnerHTML` value in
+- [x] **SEC-02**: `make verify` fails when a `dangerouslySetInnerHTML` value in
   `src/` does not trace to a DOMPurify-backed helper. The guard is a static
   check in the shape of the existing `scripts/check-*.mjs` family, not a new lint
   framework.
@@ -195,7 +195,7 @@ Deferred. Acknowledged but not in this roadmap.
 | REL-03 | Phase 9 | Pending |
 | REL-04 | Phase 9 | Pending |
 | SEC-01 | Phase 10 | Pending |
-| SEC-02 | Phase 7 | Pending |
+| SEC-02 | Phase 7 | Complete |
 | SEC-03 | Phase 11 | Pending |
 | TEST-01 | Phase 6 | Complete |
 | TEST-02 | Phase 11 | Pending |
