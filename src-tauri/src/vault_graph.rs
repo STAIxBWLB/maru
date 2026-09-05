@@ -15,8 +15,10 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::atomic_file::write_atomic;
-use crate::vault::resolve_inside_vault;
+use crate::atomic_file::{
+    with_path_transactions, write_atomic, PathTransactionLease, PathTransactionRequest,
+};
+use crate::vault::{normalize_existing_dir, resolve_inside_vault};
 
 /// Relative path of the disposable layout cache inside a workspace.
 const LAYOUT_CACHE_REL: &[&str] = &[".maru", "cache", "graph-layout.json"];
@@ -52,7 +54,6 @@ pub struct VaultGraphFile {
     pub edges: Vec<VaultGraphEdge>,
 }
 
-#[tauri::command]
 pub fn vault_graph_read(
     vault_path: String,
     source: Option<String>,
@@ -84,7 +85,6 @@ pub fn vault_graph_read(
 /// `reports/vault-graph.json` also forces `None`: reads prefer the root, so
 /// the Vault source must stay there too or the overlay and the scanned
 /// entries would come from different trees.
-#[tauri::command]
 pub fn vault_graph_root(workspace: String) -> Option<String> {
     let root = Path::new(&workspace);
     if root.join("reports/vault-graph.json").is_file() {
@@ -117,7 +117,6 @@ fn layout_cache_path(workspace: &str) -> PathBuf {
         })
 }
 
-#[tauri::command]
 pub fn vault_graph_layout_read(workspace: String) -> Result<Option<GraphLayoutCache>, String> {
     let path = layout_cache_path(&workspace);
     if !path.is_file() {
@@ -136,23 +135,118 @@ pub fn vault_graph_layout_read(workspace: String) -> Result<Option<GraphLayoutCa
     Ok(Some(cache))
 }
 
-#[tauri::command]
-pub fn vault_graph_layout_save(
+pub fn vault_graph_layout_save(workspace: String, cache: GraphLayoutCache) -> Result<(), String> {
+    let root = normalize_existing_dir(&workspace)?;
+    let path = layout_cache_path(&workspace);
+    // Reserve both selected lexical and resolved endpoints, including an exact
+    // cache-file alias and its atomic temporary-file allocation directory.
+    let mut paths = vec![
+        path.clone(),
+        path.parent().unwrap().to_path_buf(),
+        layout_cache_path(&root.to_string_lossy()),
+    ];
+    if !root.join(".maru").exists() {
+        paths.extend([PathBuf::from(&workspace).join(".maru"), root.join(".maru")]);
+    }
+    // Pin existing physical cache parents too, including a cache-file symlink.
+    paths.extend(
+        paths
+            .clone()
+            .into_iter()
+            .filter_map(|path| path.canonicalize().ok()),
+    );
+    let request = PathTransactionRequest::new(paths)?
+        .require_parent(Path::new(&workspace))?
+        .require_parent(&root)?;
+    with_path_transactions(request, |lease| {
+        vault_graph_layout_save_in_transaction(lease, workspace, cache)
+    })
+}
+
+fn vault_graph_layout_save_in_transaction(
+    lease: &PathTransactionLease,
     workspace: String,
     mut cache: GraphLayoutCache,
 ) -> Result<(), String> {
+    normalize_existing_dir(&workspace)?;
     let path = layout_cache_path(&workspace);
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|err| format!("Cannot create graph layout cache directory: {err}"))?;
-    }
-    // The client sends every current node's position (V4 filters by visibility,
-    // not topology), so the map is already complete — merging the prior on-disk
-    // positions would only re-accrete ids for deleted/renamed notes forever.
+    lease.ensure_covered(vec![path.clone(), path.parent().unwrap().to_path_buf()])?;
+    // The client supplies the complete current node set: never merge stale ids.
     cache.version = 2;
     let serialized = serde_json::to_string(&cache)
         .map_err(|err| format!("Cannot serialize graph layout cache: {err}"))?;
+    lease.before_effect()?;
+    std::fs::create_dir_all(path.parent().unwrap())
+        .map_err(|err| format!("Cannot create graph layout cache directory: {err}"))?;
     write_atomic(&path, serialized.as_bytes())
+}
+
+pub mod ipc {
+    use super::*;
+
+    #[tauri::command]
+    pub async fn vault_graph_read(
+        vault_path: String,
+        source: Option<String>,
+    ) -> Result<Option<VaultGraphFile>, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(
+                &[PathBuf::from(&vault_path)],
+                "worker:vault_graph_read",
+            );
+            super::vault_graph_read(vault_path, source)
+        })
+        .await
+        .map_err(|err| format!("vault_graph_read_task_failed: {err}"))?
+    }
+
+    #[tauri::command]
+    pub async fn vault_graph_root(workspace: String) -> Result<Option<String>, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(
+                &[PathBuf::from(&workspace)],
+                "worker:vault_graph_root",
+            );
+            super::vault_graph_root(workspace)
+        })
+        .await
+        .map_err(|err| format!("vault_graph_root_task_failed: {err}"))
+    }
+
+    #[tauri::command]
+    pub async fn vault_graph_layout_read(
+        workspace: String,
+    ) -> Result<Option<GraphLayoutCache>, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(
+                &[PathBuf::from(&workspace)],
+                "worker:vault_graph_layout_read",
+            );
+            super::vault_graph_layout_read(workspace)
+        })
+        .await
+        .map_err(|err| format!("vault_graph_layout_read_task_failed: {err}"))?
+    }
+
+    #[tauri::command]
+    pub async fn vault_graph_layout_save(
+        workspace: String,
+        cache: GraphLayoutCache,
+    ) -> Result<(), String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(
+                &[PathBuf::from(&workspace)],
+                "worker:vault_graph_layout_save",
+            );
+            super::vault_graph_layout_save(workspace, cache)
+        })
+        .await
+        .map_err(|err| format!("vault_graph_layout_save_task_failed: {err}"))?
+    }
 }
 
 #[cfg(test)]
@@ -373,5 +467,81 @@ mod tests {
         let graph = vault_graph_read(root, None).unwrap().unwrap();
         assert_eq!(graph.nodes[0].community, None);
         assert_eq!(graph.nodes[0].node_type.as_deref(), Some("moc"));
+    }
+}
+
+#[cfg(test)]
+mod phase08_13 {
+    use super::*;
+    use crate::atomic_file::phase08_06::{boundary, run, Home};
+    use std::fs;
+
+    #[test]
+    fn phase08_13_graph_wrappers_yield_same_task_and_report_join_failure() {
+        let home = Home::new();
+        let root = home.root.path().to_string_lossy().into_owned();
+        boundary(
+            root.clone().into(),
+            "vault_graph_read",
+            ipc::vault_graph_read(root.clone(), None),
+        );
+        boundary(
+            root.clone().into(),
+            "vault_graph_root",
+            ipc::vault_graph_root(root.clone()),
+        );
+        boundary(
+            root.clone().into(),
+            "vault_graph_layout_read",
+            ipc::vault_graph_layout_read(root.clone()),
+        );
+        boundary(
+            root.clone().into(),
+            "vault_graph_layout_save",
+            ipc::vault_graph_layout_save(root, GraphLayoutCache::default()),
+        );
+    }
+
+    #[test]
+    fn phase08_13_graph_wrappers_preserve_nonempty_outputs_and_legacy_errors() {
+        let home = Home::new();
+        let root = home.root.path().join("workspace");
+        fs::create_dir_all(root.join("vault/notes")).unwrap();
+        fs::create_dir_all(root.join("reports")).unwrap();
+        let work = root.to_string_lossy().into_owned();
+        assert_eq!(
+            run(ipc::vault_graph_root(work.clone())).unwrap(),
+            Some(root.join("vault").to_string_lossy().into_owned())
+        );
+        fs::write(
+            root.join("reports/vault-graph.json"),
+            r#"{"nodes":[{"id":"Alpha"}],"edges":[{"source":"Alpha","target":"Beta"}]}"#,
+        )
+        .unwrap();
+        let graph = run(ipc::vault_graph_read(work.clone(), None))
+            .unwrap()
+            .unwrap();
+        assert_eq!(graph.nodes[0].id, "Alpha");
+        assert_eq!(graph.edges[0].target, "Beta");
+        let cache = GraphLayoutCache {
+            version: 1,
+            positions: BTreeMap::from([("Alpha".into(), [1.0, 2.0])]),
+            pinned_ids: BTreeSet::from(["Alpha".into()]),
+        };
+        run(ipc::vault_graph_layout_save(work.clone(), cache)).unwrap();
+        let saved = run(ipc::vault_graph_layout_read(work.clone()))
+            .unwrap()
+            .unwrap();
+        assert_eq!(saved.version, 2);
+        assert_eq!(saved.positions["Alpha"], [1.0, 2.0]);
+        assert!(saved.pinned_ids.contains("Alpha"));
+        fs::write(root.join("reports/vault-graph.json"), "broken").unwrap();
+        let expected = vault_graph_read(work.clone(), None).unwrap_err();
+        assert_eq!(
+            run(ipc::vault_graph_read(work.clone(), None)).unwrap_err(),
+            expected
+        );
+        fs::write(layout_cache_path(&work), "broken").unwrap();
+        assert!(run(ipc::vault_graph_layout_read(work)).unwrap().is_none());
     }
 }

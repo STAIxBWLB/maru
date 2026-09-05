@@ -1057,7 +1057,7 @@ fn collect_version_names(vault: &Path) -> Vec<String> {
         .collect()
 }
 
-fn vault_cache_path(vault: &Path) -> PathBuf {
+pub(crate) fn vault_cache_path(vault: &Path) -> PathBuf {
     VAULT_CACHE_REL
         .iter()
         .fold(vault.to_path_buf(), |acc, part| acc.join(part))

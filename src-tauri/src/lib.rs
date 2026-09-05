@@ -109,7 +109,6 @@ use export::{export_dispatch, export_plan, export_validate};
 use gmail_gws::{
     check_gws_auth, decide_gmail_item, decide_gmail_items, fetch_gmail_unread, stage_gmail_items,
 };
-use graph_authoring::{graph_link_apply, graph_link_preview};
 use html_editor::prepare_html_editor_assets;
 use hub_client::{hub_fetch_catalog, hub_poll_gate, hub_queue_drain, hub_status, hub_submit_gate};
 use hwp_cli_template::{hwp_cli_template_fields, hwp_cli_template_fill};
@@ -127,7 +126,6 @@ use kakao_relay::{
     enqueue_kakao_send, read_kakao_relay_messages, read_kakao_relay_status,
     read_kakao_send_results, stage_kakao_relay_new,
 };
-use kg_refs::{kg_document_refs, kg_refs_clear};
 use korean_date::parse_korean_date_cmd;
 use launchd_migration::{detect_legacy_telegram_launchd, unload_legacy_telegram_launchd};
 use linter::gaejosik_lint;
@@ -186,9 +184,6 @@ use terminal_hooks::{
     TerminalHookWatcherState,
 };
 use today_notify::today_notify_new_day;
-use vault_graph::{
-    vault_graph_layout_read, vault_graph_layout_save, vault_graph_read, vault_graph_root,
-};
 use vault_list::{
     add_workspace_root, list_workspace_roots, refresh_workspace_capabilities,
     remove_workspace_root, set_active_workspace_root,
@@ -252,12 +247,12 @@ pub fn run() {
             stop_vault_watcher,
             start_scratchpad_watcher,
             stop_scratchpad_watcher,
-            vault_graph_read,
-            vault_graph_root,
-            vault_graph_layout_read,
-            vault_graph_layout_save,
-            graph_link_preview,
-            graph_link_apply,
+            vault_graph::ipc::vault_graph_read,
+            vault_graph::ipc::vault_graph_root,
+            vault_graph::ipc::vault_graph_layout_read,
+            vault_graph::ipc::vault_graph_layout_save,
+            graph_authoring::ipc::graph_link_preview,
+            graph_authoring::ipc::graph_link_apply,
             vault_guard::ipc::vault_validate_note,
             document::ipc::read_document,
             document::ipc::save_document,
@@ -381,8 +376,8 @@ pub fn run() {
             gap::ipc::gap_append_log,
             gap::ipc::gap_log_list,
             gap::ipc::gap_reports_list,
-            kg_document_refs,
-            kg_refs_clear,
+            kg_refs::ipc::kg_document_refs,
+            kg_refs::ipc::kg_refs_clear,
             scheduler_list,
             scheduler_add,
             scheduler_remove,

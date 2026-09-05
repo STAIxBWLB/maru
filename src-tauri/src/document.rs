@@ -814,6 +814,7 @@ pub(crate) fn create_version_in_transaction(
 /// path (which snapshots the on-disk content before every overwrite —
 /// maru-vault-graph-spec §2.4 가드 불변식). No capability assert here; the
 /// command wrapper and the managed gate each own their own checks.
+#[allow(dead_code)] // Independent synchronous API; admitted writers borrow the adapter below.
 pub(crate) fn write_version_snapshot(
     vault_path: &str,
     document_path: &str,
