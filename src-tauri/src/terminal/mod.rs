@@ -366,9 +366,8 @@ pub struct TerminalSessionHandle {
     generation: String,
 }
 
-#[tauri::command]
-pub async fn terminal_spawn(
-    state: State<'_, TerminalState>,
+pub fn terminal_spawn(
+    state: &TerminalState,
     args: TerminalSpawnArgs,
     on_event: Channel<TerminalStreamMessage>,
 ) -> Result<String, String> {
@@ -385,7 +384,7 @@ pub async fn terminal_spawn(
     if session_id.trim().is_empty() {
         return Err("terminal_session_id_required".to_string());
     }
-    let reservation = SessionReservation::acquire(&state, &session_id)?;
+    let reservation = SessionReservation::acquire(state, &session_id)?;
     let generation = Uuid::new_v4().to_string();
     let stream = Arc::new(TerminalStream::new(
         session_id.clone(),
@@ -505,23 +504,21 @@ pub async fn terminal_spawn(
     Ok(generation)
 }
 
-#[tauri::command]
-pub async fn terminal_write(
-    state: State<'_, TerminalState>,
+pub fn terminal_write(
+    state: &TerminalState,
     handle: TerminalSessionHandle,
     data: String,
 ) -> Result<(), String> {
-    let session = get_session_generation(&state, &handle)?;
+    let session = get_session_generation(state, &handle)?;
     write_shared(&session.writer, data.as_bytes())
 }
 
-#[tauri::command]
-pub async fn terminal_input(
-    state: State<'_, TerminalState>,
+pub fn terminal_input(
+    state: &TerminalState,
     handle: TerminalSessionHandle,
     command: TerminalInputCommand,
 ) -> Result<(), String> {
-    let session = get_session_generation(&state, &handle)?;
+    let session = get_session_generation(state, &handle)?;
     let is_mouse = matches!(
         command,
         TerminalInputCommand::Mouse { .. } | TerminalInputCommand::Wheel { .. }
@@ -552,14 +549,13 @@ pub async fn terminal_input(
     Ok(())
 }
 
-#[tauri::command]
-pub async fn terminal_input_batch(
-    state: State<'_, TerminalState>,
+pub fn terminal_input_batch(
+    state: &TerminalState,
     handle: TerminalSessionHandle,
     _client_seq: u64,
     commands: Vec<TerminalInputCommand>,
 ) -> Result<(), String> {
-    let session = get_session_generation(&state, &handle)?;
+    let session = get_session_generation(state, &handle)?;
     if commands.is_empty() {
         return Ok(());
     }
@@ -602,48 +598,44 @@ pub async fn terminal_input_batch(
     Ok(())
 }
 
-#[tauri::command]
-pub async fn terminal_ack(
-    state: State<'_, TerminalState>,
+pub fn terminal_ack(
+    state: &TerminalState,
     handle: TerminalSessionHandle,
     seq: u64,
 ) -> Result<(), String> {
-    let session = get_session_generation(&state, &handle)?;
+    let session = get_session_generation(state, &handle)?;
     session.stream.acknowledge(seq);
     Ok(())
 }
 
-#[tauri::command]
-pub async fn terminal_request_full(
-    state: State<'_, TerminalState>,
+pub fn terminal_request_full(
+    state: &TerminalState,
     handle: TerminalSessionHandle,
 ) -> Result<(), String> {
-    let session = get_session_generation(&state, &handle)?;
+    let session = get_session_generation(state, &handle)?;
     session.stream.request_full();
     Ok(())
 }
 
-#[tauri::command]
-pub async fn terminal_set_visibility(
-    state: State<'_, TerminalState>,
+pub fn terminal_set_visibility(
+    state: &TerminalState,
     handle: TerminalSessionHandle,
     visible: bool,
 ) -> Result<(), String> {
-    let session = get_session_generation(&state, &handle)?;
+    let session = get_session_generation(state, &handle)?;
     session.stream.set_visible(visible);
     Ok(())
 }
 
-#[tauri::command]
-pub async fn terminal_selection(
-    state: State<'_, TerminalState>,
+pub fn terminal_selection(
+    state: &TerminalState,
     handle: TerminalSessionHandle,
     command: TerminalSelectionCommand,
 ) -> Result<(), String> {
     use alacritty_terminal::index::Side;
     use alacritty_terminal::selection::SelectionType;
 
-    let session = get_session_generation(&state, &handle)?;
+    let session = get_session_generation(state, &handle)?;
     let repaint = {
         let mut model = session
             .model
@@ -709,12 +701,11 @@ pub async fn terminal_selection(
     Ok(())
 }
 
-#[tauri::command]
-pub async fn terminal_copy_selection(
-    state: State<'_, TerminalState>,
+pub fn terminal_copy_selection(
+    state: &TerminalState,
     handle: TerminalSessionHandle,
 ) -> Result<String, String> {
-    let session = get_session_generation(&state, &handle)?;
+    let session = get_session_generation(state, &handle)?;
     let model = session
         .model
         .lock()
@@ -724,13 +715,12 @@ pub async fn terminal_copy_selection(
 
 /// Scroll the viewport through scrollback by `delta` lines (positive = toward
 /// history). Emits a fresh full frame so the renderer shows the scrolled view.
-#[tauri::command]
-pub async fn terminal_scroll(
-    state: State<'_, TerminalState>,
+pub fn terminal_scroll(
+    state: &TerminalState,
     handle: TerminalSessionHandle,
     delta: i32,
 ) -> Result<(), String> {
-    let session = get_session_generation(&state, &handle)?;
+    let session = get_session_generation(state, &handle)?;
     {
         let mut model = session
             .model
@@ -746,12 +736,8 @@ pub async fn terminal_scroll(
 /// Clear the visible screen and scrollback (Cmd+K). On the primary screen
 /// also sends a form feed so a shell at a prompt redraws it at the top;
 /// no-op while the alternate screen is active (vim, TUIs).
-#[tauri::command]
-pub async fn terminal_clear(
-    state: State<'_, TerminalState>,
-    handle: TerminalSessionHandle,
-) -> Result<(), String> {
-    let session = get_session_generation(&state, &handle)?;
+pub fn terminal_clear(state: &TerminalState, handle: TerminalSessionHandle) -> Result<(), String> {
+    let session = get_session_generation(state, &handle)?;
     {
         let mut model = session
             .model
@@ -769,12 +755,11 @@ pub async fn terminal_clear(
     Ok(())
 }
 
-#[tauri::command]
-pub async fn terminal_text(
-    state: State<'_, TerminalState>,
+pub fn terminal_text(
+    state: &TerminalState,
     handle: TerminalSessionHandle,
 ) -> Result<String, String> {
-    let session = get_session_generation(&state, &handle)?;
+    let session = get_session_generation(state, &handle)?;
     let model = session
         .model
         .lock()
@@ -782,15 +767,14 @@ pub async fn terminal_text(
     Ok(model.text())
 }
 
-#[tauri::command]
-pub async fn terminal_search(
-    state: State<'_, TerminalState>,
+pub fn terminal_search(
+    state: &TerminalState,
     handle: TerminalSessionHandle,
     query: String,
     direction: Option<String>,
     case_sensitive: Option<bool>,
 ) -> Result<TerminalSearchResult, String> {
-    let session = get_session_generation(&state, &handle)?;
+    let session = get_session_generation(state, &handle)?;
     let direction = match direction.as_deref() {
         Some("previous") => SearchDirection::Previous,
         _ => SearchDirection::Next,
@@ -821,14 +805,13 @@ pub async fn terminal_search(
     })
 }
 
-#[tauri::command]
-pub async fn terminal_resize(
-    state: State<'_, TerminalState>,
+pub fn terminal_resize(
+    state: &TerminalState,
     handle: TerminalSessionHandle,
     cols: u16,
     rows: u16,
 ) -> Result<(), String> {
-    let session = get_session_generation(&state, &handle)?;
+    let session = get_session_generation(state, &handle)?;
     let cols = cols.clamp(2, MAX_COLS);
     let rows = rows.clamp(1, MAX_ROWS);
     let _resize = session
@@ -863,12 +846,8 @@ pub async fn terminal_resize(
     Ok(())
 }
 
-#[tauri::command]
-pub async fn terminal_kill(
-    state: State<'_, TerminalState>,
-    handle: TerminalSessionHandle,
-) -> Result<(), String> {
-    let session = match get_session_generation(&state, &handle) {
+pub fn terminal_kill(state: &TerminalState, handle: TerminalSessionHandle) -> Result<(), String> {
+    let session = match get_session_generation(state, &handle) {
         Ok(session) => session,
         Err(error) if error == format!("Unknown terminal session: {}", handle.session_id) => {
             return Ok(())
@@ -903,6 +882,288 @@ pub async fn terminal_kill(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod phase08_18_stage {
+    use super::TerminalState;
+    use std::sync::{Arc, Mutex};
+
+    pub(super) static STAGES: Mutex<Vec<(u64, usize, String, Arc<dyn Fn() + Send + Sync>)>> =
+        Mutex::new(Vec::new());
+
+    fn registry_key(state: &TerminalState) -> usize {
+        Arc::as_ptr(&state.sessions) as usize
+    }
+
+    pub(super) fn register(
+        id: u64,
+        command: &str,
+        state: &TerminalState,
+        callback: Arc<dyn Fn() + Send + Sync>,
+    ) {
+        STAGES
+            .lock()
+            .unwrap()
+            .push((id, registry_key(state), command.to_string(), callback));
+    }
+
+    pub(super) fn hit(command: &str, state: &TerminalState) {
+        let key = registry_key(state);
+        let callbacks: Vec<_> = STAGES
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(_, hook_key, name, _)| *hook_key == key && name == command)
+            .map(|(_, _, _, callback)| callback.clone())
+            .collect();
+        for callback in callbacks {
+            callback();
+        }
+    }
+}
+
+pub mod ipc {
+    use super::*;
+
+    #[tauri::command]
+    pub async fn terminal_spawn(
+        state: State<'_, TerminalState>,
+        args: TerminalSpawnArgs,
+        on_event: Channel<TerminalStreamMessage>,
+    ) -> Result<String, String> {
+        let state = state.inner().clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            super::phase08_18_stage::hit("terminal_spawn", &state);
+            super::terminal_spawn(&state, args, on_event)
+        })
+        .await
+        .map_err(|err| format!("terminal_spawn_task_failed: {err}"))?
+    }
+
+    #[tauri::command]
+    pub async fn terminal_write(
+        state: State<'_, TerminalState>,
+        handle: TerminalSessionHandle,
+        data: String,
+    ) -> Result<(), String> {
+        let state = state.inner().clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            super::phase08_18_stage::hit("terminal_write", &state);
+            super::terminal_write(&state, handle, data)
+        })
+        .await
+        .map_err(|err| format!("terminal_write_task_failed: {err}"))?
+    }
+
+    #[tauri::command]
+    pub async fn terminal_input(
+        state: State<'_, TerminalState>,
+        handle: TerminalSessionHandle,
+        command: TerminalInputCommand,
+    ) -> Result<(), String> {
+        let state = state.inner().clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            super::phase08_18_stage::hit("terminal_input", &state);
+            super::terminal_input(&state, handle, command)
+        })
+        .await
+        .map_err(|err| format!("terminal_input_task_failed: {err}"))?
+    }
+
+    #[tauri::command]
+    pub async fn terminal_input_batch(
+        state: State<'_, TerminalState>,
+        handle: TerminalSessionHandle,
+        client_seq: u64,
+        commands: Vec<TerminalInputCommand>,
+    ) -> Result<(), String> {
+        let state = state.inner().clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            super::phase08_18_stage::hit("terminal_input_batch", &state);
+            super::terminal_input_batch(&state, handle, client_seq, commands)
+        })
+        .await
+        .map_err(|err| format!("terminal_input_batch_task_failed: {err}"))?
+    }
+
+    #[tauri::command]
+    pub async fn terminal_ack(
+        state: State<'_, TerminalState>,
+        handle: TerminalSessionHandle,
+        seq: u64,
+    ) -> Result<(), String> {
+        let state = state.inner().clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            super::phase08_18_stage::hit("terminal_ack", &state);
+            super::terminal_ack(&state, handle, seq)
+        })
+        .await
+        .map_err(|err| format!("terminal_ack_task_failed: {err}"))?
+    }
+
+    #[tauri::command]
+    pub async fn terminal_request_full(
+        state: State<'_, TerminalState>,
+        handle: TerminalSessionHandle,
+    ) -> Result<(), String> {
+        let state = state.inner().clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            super::phase08_18_stage::hit("terminal_request_full", &state);
+            super::terminal_request_full(&state, handle)
+        })
+        .await
+        .map_err(|err| format!("terminal_request_full_task_failed: {err}"))?
+    }
+
+    #[tauri::command]
+    pub async fn terminal_set_visibility(
+        state: State<'_, TerminalState>,
+        handle: TerminalSessionHandle,
+        visible: bool,
+    ) -> Result<(), String> {
+        let state = state.inner().clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            super::phase08_18_stage::hit("terminal_set_visibility", &state);
+            super::terminal_set_visibility(&state, handle, visible)
+        })
+        .await
+        .map_err(|err| format!("terminal_set_visibility_task_failed: {err}"))?
+    }
+
+    #[tauri::command]
+    pub async fn terminal_selection(
+        state: State<'_, TerminalState>,
+        handle: TerminalSessionHandle,
+        command: TerminalSelectionCommand,
+    ) -> Result<(), String> {
+        let state = state.inner().clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            super::phase08_18_stage::hit("terminal_selection", &state);
+            super::terminal_selection(&state, handle, command)
+        })
+        .await
+        .map_err(|err| format!("terminal_selection_task_failed: {err}"))?
+    }
+
+    #[tauri::command]
+    pub async fn terminal_copy_selection(
+        state: State<'_, TerminalState>,
+        handle: TerminalSessionHandle,
+    ) -> Result<String, String> {
+        let state = state.inner().clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            super::phase08_18_stage::hit("terminal_copy_selection", &state);
+            super::terminal_copy_selection(&state, handle)
+        })
+        .await
+        .map_err(|err| format!("terminal_copy_selection_task_failed: {err}"))?
+    }
+
+    #[tauri::command]
+    pub async fn terminal_scroll(
+        state: State<'_, TerminalState>,
+        handle: TerminalSessionHandle,
+        delta: i32,
+    ) -> Result<(), String> {
+        let state = state.inner().clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            super::phase08_18_stage::hit("terminal_scroll", &state);
+            super::terminal_scroll(&state, handle, delta)
+        })
+        .await
+        .map_err(|err| format!("terminal_scroll_task_failed: {err}"))?
+    }
+
+    #[tauri::command]
+    pub async fn terminal_clear(
+        state: State<'_, TerminalState>,
+        handle: TerminalSessionHandle,
+    ) -> Result<(), String> {
+        let state = state.inner().clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            super::phase08_18_stage::hit("terminal_clear", &state);
+            super::terminal_clear(&state, handle)
+        })
+        .await
+        .map_err(|err| format!("terminal_clear_task_failed: {err}"))?
+    }
+
+    #[tauri::command]
+    pub async fn terminal_text(
+        state: State<'_, TerminalState>,
+        handle: TerminalSessionHandle,
+    ) -> Result<String, String> {
+        let state = state.inner().clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            super::phase08_18_stage::hit("terminal_text", &state);
+            super::terminal_text(&state, handle)
+        })
+        .await
+        .map_err(|err| format!("terminal_text_task_failed: {err}"))?
+    }
+
+    #[tauri::command]
+    pub async fn terminal_search(
+        state: State<'_, TerminalState>,
+        handle: TerminalSessionHandle,
+        query: String,
+        direction: Option<String>,
+        case_sensitive: Option<bool>,
+    ) -> Result<TerminalSearchResult, String> {
+        let state = state.inner().clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            super::phase08_18_stage::hit("terminal_search", &state);
+            super::terminal_search(&state, handle, query, direction, case_sensitive)
+        })
+        .await
+        .map_err(|err| format!("terminal_search_task_failed: {err}"))?
+    }
+
+    #[tauri::command]
+    pub async fn terminal_resize(
+        state: State<'_, TerminalState>,
+        handle: TerminalSessionHandle,
+        cols: u16,
+        rows: u16,
+    ) -> Result<(), String> {
+        let state = state.inner().clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            super::phase08_18_stage::hit("terminal_resize", &state);
+            super::terminal_resize(&state, handle, cols, rows)
+        })
+        .await
+        .map_err(|err| format!("terminal_resize_task_failed: {err}"))?
+    }
+
+    #[tauri::command]
+    pub async fn terminal_kill(
+        state: State<'_, TerminalState>,
+        handle: TerminalSessionHandle,
+    ) -> Result<(), String> {
+        let state = state.inner().clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            super::phase08_18_stage::hit("terminal_kill", &state);
+            super::terminal_kill(&state, handle)
+        })
+        .await
+        .map_err(|err| format!("terminal_kill_task_failed: {err}"))?
+    }
 }
 
 fn get_session(state: &TerminalState, session_id: &str) -> Result<Arc<TerminalSession>, String> {
@@ -1536,7 +1797,7 @@ mod tests {
             "terminal_resize",
             "terminal_kill",
         ] {
-            let command_start = source.find(&format!("pub async fn {command}")).unwrap();
+            let command_start = source.find(&format!("pub fn {command}(")).unwrap();
             let command_source = &source[command_start..];
             let command_end = command_source
                 .find("#[tauri::command]")
@@ -1669,5 +1930,514 @@ mod tests {
         assert!(SessionReservation::acquire(&state, "term-1").is_err());
         drop(first);
         assert!(SessionReservation::acquire(&state, "term-1").is_ok());
+    }
+}
+
+#[cfg(test)]
+mod phase08_18 {
+    use super::phase08_18_stage::STAGES;
+    use super::*;
+    use crate::atomic_file::phase08_06::run;
+    use std::future::Future;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::{mpsc, Arc, Mutex};
+    use std::time::{Duration, Instant};
+    use tauri::Manager;
+
+    type TestApp = tauri::AppHandle<tauri::test::MockRuntime>;
+
+    /// Runs an ipc wrapper future that borrows its `State` from an owned
+    /// `AppHandle` clone; the borrow stays inside the self-contained future.
+    macro_rules! run_with {
+        ($app:ident, $body:expr) => {{
+            let $app = $app.clone();
+            run(async move { $body.await })
+        }};
+    }
+
+    fn app() -> tauri::App<tauri::test::MockRuntime> {
+        let app = tauri::test::mock_app();
+        app.manage(TerminalState::default());
+        app
+    }
+
+    fn cat_args(session_id: String, cwd: PathBuf) -> TerminalSpawnArgs {
+        TerminalSpawnArgs {
+            session_id,
+            kind: "shell".to_string(),
+            cwd: Some(cwd.to_string_lossy().into_owned()),
+            command: Some("/bin/cat".to_string()),
+            extra_args: None,
+            extra_env: None,
+            cols: Some(120),
+            rows: Some(10),
+        }
+    }
+
+    async fn spawn_session(app: TestApp, args: TerminalSpawnArgs) -> Result<String, String> {
+        ipc::terminal_spawn(app.state(), args, Channel::new(|_| Ok(()))).await
+    }
+
+    async fn text_of(app: TestApp, handle: TerminalSessionHandle) -> Result<String, String> {
+        ipc::terminal_text(app.state(), handle).await
+    }
+
+    async fn write_cmd(
+        app: TestApp,
+        handle: TerminalSessionHandle,
+        data: String,
+    ) -> Result<(), String> {
+        ipc::terminal_write(app.state(), handle, data).await
+    }
+
+    fn current(session_id: String, generation: String) -> TerminalSessionHandle {
+        TerminalSessionHandle {
+            session_id,
+            generation,
+        }
+    }
+
+    fn wait_for_text(app: &TestApp, handle: &TerminalSessionHandle, needle: &str) -> String {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            let text = run(text_of(app.clone(), handle.clone())).unwrap();
+            if text.contains(needle) {
+                return text;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "fixture terminal never echoed {needle:?}"
+            );
+            thread::sleep(Duration::from_millis(20));
+        }
+    }
+
+    static NEXT_HOOK: AtomicU64 = AtomicU64::new(0);
+
+    struct StageGuard(u64);
+    impl Drop for StageGuard {
+        fn drop(&mut self) {
+            STAGES.lock().unwrap().retain(|(id, _, _, _)| *id != self.0);
+        }
+    }
+
+    fn boundary<F, T>(command: &'static str, app: &TestApp, future: F)
+    where
+        F: Future<Output = Result<T, String>> + Send + 'static,
+        T: Send + 'static,
+    {
+        let (entered_tx, mut entered_rx) = tauri::async_runtime::channel(1);
+        let (release_tx, release_rx) = mpsc::channel::<()>();
+        let release_rx = Mutex::new(release_rx);
+        let id = NEXT_HOOK.fetch_add(1, Ordering::SeqCst);
+        let callback: Arc<dyn Fn() + Send + Sync> = Arc::new(move || {
+            entered_tx
+                .blocking_send(std::thread::current().id())
+                .unwrap();
+            release_rx
+                .lock()
+                .unwrap()
+                .recv_timeout(Duration::from_secs(5))
+                .unwrap();
+            panic!("fixture worker failure");
+        });
+        super::phase08_18_stage::register(
+            id,
+            command,
+            app.state::<TerminalState>().inner(),
+            callback,
+        );
+        let _guard = StageGuard(id);
+        run(async move {
+            let caller = std::thread::current().id();
+            let mut future = Box::pin(future);
+            assert!(
+                std::future::poll_fn(|cx| std::task::Poll::Ready(future.as_mut().poll(cx)))
+                    .await
+                    .is_pending(),
+                "{command} must yield until its blocking worker completes"
+            );
+            let worker = entered_rx.recv().await.expect("worker entry");
+            let mut yielded = false;
+            std::future::poll_fn(|cx| {
+                if yielded {
+                    std::task::Poll::Ready(())
+                } else {
+                    yielded = true;
+                    cx.waker().wake_by_ref();
+                    std::task::Poll::Pending
+                }
+            })
+            .await;
+            assert_ne!(
+                worker, caller,
+                "{command} must run on a distinct blocking worker"
+            );
+            release_tx.send(()).unwrap();
+            assert!(
+                matches!(future.await, Err(error) if error.starts_with(&format!("{command}_task_failed:"))),
+                "{command} must map a panicked worker to the display-only task-failed error"
+            );
+        });
+    }
+
+    async fn boundary_invoke(command: &'static str, app: TestApp) -> Result<String, String> {
+        let missing = TerminalSessionHandle {
+            session_id: format!("phase08-18-boundary-{command}"),
+            generation: "generation".to_string(),
+        };
+        match command {
+            "terminal_spawn" => {
+                ipc::terminal_spawn(
+                    app.state(),
+                    TerminalSpawnArgs {
+                        cwd: None,
+                        command: Some("/bin/cat".to_string()),
+                        ..cat_args(missing.session_id.clone(), PathBuf::from("/"))
+                    },
+                    Channel::new(|_| Ok(())),
+                )
+                .await
+            }
+            "terminal_write" => ipc::terminal_write(app.state(), missing, "x".to_string())
+                .await
+                .map(|_| String::new()),
+            "terminal_input" => {
+                ipc::terminal_input(app.state(), missing, TerminalInputCommand::LineBreak)
+                    .await
+                    .map(|_| String::new())
+            }
+            "terminal_input_batch" => ipc::terminal_input_batch(
+                app.state(),
+                missing,
+                1,
+                vec![TerminalInputCommand::LineBreak],
+            )
+            .await
+            .map(|_| String::new()),
+            "terminal_ack" => ipc::terminal_ack(app.state(), missing, 1)
+                .await
+                .map(|_| String::new()),
+            "terminal_request_full" => ipc::terminal_request_full(app.state(), missing)
+                .await
+                .map(|_| String::new()),
+            "terminal_set_visibility" => ipc::terminal_set_visibility(app.state(), missing, false)
+                .await
+                .map(|_| String::new()),
+            "terminal_selection" => {
+                ipc::terminal_selection(app.state(), missing, TerminalSelectionCommand::SelectAll)
+                    .await
+                    .map(|_| String::new())
+            }
+            "terminal_copy_selection" => ipc::terminal_copy_selection(app.state(), missing).await,
+            "terminal_scroll" => ipc::terminal_scroll(app.state(), missing, 1)
+                .await
+                .map(|_| String::new()),
+            "terminal_clear" => ipc::terminal_clear(app.state(), missing)
+                .await
+                .map(|_| String::new()),
+            "terminal_text" => ipc::terminal_text(app.state(), missing).await,
+            "terminal_search" => ipc::terminal_search(
+                app.state(),
+                missing,
+                "needle".to_string(),
+                None,
+                Some(false),
+            )
+            .await
+            .map(|hit| hit.query),
+            "terminal_resize" => ipc::terminal_resize(app.state(), missing, 80, 10)
+                .await
+                .map(|_| String::new()),
+            "terminal_kill" => ipc::terminal_kill(app.state(), missing)
+                .await
+                .map(|_| String::new()),
+            other => panic!("unknown boundary command {other}"),
+        }
+    }
+
+    #[test]
+    fn phase08_18_each_wrapper_yields_same_poll_and_maps_join_failure() {
+        for command in [
+            "terminal_spawn",
+            "terminal_write",
+            "terminal_input",
+            "terminal_input_batch",
+            "terminal_ack",
+            "terminal_request_full",
+            "terminal_set_visibility",
+            "terminal_selection",
+            "terminal_copy_selection",
+            "terminal_scroll",
+            "terminal_clear",
+            "terminal_text",
+            "terminal_search",
+            "terminal_resize",
+            "terminal_kill",
+        ] {
+            let app = app();
+            let app = app.handle().clone();
+            let app_for_boundary = app.clone();
+            boundary(command, &app_for_boundary, async move {
+                boundary_invoke(command, app).await
+            });
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn phase08_18_real_pty_fixture_results_and_legacy_rejections() {
+        let app = app();
+        let app = app.handle().clone();
+        let work = tempfile::tempdir().unwrap();
+        let session_id = "phase08-18-cat".to_string();
+        let generation = run(spawn_session(
+            app.clone(),
+            cat_args(session_id.clone(), work.path().to_path_buf()),
+        ))
+        .unwrap();
+        assert!(!generation.is_empty());
+
+        let write_handle = current(session_id.clone(), generation.clone());
+        run_with!(
+            app,
+            ipc::terminal_write(app.state(), write_handle, "hello-marufixture\n".into())
+        )
+        .unwrap();
+        let text_handle = current(session_id.clone(), generation.clone());
+        let text = wait_for_text(&app, &text_handle, "hello-marufixture");
+        assert!(!text.trim().is_empty());
+
+        let search_handle = current(session_id.clone(), generation.clone());
+        let hit = run_with!(
+            app,
+            ipc::terminal_search(
+                app.state(),
+                search_handle,
+                "marufixture".into(),
+                None,
+                Some(false)
+            )
+        )
+        .unwrap();
+        assert!(hit.found);
+        assert_eq!(hit.length, "marufixture".len());
+
+        let select_handle = current(session_id.clone(), generation.clone());
+        run_with!(
+            app,
+            ipc::terminal_selection(
+                app.state(),
+                select_handle,
+                TerminalSelectionCommand::SelectAll
+            )
+        )
+        .unwrap();
+        let copy_handle = current(session_id.clone(), generation.clone());
+        let copied =
+            run_with!(app, ipc::terminal_copy_selection(app.state(), copy_handle)).unwrap();
+        assert!(
+            copied.contains("hello-marufixture"),
+            "selection copy must include the fixture line: {copied:?}"
+        );
+
+        let input_handle = current(session_id.clone(), generation.clone());
+        run_with!(
+            app,
+            ipc::terminal_input(
+                app.state(),
+                input_handle,
+                TerminalInputCommand::Text { text: "x".into() }
+            )
+        )
+        .unwrap();
+        let batch_handle = current(session_id.clone(), generation.clone());
+        run_with!(
+            app,
+            ipc::terminal_input_batch(
+                app.state(),
+                batch_handle,
+                1,
+                vec![TerminalInputCommand::LineBreak]
+            )
+        )
+        .unwrap();
+        let ack_handle = current(session_id.clone(), generation.clone());
+        run_with!(app, ipc::terminal_ack(app.state(), ack_handle, 1)).unwrap();
+        let full_handle = current(session_id.clone(), generation.clone());
+        run_with!(app, ipc::terminal_request_full(app.state(), full_handle)).unwrap();
+        let hide_handle = current(session_id.clone(), generation.clone());
+        run_with!(
+            app,
+            ipc::terminal_set_visibility(app.state(), hide_handle, false)
+        )
+        .unwrap();
+        let show_handle = current(session_id.clone(), generation.clone());
+        run_with!(
+            app,
+            ipc::terminal_set_visibility(app.state(), show_handle, true)
+        )
+        .unwrap();
+        let resize_handle = current(session_id.clone(), generation.clone());
+        run_with!(
+            app,
+            ipc::terminal_resize(app.state(), resize_handle, 100, 12)
+        )
+        .unwrap();
+        let up_handle = current(session_id.clone(), generation.clone());
+        run_with!(app, ipc::terminal_scroll(app.state(), up_handle, 1)).unwrap();
+        let down_handle = current(session_id.clone(), generation.clone());
+        run_with!(app, ipc::terminal_scroll(app.state(), down_handle, -1)).unwrap();
+        let clear_handle = current(session_id.clone(), generation.clone());
+        run_with!(app, ipc::terminal_clear(app.state(), clear_handle)).unwrap();
+
+        let unknown = TerminalSessionHandle {
+            session_id: "phase08-18-nope".to_string(),
+            generation: "g".to_string(),
+        };
+        assert_eq!(
+            run(text_of(app.clone(), unknown.clone())).unwrap_err(),
+            "Unknown terminal session: phase08-18-nope"
+        );
+        let stale = TerminalSessionHandle {
+            session_id: session_id.clone(),
+            generation: "old".to_string(),
+        };
+        assert_eq!(
+            run_with!(app, ipc::terminal_write(app.state(), stale, "y".into())).unwrap_err(),
+            "Stale terminal session generation: phase08-18-cat"
+        );
+        let kill_unknown = unknown.clone();
+        run_with!(app, ipc::terminal_kill(app.state(), kill_unknown)).unwrap();
+        let kill_handle = current(session_id.clone(), generation.clone());
+        run_with!(app, ipc::terminal_kill(app.state(), kill_handle)).unwrap();
+        let kill_again = current(session_id.clone(), generation.clone());
+        run_with!(app, ipc::terminal_kill(app.state(), kill_again)).unwrap();
+        let gone_handle = current(session_id.clone(), generation.clone());
+        assert_eq!(
+            run(text_of(app.clone(), gone_handle)).unwrap_err(),
+            "Unknown terminal session: phase08-18-cat"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn phase08_18_concurrent_writes_serialize_per_session_in_both_launch_orders() {
+        for (first, second) in [("a", "b"), ("b", "a")] {
+            let app = app();
+            let app = app.handle().clone();
+            let work = tempfile::tempdir().unwrap();
+            let session_id = format!("phase08-18-contention-{first}{second}");
+            let generation = run(spawn_session(
+                app.clone(),
+                cat_args(session_id.clone(), work.path().to_path_buf()),
+            ))
+            .unwrap();
+            let handle = TerminalSessionHandle {
+                session_id,
+                generation,
+            };
+            let payload_a = format!("{}phase08-18-a\n", "a".repeat(40));
+            let payload_b = format!("{}phase08-18-b\n", "b".repeat(40));
+            let (first_payload, second_payload) = if first == "a" {
+                (payload_a.clone(), payload_b.clone())
+            } else {
+                (payload_b.clone(), payload_a.clone())
+            };
+            let first_rx = start(write_cmd(app.clone(), handle.clone(), first_payload));
+            let second_rx = start(write_cmd(app.clone(), handle.clone(), second_payload));
+            done(first_rx).unwrap();
+            done(second_rx).unwrap();
+            let text = wait_for_text(&app, &handle, payload_b.trim_end());
+            assert!(
+                text.contains(payload_a.trim_end()),
+                "first-launched payload must survive whole through the shared writer: {text:?}"
+            );
+            assert!(
+                text.contains(payload_b.trim_end()),
+                "second-launched payload must survive whole through the shared writer: {text:?}"
+            );
+            run_with!(app, ipc::terminal_kill(app.state(), handle)).unwrap();
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn phase08_18_spawn_rollback_releases_reservation_and_recycles_identity() {
+        let app = app();
+        let app = app.handle().clone();
+        let work = tempfile::tempdir().unwrap();
+        let session_id = "phase08-18-lifecycle".to_string();
+        let spawn = |kind: &str| {
+            let args = TerminalSpawnArgs {
+                kind: kind.to_string(),
+                ..cat_args(session_id.clone(), work.path().to_path_buf())
+            };
+            run(spawn_session(app.clone(), args))
+        };
+
+        let error = spawn("bogus").unwrap_err();
+        assert!(error.contains("Unsupported terminal launcher"), "{error}");
+        let empty_id = TerminalSpawnArgs {
+            session_id: String::new(),
+            ..cat_args(session_id.clone(), work.path().to_path_buf())
+        };
+        assert_eq!(
+            run(spawn_session(app.clone(), empty_id)).unwrap_err(),
+            "terminal_session_id_required"
+        );
+        let generation = spawn("shell").unwrap();
+        assert!(!generation.is_empty());
+        assert_eq!(
+            spawn("shell").unwrap_err(),
+            format!("terminal_session_id_in_use: {session_id}")
+        );
+
+        let old = TerminalSessionHandle {
+            session_id: session_id.clone(),
+            generation,
+        };
+        let old_kill = old.clone();
+        run_with!(app, ipc::terminal_kill(app.state(), old_kill)).unwrap();
+        let recycled = spawn("shell").unwrap();
+        assert_ne!(old.generation, recycled);
+        let stale_write = old.clone();
+        assert_eq!(
+            run_with!(
+                app,
+                ipc::terminal_write(app.state(), stale_write, "z".into())
+            )
+            .unwrap_err(),
+            format!("Stale terminal session generation: {session_id}")
+        );
+        let fresh = TerminalSessionHandle {
+            session_id,
+            generation: recycled,
+        };
+        let fresh_write = fresh.clone();
+        run_with!(
+            app,
+            ipc::terminal_write(app.state(), fresh_write, "ok\n".into())
+        )
+        .unwrap();
+        wait_for_text(&app, &fresh, "ok");
+        run_with!(app, ipc::terminal_kill(app.state(), fresh)).unwrap();
+    }
+
+    fn start<F>(future: F) -> mpsc::Receiver<F::Output>
+    where
+        F: Future + Send + 'static,
+        F::Output: Send + 'static,
+    {
+        let (tx, rx) = mpsc::channel();
+        tauri::async_runtime::spawn(async move {
+            let _ = tx.send(future.await);
+        });
+        rx
+    }
+
+    fn done<T>(rx: mpsc::Receiver<T>) -> T {
+        rx.recv_timeout(Duration::from_secs(10))
+            .expect("fixture completion")
     }
 }

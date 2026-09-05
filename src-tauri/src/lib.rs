@@ -160,12 +160,7 @@ use tauri::Manager;
 use telegram_config::{read_telegram_monitor_config, save_telegram_monitor_config};
 use telegram_io::{check_telegram_auth, stop_poller_on_exit, TelegramIoState};
 use template_fill::{template_fill_hwpx, template_get_fields, template_prepare_hwpx_template};
-use terminal::{
-    terminal_ack, terminal_clear, terminal_copy_selection, terminal_input, terminal_input_batch,
-    terminal_kill, terminal_request_full, terminal_resize, terminal_scroll, terminal_search,
-    terminal_selection, terminal_set_visibility, terminal_spawn, terminal_text, terminal_write,
-    TerminalState,
-};
+use terminal::TerminalState;
 use terminal_hooks::{start_terminal_hook_watcher, TerminalHookWatcherState};
 use today_notify::today_notify_new_day;
 use vault_list::{
@@ -376,21 +371,21 @@ pub fn run() {
             list_ai_missions,
             read_ai_mission_log,
             stop_ai_mission,
-            terminal_input,
-            terminal_input_batch,
-            terminal_ack,
-            terminal_request_full,
-            terminal_set_visibility,
-            terminal_selection,
-            terminal_copy_selection,
-            terminal_spawn,
-            terminal_write,
-            terminal_resize,
-            terminal_clear,
-            terminal_scroll,
-            terminal_text,
-            terminal_search,
-            terminal_kill,
+            terminal::ipc::terminal_input,
+            terminal::ipc::terminal_input_batch,
+            terminal::ipc::terminal_ack,
+            terminal::ipc::terminal_request_full,
+            terminal::ipc::terminal_set_visibility,
+            terminal::ipc::terminal_selection,
+            terminal::ipc::terminal_copy_selection,
+            terminal::ipc::terminal_spawn,
+            terminal::ipc::terminal_write,
+            terminal::ipc::terminal_resize,
+            terminal::ipc::terminal_clear,
+            terminal::ipc::terminal_scroll,
+            terminal::ipc::terminal_text,
+            terminal::ipc::terminal_search,
+            terminal::ipc::terminal_kill,
             terminal_hooks::ipc::terminal_hooks_install,
             terminal_hooks::ipc::terminal_hooks_uninstall,
             terminal_hooks::ipc::terminal_hooks_status,
