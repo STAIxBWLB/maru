@@ -48,13 +48,20 @@ coverage:
         status: pass
     human_judgment: false
   - id: seven-module-evidence
-    description: Separate integration overlay validates seven modules without adding exclusive command rows; later document and adapter-owner evidence remains pending.
+    description: Separate integration overlay validates seven modules without adding exclusive command rows; Plan07 now supplies document evidence, while final adapter-owner handoffs remain pending.
     verification:
       - kind: unit
         ref: node --test scripts/check-command-isolation.test.mjs
         status: pass
       - kind: other
         ref: node scripts/check-command-isolation.mjs --integration 29
+        status: pass
+    human_judgment: false
+  - id: automatic-git-maintenance-lifetime
+    description: Both production Git builders suppress automatic maintenance per invocation; effective configuration and real local pull Trace2 prove no automatic maintenance child escapes the waited command.
+    verification:
+      - kind: unit
+        ref: cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_29_maintenance
         status: pass
     human_judgment: false
   - id: initial-fixture-escape-history
@@ -142,9 +149,31 @@ A combined phase08_ diagnostic run reported 106/108 before correcting the last p
 - T-08-29-02: nonqueued source reservation, no domain-lock-held path wait, separate network/commit sets, borrowed callback adapters, stop-lease reuse and error/unwind tests mitigate the new deadlock/availability surface.
 - T-08-29-03: corrected synthetic fixture selection and explicit initial-escape disclosure constrain the evidence claim. Historical external effects remain unknown.
 - Plan29 owns final integration for store, Git, env, dispatch and dot. Mission-state and event-store adapters are staged prerequisites; Plans16/17 must provide their final tested moduleIntegrations handoffs.
-- documentRaceConsumer is exactly 08-07 with selector phase08_07_earlier_writer_document_races: Skills save, Skills sync and Git pull each versus document save/create, both orders and aliases. Those six document pairs are pending production by Plan07, not passing evidence here.
-- Plan28 --all closure additionally requires those actual document cases and completed 16/17 handoffs. The current --integration29 pass is deliberately narrower. PERF-01 and PERF-02 are not globally completed: requirements.ready-ids returned 0/2 ready because sibling plans remain unfinished.
+- documentRaceConsumer is exactly 08-07 with selector phase08_07_earlier_writer_document_races: Skills save, Skills sync and Git pull each versus document save/create, both orders and aliases. Those six document pairs were pending at original Plan29 completion; Plan07 has now supplied them in docs/performance/phase08-07.json. The original execution does not claim to have produced that later evidence.
+- Plan28 --all closure requires the supplied Plan07 document cases and still-pending final 16/17 handoffs. The current --integration29 pass is deliberately narrower. PERF-01 and PERF-02 are not globally completed: requirements.ready-ids returned 0/2 ready because sibling plans remain unfinished.
 - No automatic retry, duplicate queue, new job service, Phase09 quit behavior or new command owner was added. Ready for Plan07, wave8.
+
+## Corrective Addendum: Automatic Git Maintenance
+
+Correction commit `8a3bebb` follows the completed Plan07 execution. It addresses the actual .git/objects/maintenance.lock race observed by Plan07: automatic Git maintenance can detach from an otherwise waited Git child, so the original Plan29 subprocess lifetime claim had a real production gap. Local Git 2.55 manuals document auto-maintenance as enabled by default and auto-detach as enabled unless configured otherwise. GIT_OPTIONAL_LOCKS alone does not disable automatic maintenance.
+
+The production change is limited to the two existing command builders, `git::git_command` and `store::store_git_command`. Both now add `-c gc.auto=0 -c maintenance.auto=false` before caller arguments. Existing config arguments, approval/permission behavior and hooks are preserved. The overrides are per invocation; no user or repository configuration is persisted. All existing clone, pull, commit and reconcile callers inherit the policy, including Git subprocesses launched internally by pull.
+
+Two focused tests first failed against the original builders because Git resolved fixture repository `maintenance.auto=true`. Both now pass. Each test verifies effective values false/0 against repository opt-in, global option ordering before the caller subcommand, and unchanged `.git/config` bytes. It then pulls real changed commits from a temporary local bare remote using pull/rebase for git.rs and pull/ff-only for store.rs. Trace2 captures real child starts and successful exits: an explicit foreground positive control re-enables maintenance and observes its child, while the protected pull observes zero maintenance/gc children and the expected new note bytes. Fixture setup always disables automatic work, including the red test run; the positive control forces foreground execution and does not create a detached daemon.
+
+| Corrective check | Actual result |
+| --- | --- |
+| cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_29_maintenance | Red: 0 passed/2 failed on effective-config assertion; green: 2 passed/0 failed/0 ignored, 0.40 seconds. |
+| cargo test --manifest-path src-tauri/Cargo.toml --lib git::phase08_05 | 10 passed, 0 failed/ignored. |
+| cargo test --manifest-path src-tauri/Cargo.toml --lib git::phase08_29_git | 7 passed, 0 failed/ignored. |
+| cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_source_transactions | 12 passed, 0 failed/ignored. |
+| cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_batch_transactions | 5 passed, 0 failed/ignored. |
+| cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_03_network_lock | 7 passed, 0 failed/ignored, including clone, reconcile, bundle and metadata availability. |
+| CLI/app cargo check, production clippy with warnings denied, rustfmt check | All passed. |
+
+The original full 37-case run remains historical evidence. There are now 39 cumulative named Plan29 cases, including these 2 focused corrective cases; the complete 39-case selector was not rerun for this bounded correction. The original performance/commit metrics above describe the original three-task execution. Corrective evidence is separately recorded under automaticMaintenanceCorrection in the integration overlay, and Plan07's pending production-maintenance item is resolved by reference to that proof.
+
+The correction suppresses automatic maintenance initiated by these Maru Git commands. Independently scheduled maintenance, remote-server administration and deliberate user-hook subprocesses remain outside the in-process exclusion contract. The earlier dispatch fixture escape and unknown historical external effects remain disclosed above. No plan counter, STATE.md or ROADMAP.md changed; Plan08 remains next, and final 16/17 handoffs plus phase-wide closure remain pending.
 
 ## Self-Check: PASSED
 

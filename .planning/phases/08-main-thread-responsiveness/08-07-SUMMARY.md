@@ -53,9 +53,12 @@ coverage:
         status: pass
     human_judgment: false
   - id: production-git-maintenance-lifetime
-    description: Automatic Git maintenance can outlive the main Git child; production Git/store builders did not disable it at this plan's completion.
-    human_judgment: true
-    rationale: Root orchestrator assigned a separate Plan29 correction and verification. Deterministic fixture configuration is not evidence that production detached-child lifetime is already fixed.
+    description: The production automatic-maintenance gap discovered at Plan07 completion is resolved by the later Plan29 per-invocation builder correction and actual local Trace2 proof.
+    verification:
+      - kind: unit
+        ref: cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_29_maintenance
+        status: pass
+    human_judgment: false
 duration: 15min
 completed: 2026-09-05
 status: complete
@@ -129,16 +132,24 @@ The 23 selector matches comprise seven document tests, ten earlier-writer consum
 1. **Minimal snapshot adapter.** A borrowed `write_version_snapshot_in_transaction` helper was added beyond the plan's command-named adapter examples because both managed writers share this existing non-command API. It avoids nested reacquisition while preserving the direct graph caller's signature and existing permission responsibilities. No producer module changed.
 2. **Fixture expectations and source guard.** Initial file-manager argv expectation missed macOS canonical `/private/var`; expected argv now uses the real validation result. Create-document fixtures now assert the complete existing heading/body/trailing-newline contract. A delegated spare-runtime Tokio probe was removed because this project has no direct Tokio dependency and actual same-task probes already exist. ERR-06 initially rejected test-channel stringification; heterogeneous test channels now preserve IpcError, without source-guard exemptions. Boundary JoinError adapters explicitly assert an empty code before comparing its display-only message.
 3. **File-manager isolation.** Success selects the current existing test executable and runs one exact harmless child test, asserting marker and captured production argv, with bounded kill/reap cleanup. Failure uses an existing executable whose temporary interpreter is absent on Unix. An earlier direct captured nonexistent path had no resolver fallback and did not launch a user application; the final fixture nevertheless follows the stricter existing-executable contract. Existing platform argument builders are preserved. Actual Finder/Explorer/window display is not claimed; existing success means process launch acceptance.
-4. **Git maintenance is a real production follow-up.** A repeat consumer run failed while `.git/objects/maintenance.lock` disappeared during a content scan. Disposable fixture repositories and setup commands now set `gc.auto=0` and `maintenance.auto=false`, removing detached maintenance from deterministic tests. Read-only audit found production `git::git_command` and `store::store_git_command` did not set those options; automatic maintenance could outlive the Git parent and therefore its lease. This must not be dismissed as fixture-only. The root orchestrator assigned a separate Plan29 minimal correction and verification after this plan. This plan changes neither producer nor its evidence ownership and does not claim that production gap is fixed.
+4. **Git maintenance is a real production follow-up.** A repeat consumer run failed while .git/objects/maintenance.lock disappeared during a content scan. Disposable fixture repositories and setup commands now set `gc.auto=0` and `maintenance.auto=false`, removing detached maintenance from deterministic tests. Read-only audit found production `git::git_command` and `store::store_git_command` did not set those options; automatic maintenance could outlive the Git parent and therefore its lease. This must not be dismissed as fixture-only. The root orchestrator assigned a separate Plan29 minimal correction and verification after this plan. This plan changes neither producer nor its evidence ownership and does not claim that production gap is fixed.
 5. **Platform and lifecycle bounds.** Only macOS fixtures ran. Windows compile/runtime, native saturation and final artifact isolation remain later gates. D-04 frontend call sites, current notice owners and existing navigation behavior are annotated; Plans25/26 still implement final lifetime and notice ownership. No automatic retry, new job service or Phase09 quit behavior was added.
 6. Existing today_ai/scheduler test-build warnings remain unrelated; production clippy is clean. Plan29's earlier dispatch-fixture historical limitation is unchanged, not reinterpreted by these tests.
 
 ## Threats and Handoff
 
 - T-08-07-01: complete path sets, pinned parents, current ownership/revision/permission checks and real serial/conflict tests mitigate the owned mutation surface. This is in-process application admission, not universal exclusion of independent external processes.
-- T-08-07-02: blocking workers, same-polling-task proof, bounded barriers and RAII release cover the new command concurrency. The discovered Git automatic-maintenance lifetime remains the root-coordinated Plan29 follow-up above.
+- T-08-07-02: blocking workers, same-polling-task proof, bounded barriers and RAII release cover the new command concurrency. The discovered Git automatic-maintenance lifetime was resolved by the later Plan29 correction recorded below.
 - T-08-07-03: disposable roots, local bare Git, captured file-manager children and no live provider/application execution constrain fixture effects. Native artifact verification remains Plan28.
 - Plan07's owned implementation and consumer evidence are complete. Plan08 (wave9) is next; Plans16/17 final adapter handoffs and Plans25-28 remain unfinished. PERF-01/PERF-02 are not globally closed.
+
+## Corrective Follow-up: Git Automatic Maintenance
+
+The historical maintenance.lock observation in item 4 above was a production lifetime gap, not just fixture flakiness. The later Plan29 correction `8a3bebb` adds `-c gc.auto=0 -c maintenance.auto=false` in both production Git builders before caller arguments. This suppresses automatically launched maintenance without changing persistent user/repository configuration or production hook behavior.
+
+The focused `phase08_29_maintenance` selector passed 2 tests after both failed against the original builders. Actual Git effective-config queries prove repository opt-in is overridden and configuration bytes remain unchanged. Real local pull/rebase and pull/ff-only update committed file bytes; Trace2 foreground positive controls observe automatic maintenance children, while protected invocations record successful exit and no maintenance/gc child. Exact evidence and scope are in [Plan29 integration correction](../../../docs/performance/phase08-29-integration.json) and the Plan29 SUMMARY corrective addendum.
+
+This resolves the pending production-maintenance note above. It does not change the original Plan07 test history, independently scheduled external-process limitations, or Plan29's earlier dispatch-fixture escape disclosure. Plan08 remains the next wave; no plan count or shared state was changed by this correction.
 
 ## Self-Check: PASSED
 

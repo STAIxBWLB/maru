@@ -8,14 +8,22 @@
       "passed": 37,
       "failed": 0,
       "ignored": 0,
-      "durationSeconds": 17.32,
-      "source": "Parent confirmed final serialized run after source identity/new-file cases and all five domain same-polling-task boundary tests."
+      "durationSeconds": 17.35,
+      "source": "Original Plan29 full run before the automatic-maintenance correction; later focused correction and regression runs are recorded separately."
     },
     {
       "command": "node --test scripts/check-command-isolation.test.mjs",
       "passed": 91,
       "failed": 0,
       "skipped": 0
+    },
+    {
+      "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_29_maintenance",
+      "passed": 2,
+      "failed": 0,
+      "ignored": 0,
+      "exitCode": 0,
+      "durationSeconds": 0.4
     }
   ],
   "integrations": [
@@ -374,6 +382,26 @@
         "symbol": "validate_network_mutation_paths",
         "contract": "Reject source_layout_conflict before network admission when a lexical or physical checkout subtree contains Skills registry metadata. Never reserve a shared registry ancestor across network work.",
         "test": "phase08_29_skills_network_rejects_checkout_containing_registry"
+      },
+      "automaticMaintenance": {
+        "policy": [
+          "gc.auto=0",
+          "maintenance.auto=false"
+        ],
+        "evidence": "automaticMaintenanceCorrection",
+        "tests": [
+          {
+            "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_29_maintenance",
+            "passed": 2,
+            "failed": 0,
+            "ignored": 0,
+            "exitCode": 0,
+            "durationSeconds": 0.4
+          }
+        ],
+        "behaviorCases": [
+          "phase08_29_maintenance_store_builder_overrides_config_before_args_and_pull_has_no_auto_child"
+        ]
       }
     },
     {
@@ -840,7 +868,27 @@
           }
         }
       ],
-      "evidence": "Actual final phase08_29 selector: 37 passed, 0 failed, 0 ignored in 17.35 seconds. All five domain polling-task boundary cases are included. Shared dispatch/event proof does not add unique test counts."
+      "evidence": "Actual final phase08_29 selector: 37 passed, 0 failed, 0 ignored in 17.35 seconds. All five domain polling-task boundary cases are included. Shared dispatch/event proof does not add unique test counts.",
+      "automaticMaintenance": {
+        "policy": [
+          "gc.auto=0",
+          "maintenance.auto=false"
+        ],
+        "evidence": "automaticMaintenanceCorrection",
+        "tests": [
+          {
+            "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_29_maintenance",
+            "passed": 2,
+            "failed": 0,
+            "ignored": 0,
+            "exitCode": 0,
+            "durationSeconds": 0.4
+          }
+        ],
+        "behaviorCases": [
+          "phase08_29_maintenance_git_builder_overrides_config_before_args_and_pull_has_no_auto_child"
+        ]
+      }
     },
     {
       "id": "phase08-29-dot_sync",
@@ -1286,7 +1334,7 @@
   "documentRaceConsumer": {
     "plan": "08-07",
     "selector": "phase08_07_earlier_writer_document_races",
-    "status": "awaiting-producer",
+    "status": "produced-by-08-07",
     "requiredPairs": [
       {
         "entryPair": [
@@ -1378,7 +1426,8 @@
           "ancestor"
         ]
       }
-    ]
+    ],
+    "evidence": "docs/performance/phase08-07.json#crossDomainConsumers"
   },
   "stagedHandoffs": [
     {
@@ -1395,10 +1444,10 @@
     }
   ],
   "testAttribution": {
-    "uniqueRustTests": 37,
+    "uniqueRustTests": 39,
     "modules": {
-      "skill_host/store": 11,
-      "git": 7,
+      "skill_host/store": 12,
+      "git": 8,
       "skill_host/env": 5,
       "skill_host/dispatch": 7,
       "mission_state": 1,
@@ -1406,7 +1455,8 @@
     },
     "sharedEvidence": {
       "agent_host/event_store": "Direct append and event callback proofs execute within the seven dispatch cases; no additional unique test is counted."
-    }
+    },
+    "countBasis": "Cumulative 37 original integration cases plus 2 focused maintenance cases. The full 39-case selector was not rerun for this bounded correction; exact executions are recorded separately."
   },
   "fixtureIsolationAudit": {
     "initialDispatchFailure": "An initial dispatch launch-error fixture did not pin the actually selected binary and escaped its intended synthetic process boundary. External effects of that initial launch are unknown; the full execution history is not claimed isolated.",
@@ -1417,5 +1467,101 @@
   "regressionNotes": [
     "The former concurrent same-source save test now accepts immediate source_busy and performs an explicit retry after both original attempts settle, preserving D-02 and successful siblings.",
     "The Git permission regression separately proves initial denial launches no Git, and a policy flip after authorized discovery launches no subsequent Git process."
-  ]
+  ],
+  "automaticMaintenanceCorrection": {
+    "status": "verified",
+    "discoveredBy": "08-07",
+    "historicalObservation": "Plan07 observed automatic Git maintenance removing .git/objects/maintenance.lock during its content scan. Original Plan29 builders did not suppress automatic maintenance; fixture-only suppression did not establish production lease safety.",
+    "productionPolicy": {
+      "builders": [
+        "src-tauri/src/git.rs#git_command",
+        "src-tauri/src/skill_host/store.rs#store_git_command"
+      ],
+      "argvPrefix": [
+        "-c",
+        "gc.auto=0",
+        "-c",
+        "maintenance.auto=false"
+      ],
+      "persistence": "Per-invocation global Git options, before caller arguments. No repository/global configuration or hook settings are changed in production."
+    },
+    "verification": {
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_29_maintenance",
+          "passed": 2,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0,
+          "durationSeconds": 0.4
+        }
+      ],
+      "evidence": {
+        "behaviorCases": [
+          "phase08_29_maintenance_git_builder_overrides_config_before_args_and_pull_has_no_auto_child",
+          "phase08_29_maintenance_store_builder_overrides_config_before_args_and_pull_has_no_auto_child"
+        ]
+      },
+      "red": "Both added tests failed before the production change: real effective maintenance.auto was true despite the required false policy.",
+      "effectiveConfig": "Both builders override fixture repository maintenance.auto=true and gc.auto=1; effective values are false and 0, and .git/config bytes remain identical.",
+      "trace2": "Actual local pull --rebase and pull --ff-only use changed commits from temporary bare remotes. Foreground positive controls re-enable automatic maintenance and observe its child_start; protected invocations record real Git children and successful exit with zero maintenance/gc child_start events and the exact updated note bytes.",
+      "regressions": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib git::phase08_05",
+          "passed": 10,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        },
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib git::phase08_29_git",
+          "passed": 7,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        },
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_source_transactions",
+          "passed": 12,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        },
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_batch_transactions",
+          "passed": 5,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        },
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_03_network_lock",
+          "passed": 7,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "checks": [
+        {
+          "command": "cargo check --manifest-path src-tauri/Cargo.toml -p maru-cli",
+          "exitCode": 0
+        },
+        {
+          "command": "cargo check --manifest-path src-tauri/Cargo.toml --lib",
+          "exitCode": 0
+        },
+        {
+          "command": "cargo clippy --manifest-path src-tauri/Cargo.toml --lib -- -D warnings",
+          "exitCode": 0
+        },
+        {
+          "command": "cargo fmt --manifest-path src-tauri/Cargo.toml -- --check",
+          "exitCode": 0
+        }
+      ]
+    },
+    "limits": "Suppresses automatic maintenance launched by these Maru Git invocations. Existing independently scheduled maintenance, remote-server administration and deliberate user hook processes remain outside this process-local guarantee. The initial Plan29 dispatch fixture escape remains an unresolved historical observation.",
+    "commit": "8a3bebb"
+  }
 }

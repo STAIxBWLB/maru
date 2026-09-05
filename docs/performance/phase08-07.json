@@ -867,7 +867,27 @@
           }
         }
       ],
-      "scope": "Actual registered wrappers in disposable local Git fixtures. All fixture repos disable gc.auto and maintenance.auto for deterministic finite-process proof. Production git/store builders did not yet disable automatic maintenance when this shard was produced; root orchestrator owns the discovered Plan29 subprocess-lifetime follow-up before phase closure."
+      "scope": "Actual registered wrappers in disposable local Git fixtures. Fixture repositories disable gc.auto and maintenance.auto for deterministic finite-process proof. The original production gap was confirmed at Plan07 completion and is now resolved by the separately verified Plan29 per-invocation builder correction; see automaticMaintenanceCorrection in docs/performance/phase08-29-integration.json. The historical observation is retained.",
+      "automaticMaintenanceFollowup": {
+        "status": "resolved",
+        "owner": "08-29",
+        "evidence": "docs/performance/phase08-29-integration.json#automaticMaintenanceCorrection",
+        "tests": [
+          {
+            "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_29_maintenance",
+            "passed": 2,
+            "failed": 0,
+            "ignored": 0,
+            "exitCode": 0,
+            "durationSeconds": 0.4
+          }
+        ],
+        "behaviorCases": [
+          "phase08_29_maintenance_git_builder_overrides_config_before_args_and_pull_has_no_auto_child",
+          "phase08_29_maintenance_store_builder_overrides_config_before_args_and_pull_has_no_auto_child"
+        ],
+        "commit": "8a3bebb"
+      }
     }
   ]
 }
