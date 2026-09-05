@@ -457,7 +457,7 @@ pub fn scan_vault_paths(
     // a full scan would report.
     let version_names = collect_version_names(&vault);
     let nested_roots = registered_nested_roots(&vault);
-    let scratchpad_root = excluded_scratchpad_root(&vault);
+    let non_document_roots = excluded_non_document_roots(&vault);
     let mut entries = Vec::new();
     for rel in rel_paths {
         let normalized = rel.replace('\\', "/");
@@ -484,10 +484,7 @@ pub fn scan_vault_paths(
         {
             continue;
         }
-        if scratchpad_root
-            .as_deref()
-            .is_some_and(|root| path.starts_with(root))
-        {
+        if non_document_roots.iter().any(|root| path.starts_with(root)) {
             continue;
         }
         if scan_filter.is_excluded_path(&path, &vault, GENERATED_DIRS) {
@@ -525,19 +522,17 @@ pub fn read_vault_cache(vault_path: String) -> Result<Option<Vec<VaultEntry>>, S
     // still holds those entries; drop them here so the first paint matches
     // what the scan will return.
     let non_document_prefixes = excluded_non_document_rel_prefixes(&vault);
-    Ok(
-        read_vault_cache_envelope(&vault)?.map(|cache| {
-            cache
-                .entries
-                .into_iter()
-                .filter(|entry| {
-                    !non_document_prefixes
-                        .iter()
-                        .any(|prefix| entry.rel_path.starts_with(prefix))
-                })
-                .collect()
-        }),
-    )
+    Ok(read_vault_cache_envelope(&vault)?.map(|cache| {
+        cache
+            .entries
+            .into_iter()
+            .filter(|entry| {
+                !non_document_prefixes
+                    .iter()
+                    .any(|prefix| entry.rel_path.starts_with(prefix))
+            })
+            .collect()
+    }))
 }
 
 fn read_vault_cache_envelope(vault: &Path) -> Result<Option<VaultCacheEnvelope>, String> {
@@ -1588,6 +1583,34 @@ mod tests {
         assert_eq!(by_rel["top.md"].title, "Top");
         assert_eq!(by_rel["sub/nested.md"].title, "Nested");
         assert_eq!(by_rel["sub/nested.md"].word_count, 5);
+    }
+
+    #[test]
+    fn scan_vault_paths_skips_inbox_root() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        write_file(root, "kept.md", "# Kept\n");
+        write_file(root, "inbox/downloads/dropped.md", "# Dropped\n");
+        write_file(root, "inbox-backup/kept2.md", "# Kept2\n");
+        let entries = scan_vault_paths(
+            root.to_string_lossy().to_string(),
+            vec![
+                "kept.md".to_string(),
+                "inbox/downloads/dropped.md".to_string(),
+                "inbox-backup/kept2.md".to_string(),
+            ],
+            None,
+        )
+        .unwrap();
+        let rels: Vec<&str> = entries
+            .iter()
+            .map(|entry| entry.rel_path.as_str())
+            .collect();
+        assert_eq!(
+            rels,
+            vec!["kept.md", "inbox-backup/kept2.md"],
+            "paths under the settings-driven inbox root must resolve absent; prefix siblings must resolve"
+        );
     }
 
     #[test]
