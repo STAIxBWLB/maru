@@ -25,6 +25,9 @@
 // items flagged `selected` (policy `calendarBlockSyncPolicy: "explicit"`).
 // Items at `none` are never published.
 
+use crate::atomic_file::{
+    with_path_transactions, PathTransactionLease, PathTransactionParent, PathTransactionRequest,
+};
 use crate::cli_path::augmented_path;
 use crate::ipc_error::IpcError;
 use crate::today::{
@@ -47,9 +50,85 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value as JsonValue};
 use std::collections::HashSet;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::Mutex;
 use walkdir::WalkDir;
+
+// Only this bookkeeping mutex is held while reserving. The owned token spans
+// provider settlement; neither a domain mutex nor a filesystem lease does.
+static CALENDAR_PUBLISH_ACTIVE: Mutex<Vec<PathBuf>> = Mutex::new(Vec::new());
+struct CalendarPublishReservation(PathBuf);
+impl CalendarPublishReservation {
+    fn acquire(work: &Path) -> Result<Self, String> {
+        let mut active = CALENDAR_PUBLISH_ACTIVE
+            .lock()
+            .map_err(|_| "calendar_publish_bookkeeping_poisoned".to_string())?;
+        if active.contains(&work.to_path_buf()) {
+            return Err(
+                "calendar_publish_busy: publication already running for this workspace".to_string(),
+            );
+        }
+        active.push(work.to_path_buf());
+        Ok(Self(work.to_path_buf()))
+    }
+}
+impl Drop for CalendarPublishReservation {
+    fn drop(&mut self) {
+        // Contents are only ownership keys; remove this key even after unwind.
+        CALENDAR_PUBLISH_ACTIVE
+            .lock()
+            .unwrap_or_else(|err| err.into_inner())
+            .retain(|path| *path != self.0);
+    }
+}
+
+// Full Today subtree is the write set for state, retained revisions and events.
+// Explicit nested aliases participate even when a directory inside it points out.
+fn calendar_transaction_request(
+    work_path: &str,
+    original: &[PathTransactionParent],
+    aliases: &[(PathBuf, PathBuf)],
+) -> Result<PathTransactionRequest, String> {
+    for (path, target) in aliases {
+        if path.canonicalize().map_err(|err| err.to_string())? != *target {
+            return Err("Calendar transaction alias changed; retry the operation".to_string());
+        }
+    }
+    let work = normalize_existing_dir(work_path)?;
+    let lexical = if Path::new(work_path).is_absolute() {
+        PathBuf::from(work_path)
+    } else {
+        std::env::current_dir()
+            .map_err(|err| err.to_string())?
+            .join(work_path)
+    };
+    let mut paths = vec![
+        work.join(".maru/today"),
+        work.join(".maru/today/revisions"),
+        work.join(".maru/today/events"),
+    ];
+    let root = work.join(".maru/today");
+    if root.is_dir() {
+        for entry in WalkDir::new(&root).follow_links(true) {
+            let entry = entry.map_err(|err| err.to_string())?;
+            if entry.path_is_symlink() {
+                paths.push(entry.into_path());
+            }
+        }
+    }
+    let paths = paths.into_iter().flat_map(|path| {
+        let alias = lexical.join(path.strip_prefix(&work).expect("Today path in workspace"));
+        [path, alias]
+    });
+    let mut request = PathTransactionRequest::new(paths)?
+        .require_parent(&work)?
+        .with_workspace_registry()?;
+    for parent in original {
+        request = request.require_parent_snapshot(parent)?;
+    }
+    Ok(request)
+}
 
 /// Conventional roots scanned for timed calendar notes.
 const COMMITMENT_ROOTS: [&str; 2] = ["tasks", "calendar"];
@@ -185,7 +264,6 @@ fn day_window(
 /// the day window. `calendars` empty = all discovered notes; otherwise only
 /// notes whose `calendarId` (or `local`) is listed. Overlapping duplicates
 /// (same title + same start, e.g. a task note and its receipt) are deduped.
-#[tauri::command]
 pub fn today_calendar_commitments(
     work_path: String,
     logical_day: String,
@@ -285,7 +363,6 @@ pub fn today_calendar_commitments(
 /// Toggle ONE plan item's `calendarSync` between `none` and `selected`
 /// (explicit user opt-in per block). Goes through `today_mutate`, so a stale
 /// `expected_revision` propagates as `today_conflict`. Never publishes.
-#[tauri::command]
 pub fn task_calendar_set_sync(
     work_path: String,
     logical_day: String,
@@ -370,12 +447,20 @@ fn selected_item_detail(
 /// under the workspace lock. Returns false when the item vanished from the
 /// plan (concurrent edit) — the caller decides what that means.
 fn persist_item_sync(
+    lease: &PathTransactionLease,
     work: &Path,
     logical_day: &str,
     item_ref: &PlanItemRef,
     state: CalendarSyncState,
     now_iso: &str,
 ) -> Result<bool, String> {
+    lease.ensure_covered([
+        work.join(".maru/today"),
+        work.join(".maru/today/revisions"),
+        work.join(".maru/today/events"),
+    ])?;
+    lease.ensure_workspace_registry()?;
+    lease.before_effect()?;
     let lock = work_lock_for(work)?;
     let _guard = lock
         .lock()
@@ -411,7 +496,6 @@ fn persist_item_sync(
 /// crash loses at most the one in-flight item.
 /// ponytail: that one-item crash window can still duplicate a calendar
 /// event on republish; closing it needs a durable per-event intent record.
-#[tauri::command]
 pub fn today_calendar_publish(
     work_path: String,
     logical_day: String,
@@ -420,11 +504,47 @@ pub fn today_calendar_publish(
     gws_path: Option<String>,
     now_iso: String,
 ) -> Result<CalendarPublishOutcome, IpcError> {
-    assert_maru_can_write(&work_path, WorkspaceWriteAction::Modify)?;
     let work = normalize_existing_dir(&work_path)?;
+    let _reservation = CalendarPublishReservation::acquire(&work)?;
     DateTime::parse_from_rfc3339(&now_iso)
         .map_err(|err| format!("now_iso must be RFC3339: {err}"))?;
-    let (_, entry_snapshot) = load_snapshot_with_raw(&work, &logical_day)?;
+    // Capture existing parents once, before any provider work. Later commits
+    // use fresh complete requests and these original handles, never new roots.
+    let mut original = vec![PathTransactionParent::capture(&work)?];
+    let mut original_aliases = vec![];
+    let today = work.join(".maru/today");
+    if today.is_dir() {
+        for entry in WalkDir::new(&today).follow_links(true) {
+            let entry = entry.map_err(|err| err.to_string())?;
+            if entry.file_type().is_dir() {
+                original.push(PathTransactionParent::capture(entry.path())?);
+            }
+            if entry.path_is_symlink() {
+                original_aliases.push((
+                    entry.path().to_path_buf(),
+                    entry.path().canonicalize().map_err(|err| err.to_string())?,
+                ));
+            }
+        }
+    }
+    let validate_original_aliases = |aliases: &[(PathBuf, PathBuf)]| -> Result<(), String> {
+        for (path, target) in aliases {
+            if path.canonicalize().map_err(|err| err.to_string())? != *target {
+                return Err("Calendar transaction alias changed; retry the operation".into());
+            }
+        }
+        Ok(())
+    };
+    let entry_snapshot = with_path_transactions(
+        calendar_transaction_request(&work_path, &original, &original_aliases)?,
+        |lease| {
+            validate_original_aliases(&original_aliases)?;
+            lease.before_effect()?;
+            assert_maru_can_write(&work_path, WorkspaceWriteAction::Modify)?;
+            let (_, snapshot) = load_snapshot_with_raw(&work, &logical_day)?;
+            Ok(snapshot)
+        },
+    )?;
     check_revision(&entry_snapshot, &expected_revision)?;
 
     // Collect the publish queue up front: only `selected` items with a block.
@@ -454,9 +574,20 @@ pub fn today_calendar_publish(
     let timezone = entry_snapshot.timezone.clone();
 
     for item_ref in &queue {
-        let Some((summary, block, item_destination)) =
-            selected_item_detail(&work, &logical_day, item_ref)?
-        else {
+        let (detail, selected_revision) = with_path_transactions(
+            calendar_transaction_request(&work_path, &original, &original_aliases)?,
+            |lease| {
+                validate_original_aliases(&original_aliases)?;
+                lease.before_effect()?;
+                assert_maru_can_write(&work_path, WorkspaceWriteAction::Modify)?;
+                let (_, snapshot) = load_snapshot_with_raw(&work, &logical_day)?;
+                Ok((
+                    selected_item_detail(&work, &logical_day, item_ref)?,
+                    snapshot.revision,
+                ))
+            },
+        )?;
+        let Some((summary, block, item_destination)) = detail else {
             // Concurrent edit unselected or removed the item — skip.
             continue;
         };
@@ -516,37 +647,145 @@ pub fn today_calendar_publish(
             }
         };
         let inserted_event_id = state.event_id.clone();
-        if !persist_item_sync(&work, &logical_day, item_ref, state, &now_iso)? {
-            // The item vanished mid-publish; the inserted event (if any) is
-            // orphaned — record that instead of resurrecting the item.
-            let _ = append_task_event_for(
-                &work,
-                &logical_day,
-                "calendar_publish_orphan",
-                None,
-                json!({ "itemRef": item_ref, "eventId": inserted_event_id }),
-                now_iso.clone(),
-            );
+        let remote_published = state.status == CalendarSyncStatus::Synced;
+        // The remote outcome is settled. A stale local snapshot must never
+        // overwrite newer user work, nor claim that the remote insert rolled back.
+        let committed = calendar_transaction_request(&work_path, &original, &original_aliases).and_then(|request| with_path_transactions(request, |lease| {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(&[work.join(".maru/today")], "calendar-local-commit");
+            validate_original_aliases(&original_aliases)?;
+            lease.before_effect()?;
+            assert_maru_can_write(&work_path, WorkspaceWriteAction::Modify)?;
+            let (_, current) = load_snapshot_with_raw(&work, &logical_day)?;
+            if current.revision != selected_revision {
+                append_task_event_for(&work, &logical_day, "calendar_publish_orphan", None,
+                    json!({"itemRef": item_ref, "eventId": inserted_event_id, "reason": "local_revision_changed", "remotePublished": remote_published}), now_iso.clone())?;
+                return Ok(false);
+            }
+            let persisted = persist_item_sync(lease, &work, &logical_day, item_ref, state, &now_iso)?;
+            if persisted {
+                // Atomic replacement intentionally replaces only this state entry.
+                // Update its expected alias under the same lease; all other
+                // original aliases and every pinned parent remain unchanged.
+                let written = work.join(".maru/today").join(format!("{logical_day}.json"));
+                for (path, target) in &mut original_aliases {
+                    if *path == written { *target = path.canonicalize().map_err(|err| err.to_string())?; }
+                }
+            }
+            Ok(persisted)
+        })).map_err(|err| IpcError::from(format!("calendar_publish_local_commit_failed: remote published={}, failed={}; {err}", outcome.published, outcome.failed)))?;
+        if !committed {
+            return Err(IpcError { code: crate::ipc_error::TODAY_CONFLICT.to_string(),
+                message: format!("calendar_publish_local_conflict: remote published={}, failed={}; refresh and review the recorded outcome before manual retry", outcome.published, outcome.failed) });
         }
     }
 
-    if outcome.published > 0 || outcome.failed > 0 {
-        let _ = append_task_event_for(
-            &work,
-            &logical_day,
-            "calendar_blocks_published",
-            None,
-            json!({
-                "published": outcome.published,
-                "failed": outcome.failed,
-                "blocked": outcome.blocked,
-            }),
-            now_iso.clone(),
-        );
-    }
-    let (_, final_snapshot) = load_snapshot_with_raw(&work, &logical_day)?;
-    outcome.snapshot = final_snapshot;
+    outcome.snapshot = calendar_transaction_request(&work_path, &original, &original_aliases).and_then(|request| with_path_transactions(
+        request,
+        |lease| {
+            validate_original_aliases(&original_aliases)?;
+            lease.before_effect()?;
+            assert_maru_can_write(&work_path, WorkspaceWriteAction::Modify)?;
+            if outcome.published > 0 || outcome.failed > 0 {
+                append_task_event_for(
+                    &work,
+                    &logical_day,
+                    "calendar_blocks_published",
+                    None,
+                    json!({"published": outcome.published, "failed": outcome.failed, "blocked": outcome.blocked}),
+                    now_iso.clone(),
+                )?;
+            }
+            let (_, snapshot) = load_snapshot_with_raw(&work, &logical_day)?;
+            Ok(snapshot)
+        },
+    )).map_err(|err| IpcError::from(format!("calendar_publish_local_commit_failed: remote published={}, failed={}; {err}", outcome.published, outcome.failed)))?;
     Ok(outcome)
+}
+
+pub mod ipc {
+    use super::*;
+    #[tauri::command]
+    pub async fn today_calendar_commitments(
+        work_path: String,
+        logical_day: String,
+        timezone: String,
+        day_start: String,
+        sleep_start: String,
+        calendars: Vec<String>,
+    ) -> Result<Vec<CalendarCommitment>, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(
+                &[PathBuf::from(&work_path)],
+                "worker:today_calendar_commitments",
+            );
+            super::today_calendar_commitments(
+                work_path,
+                logical_day,
+                timezone,
+                day_start,
+                sleep_start,
+                calendars,
+            )
+        })
+        .await
+        .map_err(|err| format!("today_calendar_commitments_task_failed: {err}"))?
+    }
+    #[tauri::command]
+    pub async fn task_calendar_set_sync(
+        work_path: String,
+        logical_day: String,
+        expected_revision: String,
+        item_ref: PlanItemRef,
+        selected: bool,
+        destination: Option<String>,
+    ) -> Result<TodaySnapshot, IpcError> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(
+                &[PathBuf::from(&work_path)],
+                "worker:task_calendar_set_sync",
+            );
+            super::task_calendar_set_sync(
+                work_path,
+                logical_day,
+                expected_revision,
+                item_ref,
+                selected,
+                destination,
+            )
+        })
+        .await
+        .map_err(|err| IpcError::from(format!("task_calendar_set_sync_task_failed: {err}")))?
+    }
+    #[tauri::command]
+    pub async fn today_calendar_publish(
+        work_path: String,
+        logical_day: String,
+        expected_revision: String,
+        destination: Option<String>,
+        gws_path: Option<String>,
+        now_iso: String,
+    ) -> Result<CalendarPublishOutcome, IpcError> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(
+                &[PathBuf::from(&work_path)],
+                "worker:today_calendar_publish",
+            );
+            super::today_calendar_publish(
+                work_path,
+                logical_day,
+                expected_revision,
+                destination,
+                gws_path,
+                now_iso,
+            )
+        })
+        .await
+        .map_err(|err| IpcError::from(format!("today_calendar_publish_task_failed: {err}")))?
+    }
 }
 
 #[cfg(test)]
@@ -587,7 +826,7 @@ mod tests {
         .unwrap()
     }
 
-    fn write_fake_gws(dir: &Path, name: &str, body: &str) -> PathBuf {
+    pub(super) fn write_fake_gws(dir: &Path, name: &str, body: &str) -> PathBuf {
         let bin = dir.join(name);
         fs::write(&bin, body).unwrap();
         #[cfg(unix)]
@@ -595,10 +834,11 @@ mod tests {
             use std::os::unix::fs::PermissionsExt;
             fs::set_permissions(&bin, fs::Permissions::from_mode(0o755)).unwrap();
         }
+        assert_eq!(resolve_gws(Some(bin.to_str().unwrap())).unwrap(), bin);
         bin
     }
 
-    fn plan_item(id: &str, block: Option<ProposedBlock>) -> DailyPlanItem {
+    pub(super) fn plan_item(id: &str, block: Option<ProposedBlock>) -> DailyPlanItem {
         DailyPlanItem {
             item_ref: PlanItemRef::Task {
                 task_id: id.to_string(),
@@ -614,7 +854,10 @@ mod tests {
         }
     }
 
-    fn open_with_plan(tmp: &tempfile::TempDir, items: Vec<DailyPlanItem>) -> TodaySnapshot {
+    pub(super) fn open_with_plan(
+        tmp: &tempfile::TempDir,
+        items: Vec<DailyPlanItem>,
+    ) -> TodaySnapshot {
         let snapshot = today_open(
             work(tmp),
             NOW.to_string(),
@@ -642,7 +885,7 @@ mod tests {
         .unwrap()
     }
 
-    fn select(
+    pub(super) fn select(
         tmp: &tempfile::TempDir,
         snapshot: &TodaySnapshot,
         task_id: &str,
@@ -660,7 +903,7 @@ mod tests {
         )
     }
 
-    fn block(start: &str, end: &str) -> ProposedBlock {
+    pub(super) fn block(start: &str, end: &str) -> ProposedBlock {
         ProposedBlock {
             start_iso: start.to_string(),
             end_iso: end.to_string(),
@@ -1040,5 +1283,498 @@ mod tests {
         assert!(err
             .to_string()
             .starts_with("today_conflict: expected revision bogus, found "));
+    }
+}
+
+#[cfg(test)]
+mod phase08_12 {
+    use super::*;
+    use crate::atomic_file::{
+        phase08_06::{boundary, run, Held, Home},
+        PathTransactionTestHook,
+    };
+    use std::{future::Future, sync::mpsc, time::Duration};
+    const DAY: &str = "2026-07-21";
+    const NOW: &str = "2026-07-21T09:00:00+09:00";
+    fn text(path: &Path) -> String {
+        path.to_string_lossy().into_owned()
+    }
+    fn fixture(home: &Home) -> (tempfile::TempDir, TodaySnapshot) {
+        let tmp = tempfile::tempdir_in(home.root.path()).unwrap();
+        let snapshot = tests::open_with_plan(
+            &tmp,
+            vec![tests::plan_item(
+                "a",
+                Some(tests::block(
+                    "2026-07-21T10:00:00+09:00",
+                    "2026-07-21T11:00:00+09:00",
+                )),
+            )],
+        );
+        let snapshot = tests::select(&tmp, &snapshot, "a", true).unwrap();
+        (tmp, snapshot)
+    }
+    fn start<F: Future + Send + 'static>(future: F) -> mpsc::Receiver<F::Output>
+    where
+        F::Output: Send + 'static,
+    {
+        let (tx, rx) = mpsc::channel();
+        tauri::async_runtime::spawn(async move {
+            let _ = tx.send(future.await);
+        });
+        rx
+    }
+    fn done<T>(rx: mpsc::Receiver<T>) -> T {
+        rx.recv_timeout(Duration::from_secs(10))
+            .expect("bounded calendar result")
+    }
+    fn publish(
+        work: String,
+        snapshot: TodaySnapshot,
+        fake: String,
+    ) -> impl Future<Output = Result<CalendarPublishOutcome, IpcError>> {
+        ipc::today_calendar_publish(
+            work,
+            DAY.into(),
+            snapshot.revision,
+            None,
+            Some(fake),
+            NOW.into(),
+        )
+    }
+    fn set(
+        work: String,
+        snapshot: TodaySnapshot,
+        selected: bool,
+    ) -> impl Future<Output = Result<TodaySnapshot, IpcError>> {
+        ipc::task_calendar_set_sync(
+            work,
+            DAY.into(),
+            snapshot.revision,
+            PlanItemRef::Task {
+                task_id: "a".into(),
+            },
+            selected,
+            Some("cal-1".into()),
+        )
+    }
+    fn wait_file(path: &Path) {
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while !path.exists() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "fake provider entered"
+            );
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+    fn fake(home: &Home, held: bool) -> (PathBuf, PathBuf, PathBuf) {
+        let folder = tempfile::tempdir_in(home.root.path()).unwrap().keep();
+        let log = folder.join("insert.log");
+        let release = folder.join("release");
+        let body = format!("#!/bin/sh\nprintf 'insert\\n' >> '{}'\n{}\nprintf '%s\\n' '{{\"id\":\"synthetic-event\"}}'\n", log.display(), if held {format!("attempt=0; while [ ! -f '{}' ]; do attempt=$((attempt + 1)); [ $attempt -ge 500 ] && exit 91; sleep 0.01; done", release.display())} else {String::new()});
+        let bin = tests::write_fake_gws(&folder, "captured-gws", &body);
+        assert_eq!(
+            resolve_gws(Some(&text(&bin))).unwrap(),
+            bin,
+            "selected existing fake, never installed provider"
+        );
+        (bin, log, release)
+    }
+    #[test]
+    fn phase08_12_calendar_all_wrappers_same_polling_task_yield_joinerror() {
+        let home = Home::new();
+        let (tmp, s) = fixture(&home);
+        let w = text(tmp.path());
+        boundary(
+            tmp.path().into(),
+            "today_calendar_commitments",
+            ipc::today_calendar_commitments(
+                w.clone(),
+                DAY.into(),
+                "Asia/Seoul".into(),
+                "03:30".into(),
+                "21:30".into(),
+                vec![],
+            ),
+        );
+        let f = set(w.clone(), s.clone(), false);
+        boundary(tmp.path().into(), "task_calendar_set_sync", async move {
+            f.await.map_err(|err| {
+                assert!(err.code.is_empty());
+                err.message
+            })
+        });
+        let (bin, _, _) = fake(&home, false);
+        let f = publish(w, s, text(&bin));
+        boundary(tmp.path().into(), "today_calendar_publish", async move {
+            f.await.map_err(|err| {
+                assert!(err.code.is_empty());
+                err.message
+            })
+        });
+    }
+    #[test]
+    fn phase08_12_calendar_nonempty_payload_errors_and_fake_success() {
+        let home = Home::new();
+        let (tmp, s) = fixture(&home);
+        let w = text(tmp.path());
+        fs::create_dir_all(tmp.path().join("calendar")).unwrap();
+        fs::write(tmp.path().join("calendar/focus.md"),"---\ntitle: Synthetic focus\ncalendarStart: 2026-07-21T09:00\ncalendarEnd: 2026-07-21T10:00\n---\n").unwrap();
+        let result = run(ipc::today_calendar_commitments(
+            w.clone(),
+            DAY.into(),
+            "Asia/Seoul".into(),
+            "03:30".into(),
+            "21:30".into(),
+            vec![],
+        ))
+        .unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].title, "Synthetic focus");
+        assert!(run(ipc::today_calendar_commitments(
+            w.clone(),
+            "bad".into(),
+            "Asia/Seoul".into(),
+            "03:30".into(),
+            "21:30".into(),
+            vec![]
+        ))
+        .unwrap_err()
+        .starts_with("today_invalid_logical_day"));
+        let mut stale = s.clone();
+        stale.revision = "stale".into();
+        assert_eq!(
+            run(set(w.clone(), stale.clone(), false)).unwrap_err().code,
+            crate::ipc_error::TODAY_CONFLICT
+        );
+        let (bin, log, _) = fake(&home, false);
+        assert_eq!(
+            run(publish(w.clone(), stale, text(&bin))).unwrap_err().code,
+            crate::ipc_error::TODAY_CONFLICT
+        );
+        assert!(!log.exists());
+        let result = run(publish(w, s, text(&bin))).unwrap();
+        assert_eq!(result.published, 1);
+        assert_eq!(
+            result.snapshot.plan.unwrap().top[0]
+                .calendar_sync
+                .event_id
+                .as_deref(),
+            Some("synthetic-event")
+        );
+        assert_eq!(fs::read_to_string(log).unwrap(), "insert\n");
+    }
+    #[test]
+    fn phase08_12_calendar_duplicate_alias_insert_once_unrelated_progress() {
+        let home = Home::new();
+        let (tmp, s) = fixture(&home);
+        let (bin, log, release) = fake(&home, true);
+        let alias = home.root.path().join("calendar-alias");
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(tmp.path(), &alias).unwrap();
+        let first = start(publish(text(tmp.path()), s.clone(), text(&bin)));
+        wait_file(&log);
+        let second = start(publish(text(&alias), s, text(&bin)));
+        let duplicate = second.recv_timeout(Duration::from_millis(150));
+        let (other, other_s) = fixture(&home);
+        let (other_bin, other_log, _) = fake(&home, false);
+        let other_outcome = run(publish(text(other.path()), other_s, text(&other_bin))).unwrap();
+        assert_eq!(other_outcome.published, 1);
+        assert_eq!(fs::read_to_string(other_log).unwrap().lines().count(), 1);
+        // Always settle both captured processes before testing the negative control.
+        fs::write(&release, "").unwrap();
+        let first_outcome = done(first);
+        if duplicate.is_err() {
+            let _ = done(second);
+        }
+        assert_eq!(
+            fs::read_to_string(&log).unwrap().lines().count(),
+            1,
+            "captured insert count"
+        );
+        let outcome = first_outcome.unwrap();
+        assert_eq!(outcome.published, 1);
+        assert!(duplicate
+            .expect("duplicate returns without queueing")
+            .unwrap_err()
+            .message
+            .contains("calendar_publish_busy"));
+        // A settled reservation is released: same workspace returns its no-op result.
+        assert_eq!(
+            run(publish(text(tmp.path()), outcome.snapshot, text(&bin)))
+                .unwrap()
+                .published,
+            0
+        );
+    }
+    #[test]
+    fn phase08_12_calendar_remote_success_stale_local_keeps_user_edit_and_event() {
+        let home = Home::new();
+        let (tmp, s) = fixture(&home);
+        let (bin, log, release) = fake(&home, true);
+        let first = start(publish(text(tmp.path()), s.clone(), text(&bin)));
+        wait_file(&log);
+        let changed = run(set(text(tmp.path()), s, false)).unwrap();
+        fs::write(release, "").unwrap();
+        let err = done(first).unwrap_err();
+        assert_eq!(err.code, crate::ipc_error::TODAY_CONFLICT);
+        assert!(err.message.contains("remote published=1"));
+        let (_, current) = load_snapshot_with_raw(tmp.path(), DAY).unwrap();
+        assert_eq!(current.revision, changed.revision);
+        assert_eq!(
+            current.plan.unwrap().top[0].calendar_sync.status,
+            CalendarSyncStatus::None
+        );
+        let events =
+            fs::read_to_string(tmp.path().join(".maru/today/events/2026-07.jsonl")).unwrap();
+        assert!(events.contains("calendar_publish_orphan"));
+        assert!(events.contains("synthetic-event"));
+        assert_eq!(fs::read_to_string(log).unwrap().lines().count(), 1);
+    }
+    #[test]
+    fn phase08_12_calendar_same_target_stale_release_and_publish_unwind_release() {
+        let home = Home::new();
+        let (tmp, s) = fixture(&home);
+        let root = tmp.path().to_path_buf();
+        let held = Held::new(root.join(".maru/today"), "pre-effect");
+        let first = start(set(text(&root), s.clone(), false));
+        held.wait();
+        let second = start(set(text(&root), s.clone(), false));
+        assert!(second.recv_timeout(Duration::from_millis(75)).is_err());
+        held.release();
+        done(first).unwrap();
+        assert_eq!(
+            done(second).unwrap_err().code,
+            crate::ipc_error::TODAY_CONFLICT
+        );
+        drop(held);
+        let (bin, _, _) = fake(&home, false);
+        let (_, current) = load_snapshot_with_raw(&root, DAY).unwrap();
+        let hook = PathTransactionTestHook::new(root.join(".maru/today"), "pre-effect", || {
+            panic!("calendar admission unwind")
+        });
+        let err = run(publish(text(&root), current.clone(), text(&bin))).unwrap_err();
+        assert!(err.code.is_empty());
+        drop(hook);
+        assert_eq!(
+            run(publish(text(&root), current, text(&bin)))
+                .unwrap()
+                .published,
+            0
+        );
+    }
+    #[test]
+    fn phase08_12_calendar_provider_parent_removal_does_not_recreate_workspace() {
+        let home = Home::new();
+        let (tmp, s) = fixture(&home);
+        let root = tmp.path().to_path_buf();
+        let (bin, log, release) = fake(&home, true);
+        let first = start(publish(text(&root), s, text(&bin)));
+        wait_file(&log);
+        let moved = root.parent().unwrap().join("calendar-moved");
+        run(crate::workspace_files::ipc::rename_workspace_entry(
+            text(root.parent().unwrap()),
+            text(&root),
+            "calendar-moved".into(),
+        ))
+        .unwrap();
+        fs::write(release, "").unwrap();
+        let err = done(first).unwrap_err();
+        assert!(err.code.is_empty());
+        assert!(err.message.contains("remote published=1"));
+        assert!(!root.exists());
+        assert!(moved.is_dir());
+        assert_eq!(fs::read_to_string(log).unwrap().lines().count(), 1);
+    }
+    #[test]
+    fn phase08_12_calendar_files_parent_both_orders_aliases_and_current_policy() {
+        use crate::workspace_files::phase08_06::TrashFixture;
+        let home = Home::new();
+        for publish_op in [false, true] {
+            for trash_op in [false, true] {
+                for parent_first in [false, true] {
+                    for alias_op in [false, true] {
+                        let (tmp, snapshot) = fixture(&home);
+                        let root = tmp.path().to_path_buf();
+                        let owner = root.parent().unwrap();
+                        let alias = owner.join(format!(
+                            "alias-{}",
+                            root.file_name().unwrap().to_string_lossy()
+                        ));
+                        #[cfg(unix)]
+                        if alias_op {
+                            std::os::unix::fs::symlink(&root, &alias).unwrap();
+                        }
+                        let w = text(if alias_op { &alias } else { &root });
+                        let moved = owner.join(format!(
+                            "moved-{}",
+                            root.file_name().unwrap().to_string_lossy()
+                        ));
+                        let trash = owner.join(format!(
+                            "trash-{}",
+                            root.file_name().unwrap().to_string_lossy()
+                        ));
+                        let _trash = TrashFixture::new(root.clone(), trash.clone());
+                        let parent_w = text(owner);
+                        let source = text(&root);
+                        let name = moved.file_name().unwrap().to_string_lossy().into_owned();
+                        let parent = async move {
+                            if trash_op {
+                                crate::workspace_files::ipc::trash_workspace_entries(
+                                    parent_w,
+                                    vec![source],
+                                )
+                                .await
+                                .map(|v| assert!(v[0].error.is_none()))
+                            } else {
+                                crate::workspace_files::ipc::rename_workspace_entry(
+                                    parent_w, source, name,
+                                )
+                                .await
+                                .map(|v| assert!(v.error.is_none()))
+                            }
+                        };
+                        let (bin, log, _) = fake(&home, false);
+                        let bin = text(&bin);
+                        let writer = async move {
+                            if publish_op {
+                                publish(w, snapshot, bin).await.map(|_| ())
+                            } else {
+                                set(w, snapshot, false).await.map(|_| ())
+                            }
+                        };
+                        if parent_first {
+                            let held = Held::new(root.clone(), "admitted");
+                            let first = start(parent);
+                            held.wait();
+                            let pending = Held::new(root.join(".maru/today"), "before-admission");
+                            let second = start(writer);
+                            pending.wait();
+                            pending.release();
+                            assert!(second.recv_timeout(Duration::from_millis(10)).is_err());
+                            held.release();
+                            done(first).unwrap();
+                            assert!(done(second).is_err());
+                            assert!(!log.exists());
+                        } else {
+                            let stage = if publish_op {
+                                "calendar-local-commit"
+                            } else {
+                                "admitted"
+                            };
+                            let held = Held::new(root.join(".maru/today"), stage);
+                            let first = start(writer);
+                            held.wait();
+                            let pending = Held::new(root.clone(), "before-admission");
+                            let second = start(parent);
+                            pending.wait();
+                            pending.release();
+                            assert!(second.recv_timeout(Duration::from_millis(10)).is_err());
+                            held.release();
+                            let result = done(first);
+                            done(second).unwrap();
+                            if !publish_op {
+                                result.unwrap();
+                            }
+                            let final_root = if trash_op { &trash } else { &moved };
+                            let (_, final_state) = load_snapshot_with_raw(final_root, DAY).unwrap();
+                            assert_eq!(
+                                final_state.plan.unwrap().top[0].calendar_sync.status,
+                                if publish_op {
+                                    CalendarSyncStatus::Synced
+                                } else {
+                                    CalendarSyncStatus::None
+                                }
+                            );
+                            if publish_op {
+                                assert_eq!(fs::read_to_string(log).unwrap().lines().count(), 1);
+                            }
+                        }
+                        assert!(!root.exists());
+                        #[cfg(unix)]
+                        if alias_op {
+                            fs::remove_file(alias).unwrap();
+                        }
+                    }
+                }
+            }
+        }
+        let (tmp, s) = fixture(&home);
+        let alias = home.root.path().join("calendar-denied-alias");
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(tmp.path(), &alias).unwrap();
+        let (bin, log, _) = fake(&home, false);
+        for reverse in [false, true] {
+            let registered = if reverse { &alias } else { tmp.path() };
+            let caller = if reverse { tmp.path() } else { &alias };
+            let registry = crate::vault_list::workspace_registry_path().unwrap();
+            fs::create_dir_all(registry.parent().unwrap()).unwrap();
+            crate::atomic_file::write_atomic(&registry,json!({"version":1,"workspaces":[{"label":"fixture","path":text(registered),"visibility":"private","provider":"local","writePolicy":"readOnly"}]}).to_string().as_bytes()).unwrap();
+            assert!(run(set(text(caller), s.clone(), false)).is_err());
+            assert!(run(publish(text(caller), s.clone(), text(&bin))).is_err());
+            assert!(!log.exists());
+            crate::atomic_file::write_atomic(
+                &registry,
+                json!({"version":1,"workspaces":[]}).to_string().as_bytes(),
+            )
+            .unwrap();
+        }
+    }
+    #[cfg(unix)]
+    #[test]
+    fn phase08_12_calendar_own_state_alias_replacement_is_not_external_retarget() {
+        let home = Home::new();
+        let (tmp, s) = fixture(&home);
+        let state = tmp.path().join(".maru/today/2026-07-21.json");
+        let original = fs::read(&state).unwrap();
+        let target = tmp.path().join("original-state.json");
+        fs::write(&target, &original).unwrap();
+        fs::remove_file(&state).unwrap();
+        std::os::unix::fs::symlink(&target, &state).unwrap();
+        let (bin, log, _) = fake(&home, false);
+        let outcome = run(publish(text(tmp.path()), s, text(&bin))).unwrap();
+        assert_eq!(outcome.published, 1);
+        assert_eq!(
+            outcome.snapshot.plan.unwrap().top[0].calendar_sync.status,
+            CalendarSyncStatus::Synced
+        );
+        assert_eq!(
+            fs::read(target).unwrap(),
+            original,
+            "atomic replacement preserves the old symlink target"
+        );
+        assert!(!fs::symlink_metadata(state)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        assert_eq!(fs::read_to_string(log).unwrap().lines().count(), 1);
+    }
+    #[cfg(unix)]
+    #[test]
+    fn phase08_12_calendar_external_event_alias_retarget_rejects_provider_commit() {
+        let home = Home::new();
+        let (tmp, s) = fixture(&home);
+        let event = tmp.path().join(".maru/today/events/2026-07.jsonl");
+        let original = fs::read(&event).unwrap();
+        let old = tmp.path().join("old-events.jsonl");
+        let next = tmp.path().join("new-events.jsonl");
+        fs::write(&old, &original).unwrap();
+        fs::write(&next, &original).unwrap();
+        fs::remove_file(&event).unwrap();
+        std::os::unix::fs::symlink(&old, &event).unwrap();
+        let (bin, log, release) = fake(&home, true);
+        let first = start(publish(text(tmp.path()), s.clone(), text(&bin)));
+        wait_file(&log);
+        fs::remove_file(&event).unwrap();
+        std::os::unix::fs::symlink(&next, &event).unwrap();
+        fs::write(release, "").unwrap();
+        let err = done(first).unwrap_err();
+        assert!(err.message.contains("remote published=1"));
+        assert!(err.message.contains("alias changed"));
+        assert_eq!(fs::read(next).unwrap(), original);
+        let (_, current) = load_snapshot_with_raw(tmp.path(), DAY).unwrap();
+        assert_eq!(current.revision, s.revision);
+        assert_eq!(fs::read_to_string(log).unwrap().lines().count(), 1);
     }
 }

@@ -634,7 +634,7 @@ pub(crate) fn today_open_in_transaction(
     // Best-effort integration-outbox recovery: reconcile crash-interrupted
     // `prepared`/`syncing` records. Never fails open — a recovery error is
     // logged to the day's event log and opening continues.
-    if let Err(err) = crate::today_outbox::recover_outbox(&work) {
+    if let Err(err) = crate::today_outbox::recover_outbox_in_transaction(lease, &work) {
         let _ = append_task_event(
             &work,
             &day,

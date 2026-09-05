@@ -56,6 +56,7 @@ struct TransitionContext {
 /// Step 1 of `complete`, factored out so the durable-before-local ordering
 /// is directly testable: the `prepared` record exists on disk before any
 /// local mutation happens.
+#[allow(dead_code)] // Retained independent synchronous helper.
 pub(crate) fn prepare_complete_op(
     work: &Path,
     rel_path: &str,
@@ -159,17 +160,24 @@ fn outcome_for(
 }
 
 fn run_complete(
+    lease: &PathTransactionLease,
     ctx: TransitionContext,
     request: &TaskTransitionRequest,
 ) -> Result<TaskTransitionOutcome, String> {
     // 1. Durable prepared record FIRST (see module docs for recovery rules).
     let prepared = match &ctx.google_task_id {
-        Some(google_task_id) => Some(prepare_complete_op(
+        Some(google_task_id) => Some(today_outbox::enqueue_record_in_transaction(
+            lease,
             &ctx.work,
-            &ctx.rel_path,
-            google_task_id,
-            ctx.google_task_list_id.clone(),
-            request.web_action_id.clone(),
+            today_outbox::OutboxRecordDraft {
+                op: OutboxOp::Complete,
+                task_path: ctx.rel_path.clone(),
+                google_task_id: google_task_id.clone(),
+                google_task_list_id: ctx.google_task_list_id.clone(),
+                payload: None,
+                status: OutboxStatus::Prepared,
+                web_action_id: request.web_action_id.clone(),
+            },
             &ctx.now_iso,
         )?),
         None => None,
@@ -195,7 +203,8 @@ fn run_complete(
     // until this lands, recovery owns the record.
     let sync_status = match prepared {
         Some(mut record) => {
-            today_outbox::set_record_status(
+            today_outbox::set_record_status_in_transaction(
+                lease,
                 &ctx.work,
                 &mut record,
                 OutboxStatus::Ready,
@@ -236,14 +245,19 @@ fn run_complete(
     )
 }
 
-fn run_reopen(ctx: TransitionContext, task_id: &str) -> Result<TaskTransitionOutcome, String> {
+fn run_reopen(
+    lease: &PathTransactionLease,
+    ctx: TransitionContext,
+    task_id: &str,
+) -> Result<TaskTransitionOutcome, String> {
     // Same durable ordering as complete: the provider mirror (only when a
     // complete op already drained — a reopen of a task the provider never
     // saw needs no remote call) is recorded `prepared` BEFORE the local
     // mutation, promoted to `ready` after the patch and before the move.
     let prepared = match &ctx.google_task_id {
         Some(google_task_id) if today_outbox::has_synced_complete(&ctx.work, google_task_id)? => {
-            Some(today_outbox::enqueue_record(
+            Some(today_outbox::enqueue_record_in_transaction(
+                lease,
                 &ctx.work,
                 today_outbox::OutboxRecordDraft {
                     op: OutboxOp::Reopen,
@@ -269,7 +283,8 @@ fn run_reopen(ctx: TransitionContext, task_id: &str) -> Result<TaskTransitionOut
     write_atomic(&ctx.path, updated.as_bytes())?;
     let sync_status = match prepared {
         Some(mut record) => {
-            today_outbox::set_record_status(
+            today_outbox::set_record_status_in_transaction(
+                lease,
                 &ctx.work,
                 &mut record,
                 OutboxStatus::Ready,
@@ -523,11 +538,11 @@ pub(crate) fn task_transition_in_transaction(
     let outcome = match request.kind {
         TaskTransitionKind::Complete => {
             assert_maru_can_write(&work_path, WorkspaceWriteAction::RenameMove)?;
-            run_complete(ctx, &request)
+            run_complete(lease, ctx, &request)
         }
         TaskTransitionKind::Reopen => {
             assert_maru_can_write(&work_path, WorkspaceWriteAction::RenameMove)?;
-            run_reopen(ctx, &request.task_id)
+            run_reopen(lease, ctx, &request.task_id)
         }
         TaskTransitionKind::Cancel => {
             assert_maru_can_write(&work_path, WorkspaceWriteAction::RenameMove)?;
@@ -713,7 +728,8 @@ pub(crate) fn task_trash_in_transaction(
     move_file(&ctx.path, &trash_path)?;
     if remote_delete.unwrap_or(false) {
         if let Some(google_task_id) = &ctx.google_task_id {
-            today_outbox::enqueue_record(
+            today_outbox::enqueue_record_in_transaction(
+                lease,
                 &ctx.work,
                 today_outbox::OutboxRecordDraft {
                     op: OutboxOp::Delete,

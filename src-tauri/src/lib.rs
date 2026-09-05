@@ -186,9 +186,7 @@ use terminal_hooks::{
     terminal_hooks_status, terminal_hooks_uninstall, write_agent_context_hint,
     TerminalHookWatcherState,
 };
-use today_calendar::{task_calendar_set_sync, today_calendar_commitments, today_calendar_publish};
 use today_notify::today_notify_new_day;
-use today_outbox::{read_task_integrations, task_integrations_drain, task_integrations_retry};
 use vault_graph::{
     vault_graph_layout_read, vault_graph_layout_save, vault_graph_read, vault_graph_root,
 };
@@ -197,10 +195,6 @@ use vault_list::{
     remove_workspace_root, set_active_workspace_root,
 };
 use vault_watcher::{start_vault_watcher, stop_vault_watcher, VaultWatcherState};
-use web_actions::{
-    web_action_repair_task_list_linkage, web_actions_apply, web_actions_import_top,
-    web_actions_scan,
-};
 use workspace::{
     detect_workspace, list_workspaces, read_workspace_config, register_workspace_roots,
 };
@@ -345,19 +339,19 @@ pub fn run() {
             // Maru Today (task lifecycle + integrations)
             today_lifecycle::ipc::task_transition,
             today_lifecycle::ipc::task_trash,
-            task_integrations_drain,
-            task_integrations_retry,
-            read_task_integrations,
+            today_outbox::ipc::task_integrations_drain,
+            today_outbox::ipc::task_integrations_retry,
+            today_outbox::ipc::read_task_integrations,
             today_notify_new_day,
             // Maru Today (selective calendar sync)
-            today_calendar_commitments,
-            task_calendar_set_sync,
-            today_calendar_publish,
+            today_calendar::ipc::today_calendar_commitments,
+            today_calendar::ipc::task_calendar_set_sync,
+            today_calendar::ipc::today_calendar_publish,
             // Web action receipts (maru.web-task-action.v1)
-            web_actions_scan,
-            web_actions_apply,
-            web_action_repair_task_list_linkage,
-            web_actions_import_top,
+            web_actions::ipc::web_actions_scan,
+            web_actions::ipc::web_actions_apply,
+            web_actions::ipc::web_action_repair_task_list_linkage,
+            web_actions::ipc::web_actions_import_top,
             shelf::ipc::store_shelf_files,
             shelf::ipc::store_shelf_files_as,
             shelf::ipc::list_memos,

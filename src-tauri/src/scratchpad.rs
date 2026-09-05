@@ -3082,14 +3082,15 @@ pub(crate) mod phase08_08 {
     pub(crate) fn registry(primary: &Path, policy: &str) {
         let path = crate::vault_list::workspace_registry_path().unwrap();
         fs::create_dir_all(path.parent().unwrap()).unwrap();
-        fs::write(
-            path,
+        crate::atomic_file::write_atomic(
+            &path,
             serde_json::json!({
                 "workspaces": [{"label": "Fixture", "path": text(primary), "visibility": "private",
                     "provider": "local", "writePolicy": policy}],
                 "activeByVisibility": {"private": text(primary)}
             })
-            .to_string(),
+            .to_string()
+            .as_bytes(),
         )
         .unwrap();
     }

@@ -21,7 +21,9 @@
 //   it, the local copy diverged and the receipt is marked `retry-needed` in
 //   place instead of being applied.
 
-use crate::atomic_file::write_atomic;
+use crate::atomic_file::{
+    with_path_transactions, write_atomic, PathTransactionLease, PathTransactionRequest,
+};
 use crate::document::revision_for;
 use crate::frontmatter::{update_frontmatter_content, FrontmatterValue};
 use crate::ipc_error::{IpcError, TODAY_CONFLICT, WEB_ACTION_REPAIR_CONFLICT};
@@ -32,12 +34,15 @@ use crate::today::{
     CalendarSyncState, DailyPlanItem, DailyPlanV1, PlanItemRef, PlanLane, TaskTransitionKind,
     TaskTransitionRequest, TodayMutation, TOP_LANE_DEFAULT, TOP_LANE_MAX,
 };
-use crate::today_lifecycle::{move_file, task_transition};
+use crate::today_lifecycle::{move_file, task_transition_in_transaction};
 use crate::today_outbox::{
-    enqueue_record, has_unusable_task_list_linkage, has_web_action, read_record, record_revision,
-    write_record, OutboxOp, OutboxRecordDraft, OutboxStatus, UpsertPayload,
+    enqueue_record_in_transaction, has_unusable_task_list_linkage, has_web_action, read_record,
+    record_revision, write_record_in_transaction, OutboxOp, OutboxRecordDraft, OutboxStatus,
+    UpsertPayload,
 };
-use crate::today_store::{load_snapshot, today_mutate, JOURNAL_END_MARKER, JOURNAL_START_MARKER};
+use crate::today_store::{
+    load_snapshot, today_mutate_in_transaction, JOURNAL_END_MARKER, JOURNAL_START_MARKER,
+};
 use crate::vault::{normalize_existing_dir, parse_frontmatter, resolve_inside_vault};
 use crate::vault_list::{assert_maru_can_write, WorkspaceWriteAction};
 use crate::win_process::NoWindow;
@@ -295,7 +300,6 @@ pub struct WebActionLinkageRepairOutcome {
 /// the matching note's `googleTaskListId` through the byte-preserving
 /// frontmatter editor. The existing Retry control remains the sole provider
 /// actuator.
-#[tauri::command]
 pub fn web_action_repair_task_list_linkage(
     work_path: String,
     record_id: String,
@@ -305,6 +309,83 @@ pub fn web_action_repair_task_list_linkage(
     expected_task_path: String,
     default_task_list_id: String,
 ) -> Result<WebActionLinkageRepairOutcome, IpcError> {
+    let work = normalize_existing_dir(&work_path)?;
+    let lexical_work = if Path::new(&work_path).is_absolute() {
+        PathBuf::from(&work_path)
+    } else {
+        std::env::current_dir()
+            .map_err(|err| format!("Cannot resolve web-action cwd: {err}"))?
+            .join(&work_path)
+    };
+    let mut paths = vec![
+        work.clone(),
+        lexical_work,
+        work.join("tasks"),
+        work.join(".maru"),
+        work.join("shared"),
+    ];
+    // Dynamic allocation and rename/rollback stay inside these domains. A
+    // workspace key alone cannot cover a nested alias's physical endpoint.
+    for root in [work.join("tasks"), work.join(".maru"), work.join("shared")] {
+        if root.is_dir() {
+            for entry in walkdir::WalkDir::new(&root).follow_links(true) {
+                let entry = entry
+                    .map_err(|err| format!("Cannot inspect web-action transaction paths: {err}"))?;
+                if entry.file_type().is_dir() || entry.path_is_symlink() {
+                    paths.push(entry.into_path());
+                }
+            }
+        }
+    }
+    let admission = PathTransactionRequest::new(paths)?
+        .require_parent(&work)?
+        .with_workspace_registry()?;
+    with_path_transactions(admission, |lease| {
+        Ok(web_action_repair_task_list_linkage_in_transaction(
+            lease,
+            work_path,
+            record_id,
+            expected_record_revision,
+            expected_updated_at,
+            expected_web_action_id,
+            expected_task_path,
+            default_task_list_id,
+        ))
+    })?
+}
+
+#[allow(clippy::too_many_arguments)] // Borrowed lease plus the unchanged seven wire arguments.
+pub(crate) fn web_action_repair_task_list_linkage_in_transaction(
+    lease: &PathTransactionLease,
+    work_path: String,
+    record_id: String,
+    expected_record_revision: String,
+    expected_updated_at: String,
+    expected_web_action_id: String,
+    expected_task_path: String,
+    default_task_list_id: String,
+) -> Result<WebActionLinkageRepairOutcome, IpcError> {
+    let work = normalize_existing_dir(&work_path)?;
+    let mut paths = vec![
+        work.clone(),
+        work.join("tasks"),
+        work.join(".maru"),
+        work.join("shared"),
+    ];
+    for root in [work.join("tasks"), work.join(".maru"), work.join("shared")] {
+        if root.is_dir() {
+            for entry in walkdir::WalkDir::new(&root).follow_links(true) {
+                let entry = entry
+                    .map_err(|err| format!("Cannot inspect web-action transaction paths: {err}"))?;
+                if entry.file_type().is_dir() || entry.path_is_symlink() {
+                    paths.push(entry.into_path());
+                }
+            }
+        }
+    }
+    lease.ensure_covered(paths)?;
+    lease.ensure_workspace_registry()?;
+    lease.before_effect()?;
     assert_maru_can_write(&work_path, WorkspaceWriteAction::Modify)?;
     let work = normalize_existing_dir(&work_path)?;
     let default_task_list_id = default_task_list_id.trim();
@@ -398,7 +479,7 @@ pub fn web_action_repair_task_list_linkage(
     if updated_note != raw {
         write_atomic(&note, updated_note.as_bytes()).map_err(repair_conflict)?;
     }
-    write_record(&work, &record).map_err(repair_conflict)?;
+    write_record_in_transaction(lease, &work, &record).map_err(repair_conflict)?;
     Ok(WebActionLinkageRepairOutcome { changed: true })
 }
 
@@ -519,7 +600,29 @@ fn ledger_append(work: &Path, receipt: &Receipt, now_iso: &str) -> Result<(), St
 /// matches the id GitHub assigned the blob the web committed. `--no-filters`
 /// hashes the raw bytes, which is what the web hashed.
 fn blob_sha(path: &Path) -> Result<String, String> {
-    let output = Command::new("git")
+    let mut command = Command::new("git");
+    // Tests hash only disposable notes; inherited user Git configuration,
+    // repository overrides, credentials and hooks never enter the fixture.
+    #[cfg(test)]
+    command
+        .current_dir(path.parent().expect("fixture note parent"))
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env(
+            "GIT_CONFIG_GLOBAL",
+            if cfg!(windows) { "NUL" } else { "/dev/null" },
+        )
+        .env("GIT_CONFIG_COUNT", "0")
+        .env_remove("GIT_DIR")
+        .env_remove("GIT_WORK_TREE")
+        .args([
+            "-c",
+            "core.hooksPath=",
+            "-c",
+            "commit.gpgsign=false",
+            "-c",
+            "credential.helper=",
+        ]);
+    let output = command
         .args(["hash-object", "--no-filters", "--"])
         .arg(path)
         .no_window()
@@ -617,6 +720,7 @@ fn provider_due(value: &str) -> Option<String> {
 /// resolved once: note frontmatter, then the caller's configured default,
 /// then the outbox's `@default` fallback.
 fn queue_upsert(
+    lease: &PathTransactionLease,
     work: &Path,
     note: &Path,
     receipt: &Receipt,
@@ -643,7 +747,8 @@ fn queue_upsert(
             .filter(|value| !value.is_empty())
             .map(ToString::to_string)
     });
-    enqueue_record(
+    enqueue_record_in_transaction(
+        lease,
         work,
         OutboxRecordDraft {
             op: OutboxOp::Upsert,
@@ -671,6 +776,7 @@ fn queue_upsert(
 /// moment the provider op is queued. Together they mean a replay never
 /// duplicates a side effect and never strands an already-applied receipt.
 fn apply_receipt(
+    lease: &PathTransactionLease,
     work_path: &str,
     work: &Path,
     receipt: &Receipt,
@@ -708,7 +814,8 @@ fn apply_receipt(
                 .unwrap_or_else(|| receipt.requested_at.clone());
             let done = string_field(&frontmatter, "done")
                 .unwrap_or_else(|| completed_at.get(..10).unwrap_or(&completed_at).to_string());
-            task_transition(
+            task_transition_in_transaction(
+                lease,
                 work_path.to_string(),
                 TaskTransitionRequest {
                     task_id: receipt.task_path.clone(),
@@ -727,7 +834,7 @@ fn apply_receipt(
             Ok(WebActionState::Applied)
         }
         WebActionOperation::Upsert => {
-            queue_upsert(work, &note, receipt, default_task_list_id, now_iso)?;
+            queue_upsert(lease, work, &note, receipt, default_task_list_id, now_iso)?;
             ledger_append(work, receipt, now_iso)?;
             Ok(WebActionState::Applied)
         }
@@ -907,13 +1014,76 @@ fn plan_with_top(plan: &DailyPlanV1, revision: &str, wanted: &[PlanItemRef]) -> 
 /// `today_open` already receives `day_start` / `sleep_start`. It arrives over
 /// IPC, so it is clamped here rather than trusted: below 1 would empty the
 /// lane, above `TOP_LANE_MAX` would build a plan `validate_plan` rejects.
-#[tauri::command(async)]
 pub fn web_actions_import_top(
     work_path: String,
     logical_day: String,
     dry_run: Option<bool>,
     top_lane_size: Option<usize>,
 ) -> Result<TopImportOutcome, String> {
+    let work = normalize_existing_dir(&work_path)?;
+    let lexical_work = if Path::new(&work_path).is_absolute() {
+        PathBuf::from(&work_path)
+    } else {
+        std::env::current_dir()
+            .map_err(|err| format!("Cannot resolve web-action cwd: {err}"))?
+            .join(&work_path)
+    };
+    let mut paths = vec![
+        work.clone(),
+        lexical_work,
+        work.join("tasks"),
+        work.join(".maru"),
+        work.join("shared"),
+    ];
+    // Dynamic allocation and rename/rollback stay inside these domains. A
+    // workspace key alone cannot cover a nested alias's physical endpoint.
+    for root in [work.join("tasks"), work.join(".maru"), work.join("shared")] {
+        if root.is_dir() {
+            for entry in walkdir::WalkDir::new(&root).follow_links(true) {
+                let entry = entry
+                    .map_err(|err| format!("Cannot inspect web-action transaction paths: {err}"))?;
+                if entry.file_type().is_dir() || entry.path_is_symlink() {
+                    paths.push(entry.into_path());
+                }
+            }
+        }
+    }
+    let admission = PathTransactionRequest::new(paths)?
+        .require_parent(&work)?
+        .with_workspace_registry()?;
+    with_path_transactions(admission, |lease| {
+        web_actions_import_top_in_transaction(lease, work_path, logical_day, dry_run, top_lane_size)
+    })
+}
+
+pub(crate) fn web_actions_import_top_in_transaction(
+    lease: &PathTransactionLease,
+    work_path: String,
+    logical_day: String,
+    dry_run: Option<bool>,
+    top_lane_size: Option<usize>,
+) -> Result<TopImportOutcome, String> {
+    let work = normalize_existing_dir(&work_path)?;
+    let mut paths = vec![
+        work.clone(),
+        work.join("tasks"),
+        work.join(".maru"),
+        work.join("shared"),
+    ];
+    for root in [work.join("tasks"), work.join(".maru"), work.join("shared")] {
+        if root.is_dir() {
+            for entry in walkdir::WalkDir::new(&root).follow_links(true) {
+                let entry = entry
+                    .map_err(|err| format!("Cannot inspect web-action transaction paths: {err}"))?;
+                if entry.file_type().is_dir() || entry.path_is_symlink() {
+                    paths.push(entry.into_path());
+                }
+            }
+        }
+    }
+    lease.ensure_covered(paths)?;
+    lease.ensure_workspace_registry()?;
+    lease.before_effect()?;
     let dry_run = dry_run.unwrap_or(false);
     let lane_size = top_lane_size
         .unwrap_or(TOP_LANE_DEFAULT)
@@ -995,7 +1165,8 @@ pub fn web_actions_import_top(
 
     let next = plan_with_top(plan, &snapshot.revision, &wanted);
     // today_mutate takes the workspace lock, so this must not hold it.
-    match today_mutate(
+    match today_mutate_in_transaction(
+        lease,
         work_path,
         logical_day,
         snapshot.revision.clone(),
@@ -1017,7 +1188,6 @@ pub fn web_actions_import_top(
 
 /// Pending web-action receipts, for the sync panel's badge. Read-only:
 /// invalid receipts are reported, never rewritten.
-#[tauri::command(async)]
 pub fn web_actions_scan(work_path: String) -> Result<Vec<WebActionSummary>, String> {
     let work = normalize_existing_dir(&work_path)?;
     Ok(pending_receipt_files(&work)
@@ -1032,12 +1202,74 @@ pub fn web_actions_scan(work_path: String) -> Result<Vec<WebActionSummary>, Stri
 /// Apply pending web-action receipts. Explicit and local-only: it never
 /// stages, commits, or pushes — the pending -> applied move is a working-tree
 /// change that rides the user's normal Git Sync cadence.
-#[tauri::command(async)]
 pub fn web_actions_apply(
     work_path: String,
     now_iso: String,
     default_task_list_id: Option<String>,
 ) -> Result<WebActionsOutcome, String> {
+    let work = normalize_existing_dir(&work_path)?;
+    let lexical_work = if Path::new(&work_path).is_absolute() {
+        PathBuf::from(&work_path)
+    } else {
+        std::env::current_dir()
+            .map_err(|err| format!("Cannot resolve web-action cwd: {err}"))?
+            .join(&work_path)
+    };
+    let mut paths = vec![
+        work.clone(),
+        lexical_work,
+        work.join("tasks"),
+        work.join(".maru"),
+        work.join("shared"),
+    ];
+    // Dynamic allocation and rename/rollback stay inside these domains. A
+    // workspace key alone cannot cover a nested alias's physical endpoint.
+    for root in [work.join("tasks"), work.join(".maru"), work.join("shared")] {
+        if root.is_dir() {
+            for entry in walkdir::WalkDir::new(&root).follow_links(true) {
+                let entry = entry
+                    .map_err(|err| format!("Cannot inspect web-action transaction paths: {err}"))?;
+                if entry.file_type().is_dir() || entry.path_is_symlink() {
+                    paths.push(entry.into_path());
+                }
+            }
+        }
+    }
+    let admission = PathTransactionRequest::new(paths)?
+        .require_parent(&work)?
+        .with_workspace_registry()?;
+    with_path_transactions(admission, |lease| {
+        web_actions_apply_in_transaction(lease, work_path, now_iso, default_task_list_id)
+    })
+}
+
+pub(crate) fn web_actions_apply_in_transaction(
+    lease: &PathTransactionLease,
+    work_path: String,
+    now_iso: String,
+    default_task_list_id: Option<String>,
+) -> Result<WebActionsOutcome, String> {
+    let work = normalize_existing_dir(&work_path)?;
+    let mut paths = vec![
+        work.clone(),
+        work.join("tasks"),
+        work.join(".maru"),
+        work.join("shared"),
+    ];
+    for root in [work.join("tasks"), work.join(".maru"), work.join("shared")] {
+        if root.is_dir() {
+            for entry in walkdir::WalkDir::new(&root).follow_links(true) {
+                let entry = entry
+                    .map_err(|err| format!("Cannot inspect web-action transaction paths: {err}"))?;
+                if entry.file_type().is_dir() || entry.path_is_symlink() {
+                    paths.push(entry.into_path());
+                }
+            }
+        }
+    }
+    lease.ensure_covered(paths)?;
+    lease.ensure_workspace_registry()?;
+    lease.before_effect()?;
     assert_maru_can_write(&work_path, WorkspaceWriteAction::Modify)?;
     assert_maru_can_write(&work_path, WorkspaceWriteAction::RenameMove)?;
     DateTime::parse_from_rfc3339(&now_iso)
@@ -1056,6 +1288,7 @@ pub fn web_actions_apply(
         // Each receipt is applied independently: `task_transition` takes the
         // workspace lock itself, so this loop must never hold it.
         match apply_receipt(
+            lease,
             &work_path,
             &work,
             &receipt,
@@ -1088,10 +1321,98 @@ pub fn web_actions_apply(
     Ok(outcome)
 }
 
+/// IPC owns every argument; all filesystem/process work and admission waits
+/// stay on the finite blocking worker. Synchronous Rust callers share admission.
+pub mod ipc {
+    use super::*;
+    #[tauri::command]
+    pub async fn web_action_repair_task_list_linkage(
+        work_path: String,
+        record_id: String,
+        expected_record_revision: String,
+        expected_updated_at: String,
+        expected_web_action_id: String,
+        expected_task_path: String,
+        default_task_list_id: String,
+    ) -> Result<WebActionLinkageRepairOutcome, IpcError> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(
+                &[PathBuf::from(&work_path)],
+                "worker:web_action_repair_task_list_linkage",
+            );
+            super::web_action_repair_task_list_linkage(
+                work_path,
+                record_id,
+                expected_record_revision,
+                expected_updated_at,
+                expected_web_action_id,
+                expected_task_path,
+                default_task_list_id,
+            )
+        })
+        .await
+        .map_err(|err| {
+            IpcError::from(format!(
+                "web_action_repair_task_list_linkage_task_failed: {err}"
+            ))
+        })?
+    }
+    #[tauri::command]
+    pub async fn web_actions_import_top(
+        work_path: String,
+        logical_day: String,
+        dry_run: Option<bool>,
+        top_lane_size: Option<usize>,
+    ) -> Result<TopImportOutcome, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(
+                &[PathBuf::from(&work_path)],
+                "worker:web_actions_import_top",
+            );
+            super::web_actions_import_top(work_path, logical_day, dry_run, top_lane_size)
+        })
+        .await
+        .map_err(|err| format!("web_actions_import_top_task_failed: {err}"))?
+    }
+    #[tauri::command]
+    pub async fn web_actions_apply(
+        work_path: String,
+        now_iso: String,
+        default_task_list_id: Option<String>,
+    ) -> Result<WebActionsOutcome, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(
+                &[PathBuf::from(&work_path)],
+                "worker:web_actions_apply",
+            );
+            super::web_actions_apply(work_path, now_iso, default_task_list_id)
+        })
+        .await
+        .map_err(|err| format!("web_actions_apply_task_failed: {err}"))?
+    }
+    #[tauri::command]
+    pub async fn web_actions_scan(work_path: String) -> Result<Vec<WebActionSummary>, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(
+                &[PathBuf::from(&work_path)],
+                "worker:web_actions_scan",
+            );
+            super::web_actions_scan(work_path)
+        })
+        .await
+        .map_err(|err| format!("web_actions_scan_task_failed: {err}"))?
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::today_outbox::{list_records, OutboxOp, OutboxStatus};
+    use crate::today_outbox::{list_records, write_record, OutboxOp, OutboxStatus};
+    use crate::today_store::today_mutate;
 
     const NOW: &str = "2026-08-16T09:00:00+09:00";
     const ID: &str = "3f2504e0-4f89-41d3-9a0c-0305e82c3301";
@@ -1159,6 +1480,570 @@ mod tests {
             record.task_path.clone(),
             list.to_string(),
         )
+    }
+
+    #[test]
+    fn phase08_12_web_wrappers_preserve_real_payloads_typed_and_legacy_errors() {
+        use crate::atomic_file::phase08_06::{run, Home};
+        let _home = Home::new();
+        let (tmp, receipt) = setup(
+            "upsert",
+            "tasks/active/task.md",
+            "---\nstatus: active\n---\n# Synthetic task\n",
+        );
+        let w = work_path(&tmp);
+        let scan = run(ipc::web_actions_scan(w.clone())).unwrap();
+        assert_eq!(scan.len(), 1);
+        assert_eq!(scan[0].state, WebActionState::Pending);
+        let applied = run(ipc::web_actions_apply(
+            w.clone(),
+            NOW.into(),
+            Some("invalid-list".into()),
+        ))
+        .unwrap();
+        assert_eq!(applied.applied, 1);
+        assert!(!receipt.exists());
+        let mut record = list_records(tmp.path()).unwrap().pop().unwrap();
+        assert_eq!(record.payload.as_ref().unwrap().title, "Synthetic task");
+        record.status = OutboxStatus::AuthBlocked;
+        record.last_error = Some("Invalid task list".into());
+        write_record(tmp.path(), &record).unwrap();
+        let record = read_record(tmp.path(), &record.id).unwrap();
+        let repaired = run(ipc::web_action_repair_task_list_linkage(
+            w.clone(),
+            record.id.clone(),
+            record_revision(&record),
+            record.updated_at.clone(),
+            ID.into(),
+            record.task_path.clone(),
+            "synthetic-list".into(),
+        ))
+        .unwrap();
+        assert!(repaired.changed);
+        assert!(fs::read_to_string(tmp.path().join("tasks/active/task.md"))
+            .unwrap()
+            .contains("googleTaskListId: synthetic-list"));
+        let stale = run(ipc::web_action_repair_task_list_linkage(
+            w.clone(),
+            record.id.clone(),
+            record_revision(&record),
+            record.updated_at,
+            ID.into(),
+            record.task_path,
+            "synthetic-list".into(),
+        ))
+        .unwrap_err();
+        assert_eq!(stale.code, WEB_ACTION_REPAIR_CONFLICT);
+        assert!(run(ipc::web_actions_apply(w, "invalid-time".into(), None))
+            .unwrap_err()
+            .starts_with("now_iso must be RFC3339:"));
+
+        let tmp = setup_day(&["tasks/active/a.md"], &["tasks/active/b.md"], &[]);
+        web_rewrites_top(&tmp, &["tasks/active/b.md"]);
+        let outcome = run(ipc::web_actions_import_top(
+            work_path(&tmp),
+            DAY.into(),
+            None,
+            None,
+        ))
+        .unwrap();
+        assert!(outcome.changed);
+        assert_eq!(outcome.imported, 1);
+        assert_eq!(ids(&plan_of(&tmp).top), ["tasks/active/b.md"]);
+
+        let (tmp, _) = setup(
+            "complete",
+            "tasks/active/task.md",
+            "---\nstatus: done\ndone: 2026-08-16\n---\n# Completed synthetic task\n",
+        );
+        assert_eq!(
+            run(ipc::web_actions_apply(work_path(&tmp), NOW.into(), None))
+                .unwrap()
+                .applied,
+            1
+        );
+        assert!(tmp.path().join("tasks/archive/task.md").is_file());
+        assert!(list_records(tmp.path()).unwrap().is_empty());
+    }
+
+    #[test]
+    fn phase08_12_web_all_wrappers_yield_on_same_task_and_preserve_join_errors() {
+        use crate::atomic_file::phase08_06::{boundary, Home};
+        let _home = Home::new();
+        for op in [
+            "web_actions_scan",
+            "web_actions_apply",
+            "web_actions_import_top",
+            "web_action_repair_task_list_linkage",
+        ] {
+            let tmp = tempfile::tempdir().unwrap();
+            let w = work_path(&tmp);
+            boundary(tmp.path().to_path_buf(), op, async move {
+                match op {
+                    "web_actions_scan" => ipc::web_actions_scan(w).await.map(|_| ()),
+                    "web_actions_apply" => ipc::web_actions_apply(w, NOW.into(), None)
+                        .await
+                        .map(|_| ()),
+                    "web_actions_import_top" => {
+                        ipc::web_actions_import_top(w, DAY.into(), None, None)
+                            .await
+                            .map(|_| ())
+                    }
+                    _ => ipc::web_action_repair_task_list_linkage(
+                        w,
+                        "record".into(),
+                        "revision".into(),
+                        NOW.into(),
+                        ID.into(),
+                        "tasks/active/task.md".into(),
+                        "list".into(),
+                    )
+                    .await
+                    .map(|_| ())
+                    .map_err(|err| {
+                        assert!(err.code.is_empty());
+                        err.message
+                    }),
+                }
+            });
+        }
+    }
+
+    #[test]
+    fn phase08_12_web_same_target_contention_unwind_releases_before_domain_locks() {
+        use crate::atomic_file::{
+            phase08_06::{Held, Home},
+            PathTransactionTestHook,
+        };
+        use std::sync::{
+            atomic::{AtomicBool, Ordering},
+            mpsc,
+        };
+        use std::time::Duration;
+        let _home = Home::new();
+        for unwind in [false, true] {
+            for op in ["apply", "import", "repair"] {
+                let tmp = if op == "import" {
+                    let tmp = setup_day(&["tasks/active/a.md"], &["tasks/active/b.md"], &[]);
+                    web_rewrites_top(&tmp, &["tasks/active/b.md"]);
+                    tmp
+                } else {
+                    setup(
+                        "upsert",
+                        "tasks/active/task.md",
+                        "---\nstatus: active\n---\n# Synthetic\n",
+                    )
+                    .0
+                };
+                let record = (op == "repair").then(|| blocked_web_upsert(&tmp));
+                let root = tmp.path().canonicalize().unwrap();
+                let w = root.to_string_lossy().into_owned();
+                let start = |w: String, record: Option<crate::today_outbox::OutboxRecord>| {
+                    let (tx, rx) = mpsc::channel();
+                    tauri::async_runtime::spawn(async move {
+                        let result = match op {
+                            "apply" => ipc::web_actions_apply(w, NOW.into(), None)
+                                .await
+                                .map(|v| v.applied == 1)
+                                .map_err(IpcError::from),
+                            "import" => ipc::web_actions_import_top(w, DAY.into(), None, None)
+                                .await
+                                .map(|v| v.changed)
+                                .map_err(IpcError::from),
+                            _ => {
+                                let record = record.unwrap();
+                                ipc::web_action_repair_task_list_linkage(
+                                    w,
+                                    record.id.clone(),
+                                    record_revision(&record),
+                                    record.updated_at,
+                                    ID.into(),
+                                    record.task_path,
+                                    "synthetic-list".into(),
+                                )
+                                .await
+                                .map(|v| v.changed)
+                            }
+                        };
+                        tx.send(result).unwrap();
+                    });
+                    rx
+                };
+                let held = Held::new(root.clone(), "admitted");
+                let first = start(w.clone(), record.clone());
+                held.wait();
+                let waiting = Held::new(root.clone(), "before-admission");
+                let second = start(w, record);
+                waiting.wait();
+                waiting.release();
+                assert!(second.recv_timeout(Duration::from_millis(30)).is_err());
+                let once = AtomicBool::new(false);
+                let _injection = PathTransactionTestHook::new(root, "pre-effect", move || {
+                    if unwind && !once.swap(true, Ordering::SeqCst) {
+                        panic!("synthetic web-action failure before domain locks");
+                    }
+                });
+                held.release();
+                let first_result = first.recv_timeout(Duration::from_secs(5)).unwrap();
+                let second_result = second.recv_timeout(Duration::from_secs(5)).unwrap();
+                if unwind {
+                    let error = first_result.unwrap_err();
+                    assert!(error.code.is_empty());
+                    assert!(error.message.contains("_task_failed:"));
+                    assert!(second_result.unwrap());
+                } else {
+                    assert!(first_result.unwrap());
+                    if op == "repair" {
+                        assert_eq!(second_result.unwrap_err().code, WEB_ACTION_REPAIR_CONFLICT);
+                    } else {
+                        assert!(!second_result.unwrap());
+                    }
+                    if op == "apply" {
+                        assert_eq!(list_records(tmp.path()).unwrap().len(), 1);
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn phase08_12_web_mutations_serialize_real_document_saves_and_release_on_errors() {
+        use crate::atomic_file::phase08_06::{run, Held, Home};
+        use std::sync::mpsc;
+        use std::time::Duration;
+        let _home = Home::new();
+        for op in ["apply", "import", "repair"] {
+            let tmp = if op == "import" {
+                let tmp = setup_day(&["tasks/active/a.md"], &["tasks/active/b.md"], &[]);
+                web_rewrites_top(&tmp, &["tasks/active/b.md"]);
+                tmp
+            } else {
+                setup(
+                    if op == "apply" { "complete" } else { "upsert" },
+                    "tasks/active/task.md",
+                    "---\nstatus: active\n---\n# Synthetic\n",
+                )
+                .0
+            };
+            let record = (op == "repair").then(|| blocked_web_upsert(&tmp));
+            let root = tmp.path().canonicalize().unwrap();
+            let w = root.to_string_lossy().into_owned();
+            let rel = if op == "import" {
+                format!("tasks/daily/{DAY}.md")
+            } else {
+                "tasks/active/task.md".into()
+            };
+            let old = fs::read_to_string(root.join(&rel)).unwrap();
+            let held = Held::new(root.clone(), "admitted");
+            let (tx, rx) = mpsc::channel();
+            let first_w = w.clone();
+            tauri::async_runtime::spawn(async move {
+                let result = match op {
+                    "apply" => ipc::web_actions_apply(first_w, NOW.into(), None)
+                        .await
+                        .map(|v| v.applied == 1)
+                        .map_err(IpcError::from),
+                    "import" => ipc::web_actions_import_top(first_w, DAY.into(), None, None)
+                        .await
+                        .map(|v| v.changed)
+                        .map_err(IpcError::from),
+                    _ => {
+                        let record = record.unwrap();
+                        ipc::web_action_repair_task_list_linkage(
+                            first_w,
+                            record.id.clone(),
+                            record_revision(&record),
+                            record.updated_at,
+                            ID.into(),
+                            record.task_path,
+                            "synthetic-list".into(),
+                        )
+                        .await
+                        .map(|v| v.changed)
+                    }
+                };
+                tx.send(result).unwrap();
+            });
+            held.wait();
+            let waiting = Held::new(root.join(&rel), "before-admission");
+            let (tx, doc) = mpsc::channel();
+            let document_w = w.clone();
+            let document_rel = rel.clone();
+            tauri::async_runtime::spawn(async move {
+                tx.send(
+                    crate::document::ipc::save_document(
+                        document_w,
+                        document_rel,
+                        "# Racing document\n".into(),
+                        Some(revision_for(&old)),
+                    )
+                    .await,
+                )
+                .unwrap();
+            });
+            waiting.wait();
+            waiting.release();
+            assert!(doc.recv_timeout(Duration::from_millis(30)).is_err());
+            held.release();
+            assert!(rx.recv_timeout(Duration::from_secs(5)).unwrap().unwrap());
+            let error = doc
+                .recv_timeout(Duration::from_secs(5))
+                .unwrap()
+                .unwrap_err();
+            assert_eq!(error.code, crate::ipc_error::DOCUMENT_CONFLICT);
+            // A denied/stale document leaves admission available for the next
+            // real web operation; no hidden provider drain is involved.
+            assert!(run(ipc::web_actions_scan(w)).unwrap().is_empty());
+        }
+    }
+
+    #[test]
+    fn phase08_12_web_parent_files_rename_trash_both_orders_and_aliases() {
+        use crate::atomic_file::phase08_06::{Held, Home};
+        use crate::workspace_files::phase08_06::TrashFixture;
+        use std::{future::Future, pin::Pin, sync::mpsc, time::Duration};
+        let home = Home::new();
+        let start = |future: Pin<Box<dyn Future<Output = Result<(), IpcError>> + Send>>| {
+            let (tx, rx) = mpsc::channel();
+            tauri::async_runtime::spawn(async move {
+                tx.send(future.await).unwrap();
+            });
+            rx
+        };
+        for op in ["apply", "import", "repair"] {
+            // Both orders for both Files operations; alias selection alternates
+            // without duplicating the entire matrix. Trash is a captured,
+            // root-scoped synthetic move, never the native desktop Trash.
+            for (parent_op, parent_first, alias) in [
+                ("rename", true, false),
+                ("rename", false, true),
+                ("trash", true, true),
+                ("trash", false, false),
+            ] {
+                let tmp = if op == "import" {
+                    let tmp = setup_day(&["tasks/active/a.md"], &["tasks/active/b.md"], &[]);
+                    web_rewrites_top(&tmp, &["tasks/active/b.md"]);
+                    tmp
+                } else {
+                    setup(
+                        "upsert",
+                        "tasks/active/task.md",
+                        "---\nstatus: active\n---\n# Synthetic\n",
+                    )
+                    .0
+                };
+                let record = (op == "repair").then(|| blocked_web_upsert(&tmp));
+                let tag = format!("web-{op}-{parent_op}-{parent_first}");
+                let root = home.root.path().join(&tag);
+                fs::rename(tmp.path(), &root).unwrap();
+                let alias_path = home.root.path().join(format!("alias-{tag}"));
+                let alias = alias && cfg!(unix);
+                #[cfg(unix)]
+                if alias {
+                    std::os::unix::fs::symlink(&root, &alias_path).unwrap();
+                }
+                let w = if alias { &alias_path } else { &root }
+                    .to_string_lossy()
+                    .into_owned();
+                let destination = home.root.path().join(format!("moved-{tag}"));
+                let _trash = TrashFixture::new(root.clone(), destination.clone());
+                let owner = home.root.path().to_string_lossy().into_owned();
+                let source = root.to_string_lossy().into_owned();
+                let new_name = destination
+                    .file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .into_owned();
+                let parent: Pin<Box<dyn Future<Output = Result<(), IpcError>> + Send>> =
+                    Box::pin(async move {
+                        if parent_op == "rename" {
+                            crate::workspace_files::ipc::rename_workspace_entry(
+                                owner, source, new_name,
+                            )
+                            .await
+                            .map(|value| assert!(value.error.is_none()))
+                            .map_err(IpcError::from)
+                        } else {
+                            crate::workspace_files::ipc::trash_workspace_entries(
+                                owner,
+                                vec![source],
+                            )
+                            .await
+                            .map(|value| assert!(value[0].error.is_none()))
+                            .map_err(IpcError::from)
+                        }
+                    });
+                let child: Pin<Box<dyn Future<Output = Result<(), IpcError>> + Send>> =
+                    Box::pin(async move {
+                        match op {
+                            "apply" => ipc::web_actions_apply(w, NOW.into(), None)
+                                .await
+                                .map(|value| assert_eq!(value.applied, 1))
+                                .map_err(IpcError::from),
+                            "import" => ipc::web_actions_import_top(w, DAY.into(), None, None)
+                                .await
+                                .map(|value| assert!(value.changed))
+                                .map_err(IpcError::from),
+                            _ => {
+                                let record = record.unwrap();
+                                ipc::web_action_repair_task_list_linkage(
+                                    w,
+                                    record.id.clone(),
+                                    record_revision(&record),
+                                    record.updated_at,
+                                    ID.into(),
+                                    record.task_path,
+                                    "synthetic-list".into(),
+                                )
+                                .await
+                                .map(|value| assert!(value.changed))
+                            }
+                        }
+                    });
+                let (first, second) = if parent_first {
+                    (parent, child)
+                } else {
+                    (child, parent)
+                };
+                let held = Held::new(root.clone(), "admitted");
+                let first = start(first);
+                held.wait();
+                let waiting = Held::new(root.clone(), "before-admission");
+                let second = start(second);
+                waiting.wait();
+                waiting.release();
+                assert!(second.recv_timeout(Duration::from_millis(30)).is_err());
+                held.release();
+                first.recv_timeout(Duration::from_secs(5)).unwrap().unwrap();
+                let result = second.recv_timeout(Duration::from_secs(5)).unwrap();
+                if parent_first {
+                    let error = result.unwrap_err();
+                    assert!(
+                        error.message.contains("parent disappeared")
+                            || error.message.contains("alias changed"),
+                        "{error:?}"
+                    );
+                } else {
+                    result.unwrap();
+                    match op {
+                        "apply" => {
+                            assert_eq!(list_records(&destination).unwrap().len(), 1);
+                            assert!(ledger_has(&destination, ID));
+                            assert!(destination
+                                .join(APPLIED_ROOT)
+                                .join("2026-08")
+                                .join(format!("{ID}.yaml"))
+                                .is_file());
+                        }
+                        "import" => assert_eq!(
+                            ids(&load_snapshot(&destination, DAY).unwrap().plan.unwrap().top),
+                            ["tasks/active/b.md"]
+                        ),
+                        _ => assert!(fs::read_to_string(destination.join("tasks/active/task.md"))
+                            .unwrap()
+                            .contains("googleTaskListId: synthetic-list")),
+                    }
+                }
+                assert!(!root.exists(), "original workspace must not be recreated");
+                assert!(destination.join("tasks").is_dir());
+                #[cfg(unix)]
+                if alias {
+                    fs::remove_file(alias_path).unwrap();
+                }
+            }
+        }
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn phase08_12_web_current_policy_in_both_alias_directions_denies_and_releases() {
+        use crate::atomic_file::phase08_06::{run, Home};
+        use crate::scratchpad::phase08_08::registry;
+        let home = Home::new();
+        for op in ["apply", "import", "repair"] {
+            let tmp = if op == "import" {
+                let tmp = setup_day(&["tasks/active/a.md"], &["tasks/active/b.md"], &[]);
+                web_rewrites_top(&tmp, &["tasks/active/b.md"]);
+                tmp
+            } else {
+                setup(
+                    "upsert",
+                    "tasks/active/task.md",
+                    "---\nstatus: active\n---\n# Synthetic\n",
+                )
+                .0
+            };
+            let record = (op == "repair").then(|| blocked_web_upsert(&tmp));
+            let root = tmp.path().canonicalize().unwrap();
+            let alias = home.root.path().join(format!("alias-{op}"));
+            std::os::unix::fs::symlink(&root, &alias).unwrap();
+            for reverse in [false, true] {
+                let (registered, caller) = if reverse {
+                    (&alias, &root)
+                } else {
+                    (&root, &alias)
+                };
+                for policy in ["readOnly", "delegated"] {
+                    registry(registered, policy);
+                    let w = caller.to_string_lossy().into_owned();
+                    let record = record.clone();
+                    let result = run(async move {
+                        match op {
+                            "apply" => ipc::web_actions_apply(w, NOW.into(), None)
+                                .await
+                                .map(|_| ())
+                                .map_err(IpcError::from),
+                            "import" => ipc::web_actions_import_top(w, DAY.into(), None, None)
+                                .await
+                                .map(|_| ())
+                                .map_err(IpcError::from),
+                            _ => {
+                                let record = record.unwrap();
+                                ipc::web_action_repair_task_list_linkage(
+                                    w,
+                                    record.id.clone(),
+                                    record_revision(&record),
+                                    record.updated_at,
+                                    ID.into(),
+                                    record.task_path,
+                                    "synthetic-list".into(),
+                                )
+                                .await
+                                .map(|_| ())
+                            }
+                        }
+                    });
+                    let error = result.unwrap_err();
+                    assert!(error.code.is_empty());
+                    assert!(error.message.contains("writes are blocked"), "{error:?}");
+                }
+            }
+            registry(&root, "direct");
+            // The same mutation remains available after every rejection.
+            match op {
+                "apply" => assert_eq!(
+                    run(ipc::web_actions_apply(work_path(&tmp), NOW.into(), None))
+                        .unwrap()
+                        .applied,
+                    1
+                ),
+                "import" => assert!(
+                    run(ipc::web_actions_import_top(
+                        work_path(&tmp),
+                        DAY.into(),
+                        None,
+                        None
+                    ))
+                    .unwrap()
+                    .changed
+                ),
+                _ => assert!(
+                    repair(&tmp, &record.unwrap(), "synthetic-list")
+                        .unwrap()
+                        .changed
+                ),
+            }
+        }
     }
 
     // --- Validation ---------------------------------------------------------
