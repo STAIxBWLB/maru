@@ -20,7 +20,9 @@
 // scan_vault skips `.` directories, and a stale schema version triggers
 // migration via `ensure_maru_dir`.
 
-use crate::atomic_file::write_atomic;
+use crate::atomic_file::{
+    with_path_transactions, write_atomic, PathTransactionLease, PathTransactionRequest,
+};
 use crate::paths::{ensure_within, native_e2e_dir_override, require_absolute, NATIVE_E2E_HOME_VAR};
 use crate::vault::{parse_frontmatter, title_from_content};
 use chrono::Utc;
@@ -156,13 +158,33 @@ fn maruignore_path(work: &Path) -> PathBuf {
     work.join(".maruignore")
 }
 
+/// Shared admission for `.maru/` mutations. The `.maru` directory covers
+/// workspace.json plus every skeleton file `ensure_maru_dir` may create and
+/// `.maruignore` covers the `ensure_maruignore` write; the workspace-root
+/// parent is pinned so remove/recreate while waiting fails revalidation.
+fn maru_mutation_admission(
+    work: &Path,
+    extra: impl IntoIterator<Item = PathBuf>,
+) -> Result<PathTransactionRequest, String> {
+    let mut paths = vec![maru_path(work), maruignore_path(work)];
+    paths.extend(extra);
+    PathTransactionRequest::new(paths)?
+        .require_parent(work)?
+        .with_workspace_registry()
+}
+
 fn maru_home_dir() -> Result<PathBuf, String> {
     // Single exit through require_absolute (mirrors skill_host/fs.rs's
     // maru_home()), so a later early return cannot bypass the native-e2e
     // fail-closed guard without restructuring this exit (T-06-03).
+    #[cfg(test)]
+    let test_base = std::env::var_os("MARU_TEST_HOME").map(PathBuf::from);
+    #[cfg(not(test))]
+    let test_base: Option<PathBuf> = None;
     let base = match native_e2e_dir_override(NATIVE_E2E_HOME_VAR)? {
         Some(override_base) => override_base,
-        None => dirs::home_dir()
+        None => test_base
+            .or_else(dirs::home_dir)
             .ok_or_else(|| "Could not determine home directory for ~/.maru".to_string())?,
     };
     require_absolute(base.join(".maru"))
@@ -807,21 +829,34 @@ fn write_workspace(work: &Path, meta: &MaruWorkspaceMeta) -> Result<(), String> 
     }
 }
 
-#[tauri::command]
 pub fn read_maru_workspace(work_path: String) -> Result<MaruWorkspaceMeta, String> {
     let work = normalize_work_path(&work_path)?;
     ensure_maru_dir(&work)?;
     read_workspace_internal(&work)
 }
 
-#[tauri::command]
 pub fn update_maru_workspace(
     work_path: String,
     patch: MaruWorkspaceMetaPatch,
 ) -> Result<MaruWorkspaceMeta, String> {
     let work = normalize_work_path(&work_path)?;
-    ensure_maru_dir(&work)?;
-    let mut meta = read_workspace_internal(&work)?;
+    let admission = maru_mutation_admission(&work, [])?;
+    with_path_transactions(admission, |lease| {
+        lease.ensure_workspace_registry()?;
+        lease.ensure_covered([workspace_json_path(&work)])?;
+        lease.before_effect()?;
+        update_maru_workspace_in_transaction(&work, patch, lease)
+    })
+}
+
+fn update_maru_workspace_in_transaction(
+    work: &Path,
+    patch: MaruWorkspaceMetaPatch,
+    lease: &PathTransactionLease,
+) -> Result<MaruWorkspaceMeta, String> {
+    lease.ensure_covered([workspace_json_path(work)])?;
+    ensure_maru_dir(work)?;
+    let mut meta = read_workspace_internal(work)?;
     if let Some(value) = patch.paired_vault_path {
         meta.paired_vault_path = Some(value);
     }
@@ -835,7 +870,7 @@ pub fn update_maru_workspace(
         meta.last_active_mode = Some(value);
     }
     meta.updated_at = Utc::now().to_rfc3339();
-    write_workspace(&work, &meta)?;
+    write_workspace(work, &meta)?;
     Ok(meta)
 }
 
@@ -859,11 +894,16 @@ pub fn set_owner_name(work: &Path, owner: Option<String>) -> Result<(), String> 
     write_workspace(work, &meta)
 }
 
-#[tauri::command]
 pub fn bootstrap_maru_dir(work_path: String) -> Result<MaruWorkspaceMeta, String> {
     let work = normalize_work_path(&work_path)?;
-    ensure_maru_dir(&work)?;
-    read_workspace_internal(&work)
+    let admission = maru_mutation_admission(&work, [])?;
+    with_path_transactions(admission, |lease| {
+        lease.ensure_workspace_registry()?;
+        lease.ensure_covered([workspace_json_path(&work), maruignore_path(&work)])?;
+        lease.before_effect()?;
+        ensure_maru_dir(&work)?;
+        read_workspace_internal(&work)
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -986,7 +1026,6 @@ fn ignore_document(work: &Path) -> Result<MaruIgnoreDocument, String> {
     })
 }
 
-#[tauri::command]
 pub fn read_maru_ignore(work_path: String) -> Result<MaruIgnoreDocument, String> {
     let work = normalize_work_path(&work_path)?;
     ignore_document(&work)
@@ -995,12 +1034,26 @@ pub fn read_maru_ignore(work_path: String) -> Result<MaruIgnoreDocument, String>
 /// Rewrite `.maruignore` from the list the settings UI holds. Comments are
 /// replaced by a single header: the file is a managed list now, and keeping
 /// stale comments attached to deleted patterns is worse than losing them.
-#[tauri::command]
 pub fn save_maru_ignore(
     work_path: String,
     patterns: Vec<String>,
 ) -> Result<MaruIgnoreDocument, String> {
     let work = normalize_work_path(&work_path)?;
+    let admission = PathTransactionRequest::new([maruignore_path(&work)])?
+        .require_parent(&work)?
+        .with_workspace_registry()?;
+    with_path_transactions(admission, |lease| {
+        lease.ensure_workspace_registry()?;
+        lease.ensure_covered([maruignore_path(&work)])?;
+        lease.before_effect()?;
+        save_maru_ignore_in_transaction(&work, patterns)
+    })
+}
+
+fn save_maru_ignore_in_transaction(
+    work: &Path,
+    patterns: Vec<String>,
+) -> Result<MaruIgnoreDocument, String> {
     let mut seen = BTreeSet::new();
     let mut lines = vec!["# maru: files hidden from the document list".to_string()];
     for pattern in patterns {
@@ -1014,15 +1067,14 @@ pub fn save_maru_ignore(
     }
     let mut content = lines.join("\n");
     content.push('\n');
-    write_atomic(&maruignore_path(&work), content.as_bytes())
+    write_atomic(&maruignore_path(work), content.as_bytes())
         .map_err(|err| format!("Cannot write .maruignore: {err}"))?;
     // Put the app-managed defaults back: the UI never offers them for
     // deletion, and losing them here would silently unhide node_modules.
-    ensure_maruignore(&work)?;
-    ignore_document(&work)
+    ensure_maruignore(work)?;
+    ignore_document(work)
 }
 
-#[tauri::command]
 pub fn list_maru_rules(work_path: String) -> Result<Vec<RuleEntry>, String> {
     let work = normalize_work_path(&work_path)?;
     ensure_maru_dir(&work)?;
@@ -1045,7 +1097,6 @@ pub fn list_maru_rules(work_path: String) -> Result<Vec<RuleEntry>, String> {
     Ok(entries)
 }
 
-#[tauri::command]
 pub fn read_maru_rule(work_path: String, name: String) -> Result<RuleDocument, String> {
     let work = normalize_work_path(&work_path)?;
     ensure_maru_dir(&work)?;
@@ -1073,28 +1124,38 @@ pub fn read_maru_rule(work_path: String, name: String) -> Result<RuleDocument, S
     })
 }
 
-#[tauri::command]
 pub fn save_maru_rule(
     work_path: String,
     name: String,
     content: String,
 ) -> Result<RuleEntry, String> {
     let work = normalize_work_path(&work_path)?;
-    ensure_maru_dir(&work)?;
-    let path = rule_path(&work, &name)?;
-    fs::write(&path, content).map_err(|err| format!("Cannot save rule {name}: {err}"))?;
-    Ok(rule_entry_from_path(&path, name))
+    let admission = maru_mutation_admission(&work, [])?;
+    with_path_transactions(admission, |lease| {
+        lease.ensure_workspace_registry()?;
+        lease.before_effect()?;
+        ensure_maru_dir(&work)?;
+        let path = rule_path(&work, &name)?;
+        lease.ensure_covered([path.clone()])?;
+        fs::write(&path, content).map_err(|err| format!("Cannot save rule {name}: {err}"))?;
+        Ok(rule_entry_from_path(&path, name))
+    })
 }
 
-#[tauri::command]
 pub fn delete_maru_rule(work_path: String, name: String) -> Result<(), String> {
     let work = normalize_work_path(&work_path)?;
-    ensure_maru_dir(&work)?;
-    let path = rule_path(&work, &name)?;
-    if path.exists() {
-        fs::remove_file(&path).map_err(|err| format!("Cannot delete rule: {err}"))?;
-    }
-    Ok(())
+    let admission = maru_mutation_admission(&work, [])?;
+    with_path_transactions(admission, |lease| {
+        lease.ensure_workspace_registry()?;
+        lease.before_effect()?;
+        ensure_maru_dir(&work)?;
+        let path = rule_path(&work, &name)?;
+        lease.ensure_covered([path.clone()])?;
+        if path.exists() {
+            fs::remove_file(&path).map_err(|err| format!("Cannot delete rule: {err}"))?;
+        }
+        Ok(())
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -1144,7 +1205,6 @@ fn template_entry_from_path(path: &Path, name: String) -> TemplateEntry {
     }
 }
 
-#[tauri::command]
 pub fn list_maru_templates(work_path: String) -> Result<Vec<TemplateEntry>, String> {
     let work = normalize_work_path(&work_path)?;
     ensure_maru_dir(&work)?;
@@ -1167,7 +1227,6 @@ pub fn list_maru_templates(work_path: String) -> Result<Vec<TemplateEntry>, Stri
     Ok(entries)
 }
 
-#[tauri::command]
 pub fn read_maru_template(work_path: String, name: String) -> Result<String, String> {
     let work = normalize_work_path(&work_path)?;
     ensure_maru_dir(&work)?;
@@ -1175,56 +1234,68 @@ pub fn read_maru_template(work_path: String, name: String) -> Result<String, Str
     fs::read_to_string(&path).map_err(|err| format!("Cannot read template {name}: {err}"))
 }
 
-#[tauri::command]
 pub fn save_maru_template(
     work_path: String,
     name: String,
     content: String,
 ) -> Result<TemplateEntry, String> {
     let work = normalize_work_path(&work_path)?;
-    ensure_maru_dir(&work)?;
-    let path = template_path(&work, &name)?;
-    fs::write(&path, content).map_err(|err| format!("Cannot save template {name}: {err}"))?;
-    Ok(template_entry_from_path(&path, name))
+    let admission = maru_mutation_admission(&work, [])?;
+    with_path_transactions(admission, |lease| {
+        lease.ensure_workspace_registry()?;
+        lease.before_effect()?;
+        ensure_maru_dir(&work)?;
+        let path = template_path(&work, &name)?;
+        lease.ensure_covered([path.clone()])?;
+        fs::write(&path, content).map_err(|err| format!("Cannot save template {name}: {err}"))?;
+        Ok(template_entry_from_path(&path, name))
+    })
 }
 
-#[tauri::command]
 pub fn delete_maru_template(work_path: String, name: String) -> Result<(), String> {
     let work = normalize_work_path(&work_path)?;
-    ensure_maru_dir(&work)?;
-    let path = template_path(&work, &name)?;
-    if path.exists() {
-        fs::remove_file(&path).map_err(|err| format!("Cannot delete template: {err}"))?;
-    }
-    Ok(())
+    let admission = maru_mutation_admission(&work, [])?;
+    with_path_transactions(admission, |lease| {
+        lease.ensure_workspace_registry()?;
+        lease.before_effect()?;
+        ensure_maru_dir(&work)?;
+        let path = template_path(&work, &name)?;
+        lease.ensure_covered([path.clone()])?;
+        if path.exists() {
+            fs::remove_file(&path).map_err(|err| format!("Cannot delete template: {err}"))?;
+        }
+        Ok(())
+    })
 }
 
 // ---------------------------------------------------------------------------
 // MCP / Projects / Skills (raw JSON documents)
 // ---------------------------------------------------------------------------
 
-#[tauri::command]
 pub fn read_maru_mcp(work_path: String) -> Result<JsonValue, String> {
     let work = normalize_work_path(&work_path)?;
     ensure_maru_dir(&work)?;
     read_json(&mcp_json_path(&work))
 }
 
-#[tauri::command]
 pub fn save_maru_mcp(work_path: String, value: JsonValue) -> Result<(), String> {
     let work = normalize_work_path(&work_path)?;
-    ensure_maru_dir(&work)?;
-    write_json_pretty(&mcp_json_path(&work), &value)
+    let admission = maru_mutation_admission(&work, [])?;
+    with_path_transactions(admission, |lease| {
+        lease.ensure_workspace_registry()?;
+        lease.ensure_covered([mcp_json_path(&work)])?;
+        lease.before_effect()?;
+        ensure_maru_dir(&work)?;
+        write_json_pretty(&mcp_json_path(&work), &value)
+    })
 }
 
-#[tauri::command]
 pub fn read_maru_projects(work_path: String) -> Result<JsonValue, String> {
     let work = normalize_work_path(&work_path)?;
     ensure_maru_dir(&work)?;
     read_json(&projects_json_path(&work))
 }
 
-#[tauri::command]
 pub fn list_workspace_projects(
     work_path: String,
     include_inactive: Option<bool>,
@@ -1266,11 +1337,16 @@ pub(crate) fn workspace_project_entries(
     Ok(entries)
 }
 
-#[tauri::command]
 pub fn save_maru_projects(work_path: String, value: JsonValue) -> Result<(), String> {
     let work = normalize_work_path(&work_path)?;
-    ensure_maru_dir(&work)?;
-    write_json_pretty(&projects_json_path(&work), &value)
+    let admission = maru_mutation_admission(&work, [])?;
+    with_path_transactions(admission, |lease| {
+        lease.ensure_workspace_registry()?;
+        lease.ensure_covered([projects_json_path(&work)])?;
+        lease.before_effect()?;
+        ensure_maru_dir(&work)?;
+        write_json_pretty(&projects_json_path(&work), &value)
+    })
 }
 
 fn collect_project_picker_entries_json(
@@ -1400,21 +1476,27 @@ fn yaml_key_string<'a>(map: &'a serde_yaml::Mapping, key: &str) -> Option<&'a st
         .and_then(serde_yaml::Value::as_str)
 }
 
-#[tauri::command]
 pub fn read_maru_skills(work_path: String) -> Result<JsonValue, String> {
     let work = normalize_work_path(&work_path)?;
     ensure_maru_dir(&work)?;
     read_json(&skills_json_path(&work))
 }
 
-#[tauri::command]
 pub fn read_maru_settings(work_path: String) -> Result<JsonValue, String> {
     let work = normalize_work_path(&work_path)?;
     let global_path = global_settings_json_path()?;
-    read_maru_settings_internal(&work, &global_path)
+    // The read can run the one-shot legacy migration, which writes the
+    // global and workspace-state settings files, so it admits the same set
+    // as save_maru_settings before any effect.
+    let admission = maru_mutation_admission(&work, [global_path.clone()])?;
+    with_path_transactions(admission, |lease| {
+        lease.ensure_workspace_registry()?;
+        lease.ensure_covered([global_path.clone(), workspace_state_json_path(&work)])?;
+        lease.before_effect()?;
+        read_maru_settings_internal(&work, &global_path)
+    })
 }
 
-#[tauri::command]
 pub fn save_maru_settings(
     work_path: String,
     value: JsonValue,
@@ -1422,7 +1504,337 @@ pub fn save_maru_settings(
 ) -> Result<MaruSettingsSaveOutcome, String> {
     let work = normalize_work_path(&work_path)?;
     let global_path = global_settings_json_path()?;
-    save_maru_settings_internal_with_base(&work, &global_path, value, base_value)
+    let admission = maru_mutation_admission(&work, [global_path.clone()])?;
+    with_path_transactions(admission, |lease| {
+        lease.ensure_workspace_registry()?;
+        lease.ensure_covered([global_path.clone(), workspace_state_json_path(&work)])?;
+        lease.before_effect()?;
+        save_maru_settings_in_transaction(&work, &global_path, value, base_value, lease)
+    })
+}
+
+fn save_maru_settings_in_transaction(
+    work: &Path,
+    global_path: &Path,
+    value: JsonValue,
+    base_value: Option<JsonValue>,
+    lease: &PathTransactionLease,
+) -> Result<MaruSettingsSaveOutcome, String> {
+    lease.ensure_covered([global_path.to_path_buf(), workspace_state_json_path(work)])?;
+    save_maru_settings_internal_with_base(work, global_path, value, base_value)
+}
+
+// ---------------------------------------------------------------------------
+// Owned IPC boundaries
+// ---------------------------------------------------------------------------
+
+/// Owned IPC boundaries; the synchronous entry points remain available to
+/// Rust callers.
+pub mod ipc {
+    use super::*;
+
+    #[tauri::command]
+    pub async fn read_maru_workspace(work_path: String) -> Result<MaruWorkspaceMeta, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(
+                &[PathBuf::from(&work_path)],
+                "worker:read_maru_workspace",
+            );
+            super::read_maru_workspace(work_path)
+        })
+        .await
+        .map_err(|err| format!("read_maru_workspace_task_failed: {err}"))?
+    }
+
+    #[tauri::command]
+    pub async fn update_maru_workspace(
+        work_path: String,
+        patch: MaruWorkspaceMetaPatch,
+    ) -> Result<MaruWorkspaceMeta, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(
+                &[PathBuf::from(&work_path)],
+                "worker:update_maru_workspace",
+            );
+            super::update_maru_workspace(work_path, patch)
+        })
+        .await
+        .map_err(|err| format!("update_maru_workspace_task_failed: {err}"))?
+    }
+
+    #[tauri::command]
+    pub async fn bootstrap_maru_dir(work_path: String) -> Result<MaruWorkspaceMeta, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(
+                &[PathBuf::from(&work_path)],
+                "worker:bootstrap_maru_dir",
+            );
+            super::bootstrap_maru_dir(work_path)
+        })
+        .await
+        .map_err(|err| format!("bootstrap_maru_dir_task_failed: {err}"))?
+    }
+
+    #[tauri::command]
+    pub async fn read_maru_ignore(work_path: String) -> Result<MaruIgnoreDocument, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(
+                &[PathBuf::from(&work_path)],
+                "worker:read_maru_ignore",
+            );
+            super::read_maru_ignore(work_path)
+        })
+        .await
+        .map_err(|err| format!("read_maru_ignore_task_failed: {err}"))?
+    }
+
+    #[tauri::command]
+    pub async fn save_maru_ignore(
+        work_path: String,
+        patterns: Vec<String>,
+    ) -> Result<MaruIgnoreDocument, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(
+                &[PathBuf::from(&work_path)],
+                "worker:save_maru_ignore",
+            );
+            super::save_maru_ignore(work_path, patterns)
+        })
+        .await
+        .map_err(|err| format!("save_maru_ignore_task_failed: {err}"))?
+    }
+
+    #[tauri::command]
+    pub async fn list_maru_rules(work_path: String) -> Result<Vec<RuleEntry>, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(
+                &[PathBuf::from(&work_path)],
+                "worker:list_maru_rules",
+            );
+            super::list_maru_rules(work_path)
+        })
+        .await
+        .map_err(|err| format!("list_maru_rules_task_failed: {err}"))?
+    }
+
+    #[tauri::command]
+    pub async fn read_maru_rule(work_path: String, name: String) -> Result<RuleDocument, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(&[PathBuf::from(&work_path)], "worker:read_maru_rule");
+            super::read_maru_rule(work_path, name)
+        })
+        .await
+        .map_err(|err| format!("read_maru_rule_task_failed: {err}"))?
+    }
+
+    #[tauri::command]
+    pub async fn save_maru_rule(
+        work_path: String,
+        name: String,
+        content: String,
+    ) -> Result<RuleEntry, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(&[PathBuf::from(&work_path)], "worker:save_maru_rule");
+            super::save_maru_rule(work_path, name, content)
+        })
+        .await
+        .map_err(|err| format!("save_maru_rule_task_failed: {err}"))?
+    }
+
+    #[tauri::command]
+    pub async fn delete_maru_rule(work_path: String, name: String) -> Result<(), String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(
+                &[PathBuf::from(&work_path)],
+                "worker:delete_maru_rule",
+            );
+            super::delete_maru_rule(work_path, name)
+        })
+        .await
+        .map_err(|err| format!("delete_maru_rule_task_failed: {err}"))?
+    }
+
+    #[tauri::command]
+    pub async fn list_maru_templates(work_path: String) -> Result<Vec<TemplateEntry>, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(
+                &[PathBuf::from(&work_path)],
+                "worker:list_maru_templates",
+            );
+            super::list_maru_templates(work_path)
+        })
+        .await
+        .map_err(|err| format!("list_maru_templates_task_failed: {err}"))?
+    }
+
+    #[tauri::command]
+    pub async fn read_maru_template(work_path: String, name: String) -> Result<String, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(
+                &[PathBuf::from(&work_path)],
+                "worker:read_maru_template",
+            );
+            super::read_maru_template(work_path, name)
+        })
+        .await
+        .map_err(|err| format!("read_maru_template_task_failed: {err}"))?
+    }
+
+    #[tauri::command]
+    pub async fn save_maru_template(
+        work_path: String,
+        name: String,
+        content: String,
+    ) -> Result<TemplateEntry, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(
+                &[PathBuf::from(&work_path)],
+                "worker:save_maru_template",
+            );
+            super::save_maru_template(work_path, name, content)
+        })
+        .await
+        .map_err(|err| format!("save_maru_template_task_failed: {err}"))?
+    }
+
+    #[tauri::command]
+    pub async fn delete_maru_template(work_path: String, name: String) -> Result<(), String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(
+                &[PathBuf::from(&work_path)],
+                "worker:delete_maru_template",
+            );
+            super::delete_maru_template(work_path, name)
+        })
+        .await
+        .map_err(|err| format!("delete_maru_template_task_failed: {err}"))?
+    }
+
+    #[tauri::command]
+    pub async fn read_maru_mcp(work_path: String) -> Result<JsonValue, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(&[PathBuf::from(&work_path)], "worker:read_maru_mcp");
+            super::read_maru_mcp(work_path)
+        })
+        .await
+        .map_err(|err| format!("read_maru_mcp_task_failed: {err}"))?
+    }
+
+    #[tauri::command]
+    pub async fn save_maru_mcp(work_path: String, value: JsonValue) -> Result<(), String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(&[PathBuf::from(&work_path)], "worker:save_maru_mcp");
+            super::save_maru_mcp(work_path, value)
+        })
+        .await
+        .map_err(|err| format!("save_maru_mcp_task_failed: {err}"))?
+    }
+
+    #[tauri::command]
+    pub async fn read_maru_projects(work_path: String) -> Result<JsonValue, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(
+                &[PathBuf::from(&work_path)],
+                "worker:read_maru_projects",
+            );
+            super::read_maru_projects(work_path)
+        })
+        .await
+        .map_err(|err| format!("read_maru_projects_task_failed: {err}"))?
+    }
+
+    #[tauri::command]
+    pub async fn list_workspace_projects(
+        work_path: String,
+        include_inactive: Option<bool>,
+    ) -> Result<Vec<ProjectPickerEntry>, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(
+                &[PathBuf::from(&work_path)],
+                "worker:list_workspace_projects",
+            );
+            super::list_workspace_projects(work_path, include_inactive)
+        })
+        .await
+        .map_err(|err| format!("list_workspace_projects_task_failed: {err}"))?
+    }
+
+    #[tauri::command]
+    pub async fn save_maru_projects(work_path: String, value: JsonValue) -> Result<(), String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(
+                &[PathBuf::from(&work_path)],
+                "worker:save_maru_projects",
+            );
+            super::save_maru_projects(work_path, value)
+        })
+        .await
+        .map_err(|err| format!("save_maru_projects_task_failed: {err}"))?
+    }
+
+    #[tauri::command]
+    pub async fn read_maru_skills(work_path: String) -> Result<JsonValue, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(
+                &[PathBuf::from(&work_path)],
+                "worker:read_maru_skills",
+            );
+            super::read_maru_skills(work_path)
+        })
+        .await
+        .map_err(|err| format!("read_maru_skills_task_failed: {err}"))?
+    }
+
+    #[tauri::command]
+    pub async fn read_maru_settings(work_path: String) -> Result<JsonValue, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(
+                &[PathBuf::from(&work_path)],
+                "worker:read_maru_settings",
+            );
+            super::read_maru_settings(work_path)
+        })
+        .await
+        .map_err(|err| format!("read_maru_settings_task_failed: {err}"))?
+    }
+
+    #[tauri::command]
+    pub async fn save_maru_settings(
+        work_path: String,
+        value: JsonValue,
+        base_value: Option<JsonValue>,
+    ) -> Result<MaruSettingsSaveOutcome, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(
+                &[PathBuf::from(&work_path)],
+                "worker:save_maru_settings",
+            );
+            super::save_maru_settings(work_path, value, base_value)
+        })
+        .await
+        .map_err(|err| format!("save_maru_settings_task_failed: {err}"))?
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -2130,5 +2542,530 @@ mod tests {
         let work = tmp.path().to_string_lossy().to_string();
         let result = save_maru_rule(work, "../escape".to_string(), "x".to_string());
         assert!(result.is_err());
+    }
+}
+
+#[cfg(test)]
+mod phase08_22 {
+    use super::*;
+    use crate::atomic_file::phase08_06::{boundary, run, Held, Home};
+    use std::sync::mpsc::Receiver;
+    use std::time::Duration;
+
+    fn text(path: &Path) -> String {
+        path.to_string_lossy().into_owned()
+    }
+
+    fn work_fixture(home: &Home, name: &str) -> PathBuf {
+        let root = home.root.path().join(name);
+        fs::create_dir_all(&root).unwrap();
+        root
+    }
+
+    fn start<F, T>(future: F) -> Receiver<T>
+    where
+        F: std::future::Future<Output = T> + Send + 'static,
+        T: Send + 'static,
+    {
+        let (tx, rx) = std::sync::mpsc::channel();
+        tauri::async_runtime::spawn(async move {
+            let _ = tx.send(future.await);
+        });
+        rx
+    }
+
+    fn done<T>(rx: Receiver<T>) -> T {
+        rx.recv_timeout(Duration::from_secs(10))
+            .expect("fixture completion")
+    }
+
+    #[test]
+    fn phase08_22_each_wrapper_yields_same_poll_and_maps_join_failure() {
+        let home = Home::new();
+        let work_path = work_fixture(&home, "boundary");
+        let work = text(&work_path);
+        boundary(
+            work_path.clone().into(),
+            "read_maru_workspace",
+            ipc::read_maru_workspace(work.clone()),
+        );
+        boundary(
+            work_path.clone().into(),
+            "update_maru_workspace",
+            ipc::update_maru_workspace(work.clone(), MaruWorkspaceMetaPatch::default()),
+        );
+        boundary(
+            work_path.clone().into(),
+            "bootstrap_maru_dir",
+            ipc::bootstrap_maru_dir(work.clone()),
+        );
+        boundary(
+            work_path.clone().into(),
+            "read_maru_ignore",
+            ipc::read_maru_ignore(work.clone()),
+        );
+        boundary(
+            work_path.clone().into(),
+            "save_maru_ignore",
+            ipc::save_maru_ignore(work.clone(), vec!["*.tmp".to_string()]),
+        );
+        boundary(
+            work_path.clone().into(),
+            "list_maru_rules",
+            ipc::list_maru_rules(work.clone()),
+        );
+        boundary(
+            work_path.clone().into(),
+            "read_maru_rule",
+            ipc::read_maru_rule(work.clone(), "demo".to_string()),
+        );
+        boundary(
+            work_path.clone().into(),
+            "save_maru_rule",
+            ipc::save_maru_rule(work.clone(), "demo".to_string(), "body".to_string()),
+        );
+        boundary(
+            work_path.clone().into(),
+            "delete_maru_rule",
+            ipc::delete_maru_rule(work.clone(), "demo".to_string()),
+        );
+        boundary(
+            work_path.clone().into(),
+            "list_maru_templates",
+            ipc::list_maru_templates(work.clone()),
+        );
+        boundary(
+            work_path.clone().into(),
+            "read_maru_template",
+            ipc::read_maru_template(work.clone(), "demo".to_string()),
+        );
+        boundary(
+            work_path.clone().into(),
+            "save_maru_template",
+            ipc::save_maru_template(work.clone(), "demo".to_string(), "body".to_string()),
+        );
+        boundary(
+            work_path.clone().into(),
+            "delete_maru_template",
+            ipc::delete_maru_template(work.clone(), "demo".to_string()),
+        );
+        boundary(
+            work_path.clone().into(),
+            "read_maru_mcp",
+            ipc::read_maru_mcp(work.clone()),
+        );
+        boundary(
+            work_path.clone().into(),
+            "save_maru_mcp",
+            ipc::save_maru_mcp(work.clone(), json!({ "version": 1, "servers": {} })),
+        );
+        boundary(
+            work_path.clone().into(),
+            "read_maru_projects",
+            ipc::read_maru_projects(work.clone()),
+        );
+        boundary(
+            work_path.clone().into(),
+            "list_workspace_projects",
+            ipc::list_workspace_projects(work.clone(), None),
+        );
+        boundary(
+            work_path.clone().into(),
+            "save_maru_projects",
+            ipc::save_maru_projects(work.clone(), json!({ "version": 1, "categories": [] })),
+        );
+        boundary(
+            work_path.clone().into(),
+            "read_maru_skills",
+            ipc::read_maru_skills(work.clone()),
+        );
+        boundary(
+            work_path.clone().into(),
+            "read_maru_settings",
+            ipc::read_maru_settings(work.clone()),
+        );
+        boundary(
+            work_path.clone().into(),
+            "save_maru_settings",
+            ipc::save_maru_settings(work.clone(), json!({ "version": 1 }), None),
+        );
+    }
+
+    #[test]
+    fn phase08_22_real_fixture_results_and_legacy_rejections() {
+        let home = Home::new();
+        let work_path = work_fixture(&home, "fixture");
+        let work = text(&work_path);
+
+        let bootstrapped = run(ipc::bootstrap_maru_dir(work.clone())).unwrap();
+        assert_eq!(bootstrapped.version, SCHEMA_VERSION);
+
+        let updated = run(ipc::update_maru_workspace(
+            work.clone(),
+            MaruWorkspaceMetaPatch {
+                owner_name: Some("이영준".to_string()),
+                last_active_mode: Some("system".to_string()),
+                ..Default::default()
+            },
+        ))
+        .unwrap();
+        assert_eq!(updated.owner_name.as_deref(), Some("이영준"));
+        let meta = run(ipc::read_maru_workspace(work.clone())).unwrap();
+        assert_eq!(meta.last_active_mode.as_deref(), Some("system"));
+
+        let saved_rule = run(ipc::save_maru_rule(
+            work.clone(),
+            "demo".to_string(),
+            "---\nenabled: true\n---\n# Fixture Rule\n".to_string(),
+        ))
+        .unwrap();
+        assert_eq!(saved_rule.name, "demo");
+        assert_eq!(saved_rule.title, "Fixture Rule");
+        let rules = run(ipc::list_maru_rules(work.clone())).unwrap();
+        assert_eq!(rules.len(), 1);
+        let rule_doc = run(ipc::read_maru_rule(work.clone(), "demo".to_string())).unwrap();
+        assert!(rule_doc.content.contains("Fixture Rule"));
+        run(ipc::delete_maru_rule(work.clone(), "demo".to_string())).unwrap();
+        assert!(run(ipc::list_maru_rules(work.clone())).unwrap().is_empty());
+
+        let ignored = run(ipc::read_maru_ignore(work.clone())).unwrap();
+        assert!(ignored.builtin.contains(&"node_modules".to_string()));
+        let saved_ignore = run(ipc::save_maru_ignore(
+            work.clone(),
+            vec!["drafts".to_string()],
+        ))
+        .unwrap();
+        assert_eq!(saved_ignore.patterns, vec!["drafts".to_string()]);
+
+        let saved_template = run(ipc::save_maru_template(
+            work.clone(),
+            "memo".to_string(),
+            "# Memo Template\n".to_string(),
+        ))
+        .unwrap();
+        assert_eq!(saved_template.title, "Memo Template");
+        assert_eq!(
+            run(ipc::list_maru_templates(work.clone())).unwrap().len(),
+            1
+        );
+        let template_body = run(ipc::read_maru_template(work.clone(), "memo".to_string())).unwrap();
+        assert_eq!(template_body, "# Memo Template\n");
+        run(ipc::delete_maru_template(work.clone(), "memo".to_string())).unwrap();
+
+        run(ipc::save_maru_mcp(
+            work.clone(),
+            json!({ "version": 1, "servers": { "fixture": { "command": "node" } } }),
+        ))
+        .unwrap();
+        let mcp = run(ipc::read_maru_mcp(work.clone())).unwrap();
+        assert!(mcp.pointer("/servers/fixture").is_some());
+
+        run(ipc::save_maru_projects(
+            work.clone(),
+            json!({
+                "version": 1,
+                "categories": [{
+                    "id": "p1",
+                    "name": "Fixture Project",
+                    "path": "projects/p1",
+                    "status": "active"
+                }]
+            }),
+        ))
+        .unwrap();
+        let projects = run(ipc::read_maru_projects(work.clone())).unwrap();
+        assert!(projects.pointer("/categories/0/id").is_some());
+        let picker = run(ipc::list_workspace_projects(work.clone(), None)).unwrap();
+        assert_eq!(picker.len(), 1);
+        assert_eq!(picker[0].name, "Fixture Project");
+
+        let skills = run(ipc::read_maru_skills(work.clone())).unwrap();
+        assert_eq!(skills.pointer("/skills"), Some(&json!([])));
+
+        let settings = run(ipc::read_maru_settings(work.clone())).unwrap();
+        assert_eq!(
+            settings
+                .pointer("/ui/documentBrowserMode")
+                .and_then(JsonValue::as_str),
+            Some("tree")
+        );
+        let outcome = run(ipc::save_maru_settings(
+            work.clone(),
+            json!({ "version": 1, "ui": { "themeMode": "dark" } }),
+            None,
+        ))
+        .unwrap();
+        assert!(outcome.global_changed);
+        let reloaded = run(ipc::read_maru_settings(work.clone())).unwrap();
+        assert_eq!(
+            reloaded
+                .pointer("/ui/themeMode")
+                .and_then(JsonValue::as_str),
+            Some("dark")
+        );
+
+        // Unchanged rejections: missing work path, path-traversal names and
+        // missing documents surface the same legacy error strings.
+        let missing = text(&home.root.path().join("missing"));
+        assert!(run(ipc::read_maru_workspace(missing.clone()))
+            .unwrap_err()
+            .contains("Work path does not exist"));
+        assert!(run(ipc::update_maru_workspace(
+            missing,
+            MaruWorkspaceMetaPatch::default()
+        ))
+        .unwrap_err()
+        .contains("Work path does not exist"));
+        assert!(run(ipc::save_maru_rule(
+            work.clone(),
+            "../escape".to_string(),
+            "x".to_string()
+        ))
+        .unwrap_err()
+        .contains("Invalid name"));
+        assert!(run(ipc::save_maru_template(
+            work.clone(),
+            "../escape".to_string(),
+            "x".to_string()
+        ))
+        .unwrap_err()
+        .contains("Invalid name"));
+        assert!(
+            run(ipc::read_maru_template(work.clone(), "missing".to_string()))
+                .unwrap_err()
+                .contains("Cannot read template missing")
+        );
+    }
+
+    #[test]
+    fn phase08_22_save_maru_rule_serializes_same_target_both_orders() {
+        let home = Home::new();
+        for swap in [false, true] {
+            let work_path = work_fixture(&home, &format!("rules-{swap}"));
+            let work = text(&work_path);
+            let first_marker = if swap { "second" } else { "first" };
+            let second_marker = if swap { "first" } else { "second" };
+            let admitted = Held::new(work_path.join(".maru"), "admitted");
+            let first = start(ipc::save_maru_rule(
+                work.clone(),
+                "demo".to_string(),
+                first_marker.to_string(),
+            ));
+            admitted.wait();
+            let waiting = Held::new(work_path.join(".maru"), "before-admission");
+            let second = start(ipc::save_maru_rule(
+                work.clone(),
+                "demo".to_string(),
+                second_marker.to_string(),
+            ));
+            waiting.wait();
+            waiting.release();
+            assert!(
+                second.recv_timeout(Duration::from_millis(30)).is_err(),
+                "second writer must wait while the first holds admission"
+            );
+            admitted.release();
+            done(first).unwrap();
+            done(second).unwrap();
+            let body = fs::read_to_string(work_path.join(".maru/rules/demo.md")).unwrap();
+            assert_eq!(
+                body, second_marker,
+                "second admitted writer must own the final bytes"
+            );
+        }
+    }
+
+    #[test]
+    fn phase08_22_workspace_meta_and_settings_serialize_both_orders() {
+        let home = Home::new();
+        for swap in [false, true] {
+            let work_path = work_fixture(&home, &format!("meta-settings-{swap}"));
+            ensure_maru_dir(&work_path).unwrap();
+            let work = text(&work_path);
+            let first_marker = if swap { "second" } else { "first" };
+            let second_marker = if swap { "first" } else { "second" };
+
+            let patch = |marker: &str| MaruWorkspaceMetaPatch {
+                owner_name: Some(marker.to_string()),
+                ..Default::default()
+            };
+            let settings_value =
+                |marker: &str| json!({ "version": 1, "ui": { "themeMode": marker } });
+
+            let held = Held::new(work_path.join(".maru"), "admitted");
+            let first_work = work.clone();
+            let first: Receiver<Result<(), String>> = if swap {
+                start(async move {
+                    ipc::save_maru_settings(first_work, settings_value(first_marker), None)
+                        .await
+                        .map(|_| ())
+                })
+            } else {
+                start(async move {
+                    ipc::update_maru_workspace(first_work, patch(first_marker))
+                        .await
+                        .map(|_| ())
+                })
+            };
+            held.wait();
+            let waiting = Held::new(work_path.join(".maru"), "before-admission");
+            let second: Receiver<Result<(), String>> = if swap {
+                start(async move {
+                    ipc::update_maru_workspace(work, patch(second_marker))
+                        .await
+                        .map(|_| ())
+                })
+            } else {
+                start(async move {
+                    ipc::save_maru_settings(work, settings_value(second_marker), None)
+                        .await
+                        .map(|_| ())
+                })
+            };
+            waiting.wait();
+            waiting.release();
+            assert!(
+                second.recv_timeout(Duration::from_millis(30)).is_err(),
+                "cross-command writer on the admitted .maru set must wait"
+            );
+            held.release();
+            done(first).unwrap();
+            done(second).unwrap();
+
+            // The two writers touch different files (workspace.json vs the
+            // global settings store), so both effects survive regardless of
+            // order; only the admission is serialized.
+            let update_marker = if swap { second_marker } else { first_marker };
+            let settings_marker = if swap { first_marker } else { second_marker };
+            let meta = read_workspace_internal(&work_path).unwrap();
+            assert_eq!(meta.owner_name.as_deref(), Some(update_marker));
+            let effective =
+                read_maru_settings_internal(&work_path, &global_settings_json_path().unwrap())
+                    .unwrap();
+            assert_eq!(
+                effective
+                    .pointer("/ui/themeMode")
+                    .and_then(JsonValue::as_str),
+                Some(settings_marker)
+            );
+        }
+    }
+
+    #[test]
+    fn phase08_22_settings_read_serializes_with_save_both_orders() {
+        let home = Home::new();
+        for swap in [false, true] {
+            let work_path = work_fixture(&home, &format!("settings-read-{swap}"));
+            let work = text(&work_path);
+            let marker = format!("theme-{swap}");
+            let saved = json!({ "version": 1, "ui": { "themeMode": marker.clone() } });
+
+            // The read admits the same set as the save because it can run
+            // the one-shot legacy migration, so the two serialize on
+            // <work>/.maru in either launch order.
+            let read_first = swap;
+            let held = Held::new(work_path.join(".maru"), "admitted");
+            let first_work = work.clone();
+            let first_saved = saved.clone();
+            let first: Receiver<Result<JsonValue, String>> = if read_first {
+                start(async move { ipc::read_maru_settings(first_work).await })
+            } else {
+                start(async move {
+                    ipc::save_maru_settings(first_work, first_saved, None)
+                        .await
+                        .map(|_| JsonValue::Null)
+                })
+            };
+            held.wait();
+            let waiting = Held::new(work_path.join(".maru"), "before-admission");
+            let second: Receiver<Result<JsonValue, String>> = if read_first {
+                start(async move {
+                    ipc::save_maru_settings(work, saved, None)
+                        .await
+                        .map(|_| JsonValue::Null)
+                })
+            } else {
+                start(async move { ipc::read_maru_settings(work).await })
+            };
+            waiting.wait();
+            waiting.release();
+            assert!(
+                second.recv_timeout(Duration::from_millis(30)).is_err(),
+                "settings read/save on the admitted .maru set must wait for the holder"
+            );
+            held.release();
+            done(first).unwrap();
+            done(second).unwrap();
+            let final_value = run(ipc::read_maru_settings(text(&work_path))).unwrap();
+            assert_eq!(
+                final_value
+                    .pointer("/ui/themeMode")
+                    .and_then(JsonValue::as_str),
+                Some(marker.as_str()),
+                "the save lands and the post-serialization read observes it"
+            );
+        }
+    }
+
+    #[test]
+    fn phase08_22_error_releases_admission_and_retry_recovers() {
+        let home = Home::new();
+        let work_path = work_fixture(&home, "error-release");
+        let work = text(&work_path);
+        fs::write(work_path.join(".maru"), "not a directory").unwrap();
+        let err = run(ipc::save_maru_rule(
+            work.clone(),
+            "demo".to_string(),
+            "x".to_string(),
+        ))
+        .unwrap_err();
+        assert!(err.contains("Cannot create .maru"), "{err}");
+        assert!(!work_path.join(".maru/rules/demo.md").exists());
+        fs::remove_file(work_path.join(".maru")).unwrap();
+        run(ipc::save_maru_rule(
+            work,
+            "demo".to_string(),
+            "recovered".to_string(),
+        ))
+        .unwrap();
+        assert_eq!(
+            fs::read_to_string(work_path.join(".maru/rules/demo.md")).unwrap(),
+            "recovered",
+            "retry after the error must succeed once admission is released"
+        );
+    }
+
+    #[test]
+    fn phase08_22_maru_dir_and_registry_writers_do_not_block_each_other() {
+        let home = Home::new();
+        let work_path = work_fixture(&home, "cross-domain");
+        let work = text(&work_path);
+        let other_root = work_fixture(&home, "other-root");
+        let admitted = Held::new(work_path.join(".maru"), "admitted");
+        let rule_write = start(ipc::save_maru_rule(
+            work,
+            "demo".to_string(),
+            "held".to_string(),
+        ));
+        admitted.wait();
+        // The registry targets disjoint keys and must progress while the
+        // .maru writer stays blocked.
+        let added = run(crate::vault_list::ipc::add_workspace_root(
+            crate::vault_list::WorkspaceRootEntry {
+                label: "Cross".to_string(),
+                path: text(&other_root),
+                visibility: "private".to_string(),
+                provider: "local".to_string(),
+                provider_id: None,
+                external_writer: None,
+                write_policy: "direct".to_string(),
+                permission_summary: None,
+            },
+        ))
+        .unwrap();
+        assert_eq!(added.workspaces.len(), 1);
+        admitted.release();
+        done(rule_write).unwrap();
+        assert!(work_path.join(".maru/rules/demo.md").exists());
     }
 }

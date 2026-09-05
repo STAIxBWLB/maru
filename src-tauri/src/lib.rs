@@ -128,7 +128,7 @@ use kakao_relay::{
 };
 use korean_date::parse_korean_date_cmd;
 use linter::gaejosik_lint;
-use maru_dir::{
+use maru_dir::ipc::{
     bootstrap_maru_dir, delete_maru_rule, delete_maru_template, list_maru_rules,
     list_maru_templates, list_workspace_projects, read_maru_ignore, read_maru_mcp,
     read_maru_projects, read_maru_rule, read_maru_settings, read_maru_skills, read_maru_template,
@@ -162,12 +162,12 @@ use template_fill::ipc::{template_fill_hwpx, template_get_fields, template_prepa
 use terminal::TerminalState;
 use terminal_hooks::{start_terminal_hook_watcher, TerminalHookWatcherState};
 use today_notify::today_notify_new_day;
-use vault_list::{
+use vault_list::ipc::{
     add_workspace_root, list_workspace_roots, refresh_workspace_capabilities,
     remove_workspace_root, set_active_workspace_root,
 };
 use vault_watcher::VaultWatcherState;
-use workspace::{
+use workspace::ipc::{
     detect_workspace, list_workspaces, read_workspace_config, register_workspace_roots,
 };
 

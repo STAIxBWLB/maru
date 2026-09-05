@@ -3,6 +3,7 @@
 // concept to `vaults.json`; the loader migrates that shape on first use
 // and keeps the old file untouched.
 
+use crate::atomic_file::{with_path_transactions, PathTransactionLease, PathTransactionRequest};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -383,6 +384,14 @@ fn save_registry(registry: &WorkspaceRegistry) -> Result<(), String> {
     save_registry_at(&workspace_registry_path()?, registry)
 }
 
+/// Registry read-modify-write admission: every registry mutation admits the
+/// workspaces.json output plus the legacy vaults.json so a migration cannot
+/// slip in while a writer waits, and readers observe a fully written file.
+fn registry_mutation_admission() -> Result<PathTransactionRequest, String> {
+    PathTransactionRequest::new([workspace_registry_path()?, legacy_vault_list_path()?])?
+        .with_workspace_registry()
+}
+
 fn normalize_visibility(value: &str) -> String {
     if value == "public" {
         "public".to_string()
@@ -561,9 +570,13 @@ fn migrate_legacy_vault_list(legacy: LegacyVaultList) -> WorkspaceRegistry {
     registry
 }
 
-#[tauri::command]
 pub fn list_workspace_roots() -> Result<WorkspaceRegistry, String> {
-    load_registry()
+    let admission = registry_mutation_admission()?;
+    with_path_transactions(admission, |lease| {
+        lease.ensure_workspace_registry()?;
+        lease.before_effect()?;
+        load_registry()
+    })
 }
 
 #[allow(dead_code)]
@@ -783,12 +796,25 @@ fn compute_permission_summary(
     }
 }
 
-#[tauri::command]
 pub fn add_workspace_root(entry: WorkspaceRootEntry) -> Result<WorkspaceRegistry, String> {
     upsert_workspace_root(entry)
 }
 
 pub fn upsert_workspace_root(entry: WorkspaceRootEntry) -> Result<WorkspaceRegistry, String> {
+    let admission = registry_mutation_admission()?;
+    with_path_transactions(admission, |lease| {
+        lease.ensure_workspace_registry()?;
+        lease.ensure_covered([workspace_registry_path()?])?;
+        lease.before_effect()?;
+        upsert_workspace_root_in_transaction(entry, lease)
+    })
+}
+
+pub(crate) fn upsert_workspace_root_in_transaction(
+    entry: WorkspaceRootEntry,
+    lease: &PathTransactionLease,
+) -> Result<WorkspaceRegistry, String> {
+    lease.ensure_covered([workspace_registry_path()?])?;
     let mut registry = load_registry()?;
     let mut normalized = entry;
     normalized.visibility = normalize_visibility(&normalized.visibility);
@@ -816,8 +842,21 @@ pub fn upsert_workspace_root(entry: WorkspaceRootEntry) -> Result<WorkspaceRegis
     Ok(registry)
 }
 
-#[tauri::command]
 pub fn refresh_workspace_capabilities(path: String) -> Result<WorkspaceRegistry, String> {
+    let admission = registry_mutation_admission()?;
+    with_path_transactions(admission, |lease| {
+        lease.ensure_workspace_registry()?;
+        lease.ensure_covered([workspace_registry_path()?])?;
+        lease.before_effect()?;
+        refresh_workspace_capabilities_in_transaction(path, lease)
+    })
+}
+
+fn refresh_workspace_capabilities_in_transaction(
+    path: String,
+    lease: &PathTransactionLease,
+) -> Result<WorkspaceRegistry, String> {
+    lease.ensure_covered([workspace_registry_path()?])?;
     let mut registry = load_registry()?;
     let Some(entry) = registry
         .workspaces
@@ -832,8 +871,21 @@ pub fn refresh_workspace_capabilities(path: String) -> Result<WorkspaceRegistry,
     Ok(registry)
 }
 
-#[tauri::command]
 pub fn remove_workspace_root(path: String) -> Result<WorkspaceRegistry, String> {
+    let admission = registry_mutation_admission()?;
+    with_path_transactions(admission, |lease| {
+        lease.ensure_workspace_registry()?;
+        lease.ensure_covered([workspace_registry_path()?])?;
+        lease.before_effect()?;
+        remove_workspace_root_in_transaction(path, lease)
+    })
+}
+
+fn remove_workspace_root_in_transaction(
+    path: String,
+    lease: &PathTransactionLease,
+) -> Result<WorkspaceRegistry, String> {
+    lease.ensure_covered([workspace_registry_path()?])?;
     let mut registry = load_registry()?;
     let removed_visibility = registry
         .workspaces
@@ -854,12 +906,26 @@ pub fn remove_workspace_root(path: String) -> Result<WorkspaceRegistry, String> 
     Ok(registry)
 }
 
-#[tauri::command]
 pub fn set_active_workspace_root(
     path: String,
     visibility: String,
 ) -> Result<WorkspaceRegistry, String> {
     let visibility = normalize_visibility(&visibility);
+    let admission = registry_mutation_admission()?;
+    with_path_transactions(admission, |lease| {
+        lease.ensure_workspace_registry()?;
+        lease.ensure_covered([workspace_registry_path()?])?;
+        lease.before_effect()?;
+        set_active_workspace_root_in_transaction(path, visibility, lease)
+    })
+}
+
+pub(crate) fn set_active_workspace_root_in_transaction(
+    path: String,
+    visibility: String,
+    lease: &PathTransactionLease,
+) -> Result<WorkspaceRegistry, String> {
+    lease.ensure_covered([workspace_registry_path()?])?;
     let mut registry = load_registry()?;
     if !registry
         .workspaces
@@ -872,6 +938,90 @@ pub fn set_active_workspace_root(
     normalize_registry(&mut registry);
     save_registry(&registry)?;
     Ok(registry)
+}
+
+/// Owned IPC boundaries; the synchronous entry points remain available to
+/// Rust callers.
+pub mod ipc {
+    use super::*;
+
+    #[cfg(test)]
+    fn registry_stage_key() -> Option<PathBuf> {
+        super::workspace_registry_path().ok()
+    }
+
+    #[tauri::command]
+    pub async fn list_workspace_roots() -> Result<WorkspaceRegistry, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            if let Some(registry) = registry_stage_key() {
+                PathTransactionLease::test_stage(&[registry], "worker:list_workspace_roots");
+            }
+            super::list_workspace_roots()
+        })
+        .await
+        .map_err(|err| format!("list_workspace_roots_task_failed: {err}"))?
+    }
+
+    #[tauri::command]
+    pub async fn add_workspace_root(
+        entry: WorkspaceRootEntry,
+    ) -> Result<WorkspaceRegistry, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            if let Some(registry) = registry_stage_key() {
+                PathTransactionLease::test_stage(&[registry], "worker:add_workspace_root");
+            }
+            super::add_workspace_root(entry)
+        })
+        .await
+        .map_err(|err| format!("add_workspace_root_task_failed: {err}"))?
+    }
+
+    #[tauri::command]
+    pub async fn refresh_workspace_capabilities(path: String) -> Result<WorkspaceRegistry, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            if let Some(registry) = registry_stage_key() {
+                PathTransactionLease::test_stage(
+                    &[registry],
+                    "worker:refresh_workspace_capabilities",
+                );
+            }
+            super::refresh_workspace_capabilities(path)
+        })
+        .await
+        .map_err(|err| format!("refresh_workspace_capabilities_task_failed: {err}"))?
+    }
+
+    #[tauri::command]
+    pub async fn remove_workspace_root(path: String) -> Result<WorkspaceRegistry, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            if let Some(registry) = registry_stage_key() {
+                PathTransactionLease::test_stage(&[registry], "worker:remove_workspace_root");
+            }
+            super::remove_workspace_root(path)
+        })
+        .await
+        .map_err(|err| format!("remove_workspace_root_task_failed: {err}"))?
+    }
+
+    #[tauri::command]
+    pub async fn set_active_workspace_root(
+        path: String,
+        visibility: String,
+    ) -> Result<WorkspaceRegistry, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            if let Some(registry) = registry_stage_key() {
+                PathTransactionLease::test_stage(&[registry], "worker:set_active_workspace_root");
+            }
+            super::set_active_workspace_root(path, visibility)
+        })
+        .await
+        .map_err(|err| format!("set_active_workspace_root_task_failed: {err}"))?
+    }
 }
 
 #[cfg(test)]
@@ -1287,5 +1437,220 @@ mod tests {
         assert!(summary.capabilities.can_read);
         assert!(!summary.capabilities.can_modify);
         assert!(summary.warning.as_deref().unwrap_or("").contains("stale"));
+    }
+}
+
+#[cfg(test)]
+mod phase08_22 {
+    use super::*;
+    use crate::atomic_file::phase08_06::{boundary, run, Held, Home};
+    use std::sync::mpsc::Receiver;
+    use std::time::Duration;
+
+    fn text(path: &Path) -> String {
+        path.to_string_lossy().into_owned()
+    }
+
+    fn root_fixture(home: &Home, name: &str) -> PathBuf {
+        let root = home.root.path().join(name);
+        fs::create_dir_all(&root).unwrap();
+        root
+    }
+
+    fn fixture_entry(label: &str, path: &str, visibility: &str) -> WorkspaceRootEntry {
+        WorkspaceRootEntry {
+            label: label.to_string(),
+            path: path.to_string(),
+            visibility: visibility.to_string(),
+            provider: "local".to_string(),
+            provider_id: None,
+            external_writer: None,
+            write_policy: "direct".to_string(),
+            permission_summary: None,
+        }
+    }
+
+    fn start<F, T>(future: F) -> Receiver<T>
+    where
+        F: std::future::Future<Output = T> + Send + 'static,
+        T: Send + 'static,
+    {
+        let (tx, rx) = std::sync::mpsc::channel();
+        tauri::async_runtime::spawn(async move {
+            let _ = tx.send(future.await);
+        });
+        rx
+    }
+
+    fn done<T>(rx: Receiver<T>) -> T {
+        rx.recv_timeout(Duration::from_secs(10))
+            .expect("fixture completion")
+    }
+
+    #[test]
+    fn phase08_22_vault_list_wrappers_yield_same_poll_and_map_join_failure() {
+        let home = Home::new();
+        let registry = workspace_registry_path().unwrap();
+        let root = root_fixture(&home, "boundary-root");
+        boundary(
+            registry.clone().into(),
+            "list_workspace_roots",
+            ipc::list_workspace_roots(),
+        );
+        boundary(
+            registry.clone().into(),
+            "add_workspace_root",
+            ipc::add_workspace_root(fixture_entry("Boundary", &text(&root), "private")),
+        );
+        boundary(
+            registry.clone().into(),
+            "refresh_workspace_capabilities",
+            ipc::refresh_workspace_capabilities(text(&root)),
+        );
+        boundary(
+            registry.clone().into(),
+            "remove_workspace_root",
+            ipc::remove_workspace_root(text(&root)),
+        );
+        boundary(
+            registry.into(),
+            "set_active_workspace_root",
+            ipc::set_active_workspace_root(text(&root), "private".to_string()),
+        );
+    }
+
+    #[test]
+    fn phase08_22_vault_list_real_fixture_and_rejections() {
+        let home = Home::new();
+        let root = root_fixture(&home, "fixture-root");
+        let path = text(&root);
+
+        let added = run(ipc::add_workspace_root(fixture_entry(
+            "Fixture", &path, "private",
+        )))
+        .unwrap();
+        assert_eq!(added.workspaces.len(), 1);
+        assert_eq!(
+            added.active_by_visibility.private.as_deref(),
+            Some(path.as_str())
+        );
+
+        let listed = run(ipc::list_workspace_roots()).unwrap();
+        assert_eq!(listed.workspaces.len(), 1);
+        assert_eq!(listed.workspaces[0].label, "Fixture");
+
+        let refreshed = run(ipc::refresh_workspace_capabilities(path.clone())).unwrap();
+        assert!(
+            refreshed.workspaces[0]
+                .permission_summary
+                .as_ref()
+                .unwrap()
+                .capabilities
+                .can_modify
+        );
+
+        let activated = run(ipc::set_active_workspace_root(
+            path.clone(),
+            "private".to_string(),
+        ))
+        .unwrap();
+        assert_eq!(
+            activated.active_by_visibility.private.as_deref(),
+            Some(path.as_str())
+        );
+
+        let removed = run(ipc::remove_workspace_root(path.clone())).unwrap();
+        assert!(removed.workspaces.is_empty());
+        assert!(removed.active_by_visibility.private.is_none());
+
+        // Unchanged rejections on unregistered paths.
+        assert!(run(ipc::set_active_workspace_root(
+            path.clone(),
+            "private".to_string()
+        ))
+        .unwrap_err()
+        .contains("Workspace is not registered for this visibility"));
+        let unknown_root = root_fixture(&home, "unknown-root");
+        assert!(
+            run(ipc::refresh_workspace_capabilities(text(&unknown_root)))
+                .unwrap_err()
+                .contains("Workspace is not registered")
+        );
+    }
+
+    #[test]
+    fn phase08_22_vault_list_serializes_registry_both_orders() {
+        let home = Home::new();
+        for swap in [false, true] {
+            let first_root = root_fixture(&home, &format!("order-{swap}-a"));
+            let second_root = root_fixture(&home, &format!("order-{swap}-b"));
+            let registry = workspace_registry_path().unwrap();
+            let first_label = if swap { "second" } else { "first" };
+            let second_label = if swap { "first" } else { "second" };
+            let admitted = Held::new(registry.clone(), "admitted");
+            let first = start(ipc::add_workspace_root(fixture_entry(
+                first_label,
+                &text(&first_root),
+                "private",
+            )));
+            admitted.wait();
+            let waiting = Held::new(registry.clone(), "before-admission");
+            let second = start(ipc::add_workspace_root(fixture_entry(
+                second_label,
+                &text(&second_root),
+                "private",
+            )));
+            waiting.wait();
+            waiting.release();
+            assert!(
+                second.recv_timeout(Duration::from_millis(30)).is_err(),
+                "second registry writer must wait while the first holds admission"
+            );
+            admitted.release();
+            done(first).unwrap();
+            let final_registry = done(second).unwrap();
+            let first_entry = final_registry
+                .workspaces
+                .iter()
+                .find(|workspace| workspace.path == text(&first_root));
+            let second_entry = final_registry
+                .workspaces
+                .iter()
+                .find(|workspace| workspace.path == text(&second_root));
+            assert!(
+                first_entry.is_some(),
+                "concurrently added root must survive the serialized second write"
+            );
+            assert_eq!(
+                second_entry.map(|workspace| workspace.label.as_str()),
+                Some(second_label),
+                "second admitted writer must own its own entry"
+            );
+        }
+    }
+
+    #[test]
+    fn phase08_22_vault_list_error_releases_admission_and_retry_recovers() {
+        let home = Home::new();
+        // Block registry persistence: the config app dir path is a plain file.
+        let blocked_dir = home.root.path().join(APP_CONFIG_DIR);
+        fs::write(&blocked_dir, "not a directory").unwrap();
+        let root = root_fixture(&home, "error-root");
+        let err = run(ipc::add_workspace_root(fixture_entry(
+            "Err",
+            &text(&root),
+            "private",
+        )))
+        .unwrap_err();
+        assert!(err.contains("Failed to create config directory"), "{err}");
+        fs::remove_file(&blocked_dir).unwrap();
+        let recovered = run(ipc::add_workspace_root(fixture_entry(
+            "Recovered",
+            &text(&root),
+            "private",
+        )))
+        .unwrap();
+        assert_eq!(recovered.workspaces.len(), 1);
+        assert_eq!(recovered.workspaces[0].label, "Recovered");
     }
 }
