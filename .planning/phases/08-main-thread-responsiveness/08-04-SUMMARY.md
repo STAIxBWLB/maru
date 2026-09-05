@@ -14,7 +14,7 @@ affects: [08-05, 08-06, 08-07, 08-16, 08-17, 08-25, 08-26, 08-27, 08-28, 08-29]
 actuals:
   tokens: 33584
   tasks: 2
-  commits: 3
+  commits: 4
 tech-stack:
   added: []
   patterns: [spawn_blocking, dedicated background threads, Runtime-generic AppHandle, evidence drift gate]
@@ -63,7 +63,7 @@ All seven environment/dispatch commands now isolate finite filesystem and proces
 - Started: approximately 2026-09-05T05:14Z, following the 08-03 state handoff.
 - Completed: 2026-09-05T05:28Z.
 - Tasks: 2; implementation, test and evidence files: 7.
-- Actual tokens: 33584, rounded-up characters/4 over the realized seven-file diff from 649ae64 through dfa27c5. Three commits count the two task commits and this SUMMARY; shared-state tracking is separate.
+- Actual tokens: 33584, rounded-up characters/4 over the realized seven-file diff from 649ae64 through dfa27c5. Four commits count the two task commits, this SUMMARY and its path-citation correction; shared-state tracking is separate.
 
 ## Accomplishments
 
@@ -90,7 +90,7 @@ All seven environment/dispatch commands now isolate finite filesystem and proces
 | `cargo check --manifest-path src-tauri/Cargo.toml --lib` | Passed, including desktop command registration. |
 | `cargo clippy --manifest-path src-tauri/Cargo.toml --lib -- -D warnings` | Passed. |
 | `cargo fmt --manifest-path src-tauri/Cargo.toml -- --check` | Passed. |
-| `node --test scripts/check-command-isolation.test.mjs` | Independently rerun: 72 passed, 0 failed/skipped, approximately 2.25 seconds. |
+| node --test scripts/check-command-isolation.test.mjs | Independently rerun: 72 passed, 0 failed/skipped, approximately 2.25 seconds. |
 | `node scripts/check-command-isolation.mjs --plan 04` | Passed: 7 evidence rows, 365 production registrations, 0 native-only commands. |
 | Checker `--plan 01`, `--plan 02`, `--plan 03`, each separately | Passed: 1, 1, 24 evidence rows; each reconciles all 365 current production registrations. |
 | Checker `--all --expected-count 365` | Expected rejection: real 08-29 overlay is not yet produced. No phase-wide closure claimed. |
@@ -103,19 +103,19 @@ No new native app build/run was required by this plan. Existing native source/ba
 
 1. **[Rule 2 - Testable existing lifecycle] Minimal `mission_state.rs` signature expansion.** Dispatch AppHandle flows through mission registration, output, finish/fail, emit and idle-watch helpers. Made only these six helpers generic over `tauri::Runtime`, enabling actual MockRuntime wrapper tests while preserving normal Wry behavior. Parent explicitly authorized this scope correction. Mission command ownership remains 16, event-store ownership remains 17. Their normal app/CLI compilation and four existing mission tests pass.
 2. **[Audit clarification] Composition is not completely read-only.** `get_skill -> load_registry_unlocked` ensures the standard Skills source/cache directories. Recorded these writes for 29 rather than claiming a pure model boundary. The 03 diagnostic doctor genuinely uses its read-only loader, so its explicit empty write set is valid.
-3. **[Audit clarification] Environment setup has delegated external effects.** Reviewed the tracked frozen `src-tauri/skills-bootstrap/envs/default/setup.sh` and `scripts/setup-node.sh` beneath that directory. The materialized script writes env target `.venv`, `node_modules`, `node`, input/output directories, temp/log directories, project uv/pnpm state and temporary node-download staging. Existing uv installation and brew/apt package operations can also affect package-manager caches/prefixes. No real package installer or provider was executed: the repair test replaces only its disposable materialized script. Plan29 must protect concrete application-owned env/project/output paths and retain this external-side-effect limitation. No global package-manager exclusion, arbitrary-script containment or broad system lock is claimed.
+3. **[Audit clarification] Environment setup has delegated external effects.** Reviewed the tracked frozen `src-tauri/skills-bootstrap/envs/default/setup.sh` and `src-tauri/skills-bootstrap/envs/default/scripts/setup-node.sh`. The materialized script writes env target `.venv`, `node_modules`, `node`, input/output directories, temp/log directories, project uv/pnpm state and temporary node-download staging. Existing uv installation and brew/apt package operations can also affect package-manager caches/prefixes. No real package installer or provider was executed: the repair test replaces only its disposable materialized script. Plan29 must protect concrete application-owned env/project/output paths and retain this external-side-effect limitation. No global package-manager exclusion, arbitrary-script containment or broad system lock is claimed.
 4. Existing test-build warnings in `today_ai.rs` and scheduler test-disabled code remain out of scope; library clippy passes. No unrelated files were changed or staged.
 
 ## Integration Contract for Later Plans
 
 - Early shards 01-05 retain `integrationRequired: "08-29"` and `moduleIntegrationOwner: "08-29"`. Their focused `--plan` checks permit this explicit future dependency. Synchronous domain functions, background callback seams and original command ownership remain available for 29.
-- `--integration 29` consumes only `docs/performance/phase08-29-integration.json`. It has seven module records and no `commands` collection. Store/env/dispatch/git/dot final owner is 29; mission_state stage owner is 29/final owner 16; event_store stage owner is 29/final owner 17. `commandRefs` are `{module,name}` references to existing inventory rows.
+- Later phase29: `--integration 29` consumes only `docs/performance/phase08-29-integration.json`. It has seven module records and no `commands` collection. Store/env/dispatch/git/dot final owner is 29; mission_state stage owner is 29/final owner 16; event_store stage owner is 29/final owner 17. `commandRefs` are `{module,name}` references to existing inventory rows.
 - Every produced integration `testCases` record includes `entryPair` with physical `path.rs::symbol` references, `orders: ["writer-first", "other-first"]`, `aliases: ["lexical", "symlink", "ancestor"]`, `failureRelease`, `outcome`, `module`, nonzero passing `tests`, and `evidence` containing real behavior-test names. Required parent pairs are Skills-save/Skills-sync/Git-pull versus rename/trash, all six combinations.
 - `networkRegistryAvailability` declares `networkWork`. Store/git must declare true. Network records require `registryReleasedDuringNetwork`, `registryReleasedDuringAdmissionWait` and `listAndMetadataRemoveProgress` true, with physical source evidence; store also requires `sourceDuplicateReturnsBusy` and `batchBusySourceSkipped`. Positive non-network reasons apply only where appropriate.
 - `lifetime` records `scope`, `admissionHeldThroughEffects`, `admissionHeldThroughRollback` and source evidence. Env/dispatch must use background scope and `backgroundCallbacksCovered: true`. Store/git `writeSetCoverage` requires `wholeCheckout`, `gitDirectory`, `gitCommonDirectory`, `stagingRollback`, `registrySidecars` true, backed by actual path/source/test records. These declarations support review and drift checks; they do not themselves prove exclusion.
 - The overlay's `documentRaceConsumer` names plan 08-07 and selector `phase08_07_earlier_writer_document_races`, with required save/create counterparts and both orders/all alias variants. Focused 29 accepts the future obligation without requiring unproduced document wrappers. Final `--all` requires actual 07 `crossDomainConsumers` results.
 - Final 16/17 `moduleIntegrations` handoffs contain `integrationId`, `status: "complete"`, `module`, physical `entrySymbols`, nonzero passing `tests` and `evidence` naming actual behavior cases. Status alone cannot close them.
-- Final processing callers additionally require `classifier`, `successRetention`, `failureReasons`, `singleTerminalNoticeOwner: true`; caller closure remains 25/26/28. Native-only evidence goes in `phase08-native-allowlist.json`; explicitly reconciled production additions go in `phase08-registration-changes.json`. Comments above `WRITERS` and executable fixtures document exact shapes.
+- Later phases25/26/28: final processing callers additionally require `classifier`, `successRetention`, `failureReasons`, `singleTerminalNoticeOwner: true`; caller closure remains 25/26/28. Native-only evidence goes in `phase08-native-allowlist.json`; explicitly reconciled production additions go in `phase08-registration-changes.json`. Comments above `WRITERS` and executable fixtures document exact shapes.
 
 ## Safety and Threat Dispositions
 
