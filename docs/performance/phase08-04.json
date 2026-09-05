@@ -14,7 +14,7 @@
         "src-tauri/src/skill_host/env.rs::skills_env_status -> env_status -> read_status -> default_public_env_setup; registry defaults, bundle recovery, local materialization and status file access execute off async workers.",
         "src-tauri/src/skill_host/store.rs::default_public_env_setup -> registry_guard -> load_registry_unlocked -> ensure_default_sources -> save_registry_unlocked -> builtin_env_setup_path; built-in bundle/cache/default source effects are writes even for env status.",
         "src-tauri/src/skill_host/bundle_update.rs::recover_interrupted_swap; local bundle restoration/copy and manifest scans reached through ensure_active_bundle.",
-        "src-tauri/src/skill_host/fs.rs::write_json_pretty; env root status atomic replacement. Bootstrap/repair use dedicated thread::spawn for fixed bash setup --target root, pump threads for output, child.wait then status and skills-env://done; invocation ID is acceptance, not completion."
+        "src-tauri/src/skill_host/fs.rs::ensure_dir; env_status materializes env_root then reads status.json and checks runtime directory existence. It resolves but never executes setup.sh."
       ],
       "workerBoundary": "src-tauri/src/skill_host/env.rs::ipc::skills_env_status -> tauri::async_runtime::spawn_blocking(move || synchronous domain(...)).await; only contextual skills_env_status_task_failed wraps JoinError, inner String preserved",
       "syncCallers": [
@@ -22,8 +22,8 @@
       ],
       "mutationKey": {
         "lexicalPaths": [
-          "env_root/{.venv,node_modules,status.json} and setup-script-defined descendants",
-          "skills_root/{registry.json,_builtin,_cache,_managed,_imported,_sources} including default/bundle recovery effects"
+          "env_root directory creation only; status.json/.venv/node_modules are inspected, not changed",
+          "skills_root/{registry.json,_builtin,_cache,_managed,_imported,_sources} including default source materialization and bundle recovery effects"
         ],
         "aliasPaths": [
           "Canonical resolved cwd and existing ancestor/source aliases must join lexical path set in 08-29; exact-target/domain-only exclusion is not claimed"
@@ -71,7 +71,9 @@
         "src-tauri/src/skill_host/env.rs::skills_env_bootstrap -> skills_env_bootstrap -> write_status -> default_public_env_setup; registry defaults, bundle recovery, local materialization and status file access execute off async workers.",
         "src-tauri/src/skill_host/store.rs::default_public_env_setup -> registry_guard -> load_registry_unlocked -> ensure_default_sources -> save_registry_unlocked -> builtin_env_setup_path; built-in bundle/cache/default source effects are writes even for env status.",
         "src-tauri/src/skill_host/bundle_update.rs::recover_interrupted_swap; local bundle restoration/copy and manifest scans reached through ensure_active_bundle.",
-        "src-tauri/src/skill_host/fs.rs::write_json_pretty; env root status atomic replacement. Bootstrap/repair use dedicated thread::spawn for fixed bash setup --target root, pump threads for output, child.wait then status and skills-env://done; invocation ID is acceptance, not completion."
+        "src-tauri/src/skill_host/fs.rs::write_json_pretty; env root status atomic replacement. Bootstrap/repair use dedicated thread::spawn for fixed bash setup --target root, pump threads for output, child.wait then status and skills-env://done; invocation ID is acceptance, not completion.",
+        "src-tauri/skills-bootstrap/envs/default/setup.sh is the frozen fallback copied into skills_root/_builtin/envs/default/setup.sh. The script operates on env_root/.venv, node_modules, node, input/{hwp,pdf}, output/{text,tables,images}, temp and logs; uv sync/pnpm install run from the materialized env project. This is reviewed source evidence, not execution of package installers.",
+        "src-tauri/skills-bootstrap/envs/default/scripts/setup-node.sh downloads into mktemp staging, removes/replaces env_root/node, and cleans download staging on EXIT. Existing setup.sh can install uv and invoke brew or apt/sudo; package-manager caches/prefixes and installed-source script variations are external side effects, not target-only application path exclusion."
       ],
       "workerBoundary": "src-tauri/src/skill_host/env.rs::ipc::skills_env_bootstrap -> tauri::async_runtime::spawn_blocking(move || synchronous domain(...)).await; only contextual skills_env_bootstrap_task_failed wraps JoinError, inner String preserved",
       "syncCallers": [
@@ -79,8 +81,11 @@
       ],
       "mutationKey": {
         "lexicalPaths": [
-          "env_root/{.venv,node_modules,status.json} and setup-script-defined descendants",
-          "skills_root/{registry.json,_builtin,_cache,_managed,_imported,_sources} including default/bundle recovery effects"
+          "env_root/{.venv,node_modules,node,input/hwp,input/pdf,output/text,output/tables,output/images,temp,logs,status.json}",
+          "skills_root/{registry.json,_builtin,_cache,_managed,_imported,_sources} including default/bundle recovery effects",
+          "materialized setup project skills_root/_builtin/envs/default, including uv/pnpm generated locks/state",
+          "setup-node.sh mktemp download/extract staging, deleted by EXIT trap",
+          "External package-manager caches/install prefixes selected by installed uv/pnpm/brew/apt configuration; preserved existing subprocess effects require explicit scope treatment by08-29, not guessed target-only protection"
         ],
         "aliasPaths": [
           "Canonical resolved cwd and existing ancestor/source aliases must join lexical path set in 08-29; exact-target/domain-only exclusion is not claimed"
@@ -128,7 +133,9 @@
         "src-tauri/src/skill_host/env.rs::skills_env_repair -> skills_env_bootstrap -> write_status -> default_public_env_setup; registry defaults, bundle recovery, local materialization and status file access execute off async workers.",
         "src-tauri/src/skill_host/store.rs::default_public_env_setup -> registry_guard -> load_registry_unlocked -> ensure_default_sources -> save_registry_unlocked -> builtin_env_setup_path; built-in bundle/cache/default source effects are writes even for env status.",
         "src-tauri/src/skill_host/bundle_update.rs::recover_interrupted_swap; local bundle restoration/copy and manifest scans reached through ensure_active_bundle.",
-        "src-tauri/src/skill_host/fs.rs::write_json_pretty; env root status atomic replacement. Bootstrap/repair use dedicated thread::spawn for fixed bash setup --target root, pump threads for output, child.wait then status and skills-env://done; invocation ID is acceptance, not completion."
+        "src-tauri/src/skill_host/fs.rs::write_json_pretty; env root status atomic replacement. Bootstrap/repair use dedicated thread::spawn for fixed bash setup --target root, pump threads for output, child.wait then status and skills-env://done; invocation ID is acceptance, not completion.",
+        "src-tauri/skills-bootstrap/envs/default/setup.sh is the frozen fallback copied into skills_root/_builtin/envs/default/setup.sh. The script operates on env_root/.venv, node_modules, node, input/{hwp,pdf}, output/{text,tables,images}, temp and logs; uv sync/pnpm install run from the materialized env project. This is reviewed source evidence, not execution of package installers.",
+        "src-tauri/skills-bootstrap/envs/default/scripts/setup-node.sh downloads into mktemp staging, removes/replaces env_root/node, and cleans download staging on EXIT. Existing setup.sh can install uv and invoke brew or apt/sudo; package-manager caches/prefixes and installed-source script variations are external side effects, not target-only application path exclusion."
       ],
       "workerBoundary": "src-tauri/src/skill_host/env.rs::ipc::skills_env_repair -> tauri::async_runtime::spawn_blocking(move || synchronous domain(...)).await; only contextual skills_env_repair_task_failed wraps JoinError, inner String preserved",
       "syncCallers": [
@@ -136,8 +143,11 @@
       ],
       "mutationKey": {
         "lexicalPaths": [
-          "env_root/{.venv,node_modules,status.json} and setup-script-defined descendants",
-          "skills_root/{registry.json,_builtin,_cache,_managed,_imported,_sources} including default/bundle recovery effects"
+          "env_root/{.venv,node_modules,node,input/hwp,input/pdf,output/text,output/tables,output/images,temp,logs,status.json}",
+          "skills_root/{registry.json,_builtin,_cache,_managed,_imported,_sources} including default/bundle recovery effects",
+          "materialized setup project skills_root/_builtin/envs/default, including uv/pnpm generated locks/state",
+          "setup-node.sh mktemp download/extract staging, deleted by EXIT trap",
+          "External package-manager caches/install prefixes selected by installed uv/pnpm/brew/apt configuration; preserved existing subprocess effects require explicit scope treatment by08-29, not guessed target-only protection"
         ],
         "aliasPaths": [
           "Canonical resolved cwd and existing ancestor/source aliases must join lexical path set in 08-29; exact-target/domain-only exclusion is not claimed"
@@ -444,8 +454,35 @@
         "passed": 9,
         "failed": 0,
         "ignored": 0
+      },
+      {
+        "command": "node --test scripts/check-command-isolation.test.mjs",
+        "passed": 72,
+        "failed": 0,
+        "skipped": 0
+      },
+      {
+        "command": "node scripts/check-command-isolation.mjs --plan 04",
+        "exitCode": 0,
+        "commands": 7,
+        "productionRegistrations": 365,
+        "nativeOnly": 0
+      },
+      {
+        "command": "node scripts/check-command-isolation.mjs --plan 01/02/03 (each separately)",
+        "exitCode": 0,
+        "commands": [
+          1,
+          1,
+          24
+        ]
+      },
+      {
+        "command": "gsd-tools verify artifacts 08-04-PLAN.md",
+        "passed": 5,
+        "total": 5
       }
     ],
-    "integrationHandoff": "Plan29 owns env/dispatch lexical+alias+parent admission for finite setup AND dedicated worker callbacks. mission_state final command ownership16 and event_store17 remain unchanged. Runtime-generic helper signatures only enable same-code MockRuntime testing; no scheduling changes outside owned commands."
+    "integrationHandoff": "Plan29 owns env/dispatch lexical+alias+parent admission for finite setup AND dedicated worker callbacks. mission_state final command ownership16 and event_store17 remain unchanged. Runtime-generic helper signatures only enable same-code MockRuntime testing; no scheduling changes outside owned commands. Environment script audit includes full target runtime/input/output/temp/log directories, materialized setup project and temporary node download staging. External package-manager install/cache effects are preserved and not claimed to be contained by env_root admission;08-29 must explicitly account for scope without arbitrary script safety claims."
   }
 }
