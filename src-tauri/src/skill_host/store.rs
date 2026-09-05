@@ -689,6 +689,9 @@ fn store_git_command() -> Command {
     let mut command = Command::new("git");
     #[cfg(test)]
     crate::git::configure_git(&mut command);
+    // Clone, pull and reconcile must not leave automatic maintenance behind
+    // after their waited child releases the source transaction's path lease.
+    command.args(["-c", "gc.auto=0", "-c", "maintenance.auto=false"]);
     command.env("GIT_OPTIONAL_LOCKS", "0");
     command
 }
@@ -6875,6 +6878,15 @@ pub mod ipc {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn phase08_29_maintenance_store_builder_overrides_config_before_args_and_pull_has_no_auto_child(
+    ) {
+        crate::git::phase08_29_maintenance::assert_finite_automatic_work(
+            store_git_command,
+            &["pull", "--ff-only"],
+        );
+    }
+
     // Insert inside store.rs's existing #[cfg(test)] mod tests.
     mod phase08_29_skills {
         #[test]

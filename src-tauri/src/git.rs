@@ -18,10 +18,12 @@ use std::sync::Mutex;
 static GIT_ACTION_LOCK: Mutex<()> = Mutex::new(());
 
 fn git_command() -> Command {
-    #[allow(unused_mut)]
     let mut command = Command::new("git");
     #[cfg(test)]
     phase08_05::configure_git(&mut command);
+    // Auto-maintenance can detach after the waited Git child exits. Keep
+    // Maru-started writes inside its lease without changing repository config.
+    command.args(["-c", "gc.auto=0", "-c", "maintenance.auto=false"]);
     command
 }
 
@@ -2588,5 +2590,179 @@ mod phase08_29_git {
         assert_eq!(fs::read_dir(&checkout).unwrap().count(), 1);
         assert!(!workspace.join("original/checkout/remote.md").exists());
         assert!(git(&workspace.join("original/checkout"), &["stash", "list"]).is_empty());
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod phase08_29_maintenance {
+    use super::*;
+
+    fn output(mut command: Command, root: &Path, args: &[&str]) -> String {
+        let output = command.args(args).current_dir(root).output().unwrap();
+        assert!(
+            output.status.success(),
+            "{args:?}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8(output.stdout).unwrap()
+    }
+
+    fn setup(builder: fn() -> Command, root: &Path, args: &[&str]) -> String {
+        let mut command = builder();
+        // Setup is finite even when running the regression against old builders.
+        command.args(["-c", "gc.auto=0", "-c", "maintenance.auto=false"]);
+        output(command, root, args)
+    }
+
+    fn maintenance_child_count(trace: &Path) -> usize {
+        let events = std::fs::read_to_string(trace).unwrap();
+        let events = events
+            .lines()
+            .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+            .collect::<Vec<_>>();
+        assert!(
+            events.iter().any(|event| event["event"] == "child_start"),
+            "trace must capture real Git children"
+        );
+        assert!(
+            events
+                .iter()
+                .any(|event| event["event"] == "exit" && event["code"] == 0),
+            "trace must capture successful exit"
+        );
+        events
+            .iter()
+            .filter(|event| {
+                event["event"] == "child_start"
+                    && event["argv"].as_array().is_some_and(|args| {
+                        args.iter().any(|arg| arg == "maintenance" || arg == "gc")
+                    })
+            })
+            .count()
+    }
+
+    pub(crate) fn assert_finite_automatic_work(builder: fn() -> Command, pull_args: &[&str]) {
+        let temp = tempfile::TempDir::new().unwrap();
+        let root = temp.path().canonicalize().unwrap();
+        let seed = root.join("seed");
+        let remote = root.join("remote.git");
+        let checkout = root.join("checkout");
+        std::fs::create_dir(&seed).unwrap();
+        std::fs::create_dir(&remote).unwrap();
+        setup(builder, &seed, &["init", "-b", "main"]);
+        setup(builder, &remote, &["init", "--bare", "-b", "main"]);
+        std::fs::write(seed.join("note.md"), "initial fixture\n").unwrap();
+        setup(builder, &seed, &["add", "note.md"]);
+        setup(builder, &seed, &["commit", "-m", "initial"]);
+        setup(
+            builder,
+            &seed,
+            &["remote", "add", "origin", remote.to_str().unwrap()],
+        );
+        setup(builder, &seed, &["push", "-u", "origin", "main"]);
+        setup(
+            builder,
+            &root,
+            &[
+                "clone",
+                remote.to_str().unwrap(),
+                checkout.to_str().unwrap(),
+            ],
+        );
+        setup(
+            builder,
+            &checkout,
+            &["config", "--local", "maintenance.auto", "true"],
+        );
+        setup(
+            builder,
+            &checkout,
+            &["config", "--local", "maintenance.autoDetach", "false"],
+        );
+        setup(builder, &checkout, &["config", "--local", "gc.auto", "1"]);
+        let config_before = std::fs::read(checkout.join(".git/config")).unwrap();
+
+        // Real Git resolves repository opt-in against the per-invocation override.
+        assert_eq!(
+            output(
+                builder(),
+                &checkout,
+                &["config", "--get", "maintenance.auto"]
+            )
+            .trim(),
+            "false"
+        );
+        assert_eq!(
+            output(builder(), &checkout, &["config", "--get", "gc.auto"]).trim(),
+            "0"
+        );
+        let mut command = builder();
+        command.args(pull_args);
+        let args = command
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+        let caller_start = args.len() - pull_args.len();
+        for setting in ["gc.auto=0", "maintenance.auto=false"] {
+            let option = args
+                .windows(2)
+                .position(|pair| pair[0] == "-c" && pair[1] == setting)
+                .expect("per-invocation maintenance policy");
+            assert!(
+                option + 1 < caller_start,
+                "Git global -c options must precede caller arguments"
+            );
+        }
+
+        // Positive control: re-enable automatic work for this one fixture command
+        // and force foreground execution. This proves the trace detects the actual
+        // fetch child and its automatic maintenance, without leaving a daemon.
+        std::fs::write(seed.join("note.md"), "control remote update\n").unwrap();
+        setup(builder, &seed, &["commit", "-am", "control update"]);
+        setup(builder, &seed, &["push", "origin", "main"]);
+        let control_trace = root.join("control-trace.jsonl");
+        let mut control = builder();
+        control.args([
+            "-c",
+            "maintenance.auto=true",
+            "-c",
+            "maintenance.autoDetach=false",
+            "-c",
+            "gc.auto=0",
+        ]);
+        control.env("GIT_TRACE2_EVENT", &control_trace);
+        output(control, &checkout, pull_args);
+        assert!(
+            maintenance_child_count(&control_trace) > 0,
+            "positive control must observe automatic maintenance"
+        );
+
+        std::fs::write(seed.join("note.md"), "protected remote update\n").unwrap();
+        setup(builder, &seed, &["commit", "-am", "protected update"]);
+        setup(builder, &seed, &["push", "origin", "main"]);
+        let protected_trace = root.join("protected-trace.jsonl");
+        let mut protected = builder();
+        protected.env("GIT_TRACE2_EVENT", &protected_trace);
+        output(protected, &checkout, pull_args);
+        assert_eq!(
+            maintenance_child_count(&protected_trace),
+            0,
+            "waited Git must not spawn automatic maintenance"
+        );
+        assert_eq!(
+            std::fs::read_to_string(checkout.join("note.md")).unwrap(),
+            "protected remote update\n"
+        );
+        assert_eq!(
+            std::fs::read(checkout.join(".git/config")).unwrap(),
+            config_before,
+            "command policy must not edit repository configuration"
+        );
+    }
+
+    #[test]
+    fn phase08_29_maintenance_git_builder_overrides_config_before_args_and_pull_has_no_auto_child()
+    {
+        assert_finite_automatic_work(git_command, &["pull", "--rebase"]);
     }
 }
