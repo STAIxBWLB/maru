@@ -5,16 +5,16 @@ milestone_name: Felt Quality and Native Proof
 current_phase: 7
 current_phase_name: Guardrails Before Churn
 status: executing
-stopped_at: Completed 07-03-PLAN.md
-last_updated: "2026-09-05T00:57:50.875Z"
+stopped_at: Completed 07-04-PLAN.md
+last_updated: "2026-09-05T01:09:18.569Z"
 last_activity: 2026-09-05
 last_activity_desc: Phase 7 execution started
-state_head: b15af2be955da0a16c69f335ea2a265a79f1e5f2
+state_head: 30c4f3ffc2e813d210af799e871e132c8064382a
 progress:
   total_phases: 6
   completed_phases: 1
   total_plans: 10
-  completed_plans: 8
+  completed_plans: 9
   percent: 17
 ---
 
@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-08-28)
 ## Current Position
 
 Phase: 7 (Guardrails Before Churn) — EXECUTING
-Plan: 4 of 5
+Plan: 5 of 5
 Status: Ready to execute
 Last activity: 2026-09-05 — Phase 7 execution started
 
@@ -103,6 +103,7 @@ Progress: [██░░░░░░░░] 17%
 | Phase 07 P01 | 10min | 3 tasks | 5 files |
 | Phase 07 P02 | 11min | 3 tasks | 7 files |
 | Phase 07 P03 | 5min | 3 tasks | 6 files |
+| Phase 07-guardrails-before-churn P04 | 15min | 2 tasks | 1 files |
 
 ## Accumulated Context
 
@@ -211,6 +212,10 @@ Recent decisions affecting current work:
 - [Phase 7]: [Phase 7]: 07-02 into_inner recovery does not clear the mutex poison flag; every later acquisition still returns Err and recovers again (repeated recoveries each emit one warn) - the recovered-guard contract callers must assume
 - [Phase 7]: 07-03: ops_catalog dispatch gate composed as pure fn should_dispatch_catalog_event(predicate && is_catalog_relevant) so the dispatch-relevance test is behavioral; the next()-only extraction shape is untouched
 - [Phase 7]: 07-03: inbox_watcher and terminal_hooks callback closures pinned with split-needle include_str! exactly-once assertions instead of refactoring for testability; scratchpad_watcher's predicate reference count is 2 (production drain filter + chain-mirroring test), the other four modules exactly 1
+- [Phase 7]: 07-04: excluded_scratchpad_rel_prefix deleted, subsumed into excluded_non_document_rel_prefixes — zero callers after read_vault_cache switched to the shared list and clippy -D warnings rejects dead code
+- [Phase 7]: 07-04: the fail-open behavior test (scan_vault_fails_open_when_inbox_root_unresolvable) passes in RED by design — fail-open is the status quo before the resolver exists; documented per the TDD fail-fast protocol
+- [Phase 7]: 07-04: Task 2 (scan_vault_paths containment) carries no separate RED commit — its test depends on the Task 1 tracer-proven shared-list resolver; the tracer gate (#3299 row 3) verified end-to-end green before expansion
+- [Phase 7]: 07-04: PERF-06 NOT marked complete in REQUIREMENTS.md — the shared-ID gate (#2388) blocks it because sibling plan 07-05 also declares PERF-06 and has no SUMMARY yet; an initial mark-complete was reverted after ready-ids returned 0/1
 
 ### Pending Todos
 
@@ -247,8 +252,8 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-09-05T00:57:50.846Z
-Stopped at: Completed 07-03-PLAN.md
+Last session: 2026-09-05T01:08:15.131Z
+Stopped at: Completed 07-04-PLAN.md
 Resume file: None
 
 ## Operator Next Steps
