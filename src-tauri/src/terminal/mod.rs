@@ -89,14 +89,21 @@ struct SessionReservation {
 
 impl SessionReservation {
     fn acquire(state: &TerminalState, session_id: &str) -> Result<Self, String> {
-        let mut reservations = state
-            .reservations
-            .lock()
-            .map_err(|_| "terminal_registry_poisoned".to_string())?;
-        let sessions = state
-            .sessions
-            .lock()
-            .map_err(|_| "terminal_registry_poisoned".to_string())?;
+        // D-03: these per-session unit mutexes guard ID-registry collections
+        // (session handles and reserved IDs) whose entries are re-validated
+        // against live session state on every use; the authoritative per-
+        // session state lives in the session struct itself, so a poisoned
+        // guard carries no tainted invariant.
+        let mut reservations = crate::lock_recovery::recover_guard(
+            state.reservations.lock(),
+            "terminal",
+            "TERMINAL_RESERVATIONS",
+        );
+        let sessions = crate::lock_recovery::recover_guard(
+            state.sessions.lock(),
+            "terminal",
+            "TERMINAL_SESSIONS",
+        );
         if sessions.contains_key(session_id) || !reservations.insert(session_id.to_string()) {
             return Err(format!("terminal_session_id_in_use: {session_id}"));
         }
@@ -463,10 +470,11 @@ pub async fn terminal_spawn(
         stream: stream.clone(),
         closing: AtomicBool::new(false),
     });
-    state
-        .sessions
-        .lock()
-        .map_err(|_| "terminal_registry_poisoned".to_string())?
+    // D-03: the sessions registry holds Arc<TerminalSession> handles whose
+    // authoritative state lives in the session struct; every reader
+    // re-validates generation and identity after acquisition, so recovering
+    // a poisoned guard cannot serve a tainted invariant.
+    crate::lock_recovery::recover_guard(state.sessions.lock(), "terminal", "TERMINAL_SESSIONS")
         .insert(session_id.clone(), session.clone());
     reservation.commit();
 
@@ -870,13 +878,13 @@ pub async fn terminal_kill(
     if session.closing.swap(true, Ordering::AcqRel) {
         return Ok(());
     }
-    let mut killer = match session.killer.lock() {
-        Ok(killer) => killer,
-        Err(_) => {
-            session.closing.store(false, Ordering::Release);
-            return Err("terminal_killer_poisoned".to_string());
-        }
-    };
+    // D-03: the killer value is an Arc<Mutex<ChildKiller>> wrapping a live
+    // process handle that survives poisoning; only the guard flag is
+    // tainted, so recovering keeps the success-path semantics (D-02):
+    // `closing` stays latched and the kill proceeds against existing PTY
+    // sessions.
+    let mut killer =
+        crate::lock_recovery::recover_guard(session.killer.lock(), "terminal", "TERMINAL_KILLER");
     if let Err(err) = killer.kill() {
         session.closing.store(false, Ordering::Release);
         return Err(format!("terminal_kill_failed: {err}"));
@@ -898,10 +906,10 @@ pub async fn terminal_kill(
 }
 
 fn get_session(state: &TerminalState, session_id: &str) -> Result<Arc<TerminalSession>, String> {
-    state
-        .sessions
-        .lock()
-        .map_err(|_| "terminal_registry_poisoned".to_string())?
+    // D-03: registry entries are Arc handles re-validated by the caller via
+    // generation checks; recovering a poisoned guard cannot serve a tainted
+    // invariant (same justification as the spawn-time insert above).
+    crate::lock_recovery::recover_guard(state.sessions.lock(), "terminal", "TERMINAL_SESSIONS")
         .get(session_id)
         .cloned()
         .ok_or_else(|| format!("Unknown terminal session: {session_id}"))
