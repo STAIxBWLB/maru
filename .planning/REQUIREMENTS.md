@@ -42,7 +42,7 @@ nothing in the existing suite would notice.
   why recovery is safe for the data it protects; the recovery is not extended to
   any lock outside the six.
 
-- [ ] **PERF-04**: A recursive filesystem watcher does not generate events for
+- [x] **PERF-04**: A recursive filesystem watcher does not generate events for
   paths under the shared generated-directory prune list, so a watched root that
   gains a heavy subtree does not become an event-volume bottleneck.
 
@@ -187,7 +187,7 @@ Deferred. Acknowledged but not in this roadmap.
 | PERF-01 | Phase 8 | Pending |
 | PERF-02 | Phase 8 | Pending |
 | PERF-03 | Phase 7 | Complete |
-| PERF-04 | Phase 7 | Pending |
+| PERF-04 | Phase 7 | Complete |
 | PERF-05 | Phase 10 | Pending |
 | PERF-06 | Phase 7 | Pending |
 | REL-01 | Phase 9 | Pending |
