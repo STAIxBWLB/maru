@@ -93,11 +93,6 @@ use agent_host::{
 use agents::{agents_delete, agents_list, agents_reset, agents_upsert};
 use ai_router::{start_agent_cli_invocation, start_claude_cli_invocation};
 use approval::{prepare_approval, record_approval, ApprovalState};
-use binary_viewer::{
-    binary_viewer_classify, binary_viewer_extract_hwpx, binary_viewer_open_external,
-    binary_viewer_prepare_asset, binary_viewer_preview_external, binary_viewer_read_archive,
-    binary_viewer_read_text,
-};
 use browser_passkeys::{
     browser_passkey_request_authorization, browser_passkey_status, BrowserPasskeyState,
 };
@@ -158,10 +153,6 @@ use scheduler::{
 };
 use scratchpad_watcher::{
     start_scratchpad_watcher, stop_scratchpad_watcher, ScratchpadWatcherState,
-};
-use secrets::{
-    secrets_delete_text, secrets_doctor, secrets_migrate, secrets_read_text, secrets_scan,
-    secrets_write_text,
 };
 #[cfg(target_os = "macos")]
 use site_view::queue_opened_urls;
@@ -493,13 +484,13 @@ pub fn run() {
             workspace_files::ipc::duplicate_workspace_entries,
             workspace_files::ipc::paste_workspace_entries,
             workspace_files::ipc::trash_workspace_entries,
-            binary_viewer_classify,
-            binary_viewer_prepare_asset,
-            binary_viewer_read_text,
-            binary_viewer_read_archive,
-            binary_viewer_extract_hwpx,
-            binary_viewer_open_external,
-            binary_viewer_preview_external,
+            binary_viewer::ipc::binary_viewer_classify,
+            binary_viewer::ipc::binary_viewer_prepare_asset,
+            binary_viewer::ipc::binary_viewer_read_text,
+            binary_viewer::ipc::binary_viewer_read_archive,
+            binary_viewer::ipc::binary_viewer_extract_hwpx,
+            binary_viewer::ipc::binary_viewer_open_external,
+            binary_viewer::ipc::binary_viewer_preview_external,
             prepare_html_editor_assets,
             bootstrap_maru_dir,
             read_maru_workspace,
@@ -522,12 +513,12 @@ pub fn run() {
             read_maru_skills,
             read_maru_settings,
             save_maru_settings,
-            secrets_scan,
-            secrets_doctor,
-            secrets_migrate,
-            secrets_read_text,
-            secrets_write_text,
-            secrets_delete_text,
+            secrets::ipc::secrets_scan,
+            secrets::ipc::secrets_doctor,
+            secrets::ipc::secrets_migrate,
+            secrets::ipc::secrets_read_text,
+            secrets::ipc::secrets_write_text,
+            secrets::ipc::secrets_delete_text,
             skill_host::store::ipc::skills_list_sources,
             skill_host::store::ipc::skills_add_source,
             skill_host::store::ipc::skills_remove_source,
