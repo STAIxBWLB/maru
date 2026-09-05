@@ -124,10 +124,6 @@ use evidence_binder::{evidence_binder_mutate, evidence_binder_read};
 use export::{export_dispatch, export_plan, export_validate};
 use file_manager::{open_in_file_manager, reveal_in_file_manager};
 use gap::{gap_analyze, gap_append_log, gap_log_list, gap_reports_list};
-use git::{
-    git_changes, git_commit, git_diff, git_generate_commit_message, git_status,
-    git_sync_commit_push, git_sync_pull_rebase, git_sync_scan, list_workspace_submodules,
-};
 use gmail_gws::{
     check_gws_auth, decide_gmail_item, decide_gmail_items, fetch_gmail_unread, stage_gmail_items,
 };
@@ -346,15 +342,15 @@ pub fn run() {
             remove_workspace_root,
             set_active_workspace_root,
             refresh_workspace_capabilities,
-            git_status,
-            git_commit,
-            git_generate_commit_message,
-            git_sync_scan,
-            git_sync_pull_rebase,
-            git_sync_commit_push,
-            git_changes,
-            git_diff,
-            list_workspace_submodules,
+            git::ipc::git_status,
+            git::ipc::git_commit,
+            git::ipc::git_generate_commit_message,
+            git::ipc::git_sync_scan,
+            git::ipc::git_sync_pull_rebase,
+            git::ipc::git_sync_commit_push,
+            git::ipc::git_changes,
+            git::ipc::git_diff,
+            git::ipc::list_workspace_submodules,
             open_in_file_manager,
             reveal_in_file_manager,
             scan_inbox_drop,

@@ -10,6 +10,20 @@ use std::collections::HashSet;
 use std::io::Write;
 use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::Mutex;
+
+// Conservative Git-domain serialization includes aliases and linked worktrees,
+// whose stash refs live in the common git directory. Plan 08-29 adds shared
+// path admission before this guard. Poisoning remains fail-closed.
+static GIT_ACTION_LOCK: Mutex<()> = Mutex::new(());
+
+fn git_command() -> Command {
+    #[allow(unused_mut)]
+    let mut command = Command::new("git");
+    #[cfg(test)]
+    phase08_05::configure_git(&mut command);
+    command
+}
 
 use crate::agent_host::contracts::{CompletionRequest, COMPLETION_REQUEST_SCHEMA_VERSION};
 use crate::agent_host::provider::{build_cli_command, CliProviderKind};
@@ -40,7 +54,6 @@ pub struct GitStatus {
     pub branch: Option<String>,
 }
 
-#[tauri::command(async)]
 pub fn git_status(vault_path: String) -> Result<GitStatus, String> {
     git_status_with_mode(vault_path, true)
 }
@@ -52,7 +65,7 @@ fn git_status_with_mode(vault_path: String, include_untracked: bool) -> Result<G
     }
 
     let untracked_arg = if include_untracked { "-uall" } else { "-uno" };
-    let output = Command::new("git")
+    let output = git_command()
         .args(["status", "--porcelain=v1", untracked_arg, "--branch"])
         .current_dir(path)
         .no_window()
@@ -206,13 +219,12 @@ struct ExclusionRule {
 /// terminal `git status` for full detail when truncated.
 const MAX_CHANGE_ROWS: usize = 200;
 
-#[tauri::command(async)]
 pub fn git_changes(vault_path: String) -> Result<Vec<GitFileChange>, String> {
     let path = Path::new(&vault_path);
     if !path.is_dir() {
         return Err(format!("Workspace path is not a directory: {vault_path}"));
     }
-    let output = Command::new("git")
+    let output = git_command()
         .args(["status", "--porcelain=v1", "-uall"])
         .current_dir(path)
         .no_window()
@@ -260,7 +272,6 @@ pub fn git_changes(vault_path: String) -> Result<Vec<GitFileChange>, String> {
 /// of huge files inline.
 const MAX_DIFF_BYTES: usize = 64 * 1024;
 
-#[tauri::command(async)]
 pub fn git_diff(vault_path: String, file_path: String) -> Result<String, String> {
     let path = Path::new(&vault_path);
     if !path.is_dir() {
@@ -272,7 +283,7 @@ pub fn git_diff(vault_path: String, file_path: String) -> Result<String, String>
 fn git_diff_for_path(path: &Path, file_path: &str) -> Result<String, String> {
     // Combined diff: index changes ∪ worktree changes for this path. -U2
     // keeps context tight so dialog stays compact.
-    let output = Command::new("git")
+    let output = git_command()
         .args(["diff", "HEAD", "--", file_path])
         .arg("-U2")
         .current_dir(path)
@@ -314,7 +325,6 @@ fn git_diff_for_path(path: &Path, file_path: &str) -> Result<String, String> {
 const MAX_COMMIT_PROMPT_BYTES: usize = 18 * 1024;
 const MAX_COMMIT_DIFF_BYTES_PER_FILE: usize = 4 * 1024;
 
-#[tauri::command(async)]
 pub fn git_generate_commit_message(
     vault_path: String,
     paths: Vec<String>,
@@ -486,7 +496,6 @@ fn sanitize_commit_message(raw: &str) -> Result<String, String> {
     Err("commit_message_provider_empty_output".to_string())
 }
 
-#[tauri::command(async)]
 pub fn git_sync_scan(
     vault_path: String,
     include_excluded: Option<bool>,
@@ -574,7 +583,6 @@ pub fn git_sync_scan(
 /// filter. `git submodule foreach` reports `$displaypath` relative to the cwd,
 /// so running it at the workspace root yields paths that line up with
 /// `VaultEntry.rel_path`.
-#[tauri::command(async)]
 pub fn list_workspace_submodules(workspace_path: String) -> Result<Vec<String>, String> {
     let root = Path::new(&workspace_path);
     if !root.is_dir() {
@@ -589,8 +597,12 @@ pub fn list_workspace_submodules(workspace_path: String) -> Result<Vec<String>, 
     Ok(paths)
 }
 
-#[tauri::command(async)]
 pub fn git_sync_pull_rebase(repo_path: String) -> Result<GitSyncPullResult, String> {
+    let _guard = GIT_ACTION_LOCK
+        .lock()
+        .map_err(|_| "git_action_lock_poisoned".to_string())?;
+    #[cfg(test)]
+    phase08_05::transaction_edge();
     let repo = Path::new(&repo_path);
     if !repo.is_dir() {
         return Err(format!("Repository path is not a directory: {repo_path}"));
@@ -600,7 +612,7 @@ pub fn git_sync_pull_rebase(repo_path: String) -> Result<GitSyncPullResult, Stri
     let dirty_before = !repo_status(repo)?.paths.is_empty();
     let mut stashed = false;
     if dirty_before {
-        let stash = Command::new("git")
+        let stash = git_command()
             .args(["stash", "push", "-u", "-m", "maru-git-sync-before-pull"])
             .current_dir(repo)
             .no_window()
@@ -616,7 +628,7 @@ pub fn git_sync_pull_rebase(repo_path: String) -> Result<GitSyncPullResult, Stri
         stashed = !stdout.contains("No local changes to save");
     }
 
-    let pull = Command::new("git")
+    let pull = git_command()
         .args(["pull", "--rebase"])
         .current_dir(repo)
         .no_window()
@@ -630,7 +642,7 @@ pub fn git_sync_pull_rebase(repo_path: String) -> Result<GitSyncPullResult, Stri
     }
 
     if stashed {
-        let pop = Command::new("git")
+        let pop = git_command()
             .args(["stash", "pop"])
             .current_dir(repo)
             .no_window()
@@ -652,7 +664,6 @@ pub fn git_sync_pull_rebase(repo_path: String) -> Result<GitSyncPullResult, Stri
     })
 }
 
-#[tauri::command(async)]
 pub fn git_sync_commit_push(
     state: tauri::State<'_, ApprovalState>,
     repo_path: String,
@@ -660,6 +671,11 @@ pub fn git_sync_commit_push(
     paths: Option<Vec<String>>,
     approval_id: Option<String>,
 ) -> Result<GitSyncCommitPushResult, String> {
+    let _guard = GIT_ACTION_LOCK
+        .lock()
+        .map_err(|_| "git_action_lock_poisoned".to_string())?;
+    #[cfg(test)]
+    phase08_05::transaction_edge();
     require_git_sync_commit_push_approval(state.inner(), approval_id)?;
     let repo = Path::new(&repo_path);
     if !repo.is_dir() {
@@ -682,7 +698,7 @@ pub fn git_sync_commit_push(
         return Err("Commit message is empty.".to_string());
     }
 
-    let mut stage_cmd = Command::new("git");
+    let mut stage_cmd = git_command();
     stage_cmd.current_dir(repo);
     if let Some(paths) = selected_paths.as_ref() {
         stage_cmd.args(["add", "--"]).args(paths);
@@ -700,7 +716,7 @@ pub fn git_sync_commit_push(
         ));
     }
 
-    let mut commit_cmd = Command::new("git");
+    let mut commit_cmd = git_command();
     commit_cmd.args(["commit", "-m", trimmed]);
     if let Some(paths) = selected_paths.as_ref() {
         commit_cmd.arg("--").args(paths);
@@ -721,7 +737,7 @@ pub fn git_sync_commit_push(
         return Err(format!("git commit failed: {detail}"));
     }
 
-    let push = Command::new("git")
+    let push = git_command()
         .args(git_push_args())
         .current_dir(repo)
         .no_window()
@@ -751,7 +767,7 @@ fn require_git_sync_commit_push_approval(
 }
 
 fn git_toplevel(start: &Path) -> Result<PathBuf, String> {
-    let output = Command::new("git")
+    let output = git_command()
         .args(["rev-parse", "--show-toplevel"])
         .current_dir(start)
         .no_window()
@@ -769,7 +785,7 @@ fn git_toplevel(start: &Path) -> Result<PathBuf, String> {
 }
 
 fn repo_status(repo: &Path) -> Result<RepoStatus, String> {
-    let output = Command::new("git")
+    let output = git_command()
         .args(["status", "--porcelain=v1", "-uall", "--branch"])
         .current_dir(repo)
         .no_window()
@@ -804,7 +820,7 @@ fn repo_status(repo: &Path) -> Result<RepoStatus, String> {
 }
 
 fn git_output(repo: &Path, args: &[&str]) -> Result<String, String> {
-    let output = Command::new("git")
+    let output = git_command()
         .args(args)
         .current_dir(repo)
         .no_window()
@@ -821,7 +837,7 @@ fn git_output(repo: &Path, args: &[&str]) -> Result<String, String> {
 }
 
 fn list_submodule_paths(sync_root: &Path) -> Result<Vec<String>, String> {
-    let output = Command::new("git")
+    let output = git_command()
         .args([
             "submodule",
             "foreach",
@@ -1026,12 +1042,16 @@ fn git_push_args() -> [&'static str; 3] {
 /// Stage all changes and create a commit. Hooks (pre-commit, commit-msg)
 /// run as configured by the user — we never pass --no-verify, so a
 /// failing hook surfaces as an error the user must resolve.
-#[tauri::command(async)]
 pub fn git_commit(
     vault_path: String,
     message: String,
     paths: Option<Vec<String>>,
 ) -> Result<GitStatus, String> {
+    let _guard = GIT_ACTION_LOCK
+        .lock()
+        .map_err(|_| "git_action_lock_poisoned".to_string())?;
+    #[cfg(test)]
+    phase08_05::transaction_edge();
     let trimmed = message.trim();
     if trimmed.is_empty() {
         return Err("Commit message is empty.".to_string());
@@ -1053,7 +1073,7 @@ pub fn git_commit(
         None => None,
     };
 
-    let mut stage_cmd = Command::new("git");
+    let mut stage_cmd = git_command();
     stage_cmd.current_dir(path);
     if let Some(paths) = selected_paths.as_ref() {
         stage_cmd.args(["add", "--"]).args(paths);
@@ -1072,7 +1092,7 @@ pub fn git_commit(
         ));
     }
 
-    let mut commit_cmd = Command::new("git");
+    let mut commit_cmd = git_command();
     commit_cmd.args(["commit", "-m", trimmed]);
     if let Some(paths) = selected_paths.as_ref() {
         commit_cmd.arg("--").args(paths);
@@ -1121,7 +1141,6 @@ fn validate_git_pathspec(value: &str) -> Result<String, String> {
 mod tests {
     use super::*;
     use std::fs;
-    use std::process::Command;
     use tempfile::TempDir;
 
     #[test]
@@ -1132,11 +1151,9 @@ mod tests {
 
     #[test]
     fn maru_repo_reports_main_branch() {
-        // The test runs from src-tauri/, which is inside the maru git
-        // repo. We don't assert clean/dirty (depends on test-time state),
-        // but is_repo + branch should be populated.
-        let cwd = std::env::current_dir().unwrap();
-        let result = git_status(cwd.to_string_lossy().to_string()).unwrap();
+        let fixture = TempDir::new().unwrap();
+        run_git(fixture.path(), &["init", "-b", "main"]);
+        let result = git_status(fixture.path().to_string_lossy().to_string()).unwrap();
         assert!(result.is_repo);
         assert!(result.branch.is_some());
         assert!(result.untracked_known);
@@ -1194,7 +1211,7 @@ mod tests {
 
         assert_eq!(status.modified, 1);
         assert!(!status.clean);
-        let committed = Command::new("git")
+        let committed = git_command()
             .args(["show", "--name-only", "--format=", "HEAD"])
             .current_dir(root)
             .output()
@@ -1369,11 +1386,7 @@ mod tests {
     }
 
     fn run_git(root: &Path, args: &[&str]) {
-        let output = Command::new("git")
-            .args(args)
-            .current_dir(root)
-            .output()
-            .unwrap();
+        let output = git_command().args(args).current_dir(root).output().unwrap();
         assert!(
             output.status.success(),
             "git {:?} failed: {}{}",
@@ -1387,5 +1400,588 @@ mod tests {
         run_git(root, &["init"]);
         run_git(root, &["config", "user.email", "maru@example.test"]);
         run_git(root, &["config", "user.name", "Maru Test"]);
+    }
+}
+
+/// IPC owns values before offloading; synchronous Rust callers keep their API.
+pub mod ipc {
+    use super::*;
+    use tauri::Manager;
+
+    #[tauri::command]
+    pub async fn git_status(vault_path: String) -> Result<GitStatus, String> {
+        #[cfg(test)]
+        let fixture = phase08_05::capture();
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            let _fixture = phase08_05::enter(fixture, "git_status");
+            super::git_status(vault_path)
+        })
+        .await
+        .map_err(|err| format!("git_status_task_failed: {err}"))?
+    }
+
+    #[tauri::command]
+    pub async fn git_changes(vault_path: String) -> Result<Vec<GitFileChange>, String> {
+        #[cfg(test)]
+        let fixture = phase08_05::capture();
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            let _fixture = phase08_05::enter(fixture, "git_changes");
+            super::git_changes(vault_path)
+        })
+        .await
+        .map_err(|err| format!("git_changes_task_failed: {err}"))?
+    }
+
+    #[tauri::command]
+    pub async fn git_diff(vault_path: String, file_path: String) -> Result<String, String> {
+        #[cfg(test)]
+        let fixture = phase08_05::capture();
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            let _fixture = phase08_05::enter(fixture, "git_diff");
+            super::git_diff(vault_path, file_path)
+        })
+        .await
+        .map_err(|err| format!("git_diff_task_failed: {err}"))?
+    }
+
+    #[tauri::command]
+    pub async fn git_generate_commit_message(
+        vault_path: String,
+        paths: Vec<String>,
+        runtime: String,
+        command_override: Option<String>,
+    ) -> Result<String, String> {
+        #[cfg(test)]
+        let fixture = phase08_05::capture();
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            let _fixture = phase08_05::enter(fixture, "git_generate_commit_message");
+            super::git_generate_commit_message(vault_path, paths, runtime, command_override)
+        })
+        .await
+        .map_err(|err| format!("git_generate_commit_message_task_failed: {err}"))?
+    }
+
+    #[tauri::command]
+    pub async fn git_sync_scan(
+        vault_path: String,
+        include_excluded: Option<bool>,
+    ) -> Result<GitSyncScanResult, String> {
+        #[cfg(test)]
+        let fixture = phase08_05::capture();
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            let _fixture = phase08_05::enter(fixture, "git_sync_scan");
+            super::git_sync_scan(vault_path, include_excluded)
+        })
+        .await
+        .map_err(|err| format!("git_sync_scan_task_failed: {err}"))?
+    }
+
+    #[tauri::command]
+    pub async fn list_workspace_submodules(workspace_path: String) -> Result<Vec<String>, String> {
+        #[cfg(test)]
+        let fixture = phase08_05::capture();
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            let _fixture = phase08_05::enter(fixture, "list_workspace_submodules");
+            super::list_workspace_submodules(workspace_path)
+        })
+        .await
+        .map_err(|err| format!("list_workspace_submodules_task_failed: {err}"))?
+    }
+
+    #[tauri::command]
+    pub async fn git_sync_pull_rebase(repo_path: String) -> Result<GitSyncPullResult, String> {
+        #[cfg(test)]
+        let fixture = phase08_05::capture();
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            let _fixture = phase08_05::enter(fixture, "git_sync_pull_rebase");
+            super::git_sync_pull_rebase(repo_path)
+        })
+        .await
+        .map_err(|err| format!("git_sync_pull_rebase_task_failed: {err}"))?
+    }
+
+    #[tauri::command]
+    pub async fn git_sync_commit_push<R: tauri::Runtime>(
+        app: tauri::AppHandle<R>,
+        repo_path: String,
+        message: String,
+        paths: Option<Vec<String>>,
+        approval_id: Option<String>,
+    ) -> Result<GitSyncCommitPushResult, String> {
+        #[cfg(test)]
+        let fixture = phase08_05::capture();
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            let _fixture = phase08_05::enter(fixture, "git_sync_commit_push");
+            super::git_sync_commit_push(
+                app.state::<ApprovalState>(),
+                repo_path,
+                message,
+                paths,
+                approval_id,
+            )
+        })
+        .await
+        .map_err(|err| format!("git_sync_commit_push_task_failed: {err}"))?
+    }
+
+    #[tauri::command]
+    pub async fn git_commit(
+        vault_path: String,
+        message: String,
+        paths: Option<Vec<String>>,
+    ) -> Result<GitStatus, String> {
+        #[cfg(test)]
+        let fixture = phase08_05::capture();
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            let _fixture = phase08_05::enter(fixture, "git_commit");
+            super::git_commit(vault_path, message, paths)
+        })
+        .await
+        .map_err(|err| format!("git_commit_task_failed: {err}"))?
+    }
+}
+
+#[cfg(test)]
+mod phase08_05 {
+    use super::*;
+    use std::cell::RefCell;
+    use std::future::Future;
+    use std::sync::{mpsc, Arc};
+    use std::time::Duration;
+    use tauri::Manager;
+    use tempfile::TempDir;
+
+    type Hook = Arc<dyn Fn(&str) + Send + Sync>;
+    thread_local! { static HOOK: RefCell<Option<Hook>> = RefCell::new(None); }
+    pub(super) fn capture() -> Option<Hook> {
+        HOOK.with(|hook| hook.borrow().clone())
+    }
+    pub(super) struct Reset(Option<Hook>);
+    impl Drop for Reset {
+        fn drop(&mut self) {
+            HOOK.with(|hook| *hook.borrow_mut() = self.0.take());
+        }
+    }
+    pub(super) fn enter(hook: Option<Hook>, edge: &str) -> Reset {
+        let old = HOOK.with(|slot| slot.replace(hook));
+        let reset = Reset(old);
+        if let Some(hook) = capture() {
+            hook(edge);
+        }
+        reset
+    }
+    pub(super) fn transaction_edge() {
+        if let Some(hook) = capture() {
+            hook("transaction");
+        }
+    }
+    pub(super) fn configure_git(command: &mut Command) {
+        // Per-child isolation; never rewrite the developer's global Git config.
+        for (key, _) in std::env::vars_os() {
+            if key.to_string_lossy().starts_with("GIT_") {
+                command.env_remove(key);
+            }
+        }
+        let null = if cfg!(windows) { "NUL" } else { "/dev/null" };
+        command
+            .env("GIT_CONFIG_GLOBAL", null)
+            .env("GIT_CONFIG_SYSTEM", null)
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_TERMINAL_PROMPT", "0")
+            .env("GIT_ALLOW_PROTOCOL", "file")
+            .args([
+                "-c",
+                "user.name=Maru Fixture",
+                "-c",
+                "user.email=fixture@example.test",
+                "-c",
+                "commit.gpgsign=false",
+                "-c",
+                "tag.gpgsign=false",
+                "-c",
+                &format!("core.hooksPath={null}"),
+                "-c",
+                "credential.helper=",
+                "-c",
+                "protocol.file.allow=always",
+            ]);
+        if let Some(hook) = capture() {
+            hook("process");
+        }
+    }
+    struct Home {
+        _dir: TempDir,
+        previous: Option<std::ffi::OsString>,
+        _guard: std::sync::MutexGuard<'static, ()>,
+    }
+    impl Home {
+        fn new() -> Self {
+            let guard = crate::skill_host::fs::test_maru_home_lock();
+            let dir = TempDir::new().unwrap();
+            let previous = std::env::var_os("MARU_TEST_CONFIG_DIR");
+            std::env::set_var("MARU_TEST_CONFIG_DIR", dir.path());
+            Self {
+                _dir: dir,
+                previous,
+                _guard: guard,
+            }
+        }
+    }
+    impl Drop for Home {
+        fn drop(&mut self) {
+            match self.previous.take() {
+                Some(value) => std::env::set_var("MARU_TEST_CONFIG_DIR", value),
+                None => std::env::remove_var("MARU_TEST_CONFIG_DIR"),
+            }
+        }
+    }
+    fn run(repo: &Path, args: &[&str]) -> String {
+        let output = git_command().args(args).current_dir(repo).output().unwrap();
+        assert!(
+            output.status.success(),
+            "{args:?}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8_lossy(&output.stdout).into_owned()
+    }
+    fn repo() -> TempDir {
+        let dir = TempDir::new().unwrap();
+        run(dir.path(), &["init", "-b", "main"]);
+        std::fs::write(dir.path().join("note.md"), "initial\n").unwrap();
+        run(dir.path(), &["add", "--", "note.md"]);
+        run(dir.path(), &["commit", "-m", "initial"]);
+        dir
+    }
+    fn app() -> tauri::App<tauri::test::MockRuntime> {
+        let app = tauri::test::mock_app();
+        app.manage(ApprovalState::default());
+        app
+    }
+    // Both futures are polled by one task on Tauri's runtime. A direct blocking
+    // call freezes the probe even if another runtime worker is idle.
+    fn boundary<T: Send + 'static>(
+        name: &'static str,
+        future: impl Future<Output = Result<T, String>> + Send + 'static,
+    ) {
+        let (entered_tx, entered_rx) = tauri::async_runtime::channel(1);
+        let (release_tx, release_rx) = mpsc::channel();
+        let release_rx = Mutex::new(release_rx);
+        let hook: Hook = Arc::new(move |edge| {
+            if edge == name {
+                entered_tx
+                    .blocking_send(std::thread::current().id())
+                    .unwrap();
+                release_rx
+                    .lock()
+                    .unwrap()
+                    .recv_timeout(Duration::from_secs(5))
+                    .unwrap();
+                panic!("fixture boundary panic");
+            }
+        });
+        tauri::async_runtime::block_on(tauri::async_runtime::spawn(async move {
+            let caller = std::thread::current().id();
+            let _reset = enter(Some(hook), "caller");
+            let mut future = Box::pin(future);
+            // Start the actual wrapper on this task, then cooperatively await the
+            // worker marker. A sync wrapper blocks here until the timeout/panic.
+            assert!(
+                std::future::poll_fn(|cx| std::task::Poll::Ready(future.as_mut().poll(cx)))
+                    .await
+                    .is_pending()
+            );
+            drop(_reset);
+            let mut entered_rx = entered_rx;
+            let worker = entered_rx.recv().await.unwrap();
+            let mut yielded = false;
+            std::future::poll_fn(|cx| {
+                if yielded {
+                    std::task::Poll::Ready(())
+                } else {
+                    yielded = true;
+                    cx.waker().wake_by_ref();
+                    std::task::Poll::Pending
+                }
+            })
+            .await;
+            assert_ne!(caller, worker);
+            release_tx.send(()).unwrap();
+            assert!(
+                matches!(future.await, Err(e) if e.starts_with(&format!("{name}_task_failed:")))
+            );
+        }))
+        .unwrap();
+    }
+    #[test]
+    fn every_git_wrapper_holds_a_distinct_worker_and_same_task_yields() {
+        let app = app();
+        boundary("git_status", ipc::git_status(String::new()));
+        boundary("git_changes", ipc::git_changes(String::new()));
+        boundary("git_diff", ipc::git_diff(String::new(), String::new()));
+        boundary(
+            "git_generate_commit_message",
+            ipc::git_generate_commit_message(String::new(), vec![], String::new(), None),
+        );
+        boundary("git_sync_scan", ipc::git_sync_scan(String::new(), None));
+        boundary(
+            "list_workspace_submodules",
+            ipc::list_workspace_submodules(String::new()),
+        );
+        boundary(
+            "git_sync_pull_rebase",
+            ipc::git_sync_pull_rebase(String::new()),
+        );
+        boundary(
+            "git_sync_commit_push",
+            ipc::git_sync_commit_push(
+                app.handle().clone(),
+                String::new(),
+                String::new(),
+                None,
+                None,
+            ),
+        );
+        boundary(
+            "git_commit",
+            ipc::git_commit(String::new(), String::new(), None),
+        );
+    }
+    #[test]
+    fn read_wrappers_return_real_nonempty_payloads_and_legacy_errors() {
+        let root = repo();
+        let path = root.path().to_string_lossy().into_owned();
+        std::fs::write(root.path().join("note.md"), "changed\n").unwrap();
+        tauri::async_runtime::block_on(async {
+            assert_eq!(ipc::git_status(path.clone()).await.unwrap().modified, 1);
+            assert_eq!(
+                ipc::git_changes(path.clone()).await.unwrap()[0].path,
+                "note.md"
+            );
+            assert!(ipc::git_diff(path.clone(), "note.md".into())
+                .await
+                .unwrap()
+                .contains("+changed"));
+            let scan = ipc::git_sync_scan(path.clone(), None).await.unwrap();
+            assert_eq!(scan.repos.len(), 1);
+            assert_eq!(scan.repos[0].changes, 1);
+            assert!(ipc::list_workspace_submodules(path.clone())
+                .await
+                .unwrap()
+                .is_empty());
+            assert_eq!(
+                ipc::git_generate_commit_message(path.clone(), vec![], "invalid".into(), None)
+                    .await
+                    .unwrap_err(),
+                "No files selected for commit message generation."
+            );
+            assert!(ipc::git_generate_commit_message(
+                path,
+                vec![".env".into()],
+                "invalid".into(),
+                None
+            )
+            .await
+            .unwrap_err()
+            .contains("refuses to send sensitive"));
+        });
+    }
+    #[test]
+    fn selected_commit_and_denied_approval_preserve_disk_and_contract() {
+        let _home = Home::new();
+        let root = repo();
+        let path = root.path().to_string_lossy().into_owned();
+        std::fs::write(root.path().join("note.md"), "changed\n").unwrap();
+        std::fs::write(root.path().join("other.md"), "retain\n").unwrap();
+        let app = app();
+        let before = run(root.path(), &["rev-parse", "HEAD"]);
+        let (tx, rx) = mpsc::channel();
+        let _reset = enter(
+            Some(Arc::new(move |edge| {
+                if edge == "process" {
+                    tx.send(()).unwrap();
+                }
+            })),
+            "caller",
+        );
+        let err = tauri::async_runtime::block_on(ipc::git_sync_commit_push(
+            app.handle().clone(),
+            path.clone(),
+            "denied".into(),
+            None,
+            None,
+        ))
+        .unwrap_err();
+        assert_eq!(err, "approval_required: git.sync.commit_push");
+        assert!(rx.try_recv().is_err(), "denied approval launched Git");
+        assert_eq!(run(root.path(), &["rev-parse", "HEAD"]), before);
+        let status = tauri::async_runtime::block_on(ipc::git_commit(
+            path,
+            "update note".into(),
+            Some(vec!["note.md".into()]),
+        ))
+        .unwrap();
+        assert_eq!(status.untracked, 1);
+        assert!(!status.clean);
+        assert_eq!(
+            run(root.path(), &["show", "--format=", "--name-only", "HEAD"]).trim(),
+            "note.md"
+        );
+    }
+    #[test]
+    fn local_pull_failure_retains_stash_and_releases_transaction() {
+        let _home = Home::new();
+        let root = repo();
+        std::fs::write(root.path().join("note.md"), "stash me\n").unwrap();
+        let path = root.path().to_string_lossy().into_owned();
+        let error =
+            tauri::async_runtime::block_on(ipc::git_sync_pull_rebase(path.clone())).unwrap_err();
+        assert!(error.starts_with("git pull --rebase failed:"));
+        assert!(run(root.path(), &["stash", "list"]).contains("maru-git-sync-before-pull"));
+        assert!(GIT_ACTION_LOCK.try_lock().is_ok());
+        assert!(
+            tauri::async_runtime::block_on(ipc::git_commit(path, " ".into(), None))
+                .unwrap_err()
+                .contains("empty")
+        );
+    }
+    #[cfg(unix)]
+    #[test]
+    fn alias_commits_wait_inside_worker_and_keep_both_selected_updates() {
+        let _home = Home::new();
+        let root = repo();
+        std::fs::write(root.path().join("note.md"), "one\n").unwrap();
+        std::fs::write(root.path().join("other.md"), "two\n").unwrap();
+        let alias_parent = TempDir::new().unwrap();
+        let alias = alias_parent.path().join("alias");
+        std::os::unix::fs::symlink(root.path(), &alias).unwrap();
+        let (held_tx, held_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let release_rx = Mutex::new(release_rx);
+        let first_path = root.path().to_string_lossy().into_owned();
+        let first = std::thread::spawn(move || {
+            let _reset = enter(
+                Some(Arc::new(move |edge| {
+                    if edge == "transaction" {
+                        held_tx.send(()).unwrap();
+                        release_rx
+                            .lock()
+                            .unwrap()
+                            .recv_timeout(Duration::from_secs(5))
+                            .unwrap();
+                    }
+                })),
+                "caller",
+            );
+            tauri::async_runtime::block_on(ipc::git_commit(
+                first_path,
+                "first".into(),
+                Some(vec!["note.md".into()]),
+            ))
+        });
+        held_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        let (started_tx, started_rx) = mpsc::channel();
+        let (entered_tx, entered_rx) = mpsc::channel();
+        let second = std::thread::spawn(move || {
+            let _reset = enter(
+                Some(Arc::new(move |edge| {
+                    if edge == "git_commit" {
+                        started_tx.send(()).unwrap();
+                    }
+                    if edge == "transaction" {
+                        entered_tx.send(()).unwrap();
+                    }
+                })),
+                "caller",
+            );
+            tauri::async_runtime::block_on(ipc::git_commit(
+                alias.to_string_lossy().into_owned(),
+                "second".into(),
+                Some(vec!["other.md".into()]),
+            ))
+        });
+        started_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        assert!(GIT_ACTION_LOCK.try_lock().is_err());
+        assert!(entered_rx.try_recv().is_err());
+        release_tx.send(()).unwrap();
+        assert_eq!(first.join().unwrap().unwrap().untracked, 1);
+        assert!(second.join().unwrap().unwrap().clean);
+        entered_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        assert_eq!(
+            run(root.path(), &["rev-list", "--count", "HEAD"]).trim(),
+            "3"
+        );
+        assert_eq!(
+            std::fs::read_to_string(root.path().join("note.md")).unwrap(),
+            "one\n"
+        );
+    }
+    #[test]
+    fn approved_commit_push_and_dirty_pull_use_only_local_remote() {
+        let _home = Home::new();
+        let root = repo();
+        let remote = TempDir::new().unwrap();
+        run(remote.path(), &["init", "--bare", "-b", "main"]);
+        run(
+            root.path(),
+            &["remote", "add", "origin", remote.path().to_str().unwrap()],
+        );
+        run(root.path(), &["push", "-u", "origin", "main"]);
+        let app = app();
+        let request = crate::approval::prepare_approval(
+            app.state(),
+            GIT_SYNC_COMMIT_PUSH_APPROVAL_KIND.into(),
+            "fixture".into(),
+            None,
+            None,
+        )
+        .unwrap();
+        crate::approval::record_approval(
+            app.state(),
+            request.id.clone(),
+            crate::approval::ApprovalDecision::Approved,
+            None,
+        )
+        .unwrap();
+        std::fs::write(root.path().join("note.md"), "committed\n").unwrap();
+        let path = root.path().to_string_lossy().into_owned();
+        let pushed = tauri::async_runtime::block_on(ipc::git_sync_commit_push(
+            app.handle().clone(),
+            path.clone(),
+            "approved".into(),
+            Some(vec!["note.md".into()]),
+            Some(request.id.clone()),
+        ))
+        .unwrap();
+        assert!(pushed.committed && pushed.pushed);
+        assert_eq!(
+            run(root.path(), &["rev-parse", "HEAD"]),
+            run(remote.path(), &["rev-parse", "main"])
+        );
+        let repeated = tauri::async_runtime::block_on(ipc::git_sync_commit_push(
+            app.handle().clone(),
+            path.clone(),
+            "repeat".into(),
+            None,
+            Some(request.id),
+        ))
+        .unwrap_err();
+        assert_eq!(repeated, "approval_consumed");
+        std::fs::write(root.path().join("note.md"), "dirty preserved\n").unwrap();
+        let pull = tauri::async_runtime::block_on(ipc::git_sync_pull_rebase(path)).unwrap();
+        assert!(pull.stashed);
+        assert!(run(root.path(), &["stash", "list"]).is_empty());
+        assert_eq!(
+            std::fs::read_to_string(root.path().join("note.md")).unwrap(),
+            "dirty preserved\n"
+        );
     }
 }

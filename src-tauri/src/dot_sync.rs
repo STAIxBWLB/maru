@@ -144,6 +144,10 @@ struct CommandOutput {
 }
 
 fn dot_candidates() -> [Option<PathBuf>; 3] {
+    #[cfg(test)]
+    if phase08_05::capture().is_some() {
+        return [Some(PathBuf::from("fixture-dot")), None, None];
+    }
     let configured = std::env::var_os("MARU_DOT_BINARY")
         .map(PathBuf::from)
         .filter(|path| path.is_file());
@@ -167,6 +171,10 @@ fn run_program(
     args: &[String],
     stdin: Option<&str>,
 ) -> Result<CommandOutput, String> {
+    #[cfg(test)]
+    if let Some(fixture) = phase08_05::capture() {
+        return (fixture.program)(program, args, stdin);
+    }
     let mut command = Command::new(program);
     command
         .args(args)
@@ -327,9 +335,15 @@ fn overview_sync() -> Result<DotSyncOverview, String> {
 
 #[tauri::command(async)]
 pub async fn dot_sync_overview() -> Result<DotSyncOverview, String> {
-    tauri::async_runtime::spawn_blocking(overview_sync)
-        .await
-        .map_err(|err| format!("dot_status_join_failed: {err}"))?
+    #[cfg(test)]
+    let fixture = phase08_05::capture();
+    tauri::async_runtime::spawn_blocking(move || {
+        #[cfg(test)]
+        let _fixture = phase08_05::enter(fixture, "overview");
+        overview_sync()
+    })
+    .await
+    .map_err(|err| format!("dot_status_join_failed: {err}"))?
 }
 
 fn validate_interval(value: u32) -> Result<(), String> {
@@ -355,6 +369,9 @@ fn run_dot_action(request: DotSyncActionRequest) -> Result<DotSyncActionResult, 
         "dot_sync",
         "DOT_ACTION_LOCK",
     );
+    // Reject invalid/secret-expanding requests before binary discovery, whose
+    // version probe is itself a process launch. Validation stays in the worker.
+    validate_dot_action(&request)?;
 
     if matches!(&request, DotSyncActionRequest::InstallCli) {
         let brew = resolve_program("brew").ok_or_else(|| "homebrew_not_installed".to_string())?;
@@ -714,9 +731,310 @@ fn run_dot_action(request: DotSyncActionRequest) -> Result<DotSyncActionResult, 
 
 #[tauri::command(async)]
 pub async fn dot_sync_run(request: DotSyncActionRequest) -> Result<DotSyncActionResult, String> {
-    tauri::async_runtime::spawn_blocking(move || run_dot_action(request))
-        .await
-        .map_err(|err| format!("dot_action_join_failed: {err}"))?
+    #[cfg(test)]
+    let fixture = phase08_05::capture();
+    tauri::async_runtime::spawn_blocking(move || {
+        #[cfg(test)]
+        let _fixture = phase08_05::enter(fixture, "run");
+        run_dot_action(request)
+    })
+    .await
+    .map_err(|err| format!("dot_action_join_failed: {err}"))?
+}
+
+fn validate_dot_action(request: &DotSyncActionRequest) -> Result<(), String> {
+    match request {
+        DotSyncActionRequest::ConfigureMirror {
+            target,
+            owner,
+            filter_mode,
+            create,
+            update,
+            delete,
+            max_delete,
+            push_interval_seconds,
+            pull_interval_seconds,
+            ..
+        } => {
+            validate_interval(*push_interval_seconds)?;
+            validate_interval(*pull_interval_seconds)?;
+            safe_token(target, "target")?;
+            safe_token(owner, "owner")?;
+            if filter_mode != "include" && filter_mode != "exclude" {
+                return Err("dot_filter_mode_invalid".into());
+            }
+            if !(*create || *update || *delete) || (*delete && *max_delete == 0) {
+                return Err("dot_propagation_invalid".into());
+            }
+        }
+        DotSyncActionRequest::ConfigurePeer {
+            host,
+            remote_path,
+            interval_seconds,
+            allow_patterns,
+            acknowledge_secrets,
+            ..
+        } => {
+            validate_interval(*interval_seconds)?;
+            safe_token(host, "peer_host")?;
+            safe_token(remote_path, "peer_path")?;
+            if !allow_patterns.trim().is_empty() && !acknowledge_secrets {
+                return Err("peer_secret_ack_required".into());
+            }
+        }
+        DotSyncActionRequest::SaveFilter { profile, kind, .. }
+        | DotSyncActionRequest::ReadFilter { profile, kind } => {
+            if profile != "sync" && profile != "peer" {
+                return Err("dot_profile_invalid".into());
+            }
+            if !["include", "exclude", "ignore", "allow"].contains(&kind.as_str()) {
+                return Err("dot_filter_kind_invalid".into());
+            }
+        }
+        DotSyncActionRequest::ReadLog { profile } => {
+            if profile != "sync" && profile != "peer" {
+                return Err("dot_profile_invalid".into());
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod phase08_05 {
+    use super::*;
+    use std::cell::RefCell;
+    use std::future::Future;
+    use std::sync::{mpsc, Arc};
+    use std::time::Duration;
+    type Program =
+        dyn Fn(&Path, &[String], Option<&str>) -> Result<CommandOutput, String> + Send + Sync;
+    type Edge = dyn Fn(&str) + Send + Sync;
+    pub(super) struct Fixture {
+        pub program: Arc<Program>,
+        edge: Arc<Edge>,
+    }
+    thread_local! { static FIXTURE: RefCell<Option<Arc<Fixture>>> = RefCell::new(None); }
+    pub(super) fn capture() -> Option<Arc<Fixture>> {
+        FIXTURE.with(|slot| slot.borrow().clone())
+    }
+    pub(super) struct Reset(Option<Arc<Fixture>>);
+    impl Drop for Reset {
+        fn drop(&mut self) {
+            FIXTURE.with(|slot| *slot.borrow_mut() = self.0.take());
+        }
+    }
+    pub(super) fn enter(fixture: Option<Arc<Fixture>>, edge: &str) -> Reset {
+        let old = FIXTURE.with(|slot| slot.replace(fixture));
+        let reset = Reset(old);
+        if let Some(fixture) = capture() {
+            (fixture.edge)(edge);
+        }
+        reset
+    }
+    fn output(args: &[String]) -> CommandOutput {
+        let stdout = match args.first().map(String::as_str) {
+            Some("--version") => "dot version 2.63.0".into(),
+            Some("sync") if args.get(1).map(String::as_str) == Some("status") => {
+                r#"{"schemaVersion":1,"kind":"mirror","target":"fixture"}"#.into()
+            }
+            Some("peer") if args.get(1).map(String::as_str) == Some("status") => {
+                r#"{"schemaVersion":1,"kind":"peer","host":"fixture"}"#.into()
+            }
+            _ => "fixture complete".into(),
+        };
+        CommandOutput {
+            stdout,
+            stderr: String::new(),
+        }
+    }
+    #[test]
+    fn dot_wrappers_hold_distinct_workers_and_same_task_yields() {
+        for edge in ["overview", "run"] {
+            let (tx, mut rx) = tauri::async_runtime::channel(1);
+            let (release_tx, release_rx) = mpsc::channel();
+            let release_rx = Mutex::new(release_rx);
+            let fixture = Arc::new(Fixture {
+                program: Arc::new(|_, _, _| panic!("boundary test must not launch")),
+                edge: Arc::new(move |name| {
+                    if name == edge {
+                        tx.blocking_send(std::thread::current().id()).unwrap();
+                        release_rx
+                            .lock()
+                            .unwrap()
+                            .recv_timeout(Duration::from_secs(5))
+                            .unwrap();
+                        panic!("fixture boundary panic");
+                    }
+                }),
+            });
+            tauri::async_runtime::block_on(tauri::async_runtime::spawn(async move {
+                let caller = std::thread::current().id();
+                let _reset = enter(Some(fixture), "caller");
+                let mut future = Box::pin(async move {
+                    if edge == "overview" {
+                        dot_sync_overview().await.map(|_| ())
+                    } else {
+                        dot_sync_run(DotSyncActionRequest::PauseMirror)
+                            .await
+                            .map(|_| ())
+                    }
+                });
+                assert!(std::future::poll_fn(|cx| std::task::Poll::Ready(
+                    future.as_mut().poll(cx)
+                ))
+                .await
+                .is_pending());
+                drop(_reset);
+                assert_ne!(caller, rx.recv().await.unwrap());
+                let mut yielded = false;
+                std::future::poll_fn(|cx| {
+                    if yielded {
+                        std::task::Poll::Ready(())
+                    } else {
+                        yielded = true;
+                        cx.waker().wake_by_ref();
+                        std::task::Poll::Pending
+                    }
+                })
+                .await;
+                release_tx.send(()).unwrap();
+                let error = future.await.unwrap_err();
+                assert!(error.starts_with(if edge == "overview" {
+                    "dot_status_join_failed:"
+                } else {
+                    "dot_action_join_failed:"
+                }));
+            }))
+            .unwrap();
+        }
+    }
+    #[test]
+    fn injected_dot_preserves_fixed_argv_stdin_payload_and_denied_no_launch() {
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let record = calls.clone();
+        let _reset = enter(
+            Some(Arc::new(Fixture {
+                edge: Arc::new(|_| {}),
+                program: Arc::new(move |program, args, stdin| {
+                    assert_eq!(program, Path::new("fixture-dot"));
+                    record
+                        .lock()
+                        .unwrap()
+                        .push((args.to_vec(), stdin.map(str::to_owned)));
+                    Ok(output(args))
+                }),
+            })),
+            "caller",
+        );
+        let overview = tauri::async_runtime::block_on(dot_sync_overview()).unwrap();
+        assert!(overview.cli.available && overview.cli.compatible);
+        assert_eq!(overview.mirror.unwrap()["target"], "fixture");
+        calls.lock().unwrap().clear();
+        let error =
+            tauri::async_runtime::block_on(dot_sync_run(DotSyncActionRequest::ConfigurePeer {
+                host: "fixture".into(),
+                remote_path: "/fixture".into(),
+                interval_seconds: 60,
+                allow_patterns: "*.key".into(),
+                home_paths: String::new(),
+                acknowledge_secrets: false,
+            }))
+            .unwrap_err();
+        assert_eq!(error, "peer_secret_ack_required");
+        assert!(calls.lock().unwrap().is_empty());
+        let result =
+            tauri::async_runtime::block_on(dot_sync_run(DotSyncActionRequest::RunMirror {
+                direction: DotMirrorDirection::Push,
+                mode: DotSyncMode::Clean,
+                dry_run: true,
+            }))
+            .unwrap();
+        assert_eq!(result.stdout, "fixture complete");
+        assert_eq!(
+            calls.lock().unwrap()[1].0,
+            ["--dry-run", "sync", "push", "--mode", "clean"]
+        );
+        calls.lock().unwrap().clear();
+        tauri::async_runtime::block_on(dot_sync_run(DotSyncActionRequest::SaveFilter {
+            profile: "peer".into(),
+            kind: "allow".into(),
+            content: "safe fixture\n".into(),
+            acknowledge_secrets: true,
+        }))
+        .unwrap();
+        let calls = calls.lock().unwrap();
+        assert_eq!(
+            calls[1].0,
+            [
+                "sync",
+                "--profile=peer",
+                "filters",
+                "set",
+                "allow",
+                "--json",
+                "--ack-secret-exposure"
+            ]
+        );
+        assert_eq!(calls[1].1.as_deref(), Some("safe fixture\n"));
+    }
+    #[test]
+    fn dot_action_lock_holds_through_action_failure_then_releases() {
+        let (held_tx, held_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let release_rx = Mutex::new(release_rx);
+        let first = std::thread::spawn(move || {
+            let _reset = enter(
+                Some(Arc::new(Fixture {
+                    edge: Arc::new(|_| {}),
+                    program: Arc::new(move |_, args, _| {
+                        if args == ["sync", "pause"] {
+                            held_tx.send(()).unwrap();
+                            release_rx
+                                .lock()
+                                .unwrap()
+                                .recv_timeout(Duration::from_secs(5))
+                                .unwrap();
+                            return Err("dot_command_failed: fixture action".into());
+                        }
+                        Ok(output(args))
+                    }),
+                })),
+                "caller",
+            );
+            tauri::async_runtime::block_on(dot_sync_run(DotSyncActionRequest::PauseMirror))
+        });
+        held_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        let (worker_tx, worker_rx) = mpsc::channel();
+        let (process_tx, process_rx) = mpsc::channel();
+        let second = std::thread::spawn(move || {
+            let _reset = enter(
+                Some(Arc::new(Fixture {
+                    edge: Arc::new(move |edge| {
+                        if edge == "run" {
+                            worker_tx.send(()).unwrap();
+                        }
+                    }),
+                    program: Arc::new(move |_, args, _| {
+                        process_tx.send(()).unwrap();
+                        Ok(output(args))
+                    }),
+                })),
+                "caller",
+            );
+            tauri::async_runtime::block_on(dot_sync_run(DotSyncActionRequest::ResumeMirror))
+        });
+        worker_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        assert!(DOT_ACTION_LOCK.get().unwrap().try_lock().is_err());
+        assert!(process_rx.try_recv().is_err());
+        release_tx.send(()).unwrap();
+        assert_eq!(
+            first.join().unwrap().unwrap_err(),
+            "dot_command_failed: fixture action"
+        );
+        assert_eq!(second.join().unwrap().unwrap().stdout, "fixture complete");
+    }
 }
 
 #[cfg(test)]
