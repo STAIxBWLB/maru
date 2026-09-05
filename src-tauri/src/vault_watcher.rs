@@ -22,12 +22,7 @@ fn relevant_path(path: &Path, root: &Path) -> bool {
     let Ok(rel) = path.strip_prefix(root) else {
         return false;
     };
-    if rel.components().any(|component| {
-        matches!(
-            component.as_os_str().to_str(),
-            Some(".git" | "node_modules" | "target" | "dist" | "build")
-        )
-    }) {
+    if crate::paths::is_under_generated_dir(path) {
         return false;
     }
     if rel.starts_with(".maru/cache") || rel.starts_with(".maru/versions") {
