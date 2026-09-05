@@ -42,6 +42,10 @@ const INSTALL_MARKER_FILE: &str = ".maru-install.json";
 // or re-embed anything.
 static BUILTIN_DIR: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/skills-bootstrap");
 
+// D-03: REGISTRY_LOCK serializes access to the on-disk skill registry; every
+// guarded section re-reads the registry from disk after acquisition, so the
+// in-memory unit carries no invariant and recovering the guard cannot serve
+// tainted state.
 static REGISTRY_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -2616,10 +2620,14 @@ fn resolve_link_target(link: &Path, target: PathBuf) -> PathBuf {
 }
 
 fn registry_guard() -> Result<MutexGuard<'static, ()>, String> {
-    REGISTRY_LOCK
-        .get_or_init(|| Mutex::new(()))
-        .lock()
-        .map_err(|_| "skills_registry_lock_poisoned".to_string())
+    // D-03: the guarded registry state is re-read from disk after
+    // acquisition, so recovering a poisoned guard is safe (see the
+    // REGISTRY_LOCK declaration).
+    Ok(crate::lock_recovery::recover_guard(
+        REGISTRY_LOCK.get_or_init(|| Mutex::new(())).lock(),
+        "skills",
+        "REGISTRY_LOCK",
+    ))
 }
 
 fn startup_profile_enabled() -> bool {

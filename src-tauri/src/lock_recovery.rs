@@ -1,6 +1,34 @@
 //! Poison-recovery guard helper shared by the six named process-global locks
-//! (PERF-03). See `<behavior>` in 07-02-PLAN.md; the helper itself lands in
-//! the GREEN commit of the tracer task.
+//! (PERF-03).
+//!
+//! Contract (D-03, REQUIREMENTS PERF-03 out-of-scope): this helper may only
+//! be used for unit mutexes (`Mutex<()>`) whose guarded state is re-derived
+//! from disk after acquisition, so the in-memory `()` carries no invariant
+//! and recovering the guard cannot serve tainted state. Every call site must
+//! carry its own co-located justification comment naming the lock's actual
+//! guarded state. Recovery emits exactly one stderr warn line per
+//! poisoned acquisition (D-01); the user surface shows nothing.
+
+use std::sync::{LockResult, MutexGuard};
+
+/// Convert a mutex lock result into a guard, recovering from poisoning.
+///
+/// The `Ok` arm returns the guard unchanged. The `Err(poisoned)` arm emits
+/// one warn line carrying the module tag and lock name (see the module
+/// docs for the exact shape)
+/// and returns `poisoned.into_inner()` so the calling feature stays usable on
+/// the next call instead of bricked until app restart. Mutual exclusion is
+/// unchanged: recovered guards still serialize acquirers.
+pub(crate) fn recover_guard<'a, T>(
+    result: LockResult<MutexGuard<'a, T>>,
+    module_tag: &str,
+    lock_name: &str,
+) -> MutexGuard<'a, T> {
+    result.unwrap_or_else(|poisoned| {
+        eprintln!("[{module_tag}] {lock_name} was poisoned; recovering guard");
+        poisoned.into_inner()
+    })
+}
 
 #[cfg(test)]
 mod tests {
@@ -34,7 +62,14 @@ mod tests {
         // ...and recovery hands back a usable guard anyway.
         let guard = recover_guard(Err(poisoned), "test", "POISONED_LOCK");
         drop(guard);
-        assert!(mutex.lock().is_ok());
+        // into_inner recovery does not clear the poison flag: every later
+        // acquisition still returns Err and goes through recover_guard again
+        // (each repeated recovery emits its own warn line). The feature stays
+        // usable because callers hold the guard, not the LockResult.
+        assert!(mutex.lock().is_err());
+        let guard = recover_guard(mutex.lock(), "test", "POISONED_LOCK");
+        drop(guard);
+        assert!(mutex.lock().is_err());
     }
 
     #[test]
@@ -49,8 +84,11 @@ mod tests {
         };
         assert!(panicked.join().is_err());
         let recovered: MutexGuard<'_, ()> =
-            recover_guard(mutex.lock().unwrap_err(), "test", "POISONED_LOCK");
-        // A second acquirer still blocks while the recovered guard is held.
+            recover_guard(Err(mutex.lock().unwrap_err()), "test", "POISONED_LOCK");
+        // Clear the poison flag so try_lock results isolate exclusion from
+        // poisoning: while the recovered guard is held, a second acquirer
+        // still blocks; after the drop, acquisition succeeds again.
+        mutex.clear_poison();
         assert!(mutex.try_lock().is_err());
         drop(recovered);
         assert!(mutex.try_lock().is_ok());
@@ -58,7 +96,7 @@ mod tests {
 
     #[test]
     fn helper_emits_exactly_one_warn_line() {
-        // D-01: visibility is exactly one eprintln! warn line per recovery,
+        // D-01: visibility is exactly one stderr warn line per recovery,
         // asserted by source because stderr capture is unreliable in tests.
         // The needles are split so this test's own source does not contain
         // the counted tokens.
