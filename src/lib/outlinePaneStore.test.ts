@@ -165,7 +165,7 @@ describe("Outline facade contract", () => {
     browser.publishDocumentBrowser(browserScope, {
       selectedPath: "/workspace-a/note.md",
       query: "report",
-      documentFilter: { kind: "view", view: "inbox" },
+      documentFilter: { kind: "view", view: "drafts" },
     });
 
     const slice = surface.getOutlineBrowserSlice({ workspacePath: "/workspace-a", browserScope });
@@ -173,7 +173,7 @@ describe("Outline facade contract", () => {
     expect(slice).toEqual({
       selectedPath: "/workspace-a/note.md",
       query: "report",
-      documentFilter: { kind: "view", view: "inbox" },
+      documentFilter: { kind: "view", view: "drafts" },
     });
     expect(Object.keys(surface.getOutlinePaneState({ workspacePath: "/workspace-a" }).sidebar))
       .not.toEqual(expect.arrayContaining(["selectedPath", "documentFilter"]));

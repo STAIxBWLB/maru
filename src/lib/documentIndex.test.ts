@@ -99,7 +99,6 @@ describe("document index", () => {
   it("filters built-in document views", () => {
     const now = new Date("2026-05-09T00:00:00Z");
     const entries = [
-      entry("inbox/dropped.md", { frontmatter: { type: "memo" } }),
       entry("plans/draft.md", { frontmatter: { status: "draft" } }),
       entry("archive/old.md"),
       entry("projects/archived.md", { frontmatter: { status: "archived" } }),
@@ -108,19 +107,16 @@ describe("document index", () => {
     ];
     const index = buildDocumentIndex(entries);
 
-    expect(filterDocumentIndex(index, "", { kind: "view", view: "inbox" })).toEqual([
+    expect(filterDocumentIndex(index, "", { kind: "view", view: "drafts" })).toEqual([
       entries[0],
     ]);
-    expect(filterDocumentIndex(index, "", { kind: "view", view: "drafts" })).toEqual([
-      entries[1],
-    ]);
     expect(filterDocumentIndex(index, "", { kind: "view", view: "archive" })).toEqual([
+      entries[1],
       entries[2],
-      entries[3],
     ]);
     expect(
       filterDocumentIndex(index, "", { kind: "view", view: "recentlyUpdated" }, { now }),
-    ).toEqual([entries[4]]);
+    ).toEqual([entries[3]]);
   });
 
   it("filters and counts custom document views with AND criteria", () => {

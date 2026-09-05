@@ -4,7 +4,6 @@ import {
   Clock,
   FileText,
   FolderGit2,
-  Inbox,
   Layers,
   Pencil,
   Plus,
@@ -88,7 +87,6 @@ export const Sidebar = memo(function Sidebar({
   const builtInViews = useMemo(
     () =>
       [
-        { view: "inbox" as const, icon: <Inbox size={12} /> },
         { view: "drafts" as const, icon: <FileText size={12} /> },
         { view: "archive" as const, icon: <Archive size={12} /> },
         { view: "recentlyUpdated" as const, icon: <Clock size={12} /> },

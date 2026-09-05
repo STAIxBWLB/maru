@@ -1300,7 +1300,6 @@ export function MainApp() {
   );
   const builtInDocumentViewCounts = useMemo<Record<BuiltInDocumentView, number>>(
     () => ({
-      inbox: countDocumentFilter(documentIndex, { kind: "view", view: "inbox" }),
       drafts: countDocumentFilter(documentIndex, { kind: "view", view: "drafts" }),
       archive: countDocumentFilter(documentIndex, { kind: "view", view: "archive" }),
       recentlyUpdated: countDocumentFilter(documentIndex, {
