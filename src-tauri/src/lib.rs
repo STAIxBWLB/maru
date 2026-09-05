@@ -109,14 +109,9 @@ use diagram::{
     diagram_write_report_asset,
 };
 use dot_sync::{dot_sync_overview, dot_sync_run};
-use drafts::{
-    drafts_create, drafts_discard, drafts_list, drafts_promote, drafts_promote_default_dir,
-    drafts_read, drafts_relink_promoted, drafts_save, drafts_set_status,
-};
 use e2e_flow::{maru_e2e_read, maru_e2e_run};
 use evidence_binder::{evidence_binder_mutate, evidence_binder_read};
 use export::{export_dispatch, export_plan, export_validate};
-use gap::{gap_analyze, gap_append_log, gap_log_list, gap_reports_list};
 use gmail_gws::{
     check_gws_auth, decide_gmail_item, decide_gmail_items, fetch_gmail_unread, stage_gmail_items,
 };
@@ -173,11 +168,6 @@ use project_activity::scan_project_activity;
 use scheduler::{
     scheduler_add, scheduler_list, scheduler_remove, scheduler_run_now, scheduler_set_enabled,
 };
-use scratchpad::{
-    scratchpad_cleanup_apply, scratchpad_cleanup_plan, scratchpad_create_idea, scratchpad_list,
-    scratchpad_migrate_legacy_memos, scratchpad_read, scratchpad_rename, scratchpad_save,
-    scratchpad_transition_idea, scratchpad_trash,
-};
 use scratchpad_watcher::{
     start_scratchpad_watcher, stop_scratchpad_watcher, ScratchpadWatcherState,
 };
@@ -188,10 +178,6 @@ use secrets::{
 use share_outbox::{
     ensure_share_outbox_root, prepare_share_outbox_files, read_share_outbox_config,
     save_share_outbox_root, scan_share_outbox,
-};
-use shelf::{
-    delete_memo, list_memos, read_memo, save_memo, save_memo_as, store_shelf_files,
-    store_shelf_files_as,
 };
 #[cfg(target_os = "macos")]
 use site_view::queue_opened_urls;
@@ -407,36 +393,36 @@ pub fn run() {
             web_actions_apply,
             web_action_repair_task_list_linkage,
             web_actions_import_top,
-            store_shelf_files,
-            store_shelf_files_as,
-            list_memos,
-            read_memo,
-            save_memo,
-            delete_memo,
-            save_memo_as,
-            scratchpad_list,
-            scratchpad_read,
-            scratchpad_save,
-            scratchpad_rename,
-            scratchpad_trash,
-            scratchpad_create_idea,
-            scratchpad_transition_idea,
-            scratchpad_cleanup_plan,
-            scratchpad_cleanup_apply,
-            scratchpad_migrate_legacy_memos,
-            drafts_list,
-            drafts_read,
-            drafts_save,
-            drafts_create,
-            drafts_set_status,
-            drafts_discard,
-            drafts_promote,
-            drafts_promote_default_dir,
-            drafts_relink_promoted,
-            gap_analyze,
-            gap_append_log,
-            gap_log_list,
-            gap_reports_list,
+            shelf::ipc::store_shelf_files,
+            shelf::ipc::store_shelf_files_as,
+            shelf::ipc::list_memos,
+            shelf::ipc::read_memo,
+            shelf::ipc::save_memo,
+            shelf::ipc::delete_memo,
+            shelf::ipc::save_memo_as,
+            scratchpad::ipc::scratchpad_list,
+            scratchpad::ipc::scratchpad_read,
+            scratchpad::ipc::scratchpad_save,
+            scratchpad::ipc::scratchpad_rename,
+            scratchpad::ipc::scratchpad_trash,
+            scratchpad::ipc::scratchpad_create_idea,
+            scratchpad::ipc::scratchpad_transition_idea,
+            scratchpad::ipc::scratchpad_cleanup_plan,
+            scratchpad::ipc::scratchpad_cleanup_apply,
+            scratchpad::ipc::scratchpad_migrate_legacy_memos,
+            drafts::ipc::drafts_list,
+            drafts::ipc::drafts_read,
+            drafts::ipc::drafts_save,
+            drafts::ipc::drafts_create,
+            drafts::ipc::drafts_set_status,
+            drafts::ipc::drafts_discard,
+            drafts::ipc::drafts_promote,
+            drafts::ipc::drafts_promote_default_dir,
+            drafts::ipc::drafts_relink_promoted,
+            gap::gap_analyze,
+            gap::gap_append_log,
+            gap::gap_log_list,
+            gap::gap_reports_list,
             kg_document_refs,
             kg_refs_clear,
             scheduler_list,

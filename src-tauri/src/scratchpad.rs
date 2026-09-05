@@ -1,4 +1,7 @@
-use crate::atomic_file::{write_atomic, write_atomic_create};
+use crate::atomic_file::{
+    with_path_transactions, write_atomic, write_atomic_create, PathTransactionLease,
+    PathTransactionRequest,
+};
 use crate::inbox_settings::{expand_tilde, lexical_normalize_path};
 #[cfg(not(test))]
 use crate::vault_list::assert_primary_private_workspace;
@@ -325,9 +328,11 @@ pub(crate) fn resolve_scratchpad_drafts_root(work_path: &Path) -> Result<PathBuf
 pub(crate) fn assert_scratchpad_workspace_access(work_path: &Path) -> Result<(), String> {
     #[cfg(test)]
     {
-        // Unit tests use isolated TempDir workspaces and validate the registry
-        // rule separately against explicit registry fixtures.
-        let _ = work_path;
+        // Legacy fixtures retain their isolated-workspace setup. Scoped
+        // phase08 fixtures opt into the production guard through actual IPC.
+        if phase08_08::enforce_workspace_access(work_path) {
+            return crate::vault_list::assert_primary_private_workspace(work_path);
+        }
         Ok(())
     }
     #[cfg(not(test))]
@@ -767,8 +772,40 @@ fn assert_revision(path: &Path, expected: &str) -> Result<(), String> {
     Ok(())
 }
 
-#[tauri::command(async)]
 pub fn scratchpad_list(work_path: String) -> Result<Vec<ScratchpadEntry>, String> {
+    let work = PathBuf::from(&work_path);
+    if !work.is_absolute() {
+        return Err("workPath must be absolute".to_string());
+    }
+    let paths = vec![
+        resolve_scratchpad_root(&work)?,
+        work.join("workspace.config.yaml"),
+    ];
+    let request = PathTransactionRequest::new(paths)?
+        .require_parent(&work)?
+        .with_workspace_registry()?;
+    with_path_transactions(request, |lease| {
+        scratchpad_list_in_transaction(lease, work_path)
+    })
+}
+
+pub(crate) fn scratchpad_list_in_transaction(
+    lease: &PathTransactionLease,
+    work_path: String,
+) -> Result<Vec<ScratchpadEntry>, String> {
+    let work = PathBuf::from(&work_path);
+    if !work.is_absolute() {
+        return Err("workPath must be absolute".to_string());
+    }
+    let paths = vec![
+        resolve_scratchpad_root(&work)?,
+        work.join("workspace.config.yaml"),
+    ];
+    lease.ensure_covered(paths)?;
+    lease.ensure_workspace_registry()?;
+    // The access guard can migrate legacy registry state, even for reads.
+    lease.before_effect()?;
+
     let work = PathBuf::from(&work_path);
     assert_scratchpad_workspace_access(&work)?;
     let (_, config) = config_for(&work)?;
@@ -817,12 +854,48 @@ fn collection_rank(collection: ScratchpadCollection) -> u8 {
     }
 }
 
-#[tauri::command(async)]
 pub fn scratchpad_read(
     work_path: String,
     collection: ScratchpadCollection,
     relative_path: String,
 ) -> Result<ScratchpadDocument, String> {
+    let work = PathBuf::from(&work_path);
+    if !work.is_absolute() {
+        return Err("workPath must be absolute".to_string());
+    }
+    let mut paths = vec![
+        resolve_scratchpad_root(&work)?,
+        work.join("workspace.config.yaml"),
+    ];
+    paths.push(resolve_entry_path(&work, collection, &relative_path)?.0);
+    let request = PathTransactionRequest::new(paths)?
+        .require_parent(&work)?
+        .with_workspace_registry()?;
+    with_path_transactions(request, |lease| {
+        scratchpad_read_in_transaction(lease, work_path, collection, relative_path)
+    })
+}
+
+pub(crate) fn scratchpad_read_in_transaction(
+    lease: &PathTransactionLease,
+    work_path: String,
+    collection: ScratchpadCollection,
+    relative_path: String,
+) -> Result<ScratchpadDocument, String> {
+    let work = PathBuf::from(&work_path);
+    if !work.is_absolute() {
+        return Err("workPath must be absolute".to_string());
+    }
+    let mut paths = vec![
+        resolve_scratchpad_root(&work)?,
+        work.join("workspace.config.yaml"),
+    ];
+    paths.push(resolve_entry_path(&work, collection, &relative_path)?.0);
+    lease.ensure_covered(paths)?;
+    lease.ensure_workspace_registry()?;
+    // The access guard can migrate legacy registry state, even for reads.
+    lease.before_effect()?;
+
     let work = PathBuf::from(&work_path);
     assert_scratchpad_workspace_access(&work)?;
     let (_, config) = config_for(&work)?;
@@ -839,7 +912,6 @@ pub fn scratchpad_read(
     Ok(ScratchpadDocument { entry, content })
 }
 
-#[tauri::command(async)]
 #[allow(clippy::too_many_arguments)]
 pub fn scratchpad_save(
     work_path: String,
@@ -850,6 +922,57 @@ pub fn scratchpad_save(
     expected_revision: Option<String>,
     force: bool,
 ) -> Result<ScratchpadDocument, String> {
+    let work = PathBuf::from(&work_path);
+    if !work.is_absolute() {
+        return Err("workPath must be absolute".to_string());
+    }
+    let mut paths = vec![
+        resolve_scratchpad_root(&work)?,
+        work.join("workspace.config.yaml"),
+    ];
+    paths.push(resolve_entry_path(&work, collection, &relative_path)?.0);
+    let request = PathTransactionRequest::new(paths)?
+        .require_parent(&work)?
+        .with_workspace_registry()?;
+    with_path_transactions(request, |lease| {
+        scratchpad_save_in_transaction(
+            lease,
+            work_path,
+            collection,
+            relative_path,
+            format,
+            content,
+            expected_revision,
+            force,
+        )
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn scratchpad_save_in_transaction(
+    lease: &PathTransactionLease,
+    work_path: String,
+    collection: ScratchpadCollection,
+    relative_path: String,
+    format: ScratchpadFormat,
+    content: String,
+    expected_revision: Option<String>,
+    force: bool,
+) -> Result<ScratchpadDocument, String> {
+    let work = PathBuf::from(&work_path);
+    if !work.is_absolute() {
+        return Err("workPath must be absolute".to_string());
+    }
+    let mut paths = vec![
+        resolve_scratchpad_root(&work)?,
+        work.join("workspace.config.yaml"),
+    ];
+    paths.push(resolve_entry_path(&work, collection, &relative_path)?.0);
+    lease.ensure_covered(paths)?;
+    lease.ensure_workspace_registry()?;
+    // The access guard can migrate legacy registry state, even for reads.
+    lease.before_effect()?;
+
     let work = PathBuf::from(&work_path);
     assert_scratchpad_workspace_access(&work)?;
     let (_, config) = config_for(&work)?;
@@ -891,10 +1014,9 @@ pub fn scratchpad_save(
         let pinned = pin_commit_path(&root, &relative)?;
         write_atomic_create(&pinned, content.as_bytes())?;
     }
-    scratchpad_read(work_path, collection, relative_path)
+    scratchpad_read_in_transaction(lease, work_path, collection, relative_path)
 }
 
-#[tauri::command(async)]
 pub fn scratchpad_rename(
     work_path: String,
     collection: ScratchpadCollection,
@@ -902,6 +1024,54 @@ pub fn scratchpad_rename(
     new_relative_path: String,
     expected_revision: String,
 ) -> Result<ScratchpadDocument, String> {
+    let work = PathBuf::from(&work_path);
+    if !work.is_absolute() {
+        return Err("workPath must be absolute".to_string());
+    }
+    let mut paths = vec![
+        resolve_scratchpad_root(&work)?,
+        work.join("workspace.config.yaml"),
+    ];
+    paths.push(resolve_entry_path(&work, collection, &relative_path)?.0);
+    paths.push(resolve_entry_path(&work, collection, &new_relative_path)?.0);
+    let request = PathTransactionRequest::new(paths)?
+        .require_parent(&work)?
+        .with_workspace_registry()?;
+    with_path_transactions(request, |lease| {
+        scratchpad_rename_in_transaction(
+            lease,
+            work_path,
+            collection,
+            relative_path,
+            new_relative_path,
+            expected_revision,
+        )
+    })
+}
+
+pub(crate) fn scratchpad_rename_in_transaction(
+    lease: &PathTransactionLease,
+    work_path: String,
+    collection: ScratchpadCollection,
+    relative_path: String,
+    new_relative_path: String,
+    expected_revision: String,
+) -> Result<ScratchpadDocument, String> {
+    let work = PathBuf::from(&work_path);
+    if !work.is_absolute() {
+        return Err("workPath must be absolute".to_string());
+    }
+    let mut paths = vec![
+        resolve_scratchpad_root(&work)?,
+        work.join("workspace.config.yaml"),
+    ];
+    paths.push(resolve_entry_path(&work, collection, &relative_path)?.0);
+    paths.push(resolve_entry_path(&work, collection, &new_relative_path)?.0);
+    lease.ensure_covered(paths)?;
+    lease.ensure_workspace_registry()?;
+    // The access guard can migrate legacy registry state, even for reads.
+    lease.before_effect()?;
+
     assert_scratchpad_workspace_access(Path::new(&work_path))?;
     assert_maru_can_write(&work_path, WorkspaceWriteAction::RenameMove)?;
     let work = PathBuf::from(&work_path);
@@ -962,16 +1132,59 @@ pub fn scratchpad_rename(
             "Cannot remove Scratchpad source after safe rename: {err}"
         ));
     }
-    scratchpad_read(work_path, collection, new_relative_path)
+    scratchpad_read_in_transaction(lease, work_path, collection, new_relative_path)
 }
 
-#[tauri::command(async)]
 pub fn scratchpad_trash(
     work_path: String,
     collection: ScratchpadCollection,
     relative_path: String,
     expected_revision: String,
 ) -> Result<(), String> {
+    let work = PathBuf::from(&work_path);
+    if !work.is_absolute() {
+        return Err("workPath must be absolute".to_string());
+    }
+    let mut paths = vec![
+        resolve_scratchpad_root(&work)?,
+        work.join("workspace.config.yaml"),
+    ];
+    paths.push(resolve_entry_path(&work, collection, &relative_path)?.0);
+    let request = PathTransactionRequest::new(paths)?
+        .require_parent(&work)?
+        .with_workspace_registry()?;
+    with_path_transactions(request, |lease| {
+        scratchpad_trash_in_transaction(
+            lease,
+            work_path,
+            collection,
+            relative_path,
+            expected_revision,
+        )
+    })
+}
+
+pub(crate) fn scratchpad_trash_in_transaction(
+    lease: &PathTransactionLease,
+    work_path: String,
+    collection: ScratchpadCollection,
+    relative_path: String,
+    expected_revision: String,
+) -> Result<(), String> {
+    let work = PathBuf::from(&work_path);
+    if !work.is_absolute() {
+        return Err("workPath must be absolute".to_string());
+    }
+    let mut paths = vec![
+        resolve_scratchpad_root(&work)?,
+        work.join("workspace.config.yaml"),
+    ];
+    paths.push(resolve_entry_path(&work, collection, &relative_path)?.0);
+    lease.ensure_covered(paths)?;
+    lease.ensure_workspace_registry()?;
+    // The access guard can migrate legacy registry state, even for reads.
+    lease.before_effect()?;
+
     assert_scratchpad_workspace_access(Path::new(&work_path))?;
     assert_maru_can_write(&work_path, WorkspaceWriteAction::Delete)?;
     let work = PathBuf::from(&work_path);
@@ -1046,11 +1259,46 @@ fn unique_relative_path(root: &Path, candidate: PathBuf) -> PathBuf {
     unreachable!()
 }
 
-#[tauri::command(async)]
 pub fn scratchpad_create_idea(
     work_path: String,
     title: String,
 ) -> Result<ScratchpadDocument, String> {
+    let work = PathBuf::from(&work_path);
+    if !work.is_absolute() {
+        return Err("workPath must be absolute".to_string());
+    }
+    let mut paths = vec![
+        resolve_scratchpad_root(&work)?,
+        work.join("workspace.config.yaml"),
+    ];
+    paths.push(resolve_collection_root(&work, ScratchpadCollection::Ideation)?.join("seeds"));
+    let request = PathTransactionRequest::new(paths)?
+        .require_parent(&work)?
+        .with_workspace_registry()?;
+    with_path_transactions(request, |lease| {
+        scratchpad_create_idea_in_transaction(lease, work_path, title)
+    })
+}
+
+pub(crate) fn scratchpad_create_idea_in_transaction(
+    lease: &PathTransactionLease,
+    work_path: String,
+    title: String,
+) -> Result<ScratchpadDocument, String> {
+    let work = PathBuf::from(&work_path);
+    if !work.is_absolute() {
+        return Err("workPath must be absolute".to_string());
+    }
+    let mut paths = vec![
+        resolve_scratchpad_root(&work)?,
+        work.join("workspace.config.yaml"),
+    ];
+    paths.push(resolve_collection_root(&work, ScratchpadCollection::Ideation)?.join("seeds"));
+    lease.ensure_covered(paths)?;
+    lease.ensure_workspace_registry()?;
+    // The access guard can migrate legacy registry state, even for reads.
+    lease.before_effect()?;
+
     assert_scratchpad_workspace_access(Path::new(&work_path))?;
     let trimmed = title.trim();
     if trimmed.is_empty() {
@@ -1069,7 +1317,8 @@ pub fn scratchpad_create_idea(
         "# {trimmed}\n\n- **Origin**: manual\n- **Source**: \n- **Date**: {}\n- **Domain**: \n- **Vault**: \n\n## Core Idea\n\n\n## Why It Matters\n\n\n## Next Steps\n- [ ] \n",
         Utc::now().format("%Y-%m-%d")
     );
-    scratchpad_save(
+    scratchpad_save_in_transaction(
+        lease,
         work_path,
         ScratchpadCollection::Ideation,
         relative_string,
@@ -1231,13 +1480,72 @@ fn lineage_update_failed(error: String, rollback: Result<(), String>) -> String 
     }
 }
 
-#[tauri::command(async)]
 pub fn scratchpad_transition_idea(
     work_path: String,
     relative_path: String,
     stage: IdeationStage,
     expected_revision: String,
 ) -> Result<ScratchpadDocument, String> {
+    let work = PathBuf::from(&work_path);
+    if !work.is_absolute() {
+        return Err("workPath must be absolute".to_string());
+    }
+    let mut paths = vec![
+        resolve_scratchpad_root(&work)?,
+        work.join("workspace.config.yaml"),
+    ];
+    paths.push(work.join(".maru/drafts"));
+    paths.push(resolve_entry_path(&work, ScratchpadCollection::Ideation, &relative_path)?.0);
+    let relative = normalize_relative_path(&relative_path)?;
+    let remainder: PathBuf = relative.components().skip(1).collect();
+    paths.push(
+        resolve_collection_root(&work, ScratchpadCollection::Ideation)?
+            .join(stage_dir(stage))
+            .join(remainder),
+    );
+    let request = PathTransactionRequest::new(paths)?
+        .require_parent(&work)?
+        .with_workspace_registry()?;
+    with_path_transactions(request, |lease| {
+        scratchpad_transition_idea_in_transaction(
+            lease,
+            work_path,
+            relative_path,
+            stage,
+            expected_revision,
+        )
+    })
+}
+
+pub(crate) fn scratchpad_transition_idea_in_transaction(
+    lease: &PathTransactionLease,
+    work_path: String,
+    relative_path: String,
+    stage: IdeationStage,
+    expected_revision: String,
+) -> Result<ScratchpadDocument, String> {
+    let work = PathBuf::from(&work_path);
+    if !work.is_absolute() {
+        return Err("workPath must be absolute".to_string());
+    }
+    let mut paths = vec![
+        resolve_scratchpad_root(&work)?,
+        work.join("workspace.config.yaml"),
+    ];
+    paths.push(work.join(".maru/drafts"));
+    paths.push(resolve_entry_path(&work, ScratchpadCollection::Ideation, &relative_path)?.0);
+    let relative = normalize_relative_path(&relative_path)?;
+    let remainder: PathBuf = relative.components().skip(1).collect();
+    paths.push(
+        resolve_collection_root(&work, ScratchpadCollection::Ideation)?
+            .join(stage_dir(stage))
+            .join(remainder),
+    );
+    lease.ensure_covered(paths)?;
+    lease.ensure_workspace_registry()?;
+    // The access guard can migrate legacy registry state, even for reads.
+    lease.before_effect()?;
+
     assert_scratchpad_workspace_access(Path::new(&work_path))?;
     let relative = normalize_relative_path(&relative_path)?;
     let mut components = relative.components();
@@ -1306,9 +1614,12 @@ pub fn scratchpad_transition_idea(
             &selected_source,
             &expected_revision,
         )?;
-        if let Err(error) =
-            crate::drafts::update_idea_origin_refs(&work, &old_relative, &new_relative)
-        {
+        if let Err(error) = crate::drafts::update_idea_origin_refs_in_transaction(
+            lease,
+            &work,
+            &old_relative,
+            &new_relative,
+        ) {
             let moved_source = root.join(&new_relative);
             let rollback = move_idea_directory_noreplace(
                 &root,
@@ -1319,19 +1630,29 @@ pub fn scratchpad_transition_idea(
             );
             return Err(lineage_update_failed(error, rollback));
         }
-        return scratchpad_read(work_path, ScratchpadCollection::Ideation, new_relative);
+        return scratchpad_read_in_transaction(
+            lease,
+            work_path,
+            ScratchpadCollection::Ideation,
+            new_relative,
+        );
     }
-    let document = scratchpad_rename(
+    let document = scratchpad_rename_in_transaction(
+        lease,
         work_path.clone(),
         ScratchpadCollection::Ideation,
         relative_path.clone(),
         new_relative.clone(),
         expected_revision.clone(),
     )?;
-    if let Err(error) =
-        crate::drafts::update_idea_origin_refs(Path::new(&work_path), &old_relative, &new_relative)
-    {
-        let rollback = scratchpad_rename(
+    if let Err(error) = crate::drafts::update_idea_origin_refs_in_transaction(
+        lease,
+        Path::new(&work_path),
+        &old_relative,
+        &new_relative,
+    ) {
+        let rollback = scratchpad_rename_in_transaction(
+            lease,
             work_path.clone(),
             ScratchpadCollection::Ideation,
             new_relative.clone(),
@@ -1344,8 +1665,40 @@ pub fn scratchpad_transition_idea(
     Ok(document)
 }
 
-#[tauri::command(async)]
 pub fn scratchpad_cleanup_plan(work_path: String) -> Result<Vec<TempCleanupCandidate>, String> {
+    let work = PathBuf::from(&work_path);
+    if !work.is_absolute() {
+        return Err("workPath must be absolute".to_string());
+    }
+    let paths = vec![
+        resolve_scratchpad_root(&work)?,
+        work.join("workspace.config.yaml"),
+    ];
+    let request = PathTransactionRequest::new(paths)?
+        .require_parent(&work)?
+        .with_workspace_registry()?;
+    with_path_transactions(request, |lease| {
+        scratchpad_cleanup_plan_in_transaction(lease, work_path)
+    })
+}
+
+pub(crate) fn scratchpad_cleanup_plan_in_transaction(
+    lease: &PathTransactionLease,
+    work_path: String,
+) -> Result<Vec<TempCleanupCandidate>, String> {
+    let work = PathBuf::from(&work_path);
+    if !work.is_absolute() {
+        return Err("workPath must be absolute".to_string());
+    }
+    let paths = vec![
+        resolve_scratchpad_root(&work)?,
+        work.join("workspace.config.yaml"),
+    ];
+    lease.ensure_covered(paths)?;
+    lease.ensure_workspace_registry()?;
+    // The access guard can migrate legacy registry state, even for reads.
+    lease.before_effect()?;
+
     let work = PathBuf::from(&work_path);
     assert_scratchpad_workspace_access(&work)?;
     let (_, config) = config_for(&work)?;
@@ -1386,11 +1739,60 @@ pub fn scratchpad_cleanup_plan(work_path: String) -> Result<Vec<TempCleanupCandi
     Ok(candidates)
 }
 
-#[tauri::command(async)]
 pub fn scratchpad_cleanup_apply(
     work_path: String,
     selections: Vec<TempCleanupSelection>,
 ) -> Result<TempCleanupResult, String> {
+    let work = PathBuf::from(&work_path);
+    if !work.is_absolute() {
+        return Err("workPath must be absolute".to_string());
+    }
+    let mut paths = vec![
+        resolve_scratchpad_root(&work)?,
+        work.join("workspace.config.yaml"),
+    ];
+    for selection in &selections {
+        // Invalid selections retain their per-item skipped result.
+        if let Ok((path, _)) =
+            resolve_entry_path(&work, ScratchpadCollection::Temp, &selection.relative_path)
+        {
+            paths.push(path);
+        }
+    }
+    let request = PathTransactionRequest::new(paths)?
+        .require_parent(&work)?
+        .with_workspace_registry()?;
+    with_path_transactions(request, |lease| {
+        scratchpad_cleanup_apply_in_transaction(lease, work_path, selections)
+    })
+}
+
+pub(crate) fn scratchpad_cleanup_apply_in_transaction(
+    lease: &PathTransactionLease,
+    work_path: String,
+    selections: Vec<TempCleanupSelection>,
+) -> Result<TempCleanupResult, String> {
+    let work = PathBuf::from(&work_path);
+    if !work.is_absolute() {
+        return Err("workPath must be absolute".to_string());
+    }
+    let mut paths = vec![
+        resolve_scratchpad_root(&work)?,
+        work.join("workspace.config.yaml"),
+    ];
+    for selection in &selections {
+        // Invalid selections retain their per-item skipped result.
+        if let Ok((path, _)) =
+            resolve_entry_path(&work, ScratchpadCollection::Temp, &selection.relative_path)
+        {
+            paths.push(path);
+        }
+    }
+    lease.ensure_covered(paths)?;
+    lease.ensure_workspace_registry()?;
+    // The access guard can migrate legacy registry state, even for reads.
+    lease.before_effect()?;
+
     assert_scratchpad_workspace_access(Path::new(&work_path))?;
     assert_maru_can_write(&work_path, WorkspaceWriteAction::Delete)?;
     let work = PathBuf::from(&work_path);
@@ -1468,10 +1870,54 @@ pub fn scratchpad_cleanup_apply(
     Ok(result)
 }
 
-#[tauri::command(async)]
 pub fn scratchpad_migrate_legacy_memos(
     work_path: String,
 ) -> Result<ScratchpadMigrationResult, String> {
+    let work = PathBuf::from(&work_path);
+    if !work.is_absolute() {
+        return Err("workPath must be absolute".to_string());
+    }
+    let mut paths = vec![
+        resolve_scratchpad_root(&work)?,
+        work.join("workspace.config.yaml"),
+    ];
+    // Unique staging directories and marker publication share .maru.
+    paths.extend([
+        work.join(".maru"),
+        work.join(".maru/memos"),
+        resolve_scratchpad_memos_root(&work)?,
+    ]);
+    let request = PathTransactionRequest::new(paths)?
+        .require_parent(&work)?
+        .with_workspace_registry()?;
+    with_path_transactions(request, |lease| {
+        scratchpad_migrate_legacy_memos_in_transaction(lease, work_path)
+    })
+}
+
+pub(crate) fn scratchpad_migrate_legacy_memos_in_transaction(
+    lease: &PathTransactionLease,
+    work_path: String,
+) -> Result<ScratchpadMigrationResult, String> {
+    let work = PathBuf::from(&work_path);
+    if !work.is_absolute() {
+        return Err("workPath must be absolute".to_string());
+    }
+    let mut paths = vec![
+        resolve_scratchpad_root(&work)?,
+        work.join("workspace.config.yaml"),
+    ];
+    // Unique staging directories and marker publication share .maru.
+    paths.extend([
+        work.join(".maru"),
+        work.join(".maru/memos"),
+        resolve_scratchpad_memos_root(&work)?,
+    ]);
+    lease.ensure_covered(paths)?;
+    lease.ensure_workspace_registry()?;
+    // The access guard can migrate legacy registry state, even for reads.
+    lease.before_effect()?;
+
     assert_scratchpad_workspace_access(Path::new(&work_path))?;
     let work = absolute_work_path(Path::new(&work_path))?;
     let legacy_root = work.join(".maru/memos");
@@ -2397,5 +2843,953 @@ mod tests {
         let error =
             scratchpad_read(work, ScratchpadCollection::Memos, "large.md".to_string()).unwrap_err();
         assert!(error.contains("scratchpad_too_large"));
+    }
+}
+
+/// IPC owns every argument before filesystem work or transaction waits.
+pub mod ipc {
+    use super::*;
+
+    #[tauri::command]
+    pub async fn scratchpad_list(work_path: String) -> Result<Vec<ScratchpadEntry>, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(
+                &[PathBuf::from(&work_path)],
+                "worker:scratchpad_list",
+            );
+            super::scratchpad_list(work_path)
+        })
+        .await
+        .map_err(|error| format!("scratchpad_list_task_failed: {error}"))?
+    }
+
+    #[tauri::command]
+    pub async fn scratchpad_read(
+        work_path: String,
+        collection: ScratchpadCollection,
+        relative_path: String,
+    ) -> Result<ScratchpadDocument, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(
+                &[PathBuf::from(&work_path)],
+                "worker:scratchpad_read",
+            );
+            super::scratchpad_read(work_path, collection, relative_path)
+        })
+        .await
+        .map_err(|error| format!("scratchpad_read_task_failed: {error}"))?
+    }
+
+    #[tauri::command]
+    #[allow(clippy::too_many_arguments)]
+    pub async fn scratchpad_save(
+        work_path: String,
+        collection: ScratchpadCollection,
+        relative_path: String,
+        format: ScratchpadFormat,
+        content: String,
+        expected_revision: Option<String>,
+        force: bool,
+    ) -> Result<ScratchpadDocument, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(
+                &[PathBuf::from(&work_path)],
+                "worker:scratchpad_save",
+            );
+            super::scratchpad_save(
+                work_path,
+                collection,
+                relative_path,
+                format,
+                content,
+                expected_revision,
+                force,
+            )
+        })
+        .await
+        .map_err(|error| format!("scratchpad_save_task_failed: {error}"))?
+    }
+
+    #[tauri::command]
+    pub async fn scratchpad_rename(
+        work_path: String,
+        collection: ScratchpadCollection,
+        relative_path: String,
+        new_relative_path: String,
+        expected_revision: String,
+    ) -> Result<ScratchpadDocument, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(
+                &[PathBuf::from(&work_path)],
+                "worker:scratchpad_rename",
+            );
+            super::scratchpad_rename(
+                work_path,
+                collection,
+                relative_path,
+                new_relative_path,
+                expected_revision,
+            )
+        })
+        .await
+        .map_err(|error| format!("scratchpad_rename_task_failed: {error}"))?
+    }
+
+    #[tauri::command]
+    pub async fn scratchpad_trash(
+        work_path: String,
+        collection: ScratchpadCollection,
+        relative_path: String,
+        expected_revision: String,
+    ) -> Result<(), String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(
+                &[PathBuf::from(&work_path)],
+                "worker:scratchpad_trash",
+            );
+            super::scratchpad_trash(work_path, collection, relative_path, expected_revision)
+        })
+        .await
+        .map_err(|error| format!("scratchpad_trash_task_failed: {error}"))?
+    }
+
+    #[tauri::command]
+    pub async fn scratchpad_create_idea(
+        work_path: String,
+        title: String,
+    ) -> Result<ScratchpadDocument, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(
+                &[PathBuf::from(&work_path)],
+                "worker:scratchpad_create_idea",
+            );
+            super::scratchpad_create_idea(work_path, title)
+        })
+        .await
+        .map_err(|error| format!("scratchpad_create_idea_task_failed: {error}"))?
+    }
+
+    #[tauri::command]
+    pub async fn scratchpad_transition_idea(
+        work_path: String,
+        relative_path: String,
+        stage: IdeationStage,
+        expected_revision: String,
+    ) -> Result<ScratchpadDocument, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(
+                &[PathBuf::from(&work_path)],
+                "worker:scratchpad_transition_idea",
+            );
+            super::scratchpad_transition_idea(work_path, relative_path, stage, expected_revision)
+        })
+        .await
+        .map_err(|error| format!("scratchpad_transition_idea_task_failed: {error}"))?
+    }
+
+    #[tauri::command]
+    pub async fn scratchpad_cleanup_plan(
+        work_path: String,
+    ) -> Result<Vec<TempCleanupCandidate>, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(
+                &[PathBuf::from(&work_path)],
+                "worker:scratchpad_cleanup_plan",
+            );
+            super::scratchpad_cleanup_plan(work_path)
+        })
+        .await
+        .map_err(|error| format!("scratchpad_cleanup_plan_task_failed: {error}"))?
+    }
+
+    #[tauri::command]
+    pub async fn scratchpad_cleanup_apply(
+        work_path: String,
+        selections: Vec<TempCleanupSelection>,
+    ) -> Result<TempCleanupResult, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(
+                &[PathBuf::from(&work_path)],
+                "worker:scratchpad_cleanup_apply",
+            );
+            super::scratchpad_cleanup_apply(work_path, selections)
+        })
+        .await
+        .map_err(|error| format!("scratchpad_cleanup_apply_task_failed: {error}"))?
+    }
+
+    #[tauri::command]
+    pub async fn scratchpad_migrate_legacy_memos(
+        work_path: String,
+    ) -> Result<ScratchpadMigrationResult, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(
+                &[PathBuf::from(&work_path)],
+                "worker:scratchpad_migrate_legacy_memos",
+            );
+            super::scratchpad_migrate_legacy_memos(work_path)
+        })
+        .await
+        .map_err(|error| format!("scratchpad_migrate_legacy_memos_task_failed: {error}"))?
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod phase08_08 {
+    use super::*;
+    use crate::atomic_file::phase08_06::{boundary, run, Held, Home};
+    use crate::workspace_files::phase08_06::TrashFixture;
+    use std::sync::mpsc;
+
+    static ENFORCE_WORKSPACE_ACCESS: std::sync::Mutex<Vec<PathBuf>> =
+        std::sync::Mutex::new(Vec::new());
+
+    /// Opts only this disposable fixture into the production registry guard.
+    /// Other legacy tests keep their existing isolated-fixture behavior.
+    pub(crate) struct PrimaryWorkspaceAccessFixture(PathBuf);
+    impl PrimaryWorkspaceAccessFixture {
+        pub(crate) fn new(path: PathBuf) -> Self {
+            ENFORCE_WORKSPACE_ACCESS.lock().unwrap().push(path.clone());
+            Self(path)
+        }
+    }
+    impl Drop for PrimaryWorkspaceAccessFixture {
+        fn drop(&mut self) {
+            ENFORCE_WORKSPACE_ACCESS
+                .lock()
+                .unwrap()
+                .retain(|path| path != &self.0);
+        }
+    }
+    pub(super) fn enforce_workspace_access(path: &Path) -> bool {
+        ENFORCE_WORKSPACE_ACCESS
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|value| value == path)
+    }
+
+    pub(crate) fn registry(primary: &Path, policy: &str) {
+        let path = crate::vault_list::workspace_registry_path().unwrap();
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(
+            path,
+            serde_json::json!({
+                "workspaces": [{"label": "Fixture", "path": text(primary), "visibility": "private",
+                    "provider": "local", "writePolicy": policy}],
+                "activeByVisibility": {"private": text(primary)}
+            })
+            .to_string(),
+        )
+        .unwrap();
+    }
+
+    fn text(path: &Path) -> String {
+        path.to_string_lossy().into_owned()
+    }
+
+    fn fixture(home: &Home) -> tempfile::TempDir {
+        let fixture = tempfile::tempdir_in(home.root.path()).unwrap();
+        let root = fixture.path();
+        for (path, body) in [
+            ("scratchpad/memos/note.md", "original"),
+            ("scratchpad/ideation/seeds/idea.md", "idea"),
+            ("scratchpad/temp/stale.txt", "stale"),
+            (".maru/memos/legacy.md", "legacy"),
+        ] {
+            let path = root.join(path);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, body).unwrap();
+        }
+        File::options()
+            .write(true)
+            .open(root.join("scratchpad/temp/stale.txt"))
+            .unwrap()
+            .set_times(
+                fs::FileTimes::new()
+                    .set_modified(SystemTime::now() - Duration::from_secs(8 * 24 * 60 * 60)),
+            )
+            .unwrap();
+        fixture
+    }
+
+    fn start<F>(future: F) -> mpsc::Receiver<F::Output>
+    where
+        F: std::future::Future + Send + 'static,
+        F::Output: Send + 'static,
+    {
+        let (tx, rx) = mpsc::channel();
+        tauri::async_runtime::spawn(async move {
+            let _ = tx.send(future.await);
+        });
+        rx
+    }
+
+    fn done<T>(rx: mpsc::Receiver<T>) -> T {
+        rx.recv_timeout(Duration::from_secs(10))
+            .expect("bounded scratchpad completion")
+    }
+
+    // Real IPC entry points, with the original revision deliberately retained
+    // across contention. No installed CLI or native Trash can run in this module.
+    async fn mutation(work: String, operation: &'static str) -> Result<(), String> {
+        match operation {
+            "save" => ipc::scratchpad_save(
+                work,
+                ScratchpadCollection::Memos,
+                "note.md".into(),
+                ScratchpadFormat::Markdown,
+                "committed".into(),
+                Some(crate::document::revision_for("original")),
+                false,
+            )
+            .await
+            .map(|_| ()),
+            "rename" => ipc::scratchpad_rename(
+                work,
+                ScratchpadCollection::Memos,
+                "note.md".into(),
+                "renamed.md".into(),
+                crate::document::revision_for("original"),
+            )
+            .await
+            .map(|_| ()),
+            "trash" => {
+                ipc::scratchpad_trash(
+                    work,
+                    ScratchpadCollection::Memos,
+                    "note.md".into(),
+                    crate::document::revision_for("original"),
+                )
+                .await
+            }
+            "create" => ipc::scratchpad_create_idea(work, "Concurrent idea".into())
+                .await
+                .map(|_| ()),
+            "transition" => ipc::scratchpad_transition_idea(
+                work,
+                "seeds/idea.md".into(),
+                IdeationStage::Developing,
+                crate::document::revision_for("idea"),
+            )
+            .await
+            .map(|_| ()),
+            "cleanup" => ipc::scratchpad_cleanup_apply(
+                work,
+                vec![TempCleanupSelection {
+                    relative_path: "stale.txt".into(),
+                    revision: crate::document::revision_for("stale"),
+                }],
+            )
+            .await
+            .map(|_| ()),
+            "migration" => ipc::scratchpad_migrate_legacy_memos(work).await.map(|_| ()),
+            _ => unreachable!(),
+        }
+    }
+
+    #[test]
+    fn phase08_08_scratchpad_all_ten_wrappers_yield_on_same_polling_task() {
+        let home = Home::new();
+        let root = home.root.path();
+        let s = text(root);
+        boundary(
+            root.into(),
+            "scratchpad_list",
+            ipc::scratchpad_list(s.clone()),
+        );
+        boundary(
+            root.into(),
+            "scratchpad_read",
+            ipc::scratchpad_read(s.clone(), ScratchpadCollection::Memos, "note.md".into()),
+        );
+        boundary(
+            root.into(),
+            "scratchpad_save",
+            ipc::scratchpad_save(
+                s.clone(),
+                ScratchpadCollection::Memos,
+                "note.md".into(),
+                ScratchpadFormat::Markdown,
+                "body".into(),
+                None,
+                false,
+            ),
+        );
+        boundary(
+            root.into(),
+            "scratchpad_rename",
+            ipc::scratchpad_rename(
+                s.clone(),
+                ScratchpadCollection::Memos,
+                "note.md".into(),
+                "renamed.md".into(),
+                "revision".into(),
+            ),
+        );
+        boundary(
+            root.into(),
+            "scratchpad_trash",
+            ipc::scratchpad_trash(
+                s.clone(),
+                ScratchpadCollection::Memos,
+                "note.md".into(),
+                "revision".into(),
+            ),
+        );
+        boundary(
+            root.into(),
+            "scratchpad_create_idea",
+            ipc::scratchpad_create_idea(s.clone(), "title".into()),
+        );
+        boundary(
+            root.into(),
+            "scratchpad_transition_idea",
+            ipc::scratchpad_transition_idea(
+                s.clone(),
+                "seeds/idea.md".into(),
+                IdeationStage::Developing,
+                "revision".into(),
+            ),
+        );
+        boundary(
+            root.into(),
+            "scratchpad_cleanup_plan",
+            ipc::scratchpad_cleanup_plan(s.clone()),
+        );
+        boundary(
+            root.into(),
+            "scratchpad_cleanup_apply",
+            ipc::scratchpad_cleanup_apply(s.clone(), vec![]),
+        );
+        boundary(
+            root.into(),
+            "scratchpad_migrate_legacy_memos",
+            ipc::scratchpad_migrate_legacy_memos(s),
+        );
+    }
+
+    #[test]
+    fn phase08_08_scratchpad_real_payloads_legacy_errors_and_all_mutations() {
+        let home = Home::new();
+        let fixture = fixture(&home);
+        let root = fixture.path();
+        let s = text(root);
+        assert_eq!(run(ipc::scratchpad_list(s.clone())).unwrap().len(), 3);
+        let read = run(ipc::scratchpad_read(
+            s.clone(),
+            ScratchpadCollection::Memos,
+            "note.md".into(),
+        ))
+        .unwrap();
+        assert_eq!(read.content, "original");
+        let saved = run(ipc::scratchpad_save(
+            s.clone(),
+            ScratchpadCollection::Memos,
+            "note.md".into(),
+            ScratchpadFormat::Markdown,
+            "saved".into(),
+            Some(read.entry.revision.clone()),
+            false,
+        ))
+        .unwrap();
+        assert_eq!(saved.content, "saved");
+        let error = run(ipc::scratchpad_save(
+            s.clone(),
+            ScratchpadCollection::Memos,
+            "note.md".into(),
+            ScratchpadFormat::Markdown,
+            "rejected".into(),
+            Some(read.entry.revision),
+            true,
+        ))
+        .unwrap_err();
+        assert!(error.starts_with("scratchpad_conflict:"));
+        assert_eq!(
+            run(ipc::scratchpad_read(
+                s.clone(),
+                ScratchpadCollection::Memos,
+                "../escape.md".into()
+            ))
+            .unwrap_err(),
+            "Scratchpad path must be a safe relative path"
+        );
+        let renamed = run(ipc::scratchpad_rename(
+            s.clone(),
+            ScratchpadCollection::Memos,
+            "note.md".into(),
+            "next.md".into(),
+            saved.entry.revision,
+        ))
+        .unwrap();
+        assert_eq!(renamed.content, "saved");
+        run(ipc::scratchpad_trash(
+            s.clone(),
+            ScratchpadCollection::Memos,
+            "next.md".into(),
+            renamed.entry.revision,
+        ))
+        .unwrap();
+        assert!(!root.join("scratchpad/memos/next.md").exists());
+        let idea = run(ipc::scratchpad_create_idea(s.clone(), "Test idea".into())).unwrap();
+        let moved = run(ipc::scratchpad_transition_idea(
+            s.clone(),
+            idea.entry.relative_path,
+            IdeationStage::Developing,
+            idea.entry.revision,
+        ))
+        .unwrap();
+        assert_eq!(moved.entry.ideation_stage, Some(IdeationStage::Developing));
+        let candidates = run(ipc::scratchpad_cleanup_plan(s.clone())).unwrap();
+        assert_eq!(candidates.len(), 1);
+        let result = run(ipc::scratchpad_cleanup_apply(
+            s.clone(),
+            candidates
+                .into_iter()
+                .map(|c| TempCleanupSelection {
+                    relative_path: c.relative_path,
+                    revision: c.revision,
+                })
+                .collect(),
+        ))
+        .unwrap();
+        assert_eq!(result.trashed, vec!["stale.txt"]);
+        let migrated = run(ipc::scratchpad_migrate_legacy_memos(s)).unwrap();
+        assert_eq!(migrated.migrated, vec!["legacy.md"]);
+        assert_eq!(
+            fs::read_to_string(root.join("scratchpad/memos/legacy.md")).unwrap(),
+            "legacy"
+        );
+        assert!(Path::new(&migrated.marker_path).is_file());
+        assert!(!root.join(".maru/memos/legacy.md").exists());
+    }
+
+    #[test]
+    fn phase08_08_scratchpad_every_mutation_contends_and_releases() {
+        let home = Home::new();
+        for operation in [
+            "save",
+            "rename",
+            "trash",
+            "create",
+            "transition",
+            "cleanup",
+            "migration",
+        ] {
+            let fixture = fixture(&home);
+            let root = fixture.path();
+            let key = root.join("scratchpad");
+            let held = Held::new(key.clone(), "admitted");
+            let first = start(mutation(text(root), operation));
+            held.wait();
+            let waiting = Held::new(key, "before-admission");
+            let second = start(mutation(text(root), operation));
+            waiting.wait();
+            waiting.release();
+            assert!(
+                second.recv_timeout(Duration::from_millis(30)).is_err(),
+                "{operation} bypassed admission"
+            );
+            held.release();
+            done(first).unwrap();
+            let second_result = done(second);
+            if matches!(operation, "save" | "rename" | "trash" | "transition") {
+                assert!(
+                    second_result.is_err(),
+                    "{operation} ignored stale source/revision"
+                );
+            } else {
+                second_result.unwrap();
+            }
+            let entries = run(ipc::scratchpad_list(text(root))).unwrap();
+            assert!(!entries.is_empty(), "{operation} failed to release");
+            if operation == "save" {
+                assert_eq!(
+                    fs::read_to_string(root.join("scratchpad/memos/note.md")).unwrap(),
+                    "committed"
+                );
+            }
+            if operation == "create" {
+                assert_eq!(
+                    entries
+                        .iter()
+                        .filter(|entry| entry.name.contains("concurrent-idea"))
+                        .count(),
+                    2
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn phase08_08_scratchpad_reads_serialize_rename_delete_both_orders() {
+        let home = Home::new();
+        for operation in ["rename", "trash"] {
+            for read_first in [false, true] {
+                let fixture = fixture(&home);
+                let root = fixture.path();
+                let held = Held::new(root.join("scratchpad"), "admitted");
+                let read =
+                    ipc::scratchpad_read(text(root), ScratchpadCollection::Memos, "note.md".into());
+                let write = mutation(text(root), operation);
+                if read_first {
+                    let a = start(read);
+                    held.wait();
+                    let waiting = Held::new(root.join("scratchpad"), "before-admission");
+                    let b = start(write);
+                    waiting.wait();
+                    waiting.release();
+                    assert!(b.recv_timeout(Duration::from_millis(30)).is_err());
+                    held.release();
+                    assert_eq!(done(a).unwrap().content, "original");
+                    done(b).unwrap();
+                } else {
+                    let a = start(write);
+                    held.wait();
+                    let waiting = Held::new(root.join("scratchpad"), "before-admission");
+                    let b = start(read);
+                    waiting.wait();
+                    waiting.release();
+                    assert!(b.recv_timeout(Duration::from_millis(30)).is_err());
+                    held.release();
+                    done(a).unwrap();
+                    assert!(done(b).is_err());
+                }
+            }
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn phase08_08_scratchpad_all_mutations_files_parent_pairs_both_orders_aliases() {
+        let home = Home::new();
+        for operation in [
+            "save",
+            "rename",
+            "trash",
+            "create",
+            "transition",
+            "cleanup",
+            "migration",
+        ] {
+            for parent in ["rename", "trash"] {
+                for parent_first in [false, true] {
+                    for alias in [false, true] {
+                        let fixture = fixture(&home);
+                        let root = fixture.path();
+                        let key = root.join("scratchpad");
+                        let destination = root.join("moved");
+                        let _trash = TrashFixture::new(key.clone(), destination.clone());
+                        let alias_path = home
+                            .root
+                            .path()
+                            .join(format!("alias-{}", uuid::Uuid::new_v4()));
+                        let child_work = if alias {
+                            std::os::unix::fs::symlink(root, &alias_path).unwrap();
+                            text(&alias_path)
+                        } else {
+                            text(root)
+                        };
+                        // Config resolution canonicalizes the workspace alias; its
+                        // physical scratchpad path is still the shared parent key.
+                        let work = text(root);
+                        let parent_future = async move {
+                            if parent == "rename" {
+                                crate::workspace_files::ipc::rename_workspace_entry(
+                                    work,
+                                    "scratchpad".into(),
+                                    "moved".into(),
+                                )
+                                .await
+                                .map(|r| assert!(r.error.is_none(), "{:?}", r.error))
+                            } else {
+                                crate::workspace_files::ipc::trash_workspace_entries(
+                                    work,
+                                    vec!["scratchpad".into()],
+                                )
+                                .await
+                                .map(|r| assert!(r[0].error.is_none(), "{:?}", r[0].error))
+                            }
+                        };
+                        let child = mutation(child_work, operation);
+                        let held = Held::new(key.clone(), "admitted");
+                        if parent_first {
+                            let a = start(parent_future);
+                            held.wait();
+                            let waiting = Held::new(key, "before-admission");
+                            let b = start(child);
+                            waiting.wait();
+                            waiting.release();
+                            assert!(b.recv_timeout(Duration::from_millis(30)).is_err());
+                            held.release();
+                            done(a).unwrap();
+                            assert!(done(b).is_err(), "{operation}/{parent}/{alias}: parent replacement must reject child");
+                        } else {
+                            let a = start(child);
+                            held.wait();
+                            let waiting = Held::new(key, "before-admission");
+                            let b = start(parent_future);
+                            waiting.wait();
+                            waiting.release();
+                            assert!(b.recv_timeout(Duration::from_millis(30)).is_err());
+                            held.release();
+                            done(a).unwrap();
+                            done(b).unwrap();
+                            match operation {
+                                "save" => assert_eq!(
+                                    fs::read_to_string(destination.join("memos/note.md")).unwrap(),
+                                    "committed"
+                                ),
+                                "rename" => assert_eq!(
+                                    fs::read_to_string(destination.join("memos/renamed.md"))
+                                        .unwrap(),
+                                    "original"
+                                ),
+                                "trash" => assert!(!destination.join("memos/note.md").exists()),
+                                "transition" => assert_eq!(
+                                    fs::read_to_string(
+                                        destination.join("ideation/developing/idea.md")
+                                    )
+                                    .unwrap(),
+                                    "idea"
+                                ),
+                                "cleanup" => assert!(!destination.join("temp/stale.txt").exists()),
+                                "migration" => assert_eq!(
+                                    fs::read_to_string(destination.join("memos/legacy.md"))
+                                        .unwrap(),
+                                    "legacy"
+                                ),
+                                _ => assert!(
+                                    fs::read_dir(destination.join("ideation/seeds"))
+                                        .unwrap()
+                                        .count()
+                                        >= 2
+                                ),
+                            }
+                        }
+                        assert!(!root.join("scratchpad").exists(), "old tree recreated");
+                        if alias {
+                            fs::remove_file(alias_path).unwrap();
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn phase08_08_scratchpad_document_save_both_orders_aliases_and_error_release() {
+        let home = Home::new();
+        for scratch_first in [false, true] {
+            for alias in [false, true] {
+                let fixture = fixture(&home);
+                let root = fixture.path();
+                let target = root.join("scratchpad/memos/note.md");
+                let doc_rel = if alias {
+                    std::os::unix::fs::symlink(root.join("scratchpad/memos"), root.join("alias"))
+                        .unwrap();
+                    "alias/note.md"
+                } else {
+                    "scratchpad/memos/note.md"
+                };
+                let scratch = mutation(text(root), "save");
+                let work = text(root);
+                let doc = async move {
+                    crate::document::ipc::save_document(
+                        work,
+                        doc_rel.into(),
+                        "document".into(),
+                        Some(crate::document::revision_for("original")),
+                    )
+                    .await
+                    .map(|_| ())
+                    .map_err(|e| e.message)
+                };
+                // Use actual lexical target for each entry's stage hook.
+                let doc_key = root.join(doc_rel);
+                if scratch_first {
+                    let held = Held::new(target.clone(), "admitted");
+                    let a = start(scratch);
+                    held.wait();
+                    let waiting = Held::new(doc_key, "before-admission");
+                    let b = start(doc);
+                    waiting.wait();
+                    waiting.release();
+                    assert!(b.recv_timeout(Duration::from_millis(30)).is_err());
+                    held.release();
+                    done(a).unwrap();
+                    assert!(done(b).is_err());
+                    assert_eq!(fs::read_to_string(&target).unwrap(), "committed");
+                } else {
+                    let held = Held::new(doc_key, "admitted");
+                    let a = start(doc);
+                    held.wait();
+                    let waiting = Held::new(target.clone(), "before-admission");
+                    let b = start(scratch);
+                    waiting.wait();
+                    waiting.release();
+                    assert!(b.recv_timeout(Duration::from_millis(30)).is_err());
+                    held.release();
+                    done(a).unwrap();
+                    assert!(done(b).is_err());
+                    assert_eq!(fs::read_to_string(&target).unwrap(), "document");
+                }
+                assert_eq!(
+                    run(ipc::scratchpad_read(
+                        text(root),
+                        ScratchpadCollection::Memos,
+                        "note.md".into()
+                    ))
+                    .unwrap()
+                    .content,
+                    fs::read_to_string(target).unwrap()
+                );
+            }
+        }
+    }
+    #[test]
+    fn phase08_08_scratchpad_actual_permission_denial_and_post_admission_recheck() {
+        let home = Home::new();
+        let fixture = fixture(&home);
+        let root = fixture.path();
+        let _guard = PrimaryWorkspaceAccessFixture::new(root.into());
+        let before = fs::read(root.join("scratchpad/memos/note.md")).unwrap();
+        registry(home.root.path(), "direct");
+        assert!(run(ipc::scratchpad_list(text(root)))
+            .unwrap_err()
+            .starts_with("scratchpad_workspace_denied:"));
+        for operation in [
+            "save",
+            "rename",
+            "trash",
+            "create",
+            "transition",
+            "cleanup",
+            "migration",
+        ] {
+            assert!(run(mutation(text(root), operation))
+                .unwrap_err()
+                .starts_with("scratchpad_workspace_denied:"));
+        }
+        registry(root, "readOnly");
+        assert!(!run(ipc::scratchpad_list(text(root))).unwrap().is_empty());
+        for operation in [
+            "save",
+            "rename",
+            "trash",
+            "create",
+            "transition",
+            "cleanup",
+            "migration",
+        ] {
+            assert!(run(mutation(text(root), operation))
+                .unwrap_err()
+                .contains("Workspace writes are blocked"));
+        }
+        for operation in [
+            "save",
+            "rename",
+            "trash",
+            "create",
+            "transition",
+            "cleanup",
+            "migration",
+        ] {
+            for foreign in [false, true] {
+                registry(root, "direct");
+                let held = Held::new(root.join("scratchpad"), "admitted");
+                let command = start(mutation(text(root), operation));
+                held.wait();
+                if foreign {
+                    registry(home.root.path(), "direct");
+                } else {
+                    registry(root, "readOnly");
+                }
+                held.release();
+                let error = done(command).unwrap_err();
+                assert!(error.contains(if foreign {
+                    "scratchpad_workspace_denied:"
+                } else {
+                    "Workspace writes are blocked"
+                }));
+                assert_eq!(
+                    fs::read(root.join("scratchpad/memos/note.md")).unwrap(),
+                    before
+                );
+            }
+        }
+        registry(root, "direct");
+        run(mutation(text(root), "save")).unwrap();
+    }
+    #[test]
+    fn phase08_08_scratchpad_nested_parent_missing_or_replaced_is_not_recreated() {
+        let home = Home::new();
+        for replace in [false, true] {
+            let fixture = fixture(&home);
+            let root = fixture.path();
+            let selected = root.join("scratchpad/memos/note.md");
+            let held = Held::new(selected, "before-admission");
+            let pending = start(mutation(text(root), "save"));
+            held.wait();
+            let moved = run(crate::workspace_files::ipc::rename_workspace_entry(
+                text(root),
+                "scratchpad/memos".into(),
+                "moved".into(),
+            ))
+            .unwrap();
+            assert!(moved.error.is_none());
+            if replace {
+                fs::create_dir(root.join("scratchpad/memos")).unwrap();
+            }
+            held.release();
+            let error = done(pending).unwrap_err();
+            assert!(error.contains("Transaction parent"), "{error}");
+            assert_eq!(
+                fs::read_to_string(root.join("scratchpad/moved/note.md")).unwrap(),
+                "original"
+            );
+            assert!(!root.join("scratchpad/memos/note.md").exists());
+            assert_eq!(root.join("scratchpad/memos").exists(), replace);
+            assert!(!run(ipc::scratchpad_list(text(root))).unwrap().is_empty());
+        }
+    }
+
+    #[test]
+    fn phase08_08_scratchpad_read_registry_migration_and_changed_condition_release() {
+        let home = Home::new();
+        let fixture = fixture(&home);
+        let root = fixture.path();
+        let _guard = PrimaryWorkspaceAccessFixture::new(root.into());
+        let output = crate::vault_list::workspace_registry_path().unwrap();
+        let legacy = crate::vault_list::legacy_vault_list_path().unwrap();
+        fs::create_dir_all(legacy.parent().unwrap()).unwrap();
+        let data = serde_json::json!({
+            "vaults": [{"label": "Fixture", "path": text(root)}],
+            "activeVault": text(root)
+        })
+        .to_string();
+        let held = Held::new(root.join("scratchpad"), "before-admission");
+        let pending = start(ipc::scratchpad_list(text(root)));
+        held.wait();
+        fs::write(&legacy, &data).unwrap();
+        held.release();
+        assert!(done(pending)
+            .unwrap_err()
+            .contains("Workspace registry migration changed"));
+        assert!(!output.exists());
+        assert!(!run(ipc::scratchpad_list(text(root))).unwrap().is_empty());
+        assert!(output.is_file());
+        assert_eq!(fs::read_to_string(legacy).unwrap(), data);
     }
 }

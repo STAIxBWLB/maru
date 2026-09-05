@@ -9,7 +9,10 @@
 // approval-gated promote target.
 
 use crate::approval::{require_approval, ApprovalState};
-use crate::atomic_file::{write_atomic, write_atomic_create};
+use crate::atomic_file::{
+    with_path_transactions, write_atomic, write_atomic_create, PathTransactionLease,
+    PathTransactionRequest,
+};
 use crate::scratchpad::{
     assert_no_symlink_components, assert_scratchpad_workspace_access, move_to_system_trash,
     resolve_scratchpad_drafts_root, resolve_scratchpad_root, ScratchpadSource,
@@ -129,7 +132,11 @@ fn default_promote_dir() -> String {
     DEFAULT_PROMOTE_DIR.to_string()
 }
 
-fn emit_drafts_changed(app: &AppHandle, work_path: &str, draft_id: Option<String>) {
+fn emit_drafts_changed<R: tauri::Runtime>(
+    app: &AppHandle<R>,
+    work_path: &str,
+    draft_id: Option<String>,
+) {
     let _ = app.emit(
         "drafts://changed",
         DraftsChangedEvent {
@@ -191,6 +198,49 @@ fn read_promote_dir(work: &Path) -> Result<String, String> {
 }
 
 fn promote_default_dir_impl(work_path: &str) -> Result<String, String> {
+    let work = crate::vault::normalize_existing_dir(work_path)?;
+    let root = resolve_scratchpad_drafts_root(&work)?;
+    let lexical_work = if Path::new(&work_path).is_absolute() {
+        PathBuf::from(&work_path)
+    } else {
+        std::env::current_dir()
+            .map_err(|err| err.to_string())?
+            .join(work_path)
+    };
+    let paths = vec![
+        root.clone(),
+        lexical_work.join(
+            canonicalize_from_existing_ancestor(&root)
+                .ok_or("Cannot resolve drafts admission alias")?
+                .strip_prefix(&work)
+                .map_err(|err| err.to_string())?,
+        ),
+        work.join(".maru/drafts"),
+        lexical_work.join(".maru/drafts"),
+        work.join("workspace.config.yaml"),
+        lexical_work.join("workspace.config.yaml"),
+    ];
+    let request = PathTransactionRequest::new(paths)?
+        .require_parent(&work)?
+        .with_workspace_registry()?;
+    with_path_transactions(request, |lease| {
+        drafts_promote_default_dir_in_transaction(lease, work_path)
+    })
+}
+
+fn drafts_promote_default_dir_in_transaction(
+    lease: &PathTransactionLease,
+    work_path: &str,
+) -> Result<String, String> {
+    lease.ensure_covered(vec![
+        resolve_scratchpad_drafts_root(Path::new(&work_path))?,
+        crate::vault::normalize_existing_dir(work_path)?.join(".maru/drafts"),
+    ])?;
+    lease.ensure_workspace_registry()?;
+    // The permission loader may migrate the legacy registry. Revalidate the
+    // original pinned parents before that first filesystem effect.
+    lease.before_effect()?;
+
     assert_scratchpad_workspace_access(Path::new(work_path))?;
     let work = crate::vault::normalize_existing_dir(work_path)?;
     read_promote_dir(&work)
@@ -243,11 +293,31 @@ pub(crate) fn fail_next_index_write() {
 /// implementation drafts pointing only at the old idea path. Duplicate refs
 /// are collapsed while touching the entry, which also keeps duplicate guards
 /// deterministic for hand-edited indexes.
+// Standalone synchronous entry remains available; lifecycle callers borrow their lease.
+#[allow(dead_code)]
 pub(crate) fn update_idea_origin_refs(
     work: &Path,
     old_path: &str,
     new_path: &str,
 ) -> Result<(), String> {
+    let request = PathTransactionRequest::new(vec![work.join(".maru/drafts")])?
+        .require_parent(work)?
+        .with_workspace_registry()?;
+    with_path_transactions(request, |lease| {
+        update_idea_origin_refs_in_transaction(lease, work, old_path, new_path)
+    })
+}
+
+pub(crate) fn update_idea_origin_refs_in_transaction(
+    lease: &PathTransactionLease,
+    work: &Path,
+    old_path: &str,
+    new_path: &str,
+) -> Result<(), String> {
+    lease.ensure_covered(vec![work.join(".maru/drafts")])?;
+    lease.ensure_workspace_registry()?;
+    lease.before_effect()?;
+
     if old_path == new_path {
         return Ok(());
     }
@@ -341,6 +411,67 @@ fn create_impl(
     confidence: Option<f32>,
     body: &str,
 ) -> Result<DraftEntry, String> {
+    let work = crate::vault::normalize_existing_dir(work_path)?;
+    let root = resolve_scratchpad_drafts_root(&work)?;
+    let lexical_work = if Path::new(&work_path).is_absolute() {
+        PathBuf::from(&work_path)
+    } else {
+        std::env::current_dir()
+            .map_err(|err| err.to_string())?
+            .join(work_path)
+    };
+    let paths = vec![
+        root.clone(),
+        lexical_work.join(
+            canonicalize_from_existing_ancestor(&root)
+                .ok_or("Cannot resolve drafts admission alias")?
+                .strip_prefix(&work)
+                .map_err(|err| err.to_string())?,
+        ),
+        work.join(".maru/drafts"),
+        lexical_work.join(".maru/drafts"),
+        work.join("workspace.config.yaml"),
+        lexical_work.join("workspace.config.yaml"),
+    ];
+    let request = PathTransactionRequest::new(paths)?
+        .require_parent(&work)?
+        .with_workspace_registry()?;
+    with_path_transactions(request, |lease| {
+        drafts_create_in_transaction(
+            lease,
+            work_path,
+            kind,
+            title,
+            source,
+            origin_refs,
+            importance,
+            confidence,
+            body,
+        )
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn drafts_create_in_transaction(
+    lease: &PathTransactionLease,
+    work_path: &str,
+    kind: DraftKind,
+    title: &str,
+    source: ScratchpadSource,
+    origin_refs: Vec<String>,
+    importance: Option<DraftImportance>,
+    confidence: Option<f32>,
+    body: &str,
+) -> Result<DraftEntry, String> {
+    lease.ensure_covered(vec![
+        resolve_scratchpad_drafts_root(Path::new(&work_path))?,
+        crate::vault::normalize_existing_dir(work_path)?.join(".maru/drafts"),
+    ])?;
+    lease.ensure_workspace_registry()?;
+    // The permission loader may migrate the legacy registry. Revalidate the
+    // original pinned parents before that first filesystem effect.
+    lease.before_effect()?;
+
     assert_scratchpad_workspace_access(Path::new(work_path))?;
     assert_maru_can_write(work_path, WorkspaceWriteAction::Create)?;
     let trimmed = title.trim();
@@ -372,6 +503,7 @@ fn create_impl(
         slug,
         &suffix[..8]
     );
+    let mut entries = load_index(&work)?;
     let body_path = root.join(&file_name);
     write_atomic_create(&body_path, body.as_bytes())?;
 
@@ -390,9 +522,12 @@ fn create_impl(
         created_at: now.clone(),
         updated_at: now,
     };
-    let mut entries = load_index(&work)?;
     entries.push(entry.clone());
-    save_index(&work, &entries)?;
+    if let Err(error) = save_index(&work, &entries) {
+        fs::remove_file(&body_path)
+            .map_err(|rollback| format!("{error}; draft body rollback failed: {rollback}"))?;
+        return Err(error);
+    }
     Ok(entry)
 }
 
@@ -572,6 +707,50 @@ fn adopt_orphan_bodies(work: &Path, entries: &mut Vec<DraftEntry>) -> Result<boo
 }
 
 fn read_impl(work_path: &str, id: &str) -> Result<DraftDocument, String> {
+    let work = crate::vault::normalize_existing_dir(work_path)?;
+    let root = resolve_scratchpad_drafts_root(&work)?;
+    let lexical_work = if Path::new(&work_path).is_absolute() {
+        PathBuf::from(&work_path)
+    } else {
+        std::env::current_dir()
+            .map_err(|err| err.to_string())?
+            .join(work_path)
+    };
+    let paths = vec![
+        root.clone(),
+        lexical_work.join(
+            canonicalize_from_existing_ancestor(&root)
+                .ok_or("Cannot resolve drafts admission alias")?
+                .strip_prefix(&work)
+                .map_err(|err| err.to_string())?,
+        ),
+        work.join(".maru/drafts"),
+        lexical_work.join(".maru/drafts"),
+        work.join("workspace.config.yaml"),
+        lexical_work.join("workspace.config.yaml"),
+    ];
+    let request = PathTransactionRequest::new(paths)?
+        .require_parent(&work)?
+        .with_workspace_registry()?;
+    with_path_transactions(request, |lease| {
+        drafts_read_in_transaction(lease, work_path, id)
+    })
+}
+
+fn drafts_read_in_transaction(
+    lease: &PathTransactionLease,
+    work_path: &str,
+    id: &str,
+) -> Result<DraftDocument, String> {
+    lease.ensure_covered(vec![
+        resolve_scratchpad_drafts_root(Path::new(&work_path))?,
+        crate::vault::normalize_existing_dir(work_path)?.join(".maru/drafts"),
+    ])?;
+    lease.ensure_workspace_registry()?;
+    // The permission loader may migrate the legacy registry. Revalidate the
+    // original pinned parents before that first filesystem effect.
+    lease.before_effect()?;
+
     assert_scratchpad_workspace_access(Path::new(work_path))?;
     validate_draft_id(id)?;
     let work = crate::vault::normalize_existing_dir(work_path)?;
@@ -588,6 +767,52 @@ fn save_impl(
     body: &str,
     expected_updated_at: &str,
 ) -> Result<DraftDocument, String> {
+    let work = crate::vault::normalize_existing_dir(work_path)?;
+    let root = resolve_scratchpad_drafts_root(&work)?;
+    let lexical_work = if Path::new(&work_path).is_absolute() {
+        PathBuf::from(&work_path)
+    } else {
+        std::env::current_dir()
+            .map_err(|err| err.to_string())?
+            .join(work_path)
+    };
+    let paths = vec![
+        root.clone(),
+        lexical_work.join(
+            canonicalize_from_existing_ancestor(&root)
+                .ok_or("Cannot resolve drafts admission alias")?
+                .strip_prefix(&work)
+                .map_err(|err| err.to_string())?,
+        ),
+        work.join(".maru/drafts"),
+        lexical_work.join(".maru/drafts"),
+        work.join("workspace.config.yaml"),
+        lexical_work.join("workspace.config.yaml"),
+    ];
+    let request = PathTransactionRequest::new(paths)?
+        .require_parent(&work)?
+        .with_workspace_registry()?;
+    with_path_transactions(request, |lease| {
+        drafts_save_in_transaction(lease, work_path, id, body, expected_updated_at)
+    })
+}
+
+fn drafts_save_in_transaction(
+    lease: &PathTransactionLease,
+    work_path: &str,
+    id: &str,
+    body: &str,
+    expected_updated_at: &str,
+) -> Result<DraftDocument, String> {
+    lease.ensure_covered(vec![
+        resolve_scratchpad_drafts_root(Path::new(&work_path))?,
+        crate::vault::normalize_existing_dir(work_path)?.join(".maru/drafts"),
+    ])?;
+    lease.ensure_workspace_registry()?;
+    // The permission loader may migrate the legacy registry. Revalidate the
+    // original pinned parents before that first filesystem effect.
+    lease.before_effect()?;
+
     assert_scratchpad_workspace_access(Path::new(work_path))?;
     assert_maru_can_write(work_path, WorkspaceWriteAction::Modify)?;
     validate_draft_id(id)?;
@@ -607,9 +832,15 @@ fn save_impl(
         ));
     }
     let path = body_file_path(&work, &entry)?;
+    let original = fs::read(&path)
+        .map_err(|err| format!("Cannot read draft body {}: {err}", path.display()))?;
     write_atomic(&path, body.as_bytes())?;
     entries[index].updated_at = Utc::now().to_rfc3339();
-    save_index(&work, &entries)?;
+    if let Err(error) = save_index(&work, &entries) {
+        write_atomic(&path, &original)
+            .map_err(|rollback| format!("{error}; draft body rollback failed: {rollback}"))?;
+        return Err(error);
+    }
     Ok(DraftDocument {
         entry: entries[index].clone(),
         content: body.to_string(),
@@ -617,6 +848,51 @@ fn save_impl(
 }
 
 fn set_status_impl(work_path: &str, id: &str, status: DraftStatus) -> Result<DraftEntry, String> {
+    let work = crate::vault::normalize_existing_dir(work_path)?;
+    let root = resolve_scratchpad_drafts_root(&work)?;
+    let lexical_work = if Path::new(&work_path).is_absolute() {
+        PathBuf::from(&work_path)
+    } else {
+        std::env::current_dir()
+            .map_err(|err| err.to_string())?
+            .join(work_path)
+    };
+    let paths = vec![
+        root.clone(),
+        lexical_work.join(
+            canonicalize_from_existing_ancestor(&root)
+                .ok_or("Cannot resolve drafts admission alias")?
+                .strip_prefix(&work)
+                .map_err(|err| err.to_string())?,
+        ),
+        work.join(".maru/drafts"),
+        lexical_work.join(".maru/drafts"),
+        work.join("workspace.config.yaml"),
+        lexical_work.join("workspace.config.yaml"),
+    ];
+    let request = PathTransactionRequest::new(paths)?
+        .require_parent(&work)?
+        .with_workspace_registry()?;
+    with_path_transactions(request, |lease| {
+        drafts_set_status_in_transaction(lease, work_path, id, status)
+    })
+}
+
+fn drafts_set_status_in_transaction(
+    lease: &PathTransactionLease,
+    work_path: &str,
+    id: &str,
+    status: DraftStatus,
+) -> Result<DraftEntry, String> {
+    lease.ensure_covered(vec![
+        resolve_scratchpad_drafts_root(Path::new(&work_path))?,
+        crate::vault::normalize_existing_dir(work_path)?.join(".maru/drafts"),
+    ])?;
+    lease.ensure_workspace_registry()?;
+    // The permission loader may migrate the legacy registry. Revalidate the
+    // original pinned parents before that first filesystem effect.
+    lease.before_effect()?;
+
     assert_scratchpad_workspace_access(Path::new(work_path))?;
     assert_maru_can_write(work_path, WorkspaceWriteAction::Modify)?;
     validate_draft_id(id)?;
@@ -630,6 +906,50 @@ fn set_status_impl(work_path: &str, id: &str, status: DraftStatus) -> Result<Dra
 }
 
 fn discard_impl(work_path: &str, id: &str) -> Result<DraftEntry, String> {
+    let work = crate::vault::normalize_existing_dir(work_path)?;
+    let root = resolve_scratchpad_drafts_root(&work)?;
+    let lexical_work = if Path::new(&work_path).is_absolute() {
+        PathBuf::from(&work_path)
+    } else {
+        std::env::current_dir()
+            .map_err(|err| err.to_string())?
+            .join(work_path)
+    };
+    let paths = vec![
+        root.clone(),
+        lexical_work.join(
+            canonicalize_from_existing_ancestor(&root)
+                .ok_or("Cannot resolve drafts admission alias")?
+                .strip_prefix(&work)
+                .map_err(|err| err.to_string())?,
+        ),
+        work.join(".maru/drafts"),
+        lexical_work.join(".maru/drafts"),
+        work.join("workspace.config.yaml"),
+        lexical_work.join("workspace.config.yaml"),
+    ];
+    let request = PathTransactionRequest::new(paths)?
+        .require_parent(&work)?
+        .with_workspace_registry()?;
+    with_path_transactions(request, |lease| {
+        drafts_discard_in_transaction(lease, work_path, id)
+    })
+}
+
+fn drafts_discard_in_transaction(
+    lease: &PathTransactionLease,
+    work_path: &str,
+    id: &str,
+) -> Result<DraftEntry, String> {
+    lease.ensure_covered(vec![
+        resolve_scratchpad_drafts_root(Path::new(&work_path))?,
+        crate::vault::normalize_existing_dir(work_path)?.join(".maru/drafts"),
+    ])?;
+    lease.ensure_workspace_registry()?;
+    // The permission loader may migrate the legacy registry. Revalidate the
+    // original pinned parents before that first filesystem effect.
+    lease.before_effect()?;
+
     assert_scratchpad_workspace_access(Path::new(work_path))?;
     assert_maru_can_write(work_path, WorkspaceWriteAction::Delete)?;
     validate_draft_id(id)?;
@@ -638,12 +958,18 @@ fn discard_impl(work_path: &str, id: &str) -> Result<DraftEntry, String> {
     let index = find_entry(&entries, id).ok_or_else(|| "drafts_not_found".to_string())?;
     let entry = entries[index].clone();
     let path = body_file_path(&work, &entry)?;
-    if path.exists() {
-        move_to_system_trash(&path)?;
-    }
+    let original_index =
+        fs::read(index_path(&work)).map_err(|err| format!("Cannot read drafts index: {err}"))?;
     entries[index].status = DraftStatus::Discarded;
     entries[index].updated_at = Utc::now().to_rfc3339();
     save_index(&work, &entries)?;
+    if path.exists() {
+        if let Err(error) = move_to_system_trash(&path) {
+            write_atomic(&index_path(&work), &original_index)
+                .map_err(|rollback| format!("{error}; draft index rollback failed: {rollback}"))?;
+            return Err(error);
+        }
+    }
     Ok(entries[index].clone())
 }
 
@@ -847,6 +1173,59 @@ fn promote_impl(
     target: DraftPromoteTarget,
     target_path: &str,
 ) -> Result<DraftEntry, String> {
+    let work = crate::vault::normalize_existing_dir(work_path)?;
+    let root = resolve_scratchpad_drafts_root(&work)?;
+    let lexical_work = if Path::new(&work_path).is_absolute() {
+        PathBuf::from(&work_path)
+    } else {
+        std::env::current_dir()
+            .map_err(|err| err.to_string())?
+            .join(work_path)
+    };
+    let paths = vec![
+        root.clone(),
+        lexical_work.join(
+            canonicalize_from_existing_ancestor(&root)
+                .ok_or("Cannot resolve drafts admission alias")?
+                .strip_prefix(&work)
+                .map_err(|err| err.to_string())?,
+        ),
+        work.join(".maru/drafts"),
+        lexical_work.join(".maru/drafts"),
+        work.join("workspace.config.yaml"),
+        lexical_work.join("workspace.config.yaml"),
+    ];
+    let mut paths = paths;
+    match target {
+        DraftPromoteTarget::Document => paths.push(resolve_inside_vault(work_path, target_path)?),
+        DraftPromoteTarget::Task => {
+            paths.push(crate::tasks::resolve_tasks_root(&work, "tasks")?.join("active"))
+        }
+    }
+    let request = PathTransactionRequest::new(paths)?
+        .require_parent(&work)?
+        .with_workspace_registry()?;
+    with_path_transactions(request, |lease| {
+        drafts_promote_in_transaction(lease, work_path, id, target, target_path)
+    })
+}
+
+fn drafts_promote_in_transaction(
+    lease: &PathTransactionLease,
+    work_path: &str,
+    id: &str,
+    target: DraftPromoteTarget,
+    target_path: &str,
+) -> Result<DraftEntry, String> {
+    lease.ensure_covered(vec![
+        resolve_scratchpad_drafts_root(Path::new(&work_path))?,
+        crate::vault::normalize_existing_dir(work_path)?.join(".maru/drafts"),
+    ])?;
+    lease.ensure_workspace_registry()?;
+    // The permission loader may migrate the legacy registry. Revalidate the
+    // original pinned parents before that first filesystem effect.
+    lease.before_effect()?;
+
     assert_scratchpad_workspace_access(Path::new(work_path))?;
     validate_draft_id(id)?;
     let work = crate::vault::normalize_existing_dir(work_path)?;
@@ -860,6 +1239,15 @@ fn promote_impl(
         return Err("drafts_promote_already_accepted".to_string());
     }
     let body = read_body(&work, &entry)?;
+    let baseline = work
+        .join(".maru/drafts")
+        .join(&entry.id)
+        .join("baseline.md");
+    let original_baseline = match fs::read(&baseline) {
+        Ok(bytes) => Some(bytes),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => None,
+        Err(err) => return Err(format!("Cannot read draft baseline: {err}")),
+    };
 
     // The baseline must be the bytes that actually landed at the promote
     // target, not the draft body: the Task path routes through
@@ -869,6 +1257,7 @@ fn promote_impl(
         DraftPromoteTarget::Document => {
             assert_maru_can_write(work_path, WorkspaceWriteAction::Create)?;
             let (dest, relative) = resolve_document_target(work_path, target_path)?;
+            lease.ensure_covered(vec![dest.clone()])?;
             if let Some(parent) = dest.parent() {
                 fs::create_dir_all(parent)
                     .map_err(|err| format!("Cannot create promote target directory: {err}"))?;
@@ -877,6 +1266,9 @@ fn promote_impl(
             (relative, body.as_bytes().to_vec())
         }
         DraftPromoteTarget::Task => {
+            lease.ensure_covered(vec![
+                crate::tasks::resolve_tasks_root(&work, "tasks")?.join("active")
+            ])?;
             let slug = if target_path.trim().is_empty() {
                 entry.title.as_str()
             } else {
@@ -894,34 +1286,96 @@ fn promote_impl(
                 None,
             )?;
             let created = work.join(&row.rel_path);
-            let bytes = fs::read(&created).map_err(|err| {
-                format!(
-                    "Cannot read promoted task note {}: {err}",
-                    created.display()
-                )
-            })?;
+            let bytes = match fs::read(&created) {
+                Ok(bytes) => bytes,
+                Err(error) => {
+                    fs::remove_file(&created).map_err(|rollback| {
+                        format!(
+                            "Cannot read promoted task note: {error}; rollback failed: {rollback}"
+                        )
+                    })?;
+                    return Err(format!(
+                        "Cannot read promoted task note {}: {error}",
+                        created.display()
+                    ));
+                }
+            };
             (row.rel_path, bytes)
         }
     };
 
     // Frozen baseline for later gap analysis between the promoted artifact and
     // the human edits made to it afterwards.
-    let baseline = work
-        .join(".maru")
-        .join("drafts")
-        .join(&entry.id)
-        .join("baseline.md");
-    write_atomic(&baseline, &baseline_bytes)?;
-
-    entries[index].status = DraftStatus::Accepted;
-    entries[index].promoted_to = Some(promoted_to);
-    entries[index].updated_at = Utc::now().to_rfc3339();
-    save_index(&work, &entries)?;
+    let promoted_path = work.join(&promoted_to);
+    let commit = (|| {
+        write_atomic(&baseline, &baseline_bytes)?;
+        entries[index].status = DraftStatus::Accepted;
+        entries[index].promoted_to = Some(promoted_to);
+        entries[index].updated_at = Utc::now().to_rfc3339();
+        save_index(&work, &entries)
+    })();
+    if let Err(error) = commit {
+        let remove_target = fs::remove_file(&promoted_path).map_err(|err| err.to_string());
+        let restore_baseline = match original_baseline {
+            Some(bytes) => write_atomic(&baseline, &bytes),
+            None => match fs::remove_file(&baseline) {
+                Ok(()) => Ok(()),
+                Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+                Err(err) => Err(err.to_string()),
+            },
+        };
+        if let Err(rollback) = remove_target.and(restore_baseline) {
+            return Err(format!("{error}; promotion rollback failed: {rollback}"));
+        }
+        return Err(error);
+    }
     Ok(entries[index].clone())
 }
 
-#[tauri::command(async)]
 pub fn drafts_list(work_path: String) -> Result<Vec<DraftEntry>, String> {
+    let work = crate::vault::normalize_existing_dir(&work_path)?;
+    let root = resolve_scratchpad_drafts_root(&work)?;
+    let lexical_work = if Path::new(&work_path).is_absolute() {
+        PathBuf::from(&work_path)
+    } else {
+        std::env::current_dir()
+            .map_err(|err| err.to_string())?
+            .join(&work_path)
+    };
+    let paths = vec![
+        root.clone(),
+        lexical_work.join(
+            canonicalize_from_existing_ancestor(&root)
+                .ok_or("Cannot resolve drafts admission alias")?
+                .strip_prefix(&work)
+                .map_err(|err| err.to_string())?,
+        ),
+        work.join(".maru/drafts"),
+        lexical_work.join(".maru/drafts"),
+        work.join("workspace.config.yaml"),
+        lexical_work.join("workspace.config.yaml"),
+    ];
+    let request = PathTransactionRequest::new(paths)?
+        .require_parent(&work)?
+        .with_workspace_registry()?;
+    with_path_transactions(request, |lease| {
+        drafts_list_in_transaction(lease, work_path)
+    })
+}
+
+fn drafts_list_in_transaction(
+    lease: &PathTransactionLease,
+    work_path: String,
+) -> Result<Vec<DraftEntry>, String> {
+    lease.ensure_covered(vec![
+        resolve_scratchpad_drafts_root(Path::new(&work_path))?,
+        crate::vault::normalize_existing_dir(&work_path)?.join(".maru/drafts"),
+    ])?;
+    lease.ensure_workspace_registry()?;
+    // The permission loader may migrate the legacy registry. Revalidate the
+    // original pinned parents before that first filesystem effect.
+    lease.before_effect()?;
+
     assert_scratchpad_workspace_access(Path::new(&work_path))?;
     let work = crate::vault::normalize_existing_dir(&work_path)?;
     let mut entries = load_index(&work)?;
@@ -939,19 +1393,28 @@ pub fn drafts_list(work_path: String) -> Result<Vec<DraftEntry>, String> {
 /// Return the configured directory used only for the document target
 /// suggestion in the promote dialog. The actual promote command still accepts
 /// any explicit, independently validated workspace-relative target.
-#[tauri::command(async)]
 pub fn drafts_promote_default_dir(work_path: String) -> Result<String, String> {
     promote_default_dir_impl(&work_path)
 }
 
-#[tauri::command(async)]
 pub fn drafts_read(work_path: String, id: String) -> Result<DraftDocument, String> {
     read_impl(&work_path, &id)
 }
 
-#[tauri::command(async)]
+// Retained exact synchronous API for Rust callers; IPC uses the owned runtime helper.
+#[allow(dead_code)]
 pub fn drafts_save(
     app: AppHandle,
+    work_path: String,
+    id: String,
+    body: String,
+    expected_updated_at: String,
+) -> Result<DraftDocument, String> {
+    drafts_save_blocking(app, work_path, id, body, expected_updated_at)
+}
+
+fn drafts_save_blocking<R: tauri::Runtime>(
+    app: AppHandle<R>,
     work_path: String,
     id: String,
     body: String,
@@ -962,10 +1425,36 @@ pub fn drafts_save(
     Ok(document)
 }
 
-#[tauri::command(async)]
 #[allow(clippy::too_many_arguments)]
+// Retained exact synchronous API for Rust callers; IPC uses the owned runtime helper.
+#[allow(dead_code)]
 pub fn drafts_create(
     app: AppHandle,
+    work_path: String,
+    kind: DraftKind,
+    title: String,
+    source: ScratchpadSource,
+    origin_refs: Option<Vec<String>>,
+    importance: Option<DraftImportance>,
+    confidence: Option<f32>,
+    body: String,
+) -> Result<DraftEntry, String> {
+    drafts_create_blocking(
+        app,
+        work_path,
+        kind,
+        title,
+        source,
+        origin_refs,
+        importance,
+        confidence,
+        body,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn drafts_create_blocking<R: tauri::Runtime>(
+    app: AppHandle<R>,
     work_path: String,
     kind: DraftKind,
     title: String,
@@ -989,9 +1478,19 @@ pub fn drafts_create(
     Ok(entry)
 }
 
-#[tauri::command(async)]
+// Retained exact synchronous API for Rust callers; IPC uses the owned runtime helper.
+#[allow(dead_code)]
 pub fn drafts_set_status(
     app: AppHandle,
+    work_path: String,
+    id: String,
+    status: DraftStatus,
+) -> Result<DraftEntry, String> {
+    drafts_set_status_blocking(app, work_path, id, status)
+}
+
+fn drafts_set_status_blocking<R: tauri::Runtime>(
+    app: AppHandle<R>,
     work_path: String,
     id: String,
     status: DraftStatus,
@@ -1001,14 +1500,24 @@ pub fn drafts_set_status(
     Ok(entry)
 }
 
-#[tauri::command(async)]
+// Retained exact synchronous API for Rust callers; IPC uses the owned runtime helper.
+#[allow(dead_code)]
 pub fn drafts_discard(app: AppHandle, work_path: String, id: String) -> Result<DraftEntry, String> {
+    drafts_discard_blocking(app, work_path, id)
+}
+
+fn drafts_discard_blocking<R: tauri::Runtime>(
+    app: AppHandle<R>,
+    work_path: String,
+    id: String,
+) -> Result<DraftEntry, String> {
     let entry = discard_impl(&work_path, &id)?;
     emit_drafts_changed(&app, &work_path, Some(id));
     Ok(entry)
 }
 
-#[tauri::command(async)]
+// Retained exact synchronous API for Rust callers; IPC uses the owned runtime helper.
+#[allow(dead_code)]
 pub fn drafts_promote(
     approvals: tauri::State<'_, ApprovalState>,
     app: AppHandle,
@@ -1019,6 +1528,16 @@ pub fn drafts_promote(
     approval_id: Option<String>,
 ) -> Result<DraftEntry, String> {
     require_approval(&approvals, approval_id, DRAFTS_PROMOTE_KIND)?;
+    drafts_promote_blocking(app, work_path, id, target, target_path)
+}
+
+fn drafts_promote_blocking<R: tauri::Runtime>(
+    app: AppHandle<R>,
+    work_path: String,
+    id: String,
+    target: DraftPromoteTarget,
+    target_path: Option<String>,
+) -> Result<DraftEntry, String> {
     let entry = promote_impl(
         &work_path,
         &id,
@@ -1034,6 +1553,53 @@ fn relink_promoted_impl(
     id: &str,
     target_path: &str,
 ) -> Result<DraftEntry, String> {
+    let work = crate::vault::normalize_existing_dir(work_path)?;
+    let root = resolve_scratchpad_drafts_root(&work)?;
+    let lexical_work = if Path::new(&work_path).is_absolute() {
+        PathBuf::from(&work_path)
+    } else {
+        std::env::current_dir()
+            .map_err(|err| err.to_string())?
+            .join(work_path)
+    };
+    let paths = vec![
+        root.clone(),
+        lexical_work.join(
+            canonicalize_from_existing_ancestor(&root)
+                .ok_or("Cannot resolve drafts admission alias")?
+                .strip_prefix(&work)
+                .map_err(|err| err.to_string())?,
+        ),
+        work.join(".maru/drafts"),
+        lexical_work.join(".maru/drafts"),
+        work.join("workspace.config.yaml"),
+        lexical_work.join("workspace.config.yaml"),
+    ];
+    let mut paths = paths;
+    paths.push(resolve_inside_vault(work_path, target_path)?);
+    let request = PathTransactionRequest::new(paths)?
+        .require_parent(&work)?
+        .with_workspace_registry()?;
+    with_path_transactions(request, |lease| {
+        drafts_relink_promoted_in_transaction(lease, work_path, id, target_path)
+    })
+}
+
+fn drafts_relink_promoted_in_transaction(
+    lease: &PathTransactionLease,
+    work_path: &str,
+    id: &str,
+    target_path: &str,
+) -> Result<DraftEntry, String> {
+    lease.ensure_covered(vec![
+        resolve_scratchpad_drafts_root(Path::new(&work_path))?,
+        crate::vault::normalize_existing_dir(work_path)?.join(".maru/drafts"),
+    ])?;
+    lease.ensure_workspace_registry()?;
+    // The permission loader may migrate the legacy registry. Revalidate the
+    // original pinned parents before that first filesystem effect.
+    lease.before_effect()?;
+
     assert_scratchpad_workspace_access(Path::new(&work_path))?;
     assert_maru_can_write(work_path, WorkspaceWriteAction::Modify)?;
     validate_draft_id(id)?;
@@ -1045,6 +1611,7 @@ fn relink_promoted_impl(
         return Err("drafts_relink_not_promoted".to_string());
     }
     let (target, relative) = validate_document_target(work_path, target_path)?;
+    lease.ensure_covered(vec![target.clone()])?;
     if !target.is_file() {
         return Err("drafts_relink_target_missing".to_string());
     }
@@ -1054,9 +1621,19 @@ fn relink_promoted_impl(
     Ok(entries[index].clone())
 }
 
-#[tauri::command(async)]
+// Retained exact synchronous API for Rust callers; IPC uses the owned runtime helper.
+#[allow(dead_code)]
 pub fn drafts_relink_promoted(
     app: AppHandle,
+    work_path: String,
+    id: String,
+    target_path: String,
+) -> Result<DraftEntry, String> {
+    drafts_relink_promoted_blocking(app, work_path, id, target_path)
+}
+
+fn drafts_relink_promoted_blocking<R: tauri::Runtime>(
+    app: AppHandle<R>,
     work_path: String,
     id: String,
     target_path: String,
@@ -1064,6 +1641,161 @@ pub fn drafts_relink_promoted(
     let entry = relink_promoted_impl(&work_path, &id, &target_path)?;
     emit_drafts_changed(&app, &work_path, Some(id));
     Ok(entry)
+}
+
+/// IPC boundaries own their inputs; filesystem work and admission waits run in workers.
+pub mod ipc {
+    use super::*;
+    use tauri::Manager;
+    #[tauri::command]
+    pub async fn drafts_list(work_path: String) -> Result<Vec<DraftEntry>, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(&[PathBuf::from(&work_path)], "worker:drafts_list");
+            super::drafts_list(work_path)
+        })
+        .await
+        .map_err(|err| format!("drafts_list_task_failed: {err}"))?
+    }
+    #[tauri::command]
+    pub async fn drafts_promote_default_dir(work_path: String) -> Result<String, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(
+                &[PathBuf::from(&work_path)],
+                "worker:drafts_promote_default_dir",
+            );
+            super::drafts_promote_default_dir(work_path)
+        })
+        .await
+        .map_err(|err| format!("drafts_promote_default_dir_task_failed: {err}"))?
+    }
+    #[tauri::command]
+    pub async fn drafts_read(work_path: String, id: String) -> Result<DraftDocument, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(&[PathBuf::from(&work_path)], "worker:drafts_read");
+            super::drafts_read(work_path, id)
+        })
+        .await
+        .map_err(|err| format!("drafts_read_task_failed: {err}"))?
+    }
+    #[tauri::command]
+    pub async fn drafts_save<R: tauri::Runtime>(
+        app: AppHandle<R>,
+        work_path: String,
+        id: String,
+        body: String,
+        expected_updated_at: String,
+    ) -> Result<DraftDocument, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(&[PathBuf::from(&work_path)], "worker:drafts_save");
+            super::drafts_save_blocking(app, work_path, id, body, expected_updated_at)
+        })
+        .await
+        .map_err(|err| format!("drafts_save_task_failed: {err}"))?
+    }
+    #[tauri::command]
+    #[allow(clippy::too_many_arguments)]
+    pub async fn drafts_create<R: tauri::Runtime>(
+        app: AppHandle<R>,
+        work_path: String,
+        kind: DraftKind,
+        title: String,
+        source: ScratchpadSource,
+        origin_refs: Option<Vec<String>>,
+        importance: Option<DraftImportance>,
+        confidence: Option<f32>,
+        body: String,
+    ) -> Result<DraftEntry, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(&[PathBuf::from(&work_path)], "worker:drafts_create");
+            super::drafts_create_blocking(
+                app,
+                work_path,
+                kind,
+                title,
+                source,
+                origin_refs,
+                importance,
+                confidence,
+                body,
+            )
+        })
+        .await
+        .map_err(|err| format!("drafts_create_task_failed: {err}"))?
+    }
+    #[tauri::command]
+    pub async fn drafts_set_status<R: tauri::Runtime>(
+        app: AppHandle<R>,
+        work_path: String,
+        id: String,
+        status: DraftStatus,
+    ) -> Result<DraftEntry, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(
+                &[PathBuf::from(&work_path)],
+                "worker:drafts_set_status",
+            );
+            super::drafts_set_status_blocking(app, work_path, id, status)
+        })
+        .await
+        .map_err(|err| format!("drafts_set_status_task_failed: {err}"))?
+    }
+    #[tauri::command]
+    pub async fn drafts_discard<R: tauri::Runtime>(
+        app: AppHandle<R>,
+        work_path: String,
+        id: String,
+    ) -> Result<DraftEntry, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(&[PathBuf::from(&work_path)], "worker:drafts_discard");
+            super::drafts_discard_blocking(app, work_path, id)
+        })
+        .await
+        .map_err(|err| format!("drafts_discard_task_failed: {err}"))?
+    }
+    #[tauri::command]
+    pub async fn drafts_promote<R: tauri::Runtime>(
+        app: AppHandle<R>,
+        work_path: String,
+        id: String,
+        target: DraftPromoteTarget,
+        target_path: Option<String>,
+        approval_id: Option<String>,
+    ) -> Result<DraftEntry, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(&[PathBuf::from(&work_path)], "worker:drafts_promote");
+            let approvals = app.state::<ApprovalState>();
+            require_approval(&approvals, approval_id, DRAFTS_PROMOTE_KIND)?;
+            super::drafts_promote_blocking(app.clone(), work_path, id, target, target_path)
+        })
+        .await
+        .map_err(|err| format!("drafts_promote_task_failed: {err}"))?
+    }
+    #[tauri::command]
+    pub async fn drafts_relink_promoted<R: tauri::Runtime>(
+        app: AppHandle<R>,
+        work_path: String,
+        id: String,
+        target_path: String,
+    ) -> Result<DraftEntry, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(
+                &[PathBuf::from(&work_path)],
+                "worker:drafts_relink_promoted",
+            );
+            super::drafts_relink_promoted_blocking(app, work_path, id, target_path)
+        })
+        .await
+        .map_err(|err| format!("drafts_relink_promoted_task_failed: {err}"))?
+    }
 }
 
 #[cfg(test)]
@@ -1752,5 +2484,827 @@ mod tests {
         assert!(validate_draft_id("../x").is_err());
         assert!(validate_draft_id("a/b").is_err());
         assert!(validate_draft_id("").is_err());
+    }
+}
+
+#[cfg(test)]
+mod phase08_08 {
+    use super::*;
+    use crate::atomic_file::phase08_06::{boundary, run, Held, Home};
+    use std::sync::mpsc;
+    use std::time::Duration;
+    use tauri::Manager;
+
+    fn text(path: &Path) -> String {
+        path.to_string_lossy().into_owned()
+    }
+    fn app() -> tauri::App<tauri::test::MockRuntime> {
+        let app = tauri::test::mock_app();
+        app.manage(ApprovalState::default());
+        app
+    }
+    fn approval(app: &tauri::App<tauri::test::MockRuntime>) -> String {
+        let request = crate::approval::prepare_approval(
+            app.state(),
+            DRAFTS_PROMOTE_KIND.into(),
+            "fixture".into(),
+            None,
+            None,
+        )
+        .unwrap();
+        crate::approval::record_approval(
+            app.state(),
+            request.id.clone(),
+            crate::approval::ApprovalDecision::Approved,
+            None,
+        )
+        .unwrap();
+        request.id
+    }
+    fn entry(work: &str) -> DraftEntry {
+        create_impl(
+            work,
+            DraftKind::Idea,
+            "Fixture",
+            ScratchpadSource::Codex,
+            vec![],
+            None,
+            None,
+            "# Fixture\n\noriginal",
+        )
+        .unwrap()
+    }
+    fn start<F>(future: F) -> mpsc::Receiver<F::Output>
+    where
+        F: std::future::Future + Send + 'static,
+        F::Output: Send + 'static,
+    {
+        let (tx, rx) = mpsc::channel();
+        tauri::async_runtime::spawn(async move {
+            let _ = tx.send(future.await);
+        });
+        rx
+    }
+    fn done<T>(rx: mpsc::Receiver<T>) -> T {
+        rx.recv_timeout(Duration::from_secs(10))
+            .expect("bounded draft completion")
+    }
+
+    #[test]
+    fn phase08_08_drafts_all_nine_wrappers_yield_on_same_task() {
+        let home = Home::new();
+        let root = home.root.path();
+        let work = text(root);
+        let app = app();
+        boundary(root.into(), "drafts_list", ipc::drafts_list(work.clone()));
+        boundary(
+            root.into(),
+            "drafts_promote_default_dir",
+            ipc::drafts_promote_default_dir(work.clone()),
+        );
+        boundary(
+            root.into(),
+            "drafts_read",
+            ipc::drafts_read(work.clone(), "draft-fixture".into()),
+        );
+        boundary(
+            root.into(),
+            "drafts_save",
+            ipc::drafts_save(
+                app.handle().clone(),
+                work.clone(),
+                "draft-fixture".into(),
+                "body".into(),
+                "revision".into(),
+            ),
+        );
+        boundary(
+            root.into(),
+            "drafts_create",
+            ipc::drafts_create(
+                app.handle().clone(),
+                work.clone(),
+                DraftKind::Idea,
+                "Fixture".into(),
+                ScratchpadSource::Codex,
+                None,
+                None,
+                None,
+                "body".into(),
+            ),
+        );
+        boundary(
+            root.into(),
+            "drafts_set_status",
+            ipc::drafts_set_status(
+                app.handle().clone(),
+                work.clone(),
+                "draft-fixture".into(),
+                DraftStatus::InReview,
+            ),
+        );
+        boundary(
+            root.into(),
+            "drafts_discard",
+            ipc::drafts_discard(app.handle().clone(), work.clone(), "draft-fixture".into()),
+        );
+        boundary(
+            root.into(),
+            "drafts_promote",
+            ipc::drafts_promote(
+                app.handle().clone(),
+                work.clone(),
+                "draft-fixture".into(),
+                DraftPromoteTarget::Document,
+                Some("notes/new.md".into()),
+                None,
+            ),
+        );
+        boundary(
+            root.into(),
+            "drafts_relink_promoted",
+            ipc::drafts_relink_promoted(
+                app.handle().clone(),
+                work,
+                "draft-fixture".into(),
+                "notes/new.md".into(),
+            ),
+        );
+    }
+
+    #[test]
+    fn phase08_08_drafts_payload_approval_and_legacy_conflict_survive() {
+        let home = Home::new();
+        let work = text(home.root.path());
+        let app = app();
+        let draft = entry(&work);
+        assert_eq!(run(ipc::drafts_list(work.clone())).unwrap().len(), 1);
+        assert!(run(ipc::drafts_read(work.clone(), draft.id.clone()))
+            .unwrap()
+            .content
+            .contains("original"));
+        let error = run(ipc::drafts_save(
+            app.handle().clone(),
+            work.clone(),
+            draft.id.clone(),
+            "change".into(),
+            "stale".into(),
+        ))
+        .unwrap_err();
+        assert!(error.starts_with("drafts_conflict:"));
+        assert!(run(ipc::drafts_promote(
+            app.handle().clone(),
+            work.clone(),
+            draft.id.clone(),
+            DraftPromoteTarget::Document,
+            Some("notes/new.md".into()),
+            None
+        ))
+        .unwrap_err()
+        .starts_with("approval_required"));
+        let id = approval(&app);
+        let promoted = run(ipc::drafts_promote(
+            app.handle().clone(),
+            work,
+            draft.id.clone(),
+            DraftPromoteTarget::Document,
+            Some("notes/new.md".into()),
+            Some(id),
+        ))
+        .unwrap();
+        assert_eq!(promoted.status, DraftStatus::Accepted);
+        assert_eq!(
+            fs::read(home.root.path().join("notes/new.md")).unwrap(),
+            fs::read(
+                home.root
+                    .path()
+                    .join(format!(".maru/drafts/{}/baseline.md", draft.id))
+            )
+            .unwrap()
+        );
+    }
+
+    #[test]
+    fn phase08_08_drafts_two_same_revision_saves_keep_one_winner() {
+        let home = Home::new();
+        let work = text(home.root.path());
+        let app = app();
+        let draft = entry(&work);
+        let held = Held::new(home.root.path().join(".maru/drafts"), "pre-effect");
+        let first = start(ipc::drafts_save(
+            app.handle().clone(),
+            work.clone(),
+            draft.id.clone(),
+            "winner".into(),
+            draft.updated_at.clone(),
+        ));
+        held.wait();
+        let waiting = Held::new(home.root.path().join(".maru/drafts"), "before-admission");
+        let second = start(ipc::drafts_save(
+            app.handle().clone(),
+            work.clone(),
+            draft.id.clone(),
+            "loser".into(),
+            draft.updated_at,
+        ));
+        waiting.wait();
+        waiting.release();
+        assert!(second.recv_timeout(Duration::from_millis(30)).is_err());
+        held.release();
+        let winner = done(first).unwrap();
+        assert!(done(second).unwrap_err().starts_with("drafts_conflict:"));
+        assert_eq!(read_impl(&work, &draft.id).unwrap().content, "winner");
+        run(ipc::drafts_save(
+            app.handle().clone(),
+            work,
+            draft.id,
+            "after error".into(),
+            winner.entry.updated_at,
+        ))
+        .unwrap();
+    }
+
+    #[test]
+    fn phase08_08_drafts_every_writer_contends_and_releases_on_index_error() {
+        let home = Home::new();
+        let app = app();
+        for operation in [
+            "list", "create", "save", "status", "discard", "promote", "relink", "lineage",
+        ] {
+            let root = home.root.path().join(operation);
+            fs::create_dir_all(&root).unwrap();
+            let work = text(&root);
+            let draft = entry(&work);
+            if operation == "list" {
+                fs::write(root.join("scratchpad/drafts/orphan.md"), "# Orphan").unwrap();
+            }
+            if operation == "discard" {
+                // Exercise the actual discard/index path without native system Trash.
+                fs::remove_file(root.join("scratchpad/drafts").join(&draft.body_path)).unwrap();
+            }
+            if operation == "relink" {
+                promote_impl(
+                    &work,
+                    &draft.id,
+                    DraftPromoteTarget::Document,
+                    "notes/old.md",
+                )
+                .unwrap();
+                fs::write(root.join("notes/new.md"), "new").unwrap();
+            }
+            let held = Held::new(root.join(".maru/drafts"), "admitted");
+            let handle = app.handle().clone();
+            let w = work.clone();
+            let d = draft.clone();
+            let id = approval(&app);
+            let first = start(async move {
+                match operation {
+                    "list" => ipc::drafts_list(w).await.map(|_| ()),
+                    "create" => ipc::drafts_create(
+                        handle,
+                        w,
+                        DraftKind::Idea,
+                        "new".into(),
+                        ScratchpadSource::Codex,
+                        None,
+                        None,
+                        None,
+                        "body".into(),
+                    )
+                    .await
+                    .map(|_| ()),
+                    "save" => ipc::drafts_save(handle, w, d.id, "new".into(), d.updated_at)
+                        .await
+                        .map(|_| ()),
+                    "status" => ipc::drafts_set_status(handle, w, d.id, DraftStatus::InReview)
+                        .await
+                        .map(|_| ()),
+                    "discard" => ipc::drafts_discard(handle, w, d.id).await.map(|_| ()),
+                    "promote" => ipc::drafts_promote(
+                        handle,
+                        w,
+                        d.id,
+                        DraftPromoteTarget::Document,
+                        Some("notes/new.md".into()),
+                        Some(id),
+                    )
+                    .await
+                    .map(|_| ()),
+                    "relink" => ipc::drafts_relink_promoted(handle, w, d.id, "notes/new.md".into())
+                        .await
+                        .map(|_| ()),
+                    "lineage" => tauri::async_runtime::spawn_blocking(move || {
+                        update_idea_origin_refs(Path::new(&w), "old", "new")
+                    })
+                    .await
+                    .unwrap(),
+                    _ => unreachable!(),
+                }
+            });
+            held.wait();
+            let waiting = Held::new(root.join(".maru/drafts"), "before-admission");
+            let second = start(ipc::drafts_set_status(
+                app.handle().clone(),
+                work.clone(),
+                draft.id.clone(),
+                DraftStatus::InReview,
+            ));
+            waiting.wait();
+            waiting.release();
+            assert!(
+                second.recv_timeout(Duration::from_millis(30)).is_err(),
+                "{operation}"
+            );
+            // The injected failure runs in the real worker, after the admission
+            // barrier, so all operations prove RAII release from their body.
+            let once = std::sync::atomic::AtomicBool::new(false);
+            let injection = crate::atomic_file::PathTransactionTestHook::new(
+                root.join(".maru/drafts"),
+                "pre-effect",
+                move || {
+                    if !once.swap(true, std::sync::atomic::Ordering::SeqCst) {
+                        fail_next_index_read();
+                    }
+                },
+            );
+            held.release();
+            assert!(
+                done(first)
+                    .unwrap_err()
+                    .contains("drafts_index_read_injected_failure"),
+                "{operation}"
+            );
+            done(second).unwrap();
+            drop(injection);
+            assert_eq!(
+                load_index(&root)
+                    .unwrap()
+                    .iter()
+                    .find(|entry| entry.id == draft.id)
+                    .unwrap()
+                    .status,
+                DraftStatus::InReview
+            );
+        }
+    }
+
+    #[test]
+    fn phase08_08_drafts_promotion_files_parent_both_orders_and_aliases() {
+        let home = Home::new();
+        let app = app();
+        for alias in [false, true] {
+            if alias && !cfg!(unix) {
+                continue;
+            }
+            for parent_first in [false, true] {
+                let root = home
+                    .root
+                    .path()
+                    .join(format!("parent-{alias}-{parent_first}"));
+                fs::create_dir_all(root.join("notes")).unwrap();
+                #[cfg(unix)]
+                if alias {
+                    std::os::unix::fs::symlink(root.join("notes"), root.join("alias")).unwrap();
+                }
+                let work = text(&root);
+                let draft = entry(&work);
+                let target = if alias {
+                    "alias/new.md"
+                } else {
+                    "notes/new.md"
+                };
+                let held = Held::new(
+                    if parent_first {
+                        root.join("notes")
+                    } else {
+                        root.join(".maru/drafts")
+                    },
+                    "pre-effect",
+                );
+                let promotion = ipc::drafts_promote(
+                    app.handle().clone(),
+                    work.clone(),
+                    draft.id.clone(),
+                    DraftPromoteTarget::Document,
+                    Some(target.into()),
+                    Some(approval(&app)),
+                );
+                let rename = crate::workspace_files::ipc::rename_workspace_entry(
+                    work.clone(),
+                    "notes".into(),
+                    "moved".into(),
+                );
+                if parent_first {
+                    let parent = start(rename);
+                    held.wait();
+                    let waiting = Held::new(root.join(".maru/drafts"), "before-admission");
+                    let child = start(promotion);
+                    waiting.wait();
+                    waiting.release();
+                    assert!(child.recv_timeout(Duration::from_millis(30)).is_err());
+                    held.release();
+                    done(parent).unwrap();
+                    assert!(done(child).is_err());
+                    assert!(!root.join("notes").exists());
+                    assert!(!root.join("moved/new.md").exists());
+                    assert_eq!(load_index(&root).unwrap()[0].status, DraftStatus::New);
+                } else {
+                    let child = start(promotion);
+                    held.wait();
+                    let waiting = Held::new(root.join("notes"), "before-admission");
+                    let parent = start(rename);
+                    waiting.wait();
+                    waiting.release();
+                    assert!(parent.recv_timeout(Duration::from_millis(30)).is_err());
+                    held.release();
+                    done(child).unwrap();
+                    done(parent).unwrap();
+                    assert!(!root.join("notes").exists());
+                    assert!(root.join("moved/new.md").is_file());
+                    // Files keeps the existing explicit-relink contract; the
+                    // frozen baseline and accepted index entry remain intact.
+                    assert_eq!(
+                        load_index(&root).unwrap()[0].promoted_to.as_deref(),
+                        Some(target)
+                    );
+                    assert_eq!(load_index(&root).unwrap()[0].status, DraftStatus::Accepted);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn phase08_08_drafts_promotion_document_create_both_orders_and_aliases() {
+        let home = Home::new();
+        let app = app();
+        for alias in [false, true] {
+            if alias && !cfg!(unix) {
+                continue;
+            }
+            for document_first in [false, true] {
+                let root = home
+                    .root
+                    .path()
+                    .join(format!("document-{alias}-{document_first}"));
+                fs::create_dir_all(root.join("notes")).unwrap();
+                #[cfg(unix)]
+                if alias {
+                    std::os::unix::fs::symlink(root.join("notes"), root.join("alias")).unwrap();
+                }
+                let work = text(&root);
+                let draft = entry(&work);
+                let target = if alias {
+                    "alias/new.md"
+                } else {
+                    "notes/new.md"
+                };
+                let promotion = ipc::drafts_promote(
+                    app.handle().clone(),
+                    work.clone(),
+                    draft.id,
+                    DraftPromoteTarget::Document,
+                    Some(target.into()),
+                    Some(approval(&app)),
+                );
+                let document = crate::document::ipc::create_document(
+                    work,
+                    "Document".into(),
+                    "reference".into(),
+                    "document bytes".into(),
+                    Some("notes/new.md".into()),
+                    None,
+                );
+                let held = Held::new(
+                    if document_first {
+                        root.join("notes/new.md")
+                    } else {
+                        root.join(".maru/drafts")
+                    },
+                    "pre-effect",
+                );
+                if document_first {
+                    let first = start(document);
+                    held.wait();
+                    let waiting = Held::new(root.join(".maru/drafts"), "before-admission");
+                    let second = start(promotion);
+                    waiting.wait();
+                    waiting.release();
+                    assert!(second.recv_timeout(Duration::from_millis(30)).is_err());
+                    held.release();
+                    done(first).unwrap();
+                    assert_eq!(done(second).unwrap_err(), "drafts_promote_target_exists");
+                    assert_eq!(load_index(&root).unwrap()[0].status, DraftStatus::New);
+                } else {
+                    let first = start(promotion);
+                    held.wait();
+                    let waiting = Held::new(root.join("notes/new.md"), "before-admission");
+                    let second = start(document);
+                    waiting.wait();
+                    waiting.release();
+                    assert!(second.recv_timeout(Duration::from_millis(30)).is_err());
+                    held.release();
+                    done(first).unwrap();
+                    assert!(done(second).is_err());
+                    assert_eq!(
+                        fs::read_to_string(root.join("notes/new.md")).unwrap(),
+                        "# Fixture\n\noriginal"
+                    );
+                }
+            }
+        }
+    }
+    #[test]
+    fn phase08_08_drafts_index_commit_failures_restore_body_baseline_and_target() {
+        let home = Home::new();
+        let app = app();
+        for operation in ["create", "save", "discard", "document", "task"] {
+            let root = home.root.path().join(format!("rollback-{operation}"));
+            fs::create_dir_all(&root).unwrap();
+            let work = text(&root);
+            let draft = entry(&work);
+            let original_index = fs::read(index_path(&root)).unwrap();
+            let original_body =
+                fs::read(root.join("scratchpad/drafts").join(&draft.body_path)).unwrap();
+            let once = std::sync::atomic::AtomicBool::new(false);
+            let hook = crate::atomic_file::PathTransactionTestHook::new(
+                root.join(".maru/drafts"),
+                "pre-effect",
+                move || {
+                    if !once.swap(true, std::sync::atomic::Ordering::SeqCst) {
+                        fail_next_index_write();
+                    }
+                },
+            );
+            let outcome = match operation {
+                "create" => run(ipc::drafts_create(
+                    app.handle().clone(),
+                    work.clone(),
+                    DraftKind::Idea,
+                    "new".into(),
+                    ScratchpadSource::Codex,
+                    None,
+                    None,
+                    None,
+                    "new".into(),
+                ))
+                .map(|_| ()),
+                "save" => run(ipc::drafts_save(
+                    app.handle().clone(),
+                    work.clone(),
+                    draft.id.clone(),
+                    "new".into(),
+                    draft.updated_at.clone(),
+                ))
+                .map(|_| ()),
+                "discard" => run(ipc::drafts_discard(
+                    app.handle().clone(),
+                    work.clone(),
+                    draft.id.clone(),
+                ))
+                .map(|_| ()),
+                _ => run(ipc::drafts_promote(
+                    app.handle().clone(),
+                    work.clone(),
+                    draft.id.clone(),
+                    if operation == "task" {
+                        DraftPromoteTarget::Task
+                    } else {
+                        DraftPromoteTarget::Document
+                    },
+                    Some(
+                        if operation == "task" {
+                            "promoted"
+                        } else {
+                            "notes/new.md"
+                        }
+                        .into(),
+                    ),
+                    Some(approval(&app)),
+                ))
+                .map(|_| ()),
+            };
+            assert_eq!(outcome.unwrap_err(), "drafts_index_write_injected_failure");
+            drop(hook);
+            assert_eq!(
+                fs::read(index_path(&root)).unwrap(),
+                original_index,
+                "{operation}"
+            );
+            assert_eq!(
+                fs::read(root.join("scratchpad/drafts").join(&draft.body_path)).unwrap(),
+                original_body,
+                "{operation}"
+            );
+            assert_eq!(
+                fs::read_dir(root.join("scratchpad/drafts"))
+                    .unwrap()
+                    .count(),
+                1
+            );
+            assert!(!root.join("notes/new.md").exists());
+            assert!(!root
+                .join(format!(".maru/drafts/{}/baseline.md", draft.id))
+                .exists());
+            if root.join("tasks/active").exists() {
+                assert_eq!(fs::read_dir(root.join("tasks/active")).unwrap().count(), 0);
+            }
+            run(ipc::drafts_set_status(
+                app.handle().clone(),
+                work,
+                draft.id,
+                DraftStatus::InReview,
+            ))
+            .unwrap();
+        }
+    }
+
+    #[test]
+    fn phase08_08_drafts_actual_wrappers_enforce_primary_and_fresh_write_policy() {
+        use crate::scratchpad::phase08_08::{registry, PrimaryWorkspaceAccessFixture};
+        let home = Home::new();
+        let app = app();
+        let root = home.root.path().join("private");
+        fs::create_dir_all(&root).unwrap();
+        let work = text(&root);
+        let draft = entry(&work);
+        let _access = PrimaryWorkspaceAccessFixture::new(root.clone());
+        let foreign = home.root.path().join("other");
+        fs::create_dir_all(&foreign).unwrap();
+        registry(&foreign, "direct");
+        assert!(run(ipc::drafts_read(work.clone(), draft.id.clone())).is_err());
+        assert!(run(ipc::drafts_list(work.clone())).is_err());
+        registry(&root, "readOnly");
+        assert!(run(ipc::drafts_save(
+            app.handle().clone(),
+            work.clone(),
+            draft.id.clone(),
+            "denied".into(),
+            draft.updated_at.clone()
+        ))
+        .is_err());
+        for operation in ["create", "status", "discard", "promote", "relink"] {
+            let result = match operation {
+                "create" => run(ipc::drafts_create(
+                    app.handle().clone(),
+                    work.clone(),
+                    DraftKind::Idea,
+                    "denied".into(),
+                    ScratchpadSource::Codex,
+                    None,
+                    None,
+                    None,
+                    "denied".into(),
+                ))
+                .map(|_| ()),
+                "status" => run(ipc::drafts_set_status(
+                    app.handle().clone(),
+                    work.clone(),
+                    draft.id.clone(),
+                    DraftStatus::InReview,
+                ))
+                .map(|_| ()),
+                "discard" => run(ipc::drafts_discard(
+                    app.handle().clone(),
+                    work.clone(),
+                    draft.id.clone(),
+                ))
+                .map(|_| ()),
+                "promote" => run(ipc::drafts_promote(
+                    app.handle().clone(),
+                    work.clone(),
+                    draft.id.clone(),
+                    DraftPromoteTarget::Document,
+                    Some("notes/denied.md".into()),
+                    Some(approval(&app)),
+                ))
+                .map(|_| ()),
+                "relink" => run(ipc::drafts_relink_promoted(
+                    app.handle().clone(),
+                    work.clone(),
+                    draft.id.clone(),
+                    "notes/denied.md".into(),
+                ))
+                .map(|_| ()),
+                _ => unreachable!(),
+            };
+            assert!(result.unwrap_err().contains("read"), "{operation}");
+        }
+        registry(&root, "direct");
+        let held = Held::new(root.join(".maru/drafts"), "admitted");
+        let saving = start(ipc::drafts_save(
+            app.handle().clone(),
+            work.clone(),
+            draft.id.clone(),
+            "stale permission".into(),
+            draft.updated_at,
+        ));
+        held.wait();
+        registry(&root, "readOnly");
+        held.release();
+        assert!(done(saving).is_err());
+        registry(&root, "direct");
+        assert!(read_impl(&work, &draft.id)
+            .unwrap()
+            .content
+            .contains("original"));
+        run(ipc::drafts_set_status(
+            app.handle().clone(),
+            work,
+            draft.id,
+            DraftStatus::InReview,
+        ))
+        .unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn phase08_08_drafts_workspace_alias_preserves_lexical_admission() {
+        let home = Home::new();
+        let app = app();
+        let root = home.root.path().join("actual");
+        fs::create_dir_all(&root).unwrap();
+        let alias = home.root.path().join("alias");
+        std::os::unix::fs::symlink(&root, &alias).unwrap();
+        let draft = entry(&text(&root));
+        let updated = run(ipc::drafts_save(
+            app.handle().clone(),
+            text(&alias),
+            draft.id.clone(),
+            "alias update".into(),
+            draft.updated_at,
+        ))
+        .unwrap();
+        assert_eq!(updated.content, "alias update");
+        assert_eq!(
+            read_impl(&text(&root), &draft.id).unwrap().content,
+            "alias update"
+        );
+    }
+    #[test]
+    fn phase08_08_drafts_reads_serialize_with_real_rename_and_local_trash() {
+        let home = Home::new();
+        for rename in [false, true] {
+            for mutation_first in [false, true] {
+                let root = home
+                    .root
+                    .path()
+                    .join(format!("read-{rename}-{mutation_first}"));
+                fs::create_dir_all(&root).unwrap();
+                let work = text(&root);
+                let draft = entry(&work);
+                let body = root.join("scratchpad/drafts").join(&draft.body_path);
+                let rel = text(body.strip_prefix(&root).unwrap());
+                let mutation_work = work.clone();
+                let mutation = async move {
+                    if rename {
+                        crate::workspace_files::ipc::rename_workspace_entry(
+                            mutation_work,
+                            rel,
+                            "renamed.md".into(),
+                        )
+                        .await
+                        .map(|_| ())
+                    } else {
+                        crate::document::ipc::trash_document(mutation_work, rel)
+                            .await
+                            .map(|_| ())
+                    }
+                };
+                let reading = ipc::drafts_read(work.clone(), draft.id.clone());
+                let held = Held::new(
+                    if mutation_first {
+                        body.clone()
+                    } else {
+                        root.join(".maru/drafts")
+                    },
+                    "pre-effect",
+                );
+                if mutation_first {
+                    let first = start(mutation);
+                    held.wait();
+                    let waiting = Held::new(root.join(".maru/drafts"), "before-admission");
+                    let second = start(reading);
+                    waiting.wait();
+                    waiting.release();
+                    assert!(second.recv_timeout(Duration::from_millis(30)).is_err());
+                    held.release();
+                    done(first).unwrap();
+                    assert!(done(second).is_err());
+                } else {
+                    let first = start(reading);
+                    held.wait();
+                    let waiting = Held::new(body.clone(), "before-admission");
+                    let second = start(mutation);
+                    waiting.wait();
+                    waiting.release();
+                    assert!(second.recv_timeout(Duration::from_millis(30)).is_err());
+                    held.release();
+                    assert!(done(first).unwrap().content.contains("original"));
+                    done(second).unwrap();
+                }
+                assert!(!body.exists());
+                assert!(read_impl(&work, &draft.id).is_err());
+            }
+        }
     }
 }

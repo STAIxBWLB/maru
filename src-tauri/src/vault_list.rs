@@ -260,7 +260,6 @@ pub(crate) fn load_registry_if_present() -> Result<Option<WorkspaceRegistry>, St
     load_registry_at(&registry_path, &legacy_path).map(Some)
 }
 
-#[cfg(not(test))]
 pub(crate) fn assert_primary_private_workspace(workspace_path: &Path) -> Result<(), String> {
     let registry_path = workspace_registry_path()?;
     let legacy_path = legacy_vault_list_path()?;
