@@ -1,0 +1,873 @@
+{
+  "plan": "08-07",
+  "moduleIntegrationOwner": "08-07",
+  "commands": [
+    {
+      "name": "read_document",
+      "module": "src-tauri/src/document.rs",
+      "registrationPath": "src-tauri/src/lib.rs::document::ipc::read_document",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/document.rs::ipc::read_document awaits spawn_blocking before file reads, parsing, process creation or admission waits",
+        "src-tauri/src/document.rs::read_document retains the public synchronous API",
+        "src-tauri/src/document.rs::read_document owns the decisive finite filesystem, validation or platform-process work"
+      ],
+      "workerBoundary": "src-tauri/src/document.rs::ipc::read_document awaits tauri::async_runtime::spawn_blocking with owned String inputs and existing Option<FieldInput>/Option<CreateDocumentExtras>/Option<String> where applicable; no State or guard crosses await. Contextual JoinError preserves String versus IpcError outer type, inner domain errors pass through untouched.",
+      "syncCallers": [
+        "src-tauri/src/document.rs::read_document remains available to synchronous Rust/CLI callers and original inline tests; cargo check -p maru-cli passes",
+        "src-tauri/src/graph_authoring.rs::snapshot_if_managed calls document::write_version_snapshot through its own short transaction; document managed saves instead pass the same lease to write_version_snapshot_in_transaction. Graph whole-proposal mutation integration belongs to its later owner; src-tauri/src/studio/mod.rs retains synchronous document reads."
+      ],
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_07",
+          "passed": 23,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/App.tsx",
+          "src/lib/documentOpsModeLifecycle.ts"
+        ],
+        "payload": "api.ts readDocument; App selectEntry and documentOpsModeLifecycle prepareDocument/reloadDocument own request-scoped view responses and keyed editor state.",
+        "terminalNoticeOwner": "Existing initiating App/editor callback owns completion/errors; query/validation results remain view-scoped. Plans25/26 own final cross-navigation lifetime and single-notice closure; this shard does not claim that UI work is implemented."
+      },
+      "mutationKey": {
+        "readOnly": true,
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "evidence": "No filesystem mutation: read-only document read/parse/hash."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_07_all_document_wrappers_yield_on_same_polling_task",
+          "phase08_07_actual_wrappers_preserve_nonempty_payloads_and_typed_conflicts"
+        ],
+        "workerProof": "All eleven actual wrapper futures are first polled and then yield on the same async task while a separate blocking worker is held; contextual panic JoinError is asserted. No spare-worker-only timing claim.",
+        "scope": "Disposable temp roots and local bare Git only; no credentials, installed runtime, native app launch, system Trash, live dot or package installer. File-manager fixture selects current test executable, runs exact harmless child, asserts marker and captured production argv; spawn-failure fixture is existing executable with absent fixture interpreter.",
+        "platformScope": "macOS execution only; platform argv builders remain covered by their existing unit cases, Windows runtime and native saturation belong to later verification. Document trash remains workspace-local .maru/trash/documents, correcting the research inventory platform-trash shorthand."
+      }
+    },
+    {
+      "name": "save_document",
+      "module": "src-tauri/src/document.rs",
+      "registrationPath": "src-tauri/src/lib.rs::document::ipc::save_document",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/document.rs::ipc::save_document awaits spawn_blocking before file reads, parsing, process creation or admission waits",
+        "src-tauri/src/document.rs::save_document retains the public synchronous API",
+        "src-tauri/src/document.rs::save_document_in_transaction owns the decisive finite filesystem, validation or platform-process work"
+      ],
+      "workerBoundary": "src-tauri/src/document.rs::ipc::save_document awaits tauri::async_runtime::spawn_blocking with owned String inputs and existing Option<FieldInput>/Option<CreateDocumentExtras>/Option<String> where applicable; no State or guard crosses await. Contextual JoinError preserves String versus IpcError outer type, inner domain errors pass through untouched.",
+      "syncCallers": [
+        "src-tauri/src/document.rs::save_document remains available to synchronous Rust/CLI callers and original inline tests; cargo check -p maru-cli passes",
+        "src-tauri/src/graph_authoring.rs::snapshot_if_managed calls document::write_version_snapshot through its own short transaction; document managed saves instead pass the same lease to write_version_snapshot_in_transaction. Graph whole-proposal mutation integration belongs to its later owner; src-tauri/src/studio/mod.rs retains synchronous document reads."
+      ],
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_07",
+          "passed": 23,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/App.tsx",
+          "src/lib/documentOpsModeLifecycle.ts"
+        ],
+        "payload": "App.tsx saveTab captures initiating tab/workspace, stores returned bytes by tab ID and routes errors to setError or Files editorError; saveCurrent and documentOpsModeLifecycle saveDocument delegate.",
+        "terminalNoticeOwner": "Existing initiating App/editor callback owns completion/errors; query/validation results remain view-scoped. Plans25/26 own final cross-navigation lifetime and single-notice closure; this shard does not claim that UI work is implemented."
+      },
+      "mutationKey": {
+        "lexicalPaths": [
+          "Exact selected document and complete .maru/versions subtree, including managed snapshot temporary-file and publication paths",
+          "Conditional workspace registry and legacy migration files are included with_workspace_registry when loader can write; admission detects newly appearing migration condition."
+        ],
+        "aliasPaths": [
+          "src-tauri/src/atomic_file.rs::PathTransactionRequest captures lexical and physical existing-target/nearest-parent-plus-suffix keys; pinned handles reject replaced parents and revalidated aliases reject retargeting."
+        ],
+        "postAdmissionPreconditions": [
+          "Required existing workspace plus nearest existing selected parents pinned before admission; changed/disappeared original parent fails without recreating it.",
+          "Nested adapter checks complete coverage and conditional registry effects before ownership/permissions; revision/current destination/managed policy validation occurs after admission before effects."
+        ],
+        "domainLockOrder": "Shared full-set admission before any existing BINDER_WRITE_LOCK or permission/domain work; nested snapshots use borrowed lease, no re-acquisition or extension. Lease lasts through rename, binder rekey, rollback and errors.",
+        "sharedAdmissionEntry": "src-tauri/src/atomic_file.rs::with_path_transactions",
+        "crossDomainProof": "Actual workspace parent wrappers vs document save/create, same-revision frontmatter/save and actual Skills-save/Skills-sync/Git-pull document consumers verify complete serial results or existing conflicts. All seven mutation kinds have held same-target contention and denied/error release."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_07_all_document_wrappers_yield_on_same_polling_task",
+          "phase08_07_actual_wrappers_preserve_nonempty_payloads_and_typed_conflicts",
+          "phase08_07_each_mutation_same_target_contention_and_error_release",
+          "phase08_07_parent_child_races_all_pairs_both_orders_and_aliases"
+        ],
+        "workerProof": "All eleven actual wrapper futures are first polled and then yield on the same async task while a separate blocking worker is held; contextual panic JoinError is asserted. No spare-worker-only timing claim.",
+        "scope": "Disposable temp roots and local bare Git only; no credentials, installed runtime, native app launch, system Trash, live dot or package installer. File-manager fixture selects current test executable, runs exact harmless child, asserts marker and captured production argv; spawn-failure fixture is existing executable with absent fixture interpreter.",
+        "platformScope": "macOS execution only; platform argv builders remain covered by their existing unit cases, Windows runtime and native saturation belong to later verification. Document trash remains workspace-local .maru/trash/documents, correcting the research inventory platform-trash shorthand.",
+        "managedSnapshotProof": "phase08_07_managed_save_and_frontmatter_reuse_snapshot_lease proves nested auto-snapshots finish with two complete prior-body snapshots and no lease reacquisition."
+      }
+    },
+    {
+      "name": "update_frontmatter_field",
+      "module": "src-tauri/src/document.rs",
+      "registrationPath": "src-tauri/src/lib.rs::document::ipc::update_frontmatter_field",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/document.rs::ipc::update_frontmatter_field awaits spawn_blocking before file reads, parsing, process creation or admission waits",
+        "src-tauri/src/document.rs::update_frontmatter_field retains the public synchronous API",
+        "src-tauri/src/document.rs::update_frontmatter_field_in_transaction owns the decisive finite filesystem, validation or platform-process work"
+      ],
+      "workerBoundary": "src-tauri/src/document.rs::ipc::update_frontmatter_field awaits tauri::async_runtime::spawn_blocking with owned String inputs and existing Option<FieldInput>/Option<CreateDocumentExtras>/Option<String> where applicable; no State or guard crosses await. Contextual JoinError preserves String versus IpcError outer type, inner domain errors pass through untouched.",
+      "syncCallers": [
+        "src-tauri/src/document.rs::update_frontmatter_field remains available to synchronous Rust/CLI callers and original inline tests; cargo check -p maru-cli passes",
+        "src-tauri/src/graph_authoring.rs::snapshot_if_managed calls document::write_version_snapshot through its own short transaction; document managed saves instead pass the same lease to write_version_snapshot_in_transaction. Graph whole-proposal mutation integration belongs to its later owner; src-tauri/src/studio/mod.rs retains synchronous document reads."
+      ],
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_07",
+          "passed": 23,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/App.tsx",
+          "src/lib/documentOpsModeLifecycle.ts"
+        ],
+        "payload": "App.tsx updateField applies the returned payload to initiating tab while preserving unsaved body draft; setError owns current failures.",
+        "terminalNoticeOwner": "Existing initiating App/editor callback owns completion/errors; query/validation results remain view-scoped. Plans25/26 own final cross-navigation lifetime and single-notice closure; this shard does not claim that UI work is implemented."
+      },
+      "mutationKey": {
+        "lexicalPaths": [
+          "Exact selected document and complete .maru/versions subtree for byte-preserving field patch and managed snapshot",
+          "Conditional workspace registry and legacy migration files are included with_workspace_registry when loader can write; admission detects newly appearing migration condition."
+        ],
+        "aliasPaths": [
+          "src-tauri/src/atomic_file.rs::PathTransactionRequest captures lexical and physical existing-target/nearest-parent-plus-suffix keys; pinned handles reject replaced parents and revalidated aliases reject retargeting."
+        ],
+        "postAdmissionPreconditions": [
+          "Required existing workspace plus nearest existing selected parents pinned before admission; changed/disappeared original parent fails without recreating it.",
+          "Nested adapter checks complete coverage and conditional registry effects before ownership/permissions; revision/current destination/managed policy validation occurs after admission before effects."
+        ],
+        "domainLockOrder": "Shared full-set admission before any existing BINDER_WRITE_LOCK or permission/domain work; nested snapshots use borrowed lease, no re-acquisition or extension. Lease lasts through rename, binder rekey, rollback and errors.",
+        "sharedAdmissionEntry": "src-tauri/src/atomic_file.rs::with_path_transactions",
+        "crossDomainProof": "Actual workspace parent wrappers vs document save/create, same-revision frontmatter/save and actual Skills-save/Skills-sync/Git-pull document consumers verify complete serial results or existing conflicts. All seven mutation kinds have held same-target contention and denied/error release."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_07_all_document_wrappers_yield_on_same_polling_task",
+          "phase08_07_actual_wrappers_preserve_nonempty_payloads_and_typed_conflicts",
+          "phase08_07_each_mutation_same_target_contention_and_error_release",
+          "phase08_07_parent_child_races_all_pairs_both_orders_and_aliases"
+        ],
+        "workerProof": "All eleven actual wrapper futures are first polled and then yield on the same async task while a separate blocking worker is held; contextual panic JoinError is asserted. No spare-worker-only timing claim.",
+        "scope": "Disposable temp roots and local bare Git only; no credentials, installed runtime, native app launch, system Trash, live dot or package installer. File-manager fixture selects current test executable, runs exact harmless child, asserts marker and captured production argv; spawn-failure fixture is existing executable with absent fixture interpreter.",
+        "platformScope": "macOS execution only; platform argv builders remain covered by their existing unit cases, Windows runtime and native saturation belong to later verification. Document trash remains workspace-local .maru/trash/documents, correcting the research inventory platform-trash shorthand.",
+        "managedSnapshotProof": "phase08_07_managed_save_and_frontmatter_reuse_snapshot_lease proves nested auto-snapshots finish with two complete prior-body snapshots and no lease reacquisition."
+      }
+    },
+    {
+      "name": "create_document",
+      "module": "src-tauri/src/document.rs",
+      "registrationPath": "src-tauri/src/lib.rs::document::ipc::create_document",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/document.rs::ipc::create_document awaits spawn_blocking before file reads, parsing, process creation or admission waits",
+        "src-tauri/src/document.rs::create_document retains the public synchronous API",
+        "src-tauri/src/document.rs::create_document_in_transaction owns the decisive finite filesystem, validation or platform-process work"
+      ],
+      "workerBoundary": "src-tauri/src/document.rs::ipc::create_document awaits tauri::async_runtime::spawn_blocking with owned String inputs and existing Option<FieldInput>/Option<CreateDocumentExtras>/Option<String> where applicable; no State or guard crosses await. Contextual JoinError preserves String versus IpcError outer type, inner domain errors pass through untouched.",
+      "syncCallers": [
+        "src-tauri/src/document.rs::create_document remains available to synchronous Rust/CLI callers and original inline tests; cargo check -p maru-cli passes",
+        "src-tauri/src/graph_authoring.rs::snapshot_if_managed calls document::write_version_snapshot through its own short transaction; document managed saves instead pass the same lease to write_version_snapshot_in_transaction. Graph whole-proposal mutation integration belongs to its later owner; src-tauri/src/studio/mod.rs retains synchronous document reads."
+      ],
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_07",
+          "passed": 23,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/App.tsx",
+          "src/lib/documentOpsModeLifecycle.ts"
+        ],
+        "payload": "App.tsx createDocumentAndOpen and onCreateDocumentDialogSubmit retain created payload and initiating workspace; existing tab activation behavior needs Plan25/26 lifetime review.",
+        "terminalNoticeOwner": "Existing initiating App/editor callback owns completion/errors; query/validation results remain view-scoped. Plans25/26 own final cross-navigation lifetime and single-notice closure; this shard does not claim that UI work is implemented."
+      },
+      "mutationKey": {
+        "lexicalPaths": [
+          "Validated selected document path and its missing suffix under the original nearest-existing parent",
+          "Conditional workspace registry and legacy migration files are included with_workspace_registry when loader can write; admission detects newly appearing migration condition."
+        ],
+        "aliasPaths": [
+          "src-tauri/src/atomic_file.rs::PathTransactionRequest captures lexical and physical existing-target/nearest-parent-plus-suffix keys; pinned handles reject replaced parents and revalidated aliases reject retargeting."
+        ],
+        "postAdmissionPreconditions": [
+          "Required existing workspace plus nearest existing selected parents pinned before admission; changed/disappeared original parent fails without recreating it.",
+          "Nested adapter checks complete coverage and conditional registry effects before ownership/permissions; revision/current destination/managed policy validation occurs after admission before effects."
+        ],
+        "domainLockOrder": "Shared full-set admission before any existing BINDER_WRITE_LOCK or permission/domain work; nested snapshots use borrowed lease, no re-acquisition or extension. Lease lasts through rename, binder rekey, rollback and errors.",
+        "sharedAdmissionEntry": "src-tauri/src/atomic_file.rs::with_path_transactions",
+        "crossDomainProof": "Actual workspace parent wrappers vs document save/create, same-revision frontmatter/save and actual Skills-save/Skills-sync/Git-pull document consumers verify complete serial results or existing conflicts. All seven mutation kinds have held same-target contention and denied/error release."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_07_all_document_wrappers_yield_on_same_polling_task",
+          "phase08_07_actual_wrappers_preserve_nonempty_payloads_and_typed_conflicts",
+          "phase08_07_each_mutation_same_target_contention_and_error_release",
+          "phase08_07_parent_child_races_all_pairs_both_orders_and_aliases"
+        ],
+        "workerProof": "All eleven actual wrapper futures are first polled and then yield on the same async task while a separate blocking worker is held; contextual panic JoinError is asserted. No spare-worker-only timing claim.",
+        "scope": "Disposable temp roots and local bare Git only; no credentials, installed runtime, native app launch, system Trash, live dot or package installer. File-manager fixture selects current test executable, runs exact harmless child, asserts marker and captured production argv; spawn-failure fixture is existing executable with absent fixture interpreter.",
+        "platformScope": "macOS execution only; platform argv builders remain covered by their existing unit cases, Windows runtime and native saturation belong to later verification. Document trash remains workspace-local .maru/trash/documents, correcting the research inventory platform-trash shorthand.",
+        "managedSnapshotProof": "phase08_07_managed_save_and_frontmatter_reuse_snapshot_lease proves nested auto-snapshots finish with two complete prior-body snapshots and no lease reacquisition."
+      }
+    },
+    {
+      "name": "move_document",
+      "module": "src-tauri/src/document.rs",
+      "registrationPath": "src-tauri/src/lib.rs::document::ipc::move_document",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/document.rs::ipc::move_document awaits spawn_blocking before file reads, parsing, process creation or admission waits",
+        "src-tauri/src/document.rs::move_document retains the public synchronous API",
+        "src-tauri/src/document.rs::move_document_in_transaction owns the decisive finite filesystem, validation or platform-process work"
+      ],
+      "workerBoundary": "src-tauri/src/document.rs::ipc::move_document awaits tauri::async_runtime::spawn_blocking with owned String inputs and existing Option<FieldInput>/Option<CreateDocumentExtras>/Option<String> where applicable; no State or guard crosses await. Contextual JoinError preserves String versus IpcError outer type, inner domain errors pass through untouched.",
+      "syncCallers": [
+        "src-tauri/src/document.rs::move_document remains available to synchronous Rust/CLI callers and original inline tests; cargo check -p maru-cli passes",
+        "src-tauri/src/graph_authoring.rs::snapshot_if_managed calls document::write_version_snapshot through its own short transaction; document managed saves instead pass the same lease to write_version_snapshot_in_transaction. Graph whole-proposal mutation integration belongs to its later owner; src-tauri/src/studio/mod.rs retains synchronous document reads."
+      ],
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_07",
+          "passed": 23,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/App.tsx",
+          "src/lib/documentOpsModeLifecycle.ts"
+        ],
+        "payload": "App.tsx renameTabDocument/moveTabDocument use initiating tab/workspace, refreshAfterDocumentMutation and replaceMovedTab, with setError on failure.",
+        "terminalNoticeOwner": "Existing initiating App/editor callback owns completion/errors; query/validation results remain view-scoped. Plans25/26 own final cross-navigation lifetime and single-notice closure; this shard does not claim that UI work is implemented."
+      },
+      "mutationKey": {
+        "lexicalPaths": [
+          "Exact source, validated destination and complete .maru/binder tree; source/destination parent creation, binder target publication/removal and rollback remain in one lease",
+          "Conditional workspace registry and legacy migration files are included with_workspace_registry when loader can write; admission detects newly appearing migration condition."
+        ],
+        "aliasPaths": [
+          "src-tauri/src/atomic_file.rs::PathTransactionRequest captures lexical and physical existing-target/nearest-parent-plus-suffix keys; pinned handles reject replaced parents and revalidated aliases reject retargeting."
+        ],
+        "postAdmissionPreconditions": [
+          "Required existing workspace plus nearest existing selected parents pinned before admission; changed/disappeared original parent fails without recreating it.",
+          "Nested adapter checks complete coverage and conditional registry effects before ownership/permissions; revision/current destination/managed policy validation occurs after admission before effects."
+        ],
+        "domainLockOrder": "Shared full-set admission before any existing BINDER_WRITE_LOCK or permission/domain work; nested snapshots use borrowed lease, no re-acquisition or extension. Lease lasts through rename, binder rekey, rollback and errors.",
+        "sharedAdmissionEntry": "src-tauri/src/atomic_file.rs::with_path_transactions",
+        "crossDomainProof": "Actual workspace parent wrappers vs document save/create, same-revision frontmatter/save and actual Skills-save/Skills-sync/Git-pull document consumers verify complete serial results or existing conflicts. All seven mutation kinds have held same-target contention and denied/error release."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_07_all_document_wrappers_yield_on_same_polling_task",
+          "phase08_07_actual_wrappers_preserve_nonempty_payloads_and_typed_conflicts",
+          "phase08_07_each_mutation_same_target_contention_and_error_release",
+          "phase08_07_parent_child_races_all_pairs_both_orders_and_aliases"
+        ],
+        "workerProof": "All eleven actual wrapper futures are first polled and then yield on the same async task while a separate blocking worker is held; contextual panic JoinError is asserted. No spare-worker-only timing claim.",
+        "scope": "Disposable temp roots and local bare Git only; no credentials, installed runtime, native app launch, system Trash, live dot or package installer. File-manager fixture selects current test executable, runs exact harmless child, asserts marker and captured production argv; spawn-failure fixture is existing executable with absent fixture interpreter.",
+        "platformScope": "macOS execution only; platform argv builders remain covered by their existing unit cases, Windows runtime and native saturation belong to later verification. Document trash remains workspace-local .maru/trash/documents, correcting the research inventory platform-trash shorthand.",
+        "managedSnapshotProof": "phase08_07_managed_save_and_frontmatter_reuse_snapshot_lease proves nested auto-snapshots finish with two complete prior-body snapshots and no lease reacquisition."
+      }
+    },
+    {
+      "name": "duplicate_document",
+      "module": "src-tauri/src/document.rs",
+      "registrationPath": "src-tauri/src/lib.rs::document::ipc::duplicate_document",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/document.rs::ipc::duplicate_document awaits spawn_blocking before file reads, parsing, process creation or admission waits",
+        "src-tauri/src/document.rs::duplicate_document retains the public synchronous API",
+        "src-tauri/src/document.rs::duplicate_document_in_transaction owns the decisive finite filesystem, validation or platform-process work"
+      ],
+      "workerBoundary": "src-tauri/src/document.rs::ipc::duplicate_document awaits tauri::async_runtime::spawn_blocking with owned String inputs and existing Option<FieldInput>/Option<CreateDocumentExtras>/Option<String> where applicable; no State or guard crosses await. Contextual JoinError preserves String versus IpcError outer type, inner domain errors pass through untouched.",
+      "syncCallers": [
+        "src-tauri/src/document.rs::duplicate_document remains available to synchronous Rust/CLI callers and original inline tests; cargo check -p maru-cli passes",
+        "src-tauri/src/graph_authoring.rs::snapshot_if_managed calls document::write_version_snapshot through its own short transaction; document managed saves instead pass the same lease to write_version_snapshot_in_transaction. Graph whole-proposal mutation integration belongs to its later owner; src-tauri/src/studio/mod.rs retains synchronous document reads."
+      ],
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_07",
+          "passed": 23,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/App.tsx",
+          "src/lib/documentOpsModeLifecycle.ts"
+        ],
+        "payload": "App.tsx duplicateTabDocument retains new payload then activates a new tab; existing navigation behavior requires Plan25/26 lifetime finalization.",
+        "terminalNoticeOwner": "Existing initiating App/editor callback owns completion/errors; query/validation results remain view-scoped. Plans25/26 own final cross-navigation lifetime and single-notice closure; this shard does not claim that UI work is implemented."
+      },
+      "mutationKey": {
+        "lexicalPaths": [
+          "Exact source physical alias plus allocation parent subtree covering every collision-selected copy destination",
+          "Conditional workspace registry and legacy migration files are included with_workspace_registry when loader can write; admission detects newly appearing migration condition."
+        ],
+        "aliasPaths": [
+          "src-tauri/src/atomic_file.rs::PathTransactionRequest captures lexical and physical existing-target/nearest-parent-plus-suffix keys; pinned handles reject replaced parents and revalidated aliases reject retargeting."
+        ],
+        "postAdmissionPreconditions": [
+          "Required existing workspace plus nearest existing selected parents pinned before admission; changed/disappeared original parent fails without recreating it.",
+          "Nested adapter checks complete coverage and conditional registry effects before ownership/permissions; revision/current destination/managed policy validation occurs after admission before effects."
+        ],
+        "domainLockOrder": "Shared full-set admission before any existing BINDER_WRITE_LOCK or permission/domain work; nested snapshots use borrowed lease, no re-acquisition or extension. Lease lasts through rename, binder rekey, rollback and errors.",
+        "sharedAdmissionEntry": "src-tauri/src/atomic_file.rs::with_path_transactions",
+        "crossDomainProof": "Actual workspace parent wrappers vs document save/create, same-revision frontmatter/save and actual Skills-save/Skills-sync/Git-pull document consumers verify complete serial results or existing conflicts. All seven mutation kinds have held same-target contention and denied/error release."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_07_all_document_wrappers_yield_on_same_polling_task",
+          "phase08_07_actual_wrappers_preserve_nonempty_payloads_and_typed_conflicts",
+          "phase08_07_each_mutation_same_target_contention_and_error_release",
+          "phase08_07_parent_child_races_all_pairs_both_orders_and_aliases"
+        ],
+        "workerProof": "All eleven actual wrapper futures are first polled and then yield on the same async task while a separate blocking worker is held; contextual panic JoinError is asserted. No spare-worker-only timing claim.",
+        "scope": "Disposable temp roots and local bare Git only; no credentials, installed runtime, native app launch, system Trash, live dot or package installer. File-manager fixture selects current test executable, runs exact harmless child, asserts marker and captured production argv; spawn-failure fixture is existing executable with absent fixture interpreter.",
+        "platformScope": "macOS execution only; platform argv builders remain covered by their existing unit cases, Windows runtime and native saturation belong to later verification. Document trash remains workspace-local .maru/trash/documents, correcting the research inventory platform-trash shorthand.",
+        "managedSnapshotProof": "phase08_07_managed_save_and_frontmatter_reuse_snapshot_lease proves nested auto-snapshots finish with two complete prior-body snapshots and no lease reacquisition."
+      }
+    },
+    {
+      "name": "trash_document",
+      "module": "src-tauri/src/document.rs",
+      "registrationPath": "src-tauri/src/lib.rs::document::ipc::trash_document",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/document.rs::ipc::trash_document awaits spawn_blocking before file reads, parsing, process creation or admission waits",
+        "src-tauri/src/document.rs::trash_document retains the public synchronous API",
+        "src-tauri/src/document.rs::trash_document_in_transaction owns the decisive finite filesystem, validation or platform-process work"
+      ],
+      "workerBoundary": "src-tauri/src/document.rs::ipc::trash_document awaits tauri::async_runtime::spawn_blocking with owned String inputs and existing Option<FieldInput>/Option<CreateDocumentExtras>/Option<String> where applicable; no State or guard crosses await. Contextual JoinError preserves String versus IpcError outer type, inner domain errors pass through untouched.",
+      "syncCallers": [
+        "src-tauri/src/document.rs::trash_document remains available to synchronous Rust/CLI callers and original inline tests; cargo check -p maru-cli passes",
+        "src-tauri/src/graph_authoring.rs::snapshot_if_managed calls document::write_version_snapshot through its own short transaction; document managed saves instead pass the same lease to write_version_snapshot_in_transaction. Graph whole-proposal mutation integration belongs to its later owner; src-tauri/src/studio/mod.rs retains synchronous document reads."
+      ],
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_07",
+          "passed": 23,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/App.tsx",
+          "src/lib/documentOpsModeLifecycle.ts"
+        ],
+        "payload": "App.tsx trashTabDocument refreshes initiating workspace, closes original tab and publishes editor.tabs.delete.success; backend keeps workspace-local recoverable trash.",
+        "terminalNoticeOwner": "Existing initiating App/editor callback owns completion/errors; query/validation results remain view-scoped. Plans25/26 own final cross-navigation lifetime and single-notice closure; this shard does not claim that UI work is implemented."
+      },
+      "mutationKey": {
+        "lexicalPaths": [
+          "Exact source and complete .maru/trash/documents destination subtree, including timestamp/collision allocation and copy/remove fallback",
+          "Conditional workspace registry and legacy migration files are included with_workspace_registry when loader can write; admission detects newly appearing migration condition."
+        ],
+        "aliasPaths": [
+          "src-tauri/src/atomic_file.rs::PathTransactionRequest captures lexical and physical existing-target/nearest-parent-plus-suffix keys; pinned handles reject replaced parents and revalidated aliases reject retargeting."
+        ],
+        "postAdmissionPreconditions": [
+          "Required existing workspace plus nearest existing selected parents pinned before admission; changed/disappeared original parent fails without recreating it.",
+          "Nested adapter checks complete coverage and conditional registry effects before ownership/permissions; revision/current destination/managed policy validation occurs after admission before effects."
+        ],
+        "domainLockOrder": "Shared full-set admission before any existing BINDER_WRITE_LOCK or permission/domain work; nested snapshots use borrowed lease, no re-acquisition or extension. Lease lasts through rename, binder rekey, rollback and errors.",
+        "sharedAdmissionEntry": "src-tauri/src/atomic_file.rs::with_path_transactions",
+        "crossDomainProof": "Actual workspace parent wrappers vs document save/create, same-revision frontmatter/save and actual Skills-save/Skills-sync/Git-pull document consumers verify complete serial results or existing conflicts. All seven mutation kinds have held same-target contention and denied/error release."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_07_all_document_wrappers_yield_on_same_polling_task",
+          "phase08_07_actual_wrappers_preserve_nonempty_payloads_and_typed_conflicts",
+          "phase08_07_each_mutation_same_target_contention_and_error_release",
+          "phase08_07_parent_child_races_all_pairs_both_orders_and_aliases"
+        ],
+        "workerProof": "All eleven actual wrapper futures are first polled and then yield on the same async task while a separate blocking worker is held; contextual panic JoinError is asserted. No spare-worker-only timing claim.",
+        "scope": "Disposable temp roots and local bare Git only; no credentials, installed runtime, native app launch, system Trash, live dot or package installer. File-manager fixture selects current test executable, runs exact harmless child, asserts marker and captured production argv; spawn-failure fixture is existing executable with absent fixture interpreter.",
+        "platformScope": "macOS execution only; platform argv builders remain covered by their existing unit cases, Windows runtime and native saturation belong to later verification. Document trash remains workspace-local .maru/trash/documents, correcting the research inventory platform-trash shorthand.",
+        "managedSnapshotProof": "phase08_07_managed_save_and_frontmatter_reuse_snapshot_lease proves nested auto-snapshots finish with two complete prior-body snapshots and no lease reacquisition."
+      }
+    },
+    {
+      "name": "create_version",
+      "module": "src-tauri/src/document.rs",
+      "registrationPath": "src-tauri/src/lib.rs::document::ipc::create_version",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/document.rs::ipc::create_version awaits spawn_blocking before file reads, parsing, process creation or admission waits",
+        "src-tauri/src/document.rs::create_version retains the public synchronous API",
+        "src-tauri/src/document.rs::write_version_snapshot_in_transaction owns the decisive finite filesystem, validation or platform-process work"
+      ],
+      "workerBoundary": "src-tauri/src/document.rs::ipc::create_version awaits tauri::async_runtime::spawn_blocking with owned String inputs and existing Option<FieldInput>/Option<CreateDocumentExtras>/Option<String> where applicable; no State or guard crosses await. Contextual JoinError preserves String versus IpcError outer type, inner domain errors pass through untouched.",
+      "syncCallers": [
+        "src-tauri/src/document.rs::create_version remains available to synchronous Rust/CLI callers and original inline tests; cargo check -p maru-cli passes",
+        "src-tauri/src/graph_authoring.rs::snapshot_if_managed calls document::write_version_snapshot through its own short transaction; document managed saves instead pass the same lease to write_version_snapshot_in_transaction. Graph whole-proposal mutation integration belongs to its later owner; src-tauri/src/studio/mod.rs retains synchronous document reads."
+      ],
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_07",
+          "passed": 23,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/App.tsx",
+          "src/lib/documentOpsModeLifecycle.ts"
+        ],
+        "payload": "App.tsx snapshotTab and snapshot-before-apply callbacks retain VersionSnapshot and publish snapshot.success through existing setError surface.",
+        "terminalNoticeOwner": "Existing initiating App/editor callback owns completion/errors; query/validation results remain view-scoped. Plans25/26 own final cross-navigation lifetime and single-notice closure; this shard does not claim that UI work is implemented."
+      },
+      "mutationKey": {
+        "lexicalPaths": [
+          "Selected source and complete .maru/versions tree including unique UUID snapshot and atomic temporary file",
+          "Conditional workspace registry and legacy migration files are included with_workspace_registry when loader can write; admission detects newly appearing migration condition."
+        ],
+        "aliasPaths": [
+          "src-tauri/src/atomic_file.rs::PathTransactionRequest captures lexical and physical existing-target/nearest-parent-plus-suffix keys; pinned handles reject replaced parents and revalidated aliases reject retargeting."
+        ],
+        "postAdmissionPreconditions": [
+          "Required existing workspace plus nearest existing selected parents pinned before admission; changed/disappeared original parent fails without recreating it.",
+          "Nested adapter checks complete coverage and conditional registry effects before ownership/permissions; revision/current destination/managed policy validation occurs after admission before effects."
+        ],
+        "domainLockOrder": "Shared full-set admission before any existing BINDER_WRITE_LOCK or permission/domain work; nested snapshots use borrowed lease, no re-acquisition or extension. Lease lasts through rename, binder rekey, rollback and errors.",
+        "sharedAdmissionEntry": "src-tauri/src/atomic_file.rs::with_path_transactions",
+        "crossDomainProof": "Actual workspace parent wrappers vs document save/create, same-revision frontmatter/save and actual Skills-save/Skills-sync/Git-pull document consumers verify complete serial results or existing conflicts. All seven mutation kinds have held same-target contention and denied/error release."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_07_all_document_wrappers_yield_on_same_polling_task",
+          "phase08_07_actual_wrappers_preserve_nonempty_payloads_and_typed_conflicts",
+          "phase08_07_each_mutation_same_target_contention_and_error_release",
+          "phase08_07_parent_child_races_all_pairs_both_orders_and_aliases"
+        ],
+        "workerProof": "All eleven actual wrapper futures are first polled and then yield on the same async task while a separate blocking worker is held; contextual panic JoinError is asserted. No spare-worker-only timing claim.",
+        "scope": "Disposable temp roots and local bare Git only; no credentials, installed runtime, native app launch, system Trash, live dot or package installer. File-manager fixture selects current test executable, runs exact harmless child, asserts marker and captured production argv; spawn-failure fixture is existing executable with absent fixture interpreter.",
+        "platformScope": "macOS execution only; platform argv builders remain covered by their existing unit cases, Windows runtime and native saturation belong to later verification. Document trash remains workspace-local .maru/trash/documents, correcting the research inventory platform-trash shorthand.",
+        "managedSnapshotProof": "phase08_07_managed_save_and_frontmatter_reuse_snapshot_lease proves nested auto-snapshots finish with two complete prior-body snapshots and no lease reacquisition."
+      }
+    },
+    {
+      "name": "reveal_in_file_manager",
+      "module": "src-tauri/src/file_manager.rs",
+      "registrationPath": "src-tauri/src/lib.rs::file_manager::ipc::reveal_in_file_manager",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/file_manager.rs::ipc::reveal_in_file_manager awaits spawn_blocking before file reads, parsing, process creation or admission waits",
+        "src-tauri/src/file_manager.rs::reveal_in_file_manager retains the public synchronous API",
+        "src-tauri/src/file_manager.rs::launch_file_manager owns the decisive finite filesystem, validation or platform-process work"
+      ],
+      "workerBoundary": "src-tauri/src/file_manager.rs::ipc::reveal_in_file_manager awaits tauri::async_runtime::spawn_blocking with owned String inputs and existing Option<FieldInput>/Option<CreateDocumentExtras>/Option<String> where applicable; no State or guard crosses await. Contextual JoinError preserves String versus IpcError outer type, inner domain errors pass through untouched.",
+      "syncCallers": [
+        "src-tauri/src/file_manager.rs::reveal_in_file_manager remains available to synchronous Rust/CLI callers and original inline tests; cargo check -p maru-cli passes",
+        "src-tauri/src/graph_authoring.rs::snapshot_if_managed calls document::write_version_snapshot through its own short transaction; document managed saves instead pass the same lease to write_version_snapshot_in_transaction. Graph whole-proposal mutation integration belongs to its later owner; src-tauri/src/studio/mod.rs retains synchronous document reads."
+      ],
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_07",
+          "passed": 23,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/App.tsx",
+          "src/components/BinaryViewerPane.tsx"
+        ],
+        "payload": "App.tsx revealTargetInFinder and Files/Studio actions plus BinaryViewerPane reveal use api.ts; observed callbacks include setError/reportError and existing fire-and-forget sites.",
+        "terminalNoticeOwner": "Existing initiating App/editor callback owns completion/errors; query/validation results remain view-scoped. Plans25/26 own final cross-navigation lifetime and single-notice closure; this shard does not claim that UI work is implemented."
+      },
+      "mutationKey": {
+        "readOnly": true,
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "evidence": "Read-only path validation with no application-owned filesystem mutation: validates containment/existence and spawns fixed platform argv (macOS open, Windows explorer, Linux xdg-open). Spawn acceptance remains the existing result; OS file-manager independent effects are delegated."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_07_file_manager_actual_wrappers_launch_native_fixture_and_preserve_argv",
+          "phase08_07_file_manager_actual_wrappers_preserve_denied_missing_and_spawn_errors",
+          "phase08_07_file_manager_actual_wrappers_yield_on_same_polling_task"
+        ],
+        "workerProof": "All eleven actual wrapper futures are first polled and then yield on the same async task while a separate blocking worker is held; contextual panic JoinError is asserted. No spare-worker-only timing claim.",
+        "scope": "Disposable temp roots and local bare Git only; no credentials, installed runtime, native app launch, system Trash, live dot or package installer. File-manager fixture selects current test executable, runs exact harmless child, asserts marker and captured production argv; spawn-failure fixture is existing executable with absent fixture interpreter.",
+        "platformScope": "macOS execution only; platform argv builders remain covered by their existing unit cases, Windows runtime and native saturation belong to later verification. Document trash remains workspace-local .maru/trash/documents, correcting the research inventory platform-trash shorthand."
+      }
+    },
+    {
+      "name": "open_in_file_manager",
+      "module": "src-tauri/src/file_manager.rs",
+      "registrationPath": "src-tauri/src/lib.rs::file_manager::ipc::open_in_file_manager",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/file_manager.rs::ipc::open_in_file_manager awaits spawn_blocking before file reads, parsing, process creation or admission waits",
+        "src-tauri/src/file_manager.rs::open_in_file_manager retains the public synchronous API",
+        "src-tauri/src/file_manager.rs::launch_file_manager owns the decisive finite filesystem, validation or platform-process work"
+      ],
+      "workerBoundary": "src-tauri/src/file_manager.rs::ipc::open_in_file_manager awaits tauri::async_runtime::spawn_blocking with owned String inputs and existing Option<FieldInput>/Option<CreateDocumentExtras>/Option<String> where applicable; no State or guard crosses await. Contextual JoinError preserves String versus IpcError outer type, inner domain errors pass through untouched.",
+      "syncCallers": [
+        "src-tauri/src/file_manager.rs::open_in_file_manager remains available to synchronous Rust/CLI callers and original inline tests; cargo check -p maru-cli passes",
+        "src-tauri/src/graph_authoring.rs::snapshot_if_managed calls document::write_version_snapshot through its own short transaction; document managed saves instead pass the same lease to write_version_snapshot_in_transaction. Graph whole-proposal mutation integration belongs to its later owner; src-tauri/src/studio/mod.rs retains synchronous document reads."
+      ],
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_07",
+          "passed": 23,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/App.tsx",
+          "src/components/BinaryViewerPane.tsx"
+        ],
+        "payload": "App.tsx Files open/open-containing-folder actions call api.ts and catch into setError.",
+        "terminalNoticeOwner": "Existing initiating App/editor callback owns completion/errors; query/validation results remain view-scoped. Plans25/26 own final cross-navigation lifetime and single-notice closure; this shard does not claim that UI work is implemented."
+      },
+      "mutationKey": {
+        "readOnly": true,
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "evidence": "Read-only path validation with no application-owned filesystem mutation: validates containment/existence and spawns fixed platform argv (macOS open, Windows explorer, Linux xdg-open). Spawn acceptance remains the existing result; OS file-manager independent effects are delegated."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_07_file_manager_actual_wrappers_launch_native_fixture_and_preserve_argv",
+          "phase08_07_file_manager_actual_wrappers_preserve_denied_missing_and_spawn_errors",
+          "phase08_07_file_manager_actual_wrappers_yield_on_same_polling_task"
+        ],
+        "workerProof": "All eleven actual wrapper futures are first polled and then yield on the same async task while a separate blocking worker is held; contextual panic JoinError is asserted. No spare-worker-only timing claim.",
+        "scope": "Disposable temp roots and local bare Git only; no credentials, installed runtime, native app launch, system Trash, live dot or package installer. File-manager fixture selects current test executable, runs exact harmless child, asserts marker and captured production argv; spawn-failure fixture is existing executable with absent fixture interpreter.",
+        "platformScope": "macOS execution only; platform argv builders remain covered by their existing unit cases, Windows runtime and native saturation belong to later verification. Document trash remains workspace-local .maru/trash/documents, correcting the research inventory platform-trash shorthand."
+      }
+    },
+    {
+      "name": "vault_validate_note",
+      "module": "src-tauri/src/vault_guard.rs",
+      "registrationPath": "src-tauri/src/lib.rs::vault_guard::ipc::vault_validate_note",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/vault_guard.rs::ipc::vault_validate_note awaits spawn_blocking before file reads, parsing, process creation or admission waits",
+        "src-tauri/src/vault_guard.rs::vault_validate_note retains the public synchronous API",
+        "src-tauri/src/vault_guard.rs::validate_note_content owns the decisive finite filesystem, validation or platform-process work"
+      ],
+      "workerBoundary": "src-tauri/src/vault_guard.rs::ipc::vault_validate_note awaits tauri::async_runtime::spawn_blocking with owned String inputs and existing Option<FieldInput>/Option<CreateDocumentExtras>/Option<String> where applicable; no State or guard crosses await. Contextual JoinError preserves String versus IpcError outer type, inner domain errors pass through untouched.",
+      "syncCallers": [
+        "src-tauri/src/vault_guard.rs::vault_validate_note remains available to synchronous Rust/CLI callers and original inline tests; cargo check -p maru-cli passes",
+        "src-tauri/src/graph_authoring.rs::snapshot_if_managed calls document::write_version_snapshot through its own short transaction; document managed saves instead pass the same lease to write_version_snapshot_in_transaction. Graph whole-proposal mutation integration belongs to its later owner; src-tauri/src/studio/mod.rs retains synchronous document reads."
+      ],
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_07",
+          "passed": 23,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/components/EditorPane.tsx"
+        ],
+        "payload": "EditorPane.tsx 500ms debounced validation owns cancellation-scoped schemaReport; api.ts returns VaultSchemaReport including valid=false as fulfilled validation data.",
+        "terminalNoticeOwner": "Existing initiating App/editor callback owns completion/errors; query/validation results remain view-scoped. Plans25/26 own final cross-navigation lifetime and single-notice closure; this shard does not claim that UI work is implemented."
+      },
+      "mutationKey": {
+        "readOnly": true,
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "evidence": "No filesystem mutation: content/schema parsing only; no length bound assumed."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_07_vault_validation_actual_wrapper_preserves_nonempty_reports",
+          "phase08_07_vault_validation_actual_wrapper_yields_on_same_polling_task"
+        ],
+        "workerProof": "All eleven actual wrapper futures are first polled and then yield on the same async task while a separate blocking worker is held; contextual panic JoinError is asserted. No spare-worker-only timing claim.",
+        "scope": "Disposable temp roots and local bare Git only; no credentials, installed runtime, native app launch, system Trash, live dot or package installer. File-manager fixture selects current test executable, runs exact harmless child, asserts marker and captured production argv; spawn-failure fixture is existing executable with absent fixture interpreter.",
+        "platformScope": "macOS execution only; platform argv builders remain covered by their existing unit cases, Windows runtime and native saturation belong to later verification. Document trash remains workspace-local .maru/trash/documents, correcting the research inventory platform-trash shorthand."
+      }
+    }
+  ],
+  "crossDomainConsumers": [
+    {
+      "integration": "08-29",
+      "selector": "phase08_07_earlier_writer_document_races",
+      "testCases": [
+        {
+          "module": "src-tauri/src/document.rs",
+          "entryPair": [
+            "src-tauri/src/skill_host/store.rs::ipc::skills_save_skill_file",
+            "src-tauri/src/document.rs::ipc::save_document"
+          ],
+          "orders": [
+            "writer-first",
+            "other-first"
+          ],
+          "aliases": [
+            "lexical",
+            "symlink",
+            "ancestor"
+          ],
+          "failureRelease": "Actual writer failure releases waiting document; original parent moved/recreated while waiter is captured is rejected. Network-held healthy list and metadata removal complete before checkout release.",
+          "outcome": "Exactly one existing conflict for overlapping Skills/document bytes, otherwise complete serial local Git/document result. Original parent remains absent or replacement untouched; complete body bytes, no temporary sidecars and successful siblings preserved.",
+          "tests": [
+            {
+              "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_07",
+              "passed": 23,
+              "failed": 0,
+              "ignored": 0,
+              "exitCode": 0
+            }
+          ],
+          "evidence": {
+            "behaviorCases": [
+              "phase08_07_skills_save_document_save_both_orders",
+              "phase08_07_all_earlier_writer_document_pairs_symlink_and_ancestor_both_orders",
+              "phase08_07_all_earlier_writer_document_pairs_parent_replacement_while_waiting",
+              "phase08_07_all_earlier_writer_document_pairs_injected_failure_releases_waiter",
+              "phase08_07_network_held_registry_list_and_metadata_removal_document_waiter_release"
+            ]
+          }
+        },
+        {
+          "module": "src-tauri/src/document.rs",
+          "entryPair": [
+            "src-tauri/src/skill_host/store.rs::ipc::skills_save_skill_file",
+            "src-tauri/src/document.rs::ipc::create_document"
+          ],
+          "orders": [
+            "writer-first",
+            "other-first"
+          ],
+          "aliases": [
+            "lexical",
+            "symlink",
+            "ancestor"
+          ],
+          "failureRelease": "Actual writer failure releases waiting document; original parent moved/recreated while waiter is captured is rejected. Network-held healthy list and metadata removal complete before checkout release.",
+          "outcome": "Exactly one existing conflict for overlapping Skills/document bytes, otherwise complete serial local Git/document result. Original parent remains absent or replacement untouched; complete body bytes, no temporary sidecars and successful siblings preserved.",
+          "tests": [
+            {
+              "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_07",
+              "passed": 23,
+              "failed": 0,
+              "ignored": 0,
+              "exitCode": 0
+            }
+          ],
+          "evidence": {
+            "behaviorCases": [
+              "phase08_07_skills_save_document_create_both_orders",
+              "phase08_07_all_earlier_writer_document_pairs_symlink_and_ancestor_both_orders",
+              "phase08_07_all_earlier_writer_document_pairs_parent_replacement_while_waiting",
+              "phase08_07_all_earlier_writer_document_pairs_injected_failure_releases_waiter",
+              "phase08_07_network_held_registry_list_and_metadata_removal_document_waiter_release"
+            ]
+          }
+        },
+        {
+          "module": "src-tauri/src/document.rs",
+          "entryPair": [
+            "src-tauri/src/skill_host/store.rs::skills_sync_source",
+            "src-tauri/src/document.rs::ipc::save_document"
+          ],
+          "orders": [
+            "writer-first",
+            "other-first"
+          ],
+          "aliases": [
+            "lexical",
+            "symlink",
+            "ancestor"
+          ],
+          "failureRelease": "Actual writer failure releases waiting document; original parent moved/recreated while waiter is captured is rejected. Network-held healthy list and metadata removal complete before checkout release.",
+          "outcome": "Exactly one existing conflict for overlapping Skills/document bytes, otherwise complete serial local Git/document result. Original parent remains absent or replacement untouched; complete body bytes, no temporary sidecars and successful siblings preserved.",
+          "tests": [
+            {
+              "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_07",
+              "passed": 23,
+              "failed": 0,
+              "ignored": 0,
+              "exitCode": 0
+            }
+          ],
+          "evidence": {
+            "behaviorCases": [
+              "phase08_07_skills_sync_document_save_both_orders",
+              "phase08_07_all_earlier_writer_document_pairs_symlink_and_ancestor_both_orders",
+              "phase08_07_all_earlier_writer_document_pairs_parent_replacement_while_waiting",
+              "phase08_07_all_earlier_writer_document_pairs_injected_failure_releases_waiter",
+              "phase08_07_network_held_registry_list_and_metadata_removal_document_waiter_release"
+            ]
+          }
+        },
+        {
+          "module": "src-tauri/src/document.rs",
+          "entryPair": [
+            "src-tauri/src/skill_host/store.rs::skills_sync_source",
+            "src-tauri/src/document.rs::ipc::create_document"
+          ],
+          "orders": [
+            "writer-first",
+            "other-first"
+          ],
+          "aliases": [
+            "lexical",
+            "symlink",
+            "ancestor"
+          ],
+          "failureRelease": "Actual writer failure releases waiting document; original parent moved/recreated while waiter is captured is rejected. Network-held healthy list and metadata removal complete before checkout release.",
+          "outcome": "Exactly one existing conflict for overlapping Skills/document bytes, otherwise complete serial local Git/document result. Original parent remains absent or replacement untouched; complete body bytes, no temporary sidecars and successful siblings preserved.",
+          "tests": [
+            {
+              "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_07",
+              "passed": 23,
+              "failed": 0,
+              "ignored": 0,
+              "exitCode": 0
+            }
+          ],
+          "evidence": {
+            "behaviorCases": [
+              "phase08_07_skills_sync_document_create_both_orders",
+              "phase08_07_all_earlier_writer_document_pairs_symlink_and_ancestor_both_orders",
+              "phase08_07_all_earlier_writer_document_pairs_parent_replacement_while_waiting",
+              "phase08_07_all_earlier_writer_document_pairs_injected_failure_releases_waiter",
+              "phase08_07_network_held_registry_list_and_metadata_removal_document_waiter_release"
+            ]
+          }
+        },
+        {
+          "module": "src-tauri/src/document.rs",
+          "entryPair": [
+            "src-tauri/src/git.rs::ipc::git_sync_pull_rebase",
+            "src-tauri/src/document.rs::ipc::save_document"
+          ],
+          "orders": [
+            "writer-first",
+            "other-first"
+          ],
+          "aliases": [
+            "lexical",
+            "symlink",
+            "ancestor"
+          ],
+          "failureRelease": "Actual writer failure releases waiting document; original parent moved/recreated while waiter is captured is rejected. Network-held healthy list and metadata removal complete before checkout release.",
+          "outcome": "Exactly one existing conflict for overlapping Skills/document bytes, otherwise complete serial local Git/document result. Original parent remains absent or replacement untouched; complete body bytes, no temporary sidecars and successful siblings preserved.",
+          "tests": [
+            {
+              "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_07",
+              "passed": 23,
+              "failed": 0,
+              "ignored": 0,
+              "exitCode": 0
+            }
+          ],
+          "evidence": {
+            "behaviorCases": [
+              "phase08_07_git_pull_document_save_both_orders",
+              "phase08_07_all_earlier_writer_document_pairs_symlink_and_ancestor_both_orders",
+              "phase08_07_all_earlier_writer_document_pairs_parent_replacement_while_waiting",
+              "phase08_07_all_earlier_writer_document_pairs_injected_failure_releases_waiter",
+              "phase08_07_network_held_registry_list_and_metadata_removal_document_waiter_release"
+            ]
+          }
+        },
+        {
+          "module": "src-tauri/src/document.rs",
+          "entryPair": [
+            "src-tauri/src/git.rs::ipc::git_sync_pull_rebase",
+            "src-tauri/src/document.rs::ipc::create_document"
+          ],
+          "orders": [
+            "writer-first",
+            "other-first"
+          ],
+          "aliases": [
+            "lexical",
+            "symlink",
+            "ancestor"
+          ],
+          "failureRelease": "Actual writer failure releases waiting document; original parent moved/recreated while waiter is captured is rejected. Network-held healthy list and metadata removal complete before checkout release.",
+          "outcome": "Exactly one existing conflict for overlapping Skills/document bytes, otherwise complete serial local Git/document result. Original parent remains absent or replacement untouched; complete body bytes, no temporary sidecars and successful siblings preserved.",
+          "tests": [
+            {
+              "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_07",
+              "passed": 23,
+              "failed": 0,
+              "ignored": 0,
+              "exitCode": 0
+            }
+          ],
+          "evidence": {
+            "behaviorCases": [
+              "phase08_07_git_pull_document_create_both_orders",
+              "phase08_07_all_earlier_writer_document_pairs_symlink_and_ancestor_both_orders",
+              "phase08_07_all_earlier_writer_document_pairs_parent_replacement_while_waiting",
+              "phase08_07_all_earlier_writer_document_pairs_injected_failure_releases_waiter",
+              "phase08_07_network_held_registry_list_and_metadata_removal_document_waiter_release"
+            ]
+          }
+        }
+      ],
+      "scope": "Actual registered wrappers in disposable local Git fixtures. All fixture repos disable gc.auto and maintenance.auto for deterministic finite-process proof. Production git/store builders did not yet disable automatic maintenance when this shard was produced; root orchestrator owns the discovered Plan29 subprocess-lifetime follow-up before phase closure."
+    }
+  ]
+}

@@ -1698,13 +1698,19 @@ mod phase08_07 {
         boundary(root.into(), "save_document", async move {
             ipc::save_document(t, "note.md".into(), "body".into(), None)
                 .await
-                .map_err(|e| e.to_string())
+                .map_err(|e| {
+                    assert!(e.code.is_empty(), "JoinError must remain display-only");
+                    e.message
+                })
         });
         let t = s.clone();
         boundary(root.into(), "update_frontmatter_field", async move {
             ipc::update_frontmatter_field(t, "note.md".into(), "status".into(), None, None)
                 .await
-                .map_err(|e| e.to_string())
+                .map_err(|e| {
+                    assert!(e.code.is_empty(), "JoinError must remain display-only");
+                    e.message
+                })
         });
         boundary(
             root.into(),
@@ -1885,7 +1891,6 @@ mod phase08_07 {
                                 )
                                 .await
                                 .map(|_| ())
-                                .map_err(|e| e.to_string())
                             } else {
                                 ipc::create_document(
                                     s,
@@ -1897,6 +1902,7 @@ mod phase08_07 {
                                 )
                                 .await
                                 .map(|_| ())
+                                .map_err(IpcError::from)
                             }
                         };
                         if parent_first {
@@ -2028,7 +2034,7 @@ mod phase08_07 {
                     "save" => ipc::save_document(root, "note.md".into(), "# saved".into(), None)
                         .await
                         .map(|_| ())
-                        .map_err(|e| e.to_string()),
+                        .map_err(IpcError::from),
                     "frontmatter" => ipc::update_frontmatter_field(
                         root,
                         "note.md".into(),
@@ -2038,7 +2044,7 @@ mod phase08_07 {
                     )
                     .await
                     .map(|_| ())
-                    .map_err(|e| e.to_string()),
+                    .map_err(IpcError::from),
                     "create" => ipc::create_document(
                         root,
                         "new".into(),
@@ -2048,16 +2054,20 @@ mod phase08_07 {
                         None,
                     )
                     .await
-                    .map(|_| ()),
+                    .map(|_| ())
+                    .map_err(IpcError::from),
                     "move" => ipc::move_document(root, "note.md".into(), "moved.md".into())
                         .await
-                        .map(|_| ()),
+                        .map(|_| ())
+                        .map_err(IpcError::from),
                     "duplicate" => ipc::duplicate_document(root, "note.md".into())
                         .await
-                        .map(|_| ()),
+                        .map(|_| ())
+                        .map_err(IpcError::from),
                     "trash" => ipc::trash_document(root, "note.md".into())
                         .await
-                        .map(|_| ()),
+                        .map(|_| ())
+                        .map_err(IpcError::from),
                     _ => ipc::create_version(
                         root,
                         "note.md".into(),
@@ -2066,7 +2076,8 @@ mod phase08_07 {
                         "snapshot".into(),
                     )
                     .await
-                    .map(|_| ()),
+                    .map(|_| ())
+                    .map_err(IpcError::from),
                 }
             };
             let held = Held::new(target.clone(), "pre-effect");
@@ -2100,12 +2111,57 @@ mod phase08_07 {
             fs::create_dir_all(registry.parent().unwrap()).unwrap();
             fs::write(&registry,serde_json::json!({"workspaces":[{"label":"fixture","visibility":"private","path":s,"writePolicy":"readOnly"}]}).to_string()).unwrap();
             assert!(
-                run(invoke(text(root))).unwrap_err().contains("blocked"),
+                run(invoke(text(root)))
+                    .unwrap_err()
+                    .message
+                    .contains("blocked"),
                 "{command}"
             );
             fs::write(registry, r#"{"workspaces":[]}"#).unwrap();
             run(invoke(text(root))).unwrap();
         }
+    }
+
+    #[test]
+    fn phase08_07_managed_save_and_frontmatter_reuse_snapshot_lease() {
+        let home = Home::new();
+        let root = home.root.path();
+        let s = text(root);
+        let registry = crate::vault_list::workspace_registry_path().unwrap();
+        fs::create_dir_all(registry.parent().unwrap()).unwrap();
+        fs::write(registry,serde_json::json!({"workspaces":[{"label":"fixture","visibility":"private","path":s,"writePolicy":"managed"}]}).to_string()).unwrap();
+        fs::write(
+            root.join("note.md"),
+            "---\nstatus: draft\n---\n# original body\n",
+        )
+        .unwrap();
+        let revision = revision_for(&fs::read_to_string(root.join("note.md")).unwrap());
+        let saved = run(ipc::save_document(
+            text(root),
+            "note.md".into(),
+            "---\nstatus: draft\n---\n# saved body\n".into(),
+            Some(revision),
+        ))
+        .unwrap();
+        let patched = run(ipc::update_frontmatter_field(
+            text(root),
+            "note.md".into(),
+            "status".into(),
+            Some(FieldInput::Str("done".into())),
+            Some(saved.revision),
+        ))
+        .unwrap();
+        assert_eq!(saved.body, patched.body);
+        let snapshots = fs::read_dir(root.join(".maru/versions"))
+            .unwrap()
+            .map(|e| fs::read_to_string(e.unwrap().path()).unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(snapshots.len(), 2);
+        assert!(snapshots.iter().any(|s| s.contains("# original body")));
+        assert!(snapshots.iter().any(|s| s.contains("# saved body")));
+        assert!(snapshots
+            .iter()
+            .all(|s| s.contains("managed-write auto snapshot")));
     }
 
     #[test]
@@ -2138,5 +2194,544 @@ mod phase08_07 {
         run(ipc::move_document(s, "note.md".into(), "moved.md".into())).unwrap();
         assert_binder(root, "moved.md", "moved");
         assert!(!root.join(".maru/binder/note.json").exists());
+    }
+}
+#[cfg(test)]
+mod phase08_07_earlier_writer_document_races {
+    use super::*;
+    use crate::atomic_file::phase08_06::{Held, Home};
+    use crate::skill_host::store;
+    use std::{
+        future::Future,
+        path::{Path, PathBuf},
+        process::Command,
+        sync::mpsc,
+        time::Duration,
+    };
+
+    const ORIGINAL: &str =
+        "---\nname: fixture\ndescription: original fixture\n---\n# Original skill\n";
+    const WRITER: &str =
+        "---\nname: fixture\ndescription: saved fixture\n---\n# Writer complete content\n";
+    const DOCUMENT: &str =
+        "---\nname: fixture\ndescription: document fixture\n---\n# Document complete content\n";
+    const BODY: &str = "Complete newly created document body.\n";
+
+    #[derive(Clone, Copy, Debug, PartialEq)]
+    enum Writer {
+        SkillSave,
+        SkillSync,
+        GitPull,
+    }
+    #[derive(Clone, Copy, Debug)]
+    enum Alias {
+        Lexical,
+        Symlink,
+        Ancestor,
+    }
+    fn text(path: &Path) -> String {
+        path.to_string_lossy().into_owned()
+    }
+    fn git(repo: &Path, args: &[&str]) -> String {
+        let mut command = Command::new("git");
+        crate::git::configure_git(&mut command);
+        let output = command
+            .args(["-c", "gc.auto=0", "-c", "maintenance.auto=false"])
+            .args(args)
+            .current_dir(repo)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "fixture git {args:?}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8_lossy(&output.stdout).into_owned()
+    }
+    fn start<T: Send + 'static, E: Into<IpcError> + Send + 'static>(
+        future: impl Future<Output = Result<T, E>> + Send + 'static,
+    ) -> mpsc::Receiver<Result<T, IpcError>> {
+        let (tx, rx) = mpsc::channel();
+        tauri::async_runtime::spawn(async move {
+            let _ = tx.send(future.await.map_err(Into::into));
+        });
+        rx
+    }
+    fn done<T>(rx: mpsc::Receiver<Result<T, IpcError>>) -> Result<T, IpcError> {
+        rx.recv_timeout(Duration::from_secs(10))
+            .expect("earlier writer/document completion")
+    }
+    struct Fixture {
+        checkout: PathBuf,
+        selected: PathBuf,
+        remote: PathBuf,
+    }
+    fn fixture(root: &Path, writer: Writer, alias: Alias) -> Fixture {
+        let checkout = root.join("workspace/parent/checkout");
+        let remote = root.join("remote.git");
+        let peer = root.join("peer");
+        fs::create_dir_all(checkout.join("skills/fixture")).unwrap();
+        fs::write(checkout.join("skills/fixture/SKILL.md"), ORIGINAL).unwrap();
+        fs::write(checkout.join("skills/fixture/note.md"), ORIGINAL).unwrap();
+        fs::write(checkout.join("sibling.md"), "untouched sibling\n").unwrap();
+        // Real remote effects are confined to another tracked file, so network
+        // writers and document edits can finish as a complete serial result.
+        if writer != Writer::SkillSave {
+            fs::create_dir(&remote).unwrap();
+            fs::create_dir(&peer).unwrap();
+            git(&remote, &["init", "--bare", "-b", "main"]);
+            git(&remote, &["config", "gc.auto", "0"]);
+            git(&remote, &["config", "maintenance.auto", "false"]);
+            git(&checkout, &["init", "-b", "main"]);
+            git(&checkout, &["config", "gc.auto", "0"]);
+            git(&checkout, &["config", "maintenance.auto", "false"]);
+            git(&checkout, &["add", "."]);
+            git(&checkout, &["commit", "-m", "initial fixture"]);
+            git(&checkout, &["remote", "add", "origin", &text(&remote)]);
+            git(&checkout, &["push", "-u", "origin", "main"]);
+            git(&peer, &["clone", &text(&remote), "."]);
+            git(&peer, &["config", "gc.auto", "0"]);
+            git(&peer, &["config", "maintenance.auto", "false"]);
+            fs::write(peer.join("remote.md"), "complete remote content\n").unwrap();
+            git(&peer, &["add", "remote.md"]);
+            git(&peer, &["commit", "-m", "remote fixture update"]);
+            git(&peer, &["push", "origin", "HEAD"]);
+        }
+        let selected = match alias {
+            Alias::Lexical => checkout.clone(),
+            #[cfg(unix)]
+            Alias::Symlink => {
+                let link = root.join("checkout-alias");
+                std::os::unix::fs::symlink(&checkout, &link).unwrap();
+                link
+            }
+            #[cfg(unix)]
+            Alias::Ancestor => {
+                let link = root.join("parent-alias");
+                std::os::unix::fs::symlink(checkout.parent().unwrap(), &link).unwrap();
+                link.join("checkout")
+            }
+            #[cfg(not(unix))]
+            _ => unreachable!("symlink cases are cfg(unix)"),
+        };
+        // Public registration scans the real linked fixture. Only fixture setup
+        // changes its persisted kind, enabling the real cloned-source pull path.
+        store::skills_add_source(
+            "fixture".into(),
+            "linked".into(),
+            Some(text(&selected)),
+            None,
+            Some("skills".into()),
+        )
+        .unwrap();
+        if writer == Writer::SkillSync {
+            let path = crate::skill_host::fs::skills_root()
+                .unwrap()
+                .join("registry.json");
+            let mut registry: serde_json::Value =
+                serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+            let source = registry["sources"]
+                .as_array_mut()
+                .unwrap()
+                .iter_mut()
+                .find(|source| source["id"] == "fixture")
+                .unwrap();
+            source["kind"] = "cloned".into();
+            source["repoUrl"] = text(&remote).into();
+            fs::write(path, serde_json::to_vec_pretty(&registry).unwrap()).unwrap();
+        }
+        Fixture {
+            checkout,
+            selected,
+            remote,
+        }
+    }
+    fn writer_start(fixture: &Fixture, writer: Writer) -> mpsc::Receiver<Result<(), IpcError>> {
+        let selected = text(&fixture.selected);
+        let app = tauri::test::mock_app();
+        let handle = app.handle().clone();
+        start(async move {
+            match writer {
+                Writer::SkillSave => store::ipc::skills_save_skill_file(
+                    "fixture::fixture".into(),
+                    "SKILL.md".into(),
+                    WRITER.into(),
+                )
+                .await
+                .map(|_| ())
+                .map_err(IpcError::from),
+                Writer::SkillSync => store::skills_sync_source(handle, "fixture".into(), None)
+                    .await
+                    .map(|_| ())
+                    .map_err(IpcError::from),
+                Writer::GitPull => crate::git::ipc::git_sync_pull_rebase(selected)
+                    .await
+                    .map(|_| ())
+                    .map_err(IpcError::from),
+            }
+        })
+    }
+    fn relative(writer: Writer, create: bool) -> &'static str {
+        if create {
+            "skills/fixture/created.md"
+        } else if writer == Writer::SkillSave {
+            "skills/fixture/SKILL.md"
+        } else {
+            "skills/fixture/note.md"
+        }
+    }
+    fn document_start(
+        fixture: &Fixture,
+        writer: Writer,
+        create: bool,
+    ) -> mpsc::Receiver<Result<(), IpcError>> {
+        let root = text(&fixture.selected);
+        let rel = relative(writer, create).to_string();
+        let revision =
+            (!create).then(|| read_document(root.clone(), rel.clone()).unwrap().revision);
+        start(async move {
+            if create {
+                ipc::create_document(
+                    root,
+                    "Fixture document".into(),
+                    "note".into(),
+                    BODY.into(),
+                    Some(rel),
+                    None,
+                )
+                .await
+                .map(|_| ())
+                .map_err(IpcError::from)
+            } else {
+                ipc::save_document(root, rel, DOCUMENT.into(), revision)
+                    .await
+                    .map(|_| ())
+                    .map_err(IpcError::from)
+            }
+        })
+    }
+    fn assert_document(checkout: &Path, writer: Writer, create: bool) {
+        let content = fs::read_to_string(checkout.join(relative(writer, create))).unwrap();
+        if create {
+            assert_eq!(
+                parse_frontmatter(&content).body,
+                format!("# Fixture document\n\n{BODY}\n")
+            );
+            assert!(content.contains("type: note"));
+        } else {
+            assert_eq!(content, DOCUMENT);
+        }
+    }
+    fn assert_clean_sidecars(checkout: &Path) {
+        // These linked, unmanaged fixtures do not create version sidecars.
+        assert!(!checkout.join(".maru/versions").exists());
+        assert_eq!(
+            fs::read_to_string(checkout.join("sibling.md")).unwrap(),
+            "untouched sibling\n"
+        );
+        for entry in fs::read_dir(checkout.join("skills/fixture")).unwrap() {
+            assert!(!entry
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .ends_with(".tmp"));
+        }
+    }
+    fn pair(writer: Writer, create: bool, writer_first: bool, alias: Alias) {
+        let home = Home::new();
+        let fixture = fixture(home.root.path(), writer, alias);
+        let target = fixture.checkout.join(relative(writer, create));
+        let held = Held::new(
+            if writer_first {
+                fixture.checkout.clone()
+            } else {
+                target.clone()
+            },
+            "pre-effect",
+        );
+        let first = if writer_first {
+            writer_start(&fixture, writer)
+        } else {
+            document_start(&fixture, writer, create)
+        };
+        held.wait();
+        // Install after first admission: the complete writer set may itself
+        // contain the document key and must not consume the waiter's hook.
+        let waiting = Held::new(
+            if writer_first {
+                target
+            } else {
+                fixture.checkout.clone()
+            },
+            "before-admission",
+        );
+        let second = if writer_first {
+            document_start(&fixture, writer, create)
+        } else {
+            writer_start(&fixture, writer)
+        };
+        waiting.wait();
+        waiting.release();
+        assert!(
+            second.recv_timeout(Duration::from_millis(40)).is_err(),
+            "{writer:?}/{create}/{writer_first}/{alias:?}: waiter escaped exclusion"
+        );
+        assert!(first.try_recv().is_err());
+        held.release();
+        let first_result = done(first);
+        let second_result = done(second);
+        if writer == Writer::SkillSave && !create {
+            first_result.unwrap();
+            let error = second_result.unwrap_err();
+            assert!(
+                error.to_string().starts_with(if writer_first {
+                    "document_conflict:"
+                } else {
+                    "skill_changed:"
+                }),
+                "{error}"
+            );
+            assert_eq!(
+                fs::read_to_string(fixture.checkout.join("skills/fixture/SKILL.md")).unwrap(),
+                if writer_first { WRITER } else { DOCUMENT }
+            );
+        } else if writer == Writer::SkillSave && create && !writer_first {
+            first_result.unwrap();
+            assert!(second_result
+                .unwrap_err()
+                .message
+                .starts_with("skill_changed:"));
+            assert_document(&fixture.checkout, writer, create);
+            assert_eq!(
+                fs::read_to_string(fixture.checkout.join("skills/fixture/SKILL.md")).unwrap(),
+                ORIGINAL
+            );
+        } else {
+            // Sync's registry commit has a separate, fresh lease. A document
+            // that wins that admission may cause the established stale result.
+            for result in [first_result, second_result] {
+                if let Err(error) = result {
+                    assert!(
+                        writer == Writer::SkillSync && error.message.starts_with("source_changed:"),
+                        "{error}"
+                    );
+                }
+            }
+            assert_document(&fixture.checkout, writer, create);
+            if writer != Writer::SkillSave {
+                assert_eq!(
+                    fs::read(fixture.checkout.join("remote.md")).unwrap(),
+                    b"complete remote content\n"
+                );
+            } else {
+                assert_eq!(
+                    fs::read_to_string(fixture.checkout.join("skills/fixture/SKILL.md")).unwrap(),
+                    WRITER
+                );
+            }
+        }
+        assert_clean_sidecars(&fixture.checkout);
+        if writer == Writer::GitPull {
+            assert!(git(&fixture.checkout, &["stash", "list"]).is_empty());
+        }
+    }
+    fn matrix(writer: Writer, create: bool, alias: Alias) {
+        for first in [false, true] {
+            pair(writer, create, first, alias);
+        }
+    }
+    #[test]
+    fn phase08_07_skills_save_document_save_both_orders() {
+        matrix(Writer::SkillSave, false, Alias::Lexical);
+    }
+    #[test]
+    fn phase08_07_skills_save_document_create_both_orders() {
+        matrix(Writer::SkillSave, true, Alias::Lexical);
+    }
+    #[test]
+    fn phase08_07_skills_sync_document_save_both_orders() {
+        matrix(Writer::SkillSync, false, Alias::Lexical);
+    }
+    #[test]
+    fn phase08_07_skills_sync_document_create_both_orders() {
+        matrix(Writer::SkillSync, true, Alias::Lexical);
+    }
+    #[test]
+    fn phase08_07_git_pull_document_save_both_orders() {
+        matrix(Writer::GitPull, false, Alias::Lexical);
+    }
+    #[test]
+    fn phase08_07_git_pull_document_create_both_orders() {
+        matrix(Writer::GitPull, true, Alias::Lexical);
+    }
+    #[cfg(unix)]
+    #[test]
+    fn phase08_07_all_earlier_writer_document_pairs_symlink_and_ancestor_both_orders() {
+        for alias in [Alias::Symlink, Alias::Ancestor] {
+            for writer in [Writer::SkillSave, Writer::SkillSync, Writer::GitPull] {
+                for create in [false, true] {
+                    matrix(writer, create, alias);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn phase08_07_all_earlier_writer_document_pairs_parent_replacement_while_waiting() {
+        for writer in [Writer::SkillSave, Writer::SkillSync, Writer::GitPull] {
+            for create in [false, true] {
+                for writer_first in [false, true] {
+                    for recreate in [false, true] {
+                        let home = Home::new();
+                        let fixture = fixture(home.root.path(), writer, Alias::Lexical);
+                        let target = fixture.checkout.join(relative(writer, create));
+                        let held = Held::new(
+                            if writer_first {
+                                fixture.checkout.clone()
+                            } else {
+                                target.clone()
+                            },
+                            "pre-effect",
+                        );
+                        let first = if writer_first {
+                            writer_start(&fixture, writer)
+                        } else {
+                            document_start(&fixture, writer, create)
+                        };
+                        held.wait();
+                        let waiting = Held::new(
+                            if writer_first {
+                                target
+                            } else {
+                                fixture.checkout.clone()
+                            },
+                            "before-admission",
+                        );
+                        let second = if writer_first {
+                            document_start(&fixture, writer, create)
+                        } else {
+                            writer_start(&fixture, writer)
+                        };
+                        waiting.wait();
+                        held.release();
+                        done(first).unwrap();
+                        // The waiter captured its required parent before this external
+                        // replacement, and must not accept the same spelling as identity.
+                        let original = home.root.path().join("original-checkout");
+                        fs::rename(&fixture.checkout, &original).unwrap();
+                        if recreate {
+                            fs::create_dir_all(fixture.checkout.join("skills/fixture")).unwrap();
+                            fs::write(fixture.checkout.join("sentinel"), "replacement untouched\n")
+                                .unwrap();
+                        }
+                        waiting.release();
+                        assert!(
+                            done(second).is_err(),
+                            "{writer:?}/{create}/{writer_first}: stale parent accepted"
+                        );
+                        if recreate {
+                            assert_eq!(
+                                fs::read(fixture.checkout.join("sentinel")).unwrap(),
+                                b"replacement untouched\n"
+                            );
+                            assert_eq!(
+                                fs::read_dir(fixture.checkout.join("skills/fixture"))
+                                    .unwrap()
+                                    .count(),
+                                0
+                            );
+                        } else {
+                            assert!(!fixture.checkout.exists(), "vanished checkout resurrected");
+                        }
+                        assert!(!fixture.checkout.join(".maru").exists());
+                        if !writer_first {
+                            assert_document(&original, writer, create);
+                        }
+                        assert_clean_sidecars(&original);
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn phase08_07_all_earlier_writer_document_pairs_injected_failure_releases_waiter() {
+        for writer in [Writer::SkillSave, Writer::SkillSync, Writer::GitPull] {
+            for create in [false, true] {
+                let home = Home::new();
+                let fixture = fixture(home.root.path(), writer, Alias::Lexical);
+                let held = Held::new(fixture.checkout.clone(), "pre-effect");
+                let first = writer_start(&fixture, writer);
+                held.wait();
+                // A non-overlapping document still conflicts with checkout-wide
+                // admission. It must be able to finish after the writer error.
+                let document_kind = if writer == Writer::SkillSave {
+                    Writer::SkillSync
+                } else {
+                    writer
+                };
+                let waiting = Held::new(
+                    fixture.checkout.join(relative(document_kind, create)),
+                    "before-admission",
+                );
+                let second = document_start(&fixture, document_kind, create);
+                waiting.wait();
+                waiting.release();
+                assert!(second.recv_timeout(Duration::from_millis(40)).is_err());
+                if writer == Writer::SkillSave {
+                    fs::write(
+                        fixture.checkout.join("skills/fixture/SKILL.md"),
+                        ORIGINAL.replace("original fixture", "external fixture"),
+                    )
+                    .unwrap();
+                } else {
+                    fs::rename(&fixture.remote, home.root.path().join("offline-remote.git"))
+                        .unwrap();
+                }
+                held.release();
+                let error = done(first).unwrap_err();
+                assert!(!error.message.is_empty());
+                done(second).unwrap();
+                assert_document(&fixture.checkout, document_kind, create);
+                assert_clean_sidecars(&fixture.checkout);
+            }
+        }
+    }
+
+    #[test]
+    fn phase08_07_network_held_registry_list_and_metadata_removal_document_waiter_release() {
+        for writer in [Writer::SkillSync, Writer::GitPull] {
+            let home = Home::new();
+            let fixture = fixture(home.root.path(), writer, Alias::Lexical);
+            let held = Held::new(fixture.checkout.clone(), "pre-effect");
+            let network = writer_start(&fixture, writer);
+            held.wait();
+            let waiting = Held::new(
+                fixture.checkout.join("skills/fixture/created.md"),
+                "before-admission",
+            );
+            let document = document_start(&fixture, writer, true);
+            waiting.wait();
+            waiting.release();
+            let sources = done(start(store::ipc::skills_list_sources(None))).unwrap();
+            assert!(sources.iter().any(|source| source.id == "fixture"));
+            done(start(store::ipc::skills_remove_source("fixture".into()))).unwrap();
+            assert!(fixture.checkout.exists());
+            assert!(document.recv_timeout(Duration::from_millis(40)).is_err());
+            held.release();
+            let result = done(network);
+            if writer == Writer::SkillSync {
+                assert!(result.is_err());
+            } else {
+                result.unwrap();
+            }
+            done(document).unwrap();
+            assert_document(&fixture.checkout, writer, true);
+            assert!(!done(start(store::ipc::skills_list_sources(None)))
+                .unwrap()
+                .iter()
+                .any(|source| source.id == "fixture"));
+            assert_clean_sidecars(&fixture.checkout);
+        }
     }
 }

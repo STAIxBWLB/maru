@@ -393,8 +393,20 @@ mod phase08_07_tests {
         let expected_missing = open_in_file_manager(root.clone(), "missing.md".into()).unwrap_err();
         assert!(expected_denied.contains("escapes"));
         assert!(expected_missing.contains("does not exist"));
+        let invalid_program = temp.path().join("native-program-with-missing-interpreter");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let interpreter = temp.path().join("absent-fixture-interpreter");
+            std::fs::write(&invalid_program, format!("#!{}\n", interpreter.display())).unwrap();
+            std::fs::set_permissions(&invalid_program, std::fs::Permissions::from_mode(0o700))
+                .unwrap();
+        }
+        #[cfg(not(unix))]
+        std::fs::write(&invalid_program, "invalid fixture executable").unwrap();
+        assert!(invalid_program.is_file());
         let fixture = Arc::new(phase08_07::Fixture {
-            program: temp.path().join("absent-native-program"),
+            program: invalid_program,
             marker: temp.path().join("unused-marker"),
             commands: Mutex::new(Vec::new()),
         });
