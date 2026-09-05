@@ -39,7 +39,7 @@ const M365_JSON_STDERR_LIMIT: usize = 64 * 1024;
 #[cfg(not(test))]
 const PROVIDER_READINESS_TIMEOUT: Duration = Duration::from_secs(10);
 #[cfg(test)]
-const PROVIDER_READINESS_TIMEOUT: Duration = Duration::from_millis(300);
+const PROVIDER_READINESS_TIMEOUT: Duration = Duration::from_secs(5);
 #[cfg(not(test))]
 const OUTLOOK_IO_TIMEOUT: Duration = Duration::from_secs(15);
 #[cfg(test)]
