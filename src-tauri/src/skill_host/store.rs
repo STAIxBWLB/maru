@@ -66,6 +66,7 @@ struct SourceSnapshot {
     registry_path: PathBuf,
     source: SkillSource,
     generation: SourceGeneration,
+    canonical_path: Option<PathBuf>,
 }
 
 struct SourceOperationLease {
@@ -104,6 +105,7 @@ fn ensure_source_generation(registry: &SkillsRegistry) -> Result<(), String> {
                 },
                 registry_path: path.clone(),
                 source: configuration.clone(),
+                canonical_path: None,
             });
         if entry.source != configuration {
             entry.generation.config_revision = Uuid::new_v4();
@@ -134,7 +136,9 @@ fn capture_source_snapshot(
         .get(&(registry_path.clone(), source_id.to_string()))
         .ok_or_else(|| format!("source_changed: {source_id}"))?
         .generation;
+    let canonical_path = source_path(&source).ok();
     Ok(SourceSnapshot {
+        canonical_path,
         registry_path,
         source,
         generation,
@@ -758,6 +762,7 @@ fn skills_sync_source_impl(
         }
         Ok(())
     })
+    .map(|(skills, _)| skills)
 }
 
 fn sync_source_transaction(
@@ -765,7 +770,7 @@ fn sync_source_transaction(
     expected: Option<SourceSnapshot>,
     progress: ProgressReporter<'_>,
     network: impl FnOnce(&SkillSource, ProgressReporter<'_>) -> Result<(), String>,
-) -> Result<Vec<SkillRecord>, IpcError> {
+) -> Result<(Vec<SkillRecord>, Option<String>), IpcError> {
     progress.info(format!("Resolving source {source_id}"));
     let (snapshot, original_path) = {
         let _guard = registry_guard()?;
@@ -774,7 +779,10 @@ fn sync_source_transaction(
             Some(snapshot) => snapshot,
             None => capture_source_snapshot(&registry, &source_id)?,
         };
-        let path = source_path(&snapshot.source)?;
+        let path = match &snapshot.canonical_path {
+            Some(path) => path.clone(),
+            None => source_path(&snapshot.source)?,
+        };
         (snapshot, path)
     };
     #[cfg(test)]
@@ -783,13 +791,14 @@ fn sync_source_transaction(
     // Revalidate after checkout discovery/admission, before the network edge.
     {
         let _guard = registry_guard()?;
-        let current =
-            capture_source_snapshot(&load_registry_unlocked()?, &source_id).map_err(|message| {
-                IpcError {
-                    code: SKILLS_SOURCE_STALE.into(),
-                    message,
-                }
-            })?;
+        let registry = load_registry_unlocked()?;
+        if !registry.sources.iter().any(|source| source.id == source_id) {
+            return Err(IpcError {
+                code: SKILLS_SOURCE_STALE.into(),
+                message: format!("unknown_source: {source_id}"),
+            });
+        }
+        let current = capture_source_snapshot(&registry, &source_id)?;
         if current.generation != snapshot.generation
             || lease.source_path != original_path
             || source_path(&current.source)? != original_path
@@ -807,10 +816,13 @@ fn sync_source_transaction(
     tests::phase08_source_transactions::at_edge("before_commit");
     let _guard = registry_guard()?;
     let mut registry = load_registry_unlocked()?;
-    let current = capture_source_snapshot(&registry, &source_id).map_err(|message| IpcError {
-        code: SKILLS_SOURCE_STALE.into(),
-        message,
-    })?;
+    if !registry.sources.iter().any(|source| source.id == source_id) {
+        return Err(IpcError {
+            code: SKILLS_SOURCE_STALE.into(),
+            message: format!("unknown_source: {source_id}"),
+        });
+    }
+    let current = capture_source_snapshot(&registry, &source_id)?;
     if current.registry_path != snapshot.registry_path
         || current.generation != snapshot.generation
         || source_path(&current.source)? != original_path
@@ -827,7 +839,12 @@ fn sync_source_transaction(
         "Sync complete for {source_id}: {} skill(s)",
         skills.len()
     ));
-    Ok(skills)
+    let last_synced_at = registry
+        .sources
+        .iter()
+        .find(|source| source.id == source_id)
+        .and_then(|source| source.last_synced_at.clone());
+    Ok((skills, last_synced_at))
 }
 
 #[tauri::command]
@@ -895,15 +912,7 @@ fn skills_sync_all_sources_blocking(
             },
         );
         match result {
-            Ok(skills) => {
-                let last_synced_at = {
-                    let _guard = registry_guard()?;
-                    load_registry_unlocked()?
-                        .sources
-                        .iter()
-                        .find(|s| s.id == source_id)
-                        .and_then(|s| s.last_synced_at.clone())
-                };
+            Ok((skills, last_synced_at)) => {
                 results.push(SyncSourceResult {
                     source_id: source_id.clone(),
                     kind,
@@ -5778,7 +5787,25 @@ mod tests {
             }
             let initial = snapshots();
             let lease = admit_source_operation(&initial[0]).unwrap();
-            fs::remove_dir_all(root.path().join("c")).unwrap();
+            run_command(
+                Command::new("git")
+                    .args(["init", "--quiet"])
+                    .arg(root.path().join("c")),
+            )
+            .unwrap();
+            // A real git pull with no remote fails after lease admission.
+            {
+                let _guard = registry_guard().unwrap();
+                let mut registry = load_registry_unlocked().unwrap();
+                registry
+                    .sources
+                    .iter_mut()
+                    .find(|s| s.id == "c")
+                    .unwrap()
+                    .kind = "cloned".into();
+                save_registry_unlocked(&registry).unwrap();
+            }
+            let initial = snapshots();
             let outcome =
                 skills_sync_all_sources_blocking(initial, ProgressReporter::noop()).unwrap();
             reconcile(&outcome);
@@ -5801,7 +5828,17 @@ mod tests {
                 .last_synced_at
                 .is_some());
             drop(lease);
-            write_skill(&root.path().join("c"), "c");
+            {
+                let _guard = registry_guard().unwrap();
+                let mut registry = load_registry_unlocked().unwrap();
+                registry
+                    .sources
+                    .iter_mut()
+                    .find(|s| s.id == "c")
+                    .unwrap()
+                    .kind = "linked".into();
+                save_registry_unlocked(&registry).unwrap();
+            }
             let retry =
                 skills_sync_all_sources_blocking(snapshots(), ProgressReporter::noop()).unwrap();
             reconcile(&retry);
@@ -5830,6 +5867,36 @@ mod tests {
                 );
                 assert_eq!(fs::read(registry_path().unwrap()).unwrap(), disk);
             }
+        }
+        #[test]
+        #[cfg(unix)]
+        fn retargeted_symlink_before_batch_turn_rejects_old_snapshot() {
+            let _home = test_home();
+            let root = TempDir::new().unwrap();
+            let first = root.path().join("first");
+            let second = root.path().join("second");
+            seed("alias", &first);
+            write_skill(&second, "replacement");
+            let link = root.path().join("link");
+            std::os::unix::fs::symlink(&first, &link).unwrap();
+            {
+                let _guard = registry_guard().unwrap();
+                let mut registry = load_registry_unlocked().unwrap();
+                registry.sources[0].path = Some(path_string(&link));
+                save_registry_unlocked(&registry).unwrap();
+            }
+            let before = snapshots();
+            let disk = fs::read(registry_path().unwrap()).unwrap();
+            fs::remove_file(&link).unwrap();
+            std::os::unix::fs::symlink(&second, &link).unwrap();
+            let outcome =
+                skills_sync_all_sources_blocking(before, ProgressReporter::noop()).unwrap();
+            assert_eq!(outcome.failed, 1);
+            assert_eq!(
+                outcome.results[0].error_code.as_deref(),
+                Some(SKILLS_SOURCE_STALE)
+            );
+            assert_eq!(fs::read(registry_path().unwrap()).unwrap(), disk);
         }
         #[test]
         fn actual_wrapper_allows_async_progress() {
@@ -5959,7 +6026,7 @@ mod tests {
             release_tx.send(()).unwrap();
             let result = worker.join().unwrap();
             (
-                result,
+                result.map(|(skills, _)| skills),
                 load_registry().unwrap(),
                 calls.load(Ordering::SeqCst),
             )
@@ -6310,7 +6377,7 @@ mod tests {
             });
             assert_eq!(reader.join().unwrap(), 1);
             release_tx.send(()).unwrap();
-            assert_eq!(worker.join().unwrap().unwrap().len(), 1);
+            assert_eq!(worker.join().unwrap().unwrap().0.len(), 1);
             assert!(load_registry()
                 .unwrap()
                 .removed_source_ids

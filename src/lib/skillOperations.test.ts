@@ -88,6 +88,24 @@ describe("Skills operation ownership", () => {
     const retry = startSkillOperation({ ...task.options, execute: async () => [] });
     expect(retry).not.toBe(promise); await retry;
   });
+  it("batch admission is separate from active sources and duplicate batches never queue", async () => {
+    const source = setup("a"); const batch = setup(null, source.options.workspace);
+    const one = startSkillOperation(source.options); const all = startSkillOperation(batch.options);
+    expect(isSkillOperationActive(source.options.workspace, "a")).toBe(true);
+    expect(isSkillOperationActive(source.options.workspace, null)).toBe(true);
+    expect(isSkillOperationActive("another-workspace", null)).toBe(false);
+    expect(startSkillOperation(batch.options)).toBe(all);
+    source.resolve([]); batch.resolve({ total: 1, succeeded: 0, failed: 0, skipped: 1, results: [{ sourceId: "a", kind: "linked", ok: false, skipped: true, skills: 0, error: "busy" }] });
+    await Promise.all([one, all]);
+    expect(batch.execute).toHaveBeenCalledTimes(1);
+    expect(mocks.notice.mock.calls.at(-1)![0].kind).toBe("info");
+  });
+  it("a failed progress cleanup still reports the result once", async () => {
+    mocks.listen.mockResolvedValue(() => { throw new Error("cleanup failed"); });
+    const task = setup(); const promise = startSkillOperation(task.options);
+    await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+    task.resolve([]); await promise; expect(mocks.notice).toHaveBeenCalledTimes(1);
+  });
   it("fulfilled partial batch retains successes, skipped count and failed reason", async () => {
     const task = setup(null); const promise = startSkillOperation(task.options);
     const result: SyncAllOutcome = { total: 3, succeeded: 1, failed: 1, skipped: 1, results: [

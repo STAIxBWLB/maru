@@ -9,7 +9,7 @@ import {
   Wrench,
 } from "lucide-react";
 import * as Dialog from "@radix-ui/react-dialog";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useTranslation } from "../../../lib/i18n";
 import {
   SKILLS_UPDATED_EVENT,
@@ -43,6 +43,7 @@ import {
   type SkillSource,
   type SkillsEnvStatus,
 } from "../../../lib/skills";
+import { createSkillViewScope, getSkillOperationsSnapshot, isSkillOperationActive, startSkillOperation, subscribeSkillOperations } from "../../../lib/skillOperations";
 import { readDefaultInstallMode, writeDefaultInstallMode } from "../../../lib/skillsInstallMode";
 import { formatRelativeDate } from "../../../lib/document";
 import { openSkillEditorWindow } from "../../../lib/windowLayout";
@@ -125,31 +126,50 @@ export function SkillsTab({ workPath }: { workPath: string }) {
   useEffect(() => {
     writeDefaultInstallMode(defaultInstallMode);
   }, [defaultInstallMode]);
-  const [operation, setOperation] = useState<SkillOperationState>(EMPTY_SKILL_OPERATION);
+  const [localOperation, setOperation] = useState<SkillOperationState>(EMPTY_SKILL_OPERATION);
   const [confirmState, setConfirmState] = useState<SkillConfirmState | null>(null);
   const confirmResolverRef = useRef<((confirmed: boolean) => void) | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const viewScope = useRef(createSkillViewScope());
+  const skillOperations = useSyncExternalStore(subscribeSkillOperations, getSkillOperationsSnapshot, getSkillOperationsSnapshot);
+  const sharedOperation = skillOperations.filter((item) => item.workspace === workPath).at(-1);
+  const operation = localOperation.active || localOperation.message ? localOperation : sharedOperation ?? localOperation;
+  const workspaceLabel = workPath.split(/[\\/]/).filter(Boolean).at(-1) ?? workPath;
+  useEffect(() => {
+    const scope = viewScope.current;
+    scope.enter(workPath);
+    setBusy(false);
+    setOperation(EMPTY_SKILL_OPERATION);
+    setSources([]); setSkills([]); setInstalls([]);
+    return () => scope.leave();
+  }, [workPath]);
 
   const refresh = useCallback(async () => {
+    const isCurrent = viewScope.current.request(workPath);
     setError(null);
     try {
       const nextSources = await skillsListSources(workPath);
       const nextSkills = await skillsListSkills(workPath, { refresh: true });
       const nextInstalls = await skillsListInstalls(workPath);
       const nextEnv = await skillsEnvStatus(workPath);
+      if (!isCurrent()) return;
       setSources(nextSources);
       setSkills(nextSkills);
       setInstalls(nextInstalls);
       setEnvStatus(nextEnv);
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      if (isCurrent()) setError(err instanceof Error ? err.message : String(err));
     }
   }, [workPath]);
 
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  useEffect(() => {
+    if (sharedOperation && !sharedOperation.active) void refresh();
+  }, [sharedOperation, refresh]);
 
   useEffect(() => {
     let disposed = false;
@@ -373,37 +393,40 @@ export function SkillsTab({ workPath }: { workPath: string }) {
   );
 
   const refreshWithProgress = useCallback(async () => {
+    const viewCurrent = viewScope.current.current(workPath);
+    const isCurrent = viewScope.current.request(workPath);
     setBusy(true);
     setError(null);
     startOperation(t("system.skills.refreshing"), 4);
     try {
       appendOperationLog(t("system.skills.log.refreshSources"));
       const nextSources = await skillsListSources(workPath);
-      setSources(nextSources);
+      if (!isCurrent()) return;
       stepOperation();
-
       appendOperationLog(t("system.skills.log.refreshSkills"));
       const nextSkills = await skillsListSkills(workPath, { refresh: true });
-      setSkills(nextSkills);
+      if (!isCurrent()) return;
       stepOperation();
-
       appendOperationLog(t("system.skills.log.refreshInstalls"));
       const nextInstalls = await skillsListInstalls(workPath);
-      setInstalls(nextInstalls);
+      if (!isCurrent()) return;
       stepOperation();
-
       appendOperationLog(t("system.skills.log.refreshEnv"));
       const nextEnv = await skillsEnvStatus(workPath);
-      setEnvStatus(nextEnv);
+      if (!isCurrent()) return;
       stepOperation();
-
+      if (!isCurrent()) return;
+      setSources(nextSources); setSkills(nextSkills); setInstalls(nextInstalls); setEnvStatus(nextEnv);
       finishOperation(t("system.skills.refreshComplete"));
     } catch (err) {
+      if (!isCurrent()) return;
       const message = err instanceof Error ? err.message : String(err);
-      setError(message);
-      finishOperation(message, [message]);
+      setError(message); finishOperation(message, [message]);
     } finally {
-      setBusy(false);
+      if (viewCurrent()) {
+        setBusy(false);
+        if (!isCurrent()) setOperation((previous) => ({ ...previous, active: false }));
+      }
     }
   }, [appendOperationLog, finishOperation, startOperation, stepOperation, t, workPath]);
 
@@ -533,43 +556,27 @@ export function SkillsTab({ workPath }: { workPath: string }) {
 
   const syncSource = useCallback(
     async (source: SkillSource) => {
+      if (isSkillOperationActive(workPath, source.id)) return;
       if (!(await confirmAction(t("system.skills.syncConfirm", { id: source.id })))) return;
-      await runBackendProgressOperation(
-        t("system.skills.syncingSource", { id: source.id }),
-        1,
-        async (progressId) => {
-          const records = await skillsSyncSource(source.id, progressId);
-          appendOperationLog(t("system.skills.log.refreshSkills"));
-          await refresh();
-          return records;
-        },
-        (records) => t("system.skills.syncComplete", { id: source.id, count: records.length }),
-      );
-    },
-    [appendOperationLog, confirmAction, refresh, runBackendProgressOperation, t],
+      setOperation(EMPTY_SKILL_OPERATION);
+      void startSkillOperation({
+        workspace: workPath, workspaceLabel, sourceId: source.id,
+        label: source.id, total: 1, t,
+        execute: (progressId) => skillsSyncSource(source.id, progressId),
+      });
+    }, [confirmAction, t, workPath, workspaceLabel],
   );
 
   const syncAllSources = useCallback(async () => {
-    if (sources.length === 0) return;
-    if (!(await confirmAction(t("system.skills.syncAllConfirm", { count: sources.length })))) {
-      return;
-    }
-    await runBackendProgressOperation(
-      t("system.skills.syncingAll"),
-      sources.length,
-      async (progressId) => {
-        const outcome = await skillsSyncAllSources(workPath, progressId);
-        appendOperationLog(t("system.skills.log.refreshSkills"));
-        await refresh();
-        return outcome;
-      },
-      (outcome) =>
-        t("system.skills.syncAllComplete", {
-          succeeded: outcome.succeeded,
-          failed: outcome.failed,
-        }),
-    );
-  }, [appendOperationLog, confirmAction, refresh, runBackendProgressOperation, sources.length, t, workPath]);
+    if (sources.length === 0 || isSkillOperationActive(workPath, null)) return;
+    if (!(await confirmAction(t("system.skills.syncAllConfirm", { count: sources.length })))) return;
+    setOperation(EMPTY_SKILL_OPERATION);
+    void startSkillOperation({
+      workspace: workPath, workspaceLabel, sourceId: null,
+      label: t("system.skills.syncAll"), total: sources.length, t,
+      execute: (progressId) => skillsSyncAllSources(workPath, progressId),
+    });
+  }, [confirmAction, sources.length, t, workPath, workspaceLabel]);
 
   const loadBundleStatus = useCallback(async () => {
     try {
@@ -1199,7 +1206,7 @@ export function SkillsTab({ workPath }: { workPath: string }) {
             variant="secondary"
             size="sm"
             onClick={() => void syncAllSources()}
-            disabled={busy || sources.length === 0}
+            disabled={busy || sources.length === 0 || isSkillOperationActive(workPath, null)}
             icon={<RefreshCcw size={14} />}
           >
             {t("system.skills.syncAll")}
@@ -1391,7 +1398,7 @@ export function SkillsTab({ workPath }: { workPath: string }) {
                         variant="ghost"
                         size="sm"
                         onClick={() => void syncSource(source)}
-                        disabled={busy}
+                        disabled={busy || isSkillOperationActive(workPath, source.id) || isSkillOperationActive(workPath, null)}
                       >
                         {t("system.skills.sync")}
                       </Button>

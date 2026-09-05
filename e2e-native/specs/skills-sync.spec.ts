@@ -9,9 +9,10 @@ describe("native Skills synchronization", () => {
     const before = await readFixtureSkillRegistry();
     assert.ok(before.sources.some((source) => source.id === FIXTURE_SKILL_SOURCE));
     assert.ok(!before.skills.some((skill) => skill.title === FIXTURE_SKILL_TITLE));
-    const result = await browser.executeAsync((sourceId: string, done: (result: { ok: boolean; stage: string; log: string }) => void) => {
+    const result = await browser.executeAsync((sourceId: string, done: (result: { ok: boolean; stage: string; log: string; notice?: string }) => void) => {
       let stage = "settings";
-      const deadline = Date.now() + 60_000;
+      // Return diagnostic state before WebDriver can replay the UI script.
+      const deadline = Date.now() + 25_000;
       const timer = setInterval(() => {
         const buttons = Array.from(document.querySelectorAll<HTMLButtonElement>("button"));
         if (stage === "settings") {
@@ -29,8 +30,11 @@ describe("native Skills synchronization", () => {
           if (proceed) { proceed.click(); stage = "completion"; }
         } else {
           const log = document.querySelector(".skills-operation")?.textContent ?? "";
-          if (log.includes(`Git pull complete for ${sourceId}`) && log.includes(`Sync complete for ${sourceId}`)) {
-            clearInterval(timer); done({ ok: true, stage, log }); return;
+// IPC settlement and event delivery have no final-event ordering contract.
+          // The notice plus persisted Git result is the completion authority.
+          const notice = document.querySelector("[data-skill-operation]")?.textContent ?? "";
+          if (log.includes("[info]") && log.includes(sourceId) && notice.includes(sourceId) && notice.includes("동기화를 완료")) {
+            clearInterval(timer); done({ ok: true, stage, log, notice }); return;
           }
         }
         if (Date.now() > deadline) {
@@ -56,7 +60,7 @@ describe("native Skills synchronization", () => {
     await fs.mkdir(evidenceDir, { recursive: true });
     await fs.writeFile(path.join(evidenceDir, "phase08-01-skills-sync.json"), JSON.stringify({
       sourceId: FIXTURE_SKILL_SOURCE, title: FIXTURE_SKILL_TITLE,
-      realGit: true, persisted: true, fixtureHomeOnly: true, progress: result.log,
+      realGit: true, persisted: true, fixtureHomeOnly: true, progress: result.log, successNotice: result.notice,
     }, null, 2));
   });
 });

@@ -359,7 +359,7 @@ import {
   useAgentMissionSlice,
   useAgentRegistrySlice,
 } from "./lib/agentRuntimeModeStore";
-import { setError, useError } from "./lib/errorStore";
+import { dismissOperationNotice, setError, useError, useOperationNotice } from "./lib/errorStore";
 import { setTelegramMessages, setTelegramPolling, useTelegramPolling } from "./lib/telegramEventsStore";
 import {
   communicationsModeController,
@@ -1014,6 +1014,7 @@ export function MainApp() {
   // Global error toast lives in the error store (step 9); setError is a
   // module action now, so every call site below keeps its old shape.
   const error = useError();
+  const operationNotice = useOperationNotice();
   // Overlay/dialog UI state lives in the app overlay store (step 9); these
   // per-slice hooks keep the same render-scope names MainApp had before.
   const newDocumentDialog = useNewDocumentDialog();
@@ -8578,6 +8579,15 @@ export function MainApp() {
         />
 
         <div className="toast-stack">
+          {operationNotice ? (
+            <div className={operationNotice.kind === "error" ? "toast" : "toast notice"} title={operationNotice.message} role="status" data-skill-operation={operationNotice.operationId}>
+              <AlertTriangle size={15} />
+              <span>{operationNotice.message}</span>
+              <button type="button" className="icon-button" onClick={() => dismissOperationNotice(operationNotice.operationId)} aria-label={t("app.errorClose")} title={t("app.errorClose")}>
+                <X size={14} />
+              </button>
+            </div>
+          ) : null}
           {error ? (
             <div
               className={

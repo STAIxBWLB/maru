@@ -46,13 +46,19 @@ export function getLatestSkillOperation(workspace: string): SkillOperation | und
 /** View refresh tickets expire on every navigation, including A -> B -> A. */
 export function createSkillViewScope() {
   let generation = 0;
+  let requestSequence = 0;
   let workspace: string | null = null;
   return {
     enter(next: string) { workspace = next; generation += 1; },
     leave() { workspace = null; generation += 1; },
-    request(expected: string) {
-      const ticket = ++generation;
+    current(expected: string) {
+      const ticket = generation;
       return () => workspace === expected && generation === ticket;
+    },
+    request(expected: string) {
+      const ticket = ++requestSequence;
+      const view = generation;
+      return () => workspace === expected && generation === view && requestSequence === ticket;
     },
   };
 }
