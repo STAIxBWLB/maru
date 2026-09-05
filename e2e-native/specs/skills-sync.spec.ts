@@ -9,8 +9,9 @@ describe("native Skills synchronization", () => {
     const before = await readFixtureSkillRegistry();
     assert.ok(before.sources.some((source) => source.id === FIXTURE_SKILL_SOURCE));
     assert.ok(!before.skills.some((skill) => skill.title === FIXTURE_SKILL_TITLE));
-    const result = await browser.executeAsync((sourceId: string, done: (result: { ok: boolean; stage: string; log: string; notice?: string }) => void) => {
+    const result = await browser.executeAsync((sourceId: string, done: (result: { ok: boolean; stage: string; log: string; notice?: string; syncClicks?: number; noticeCount?: number }) => void) => {
       let stage = "settings";
+      let syncClicks = 0;
       // Return diagnostic state before WebDriver can replay the UI script.
       const deadline = Date.now() + 25_000;
       const timer = setInterval(() => {
@@ -24,7 +25,7 @@ describe("native Skills synchronization", () => {
         } else if (stage === "source") {
           const card = Array.from(document.querySelectorAll(".source-card")).find((element) => element.querySelector(".system-skill-name")?.textContent === sourceId);
           const sync = Array.from(card?.querySelectorAll<HTMLButtonElement>("button") ?? []).find((button) => button.textContent?.trim() === "Sync" && !button.disabled);
-          if (sync) { sync.click(); stage = "confirm"; }
+          if (sync) { syncClicks += 1; sync.click(); stage = "confirm"; }
         } else if (stage === "confirm") {
           const proceed = buttons.find((button) => button.closest('[role="dialog"]') && button.textContent?.trim() === "진행");
           if (proceed) { proceed.click(); stage = "completion"; }
@@ -32,9 +33,10 @@ describe("native Skills synchronization", () => {
           const log = document.querySelector(".skills-operation")?.textContent ?? "";
 // IPC settlement and event delivery have no final-event ordering contract.
           // The notice plus persisted Git result is the completion authority.
-          const notice = document.querySelector("[data-skill-operation]")?.textContent ?? "";
+          const notices = document.querySelectorAll("[data-skill-operation]");
+          const notice = notices[0]?.textContent ?? "";
           if (log.includes("[info]") && log.includes(sourceId) && notice.includes(sourceId) && notice.includes("동기화를 완료")) {
-            clearInterval(timer); done({ ok: true, stage, log, notice }); return;
+            clearInterval(timer); done({ ok: true, stage, log, notice, syncClicks, noticeCount: notices.length }); return;
           }
         }
         if (Date.now() > deadline) {
@@ -44,6 +46,8 @@ describe("native Skills synchronization", () => {
       }, 100);
     }, FIXTURE_SKILL_SOURCE);
     assert.equal(result.ok, true, JSON.stringify(result));
+    assert.equal(result.syncClicks, 1);
+    assert.equal(result.noticeCount, 1);
     const after = await readFixtureSkillRegistry();
     assert.ok(after.sources.find((source) => source.id === FIXTURE_SKILL_SOURCE)?.lastSyncedAt);
     assert.ok(after.skills.some((skill) => skill.sourceId === FIXTURE_SKILL_SOURCE && skill.title === FIXTURE_SKILL_TITLE && skill.valid));
@@ -60,7 +64,7 @@ describe("native Skills synchronization", () => {
     await fs.mkdir(evidenceDir, { recursive: true });
     await fs.writeFile(path.join(evidenceDir, "phase08-01-skills-sync.json"), JSON.stringify({
       sourceId: FIXTURE_SKILL_SOURCE, title: FIXTURE_SKILL_TITLE,
-      realGit: true, persisted: true, fixtureHomeOnly: true, progress: result.log, successNotice: result.notice,
+      realGit: true, persisted: true, fixtureHomeOnly: true, progress: result.log, successNotice: result.notice, syncClicks: result.syncClicks, noticeCount: result.noticeCount,
     }, null, 2));
   });
 });
