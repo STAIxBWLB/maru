@@ -13,6 +13,10 @@ pub const JOBS_SCHEMA: u32 = 1;
 pub const JOB_LABEL_PREFIX: &str = "com.maru.job.";
 const LOG_TAIL_LINES: usize = 200;
 
+// D-03: JOBS_LOCK serializes writers of `.maru/jobs.json`; the guarded data
+// lives on disk and is re-read after acquisition (see `load_jobs`), so the
+// in-memory unit carries no invariant and recovering the guard cannot serve
+// tainted state.
 static JOBS_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -93,10 +97,14 @@ pub struct JobLogsTail {
 }
 
 fn jobs_guard() -> Result<MutexGuard<'static, ()>, String> {
-    JOBS_LOCK
-        .get_or_init(|| Mutex::new(()))
-        .lock()
-        .map_err(|_| "jobs_lock_poisoned".to_string())
+    // D-03: the guarded jobs.json state is re-read from disk after
+    // acquisition, so recovering a poisoned guard is safe (see the
+    // JOBS_LOCK declaration).
+    Ok(crate::lock_recovery::recover_guard(
+        JOBS_LOCK.get_or_init(|| Mutex::new(())).lock(),
+        "jobs",
+        "JOBS_LOCK",
+    ))
 }
 
 fn jobs_file_path(work_path: &Path) -> PathBuf {

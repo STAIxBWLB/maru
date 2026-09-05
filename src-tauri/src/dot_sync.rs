@@ -11,6 +11,9 @@ use crate::win_process::NoWindow;
 
 const MIN_DOT_VERSION: &str = "2.63.0";
 const MAX_OUTPUT_BYTES: usize = 512 * 1024;
+// D-03: DOT_ACTION_LOCK serializes external dot CLI invocations; the guarded
+// state is the external dotfiles repository on disk, not an in-memory
+// invariant, so recovering the guard cannot serve tainted state.
 static DOT_ACTION_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
 #[derive(Debug, Clone, Serialize)]
@@ -345,10 +348,13 @@ fn safe_token(value: &str, name: &str) -> Result<String, String> {
 }
 
 fn run_dot_action(request: DotSyncActionRequest) -> Result<DotSyncActionResult, String> {
-    let _guard = DOT_ACTION_LOCK
-        .get_or_init(|| Mutex::new(()))
-        .lock()
-        .map_err(|_| "dot_action_lock_poisoned".to_string())?;
+    // D-03: the guarded state is the external dotfiles repo on disk (see the
+    // DOT_ACTION_LOCK declaration), so recovering a poisoned guard is safe.
+    let _guard = crate::lock_recovery::recover_guard(
+        DOT_ACTION_LOCK.get_or_init(|| Mutex::new(())).lock(),
+        "dot_sync",
+        "DOT_ACTION_LOCK",
+    );
 
     if matches!(&request, DotSyncActionRequest::InstallCli) {
         let brew = resolve_program("brew").ok_or_else(|| "homebrew_not_installed".to_string())?;

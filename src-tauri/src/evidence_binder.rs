@@ -21,6 +21,9 @@ const MAX_TARGETS_PER_CATEGORY: usize = 50;
 const MAX_TARGET_LENGTH: usize = 200;
 const MAX_NOTE_LENGTH: usize = 2_000;
 const MAX_INSPECTION_CACHE_ENTRIES: usize = 512;
+// D-03: BINDER_WRITE_LOCK serializes writers of the `.maru/binder/` state,
+// which is read from disk after acquisition, so the in-memory unit carries
+// no invariant and recovering the guard cannot serve tainted state.
 static BINDER_WRITE_LOCK: Mutex<()> = Mutex::new(());
 static INSPECTION_CACHE: OnceLock<Mutex<HashMap<CandidateInspectionKey, CandidateInspection>>> =
     OnceLock::new();
@@ -262,9 +265,14 @@ pub fn evidence_binder_mutate(
     let work = normalize_existing_dir(&req.work_path)?;
     assert_maru_can_write(&req.work_path, WorkspaceWriteAction::Modify)?;
     let doc_id = sanitize_doc_id(&req.doc_id)?;
-    let _guard = BINDER_WRITE_LOCK
-        .lock()
-        .map_err(|_| "evidence_binder_lock_poisoned".to_string())?;
+    // D-03: the guarded `.maru/binder/` state is read from disk after
+    // acquisition (see the BINDER_WRITE_LOCK declaration), so recovering a
+    // poisoned guard is safe.
+    let _guard = crate::lock_recovery::recover_guard(
+        BINDER_WRITE_LOCK.lock(),
+        "evidence_binder",
+        "BINDER_WRITE_LOCK",
+    );
     let candidates = discover_candidates(&work, req.document_path.as_deref())?;
     let mut state = read_or_create_state(&work, &doc_id, req.document_path.clone(), &candidates)?;
     let actual_revision = state_revision(&state)?;
@@ -650,9 +658,14 @@ pub(crate) fn rekey_document_states(
     old_path: &Path,
     new_path: &Path,
 ) -> Result<(), String> {
-    let _guard = BINDER_WRITE_LOCK
-        .lock()
-        .map_err(|_| "evidence_binder_lock_poisoned".to_string())?;
+    // D-03: the guarded `.maru/binder/` state is read from disk after
+    // acquisition (see the BINDER_WRITE_LOCK declaration), so recovering a
+    // poisoned guard is safe.
+    let _guard = crate::lock_recovery::recover_guard(
+        BINDER_WRITE_LOCK.lock(),
+        "evidence_binder",
+        "BINDER_WRITE_LOCK",
+    );
     let binder_dir = work.join(".maru").join("binder");
     if !binder_dir.is_dir() {
         return Ok(());
