@@ -175,6 +175,10 @@ lint-i18n: ## i18n lint: ko/en key parity + hardcoded UI string scan
 check-select-chrome: ## Static guard: select rules must not wipe the base chevron via background shorthand
 	$(NODE) scripts/check-select-chrome.mjs
 
+.PHONY: check-dom-sanitizer
+check-dom-sanitizer: ## Static guard: every dangerouslySetInnerHTML sink in src/ must trace to a DOMPurify-backed helper
+	$(NODE) scripts/check-dom-sanitizer.mjs
+
 .PHONY: check-native-e2e-isolation
 check-native-e2e-isolation: ## Static guard: no native-e2e runner affordances in the production bundle or Cargo manifest (D-10)
 	$(NODE) scripts/check-native-e2e-isolation.mjs
@@ -352,7 +356,7 @@ homebrew-fetch: ## Fetch Maru Homebrew cask and CLI formula in HOMEBREW_TAP_DIR
 # ---------------------------------------------------------------------------
 
 .PHONY: verify
-verify: typecheck lint release-version-check icons-check lint-i18n check-select-chrome check-type-tokens test-ts test-rust fmt-check clippy build-frontend ## Full verification: typecheck + ESLint gate + release versions + generated assets + guards + tests + Rust format check + Rust lint gate + frontend build
+verify: typecheck lint release-version-check icons-check lint-i18n check-select-chrome check-dom-sanitizer check-type-tokens test-ts test-rust fmt-check clippy build-frontend ## Full verification: typecheck + ESLint gate + release versions + generated assets + guards + tests + Rust format check + Rust lint gate + frontend build
 
 # ---------------------------------------------------------------------------
 # Clean
