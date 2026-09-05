@@ -154,4 +154,49 @@ mod tests {
         assert!(relevant_path(Path::new("/work/notes/a.MD"), root));
         assert!(!relevant_path(Path::new("/work/notes/a.txt"), root));
     }
+
+    #[test]
+    fn rejects_generated_dir_paths_via_shared_predicate() {
+        let root = Path::new("/work");
+        assert!(!relevant_path(
+            Path::new("/work/node_modules/pkg/index.js"),
+            root
+        ));
+        assert!(!relevant_path(
+            Path::new("/work/api/.venv/lib/site.py"),
+            root
+        ));
+    }
+
+    #[test]
+    fn accepts_prefix_sibling_of_generated_dir_name() {
+        let root = Path::new("/work");
+        assert!(relevant_path(
+            Path::new("/work/node_modules_backup/notes.md"),
+            root
+        ));
+    }
+
+    #[test]
+    fn mixed_batch_keeps_only_legitimate_paths() {
+        // Mirrors the drain-thread filter chain: per-path filter, then
+        // strip_prefix — a generated-dir path in the batch must not drop its
+        // legitimate siblings (D-04 per-path semantics, Pitfall 7).
+        let root = Path::new("/work");
+        let batch = vec![
+            PathBuf::from("/work/node_modules/pkg/index.js"),
+            PathBuf::from("/work/notes/a.md"),
+            PathBuf::from("/work/notes/b.md"),
+        ];
+        let kept: Vec<String> = batch
+            .iter()
+            .filter(|path| relevant_path(path, root))
+            .filter_map(|path| {
+                path.strip_prefix(root)
+                    .ok()
+                    .map(|rel| rel.to_string_lossy().replace('\\', "/"))
+            })
+            .collect();
+        assert_eq!(kept, vec!["notes/a.md", "notes/b.md"]);
+    }
 }

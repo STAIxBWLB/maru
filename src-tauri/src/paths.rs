@@ -166,6 +166,30 @@ mod tests {
     }
 
     #[test]
+    fn is_under_generated_dir_matches_deep_component() {
+        assert!(is_under_generated_dir(Path::new("/work/a/target/debug/x.o")));
+    }
+
+    #[test]
+    fn is_under_generated_dir_rejects_prefix_sibling() {
+        assert!(!is_under_generated_dir(Path::new("/work/node_modules_backup/notes.md")));
+    }
+
+    #[test]
+    fn is_under_generated_dir_rejects_root_and_empty_path() {
+        assert!(!is_under_generated_dir(Path::new("/work")));
+        assert!(!is_under_generated_dir(Path::new("")));
+    }
+
+    #[test]
+    fn is_under_generated_dir_prunes_every_generated_dir_entry() {
+        for dir in GENERATED_DIRS {
+            let path = Path::new("/work/x").join(dir).join("file");
+            assert!(is_under_generated_dir(&path), "entry {dir} must prune");
+        }
+    }
+
+    #[test]
     fn resolve_native_e2e_dir_accepts_absolute_value() {
         let value = OsStr::new("/tmp/native-e2e-home");
         assert_eq!(
