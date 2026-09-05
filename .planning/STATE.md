@@ -5,16 +5,16 @@ milestone_name: Felt Quality and Native Proof
 current_phase: 08
 current_phase_name: Main-Thread Responsiveness
 status: executing
-stopped_at: Completed 08-12-PLAN.md; next Plan13 wave14; Plan26 must consume outcome-unknown and local-settlement marker UI and verified retry handoffs
-last_updated: "2026-09-05T08:24:40.490Z"
+stopped_at: Completed 08-13-PLAN.md; next Plan14 wave15; Plan25/26 graph/catalog completion and KG stale-toggle ownership pending; Plan26 provider reconciliation handoff preserved
+last_updated: "2026-09-05T08:37:35.116Z"
 last_activity: 2026-09-05
 last_activity_desc: Phase 08 execution started
-state_head: 8a80f160b1c6692c10d73668aed4caa2ff7709aa
+state_head: e49d2c24ec736279072e0dcb4c0355936c28220f
 progress:
   total_phases: 6
   completed_phases: 2
   total_plans: 39
-  completed_plans: 23
+  completed_plans: 24
   percent: 33
 ---
 
@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-09-05)
 ## Current Position
 
 Phase: 08 (Main-Thread Responsiveness) — EXECUTING
-Plan: 14 of 29
+Plan: 15 of 29
 Status: Ready to execute
 Last Activity Description: Phase 08 execution started
 Last activity: 2026-09-05 — Phase 08 execution started
@@ -120,6 +120,7 @@ Progress: [███░░░░░░░] 33%
 | Phase 08 P10 | 20 min | 2 tasks | 7 files |
 | Phase 08 P11 | 15min | 2 tasks | 7 files |
 | Phase 08 P12 | 23min | 2 tasks | 9 files |
+| Phase 08 P13 | 11min | 2 tasks | 9 files |
 
 ## Accumulated Context
 
@@ -247,6 +248,7 @@ Recent decisions affecting current work:
 - [Phase 08]: Plan10 isolates 34 Inbox/outbox/viewer/secret commands; batches retain original parents and settled siblings, local preparation suppresses sends and bytecode caches, and frontend lifetime closure remains Plans25/26.
 - [Phase 08]: Plan11 isolates all ten Today commands; complete alias-aware admission precedes Today locks and capture materialization borrows the outer lease. Plan12 must consume raw calendar/outbox/web-actions helper handoffs without nested admission.
 - [Phase 08]: Plan12 provider uncertainty is durable and manual-only: Plan26 must classify provider_outcome_unknown: and provider_succeeded_local_commit_failed: as external-result reconciliation, disable ordinary UI retry, and retain verified known-ID retry; unknown Upsert without ID is rejected by Rust.
+- [Phase 08]: Plan13 graph and cache commands share complete admission with borrowed snapshots and scanner consumers; catalog public scan owns its write lease. String error contracts remain unchanged; Plan25/26 owns final completion and stale-view UI.
 
 ### Pending Todos
 
@@ -283,8 +285,8 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-09-05T08:24:04.456Z
-Stopped at: Completed 08-12-PLAN.md; next Plan13 wave14; Plan26 must consume outcome-unknown and local-settlement marker UI and verified retry handoffs
+Last session: 2026-09-05T08:37:35.053Z
+Stopped at: Completed 08-13-PLAN.md; next Plan14 wave15; Plan25/26 graph/catalog completion and KG stale-toggle ownership pending; Plan26 provider reconciliation handoff preserved
 Resume file: None
 
 ## Operator Next Steps
