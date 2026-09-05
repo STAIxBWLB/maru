@@ -18,6 +18,8 @@
 //! documented follow-up (docs/hwp-editor.md) — deliberately not implemented
 //! here.
 
+#[cfg(test)]
+use crate::atomic_file::PathTransactionLease;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine as _;
 use serde::{Deserialize, Serialize};
@@ -648,9 +650,13 @@ pub async fn hwped_read(
     document: HwpedDocumentRef,
     workspace_root: Option<String>,
 ) -> Result<Value, String> {
-    tauri::async_runtime::spawn_blocking(move || read_now(document, workspace_root))
-        .await
-        .map_err(|err| format!("hwped_task_failed: {err}"))?
+    tauri::async_runtime::spawn_blocking(move || {
+        #[cfg(test)]
+        PathTransactionLease::test_stage(&[std::env::temp_dir()], "worker:hwped_read");
+        read_now(document, workspace_root)
+    })
+    .await
+    .map_err(|err| format!("hwped_task_failed: {err}"))?
 }
 
 #[tauri::command]
@@ -660,6 +666,8 @@ pub async fn hwped_render(
     workspace_root: Option<String>,
 ) -> Result<HwpedRenderResponse, String> {
     tauri::async_runtime::spawn_blocking(move || {
+        #[cfg(test)]
+        PathTransactionLease::test_stage(&[std::env::temp_dir()], "worker:hwped_render");
         render_now(document, options.unwrap_or_default(), workspace_root)
     })
     .await
@@ -675,6 +683,8 @@ pub async fn hwped_edit(
     workspace_root: Option<String>,
 ) -> Result<HwpedEditResponse, String> {
     tauri::async_runtime::spawn_blocking(move || {
+        #[cfg(test)]
+        PathTransactionLease::test_stage(&[std::env::temp_dir()], "worker:hwped_edit");
         edit_now(document, ops_argv, verify, allow_partial, workspace_root)
     })
     .await
@@ -683,9 +693,13 @@ pub async fn hwped_edit(
 
 #[tauri::command]
 pub async fn hwped_compose(spec: Value, name: String) -> Result<HwpedComposeResponse, String> {
-    tauri::async_runtime::spawn_blocking(move || compose_now(spec, name))
-        .await
-        .map_err(|err| format!("hwped_task_failed: {err}"))?
+    tauri::async_runtime::spawn_blocking(move || {
+        #[cfg(test)]
+        PathTransactionLease::test_stage(&[std::env::temp_dir()], "worker:hwped_compose");
+        compose_now(spec, name)
+    })
+    .await
+    .map_err(|err| format!("hwped_task_failed: {err}"))?
 }
 
 #[tauri::command]
@@ -693,16 +707,24 @@ pub async fn hwped_validate(
     document: HwpedDocumentRef,
     workspace_root: Option<String>,
 ) -> Result<HwpedValidationReport, String> {
-    tauri::async_runtime::spawn_blocking(move || validate_now(document, workspace_root))
-        .await
-        .map_err(|err| format!("hwped_task_failed: {err}"))?
+    tauri::async_runtime::spawn_blocking(move || {
+        #[cfg(test)]
+        PathTransactionLease::test_stage(&[std::env::temp_dir()], "worker:hwped_validate");
+        validate_now(document, workspace_root)
+    })
+    .await
+    .map_err(|err| format!("hwped_task_failed: {err}"))?
 }
 
 #[tauri::command]
 pub async fn hwped_capabilities() -> Result<HwpedCapabilities, String> {
-    tauri::async_runtime::spawn_blocking(capabilities_now)
-        .await
-        .map_err(|err| format!("hwped_task_failed: {err}"))?
+    tauri::async_runtime::spawn_blocking(move || {
+        #[cfg(test)]
+        PathTransactionLease::test_stage(&[std::env::temp_dir()], "worker:hwped_capabilities");
+        capabilities_now()
+    })
+    .await
+    .map_err(|err| format!("hwped_task_failed: {err}"))?
 }
 
 #[cfg(test)]
@@ -796,5 +818,288 @@ mod tests {
         png[16..20].copy_from_slice(&595u32.to_be_bytes());
         png[20..24].copy_from_slice(&842u32.to_be_bytes());
         assert_eq!(png_size(&png), Some((595, 842)));
+    }
+}
+
+/// Serializes the MARU_HWP_BIN / MARU_HWPX_BIN fixture overrides across every
+/// phase08_21 module so parallel tests never observe each other's binaries.
+#[cfg(test)]
+pub(crate) static PHASE08_21_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+#[cfg(test)]
+mod phase08_21 {
+    use super::*;
+    use crate::atomic_file::phase08_06::run;
+    use std::path::{Path, PathBuf};
+    use std::sync::MutexGuard;
+    use std::time::Duration;
+
+    /// hwped wrappers all map worker failures to the shared `hwped_task_failed:`
+    /// prefix, so the stock `boundary` helper's per-command assertion does not
+    /// apply. Mirrors it otherwise, staging `worker:{command}` per wrapper.
+    fn boundary_hwped<F, T>(path: PathBuf, command: &str, future: F)
+    where
+        F: std::future::Future<Output = Result<T, String>> + Send + 'static,
+        T: Send + 'static,
+    {
+        use crate::atomic_file::PathTransactionTestHook;
+        use std::sync::{mpsc, Mutex};
+
+        let (entered_tx, mut entered_rx) = tauri::async_runtime::channel(1);
+        let (release_tx, release_rx) = mpsc::channel();
+        let release_rx = Mutex::new(release_rx);
+        let _hook = PathTransactionTestHook::new(path, &format!("worker:{command}"), move || {
+            entered_tx
+                .blocking_send(std::thread::current().id())
+                .unwrap();
+            release_rx
+                .lock()
+                .unwrap()
+                .recv_timeout(Duration::from_secs(5))
+                .unwrap();
+            panic!("fixture worker failure");
+        });
+        run(async move {
+            let caller = std::thread::current().id();
+            let mut future = Box::pin(future);
+            assert!(
+                std::future::poll_fn(|cx| std::task::Poll::Ready(future.as_mut().poll(cx)))
+                    .await
+                    .is_pending()
+            );
+            let worker = entered_rx.recv().await.unwrap();
+            let mut yielded = false;
+            std::future::poll_fn(|cx| {
+                if yielded {
+                    std::task::Poll::Ready(())
+                } else {
+                    yielded = true;
+                    cx.waker().wake_by_ref();
+                    std::task::Poll::Pending
+                }
+            })
+            .await;
+            assert_ne!(worker, caller);
+            release_tx.send(()).unwrap();
+            assert!(matches!(future.await, Err(error) if error.starts_with("hwped_task_failed:")));
+        });
+    }
+
+    struct EnvGuard {
+        _lock: MutexGuard<'static, ()>,
+        key: &'static str,
+    }
+    impl EnvGuard {
+        fn set(key: &'static str, value: &Path) -> Self {
+            let guard = super::PHASE08_21_ENV_LOCK
+                .lock()
+                .unwrap_or_else(|poison| poison.into_inner());
+            std::env::set_var(key, value);
+            Self { _lock: guard, key }
+        }
+    }
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            std::env::remove_var(self.key);
+        }
+    }
+
+    fn text(path: &Path) -> String {
+        path.to_string_lossy().into_owned()
+    }
+
+    fn doc_with_path(path: &str) -> HwpedDocumentRef {
+        HwpedDocumentRef {
+            name: "문서.hwpx".to_string(),
+            path: Some(path.to_string()),
+            data_base64: None,
+        }
+    }
+
+    /// Fake hwp-cli >= 0.8.7: version probe plus every subcommand the six
+    /// wrappers spawn, with fixed argv parsing (no shell interpolation).
+    #[cfg(unix)]
+    fn fake_hwp(dir: &Path) -> PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+
+        let binary = dir.join("hwp");
+        let script = r#"#!/bin/sh
+case "$1" in
+  --version) echo "hwp 0.9.0" ;;
+  cat) echo '{"title":"문서","segments":[{"text":"본문"}]}' ;;
+  render)
+    out=""; report=""
+    while [ "$#" -gt 0 ]; do
+      if [ "$1" = "-o" ]; then shift; out="$1"; fi
+      if [ "$1" = "--report" ]; then shift; report="$1"; fi
+      shift
+    done
+    [ -n "$out" ] && [ -n "$report" ] || exit 2
+    printf '<svg width="100pt" height="50pt"></svg>' > "$out"
+    printf '{"selected_pages":[1]}' > "$report" ;;
+  edit)
+    out=""
+    while [ "$#" -gt 0 ]; do
+      if [ "$1" = "-o" ]; then shift; out="$1"; fi
+      shift
+    done
+    [ -n "$out" ] || exit 2
+    printf 'edited' > "$out" ;;
+  compose)
+    out=""
+    while [ "$#" -gt 0 ]; do
+      if [ "$1" = "-o" ]; then shift; out="$1"; fi
+      shift
+    done
+    [ -n "$out" ] || exit 2
+    printf 'composed' > "$out"
+    printf '{"report":true}' ;;
+  validate) printf '{"valid":true,"errors":[]}' ;;
+  *) exit 2 ;;
+esac
+"#;
+        std::fs::write(&binary, script).unwrap();
+        let mut permissions = std::fs::metadata(&binary).unwrap().permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(&binary, permissions).unwrap();
+        binary
+    }
+
+    #[test]
+    fn phase08_21_hwped_each_wrapper_yields_same_poll_and_maps_join_failure() {
+        boundary_hwped(
+            std::env::temp_dir(),
+            "hwped_read",
+            hwped_read(doc_with_path("docs/a.hwpx"), Some("/tmp".to_string())),
+        );
+        boundary_hwped(
+            std::env::temp_dir(),
+            "hwped_render",
+            hwped_render(doc_with_path("docs/a.hwpx"), None, Some("/tmp".to_string())),
+        );
+        boundary_hwped(
+            std::env::temp_dir(),
+            "hwped_edit",
+            hwped_edit(
+                doc_with_path("docs/a.hwpx"),
+                vec!["--replace".to_string(), "x".to_string()],
+                None,
+                None,
+                Some("/tmp".to_string()),
+            ),
+        );
+        boundary_hwped(
+            std::env::temp_dir(),
+            "hwped_compose",
+            hwped_compose(serde_json::json!({"pages": []}), "보고서".to_string()),
+        );
+        boundary_hwped(
+            std::env::temp_dir(),
+            "hwped_validate",
+            hwped_validate(doc_with_path("docs/a.hwpx"), Some("/tmp".to_string())),
+        );
+        boundary_hwped(
+            std::env::temp_dir(),
+            "hwped_capabilities",
+            hwped_capabilities(),
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn phase08_21_hwped_real_fixture_results_and_legacy_rejections() {
+        let home = crate::atomic_file::phase08_06::Home::new();
+        let root = home.root.path().join("work");
+        std::fs::create_dir_all(root.join("docs")).unwrap();
+        std::fs::write(root.join("docs/a.hwpx"), b"doc").unwrap();
+        let bin_dir = home.root.path().join("bin");
+        std::fs::create_dir_all(&bin_dir).unwrap();
+        let _env = EnvGuard::set("MARU_HWP_BIN", &fake_hwp(&bin_dir));
+        let work = text(&root);
+
+        let read = run(hwped_read(doc_with_path("docs/a.hwpx"), Some(work.clone()))).unwrap();
+        assert_eq!(read["title"], serde_json::json!("문서"));
+
+        let rendered = run(hwped_render(
+            doc_with_path("docs/a.hwpx"),
+            None,
+            Some(work.clone()),
+        ))
+        .unwrap();
+        assert_eq!(rendered.pages.len(), 1);
+        assert_eq!(rendered.pages[0].width, 100);
+        assert_eq!(rendered.pages[0].height, 50);
+        assert_eq!(rendered.pages[0].format, "svg");
+
+        let edited = run(hwped_edit(
+            doc_with_path("docs/a.hwpx"),
+            vec!["--replace".to_string(), "본문".to_string()],
+            None,
+            None,
+            Some(work.clone()),
+        ))
+        .unwrap();
+        assert_eq!(
+            BASE64.decode(edited.data_base64).unwrap(),
+            b"edited".to_vec()
+        );
+
+        let composed = run(hwped_compose(
+            serde_json::json!({"sections": []}),
+            "보고서".to_string(),
+        ))
+        .unwrap();
+        assert_eq!(composed.name, "보고서.hwpx");
+        assert_eq!(
+            BASE64.decode(composed.data_base64).unwrap(),
+            b"composed".to_vec()
+        );
+        assert!(composed.report.is_some());
+
+        let validated = run(hwped_validate(
+            doc_with_path("docs/a.hwpx"),
+            Some(work.clone()),
+        ))
+        .unwrap();
+        assert!(validated.valid);
+        assert!(validated.errors.is_empty());
+
+        let capabilities = run(hwped_capabilities()).unwrap();
+        assert_eq!(capabilities.version, "0.9.0");
+        assert!(capabilities.editable);
+
+        assert!(run(hwped_edit(
+            doc_with_path("docs/a.hwpx"),
+            vec!["--replace".to_string()],
+            None,
+            None,
+            Some(work.clone()),
+        ))
+        .unwrap_err()
+        .contains("hwped_bad_request: opsArgv must be --flag value pairs"));
+        assert!(run(hwped_render(
+            doc_with_path("docs/a.hwpx"),
+            Some(HwpedRenderOptions {
+                pages: None,
+                dpi: None,
+                format: Some("pdf".to_string()),
+            }),
+            Some(work.clone()),
+        ))
+        .unwrap_err()
+        .contains("hwped_bad_request"));
+        assert!(run(hwped_compose(serde_json::json!({}), "  ".to_string()))
+            .unwrap_err()
+            .contains("hwped_bad_request: compose requires a non-empty name"));
+        assert!(run(hwped_read(
+            HwpedDocumentRef {
+                name: "a.hwpx".to_string(),
+                path: Some("../outside.hwpx".to_string()),
+                data_base64: None,
+            },
+            Some(work),
+        ))
+        .unwrap_err()
+        .contains("hwped_bad_request"));
     }
 }

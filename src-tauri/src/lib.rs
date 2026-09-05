@@ -107,13 +107,14 @@ use diagram::ipc::{
 };
 use dot_sync::{dot_sync_overview, dot_sync_run};
 use e2e_flow::{maru_e2e_read, maru_e2e_run};
-use export::{export_dispatch, export_plan, export_validate};
+use export::dispatch::ipc::export_dispatch;
+use export::ipc::{export_plan, export_validate};
 use gmail_gws::check_gws_auth;
 use html_editor::prepare_html_editor_assets;
 use hub_client::ipc::{
     hub_fetch_catalog, hub_poll_gate, hub_queue_drain, hub_status, hub_submit_gate,
 };
-use hwp_cli_template::{hwp_cli_template_fields, hwp_cli_template_fill};
+use hwp_cli_template::ipc::{hwp_cli_template_fields, hwp_cli_template_fill};
 use hwped::{
     hwped_capabilities, hwped_compose, hwped_edit, hwped_read, hwped_render, hwped_validate,
 };
@@ -157,7 +158,7 @@ use studio::ipc::{
 use tauri::Manager;
 use telegram_config::{read_telegram_monitor_config, save_telegram_monitor_config};
 use telegram_io::{check_telegram_auth, stop_poller_on_exit, TelegramIoState};
-use template_fill::{template_fill_hwpx, template_get_fields, template_prepare_hwpx_template};
+use template_fill::ipc::{template_fill_hwpx, template_get_fields, template_prepare_hwpx_template};
 use terminal::TerminalState;
 use terminal_hooks::{start_terminal_hook_watcher, TerminalHookWatcherState};
 use today_notify::today_notify_new_day;

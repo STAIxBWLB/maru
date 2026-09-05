@@ -11,6 +11,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
+use crate::atomic_file::{with_path_transactions, PathTransactionLease, PathTransactionRequest};
 use crate::win_process::NoWindow;
 
 use super::manifest::{
@@ -46,7 +47,6 @@ pub struct ExportDispatchResponse {
     pub results: Vec<ExportDispatchResult>,
 }
 
-#[tauri::command]
 pub fn export_dispatch(req: ExportDispatchRequest) -> Result<ExportDispatchResponse, String> {
     dispatch_bundle(
         &PathBuf::from(req.workspace_root),
@@ -56,57 +56,126 @@ pub fn export_dispatch(req: ExportDispatchRequest) -> Result<ExportDispatchRespo
     .map_err(|err| err.to_string())
 }
 
+/// The complete admitted write set for one dispatch: the manifest and every
+/// selected output path, converted to absolute lexical form.
+struct DispatchPlan {
+    workspace_root: PathBuf,
+    manifest_path: PathBuf,
+    formats: Vec<ExportFormat>,
+    output_paths: Vec<PathBuf>,
+}
+
+impl DispatchPlan {
+    fn load(
+        workspace_root: &Path,
+        manifest_path: &Path,
+        requested_formats: &[String],
+    ) -> io::Result<Self> {
+        let workspace_root = absolute_lexical(workspace_root);
+        let manifest_path = absolute_lexical(manifest_path);
+        let manifest = load_manifest(&manifest_path)?;
+        let formats = select_formats(&manifest, requested_formats)?;
+        let output_paths = formats
+            .iter()
+            .map(|format| output_path_for(&workspace_root, &manifest, *format))
+            .collect::<io::Result<Vec<_>>>()?;
+        Ok(Self {
+            workspace_root,
+            manifest_path,
+            formats,
+            output_paths,
+        })
+    }
+
+    fn admission_paths(&self) -> Vec<PathBuf> {
+        std::iter::once(self.manifest_path.clone())
+            .chain(self.output_paths.iter().cloned())
+            .collect()
+    }
+}
+
+fn absolute_lexical(path: &Path) -> PathBuf {
+    let joined = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir()
+            .unwrap_or_else(|_| PathBuf::from("."))
+            .join(path)
+    };
+    crate::vault::lexical_normalize(&joined)
+}
+
 pub fn dispatch_bundle(
     workspace_root: &Path,
     manifest_path: &Path,
     requested_formats: &[String],
 ) -> io::Result<ExportDispatchResponse> {
-    let mut manifest = load_manifest(manifest_path)?;
-    let formats = select_formats(&manifest, requested_formats)?;
-    let source_abs = workspace_root.join(&manifest.source);
+    let plan = DispatchPlan::load(workspace_root, manifest_path, requested_formats)?;
+    let request = PathTransactionRequest::new(plan.admission_paths())
+        .and_then(|request| request.require_parent(&plan.workspace_root))
+        .and_then(PathTransactionRequest::with_workspace_registry)
+        .map_err(io::Error::other)?;
+    with_path_transactions(request, |lease| {
+        lease.ensure_workspace_registry()?;
+        lease.ensure_covered(plan.admission_paths())?;
+        lease.before_effect()?;
+        dispatch_bundle_in_transaction(&plan, lease).map_err(|err| err.to_string())
+    })
+    .map_err(io::Error::other)
+}
+
+fn dispatch_bundle_in_transaction(
+    plan: &DispatchPlan,
+    lease: &PathTransactionLease,
+) -> io::Result<ExportDispatchResponse> {
+    let mut manifest = load_manifest(&plan.manifest_path)?;
+    let source_abs = plan.workspace_root.join(&manifest.source);
     let mut results = Vec::new();
 
     if source_changed(&source_abs, &manifest)? {
-        for format in formats {
-            let output_path = output_path_for(workspace_root, &manifest, format)?;
+        for (format, output_path) in plan.formats.iter().zip(&plan.output_paths) {
             let reason = "source sha256 changed; re-plan the export bundle".to_string();
-            manifest = record_output_failure(manifest_path, format, &reason)?;
+            manifest = record_output_failure(&plan.manifest_path, *format, &reason)?;
             results.push(ExportDispatchResult {
-                format,
+                format: *format,
                 output_path: output_path.to_string_lossy().to_string(),
                 success: false,
                 command: "preflight".to_string(),
                 reason: Some(reason),
             });
         }
-        let validation = validate_manifest(manifest_path)?;
+        let validation = validate_manifest(&plan.manifest_path)?;
         return Ok(ExportDispatchResponse {
-            manifest_path: manifest_path.to_string_lossy().to_string(),
+            manifest_path: plan.manifest_path.to_string_lossy().to_string(),
             manifest,
             validation,
             results,
         });
     }
 
-    for format in formats {
-        manifest = record_output_pending(manifest_path, format)?;
-        let output_path = output_path_for(workspace_root, &manifest, format)?;
+    for (format, output_path) in plan.formats.iter().zip(&plan.output_paths) {
+        lease
+            .ensure_covered(std::iter::once(output_path.clone()))
+            .map_err(io::Error::other)?;
+        manifest = record_output_pending(&plan.manifest_path, *format)?;
         if let Some(parent) = output_path.parent() {
             std::fs::create_dir_all(parent)?;
         }
 
         let run = match format {
-            ExportFormat::Docx => convert_docx(&source_abs, &output_path),
-            ExportFormat::Hwpx => convert_hwpx(&source_abs, &output_path),
-            ExportFormat::Pdf => convert_pdf(workspace_root, &manifest, &source_abs, &output_path),
+            ExportFormat::Docx => convert_docx(&source_abs, output_path),
+            ExportFormat::Hwpx => convert_hwpx(&source_abs, output_path),
+            ExportFormat::Pdf => {
+                convert_pdf(&plan.workspace_root, &manifest, &source_abs, output_path)
+            }
         };
 
         let command_label = run.command;
         match run.result {
             Ok(()) if output_path.exists() => {
-                let _ = record_output_success(manifest_path, format, &output_path)?;
+                let _ = record_output_success(&plan.manifest_path, *format, output_path)?;
                 results.push(ExportDispatchResult {
-                    format,
+                    format: *format,
                     output_path: output_path.to_string_lossy().to_string(),
                     success: true,
                     command: command_label,
@@ -118,9 +187,9 @@ pub fn dispatch_bundle(
                     "converter finished but output is missing: {}",
                     output_path.display()
                 );
-                let _ = record_output_failure(manifest_path, format, &reason)?;
+                let _ = record_output_failure(&plan.manifest_path, *format, &reason)?;
                 results.push(ExportDispatchResult {
-                    format,
+                    format: *format,
                     output_path: output_path.to_string_lossy().to_string(),
                     success: false,
                     command: command_label,
@@ -129,9 +198,9 @@ pub fn dispatch_bundle(
             }
             Err(err) => {
                 let reason = err.to_string();
-                let _ = record_output_failure(manifest_path, format, &reason)?;
+                let _ = record_output_failure(&plan.manifest_path, *format, &reason)?;
                 results.push(ExportDispatchResult {
-                    format,
+                    format: *format,
                     output_path: output_path.to_string_lossy().to_string(),
                     success: false,
                     command: command_label,
@@ -141,10 +210,10 @@ pub fn dispatch_bundle(
         }
     }
 
-    let manifest = load_manifest(manifest_path)?;
-    let validation = validate_manifest(manifest_path)?;
+    let manifest = load_manifest(&plan.manifest_path)?;
+    let validation = validate_manifest(&plan.manifest_path)?;
     Ok(ExportDispatchResponse {
-        manifest_path: manifest_path.to_string_lossy().to_string(),
+        manifest_path: plan.manifest_path.to_string_lossy().to_string(),
         manifest,
         validation,
         results,
@@ -411,6 +480,26 @@ fn not_found(program: &str) -> io::Error {
     )
 }
 
+/// Owned IPC boundary; the synchronous entry point remains available to Rust callers.
+pub mod ipc {
+    use super::*;
+    #[tauri::command]
+    pub async fn export_dispatch(
+        req: ExportDispatchRequest,
+    ) -> Result<ExportDispatchResponse, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(
+                &[PathBuf::from(&req.workspace_root)],
+                "worker:export_dispatch",
+            );
+            super::export_dispatch(req)
+        })
+        .await
+        .map_err(|err| format!("export_dispatch_task_failed: {err}"))?
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::manifest::{plan_bundle, ExportFormat, ExportOutputStatus};
@@ -461,5 +550,203 @@ mod tests {
         let (tmp, _source, manifest_path) = setup_workspace();
         let err = dispatch_bundle(tmp.path(), &manifest_path, &[String::from("pdf")]).unwrap_err();
         assert_eq!(err.kind(), io::ErrorKind::NotFound);
+    }
+}
+
+#[cfg(test)]
+mod phase08_21 {
+    use super::*;
+    use crate::atomic_file::phase08_06::{boundary, run, Held, Home};
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    fn text(path: &Path) -> String {
+        path.to_string_lossy().into_owned()
+    }
+
+    fn plan_request(root: &Path) -> ExportDispatchRequest {
+        ExportDispatchRequest {
+            workspace_root: text(root),
+            manifest_path: text(&root.join("draft.exports/manifest.yaml")),
+            formats: Vec::new(),
+        }
+    }
+
+    fn setup_workspace(home: &Home) -> PathBuf {
+        let root = home.root.path().join("work");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("draft.md"), "# Title\n\nbody\n").unwrap();
+        root
+    }
+
+    fn start<F, T>(future: F) -> mpsc::Receiver<T>
+    where
+        F: std::future::Future<Output = T> + Send + 'static,
+        T: Send + 'static,
+    {
+        let (tx, rx) = mpsc::channel();
+        tauri::async_runtime::spawn(async move {
+            let _ = tx.send(future.await);
+        });
+        rx
+    }
+
+    fn done<T>(rx: mpsc::Receiver<T>) -> T {
+        rx.recv_timeout(Duration::from_secs(10))
+            .expect("export fixture completion")
+    }
+
+    #[test]
+    fn phase08_21_export_dispatch_yields_same_poll_and_maps_join_failure() {
+        let home = Home::new();
+        let root = home.root.path();
+        boundary(
+            root.into(),
+            "export_dispatch",
+            ipc::export_dispatch(ExportDispatchRequest {
+                workspace_root: text(root),
+                manifest_path: text(&root.join("draft.exports/manifest.yaml")),
+                formats: Vec::new(),
+            }),
+        );
+    }
+
+    #[test]
+    fn phase08_21_export_dispatch_real_fixture_and_legacy_rejections() {
+        let home = Home::new();
+        let root = setup_workspace(&home);
+        let planned = run(crate::export::ipc::export_plan(
+            crate::export::ExportPlanRequest {
+                workspace_root: text(&root),
+                source_path: "draft.md".to_string(),
+                formats: vec!["docx".to_string()],
+                output_dir: None,
+            },
+        ))
+        .unwrap();
+        assert!(PathBuf::from(&planned.manifest_path).is_file());
+
+        let response = run(ipc::export_dispatch(plan_request(&root))).unwrap();
+        assert_eq!(response.results.len(), 1);
+        assert_eq!(response.results[0].format, ExportFormat::Docx);
+        let docx = response
+            .manifest
+            .outputs
+            .iter()
+            .find(|entry| entry.format == ExportFormat::Docx)
+            .unwrap();
+        assert_ne!(
+            docx.status,
+            super::super::manifest::ExportOutputStatus::Planned
+        );
+
+        // Source edit triggers the deterministic preflight failure path.
+        std::fs::write(root.join("draft.md"), "# Title\n\nedited\n").unwrap();
+        let response = run(ipc::export_dispatch(plan_request(&root))).unwrap();
+        assert_eq!(response.results.len(), 1);
+        assert!(!response.results[0].success);
+        assert!(response.results[0]
+            .reason
+            .as_deref()
+            .unwrap_or_default()
+            .contains("source sha256 changed"));
+
+        let err = run(ipc::export_dispatch(ExportDispatchRequest {
+            workspace_root: text(&root),
+            manifest_path: text(&root.join("draft.exports/manifest.yaml")),
+            formats: vec!["md".to_string()],
+        }))
+        .unwrap_err();
+        assert!(err.contains("unsupported format: md"), "{err}");
+
+        let err = run(ipc::export_dispatch(ExportDispatchRequest {
+            workspace_root: text(&root),
+            manifest_path: text(&root.join("draft.exports/manifest.yaml")),
+            formats: vec!["pdf".to_string()],
+        }))
+        .unwrap_err();
+        assert!(
+            err.contains("manifest has no entry for format Pdf"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn phase08_21_export_plan_dispatch_serialize_manifest_both_orders() {
+        let home = Home::new();
+        for plan_first in [false, true] {
+            let root = setup_workspace(&home);
+            run(crate::export::ipc::export_plan(
+                crate::export::ExportPlanRequest {
+                    workspace_root: text(&root),
+                    source_path: "draft.md".to_string(),
+                    formats: vec!["docx".to_string()],
+                    output_dir: None,
+                },
+            ))
+            .unwrap();
+            let manifest = root.join("draft.exports/manifest.yaml");
+            if plan_first {
+                let held = Held::new(manifest.clone(), "admitted");
+                let first = start(crate::export::ipc::export_plan(
+                    crate::export::ExportPlanRequest {
+                        workspace_root: text(&root),
+                        source_path: "draft.md".to_string(),
+                        formats: vec!["docx".to_string()],
+                        output_dir: None,
+                    },
+                ));
+                held.wait();
+                let waiting = Held::new(manifest.clone(), "before-admission");
+                let second = start(ipc::export_dispatch(plan_request(&root)));
+                waiting.wait();
+                waiting.release();
+                assert!(second.recv_timeout(Duration::from_millis(30)).is_err());
+                held.release();
+                done(first).unwrap();
+                done(second).unwrap();
+                // Dispatch ran last: the entry left the planned state.
+                let docx = load_manifest(&manifest)
+                    .unwrap()
+                    .outputs
+                    .into_iter()
+                    .find(|entry| entry.format == ExportFormat::Docx)
+                    .unwrap();
+                assert_ne!(
+                    docx.status,
+                    super::super::manifest::ExportOutputStatus::Planned
+                );
+            } else {
+                let held = Held::new(manifest.clone(), "admitted");
+                let first = start(ipc::export_dispatch(plan_request(&root)));
+                held.wait();
+                let waiting = Held::new(manifest.clone(), "before-admission");
+                let second = start(crate::export::ipc::export_plan(
+                    crate::export::ExportPlanRequest {
+                        workspace_root: text(&root),
+                        source_path: "draft.md".to_string(),
+                        formats: vec!["docx".to_string()],
+                        output_dir: None,
+                    },
+                ));
+                waiting.wait();
+                waiting.release();
+                assert!(second.recv_timeout(Duration::from_millis(30)).is_err());
+                held.release();
+                done(first).unwrap();
+                done(second).unwrap();
+                // The re-plan ran last and restored the planned baseline.
+                let docx = load_manifest(&manifest)
+                    .unwrap()
+                    .outputs
+                    .into_iter()
+                    .find(|entry| entry.format == ExportFormat::Docx)
+                    .unwrap();
+                assert_eq!(
+                    docx.status,
+                    super::super::manifest::ExportOutputStatus::Planned
+                );
+            }
+        }
     }
 }
