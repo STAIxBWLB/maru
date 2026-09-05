@@ -4,17 +4,17 @@ milestone: v1.1
 milestone_name: Felt Quality and Native Proof
 current_phase: 7
 current_phase_name: Guardrails Before Churn
-status: executing
-stopped_at: Completed 07-04-PLAN.md
-last_updated: "2026-09-05T01:09:18.569Z"
+status: verifying
+stopped_at: Completed 07-05-PLAN.md
+last_updated: "2026-09-05T01:18:39.707Z"
 last_activity: 2026-09-05
 last_activity_desc: Phase 7 execution started
-state_head: 30c4f3ffc2e813d210af799e871e132c8064382a
+state_head: 424e87e821fc46ee57230ad2e0bedbff7446cfa5
 progress:
   total_phases: 6
   completed_phases: 1
   total_plans: 10
-  completed_plans: 9
+  completed_plans: 10
   percent: 17
 ---
 
@@ -31,7 +31,7 @@ See: .planning/PROJECT.md (updated 2026-08-28)
 
 Phase: 7 (Guardrails Before Churn) — EXECUTING
 Plan: 5 of 5
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-09-05 — Phase 7 execution started
 
 Progress: [██░░░░░░░░] 17%
@@ -104,6 +104,7 @@ Progress: [██░░░░░░░░] 17%
 | Phase 07 P02 | 11min | 3 tasks | 7 files |
 | Phase 07 P03 | 5min | 3 tasks | 6 files |
 | Phase 07-guardrails-before-churn P04 | 15min | 2 tasks | 1 files |
+| Phase 07-guardrails-before-churn P05 | 6min | 2 tasks | 10 files |
 
 ## Accumulated Context
 
@@ -216,6 +217,8 @@ Recent decisions affecting current work:
 - [Phase 7]: 07-04: the fail-open behavior test (scan_vault_fails_open_when_inbox_root_unresolvable) passes in RED by design — fail-open is the status quo before the resolver exists; documented per the TDD fail-fast protocol
 - [Phase 7]: 07-04: Task 2 (scan_vault_paths containment) carries no separate RED commit — its test depends on the Task 1 tracer-proven shared-list resolver; the tracer gate (#3299 row 3) verified end-to-end green before expansion
 - [Phase 7]: 07-04: PERF-06 NOT marked complete in REQUIREMENTS.md — the shared-ID gate (#2388) blocks it because sibling plan 07-05 also declares PERF-06 and has no SUMMARY yet; an initial mark-complete was reverted after ready-ids returned 0/1
+- [Phase 07-guardrails-before-churn]: 07-05: outlinePaneStore empty-slice inbox key and test fixtures retired in Task 1, not Task 2 — the narrowed union made them typecheck errors, so the tracer gate could not pass otherwise; same prescribed edits, earlier commit slot
+- [Phase 07-guardrails-before-churn]: 07-05: persisted built-in view filters reset to All silently inside the existing pruneCustomDocumentFiltersInState pass via BUILT_IN_DOCUMENT_VIEWS/isBuiltInDocumentView — no signature change to the MainApp call site
 
 ### Pending Todos
 
@@ -252,8 +255,8 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-09-05T01:08:15.131Z
-Stopped at: Completed 07-04-PLAN.md
+Last session: 2026-09-05T01:18:39.676Z
+Stopped at: Completed 07-05-PLAN.md
 Resume file: None
 
 ## Operator Next Steps
