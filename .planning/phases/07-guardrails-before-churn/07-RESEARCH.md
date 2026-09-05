@@ -367,22 +367,24 @@ Allowlisted helper origins (verbatim):
 
 **If A1-A5 resolve as expected:** no user confirmation needed; all are planner-level details.
 
-## Open Questions
+## Open Questions (RESOLVED)
 
-1. **HwpxViewer extraction name and registration**
-   - What we know: the inline sanitize must become a named function to satisfy D-08 (Pitfall 4).
-   - What's unclear: the planner's preferred name and whether it should be exported (consumed by the guard's pair registry as `"sanitizeHwpxPreviewHtml"`) or module-private (registration still names it).
-   - Recommendation: export it; the existing helper modules all export theirs, and export makes the registration verifiable from the guard script.
+All three questions were resolved during planning; resolutions are recorded inline.
 
-2. **Whether `make verify` ordering matters for the new guard**
-   - What we know: `verify` chains ~12 targets (Makefile:354-355); check-select-chrome and check-type-tokens run after lint-i18n, before tests.
-   - What's unclear: whether the SEC-02 guard should run early (cheap static, fail fast) or alongside the other static guards.
-   - Recommendation: place it adjacent to `check-select-chrome` — same cost class, same "static guard" semantic, and the family is already grouped there.
+1. **HwpxViewer extraction name and registration** — RESOLVED in 07-01 (Task 1): the helper is exported as `sanitizeHwpxPreviewHtml(html: string): string` at module level in `src/components/binaryViewers/HwpxViewer.tsx`, mirroring `src/lib/diagram/richText.ts:20-26`, and registered as the (`src/components/binaryViewers/HwpxViewer.tsx`, `sanitizeHwpxPreviewHtml`) pair in the guard's `REGISTERED_LOCAL_HELPERS` (D-08). Export chosen over module-private, per the recommendation.
+   - What we knew: the inline sanitize must become a named function to satisfy D-08 (Pitfall 4).
+   - What was unclear: the planner's preferred name and whether it should be exported (consumed by the guard's pair registry as `"sanitizeHwpxPreviewHtml"`) or module-private (registration still names it).
+   - Recommendation (adopted): export it; the existing helper modules all export theirs, and export makes the registration verifiable from the guard script.
 
-3. **Inbox view removal blast radius beyond the three located sites**
-   - What we know: `BuiltInDocumentView` union (documentIndex.ts:5), its `case "inbox"` (:273-274), Sidebar `builtInViews` (:88-97), App.tsx:1303 count badge.
-   - What's unclear: whether persisted workspace state (`documentFilterByVisibility` in workspaceStore.ts, `pruneCustomDocumentFiltersInState`) can hold `{ kind: "view", view: "inbox" }` across the removal and needs a prune/migration path; outlinePaneStore.test.ts:168,176 show the inbox filter shape in tests.
-   - Recommendation: plan a task that resets a persisted `view: "inbox"` filter to the all-documents default on load (fail-open), plus updates the two test references. The planner should read workspaceStore.ts:212-232 before writing this task.
+2. **Whether `make verify` ordering matters for the new guard** — RESOLVED in 07-01 (Task 2): the `check-dom-sanitizer` target is placed immediately after `check-select-chrome` (adjacent in the target block and in the `verify` prerequisite list at Makefile:355), same cost class and same static-guard semantics.
+   - What we knew: `verify` chains ~12 targets (Makefile:354-355); check-select-chrome and check-type-tokens run after lint-i18n, before tests.
+   - What was unclear: whether the SEC-02 guard should run early (cheap static, fail fast) or alongside the other static guards.
+   - Recommendation (adopted): place it adjacent to `check-select-chrome` — same cost class, same "static guard" semantic, and the family is already grouped there.
+
+3. **Inbox view removal blast radius beyond the three located sites** — RESOLVED in 07-05 (Task 2): `pruneCustomDocumentFiltersInState` is extended to reset a persisted `{ kind: "view", view: "inbox" }` filter (any built-in view outside the narrowed union) to `{ kind: "all" }` per visibility, silently, in the same pass as the existing custom-view prune; the two `outlinePaneStore.test.ts` fixture references move to `drafts`. workspaceStore.ts:212-240 was read before writing the task, per the recommendation.
+   - What we knew: `BuiltInDocumentView` union (documentIndex.ts:5), its `case "inbox"` (:273-274), Sidebar `builtInViews` (:88-97), App.tsx:1303 count badge.
+   - What was unclear: whether persisted workspace state (`documentFilterByVisibility` in workspaceStore.ts, `pruneCustomDocumentFiltersInState`) can hold `{ kind: "view", view: "inbox" }` across the removal and needs a prune/migration path; outlinePaneStore.test.ts:168,176 show the inbox filter shape in tests.
+   - Recommendation (adopted): plan a task that resets a persisted `view: "inbox"` filter to the all-documents default on load (fail-open), plus updates the two test references.
 
 ## Environment Availability
 
