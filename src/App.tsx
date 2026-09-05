@@ -192,7 +192,6 @@ import {
   exportDispatch,
   exportPlan,
   exportValidate,
-  summarizeDispatch,
   summarizeValidation,
   type ExportFormat,
 } from "./lib/export";
@@ -1080,6 +1079,20 @@ export function MainApp() {
   // entry in the meantime. Only the latest call wins.
   const selectRequestRef = useRef(0);
   const loadWorkspaceRequestRef = useRef(0);
+  // View-admission guard for user-started processing completions (D-04). Each
+  // handler captures its initiating workspace plus the current generation
+  // before invoking an owned operation; post-completion setters and refreshes
+  // run only while both still match. Starting a newer request in any
+  // workspace invalidates older tickets, so A -> B -> A never admits the
+  // stale A result once the user starts anything new.
+  const processingAdmissionRef = useRef({ workspace: "", generation: 0 });
+  const beginProcessingAdmission = useCallback((workspace: string) => {
+    const generation = ++processingAdmissionRef.current.generation;
+    processingAdmissionRef.current = { workspace, generation };
+    return () =>
+      processingAdmissionRef.current.workspace === workspace &&
+      processingAdmissionRef.current.generation === generation;
+  }, []);
   // Holds the discarded draft + entry when the user switches away from a
   // dirty document. Surfaces a "Restore" toast button — non-blocking
   // alternative to window.confirm (which Tauri webview suppresses).
@@ -2969,23 +2982,29 @@ export function MainApp() {
         payloadPreview: id,
       });
       if (!approvalId) return;
+      const workspace = inboxWorkspacePath;
+      const isCurrent = beginProcessingAdmission(workspace);
       setInboxActionBusy(true);
       setError(null);
       try {
         const outcome =
           decision === "accepted"
-            ? await acceptInboxItem(inboxWorkspacePath, id, targetFolder ?? "", approvalId)
-            : await rejectInboxItem(inboxWorkspacePath, id, approvalId);
-        if (!outcome.ok) throw new Error(outcome.error ?? "Inbox decision failed.");
-        updateInboxCarry(id, { decision });
-        void refreshInbox();
-      } catch (err) {
-        setError(agentErrorMessage(err, t));
+            ? await acceptInboxItem(workspace, id, targetFolder ?? "", approvalId)
+            : await rejectInboxItem(workspace, id, approvalId);
+        // The api.ts wrapper owns the terminal notice for both fulfilled
+        // !outcome.ok payloads and rejections; this branch only maintains
+        // admitted detail state.
+        if (outcome.ok && isCurrent()) {
+          updateInboxCarry(id, { decision });
+          void refreshInbox();
+        }
+      } catch {
+        // Owned by the operation wrapper; no second toast from the component.
       } finally {
         setInboxActionBusy(false);
       }
     },
-    [approvalGate, inboxWorkspacePath, refreshInbox, targetFolderForInboxItem, updateInboxCarry, t],
+    [approvalGate, beginProcessingAdmission, inboxWorkspacePath, refreshInbox, targetFolderForInboxItem, updateInboxCarry, t],
   );
 
   const decideInboxKeys = useCallback(
@@ -3038,11 +3057,13 @@ export function MainApp() {
         setInboxActionBusy(true);
         setError(null);
         setGmailError(null);
+        const workspace = inboxWorkspacePath;
+        const isCurrent = beginProcessingAdmission(workspace);
         if (fileIds.length > 0) {
           const outcomes =
             decision === "accepted"
               ? await acceptInboxItems(
-                  inboxWorkspacePath,
+                  workspace,
                   fileIds.map((id) => ({
                     id,
                     targetFolder:
@@ -3052,18 +3073,18 @@ export function MainApp() {
                   })),
                   approvalId,
                 )
-              : await rejectInboxItems(inboxWorkspacePath, fileIds, approvalId);
-          const failed = outcomes.filter((outcome) => !outcome.ok);
-          outcomes
-            .filter((outcome) => outcome.ok)
-            .forEach((outcome) => updateInboxCarry(outcome.id, { decision }));
-          if (failed.length > 0) {
-            setError(failed.map((outcome) => outcome.error).filter(Boolean).join("\n"));
+              : await rejectInboxItems(workspace, fileIds, approvalId);
+          // Fulfilled mixed/all-failed payloads are classified and noticed once
+          // by the api.ts wrapper; only admitted detail state updates remain here.
+          if (isCurrent()) {
+            outcomes
+              .filter((outcome) => outcome.ok)
+              .forEach((outcome) => updateInboxCarry(outcome.id, { decision }));
           }
         }
         if (gmailIds.length > 0) {
           const outcomes = await decideGmailItems(
-            inboxWorkspacePath,
+            workspace,
             gmailIds.map((messageId) => ({ messageId, decision })),
             gmailApprovalId,
           );
@@ -3082,13 +3103,14 @@ export function MainApp() {
         void refreshInbox();
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
-        if (fileIds.length > 0) setError(message);
+        // Gmail decide wrappers are pane-local owners; owned file operations
+        // already published their terminal notice through the wrapper.
         if (gmailIds.length > 0) setGmailError(message);
       } finally {
         setInboxActionBusy(false);
       }
     },
-    [approvalGate, inboxCarry, inboxWorkspacePath, refreshInbox, updateInboxCarry, t],
+    [approvalGate, beginProcessingAdmission, inboxCarry, inboxWorkspacePath, refreshInbox, updateInboxCarry, t],
   );
 
   const bulkAcceptInboxKeys = useCallback(
@@ -3128,32 +3150,25 @@ export function MainApp() {
         payloadPreview: targets.map((target) => `${target.kind}: ${target.path}`).join("\n"),
       });
       if (!approvalId) return;
+      const workspace = inboxWorkspacePath;
+      const isCurrent = beginProcessingAdmission(workspace);
       setInboxActionBusy(true);
       setError(null);
       try {
-        const outcomes = await trashInboxItems(inboxWorkspacePath, targets, approvalId);
-        const failed = outcomes.filter((outcome) => !outcome.ok);
+        await trashInboxItems(workspace, targets, approvalId);
         if (targets.some((target) => target.kind === "processedItem" && target.path === processedDetail?.item.itemDir)) {
-          setProcessedDetail(null);
+          if (isCurrent()) setProcessedDetail(null);
         }
-        await Promise.all([refreshInbox(), refreshProcessedItems()]);
-        if (failed.length > 0) {
-          setError(
-            [
-              t("inbox.delete.partialFailure", { count: failed.length }),
-              ...failed.map((outcome) => outcome.error).filter(Boolean),
-            ].join("\n"),
-          );
-        } else {
-          setError(t("inbox.delete.success", { count: outcomes.length }));
-        }
-      } catch (err) {
-        setError(err instanceof Error ? err.message : String(err));
+        if (isCurrent()) await Promise.all([refreshInbox(), refreshProcessedItems()]);
+        // Fulfilled mixed/all-failed results and rejections are noticed once by
+        // the api.ts wrapper; no component toast duplicates them.
+      } catch {
+        // Owned by the operation wrapper.
       } finally {
         setInboxActionBusy(false);
       }
     },
-    [approvalGate, inboxWorkspacePath, processedDetail?.item.itemDir, refreshInbox, refreshProcessedItems, t],
+    [approvalGate, beginProcessingAdmission, inboxWorkspacePath, processedDetail?.item.itemDir, refreshInbox, refreshProcessedItems, t],
   );
 
   const processInboxKeys = useCallback(
@@ -3407,26 +3422,22 @@ export function MainApp() {
   const stageInboxFiles = useCallback(
     async (sourcePaths: string[]) => {
       if (!inboxWorkspacePath || sourcePaths.length === 0) return;
+      const workspace = inboxWorkspacePath;
+      const isCurrent = beginProcessingAdmission(workspace);
       setInboxActionBusy(true);
       setError(null);
       try {
-        const outcomes = await stageInboxDropFiles(inboxWorkspacePath, { sourcePaths });
-        const failed = outcomes.filter((outcome) => !outcome.ok);
-        if (failed.length > 0) {
-          setError(
-            failed
-              .map((outcome) => outcome.error ?? `Cannot stage ${outcome.sourcePath}`)
-              .join("\n"),
-          );
-        }
-        await refreshInbox();
-      } catch (err) {
-        setError(err instanceof Error ? err.message : String(err));
+        await stageInboxDropFiles(workspace, { sourcePaths });
+        // Fulfilled mixed/all-failed payloads and rejections are noticed once
+        // by the api.ts wrapper; only the admitted view refreshes remain here.
+        if (isCurrent()) await refreshInbox();
+      } catch {
+        // Owned by the operation wrapper.
       } finally {
         setInboxActionBusy(false);
       }
     },
-    [inboxWorkspacePath, refreshInbox],
+    [beginProcessingAdmission, inboxWorkspacePath, refreshInbox],
   );
 
   const classifyItem = useCallback(
@@ -4301,6 +4312,7 @@ export function MainApp() {
     }
     setError(null);
     setOutlineOperation(outlinePaneScope, { applyingFileQueue: true, fileQueueError: null });
+    const isCurrent = beginProcessingAdmission(outlinePaneScope.workspacePath);
     try {
       const outcomes: FileQueueApplyOutcome[] = (
         await Promise.all(
@@ -4309,6 +4321,7 @@ export function MainApp() {
           ),
         )
       ).flat();
+      if (!isCurrent()) return outcomes;
       const byId = new Map(outcomes.map((outcome) => [outcome.id, outcome]));
       const current = getOutlinePaneState(outlinePaneScope).fileQueue.fileQueue;
       replaceOutlineFileQueue(
@@ -4341,22 +4354,26 @@ export function MainApp() {
       return outcomes;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      const failedIds = itemsOverride ? new Set(itemsOverride.map((item) => item.id)) : null;
-      const current = getOutlinePaneState(outlinePaneScope).fileQueue.fileQueue;
-      replaceOutlineFileQueue(
-        outlinePaneScope,
-        current.map((item) =>
-          item.status === "queued" && (!failedIds || failedIds.has(item.id))
-            ? { ...item, status: "error", message }
-            : item,
-        ),
-      );
-      setOutlineOperation(outlinePaneScope, { applyingFileQueue: false, fileQueueError: message });
-      setError(message);
+      if (isCurrent()) {
+        const failedIds = itemsOverride ? new Set(itemsOverride.map((item) => item.id)) : null;
+        const current = getOutlinePaneState(outlinePaneScope).fileQueue.fileQueue;
+        replaceOutlineFileQueue(
+          outlinePaneScope,
+          current.map((item) =>
+            item.status === "queued" && (!failedIds || failedIds.has(item.id))
+              ? { ...item, status: "error", message }
+              : item,
+          ),
+        );
+        setOutlineOperation(outlinePaneScope, { applyingFileQueue: false, fileQueueError: message });
+      }
+      // applyFileQueue uses the rejection-only contract: the wrapper publishes
+      // exactly one error notice for the rejection; no component toast repeats it.
       return [];
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- updateWorkspaceState is flagged unneeded; not removed here to avoid changing this callback's re-creation timing, a behavior change out of scope for this phase
   }, [
+    beginProcessingAdmission,
     outlinePaneScope,
     refreshWorkspaceFiles,
     scanOptions,
@@ -6519,30 +6536,34 @@ export function MainApp() {
       setError(t("export.error.noDocument"));
       return;
     }
+    const formats: ExportFormat[] = ["docx", "hwpx", "pdf"];
+    let manifestPath: string;
     try {
-      const formats: ExportFormat[] = ["docx", "hwpx", "pdf"];
       const resp = await exportPlan({
         workspaceRoot,
         sourcePath: sourceRel,
         formats,
       });
-      setLastExportManifestPath(resp.manifest_path);
-      const dispatched = await exportDispatch({
+      manifestPath = resp.manifest_path;
+    } catch (err) {
+      // exportPlan is an ordinary read/plan step; its failure stays component-owned.
+      setError(err instanceof Error ? err.message : String(err));
+      return;
+    }
+    if (beginProcessingAdmission(workspaceRoot)()) {
+      setLastExportManifestPath(manifestPath);
+    }
+    try {
+      await exportDispatch({
         workspaceRoot,
-        manifestPath: resp.manifest_path,
+        manifestPath,
         formats,
       });
-      setError(
-        t("export.success", {
-          count: String(dispatched.results.length),
-          manifest: resp.manifest_path,
-          summary: summarizeDispatch(dispatched),
-        }),
-      );
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+    } catch {
+      // exportDispatch owns the single terminal notice (success/info/error)
+      // through classifyExportDispatchCompletion, including rejections.
     }
-  }, [activeDocumentWorkspacePath, document, t]);
+  }, [activeDocumentWorkspacePath, beginProcessingAdmission, document, t]);
 
   const validateLastExportBundle = useCallback(async (): Promise<void> => {
     if (!lastExportManifestPath) {

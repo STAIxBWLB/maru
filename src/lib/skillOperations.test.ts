@@ -116,4 +116,51 @@ describe("Skills operation ownership", () => {
     expect(final.result).toBe(result); expect(final.message).toContain("network failed"); expect(final.message).toContain("skipped");
     expect(mocks.notice.mock.calls[0][0].kind).toBe("error");
   });
+  it("explicit classify is used exactly once and kind, key, reason flow into the notice", async () => {
+    const mutation = deferred<string>();
+    const classify = vi.fn((_result: string) => ({ kind: "info" as const, key: "skills.operation.complete", reason: "rescan done" }));
+    const promise = startSkillOperation({
+      workspace: `workspace-${++sequence}`, workspaceLabel: "Workspace A", sourceId: "s",
+      label: "Source A", total: 1, t, execute: () => mutation.promise, classify,
+    });
+    mutation.resolve("payload"); const final = await promise;
+    expect(classify).toHaveBeenCalledTimes(1);
+    expect(classify.mock.calls[0][0]).toBe("payload");
+    expect(final.result).toBe("payload");
+    expect(mocks.notice).toHaveBeenCalledTimes(1);
+    expect(mocks.notice.mock.calls[0][0].kind).toBe("info");
+    expect(mocks.notice.mock.calls[0][0].message).toContain("skills.operation.complete");
+    expect(mocks.notice.mock.calls[0][0].message).toContain("rescan done");
+  });
+  it("fulfilled install payload classifies by failure counts and retains the payload", async () => {
+    const mutation = deferred<{ installed: number; failures: string[] }>();
+    const classify = (result: { installed: number; failures: string[] }) =>
+      result.failures.length === 0
+        ? { kind: "success" as const, key: "skills.operation.success" }
+        : result.installed > 0
+          ? { kind: "info" as const, key: "skills.operation.partial", reason: result.failures.join("; ") }
+          : { kind: "error" as const, key: "skills.operation.error", reason: result.failures.join("; ") };
+    const options = {
+      workspace: `workspace-${++sequence}`, workspaceLabel: "Workspace A", sourceId: null,
+      label: "install", total: 2, t, execute: () => mutation.promise, classify,
+    };
+    const promise = startSkillOperation(options);
+    const payload = { installed: 1, failures: ["beta: network failed"] };
+    mutation.resolve(payload); const final = await promise;
+    expect(final.result).toBe(payload);
+    expect(mocks.notice).toHaveBeenCalledTimes(1);
+    expect(mocks.notice.mock.calls[0][0].kind).toBe("info");
+    expect(mocks.notice.mock.calls[0][0].message).toContain("network failed");
+
+    const allFailed = deferred<{ installed: number; failures: string[] }>();
+    const second = startSkillOperation({
+      ...options, workspace: `workspace-${++sequence}`,
+      execute: () => allFailed.promise,
+    });
+    allFailed.resolve({ installed: 0, failures: ["alpha: denied", "beta: denied"] });
+    const secondFinal = await second;
+    expect(secondFinal.result).toEqual({ installed: 0, failures: ["alpha: denied", "beta: denied"] });
+    expect(mocks.notice).toHaveBeenCalledTimes(2);
+    expect(mocks.notice.mock.calls[1][0].kind).toBe("error");
+  });
 });

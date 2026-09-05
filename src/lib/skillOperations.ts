@@ -5,7 +5,14 @@ import type { SkillProgressEvent, SkillRecord, SyncAllOutcome } from "./skills";
 
 type SkillResult = SkillRecord[] | SyncAllOutcome;
 type Translate = (key: string, vars?: Record<string, string | number>) => string;
-export interface SkillOperation {
+
+export interface SkillOperationClassification {
+  kind: OperationNotice["kind"];
+  key: string;
+  reason?: string;
+}
+
+export interface SkillOperation<T = SkillResult> {
   operationId: string;
   workspace: string;
   sourceId: string | null;
@@ -16,22 +23,23 @@ export interface SkillOperation {
   message: string | null;
   errors: readonly string[];
   log: readonly string[];
-  result?: SkillResult;
+  result?: T;
 }
-interface StartSkillOperation {
+interface StartSkillOperation<T = SkillResult> {
   workspace: string;
   workspaceLabel: string;
   sourceId: string | null;
   label: string;
   total: number;
-  execute: (progressId: string) => Promise<SkillResult>;
+  execute: (progressId: string) => Promise<T>;
   t: Translate;
+  classify?: (result: T) => SkillOperationClassification;
 }
-let snapshot: readonly SkillOperation[] = [];
+let snapshot: readonly SkillOperation<unknown>[] = [];
 const subscribers = new Set<() => void>();
-const running = new Map<string, Promise<SkillOperation>>();
+const running = new Map<string, Promise<SkillOperation<unknown>>>();
 const keyFor = (workspace: string, sourceId: string | null) => JSON.stringify([workspace, sourceId]);
-export const getSkillOperationsSnapshot = (): readonly SkillOperation[] => snapshot;
+export const getSkillOperationsSnapshot = (): readonly SkillOperation<unknown>[] => snapshot;
 export function subscribeSkillOperations(subscriber: () => void): () => void {
   subscribers.add(subscriber);
   return () => { subscribers.delete(subscriber); };
@@ -39,7 +47,7 @@ export function subscribeSkillOperations(subscriber: () => void): () => void {
 export function isSkillOperationActive(workspace: string, sourceId: string | null): boolean {
   return running.has(keyFor(workspace, sourceId));
 }
-export function getLatestSkillOperation(workspace: string): SkillOperation | undefined {
+export function getLatestSkillOperation(workspace: string): SkillOperation<unknown> | undefined {
   return snapshot.filter((operation) => operation.workspace === workspace).at(-1);
 }
 
@@ -65,17 +73,17 @@ export function createSkillViewScope() {
 
 /** The module owns mutation settlement and progress cleanup; view disposal only
  * removes subscribers. No queue, retry, persistence, or navigation side effect. */
-export function startSkillOperation(options: StartSkillOperation): Promise<SkillOperation> {
+export function startSkillOperation<T = SkillResult>(options: StartSkillOperation<T>): Promise<SkillOperation<T>> {
   const key = keyFor(options.workspace, options.sourceId);
   const existing = running.get(key);
-  if (existing) return existing;
+  if (existing) return existing as unknown as Promise<SkillOperation<T>>;
   const operationId = crypto.randomUUID();
-  let operation: SkillOperation = Object.freeze({
+  let operation: SkillOperation<T> = Object.freeze({
     operationId, workspace: options.workspace, sourceId: options.sourceId,
     label: options.label, active: true, total: options.total, completed: 0,
     message: null, errors: [], log: [],
   });
-  function publish(patch: Partial<SkillOperation>) {
+  function publish(patch: Partial<SkillOperation<T>>) {
     operation = Object.freeze({ ...operation, ...patch });
     snapshot = [...snapshot.filter((item) => keyFor(item.workspace, item.sourceId) !== key), operation];
     for (const subscriber of subscribers) subscriber();
@@ -95,26 +103,29 @@ export function startSkillOperation(options: StartSkillOperation): Promise<Skill
     if (settled) unlisten(); else off = unlisten;
   }).catch(() => { /* Mutation and its terminal notice remain authoritative. */ });
 
-  const finish = (kind: OperationNotice["kind"], key: string, reason: string, result?: SkillResult) => {
+  const finish = (kind: OperationNotice["kind"], key: string, reason: string, result?: T) => {
     settled = true;
     try { off?.(); } catch { /* Cleanup cannot suppress the terminal result. */ }
-    const summary = result && !Array.isArray(result)
-      ? options.t("system.skills.syncAllComplete", { succeeded: result.succeeded, failed: result.failed, skipped: result.skipped })
-      : "";
-    const message = options.t(key, { workspace: options.workspaceLabel, source: options.label, reason: [summary, reason].filter(Boolean).join("; ") });
+    const message = options.t(key, { workspace: options.workspaceLabel, source: options.label, reason });
     running.delete(keyFor(options.workspace, options.sourceId));
     publish({ active: false, completed: operation.total, message, errors: kind === "error" ? [reason] : [], result });
     publishOperationNotice({ operationId, kind, message });
     return operation;
   };
   const promise = Promise.resolve().then(() => options.execute(operationId)).then((result) => {
-    if (Array.isArray(result)) return finish("success", "skills.operation.success", "", result);
-    const reasons = result.results.filter((item) => !item.ok).map((item) => `${item.sourceId}: ${item.error ?? ""}`).join("; ");
-    if (result.failed > 0) {
-      const stale = result.results.some((item) => item.errorCode === "skills_source_stale");
+    if (options.classify) {
+      const classification = options.classify(result);
+      return finish(classification.kind, classification.key, classification.reason ?? "", result);
+    }
+    const builtin = result as SkillResult;
+    if (Array.isArray(builtin)) return finish("success", "skills.operation.success", "", result);
+    const summary = options.t("system.skills.syncAllComplete", { succeeded: builtin.succeeded, failed: builtin.failed, skipped: builtin.skipped });
+    const reasons = [summary, builtin.results.filter((item) => !item.ok).map((item) => `${item.sourceId}: ${item.error ?? ""}`).join("; ")].filter(Boolean).join("; ");
+    if (builtin.failed > 0) {
+      const stale = builtin.results.some((item) => item.errorCode === "skills_source_stale");
       return finish("error", stale ? "skills.operation.stale" : "skills.operation.failed", reasons, result);
     }
-    if (result.skipped > 0) return finish("info", "skills.operation.skipped", reasons, result);
+    if (builtin.skipped > 0) return finish("info", "skills.operation.skipped", reasons, result);
     return finish("success", "skills.operation.success", "", result);
   }, (error: unknown) => {
     const code = error instanceof IpcError ? error.code : null;

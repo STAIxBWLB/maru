@@ -38,6 +38,7 @@ import {
   exportPlan,
   summarizeDispatch,
   type ExportFormat,
+  type ExportPlanResponse,
 } from "../../lib/export";
 import {
   STUDIO_STEPS,
@@ -62,6 +63,8 @@ import {
   type StudioHwpTemplateFieldState,
   type StudioStateSummary,
   type StudioStep,
+  type TemplateFillResponse,
+  type TemplatePrepareResponse,
 } from "../../lib/studio";
 import { frontmatterScalar } from "../../lib/document";
 import type { DocumentPayload } from "../../lib/types";
@@ -125,6 +128,19 @@ export function StudioMode({
   const loadingRef = useRef(false);
   const saveQueueRef = useRef<Promise<void>>(Promise.resolve());
   const saveRevisionRef = useRef(0);
+  // D-04 view admission for template/export flows: a flow captures its
+  // workspace plus the current generation before invoking an owned wrapper,
+  // and patchState runs only while both still match. Workspace/document
+  // switches below bump the generation, so A -> B -> A never admits a stale
+  // completion from the earlier visit.
+  const flowAdmissionRef = useRef({ workspace: "", generation: 0 });
+  const beginAdmittedFlow = useCallback((workspace: string) => {
+    const generation = ++flowAdmissionRef.current.generation;
+    flowAdmissionRef.current = { workspace, generation };
+    return () =>
+      flowAdmissionRef.current.workspace === workspace &&
+      flowAdmissionRef.current.generation === generation;
+  }, []);
 
   const activeDocId = useMemo(
     () => (activeDocument ? studioDocIdFromDocument(activeDocument) : null),
@@ -204,6 +220,10 @@ export function StudioMode({
   );
 
   useEffect(() => {
+    flowAdmissionRef.current = {
+      workspace: workspaceRoot ?? "",
+      generation: flowAdmissionRef.current.generation + 1,
+    };
     if (!workspaceRoot) {
       setState(null);
       setSummaries([]);
@@ -487,6 +507,7 @@ export function StudioMode({
 
   async function scanHwpFields(): Promise<void> {
     if (!workspaceRoot || !state) return;
+    const workspace = workspaceRoot;
     const templateKey = state.template?.hwpxTemplateKey ?? null;
     const configuredPath = state.hwpFields.templatePath?.trim() || null;
     if (!templateKey && !configuredPath) {
@@ -494,6 +515,7 @@ export function StudioMode({
       return;
     }
 
+    const isCurrent = beginAdmittedFlow(workspace);
     setBusyAction("hwp-scan");
     try {
       if (state.template?.source === "hwp_cli_skill") {
@@ -504,6 +526,7 @@ export function StudioMode({
           source: "hwp_cli_skill",
           templateKey,
         });
+        if (!isCurrent()) return;
         patchState((prev) => {
           const values = { ...prev.hwpFields.values };
           for (const field of response.fields) {
@@ -530,28 +553,38 @@ export function StudioMode({
       }
       let scanPath = configuredPath;
       if (scanPath?.toLowerCase().endsWith(".hwp")) {
-        const prepared = await templatePrepareHwpxTemplate(workspaceRoot, scanPath);
+        // Owned wrapper: fulfillments (including manualFallback) and rejections
+        // publish exactly one terminal notice from the module.
+        let prepared: TemplatePrepareResponse;
+        try {
+          prepared = await templatePrepareHwpxTemplate(workspace, scanPath);
+        } catch {
+          return;
+        }
         if (!prepared.preparedPath) {
-          patchState((prev) => ({
-            ...prev,
-            hwpFields: {
-              ...prev.hwpFields,
-              status: "manualFallback",
-              formFilledCount: 0,
-              unmatchedFields: [],
-              validationChecks: [],
-              warnings: [prepared.reason ?? t("studio.hwp.manualFallback")],
-            },
-          }));
+          if (isCurrent()) {
+            patchState((prev) => ({
+              ...prev,
+              hwpFields: {
+                ...prev.hwpFields,
+                status: "manualFallback",
+                formFilledCount: 0,
+                unmatchedFields: [],
+                validationChecks: [],
+                warnings: [prepared.reason ?? t("studio.hwp.manualFallback")],
+              },
+            }));
+          }
           return;
         }
         scanPath = prepared.preparedPath;
       }
 
-      const response = await templateGetFields(workspaceRoot, {
+      const response = await templateGetFields(workspace, {
         templateKey,
         templatePath: scanPath,
       });
+      if (!isCurrent()) return;
       patchState((prev) => {
         const values = { ...prev.hwpFields.values };
         for (const field of response.fields) {
@@ -576,6 +609,9 @@ export function StudioMode({
         };
       });
     } catch (err) {
+      // Read-path failures (hwp cli fields / templateGetFields) stay
+      // component-owned; the owned prepare wrapper never reaches this catch.
+      if (!isCurrent()) return;
       patchState((prev) => ({
         ...prev,
         hwpFields: {
@@ -595,6 +631,7 @@ export function StudioMode({
 
   async function fillHwpTemplate(): Promise<void> {
     if (!workspaceRoot || !state) return;
+    const workspace = workspaceRoot;
     const templateKey = state.template?.hwpxTemplateKey ?? null;
     const templatePath = state.hwpFields.templatePath?.trim() || null;
     if (!templateKey && !templatePath) {
@@ -606,22 +643,33 @@ export function StudioMode({
       return;
     }
 
+    const isCurrent = beginAdmittedFlow(workspace);
     setBusyAction("hwp-fill");
     try {
       const values = Object.fromEntries(
         state.hwpFields.fields.map((field) => [field.key, state.hwpFields.values[field.key] ?? ""]),
       );
-      const response = state.template?.source === "hwp_cli_skill"
-        ? await hwpCliTemplateFill(workspaceRoot, {
-            source: "hwp_cli_skill",
-            templateKey: templateKey ?? "",
-            values,
-          })
-        : await templateFillHwpx(workspaceRoot, {
+      let response: TemplateFillResponse;
+      if (state.template?.source === "hwp_cli_skill") {
+        response = await hwpCliTemplateFill(workspace, {
+          source: "hwp_cli_skill",
+          templateKey: templateKey ?? "",
+          values,
+        });
+      } else {
+        // Owned wrapper: validation failures, unmatched fields and rejections
+        // publish exactly one terminal notice from the module.
+        try {
+          response = await templateFillHwpx(workspace, {
             templateKey,
             templatePath,
             values,
           });
+        } catch {
+          return;
+        }
+      }
+      if (!isCurrent()) return;
       patchState((prev) => ({
         ...prev,
         hwpFields: {
@@ -635,6 +683,8 @@ export function StudioMode({
         },
       }));
     } catch (err) {
+      // hwp cli fill is unowned, so its rejection stays component-owned.
+      if (!isCurrent()) return;
       patchState((prev) => ({
         ...prev,
         hwpFields: {
@@ -657,6 +707,7 @@ export function StudioMode({
       setError(t("studio.error.noDocument"));
       return;
     }
+    const workspace = workspaceRoot;
     const formats = state.export.formats.filter((format): format is ExportFormat =>
       FORMAT_OPTIONS.includes(format as ExportFormat),
     );
@@ -664,18 +715,30 @@ export function StudioMode({
       setError(t("studio.export.error.noFormat"));
       return;
     }
+    const isCurrent = beginAdmittedFlow(workspace);
     setBusyAction("export");
     try {
-      const plan = await exportPlan({
-        workspaceRoot,
-        sourcePath: state.source.documentPath,
-        formats,
-      });
+      let plan: ExportPlanResponse;
+      try {
+        plan = await exportPlan({
+          workspaceRoot: workspace,
+          sourcePath: state.source.documentPath,
+          formats,
+        });
+      } catch (err) {
+        // exportPlan is an ordinary read/plan step; its failure stays here.
+        setError(err instanceof Error ? err.message : String(err));
+        return;
+      }
+      // Owned wrapper: partial and all-failed fulfilled payloads and rejections
+      // publish exactly one terminal notice from the module. The partial
+      // summary still lands in admitted detail state below.
       const dispatched = await exportDispatch({
-        workspaceRoot,
+        workspaceRoot: workspace,
         manifestPath: plan.manifest_path,
         formats,
       });
+      if (!isCurrent()) return;
       const summary = summarizeDispatch(dispatched);
       patchState((prev) => ({
         ...prev,
@@ -688,8 +751,8 @@ export function StudioMode({
           lastRunAt: new Date().toISOString(),
         },
       }));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+    } catch {
+      // exportDispatch already published the terminal notice.
     } finally {
       setBusyAction(null);
     }

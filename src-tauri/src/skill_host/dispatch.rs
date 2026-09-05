@@ -222,6 +222,16 @@ pub fn skills_dispatch_background<R: tauri::Runtime>(
     app: AppHandle<R>,
     args: SkillDispatchBackgroundArgs,
 ) -> Result<String, String> {
+    skills_dispatch_background_with_parents(app, args, Vec::new())
+}
+
+/// Preserve the caller's accepted workspace identity after releasing its
+/// transaction, including every later stream and completion callback.
+pub(crate) fn skills_dispatch_background_with_parents<R: tauri::Runtime>(
+    app: AppHandle<R>,
+    args: SkillDispatchBackgroundArgs,
+    parents: Vec<PathTransactionParent>,
+) -> Result<String, String> {
     let SkillDispatchBackgroundArgs {
         skill_id,
         runtime,
@@ -285,6 +295,7 @@ pub fn skills_dispatch_background<R: tauri::Runtime>(
             metadata,
             run_request,
             retry_payload,
+            parents,
             write_roots: if approved_execution {
                 add_dirs.into_iter().map(PathBuf::from).collect()
             } else {
@@ -446,6 +457,7 @@ struct BackgroundRunInfo {
     run_request: AgentRunRequest,
     retry_payload: JsonValue,
     write_roots: Vec<PathBuf>,
+    parents: Vec<PathTransactionParent>,
 }
 
 /// One explicit transaction context shared by the setup, stream pumps and exit
@@ -455,6 +467,7 @@ struct DispatchWrites {
     event_path: PathBuf,
     mission_paths: Vec<PathBuf>,
     parents: Vec<PathTransactionParent>,
+    caller_parents: Vec<PathTransactionParent>,
     owned: Option<Arc<PathTransactionLease>>,
     serial: Arc<Mutex<()>>,
 }
@@ -466,7 +479,12 @@ fn dispatch_mutation_paths(cwd: &str, id: &str) -> Result<Vec<PathBuf>, String> 
 }
 
 impl DispatchWrites {
-    fn new(cwd: &str, id: &str, write_roots: Vec<PathBuf>) -> Result<Self, String> {
+    fn new(
+        cwd: &str,
+        id: &str,
+        write_roots: Vec<PathBuf>,
+        caller_parents: Vec<PathTransactionParent>,
+    ) -> Result<Self, String> {
         let mut paths = dispatch_mutation_paths(cwd, id)?;
         let mut parents = vec![
             PathTransactionParent::capture(Path::new(cwd))?,
@@ -482,6 +500,7 @@ impl DispatchWrites {
             mission_paths: mission_state::mission_mutation_paths(id)?,
             paths,
             parents,
+            caller_parents,
             owned: None,
             serial: Arc::new(Mutex::new(())),
         };
@@ -496,6 +515,16 @@ impl DispatchWrites {
     fn request(&self) -> Result<PathTransactionRequest, String> {
         let mut request = PathTransactionRequest::new(self.paths.clone())?;
         for parent in &self.parents {
+            request = request.require_parent_snapshot(parent)?;
+        }
+        self.require_caller_parents(request)
+    }
+
+    fn require_caller_parents(
+        &self,
+        mut request: PathTransactionRequest,
+    ) -> Result<PathTransactionRequest, String> {
+        for parent in &self.caller_parents {
             request = request.require_parent_snapshot(parent)?;
         }
         Ok(request)
@@ -514,7 +543,7 @@ impl DispatchWrites {
         } else {
             let request = PathTransactionRequest::new(self.mission_paths.clone())?
                 .require_parent_snapshot(&self.parents[1])?;
-            with_path_transactions(request, work)
+            with_path_transactions(self.require_caller_parents(request)?, work)
         }
     }
 
@@ -535,7 +564,7 @@ impl DispatchWrites {
         } else {
             let request = PathTransactionRequest::new(vec![self.event_path.clone()])?
                 .require_parent_snapshot(&self.parents[0])?;
-            with_path_transactions(request, append)
+            with_path_transactions(self.require_caller_parents(request)?, append)
         }
     }
 }
@@ -576,8 +605,14 @@ fn spawn_background<R: tauri::Runtime>(
         run_request,
         retry_payload,
         write_roots,
+        parents,
     } = run_info;
-    let writes = Arc::new(DispatchWrites::new(&cwd, &invocation_id, write_roots)?);
+    let writes = Arc::new(DispatchWrites::new(
+        &cwd,
+        &invocation_id,
+        write_roots,
+        parents,
+    )?);
     writes.event(
         &cwd,
         &invocation_id,
@@ -1524,6 +1559,7 @@ mod phase08_04 {
                     .unwrap(),
                 retry_payload: serde_json::json!({}),
                 write_roots: Vec::new(),
+                parents: Vec::new(),
             },
         );
         assert!(result.unwrap_err().starts_with("cli_missing:"));
@@ -1596,6 +1632,106 @@ mod phase08_29_dispatch {
             }
             Ok(())
         })
+    }
+
+    #[test]
+    fn phase08_15_dispatch_caller_parents_reject_replacement_before_first_effect() {
+        let _home = Home::new();
+        let skill =
+            crate::skill_host::store::skills_create_skill("phase15-first".into(), None).unwrap();
+        for approved in [false, true] {
+            for replace_maru in [false, true] {
+                let temp =
+                    tempfile::tempdir_in(std::env::temp_dir().canonicalize().unwrap()).unwrap();
+                let root = temp.path();
+                let workspace = root.join("work");
+                let maru = workspace.join(".maru");
+                fs::create_dir_all(&maru).unwrap();
+                let parents = vec![
+                    PathTransactionParent::capture(&workspace).unwrap(),
+                    PathTransactionParent::capture(&maru).unwrap(),
+                ];
+                let marker = root.join("launched");
+                let cli = tests::write_fake_cli(
+                    root.join("provider"),
+                    &format!(
+                        "#!/bin/sh\nprintf 'unexpected' > {}\n",
+                        shell_quote(&text(&marker))
+                    ),
+                );
+                let args = args(&skill.id, &workspace, &cli, approved);
+                let replaced = if replace_maru { &maru } else { &workspace };
+                fs::rename(replaced, root.join("original")).unwrap();
+                fs::create_dir_all(&maru).unwrap();
+                fs::write(maru.join("sentinel"), b"replacement").unwrap();
+                let app = tauri::test::mock_app();
+                app.manage(mission_state::MissionState::default());
+                let error =
+                    skills_dispatch_background_with_parents(app.handle().clone(), args, parents)
+                        .unwrap_err();
+                assert!(error.contains("Transaction parent changed"), "{error}");
+                assert!(!marker.exists(), "stale selection launched its provider");
+                assert!(!maru.join("runs").exists(), "first event was written");
+                assert_eq!(fs::read(maru.join("sentinel")).unwrap(), b"replacement");
+            }
+        }
+    }
+
+    #[test]
+    fn phase08_15_dispatch_caller_parents_survive_into_real_proposal_callbacks() {
+        let _home = Home::new();
+        let skill =
+            crate::skill_host::store::skills_create_skill("phase15-callback".into(), None).unwrap();
+        for replace_maru in [false, true] {
+            let temp = tempfile::tempdir_in(std::env::temp_dir().canonicalize().unwrap()).unwrap();
+            let root = temp.path();
+            let workspace = root.join("work");
+            let maru = workspace.join(".maru");
+            fs::create_dir_all(&maru).unwrap();
+            let parents = vec![
+                PathTransactionParent::capture(&workspace).unwrap(),
+                PathTransactionParent::capture(&maru).unwrap(),
+            ];
+            let gate = root.join("release");
+            let cli = tests::write_fake_cli(
+                root.join("provider"),
+                &format!(
+                    "#!/bin/sh\ni=0\nwhile [ ! -f {} ]; do i=$((i+1)); [ \"$i\" -lt 500 ] || exit 2; sleep 0.01; done\nprintf 'late output\\n'\n",
+                    shell_quote(&text(&gate))
+                ),
+            );
+            let app = tauri::test::mock_app();
+            app.manage(mission_state::MissionState::default());
+            let (tx, rx) = mpsc::channel();
+            app.listen("ai://done", move |_| {
+                let _ = tx.send(());
+            });
+            let id = skills_dispatch_background_with_parents(
+                app.handle().clone(),
+                args(&skill.id, &workspace, &cli, false),
+                parents,
+            )
+            .unwrap();
+            let event = run_events_path(&text(&workspace), &id).unwrap();
+            let event_before = fs::read(&event).unwrap();
+            let mission = mission_state::mission_mutation_paths(&id).unwrap();
+            let mission_before = fs::read(&mission[1]).unwrap();
+            let log_before = fs::read(&mission[2]).ok();
+            let moved = root.join("original");
+            let replaced = if replace_maru { &maru } else { &workspace };
+            let moved_event = moved.join(event.strip_prefix(replaced).unwrap());
+            fs::rename(replaced, &moved).unwrap();
+            fs::create_dir_all(&maru).unwrap();
+            fs::write(&gate, b"release").unwrap();
+            rx.recv_timeout(Duration::from_secs(5)).unwrap();
+            assert_eq!(fs::read(moved_event).unwrap(), event_before);
+            assert!(
+                !maru.join("runs").exists(),
+                "callback wrote into replacement"
+            );
+            assert_eq!(fs::read(&mission[1]).unwrap(), mission_before);
+            assert_eq!(fs::read(&mission[2]).ok(), log_before);
+        }
     }
 
     #[test]
@@ -1722,7 +1858,7 @@ mod phase08_29_dispatch {
         let source = root.join("work");
         fs::create_dir(&source).unwrap();
         let cwd = text(&source);
-        let context = DispatchWrites::new(&cwd, "callback", vec![]).unwrap();
+        let context = DispatchWrites::new(&cwd, "callback", vec![], vec![]).unwrap();
         context
             .event(
                 &cwd,
@@ -1945,7 +2081,8 @@ mod phase08_29_dispatch {
         assert!(result.unwrap_err().starts_with("cli_missing:"));
         let cwd = text(&source);
         assert!(std::panic::catch_unwind(|| {
-            let _context = DispatchWrites::new(&cwd, "unwind", vec![source.clone()]).unwrap();
+            let _context =
+                DispatchWrites::new(&cwd, "unwind", vec![source.clone()], vec![]).unwrap();
             panic!("fixture unwind");
         })
         .is_err());

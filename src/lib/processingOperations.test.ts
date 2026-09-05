@@ -194,4 +194,27 @@ describe("runProcessingOperation ownership", () => {
     expect(mocks.notice).not.toHaveBeenCalled();
     expect(getProcessingOperation(task.context.operationId)?.completion).toEqual(partial);
   });
+
+  it("Studio aggregation: suppressed inner plus one outer notice, inner record still readable", async () => {
+    const inner = setup<string>(() => partial);
+    const innerPromise = runProcessingOperation(
+      { ...inner.context, outerOperationId: "studio-flow-2" },
+      inner.run,
+      inner.classifyResult,
+    );
+    inner.resolve("inner-payload");
+    await innerPromise;
+    expect(mocks.notice).not.toHaveBeenCalled();
+
+    const outer = setup<string>(() => success);
+    const outerPromise = runProcessingOperation(outer.context, outer.run, outer.classifyResult);
+    outer.resolve("outer-payload");
+    await outerPromise;
+    expect(mocks.notice).toHaveBeenCalledTimes(1);
+    expect(mocks.notice.mock.calls[0][0].operationId).toBe(outer.context.operationId);
+
+    const innerRecord = getProcessingOperation(inner.context.operationId);
+    expect(innerRecord?.status).toBe("settled");
+    expect(innerRecord?.completion).toEqual(partial);
+  });
 });

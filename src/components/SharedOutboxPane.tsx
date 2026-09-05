@@ -170,8 +170,8 @@ export function SharedOutboxPane({
       setResults(res);
       await loadRecent();
       await loadConfig();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+    } catch {
+      // prepareShareOutboxFiles owns the terminal notice.
     } finally {
       setApplying(false);
     }
