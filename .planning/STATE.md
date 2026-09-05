@@ -2,20 +2,20 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Felt Quality and Native Proof
-current_phase: 8
+current_phase: 08
 current_phase_name: Main-Thread Responsiveness
 status: executing
-stopped_at: Phase 8 plans verified; ready to execute 29 plans
-last_updated: "2026-09-05T04:16:21.394Z"
+stopped_at: Completed 08-01-PLAN.md
+last_updated: "2026-09-05T04:38:41.838Z"
 last_activity: 2026-09-05
-last_activity_desc: Phase 8 planning complete; 29 plans independently verified
-state_head: bd5e45511368f9b135c9d8ccdae94e0fe92a8284
+last_activity_desc: Phase 08 execution started
+state_head: ebb22e4715635a639aaf4dc55a9546137c161a78
 progress:
   total_phases: 6
   completed_phases: 2
   total_plans: 39
-  completed_plans: 10
-  percent: 26
+  completed_plans: 11
+  percent: 28
 ---
 
 # Project State
@@ -25,17 +25,17 @@ progress:
 See: .planning/PROJECT.md (updated 2026-09-05)
 
 **Core value:** The filesystem stays the source of truth, everything Maru shows is derived from real files the user owns, and nothing is lost if Maru is uninstalled.
-**Current focus:** Phase 8 - Main-Thread Responsiveness
+**Current focus:** Phase 08 — Main-Thread Responsiveness
 
 ## Current Position
 
-Phase: 8 (Main-Thread Responsiveness) — READY TO EXECUTE
-Plan: Not started
+Phase: 08 (Main-Thread Responsiveness) — EXECUTING
+Plan: 2 of 29
 Status: Ready to execute
-Last Activity Description: Phase 8 planning complete; 29 plans independently verified
-Last activity: 2026-09-05 - Phase 8 planning complete; 29 plans independently verified
+Last Activity Description: Phase 08 execution started
+Last activity: 2026-09-05 — Phase 08 execution started
 
-Progress: [███░░░░░░░] 26%
+Progress: [███░░░░░░░] 28%
 
 ## Performance Metrics
 
@@ -107,6 +107,7 @@ Progress: [███░░░░░░░] 26%
 | Phase 07 P03 | 5min | 3 tasks | 6 files |
 | Phase 07-guardrails-before-churn P04 | 15min | 2 tasks | 1 files |
 | Phase 07-guardrails-before-churn P05 | 6min | 2 tasks | 10 files |
+| Phase 08 P01 | 15min | 2 tasks | 8 files |
 
 ## Accumulated Context
 
@@ -221,6 +222,7 @@ Recent decisions affecting current work:
 - [Phase 7]: 07-04: PERF-06 NOT marked complete in REQUIREMENTS.md — the shared-ID gate (#2388) blocks it because sibling plan 07-05 also declares PERF-06 and has no SUMMARY yet; an initial mark-complete was reverted after ready-ids returned 0/1
 - [Phase 07-guardrails-before-churn]: 07-05: outlinePaneStore empty-slice inbox key and test fixtures retired in Task 1, not Task 2 — the narrowed union made them typecheck errors, so the tracer gate could not pass otherwise; same prescribed edits, earlier commit slot
 - [Phase 07-guardrails-before-churn]: 07-05: persisted built-in view filters reset to All silently inside the existing pruneCustomDocumentFiltersInState pass via BUILT_IN_DOCUMENT_VIEWS/isBuiltInDocumentView — no signature change to the MainApp call site
+- [Phase 08]: 08-01 uses process-local UUID generations at registry saves and source/worktree reservations; cross-command path exclusion is explicitly staged to 08-29.
 
 ### Pending Todos
 
@@ -257,9 +259,9 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-09-05T04:15:17.923Z
-Stopped at: Phase 8 plans verified; ready to execute 29 plans
-Resume file: .planning/phases/08-main-thread-responsiveness/08-PLAN-MAP.md
+Last session: 2026-09-05T04:38:30.629Z
+Stopped at: Completed 08-01-PLAN.md
+Resume file: None
 
 ## Operator Next Steps
 
