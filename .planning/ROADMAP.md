@@ -99,7 +99,7 @@ Plans:
   2. Every command that reaches the network, a subprocess, or an unbounded filesystem walk is off the main thread. The 37 commands counted during research are the known set at kickoff, not the definition: that count came from scanning each command's first 80 lines, so a command that blocks further down is equally in scope and the set must be re-measured when the phase starts.
   3. A concurrency load test fires several converted commands at once and shows an unrelated command's latency stays flat (not merely the absence of a visible freeze, which cannot by itself distinguish a real fix from one that relocated the block onto Tauri's shared async worker pool).
 
-**Plans**: 17/29 plans executed across 29 waves
+**Plans**: 18/29 plans executed across 29 waves
 
 Plans:
 **Wave 1**
@@ -172,7 +172,7 @@ Plans:
 
 **Wave 18** *(blocked on Wave 17 completion)*
 
-- [ ] 08-17-PLAN.md - Agent data and Hub command isolation
+- [x] 08-17-PLAN.md - Agent data and Hub command isolation
 
 **Wave 19** *(blocked on Wave 18 completion)*
 
@@ -279,7 +279,7 @@ Phases execute in numeric order: 6 → 7 → 8 → 9 → 10 → 11
 |-------|-----------------|--------|-----------|
 | 6. Native E2E Runner Foundation | 5/5 | Complete    | 2026-08-29 |
 | 7. Guardrails Before Churn | 5/5 | Complete    | 2026-09-05 |
-| 8. Main-Thread Responsiveness | 17/29 | In Progress|  |
+| 8. Main-Thread Responsiveness | 18/29 | In Progress|  |
 | 9. Durability and Session Lifecycle | 0/TBD | Not started | - |
 | 10. Bundle and Build Hardening | 0/TBD | Not started | - |
 | 11. Milestone Verification & Evidence | 0/TBD | Not started | - |
