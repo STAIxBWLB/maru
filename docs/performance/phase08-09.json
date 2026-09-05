@@ -1,0 +1,890 @@
+{
+  "plan": "08-09",
+  "moduleIntegrationOwner": "08-09",
+  "commands": [
+    {
+      "name": "scan_task_notes",
+      "module": "src-tauri/src/tasks.rs",
+      "registrationPath": "src-tauri/src/lib.rs::tasks::ipc::scan_task_notes",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/tasks.rs::ipc::scan_task_notes awaits spawn_blocking before filesystem reads, walks, serialization or admission waits.",
+        "src-tauri/src/tasks.rs::scan_task_notes retains the synchronous API and actual domain result."
+      ],
+      "workerBoundary": "src-tauri/src/tasks.rs::ipc::scan_task_notes owns every String, Option, enum or draft/field struct before awaiting tauri::async_runtime::spawn_blocking. No State/AppHandle/guard adaptation is required. Inner Result<T,String> passes unchanged; only JoinError adds command_task_failed context.",
+      "syncCallers": [
+        "src-tauri/src/tasks.rs::scan_task_notes remains available with identical owned arguments/result for Rust and CLI callers."
+      ],
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_09",
+          "passed": 21,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/components/tasks/TasksPane.tsx",
+          "src/components/today/useTodayTasks.ts",
+          "src/components/today/useTodayPlanner.ts",
+          "src/components/dashboard/useDashboardData.ts"
+        ],
+        "payload": "TasksPane load sets rows/loading/errors; Today hooks and dashboard widget loaders consume task rows.",
+        "terminalNoticeOwner": "Existing initiating component/hook and existing error surface retain completion ownership. Metadata cancellation remains local; durable workspace-scoped lifetime/terminal notices and stale refresh closure remain Plans25/26. Workers complete independently of UI polling; no new service or final D04 claim."
+      },
+      "mutationKey": {
+        "readOnly": true,
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "reason": "src-tauri/src/tasks.rs::scan_task_notes and reached helpers perform read-only filesystem/config/metadata inspection; no filesystem mutation or registry migration. Entire read runs in blocking worker. Log result limits do not imply byte-size bounds; worker owns full read."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_09_tasks_all_nine_wrappers_yield_on_same_polling_task",
+          "phase08_09_tasks_real_payloads_schedule_transition_and_legacy_errors",
+          "phase08_09_tasks_every_writer_same_target_contention_and_unwind_release",
+          "phase08_09_tasks_every_writer_production_policy_rechecked_after_admission",
+          "phase08_09_tasks_and_meetings_workspace_alias_cannot_bypass_write_policy",
+          "phase08_09_tasks_all_writers_files_parent_both_orders_aliases",
+          "phase08_09_tasks_document_save_order_and_typed_error_release",
+          "phase08_09_tasks_move_failure_restores_source_and_releases_for_retry",
+          "phase08_09_tasks_concurrent_field_changes_keep_successful_siblings",
+          "phase08_09_tasks_borrowed_create_rejects_incomplete_write_set_before_effect",
+          "phase08_09_tasks_capture_preparation_is_read_only_and_parent_snapshot_survives"
+        ],
+        "workerProof": "Every actual wrapper yields on its same polling task while a distinct blocking worker is held; injected worker panic verifies contextual JoinError, not spare-worker-only progress.",
+        "permissions": "Production src-tauri/src/vault_list.rs::assert_maru_can_write compares both requested and registered roots using comparable_root and checks every matching alias. Actual Tasks/Meetings wrappers reject canonical/alias calls and alias/canonical registry entries with readOnly/delegated policies, refuse permissive duplicates, and accept direct aliases. No registry standalone behavior remains unchanged.",
+        "crossDomain": "Actual Tasks/Meetings wrapper writes contend with Files parent rename and document save. Typed document_conflict remains structured through test channels, admission releases after error/unwind, and successful independent field patches retain both results.",
+        "platformScope": "Executed on macOS, disposable temporary homes/workspaces only. No subprocess/native provider/Finder/system Trash invocation. Windows/native saturation and artifact isolation remain Plans27/28."
+      }
+    },
+    {
+      "name": "read_task_metadata",
+      "module": "src-tauri/src/tasks.rs",
+      "registrationPath": "src-tauri/src/lib.rs::tasks::ipc::read_task_metadata",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/tasks.rs::ipc::read_task_metadata awaits spawn_blocking before filesystem reads, walks, serialization or admission waits.",
+        "src-tauri/src/tasks.rs::read_task_metadata retains the synchronous API and actual domain result."
+      ],
+      "workerBoundary": "src-tauri/src/tasks.rs::ipc::read_task_metadata owns every String, Option, enum or draft/field struct before awaiting tauri::async_runtime::spawn_blocking. No State/AppHandle/guard adaptation is required. Inner Result<T,String> passes unchanged; only JoinError adds command_task_failed context.",
+      "syncCallers": [
+        "src-tauri/src/tasks.rs::read_task_metadata remains available with identical owned arguments/result for Rust and CLI callers."
+      ],
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_09",
+          "passed": 21,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/components/tasks/TasksPane.tsx",
+          "src/components/today/TaskSheet.tsx"
+        ],
+        "payload": "Metadata effects use cancellation before publishing local state; TaskSheet load owns detail completion.",
+        "terminalNoticeOwner": "Existing initiating component/hook and existing error surface retain completion ownership. Metadata cancellation remains local; durable workspace-scoped lifetime/terminal notices and stale refresh closure remain Plans25/26. Workers complete independently of UI polling; no new service or final D04 claim."
+      },
+      "mutationKey": {
+        "readOnly": true,
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "reason": "src-tauri/src/tasks.rs::read_task_metadata and reached helpers perform read-only filesystem/config/metadata inspection; no filesystem mutation or registry migration. Entire read runs in blocking worker. Log result limits do not imply byte-size bounds; worker owns full read."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_09_tasks_all_nine_wrappers_yield_on_same_polling_task",
+          "phase08_09_tasks_real_payloads_schedule_transition_and_legacy_errors",
+          "phase08_09_tasks_every_writer_same_target_contention_and_unwind_release",
+          "phase08_09_tasks_every_writer_production_policy_rechecked_after_admission",
+          "phase08_09_tasks_and_meetings_workspace_alias_cannot_bypass_write_policy",
+          "phase08_09_tasks_all_writers_files_parent_both_orders_aliases",
+          "phase08_09_tasks_document_save_order_and_typed_error_release",
+          "phase08_09_tasks_move_failure_restores_source_and_releases_for_retry",
+          "phase08_09_tasks_concurrent_field_changes_keep_successful_siblings",
+          "phase08_09_tasks_borrowed_create_rejects_incomplete_write_set_before_effect",
+          "phase08_09_tasks_capture_preparation_is_read_only_and_parent_snapshot_survives"
+        ],
+        "workerProof": "Every actual wrapper yields on its same polling task while a distinct blocking worker is held; injected worker panic verifies contextual JoinError, not spare-worker-only progress.",
+        "permissions": "Production src-tauri/src/vault_list.rs::assert_maru_can_write compares both requested and registered roots using comparable_root and checks every matching alias. Actual Tasks/Meetings wrappers reject canonical/alias calls and alias/canonical registry entries with readOnly/delegated policies, refuse permissive duplicates, and accept direct aliases. No registry standalone behavior remains unchanged.",
+        "crossDomain": "Actual Tasks/Meetings wrapper writes contend with Files parent rename and document save. Typed document_conflict remains structured through test channels, admission releases after error/unwind, and successful independent field patches retain both results.",
+        "platformScope": "Executed on macOS, disposable temporary homes/workspaces only. No subprocess/native provider/Finder/system Trash invocation. Windows/native saturation and artifact isolation remain Plans27/28."
+      }
+    },
+    {
+      "name": "create_task_note",
+      "module": "src-tauri/src/tasks.rs",
+      "registrationPath": "src-tauri/src/lib.rs::tasks::ipc::create_task_note",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/tasks.rs::ipc::create_task_note awaits spawn_blocking before filesystem reads, walks, serialization or admission waits.",
+        "src-tauri/src/tasks.rs::create_task_note retains the synchronous API and actual domain result.",
+        "src-tauri/src/tasks.rs::create_task_note_in_transaction verifies the complete admitted set before current policy and domain writes."
+      ],
+      "workerBoundary": "src-tauri/src/tasks.rs::ipc::create_task_note owns every String, Option, enum or draft/field struct before awaiting tauri::async_runtime::spawn_blocking. No State/AppHandle/guard adaptation is required. Inner Result<T,String> passes unchanged; only JoinError adds command_task_failed context.",
+      "syncCallers": [
+        "src-tauri/src/tasks.rs::create_task_note remains available with identical owned arguments/result for Rust and CLI callers.",
+        "src-tauri/src/drafts.rs::drafts_promote_in_transaction now calls src-tauri/src/tasks.rs::create_task_note_in_transaction with its existing complete lease; no reacquisition or write-set extension."
+      ],
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_09",
+          "passed": 21,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/components/tasks/TasksPane.tsx",
+          "src/components/agents/AgentChatTab.tsx"
+        ],
+        "payload": "TasksPane createTask awaits create then reload; AgentChatTab handoff owns returned row and local state.",
+        "terminalNoticeOwner": "Existing initiating component/hook and existing error surface retain completion ownership. Metadata cancellation remains local; durable workspace-scoped lifetime/terminal notices and stale refresh closure remain Plans25/26. Workers complete independently of UI polling; no new service or final D04 claim."
+      },
+      "mutationKey": {
+        "lexicalPaths": [
+          "Resolved task bucket allocation subtree, including collision-selected filenames and newly created ancestors under the pinned workspace.",
+          "Both original lexical workspace spelling and resolved workspace endpoints; with_workspace_registry includes conditional legacy/output registry migration files."
+        ],
+        "aliasPaths": [
+          "src-tauri/src/atomic_file.rs::PathTransactionRequest stores physical existing-target/nearest-parent-plus-suffix aliases beside lexical paths."
+        ],
+        "postAdmissionPreconditions": "Pinned original workspace and nearest existing parents, unchanged aliases, complete lease coverage and registry coverage; current backend capability checks and original lexical containment run before writes; Meetings also verifies document ownership. Task field patches read current bytes under admission.",
+        "domainLockOrder": "Shared path admission occurs before permission loader or domain work. Existing owned task/meeting paths have no additional domain mutex; no guard exemption or guard across await. Whole write/move/rollback remains admitted.",
+        "sharedAdmissionEntry": "src-tauri/src/tasks.rs::create_task_note enters src-tauri/src/atomic_file.rs::with_path_transactions inside the actual IPC blocking worker; unchanged synchronous callers use the same outer entry."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_09_tasks_all_nine_wrappers_yield_on_same_polling_task",
+          "phase08_09_tasks_real_payloads_schedule_transition_and_legacy_errors",
+          "phase08_09_tasks_every_writer_same_target_contention_and_unwind_release",
+          "phase08_09_tasks_every_writer_production_policy_rechecked_after_admission",
+          "phase08_09_tasks_and_meetings_workspace_alias_cannot_bypass_write_policy",
+          "phase08_09_tasks_all_writers_files_parent_both_orders_aliases",
+          "phase08_09_tasks_document_save_order_and_typed_error_release",
+          "phase08_09_tasks_move_failure_restores_source_and_releases_for_retry",
+          "phase08_09_tasks_concurrent_field_changes_keep_successful_siblings",
+          "phase08_09_tasks_borrowed_create_rejects_incomplete_write_set_before_effect",
+          "phase08_09_tasks_capture_preparation_is_read_only_and_parent_snapshot_survives"
+        ],
+        "workerProof": "Every actual wrapper yields on its same polling task while a distinct blocking worker is held; injected worker panic verifies contextual JoinError, not spare-worker-only progress.",
+        "permissions": "Production src-tauri/src/vault_list.rs::assert_maru_can_write compares both requested and registered roots using comparable_root and checks every matching alias. Actual Tasks/Meetings wrappers reject canonical/alias calls and alias/canonical registry entries with readOnly/delegated policies, refuse permissive duplicates, and accept direct aliases. No registry standalone behavior remains unchanged.",
+        "crossDomain": "Actual Tasks/Meetings wrapper writes contend with Files parent rename and document save. Typed document_conflict remains structured through test channels, admission releases after error/unwind, and successful independent field patches retain both results.",
+        "platformScope": "Executed on macOS, disposable temporary homes/workspaces only. No subprocess/native provider/Finder/system Trash invocation. Windows/native saturation and artifact isolation remain Plans27/28."
+      }
+    },
+    {
+      "name": "update_task_status",
+      "module": "src-tauri/src/tasks.rs",
+      "registrationPath": "src-tauri/src/lib.rs::tasks::ipc::update_task_status",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/tasks.rs::ipc::update_task_status awaits spawn_blocking before filesystem reads, walks, serialization or admission waits.",
+        "src-tauri/src/tasks.rs::update_task_status retains the synchronous API and actual domain result.",
+        "src-tauri/src/tasks.rs::update_task_status_in_transaction verifies the complete admitted set before current policy and domain writes."
+      ],
+      "workerBoundary": "src-tauri/src/tasks.rs::ipc::update_task_status owns every String, Option, enum or draft/field struct before awaiting tauri::async_runtime::spawn_blocking. No State/AppHandle/guard adaptation is required. Inner Result<T,String> passes unchanged; only JoinError adds command_task_failed context.",
+      "syncCallers": [
+        "src-tauri/src/tasks.rs::update_task_status remains available with identical owned arguments/result for Rust and CLI callers."
+      ],
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_09",
+          "passed": 21,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/components/tasks/TasksPane.tsx"
+        ],
+        "payload": "setStatus replaces current row and selection or reports local error.",
+        "terminalNoticeOwner": "Existing initiating component/hook and existing error surface retain completion ownership. Metadata cancellation remains local; durable workspace-scoped lifetime/terminal notices and stale refresh closure remain Plans25/26. Workers complete independently of UI polling; no new service or final D04 claim."
+      },
+      "mutationKey": {
+        "lexicalPaths": [
+          "Exact source note plus complete configured tasks subtree, including target bucket allocation and rollback source.",
+          "Both original lexical workspace spelling and resolved workspace endpoints; with_workspace_registry includes conditional legacy/output registry migration files."
+        ],
+        "aliasPaths": [
+          "src-tauri/src/atomic_file.rs::PathTransactionRequest stores physical existing-target/nearest-parent-plus-suffix aliases beside lexical paths."
+        ],
+        "postAdmissionPreconditions": "Pinned original workspace and nearest existing parents, unchanged aliases, complete lease coverage and registry coverage; current backend capability checks and original lexical containment run before writes; Meetings also verifies document ownership. Task field patches read current bytes under admission.",
+        "domainLockOrder": "Shared path admission occurs before permission loader or domain work. Existing owned task/meeting paths have no additional domain mutex; no guard exemption or guard across await. Whole write/move/rollback remains admitted.",
+        "sharedAdmissionEntry": "src-tauri/src/tasks.rs::update_task_status enters src-tauri/src/atomic_file.rs::with_path_transactions inside the actual IPC blocking worker; unchanged synchronous callers use the same outer entry."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_09_tasks_all_nine_wrappers_yield_on_same_polling_task",
+          "phase08_09_tasks_real_payloads_schedule_transition_and_legacy_errors",
+          "phase08_09_tasks_every_writer_same_target_contention_and_unwind_release",
+          "phase08_09_tasks_every_writer_production_policy_rechecked_after_admission",
+          "phase08_09_tasks_and_meetings_workspace_alias_cannot_bypass_write_policy",
+          "phase08_09_tasks_all_writers_files_parent_both_orders_aliases",
+          "phase08_09_tasks_document_save_order_and_typed_error_release",
+          "phase08_09_tasks_move_failure_restores_source_and_releases_for_retry",
+          "phase08_09_tasks_concurrent_field_changes_keep_successful_siblings",
+          "phase08_09_tasks_borrowed_create_rejects_incomplete_write_set_before_effect",
+          "phase08_09_tasks_capture_preparation_is_read_only_and_parent_snapshot_survives"
+        ],
+        "workerProof": "Every actual wrapper yields on its same polling task while a distinct blocking worker is held; injected worker panic verifies contextual JoinError, not spare-worker-only progress.",
+        "permissions": "Production src-tauri/src/vault_list.rs::assert_maru_can_write compares both requested and registered roots using comparable_root and checks every matching alias. Actual Tasks/Meetings wrappers reject canonical/alias calls and alias/canonical registry entries with readOnly/delegated policies, refuse permissive duplicates, and accept direct aliases. No registry standalone behavior remains unchanged.",
+        "crossDomain": "Actual Tasks/Meetings wrapper writes contend with Files parent rename and document save. Typed document_conflict remains structured through test channels, admission releases after error/unwind, and successful independent field patches retain both results.",
+        "platformScope": "Executed on macOS, disposable temporary homes/workspaces only. No subprocess/native provider/Finder/system Trash invocation. Windows/native saturation and artifact isolation remain Plans27/28."
+      }
+    },
+    {
+      "name": "update_task_schedule_fields",
+      "module": "src-tauri/src/tasks.rs",
+      "registrationPath": "src-tauri/src/lib.rs::tasks::ipc::update_task_schedule_fields",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/tasks.rs::ipc::update_task_schedule_fields awaits spawn_blocking before filesystem reads, walks, serialization or admission waits.",
+        "src-tauri/src/tasks.rs::update_task_schedule_fields retains the synchronous API and actual domain result.",
+        "src-tauri/src/tasks.rs::update_task_schedule_fields_in_transaction verifies the complete admitted set before current policy and domain writes."
+      ],
+      "workerBoundary": "src-tauri/src/tasks.rs::ipc::update_task_schedule_fields owns every String, Option, enum or draft/field struct before awaiting tauri::async_runtime::spawn_blocking. No State/AppHandle/guard adaptation is required. Inner Result<T,String> passes unchanged; only JoinError adds command_task_failed context.",
+      "syncCallers": [
+        "src-tauri/src/tasks.rs::update_task_schedule_fields remains available with identical owned arguments/result for Rust and CLI callers."
+      ],
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_09",
+          "passed": 21,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts"
+        ],
+        "payload": "Exported API wrapper currently has no live component caller; synchronous API remains available.",
+        "terminalNoticeOwner": "Existing initiating component/hook and existing error surface retain completion ownership. Metadata cancellation remains local; durable workspace-scoped lifetime/terminal notices and stale refresh closure remain Plans25/26. Workers complete independently of UI polling; no new service or final D04 claim."
+      },
+      "mutationKey": {
+        "lexicalPaths": [
+          "Exact source task note.",
+          "Both original lexical workspace spelling and resolved workspace endpoints; with_workspace_registry includes conditional legacy/output registry migration files."
+        ],
+        "aliasPaths": [
+          "src-tauri/src/atomic_file.rs::PathTransactionRequest stores physical existing-target/nearest-parent-plus-suffix aliases beside lexical paths."
+        ],
+        "postAdmissionPreconditions": "Pinned original workspace and nearest existing parents, unchanged aliases, complete lease coverage and registry coverage; current backend capability checks and original lexical containment run before writes; Meetings also verifies document ownership. Task field patches read current bytes under admission.",
+        "domainLockOrder": "Shared path admission occurs before permission loader or domain work. Existing owned task/meeting paths have no additional domain mutex; no guard exemption or guard across await. Whole write/move/rollback remains admitted.",
+        "sharedAdmissionEntry": "src-tauri/src/tasks.rs::update_task_schedule_fields enters src-tauri/src/atomic_file.rs::with_path_transactions inside the actual IPC blocking worker; unchanged synchronous callers use the same outer entry."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_09_tasks_all_nine_wrappers_yield_on_same_polling_task",
+          "phase08_09_tasks_real_payloads_schedule_transition_and_legacy_errors",
+          "phase08_09_tasks_every_writer_same_target_contention_and_unwind_release",
+          "phase08_09_tasks_every_writer_production_policy_rechecked_after_admission",
+          "phase08_09_tasks_and_meetings_workspace_alias_cannot_bypass_write_policy",
+          "phase08_09_tasks_all_writers_files_parent_both_orders_aliases",
+          "phase08_09_tasks_document_save_order_and_typed_error_release",
+          "phase08_09_tasks_move_failure_restores_source_and_releases_for_retry",
+          "phase08_09_tasks_concurrent_field_changes_keep_successful_siblings",
+          "phase08_09_tasks_borrowed_create_rejects_incomplete_write_set_before_effect",
+          "phase08_09_tasks_capture_preparation_is_read_only_and_parent_snapshot_survives"
+        ],
+        "workerProof": "Every actual wrapper yields on its same polling task while a distinct blocking worker is held; injected worker panic verifies contextual JoinError, not spare-worker-only progress.",
+        "permissions": "Production src-tauri/src/vault_list.rs::assert_maru_can_write compares both requested and registered roots using comparable_root and checks every matching alias. Actual Tasks/Meetings wrappers reject canonical/alias calls and alias/canonical registry entries with readOnly/delegated policies, refuse permissive duplicates, and accept direct aliases. No registry standalone behavior remains unchanged.",
+        "crossDomain": "Actual Tasks/Meetings wrapper writes contend with Files parent rename and document save. Typed document_conflict remains structured through test channels, admission releases after error/unwind, and successful independent field patches retain both results.",
+        "platformScope": "Executed on macOS, disposable temporary homes/workspaces only. No subprocess/native provider/Finder/system Trash invocation. Windows/native saturation and artifact isolation remain Plans27/28."
+      }
+    },
+    {
+      "name": "update_task_details",
+      "module": "src-tauri/src/tasks.rs",
+      "registrationPath": "src-tauri/src/lib.rs::tasks::ipc::update_task_details",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/tasks.rs::ipc::update_task_details awaits spawn_blocking before filesystem reads, walks, serialization or admission waits.",
+        "src-tauri/src/tasks.rs::update_task_details retains the synchronous API and actual domain result.",
+        "src-tauri/src/tasks.rs::update_task_details_in_transaction verifies the complete admitted set before current policy and domain writes."
+      ],
+      "workerBoundary": "src-tauri/src/tasks.rs::ipc::update_task_details owns every String, Option, enum or draft/field struct before awaiting tauri::async_runtime::spawn_blocking. No State/AppHandle/guard adaptation is required. Inner Result<T,String> passes unchanged; only JoinError adds command_task_failed context.",
+      "syncCallers": [
+        "src-tauri/src/tasks.rs::update_task_details remains available with identical owned arguments/result for Rust and CLI callers."
+      ],
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_09",
+          "passed": 21,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/components/tasks/TasksPane.tsx",
+          "src/components/today/TaskSheet.tsx"
+        ],
+        "payload": "TasksPane updateDetails replaces row and clears editor dirtiness; TaskSheet awaits save callback.",
+        "terminalNoticeOwner": "Existing initiating component/hook and existing error surface retain completion ownership. Metadata cancellation remains local; durable workspace-scoped lifetime/terminal notices and stale refresh closure remain Plans25/26. Workers complete independently of UI polling; no new service or final D04 claim."
+      },
+      "mutationKey": {
+        "lexicalPaths": [
+          "Exact source note plus complete configured tasks subtree, including target bucket allocation and rollback source.",
+          "Both original lexical workspace spelling and resolved workspace endpoints; with_workspace_registry includes conditional legacy/output registry migration files."
+        ],
+        "aliasPaths": [
+          "src-tauri/src/atomic_file.rs::PathTransactionRequest stores physical existing-target/nearest-parent-plus-suffix aliases beside lexical paths."
+        ],
+        "postAdmissionPreconditions": "Pinned original workspace and nearest existing parents, unchanged aliases, complete lease coverage and registry coverage; current backend capability checks and original lexical containment run before writes; Meetings also verifies document ownership. Task field patches read current bytes under admission.",
+        "domainLockOrder": "Shared path admission occurs before permission loader or domain work. Existing owned task/meeting paths have no additional domain mutex; no guard exemption or guard across await. Whole write/move/rollback remains admitted.",
+        "sharedAdmissionEntry": "src-tauri/src/tasks.rs::update_task_details enters src-tauri/src/atomic_file.rs::with_path_transactions inside the actual IPC blocking worker; unchanged synchronous callers use the same outer entry."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_09_tasks_all_nine_wrappers_yield_on_same_polling_task",
+          "phase08_09_tasks_real_payloads_schedule_transition_and_legacy_errors",
+          "phase08_09_tasks_every_writer_same_target_contention_and_unwind_release",
+          "phase08_09_tasks_every_writer_production_policy_rechecked_after_admission",
+          "phase08_09_tasks_and_meetings_workspace_alias_cannot_bypass_write_policy",
+          "phase08_09_tasks_all_writers_files_parent_both_orders_aliases",
+          "phase08_09_tasks_document_save_order_and_typed_error_release",
+          "phase08_09_tasks_move_failure_restores_source_and_releases_for_retry",
+          "phase08_09_tasks_concurrent_field_changes_keep_successful_siblings",
+          "phase08_09_tasks_borrowed_create_rejects_incomplete_write_set_before_effect",
+          "phase08_09_tasks_capture_preparation_is_read_only_and_parent_snapshot_survives"
+        ],
+        "workerProof": "Every actual wrapper yields on its same polling task while a distinct blocking worker is held; injected worker panic verifies contextual JoinError, not spare-worker-only progress.",
+        "permissions": "Production src-tauri/src/vault_list.rs::assert_maru_can_write compares both requested and registered roots using comparable_root and checks every matching alias. Actual Tasks/Meetings wrappers reject canonical/alias calls and alias/canonical registry entries with readOnly/delegated policies, refuse permissive duplicates, and accept direct aliases. No registry standalone behavior remains unchanged.",
+        "crossDomain": "Actual Tasks/Meetings wrapper writes contend with Files parent rename and document save. Typed document_conflict remains structured through test channels, admission releases after error/unwind, and successful independent field patches retain both results.",
+        "platformScope": "Executed on macOS, disposable temporary homes/workspaces only. No subprocess/native provider/Finder/system Trash invocation. Windows/native saturation and artifact isolation remain Plans27/28."
+      }
+    },
+    {
+      "name": "move_task_note",
+      "module": "src-tauri/src/tasks.rs",
+      "registrationPath": "src-tauri/src/lib.rs::tasks::ipc::move_task_note",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/tasks.rs::ipc::move_task_note awaits spawn_blocking before filesystem reads, walks, serialization or admission waits.",
+        "src-tauri/src/tasks.rs::move_task_note retains the synchronous API and actual domain result.",
+        "src-tauri/src/tasks.rs::move_task_note_in_transaction verifies the complete admitted set before current policy and domain writes."
+      ],
+      "workerBoundary": "src-tauri/src/tasks.rs::ipc::move_task_note owns every String, Option, enum or draft/field struct before awaiting tauri::async_runtime::spawn_blocking. No State/AppHandle/guard adaptation is required. Inner Result<T,String> passes unchanged; only JoinError adds command_task_failed context.",
+      "syncCallers": [
+        "src-tauri/src/tasks.rs::move_task_note remains available with identical owned arguments/result for Rust and CLI callers."
+      ],
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_09",
+          "passed": 21,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts"
+        ],
+        "payload": "Exported API wrapper currently has no live component caller; synchronous API remains available.",
+        "terminalNoticeOwner": "Existing initiating component/hook and existing error surface retain completion ownership. Metadata cancellation remains local; durable workspace-scoped lifetime/terminal notices and stale refresh closure remain Plans25/26. Workers complete independently of UI polling; no new service or final D04 claim."
+      },
+      "mutationKey": {
+        "lexicalPaths": [
+          "Exact source note plus complete configured tasks subtree and collision-selected destination.",
+          "Both original lexical workspace spelling and resolved workspace endpoints; with_workspace_registry includes conditional legacy/output registry migration files."
+        ],
+        "aliasPaths": [
+          "src-tauri/src/atomic_file.rs::PathTransactionRequest stores physical existing-target/nearest-parent-plus-suffix aliases beside lexical paths."
+        ],
+        "postAdmissionPreconditions": "Pinned original workspace and nearest existing parents, unchanged aliases, complete lease coverage and registry coverage; current backend capability checks and original lexical containment run before writes; Meetings also verifies document ownership. Task field patches read current bytes under admission.",
+        "domainLockOrder": "Shared path admission occurs before permission loader or domain work. Existing owned task/meeting paths have no additional domain mutex; no guard exemption or guard across await. Whole write/move/rollback remains admitted.",
+        "sharedAdmissionEntry": "src-tauri/src/tasks.rs::move_task_note enters src-tauri/src/atomic_file.rs::with_path_transactions inside the actual IPC blocking worker; unchanged synchronous callers use the same outer entry."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_09_tasks_all_nine_wrappers_yield_on_same_polling_task",
+          "phase08_09_tasks_real_payloads_schedule_transition_and_legacy_errors",
+          "phase08_09_tasks_every_writer_same_target_contention_and_unwind_release",
+          "phase08_09_tasks_every_writer_production_policy_rechecked_after_admission",
+          "phase08_09_tasks_and_meetings_workspace_alias_cannot_bypass_write_policy",
+          "phase08_09_tasks_all_writers_files_parent_both_orders_aliases",
+          "phase08_09_tasks_document_save_order_and_typed_error_release",
+          "phase08_09_tasks_move_failure_restores_source_and_releases_for_retry",
+          "phase08_09_tasks_concurrent_field_changes_keep_successful_siblings",
+          "phase08_09_tasks_borrowed_create_rejects_incomplete_write_set_before_effect",
+          "phase08_09_tasks_capture_preparation_is_read_only_and_parent_snapshot_survives"
+        ],
+        "workerProof": "Every actual wrapper yields on its same polling task while a distinct blocking worker is held; injected worker panic verifies contextual JoinError, not spare-worker-only progress.",
+        "permissions": "Production src-tauri/src/vault_list.rs::assert_maru_can_write compares both requested and registered roots using comparable_root and checks every matching alias. Actual Tasks/Meetings wrappers reject canonical/alias calls and alias/canonical registry entries with readOnly/delegated policies, refuse permissive duplicates, and accept direct aliases. No registry standalone behavior remains unchanged.",
+        "crossDomain": "Actual Tasks/Meetings wrapper writes contend with Files parent rename and document save. Typed document_conflict remains structured through test channels, admission releases after error/unwind, and successful independent field patches retain both results.",
+        "platformScope": "Executed on macOS, disposable temporary homes/workspaces only. No subprocess/native provider/Finder/system Trash invocation. Windows/native saturation and artifact isolation remain Plans27/28."
+      }
+    },
+    {
+      "name": "append_tasks_log",
+      "module": "src-tauri/src/tasks.rs",
+      "registrationPath": "src-tauri/src/lib.rs::tasks::ipc::append_tasks_log",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/tasks.rs::ipc::append_tasks_log awaits spawn_blocking before filesystem reads, walks, serialization or admission waits.",
+        "src-tauri/src/tasks.rs::append_tasks_log retains the synchronous API and actual domain result.",
+        "src-tauri/src/tasks.rs::append_tasks_log_in_transaction verifies the complete admitted set before current policy and domain writes."
+      ],
+      "workerBoundary": "src-tauri/src/tasks.rs::ipc::append_tasks_log owns every String, Option, enum or draft/field struct before awaiting tauri::async_runtime::spawn_blocking. No State/AppHandle/guard adaptation is required. Inner Result<T,String> passes unchanged; only JoinError adds command_task_failed context.",
+      "syncCallers": [
+        "src-tauri/src/tasks.rs::append_tasks_log remains available with identical owned arguments/result for Rust and CLI callers."
+      ],
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_09",
+          "passed": 21,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/components/tasks/TasksPane.tsx",
+          "src/components/tasks/TasksRunsPanel.tsx"
+        ],
+        "payload": "Task AI run completion and TasksRunsPanel audit handling await append before their existing completion handling.",
+        "terminalNoticeOwner": "Existing initiating component/hook and existing error surface retain completion ownership. Metadata cancellation remains local; durable workspace-scoped lifetime/terminal notices and stale refresh closure remain Plans25/26. Workers complete independently of UI polling; no new service or final D04 claim."
+      },
+      "mutationKey": {
+        "lexicalPaths": [
+          "Exact .maru/tasks-log.md and its creation beneath the original pinned nearest parent.",
+          "Both original lexical workspace spelling and resolved workspace endpoints; with_workspace_registry includes conditional legacy/output registry migration files."
+        ],
+        "aliasPaths": [
+          "src-tauri/src/atomic_file.rs::PathTransactionRequest stores physical existing-target/nearest-parent-plus-suffix aliases beside lexical paths."
+        ],
+        "postAdmissionPreconditions": "Pinned original workspace and nearest existing parents, unchanged aliases, complete lease coverage and registry coverage; current backend capability checks and original lexical containment run before writes; Meetings also verifies document ownership. Task field patches read current bytes under admission.",
+        "domainLockOrder": "Shared path admission occurs before permission loader or domain work. Existing owned task/meeting paths have no additional domain mutex; no guard exemption or guard across await. Whole write/move/rollback remains admitted.",
+        "sharedAdmissionEntry": "src-tauri/src/tasks.rs::append_tasks_log enters src-tauri/src/atomic_file.rs::with_path_transactions inside the actual IPC blocking worker; unchanged synchronous callers use the same outer entry."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_09_tasks_all_nine_wrappers_yield_on_same_polling_task",
+          "phase08_09_tasks_real_payloads_schedule_transition_and_legacy_errors",
+          "phase08_09_tasks_every_writer_same_target_contention_and_unwind_release",
+          "phase08_09_tasks_every_writer_production_policy_rechecked_after_admission",
+          "phase08_09_tasks_and_meetings_workspace_alias_cannot_bypass_write_policy",
+          "phase08_09_tasks_all_writers_files_parent_both_orders_aliases",
+          "phase08_09_tasks_document_save_order_and_typed_error_release",
+          "phase08_09_tasks_move_failure_restores_source_and_releases_for_retry",
+          "phase08_09_tasks_concurrent_field_changes_keep_successful_siblings",
+          "phase08_09_tasks_borrowed_create_rejects_incomplete_write_set_before_effect",
+          "phase08_09_tasks_capture_preparation_is_read_only_and_parent_snapshot_survives"
+        ],
+        "workerProof": "Every actual wrapper yields on its same polling task while a distinct blocking worker is held; injected worker panic verifies contextual JoinError, not spare-worker-only progress.",
+        "permissions": "Production src-tauri/src/vault_list.rs::assert_maru_can_write compares both requested and registered roots using comparable_root and checks every matching alias. Actual Tasks/Meetings wrappers reject canonical/alias calls and alias/canonical registry entries with readOnly/delegated policies, refuse permissive duplicates, and accept direct aliases. No registry standalone behavior remains unchanged.",
+        "crossDomain": "Actual Tasks/Meetings wrapper writes contend with Files parent rename and document save. Typed document_conflict remains structured through test channels, admission releases after error/unwind, and successful independent field patches retain both results.",
+        "platformScope": "Executed on macOS, disposable temporary homes/workspaces only. No subprocess/native provider/Finder/system Trash invocation. Windows/native saturation and artifact isolation remain Plans27/28."
+      }
+    },
+    {
+      "name": "read_tasks_log",
+      "module": "src-tauri/src/tasks.rs",
+      "registrationPath": "src-tauri/src/lib.rs::tasks::ipc::read_tasks_log",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/tasks.rs::ipc::read_tasks_log awaits spawn_blocking before filesystem reads, walks, serialization or admission waits.",
+        "src-tauri/src/tasks.rs::read_tasks_log retains the synchronous API and actual domain result."
+      ],
+      "workerBoundary": "src-tauri/src/tasks.rs::ipc::read_tasks_log owns every String, Option, enum or draft/field struct before awaiting tauri::async_runtime::spawn_blocking. No State/AppHandle/guard adaptation is required. Inner Result<T,String> passes unchanged; only JoinError adds command_task_failed context.",
+      "syncCallers": [
+        "src-tauri/src/tasks.rs::read_tasks_log remains available with identical owned arguments/result for Rust and CLI callers."
+      ],
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_09",
+          "passed": 21,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts"
+        ],
+        "payload": "Exported API wrapper currently has no live component caller; log read returns newest capped rows.",
+        "terminalNoticeOwner": "Existing initiating component/hook and existing error surface retain completion ownership. Metadata cancellation remains local; durable workspace-scoped lifetime/terminal notices and stale refresh closure remain Plans25/26. Workers complete independently of UI polling; no new service or final D04 claim."
+      },
+      "mutationKey": {
+        "readOnly": true,
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "reason": "src-tauri/src/tasks.rs::read_tasks_log and reached helpers perform read-only filesystem/config/metadata inspection; no filesystem mutation or registry migration. Entire read runs in blocking worker. Log result limits do not imply byte-size bounds; worker owns full read."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_09_tasks_all_nine_wrappers_yield_on_same_polling_task",
+          "phase08_09_tasks_real_payloads_schedule_transition_and_legacy_errors",
+          "phase08_09_tasks_every_writer_same_target_contention_and_unwind_release",
+          "phase08_09_tasks_every_writer_production_policy_rechecked_after_admission",
+          "phase08_09_tasks_and_meetings_workspace_alias_cannot_bypass_write_policy",
+          "phase08_09_tasks_all_writers_files_parent_both_orders_aliases",
+          "phase08_09_tasks_document_save_order_and_typed_error_release",
+          "phase08_09_tasks_move_failure_restores_source_and_releases_for_retry",
+          "phase08_09_tasks_concurrent_field_changes_keep_successful_siblings",
+          "phase08_09_tasks_borrowed_create_rejects_incomplete_write_set_before_effect",
+          "phase08_09_tasks_capture_preparation_is_read_only_and_parent_snapshot_survives"
+        ],
+        "workerProof": "Every actual wrapper yields on its same polling task while a distinct blocking worker is held; injected worker panic verifies contextual JoinError, not spare-worker-only progress.",
+        "permissions": "Production src-tauri/src/vault_list.rs::assert_maru_can_write compares both requested and registered roots using comparable_root and checks every matching alias. Actual Tasks/Meetings wrappers reject canonical/alias calls and alias/canonical registry entries with readOnly/delegated policies, refuse permissive duplicates, and accept direct aliases. No registry standalone behavior remains unchanged.",
+        "crossDomain": "Actual Tasks/Meetings wrapper writes contend with Files parent rename and document save. Typed document_conflict remains structured through test channels, admission releases after error/unwind, and successful independent field patches retain both results.",
+        "platformScope": "Executed on macOS, disposable temporary homes/workspaces only. No subprocess/native provider/Finder/system Trash invocation. Windows/native saturation and artifact isolation remain Plans27/28."
+      }
+    },
+    {
+      "name": "scan_meeting_notes",
+      "module": "src-tauri/src/meetings.rs",
+      "registrationPath": "src-tauri/src/lib.rs::meetings::ipc::scan_meeting_notes",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/meetings.rs::ipc::scan_meeting_notes awaits spawn_blocking before filesystem reads, walks, serialization or admission waits.",
+        "src-tauri/src/meetings.rs::scan_meeting_notes retains the synchronous API and actual domain result."
+      ],
+      "workerBoundary": "src-tauri/src/meetings.rs::ipc::scan_meeting_notes owns every String, Option, enum or draft/field struct before awaiting tauri::async_runtime::spawn_blocking. No State/AppHandle/guard adaptation is required. Inner Result<T,String> passes unchanged; only JoinError adds command_task_failed context.",
+      "syncCallers": [
+        "src-tauri/src/meetings.rs::scan_meeting_notes remains available with identical owned arguments/result for Rust and CLI callers."
+      ],
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_09",
+          "passed": 21,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/components/meetings/MeetingsPane.tsx"
+        ],
+        "payload": "MeetingsPane refresh at scan call owns rows/loading/error/finally.",
+        "terminalNoticeOwner": "Existing initiating component/hook and existing error surface retain completion ownership. Metadata cancellation remains local; durable workspace-scoped lifetime/terminal notices and stale refresh closure remain Plans25/26. Workers complete independently of UI polling; no new service or final D04 claim."
+      },
+      "mutationKey": {
+        "readOnly": true,
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "reason": "src-tauri/src/meetings.rs::scan_meeting_notes and reached helpers perform read-only filesystem/config/metadata inspection; no filesystem mutation or registry migration. Entire read runs in blocking worker. Log result limits do not imply byte-size bounds; worker owns full read."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_09_meetings_all_five_wrappers_yield_and_preserve_join_errors",
+          "phase08_09_meetings_nonempty_payloads_and_legacy_errors",
+          "phase08_09_meetings_same_target_append_serializes_complete_lines",
+          "phase08_09_meetings_parent_rename_both_orders_without_recreation",
+          "phase08_09_meetings_document_error_releases_append_admission",
+          "phase08_09_meetings_production_policy_denial_has_no_effect_and_releases",
+          "phase08_09_meetings_symlink_alias_conflicts_with_physical_parent"
+        ],
+        "workerProof": "Every actual wrapper yields on its same polling task while a distinct blocking worker is held; injected worker panic verifies contextual JoinError, not spare-worker-only progress.",
+        "permissions": "Production src-tauri/src/vault_list.rs::assert_maru_can_write compares both requested and registered roots using comparable_root and checks every matching alias. Actual Tasks/Meetings wrappers reject canonical/alias calls and alias/canonical registry entries with readOnly/delegated policies, refuse permissive duplicates, and accept direct aliases. No registry standalone behavior remains unchanged.",
+        "crossDomain": "Actual Tasks/Meetings wrapper writes contend with Files parent rename and document save. Typed document_conflict remains structured through test channels, admission releases after error/unwind, and successful independent field patches retain both results.",
+        "platformScope": "Executed on macOS, disposable temporary homes/workspaces only. No subprocess/native provider/Finder/system Trash invocation. Windows/native saturation and artifact isolation remain Plans27/28."
+      }
+    },
+    {
+      "name": "read_meeting_metadata",
+      "module": "src-tauri/src/meetings.rs",
+      "registrationPath": "src-tauri/src/lib.rs::meetings::ipc::read_meeting_metadata",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/meetings.rs::ipc::read_meeting_metadata awaits spawn_blocking before filesystem reads, walks, serialization or admission waits.",
+        "src-tauri/src/meetings.rs::read_meeting_metadata retains the synchronous API and actual domain result."
+      ],
+      "workerBoundary": "src-tauri/src/meetings.rs::ipc::read_meeting_metadata owns every String, Option, enum or draft/field struct before awaiting tauri::async_runtime::spawn_blocking. No State/AppHandle/guard adaptation is required. Inner Result<T,String> passes unchanged; only JoinError adds command_task_failed context.",
+      "syncCallers": [
+        "src-tauri/src/meetings.rs::read_meeting_metadata remains available with identical owned arguments/result for Rust and CLI callers."
+      ],
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_09",
+          "passed": 21,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/components/meetings/MeetingsPane.tsx"
+        ],
+        "payload": "MeetingsPane metadata effect owns cancellation and metadataLoading.",
+        "terminalNoticeOwner": "Existing initiating component/hook and existing error surface retain completion ownership. Metadata cancellation remains local; durable workspace-scoped lifetime/terminal notices and stale refresh closure remain Plans25/26. Workers complete independently of UI polling; no new service or final D04 claim."
+      },
+      "mutationKey": {
+        "readOnly": true,
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "reason": "src-tauri/src/meetings.rs::read_meeting_metadata and reached helpers perform read-only filesystem/config/metadata inspection; no filesystem mutation or registry migration. Entire read runs in blocking worker. Log result limits do not imply byte-size bounds; worker owns full read."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_09_meetings_all_five_wrappers_yield_and_preserve_join_errors",
+          "phase08_09_meetings_nonempty_payloads_and_legacy_errors",
+          "phase08_09_meetings_same_target_append_serializes_complete_lines",
+          "phase08_09_meetings_parent_rename_both_orders_without_recreation",
+          "phase08_09_meetings_document_error_releases_append_admission",
+          "phase08_09_meetings_production_policy_denial_has_no_effect_and_releases",
+          "phase08_09_meetings_symlink_alias_conflicts_with_physical_parent"
+        ],
+        "workerProof": "Every actual wrapper yields on its same polling task while a distinct blocking worker is held; injected worker panic verifies contextual JoinError, not spare-worker-only progress.",
+        "permissions": "Production src-tauri/src/vault_list.rs::assert_maru_can_write compares both requested and registered roots using comparable_root and checks every matching alias. Actual Tasks/Meetings wrappers reject canonical/alias calls and alias/canonical registry entries with readOnly/delegated policies, refuse permissive duplicates, and accept direct aliases. No registry standalone behavior remains unchanged.",
+        "crossDomain": "Actual Tasks/Meetings wrapper writes contend with Files parent rename and document save. Typed document_conflict remains structured through test channels, admission releases after error/unwind, and successful independent field patches retain both results.",
+        "platformScope": "Executed on macOS, disposable temporary homes/workspaces only. No subprocess/native provider/Finder/system Trash invocation. Windows/native saturation and artifact isolation remain Plans27/28."
+      }
+    },
+    {
+      "name": "read_meeting_guides",
+      "module": "src-tauri/src/meetings.rs",
+      "registrationPath": "src-tauri/src/lib.rs::meetings::ipc::read_meeting_guides",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/meetings.rs::ipc::read_meeting_guides awaits spawn_blocking before filesystem reads, walks, serialization or admission waits.",
+        "src-tauri/src/meetings.rs::read_meeting_guides retains the synchronous API and actual domain result."
+      ],
+      "workerBoundary": "src-tauri/src/meetings.rs::ipc::read_meeting_guides owns every String, Option, enum or draft/field struct before awaiting tauri::async_runtime::spawn_blocking. No State/AppHandle/guard adaptation is required. Inner Result<T,String> passes unchanged; only JoinError adds command_task_failed context.",
+      "syncCallers": [
+        "src-tauri/src/meetings.rs::read_meeting_guides remains available with identical owned arguments/result for Rust and CLI callers."
+      ],
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_09",
+          "passed": 21,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/components/meetings/MeetingsPane.tsx"
+        ],
+        "payload": "External run preparation awaits guides inside busy try/finally.",
+        "terminalNoticeOwner": "Existing initiating component/hook and existing error surface retain completion ownership. Metadata cancellation remains local; durable workspace-scoped lifetime/terminal notices and stale refresh closure remain Plans25/26. Workers complete independently of UI polling; no new service or final D04 claim."
+      },
+      "mutationKey": {
+        "readOnly": true,
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "reason": "src-tauri/src/meetings.rs::read_meeting_guides and reached helpers perform read-only filesystem/config/metadata inspection; no filesystem mutation or registry migration. Entire read runs in blocking worker. Log result limits do not imply byte-size bounds; worker owns full read."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_09_meetings_all_five_wrappers_yield_and_preserve_join_errors",
+          "phase08_09_meetings_nonempty_payloads_and_legacy_errors",
+          "phase08_09_meetings_same_target_append_serializes_complete_lines",
+          "phase08_09_meetings_parent_rename_both_orders_without_recreation",
+          "phase08_09_meetings_document_error_releases_append_admission",
+          "phase08_09_meetings_production_policy_denial_has_no_effect_and_releases",
+          "phase08_09_meetings_symlink_alias_conflicts_with_physical_parent"
+        ],
+        "workerProof": "Every actual wrapper yields on its same polling task while a distinct blocking worker is held; injected worker panic verifies contextual JoinError, not spare-worker-only progress.",
+        "permissions": "Production src-tauri/src/vault_list.rs::assert_maru_can_write compares both requested and registered roots using comparable_root and checks every matching alias. Actual Tasks/Meetings wrappers reject canonical/alias calls and alias/canonical registry entries with readOnly/delegated policies, refuse permissive duplicates, and accept direct aliases. No registry standalone behavior remains unchanged.",
+        "crossDomain": "Actual Tasks/Meetings wrapper writes contend with Files parent rename and document save. Typed document_conflict remains structured through test channels, admission releases after error/unwind, and successful independent field patches retain both results.",
+        "platformScope": "Executed on macOS, disposable temporary homes/workspaces only. No subprocess/native provider/Finder/system Trash invocation. Windows/native saturation and artifact isolation remain Plans27/28."
+      }
+    },
+    {
+      "name": "append_meetings_log",
+      "module": "src-tauri/src/meetings.rs",
+      "registrationPath": "src-tauri/src/lib.rs::meetings::ipc::append_meetings_log",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/meetings.rs::ipc::append_meetings_log awaits spawn_blocking before filesystem reads, walks, serialization or admission waits.",
+        "src-tauri/src/meetings.rs::append_meetings_log retains the synchronous API and actual domain result."
+      ],
+      "workerBoundary": "src-tauri/src/meetings.rs::ipc::append_meetings_log owns every String, Option, enum or draft/field struct before awaiting tauri::async_runtime::spawn_blocking. No State/AppHandle/guard adaptation is required. Inner Result<T,String> passes unchanged; only JoinError adds command_task_failed context.",
+      "syncCallers": [
+        "src-tauri/src/meetings.rs::append_meetings_log remains available with identical owned arguments/result for Rust and CLI callers."
+      ],
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_09",
+          "passed": 21,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/components/meetings/MeetingsPane.tsx"
+        ],
+        "payload": "Clear/undo append with catch; followup/retry/writeAuditLine await append inside existing review/run handlers.",
+        "terminalNoticeOwner": "Existing initiating component/hook and existing error surface retain completion ownership. Metadata cancellation remains local; durable workspace-scoped lifetime/terminal notices and stale refresh closure remain Plans25/26. Workers complete independently of UI polling; no new service or final D04 claim."
+      },
+      "mutationKey": {
+        "lexicalPaths": [
+          "Complete .maru parent plus exact .maru/meetings-log.md.",
+          "Both original lexical workspace spelling and resolved workspace endpoints; with_workspace_registry includes conditional legacy/output registry migration files."
+        ],
+        "aliasPaths": [
+          "src-tauri/src/atomic_file.rs::PathTransactionRequest stores physical existing-target/nearest-parent-plus-suffix aliases beside lexical paths."
+        ],
+        "postAdmissionPreconditions": "Pinned original workspace and nearest existing parents, unchanged aliases, complete lease coverage and registry coverage; current backend capability checks and original lexical containment run before writes; Meetings also verifies document ownership. Task field patches read current bytes under admission.",
+        "domainLockOrder": "Shared path admission occurs before permission loader or domain work. Existing owned task/meeting paths have no additional domain mutex; no guard exemption or guard across await. Whole write/move/rollback remains admitted.",
+        "sharedAdmissionEntry": "src-tauri/src/meetings.rs::append_meetings_log enters src-tauri/src/atomic_file.rs::with_path_transactions inside the actual IPC blocking worker; unchanged synchronous callers use the same outer entry."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_09_meetings_all_five_wrappers_yield_and_preserve_join_errors",
+          "phase08_09_meetings_nonempty_payloads_and_legacy_errors",
+          "phase08_09_meetings_same_target_append_serializes_complete_lines",
+          "phase08_09_meetings_parent_rename_both_orders_without_recreation",
+          "phase08_09_meetings_document_error_releases_append_admission",
+          "phase08_09_meetings_production_policy_denial_has_no_effect_and_releases",
+          "phase08_09_meetings_symlink_alias_conflicts_with_physical_parent"
+        ],
+        "workerProof": "Every actual wrapper yields on its same polling task while a distinct blocking worker is held; injected worker panic verifies contextual JoinError, not spare-worker-only progress.",
+        "permissions": "Production src-tauri/src/vault_list.rs::assert_maru_can_write compares both requested and registered roots using comparable_root and checks every matching alias. Actual Tasks/Meetings wrappers reject canonical/alias calls and alias/canonical registry entries with readOnly/delegated policies, refuse permissive duplicates, and accept direct aliases. No registry standalone behavior remains unchanged.",
+        "crossDomain": "Actual Tasks/Meetings wrapper writes contend with Files parent rename and document save. Typed document_conflict remains structured through test channels, admission releases after error/unwind, and successful independent field patches retain both results.",
+        "platformScope": "Executed on macOS, disposable temporary homes/workspaces only. No subprocess/native provider/Finder/system Trash invocation. Windows/native saturation and artifact isolation remain Plans27/28."
+      }
+    },
+    {
+      "name": "read_meetings_log",
+      "module": "src-tauri/src/meetings.rs",
+      "registrationPath": "src-tauri/src/lib.rs::meetings::ipc::read_meetings_log",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/meetings.rs::ipc::read_meetings_log awaits spawn_blocking before filesystem reads, walks, serialization or admission waits.",
+        "src-tauri/src/meetings.rs::read_meetings_log retains the synchronous API and actual domain result."
+      ],
+      "workerBoundary": "src-tauri/src/meetings.rs::ipc::read_meetings_log owns every String, Option, enum or draft/field struct before awaiting tauri::async_runtime::spawn_blocking. No State/AppHandle/guard adaptation is required. Inner Result<T,String> passes unchanged; only JoinError adds command_task_failed context.",
+      "syncCallers": [
+        "src-tauri/src/meetings.rs::read_meetings_log remains available with identical owned arguments/result for Rust and CLI callers."
+      ],
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_09",
+          "passed": 21,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/components/meetings/MeetingsPane.tsx"
+        ],
+        "payload": "Activity refresh owns loading/error/finally.",
+        "terminalNoticeOwner": "Existing initiating component/hook and existing error surface retain completion ownership. Metadata cancellation remains local; durable workspace-scoped lifetime/terminal notices and stale refresh closure remain Plans25/26. Workers complete independently of UI polling; no new service or final D04 claim."
+      },
+      "mutationKey": {
+        "readOnly": true,
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "reason": "src-tauri/src/meetings.rs::read_meetings_log and reached helpers perform read-only filesystem/config/metadata inspection; no filesystem mutation or registry migration. Entire read runs in blocking worker. Log result limits do not imply byte-size bounds; worker owns full read."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_09_meetings_all_five_wrappers_yield_and_preserve_join_errors",
+          "phase08_09_meetings_nonempty_payloads_and_legacy_errors",
+          "phase08_09_meetings_same_target_append_serializes_complete_lines",
+          "phase08_09_meetings_parent_rename_both_orders_without_recreation",
+          "phase08_09_meetings_document_error_releases_append_admission",
+          "phase08_09_meetings_production_policy_denial_has_no_effect_and_releases",
+          "phase08_09_meetings_symlink_alias_conflicts_with_physical_parent"
+        ],
+        "workerProof": "Every actual wrapper yields on its same polling task while a distinct blocking worker is held; injected worker panic verifies contextual JoinError, not spare-worker-only progress.",
+        "permissions": "Production src-tauri/src/vault_list.rs::assert_maru_can_write compares both requested and registered roots using comparable_root and checks every matching alias. Actual Tasks/Meetings wrappers reject canonical/alias calls and alias/canonical registry entries with readOnly/delegated policies, refuse permissive duplicates, and accept direct aliases. No registry standalone behavior remains unchanged.",
+        "crossDomain": "Actual Tasks/Meetings wrapper writes contend with Files parent rename and document save. Typed document_conflict remains structured through test channels, admission releases after error/unwind, and successful independent field patches retain both results.",
+        "platformScope": "Executed on macOS, disposable temporary homes/workspaces only. No subprocess/native provider/Finder/system Trash invocation. Windows/native saturation and artifact isolation remain Plans27/28."
+      }
+    },
+    {
+      "name": "scan_project_activity",
+      "module": "src-tauri/src/project_activity.rs",
+      "registrationPath": "src-tauri/src/lib.rs::project_activity::ipc::scan_project_activity",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/project_activity.rs::ipc::scan_project_activity awaits spawn_blocking before filesystem reads, walks, serialization or admission waits.",
+        "src-tauri/src/project_activity.rs::scan_project_activity retains the synchronous API and actual domain result.",
+        "src-tauri/src/project_activity.rs::scan_project_activity_impl calls workspace_project_entries and walks meeting/project files; no initialization write."
+      ],
+      "workerBoundary": "src-tauri/src/project_activity.rs::ipc::scan_project_activity owns every String, Option, enum or draft/field struct before awaiting tauri::async_runtime::spawn_blocking. No State/AppHandle/guard adaptation is required. Inner Result<T,String> passes unchanged; only JoinError adds command_task_failed context.",
+      "syncCallers": [
+        "src-tauri/src/project_activity.rs::scan_project_activity remains available with identical owned arguments/result for Rust and CLI callers."
+      ],
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_09",
+          "passed": 21,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/components/dashboard/useDashboardData.ts"
+        ],
+        "payload": "Dashboard useWidgetData Promise.all owns project activity completion and current widget generation.",
+        "terminalNoticeOwner": "Existing initiating component/hook and existing error surface retain completion ownership. Metadata cancellation remains local; durable workspace-scoped lifetime/terminal notices and stale refresh closure remain Plans25/26. Workers complete independently of UI polling; no new service or final D04 claim."
+      },
+      "mutationKey": {
+        "readOnly": true,
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "reason": "src-tauri/src/project_activity.rs::scan_project_activity and reached helpers perform read-only filesystem/config/metadata inspection; no filesystem mutation or registry migration. Entire read runs in blocking worker. Log result limits do not imply byte-size bounds; worker owns full read."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_09_project_activity_wrapper_yields_and_preserves_join_error",
+          "phase08_09_project_activity_payload_errors_and_no_implicit_writes"
+        ],
+        "workerProof": "Every actual wrapper yields on its same polling task while a distinct blocking worker is held; injected worker panic verifies contextual JoinError, not spare-worker-only progress.",
+        "permissions": "Production src-tauri/src/vault_list.rs::assert_maru_can_write compares both requested and registered roots using comparable_root and checks every matching alias. Actual Tasks/Meetings wrappers reject canonical/alias calls and alias/canonical registry entries with readOnly/delegated policies, refuse permissive duplicates, and accept direct aliases. No registry standalone behavior remains unchanged.",
+        "crossDomain": "Actual Tasks/Meetings wrapper writes contend with Files parent rename and document save. Typed document_conflict remains structured through test channels, admission releases after error/unwind, and successful independent field patches retain both results.",
+        "platformScope": "Executed on macOS, disposable temporary homes/workspaces only. No subprocess/native provider/Finder/system Trash invocation. Windows/native saturation and artifact isolation remain Plans27/28."
+      }
+    }
+  ],
+  "consumedHandoffs": {
+    "draftsPromotion": "src-tauri/src/drafts.rs::drafts_promote_in_transaction consumes src-tauri/src/tasks.rs::create_task_note_in_transaction under the previously reserved tasks/active allocation. phase08_09_drafts_task_promotion_borrows_complete_lease_and_freezes_real_bytes proves baseline equals promoted bytes; existing phase08_08_drafts rollback regression remains tested.",
+    "todayCapture": "src-tauri/src/tasks.rs::prepare_capture_task_materialization is now read-only and retains original workspace/nearest-target-parent snapshots. src-tauri/src/tasks.rs::materialize_capture_task acquires a fresh complete target request with these snapshots. Plan11 must move shared admission ahead of Today finalize domain guard and call materialize_capture_task_in_transaction from today_store::today_finalize_setup with full tasks + journal/plan write set. Current whole Today transaction is not closed here."
+  }
+}

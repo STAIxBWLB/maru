@@ -2558,6 +2558,82 @@ mod phase08_09 {
         }
     }
     #[test]
+    fn phase08_09_tasks_move_failure_restores_source_and_releases_for_retry() {
+        let home = Home::new();
+        for operation in ["status", "details"] {
+            let tmp = fixture(&home);
+            let root = tmp.path();
+            let work = text(root);
+            let original = fs::read(root.join("tasks/active/task.md")).unwrap();
+            fs::write(root.join("tasks/archive"), "target is not a directory").unwrap();
+            let error = if operation == "status" {
+                run(mutate("status", work.clone())).unwrap_err()
+            } else {
+                let fields = UpdateTaskDetailsFields {
+                    status: Some(TaskStatus::Done),
+                    ..details()
+                };
+                run(ipc::update_task_details(
+                    work.clone(),
+                    "tasks/active/task.md".into(),
+                    fields,
+                    None,
+                ))
+                .unwrap_err()
+            };
+            assert!(error.contains("Cannot create task target"));
+            assert_eq!(
+                fs::read(root.join("tasks/active/task.md")).unwrap(),
+                original
+            );
+            fs::remove_file(root.join("tasks/archive")).unwrap();
+            run(mutate("status", work)).unwrap();
+            assert!(root.join("tasks/archive/task.md").is_file());
+        }
+    }
+    #[test]
+    fn phase08_09_tasks_concurrent_field_changes_keep_successful_siblings() {
+        let home = Home::new();
+        let tmp = fixture(&home);
+        let root = tmp.path();
+        let work = text(root);
+        let key = root.join("tasks/active/task.md");
+        let held = Held::new(key.clone(), "admitted");
+        let first = start(mutate("schedule", work.clone()));
+        held.wait();
+        let waiting = Held::new(key, "before-admission");
+        let second = start(mutate("details", work.clone()));
+        waiting.wait();
+        waiting.release();
+        assert!(second.recv_timeout(Duration::from_millis(30)).is_err());
+        held.release();
+        done(first).unwrap();
+        done(second).unwrap();
+        let result = run(ipc::read_task_metadata(work, "tasks/active/task.md".into())).unwrap();
+        assert_eq!(result.frontmatter["title"], "Changed");
+        assert_eq!(result.frontmatter["project"], "project");
+        assert_eq!(result.frontmatter["estimateMinutes"], 30.0);
+        assert_eq!(result.frontmatter["custom"], "preserved");
+    }
+    #[test]
+    fn phase08_09_tasks_borrowed_create_rejects_incomplete_write_set_before_effect() {
+        let home = Home::new();
+        let tmp = fixture(&home);
+        let root = tmp.path();
+        let request = PathTransactionRequest::new(vec![root.join(".maru")])
+            .unwrap()
+            .with_workspace_registry()
+            .unwrap();
+        let error = with_path_transactions(request, |lease| {
+            create_task_note_in_transaction(lease, text(root), draft(), None)
+        })
+        .unwrap_err();
+        assert_eq!(error, "Nested mutation exceeds the admitted path set");
+        assert_eq!(fs::read_dir(root.join("tasks/active")).unwrap().count(), 1);
+        run(ipc::create_task_note(text(root), draft(), None)).unwrap();
+    }
+
+    #[test]
     fn phase08_09_tasks_capture_preparation_is_read_only_and_parent_snapshot_survives() {
         let home = Home::new();
         let root = home.root.path().join("capture");
