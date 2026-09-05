@@ -122,13 +122,6 @@ use hwp_cli_template::{hwp_cli_template_fields, hwp_cli_template_fill};
 use hwped::{
     hwped_capabilities, hwped_compose, hwped_edit, hwped_read, hwped_render, hwped_validate,
 };
-use inbox::{
-    accept_inbox_item, accept_inbox_items, apply_inbox_decisions, count_inbox_processed_by_channel,
-    read_inbox_processed_item, read_inbox_source_runs, reject_inbox_item, reject_inbox_items,
-    scan_inbox_drop, scan_inbox_entries, scan_inbox_processed_items, scan_inbox_processed_snapshot,
-    stage_inbox_drop_files, trash_inbox_items,
-};
-use inbox_classifier::{build_inbox_classification_prompt, parse_inbox_classification};
 use inbox_settings::{
     read_inbox_runtime_config, read_inbox_settings, save_inbox_runtime_config, save_inbox_settings,
 };
@@ -169,10 +162,6 @@ use scratchpad_watcher::{
 use secrets::{
     secrets_delete_text, secrets_doctor, secrets_migrate, secrets_read_text, secrets_scan,
     secrets_write_text,
-};
-use share_outbox::{
-    ensure_share_outbox_root, prepare_share_outbox_files, read_share_outbox_config,
-    save_share_outbox_root, scan_share_outbox,
 };
 #[cfg(target_os = "macos")]
 use site_view::queue_opened_urls;
@@ -316,31 +305,31 @@ pub fn run() {
             git::ipc::list_workspace_submodules,
             file_manager::ipc::open_in_file_manager,
             file_manager::ipc::reveal_in_file_manager,
-            scan_inbox_drop,
-            scan_inbox_entries,
-            scan_inbox_processed_items,
-            scan_inbox_processed_snapshot,
-            read_inbox_processed_item,
-            read_inbox_source_runs,
-            count_inbox_processed_by_channel,
-            trash_inbox_items,
-            stage_inbox_drop_files,
-            accept_inbox_item,
-            accept_inbox_items,
-            apply_inbox_decisions,
-            reject_inbox_item,
-            reject_inbox_items,
+            inbox::ipc::scan_inbox_drop,
+            inbox::ipc::scan_inbox_entries,
+            inbox::ipc::scan_inbox_processed_items,
+            inbox::scan_inbox_processed_snapshot,
+            inbox::ipc::read_inbox_processed_item,
+            inbox::ipc::read_inbox_source_runs,
+            inbox::ipc::count_inbox_processed_by_channel,
+            inbox::ipc::trash_inbox_items,
+            inbox::ipc::stage_inbox_drop_files,
+            inbox::ipc::accept_inbox_item,
+            inbox::ipc::accept_inbox_items,
+            inbox::ipc::apply_inbox_decisions,
+            inbox::ipc::reject_inbox_item,
+            inbox::ipc::reject_inbox_items,
             start_inbox_watcher,
             stop_inbox_watcher,
             read_inbox_settings,
             save_inbox_settings,
             read_inbox_runtime_config,
             save_inbox_runtime_config,
-            read_share_outbox_config,
-            save_share_outbox_root,
-            ensure_share_outbox_root,
-            scan_share_outbox,
-            prepare_share_outbox_files,
+            share_outbox::ipc::read_share_outbox_config,
+            share_outbox::ipc::save_share_outbox_root,
+            share_outbox::ipc::ensure_share_outbox_root,
+            share_outbox::ipc::scan_share_outbox,
+            share_outbox::ipc::prepare_share_outbox_files,
             parse_korean_date_cmd,
             meetings::ipc::scan_meeting_notes,
             meetings::ipc::read_meeting_metadata,
@@ -450,8 +439,8 @@ pub fn run() {
             terminal_hooks_status,
             write_agent_context_hint,
             remove_agent_context_hint,
-            build_inbox_classification_prompt,
-            parse_inbox_classification,
+            inbox_classifier::ipc::build_inbox_classification_prompt,
+            inbox_classifier::ipc::parse_inbox_classification,
             fetch_gmail_unread,
             stage_gmail_items,
             check_gws_auth,

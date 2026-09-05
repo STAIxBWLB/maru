@@ -1,3 +1,6 @@
+use crate::atomic_file::{
+    with_path_transactions, PathTransactionLease, PathTransactionParent, PathTransactionRequest,
+};
 use crate::inbox_settings::{self, InboxRuntimeConfig, InboxSettings};
 use crate::vault::normalize_existing_dir;
 use crate::vault::{
@@ -14,7 +17,7 @@ use serde_yaml::Value as YamlValue;
 use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 use walkdir::WalkDir;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -338,7 +341,6 @@ const INBOX_FILE_TRASH_KIND: &str = "inbox.file.trash";
 const INBOX_BULK_KIND: &str = "inbox.bulk";
 const INBOX_ROUTE_KIND: &str = "inbox.route";
 
-#[tauri::command(async)]
 pub fn scan_inbox_drop(
     vault_path: String,
     scan_options: Option<ScanOptions>,
@@ -349,7 +351,6 @@ pub fn scan_inbox_drop(
     scan_inbox_with_settings(&vault, &settings, &scan_filter)
 }
 
-#[tauri::command(async)]
 pub fn scan_inbox_entries(
     work_path: String,
     scan_options: Option<ScanOptions>,
@@ -366,7 +367,6 @@ pub fn scan_inbox_entries(
     Ok(entries)
 }
 
-#[tauri::command(async)]
 pub fn scan_inbox_processed_items(
     work_path: String,
     channel: Option<String>,
@@ -388,15 +388,19 @@ pub async fn scan_inbox_processed_snapshot(
     limit: Option<usize>,
 ) -> Result<InboxProcessedSnapshot, String> {
     tauri::async_runtime::spawn_blocking(move || {
+        #[cfg(test)]
+        PathTransactionLease::test_stage(
+            &[PathBuf::from(&work_path)],
+            "worker:scan_inbox_processed_snapshot",
+        );
         let work = normalize_existing_dir(&work_path)?;
         let config = inbox_settings::load_runtime_config_or_legacy(&work)?;
         scan_processed_snapshot_with_config(&work, &config, channel, statuses, query, limit)
     })
     .await
-    .map_err(|err| format!("Inbox processed scan task failed: {err}"))?
+    .map_err(|err| format!("scan_inbox_processed_snapshot_task_failed: {err}"))?
 }
 
-#[tauri::command(async)]
 pub fn read_inbox_processed_item(
     work_path: String,
     item_dir: String,
@@ -406,7 +410,6 @@ pub fn read_inbox_processed_item(
     read_processed_item_with_config(&work, &config, &item_dir)
 }
 
-#[tauri::command(async)]
 pub fn read_inbox_source_runs(work_path: String) -> Result<Vec<InboxSourceRun>, String> {
     let work = normalize_existing_dir(&work_path)?;
     let config = inbox_settings::load_runtime_config_or_legacy(&work)?;
@@ -417,7 +420,6 @@ pub fn read_inbox_source_runs(work_path: String) -> Result<Vec<InboxSourceRun>, 
 /// status/query filter and no result cap. The dashboard source badges use this
 /// so the per-source totals stay stable regardless of the search box or status
 /// chip and do not silently cap at the processed-item list limit.
-#[tauri::command(async)]
 pub fn count_inbox_processed_by_channel(
     work_path: String,
 ) -> Result<std::collections::HashMap<String, usize>, String> {
@@ -426,7 +428,6 @@ pub fn count_inbox_processed_by_channel(
     count_processed_by_channel_with_config(&work, &config)
 }
 
-#[tauri::command(async)]
 pub fn trash_inbox_items(
     approvals: tauri::State<'_, crate::approval::ApprovalState>,
     work_path: String,
@@ -434,56 +435,78 @@ pub fn trash_inbox_items(
     approval_id: Option<String>,
 ) -> Result<Vec<InboxTrashOutcome>, String> {
     crate::approval::require_approval(&approvals, approval_id, INBOX_FILE_TRASH_KIND)?;
+    let parent = PathTransactionParent::capture(Path::new(&work_path))?;
     let work = normalize_existing_dir(&work_path)?;
-    assert_maru_can_write(&work.to_string_lossy(), WorkspaceWriteAction::Delete)?;
     let config = inbox_settings::load_runtime_config_or_legacy(&work)?;
-    Ok(trash_inbox_items_with(
+    Ok(trash_inbox_items_blocking(
         &work,
+        &parent,
         &config,
         targets,
         move_path_to_system_trash,
     ))
 }
 
-#[tauri::command(async)]
-pub fn stage_inbox_drop_files(
-    app: AppHandle,
+pub fn stage_inbox_drop_files<R: tauri::Runtime>(
+    app: AppHandle<R>,
     work_path: String,
     channel: Option<String>,
     drop_path: Option<String>,
     source_paths: Vec<String>,
 ) -> Result<Vec<InboxDropStageOutcome>, String> {
+    let parent = PathTransactionParent::capture(Path::new(&work_path))?;
     let work = normalize_existing_dir(&work_path)?;
-    assert_maru_can_write(&work.to_string_lossy(), WorkspaceWriteAction::Create)?;
     let config = inbox_settings::load_runtime_config_or_legacy(&work)?;
     let target = resolve_file_drop_target(&work, &config, channel, drop_path)?;
-    fs::create_dir_all(&target.target_dir)
-        .map_err(|err| format!("Cannot create inbox drop directory: {err}"))?;
-    if !target.target_dir.is_dir() {
-        return Err("inbox_drop_target_not_directory".to_string());
-    }
+    let mut paths = vec![
+        target.target_dir.clone(),
+        work.join("workspace.config.yaml"),
+        work.join(".maru/inbox.json"),
+    ];
+    paths.extend(
+        source_paths
+            .iter()
+            .map(PathBuf::from)
+            .filter(|p| p.is_absolute()),
+    );
+    let request = PathTransactionRequest::new(paths)?
+        .require_parent_snapshot(&parent)?
+        .with_workspace_registry()?;
+    with_path_transactions(request, |lease| {
+        lease.ensure_workspace_registry()?;
+        if inbox_settings::load_runtime_config_or_legacy(&work)? != config {
+            return Err("Inbox configuration changed; retry the operation".into());
+        }
+        lease.before_effect()?;
+        assert_maru_can_write(&work.to_string_lossy(), WorkspaceWriteAction::Create)?;
+        lease.before_effect()?;
+        fs::create_dir_all(&target.target_dir)
+            .map_err(|err| format!("Cannot create inbox drop directory: {err}"))?;
+        if !target.target_dir.is_dir() {
+            return Err("inbox_drop_target_not_directory".to_string());
+        }
 
-    let mut outcomes = Vec::new();
-    for source in source_paths {
-        outcomes.push(stage_one_drop_file(&target, source));
-    }
-    if outcomes.iter().any(|outcome| outcome.ok) {
-        let _ = app.emit(
-            "inbox://drop_staged",
-            InboxDropStagedEvent {
-                work_path: work.to_string_lossy().to_string(),
-                channel: target.channel.clone(),
-                drop_path: target.drop_path.clone(),
-                outcomes: outcomes.clone(),
-            },
-        );
-    }
-    Ok(outcomes)
+        let mut outcomes = Vec::new();
+        for source in source_paths {
+            outcomes.push(stage_one_drop_file_in_transaction(lease, &target, source));
+        }
+        if outcomes.iter().any(|outcome| outcome.ok) {
+            let _ = app.emit(
+                "inbox://drop_staged",
+                InboxDropStagedEvent {
+                    work_path: work.to_string_lossy().to_string(),
+                    channel: target.channel.clone(),
+                    drop_path: target.drop_path.clone(),
+                    outcomes: outcomes.clone(),
+                },
+            );
+        }
+        Ok(outcomes)
+    })
 }
 
-#[tauri::command(async)]
-pub fn accept_inbox_item(
-    app: AppHandle,
+pub fn accept_inbox_item<R: tauri::Runtime>(
+    app: AppHandle<R>,
     approvals: tauri::State<'_, crate::approval::ApprovalState>,
     vault_path: String,
     id: String,
@@ -491,15 +514,15 @@ pub fn accept_inbox_item(
     approval_id: Option<String>,
 ) -> Result<InboxDecisionOutcome, String> {
     crate::approval::require_approval(&approvals, approval_id, INBOX_FILE_ACCEPT_KIND)?;
+    let parent = PathTransactionParent::capture(Path::new(&vault_path))?;
     let vault = normalize_existing_dir(&vault_path)?;
-    let outcome = accept_inbox_item_at(&vault, id, target_folder)?;
+    let outcome = accept_inbox_item_blocking(&vault, &parent, id, target_folder)?;
     emit_decision(&app, "inbox://accepted", &outcome);
     Ok(outcome)
 }
 
-#[tauri::command(async)]
-pub fn accept_inbox_items(
-    app: AppHandle,
+pub fn accept_inbox_items<R: tauri::Runtime>(
+    app: AppHandle<R>,
     approvals: tauri::State<'_, crate::approval::ApprovalState>,
     vault_path: String,
     items: Vec<InboxAcceptRequest>,
@@ -510,10 +533,11 @@ pub fn accept_inbox_items(
         approval_id,
         &[INBOX_FILE_ACCEPT_KIND, INBOX_BULK_KIND],
     )?;
+    let parent = PathTransactionParent::capture(Path::new(&vault_path))?;
     let vault = normalize_existing_dir(&vault_path)?;
     let mut outcomes = Vec::new();
     for item in items {
-        match accept_inbox_item_at(&vault, item.id.clone(), item.target_folder) {
+        match accept_inbox_item_blocking(&vault, &parent, item.id.clone(), item.target_folder) {
             Ok(outcome) => {
                 emit_decision(&app, "inbox://accepted", &outcome);
                 outcomes.push(outcome);
@@ -524,24 +548,23 @@ pub fn accept_inbox_items(
     Ok(outcomes)
 }
 
-#[tauri::command(async)]
-pub fn reject_inbox_item(
-    app: AppHandle,
+pub fn reject_inbox_item<R: tauri::Runtime>(
+    app: AppHandle<R>,
     approvals: tauri::State<'_, crate::approval::ApprovalState>,
     vault_path: String,
     id: String,
     approval_id: Option<String>,
 ) -> Result<InboxDecisionOutcome, String> {
     crate::approval::require_approval(&approvals, approval_id, INBOX_FILE_REJECT_KIND)?;
+    let parent = PathTransactionParent::capture(Path::new(&vault_path))?;
     let vault = normalize_existing_dir(&vault_path)?;
-    let outcome = reject_inbox_item_at(&vault, id)?;
+    let outcome = reject_inbox_item_blocking(&vault, &parent, id)?;
     emit_decision(&app, "inbox://rejected", &outcome);
     Ok(outcome)
 }
 
-#[tauri::command(async)]
-pub fn reject_inbox_items(
-    app: AppHandle,
+pub fn reject_inbox_items<R: tauri::Runtime>(
+    app: AppHandle<R>,
     approvals: tauri::State<'_, crate::approval::ApprovalState>,
     vault_path: String,
     ids: Vec<String>,
@@ -552,10 +575,11 @@ pub fn reject_inbox_items(
         approval_id,
         &[INBOX_FILE_REJECT_KIND, INBOX_BULK_KIND],
     )?;
+    let parent = PathTransactionParent::capture(Path::new(&vault_path))?;
     let vault = normalize_existing_dir(&vault_path)?;
     let mut outcomes = Vec::new();
     for id in ids {
-        match reject_inbox_item_at(&vault, id.clone()) {
+        match reject_inbox_item_blocking(&vault, &parent, id.clone()) {
             Ok(outcome) => {
                 emit_decision(&app, "inbox://rejected", &outcome);
                 outcomes.push(outcome);
@@ -570,9 +594,8 @@ pub fn reject_inbox_items(
 /// pending item directory is moved as a whole (manifest + raw + extracted +
 /// summary + route) — never a single file — so nothing is orphaned. A receipt
 /// is appended per item to the configured `_state/index.jsonl`.
-#[tauri::command(async)]
-pub fn apply_inbox_decisions(
-    app: AppHandle,
+pub fn apply_inbox_decisions<R: tauri::Runtime>(
+    app: AppHandle<R>,
     approvals: tauri::State<'_, crate::approval::ApprovalState>,
     work_path: String,
     decisions: Vec<InboxApplyDecision>,
@@ -583,8 +606,8 @@ pub fn apply_inbox_decisions(
         approval_id,
         &[INBOX_ROUTE_KIND, INBOX_BULK_KIND],
     )?;
+    let parent = PathTransactionParent::capture(Path::new(&work_path))?;
     let work = normalize_existing_dir(&work_path)?;
-    assert_maru_can_write(&work.to_string_lossy(), WorkspaceWriteAction::RenameMove)?;
     let config = inbox_settings::load_runtime_config_or_legacy(&work)?;
     let root = inbox_settings::resolve_runtime_root(&work, &config)?;
     let mut outcomes = Vec::new();
@@ -595,7 +618,7 @@ pub fn apply_inbox_decisions(
             "inbox://accepted"
         };
         let fallback_decision = apply_inbox_error_decision_label(&decision.decision);
-        match apply_inbox_decision_at(&work, &config, &root, &decision) {
+        match apply_inbox_decisions_blocking(&work, &parent, &config, &root, &decision) {
             Ok(outcome) => {
                 emit_decision(&app, event, &outcome);
                 outcomes.push(outcome);
@@ -614,7 +637,61 @@ fn apply_inbox_error_decision_label(decision: &str) -> &'static str {
     }
 }
 
+#[cfg(test)]
 fn apply_inbox_decision_at(
+    work: &Path,
+    config: &InboxRuntimeConfig,
+    root: &Path,
+    decision: &InboxApplyDecision,
+) -> Result<InboxDecisionOutcome, String> {
+    let parent = PathTransactionParent::capture(work)?;
+    apply_inbox_decisions_blocking(work, &parent, config, root, decision)
+}
+
+fn apply_inbox_decisions_blocking(
+    work: &Path,
+    parent: &PathTransactionParent,
+    config: &InboxRuntimeConfig,
+    root: &Path,
+    decision: &InboxApplyDecision,
+) -> Result<InboxDecisionOutcome, String> {
+    let raw = PathBuf::from(&decision.item_dir);
+    let item_dir = if raw.is_absolute() {
+        inbox_settings::lexical_normalize_path(&raw)
+    } else {
+        resolve_inside_vault(&work.to_string_lossy(), &decision.item_dir)?
+    };
+    let receipts = inbox_settings::lexical_normalize_path(&root.join(&config.paths.receipts));
+    if !receipts.starts_with(work) {
+        return Err("inbox_receipts_outside_workspace".into());
+    }
+    let mut paths = vec![
+        item_dir.clone(),
+        work.join("workspace.config.yaml"),
+        work.join(".maru/inbox.json"),
+        receipts,
+        processed_status_dir(root, config, "done")?,
+    ];
+    let channel = read_manifest_channel(&item_dir.join(&config.naming.manifest_file));
+    paths.push(rejected_item_target_dir(work, root, channel.as_deref())?);
+    if let Some(dest) = decision
+        .destination
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        paths.push(resolve_target_dir(work, dest)?);
+    }
+    let request = PathTransactionRequest::new(paths)?
+        .require_parent_snapshot(parent)?
+        .with_workspace_registry()?;
+    with_path_transactions(request, |lease| {
+        apply_inbox_decisions_in_transaction(lease, work, config, root, decision)
+    })
+}
+
+fn apply_inbox_decisions_in_transaction(
+    lease: &PathTransactionLease,
     work: &Path,
     config: &InboxRuntimeConfig,
     root: &Path,
@@ -626,6 +703,16 @@ fn apply_inbox_decision_at(
     } else {
         resolve_inside_vault(&work.to_string_lossy(), &decision.item_dir)?
     };
+    lease.ensure_workspace_registry()?;
+    if inbox_settings::load_runtime_config_or_legacy(work)? != *config {
+        return Err("Inbox configuration changed; retry the operation".into());
+    }
+    lease.before_effect()?;
+    assert_maru_can_write(&work.to_string_lossy(), WorkspaceWriteAction::RenameMove)?;
+    lease.ensure_covered(vec![
+        item_dir.clone(),
+        inbox_settings::lexical_normalize_path(&root.join(&config.paths.receipts)),
+    ])?;
     let item_metadata = fs::symlink_metadata(&item_dir).map_err(|err| {
         if err.kind() == std::io::ErrorKind::NotFound {
             "inbox_item_missing".to_string()
@@ -651,23 +738,49 @@ fn apply_inbox_decision_at(
 
     match decision.decision.as_str() {
         "accept" => {
-            if let Some(dest) = decision
+            let done_root = processed_status_dir(root, config, "done")?;
+            lease.ensure_covered(vec![done_root.clone()])?;
+            lease.before_effect()?;
+            // Validate/create the final item's parent before copying raw outputs.
+            fs::create_dir_all(&done_root)
+                .map_err(|err| format!("Cannot create done directory: {err}"))?;
+            let copies = if let Some(dest) = decision
                 .destination
                 .as_deref()
                 .map(str::trim)
-                .filter(|value| !value.is_empty())
+                .filter(|s| !s.is_empty())
             {
                 let dest_dir = resolve_target_dir(work, dest)?;
-                file_raw_originals(&item_dir, config, &dest_dir)?;
-            }
-            // Best-effort: stamp manifest status before moving the whole dir.
-            let _ = set_manifest_status(&manifest_path, "done");
-            let done_root = processed_status_dir(root, config, "done")?;
-            fs::create_dir_all(&done_root)
-                .map_err(|err| format!("Cannot create done directory: {err}"))?;
+                file_raw_originals(lease, &item_dir, config, &dest_dir)?
+            } else {
+                Vec::new()
+            };
             let target = unique_path(done_root.join(&dir_name));
-            move_source(&item_dir, &target, FileQueueSourceKind::Directory)?;
-            append_inbox_receipt(root, config, "route", decision, &dir_name, Some(&target));
+            #[cfg(test)]
+            PathTransactionLease::test_stage(&[item_dir.clone()], "before-item-move");
+            if let Err(error) = move_source(&item_dir, &target, FileQueueSourceKind::Directory) {
+                // These collision-free paths belong only to this decision. Keep
+                // completed siblings and the pending source available for retry.
+                for copy in copies.iter().chain(std::iter::once(&target)) {
+                    if copy.is_dir() {
+                        let _ = fs::remove_dir_all(copy);
+                    } else {
+                        let _ = fs::remove_file(copy);
+                    }
+                }
+                return Err(error);
+            }
+            // A failed move must not leave a pending item stamped as done.
+            let _ = set_manifest_status(lease, &target.join(&config.naming.manifest_file), "done");
+            append_inbox_receipt(
+                lease,
+                root,
+                config,
+                "route",
+                decision,
+                &dir_name,
+                Some(&target),
+            );
             Ok(decision_outcome(
                 &decision.item_dir,
                 "accepted",
@@ -678,11 +791,21 @@ fn apply_inbox_decision_at(
         "reject" => {
             let channel = read_manifest_channel(&manifest_path);
             let rejected_dir = rejected_item_target_dir(work, root, channel.as_deref())?;
+            lease.ensure_covered(vec![rejected_dir.clone()])?;
+            lease.before_effect()?;
             fs::create_dir_all(&rejected_dir)
                 .map_err(|err| format!("Cannot create rejected directory: {err}"))?;
             let target = unique_path(rejected_dir.join(&dir_name));
             move_source(&item_dir, &target, FileQueueSourceKind::Directory)?;
-            append_inbox_receipt(root, config, "reject", decision, &dir_name, Some(&target));
+            append_inbox_receipt(
+                lease,
+                root,
+                config,
+                "reject",
+                decision,
+                &dir_name,
+                Some(&target),
+            );
             Ok(decision_outcome(
                 &decision.item_dir,
                 "rejected",
@@ -697,14 +820,19 @@ fn apply_inbox_decision_at(
 /// Copy raw originals from `<item>/<raw_dir>` into the destination project
 /// folder. Copies (not moves) so the inbox `done/` item keeps its full record.
 fn file_raw_originals(
+    lease: &PathTransactionLease,
     item_dir: &Path,
     config: &InboxRuntimeConfig,
     dest_dir: &Path,
-) -> Result<(), String> {
+) -> Result<Vec<PathBuf>, String> {
     let raw_dir = item_dir.join(&config.naming.raw_dir);
+    lease.ensure_covered(vec![raw_dir.clone(), dest_dir.to_path_buf()])?;
+    if dest_dir.starts_with(item_dir) {
+        return Err("inbox_destination_inside_pending_item".into());
+    }
     let raw_metadata = match fs::symlink_metadata(&raw_dir) {
         Ok(metadata) => metadata,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
         Err(err) => return Err(format!("Cannot inspect raw directory: {err}")),
     };
     if raw_metadata.file_type().is_symlink() {
@@ -714,8 +842,18 @@ fn file_raw_originals(
         ));
     }
     if !raw_metadata.is_dir() {
-        return Ok(());
+        return Ok(Vec::new());
     }
+    for entry in WalkDir::new(&raw_dir).follow_links(false) {
+        let entry = entry.map_err(|err| format!("Cannot inspect raw tree: {err}"))?;
+        if entry.file_type().is_symlink() {
+            return Err(format!(
+                "Source symlinks are not supported: {}",
+                entry.path().display()
+            ));
+        }
+    }
+    let mut copies = Vec::new();
     fs::create_dir_all(dest_dir)
         .map_err(|err| format!("Cannot create destination directory: {err}"))?;
     for entry in
@@ -745,13 +883,28 @@ fn file_raw_originals(
             continue;
         };
         let target = unique_path(dest_dir.join(name));
-        copy_source(&path, &target, kind)?;
+        copies.push(target.clone());
+        if let Err(error) = copy_source(&path, &target, kind) {
+            for copy in &copies {
+                if copy.is_dir() {
+                    let _ = fs::remove_dir_all(copy);
+                } else {
+                    let _ = fs::remove_file(copy);
+                }
+            }
+            return Err(error);
+        }
     }
-    Ok(())
+    Ok(copies)
 }
 
 /// Set `status:` in a pending manifest, preserving all other keys.
-fn set_manifest_status(manifest_path: &Path, status: &str) -> Result<(), String> {
+fn set_manifest_status(
+    lease: &PathTransactionLease,
+    manifest_path: &Path,
+    status: &str,
+) -> Result<(), String> {
+    lease.ensure_covered(vec![manifest_path.to_path_buf()])?;
     let raw =
         fs::read_to_string(manifest_path).map_err(|err| format!("Cannot read manifest: {err}"))?;
     let mut value: YamlValue =
@@ -817,6 +970,7 @@ fn decision_outcome(
 /// Append a single JSON receipt line to the configured `_state/index.jsonl`.
 /// Best-effort: a receipt failure must not roll back a successful move.
 fn append_inbox_receipt(
+    lease: &PathTransactionLease,
     root: &Path,
     config: &InboxRuntimeConfig,
     event: &str,
@@ -825,6 +979,9 @@ fn append_inbox_receipt(
     dest: Option<&Path>,
 ) {
     let receipts_path = inbox_settings::lexical_normalize_path(&root.join(&config.paths.receipts));
+    if lease.ensure_covered(vec![receipts_path.clone()]).is_err() {
+        return;
+    }
     if let Some(parent) = receipts_path.parent() {
         let _ = fs::create_dir_all(parent);
     }
@@ -1777,8 +1934,23 @@ fn read_processed_item_with_config(
     })
 }
 
+#[cfg(test)]
 fn trash_inbox_items_with<F>(
     work: &Path,
+    config: &InboxRuntimeConfig,
+    targets: Vec<InboxTrashTarget>,
+    trasher: F,
+) -> Vec<InboxTrashOutcome>
+where
+    F: FnMut(&Path) -> Result<(), String>,
+{
+    let parent = PathTransactionParent::capture(work).unwrap();
+    trash_inbox_items_blocking(work, &parent, config, targets, trasher)
+}
+
+fn trash_inbox_items_blocking<F>(
+    work: &Path,
+    parent: &PathTransactionParent,
     config: &InboxRuntimeConfig,
     targets: Vec<InboxTrashTarget>,
     mut trasher: F,
@@ -1794,7 +1966,24 @@ where
             match resolve_inbox_trash_target(work, config, &target) {
                 Ok(path) => {
                     let original_path = path.to_string_lossy().to_string();
-                    match trasher(&path) {
+                    let result = (|| {
+                        let request = PathTransactionRequest::new(vec![path.clone()])?
+                            .require_parent_snapshot(parent)?
+                            .with_workspace_registry()?;
+                        with_path_transactions(request, |lease| {
+                            lease.ensure_workspace_registry()?;
+                            lease.before_effect()?;
+                            assert_maru_can_write(
+                                &work.to_string_lossy(),
+                                WorkspaceWriteAction::Delete,
+                            )?;
+                            let current = resolve_inbox_trash_target(work, config, &target)?;
+                            lease.ensure_covered(vec![current.clone()])?;
+                            lease.before_effect()?;
+                            trasher(&current)
+                        })
+                    })();
+                    match result {
                         Ok(()) => InboxTrashOutcome {
                             id,
                             kind,
@@ -1940,6 +2129,10 @@ fn is_processed_item_dir(
 }
 
 fn move_path_to_system_trash(path: &Path) -> Result<(), String> {
+    #[cfg(test)]
+    if let Some(result) = phase08_10::trash(path) {
+        return result;
+    }
     #[cfg(target_os = "macos")]
     {
         use trash::macos::{DeleteMethod, TrashContextExtMacos};
@@ -2514,9 +2707,25 @@ fn resolved_drop_target(
     })
 }
 
+#[cfg(test)]
 fn stage_one_drop_file(target: &ResolvedFileDropTarget, source: String) -> InboxDropStageOutcome {
+    let request =
+        PathTransactionRequest::new(vec![target.target_dir.clone(), PathBuf::from(&source)])
+            .unwrap();
+    with_path_transactions(request, |lease| {
+        lease.before_effect()?;
+        Ok(stage_one_drop_file_in_transaction(lease, target, source))
+    })
+    .unwrap()
+}
+
+fn stage_one_drop_file_in_transaction(
+    lease: &PathTransactionLease,
+    target: &ResolvedFileDropTarget,
+    source: String,
+) -> InboxDropStageOutcome {
     let source_path = PathBuf::from(&source);
-    match stage_one_drop_file_result(target, &source_path) {
+    match stage_one_drop_file_result(lease, target, &source_path) {
         Ok((target_path, file_name)) => InboxDropStageOutcome {
             id: source.clone(),
             source_path: source,
@@ -2541,9 +2750,11 @@ fn stage_one_drop_file(target: &ResolvedFileDropTarget, source: String) -> Inbox
 }
 
 fn stage_one_drop_file_result(
+    lease: &PathTransactionLease,
     target: &ResolvedFileDropTarget,
     source_path: &Path,
 ) -> Result<(PathBuf, String), String> {
+    lease.ensure_covered(vec![source_path.to_path_buf(), target.target_dir.clone()])?;
     let metadata =
         fs::symlink_metadata(source_path).map_err(|err| format!("Cannot inspect source: {err}"))?;
     if metadata.file_type().is_symlink() {
@@ -2570,29 +2781,97 @@ fn stage_one_drop_file_result(
     Ok((target_path, final_name))
 }
 
+#[cfg(test)]
 fn accept_inbox_item_at(
     vault: &Path,
     id: String,
     target_folder: Option<String>,
 ) -> Result<InboxDecisionOutcome, String> {
-    assert_maru_can_write(&vault.to_string_lossy(), WorkspaceWriteAction::RenameMove)?;
-    let settings = inbox_settings::load(vault);
-    let source = resolve_inbox_source(vault, &settings, &id)?;
-    let target_folder = target_folder
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| "target_folder_required".to_string())?;
-    let target_dir = resolve_target_dir(vault, target_folder)?;
-    move_inbox_file(id, "accepted", source.source_path, target_dir)
+    let parent = PathTransactionParent::capture(vault)?;
+    accept_inbox_item_blocking(vault, &parent, id, target_folder)
 }
 
+fn accept_inbox_item_blocking(
+    vault: &Path,
+    parent: &PathTransactionParent,
+    id: String,
+    target_folder: Option<String>,
+) -> Result<InboxDecisionOutcome, String> {
+    let settings = inbox_settings::load(vault);
+    let source = resolve_inbox_source(vault, &settings, &id)?;
+    let target = target_folder
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .ok_or("target_folder_required")?;
+    let target_dir = resolve_target_dir(vault, target)?;
+    let request = PathTransactionRequest::new(vec![
+        source.source_path,
+        target_dir.clone(),
+        vault.join(".maru/inbox.json"),
+    ])?
+    .require_parent_snapshot(parent)?
+    .with_workspace_registry()?;
+    with_path_transactions(request, |lease| {
+        accept_inbox_item_in_transaction(lease, vault, id, target_dir)
+    })
+}
+
+fn accept_inbox_item_in_transaction(
+    lease: &PathTransactionLease,
+    vault: &Path,
+    id: String,
+    target_dir: PathBuf,
+) -> Result<InboxDecisionOutcome, String> {
+    lease.ensure_workspace_registry()?;
+    lease.before_effect()?;
+    assert_maru_can_write(&vault.to_string_lossy(), WorkspaceWriteAction::RenameMove)?;
+    let source = resolve_inbox_source(vault, &inbox_settings::load(vault), &id)?;
+    lease.ensure_covered(vec![source.source_path.clone(), target_dir.clone()])?;
+    lease.before_effect()?;
+    move_inbox_file(lease, id, "accepted", source.source_path, target_dir)
+}
+
+#[cfg(test)]
 fn reject_inbox_item_at(vault: &Path, id: String) -> Result<InboxDecisionOutcome, String> {
+    let parent = PathTransactionParent::capture(vault)?;
+    reject_inbox_item_blocking(vault, &parent, id)
+}
+
+fn reject_inbox_item_blocking(
+    vault: &Path,
+    parent: &PathTransactionParent,
+    id: String,
+) -> Result<InboxDecisionOutcome, String> {
+    let settings = inbox_settings::load(vault);
+    let source = resolve_inbox_source(vault, &settings, &id)?;
+    let target_dir = rejected_target_dir(vault, &settings, &source.source)?;
+    let request = PathTransactionRequest::new(vec![
+        source.source_path,
+        target_dir,
+        vault.join(".maru/inbox.json"),
+    ])?
+    .require_parent_snapshot(parent)?
+    .with_workspace_registry()?;
+    with_path_transactions(request, |lease| {
+        reject_inbox_item_in_transaction(lease, vault, id)
+    })
+}
+
+fn reject_inbox_item_in_transaction(
+    lease: &PathTransactionLease,
+    vault: &Path,
+    id: String,
+) -> Result<InboxDecisionOutcome, String> {
+    lease.ensure_workspace_registry()?;
+    lease.before_effect()?;
     assert_maru_can_write(&vault.to_string_lossy(), WorkspaceWriteAction::RenameMove)?;
     let settings = inbox_settings::load(vault);
     let source = resolve_inbox_source(vault, &settings, &id)?;
     let target_dir = rejected_target_dir(vault, &settings, &source.source)?;
-    move_inbox_file(id, "rejected", source.source_path, target_dir)
+    lease.ensure_covered(vec![source.source_path.clone(), target_dir.clone()])?;
+    lease.before_effect()?;
+    move_inbox_file(lease, id, "rejected", source.source_path, target_dir)
 }
 
 #[derive(Debug)]
@@ -2649,11 +2928,13 @@ fn rejected_target_dir(
 }
 
 fn move_inbox_file(
+    lease: &PathTransactionLease,
     id: String,
     decision: &str,
     source_path: PathBuf,
     target_dir: PathBuf,
 ) -> Result<InboxDecisionOutcome, String> {
+    lease.ensure_covered(vec![source_path.clone(), target_dir.clone()])?;
     fs::create_dir_all(&target_dir)
         .map_err(|err| format!("Cannot create target directory: {err}"))?;
     let file_name = source_path
@@ -2689,7 +2970,11 @@ fn error_outcome(id: String, decision: &str, error: String) -> InboxDecisionOutc
     }
 }
 
-fn emit_decision(app: &AppHandle, event: &str, outcome: &InboxDecisionOutcome) {
+fn emit_decision<R: tauri::Runtime>(
+    app: &AppHandle<R>,
+    event: &str,
+    outcome: &InboxDecisionOutcome,
+) {
     let _ = app.emit(event, outcome);
 }
 
@@ -2702,6 +2987,7 @@ mod tests {
 
     #[test]
     fn scan_inbox_drop_returns_empty_when_folder_is_absent() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         let tmp = TempDir::new().unwrap();
         let items = scan_inbox_drop(tmp.path().to_string_lossy().to_string(), None).unwrap();
 
@@ -2710,6 +2996,7 @@ mod tests {
 
     #[test]
     fn scan_inbox_drop_finds_nested_source_files() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         let tmp = TempDir::new().unwrap();
         let root = tmp.path();
         fs::create_dir_all(root.join("inbox/downloads/gmail")).unwrap();
@@ -2725,6 +3012,7 @@ mod tests {
 
     #[test]
     fn scan_inbox_drop_skips_default_dotfiles() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         let tmp = TempDir::new().unwrap();
         let root = tmp.path();
         fs::create_dir_all(root.join("inbox/downloads/outlook")).unwrap();
@@ -2741,6 +3029,7 @@ mod tests {
 
     #[test]
     fn scan_inbox_drop_skips_dot_folders_unless_allowlisted() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         let tmp = TempDir::new().unwrap();
         let root = tmp.path();
         fs::create_dir_all(root.join("inbox/downloads/kakao/.omc/state")).unwrap();
@@ -2770,6 +3059,7 @@ mod tests {
 
     #[test]
     fn scan_inbox_drop_uses_custom_root_from_settings() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         let tmp = TempDir::new().unwrap();
         let root = tmp.path();
         fs::create_dir_all(root.join("incoming/spool/alpha")).unwrap();
@@ -2790,6 +3080,7 @@ mod tests {
 
     #[test]
     fn scan_inbox_drop_filters_unregistered_sources() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         let tmp = TempDir::new().unwrap();
         let root = tmp.path();
         fs::create_dir_all(root.join("inbox/downloads/outlook")).unwrap();
@@ -2811,6 +3102,7 @@ mod tests {
 
     #[test]
     fn accept_inbox_item_moves_to_target_with_conflict_safe_name() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         let tmp = TempDir::new().unwrap();
         let root = tmp.path();
         fs::create_dir_all(root.join("inbox/downloads/gmail")).unwrap();
@@ -2837,6 +3129,7 @@ mod tests {
 
     #[test]
     fn accept_inbox_item_rejects_target_traversal() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         let tmp = TempDir::new().unwrap();
         let root = tmp.path();
         fs::create_dir_all(root.join("inbox/downloads/gmail")).unwrap();
@@ -2855,6 +3148,7 @@ mod tests {
 
     #[test]
     fn reject_inbox_item_moves_to_default_rejected_source_folder() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         let tmp = TempDir::new().unwrap();
         let root = tmp.path();
         fs::create_dir_all(root.join("inbox/downloads/kakao")).unwrap();
@@ -2870,6 +3164,7 @@ mod tests {
 
     #[test]
     fn reject_inbox_item_uses_custom_root_sibling_rejected_folder() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         let tmp = TempDir::new().unwrap();
         let root = tmp.path();
         fs::create_dir_all(root.join("incoming/spool/alpha")).unwrap();
@@ -2891,6 +3186,7 @@ mod tests {
 
     #[test]
     fn batch_error_outcome_keeps_failed_item_local() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         let outcome = error_outcome("missing".to_string(), "accepted", "nope".to_string());
         assert!(!outcome.ok);
         assert_eq!(outcome.id, "missing");
@@ -2899,6 +3195,7 @@ mod tests {
 
     #[test]
     fn stage_drop_file_copies_to_configured_target_with_conflict_safe_name() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         let tmp = TempDir::new().unwrap();
         let root = tmp.path().canonicalize().unwrap();
         let source_dir = TempDir::new().unwrap();
@@ -2924,6 +3221,7 @@ mod tests {
 
     #[test]
     fn stage_drop_file_rejects_directory_sources() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         let tmp = TempDir::new().unwrap();
         let root = tmp.path().canonicalize().unwrap();
         fs::create_dir_all(root.join("inbox/drop/incoming")).unwrap();
@@ -2939,6 +3237,7 @@ mod tests {
 
     #[test]
     fn explicit_drop_target_must_match_registered_channel_path() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         let tmp = TempDir::new().unwrap();
         let root = tmp.path().canonicalize().unwrap();
         let config = InboxRuntimeConfig::default();
@@ -2964,6 +3263,7 @@ mod tests {
 
     #[test]
     fn scan_inbox_entries_reads_configured_drop_files_and_pending_manifests() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         let tmp = TempDir::new().unwrap();
         let root = tmp.path();
         fs::write(
@@ -3050,6 +3350,7 @@ metadata:
     /// fallback, and a blank or whitespace-only name must not win over it.
     #[test]
     fn scan_inbox_entries_prefers_manifest_source_original_name_for_the_title() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         let tmp = TempDir::new().unwrap();
         let root = tmp.path();
         fs::write(
@@ -3108,6 +3409,7 @@ inbox:
     /// declare otherwise.
     #[test]
     fn scan_inbox_entries_reports_intake_mode_and_defaults_to_manual() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         let tmp = TempDir::new().unwrap();
         let root = tmp.path();
         fs::write(
@@ -3186,6 +3488,7 @@ inbox:
 
     #[test]
     fn scan_inbox_entries_filters_by_intake_mode_and_rejects_unknown_values() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         let tmp = TempDir::new().unwrap();
         let root = tmp.path();
         fs::write(
@@ -3248,6 +3551,7 @@ inbox:
     /// one.
     #[test]
     fn scan_inbox_entries_takes_received_at_from_the_manifest_normalized_to_utc() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         let tmp = TempDir::new().unwrap();
         let root = tmp.path();
         fs::write(
@@ -3313,6 +3617,7 @@ inbox:
 
     #[test]
     fn scan_inbox_entries_skips_dot_folders_unless_allowlisted() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         let tmp = TempDir::new().unwrap();
         let root = tmp.path();
         fs::write(
@@ -3359,6 +3664,7 @@ inbox:
 
     #[test]
     fn scan_inbox_entries_uses_legacy_settings_when_workspace_config_has_no_inbox() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         let tmp = TempDir::new().unwrap();
         let root = tmp.path();
         fs::create_dir_all(root.join(".maru")).unwrap();
@@ -3380,6 +3686,7 @@ inbox:
 
     #[test]
     fn scan_processed_items_reads_done_failed_duplicate_and_excludes_pending_by_default() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         let tmp = TempDir::new().unwrap();
         let root = tmp.path();
         write_processed_config(root, "summary.md", "route.md", "extracted.md");
@@ -3406,6 +3713,7 @@ inbox:
 
     #[test]
     fn scan_processed_items_uses_custom_filenames_and_query() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         let tmp = TempDir::new().unwrap();
         let root = tmp.path();
         write_processed_config(root, "digest.md", "routing.md", "text.md");
@@ -3441,6 +3749,7 @@ inbox:
 
     #[test]
     fn scan_processed_items_filters_channel_before_applying_limit() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         let tmp = TempDir::new().unwrap();
         let root = tmp.path();
         write_processed_config(root, "summary.md", "route.md", "extracted.md");
@@ -3463,6 +3772,7 @@ inbox:
 
     #[test]
     fn read_source_runs_reads_cursors_and_latest_digest() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         let tmp = TempDir::new().unwrap();
         let root = tmp.path();
         write_processed_config(root, "summary.md", "route.md", "extracted.md");
@@ -3529,6 +3839,7 @@ inbox:
 
     #[test]
     fn read_source_runs_returns_empty_when_state_absent() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         let tmp = TempDir::new().unwrap();
         let root = tmp.path();
         write_processed_config(root, "summary.md", "route.md", "extracted.md");
@@ -3540,6 +3851,7 @@ inbox:
 
     #[test]
     fn count_processed_by_channel_aggregates_all_statuses_unfiltered() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         let tmp = TempDir::new().unwrap();
         let root = tmp.path();
         write_processed_config(root, "summary.md", "route.md", "extracted.md");
@@ -3558,6 +3870,7 @@ inbox:
 
     #[test]
     fn processed_snapshot_counts_all_items_once_before_filtering_and_limit() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         let tmp = TempDir::new().unwrap();
         let root = tmp.path();
         write_processed_config(root, "summary.md", "route.md", "extracted.md");
@@ -3600,6 +3913,7 @@ inbox:
 
     #[test]
     fn processed_snapshot_counts_channel_when_full_manifest_shape_is_invalid() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         let tmp = TempDir::new().unwrap();
         let root = tmp.path();
         write_processed_config(root, "summary.md", "route.md", "extracted.md");
@@ -3636,6 +3950,7 @@ inbox:
 
     #[test]
     fn processed_snapshot_applies_status_channel_and_limit_before_hydration() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         let tmp = TempDir::new().unwrap();
         let root = tmp.path();
         write_processed_config(root, "summary.md", "route.md", "extracted.md");
@@ -3662,6 +3977,7 @@ inbox:
 
     #[test]
     fn processed_snapshot_query_hydrates_filtered_candidates_and_matches_route() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         let tmp = TempDir::new().unwrap();
         let root = tmp.path();
         write_processed_config(root, "summary.md", "route.md", "extracted.md");
@@ -3693,6 +4009,7 @@ inbox:
 
     #[test]
     fn processed_snapshot_reapplies_channel_after_summary_hydration_failure() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         let tmp = TempDir::new().unwrap();
         let root = tmp.path();
         write_processed_config(root, "summary.md", "route.md", "extracted.md");
@@ -3724,6 +4041,7 @@ inbox:
 
     #[test]
     fn processed_snapshot_route_hydration_failure_does_not_displace_dated_item() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         let tmp = TempDir::new().unwrap();
         let root = tmp.path();
         write_processed_config(root, "summary.md", "route.md", "extracted.md");
@@ -3755,6 +4073,7 @@ inbox:
 
     #[test]
     fn processed_snapshot_defers_malformed_manifest_error_beyond_dated_limit() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         let tmp = TempDir::new().unwrap();
         let root = tmp.path();
         write_processed_config(root, "summary.md", "route.md", "extracted.md");
@@ -3784,6 +4103,7 @@ inbox:
 
     #[test]
     fn digest_generated_after_compares_instants_across_offsets() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         // 00:30Z is later than 09:00+09:00 (== 00:00Z) despite smaller wall-clock text.
         assert!(digest_generated_after(
             &Some("2026-05-20T00:30:00Z".to_string()),
@@ -3801,6 +4121,7 @@ inbox:
 
     #[test]
     fn malformed_processed_manifest_returns_item_error() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         let tmp = TempDir::new().unwrap();
         let root = tmp.path();
         write_processed_config(root, "summary.md", "route.md", "extracted.md");
@@ -3822,6 +4143,7 @@ inbox:
 
     #[test]
     fn processed_manifest_allows_file_entries_without_raw_path() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         let tmp = TempDir::new().unwrap();
         let root = tmp.path();
         write_processed_config(root, "summary.md", "route.md", "extracted.md");
@@ -3856,6 +4178,7 @@ files:
 
     #[test]
     fn processed_manifest_accepts_string_file_entries_as_paths() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         let tmp = TempDir::new().unwrap();
         let root = tmp.path();
         write_processed_config(root, "summary.md", "route.md", "extracted.md");
@@ -3892,6 +4215,7 @@ files:
 
     #[test]
     fn processed_manifest_uses_folder_fallbacks_for_missing_identity_fields() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         let tmp = TempDir::new().unwrap();
         let root = tmp.path();
         write_processed_config(root, "summary.md", "route.md", "extracted.md");
@@ -3927,6 +4251,7 @@ files:
 
     #[test]
     fn read_processed_item_rejects_traversal_and_truncates_extracted() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         let tmp = TempDir::new().unwrap();
         let root = tmp.path().canonicalize().unwrap();
         write_processed_config(&root, "summary.md", "route.md", "extracted.md");
@@ -3954,6 +4279,7 @@ files:
 
     #[test]
     fn trash_inbox_items_validates_and_trashes_local_inbox_targets() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         let tmp = TempDir::new().unwrap();
         let root = tmp.path().canonicalize().unwrap();
         let config = runtime_config_with_kakao_drop();
@@ -3999,6 +4325,7 @@ files:
 
     #[test]
     fn trash_inbox_items_rejects_outside_missing_and_wrong_kind_targets() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         let tmp = TempDir::new().unwrap();
         let root = tmp.path().canonicalize().unwrap();
         let outside = TempDir::new().unwrap();
@@ -4040,6 +4367,7 @@ files:
     #[cfg(unix)]
     #[test]
     fn trash_inbox_items_rejects_symlink_targets() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         use std::os::unix::fs::symlink;
 
         let tmp = TempDir::new().unwrap();
@@ -4069,6 +4397,7 @@ files:
 
     #[test]
     fn trash_inbox_items_keeps_batch_failures_per_item() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         let tmp = TempDir::new().unwrap();
         let root = tmp.path().canonicalize().unwrap();
         let config = runtime_config_with_kakao_drop();
@@ -4264,6 +4593,7 @@ inbox:
 
     #[test]
     fn apply_inbox_decision_labels_unsupported_apply_error_as_pending() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         let tmp = TempDir::new().unwrap();
         let root = tmp.path().canonicalize().unwrap();
         let item = apply_fixture(&root, "260604-kakao-unsupported");
@@ -4300,6 +4630,7 @@ inbox:
 
     #[test]
     fn apply_inbox_decision_routes_accept_files_and_records_receipt() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         let tmp = TempDir::new().unwrap();
         let root = tmp.path().canonicalize().unwrap();
         let item = apply_fixture(&root, "260604-kakao-a");
@@ -4340,6 +4671,7 @@ inbox:
 
     #[test]
     fn apply_inbox_decision_reject_moves_item_to_rejected_channel() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         let tmp = TempDir::new().unwrap();
         let root = tmp.path().canonicalize().unwrap();
         let item = apply_fixture(&root, "260604-kakao-b");
@@ -4363,6 +4695,7 @@ inbox:
     #[cfg(unix)]
     #[test]
     fn apply_inbox_decision_rejects_symlink_pending_item_dir() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         use std::os::unix::fs::symlink;
 
         let tmp = TempDir::new().unwrap();
@@ -4402,6 +4735,7 @@ inbox:
     #[cfg(unix)]
     #[test]
     fn apply_inbox_decision_rejects_raw_symlink_entries() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         use std::os::unix::fs::symlink;
 
         let tmp = TempDir::new().unwrap();
@@ -4431,6 +4765,7 @@ inbox:
 
     #[test]
     fn apply_inbox_decision_rejects_non_pending_dir() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         let tmp = TempDir::new().unwrap();
         let root = tmp.path().canonicalize().unwrap();
         fs::write(root.join("workspace.config.yaml"), APPLY_CONFIG).unwrap();
@@ -4454,5 +4789,1085 @@ inbox:
 
         let err = apply_inbox_decision_at(&root, &config, &inbox_root, &decision).unwrap_err();
         assert_eq!(err, "inbox_item_not_pending");
+    }
+}
+
+pub mod ipc {
+    use super::*;
+    #[tauri::command]
+    pub async fn scan_inbox_drop(
+        vault_path: String,
+        scan_options: Option<ScanOptions>,
+    ) -> Result<Vec<InboxDropItem>, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(
+                &[PathBuf::from(&vault_path)],
+                "worker:scan_inbox_drop",
+            );
+            super::scan_inbox_drop(vault_path, scan_options)
+        })
+        .await
+        .map_err(|err| format!("scan_inbox_drop_task_failed: {err}"))?
+    }
+    #[tauri::command]
+    pub async fn scan_inbox_entries(
+        work_path: String,
+        scan_options: Option<ScanOptions>,
+        intake_mode: Option<String>,
+    ) -> Result<Vec<InboxEntry>, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(
+                &[PathBuf::from(&work_path)],
+                "worker:scan_inbox_entries",
+            );
+            super::scan_inbox_entries(work_path, scan_options, intake_mode)
+        })
+        .await
+        .map_err(|err| format!("scan_inbox_entries_task_failed: {err}"))?
+    }
+    #[tauri::command]
+    pub async fn scan_inbox_processed_items(
+        work_path: String,
+        channel: Option<String>,
+        statuses: Option<Vec<String>>,
+        query: Option<String>,
+        limit: Option<usize>,
+    ) -> Result<Vec<InboxProcessedItem>, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(
+                &[PathBuf::from(&work_path)],
+                "worker:scan_inbox_processed_items",
+            );
+            super::scan_inbox_processed_items(work_path, channel, statuses, query, limit)
+        })
+        .await
+        .map_err(|err| format!("scan_inbox_processed_items_task_failed: {err}"))?
+    }
+    #[tauri::command]
+    pub async fn read_inbox_processed_item(
+        work_path: String,
+        item_dir: String,
+    ) -> Result<InboxProcessedItemDetail, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(
+                &[PathBuf::from(&work_path)],
+                "worker:read_inbox_processed_item",
+            );
+            super::read_inbox_processed_item(work_path, item_dir)
+        })
+        .await
+        .map_err(|err| format!("read_inbox_processed_item_task_failed: {err}"))?
+    }
+    #[tauri::command]
+    pub async fn read_inbox_source_runs(work_path: String) -> Result<Vec<InboxSourceRun>, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(
+                &[PathBuf::from(&work_path)],
+                "worker:read_inbox_source_runs",
+            );
+            super::read_inbox_source_runs(work_path)
+        })
+        .await
+        .map_err(|err| format!("read_inbox_source_runs_task_failed: {err}"))?
+    }
+    #[tauri::command]
+    pub async fn count_inbox_processed_by_channel(
+        work_path: String,
+    ) -> Result<std::collections::HashMap<String, usize>, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(
+                &[PathBuf::from(&work_path)],
+                "worker:count_inbox_processed_by_channel",
+            );
+            super::count_inbox_processed_by_channel(work_path)
+        })
+        .await
+        .map_err(|err| format!("count_inbox_processed_by_channel_task_failed: {err}"))?
+    }
+    #[tauri::command]
+    pub async fn trash_inbox_items<R: tauri::Runtime>(
+        app: AppHandle<R>,
+        work_path: String,
+        targets: Vec<InboxTrashTarget>,
+        approval_id: Option<String>,
+    ) -> Result<Vec<InboxTrashOutcome>, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(
+                &[PathBuf::from(&work_path)],
+                "worker:trash_inbox_items",
+            );
+            super::trash_inbox_items(
+                app.state::<crate::approval::ApprovalState>(),
+                work_path,
+                targets,
+                approval_id,
+            )
+        })
+        .await
+        .map_err(|err| format!("trash_inbox_items_task_failed: {err}"))?
+    }
+    #[tauri::command]
+    pub async fn stage_inbox_drop_files<R: tauri::Runtime>(
+        app: AppHandle<R>,
+        work_path: String,
+        channel: Option<String>,
+        drop_path: Option<String>,
+        source_paths: Vec<String>,
+    ) -> Result<Vec<InboxDropStageOutcome>, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(
+                &[PathBuf::from(&work_path)],
+                "worker:stage_inbox_drop_files",
+            );
+            super::stage_inbox_drop_files(app.clone(), work_path, channel, drop_path, source_paths)
+        })
+        .await
+        .map_err(|err| format!("stage_inbox_drop_files_task_failed: {err}"))?
+    }
+    #[tauri::command]
+    pub async fn accept_inbox_item<R: tauri::Runtime>(
+        app: AppHandle<R>,
+        vault_path: String,
+        id: String,
+        target_folder: Option<String>,
+        approval_id: Option<String>,
+    ) -> Result<InboxDecisionOutcome, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(
+                &[PathBuf::from(&vault_path)],
+                "worker:accept_inbox_item",
+            );
+            super::accept_inbox_item(
+                app.clone(),
+                app.state::<crate::approval::ApprovalState>(),
+                vault_path,
+                id,
+                target_folder,
+                approval_id,
+            )
+        })
+        .await
+        .map_err(|err| format!("accept_inbox_item_task_failed: {err}"))?
+    }
+    #[tauri::command]
+    pub async fn accept_inbox_items<R: tauri::Runtime>(
+        app: AppHandle<R>,
+        vault_path: String,
+        items: Vec<InboxAcceptRequest>,
+        approval_id: Option<String>,
+    ) -> Result<Vec<InboxDecisionOutcome>, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(
+                &[PathBuf::from(&vault_path)],
+                "worker:accept_inbox_items",
+            );
+            super::accept_inbox_items(
+                app.clone(),
+                app.state::<crate::approval::ApprovalState>(),
+                vault_path,
+                items,
+                approval_id,
+            )
+        })
+        .await
+        .map_err(|err| format!("accept_inbox_items_task_failed: {err}"))?
+    }
+    #[tauri::command]
+    pub async fn reject_inbox_item<R: tauri::Runtime>(
+        app: AppHandle<R>,
+        vault_path: String,
+        id: String,
+        approval_id: Option<String>,
+    ) -> Result<InboxDecisionOutcome, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(
+                &[PathBuf::from(&vault_path)],
+                "worker:reject_inbox_item",
+            );
+            super::reject_inbox_item(
+                app.clone(),
+                app.state::<crate::approval::ApprovalState>(),
+                vault_path,
+                id,
+                approval_id,
+            )
+        })
+        .await
+        .map_err(|err| format!("reject_inbox_item_task_failed: {err}"))?
+    }
+    #[tauri::command]
+    pub async fn reject_inbox_items<R: tauri::Runtime>(
+        app: AppHandle<R>,
+        vault_path: String,
+        ids: Vec<String>,
+        approval_id: Option<String>,
+    ) -> Result<Vec<InboxDecisionOutcome>, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(
+                &[PathBuf::from(&vault_path)],
+                "worker:reject_inbox_items",
+            );
+            super::reject_inbox_items(
+                app.clone(),
+                app.state::<crate::approval::ApprovalState>(),
+                vault_path,
+                ids,
+                approval_id,
+            )
+        })
+        .await
+        .map_err(|err| format!("reject_inbox_items_task_failed: {err}"))?
+    }
+    #[tauri::command]
+    pub async fn apply_inbox_decisions<R: tauri::Runtime>(
+        app: AppHandle<R>,
+        work_path: String,
+        decisions: Vec<InboxApplyDecision>,
+        approval_id: Option<String>,
+    ) -> Result<Vec<InboxDecisionOutcome>, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(
+                &[PathBuf::from(&work_path)],
+                "worker:apply_inbox_decisions",
+            );
+            super::apply_inbox_decisions(
+                app.clone(),
+                app.state::<crate::approval::ApprovalState>(),
+                work_path,
+                decisions,
+                approval_id,
+            )
+        })
+        .await
+        .map_err(|err| format!("apply_inbox_decisions_task_failed: {err}"))?
+    }
+}
+
+#[cfg(test)]
+mod phase08_10 {
+    use super::*;
+    use crate::atomic_file::phase08_06::{boundary, run, Held, Home};
+    use crate::atomic_file::PathTransactionTestHook;
+    use crate::scratchpad::phase08_08::registry;
+    use std::sync::{mpsc, Mutex};
+    use std::time::Duration;
+    type TestApp = tauri::AppHandle<tauri::test::MockRuntime>;
+    static TRASH: Mutex<Vec<(PathBuf, PathBuf)>> = Mutex::new(Vec::new());
+    struct Trash(PathBuf);
+    impl Trash {
+        fn new(source: PathBuf, destination: PathBuf) -> Self {
+            TRASH.lock().unwrap().push((source.clone(), destination));
+            Self(source)
+        }
+    }
+    impl Drop for Trash {
+        fn drop(&mut self) {
+            TRASH.lock().unwrap().retain(|(s, _)| s != &self.0);
+        }
+    }
+    pub(super) fn trash(path: &Path) -> Option<Result<(), String>> {
+        let target = TRASH
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|(s, _)| s == path)
+            .map(|(_, d)| d.clone());
+        target.map(|d| fs::rename(path, d).map_err(|e| e.to_string()))
+    }
+    fn text(path: &Path) -> String {
+        path.to_string_lossy().into_owned()
+    }
+    fn app() -> tauri::App<tauri::test::MockRuntime> {
+        let app = tauri::test::mock_app();
+        app.manage(crate::approval::ApprovalState::default());
+        app
+    }
+    fn approval(app: &TestApp, kind: &str) -> Option<String> {
+        let request = crate::approval::prepare_approval(
+            app.state(),
+            kind.into(),
+            "fixture".into(),
+            None,
+            None,
+        )
+        .unwrap();
+        crate::approval::record_approval(
+            app.state(),
+            request.id.clone(),
+            crate::approval::ApprovalDecision::Approved,
+            None,
+        )
+        .unwrap();
+        Some(request.id)
+    }
+    fn fixture(home: &Home) -> tempfile::TempDir {
+        let tmp = tempfile::tempdir_in(home.root.path()).unwrap();
+        let root = tmp.path();
+        fs::write(root.join("workspace.config.yaml"), "inbox:\n  root: inbox\n  channels:\n    kakao:\n      provider: kakao\n      kind: bundle\n      dedupe: sha256\n      drop_paths: [drop/kakao]\n").unwrap();
+        fs::create_dir_all(root.join("inbox/downloads/gmail")).unwrap();
+        fs::write(root.join("inbox/downloads/gmail/note.md"), "# Original\n").unwrap();
+        fs::create_dir_all(root.join("inbox/drop/kakao")).unwrap();
+        fs::write(root.join("inbox/drop/kakao/drop.txt"), "dropped").unwrap();
+        for name in ["a", "b"] {
+            let item = root.join("inbox/items/pending").join(name);
+            fs::create_dir_all(item.join("raw")).unwrap();
+            fs::write(
+                item.join("manifest.yaml"),
+                format!("id: {name}\nstatus: pending\nchannel: kakao\n"),
+            )
+            .unwrap();
+            fs::write(item.join("raw/input.txt"), format!("source {name}")).unwrap();
+            fs::write(item.join("summary.md"), format!("# Summary {name}\n")).unwrap();
+        }
+        fs::write(root.join("source.txt"), "staged original").unwrap();
+        tmp
+    }
+    fn decision(name: &str, action: &str) -> InboxApplyDecision {
+        InboxApplyDecision {
+            item_dir: format!("inbox/items/pending/{name}"),
+            decision: action.into(),
+            destination: Some("projects/result".into()),
+            classification: Some("info".into()),
+            project: Some("fixture".into()),
+        }
+    }
+    fn start<F: std::future::Future + Send + 'static>(future: F) -> mpsc::Receiver<F::Output>
+    where
+        F::Output: Send + 'static,
+    {
+        let (tx, rx) = mpsc::channel();
+        tauri::async_runtime::spawn(async move {
+            let _ = tx.send(future.await);
+        });
+        rx
+    }
+    fn done<T>(rx: mpsc::Receiver<T>) -> T {
+        rx.recv_timeout(Duration::from_secs(10))
+            .expect("bounded completion")
+    }
+    async fn mutate(
+        op: &'static str,
+        app: TestApp,
+        work: String,
+        approval_id: Option<String>,
+    ) -> Result<(), String> {
+        let id = "inbox/downloads/gmail/note.md".to_string();
+        let outcomes = match op {
+            "accept_inbox_item" => vec![
+                ipc::accept_inbox_item(app, work, id, Some("projects/result".into()), approval_id)
+                    .await?,
+            ],
+            "accept_inbox_items" => {
+                ipc::accept_inbox_items(
+                    app,
+                    work,
+                    vec![InboxAcceptRequest {
+                        id,
+                        target_folder: Some("projects/result".into()),
+                    }],
+                    approval_id,
+                )
+                .await?
+            }
+            "reject_inbox_item" => vec![ipc::reject_inbox_item(app, work, id, approval_id).await?],
+            "reject_inbox_items" => {
+                ipc::reject_inbox_items(app, work, vec![id], approval_id).await?
+            }
+            "apply_inbox_decisions" => {
+                ipc::apply_inbox_decisions(app, work, vec![decision("a", "accept")], approval_id)
+                    .await?
+            }
+            "stage_inbox_drop_files" => {
+                let source = text(&PathBuf::from(&work).join("source.txt"));
+                let rows = ipc::stage_inbox_drop_files(app, work, None, None, vec![source]).await?;
+                assert_eq!(rows.len(), 1);
+                return if rows[0].ok {
+                    Ok(())
+                } else {
+                    Err(rows[0].error.clone().unwrap())
+                };
+            }
+            "trash_inbox_items" => {
+                let source = PathBuf::from(&work).join("inbox/drop/kakao/drop.txt");
+                let rows = ipc::trash_inbox_items(
+                    app,
+                    work,
+                    vec![InboxTrashTarget {
+                        id: "drop".into(),
+                        kind: "dropFile".into(),
+                        path: text(&source),
+                    }],
+                    approval_id,
+                )
+                .await?;
+                assert_eq!(rows.len(), 1);
+                return if rows[0].ok {
+                    Ok(())
+                } else {
+                    Err(rows[0].error.clone().unwrap())
+                };
+            }
+            _ => unreachable!(),
+        };
+        assert_eq!(outcomes.len(), 1);
+        if outcomes[0].ok {
+            Ok(())
+        } else {
+            Err(outcomes[0].error.clone().unwrap())
+        }
+    }
+    const WRITERS: [&str; 7] = [
+        "stage_inbox_drop_files",
+        "accept_inbox_item",
+        "accept_inbox_items",
+        "reject_inbox_item",
+        "reject_inbox_items",
+        "apply_inbox_decisions",
+        "trash_inbox_items",
+    ];
+    fn authorize(app: &TestApp, op: &str) -> Option<String> {
+        match op {
+            "stage_inbox_drop_files" => None,
+            "accept_inbox_item" => approval(app, INBOX_FILE_ACCEPT_KIND),
+            "reject_inbox_item" => approval(app, INBOX_FILE_REJECT_KIND),
+            "trash_inbox_items" => approval(app, INBOX_FILE_TRASH_KIND),
+            _ => approval(app, INBOX_BULK_KIND),
+        }
+    }
+    fn key(root: &Path, op: &str) -> PathBuf {
+        root.join(match op {
+            "stage_inbox_drop_files" => "inbox/drop/kakao",
+            "apply_inbox_decisions" => "inbox/items/pending/a",
+            "trash_inbox_items" => "inbox/drop/kakao/drop.txt",
+            _ => "inbox/downloads/gmail/note.md",
+        })
+    }
+    #[test]
+    fn phase08_10_inbox_all_fourteen_workers_yield_on_same_polling_task_and_join_error() {
+        let home = Home::new();
+        let tmp = fixture(&home);
+        let root = tmp.path();
+        let w = text(root);
+        let app = app();
+        boundary(
+            root.into(),
+            "scan_inbox_drop",
+            ipc::scan_inbox_drop(w.clone(), None),
+        );
+        boundary(
+            root.into(),
+            "scan_inbox_entries",
+            ipc::scan_inbox_entries(w.clone(), None, None),
+        );
+        boundary(
+            root.into(),
+            "scan_inbox_processed_items",
+            ipc::scan_inbox_processed_items(w.clone(), None, None, None, None),
+        );
+        boundary(
+            root.into(),
+            "scan_inbox_processed_snapshot",
+            scan_inbox_processed_snapshot(w.clone(), None, None, None, None),
+        );
+        boundary(
+            root.into(),
+            "read_inbox_processed_item",
+            ipc::read_inbox_processed_item(w.clone(), "inbox/items/done/a".into()),
+        );
+        boundary(
+            root.into(),
+            "read_inbox_source_runs",
+            ipc::read_inbox_source_runs(w.clone()),
+        );
+        boundary(
+            root.into(),
+            "count_inbox_processed_by_channel",
+            ipc::count_inbox_processed_by_channel(w.clone()),
+        );
+        for op in WRITERS {
+            boundary(
+                root.into(),
+                op,
+                mutate(op, app.handle().clone(), w.clone(), None),
+            );
+        }
+    }
+    #[test]
+    fn phase08_10_inbox_real_nonempty_read_processing_approval_and_denied_paths() {
+        let home = Home::new();
+        let tmp = fixture(&home);
+        let root = tmp.path();
+        let w = text(root);
+        let app = app();
+        assert_eq!(run(ipc::scan_inbox_drop(w.clone(), None)).unwrap().len(), 1);
+        assert_eq!(
+            run(ipc::scan_inbox_entries(w.clone(), None, None))
+                .unwrap()
+                .len(),
+            3
+        );
+        assert!(run(ipc::scan_inbox_entries(
+            w.clone(),
+            None,
+            Some("invalid".into())
+        ))
+        .is_err());
+        let error = run(ipc::accept_inbox_item(
+            app.handle().clone(),
+            w.clone(),
+            "inbox/downloads/gmail/note.md".into(),
+            Some("projects/result".into()),
+            None,
+        ))
+        .unwrap_err();
+        assert!(error.contains("approval"));
+        assert!(root.join("inbox/downloads/gmail/note.md").exists());
+        let auth = approval(app.handle(), INBOX_BULK_KIND);
+        let mut denied = decision("b", "accept");
+        denied.destination = Some("../outside".into());
+        let outcomes = run(ipc::apply_inbox_decisions(
+            app.handle().clone(),
+            w.clone(),
+            vec![decision("a", "accept"), denied],
+            auth,
+        ))
+        .unwrap();
+        assert!(outcomes[0].ok);
+        assert!(!outcomes[1].ok);
+        assert_eq!(
+            fs::read_to_string(root.join("projects/result/input.txt")).unwrap(),
+            "source a"
+        );
+        assert!(root.join("inbox/items/done/a/raw/input.txt").exists());
+        assert!(root.join("inbox/items/pending/b").exists());
+        let items = run(ipc::scan_inbox_processed_items(
+            w.clone(),
+            None,
+            None,
+            None,
+            None,
+        ))
+        .unwrap();
+        assert_eq!(items.len(), 1);
+        let snapshot = run(scan_inbox_processed_snapshot(
+            w.clone(),
+            None,
+            None,
+            None,
+            None,
+        ))
+        .unwrap();
+        assert_eq!(snapshot.items.len(), 1);
+        let detail = run(ipc::read_inbox_processed_item(
+            w.clone(),
+            "inbox/items/done/a".into(),
+        ))
+        .unwrap();
+        assert_eq!(detail.item.id, "a");
+        assert!(run(ipc::read_inbox_processed_item(
+            w.clone(),
+            "../outside".into()
+        ))
+        .is_err());
+        let counts = run(ipc::count_inbox_processed_by_channel(w.clone())).unwrap();
+        assert_eq!(counts.get("kakao"), Some(&1));
+        fs::create_dir_all(root.join("inbox/_state")).unwrap();
+        fs::write(
+            root.join("inbox/_state/sync-cursors.jsonl"),
+            "{\"channel\":\"kakao\",\"synced_at\":\"2026-09-05T10:00:00Z\"}\n",
+        )
+        .unwrap();
+        let runs = run(ipc::read_inbox_source_runs(w.clone())).unwrap();
+        assert!(!runs.is_empty());
+        let auth = approval(app.handle(), INBOX_BULK_KIND);
+        let retry = run(ipc::apply_inbox_decisions(
+            app.handle().clone(),
+            w.clone(),
+            vec![decision("b", "accept")],
+            auth,
+        ))
+        .unwrap();
+        assert!(retry[0].ok);
+        assert_eq!(
+            fs::read_to_string(root.join("projects/result/input.txt")).unwrap(),
+            "source a"
+        );
+        assert_eq!(
+            fs::read_to_string(root.join("projects/result/input-copy.txt")).unwrap(),
+            "source b"
+        );
+        assert_eq!(
+            fs::read_to_string(root.join("inbox/_state/index.jsonl"))
+                .unwrap()
+                .lines()
+                .count(),
+            2
+        );
+    }
+    #[test]
+    fn phase08_10_inbox_every_writer_same_target_serializes_and_unwind_releases() {
+        let home = Home::new();
+        let app = app();
+        for op in WRITERS {
+            let tmp = fixture(&home);
+            let root = tmp.path();
+            let w = text(root);
+            let path = key(root, op);
+            let _trash = Trash::new(
+                root.join("inbox/drop/kakao/drop.txt"),
+                root.join("trashed.txt"),
+            );
+            let held = Held::new(path.clone(), "admitted");
+            let first = start(mutate(
+                op,
+                app.handle().clone(),
+                w.clone(),
+                authorize(app.handle(), op),
+            ));
+            held.wait();
+            let waiting = Held::new(path.clone(), "before-admission");
+            let second = start(mutate(
+                op,
+                app.handle().clone(),
+                w.clone(),
+                authorize(app.handle(), op),
+            ));
+            waiting.wait();
+            waiting.release();
+            assert!(second.recv_timeout(Duration::from_millis(30)).is_err());
+            held.release();
+            done(first).unwrap();
+            let second = done(second);
+            if op == "stage_inbox_drop_files" {
+                second.unwrap();
+                assert_eq!(
+                    fs::read_to_string(root.join("inbox/drop/kakao/source-copy.txt")).unwrap(),
+                    "staged original"
+                );
+            } else {
+                assert!(
+                    second.is_err(),
+                    "{op} second decision must see settled source"
+                );
+            }
+            // A held admitted operation that unwinds releases its entire set.
+            let tmp = fixture(&home);
+            let root = tmp.path();
+            let w = text(root);
+            let _trash = Trash::new(
+                root.join("inbox/drop/kakao/drop.txt"),
+                root.join("trashed.txt"),
+            );
+            let hook = PathTransactionTestHook::new(key(root, op), "admitted", || {
+                panic!("fixture unwind")
+            });
+            assert!(run(mutate(
+                op,
+                app.handle().clone(),
+                w.clone(),
+                authorize(app.handle(), op)
+            ))
+            .unwrap_err()
+            .contains("task_failed"));
+            drop(hook);
+            run(mutate(
+                op,
+                app.handle().clone(),
+                w,
+                authorize(app.handle(), op),
+            ))
+            .unwrap();
+        }
+    }
+    #[test]
+    fn phase08_10_inbox_competing_accept_reject_and_batch_keep_settled_siblings() {
+        let home = Home::new();
+        let app = app();
+        let tmp = fixture(&home);
+        let root = tmp.path();
+        let w = text(root);
+        let held = Held::new(root.join("inbox/items/pending/a"), "admitted");
+        let first = start(ipc::apply_inbox_decisions(
+            app.handle().clone(),
+            w.clone(),
+            vec![decision("a", "accept")],
+            approval(app.handle(), INBOX_BULK_KIND),
+        ));
+        held.wait();
+        let waiting = Held::new(root.join("inbox/items/pending/a"), "before-admission");
+        let second = start(ipc::apply_inbox_decisions(
+            app.handle().clone(),
+            w.clone(),
+            vec![decision("a", "reject"), decision("b", "reject")],
+            approval(app.handle(), INBOX_BULK_KIND),
+        ));
+        waiting.wait();
+        waiting.release();
+        assert!(second.recv_timeout(Duration::from_millis(30)).is_err());
+        held.release();
+        assert!(done(first).unwrap()[0].ok);
+        let rows = done(second).unwrap();
+        assert!(!rows[0].ok);
+        assert!(rows[1].ok);
+        assert!(root.join("inbox/items/done/a/raw/input.txt").exists());
+        assert!(root.join("rejected/kakao/b/raw/input.txt").exists());
+        assert_eq!(
+            fs::read_to_string(root.join("inbox/_state/index.jsonl"))
+                .unwrap()
+                .lines()
+                .count(),
+            2
+        );
+    }
+    #[test]
+    fn phase08_10_inbox_all_writers_policy_rechecked_after_admission_and_failure_release() {
+        let home = Home::new();
+        let app = app();
+        for op in WRITERS {
+            let tmp = fixture(&home);
+            let root = tmp.path();
+            let w = text(root);
+            let _trash = Trash::new(
+                root.join("inbox/drop/kakao/drop.txt"),
+                root.join("trashed.txt"),
+            );
+            registry(root, "direct");
+            let held = Held::new(key(root, op), "admitted");
+            let result = start(mutate(
+                op,
+                app.handle().clone(),
+                w.clone(),
+                authorize(app.handle(), op),
+            ));
+            held.wait();
+            registry(root, "readOnly");
+            held.release();
+            assert!(
+                done(result)
+                    .unwrap_err()
+                    .contains("Workspace writes are blocked"),
+                "{op}"
+            );
+            assert!(key(root, op).exists());
+            registry(root, "direct");
+            run(mutate(
+                op,
+                app.handle().clone(),
+                w,
+                authorize(app.handle(), op),
+            ))
+            .unwrap();
+        }
+    }
+    #[cfg(unix)]
+    #[test]
+    fn phase08_10_inbox_policy_alias_spellings_restrictive_duplicates_and_allowed_alias() {
+        let home = Home::new();
+        let tmp = fixture(&home);
+        let root = tmp.path();
+        let alias = home.root.path().join("alias");
+        std::os::unix::fs::symlink(root, &alias).unwrap();
+        let app = app();
+        for reverse in [false, true] {
+            for policy in ["readOnly", "delegated"] {
+                let (registered, caller) = if reverse {
+                    (alias.as_path(), root)
+                } else {
+                    (root, alias.as_path())
+                };
+                registry(registered, policy);
+                for op in WRITERS {
+                    assert!(
+                        run(mutate(
+                            op,
+                            app.handle().clone(),
+                            text(caller),
+                            authorize(app.handle(), op)
+                        ))
+                        .unwrap_err()
+                        .contains("Workspace writes are blocked"),
+                        "{op}"
+                    );
+                }
+            }
+        }
+        registry(root, "direct");
+        let path = crate::vault_list::workspace_registry_path().unwrap();
+        let mut value: serde_json::Value =
+            serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        value["workspaces"].as_array_mut().unwrap().push(serde_json::json!({"label":"alias", "path":text(&alias), "visibility":"private", "provider":"local", "writePolicy":"readOnly"}));
+        fs::write(path, value.to_string()).unwrap();
+        assert!(run(mutate(
+            "stage_inbox_drop_files",
+            app.handle().clone(),
+            text(root),
+            None
+        ))
+        .unwrap_err()
+        .contains("Workspace writes are blocked"));
+        registry(&alias, "direct");
+        run(mutate(
+            "stage_inbox_drop_files",
+            app.handle().clone(),
+            text(&alias),
+            None,
+        ))
+        .unwrap();
+        assert_eq!(
+            fs::read_to_string(root.join("inbox/drop/kakao/source.txt")).unwrap(),
+            "staged original"
+        );
+    }
+    #[test]
+    fn phase08_10_inbox_all_writers_parent_rename_trash_both_orders_and_aliases() {
+        let home = Home::new();
+        let app = app();
+        for op in WRITERS {
+            for parent_first in [false, true] {
+                for trash_parent in [false, true] {
+                    for alias in [false, true] {
+                        let tmp = fixture(&home);
+                        let root = tmp.path().to_path_buf();
+                        let w = text(&root);
+                        let parent = root.parent().unwrap();
+                        let moved = parent.join(format!(
+                            "moved-{}",
+                            root.file_name().unwrap().to_string_lossy()
+                        ));
+                        let mut parent_w = text(parent);
+                        #[cfg(unix)]
+                        if alias {
+                            let alias_path = parent.join(format!(
+                                "alias-{}",
+                                root.file_name().unwrap().to_string_lossy()
+                            ));
+                            std::os::unix::fs::symlink(parent, &alias_path).unwrap();
+                            parent_w = text(&alias_path);
+                        }
+                        let _trash = Trash::new(
+                            root.join("inbox/drop/kakao/drop.txt"),
+                            root.join("trashed.txt"),
+                        );
+                        let _parent_trash = crate::workspace_files::phase08_06::TrashFixture::new(
+                            root.clone(),
+                            moved.clone(),
+                        );
+                        let source = text(&root);
+                        let new_name = moved.file_name().unwrap().to_string_lossy().into_owned();
+                        let parent_future = async move {
+                            if trash_parent {
+                                crate::workspace_files::ipc::trash_workspace_entries(
+                                    parent_w,
+                                    vec![source],
+                                )
+                                .await
+                                .map(|_| ())
+                            } else {
+                                crate::workspace_files::ipc::rename_workspace_entry(
+                                    parent_w, source, new_name,
+                                )
+                                .await
+                                .map(|_| ())
+                            }
+                        };
+                        if parent_first {
+                            let held = Held::new(root.clone(), "admitted");
+                            let first = start(parent_future);
+                            held.wait();
+                            let waiting = Held::new(key(&root, op), "before-admission");
+                            let second = start(mutate(
+                                op,
+                                app.handle().clone(),
+                                w,
+                                authorize(app.handle(), op),
+                            ));
+                            waiting.wait();
+                            waiting.release();
+                            assert!(second.recv_timeout(Duration::from_millis(30)).is_err());
+                            held.release();
+                            done(first).unwrap();
+                            assert!(done(second).is_err(), "{op}");
+                        } else {
+                            let held = Held::new(key(&root, op), "admitted");
+                            let first = start(mutate(
+                                op,
+                                app.handle().clone(),
+                                w,
+                                authorize(app.handle(), op),
+                            ));
+                            held.wait();
+                            let waiting = Held::new(root.clone(), "before-admission");
+                            let second = start(parent_future);
+                            waiting.wait();
+                            waiting.release();
+                            assert!(second.recv_timeout(Duration::from_millis(30)).is_err());
+                            held.release();
+                            done(first).unwrap();
+                            done(second).unwrap();
+                            let output = match op {
+                                "stage_inbox_drop_files" => "inbox/drop/kakao/source.txt",
+                                "accept_inbox_item" | "accept_inbox_items" => {
+                                    "projects/result/note.md"
+                                }
+                                "reject_inbox_item" | "reject_inbox_items" => {
+                                    "inbox/rejected/gmail/note.md"
+                                }
+                                "apply_inbox_decisions" => "inbox/items/done/a/raw/input.txt",
+                                _ => "trashed.txt",
+                            };
+                            assert!(moved.join(output).is_file(), "{op} {output}");
+                        }
+                        assert!(!root.exists(), "vanished workspace recreated: {op}");
+                        assert!(moved.exists());
+                    }
+                }
+            }
+        }
+    }
+    #[test]
+    fn phase08_10_inbox_document_save_serializes_and_preserves_typed_conflict() {
+        let home = Home::new();
+        let app = app();
+        for inbox_first in [false, true] {
+            let tmp = fixture(&home);
+            let root = tmp.path();
+            let w = text(root);
+            let path = root.join("inbox/downloads/gmail/note.md");
+            let original = fs::read_to_string(&path).unwrap();
+            let revision = crate::document::revision_for(&original);
+            if inbox_first {
+                let held = Held::new(path.clone(), "admitted");
+                let first = start(mutate(
+                    "accept_inbox_item",
+                    app.handle().clone(),
+                    w.clone(),
+                    authorize(app.handle(), "accept_inbox_item"),
+                ));
+                held.wait();
+                let waiting = Held::new(path.clone(), "before-admission");
+                let second = start(crate::document::ipc::save_document(
+                    w,
+                    text(&path),
+                    "# Editor".into(),
+                    Some(revision),
+                ));
+                waiting.wait();
+                waiting.release();
+                assert!(second.recv_timeout(Duration::from_millis(30)).is_err());
+                held.release();
+                done(first).unwrap();
+                let error = done(second).unwrap_err();
+                assert_eq!(error.code, crate::ipc_error::DOCUMENT_CONFLICT);
+            } else {
+                let held = Held::new(path.clone(), "admitted");
+                let first = start(crate::document::ipc::save_document(
+                    w.clone(),
+                    text(&path),
+                    "# Editor".into(),
+                    Some(revision),
+                ));
+                held.wait();
+                let waiting = Held::new(path.clone(), "before-admission");
+                let second = start(mutate(
+                    "accept_inbox_item",
+                    app.handle().clone(),
+                    w,
+                    authorize(app.handle(), "accept_inbox_item"),
+                ));
+                waiting.wait();
+                waiting.release();
+                assert!(second.recv_timeout(Duration::from_millis(30)).is_err());
+                held.release();
+                done(first).unwrap();
+                done(second).unwrap();
+                assert_eq!(
+                    fs::read_to_string(root.join("projects/result/note.md")).unwrap(),
+                    "# Editor"
+                );
+            }
+            assert!(root.join("projects/result/note.md").is_file());
+        }
+    }
+    #[test]
+    fn phase08_10_inbox_failed_item_move_rolls_back_copies_and_keeps_pending_for_retry() {
+        let home = Home::new();
+        let tmp = fixture(&home);
+        let root = tmp.path();
+        let app = app();
+        let done_root = root.join("inbox/items/done");
+        let preserved = root.join("inbox/items/done-preserved");
+        let old = done_root.clone();
+        let held = preserved.clone();
+        let hook = PathTransactionTestHook::new(
+            root.join("inbox/items/pending/a"),
+            "before-item-move",
+            move || {
+                fs::rename(&old, &held).unwrap();
+                fs::write(&old, "blocked fixture parent").unwrap();
+            },
+        );
+        let rows = run(ipc::apply_inbox_decisions(
+            app.handle().clone(),
+            text(root),
+            vec![decision("a", "accept")],
+            approval(app.handle(), INBOX_BULK_KIND),
+        ))
+        .unwrap();
+        assert!(!rows[0].ok);
+        drop(hook);
+        assert!(!root.join("projects/result/input.txt").exists());
+        let manifest =
+            fs::read_to_string(root.join("inbox/items/pending/a/manifest.yaml")).unwrap();
+        assert!(manifest.contains("status: pending"));
+        assert!(!root.join("inbox/_state/index.jsonl").exists());
+        fs::remove_file(&done_root).unwrap();
+        fs::rename(preserved, done_root).unwrap();
+        let retry = run(ipc::apply_inbox_decisions(
+            app.handle().clone(),
+            text(root),
+            vec![decision("a", "accept")],
+            approval(app.handle(), INBOX_BULK_KIND),
+        ))
+        .unwrap();
+        assert!(retry[0].ok);
+        assert_eq!(
+            fs::read_to_string(root.join("projects/result/input.txt")).unwrap(),
+            "source a"
+        );
+    }
+    #[cfg(unix)]
+    #[test]
+    fn phase08_10_inbox_raw_tree_denial_leaves_no_partial_output() {
+        let home = Home::new();
+        let tmp = fixture(&home);
+        let root = tmp.path();
+        let app = app();
+        let raw = root.join("inbox/items/pending/a/raw");
+        fs::create_dir(raw.join("nested")).unwrap();
+        std::os::unix::fs::symlink(root.join("source.txt"), raw.join("nested/leak.txt")).unwrap();
+        let rows = run(ipc::apply_inbox_decisions(
+            app.handle().clone(),
+            text(root),
+            vec![decision("a", "accept")],
+            approval(app.handle(), INBOX_BULK_KIND),
+        ))
+        .unwrap();
+        assert!(!rows[0].ok);
+        assert!(rows[0].error.as_ref().unwrap().contains("Source symlinks"));
+        assert!(!root.join("projects/result/input.txt").exists());
+        assert!(root.join("inbox/items/pending/a/raw/input.txt").exists());
     }
 }
