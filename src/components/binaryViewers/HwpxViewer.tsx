@@ -6,6 +6,15 @@ import { useTranslation } from "../../lib/i18n";
 import type { WorkspaceFileEntry } from "../../lib/types";
 import { SystemPreviewViewer } from "./SystemPreviewViewer";
 
+/**
+ * DOMPurify-backed helper for the Hwpx preview sink: the only path by which
+ * extracted third-party document HTML reaches `dangerouslySetInnerHTML`
+ * in this component (SEC-02).
+ */
+export function sanitizeHwpxPreviewHtml(html: string): string {
+  return DOMPurify.sanitize(html, { USE_PROFILES: { html: true } });
+}
+
 interface Props {
   entry: WorkspaceFileEntry;
   workspacePath: string;
@@ -34,9 +43,7 @@ export function HwpxViewer({
     binaryViewerExtractHwpx(workspacePath, entry.path)
       .then((preview) => {
         if (cancelled) return;
-        const sanitizedHtml = DOMPurify.sanitize(preview.html, {
-          USE_PROFILES: { html: true },
-        });
+        const sanitizedHtml = sanitizeHwpxPreviewHtml(preview.html);
         setState({ status: "ready", preview, sanitizedHtml });
       })
       .catch((err: unknown) => {

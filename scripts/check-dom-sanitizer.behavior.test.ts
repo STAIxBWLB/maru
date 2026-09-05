@@ -25,7 +25,7 @@ describe("check-dom-sanitizer.mjs behavior", () => {
     const result = runGuard();
     expect(result.status).toBe(0);
     expect(result.stdout).toContain("check-dom-sanitizer:");
-    expect(result.stdout).toMatch(/sinks verified/);
+    expect(result.stdout).toMatch(/6 dangerouslySetInnerHTML sinks trace/);
   });
 
   it("fails closed on an untraced sink, naming the probe file", () => {
