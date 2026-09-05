@@ -1,0 +1,707 @@
+{
+  "plan": "08-16",
+  "moduleIntegrationOwner": "08-16",
+  "commands": [
+    {
+      "name": "agents_list",
+      "module": "src-tauri/src/agents.rs",
+      "registrationPath": "src-tauri/src/lib.rs::agents::ipc::agents_list",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/agents.rs::ipc::agents_list owns no state and delegates to src-tauri/src/agents.rs::agents_list.",
+        "src-tauri/src/agents.rs::agents_list loads the registry through src-tauri/src/agents.rs::load_file (src-tauri/src/agents.rs::agents_path) and merges seeds via src-tauri/src/agents.rs::merged with src-tauri/src/agents.rs::seed_record and src-tauri/src/agents.rs::apply_patch; every read stays inside the owned blocking worker."
+      ],
+      "workerBoundary": "src-tauri/src/agents.rs::ipc::agents_list awaits tauri::async_runtime::spawn_blocking before any agents.json read; existing Vec<AgentRecord> payloads and the merged seed+override order are unchanged, a JoinError maps to the display-only agents_list_task_failed String, and no borrow crosses await.",
+      "syncCallers": [
+        "src-tauri/src/agents.rs::agents_list stays synchronous for Rust callers (scheduler and feature-bound dispatch read agents through src-tauri/src/agents.rs::get_agent on the same load_file/merged path)."
+      ],
+      "mutationKey": {
+        "readOnly": true,
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "sharedAdmissionEntry": "No filesystem mutation is owned by this command: agents_list only reads the finite ~/.maru/agents.json registry and merges it with in-process seeds.",
+        "postAdmissionPreconditions": [
+          "agents_path shape validation (absolute maru home) still rejects a relative override before the read."
+        ],
+        "domainLockOrder": "No command-owned filesystem mutation lease; the seed merge is pure in-memory work inside the worker."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_16",
+          "passed": 18,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/agents.ts"
+        ],
+        "payload": "The agents settings pane owns the list refresh: it awaits agents_list, renders the merged seed+override rows and surfaces the returned error string on failure.",
+        "terminalNoticeOwner": "SkillRunsPanel and the agents settings pane own current completion and error display for these flows. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_16_agents_all_wrappers_round_trip_and_legacy_rejections",
+          "phase08_16_agents_each_wrapper_yields_same_poll_and_maps_join_failure"
+        ],
+        "workerProof": "Each agents_* command future is held at spawn_blocking worker entry (worker:agents_list stage), manually polled on the same async task and yields before release; a panicked or cancelled worker maps to the display-only agents_*_task_failed String while Ok payloads pass through unchanged.",
+        "platformScope": "macOS and synthetic fixtures only: disposable MARU_TEST_HOME/MARU_TEST_CONFIG_DIR under the shared Home lock; no real user agent registry is touched.",
+        "limits": "In-process path admission does not exclude independent external processes; a real CLI provider or another agent's filesystem access stays outside the lease. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
+        "contract": "Existing AgentRecord payloads, seed merge order and error strings are unchanged; agents_list performs no admission wait of its own."
+      }
+    },
+    {
+      "name": "agents_upsert",
+      "module": "src-tauri/src/agents.rs",
+      "registrationPath": "src-tauri/src/lib.rs::agents::ipc::agents_upsert",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/agents.rs::ipc::agents_upsert owns the AgentRecord payload and delegates to src-tauri/src/agents.rs::agents_upsert.",
+        "src-tauri/src/agents.rs::agents_upsert enters src-tauri/src/agents.rs::agents_transaction and runs src-tauri/src/agents.rs::agents_upsert_in_transaction, which revalidates coverage, resolves builtin identity through src-tauri/src/agents.rs::find_seed and src-tauri/src/agents.rs::seed_record, validates via src-tauri/src/agents.rs::validate_agent, diffs with diff_vs_seed, persists through src-tauri/src/agents.rs::save_file_in_transaction and returns the merged row via src-tauri/src/agents.rs::merged."
+      ],
+      "workerBoundary": "src-tauri/src/agents.rs::ipc::agents_upsert awaits tauri::async_runtime::spawn_blocking before any registry read, admission wait or atomic write; the AgentRecord crosses the boundary by value, existing payloads and agent_* error strings are unchanged, and a JoinError maps to agents_upsert_task_failed.",
+      "syncCallers": [
+        "src-tauri/src/agents.rs::agents_upsert stays synchronous for Rust callers; no production Rust caller bypasses the transaction adapter."
+      ],
+      "mutationKey": {
+        "lexicalPaths": [
+          "User-global ~/.maru/agents.json plus the write_atomic random tempfile sibling covered by pinning the ~/.maru parent."
+        ],
+        "aliasPaths": [
+          "Original lexical parent of ~/.maru captured by the PathTransactionRequest parent snapshot in agents_transaction before the registry read."
+        ],
+        "sharedAdmissionEntry": "src-tauri/src/agents.rs::agents_transaction builds the src-tauri/src/atomic_file.rs::PathTransactionRequest over src-tauri/src/agents.rs::agents_mutation_paths with parent snapshots; the sync command enters src-tauri/src/atomic_file.rs::with_path_transactions and the matching _in_transaction adapter revalidates the admitted set with lease.ensure_covered and lease.before_effect before the first filesystem effect.",
+        "postAdmissionPreconditions": [
+          "load_file still finds a parseable registry (corrupt file errors unchanged).",
+          "ensure_covered revalidates ~/.maru/agents.json and the tempfile sibling against the admitted set before effects.",
+          "lease.before_effect confirms the ~/.maru parent identity before the atomic write."
+        ],
+        "domainLockOrder": "Shared path admission is acquired before the agents.json read-modify-write; no module-level mutex is held across the admission wait or the atomic write."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_16",
+          "passed": 18,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/agents.ts"
+        ],
+        "payload": "The agents settings pane owns the create/edit form: it awaits agents_upsert, applies the returned merged row to local state and surfaces agent_* validation errors inline.",
+        "terminalNoticeOwner": "SkillRunsPanel and the agents settings pane own current completion and error display for these flows. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_16_agents_all_wrappers_round_trip_and_legacy_rejections",
+          "phase08_16_agents_each_wrapper_yields_same_poll_and_maps_join_failure",
+          "phase08_16_agents_files_parent_both_orders_and_aliases_no_recreation",
+          "phase08_16_agents_error_and_unwind_release_admission"
+        ],
+        "workerProof": "Held at worker:agents_upsert entry, manually polled on the same async task and yields before release; a panicked or cancelled worker releases the admitted path set and maps to agents_upsert_task_failed.",
+        "platformScope": "macOS synthetic fixtures only: rename/trash competitors from workspace_files race the admitted ~/.maru parent in both orders and through a lexical alias, all under the shared Home lock.",
+        "limits": "In-process path admission does not exclude independent external processes; a real CLI provider or another agent's filesystem access stays outside the lease. PERF-01/PERF-02 remain globally outstanding for the whole phase. Builtin identity fields still come from the compiled seed registry, not from the client payload.",
+        "contract": "Existing AgentRecord payloads, builtin diff-vs-seed storage and error strings are unchanged; the sync agents_upsert keeps its signature for Rust callers."
+      }
+    },
+    {
+      "name": "agents_delete",
+      "module": "src-tauri/src/agents.rs",
+      "registrationPath": "src-tauri/src/lib.rs::agents::ipc::agents_delete",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/agents.rs::ipc::agents_delete owns the id String and delegates to src-tauri/src/agents.rs::agents_delete.",
+        "src-tauri/src/agents.rs::agents_delete enters src-tauri/src/agents.rs::agents_transaction and runs src-tauri/src/agents.rs::agents_delete_in_transaction, which rejects builtin ids through src-tauri/src/agents.rs::find_seed, reloads via src-tauri/src/agents.rs::load_file, retains the remaining rows, persists through src-tauri/src/agents.rs::save_file_in_transaction and returns the merged registry via src-tauri/src/agents.rs::merged."
+      ],
+      "workerBoundary": "src-tauri/src/agents.rs::ipc::agents_delete awaits tauri::async_runtime::spawn_blocking before any registry read, admission wait or atomic write; existing Vec<AgentRecord> payloads and agent_builtin_not_deletable/agent_not_found errors are unchanged and a JoinError maps to agents_delete_task_failed.",
+      "syncCallers": [
+        "src-tauri/src/agents.rs::agents_delete stays synchronous for Rust callers."
+      ],
+      "mutationKey": {
+        "lexicalPaths": [
+          "User-global ~/.maru/agents.json plus the write_atomic random tempfile sibling covered by pinning the ~/.maru parent."
+        ],
+        "aliasPaths": [
+          "Original lexical parent of ~/.maru captured by the PathTransactionRequest parent snapshot in agents_transaction before the registry read."
+        ],
+        "sharedAdmissionEntry": "src-tauri/src/agents.rs::agents_transaction builds the src-tauri/src/atomic_file.rs::PathTransactionRequest over src-tauri/src/agents.rs::agents_mutation_paths with parent snapshots; the sync command enters src-tauri/src/atomic_file.rs::with_path_transactions and the matching _in_transaction adapter revalidates the admitted set with lease.ensure_covered and lease.before_effect before the first filesystem effect.",
+        "postAdmissionPreconditions": [
+          "find_seed still classifies the id as builtin or user before the write (builtin rejection unchanged).",
+          "ensure_covered revalidates ~/.maru/agents.json and the tempfile sibling before effects.",
+          "lease.before_effect confirms the ~/.maru parent identity before the atomic write."
+        ],
+        "domainLockOrder": "Shared path admission is acquired before the agents.json read-modify-write; no module-level mutex is held across the admission wait or the atomic write."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_16",
+          "passed": 18,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/agents.ts"
+        ],
+        "payload": "The agents settings pane owns the delete action: it awaits agents_delete, replaces local rows with the returned merged registry and surfaces agent_builtin_not_deletable inline.",
+        "terminalNoticeOwner": "SkillRunsPanel and the agents settings pane own current completion and error display for these flows. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_16_agents_all_wrappers_round_trip_and_legacy_rejections",
+          "phase08_16_agents_each_wrapper_yields_same_poll_and_maps_join_failure"
+        ],
+        "workerProof": "Held at worker:agents_delete entry, manually polled on the same async task and yields before release; a panicked or cancelled worker maps to agents_delete_task_failed while Ok payloads pass through unchanged.",
+        "platformScope": "macOS synthetic fixtures only under the shared Home lock.",
+        "limits": "In-process path admission does not exclude independent external processes; a real CLI provider or another agent's filesystem access stays outside the lease. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
+        "contract": "Existing payloads and error strings are unchanged; deleting a builtin remains rejected with agent_builtin_not_deletable."
+      }
+    },
+    {
+      "name": "agents_reset",
+      "module": "src-tauri/src/agents.rs",
+      "registrationPath": "src-tauri/src/lib.rs::agents::ipc::agents_reset",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/agents.rs::ipc::agents_reset owns the id String and delegates to src-tauri/src/agents.rs::agents_reset.",
+        "src-tauri/src/agents.rs::agents_reset enters src-tauri/src/agents.rs::agents_transaction and runs src-tauri/src/agents.rs::agents_reset_in_transaction, which resolves the seed through src-tauri/src/agents.rs::find_seed and src-tauri/src/agents.rs::seed_record, drops the override from the src-tauri/src/agents.rs::load_file snapshot, persists through src-tauri/src/agents.rs::save_file_in_transaction and returns the seed record."
+      ],
+      "workerBoundary": "src-tauri/src/agents.rs::ipc::agents_reset awaits tauri::async_runtime::spawn_blocking before any registry read, admission wait or atomic write; the AgentRecord payload and agent_not_builtin error are unchanged and a JoinError maps to agents_reset_task_failed.",
+      "syncCallers": [
+        "src-tauri/src/agents.rs::agents_reset stays synchronous for Rust callers."
+      ],
+      "mutationKey": {
+        "lexicalPaths": [
+          "User-global ~/.maru/agents.json plus the write_atomic random tempfile sibling covered by pinning the ~/.maru parent."
+        ],
+        "aliasPaths": [
+          "Original lexical parent of ~/.maru captured by the PathTransactionRequest parent snapshot in agents_transaction before the registry read."
+        ],
+        "sharedAdmissionEntry": "src-tauri/src/agents.rs::agents_transaction builds the src-tauri/src/atomic_file.rs::PathTransactionRequest over src-tauri/src/agents.rs::agents_mutation_paths with parent snapshots; the sync command enters src-tauri/src/atomic_file.rs::with_path_transactions and the matching _in_transaction adapter revalidates the admitted set with lease.ensure_covered and lease.before_effect before the first filesystem effect.",
+        "postAdmissionPreconditions": [
+          "find_seed still proves the id is a builtin before the override drop (agent_not_builtin unchanged).",
+          "ensure_covered revalidates ~/.maru/agents.json and the tempfile sibling before effects.",
+          "lease.before_effect confirms the ~/.maru parent identity before the atomic write."
+        ],
+        "domainLockOrder": "Shared path admission is acquired before the agents.json read-modify-write; no module-level mutex is held across the admission wait or the atomic write."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_16",
+          "passed": 18,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/agents.ts"
+        ],
+        "payload": "The agents settings pane owns the reset-to-default action: it awaits agents_reset and replaces the edited row with the returned seed record.",
+        "terminalNoticeOwner": "SkillRunsPanel and the agents settings pane own current completion and error display for these flows. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_16_agents_all_wrappers_round_trip_and_legacy_rejections",
+          "phase08_16_agents_each_wrapper_yields_same_poll_and_maps_join_failure"
+        ],
+        "workerProof": "Held at worker:agents_reset entry, manually polled on the same async task and yields before release; a panicked or cancelled worker maps to agents_reset_task_failed while Ok payloads pass through unchanged.",
+        "platformScope": "macOS synthetic fixtures only under the shared Home lock.",
+        "limits": "In-process path admission does not exclude independent external processes; a real CLI provider or another agent's filesystem access stays outside the lease. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
+        "contract": "Existing payloads and error strings are unchanged; resetting a user agent remains rejected with agent_not_builtin."
+      }
+    },
+    {
+      "name": "start_agent_cli_invocation",
+      "module": "src-tauri/src/ai_router.rs",
+      "registrationPath": "src-tauri/src/lib.rs::ai_router::ipc::start_agent_cli_invocation",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/ai_router.rs::ipc::start_agent_cli_invocation owns every payload value and delegates to src-tauri/src/ai_router.rs::start_agent_cli_invocation.",
+        "src-tauri/src/ai_router.rs::start_agent_cli_invocation builds the provider command via src-tauri/src/ai_router.rs::build_agent_command (provider parse, cwd resolution, build_cli_command) and hands off to src-tauri/src/ai_router.rs::spawn_streaming_invocation, which prepares the reserved invocation env via src-tauri/src/ai_router.rs::prepare_invocation_env, registers the mission (mission_state::register_mission_with_metadata, itself admitted through mission_transaction), then spawns the stdout/stderr pumps via src-tauri/src/ai_router.rs::spawn_line_pump and maps spawn failures through src-tauri/src/ai_router.rs::format_spawn_error."
+      ],
+      "workerBoundary": "src-tauri/src/ai_router.rs::ipc::start_agent_cli_invocation awaits tauri::async_runtime::spawn_blocking before provider resolution, mission registration or process spawn; the invocation id String returns immediately, the CLI keeps running on the owned worker thread, and a JoinError maps to start_agent_cli_invocation_task_failed.",
+      "syncCallers": [
+        "src-tauri/src/ai_router.rs::start_agent_cli_invocation stays generic over tauri::Runtime for Rust callers; the dispatch/scheduler spawn paths keep calling the sync fn on their own worker threads."
+      ],
+      "mutationKey": {
+        "lexicalPaths": [
+          "Mission record <id>.json plus its .json.tmp sidecar and <id>.log under the maru home state/missions directory (write_atomic random tempfile covered by the state parent)."
+        ],
+        "aliasPaths": [
+          "Original lexical parents captured by the mission PathTransactionRequest parent snapshot inside mission_state::mission_transaction before the record write; CLI stdout/stderr pipes are process state, not filesystem paths."
+        ],
+        "sharedAdmissionEntry": "src-tauri/src/mission_state.rs::mission_transaction builds the src-tauri/src/atomic_file.rs::PathTransactionRequest over src-tauri/src/mission_state.rs::mission_mutation_paths with parent snapshots; src-tauri/src/mission_state.rs::check_mission_lease revalidates coverage and calls lease.before_effect before the mission record or log is touched.",
+        "postAdmissionPreconditions": [
+          "validate_mission_id still shapes the id before registration.",
+          "build_cli_command still proves the provider binary exists before the mission record is persisted.",
+          "ensure_covered and lease.before_effect run inside check_mission_lease before the record write."
+        ],
+        "domainLockOrder": "Shared path admission for the mission record is acquired before the child process spawn; the MissionState maps mutex is nested only for the in-memory record and is never held across the admission wait or the spawn."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_16",
+          "passed": 18,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/lib/agentChat.ts"
+        ],
+        "payload": "startClaude/startAgent own the headless invocation call: they await the wrapper for the immediate ai-* id, keep polling list_ai_missions for completion and surface the terminal error string on failure.",
+        "terminalNoticeOwner": "SkillRunsPanel and the agents settings pane own current completion and error display for these flows. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_16_ai_router_wrappers_launch_fixture_cli_and_legacy_rejections",
+          "phase08_16_ai_router_each_wrapper_yields_same_poll_and_maps_join_failure"
+        ],
+        "workerProof": "Held at the mission-dir worker stage, manually polled on the same async task and yields before release; a panicked or cancelled worker maps to start_agent_cli_invocation_task_failed while the immediate id payload passes through unchanged.",
+        "platformScope": "macOS synthetic fixtures only: fake claude/codex shell CLIs under a disposable MARU_TEST_HOME complete immediately; no real provider binary or network is touched.",
+        "limits": "In-process path admission does not exclude independent external processes; a real CLI provider or another agent's filesystem access stays outside the lease. PERF-01/PERF-02 remain globally outstanding for the whole phase. A real provider CLI can still outlive the lease once spawned; admission covers the mission record write, not the child's whole lifetime.",
+        "contract": "Existing invocation-id payload, ai://output/ai://done event flow and error strings are unchanged; the sync start_agent_cli_invocation keeps its generic signature for Rust callers."
+      }
+    },
+    {
+      "name": "start_claude_cli_invocation",
+      "module": "src-tauri/src/ai_router.rs",
+      "registrationPath": "src-tauri/src/lib.rs::ai_router::ipc::start_claude_cli_invocation",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/ai_router.rs::ipc::start_claude_cli_invocation owns the prompt/cwd/env payloads and delegates to src-tauri/src/ai_router.rs::start_claude_cli_invocation, which preserves the legacy empty-prompt error and forwards to src-tauri/src/ai_router.rs::start_agent_cli_invocation.",
+        "From there the chain is shared with the generic bridge: src-tauri/src/ai_router.rs::build_agent_command resolves the provider command, src-tauri/src/ai_router.rs::spawn_streaming_invocation registers the admitted mission via src-tauri/src/ai_router.rs::prepare_invocation_env and src-tauri/src/ai_router.rs::spawn_line_pump, and spawn failures map through src-tauri/src/ai_router.rs::format_spawn_error."
+      ],
+      "workerBoundary": "src-tauri/src/ai_router.rs::ipc::start_claude_cli_invocation awaits tauri::async_runtime::spawn_blocking before the prompt check, provider resolution, mission registration or process spawn; the immediate id String and the legacy 'Prompt is empty.' rejection are unchanged and a JoinError maps to start_claude_cli_invocation_task_failed.",
+      "syncCallers": [
+        "src-tauri/src/ai_router.rs::start_claude_cli_invocation stays generic over tauri::Runtime for Rust callers."
+      ],
+      "mutationKey": {
+        "lexicalPaths": [
+          "Mission record <id>.json plus its .json.tmp sidecar and <id>.log under the maru home state/missions directory (write_atomic random tempfile covered by the state parent)."
+        ],
+        "aliasPaths": [
+          "Original lexical parents captured by the mission PathTransactionRequest parent snapshot inside mission_state::mission_transaction before the record write."
+        ],
+        "sharedAdmissionEntry": "src-tauri/src/mission_state.rs::mission_transaction builds the src-tauri/src/atomic_file.rs::PathTransactionRequest over src-tauri/src/mission_state.rs::mission_mutation_paths with parent snapshots; src-tauri/src/mission_state.rs::check_mission_lease revalidates coverage and calls lease.before_effect before the mission record or log is touched.",
+        "postAdmissionPreconditions": [
+          "The legacy empty-prompt check still runs before any filesystem work.",
+          "build_cli_command still proves the claude binary exists before the mission record is persisted.",
+          "ensure_covered and lease.before_effect run inside check_mission_lease before the record write."
+        ],
+        "domainLockOrder": "Shared path admission for the mission record is acquired before the child process spawn; the MissionState maps mutex is nested only for the in-memory record and is never held across the admission wait or the spawn."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_16",
+          "passed": 18,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/lib/agentChat.ts"
+        ],
+        "payload": "The legacy startClaude call sites own the immediate id and keep polling list_ai_missions for completion; the empty-prompt rejection stays a caller-side form guard.",
+        "terminalNoticeOwner": "SkillRunsPanel and the agents settings pane own current completion and error display for these flows. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_16_ai_router_wrappers_launch_fixture_cli_and_legacy_rejections",
+          "phase08_16_ai_router_each_wrapper_yields_same_poll_and_maps_join_failure"
+        ],
+        "workerProof": "Held at the mission-dir worker stage, manually polled on the same async task and yields before release; a panicked or cancelled worker maps to start_claude_cli_invocation_task_failed while the immediate id payload passes through unchanged.",
+        "platformScope": "macOS synthetic fixtures only: the generic-bridge path is exercised with fake CLIs; the legacy wrapper's own rejection cases run without spawning.",
+        "limits": "In-process path admission does not exclude independent external processes; a real CLI provider or another agent's filesystem access stays outside the lease. PERF-01/PERF-02 remain globally outstanding for the whole phase. The wrapper resolves the real claude binary from PATH when no override is given, so its happy path depends on the host install; the hermetic proof covers the shared spawn chain through the generic bridge.",
+        "contract": "Existing invocation-id payload, 'Prompt is empty.' error and ai://done/ai://error flow are unchanged."
+      }
+    },
+    {
+      "name": "list_ai_missions",
+      "module": "src-tauri/src/mission_state.rs",
+      "registrationPath": "src-tauri/src/lib.rs::mission_state::ipc::list_ai_missions",
+      "originalDisposition": "RETAIN",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/mission_state.rs::ipc::list_ai_missions owns the AppHandle and delegates to src-tauri/src/mission_state.rs::list_ai_missions.",
+        "src-tauri/src/mission_state.rs::list_ai_missions reads the in-memory MissionState records (newest first) and hydrates from the admitted state directory on demand; every read stays inside the owned blocking worker."
+      ],
+      "workerBoundary": "src-tauri/src/mission_state.rs::ipc::list_ai_missions awaits tauri::async_runtime::spawn_blocking before touching MissionState or the state directory; the Vec<MissionRecord> payload and newest-first order are unchanged and a JoinError maps to list_ai_missions_task_failed.",
+      "syncCallers": [
+        "src-tauri/src/mission_state.rs::list_ai_missions stays generic over tauri::Runtime for Rust callers (ai_router reaper and idle watch read records on their own threads)."
+      ],
+      "mutationKey": {
+        "readOnly": true,
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "sharedAdmissionEntry": "No filesystem mutation is owned by this command: list_ai_missions only reads mission records and the state directory.",
+        "postAdmissionPreconditions": [
+          "validate/normalize behavior for missing records stays unchanged (empty list instead of an error)."
+        ],
+        "domainLockOrder": "No command-owned filesystem mutation lease; the MissionState missions mutex is scoped to the in-memory snapshot only."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_16",
+          "passed": 18,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts"
+        ],
+        "payload": "SkillRunsPanel and the mission list consumers own the poll loop: they await list_ai_missions on an interval, diff records by id and render status transitions.",
+        "terminalNoticeOwner": "SkillRunsPanel and the agents settings pane own current completion and error display for these flows. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_16_missions_all_wrappers_round_trip_and_legacy_rejections",
+          "phase08_16_missions_each_wrapper_yields_same_poll_and_maps_join_failure"
+        ],
+        "workerProof": "Held at the mission-dir worker stage, manually polled on the same async task and yields before release; a panicked or cancelled worker maps to list_ai_missions_task_failed.",
+        "platformScope": "macOS synthetic fixtures only under the shared Home lock and a disposable MARU_MISSION_STATE_DIR.",
+        "limits": "In-process path admission does not exclude independent external processes; a real CLI provider or another agent's filesystem access stays outside the lease. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
+        "contract": "Existing MissionRecord payload, newest-first ordering and empty-list semantics are unchanged."
+      }
+    },
+    {
+      "name": "stop_ai_mission",
+      "module": "src-tauri/src/mission_state.rs",
+      "registrationPath": "src-tauri/src/lib.rs::mission_state::ipc::stop_ai_mission",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/mission_state.rs::ipc::stop_ai_mission owns the AppHandle and invocation id and delegates to src-tauri/src/mission_state.rs::stop_ai_mission.",
+        "src-tauri/src/mission_state.rs::stop_ai_mission runs MissionState::stop through src-tauri/src/mission_state.rs::stop_in_transaction: src-tauri/src/mission_state.rs::check_mission_lease revalidates the admitted mission paths, the owned pid is signalled, the stopped record persists through src-tauri/src/mission_state.rs::persist_record_in_transaction, and emit_update notifies subscribers."
+      ],
+      "workerBoundary": "src-tauri/src/mission_state.rs::ipc::stop_ai_mission awaits tauri::async_runtime::spawn_blocking before any MissionState lookup, admission wait, signal or record write; the MissionRecord payload and mission_not_running error are unchanged and a JoinError maps to stop_ai_mission_task_failed.",
+      "syncCallers": [
+        "src-tauri/src/mission_state.rs::stop_ai_mission stays generic over tauri::Runtime for Rust callers (skill dispatch reuses MissionState::stop on its own worker)."
+      ],
+      "mutationKey": {
+        "lexicalPaths": [
+          "Mission record <id>.json plus its .json.tmp sidecar and <id>.log under the maru home state/missions directory (write_atomic random tempfile covered by the state parent)."
+        ],
+        "aliasPaths": [
+          "Original lexical parents captured by the mission PathTransactionRequest parent snapshot inside src-tauri/src/mission_state.rs::mission_transaction before the record write; descendant symlink aliases are revalidated against their physical targets."
+        ],
+        "sharedAdmissionEntry": "src-tauri/src/mission_state.rs::mission_transaction builds the src-tauri/src/atomic_file.rs::PathTransactionRequest over src-tauri/src/mission_state.rs::mission_mutation_paths with parent snapshots; src-tauri/src/mission_state.rs::check_mission_lease revalidates coverage and calls lease.before_effect before the mission record or log is touched.",
+        "postAdmissionPreconditions": [
+          "The in-memory record must still be Running/Idle before the kill (mission_not_running unchanged).",
+          "ensure_covered revalidates the mission json/tmp/log set before effects.",
+          "lease.before_effect confirms the state parent identity before the stopped record is persisted."
+        ],
+        "domainLockOrder": "Shared path admission for the mission record is acquired before the pid signal and the record write; the MissionState maps mutex is nested only for the in-memory record and is never held across the admission wait."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_16",
+          "passed": 18,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts"
+        ],
+        "payload": "SkillRunsPanel owns the stop action: it awaits stop_ai_mission, marks the row stopping and reconciles the final record from the next poll.",
+        "terminalNoticeOwner": "SkillRunsPanel and the agents settings pane own current completion and error display for these flows. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_16_missions_all_wrappers_round_trip_and_legacy_rejections",
+          "phase08_16_missions_each_wrapper_yields_same_poll_and_maps_join_failure",
+          "phase08_16_missions_files_parent_both_orders_and_aliases_no_recreation",
+          "phase08_16_missions_error_and_unwind_release_admission"
+        ],
+        "workerProof": "Held at the mission-dir worker stage, manually polled on the same async task and yields before release; a panicked or cancelled worker releases the admitted set and maps to stop_ai_mission_task_failed.",
+        "platformScope": "macOS synthetic fixtures only: a real short-lived sleep child is signalled, and rename/trash competitors from workspace_files race the admitted state parent in both orders and through a lexical alias under the shared Home lock.",
+        "limits": "In-process path admission does not exclude independent external processes; a real CLI provider or another agent's filesystem access stays outside the lease. PERF-01/PERF-02 remain globally outstanding for the whole phase. Signalling a pid owned by another process is unchanged best-effort behavior outside the lease.",
+        "contract": "Existing MissionRecord payload, mission_not_running error and ai://update emission are unchanged; the sync stop_ai_mission keeps its signature for Rust callers."
+      }
+    },
+    {
+      "name": "read_ai_mission_log",
+      "module": "src-tauri/src/mission_state.rs",
+      "registrationPath": "src-tauri/src/lib.rs::mission_state::ipc::read_ai_mission_log",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/mission_state.rs::ipc::read_ai_mission_log owns the id/max_lines payload and delegates to src-tauri/src/mission_state.rs::read_ai_mission_log.",
+        "src-tauri/src/mission_state.rs::read_ai_mission_log bounds max_lines and tails the log through src-tauri/src/mission_state.rs::read_mission_log_tail (mission_log_path); every read stays inside the owned blocking worker."
+      ],
+      "workerBoundary": "src-tauri/src/mission_state.rs::ipc::read_ai_mission_log awaits tauri::async_runtime::spawn_blocking before any log read; the MissionLogTail payload, the 1..=1000 line clamp and mission_id_invalid error are unchanged and a JoinError maps to read_ai_mission_log_task_failed.",
+      "syncCallers": [
+        "src-tauri/src/mission_state.rs::read_ai_mission_log stays synchronous for Rust callers."
+      ],
+      "mutationKey": {
+        "readOnly": true,
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "sharedAdmissionEntry": "No filesystem mutation is owned by this command: read_ai_mission_log only reads the bounded mission log tail.",
+        "postAdmissionPreconditions": [
+          "validate_mission_id still rejects malformed ids before the read (mission_id_invalid unchanged)."
+        ],
+        "domainLockOrder": "No command-owned filesystem mutation lease; the log tail read holds no domain mutex."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_16",
+          "passed": 18,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts"
+        ],
+        "payload": "SkillRunsPanel owns the log viewer: it awaits read_ai_mission_log with a bounded tail, appends lines to the run transcript and surfaces mission_id_invalid inline.",
+        "terminalNoticeOwner": "SkillRunsPanel and the agents settings pane own current completion and error display for these flows. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_16_missions_all_wrappers_round_trip_and_legacy_rejections",
+          "phase08_16_missions_each_wrapper_yields_same_poll_and_maps_join_failure"
+        ],
+        "workerProof": "Held at the mission-dir worker stage, manually polled on the same async task and yields before release; a panicked or cancelled worker maps to read_ai_mission_log_task_failed.",
+        "platformScope": "macOS synthetic fixtures only under the shared Home lock.",
+        "limits": "In-process path admission does not exclude independent external processes; a real CLI provider or another agent's filesystem access stays outside the lease. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
+        "contract": "Existing MissionLogTail payload, line clamp and error strings are unchanged."
+      }
+    },
+    {
+      "name": "agent_parse_skill_proposal",
+      "module": "src-tauri/src/agent_host/proposal.rs",
+      "registrationPath": "src-tauri/src/lib.rs::agent_host::proposal::ipc::agent_parse_skill_proposal",
+      "originalDisposition": "RETAIN",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/agent_host/proposal.rs::ipc::agent_parse_skill_proposal owns the raw String and delegates to src-tauri/src/agent_host/proposal.rs::agent_parse_skill_proposal.",
+        "src-tauri/src/agent_host/proposal.rs::agent_parse_skill_proposal runs src-tauri/src/agent_host/proposal.rs::parse_skill_proposal: src-tauri/src/agent_host/proposal.rs::extract_json_object pulls the fenced or inline object, serde parses it and SkillProposal::validate enforces the schema; the work is pure parsing inside the owned blocking worker."
+      ],
+      "workerBoundary": "src-tauri/src/agent_host/proposal.rs::ipc::agent_parse_skill_proposal awaits tauri::async_runtime::spawn_blocking before any parsing; the SkillProposal payload and skill_proposal_* error strings are unchanged and a JoinError maps to agent_parse_skill_proposal_task_failed.",
+      "syncCallers": [
+        "src-tauri/src/agent_host/proposal.rs::agent_parse_skill_proposal stays synchronous for Rust callers."
+      ],
+      "mutationKey": {
+        "readOnly": true,
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "sharedAdmissionEntry": "No filesystem mutation is owned by this command: agent_parse_skill_proposal is pure parsing of the proposal text.",
+        "postAdmissionPreconditions": [
+          "Schema-version and file-content validation still run inside the worker before the Ok payload (skill_proposal_* errors unchanged)."
+        ],
+        "domainLockOrder": "No command-owned filesystem mutation lease; parsing holds no domain mutex."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_16",
+          "passed": 18,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/skills.ts"
+        ],
+        "payload": "The skill run review flow owns the parse call: it awaits agent_parse_skill_proposal on the raw model output and surfaces skill_proposal_* parse errors before apply is offered.",
+        "terminalNoticeOwner": "SkillRunsPanel and the agents settings pane own current completion and error display for these flows. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_16_proposal_parse_wrapper_round_trip_and_legacy_rejections",
+          "phase08_16_proposal_wrappers_yield_on_same_polling_task",
+          "phase08_16_proposal_wrappers_map_join_failure"
+        ],
+        "workerProof": "Held at the parse worker stage (phase08_16_hooks), manually polled on the same async task and yields before release; a panicked or cancelled worker maps to agent_parse_skill_proposal_task_failed.",
+        "platformScope": "Platform-independent synthetic fixtures only.",
+        "limits": "In-process path admission does not exclude independent external processes; a real CLI provider or another agent's filesystem access stays outside the lease. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
+        "contract": "Existing SkillProposal payload and skill_proposal_* error strings are unchanged."
+      }
+    },
+    {
+      "name": "agent_apply_skill_proposal",
+      "module": "src-tauri/src/agent_host/proposal.rs",
+      "registrationPath": "src-tauri/src/lib.rs::agent_host::proposal::ipc::agent_apply_skill_proposal",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/agent_host/proposal.rs::ipc::agent_apply_skill_proposal owns the AppHandle, cwd, proposal and optional approval/run ids and delegates to src-tauri/src/agent_host/proposal.rs::agent_apply_skill_proposal.",
+        "src-tauri/src/agent_host/proposal.rs::agent_apply_skill_proposal checks the approval grant (require_approval) and runs src-tauri/src/agent_host/proposal.rs::apply_skill_proposal: src-tauri/src/agent_host/proposal.rs::apply_write_set resolves every file target inside the vault with its .maru-write.tmp sidecar plus the run-events log when a run id is present, src-tauri/src/agent_host/proposal.rs::apply_skill_proposal_in_transaction revalidates coverage and applies each file operation, and run events append through event_store::append_run_event_payload_in_transaction under the same lease."
+      ],
+      "workerBoundary": "src-tauri/src/agent_host/proposal.rs::ipc::agent_apply_skill_proposal awaits tauri::async_runtime::spawn_blocking before the approval check, target resolution, admission wait or any file effect; the ProposalApplyReport payload and skill_proposal_* errors are unchanged and a JoinError maps to agent_apply_skill_proposal_task_failed.",
+      "syncCallers": [
+        "src-tauri/src/agent_host/proposal.rs::agent_apply_skill_proposal stays generic over tauri::Runtime for Rust callers; skill dispatch keeps calling the sync fn on its own worker thread."
+      ],
+      "mutationKey": {
+        "lexicalPaths": [
+          "Every proposal file target resolved inside the vault cwd plus its .maru-write.tmp sidecar, and <cwd>/.maru/runs/skills/<run_id>/events.jsonl when a run id is present (write_atomic random tempfile covered by the target parent)."
+        ],
+        "aliasPaths": [
+          "Original lexical parents of the cwd and each resolved target captured by src-tauri/src/agent_host/proposal.rs::apply_write_set before admission; symlinked ancestors revalidate against their physical targets."
+        ],
+        "sharedAdmissionEntry": "src-tauri/src/agent_host/proposal.rs::apply_write_set builds the complete target set; src-tauri/src/agent_host/proposal.rs::apply_skill_proposal enters src-tauri/src/atomic_file.rs::with_path_transactions and src-tauri/src/agent_host/proposal.rs::apply_skill_proposal_in_transaction revalidates coverage with lease.ensure_covered and lease.before_effect before the first file effect, while src-tauri/src/agent_host/event_store.rs::append_run_event_payload_in_transaction appends run events under the same admitted lease.",
+        "postAdmissionPreconditions": [
+          "require_approval still gates the write set (approval_required error unchanged).",
+          "resolve_inside_vault still rejects targets escaping the cwd before admission.",
+          "ensure_covered revalidates every target, sidecar and the events log before effects.",
+          "lease.before_effect confirms the original parents before the first write."
+        ],
+        "domainLockOrder": "Shared path admission for the whole write set is acquired before any file effect; the approval state lock is released before admission and no per-file lock is taken before the lease."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_16",
+          "passed": 18,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/skills.ts",
+          "src/components/skills/SkillRunsPanel.tsx"
+        ],
+        "payload": "SkillRunsPanel owns the apply action: it awaits agent_apply_skill_proposal with the stored approval id, renders the ProposalApplyReport per-file outcomes and keeps the review transcript on failure.",
+        "terminalNoticeOwner": "SkillRunsPanel and the agents settings pane own current completion and error display for these flows. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_16_proposal_apply_commits_writes_with_approval_and_rejections",
+          "phase08_16_proposal_wrappers_yield_on_same_polling_task",
+          "phase08_16_proposal_wrappers_map_join_failure",
+          "phase08_16_proposal_apply_files_parent_both_orders_and_aliases_no_recreation",
+          "phase08_16_proposal_apply_error_and_unwind_release_admission"
+        ],
+        "workerProof": "Held at the apply worker stage (phase08_16_hooks), manually polled on the same async task and yields before release; a panicked or cancelled worker releases the admitted write set and maps to agent_apply_skill_proposal_task_failed.",
+        "platformScope": "macOS synthetic fixtures only: rename competitors from workspace_files race the admitted docs parent in both orders and through a lexical alias, and approval grants are issued through the shared ApprovalState under the Home lock.",
+        "limits": "In-process path admission does not exclude independent external processes; a real CLI provider or another agent's filesystem access stays outside the lease. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
+        "contract": "Existing ProposalApplyReport payload, per-file outcomes and approval/parse error strings are unchanged; the sync agent_apply_skill_proposal keeps its generic signature for Rust callers."
+      }
+    },
+    {
+      "name": "agent_run_structured_loop",
+      "module": "src-tauri/src/agent_host/structured_loop.rs",
+      "registrationPath": "src-tauri/src/lib.rs::agent_host::structured_loop::ipc::agent_run_structured_loop",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/agent_host/structured_loop.rs::ipc::agent_run_structured_loop owns every payload value and delegates to src-tauri/src/agent_host/structured_loop.rs::agent_run_structured_loop on the owned worker thread.",
+        "src-tauri/src/agent_host/structured_loop.rs::agent_run_structured_loop validates provider/directive/cwd, writes the run.started event through event_store::append_run_event_payload (itself admitted via with_path_transactions), registers the logical mission via mission_state::register_mission_logical (admitted via mission_transaction), then drives run_five_role_loop with the provider adapter; role outputs, the proposal and run.completed/failed all append as run events under the same admitted event-log path."
+      ],
+      "workerBoundary": "src-tauri/src/agent_host/structured_loop.rs::ipc::agent_run_structured_loop awaits tauri::async_runtime::spawn_blocking before provider resolution, the run.started event or mission registration; the run id String returns immediately, the bounded five-role loop keeps running on the owned worker thread, and a JoinError maps to agent_run_structured_loop_task_failed.",
+      "syncCallers": [
+        "src-tauri/src/agent_host/structured_loop.rs::agent_run_structured_loop stays generic over tauri::Runtime for Rust callers."
+      ],
+      "mutationKey": {
+        "lexicalPaths": [
+          "Run event log <cwd>/.maru/runs/skills/<run_id>/events.jsonl and the logical mission record <run_id>.json/.tmp/.log under the maru home state/missions directory (append tempfiles covered by their parents)."
+        ],
+        "aliasPaths": [
+          "Original lexical parents captured by the event-store and mission PathTransactionRequest parent snapshots before the first append; the run id is validated before any path is built."
+        ],
+        "sharedAdmissionEntry": "src-tauri/src/agent_host/event_store.rs::append_run_event_at enters src-tauri/src/atomic_file.rs::with_path_transactions and src-tauri/src/agent_host/event_store.rs::append_run_event_at_in_transaction revalidates coverage and calls lease.before_effect before the event write; the mission record follows src-tauri/src/mission_state.rs::mission_transaction with the same before-effect revalidation, so every event append and the mission write are admitted before their first effect.",
+        "postAdmissionPreconditions": [
+          "validate_run_id still shapes the run id before any path is built.",
+          "CliProviderKind::parse and the directive/cwd checks still reject invalid input before the first event.",
+          "ensure_covered and lease.before_effect run inside each event append before the file write.",
+          "register_mission_logical still records the logical mission before the loop starts."
+        ],
+        "domainLockOrder": "Shared path admission for each event append and the mission record is acquired before the corresponding write; the per-path append lock is nested inside the admitted effect and no provider-adapter lock is taken before admission."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_16",
+          "passed": 18,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/skills.ts",
+          "src/components/skills/SkillRunsPanel.tsx"
+        ],
+        "payload": "SkillRunsPanel owns the structured-run action: it awaits agent_run_structured_loop for the immediate run id, then follows run events (proposal.created, run.completed) through the existing review transcript.",
+        "terminalNoticeOwner": "SkillRunsPanel and the agents settings pane own current completion and error display for these flows. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_16_structured_loop_wrapper_runs_fixture_cli_to_proposal",
+          "phase08_16_structured_loop_wrapper_yields_same_poll_and_maps_join_failure"
+        ],
+        "workerProof": "Held at the cwd worker stage, manually polled on the same async task and yields before release; a panicked or cancelled worker maps to agent_run_structured_loop_task_failed while the immediate run id passes through unchanged.",
+        "platformScope": "macOS synthetic fixtures only: a counting fake provider CLI completes each role instantly under a disposable MARU_TEST_HOME; no real provider or network is touched.",
+        "limits": "In-process path admission does not exclude independent external processes; a real CLI provider or another agent's filesystem access stays outside the lease. PERF-01/PERF-02 remain globally outstanding for the whole phase. Sequential role spawns can outlive individual event-appends; each append is admitted independently so a slow provider does not hold one lease across the loop.",
+        "contract": "Existing run id payload, run event schema and five_role_directive_required/agent_run_cwd_required errors are unchanged; the sync agent_run_structured_loop keeps its generic signature for Rust callers."
+      }
+    }
+  ],
+  "moduleIntegrations": [
+    {
+      "integrationId": "phase08-29-mission_state",
+      "status": "complete",
+      "module": "src-tauri/src/mission_state.rs",
+      "entrySymbols": [
+        "src-tauri/src/mission_state.rs::register_mission_with_metadata_in_transaction",
+        "src-tauri/src/mission_state.rs::touch_output_in_transaction",
+        "src-tauri/src/mission_state.rs::finish_mission_in_transaction",
+        "src-tauri/src/mission_state.rs::fail_mission_in_transaction",
+        "src-tauri/src/mission_state.rs::stop_in_transaction",
+        "src-tauri/src/mission_state.rs::hydrate_from_disk_in_transaction",
+        "src-tauri/src/mission_state.rs::mark_idle_if_stale_in_transaction",
+        "src-tauri/src/mission_state.rs::persist_record_in_transaction",
+        "src-tauri/src/mission_state.rs::append_output_in_transaction"
+      ],
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_16",
+          "passed": 18,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "evidence": {
+        "behaviorCases": [
+          "phase08_16_missions_all_wrappers_round_trip_and_legacy_rejections",
+          "phase08_16_missions_each_wrapper_yields_same_poll_and_maps_join_failure",
+          "phase08_16_missions_files_parent_both_orders_and_aliases_no_recreation",
+          "phase08_16_missions_error_and_unwind_release_admission"
+        ]
+      }
+    }
+  ]
+}

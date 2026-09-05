@@ -54,10 +54,9 @@ pub struct AiErrorEvent {
 
 /// Generic headless invocation: spawn `provider` (claude/codex) with `prompt`,
 /// streaming stdout/stderr as `ai://output` and a terminal `ai://done`/`ai://error`.
-#[tauri::command]
 #[allow(clippy::too_many_arguments)]
-pub fn start_agent_cli_invocation(
-    app: AppHandle,
+pub fn start_agent_cli_invocation<R: tauri::Runtime>(
+    app: AppHandle<R>,
     provider: String,
     prompt: String,
     cwd: Option<String>,
@@ -105,9 +104,8 @@ pub fn start_agent_cli_invocation(
 
 /// Back-compat Claude wrapper. Preserves the original empty-prompt error string,
 /// then delegates to the generic bridge with `provider = "claude"`.
-#[tauri::command]
-pub fn start_claude_cli_invocation(
-    app: AppHandle,
+pub fn start_claude_cli_invocation<R: tauri::Runtime>(
+    app: AppHandle<R>,
     prompt: String,
     cwd: Option<String>,
     extra_args: Option<Vec<String>>,
@@ -186,8 +184,8 @@ struct MissionInfo {
 /// by `mission.kind`, and (when `stdin_payload` is `Some`) write the prompt to
 /// the child's stdin on its own thread so the pipe closes on EOF (Codex). Shared
 /// by both the generic command and the Claude wrapper.
-fn spawn_streaming_invocation(
-    app: AppHandle,
+fn spawn_streaming_invocation<R: tauri::Runtime>(
+    app: AppHandle<R>,
     invocation_id: String,
     mut cmd: Command,
     cwd: Option<String>,
@@ -316,14 +314,15 @@ fn prepare_invocation_env(
     Ok(extra_env)
 }
 
-fn spawn_line_pump<R>(
-    app: AppHandle,
+fn spawn_line_pump<R, ReadSource>(
+    app: AppHandle<R>,
     invocation_id: String,
     stream_name: String,
-    source: R,
+    source: ReadSource,
 ) -> thread::JoinHandle<()>
 where
-    R: Read + Send + 'static,
+    R: tauri::Runtime,
+    ReadSource: Read + Send + 'static,
 {
     thread::spawn(move || {
         let reader = BufReader::new(source);
@@ -354,6 +353,68 @@ fn format_spawn_error(err: &std::io::Error) -> String {
         "spawn_failed"
     };
     format!("{kind}: {err}")
+}
+
+/// IPC owns values before offloading; synchronous Rust callers keep their API.
+pub mod ipc {
+    use super::*;
+
+    #[tauri::command]
+    #[allow(clippy::too_many_arguments)]
+    pub async fn start_agent_cli_invocation<R: tauri::Runtime>(
+        app: AppHandle<R>,
+        provider: String,
+        prompt: String,
+        cwd: Option<String>,
+        extra_args: Option<Vec<String>>,
+        extra_env: Option<HashMap<String, String>>,
+        command_override: Option<String>,
+        permission_mode: Option<String>,
+    ) -> Result<String, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            if let Ok(dir) = crate::mission_state::mission_dir() {
+                crate::atomic_file::PathTransactionLease::test_stage(
+                    &[dir],
+                    "worker:start_agent_cli_invocation",
+                );
+            }
+            super::start_agent_cli_invocation(
+                app,
+                provider,
+                prompt,
+                cwd,
+                extra_args,
+                extra_env,
+                command_override,
+                permission_mode,
+            )
+        })
+        .await
+        .map_err(|err| format!("start_agent_cli_invocation_task_failed: {err}"))?
+    }
+
+    #[tauri::command]
+    pub async fn start_claude_cli_invocation<R: tauri::Runtime>(
+        app: AppHandle<R>,
+        prompt: String,
+        cwd: Option<String>,
+        extra_args: Option<Vec<String>>,
+        extra_env: Option<HashMap<String, String>>,
+    ) -> Result<String, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            if let Ok(dir) = crate::mission_state::mission_dir() {
+                crate::atomic_file::PathTransactionLease::test_stage(
+                    &[dir],
+                    "worker:start_claude_cli_invocation",
+                );
+            }
+            super::start_claude_cli_invocation(app, prompt, cwd, extra_args, extra_env)
+        })
+        .await
+        .map_err(|err| format!("start_claude_cli_invocation_task_failed: {err}"))?
+    }
 }
 
 #[cfg(test)]
@@ -545,5 +606,201 @@ mod tests {
         let err = std::io::Error::from(std::io::ErrorKind::Other);
         let formatted = format_spawn_error(&err);
         assert!(formatted.starts_with("spawn_failed:"), "{formatted}");
+    }
+}
+
+#[cfg(all(test, unix))]
+mod phase08_16 {
+    use super::*;
+    use crate::atomic_file::phase08_06::{boundary, run, Home};
+    use std::fs;
+    use std::os::unix::fs::PermissionsExt;
+    use std::path::{Path, PathBuf};
+    use std::time::{Duration, Instant};
+    use tauri::Manager;
+
+    type TestApp = tauri::App<tauri::test::MockRuntime>;
+
+    fn text(path: &Path) -> String {
+        path.to_string_lossy().into_owned()
+    }
+
+    fn app() -> TestApp {
+        let app = tauri::test::mock_app();
+        app.manage(crate::mission_state::MissionState::default());
+        app
+    }
+
+    fn fixture(home: &Home) -> (PathBuf, PathBuf) {
+        let work = home.root.path().join("work");
+        fs::create_dir_all(&work).unwrap();
+        fs::write(
+            work.join("workspace.config.yaml"),
+            format!(
+                "version: 1\npaths:\n  primary: {p}\n  scratchpad: {s}\nscratchpad:\n  temp_subdir: temp\n  drafts_subdir: generated-drafts\n",
+                p = work.display(),
+                s = work.join("scratchpad").display()
+            ),
+        )
+        .unwrap();
+        let cli = home.root.path().join("fake-claude");
+        fs::write(&cli, "#!/bin/sh\necho 'fixture cli output'\nexit 0\n").unwrap();
+        let mut perms = fs::metadata(&cli).unwrap().permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&cli, perms).unwrap();
+        (work, cli)
+    }
+
+    fn wait_for_done(
+        handle: &tauri::AppHandle<tauri::test::MockRuntime>,
+    ) -> Vec<crate::mission_state::MissionRecord> {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            let records = run(crate::mission_state::ipc::list_ai_missions(handle.clone())).unwrap();
+            if records.len() == 2 && records.iter().all(|r| r.exit_code == Some(0)) {
+                return records;
+            }
+            assert!(Instant::now() < deadline, "fixture missions must finish");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    #[test]
+    fn phase08_16_ai_router_wrappers_launch_fixture_cli_and_legacy_rejections() {
+        let home = Home::new();
+        let app = app();
+        let handle = app.handle().clone();
+        let (work, cli) = fixture(&home);
+        let cwd = text(&work);
+        let cli_text = text(&cli);
+
+        let id = run(ipc::start_agent_cli_invocation(
+            handle.clone(),
+            "claude".into(),
+            "classify this".into(),
+            Some(cwd.clone()),
+            None,
+            None,
+            Some(cli_text.clone()),
+            Some("plan".into()),
+        ))
+        .unwrap();
+        assert!(id.starts_with("ai-"), "{id}");
+
+        let codex_cli = home.root.path().join("fake-codex");
+        fs::write(
+            &codex_cli,
+            "#!/bin/sh\ncat >/dev/null\necho 'fixture cli output'\nexit 0\n",
+        )
+        .unwrap();
+        let mut perms = fs::metadata(&codex_cli).unwrap().permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&codex_cli, perms).unwrap();
+        let codex_id = run(ipc::start_agent_cli_invocation(
+            handle.clone(),
+            "codex".into(),
+            "summarise this".into(),
+            Some(cwd.clone()),
+            None,
+            None,
+            Some(text(&codex_cli)),
+            Some("plan".into()),
+        ))
+        .unwrap();
+        assert!(codex_id.starts_with("ai-"), "{codex_id}");
+        assert_ne!(id, codex_id);
+
+        let records = wait_for_done(&handle);
+        let mut kinds: Vec<&str> = records.iter().map(|record| record.kind.as_str()).collect();
+        kinds.sort_unstable();
+        assert_eq!(kinds, ["claude", "codex"]);
+        for record in &records {
+            assert_eq!(
+                record.metadata.as_ref().unwrap()["origin"],
+                "agentCliInvocation"
+            );
+            let tail = run(crate::mission_state::ipc::read_ai_mission_log(
+                record.id.clone(),
+                Some(10),
+            ))
+            .unwrap();
+            assert!(
+                tail.lines.iter().any(|l| l.contains("fixture cli output")),
+                "mission log must carry the child output: {:?}",
+                tail.lines
+            );
+        }
+
+        assert_eq!(
+            run(ipc::start_claude_cli_invocation(
+                handle.clone(),
+                "   ".into(),
+                Some(cwd.clone()),
+                None,
+                None,
+            ))
+            .unwrap_err(),
+            "Prompt is empty."
+        );
+        assert_eq!(
+            run(ipc::start_agent_cli_invocation(
+                handle.clone(),
+                "claude".into(),
+                "  \n ".into(),
+                Some(cwd.clone()),
+                None,
+                None,
+                Some(cli_text),
+                Some("plan".into()),
+            ))
+            .unwrap_err(),
+            "completion_prompt_required"
+        );
+        assert!(run(ipc::start_agent_cli_invocation(
+            handle,
+            "openai".into(),
+            "hello".into(),
+            Some(cwd),
+            None,
+            None,
+            None,
+            None,
+        ))
+        .unwrap_err()
+        .starts_with("unsupported_provider"));
+    }
+
+    #[test]
+    fn phase08_16_ai_router_each_wrapper_yields_same_poll_and_maps_join_failure() {
+        let home = Home::new();
+        let app = app();
+        let handle = app.handle().clone();
+        let (work, cli) = fixture(&home);
+        let dir = crate::mission_state::mission_dir().unwrap();
+        boundary(
+            dir.clone(),
+            "start_agent_cli_invocation",
+            ipc::start_agent_cli_invocation(
+                handle.clone(),
+                "claude".into(),
+                "classify this".into(),
+                Some(text(&work)),
+                None,
+                None,
+                Some(text(&cli)),
+                Some("plan".into()),
+            ),
+        );
+        boundary(
+            dir,
+            "start_claude_cli_invocation",
+            ipc::start_claude_cli_invocation(
+                handle,
+                "summarise this".into(),
+                Some(text(&work)),
+                None,
+                None,
+            ),
+        );
     }
 }

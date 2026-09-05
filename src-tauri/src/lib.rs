@@ -85,13 +85,14 @@ mod win_process;
 mod workspace;
 mod workspace_files;
 
+use agent_host::proposal::ipc::{agent_apply_skill_proposal, agent_parse_skill_proposal};
+use agent_host::structured_loop::ipc::agent_run_structured_loop;
 use agent_host::{
-    agent_apply_skill_proposal, agent_export_redacted_run_summary, agent_parse_skill_proposal,
-    agent_read_run_events, agent_replay_run_summary, agent_run_structured_loop,
+    agent_export_redacted_run_summary, agent_read_run_events, agent_replay_run_summary,
     agent_write_redacted_run_summary, agents_account_status, agents_usage_status,
 };
-use agents::{agents_delete, agents_list, agents_reset, agents_upsert};
-use ai_router::{start_agent_cli_invocation, start_claude_cli_invocation};
+use agents::ipc::{agents_delete, agents_list, agents_reset, agents_upsert};
+use ai_router::ipc::{start_agent_cli_invocation, start_claude_cli_invocation};
 use approval::{prepare_approval, record_approval, ApprovalState};
 use browser_passkeys::{
     browser_passkey_request_authorization, browser_passkey_status, BrowserPasskeyState,
@@ -130,7 +131,8 @@ use maru_dir::{
     read_maru_workspace, save_maru_ignore, save_maru_mcp, save_maru_projects, save_maru_rule,
     save_maru_settings, save_maru_template, update_maru_workspace,
 };
-use mission_state::{list_ai_missions, read_ai_mission_log, stop_ai_mission, MissionState};
+use mission_state::ipc::{list_ai_missions, read_ai_mission_log, stop_ai_mission};
+use mission_state::MissionState;
 use ops_catalog::watcher::{catalog_watcher_start, catalog_watcher_stop, CatalogWatcherState};
 use outlook_mso::{
     check_mso_auth, decide_outlook_item, decide_outlook_items, fetch_outlook_unread,
