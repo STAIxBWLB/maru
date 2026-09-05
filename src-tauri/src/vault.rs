@@ -256,16 +256,47 @@ fn excluded_scratchpad_root(vault: &Path) -> Option<PathBuf> {
     resolve_scratchpad_root(vault).ok()
 }
 
-/// `excluded_scratchpad_root` expressed as a `relPath` prefix (with trailing
-/// slash) for filtering already-indexed entries.
-fn excluded_scratchpad_rel_prefix(vault: &Path) -> Option<String> {
-    let root = excluded_scratchpad_root(vault)?;
-    let rel = root.strip_prefix(vault).ok()?;
-    let rel = rel.to_string_lossy().replace('\\', "/");
-    if rel.is_empty() {
-        return None;
-    }
-    Some(format!("{rel}/"))
+/// The Inbox root, resolved exactly the way the Inbox scanner resolves it
+/// (`inbox.rs::scan_inbox_with_settings`): per-vault `InboxSettings` via
+/// `inbox_settings::load`, then this module's own `resolve_inside_vault`
+/// lexical-containment helper. `None` fails open (keep listing) when the
+/// settings are missing, malformed, or point outside the vault — a settings
+/// problem can never brick scanning, mirroring `excluded_scratchpad_root`.
+fn excluded_inbox_root(vault: &Path) -> Option<PathBuf> {
+    let settings = crate::inbox_settings::load(vault);
+    resolve_inside_vault(&vault.to_string_lossy(), settings.inbox_root.as_str()).ok()
+}
+
+/// D-09: every root whose tree is browsed in its own pane rather than served
+/// by the documents surface — today the Scratchpad root and the Inbox root.
+/// A tree browsed in its own pane is not document-index content. A future
+/// non-document root is a one-line addition to this list (D-09). The list is
+/// derived per call from settings plus the vault path (no static, mutex, or
+/// shared mutable state), so concurrent scans each resolve their own roots.
+fn excluded_non_document_roots(vault: &Path) -> Vec<PathBuf> {
+    excluded_scratchpad_root(vault)
+        .into_iter()
+        .chain(excluded_inbox_root(vault))
+        .collect()
+}
+
+/// `excluded_non_document_roots` expressed as `relPath` prefixes (with
+/// trailing slash) for filtering already-indexed entries, so a stale cache
+/// written before an exclusion existed self-heals at read time. The
+/// empty-rel guard is load-bearing: a root that resolves to the vault itself
+/// contributes no prefix, so excluding the whole vault is impossible.
+fn excluded_non_document_rel_prefixes(vault: &Path) -> Vec<String> {
+    excluded_non_document_roots(vault)
+        .iter()
+        .filter_map(|root| {
+            let rel = root.strip_prefix(vault).ok()?;
+            let rel = rel.to_string_lossy().replace('\\', "/");
+            if rel.is_empty() {
+                return None;
+            }
+            Some(format!("{rel}/"))
+        })
+        .collect()
 }
 
 #[tauri::command(async)]
@@ -312,7 +343,7 @@ pub fn scan_vault(
     let ignore_patterns = load_maruignore(&vault);
     let version_names = collect_version_names(&vault);
     let nested_roots = registered_nested_roots(&vault);
-    let scratchpad_root = excluded_scratchpad_root(&vault);
+    let non_document_roots = excluded_non_document_roots(&vault);
     let cached = read_vault_cache_envelope(&vault).ok().flatten();
     let cached_entries: HashMap<String, VaultEntry> = cached
         .as_ref()
@@ -347,7 +378,7 @@ pub fn scan_vault(
             if nested_roots.iter().any(|root| path == root) {
                 return false;
             }
-            if scratchpad_root.as_deref() == Some(path) {
+            if non_document_roots.iter().any(|root| root.as_path() == path) {
                 return false;
             }
             if scan_filter.is_excluded_path(path, &vault, GENERATED_DIRS) {
@@ -490,17 +521,21 @@ pub fn scan_vault_paths(
 #[tauri::command(async)]
 pub fn read_vault_cache(vault_path: String) -> Result<Option<Vec<VaultEntry>>, String> {
     let vault = normalize_existing_dir(&vault_path)?;
-    // A cache written before scratchpad exclusion still holds those entries;
-    // drop them here so the first paint matches what the scan will return.
-    let scratchpad_prefix = excluded_scratchpad_rel_prefix(&vault);
+    // A cache written before non-document-root exclusion (scratchpad, inbox)
+    // still holds those entries; drop them here so the first paint matches
+    // what the scan will return.
+    let non_document_prefixes = excluded_non_document_rel_prefixes(&vault);
     Ok(
-        read_vault_cache_envelope(&vault)?.map(|cache| match scratchpad_prefix {
-            Some(prefix) => cache
+        read_vault_cache_envelope(&vault)?.map(|cache| {
+            cache
                 .entries
                 .into_iter()
-                .filter(|entry| !entry.rel_path.starts_with(&prefix))
-                .collect(),
-            None => cache.entries,
+                .filter(|entry| {
+                    !non_document_prefixes
+                        .iter()
+                        .any(|prefix| entry.rel_path.starts_with(prefix))
+                })
+                .collect()
         }),
     )
 }
