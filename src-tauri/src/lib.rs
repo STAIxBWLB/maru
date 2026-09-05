@@ -106,9 +106,7 @@ use diagram::{
 use dot_sync::{dot_sync_overview, dot_sync_run};
 use e2e_flow::{maru_e2e_read, maru_e2e_run};
 use export::{export_dispatch, export_plan, export_validate};
-use gmail_gws::{
-    check_gws_auth, decide_gmail_item, decide_gmail_items, fetch_gmail_unread, stage_gmail_items,
-};
+use gmail_gws::check_gws_auth;
 use html_editor::prepare_html_editor_assets;
 use hub_client::{hub_fetch_catalog, hub_poll_gate, hub_queue_drain, hub_status, hub_submit_gate};
 use hwp_cli_template::{hwp_cli_template_fields, hwp_cli_template_fill};
@@ -140,7 +138,6 @@ use mission_state::{list_ai_missions, read_ai_mission_log, stop_ai_mission, Miss
 use ops_catalog::watcher::{catalog_watcher_start, catalog_watcher_stop, CatalogWatcherState};
 use outlook_mso::{
     check_mso_auth, decide_outlook_item, decide_outlook_items, fetch_outlook_unread,
-    stage_outlook_items,
 };
 use scheduler::{
     scheduler_add, scheduler_list, scheduler_remove, scheduler_run_now, scheduler_set_enabled,
@@ -163,11 +160,7 @@ use studio::{
 };
 use tauri::Manager;
 use telegram_config::{read_telegram_monitor_config, save_telegram_monitor_config};
-use telegram_io::{
-    accept_telegram_item, check_telegram_auth, fetch_telegram_recent, reject_telegram_item,
-    stage_telegram_items, start_telegram_polling, stop_poller_on_exit, stop_telegram_polling,
-    telegram_polling_status, TelegramIoState,
-};
+use telegram_io::{check_telegram_auth, stop_poller_on_exit, TelegramIoState};
 use template_fill::{template_fill_hwpx, template_get_fields, template_prepare_hwpx_template};
 use terminal::{
     terminal_ack, terminal_clear, terminal_copy_selection, terminal_input, terminal_input_batch,
@@ -411,24 +404,24 @@ pub fn run() {
             remove_agent_context_hint,
             inbox_classifier::ipc::build_inbox_classification_prompt,
             inbox_classifier::ipc::parse_inbox_classification,
-            fetch_gmail_unread,
-            stage_gmail_items,
+            gmail_gws::ipc::fetch_gmail_unread,
+            gmail_gws::ipc::stage_gmail_items,
             check_gws_auth,
-            decide_gmail_item,
-            decide_gmail_items,
+            gmail_gws::ipc::decide_gmail_item,
+            gmail_gws::ipc::decide_gmail_items,
             fetch_outlook_unread,
-            stage_outlook_items,
+            outlook_mso::ipc::stage_outlook_items,
             check_mso_auth,
             decide_outlook_item,
             decide_outlook_items,
-            fetch_telegram_recent,
-            accept_telegram_item,
-            reject_telegram_item,
-            stage_telegram_items,
+            telegram_io::ipc::fetch_telegram_recent,
+            telegram_io::ipc::accept_telegram_item,
+            telegram_io::ipc::reject_telegram_item,
+            telegram_io::ipc::stage_telegram_items,
             check_telegram_auth,
-            start_telegram_polling,
-            stop_telegram_polling,
-            telegram_polling_status,
+            telegram_io::ipc::start_telegram_polling,
+            telegram_io::ipc::stop_telegram_polling,
+            telegram_io::ipc::telegram_polling_status,
             read_telegram_monitor_config,
             save_telegram_monitor_config,
             detect_legacy_telegram_launchd,

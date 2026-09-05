@@ -8,14 +8,16 @@ use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use serde_yaml::Value as YamlValue;
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 
 use crate::cli_path::{augmented_path, resolve_program};
 use crate::command_output::{
     diagnostic_contains_sensitive_value, run_command_with_timeout,
     run_command_with_timeout_and_limits, BoundedOutput, CommandTermination, OutputLimits,
 };
-use crate::inbox_drop::{auth_status, stage_message_outcome, ProviderAuthStatus, StageOutcome};
+use crate::inbox_drop::{
+    auth_status, stage_message_outcome_with_parent, ProviderAuthStatus, StageOutcome,
+};
 use crate::vault::resolve_inside_vault;
 
 const OUTLOOK_ACCEPT_KIND: &str = "outlook.accept";
@@ -150,6 +152,11 @@ pub async fn fetch_outlook_unread(
     m365_path: Option<String>,
 ) -> Result<Vec<OutlookMessage>, String> {
     tauri::async_runtime::spawn_blocking(move || {
+        #[cfg(test)]
+        crate::atomic_file::PathTransactionLease::test_stage(
+            &[PathBuf::from(work_path.as_deref().unwrap_or("/"))],
+            "worker:fetch_outlook_unread",
+        );
         fetch_outlook_unread_now(work_path, max, m365_path)
     })
     .await
@@ -215,7 +222,6 @@ fn fetch_outlook_unread_now(
     Ok(messages)
 }
 
-#[tauri::command]
 pub fn stage_outlook_items(
     approvals: tauri::State<'_, crate::approval::ApprovalState>,
     work_path: String,
@@ -227,10 +233,20 @@ pub fn stage_outlook_items(
         approval_id,
         &[OUTLOOK_STAGE_KIND, COMMS_BULK_KIND, INBOX_BULK_KIND],
     )?;
+    stage_outlook_items_blocking(work_path, messages)
+}
+
+fn stage_outlook_items_blocking(
+    work_path: String,
+    messages: Vec<OutlookMessage>,
+) -> Result<Vec<StageOutcome>, String> {
+    let parent = crate::atomic_file::PathTransactionParent::capture(Path::new(&work_path))?;
     let work = resolve_inside_vault(&work_path, ".")?;
     Ok(messages
         .into_iter()
-        .map(|message| stage_message_outcome(&work, "mso", "mso", &message.id, &message))
+        .map(|message| {
+            stage_message_outcome_with_parent(&work, "mso", "mso", &message.id, &message, &parent)
+        })
         .collect())
 }
 
@@ -239,9 +255,16 @@ pub async fn check_mso_auth(
     work_path: Option<String>,
     m365_path: Option<String>,
 ) -> Result<ProviderAuthStatus, String> {
-    tauri::async_runtime::spawn_blocking(move || check_mso_auth_now(work_path, m365_path))
-        .await
-        .map_err(|err| format!("m365_probe_task_failed: {err}"))?
+    tauri::async_runtime::spawn_blocking(move || {
+        #[cfg(test)]
+        crate::atomic_file::PathTransactionLease::test_stage(
+            &[PathBuf::from(work_path.as_deref().unwrap_or("/"))],
+            "worker:check_mso_auth",
+        );
+        check_mso_auth_now(work_path, m365_path)
+    })
+    .await
+    .map_err(|err| format!("m365_probe_task_failed: {err}"))?
 }
 
 fn check_mso_auth_now(
@@ -453,17 +476,26 @@ fn decision_error_outcome(item: OutlookDecisionRequest, error: String) -> Outloo
 }
 
 #[tauri::command]
-pub async fn decide_outlook_item(
-    app: AppHandle,
-    approvals: tauri::State<'_, crate::approval::ApprovalState>,
+pub async fn decide_outlook_item<R: tauri::Runtime>(
+    app: AppHandle<R>,
     work_path: Option<String>,
     message_id: String,
     decision: OutlookDecision,
     approval_id: Option<String>,
     m365_path: Option<String>,
 ) -> Result<OutlookDecisionOutcome, String> {
-    crate::approval::require_approval(&approvals, approval_id, decision.approval_kind())?;
+    let worker_app = app.clone();
     let outcome = tauri::async_runtime::spawn_blocking(move || {
+        #[cfg(test)]
+        crate::atomic_file::PathTransactionLease::test_stage(
+            &[PathBuf::from(work_path.as_deref().unwrap_or("/"))],
+            "worker:decide_outlook_item",
+        );
+        crate::approval::require_approval(
+            &worker_app.state::<crate::approval::ApprovalState>(),
+            approval_id,
+            decision.approval_kind(),
+        )?;
         decide_outlook_item_now(
             work_path.as_deref(),
             &message_id,
@@ -478,16 +510,23 @@ pub async fn decide_outlook_item(
 }
 
 #[tauri::command]
-pub async fn decide_outlook_items(
-    app: AppHandle,
-    approvals: tauri::State<'_, crate::approval::ApprovalState>,
+pub async fn decide_outlook_items<R: tauri::Runtime>(
+    app: AppHandle<R>,
     work_path: Option<String>,
     items: Vec<OutlookDecisionRequest>,
     approval_id: Option<String>,
     m365_path: Option<String>,
 ) -> Result<Vec<OutlookDecisionOutcome>, String> {
-    require_outlook_items_approval(&approvals, approval_id, &items)?;
+    let worker_app = app.clone();
     let outcomes = tauri::async_runtime::spawn_blocking(move || {
+        #[cfg(test)]
+        crate::atomic_file::PathTransactionLease::test_stage(
+            &[PathBuf::from(work_path.as_deref().unwrap_or("/"))],
+            "worker:decide_outlook_items",
+        );
+        require_outlook_items_approval(
+            &worker_app.state::<crate::approval::ApprovalState>(), approval_id, &items,
+        )?;
         let work_path = require_workspace_path(work_path.as_deref())?;
         let context = resolve_mso_context(Some(work_path), m365_path.as_deref())?;
         if context.config.enabled == Some(false) {
@@ -1138,6 +1177,36 @@ impl OutlookDecision {
             Self::Accepted => OUTLOOK_ACCEPT_KIND,
             Self::Rejected => OUTLOOK_REJECT_KIND,
         }
+    }
+}
+
+/// The wire name remains unchanged; the owned handle borrows approval state only
+/// after entering the blocking worker. Synchronous callers retain their API.
+pub mod ipc {
+    use super::*;
+
+    #[tauri::command]
+    pub async fn stage_outlook_items<R: tauri::Runtime>(
+        app: AppHandle<R>,
+        work_path: String,
+        messages: Vec<OutlookMessage>,
+        approval_id: Option<String>,
+    ) -> Result<Vec<StageOutcome>, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            crate::atomic_file::PathTransactionLease::test_stage(
+                &[PathBuf::from(&work_path)],
+                "worker:stage_outlook_items",
+            );
+            super::stage_outlook_items(
+                app.state::<crate::approval::ApprovalState>(),
+                work_path,
+                messages,
+                approval_id,
+            )
+        })
+        .await
+        .map_err(|err| format!("stage_outlook_items_task_failed: {err}"))?
     }
 }
 
@@ -2172,5 +2241,568 @@ printf '%s' '{"value":[{"id":"new","receivedDateTime":"2026-07-29T08:00:00Z","is
     #[test]
     fn encodes_graph_message_path_segment() {
         assert_eq!(percent_encode_path_segment("a/b+c="), "a%2Fb%2Bc%3D");
+    }
+}
+
+#[cfg(all(test, unix))]
+mod phase08_14 {
+    use super::*;
+    use crate::atomic_file::phase08_06::{run, Held, Home};
+    use crate::atomic_file::PathTransactionTestHook;
+    use std::future::Future;
+    use std::sync::{mpsc, Mutex};
+
+    type TestApp = AppHandle<tauri::test::MockRuntime>;
+
+    fn text(path: &Path) -> String {
+        path.to_string_lossy().into_owned()
+    }
+
+    fn app() -> tauri::App<tauri::test::MockRuntime> {
+        let app = tauri::test::mock_app();
+        app.manage(crate::approval::ApprovalState::default());
+        app
+    }
+
+    fn approval(app: &TestApp, kind: &str) -> Option<String> {
+        let request = crate::approval::prepare_approval(
+            app.state(),
+            kind.into(),
+            "synthetic fixture".into(),
+            None,
+            None,
+        )
+        .unwrap();
+        crate::approval::record_approval(
+            app.state(),
+            request.id.clone(),
+            crate::approval::ApprovalDecision::Approved,
+            None,
+        )
+        .unwrap();
+        Some(request.id)
+    }
+
+    fn message() -> OutlookMessage {
+        OutlookMessage {
+            id: "fixture-message".into(),
+            from: "synthetic@example.invalid".into(),
+            subject: "Fixture".into(),
+            date: "2026-09-05T00:00:00Z".into(),
+            body_preview: "synthetic body".into(),
+            web_link: None,
+            categories: vec![],
+            is_read: false,
+        }
+    }
+
+    fn fixture(home: &Home) -> (tempfile::TempDir, PathBuf) {
+        use std::os::unix::fs::PermissionsExt;
+        let root = tempfile::tempdir_in(home.root.path()).unwrap();
+        let script = home.root.path().join("fixture-m365");
+        fs::write(&script, r#"#!/bin/sh
+if [ "$1" = status ]; then
+  printf '%s' '{"connectedAs":"synthetic@example.invalid"}'
+  exit 0
+fi
+method=""
+previous=""
+for argument in "$@"; do
+  if [ "$previous" = "--method" ]; then method="$argument"; fi
+  previous="$argument"
+done
+if [ "$method" = patch ]; then
+  printf '%s\n' "$@" > "${0%/*}/fixture-patch-args"
+  printf '%s' '{}'
+else
+  printf '%s' '{"categories":["Existing"],"value":[{"id":"fixture-message","subject":"Fixture","isRead":false}]}'
+fi
+"#).unwrap();
+        fs::set_permissions(&script, fs::Permissions::from_mode(0o700)).unwrap();
+        // An existing exact executable is selected before any provider invocation.
+        assert_eq!(
+            resolve_m365_path(Some(&text(&script))),
+            Some(script.clone())
+        );
+        fs::write(root.path().join("workspace.config.yaml"), "inbox:\n  root: inbox\n  channels:\n    mso:\n      provider: mso\n      kind: bundle\n      dedupe: provider-id\n      drop_paths: [drop/mso]\n").unwrap();
+        fs::create_dir_all(root.path().join("inbox/drop/mso")).unwrap();
+        (root, script)
+    }
+
+    fn start<F>(future: F) -> mpsc::Receiver<F::Output>
+    where
+        F: Future + Send + 'static,
+        F::Output: Send + 'static,
+    {
+        let (tx, rx) = mpsc::channel();
+        tauri::async_runtime::spawn(async move {
+            let _ = tx.send(future.await);
+        });
+        rx
+    }
+
+    fn done<T>(rx: mpsc::Receiver<T>) -> T {
+        rx.recv_timeout(Duration::from_secs(8))
+            .expect("fixture completion")
+    }
+
+    fn boundary<F, T>(root: &Path, name: &str, prefix: &str, future: F)
+    where
+        F: Future<Output = Result<T, String>> + Send + 'static,
+        T: Send + 'static,
+    {
+        let (entered_tx, mut entered_rx) = tauri::async_runtime::channel(1);
+        let (release_tx, release_rx) = mpsc::channel();
+        let release_rx = Mutex::new(release_rx);
+        let _hook =
+            PathTransactionTestHook::new(root.into(), &format!("worker:{name}"), move || {
+                entered_tx
+                    .blocking_send(std::thread::current().id())
+                    .unwrap();
+                release_rx
+                    .lock()
+                    .unwrap()
+                    .recv_timeout(Duration::from_secs(5))
+                    .unwrap();
+                panic!("synthetic Outlook worker unwind");
+            });
+        let prefix = prefix.to_string();
+        run(async move {
+            let caller = std::thread::current().id();
+            let mut future = Box::pin(future);
+            assert!(
+                std::future::poll_fn(|cx| std::task::Poll::Ready(future.as_mut().poll(cx)))
+                    .await
+                    .is_pending()
+            );
+            let worker = entered_rx.recv().await.unwrap();
+            let mut yielded = false;
+            std::future::poll_fn(|cx| {
+                if yielded {
+                    std::task::Poll::Ready(())
+                } else {
+                    yielded = true;
+                    cx.waker().wake_by_ref();
+                    std::task::Poll::Pending
+                }
+            })
+            .await;
+            assert_ne!(caller, worker);
+            release_tx.send(()).unwrap();
+            assert!(matches!(future.await, Err(err) if err.starts_with(&prefix)));
+        });
+    }
+
+    #[test]
+    fn phase08_14_outlook_fetch_actual_wrapper_result_and_same_task_yield() {
+        let home = Home::new();
+        let (root, script) = fixture(&home);
+        let work = text(root.path());
+        let result = run(fetch_outlook_unread(
+            Some(work.clone()),
+            Some(2),
+            Some(text(&script)),
+        ))
+        .unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].id, "fixture-message");
+        assert_eq!(
+            run(fetch_outlook_unread(None, None, Some(text(&script)))).unwrap_err(),
+            "workspace_required"
+        );
+        boundary(
+            root.path(),
+            "fetch_outlook_unread",
+            "m365_task_failed:",
+            fetch_outlook_unread(Some(work), None, Some(text(&script))),
+        );
+    }
+
+    #[test]
+    fn phase08_14_outlook_auth_actual_wrapper_result_and_same_task_yield() {
+        let home = Home::new();
+        let (root, script) = fixture(&home);
+        let work = text(root.path());
+        let status = run(check_mso_auth(Some(work.clone()), Some(text(&script)))).unwrap();
+        assert_eq!(status.state, "ok");
+        assert_eq!(status.account.as_deref(), Some("synthetic@example.invalid"));
+        boundary(
+            root.path(),
+            "check_mso_auth",
+            "m365_probe_task_failed:",
+            check_mso_auth(Some(work), Some(text(&script))),
+        );
+    }
+
+    #[test]
+    fn phase08_14_outlook_stage_actual_wrapper_result_rejection_and_same_task_yield() {
+        let home = Home::new();
+        let (root, _) = fixture(&home);
+        let app = app();
+        let work = text(root.path());
+        let error = run(ipc::stage_outlook_items(
+            app.handle().clone(),
+            work.clone(),
+            vec![message()],
+            None,
+        ))
+        .unwrap_err();
+        assert!(error.starts_with("approval_required"), "{error}");
+        let result = run(ipc::stage_outlook_items(
+            app.handle().clone(),
+            work.clone(),
+            vec![message()],
+            approval(app.handle(), OUTLOOK_STAGE_KIND),
+        ))
+        .unwrap();
+        assert_eq!(result.len(), 1);
+        assert!(result[0].ok, "{:?}", result[0]);
+        let data: serde_json::Value =
+            serde_json::from_slice(&fs::read(result[0].target_path.as_ref().unwrap()).unwrap())
+                .unwrap();
+        assert_eq!(data["message"]["subject"], "Fixture");
+        boundary(
+            root.path(),
+            "stage_outlook_items",
+            "stage_outlook_items_task_failed:",
+            ipc::stage_outlook_items(
+                app.handle().clone(),
+                work,
+                vec![message()],
+                approval(app.handle(), OUTLOOK_STAGE_KIND),
+            ),
+        );
+    }
+
+    #[test]
+    fn phase08_14_outlook_single_actual_wrapper_result_rejection_and_same_task_yield() {
+        let home = Home::new();
+        let (root, script) = fixture(&home);
+        let app = app();
+        let work = text(root.path());
+        let error = run(decide_outlook_item(
+            app.handle().clone(),
+            Some(work.clone()),
+            "fixture-message".into(),
+            OutlookDecision::Accepted,
+            None,
+            Some(text(&script)),
+        ))
+        .unwrap_err();
+        assert!(error.starts_with("approval_required"), "{error}");
+        assert!(!home.root.path().join("fixture-patch-args").exists());
+        let outcome = run(decide_outlook_item(
+            app.handle().clone(),
+            Some(work.clone()),
+            "fixture-message".into(),
+            OutlookDecision::Accepted,
+            approval(app.handle(), OUTLOOK_ACCEPT_KIND),
+            Some(text(&script)),
+        ))
+        .unwrap();
+        assert!(outcome.ok);
+        let args = fs::read_to_string(home.root.path().join("fixture-patch-args")).unwrap();
+        assert!(args.contains("Existing"));
+        assert!(args.contains(ACCEPTED_CATEGORY));
+        boundary(
+            root.path(),
+            "decide_outlook_item",
+            "m365_task_failed:",
+            decide_outlook_item(
+                app.handle().clone(),
+                Some(work),
+                "fixture-message".into(),
+                OutlookDecision::Accepted,
+                approval(app.handle(), OUTLOOK_ACCEPT_KIND),
+                Some(text(&script)),
+            ),
+        );
+    }
+
+    #[test]
+    fn phase08_14_outlook_bulk_actual_wrapper_partial_result_and_same_task_yield() {
+        let home = Home::new();
+        let (root, script) = fixture(&home);
+        let app = app();
+        let work = text(root.path());
+        let items = vec![
+            OutlookDecisionRequest {
+                message_id: "fixture-message".into(),
+                decision: OutlookDecision::Rejected,
+            },
+            OutlookDecisionRequest {
+                message_id: "".into(),
+                decision: OutlookDecision::Accepted,
+            },
+        ];
+        let outcomes = run(decide_outlook_items(
+            app.handle().clone(),
+            Some(work.clone()),
+            items.clone(),
+            approval(app.handle(), COMMS_BULK_KIND),
+            Some(text(&script)),
+        ))
+        .unwrap();
+        assert!(outcomes[0].ok);
+        assert!(!outcomes[1].ok);
+        assert_eq!(outcomes[1].error.as_deref(), Some("message_id_required"));
+        assert_eq!(
+            run(decide_outlook_items(
+                app.handle().clone(),
+                Some(work.clone()),
+                vec![],
+                None,
+                Some(text(&script))
+            ))
+            .unwrap_err(),
+            "outlook_items_required"
+        );
+        boundary(
+            root.path(),
+            "decide_outlook_items",
+            "m365_task_failed:",
+            decide_outlook_items(
+                app.handle().clone(),
+                Some(work),
+                items,
+                approval(app.handle(), COMMS_BULK_KIND),
+                Some(text(&script)),
+            ),
+        );
+    }
+
+    #[test]
+    fn phase08_14_outlook_stage_same_target_serializes_and_error_unwind_release() {
+        let home = Home::new();
+        let (root, _) = fixture(&home);
+        let app = app();
+        let work = text(root.path());
+        let key = root.path().join("inbox/drop/mso");
+        let held = Held::new(key.clone(), "admitted");
+        let first = start(ipc::stage_outlook_items(
+            app.handle().clone(),
+            work.clone(),
+            vec![message()],
+            approval(app.handle(), OUTLOOK_STAGE_KIND),
+        ));
+        held.wait();
+        let waiting = Held::new(key.clone(), "before-admission");
+        let second = start(ipc::stage_outlook_items(
+            app.handle().clone(),
+            work.clone(),
+            vec![message()],
+            approval(app.handle(), OUTLOOK_STAGE_KIND),
+        ));
+        waiting.wait();
+        waiting.release();
+        assert!(second.recv_timeout(Duration::from_millis(30)).is_err());
+        held.release();
+        assert!(done(first).unwrap()[0].ok);
+        assert!(done(second).unwrap()[0].ok);
+        drop(waiting);
+        drop(held);
+        // A real filesystem error after admission releases the complete set.
+        fs::remove_dir_all(&key).unwrap();
+        fs::write(&key, "blocking file").unwrap();
+        let result = run(ipc::stage_outlook_items(
+            app.handle().clone(),
+            work.clone(),
+            vec![message()],
+            approval(app.handle(), OUTLOOK_STAGE_KIND),
+        ))
+        .unwrap();
+        assert!(!result[0].ok);
+        fs::remove_file(&key).unwrap();
+        fs::create_dir(&key).unwrap();
+        // A worker panic while owning admission must release it as well.
+        let hook = PathTransactionTestHook::new(key.clone(), "admitted", || {
+            panic!("synthetic admitted unwind")
+        });
+        let error = run(ipc::stage_outlook_items(
+            app.handle().clone(),
+            work.clone(),
+            vec![message()],
+            approval(app.handle(), OUTLOOK_STAGE_KIND),
+        ))
+        .unwrap_err();
+        assert!(error.starts_with("stage_outlook_items_task_failed:"));
+        drop(hook);
+        let result = run(ipc::stage_outlook_items(
+            app.handle().clone(),
+            work,
+            vec![message()],
+            approval(app.handle(), OUTLOOK_STAGE_KIND),
+        ))
+        .unwrap();
+        assert!(result[0].ok);
+    }
+
+    #[test]
+    fn phase08_14_outlook_stage_real_files_parent_rename_trash_both_orders_and_aliases() {
+        let home = Home::new();
+        let app = app();
+        for parent_first in [false, true] {
+            for trash in [false, true] {
+                for alias in [false, true] {
+                    let (root, _) = fixture(&home);
+                    let original = root.path().to_path_buf();
+                    let parent = original.parent().unwrap();
+                    let moved = parent.join(format!(
+                        "moved-{}",
+                        original.file_name().unwrap().to_string_lossy()
+                    ));
+                    let mut parent_work = text(parent);
+                    if alias {
+                        let alias_path = parent.join(format!(
+                            "alias-{}",
+                            original.file_name().unwrap().to_string_lossy()
+                        ));
+                        std::os::unix::fs::symlink(parent, &alias_path).unwrap();
+                        parent_work = text(&alias_path);
+                    }
+                    let _trash = crate::workspace_files::phase08_06::TrashFixture::new(
+                        original.clone(),
+                        moved.clone(),
+                    );
+                    let source = text(&original);
+                    let name = moved.file_name().unwrap().to_string_lossy().into_owned();
+                    let parent_future = async move {
+                        if trash {
+                            crate::workspace_files::ipc::trash_workspace_entries(
+                                parent_work,
+                                vec![source],
+                            )
+                            .await
+                            .map(|result| {
+                                assert_eq!(
+                                    result[0].status,
+                                    crate::workspace_files::WorkspaceMutationStatus::Done
+                                );
+                            })
+                        } else {
+                            crate::workspace_files::ipc::rename_workspace_entry(
+                                parent_work,
+                                source,
+                                name,
+                            )
+                            .await
+                            .map(|_| ())
+                        }
+                    };
+                    let stage = ipc::stage_outlook_items(
+                        app.handle().clone(),
+                        text(&original),
+                        vec![message()],
+                        approval(app.handle(), OUTLOOK_STAGE_KIND),
+                    );
+                    let key = original.join("inbox/drop/mso");
+                    if parent_first {
+                        let held = Held::new(original.clone(), "admitted");
+                        let first = start(parent_future);
+                        held.wait();
+                        let waiting = Held::new(key, "before-admission");
+                        let second = start(stage);
+                        waiting.wait();
+                        waiting.release();
+                        assert!(second.recv_timeout(Duration::from_millis(30)).is_err());
+                        held.release();
+                        done(first).unwrap();
+                        let result = done(second).unwrap();
+                        assert!(
+                            !result[0].ok,
+                            "parent_first={parent_first} trash={trash} alias={alias}"
+                        );
+                        assert_eq!(
+                            fs::read_dir(moved.join("inbox/drop/mso")).unwrap().count(),
+                            0
+                        );
+                    } else {
+                        let held = Held::new(key, "admitted");
+                        let first = start(stage);
+                        held.wait();
+                        let waiting = Held::new(original.clone(), "before-admission");
+                        let second = start(parent_future);
+                        waiting.wait();
+                        waiting.release();
+                        assert!(second.recv_timeout(Duration::from_millis(30)).is_err());
+                        held.release();
+                        assert!(done(first).unwrap()[0].ok);
+                        done(second).unwrap();
+                        let target = fs::read_dir(moved.join("inbox/drop/mso"))
+                            .unwrap()
+                            .next()
+                            .unwrap()
+                            .unwrap()
+                            .path();
+                        let data: serde_json::Value =
+                            serde_json::from_slice(&fs::read(target).unwrap()).unwrap();
+                        assert_eq!(data["message"]["bodyPreview"], "synthetic body");
+                    }
+                    assert!(!original.exists(), "old parent must never be recreated");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn phase08_14_outlook_stage_policy_alias_denial_and_config_revalidation() {
+        let home = Home::new();
+        let (root, _) = fixture(&home);
+        let app = app();
+        let alias = home.root.path().join("workspace-alias");
+        std::os::unix::fs::symlink(root.path(), &alias).unwrap();
+        for policy in ["readOnly", "delegated"] {
+            for reverse in [false, true] {
+                let (registered, caller) = if reverse {
+                    (alias.as_path(), root.path())
+                } else {
+                    (root.path(), alias.as_path())
+                };
+                crate::scratchpad::phase08_08::registry(registered, policy);
+                let outcome = run(ipc::stage_outlook_items(
+                    app.handle().clone(),
+                    text(caller),
+                    vec![message()],
+                    approval(app.handle(), OUTLOOK_STAGE_KIND),
+                ))
+                .unwrap();
+                assert!(!outcome[0].ok);
+                assert!(outcome[0]
+                    .error
+                    .as_ref()
+                    .unwrap()
+                    .contains("Workspace writes are blocked"));
+            }
+        }
+        crate::scratchpad::phase08_08::registry(root.path(), "direct");
+        let held = Held::new(root.path().join("inbox/drop/mso"), "admitted");
+        let pending = start(ipc::stage_outlook_items(
+            app.handle().clone(),
+            text(root.path()),
+            vec![message()],
+            approval(app.handle(), OUTLOOK_STAGE_KIND),
+        ));
+        held.wait();
+        let config = root.path().join("workspace.config.yaml");
+        let original = fs::read_to_string(&config).unwrap();
+        fs::write(&config, original.replace("drop/mso", "drop/changed")).unwrap();
+        held.release();
+        let outcome = done(pending).unwrap();
+        assert!(!outcome[0].ok);
+        assert!(outcome[0]
+            .error
+            .as_ref()
+            .unwrap()
+            .contains("configuration changed"));
+        assert!(!root.path().join("inbox/drop/changed").exists());
+        fs::write(config, original).unwrap();
+        let outcome = run(ipc::stage_outlook_items(
+            app.handle().clone(),
+            text(&alias),
+            vec![message()],
+            approval(app.handle(), OUTLOOK_STAGE_KIND),
+        ))
+        .unwrap();
+        assert!(outcome[0].ok);
     }
 }

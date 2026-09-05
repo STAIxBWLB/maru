@@ -6,6 +6,7 @@ use chrono::{DateTime, Utc};
 use serde::Serialize;
 use serde_json::json;
 
+use crate::atomic_file::{with_path_transactions, PathTransactionParent, PathTransactionRequest};
 use crate::inbox_settings;
 
 #[derive(Debug, Clone, Serialize)]
@@ -36,6 +37,20 @@ pub fn stage_message_json<T: Serialize>(
     id: &str,
     message: &T,
 ) -> Result<String, String> {
+    let parent = PathTransactionParent::capture(work)?;
+    stage_message_json_with_parent(work, channel, provider, id, message, &parent)
+}
+
+/// Provider callbacks retain the original selected parent while external work runs.
+/// Each settlement acquires fresh admission, configuration and write policy.
+pub(crate) fn stage_message_json_with_parent<T: Serialize>(
+    work: &Path,
+    channel: &str,
+    provider: &str,
+    id: &str,
+    message: &T,
+    parent: &PathTransactionParent,
+) -> Result<String, String> {
     let config = inbox_settings::load_runtime_config_or_legacy(work)?;
     let root = inbox_settings::resolve_runtime_root(work, &config)?;
     let drop_path = config
@@ -48,8 +63,6 @@ pub fn stage_message_json<T: Serialize>(
     if !target_dir.starts_with(&root) {
         return Err(format!("drop_path_outside_inbox: {drop_path}"));
     }
-    fs::create_dir_all(&target_dir)
-        .map_err(|err| format!("Cannot create {}: {err}", target_dir.to_string_lossy()))?;
     let stamp = timestamp_for_filename();
     let name = sanitize_filename(&format!("{stamp}-{provider}-{id}.json"));
     let target = target_dir.join(name);
@@ -59,11 +72,47 @@ pub fn stage_message_json<T: Serialize>(
         "message": message,
     }))
     .map_err(|err| format!("{provider}_payload_failed: {err}"))?;
-    fs::write(&target, payload)
-        .map_err(|err| format!("Cannot write {}: {err}", target.to_string_lossy()))?;
-    Ok(target.to_string_lossy().to_string())
+    // Reserve the whole configured inbox allocation tree and exact existing
+    // file aliases; no path/domain guard survives the provider call.
+    let mut paths = vec![
+        root.clone(),
+        target_dir.clone(),
+        target.clone(),
+        work.join("workspace.config.yaml"),
+        work.join(".maru/inbox.json"),
+    ];
+    if !work.join(".maru").exists() {
+        paths.push(work.join(".maru"));
+    }
+    paths.extend(
+        paths
+            .clone()
+            .into_iter()
+            .filter_map(|path| path.canonicalize().ok()),
+    );
+    let request = PathTransactionRequest::new(paths)?
+        .require_parent_snapshot(parent)?
+        .with_workspace_registry()?;
+    with_path_transactions(request, |lease| {
+        lease.ensure_workspace_registry()?;
+        if inbox_settings::load_runtime_config_or_legacy(work)? != config {
+            return Err("Inbox configuration changed; retry the operation".into());
+        }
+        lease.before_effect()?;
+        crate::vault_list::assert_maru_can_write(
+            &work.to_string_lossy(),
+            crate::vault_list::WorkspaceWriteAction::Create,
+        )?;
+        fs::create_dir_all(&target_dir)
+            .map_err(|err| format!("Cannot create {}: {err}", target_dir.to_string_lossy()))?;
+        // Preserve the prior final-symlink-following fs::write behavior.
+        fs::write(&target, &payload)
+            .map_err(|err| format!("Cannot write {}: {err}", target.to_string_lossy()))?;
+        Ok(target.to_string_lossy().to_string())
+    })
 }
 
+#[allow(dead_code)] // Preserved synchronous producer API.
 pub fn stage_message_outcome<T: Serialize>(
     work: &Path,
     channel: &str,
@@ -87,6 +136,34 @@ pub fn stage_message_outcome<T: Serialize>(
             target_path: None,
             ok: false,
             error: Some(err),
+        },
+    }
+}
+
+pub(crate) fn stage_message_outcome_with_parent<T: Serialize>(
+    work: &Path,
+    channel: &str,
+    provider: &str,
+    id: &str,
+    message: &T,
+    parent: &PathTransactionParent,
+) -> StageOutcome {
+    match stage_message_json_with_parent(work, channel, provider, id, message, parent) {
+        Ok(path) => StageOutcome {
+            message_id: id.into(),
+            channel: channel.into(),
+            provider: provider.into(),
+            target_path: Some(path),
+            ok: true,
+            error: None,
+        },
+        Err(error) => StageOutcome {
+            message_id: id.into(),
+            channel: channel.into(),
+            provider: provider.into(),
+            target_path: None,
+            ok: false,
+            error: Some(error),
         },
     }
 }

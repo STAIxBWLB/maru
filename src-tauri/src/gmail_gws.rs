@@ -22,11 +22,13 @@ use crate::win_process::NoWindow;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use serde_yaml::Value as YamlValue;
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 
 use crate::cli_path::{augmented_path, is_executable, resolve_program};
 use crate::command_output::{run_command_with_timeout, BoundedOutput, CommandTermination};
-use crate::inbox_drop::{auth_status, stage_message_outcome, ProviderAuthStatus, StageOutcome};
+use crate::inbox_drop::{
+    auth_status, stage_message_outcome_with_parent, ProviderAuthStatus, StageOutcome,
+};
 use crate::inbox_settings::{self, InboxGmailConfig};
 use crate::vault::resolve_inside_vault;
 
@@ -119,7 +121,6 @@ fn resolve_gws_path(override_path: Option<&str>) -> Option<PathBuf> {
     resolve_program("gws")
 }
 
-#[tauri::command]
 pub fn fetch_gmail_unread(
     vault_path: Option<String>,
     max: Option<u32>,
@@ -180,30 +181,49 @@ pub fn fetch_gmail_unread(
     parse_triage_output(&stdout).map_err(|err| format!("gws_parse_failed: {err}"))
 }
 
-#[tauri::command]
+#[allow(dead_code)] // Preserved synchronous API for Rust callers.
 pub fn stage_gmail_items(
     approvals: tauri::State<'_, crate::approval::ApprovalState>,
     work_path: String,
     messages: Vec<GmailMessage>,
     approval_id: Option<String>,
 ) -> Result<Vec<StageOutcome>, String> {
+    stage_gmail_items_blocking(&approvals, work_path, messages, approval_id)
+}
+
+fn stage_gmail_items_blocking(
+    approvals: &crate::approval::ApprovalState,
+    work_path: String,
+    messages: Vec<GmailMessage>,
+    approval_id: Option<String>,
+) -> Result<Vec<StageOutcome>, String> {
     crate::approval::require_approval_any(
-        &approvals,
+        approvals,
         approval_id,
         &[GMAIL_STAGE_KIND, INBOX_BULK_KIND],
     )?;
     let work = resolve_inside_vault(&work_path, ".")?;
+    let parent = crate::atomic_file::PathTransactionParent::capture(&work)?;
     Ok(messages
         .into_iter()
-        .map(|message| stage_message_outcome(&work, "gws", "gws", &message.id, &message))
+        .map(|message| {
+            stage_message_outcome_with_parent(&work, "gws", "gws", &message.id, &message, &parent)
+        })
         .collect())
 }
 
 #[tauri::command]
 pub async fn check_gws_auth(vault_path: Option<String>) -> Result<ProviderAuthStatus, String> {
-    tauri::async_runtime::spawn_blocking(move || check_gws_auth_now(vault_path))
-        .await
-        .map_err(|err| format!("gws_probe_task_failed: {err}"))?
+    tauri::async_runtime::spawn_blocking(move || {
+        #[cfg(test)]
+        crate::atomic_file::PathTransactionLease::test_stage(
+            &[PathBuf::from(vault_path.as_deref().unwrap_or("/"))],
+            "worker:check_gws_auth",
+        );
+        check_gws_auth_now(vault_path)
+    })
+    .await
+    .map_err(|err| format!("gws_probe_task_failed: {err}"))?
 }
 
 fn check_gws_auth_now(vault_path: Option<String>) -> Result<ProviderAuthStatus, String> {
@@ -285,32 +305,60 @@ fn provider_failure_detail(output: &BoundedOutput, fallback: &str) -> String {
         .unwrap_or_else(|| fallback.to_string())
 }
 
-#[tauri::command]
-pub fn decide_gmail_item(
-    app: AppHandle,
+#[allow(dead_code)] // Preserved synchronous API for Rust callers.
+pub fn decide_gmail_item<R: tauri::Runtime>(
+    app: AppHandle<R>,
     approvals: tauri::State<'_, crate::approval::ApprovalState>,
     vault_path: Option<String>,
     message_id: String,
     decision: GmailDecision,
     approval_id: Option<String>,
 ) -> Result<GmailDecisionOutcome, String> {
+    decide_gmail_item_blocking(
+        app,
+        &approvals,
+        vault_path,
+        message_id,
+        decision,
+        approval_id,
+    )
+}
+
+fn decide_gmail_item_blocking<R: tauri::Runtime>(
+    app: AppHandle<R>,
+    approvals: &crate::approval::ApprovalState,
+    vault_path: Option<String>,
+    message_id: String,
+    decision: GmailDecision,
+    approval_id: Option<String>,
+) -> Result<GmailDecisionOutcome, String> {
     let kind = decision.approval_kind();
-    crate::approval::require_approval(&approvals, approval_id, kind)?;
+    crate::approval::require_approval(approvals, approval_id, kind)?;
     let outcome = decide_gmail_item_now(vault_path.as_deref(), message_id, decision)?;
     emit_gmail_decision(&app, &outcome);
     Ok(outcome)
 }
 
-#[tauri::command]
-pub fn decide_gmail_items(
-    app: AppHandle,
+#[allow(dead_code)] // Preserved synchronous API for Rust callers.
+pub fn decide_gmail_items<R: tauri::Runtime>(
+    app: AppHandle<R>,
     approvals: tauri::State<'_, crate::approval::ApprovalState>,
     vault_path: Option<String>,
     items: Vec<GmailDecisionRequest>,
     approval_id: Option<String>,
 ) -> Result<Vec<GmailDecisionOutcome>, String> {
+    decide_gmail_items_blocking(app, &approvals, vault_path, items, approval_id)
+}
+
+fn decide_gmail_items_blocking<R: tauri::Runtime>(
+    app: AppHandle<R>,
+    approvals: &crate::approval::ApprovalState,
+    vault_path: Option<String>,
+    items: Vec<GmailDecisionRequest>,
+    approval_id: Option<String>,
+) -> Result<Vec<GmailDecisionOutcome>, String> {
     crate::approval::require_approval_any(
-        &approvals,
+        approvals,
         approval_id,
         &[GMAIL_ACCEPT_KIND, GMAIL_REJECT_KIND, INBOX_BULK_KIND],
     )?;
@@ -576,7 +624,7 @@ fn gmail_modify_body(add_label_ids: Vec<String>, remove_label_ids: Vec<String>) 
     .to_string()
 }
 
-fn emit_gmail_decision(app: &AppHandle, outcome: &GmailDecisionOutcome) {
+fn emit_gmail_decision<R: tauri::Runtime>(app: &AppHandle<R>, outcome: &GmailDecisionOutcome) {
     let _ = app.emit("gmail://decided", outcome);
 }
 
@@ -618,6 +666,103 @@ impl GmailDecision {
             Self::Accepted => ACCEPTED_LABEL,
             Self::Rejected => REJECTED_LABEL,
         }
+    }
+}
+
+// Each worker owns all request values and an AppHandle. Real managed approval
+// state is borrowed only after dispatch, never across await. Gmail decisions
+// have provider effects only; no filesystem/domain guard spans the CLI calls.
+pub mod ipc {
+    use super::*;
+
+    #[tauri::command]
+    pub async fn fetch_gmail_unread(
+        vault_path: Option<String>,
+        max: Option<u32>,
+        query: Option<String>,
+    ) -> Result<Vec<GmailMessage>, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            crate::atomic_file::PathTransactionLease::test_stage(
+                &[PathBuf::from(vault_path.as_deref().unwrap_or("/"))],
+                "worker:fetch_gmail_unread",
+            );
+            super::fetch_gmail_unread(vault_path, max, query)
+        })
+        .await
+        .map_err(|err| format!("fetch_gmail_unread_task_failed: {err}"))?
+    }
+
+    #[tauri::command]
+    pub async fn stage_gmail_items<R: tauri::Runtime>(
+        app: AppHandle<R>,
+        work_path: String,
+        messages: Vec<GmailMessage>,
+        approval_id: Option<String>,
+    ) -> Result<Vec<StageOutcome>, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            crate::atomic_file::PathTransactionLease::test_stage(
+                &[PathBuf::from(&work_path)],
+                "worker:stage_gmail_items",
+            );
+            stage_gmail_items_blocking(
+                &app.state::<crate::approval::ApprovalState>(),
+                work_path,
+                messages,
+                approval_id,
+            )
+        })
+        .await
+        .map_err(|err| format!("stage_gmail_items_task_failed: {err}"))?
+    }
+
+    #[tauri::command]
+    pub async fn decide_gmail_item<R: tauri::Runtime>(
+        app: AppHandle<R>,
+        vault_path: Option<String>,
+        message_id: String,
+        decision: GmailDecision,
+        approval_id: Option<String>,
+    ) -> Result<GmailDecisionOutcome, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            crate::atomic_file::PathTransactionLease::test_stage(
+                &[PathBuf::from(vault_path.as_deref().unwrap_or("/"))],
+                "worker:decide_gmail_item",
+            );
+            let approvals = app.state::<crate::approval::ApprovalState>();
+            decide_gmail_item_blocking(
+                app.clone(),
+                &approvals,
+                vault_path,
+                message_id,
+                decision,
+                approval_id,
+            )
+        })
+        .await
+        .map_err(|err| format!("decide_gmail_item_task_failed: {err}"))?
+    }
+
+    #[tauri::command]
+    pub async fn decide_gmail_items<R: tauri::Runtime>(
+        app: AppHandle<R>,
+        vault_path: Option<String>,
+        items: Vec<GmailDecisionRequest>,
+        approval_id: Option<String>,
+    ) -> Result<Vec<GmailDecisionOutcome>, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            crate::atomic_file::PathTransactionLease::test_stage(
+                &[PathBuf::from(vault_path.as_deref().unwrap_or("/"))],
+                "worker:decide_gmail_items",
+            );
+            let approvals = app.state::<crate::approval::ApprovalState>();
+            decide_gmail_items_blocking(app.clone(), &approvals, vault_path, items, approval_id)
+        })
+        .await
+        .map_err(|err| format!("decide_gmail_items_task_failed: {err}"))?
     }
 }
 
@@ -840,5 +985,521 @@ mod tests {
 
         assert_eq!(detail, "gws command failed without a safe diagnostic");
         assert!(!detail.contains(&"S".repeat(128)));
+    }
+}
+
+#[cfg(all(test, unix))]
+mod phase08_14 {
+    use super::*;
+    use crate::atomic_file::phase08_06::{boundary, run, Held, Home};
+    use crate::atomic_file::PathTransactionTestHook;
+    use crate::scratchpad::phase08_08::registry;
+    use std::future::Future;
+    use std::os::unix::fs::PermissionsExt;
+    use std::sync::mpsc;
+    type TestApp = AppHandle<tauri::test::MockRuntime>;
+
+    fn text(path: &Path) -> String {
+        path.to_string_lossy().into_owned()
+    }
+    fn app() -> tauri::App<tauri::test::MockRuntime> {
+        let app = tauri::test::mock_app();
+        app.manage(crate::approval::ApprovalState::default());
+        app
+    }
+    fn approval(app: &TestApp, kind: &str) -> Option<String> {
+        let request = crate::approval::prepare_approval(
+            app.state(),
+            kind.into(),
+            "Synthetic Gmail fixture".into(),
+            None,
+            None,
+        )
+        .unwrap();
+        crate::approval::record_approval(
+            app.state(),
+            request.id.clone(),
+            crate::approval::ApprovalDecision::Approved,
+            None,
+        )
+        .unwrap();
+        Some(request.id)
+    }
+    fn fixture(home: &Home) -> tempfile::TempDir {
+        let tmp = tempfile::tempdir_in(home.root.path()).unwrap();
+        let bin = tmp.path().join("fake-gws");
+        fs::write(&bin, r#"#!/bin/sh
+printf '%s\n' "$*" >> "$0.calls"
+case "$*" in
+  *+triage*) printf '%s\n' '{"messages":[{"id":"fixture-1","from":"synthetic@example.invalid","subject":"Synthetic envelope","date":"2026-01-01"}]}' ;;
+  *'labels list'*) printf '%s\n' '{"labels":[{"id":"Label_A","name":"maru-accepted"},{"id":"Label_R","name":"maru-rejected"}]}' ;;
+  *'messages modify'*) printf '%s\n' '{"id":"fixture-1"}' ;;
+  *) printf '%s\n' 'unexpected synthetic arguments' >&2; exit 7 ;;
+esac
+"#).unwrap();
+        fs::set_permissions(&bin, fs::Permissions::from_mode(0o755)).unwrap();
+        fs::write(tmp.path().join("workspace.config.yaml"), format!("io:\n  providers:\n    gws:\n      gws_binary: {}\ninbox:\n  root: inbox\n  channels:\n    gws:\n      provider: gws\n      kind: bundle\n      dedupe: provider-id\n      drop_paths: [drop/gws]\n", text(&bin))).unwrap();
+        fs::create_dir_all(tmp.path().join("inbox/drop/gws")).unwrap();
+        assert_eq!(resolve_gws_for_vault(Some(&text(tmp.path()))).unwrap(), bin);
+        tmp
+    }
+    fn message() -> GmailMessage {
+        GmailMessage {
+            id: "fixture-1".into(),
+            from: "synthetic@example.invalid".into(),
+            subject: "Synthetic envelope".into(),
+            date: "2026-01-01".into(),
+        }
+    }
+    fn start<F: Future + Send + 'static>(future: F) -> mpsc::Receiver<F::Output>
+    where
+        F::Output: Send + 'static,
+    {
+        let (tx, rx) = mpsc::channel();
+        tauri::async_runtime::spawn(async move {
+            let _ = tx.send(future.await);
+        });
+        rx
+    }
+    fn done<T>(rx: mpsc::Receiver<T>) -> T {
+        rx.recv_timeout(Duration::from_secs(10))
+            .expect("Gmail fixture completion")
+    }
+    fn stage(
+        app: &TestApp,
+        root: &Path,
+    ) -> impl Future<Output = Result<Vec<StageOutcome>, String>> + Send + 'static {
+        ipc::stage_gmail_items(
+            app.clone(),
+            text(root),
+            vec![message()],
+            approval(app, GMAIL_STAGE_KIND),
+        )
+    }
+
+    #[test]
+    fn phase08_14_gmail_each_wrapper_nonempty_results_and_legacy_rejections() {
+        let home = Home::new();
+        let tmp = fixture(&home);
+        let app = app();
+        let w = text(tmp.path());
+        use tauri::Listener;
+        let events = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let seen = events.clone();
+        let _listener = app.listen("gmail://decided", move |event| {
+            seen.lock().unwrap().push(event.payload().to_string());
+        });
+        let messages = run(ipc::fetch_gmail_unread(
+            Some(w.clone()),
+            Some(3),
+            Some("is:unread".into()),
+        ))
+        .unwrap();
+        assert_eq!(messages, vec![message()]);
+        let status = run(check_gws_auth(Some(w.clone()))).unwrap();
+        assert_eq!(status.state, "ok");
+        assert_eq!(status.cli_path, Some(text(&tmp.path().join("fake-gws"))));
+        let staged = run(stage(app.handle(), tmp.path())).unwrap();
+        assert!(staged[0].ok);
+        let payload: serde_json::Value =
+            serde_json::from_slice(&fs::read(staged[0].target_path.as_ref().unwrap()).unwrap())
+                .unwrap();
+        assert_eq!(payload["message"]["subject"], "Synthetic envelope");
+        let accepted = run(ipc::decide_gmail_item(
+            app.handle().clone(),
+            Some(w.clone()),
+            "fixture-1".into(),
+            GmailDecision::Accepted,
+            approval(app.handle(), GMAIL_ACCEPT_KIND),
+        ))
+        .unwrap();
+        assert!(accepted.ok && accepted.archived);
+        let rows = run(ipc::decide_gmail_items(
+            app.handle().clone(),
+            Some(w.clone()),
+            vec![
+                GmailDecisionRequest {
+                    message_id: "".into(),
+                    decision: GmailDecision::Accepted,
+                },
+                GmailDecisionRequest {
+                    message_id: "fixture-1".into(),
+                    decision: GmailDecision::Rejected,
+                },
+            ],
+            approval(app.handle(), INBOX_BULK_KIND),
+        ))
+        .unwrap();
+        assert!(!rows[0].ok);
+        assert_eq!(rows[0].error.as_deref(), Some("message_id_required"));
+        assert!(rows[1].ok && !rows[1].archived);
+        assert_eq!(events.lock().unwrap().len(), 2);
+        let call_log = tmp.path().join("fake-gws.calls");
+        let calls_before_denials = fs::read(&call_log).unwrap();
+        assert_eq!(
+            run(ipc::stage_gmail_items(
+                app.handle().clone(),
+                w.clone(),
+                vec![message()],
+                None
+            ))
+            .unwrap_err(),
+            "approval_required: gmail.stage"
+        );
+        assert_eq!(
+            run(ipc::decide_gmail_item(
+                app.handle().clone(),
+                Some(w.clone()),
+                "fixture-1".into(),
+                GmailDecision::Accepted,
+                None
+            ))
+            .unwrap_err(),
+            "approval_required: gmail.accept"
+        );
+        assert_eq!(
+            run(ipc::decide_gmail_items(
+                app.handle().clone(),
+                Some(w.clone()),
+                vec![],
+                None
+            ))
+            .unwrap_err(),
+            "approval_required: gmail.accept"
+        );
+        assert_eq!(
+            run(ipc::decide_gmail_item(
+                app.handle().clone(),
+                Some(w),
+                "".into(),
+                GmailDecision::Rejected,
+                approval(app.handle(), GMAIL_REJECT_KIND)
+            ))
+            .unwrap_err(),
+            "message_id_required"
+        );
+        assert_eq!(fs::read(call_log).unwrap(), calls_before_denials);
+        assert_eq!(events.lock().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn phase08_14_gmail_each_new_wrapper_yields_same_task_and_maps_worker_unwind() {
+        let home = Home::new();
+        let tmp = fixture(&home);
+        let app = app();
+        let root = tmp.path();
+        let w = text(root);
+        boundary(
+            root.into(),
+            "fetch_gmail_unread",
+            ipc::fetch_gmail_unread(Some(w.clone()), None, None),
+        );
+        boundary(root.into(), "stage_gmail_items", stage(app.handle(), root));
+        boundary(
+            root.into(),
+            "decide_gmail_item",
+            ipc::decide_gmail_item(
+                app.handle().clone(),
+                Some(w.clone()),
+                "fixture-1".into(),
+                GmailDecision::Accepted,
+                approval(app.handle(), GMAIL_ACCEPT_KIND),
+            ),
+        );
+        boundary(
+            root.into(),
+            "decide_gmail_items",
+            ipc::decide_gmail_items(
+                app.handle().clone(),
+                Some(w),
+                vec![GmailDecisionRequest {
+                    message_id: "fixture-1".into(),
+                    decision: GmailDecision::Rejected,
+                }],
+                approval(app.handle(), INBOX_BULK_KIND),
+            ),
+        );
+    }
+
+    #[test]
+    fn phase08_14_gmail_auth_existing_worker_yields_and_preserves_probe_error() {
+        let home = Home::new();
+        let tmp = fixture(&home);
+        let w = text(tmp.path());
+        let (tx, mut entered) = tauri::async_runtime::channel(1);
+        let (release, rx) = mpsc::channel();
+        let rx = std::sync::Mutex::new(rx);
+        let _hook =
+            PathTransactionTestHook::new(tmp.path().into(), "worker:check_gws_auth", move || {
+                tx.blocking_send(std::thread::current().id()).unwrap();
+                rx.lock()
+                    .unwrap()
+                    .recv_timeout(Duration::from_secs(5))
+                    .unwrap();
+                panic!("synthetic Gmail probe panic");
+            });
+        run(async move {
+            let caller = std::thread::current().id();
+            let mut future = Box::pin(check_gws_auth(Some(w)));
+            assert!(
+                std::future::poll_fn(|cx| std::task::Poll::Ready(future.as_mut().poll(cx)))
+                    .await
+                    .is_pending()
+            );
+            assert_ne!(caller, entered.recv().await.unwrap());
+            let mut yielded = false;
+            std::future::poll_fn(|cx| {
+                if yielded {
+                    std::task::Poll::Ready(())
+                } else {
+                    yielded = true;
+                    cx.waker().wake_by_ref();
+                    std::task::Poll::Pending
+                }
+            })
+            .await;
+            release.send(()).unwrap();
+            assert!(future
+                .await
+                .unwrap_err()
+                .starts_with("gws_probe_task_failed:"));
+        });
+    }
+
+    #[test]
+    fn phase08_14_gmail_stage_same_target_contention_policy_and_unwind_release() {
+        let home = Home::new();
+        let tmp = fixture(&home);
+        let app = app();
+        let root = tmp.path();
+        let key = root.join("inbox/drop/gws");
+        let held = Held::new(key.clone(), "admitted");
+        let first = start(stage(app.handle(), root));
+        held.wait();
+        let waiting = Held::new(key.clone(), "before-admission");
+        let second = start(stage(app.handle(), root));
+        waiting.wait();
+        waiting.release();
+        assert!(second.recv_timeout(Duration::from_millis(30)).is_err());
+        held.release();
+        assert!(done(first).unwrap()[0].ok);
+        let second = done(second).unwrap();
+        // Preserve the existing identical-message duplicate contract: admitted
+        // publication may replace the same timestamp name with identical bytes.
+        if !second[0].ok {
+            assert!(second[0].error.is_some());
+        }
+        assert!(fs::read_dir(&key).unwrap().count() >= 1);
+        drop(held);
+        drop(waiting);
+        registry(root, "direct");
+        let held = Held::new(key.clone(), "admitted");
+        let denied = start(stage(app.handle(), root));
+        held.wait();
+        registry(root, "readOnly");
+        held.release();
+        let denied = done(denied).unwrap();
+        assert!(!denied[0].ok);
+        assert!(denied[0]
+            .error
+            .as_deref()
+            .unwrap()
+            .contains("Workspace writes are blocked"));
+        drop(held);
+        registry(root, "direct");
+        let hook = PathTransactionTestHook::new(key.clone(), "admitted", || {
+            panic!("synthetic Gmail stage unwind")
+        });
+        assert!(run(stage(app.handle(), root))
+            .unwrap_err()
+            .starts_with("stage_gmail_items_task_failed:"));
+        drop(hook);
+        let mut distinct = message();
+        distinct.id = "after-unwind".into();
+        assert!(
+            run(ipc::stage_gmail_items(
+                app.handle().clone(),
+                text(root),
+                vec![distinct],
+                approval(app.handle(), GMAIL_STAGE_KIND)
+            ))
+            .unwrap()[0]
+                .ok
+        );
+    }
+
+    #[test]
+    fn phase08_14_gmail_stage_real_files_parent_rename_trash_both_orders_aliases() {
+        let home = Home::new();
+        let app = app();
+        for parent_first in [false, true] {
+            for trash in [false, true] {
+                for alias in [false, true] {
+                    let tmp = fixture(&home);
+                    let root = tmp.path().to_path_buf();
+                    let parent = root.parent().unwrap();
+                    let moved = parent.join(format!(
+                        "moved-{}",
+                        root.file_name().unwrap().to_string_lossy()
+                    ));
+                    let mut parent_w = text(parent);
+                    if alias {
+                        let link = parent.join(format!(
+                            "alias-{}",
+                            root.file_name().unwrap().to_string_lossy()
+                        ));
+                        std::os::unix::fs::symlink(parent, &link).unwrap();
+                        parent_w = text(&link);
+                    }
+                    let _trash = crate::workspace_files::phase08_06::TrashFixture::new(
+                        root.clone(),
+                        moved.clone(),
+                    );
+                    let source = text(&root);
+                    let name = moved.file_name().unwrap().to_string_lossy().into_owned();
+                    let parent_future = async move {
+                        if trash {
+                            crate::workspace_files::ipc::trash_workspace_entries(
+                                parent_w,
+                                vec![source],
+                            )
+                            .await
+                            .map(|_| ())
+                        } else {
+                            crate::workspace_files::ipc::rename_workspace_entry(
+                                parent_w, source, name,
+                            )
+                            .await
+                            .map(|_| ())
+                        }
+                    };
+                    let key = root.join("inbox/drop/gws");
+                    if parent_first {
+                        let held = Held::new(root.clone(), "admitted");
+                        let first = start(parent_future);
+                        held.wait();
+                        let waiting = Held::new(key.clone(), "before-admission");
+                        let second = start(stage(app.handle(), &root));
+                        waiting.wait();
+                        waiting.release();
+                        assert!(second.recv_timeout(Duration::from_millis(30)).is_err());
+                        held.release();
+                        done(first).unwrap();
+                        let rows = done(second).unwrap();
+                        assert!(!rows[0].ok);
+                        assert_eq!(
+                            fs::read_dir(moved.join("inbox/drop/gws")).unwrap().count(),
+                            0
+                        );
+                    } else {
+                        let held = Held::new(key.clone(), "admitted");
+                        let first = start(stage(app.handle(), &root));
+                        held.wait();
+                        let waiting = Held::new(root.clone(), "before-admission");
+                        let second = start(parent_future);
+                        waiting.wait();
+                        waiting.release();
+                        assert!(second.recv_timeout(Duration::from_millis(30)).is_err());
+                        held.release();
+                        assert!(done(first).unwrap()[0].ok);
+                        done(second).unwrap();
+                        assert_eq!(
+                            fs::read_dir(moved.join("inbox/drop/gws")).unwrap().count(),
+                            1
+                        );
+                    }
+                    assert!(!root.exists(), "Gmail stage recreated moved parent");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn phase08_14_gmail_stage_policy_aliases_and_config_change_fail_closed() {
+        let home = Home::new();
+        let tmp = fixture(&home);
+        let app = app();
+        let root = tmp.path();
+        let alias = home.root.path().join("gmail-alias");
+        std::os::unix::fs::symlink(root, &alias).unwrap();
+        for reverse in [false, true] {
+            for policy in ["readOnly", "delegated"] {
+                let (registered, caller) = if reverse {
+                    (alias.as_path(), root)
+                } else {
+                    (root, alias.as_path())
+                };
+                registry(registered, policy);
+                assert!(!run(stage(app.handle(), caller)).unwrap()[0].ok);
+            }
+        }
+        registry(&alias, "direct");
+        assert!(run(stage(app.handle(), &alias)).unwrap()[0].ok);
+        let key = root.join("inbox/drop/gws");
+        let held = Held::new(key, "admitted");
+        let pending = start(stage(app.handle(), root));
+        held.wait();
+        let config = root.join("workspace.config.yaml");
+        fs::write(
+            &config,
+            fs::read_to_string(&config)
+                .unwrap()
+                .replace("drop/gws", "drop/changed"),
+        )
+        .unwrap();
+        held.release();
+        let rows = done(pending).unwrap();
+        assert!(!rows[0].ok);
+        assert!(!root.join("inbox/drop/changed").exists());
+    }
+
+    #[test]
+    fn phase08_14_gmail_stage_batch_retains_success_and_rejects_replaced_parent() {
+        let home = Home::new();
+        let tmp = fixture(&home);
+        let app = app();
+        let root = tmp.path().to_path_buf();
+        let key = root.join("inbox/drop/gws");
+        let (tx, entered) = mpsc::channel();
+        let (release, rx) = mpsc::channel();
+        let rx = std::sync::Mutex::new(rx);
+        let calls = std::sync::atomic::AtomicUsize::new(0);
+        let _hook = PathTransactionTestHook::new(key.clone(), "before-admission", move || {
+            if calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 1 {
+                tx.send(()).unwrap();
+                rx.lock()
+                    .unwrap()
+                    .recv_timeout(Duration::from_secs(5))
+                    .unwrap();
+            }
+        });
+        let mut second = message();
+        second.id = "fixture-2".into();
+        let result = start(ipc::stage_gmail_items(
+            app.handle().clone(),
+            text(&root),
+            vec![message(), second],
+            approval(app.handle(), GMAIL_STAGE_KIND),
+        ));
+        entered.recv_timeout(Duration::from_secs(5)).unwrap();
+        assert_eq!(fs::read_dir(&key).unwrap().count(), 1);
+        let moved = root.parent().unwrap().join("gmail-original-parent");
+        run(crate::workspace_files::ipc::rename_workspace_entry(
+            text(root.parent().unwrap()),
+            text(&root),
+            "gmail-original-parent".into(),
+        ))
+        .unwrap();
+        fs::create_dir(&root).unwrap();
+        release.send(()).unwrap();
+        let rows = done(result).unwrap();
+        assert!(rows[0].ok);
+        assert!(!rows[1].ok);
+        assert!(rows[1].error.is_some());
+        assert_eq!(
+            fs::read_dir(moved.join("inbox/drop/gws")).unwrap().count(),
+            1
+        );
+        assert!(!root.join("inbox").exists());
     }
 }
