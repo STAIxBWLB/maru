@@ -208,6 +208,7 @@ pub fn start_scratchpad_watcher(
             }
             let mut relative_paths: Vec<String> = paths
                 .into_iter()
+                .filter(|path| !crate::paths::is_under_generated_dir(path))
                 .filter(|path| relevant_path(path, &root_for_thread))
                 .filter_map(|path| {
                     path.strip_prefix(&root_for_thread)
@@ -291,6 +292,29 @@ mod tests {
             root
         ));
         assert!(!relevant_path(root, root));
+    }
+
+    #[test]
+    fn drain_filter_drops_generated_dir_paths_but_keeps_siblings() {
+        // Mirrors the drain-thread chain: generated-dir prune ahead of
+        // relevant_path — a generated path in the batch must not drop its
+        // legitimate siblings (per-path D-04 semantics, Pitfall 7).
+        let root = Path::new("/work/scratchpad");
+        let batch = vec![
+            PathBuf::from("/work/scratchpad/node_modules/pkg/index.js"),
+            PathBuf::from("/work/scratchpad/ideation/seeds/a.md"),
+        ];
+        let kept: Vec<String> = batch
+            .iter()
+            .filter(|path| !crate::paths::is_under_generated_dir(path))
+            .filter(|path| relevant_path(path, root))
+            .filter_map(|path| {
+                path.strip_prefix(root)
+                    .ok()
+                    .map(|relative| relative.to_string_lossy().replace('\\', "/"))
+            })
+            .collect();
+        assert_eq!(kept, vec!["ideation/seeds/a.md"]);
     }
 
     #[test]

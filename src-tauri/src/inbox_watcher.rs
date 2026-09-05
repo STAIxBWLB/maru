@@ -126,6 +126,9 @@ pub fn start_inbox_watcher(
             _ => return,
         };
         for path in event.paths {
+            if crate::paths::is_under_generated_dir(&path) {
+                continue;
+            }
             if kind_label != "removed" && !path.is_file() {
                 continue;
             }
@@ -288,5 +291,20 @@ mod tests {
     fn dedup_events_keeps_distinct_kinds_of_the_same_path() {
         let deduped = dedup_events(vec![event("a.pdf", "added"), event("a.pdf", "removed")]);
         assert_eq!(deduped.len(), 2);
+    }
+
+    #[test]
+    fn callback_prunes_generated_dir_paths_via_shared_predicate() {
+        // The per-path prune lives inside the notify callback closure, which
+        // is not unit-testable without a refactor (out of scope); pin the
+        // wiring with a source assertion instead. Split needles keep the
+        // test's own text from matching the count.
+        let source = include_str!("inbox_watcher.rs");
+        let needle = concat!("is_under_generated_", "dir");
+        assert_eq!(
+            source.matches(needle).count(),
+            1,
+            "callback must reference the SSOT predicate exactly once"
+        );
     }
 }
