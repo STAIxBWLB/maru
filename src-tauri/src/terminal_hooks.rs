@@ -205,6 +205,9 @@ pub fn start_terminal_hook_watcher(app: &AppHandle) -> Result<(), String> {
             return;
         }
         for path in event.paths {
+            if crate::paths::is_under_generated_dir(&path) {
+                continue;
+            }
             if path.file_name().and_then(|n| n.to_str()) != Some("events.jsonl") {
                 continue;
             }
@@ -824,6 +827,21 @@ mod tests {
                 Some(PathBuf::from("/tmp/custom-kimi")),
             ),
             PathBuf::from("/tmp/custom-kimi/config.toml")
+        );
+    }
+
+    #[test]
+    fn hook_watcher_callback_prunes_generated_dir_paths_via_shared_predicate() {
+        // The per-path prune lives inside the notify callback closure, which
+        // is not unit-testable without a refactor (out of scope); pin the
+        // wiring with a source assertion instead. Split needles keep the
+        // test's own text from matching the count.
+        let source = include_str!("terminal_hooks.rs");
+        let needle = concat!("is_under_generated_", "dir");
+        assert_eq!(
+            source.matches(needle).count(),
+            1,
+            "callback must reference the SSOT predicate exactly once"
         );
     }
 

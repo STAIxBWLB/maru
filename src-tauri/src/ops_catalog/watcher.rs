@@ -66,7 +66,7 @@ pub fn catalog_watcher_start(
         let Some(path) = event.paths.into_iter().next() else {
             return;
         };
-        if !is_catalog_relevant(&path, &root_clone) {
+        if !should_dispatch_catalog_event(&path, &root_clone) {
             return;
         }
         // Debounce: 마지막 emit으로부터 500ms 이내면 펜딩에 적재만 하고 스킵
@@ -169,6 +169,15 @@ fn register_bu_watch_paths(watcher: &mut RecommendedWatcher, root: &Path) {
     }
 }
 
+/// Dispatch gate: the shared generated-dir prune (PERF-04, D-06) composed with
+/// the catalog relevance check — factored into a pure fn so the combination
+/// is unit-testable. A heavy generated subtree under a watched BU surface
+/// (e.g. a business unit that grows node_modules) must not flood the
+/// debounce/emit pipeline.
+fn should_dispatch_catalog_event(path: &Path, root: &Path) -> bool {
+    !crate::paths::is_under_generated_dir(path) && is_catalog_relevant(path, root)
+}
+
 fn is_catalog_relevant(path: &Path, root: &Path) -> bool {
     let rel = match path.strip_prefix(root) {
         Ok(r) => r.to_string_lossy().to_string(),
@@ -245,6 +254,16 @@ mod tests {
         assert!(!is_catalog_relevant(&p, &root));
         let sidecar = root.join("projects/a/03-evidence-cert/receipts/foo.pdf.evidence.yaml");
         assert!(is_catalog_relevant(&sidecar, &root));
+    }
+
+    #[test]
+    fn generated_dir_path_under_catalog_surface_is_not_dispatch_relevant() {
+        let root = PathBuf::from("/ws");
+        // A generated subtree under a watched BU surface would pass
+        // is_catalog_relevant on its own — the dispatch gate must prune it.
+        let path = root.join("projects/a/03-evidence-cert/node_modules/pkg/receipt.pdf");
+        assert!(is_catalog_relevant(&path, &root));
+        assert!(!should_dispatch_catalog_event(&path, &root));
     }
 
     #[test]

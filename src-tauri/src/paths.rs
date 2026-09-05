@@ -183,12 +183,16 @@ mod tests {
 
     #[test]
     fn is_under_generated_dir_matches_deep_component() {
-        assert!(is_under_generated_dir(Path::new("/work/a/target/debug/x.o")));
+        assert!(is_under_generated_dir(Path::new(
+            "/work/a/target/debug/x.o"
+        )));
     }
 
     #[test]
     fn is_under_generated_dir_rejects_prefix_sibling() {
-        assert!(!is_under_generated_dir(Path::new("/work/node_modules_backup/notes.md")));
+        assert!(!is_under_generated_dir(Path::new(
+            "/work/node_modules_backup/notes.md"
+        )));
     }
 
     #[test]
