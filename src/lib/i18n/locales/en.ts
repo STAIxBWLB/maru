@@ -598,7 +598,6 @@ export const en: Record<string, string> = {
   "sidebar.types": "Document types",
   "sidebar.types.all": "All documents",
   "sidebar.types.untyped": "Untyped",
-  "sidebar.view.inbox": "Inbox",
   "sidebar.view.drafts": "Drafts",
   "sidebar.view.archive": "Archive",
   "sidebar.view.recentlyUpdated": "Recently updated",

@@ -7,7 +7,7 @@ import {
   startVaultWatcher,
   stopVaultWatcher,
 } from "./api";
-import { ALL_DOCUMENTS_FILTER, type DocumentFilter } from "./documentIndex";
+import { ALL_DOCUMENTS_FILTER, isBuiltInDocumentView, type DocumentFilter } from "./documentIndex";
 import type {
   ScanOptions,
   VaultEntry,
@@ -222,7 +222,9 @@ export function setDocumentFilterInState(
 }
 
 /** The custom-view prune MainApp ran in an effect: a custom filter whose view
- *  disappeared falls back to "all". */
+ *  disappeared falls back to "all". Built-in view filters referencing a view
+ *  outside BUILT_IN_DOCUMENT_VIEWS (e.g. persisted from before the PERF-06
+ *  Inbox removal) reset the same way, silently. */
 export function pruneCustomDocumentFiltersInState(
   state: WorkspaceStoreState,
   validViewIds: ReadonlySet<string>,
@@ -232,6 +234,9 @@ export function pruneCustomDocumentFiltersInState(
   for (const visibility of ["private", "public"] as const) {
     const filter = next[visibility];
     if (filter.kind === "custom" && !validViewIds.has(filter.viewId)) {
+      next[visibility] = { kind: "all" };
+      changed = true;
+    } else if (filter.kind === "view" && !isBuiltInDocumentView(filter.view)) {
       next[visibility] = { kind: "all" };
       changed = true;
     }

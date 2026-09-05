@@ -551,7 +551,6 @@ export const ko: Record<string, string> = {
   "sidebar.types": "문서 타입",
   "sidebar.types.all": "전체",
   "sidebar.types.untyped": "타입 없음",
-  "sidebar.view.inbox": "Inbox",
   "sidebar.view.drafts": "Drafts",
   "sidebar.view.archive": "Archive",
   "sidebar.view.recentlyUpdated": "최근 업데이트",
