@@ -24,8 +24,8 @@ use walkdir::WalkDir;
 
 const DEBOUNCE_MS: u64 = 500;
 
-#[derive(Default)]
-pub struct CatalogWatcherState(pub Mutex<Option<RecommendedWatcher>>);
+#[derive(Default, Clone)]
+pub struct CatalogWatcherState(pub Arc<Mutex<Option<RecommendedWatcher>>>);
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -35,10 +35,9 @@ pub struct CatalogRefreshEvent {
     pub kind: String,
 }
 
-#[tauri::command]
-pub fn catalog_watcher_start(
-    app: AppHandle,
-    state: State<'_, CatalogWatcherState>,
+pub fn catalog_watcher_start<R: tauri::Runtime>(
+    app: AppHandle<R>,
+    state: &CatalogWatcherState,
     workspace_root: String,
 ) -> Result<bool, String> {
     let root = PathBuf::from(&workspace_root);
@@ -117,15 +116,87 @@ pub fn catalog_watcher_start(
     Ok(true)
 }
 
-#[tauri::command]
-pub fn catalog_watcher_stop(state: State<'_, CatalogWatcherState>) -> Result<bool, String> {
+pub fn catalog_watcher_stop(state: &CatalogWatcherState) -> Result<bool, String> {
     let mut guard = state.0.lock().map_err(|_| "state poisoned".to_string())?;
     let had_watcher = guard.is_some();
     *guard = None;
     Ok(had_watcher)
 }
 
-fn emit_refresh(app: &AppHandle, root: &Path, path: &Path, kind: &str) {
+#[cfg(test)]
+mod phase08_19_stage {
+    use super::CatalogWatcherState;
+    use std::sync::{Arc, Mutex};
+
+    pub(super) static STAGES: Mutex<Vec<(u64, usize, String, Arc<dyn Fn() + Send + Sync>)>> =
+        Mutex::new(Vec::new());
+
+    fn state_key(state: &CatalogWatcherState) -> usize {
+        Arc::as_ptr(&state.0) as usize
+    }
+
+    pub(super) fn register(
+        id: u64,
+        command: &str,
+        state: &CatalogWatcherState,
+        callback: Arc<dyn Fn() + Send + Sync>,
+    ) {
+        STAGES
+            .lock()
+            .unwrap()
+            .push((id, state_key(state), command.to_string(), callback));
+    }
+
+    pub(super) fn hit(command: &str, state: &CatalogWatcherState) {
+        let key = state_key(state);
+        let callbacks: Vec<_> = STAGES
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(_, hook_key, name, _)| *hook_key == key && name == command)
+            .map(|(_, _, _, callback)| callback.clone())
+            .collect();
+        for callback in callbacks {
+            callback();
+        }
+    }
+}
+
+pub mod ipc {
+    use super::*;
+
+    #[tauri::command]
+    pub async fn catalog_watcher_start<R: tauri::Runtime>(
+        app: AppHandle<R>,
+        state: State<'_, CatalogWatcherState>,
+        workspace_root: String,
+    ) -> Result<bool, String> {
+        let state = state.inner().clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            super::phase08_19_stage::hit("catalog_watcher_start", &state);
+            super::catalog_watcher_start(app, &state, workspace_root)
+        })
+        .await
+        .map_err(|err| format!("catalog_watcher_start_task_failed: {err}"))?
+    }
+
+    #[tauri::command]
+    pub async fn catalog_watcher_stop(
+        state: State<'_, CatalogWatcherState>,
+    ) -> Result<bool, String> {
+        let state = state.inner().clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            super::phase08_19_stage::hit("catalog_watcher_stop", &state);
+            super::catalog_watcher_stop(&state)
+        })
+        .await
+        .map_err(|err| format!("catalog_watcher_stop_task_failed: {err}"))?
+    }
+}
+
+fn emit_refresh<R: tauri::Runtime>(app: &AppHandle<R>, root: &Path, path: &Path, kind: &str) {
     let payload = CatalogRefreshEvent {
         workspace_root: root.to_string_lossy().to_string(),
         trigger_path: path.to_string_lossy().to_string(),
@@ -213,6 +284,152 @@ fn is_catalog_relevant(path: &Path, root: &Path) -> bool {
         || rel.contains("/02-admin-approvals/")
         || rel.contains("/03-evidence-cert/")
         || rel.contains("/.maru/bu-config.yaml")
+}
+
+#[cfg(test)]
+mod phase08_19 {
+    use super::phase08_19_stage::STAGES;
+    use super::*;
+    use crate::atomic_file::phase08_06::run;
+    use std::future::Future;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::{mpsc, Arc, Mutex};
+    use std::time::Duration;
+    use tauri::Manager;
+
+    type TestApp = tauri::AppHandle<tauri::test::MockRuntime>;
+
+    fn mock_app() -> tauri::App<tauri::test::MockRuntime> {
+        let app = tauri::test::mock_app();
+        app.manage(CatalogWatcherState::default());
+        app
+    }
+
+    fn workspace_with_surface() -> (tempfile::TempDir, String) {
+        let work = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(work.path().join("inbox/items/pending")).unwrap();
+        let path = work.path().to_path_buf().to_string_lossy().into_owned();
+        (work, path)
+    }
+
+    static NEXT_HOOK: AtomicU64 = AtomicU64::new(0);
+
+    struct StageGuard(u64);
+    impl Drop for StageGuard {
+        fn drop(&mut self) {
+            STAGES.lock().unwrap().retain(|(id, _, _, _)| *id != self.0);
+        }
+    }
+
+    fn boundary<F, T>(command: &'static str, app: &TestApp, future: F)
+    where
+        F: Future<Output = Result<T, String>> + Send + 'static,
+        T: Send + 'static,
+    {
+        let (entered_tx, mut entered_rx) = tauri::async_runtime::channel(1);
+        let (release_tx, release_rx) = mpsc::channel::<()>();
+        let release_rx = Mutex::new(release_rx);
+        let id = NEXT_HOOK.fetch_add(1, Ordering::SeqCst);
+        let callback: Arc<dyn Fn() + Send + Sync> = Arc::new(move || {
+            entered_tx
+                .blocking_send(std::thread::current().id())
+                .unwrap();
+            release_rx
+                .lock()
+                .unwrap()
+                .recv_timeout(Duration::from_secs(5))
+                .unwrap();
+            panic!("fixture worker failure");
+        });
+        super::phase08_19_stage::register(
+            id,
+            command,
+            app.state::<CatalogWatcherState>().inner(),
+            callback,
+        );
+        let _guard = StageGuard(id);
+        run(async move {
+            let caller = std::thread::current().id();
+            let mut future = Box::pin(future);
+            assert!(
+                std::future::poll_fn(|cx| std::task::Poll::Ready(future.as_mut().poll(cx)))
+                    .await
+                    .is_pending(),
+                "{command} must yield until its blocking worker completes"
+            );
+            let worker = entered_rx.recv().await.expect("worker entry");
+            let mut yielded = false;
+            std::future::poll_fn(|cx| {
+                if yielded {
+                    std::task::Poll::Ready(())
+                } else {
+                    yielded = true;
+                    cx.waker().wake_by_ref();
+                    std::task::Poll::Pending
+                }
+            })
+            .await;
+            assert_ne!(
+                worker, caller,
+                "{command} must run on a distinct blocking worker"
+            );
+            release_tx.send(()).unwrap();
+            assert!(
+                matches!(future.await, Err(error) if error.starts_with(&format!("{command}_task_failed:"))),
+                "{command} must map a panicked worker to the display-only task-failed error"
+            );
+        });
+    }
+
+    async fn start_watcher(app: TestApp, workspace_root: String) -> Result<bool, String> {
+        ipc::catalog_watcher_start(app.clone(), app.state(), workspace_root).await
+    }
+
+    async fn stop_watcher(app: TestApp) -> Result<bool, String> {
+        ipc::catalog_watcher_stop(app.state()).await
+    }
+
+    #[test]
+    fn phase08_19_catalog_each_wrapper_yields_same_poll_and_maps_join_failure() {
+        for command in ["catalog_watcher_start", "catalog_watcher_stop"] {
+            let app = mock_app();
+            let app = app.handle().clone();
+            let app_for_call = app.clone();
+            let future = async move {
+                if command == "catalog_watcher_start" {
+                    start_watcher(app_for_call, "/phase08-19-missing-workspace".to_string())
+                        .await
+                        .map(|_| String::new())
+                } else {
+                    stop_watcher(app_for_call).await.map(|_| String::new())
+                }
+            };
+            boundary(command, &app, future);
+        }
+    }
+
+    #[test]
+    fn phase08_19_catalog_real_fixture_results_and_legacy_rejections() {
+        let app = mock_app();
+        let app = app.handle().clone();
+        let (_work, workspace_root) = workspace_with_surface();
+
+        assert!(!run(stop_watcher(app.clone())).unwrap());
+        assert!(run(start_watcher(app.clone(), workspace_root.clone())).unwrap());
+        assert!(run(start_watcher(app.clone(), workspace_root.clone())).unwrap());
+        assert!(run(stop_watcher(app.clone())).unwrap());
+        assert!(!run(stop_watcher(app.clone())).unwrap());
+
+        let err = run(start_watcher(
+            app,
+            "/phase08-19-missing-workspace".to_string(),
+        ))
+        .unwrap_err();
+        assert!(
+            err.contains("workspace_root not found"),
+            "legacy rejection string unchanged, got: {err}"
+        );
+    }
 }
 
 #[cfg(test)]

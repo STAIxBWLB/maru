@@ -120,7 +120,7 @@ use hwped::{
 use inbox_settings::{
     read_inbox_runtime_config, read_inbox_settings, save_inbox_runtime_config, save_inbox_settings,
 };
-use inbox_watcher::{start_inbox_watcher, stop_inbox_watcher, InboxWatcherState};
+use inbox_watcher::InboxWatcherState;
 use kakao_relay::{
     enqueue_kakao_send, read_kakao_relay_messages, read_kakao_relay_status,
     read_kakao_send_results, stage_kakao_relay_new,
@@ -136,13 +136,11 @@ use maru_dir::{
 };
 use mission_state::ipc::{list_ai_missions, read_ai_mission_log, stop_ai_mission};
 use mission_state::MissionState;
-use ops_catalog::watcher::{catalog_watcher_start, catalog_watcher_stop, CatalogWatcherState};
+use ops_catalog::watcher::CatalogWatcherState;
 use outlook_mso::{
     check_mso_auth, decide_outlook_item, decide_outlook_items, fetch_outlook_unread,
 };
-use scratchpad_watcher::{
-    start_scratchpad_watcher, stop_scratchpad_watcher, ScratchpadWatcherState,
-};
+use scratchpad_watcher::ScratchpadWatcherState;
 #[cfg(target_os = "macos")]
 use site_view::queue_opened_urls;
 use site_view::{
@@ -167,7 +165,7 @@ use vault_list::{
     add_workspace_root, list_workspace_roots, refresh_workspace_capabilities,
     remove_workspace_root, set_active_workspace_root,
 };
-use vault_watcher::{start_vault_watcher, stop_vault_watcher, VaultWatcherState};
+use vault_watcher::VaultWatcherState;
 use workspace::{
     detect_workspace, list_workspaces, read_workspace_config, register_workspace_roots,
 };
@@ -222,10 +220,10 @@ pub fn run() {
             vault::ipc::scan_vault,
             vault::ipc::scan_vault_paths,
             vault::ipc::read_vault_cache,
-            start_vault_watcher,
-            stop_vault_watcher,
-            start_scratchpad_watcher,
-            stop_scratchpad_watcher,
+            vault_watcher::ipc::start_vault_watcher,
+            vault_watcher::ipc::stop_vault_watcher,
+            scratchpad_watcher::ipc::start_scratchpad_watcher,
+            scratchpad_watcher::ipc::stop_scratchpad_watcher,
             vault_graph::ipc::vault_graph_read,
             vault_graph::ipc::vault_graph_root,
             vault_graph::ipc::vault_graph_layout_read,
@@ -271,8 +269,8 @@ pub fn run() {
             inbox::ipc::apply_inbox_decisions,
             inbox::ipc::reject_inbox_item,
             inbox::ipc::reject_inbox_items,
-            start_inbox_watcher,
-            stop_inbox_watcher,
+            inbox_watcher::ipc::start_inbox_watcher,
+            inbox_watcher::ipc::stop_inbox_watcher,
             read_inbox_settings,
             save_inbox_settings,
             read_inbox_runtime_config,
@@ -530,8 +528,8 @@ pub fn run() {
             ops_catalog::ipc::catalog_scan,
             ops_catalog::ipc::catalog_query,
             ops_catalog::ipc::catalog_drilldown,
-            catalog_watcher_start,
-            catalog_watcher_stop,
+            ops_catalog::watcher::ipc::catalog_watcher_start,
+            ops_catalog::watcher::ipc::catalog_watcher_stop,
             // Dashboard project portfolio (issue #256)
             project_activity::ipc::scan_project_activity,
             // M7 Hub Connector (Phase 3 read, Phase 6 write)

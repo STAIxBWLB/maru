@@ -1,0 +1,433 @@
+{
+ "plan": "08-19",
+ "moduleIntegrationOwner": "08-19",
+ "commands": [
+  {
+   "name": "start_scratchpad_watcher",
+   "module": "src-tauri/src/scratchpad_watcher.rs",
+   "registrationPath": "src-tauri/src/lib.rs::scratchpad_watcher::ipc::start_scratchpad_watcher",
+   "originalDisposition": "CONVERT",
+   "disposition": "ISOLATED",
+   "helperChain": [
+    "src-tauri/src/scratchpad_watcher.rs::ipc::start_scratchpad_watcher owns the work_path String, clones the managed ScratchpadWatcherState and awaits tauri::async_runtime::spawn_blocking calling src-tauri/src/scratchpad_watcher.rs::start_scratchpad_watcher inside the worker; a JoinError becomes the display-only start_scratchpad_watcher_task_failed String.",
+    "src-tauri/src/scratchpad_watcher.rs::start_scratchpad_watcher revalidates workspace access and layout, returns the live generation for an idempotent same-work restart, claims the next epoch generation, then builds a src-tauri/src/atomic_file.rs::PathTransactionRequest over the configured scratchpad root from src-tauri/src/scratchpad.rs::resolve_scratchpad_root (workspace parent snapshot plus workspace-registry precondition) and enters src-tauri/src/atomic_file.rs::with_path_transactions.",
+    "src-tauri/src/scratchpad_watcher.rs::start_scratchpad_watcher_in_transaction re-checks the root with lease.ensure_covered and lease.before_effect, re-runs the access/layout validation, creates the missing root directory, registers the recursive notify watcher, spawns the debounce drain thread and publishes the ActiveWatcher only while the claimed generation is still current, so a superseded start can never replace the live owner."
+   ],
+   "workerBoundary": "src-tauri/src/scratchpad_watcher.rs::ipc::start_scratchpad_watcher awaits tauri::async_runtime::spawn_blocking before any config read, canonicalization, path admission or notify registration runs; only a JoinError maps to the display-only start_scratchpad_watcher_task_failed String while the u64 generation payload and every domain error string pass through unchanged; the owned state clone, never a borrowed State or guard, crosses the await.",
+   "syncCallers": [
+    "No Rust or CLI caller invokes start_scratchpad_watcher synchronously today; src-tauri/src/lib.rs registers only scratchpad_watcher::ipc::start_scratchpad_watcher, and the original synchronous src-tauri/src/scratchpad_watcher.rs::start_scratchpad_watcher keeps its name with owned AppHandle/state arguments for Rust callers."
+   ],
+   "mutationKey": {
+    "lexicalPaths": [
+     "Configured scratchpad root resolved from the command lexical workPath by src-tauri/src/scratchpad.rs::resolve_scratchpad_root (default <work>/scratchpad); the watcher start creates that root directory when missing via fs::create_dir_all"
+    ],
+    "aliasPaths": [
+     "Physical alias key of the root and the pinned existing-ancestor parents captured by PathTransactionRequest::new; resolve_scratchpad_root rejects symlink roots, so the root itself admits only its lexical identity while parents pin real directory handles"
+    ],
+    "sharedAdmissionEntry": "src-tauri/src/scratchpad_watcher.rs::start_scratchpad_watcher builds the src-tauri/src/atomic_file.rs::PathTransactionRequest (root path, workspace parent snapshot, workspace-registry precondition) and enters src-tauri/src/atomic_file.rs::with_path_transactions inside the blocking worker; src-tauri/src/scratchpad_watcher.rs::start_scratchpad_watcher_in_transaction revalidates coverage with lease.ensure_covered plus lease.ensure_workspace_registry and calls lease.before_effect before the first filesystem effect.",
+    "postAdmissionPreconditions": [
+     "Idempotent fast path: an active watcher for the same canonical work path with a current generation returns before any admission",
+     "Epoch generation is claimed before admission, so a concurrent stop still invalidates the setup before publish",
+     "lease.ensure_covered revalidates the resolved root against the admitted set and lease.before_effect confirms the pinned parents and workspace registry before fs::create_dir_all",
+     "Access and layout validation re-runs inside the transaction before the root creation"
+    ],
+    "domainLockOrder": "Shared path admission is acquired inside the blocking worker before the ScratchpadWatcherState control lock is taken for the final publish, and the control lock is released before the worker returns; the in-memory control lock is never held across the admission wait or any drain-thread interaction, and no guard needed by the drain thread exists at publish time."
+   },
+   "tests": [
+    {
+     "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_19",
+     "passed": 12,
+     "failed": 0,
+     "ignored": 0,
+     "exitCode": 0
+    }
+   ],
+   "processingCaller": {
+    "path": [
+     "src/lib/api.ts",
+     "src/lib/scratchpadApi.test.ts"
+    ],
+    "payload": "startScratchpadWatcher (src/lib/api.ts:3084) invokes start_scratchpad_watcher with workPath when the Scratchpad surface activates and stopScratchpadWatcher (src/lib/api.ts:3089) stops it on switch/quit; the surface keeps owning scratchpad://changed and scratchpad://error subscription regardless of screen changes.",
+    "terminalNoticeOwner": "The Scratchpad surface owns current watcher-event display and error toasts. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+   },
+   "evidence": {
+    "behaviorCases": [
+     "phase08_19_scratchpad_each_wrapper_yields_same_poll_and_maps_join_failure",
+     "phase08_19_scratchpad_real_fixture_results_and_legacy_rejections",
+     "phase08_19_scratchpad_start_serializes_with_scratchpad_save_both_orders",
+     "phase08_19_scratchpad_save_conflict_releases_admission_for_watcher_start",
+     "phase08_19_scratchpad_stop_before_start_is_accepted"
+    ],
+    "workerProof": "scratchpad_watcher::phase08_19::phase08_19_scratchpad_each_wrapper_yields_same_poll_and_maps_join_failure holds the start_scratchpad_watcher future at spawn_blocking worker entry via a #[cfg(test)] worker-stage hook keyed to the test managed ScratchpadWatcherState identity (Arc pointer of the control mutex), manually polls it on the same async task and proves progress while a distinct worker thread stays blocked; the panicked worker maps to the display-only start_scratchpad_watcher_task_failed String.",
+    "platformScope": "macOS unit fixtures only: tauri::test::mock_app with a fresh managed ScratchpadWatcherState, tempfile workspaces and atomic_file::phase08_06::Home isolation; no live workspace, credential, network endpoint or native test hook is touched, and the worker-stage hook is test-only code.",
+    "limits": "Shared admission serializes cooperating in-process writers only; notify registration is an OS subscription outside the transaction, and external editor processes are outside the in-process guarantee. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
+    "contract": "The wire payload (u64 generation), idempotent restart, epoch superseded rejection string, watcher epochs, stale-start rejection, stop-before-start semantics and the Phase 7 generated-directory prune predicate are unchanged; the only new failure path is the JoinError-to-String mapping at the worker boundary."
+   }
+  },
+  {
+   "name": "stop_scratchpad_watcher",
+   "module": "src-tauri/src/scratchpad_watcher.rs",
+   "registrationPath": "src-tauri/src/lib.rs::scratchpad_watcher::ipc::stop_scratchpad_watcher",
+   "originalDisposition": "AUDIT",
+   "disposition": "ISOLATED",
+   "helperChain": [
+    "src-tauri/src/scratchpad_watcher.rs::ipc::stop_scratchpad_watcher clones the managed ScratchpadWatcherState and awaits tauri::async_runtime::spawn_blocking calling src-tauri/src/scratchpad_watcher.rs::stop_scratchpad_watcher inside the worker; a JoinError becomes the display-only stop_scratchpad_watcher_task_failed String.",
+    "src-tauri/src/scratchpad_watcher.rs::stop_scratchpad_watcher bumps the shared epoch and clears the active watcher under the control lock; dropping the RecommendedWatcher unsubscribes the OS handle and the drain thread exits through the disconnected channel, so the audited chain reaches no filesystem write, network call, process wait or unbounded walk, and stop-before-start stays a no-op Ok."
+   ],
+   "workerBoundary": "src-tauri/src/scratchpad_watcher.rs::ipc::stop_scratchpad_watcher awaits tauri::async_runtime::spawn_blocking before the state lock wait runs; only a JoinError maps to the display-only stop_scratchpad_watcher_task_failed String while the unit payload and the poisoned-lock error string pass through unchanged; the owned state clone crosses the await, never a borrowed State or guard.",
+   "syncCallers": [
+    "No Rust or CLI caller invokes stop_scratchpad_watcher synchronously today; src-tauri/src/lib.rs registers only scratchpad_watcher::ipc::stop_scratchpad_watcher, and the original synchronous src-tauri/src/scratchpad_watcher.rs::stop_scratchpad_watcher keeps its name for Rust callers."
+   ],
+   "mutationKey": {
+    "readOnly": true,
+    "lexicalPaths": [],
+    "aliasPaths": [],
+    "sharedAdmissionEntry": "No filesystem mutation is owned by stop_scratchpad_watcher: it mutates only the in-memory epoch counter and the active-watcher slot; dropping the watcher handle unsubscribes the OS watch without writing files.",
+    "postAdmissionPreconditions": [
+     "No mutation admission is required for a read-only lifecycle stop; the epoch bump and slot clear are pure in-memory effects under the control lock"
+    ],
+    "domainLockOrder": "No path admission exists; the ScratchpadWatcherState control lock is the only guard, taken inside the blocking worker and released before return, never across an await."
+   },
+   "tests": [
+    {
+     "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_19",
+     "passed": 12,
+     "failed": 0,
+     "ignored": 0,
+     "exitCode": 0
+    }
+   ],
+   "processingCaller": {
+    "path": [
+     "src/lib/api.ts",
+     "src/lib/scratchpadApi.test.ts"
+    ],
+    "payload": "stopScratchpadWatcher (src/lib/api.ts:3089) invokes stop_scratchpad_watcher on Scratchpad surface switch/quit; the surface disposes its scratchpad://changed and scratchpad://error subscriptions on stop.",
+    "terminalNoticeOwner": "The Scratchpad surface owns current watcher-event display and error toasts. Navigation-safe terminal notices remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+   },
+   "evidence": {
+    "behaviorCases": [
+     "phase08_19_scratchpad_each_wrapper_yields_same_poll_and_maps_join_failure",
+     "phase08_19_scratchpad_real_fixture_results_and_legacy_rejections",
+     "phase08_19_scratchpad_stop_before_start_is_accepted"
+    ],
+    "workerProof": "scratchpad_watcher::phase08_19::phase08_19_scratchpad_each_wrapper_yields_same_poll_and_maps_join_failure holds the stop_scratchpad_watcher future at spawn_blocking worker entry via the state-keyed #[cfg(test)] worker-stage hook, manually polls it on the same async task and proves progress while a distinct worker thread stays blocked; the panicked worker maps to the display-only stop_scratchpad_watcher_task_failed String.",
+    "platformScope": "macOS unit fixtures only: tauri::test::mock_app with a fresh managed ScratchpadWatcherState per test; no live workspace, credential or network endpoint is touched, and the worker-stage hook is test-only code.",
+    "limits": "The stop clears the in-memory owner; OS watch teardown latency belongs to notify and is not a filesystem mutation. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
+    "contract": "The unit payload, the poisoned-lock error string and the stop-before-start Ok(()) semantics are unchanged; the only new failure path is the JoinError-to-String mapping at the worker boundary."
+   }
+  },
+  {
+   "name": "start_inbox_watcher",
+   "module": "src-tauri/src/inbox_watcher.rs",
+   "registrationPath": "src-tauri/src/lib.rs::inbox_watcher::ipc::start_inbox_watcher",
+   "originalDisposition": "CONVERT",
+   "disposition": "ISOLATED",
+   "helperChain": [
+    "src-tauri/src/inbox_watcher.rs::ipc::start_inbox_watcher owns the vault_path String, clones the managed InboxWatcherState and awaits tauri::async_runtime::spawn_blocking calling src-tauri/src/inbox_watcher.rs::start_inbox_watcher inside the worker; a JoinError becomes the display-only start_inbox_watcher_task_failed String.",
+    "src-tauri/src/inbox_watcher.rs::start_inbox_watcher validates the vault directory, loads the runtime or legacy config through src-tauri/src/inbox_settings.rs::load_runtime_config_or_legacy, resolves existing drop/pending watch roots via src-tauri/src/inbox_settings.rs::resolve_runtime_root and src-tauri/src/inbox_settings.rs::lexical_normalize_path, registers the recursive notify watches, spawns the 150ms debounce drain thread and publishes the watcher under the state lock, replacing any previous watcher whose drain thread exits on the disconnected channel."
+   ],
+   "workerBoundary": "src-tauri/src/inbox_watcher.rs::ipc::start_inbox_watcher awaits tauri::async_runtime::spawn_blocking before any config read, directory probe or notify registration runs; only a JoinError maps to the display-only start_inbox_watcher_task_failed String while the unit payload and every domain error string pass through unchanged; the owned state clone crosses the await, never a borrowed State or guard.",
+   "syncCallers": [
+    "No Rust or CLI caller invokes start_inbox_watcher synchronously today; src-tauri/src/lib.rs registers only inbox_watcher::ipc::start_inbox_watcher, and the original synchronous src-tauri/src/inbox_watcher.rs::start_inbox_watcher keeps its name with owned AppHandle/state arguments for Rust callers."
+   ],
+   "mutationKey": {
+    "readOnly": true,
+    "lexicalPaths": [],
+    "aliasPaths": [],
+    "sharedAdmissionEntry": "No filesystem mutation is owned by start_inbox_watcher: it reads .maru/inbox.json or workspace.config.yaml and registers OS watches only on drop/pending directories that already exist; notify watch registration is an OS subscription, not a file write, so no shared mutation admission is required.",
+    "postAdmissionPreconditions": [
+     "Vault path must be an existing directory and at least one configured drop or pending directory must exist before registration",
+     "The generated-dir prune predicate and per-path relevance filter run on the root-relative path inside the notify callback before any event is queued"
+    ],
+    "domainLockOrder": "No path admission exists; the InboxWatcherState slot lock is the only guard, taken inside the blocking worker for the final publish and released before return, never across an await."
+   },
+   "tests": [
+    {
+     "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_19",
+     "passed": 12,
+     "failed": 0,
+     "ignored": 0,
+     "exitCode": 0
+    }
+   ],
+   "processingCaller": {
+    "path": [
+     "src/lib/api.ts"
+    ],
+    "payload": "startInboxWatcher (src/lib/api.ts:1518) invokes start_inbox_watcher with vaultPath on vault activation and stopInboxWatcher (src/lib/api.ts:1523) stops it on switch/quit; the Inbox surface re-runs scan_inbox_drop on each inbox://file_events batch and keeps owning that refresh regardless of screen changes.",
+    "terminalNoticeOwner": "The Inbox surface owns current file-event refresh and error display. Navigation-safe terminal notices remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+   },
+   "evidence": {
+    "behaviorCases": [
+     "phase08_19_inbox_each_wrapper_yields_same_poll_and_maps_join_failure",
+     "phase08_19_inbox_real_fixture_results_and_legacy_rejections",
+     "phase08_19_inbox_blocked_start_still_allows_stop_and_replace"
+    ],
+    "workerProof": "inbox_watcher::phase08_19::phase08_19_inbox_each_wrapper_yields_same_poll_and_maps_join_failure holds the start_inbox_watcher future at spawn_blocking worker entry via a #[cfg(test)] worker-stage hook keyed to the test managed InboxWatcherState identity (Arc pointer of the watcher slot mutex), manually polls it on the same async task and proves progress while a distinct worker thread stays blocked; the panicked worker maps to the display-only start_inbox_watcher_task_failed String.",
+    "platformScope": "macOS unit fixtures only: tauri::test::mock_app with a fresh managed InboxWatcherState and a disposable vault fixture seeded with a legacy .maru/inbox.json and an existing drop directory; no live workspace, credential or network endpoint is touched, and the worker-stage hook is test-only code.",
+    "limits": "The debounce drain thread is a dedicated OS thread that exits on watcher drop; watch registration reaches no network, process or unbounded walk. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
+    "contract": "The unit payload, the not-a-directory and no-watch-roots rejection strings, the replace-active-watcher lifecycle and the Phase 7 generated-directory prune predicate are unchanged; the only new failure path is the JoinError-to-String mapping at the worker boundary."
+   }
+  },
+  {
+   "name": "stop_inbox_watcher",
+   "module": "src-tauri/src/inbox_watcher.rs",
+   "registrationPath": "src-tauri/src/lib.rs::inbox_watcher::ipc::stop_inbox_watcher",
+   "originalDisposition": "AUDIT",
+   "disposition": "ISOLATED",
+   "helperChain": [
+    "src-tauri/src/inbox_watcher.rs::ipc::stop_inbox_watcher clones the managed InboxWatcherState and awaits tauri::async_runtime::spawn_blocking calling src-tauri/src/inbox_watcher.rs::stop_inbox_watcher inside the worker; a JoinError becomes the display-only stop_inbox_watcher_task_failed String.",
+    "src-tauri/src/inbox_watcher.rs::stop_inbox_watcher clears the watcher slot under the state lock; dropping the RecommendedWatcher unsubscribes the OS handle and ends the drain thread via the disconnected channel, so the audited chain reaches no filesystem write, network call, process wait or unbounded walk."
+   ],
+   "workerBoundary": "src-tauri/src/inbox_watcher.rs::ipc::stop_inbox_watcher awaits tauri::async_runtime::spawn_blocking before the state lock wait runs; only a JoinError maps to the display-only stop_inbox_watcher_task_failed String while the unit payload and the poisoned-lock error string pass through unchanged; the owned state clone crosses the await, never a borrowed State or guard.",
+   "syncCallers": [
+    "No Rust or CLI caller invokes stop_inbox_watcher synchronously today; src-tauri/src/lib.rs registers only inbox_watcher::ipc::stop_inbox_watcher, and the original synchronous src-tauri/src/inbox_watcher.rs::stop_inbox_watcher keeps its name for Rust callers."
+   ],
+   "mutationKey": {
+    "readOnly": true,
+    "lexicalPaths": [],
+    "aliasPaths": [],
+    "sharedAdmissionEntry": "No filesystem mutation is owned by stop_inbox_watcher: it clears only the in-memory watcher slot; dropping the handle unsubscribes the OS watch without writing files.",
+    "postAdmissionPreconditions": [
+     "No mutation admission is required for a read-only lifecycle stop; the slot clear is a pure in-memory effect under the state lock"
+    ],
+    "domainLockOrder": "No path admission exists; the InboxWatcherState slot lock is the only guard, taken inside the blocking worker and released before return, never across an await."
+   },
+   "tests": [
+    {
+     "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_19",
+     "passed": 12,
+     "failed": 0,
+     "ignored": 0,
+     "exitCode": 0
+    }
+   ],
+   "processingCaller": {
+    "path": [
+     "src/lib/api.ts"
+    ],
+    "payload": "stopInboxWatcher (src/lib/api.ts:1523) invokes stop_inbox_watcher on vault switch/quit; the Inbox surface disposes its inbox://file_events subscription on stop.",
+    "terminalNoticeOwner": "The Inbox surface owns current file-event refresh and error display. Navigation-safe terminal notices remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+   },
+   "evidence": {
+    "behaviorCases": [
+     "phase08_19_inbox_each_wrapper_yields_same_poll_and_maps_join_failure",
+     "phase08_19_inbox_real_fixture_results_and_legacy_rejections",
+     "phase08_19_inbox_blocked_start_still_allows_stop_and_replace"
+    ],
+    "workerProof": "inbox_watcher::phase08_19::phase08_19_inbox_each_wrapper_yields_same_poll_and_maps_join_failure holds the stop_inbox_watcher future at spawn_blocking worker entry via the state-keyed #[cfg(test)] worker-stage hook, manually polls it on the same async task and proves progress while a distinct worker thread stays blocked; the panicked worker maps to the display-only stop_inbox_watcher_task_failed String.",
+    "platformScope": "macOS unit fixtures only: tauri::test::mock_app with a fresh managed InboxWatcherState per test; no live workspace, credential or network endpoint is touched, and the worker-stage hook is test-only code.",
+    "limits": "OS watch teardown latency belongs to notify and is not a filesystem mutation. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
+    "contract": "The unit payload and the poisoned-lock error string are unchanged; the only new failure path is the JoinError-to-String mapping at the worker boundary."
+   }
+  },
+  {
+   "name": "start_vault_watcher",
+   "module": "src-tauri/src/vault_watcher.rs",
+   "registrationPath": "src-tauri/src/lib.rs::vault_watcher::ipc::start_vault_watcher",
+   "originalDisposition": "CONVERT",
+   "disposition": "ISOLATED",
+   "helperChain": [
+    "src-tauri/src/vault_watcher.rs::ipc::start_vault_watcher owns the workspace_path String, clones the managed VaultWatcherState and awaits tauri::async_runtime::spawn_blocking calling src-tauri/src/vault_watcher.rs::start_vault_watcher inside the worker; a JoinError becomes the display-only start_vault_watcher_task_failed String.",
+    "src-tauri/src/vault_watcher.rs::start_vault_watcher canonicalizes the workspace root, registers the recursive notify watcher, spawns the 120ms debounce drain thread that filters paths through src-tauri/src/vault_watcher.rs::relevant_path (shared generated-dir prune, .maru cache exclusion and document-extension gate) and publishes the watcher under the state lock, replacing any previous watcher."
+   ],
+   "workerBoundary": "src-tauri/src/vault_watcher.rs::ipc::start_vault_watcher awaits tauri::async_runtime::spawn_blocking before any canonicalization or notify registration runs; only a JoinError maps to the display-only start_vault_watcher_task_failed String while the unit payload and every domain error string pass through unchanged; the owned state clone crosses the await, never a borrowed State or guard.",
+   "syncCallers": [
+    "No Rust or CLI caller invokes start_vault_watcher synchronously today; src-tauri/src/lib.rs registers only vault_watcher::ipc::start_vault_watcher, and the original synchronous src-tauri/src/vault_watcher.rs::start_vault_watcher keeps its name with owned AppHandle/state arguments for Rust callers."
+   ],
+   "mutationKey": {
+    "readOnly": true,
+    "lexicalPaths": [],
+    "aliasPaths": [],
+    "sharedAdmissionEntry": "No filesystem mutation is owned by start_vault_watcher: it canonicalizes and probes the workspace directory and registers an OS watch; notify registration is an OS subscription, not a file write, so no shared mutation admission is required.",
+    "postAdmissionPreconditions": [
+     "The workspace path must resolve and be an existing directory before registration",
+     "The generated-dir prune runs on the root-relative path and a root named like a generated dir still dispatches (WR-01)"
+    ],
+    "domainLockOrder": "No path admission exists; the VaultWatcherState slot lock is the only guard, taken inside the blocking worker for the final publish and released before return, never across an await."
+   },
+   "tests": [
+    {
+     "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_19",
+     "passed": 12,
+     "failed": 0,
+     "ignored": 0,
+     "exitCode": 0
+    }
+   ],
+   "processingCaller": {
+    "path": [
+     "src/lib/api.ts"
+    ],
+    "payload": "startVaultWatcher (src/lib/api.ts:337) invokes start_vault_watcher with workspacePath on workspace activation and stopVaultWatcher (src/lib/api.ts:342) stops it on switch/quit; vault://index-delta consumers keep owning their incremental index refresh regardless of screen changes.",
+    "terminalNoticeOwner": "The vault index consumer owns current index-delta refresh and error display. Navigation-safe terminal notices remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+   },
+   "evidence": {
+    "behaviorCases": [
+     "phase08_19_vault_each_wrapper_yields_same_poll_and_maps_join_failure",
+     "phase08_19_vault_real_fixture_results_and_legacy_rejections"
+    ],
+    "workerProof": "vault_watcher::phase08_19::phase08_19_vault_each_wrapper_yields_same_poll_and_maps_join_failure holds the start_vault_watcher future at spawn_blocking worker entry via a #[cfg(test)] worker-stage hook keyed to the test managed VaultWatcherState identity (Arc pointer of the watcher slot mutex), manually polls it on the same async task and proves progress while a distinct worker thread stays blocked; the panicked worker maps to the display-only start_vault_watcher_task_failed String.",
+    "platformScope": "macOS unit fixtures only: tauri::test::mock_app with a fresh managed VaultWatcherState and a disposable workspace fixture containing one markdown file; no live workspace, credential or network endpoint is touched, and the worker-stage hook is test-only code.",
+    "limits": "The debounce drain thread is a dedicated OS thread that exits on watcher drop; the watch reaches no network, process or unbounded walk. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
+    "contract": "The unit payload, the not-a-directory and cannot-watch rejection strings, the replace-active-watcher lifecycle and the Phase 7 generated-directory prune predicate are unchanged; the only new failure path is the JoinError-to-String mapping at the worker boundary."
+   }
+  },
+  {
+   "name": "stop_vault_watcher",
+   "module": "src-tauri/src/vault_watcher.rs",
+   "registrationPath": "src-tauri/src/lib.rs::vault_watcher::ipc::stop_vault_watcher",
+   "originalDisposition": "AUDIT",
+   "disposition": "ISOLATED",
+   "helperChain": [
+    "src-tauri/src/vault_watcher.rs::ipc::stop_vault_watcher clones the managed VaultWatcherState and awaits tauri::async_runtime::spawn_blocking calling src-tauri/src/vault_watcher.rs::stop_vault_watcher inside the worker; a JoinError becomes the display-only stop_vault_watcher_task_failed String.",
+    "src-tauri/src/vault_watcher.rs::stop_vault_watcher clears the watcher slot under the state lock; dropping the RecommendedWatcher unsubscribes the OS handle and ends the drain thread via the disconnected channel, so the audited chain reaches no filesystem write, network call, process wait or unbounded walk."
+   ],
+   "workerBoundary": "src-tauri/src/vault_watcher.rs::ipc::stop_vault_watcher awaits tauri::async_runtime::spawn_blocking before the state lock wait runs; only a JoinError maps to the display-only stop_vault_watcher_task_failed String while the unit payload and the poisoned-lock error string pass through unchanged; the owned state clone crosses the await, never a borrowed State or guard.",
+   "syncCallers": [
+    "No Rust or CLI caller invokes stop_vault_watcher synchronously today; src-tauri/src/lib.rs registers only vault_watcher::ipc::stop_vault_watcher, and the original synchronous src-tauri/src/vault_watcher.rs::stop_vault_watcher keeps its name for Rust callers."
+   ],
+   "mutationKey": {
+    "readOnly": true,
+    "lexicalPaths": [],
+    "aliasPaths": [],
+    "sharedAdmissionEntry": "No filesystem mutation is owned by stop_vault_watcher: it clears only the in-memory watcher slot; dropping the handle unsubscribes the OS watch without writing files.",
+    "postAdmissionPreconditions": [
+     "No mutation admission is required for a read-only lifecycle stop; the slot clear is a pure in-memory effect under the state lock"
+    ],
+    "domainLockOrder": "No path admission exists; the VaultWatcherState slot lock is the only guard, taken inside the blocking worker and released before return, never across an await."
+   },
+   "tests": [
+    {
+     "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_19",
+     "passed": 12,
+     "failed": 0,
+     "ignored": 0,
+     "exitCode": 0
+    }
+   ],
+   "processingCaller": {
+    "path": [
+     "src/lib/api.ts"
+    ],
+    "payload": "stopVaultWatcher (src/lib/api.ts:342) invokes stop_vault_watcher on workspace switch/quit; vault://index-delta consumers dispose their subscriptions on stop.",
+    "terminalNoticeOwner": "The vault index consumer owns current index-delta refresh and error display. Navigation-safe terminal notices remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+   },
+   "evidence": {
+    "behaviorCases": [
+     "phase08_19_vault_each_wrapper_yields_same_poll_and_maps_join_failure",
+     "phase08_19_vault_real_fixture_results_and_legacy_rejections"
+    ],
+    "workerProof": "vault_watcher::phase08_19::phase08_19_vault_each_wrapper_yields_same_poll_and_maps_join_failure holds the stop_vault_watcher future at spawn_blocking worker entry via the state-keyed #[cfg(test)] worker-stage hook, manually polls it on the same async task and proves progress while a distinct worker thread stays blocked; the panicked worker maps to the display-only stop_vault_watcher_task_failed String.",
+    "platformScope": "macOS unit fixtures only: tauri::test::mock_app with a fresh managed VaultWatcherState per test; no live workspace, credential or network endpoint is touched, and the worker-stage hook is test-only code.",
+    "limits": "OS watch teardown latency belongs to notify and is not a filesystem mutation. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
+    "contract": "The unit payload and the poisoned-lock error string are unchanged; the only new failure path is the JoinError-to-String mapping at the worker boundary."
+   }
+  },
+  {
+   "name": "catalog_watcher_start",
+   "module": "src-tauri/src/ops_catalog/watcher.rs",
+   "registrationPath": "src-tauri/src/lib.rs::ops_catalog::watcher::ipc::catalog_watcher_start",
+   "originalDisposition": "CONVERT",
+   "disposition": "ISOLATED",
+   "helperChain": [
+    "src-tauri/src/ops_catalog/watcher.rs::ipc::catalog_watcher_start owns the workspace_root String, clones the managed CatalogWatcherState and awaits tauri::async_runtime::spawn_blocking calling src-tauri/src/ops_catalog/watcher.rs::catalog_watcher_start inside the worker; a JoinError becomes the display-only catalog_watcher_start_task_failed String.",
+    "src-tauri/src/ops_catalog/watcher.rs::catalog_watcher_start probes the workspace root, registers recursive watches on the existing core surfaces from src-tauri/src/ops_catalog/watcher.rs::catalog_watch_paths and the bounded BU walk of src-tauri/src/ops_catalog/watcher.rs::register_bu_watch_paths (WalkDir min_depth 2 max_depth 3 over projects/ and admin/ only), spawns the 500ms debounce flush thread whose events pass through src-tauri/src/ops_catalog/watcher.rs::should_dispatch_catalog_event (shared generated-dir prune composed with the catalog relevance gate) and publishes the watcher under the state lock."
+   ],
+   "workerBoundary": "src-tauri/src/ops_catalog/watcher.rs::ipc::catalog_watcher_start awaits tauri::async_runtime::spawn_blocking before any directory probe, bounded walk or notify registration runs; only a JoinError maps to the display-only catalog_watcher_start_task_failed String while the bool payload and every domain error string pass through unchanged; the owned state clone crosses the await, never a borrowed State or guard.",
+   "syncCallers": [
+    "No Rust or CLI caller invokes catalog_watcher_start synchronously today; src-tauri/src/lib.rs registers only ops_catalog::watcher::ipc::catalog_watcher_start, and the original synchronous src-tauri/src/ops_catalog/watcher.rs::catalog_watcher_start keeps its name with owned AppHandle/state arguments for Rust callers."
+   ],
+   "mutationKey": {
+    "readOnly": true,
+    "lexicalPaths": [],
+    "aliasPaths": [],
+    "sharedAdmissionEntry": "No filesystem mutation is owned by catalog_watcher_start: it probes existing directories and registers OS watches; the WalkDir pass is bounded (min_depth 2, max_depth 3, projects/ and admin/ subtrees only) and notify registration is an OS subscription, not a file write, so no shared mutation admission is required.",
+    "postAdmissionPreconditions": [
+     "workspace_root must exist before registration",
+     "Only existing surfaces are watched; watch failures on individual surfaces are logged and skipped without failing the start",
+     "The generated-dir prune composed with the catalog relevance gate runs per event before any catalog://refresh emit"
+    ],
+    "domainLockOrder": "No path admission exists; the CatalogWatcherState slot lock is the only guard, taken inside the blocking worker for the final publish and released before return, never across an await."
+   },
+   "tests": [
+    {
+     "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_19",
+     "passed": 12,
+     "failed": 0,
+     "ignored": 0,
+     "exitCode": 0
+    }
+   ],
+   "processingCaller": {
+    "path": [
+     "src/components/catalog/CatalogPane.tsx"
+    ],
+    "payload": "CatalogPane (src/components/catalog/CatalogPane.tsx:103) invokes catalog_watcher_start with workspaceRoot when the pane mounts and catalog_watcher_stop (src/components/catalog/CatalogPane.tsx:125) on unmount; the pane keeps owning the follow-up catalog_scan refresh on each catalog://refresh event regardless of screen changes.",
+    "terminalNoticeOwner": "CatalogPane owns current catalog refresh and failure display (it already logs a console warning when start fails). Navigation-safe terminal notices remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+   },
+   "evidence": {
+    "behaviorCases": [
+     "phase08_19_catalog_each_wrapper_yields_same_poll_and_maps_join_failure",
+     "phase08_19_catalog_real_fixture_results_and_legacy_rejections"
+    ],
+    "workerProof": "ops_catalog::watcher::phase08_19::phase08_19_catalog_each_wrapper_yields_same_poll_and_maps_join_failure holds the catalog_watcher_start future at spawn_blocking worker entry via a #[cfg(test)] worker-stage hook keyed to the test managed CatalogWatcherState identity (Arc pointer of the watcher slot mutex), manually polls it on the same async task and proves progress while a distinct worker thread stays blocked; the panicked worker maps to the display-only catalog_watcher_start_task_failed String.",
+    "platformScope": "macOS unit fixtures only: tauri::test::mock_app with a fresh managed CatalogWatcherState and a disposable workspace fixture seeded with an existing inbox/items/pending surface; no live workspace, credential or network endpoint is touched, and the worker-stage hook is test-only code.",
+    "limits": "The pending-flush thread cadence and OS watch teardown latency belong to notify/std and are not filesystem mutations; the BU walk stays depth-bounded. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
+    "contract": "The bool payload, the workspace_root not found rejection string, the replace-active-watcher lifecycle, per-surface watch-failure tolerance and the Phase 7 generated-directory prune predicate are unchanged; the only new failure path is the JoinError-to-String mapping at the worker boundary."
+   }
+  },
+  {
+   "name": "catalog_watcher_stop",
+   "module": "src-tauri/src/ops_catalog/watcher.rs",
+   "registrationPath": "src-tauri/src/lib.rs::ops_catalog::watcher::ipc::catalog_watcher_stop",
+   "originalDisposition": "AUDIT",
+   "disposition": "ISOLATED",
+   "helperChain": [
+    "src-tauri/src/ops_catalog/watcher.rs::ipc::catalog_watcher_stop clones the managed CatalogWatcherState and awaits tauri::async_runtime::spawn_blocking calling src-tauri/src/ops_catalog/watcher.rs::catalog_watcher_stop inside the worker; a JoinError becomes the display-only catalog_watcher_stop_task_failed String.",
+    "src-tauri/src/ops_catalog/watcher.rs::catalog_watcher_stop reports whether a watcher was active and clears the slot under the state lock; dropping the RecommendedWatcher unsubscribes the OS handle, so the audited chain reaches no filesystem write, network call, process wait or unbounded walk."
+   ],
+   "workerBoundary": "src-tauri/src/ops_catalog/watcher.rs::ipc::catalog_watcher_stop awaits tauri::async_runtime::spawn_blocking before the state lock wait runs; only a JoinError maps to the display-only catalog_watcher_stop_task_failed String while the bool payload and the state poisoned error string pass through unchanged; the owned state clone crosses the await, never a borrowed State or guard.",
+   "syncCallers": [
+    "No Rust or CLI caller invokes catalog_watcher_stop synchronously today; src-tauri/src/lib.rs registers only ops_catalog::watcher::ipc::catalog_watcher_stop, and the original synchronous src-tauri/src/ops_catalog/watcher.rs::catalog_watcher_stop keeps its name for Rust callers."
+   ],
+   "mutationKey": {
+    "readOnly": true,
+    "lexicalPaths": [],
+    "aliasPaths": [],
+    "sharedAdmissionEntry": "No filesystem mutation is owned by catalog_watcher_stop: it clears only the in-memory watcher slot; dropping the handle unsubscribes the OS watch without writing files.",
+    "postAdmissionPreconditions": [
+     "No mutation admission is required for a read-only lifecycle stop; the slot clear is a pure in-memory effect under the state lock"
+    ],
+    "domainLockOrder": "No path admission exists; the CatalogWatcherState slot lock is the only guard, taken inside the blocking worker and released before return, never across an await."
+   },
+   "tests": [
+    {
+     "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_19",
+     "passed": 12,
+     "failed": 0,
+     "ignored": 0,
+     "exitCode": 0
+    }
+   ],
+   "processingCaller": {
+    "path": [
+     "src/components/catalog/CatalogPane.tsx"
+    ],
+    "payload": "CatalogPane (src/components/catalog/CatalogPane.tsx:125) invokes catalog_watcher_stop on unmount and ignores a missing watcher; the pane stops its catalog://refresh subscription on stop.",
+    "terminalNoticeOwner": "CatalogPane owns current catalog refresh and failure display. Navigation-safe terminal notices remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+   },
+   "evidence": {
+    "behaviorCases": [
+     "phase08_19_catalog_each_wrapper_yields_same_poll_and_maps_join_failure",
+     "phase08_19_catalog_real_fixture_results_and_legacy_rejections"
+    ],
+    "workerProof": "ops_catalog::watcher::phase08_19::phase08_19_catalog_each_wrapper_yields_same_poll_and_maps_join_failure holds the catalog_watcher_stop future at spawn_blocking worker entry via the state-keyed #[cfg(test)] worker-stage hook, manually polls it on the same async task and proves progress while a distinct worker thread stays blocked; the panicked worker maps to the display-only catalog_watcher_stop_task_failed String.",
+    "platformScope": "macOS unit fixtures only: tauri::test::mock_app with a fresh managed CatalogWatcherState per test; no live workspace, credential or network endpoint is touched, and the worker-stage hook is test-only code.",
+    "limits": "OS watch teardown latency belongs to notify and is not a filesystem mutation. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
+    "contract": "The had-watcher bool payload and the state poisoned error string are unchanged; the only new failure path is the JoinError-to-String mapping at the worker boundary."
+   }
+  }
+ ]
+}
