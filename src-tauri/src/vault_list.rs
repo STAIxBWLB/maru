@@ -576,27 +576,28 @@ pub fn assert_maru_can_write(
     action: WorkspaceWriteAction,
 ) -> Result<(), String> {
     let registry = load_registry()?;
-    let Some(workspace) = registry
+    let requested = comparable_root(workspace_path);
+    // Registry files may retain supported aliases (including legacy spellings).
+    // Every matching entry must allow the action; a permissive duplicate cannot
+    // hide another entry's read-only or delegated policy.
+    for workspace in registry
         .workspaces
         .iter()
-        .find(|workspace| workspace.path == workspace_path)
-    else {
-        return Ok(());
-    };
-    let summary = compute_permission_summary(workspace, false);
-    if !capability_allows(&summary.capabilities, action) {
-        let writer =
-            workspace
-                .external_writer
-                .as_deref()
-                .unwrap_or(match workspace.write_policy.as_str() {
+        .filter(|workspace| comparable_root(&workspace.path) == requested)
+    {
+        let summary = compute_permission_summary(workspace, false);
+        if !capability_allows(&summary.capabilities, action) {
+            let writer = workspace.external_writer.as_deref().unwrap_or(
+                match workspace.write_policy.as_str() {
                     "readOnly" => "read-only workspace",
                     "delegated" => "external writer",
                     _ => "provider capabilities",
-                });
-        return Err(format!(
-            "Workspace writes are blocked by {writer}; Maru will not write directly."
-        ));
+                },
+            );
+            return Err(format!(
+                "Workspace writes are blocked by {writer}; Maru will not write directly."
+            ));
+        }
     }
     Ok(())
 }

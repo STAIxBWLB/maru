@@ -151,10 +151,6 @@ use maru_dir::{
     read_maru_workspace, save_maru_ignore, save_maru_mcp, save_maru_projects, save_maru_rule,
     save_maru_settings, save_maru_template, update_maru_workspace,
 };
-use meetings::{
-    append_meetings_log, read_meeting_guides, read_meeting_metadata, read_meetings_log,
-    scan_meeting_notes,
-};
 use mission_state::{list_ai_missions, read_ai_mission_log, stop_ai_mission, MissionState};
 use ops_catalog::{
     catalog_drilldown, catalog_query, catalog_scan,
@@ -164,7 +160,6 @@ use outlook_mso::{
     check_mso_auth, decide_outlook_item, decide_outlook_items, fetch_outlook_unread,
     stage_outlook_items,
 };
-use project_activity::scan_project_activity;
 use scheduler::{
     scheduler_add, scheduler_list, scheduler_remove, scheduler_run_now, scheduler_set_enabled,
 };
@@ -191,10 +186,6 @@ use sites::{read_sites, save_sites, scan_work_sites};
 use skill_host::{skills_sync_all_sources, skills_sync_source};
 use studio::{
     studio_apply_body, studio_state_delete, studio_state_list, studio_state_read, studio_state_save,
-};
-use tasks::{
-    append_tasks_log, create_task_note, move_task_note, read_task_metadata, read_tasks_log,
-    scan_task_notes, update_task_details, update_task_schedule_fields, update_task_status,
 };
 use tauri::Manager;
 use telegram_config::{read_telegram_monitor_config, save_telegram_monitor_config};
@@ -351,22 +342,22 @@ pub fn run() {
             scan_share_outbox,
             prepare_share_outbox_files,
             parse_korean_date_cmd,
-            scan_meeting_notes,
-            read_meeting_metadata,
-            read_meeting_guides,
-            append_meetings_log,
-            read_meetings_log,
+            meetings::ipc::scan_meeting_notes,
+            meetings::ipc::read_meeting_metadata,
+            meetings::ipc::read_meeting_guides,
+            meetings::ipc::append_meetings_log,
+            meetings::ipc::read_meetings_log,
             calendar_search::ipc::search_calendar_notes,
             content_search::ipc::search_workspace_contents,
-            scan_task_notes,
-            read_task_metadata,
-            create_task_note,
-            update_task_status,
-            update_task_schedule_fields,
-            update_task_details,
-            move_task_note,
-            append_tasks_log,
-            read_tasks_log,
+            tasks::ipc::scan_task_notes,
+            tasks::ipc::read_task_metadata,
+            tasks::ipc::create_task_note,
+            tasks::ipc::update_task_status,
+            tasks::ipc::update_task_schedule_fields,
+            tasks::ipc::update_task_details,
+            tasks::ipc::move_task_note,
+            tasks::ipc::append_tasks_log,
+            tasks::ipc::read_tasks_log,
             // Maru Today (morning ritual core)
             today_logical_day,
             today_open,
@@ -601,7 +592,7 @@ pub fn run() {
             catalog_watcher_start,
             catalog_watcher_stop,
             // Dashboard project portfolio (issue #256)
-            scan_project_activity,
+            project_activity::ipc::scan_project_activity,
             // M7 Hub Connector (Phase 3 read, Phase 6 write)
             hub_status,
             hub_fetch_catalog,

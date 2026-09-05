@@ -1,4 +1,7 @@
-use crate::atomic_file::write_atomic;
+use crate::atomic_file::{
+    with_path_transactions, write_atomic, PathTransactionLease, PathTransactionParent,
+    PathTransactionRequest,
+};
 use crate::document::revision_for;
 use crate::frontmatter::{update_frontmatter_content, FrontmatterValue};
 use crate::vault::{
@@ -125,8 +128,10 @@ pub(crate) struct MaterializedTaskWrite {
     pub created: bool,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub(crate) struct PreparedCaptureTask {
+    parent: PathTransactionParent,
+    workspace_parent: PathTransactionParent,
     path: PathBuf,
     pub rel_path: String,
     bucket: TaskBucket,
@@ -134,6 +139,20 @@ pub(crate) struct PreparedCaptureTask {
     content: String,
     pub content_hash: String,
     pub will_create: bool,
+}
+
+impl std::fmt::Debug for PreparedCaptureTask {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PreparedCaptureTask")
+            .field("path", &self.path)
+            .field("rel_path", &self.rel_path)
+            .field("bucket", &self.bucket)
+            .field("capture_id", &self.capture_id)
+            .field("content", &self.content)
+            .field("content_hash", &self.content_hash)
+            .field("will_create", &self.will_create)
+            .finish()
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -175,7 +194,6 @@ pub struct TasksLogLine {
     pub legacy: bool,
 }
 
-#[tauri::command(async)]
 pub fn scan_task_notes(
     work_path: String,
     root: Option<String>,
@@ -218,7 +236,6 @@ pub fn scan_task_notes(
     Ok(rows)
 }
 
-#[tauri::command(async)]
 pub fn read_task_metadata(work_path: String, rel_path: String) -> Result<TaskMetadata, String> {
     let path = resolve_inside_vault(&work_path, &rel_path)?;
     let raw = fs::read_to_string(&path).map_err(|err| format!("Cannot read task note: {err}"))?;
@@ -241,13 +258,58 @@ pub fn read_task_metadata(work_path: String, rel_path: String) -> Result<TaskMet
     })
 }
 
-#[tauri::command(async)]
 pub fn create_task_note(
     work_path: String,
     draft: CreateTaskDraft,
     root: Option<String>,
 ) -> Result<TaskNoteRow, String> {
-    assert_maru_can_write(&work_path, WorkspaceWriteAction::Create)?;
+    let work = normalize_existing_dir(&work_path)?;
+    let paths = vec![
+        resolve_tasks_root(&work, root.as_deref().unwrap_or("tasks"))?.join(draft.bucket.as_str()),
+    ];
+    let lexical_work = if Path::new(&work_path).is_absolute() {
+        PathBuf::from(&work_path)
+    } else {
+        std::env::current_dir()
+            .map_err(|err| err.to_string())?
+            .join(&work_path)
+    };
+    let paths = paths
+        .into_iter()
+        .flat_map(|path| {
+            let alias = path
+                .strip_prefix(&work)
+                .map(|rel| lexical_work.join(rel))
+                .unwrap_or_else(|_| path.clone());
+            [path, alias]
+        })
+        .collect::<Vec<_>>();
+    let request = PathTransactionRequest::new(paths)?
+        .require_parent(&work)?
+        .with_workspace_registry()?;
+    with_path_transactions(request, |lease| {
+        create_task_note_in_transaction(lease, work_path, draft, root)
+    })
+}
+
+pub(crate) fn create_task_note_in_transaction(
+    lease: &PathTransactionLease,
+    work_path: String,
+    draft: CreateTaskDraft,
+    root: Option<String>,
+) -> Result<TaskNoteRow, String> {
+    let work = normalize_existing_dir(&work_path)?;
+    let paths = vec![
+        resolve_tasks_root(&work, root.as_deref().unwrap_or("tasks"))?.join(draft.bucket.as_str()),
+    ];
+    lease.ensure_covered(paths)?;
+    lease.ensure_workspace_registry()?;
+    lease.before_effect()?;
+
+    assert_maru_can_write(
+        &normalize_existing_dir(&work_path)?.to_string_lossy(),
+        WorkspaceWriteAction::Create,
+    )?;
     let work = normalize_existing_dir(&work_path)?;
     let tasks_root = resolve_tasks_root(&work, root.as_deref().unwrap_or("tasks"))?;
     let bucket_root = tasks_root.join(draft.bucket.as_str());
@@ -295,7 +357,12 @@ pub(crate) fn prepare_capture_task_materialization(
 ) -> Result<PreparedCaptureTask, String> {
     let tasks_root = resolve_tasks_root(work, "tasks")?;
     let bucket_root = tasks_root.join(draft.bucket.as_str());
-    fs::create_dir_all(&bucket_root).map_err(|err| format!("Cannot create task bucket: {err}"))?;
+    let workspace_parent = PathTransactionParent::capture(work)?;
+    let mut existing = bucket_root.as_path();
+    while !existing.is_dir() {
+        existing = existing.parent().ok_or("Task parent missing")?;
+    }
+    let parent = PathTransactionParent::capture(existing)?;
 
     let capture_hash = revision_for(capture_id);
     let suffix = capture_hash.get(..10).unwrap_or(&capture_hash);
@@ -338,6 +405,8 @@ pub(crate) fn prepare_capture_task_materialization(
     let content_hash = revision_for(&content);
     let will_create = !path.exists();
     Ok(PreparedCaptureTask {
+        parent,
+        workspace_parent,
         path,
         rel_path,
         bucket: draft.bucket,
@@ -355,6 +424,24 @@ pub(crate) fn materialize_capture_task(
     work: &Path,
     prepared: &PreparedCaptureTask,
 ) -> Result<MaterializedTaskWrite, String> {
+    let request = PathTransactionRequest::new(vec![prepared.path.clone()])?
+        .require_parent_snapshot(&prepared.parent)?
+        .require_parent_snapshot(&prepared.workspace_parent)?
+        .with_workspace_registry()?;
+    with_path_transactions(request, |lease| {
+        materialize_capture_task_in_transaction(lease, work, prepared)
+    })
+}
+
+pub(crate) fn materialize_capture_task_in_transaction(
+    lease: &PathTransactionLease,
+    work: &Path,
+    prepared: &PreparedCaptureTask,
+) -> Result<MaterializedTaskWrite, String> {
+    lease.ensure_covered(vec![prepared.path.clone()])?;
+    lease.ensure_workspace_registry()?;
+    lease.before_effect()?;
+    assert_maru_can_write(&work.to_string_lossy(), WorkspaceWriteAction::Create)?;
     if prepared.path.exists() {
         let row = task_row_for_path(work, &prepared.path, prepared.bucket)?;
         let stored_capture = row
@@ -376,14 +463,62 @@ pub(crate) fn materialize_capture_task(
     Ok(MaterializedTaskWrite { row, created: true })
 }
 
-#[tauri::command(async)]
 pub fn update_task_status(
     work_path: String,
     rel_path: String,
     status: TaskStatus,
     root: Option<String>,
 ) -> Result<TaskNoteRow, String> {
-    assert_maru_can_write(&work_path, WorkspaceWriteAction::Modify)?;
+    let work = normalize_existing_dir(&work_path)?;
+    let paths = vec![
+        resolve_inside_vault(&work_path, &rel_path)?,
+        resolve_tasks_root(&work, root.as_deref().unwrap_or("tasks"))?,
+    ];
+    let lexical_work = if Path::new(&work_path).is_absolute() {
+        PathBuf::from(&work_path)
+    } else {
+        std::env::current_dir()
+            .map_err(|err| err.to_string())?
+            .join(&work_path)
+    };
+    let paths = paths
+        .into_iter()
+        .flat_map(|path| {
+            let alias = path
+                .strip_prefix(&work)
+                .map(|rel| lexical_work.join(rel))
+                .unwrap_or_else(|_| path.clone());
+            [path, alias]
+        })
+        .collect::<Vec<_>>();
+    let request = PathTransactionRequest::new(paths)?
+        .require_parent(&work)?
+        .with_workspace_registry()?;
+    with_path_transactions(request, |lease| {
+        update_task_status_in_transaction(lease, work_path, rel_path, status, root)
+    })
+}
+
+pub(crate) fn update_task_status_in_transaction(
+    lease: &PathTransactionLease,
+    work_path: String,
+    rel_path: String,
+    status: TaskStatus,
+    root: Option<String>,
+) -> Result<TaskNoteRow, String> {
+    let work = normalize_existing_dir(&work_path)?;
+    let paths = vec![
+        resolve_inside_vault(&work_path, &rel_path)?,
+        resolve_tasks_root(&work, root.as_deref().unwrap_or("tasks"))?,
+    ];
+    lease.ensure_covered(paths)?;
+    lease.ensure_workspace_registry()?;
+    lease.before_effect()?;
+
+    assert_maru_can_write(
+        &normalize_existing_dir(&work_path)?.to_string_lossy(),
+        WorkspaceWriteAction::Modify,
+    )?;
     let work = normalize_existing_dir(&work_path)?;
     let path = resolve_inside_vault(&work_path, &rel_path)?;
     let tasks_root = resolve_tasks_root(&work, root.as_deref().unwrap_or("tasks"))?;
@@ -394,30 +529,88 @@ pub fn update_task_status(
         "status",
         Some(FrontmatterValue::String(status.as_str().to_string())),
     )?;
-    if updated != original {
-        fs::write(&path, &updated).map_err(|err| format!("Cannot update task status: {err}"))?;
-    }
     let target_bucket = status.target_bucket();
     let current_bucket = bucket_from_task_path(&tasks_root, &path)?;
+    if current_bucket != target_bucket {
+        assert_maru_can_write(
+            &normalize_existing_dir(&work_path)?.to_string_lossy(),
+            WorkspaceWriteAction::RenameMove,
+        )?;
+    }
+    if updated != original {
+        write_atomic(&path, updated.as_bytes())
+            .map_err(|err| format!("Cannot update task status: {err}"))?;
+    }
     if current_bucket == target_bucket {
         return task_row_for_path(&work, &path, current_bucket);
     }
-    assert_maru_can_write(&work_path, WorkspaceWriteAction::RenameMove)?;
+    assert_maru_can_write(
+        &normalize_existing_dir(&work_path)?.to_string_lossy(),
+        WorkspaceWriteAction::RenameMove,
+    )?;
     let target = conflict_free_path(&target_path_for_bucket(&tasks_root, &path, target_bucket)?);
-    if let Some(parent) = target.parent() {
-        fs::create_dir_all(parent).map_err(|err| format!("Cannot create task target: {err}"))?;
+    let moved = (|| {
+        if let Some(parent) = target.parent() {
+            fs::create_dir_all(parent)
+                .map_err(|err| format!("Cannot create task target: {err}"))?;
+        }
+        fs::rename(&path, &target).map_err(|err| format!("Cannot move task note: {err}"))
+    })();
+    if let Err(error) = moved {
+        write_atomic(&path, original.as_bytes())
+            .map_err(|rollback| format!("{error}; rollback failed: {rollback}"))?;
+        return Err(error);
     }
-    fs::rename(&path, &target).map_err(|err| format!("Cannot move task note: {err}"))?;
     task_row_for_path(&work, &target, target_bucket)
 }
 
-#[tauri::command(async)]
 pub fn update_task_schedule_fields(
     work_path: String,
     rel_path: String,
     fields: UpdateTaskScheduleFields,
 ) -> Result<TaskNoteRow, String> {
-    assert_maru_can_write(&work_path, WorkspaceWriteAction::Modify)?;
+    let work = normalize_existing_dir(&work_path)?;
+    let paths = vec![resolve_inside_vault(&work_path, &rel_path)?];
+    let lexical_work = if Path::new(&work_path).is_absolute() {
+        PathBuf::from(&work_path)
+    } else {
+        std::env::current_dir()
+            .map_err(|err| err.to_string())?
+            .join(&work_path)
+    };
+    let paths = paths
+        .into_iter()
+        .flat_map(|path| {
+            let alias = path
+                .strip_prefix(&work)
+                .map(|rel| lexical_work.join(rel))
+                .unwrap_or_else(|_| path.clone());
+            [path, alias]
+        })
+        .collect::<Vec<_>>();
+    let request = PathTransactionRequest::new(paths)?
+        .require_parent(&work)?
+        .with_workspace_registry()?;
+    with_path_transactions(request, |lease| {
+        update_task_schedule_fields_in_transaction(lease, work_path, rel_path, fields)
+    })
+}
+
+pub(crate) fn update_task_schedule_fields_in_transaction(
+    lease: &PathTransactionLease,
+    work_path: String,
+    rel_path: String,
+    fields: UpdateTaskScheduleFields,
+) -> Result<TaskNoteRow, String> {
+    let paths = vec![resolve_inside_vault(&work_path, &rel_path)?];
+    lease.ensure_covered(paths)?;
+    lease.ensure_workspace_registry()?;
+    lease.before_effect()?;
+
+    assert_maru_can_write(
+        &normalize_existing_dir(&work_path)?.to_string_lossy(),
+        WorkspaceWriteAction::Modify,
+    )?;
     let work = normalize_existing_dir(&work_path)?;
     let path = resolve_inside_vault(&work_path, &rel_path)?;
     let original =
@@ -436,14 +629,62 @@ pub fn update_task_schedule_fields(
     task_row_for_path(&work, &path, bucket)
 }
 
-#[tauri::command(async)]
 pub fn update_task_details(
     work_path: String,
     rel_path: String,
     fields: UpdateTaskDetailsFields,
     root: Option<String>,
 ) -> Result<TaskNoteRow, String> {
-    assert_maru_can_write(&work_path, WorkspaceWriteAction::Modify)?;
+    let work = normalize_existing_dir(&work_path)?;
+    let paths = vec![
+        resolve_inside_vault(&work_path, &rel_path)?,
+        resolve_tasks_root(&work, root.as_deref().unwrap_or("tasks"))?,
+    ];
+    let lexical_work = if Path::new(&work_path).is_absolute() {
+        PathBuf::from(&work_path)
+    } else {
+        std::env::current_dir()
+            .map_err(|err| err.to_string())?
+            .join(&work_path)
+    };
+    let paths = paths
+        .into_iter()
+        .flat_map(|path| {
+            let alias = path
+                .strip_prefix(&work)
+                .map(|rel| lexical_work.join(rel))
+                .unwrap_or_else(|_| path.clone());
+            [path, alias]
+        })
+        .collect::<Vec<_>>();
+    let request = PathTransactionRequest::new(paths)?
+        .require_parent(&work)?
+        .with_workspace_registry()?;
+    with_path_transactions(request, |lease| {
+        update_task_details_in_transaction(lease, work_path, rel_path, fields, root)
+    })
+}
+
+pub(crate) fn update_task_details_in_transaction(
+    lease: &PathTransactionLease,
+    work_path: String,
+    rel_path: String,
+    fields: UpdateTaskDetailsFields,
+    root: Option<String>,
+) -> Result<TaskNoteRow, String> {
+    let work = normalize_existing_dir(&work_path)?;
+    let paths = vec![
+        resolve_inside_vault(&work_path, &rel_path)?,
+        resolve_tasks_root(&work, root.as_deref().unwrap_or("tasks"))?,
+    ];
+    lease.ensure_covered(paths)?;
+    lease.ensure_workspace_registry()?;
+    lease.before_effect()?;
+
+    assert_maru_can_write(
+        &normalize_existing_dir(&work_path)?.to_string_lossy(),
+        WorkspaceWriteAction::Modify,
+    )?;
     let work = normalize_existing_dir(&work_path)?;
     let path = resolve_inside_vault(&work_path, &rel_path)?;
     let tasks_root = resolve_tasks_root(&work, root.as_deref().unwrap_or("tasks"))?;
@@ -482,35 +723,102 @@ pub fn update_task_details(
         updated = replace_markdown_body(&updated, &body)?;
     }
 
-    if updated != original {
-        fs::write(&path, &updated).map_err(|err| format!("Cannot update task details: {err}"))?;
-    }
-
     let target_bucket = target_status.target_bucket();
+    let will_move = fields.status.is_some()
+        && target_status != current_status
+        && current_bucket != target_bucket;
+    if will_move {
+        assert_maru_can_write(
+            &normalize_existing_dir(&work_path)?.to_string_lossy(),
+            WorkspaceWriteAction::RenameMove,
+        )?;
+    }
+    if updated != original {
+        write_atomic(&path, updated.as_bytes())
+            .map_err(|err| format!("Cannot update task details: {err}"))?;
+    }
     if fields.status.is_some() && target_status != current_status && current_bucket != target_bucket
     {
-        assert_maru_can_write(&work_path, WorkspaceWriteAction::RenameMove)?;
+        assert_maru_can_write(
+            &normalize_existing_dir(&work_path)?.to_string_lossy(),
+            WorkspaceWriteAction::RenameMove,
+        )?;
         let target =
             conflict_free_path(&target_path_for_bucket(&tasks_root, &path, target_bucket)?);
-        if let Some(parent) = target.parent() {
-            fs::create_dir_all(parent)
-                .map_err(|err| format!("Cannot create task target: {err}"))?;
+        let moved = (|| {
+            if let Some(parent) = target.parent() {
+                fs::create_dir_all(parent)
+                    .map_err(|err| format!("Cannot create task target: {err}"))?;
+            }
+            fs::rename(&path, &target).map_err(|err| format!("Cannot move task note: {err}"))
+        })();
+        if let Err(error) = moved {
+            write_atomic(&path, original.as_bytes())
+                .map_err(|rollback| format!("{error}; rollback failed: {rollback}"))?;
+            return Err(error);
         }
-        fs::rename(&path, &target).map_err(|err| format!("Cannot move task note: {err}"))?;
         return task_row_for_path(&work, &target, target_bucket);
     }
 
     task_row_for_path(&work, &path, current_bucket)
 }
 
-#[tauri::command(async)]
 pub fn move_task_note(
     work_path: String,
     rel_path: String,
     target_bucket: TaskBucket,
     root: Option<String>,
 ) -> Result<TaskNoteRow, String> {
-    assert_maru_can_write(&work_path, WorkspaceWriteAction::RenameMove)?;
+    let work = normalize_existing_dir(&work_path)?;
+    let paths = vec![
+        resolve_inside_vault(&work_path, &rel_path)?,
+        resolve_tasks_root(&work, root.as_deref().unwrap_or("tasks"))?,
+    ];
+    let lexical_work = if Path::new(&work_path).is_absolute() {
+        PathBuf::from(&work_path)
+    } else {
+        std::env::current_dir()
+            .map_err(|err| err.to_string())?
+            .join(&work_path)
+    };
+    let paths = paths
+        .into_iter()
+        .flat_map(|path| {
+            let alias = path
+                .strip_prefix(&work)
+                .map(|rel| lexical_work.join(rel))
+                .unwrap_or_else(|_| path.clone());
+            [path, alias]
+        })
+        .collect::<Vec<_>>();
+    let request = PathTransactionRequest::new(paths)?
+        .require_parent(&work)?
+        .with_workspace_registry()?;
+    with_path_transactions(request, |lease| {
+        move_task_note_in_transaction(lease, work_path, rel_path, target_bucket, root)
+    })
+}
+
+pub(crate) fn move_task_note_in_transaction(
+    lease: &PathTransactionLease,
+    work_path: String,
+    rel_path: String,
+    target_bucket: TaskBucket,
+    root: Option<String>,
+) -> Result<TaskNoteRow, String> {
+    let work = normalize_existing_dir(&work_path)?;
+    let paths = vec![
+        resolve_inside_vault(&work_path, &rel_path)?,
+        resolve_tasks_root(&work, root.as_deref().unwrap_or("tasks"))?,
+    ];
+    lease.ensure_covered(paths)?;
+    lease.ensure_workspace_registry()?;
+    lease.before_effect()?;
+
+    assert_maru_can_write(
+        &normalize_existing_dir(&work_path)?.to_string_lossy(),
+        WorkspaceWriteAction::RenameMove,
+    )?;
     let work = normalize_existing_dir(&work_path)?;
     let path = resolve_inside_vault(&work_path, &rel_path)?;
     let tasks_root = resolve_tasks_root(&work, root.as_deref().unwrap_or("tasks"))?;
@@ -526,8 +834,49 @@ pub fn move_task_note(
     task_row_for_path(&work, &target, target_bucket)
 }
 
-#[tauri::command(async)]
 pub fn append_tasks_log(work_path: String, line: String) -> Result<(), String> {
+    let work = normalize_existing_dir(&work_path)?;
+    let paths = vec![work.join(".maru/tasks-log.md")];
+    let lexical_work = if Path::new(&work_path).is_absolute() {
+        PathBuf::from(&work_path)
+    } else {
+        std::env::current_dir()
+            .map_err(|err| err.to_string())?
+            .join(&work_path)
+    };
+    let paths = paths
+        .into_iter()
+        .flat_map(|path| {
+            let alias = path
+                .strip_prefix(&work)
+                .map(|rel| lexical_work.join(rel))
+                .unwrap_or_else(|_| path.clone());
+            [path, alias]
+        })
+        .collect::<Vec<_>>();
+    let request = PathTransactionRequest::new(paths)?
+        .require_parent(&work)?
+        .with_workspace_registry()?;
+    with_path_transactions(request, |lease| {
+        append_tasks_log_in_transaction(lease, work_path, line)
+    })
+}
+
+pub(crate) fn append_tasks_log_in_transaction(
+    lease: &PathTransactionLease,
+    work_path: String,
+    line: String,
+) -> Result<(), String> {
+    let work = normalize_existing_dir(&work_path)?;
+    let paths = vec![work.join(".maru/tasks-log.md")];
+    lease.ensure_covered(paths)?;
+    lease.ensure_workspace_registry()?;
+    lease.before_effect()?;
+    assert_maru_can_write(
+        &normalize_existing_dir(&work_path)?.to_string_lossy(),
+        WorkspaceWriteAction::Modify,
+    )?;
+
     let work = normalize_existing_dir(&work_path)?;
     let log_path = work.join(".maru").join("tasks-log.md");
     if let Some(parent) = log_path.parent() {
@@ -542,7 +891,6 @@ pub fn append_tasks_log(work_path: String, line: String) -> Result<(), String> {
     Ok(())
 }
 
-#[tauri::command(async)]
 pub fn read_tasks_log(
     work_path: String,
     limit: Option<usize>,
@@ -1571,5 +1919,664 @@ mod tests {
         .unwrap();
         let metadata = read_task_metadata(work, "tasks/archive/flag.md".to_string()).unwrap();
         assert!(metadata.frontmatter.get("completedAt").is_none());
+    }
+}
+
+/// IPC owns inputs; all filesystem work and admission waits run inside workers.
+pub mod ipc {
+    use super::*;
+    #[tauri::command]
+    pub async fn scan_task_notes(
+        work_path: String,
+        root: Option<String>,
+    ) -> Result<Vec<TaskNoteRow>, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(
+                &[PathBuf::from(&work_path)],
+                "worker:scan_task_notes",
+            );
+            super::scan_task_notes(work_path, root)
+        })
+        .await
+        .map_err(|err| format!("scan_task_notes_task_failed: {err}"))?
+    }
+    #[tauri::command]
+    pub async fn read_task_metadata(
+        work_path: String,
+        rel_path: String,
+    ) -> Result<TaskMetadata, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(
+                &[PathBuf::from(&work_path)],
+                "worker:read_task_metadata",
+            );
+            super::read_task_metadata(work_path, rel_path)
+        })
+        .await
+        .map_err(|err| format!("read_task_metadata_task_failed: {err}"))?
+    }
+    #[tauri::command]
+    pub async fn create_task_note(
+        work_path: String,
+        draft: CreateTaskDraft,
+        root: Option<String>,
+    ) -> Result<TaskNoteRow, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(
+                &[PathBuf::from(&work_path)],
+                "worker:create_task_note",
+            );
+            super::create_task_note(work_path, draft, root)
+        })
+        .await
+        .map_err(|err| format!("create_task_note_task_failed: {err}"))?
+    }
+    #[tauri::command]
+    pub async fn update_task_status(
+        work_path: String,
+        rel_path: String,
+        status: TaskStatus,
+        root: Option<String>,
+    ) -> Result<TaskNoteRow, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(
+                &[PathBuf::from(&work_path)],
+                "worker:update_task_status",
+            );
+            super::update_task_status(work_path, rel_path, status, root)
+        })
+        .await
+        .map_err(|err| format!("update_task_status_task_failed: {err}"))?
+    }
+    #[tauri::command]
+    pub async fn update_task_schedule_fields(
+        work_path: String,
+        rel_path: String,
+        fields: UpdateTaskScheduleFields,
+    ) -> Result<TaskNoteRow, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(
+                &[PathBuf::from(&work_path)],
+                "worker:update_task_schedule_fields",
+            );
+            super::update_task_schedule_fields(work_path, rel_path, fields)
+        })
+        .await
+        .map_err(|err| format!("update_task_schedule_fields_task_failed: {err}"))?
+    }
+    #[tauri::command]
+    pub async fn update_task_details(
+        work_path: String,
+        rel_path: String,
+        fields: UpdateTaskDetailsFields,
+        root: Option<String>,
+    ) -> Result<TaskNoteRow, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(
+                &[PathBuf::from(&work_path)],
+                "worker:update_task_details",
+            );
+            super::update_task_details(work_path, rel_path, fields, root)
+        })
+        .await
+        .map_err(|err| format!("update_task_details_task_failed: {err}"))?
+    }
+    #[tauri::command]
+    pub async fn move_task_note(
+        work_path: String,
+        rel_path: String,
+        target_bucket: TaskBucket,
+        root: Option<String>,
+    ) -> Result<TaskNoteRow, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(&[PathBuf::from(&work_path)], "worker:move_task_note");
+            super::move_task_note(work_path, rel_path, target_bucket, root)
+        })
+        .await
+        .map_err(|err| format!("move_task_note_task_failed: {err}"))?
+    }
+    #[tauri::command]
+    pub async fn append_tasks_log(work_path: String, line: String) -> Result<(), String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(
+                &[PathBuf::from(&work_path)],
+                "worker:append_tasks_log",
+            );
+            super::append_tasks_log(work_path, line)
+        })
+        .await
+        .map_err(|err| format!("append_tasks_log_task_failed: {err}"))?
+    }
+    #[tauri::command]
+    pub async fn read_tasks_log(
+        work_path: String,
+        limit: Option<usize>,
+        event_filter: Option<Vec<String>>,
+    ) -> Result<Vec<TasksLogLine>, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(&[PathBuf::from(&work_path)], "worker:read_tasks_log");
+            super::read_tasks_log(work_path, limit, event_filter)
+        })
+        .await
+        .map_err(|err| format!("read_tasks_log_task_failed: {err}"))?
+    }
+}
+
+#[cfg(test)]
+mod phase08_09 {
+    use super::*;
+    use crate::atomic_file::phase08_06::{boundary, run, Held, Home};
+    use crate::atomic_file::PathTransactionTestHook;
+    use crate::scratchpad::phase08_08::registry;
+    use std::sync::{
+        atomic::{AtomicBool, Ordering},
+        mpsc,
+    };
+    use std::time::Duration;
+
+    fn text(path: &Path) -> String {
+        path.to_string_lossy().into_owned()
+    }
+    fn fixture(home: &Home) -> tempfile::TempDir {
+        let temp = tempfile::tempdir_in(home.root.path()).unwrap();
+        fs::create_dir_all(temp.path().join("tasks/active")).unwrap();
+        fs::create_dir_all(temp.path().join(".maru")).unwrap();
+        fs::write(
+            temp.path().join("tasks/active/task.md"),
+            "---\ntitle: Original\nstatus: active\ncustom: preserved\n---\n# Original\n",
+        )
+        .unwrap();
+        temp
+    }
+    fn draft() -> CreateTaskDraft {
+        CreateTaskDraft {
+            slug: "fixture".into(),
+            title: "Fixture".into(),
+            frontmatter: BTreeMap::new(),
+            body: "# Created".into(),
+            bucket: TaskBucket::Active,
+        }
+    }
+    fn schedule() -> UpdateTaskScheduleFields {
+        UpdateTaskScheduleFields {
+            project: Some(Some("project".into())),
+            priority: None,
+            due: None,
+            calendar_start: Some(Some("2026-09-05T10:00".into())),
+            calendar_end: None,
+            estimate_minutes: Some(Some(30.0)),
+        }
+    }
+    fn details() -> UpdateTaskDetailsFields {
+        UpdateTaskDetailsFields {
+            title: Some("Changed".into()),
+            status: None,
+            project: None,
+            priority: None,
+            due: None,
+            calendar_start: None,
+            calendar_end: None,
+            estimate_minutes: None,
+            body: Some("# Changed".into()),
+        }
+    }
+    fn start<F: std::future::Future + Send + 'static>(future: F) -> mpsc::Receiver<F::Output>
+    where
+        F::Output: Send + 'static,
+    {
+        let (tx, rx) = mpsc::channel();
+        tauri::async_runtime::spawn(async move {
+            let _ = tx.send(future.await);
+        });
+        rx
+    }
+    fn done<T>(rx: mpsc::Receiver<T>) -> T {
+        rx.recv_timeout(Duration::from_secs(10))
+            .expect("bounded task completion")
+    }
+    async fn mutate(operation: &'static str, work: String) -> Result<(), String> {
+        match operation {
+            "create" => ipc::create_task_note(work, draft(), None).await.map(|_| ()),
+            "status" => {
+                ipc::update_task_status(work, "tasks/active/task.md".into(), TaskStatus::Done, None)
+                    .await
+                    .map(|_| ())
+            }
+            "schedule" => {
+                ipc::update_task_schedule_fields(work, "tasks/active/task.md".into(), schedule())
+                    .await
+                    .map(|_| ())
+            }
+            "details" => {
+                ipc::update_task_details(work, "tasks/active/task.md".into(), details(), None)
+                    .await
+                    .map(|_| ())
+            }
+            "move" => ipc::move_task_note(
+                work,
+                "tasks/active/task.md".into(),
+                TaskBucket::Backlog,
+                None,
+            )
+            .await
+            .map(|_| ()),
+            "log" => {
+                ipc::append_tasks_log(
+                    work,
+                    "2026-09-05T10:00:00Z [DONE] {\"target\":\"fixture\"}".into(),
+                )
+                .await
+            }
+            _ => unreachable!(),
+        }
+    }
+    fn key(root: &Path, op: &str) -> PathBuf {
+        match op {
+            "create" => root.join("tasks/active"),
+            "log" => root.join(".maru/tasks-log.md"),
+            _ => root.join("tasks/active/task.md"),
+        }
+    }
+
+    #[test]
+    fn phase08_09_tasks_all_nine_wrappers_yield_on_same_polling_task() {
+        let home = Home::new();
+        let root = home.root.path();
+        let w = text(root);
+        boundary(
+            root.into(),
+            "scan_task_notes",
+            ipc::scan_task_notes(w.clone(), None),
+        );
+        boundary(
+            root.into(),
+            "read_task_metadata",
+            ipc::read_task_metadata(w.clone(), "tasks/active/task.md".into()),
+        );
+        boundary(
+            root.into(),
+            "create_task_note",
+            ipc::create_task_note(w.clone(), draft(), None),
+        );
+        boundary(
+            root.into(),
+            "update_task_status",
+            ipc::update_task_status(
+                w.clone(),
+                "tasks/active/task.md".into(),
+                TaskStatus::Done,
+                None,
+            ),
+        );
+        boundary(
+            root.into(),
+            "update_task_schedule_fields",
+            ipc::update_task_schedule_fields(w.clone(), "tasks/active/task.md".into(), schedule()),
+        );
+        boundary(
+            root.into(),
+            "update_task_details",
+            ipc::update_task_details(w.clone(), "tasks/active/task.md".into(), details(), None),
+        );
+        boundary(
+            root.into(),
+            "move_task_note",
+            ipc::move_task_note(
+                w.clone(),
+                "tasks/active/task.md".into(),
+                TaskBucket::Backlog,
+                None,
+            ),
+        );
+        boundary(
+            root.into(),
+            "append_tasks_log",
+            ipc::append_tasks_log(w.clone(), "fixture".into()),
+        );
+        boundary(
+            root.into(),
+            "read_tasks_log",
+            ipc::read_tasks_log(w, Some(10), None),
+        );
+    }
+    #[test]
+    fn phase08_09_tasks_real_payloads_schedule_transition_and_legacy_errors() {
+        let home = Home::new();
+        let tmp = fixture(&home);
+        let w = text(tmp.path());
+        assert_eq!(run(ipc::scan_task_notes(w.clone(), None)).unwrap().len(), 1);
+        let row = run(ipc::create_task_note(w.clone(), draft(), None)).unwrap();
+        assert_eq!(row.frontmatter["title"], "Fixture");
+        let row2 = run(ipc::create_task_note(w.clone(), draft(), None)).unwrap();
+        assert_ne!(row.rel_path, row2.rel_path);
+        run(mutate("schedule", w.clone())).unwrap();
+        run(mutate("details", w.clone())).unwrap();
+        let meta = run(ipc::read_task_metadata(
+            w.clone(),
+            "tasks/active/task.md".into(),
+        ))
+        .unwrap();
+        assert_eq!(meta.frontmatter["custom"], "preserved");
+        assert_eq!(meta.frontmatter["project"], "project");
+        assert_eq!(meta.frontmatter["estimateMinutes"], 30.0);
+        assert!(meta.body.contains("Changed"));
+        let moved = run(ipc::update_task_status(
+            w.clone(),
+            "tasks/active/task.md".into(),
+            TaskStatus::Done,
+            None,
+        ))
+        .unwrap();
+        assert_eq!(moved.bucket, TaskBucket::Archive);
+        assert_eq!(moved.frontmatter["status"], "done");
+        let moved = run(ipc::move_task_note(
+            w.clone(),
+            moved.rel_path,
+            TaskBucket::Backlog,
+            None,
+        ))
+        .unwrap();
+        assert_eq!(moved.bucket, TaskBucket::Backlog);
+        run(mutate("log", w.clone())).unwrap();
+        let logs = run(ipc::read_tasks_log(
+            w.clone(),
+            Some(1),
+            Some(vec!["DONE".into()]),
+        ))
+        .unwrap();
+        assert_eq!(logs.len(), 1);
+        assert_eq!(logs[0].target.as_deref(), Some("fixture"));
+        assert_eq!(
+            run(ipc::scan_task_notes(w.clone(), Some("../escape".into()))).unwrap_err(),
+            "tasks_root_escapes_workspace"
+        );
+        let bad = UpdateTaskDetailsFields {
+            title: Some(" ".into()),
+            ..details()
+        };
+        assert_eq!(
+            run(ipc::update_task_details(w, moved.rel_path, bad, None)).unwrap_err(),
+            "task_title_required"
+        );
+    }
+    #[test]
+    fn phase08_09_tasks_every_writer_same_target_contention_and_unwind_release() {
+        let home = Home::new();
+        for op in ["create", "status", "schedule", "details", "move", "log"] {
+            let tmp = fixture(&home);
+            let root = tmp.path();
+            let w = text(root);
+            let k = key(root, op);
+            let held = Held::new(k.clone(), "admitted");
+            let first = start(mutate(op, w.clone()));
+            held.wait();
+            let waiting = Held::new(k.clone(), "before-admission");
+            let second = start(mutate(op, w));
+            waiting.wait();
+            waiting.release();
+            assert!(
+                second.recv_timeout(Duration::from_millis(30)).is_err(),
+                "{op}"
+            );
+            let once = AtomicBool::new(false);
+            let injection = PathTransactionTestHook::new(k, "pre-effect", move || {
+                if !once.swap(true, Ordering::SeqCst) {
+                    panic!("fixture transaction failure");
+                }
+            });
+            held.release();
+            assert!(done(first).unwrap_err().contains("_task_failed:"));
+            done(second).unwrap();
+            drop(injection);
+            match op {
+                "create" => assert_eq!(fs::read_dir(root.join("tasks/active")).unwrap().count(), 2),
+                "status" => assert!(root.join("tasks/archive/task.md").is_file()),
+                "move" => assert!(root.join("tasks/backlog/task.md").is_file()),
+                "log" => assert_eq!(
+                    fs::read_to_string(root.join(".maru/tasks-log.md"))
+                        .unwrap()
+                        .lines()
+                        .count(),
+                    1
+                ),
+                _ => assert!(root.join("tasks/active/task.md").is_file()),
+            }
+        }
+    }
+    #[test]
+    fn phase08_09_tasks_every_writer_production_policy_rechecked_after_admission() {
+        let home = Home::new();
+        for op in ["create", "status", "schedule", "details", "move", "log"] {
+            let tmp = fixture(&home);
+            let root = tmp.path();
+            let w = text(root);
+            registry(root, "direct");
+            let before = fs::read(root.join("tasks/active/task.md")).unwrap();
+            let held = Held::new(key(root, op), "admitted");
+            let first = start(mutate(op, w.clone()));
+            held.wait();
+            registry(root, "readOnly");
+            held.release();
+            assert!(
+                done(first)
+                    .unwrap_err()
+                    .contains("Workspace writes are blocked"),
+                "{op}"
+            );
+            assert_eq!(fs::read(root.join("tasks/active/task.md")).unwrap(), before);
+            assert!(!root.join(".maru/tasks-log.md").exists());
+            registry(root, "direct");
+            run(mutate(op, w)).unwrap();
+        }
+    }
+    #[cfg(unix)]
+    #[test]
+    fn phase08_09_tasks_and_meetings_workspace_alias_cannot_bypass_write_policy() {
+        let home = Home::new();
+        let tmp = fixture(&home);
+        let alias = home.root.path().join("work-alias");
+        std::os::unix::fs::symlink(tmp.path(), &alias).unwrap();
+        for reverse in [false, true] {
+            for policy in ["readOnly", "delegated"] {
+                let (registered, caller) = if reverse {
+                    (alias.as_path(), tmp.path())
+                } else {
+                    (tmp.path(), alias.as_path())
+                };
+                registry(registered, policy);
+                for op in ["create", "status", "schedule", "details", "move", "log"] {
+                    assert!(
+                        run(mutate(op, text(caller)))
+                            .unwrap_err()
+                            .contains("Workspace writes are blocked"),
+                        "{op} {policy} reverse={reverse}"
+                    );
+                }
+                assert!(run(crate::meetings::ipc::append_meetings_log(
+                    text(caller),
+                    "denied".into()
+                ))
+                .unwrap_err()
+                .contains("Workspace writes are blocked"));
+            }
+        }
+        assert_eq!(
+            fs::read_dir(tmp.path().join("tasks/active"))
+                .unwrap()
+                .count(),
+            1
+        );
+        assert!(!tmp.path().join(".maru/tasks-log.md").exists());
+        assert!(!tmp.path().join(".maru/meetings-log.md").exists());
+        // Duplicate registry spellings must not let direct policy hide denial.
+        registry(tmp.path(), "direct");
+        let registry_path = crate::vault_list::workspace_registry_path().unwrap();
+        let mut document: serde_json::Value =
+            serde_json::from_slice(&fs::read(&registry_path).unwrap()).unwrap();
+        document["workspaces"].as_array_mut().unwrap().push(serde_json::json!({"label":"Alias", "path":text(&alias), "visibility":"private", "provider":"local", "writePolicy":"readOnly"}));
+        fs::write(&registry_path, document.to_string()).unwrap();
+        assert!(run(mutate("create", text(tmp.path())))
+            .unwrap_err()
+            .contains("Workspace writes are blocked"));
+        assert!(run(crate::meetings::ipc::append_meetings_log(
+            text(&alias),
+            "denied".into()
+        ))
+        .is_err());
+        registry(&alias, "direct");
+        run(mutate("create", text(tmp.path()))).unwrap();
+        run(crate::meetings::ipc::append_meetings_log(
+            text(&alias),
+            "allowed".into(),
+        ))
+        .unwrap();
+    }
+
+    #[test]
+    fn phase08_09_tasks_all_writers_files_parent_both_orders_aliases() {
+        let home = Home::new();
+        for op in ["create", "status", "schedule", "details", "move", "log"] {
+            for parent_first in [false, true] {
+                for alias in [false, true] {
+                    let tmp = fixture(&home);
+                    let root = tmp.path().to_path_buf();
+                    let w = text(&root);
+                    let parent = root.parent().unwrap();
+                    let mut parent_w = text(parent);
+                    let source = text(&root);
+                    #[cfg(unix)]
+                    if alias {
+                        let alias_path = parent.join(format!(
+                            "alias-{}",
+                            root.file_name().unwrap().to_string_lossy()
+                        ));
+                        std::os::unix::fs::symlink(parent, &alias_path).unwrap();
+                        parent_w = text(&alias_path);
+                    }
+                    let new_name = format!("moved-{}", root.file_name().unwrap().to_string_lossy());
+                    let moved = parent.join(&new_name);
+                    if parent_first {
+                        let held = Held::new(root.clone(), "admitted");
+                        let first = start(crate::workspace_files::ipc::rename_workspace_entry(
+                            parent_w, source, new_name,
+                        ));
+                        held.wait();
+                        let waiting = Held::new(key(&root, op), "before-admission");
+                        let second = start(mutate(op, w));
+                        waiting.wait();
+                        waiting.release();
+                        assert!(second.recv_timeout(Duration::from_millis(30)).is_err());
+                        held.release();
+                        done(first).unwrap();
+                        assert!(done(second).is_err(), "{op}");
+                        assert!(!root.exists());
+                    } else {
+                        let held = Held::new(key(&root, op), "admitted");
+                        let first = start(mutate(op, w));
+                        held.wait();
+                        let waiting = Held::new(root.clone(), "before-admission");
+                        let second = start(crate::workspace_files::ipc::rename_workspace_entry(
+                            parent_w, source, new_name,
+                        ));
+                        waiting.wait();
+                        waiting.release();
+                        assert!(second.recv_timeout(Duration::from_millis(30)).is_err());
+                        held.release();
+                        done(first).unwrap();
+                        done(second).unwrap();
+                        assert!(!root.exists());
+                        match op {
+                            "status" => assert!(moved.join("tasks/archive/task.md").is_file()),
+                            "move" => assert!(moved.join("tasks/backlog/task.md").is_file()),
+                            "log" => assert!(moved.join(".maru/tasks-log.md").is_file()),
+                            _ => assert!(moved.join("tasks/active/task.md").is_file()),
+                        }
+                    }
+                }
+            }
+        }
+    }
+    #[test]
+    fn phase08_09_tasks_document_save_order_and_typed_error_release() {
+        let home = Home::new();
+        for task_first in [false, true] {
+            let tmp = fixture(&home);
+            let root = tmp.path();
+            let w = text(root);
+            let path = root.join("tasks/active/task.md");
+            let original = fs::read_to_string(&path).unwrap();
+            let revision = revision_for(&original);
+            if task_first {
+                let held = Held::new(path.clone(), "admitted");
+                let first = start(mutate("schedule", w.clone()));
+                held.wait();
+                let waiting = Held::new(path.clone(), "before-admission");
+                let second = start(crate::document::ipc::save_document(
+                    w.clone(),
+                    text(&path),
+                    "editor".into(),
+                    Some(revision),
+                ));
+                waiting.wait();
+                waiting.release();
+                assert!(second.recv_timeout(Duration::from_millis(30)).is_err());
+                held.release();
+                done(first).unwrap();
+                let error = done(second).unwrap_err();
+                assert_eq!(error.code, crate::ipc_error::DOCUMENT_CONFLICT);
+            } else {
+                let held = Held::new(path.clone(), "admitted");
+                let first = start(crate::document::ipc::save_document(
+                    w.clone(),
+                    text(&path),
+                    original.replace("Original", "Editor"),
+                    Some(revision),
+                ));
+                held.wait();
+                let waiting = Held::new(path.clone(), "before-admission");
+                let second = start(mutate("schedule", w.clone()));
+                waiting.wait();
+                waiting.release();
+                assert!(second.recv_timeout(Duration::from_millis(30)).is_err());
+                held.release();
+                done(first).unwrap();
+                done(second).unwrap();
+                let result = fs::read_to_string(&path).unwrap();
+                assert!(result.contains("Editor"));
+                assert!(result.contains("project: project"));
+            }
+            run(mutate("details", w)).unwrap();
+        }
+    }
+    #[test]
+    fn phase08_09_tasks_capture_preparation_is_read_only_and_parent_snapshot_survives() {
+        let home = Home::new();
+        let root = home.root.path().join("capture");
+        fs::create_dir(&root).unwrap();
+        let prepared =
+            prepare_capture_task_materialization(&root, "2026-09-05", "capture-id", draft())
+                .unwrap();
+        assert!(!root.join("tasks").exists());
+        fs::rename(&root, home.root.path().join("old")).unwrap();
+        fs::create_dir(&root).unwrap();
+        assert!(materialize_capture_task(&root, &prepared).is_err());
+        assert!(!root.join("tasks").exists());
+        let prepared =
+            prepare_capture_task_materialization(&root, "2026-09-05", "capture-id", draft())
+                .unwrap();
+        let first = materialize_capture_task(&root, &prepared).unwrap();
+        assert!(first.created);
+        let second = materialize_capture_task(&root, &prepared).unwrap();
+        assert!(!second.created);
+        assert_eq!(first.row.rel_path, second.row.rel_path);
     }
 }

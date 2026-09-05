@@ -1274,7 +1274,8 @@ fn drafts_promote_in_transaction(
             } else {
                 target_path.trim()
             };
-            let row = crate::tasks::create_task_note(
+            let row = crate::tasks::create_task_note_in_transaction(
+                lease,
                 work_path.to_string(),
                 CreateTaskDraft {
                     slug: slug.to_string(),
@@ -2548,6 +2549,43 @@ mod phase08_08 {
     fn done<T>(rx: mpsc::Receiver<T>) -> T {
         rx.recv_timeout(Duration::from_secs(10))
             .expect("bounded draft completion")
+    }
+
+    #[test]
+    fn phase08_09_drafts_task_promotion_borrows_complete_lease_and_freezes_real_bytes() {
+        let home = Home::new();
+        let work = text(home.root.path());
+        let app = app();
+        let draft = entry(&work);
+        let promoted = run(ipc::drafts_promote(
+            app.handle().clone(),
+            work.clone(),
+            draft.id.clone(),
+            DraftPromoteTarget::Task,
+            Some("promoted".into()),
+            Some(approval(&app)),
+        ))
+        .unwrap();
+        assert_eq!(promoted.status, DraftStatus::Accepted);
+        let target = promoted.promoted_to.as_ref().unwrap();
+        assert!(target.starts_with("tasks/active/"));
+        let content = fs::read(home.root.path().join(target)).unwrap();
+        assert_eq!(
+            content,
+            fs::read(
+                home.root
+                    .path()
+                    .join(format!(".maru/drafts/{}/baseline.md", draft.id))
+            )
+            .unwrap()
+        );
+        assert!(String::from_utf8(content)
+            .unwrap()
+            .contains("status: active"));
+        assert_eq!(
+            load_index(home.root.path()).unwrap()[0].status,
+            DraftStatus::Accepted
+        );
     }
 
     #[test]

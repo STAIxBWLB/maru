@@ -1,3 +1,4 @@
+use crate::atomic_file::{with_path_transactions, PathTransactionRequest};
 use crate::vault::{
     lexical_normalize, normalize_existing_dir, parse_frontmatter, resolve_inside_vault,
 };
@@ -62,7 +63,6 @@ pub struct MeetingGuides {
     pub notes_guidelines: Option<String>,
 }
 
-#[tauri::command(async)]
 pub fn scan_meeting_notes(
     work_path: String,
     root: Option<String>,
@@ -127,7 +127,6 @@ pub fn scan_meeting_notes(
     Ok(rows)
 }
 
-#[tauri::command(async)]
 pub fn read_meeting_metadata(
     work_path: String,
     rel_path: String,
@@ -159,7 +158,6 @@ pub fn read_meeting_metadata(
     })
 }
 
-#[tauri::command(async)]
 pub fn read_meeting_guides(work_path: String) -> Result<MeetingGuides, String> {
     let work = normalize_existing_dir(&work_path)?;
     let guide_paths = read_guide_paths(&work);
@@ -172,24 +170,56 @@ pub fn read_meeting_guides(work_path: String) -> Result<MeetingGuides, String> {
     })
 }
 
-#[tauri::command(async)]
 pub fn append_meetings_log(work_path: String, line: String) -> Result<(), String> {
     let work = normalize_existing_dir(&work_path)?;
-    let log_path = work.join(".maru").join("meetings-log.md");
-    if let Some(parent) = log_path.parent() {
-        fs::create_dir_all(parent)
-            .map_err(|err| format!("Cannot create meetings log dir: {err}"))?;
-    }
-    let mut file = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&log_path)
-        .map_err(|err| format!("Cannot open meetings log: {err}"))?;
-    writeln!(file, "{line}").map_err(|err| format!("Cannot append meetings log: {err}"))?;
-    Ok(())
+    let parent = work.join(".maru");
+    let log_path = parent.join("meetings-log.md");
+    // Admit the parent as well as the append target: creating .maru and aliases
+    // must serialize with Files parent moves and registry migration writes.
+    let requested_work = PathBuf::from(&work_path);
+    let requested_work = lexical_normalize(&if requested_work.is_absolute() {
+        requested_work
+    } else {
+        std::env::current_dir()
+            .map_err(|err| err.to_string())?
+            .join(requested_work)
+    });
+    let request = PathTransactionRequest::new(vec![
+        parent.clone(),
+        log_path.clone(),
+        requested_work.join(".maru"),
+        requested_work.join(".maru/meetings-log.md"),
+    ])?
+    .require_parent(&work)?
+    .with_workspace_registry()?;
+    with_path_transactions(request, |lease| {
+        lease.ensure_workspace_registry()?;
+        lease.before_effect()?;
+        let current_work = normalize_existing_dir(&work_path)?;
+        if current_work != work {
+            return Err("Transaction parent changed; retry the operation".into());
+        }
+        crate::vault_list::assert_document_owner(&work_path, &log_path)?;
+        crate::vault_list::assert_maru_can_write(
+            &current_work.to_string_lossy(),
+            crate::vault_list::WorkspaceWriteAction::Modify,
+        )?;
+        // An existing parent is pinned by the request and cannot be recreated
+        // after another admitted writer moves it while this append waits.
+        if !parent.exists() {
+            fs::create_dir(&parent)
+                .map_err(|err| format!("Cannot create meetings log dir: {err}"))?;
+        }
+        let mut file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&log_path)
+            .map_err(|err| format!("Cannot open meetings log: {err}"))?;
+        writeln!(file, "{line}").map_err(|err| format!("Cannot append meetings log: {err}"))?;
+        Ok(())
+    })
 }
 
-#[tauri::command(async)]
 pub fn read_meetings_log(
     work_path: String,
     limit: Option<usize>,
@@ -437,7 +467,9 @@ fn read_guide_paths(work: &Path) -> BTreeMap<String, String> {
 }
 
 fn read_global_settings_json() -> Option<JsonValue> {
-    let path = dirs::home_dir()?.join(".maru").join("settings.json");
+    let path = crate::skill_host::fs::maru_home()
+        .ok()?
+        .join("settings.json");
     let raw = fs::read_to_string(path).ok()?;
     serde_json::from_str::<JsonValue>(&raw).ok()
 }
@@ -517,6 +549,86 @@ fn guide_aliases() -> [(&'static str, &'static [&'static str]); 5] {
 fn read_optional_guide(work: &Path, raw: Option<&String>) -> Option<String> {
     let path = resolve_config_path(work, raw?);
     fs::read_to_string(path).ok()
+}
+
+/// Owned IPC boundaries; synchronous entry points remain available to Rust callers.
+pub mod ipc {
+    use super::*;
+    #[tauri::command]
+    pub async fn scan_meeting_notes(
+        work_path: String,
+        root: Option<String>,
+    ) -> Result<Vec<MeetingNoteRow>, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            crate::atomic_file::PathTransactionLease::test_stage(
+                &[PathBuf::from(&work_path)],
+                "worker:scan_meeting_notes",
+            );
+            super::scan_meeting_notes(work_path, root)
+        })
+        .await
+        .map_err(|error| format!("scan_meeting_notes_task_failed: {error}"))?
+    }
+    #[tauri::command]
+    pub async fn read_meeting_metadata(
+        work_path: String,
+        rel_path: String,
+    ) -> Result<MeetingMetadata, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            crate::atomic_file::PathTransactionLease::test_stage(
+                &[PathBuf::from(&work_path)],
+                "worker:read_meeting_metadata",
+            );
+            super::read_meeting_metadata(work_path, rel_path)
+        })
+        .await
+        .map_err(|error| format!("read_meeting_metadata_task_failed: {error}"))?
+    }
+    #[tauri::command]
+    pub async fn read_meeting_guides(work_path: String) -> Result<MeetingGuides, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            crate::atomic_file::PathTransactionLease::test_stage(
+                &[PathBuf::from(&work_path)],
+                "worker:read_meeting_guides",
+            );
+            super::read_meeting_guides(work_path)
+        })
+        .await
+        .map_err(|error| format!("read_meeting_guides_task_failed: {error}"))?
+    }
+    #[tauri::command]
+    pub async fn append_meetings_log(work_path: String, line: String) -> Result<(), String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            crate::atomic_file::PathTransactionLease::test_stage(
+                &[PathBuf::from(&work_path)],
+                "worker:append_meetings_log",
+            );
+            super::append_meetings_log(work_path, line)
+        })
+        .await
+        .map_err(|error| format!("append_meetings_log_task_failed: {error}"))?
+    }
+    #[tauri::command]
+    pub async fn read_meetings_log(
+        work_path: String,
+        limit: Option<usize>,
+        event_filter: Option<Vec<String>>,
+    ) -> Result<Vec<MeetingsLogLine>, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            crate::atomic_file::PathTransactionLease::test_stage(
+                &[PathBuf::from(&work_path)],
+                "worker:read_meetings_log",
+            );
+            super::read_meetings_log(work_path, limit, event_filter)
+        })
+        .await
+        .map_err(|error| format!("read_meetings_log_task_failed: {error}"))?
+    }
 }
 
 #[cfg(test)]
@@ -611,6 +723,7 @@ mod tests {
 
     #[test]
     fn missing_guides_return_nulls() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         let tmp = tempdir().unwrap();
         let guides = read_meeting_guides(tmp.path().to_string_lossy().to_string()).unwrap();
 
@@ -620,6 +733,7 @@ mod tests {
 
     #[test]
     fn reads_guides_from_meetings_workspace_alias() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         let tmp = tempdir().unwrap();
         let guide = tmp.path().join("docs/GLOSSARY.md");
         fs::create_dir_all(guide.parent().unwrap()).unwrap();
@@ -637,6 +751,7 @@ mod tests {
 
     #[test]
     fn appends_meetings_log() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         let tmp = tempdir().unwrap();
         append_meetings_log(
             tmp.path().to_string_lossy().to_string(),
@@ -658,6 +773,7 @@ mod tests {
 
     #[test]
     fn reads_structured_meetings_log_lines() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         let tmp = tempdir().unwrap();
         let work = tmp.path().to_string_lossy().to_string();
         append_meetings_log(
@@ -692,6 +808,7 @@ mod tests {
 
     #[test]
     fn reads_legacy_meetings_log_lines() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         let tmp = tempdir().unwrap();
         let work = tmp.path().to_string_lossy().to_string();
         append_meetings_log(
@@ -717,6 +834,7 @@ mod tests {
 
     #[test]
     fn reads_meetings_log_respects_limit_and_filter() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         let tmp = tempdir().unwrap();
         let work = tmp.path().to_string_lossy().to_string();
         for index in 0..5 {
@@ -744,5 +862,304 @@ mod tests {
         let filtered = read_meetings_log(work, Some(10), Some(vec!["apply".to_string()])).unwrap();
         assert_eq!(filtered.len(), 5);
         assert!(filtered.iter().all(|entry| entry.event == "apply"));
+    }
+}
+
+#[cfg(test)]
+mod phase08_09 {
+    use super::*;
+    use crate::atomic_file::phase08_06::{boundary, run, Held, Home};
+    use std::future::Future;
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    fn text(path: &Path) -> String {
+        path.to_string_lossy().into_owned()
+    }
+
+    fn start<F, T>(future: F) -> mpsc::Receiver<T>
+    where
+        F: Future<Output = T> + Send + 'static,
+        T: Send + 'static,
+    {
+        let (tx, rx) = mpsc::channel();
+        tauri::async_runtime::spawn(async move {
+            let _ = tx.send(future.await);
+        });
+        rx
+    }
+
+    fn done<T>(rx: mpsc::Receiver<T>) -> T {
+        rx.recv_timeout(Duration::from_secs(10))
+            .expect("meeting fixture completion")
+    }
+
+    #[test]
+    fn phase08_09_meetings_all_five_wrappers_yield_and_preserve_join_errors() {
+        let home = Home::new();
+        let root = home.root.path();
+        boundary(
+            root.into(),
+            "scan_meeting_notes",
+            ipc::scan_meeting_notes(text(root), None),
+        );
+        boundary(
+            root.into(),
+            "read_meeting_metadata",
+            ipc::read_meeting_metadata(text(root), "meeting.md".into()),
+        );
+        boundary(
+            root.into(),
+            "read_meeting_guides",
+            ipc::read_meeting_guides(text(root)),
+        );
+        boundary(
+            root.into(),
+            "append_meetings_log",
+            ipc::append_meetings_log(text(root), "entry".into()),
+        );
+        boundary(
+            root.into(),
+            "read_meetings_log",
+            ipc::read_meetings_log(text(root), None, None),
+        );
+        assert!(!root.join(".maru").exists());
+    }
+
+    #[test]
+    fn phase08_09_meetings_nonempty_payloads_and_legacy_errors() {
+        let home = Home::new();
+        let root = home.root.path().join("work");
+        fs::create_dir_all(root.join("meetings")).unwrap();
+        fs::write(root.join("meetings/note.md"), "---\ntitle: 회의\ntags: [review]\nattendees: [Lee]\npeople: [Lee, Kim]\ndate: 2026-09-05\n---\n# Body\n").unwrap();
+        fs::write(root.join("guide.md"), "# Guide").unwrap();
+        fs::write(
+            root.join("workspace.config.yaml"),
+            "meetings:\n  guides:\n    glossary: guide.md\n",
+        )
+        .unwrap();
+        let rows = run(ipc::scan_meeting_notes(text(&root), None)).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].frontmatter["title"], "회의");
+        let metadata = run(ipc::read_meeting_metadata(
+            text(&root),
+            "meetings/note.md".into(),
+        ))
+        .unwrap();
+        assert_eq!(metadata.attendees, ["Lee", "Kim"]);
+        assert_eq!(metadata.tags, ["review"]);
+        assert_eq!(metadata.preview, "# Body");
+        assert!(metadata.char_count > 0);
+        assert_eq!(
+            run(ipc::read_meeting_guides(text(&root)))
+                .unwrap()
+                .glossary
+                .as_deref(),
+            Some("# Guide")
+        );
+        run(ipc::append_meetings_log(
+            text(&root),
+            "- 2026-09-05T00:00:00Z [apply] {\"runId\":\"r1\"}".into(),
+        ))
+        .unwrap();
+        run(ipc::append_meetings_log(
+            text(&root),
+            "- 2026-09-05T00:00:01Z vault-extract: note.md".into(),
+        ))
+        .unwrap();
+        let entries = run(ipc::read_meetings_log(text(&root), Some(1), None)).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert!(entries[0].legacy);
+        assert_eq!(entries[0].skill.as_deref(), Some("vault-extract"));
+        let entries = run(ipc::read_meetings_log(
+            text(&root),
+            None,
+            Some(vec!["apply".into()]),
+        ))
+        .unwrap();
+        assert_eq!(entries[0].run_id.as_deref(), Some("r1"));
+        assert_eq!(
+            run(ipc::scan_meeting_notes(
+                text(&root),
+                Some("../outside".into())
+            ))
+            .unwrap_err(),
+            "meeting_notes_root_escapes_workspace"
+        );
+        assert!(
+            run(ipc::read_meeting_metadata(text(&root), "missing.md".into()))
+                .unwrap_err()
+                .starts_with("Cannot read meeting note metadata:")
+        );
+        let missing = text(&root.join("missing"));
+        assert!(run(ipc::read_meeting_guides(missing.clone())).is_err());
+        assert!(run(ipc::append_meetings_log(missing.clone(), "entry".into())).is_err());
+        assert!(run(ipc::read_meetings_log(missing, None, None)).is_err());
+    }
+
+    #[test]
+    fn phase08_09_meetings_same_target_append_serializes_complete_lines() {
+        let home = Home::new();
+        let root = home.root.path();
+        fs::create_dir(root.join(".maru")).unwrap();
+        let target = root.join(".maru/meetings-log.md");
+        let first_line = "first".repeat(10000);
+        let second_line = "second".repeat(10000);
+        let held = Held::new(target.clone(), "admitted");
+        let first = start(ipc::append_meetings_log(text(root), first_line.clone()));
+        held.wait();
+        let waiting = Held::new(target.clone(), "before-admission");
+        let second = start(ipc::append_meetings_log(text(root), second_line.clone()));
+        waiting.wait();
+        waiting.release();
+        assert!(second.recv_timeout(Duration::from_millis(30)).is_err());
+        held.release();
+        done(first).unwrap();
+        done(second).unwrap();
+        assert_eq!(
+            fs::read_to_string(target).unwrap(),
+            format!("{first_line}\n{second_line}\n")
+        );
+    }
+
+    #[test]
+    fn phase08_09_meetings_parent_rename_both_orders_without_recreation() {
+        let home = Home::new();
+        for parent_first in [false, true] {
+            let root = home.root.path().join(format!("work-{parent_first}"));
+            fs::create_dir_all(root.join(".maru")).unwrap();
+            let parent = root.clone();
+            let target = root.join(".maru/meetings-log.md");
+            let moved = home.root.path().join(format!("moved-{parent_first}"));
+            fs::write(&target, "seed\n").unwrap();
+            let rename = crate::workspace_files::ipc::rename_workspace_entry(
+                text(home.root.path()),
+                format!("work-{parent_first}"),
+                format!("moved-{parent_first}"),
+            );
+            let append = ipc::append_meetings_log(text(&root), "appended".into());
+            if parent_first {
+                let held = Held::new(parent.clone(), "pre-effect");
+                let first = start(rename);
+                held.wait();
+                let waiting = Held::new(target.clone(), "before-admission");
+                let second = start(append);
+                waiting.wait();
+                waiting.release();
+                assert!(second.recv_timeout(Duration::from_millis(30)).is_err());
+                held.release();
+                done(first).unwrap();
+                assert!(done(second).unwrap_err().contains("parent"));
+                assert_eq!(
+                    fs::read_to_string(moved.join(".maru/meetings-log.md")).unwrap(),
+                    "seed\n"
+                );
+            } else {
+                let held = Held::new(target.clone(), "admitted");
+                let first = start(append);
+                held.wait();
+                let waiting = Held::new(parent.clone(), "before-admission");
+                let second = start(rename);
+                waiting.wait();
+                waiting.release();
+                assert!(second.recv_timeout(Duration::from_millis(30)).is_err());
+                held.release();
+                done(first).unwrap();
+                done(second).unwrap();
+                assert_eq!(
+                    fs::read_to_string(moved.join(".maru/meetings-log.md")).unwrap(),
+                    "seed\nappended\n"
+                );
+            }
+            assert!(!parent.exists());
+        }
+    }
+
+    #[test]
+    fn phase08_09_meetings_document_error_releases_append_admission() {
+        let home = Home::new();
+        let root = home.root.path();
+        fs::create_dir(root.join(".maru")).unwrap();
+        let target = root.join(".maru/meetings-log.md");
+        fs::write(&target, "seed\n").unwrap();
+        let held = Held::new(target.clone(), "admitted");
+        let document = start(crate::document::ipc::save_document(
+            text(root),
+            ".maru/meetings-log.md".into(),
+            "overwrite".into(),
+            Some("stale".into()),
+        ));
+        held.wait();
+        let waiting = Held::new(target.clone(), "before-admission");
+        let append = start(ipc::append_meetings_log(text(root), "after error".into()));
+        waiting.wait();
+        waiting.release();
+        assert!(append.recv_timeout(Duration::from_millis(30)).is_err());
+        held.release();
+        assert_eq!(
+            done(document).unwrap_err().code,
+            crate::ipc_error::DOCUMENT_CONFLICT
+        );
+        done(append).unwrap();
+        assert_eq!(fs::read_to_string(target).unwrap(), "seed\nafter error\n");
+    }
+
+    #[test]
+    fn phase08_09_meetings_production_policy_denial_has_no_effect_and_releases() {
+        let home = Home::new();
+        let root = home.root.path().join("work");
+        fs::create_dir(&root).unwrap();
+        crate::scratchpad::phase08_08::registry(&root, "readOnly");
+        assert!(run(ipc::append_meetings_log(text(&root), "denied".into()))
+            .unwrap_err()
+            .contains("Workspace writes are blocked"));
+        assert!(!root.join(".maru").exists());
+        crate::scratchpad::phase08_08::registry(&root, "direct");
+        run(ipc::append_meetings_log(text(&root), "allowed".into())).unwrap();
+        assert_eq!(
+            fs::read_to_string(root.join(".maru/meetings-log.md")).unwrap(),
+            "allowed\n"
+        );
+        // A filesystem error must also release admission for the actual next append.
+        fs::remove_file(root.join(".maru/meetings-log.md")).unwrap();
+        fs::create_dir(root.join(".maru/meetings-log.md")).unwrap();
+        assert!(run(ipc::append_meetings_log(text(&root), "error".into()))
+            .unwrap_err()
+            .starts_with("Cannot open meetings log:"));
+        fs::remove_dir(root.join(".maru/meetings-log.md")).unwrap();
+        run(ipc::append_meetings_log(text(&root), "recovered".into())).unwrap();
+        assert_eq!(
+            fs::read_to_string(root.join(".maru/meetings-log.md")).unwrap(),
+            "recovered\n"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn phase08_09_meetings_symlink_alias_conflicts_with_physical_parent() {
+        let home = Home::new();
+        let root = home.root.path().join("work");
+        fs::create_dir_all(root.join("physical")).unwrap();
+        std::os::unix::fs::symlink(root.join("physical"), root.join(".maru")).unwrap();
+        let held = Held::new(root.join(".maru/meetings-log.md"), "admitted");
+        let append = start(ipc::append_meetings_log(text(&root), "alias".into()));
+        held.wait();
+        let waiting = Held::new(root.join("physical"), "before-admission");
+        let rename = start(crate::workspace_files::ipc::rename_workspace_entry(
+            text(home.root.path()),
+            "work/physical".into(),
+            "moved".into(),
+        ));
+        waiting.wait();
+        waiting.release();
+        assert!(rename.recv_timeout(Duration::from_millis(30)).is_err());
+        held.release();
+        done(append).unwrap();
+        done(rename).unwrap();
+        assert_eq!(
+            fs::read_to_string(root.join("moved/meetings-log.md")).unwrap(),
+            "alias\n"
+        );
+        assert!(!root.join("physical").exists());
     }
 }
