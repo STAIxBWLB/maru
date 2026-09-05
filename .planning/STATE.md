@@ -5,16 +5,16 @@ milestone_name: Felt Quality and Native Proof
 current_phase: 08
 current_phase_name: Main-Thread Responsiveness
 status: executing
-stopped_at: Completed 08-10-PLAN.md; next Plan11 wave12; Today capture borrowed lease handoff retained
-last_updated: "2026-09-05T07:43:39.887Z"
+stopped_at: Completed 08-11-PLAN.md; next Plan12 wave13; calendar/outbox/web-actions borrowed lease handoffs retained
+last_updated: "2026-09-05T08:00:18.240Z"
 last_activity: 2026-09-05
 last_activity_desc: Phase 08 execution started
-state_head: 0c4225de093f83fc00d8f5bfd1220f7335a964fc
+state_head: ff0707496f4f85cb26c2f03b92ff76185651bd19
 progress:
   total_phases: 6
   completed_phases: 2
   total_plans: 39
-  completed_plans: 21
+  completed_plans: 22
   percent: 33
 ---
 
@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-09-05)
 ## Current Position
 
 Phase: 08 (Main-Thread Responsiveness) — EXECUTING
-Plan: 12 of 29
+Plan: 13 of 29
 Status: Ready to execute
 Last Activity Description: Phase 08 execution started
 Last activity: 2026-09-05 — Phase 08 execution started
@@ -118,6 +118,7 @@ Progress: [███░░░░░░░] 33%
 | Phase 08 P08 | 18min | 2 tasks | 7 files |
 | Phase 08 P09 | 10min | 2 tasks | 7 files |
 | Phase 08 P10 | 20 min | 2 tasks | 7 files |
+| Phase 08 P11 | 15min | 2 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -243,6 +244,7 @@ Recent decisions affecting current work:
 - [Phase 08]: Document commands use complete path admission and borrowed managed-snapshot leases; actual Files and earlier Skills/Git document consumers pass in both orders and aliases. Production Git automatic maintenance lifetime is a separate root-coordinated Plan29 follow-up.
 - [Phase 08]: Thirty scratchpad/shelf/drafts/Gap commands await blocking workers with complete admission and actual production-policy proof. Plan09 must switch drafts task promotion to its borrowed task-creation adapter when adding task admission.
 - [Phase 08]: Plan10 isolates 34 Inbox/outbox/viewer/secret commands; batches retain original parents and settled siblings, local preparation suppresses sends and bytecode caches, and frontend lifetime closure remains Plans25/26.
+- [Phase 08]: Plan11 isolates all ten Today commands; complete alias-aware admission precedes Today locks and capture materialization borrows the outer lease. Plan12 must consume raw calendar/outbox/web-actions helper handoffs without nested admission.
 
 ### Pending Todos
 
@@ -279,8 +281,8 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-09-05T07:43:13.842Z
-Stopped at: Completed 08-10-PLAN.md; next Plan11 wave12; Today capture borrowed lease handoff retained
+Last session: 2026-09-05T08:00:18.178Z
+Stopped at: Completed 08-11-PLAN.md; next Plan12 wave13; calendar/outbox/web-actions borrowed lease handoffs retained
 Resume file: None
 
 ## Operator Next Steps
