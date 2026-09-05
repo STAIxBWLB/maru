@@ -5,16 +5,16 @@ milestone_name: Felt Quality and Native Proof
 current_phase: 08
 current_phase_name: Main-Thread Responsiveness
 status: executing
-stopped_at: Completed 08-29-PLAN.md; next Plan07 wave8
-last_updated: "2026-09-05T06:32:05.080Z"
+stopped_at: Completed 08-07-PLAN.md; next Plan08 wave9; Plan29 Git maintenance follow-up assigned
+last_updated: "2026-09-05T06:46:49.911Z"
 last_activity: 2026-09-05
 last_activity_desc: Phase 08 execution started
-state_head: 53e8909042ca8d32590accbd314f18fb370cc306
+state_head: a355426b2f6660043859b93b408158485ff74bea
 progress:
   total_phases: 6
   completed_phases: 2
   total_plans: 39
-  completed_plans: 17
+  completed_plans: 18
   percent: 33
 ---
 
@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-09-05)
 ## Current Position
 
 Phase: 08 (Main-Thread Responsiveness) — EXECUTING
-Plan: 8 of 29
+Plan: 9 of 29
 Status: Ready to execute
 Last Activity Description: Phase 08 execution started
 Last activity: 2026-09-05 — Phase 08 execution started
@@ -114,6 +114,7 @@ Progress: [███░░░░░░░] 33%
 | Phase 08 P05 | 13min | 2 tasks | 5 files |
 | Phase 08 P06 | 23min | 2 tasks | 9 files |
 | Phase 08 P29 | 25min | 3 tasks | 10 files |
+| Phase 08 P07 | 15min | 2 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -236,6 +237,7 @@ Recent decisions affecting current work:
 - [Phase 08]: Git IPC owns AppHandle and resolves ApprovalState only inside a blocking worker; Git domain transactions serialize aliases until Plan29 shared admission.
 - [Phase 08]: Shared path admission pins parent handles; Plan29 wave7 consumes fresh requests, reusable original-parent snapshots and explicit nested leases before Plan07.
 - [Phase 08]: Earlier Skills/Git/env/dispatch/dot writers share complete path admission; initializing lists retain short conditional metadata transactions, while plain getters are read-only. Plan07 document races and Plans16/17 final adapter handoffs remain pending. — Keep source reservation before path waits, release registry admission for network stages, and retain original parent snapshots. Final 37 integration cases pass; the initial dispatch fixture escape has unknown external effects and remains disclosed in SUMMARY/overlay.
+- [Phase 08]: Document commands use complete path admission and borrowed managed-snapshot leases; actual Files and earlier Skills/Git document consumers pass in both orders and aliases. Production Git automatic maintenance lifetime is a separate root-coordinated Plan29 follow-up.
 
 ### Pending Todos
 
@@ -272,8 +274,8 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-09-05T06:31:22.991Z
-Stopped at: Completed 08-29-PLAN.md; next Plan07 wave8
+Last session: 2026-09-05T06:46:43.388Z
+Stopped at: Completed 08-07-PLAN.md; next Plan08 wave9; Plan29 Git maintenance follow-up assigned
 Resume file: None
 
 ## Operator Next Steps
