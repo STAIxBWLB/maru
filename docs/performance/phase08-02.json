@@ -129,7 +129,10 @@
           "realGit": true,
           "persisted": true,
           "fixtureHomeOnly": true,
-          "successNotice": "workspace / native-local-git: 동기화를 완료했습니다."
+          "successNotice": "workspace / native-local-git: 동기화를 완료했습니다.",
+          "syncClicks": 1,
+          "noticeCount": 1,
+          "driverReplay": false
         },
         "verificationCorrection": "The initial direct native runner invocation reused the prior binary and timed out; it is not counted as passing. Rebuilt using the Makefile native frontend, build.rs touch, and cargo --features native-e2e sequence before successful focused verification. A later rebuilt run passed after the driver replayed a timed-out script. The spec now returns diagnostics at 25 seconds (before the driver timeout) and asserts observed progress plus terminal success notice and actual persisted Git effects, without assuming final progress-event ordering relative to invoke settlement.",
         "safety": "No live credentials or services, dependency package, retry framework, persisted job center, runtime test IPC bridge, navigation side effect, permission bypass, push or release. Tauri test support is dev-only. Final production artifact isolation and native saturation/navigation scenarios remain 08-27/28; cross-domain path integration remains 08-29."

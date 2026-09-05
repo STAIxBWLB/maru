@@ -12,9 +12,9 @@ provides:
   - Workspace-scoped Skills operation ownership and existing-surface completion notices
 affects: [08-03, 08-29, 08-27, 08-28]
 actuals:
-  tokens: 24189
+  tokens: 24552
   tasks: 3
-  commits: 4
+  commits: 6
 tech-stack:
   added: []
   patterns: [spawn_blocking, expected source snapshots, keyed external store, terminal notice deduplication]
@@ -72,7 +72,7 @@ Sync All now processes fixed source identities in an awaited worker, preserves s
 - Started: approximately 2026-09-05T04:39Z, following the 08-01 state handoff at 04:38:41Z.
 - Completed: 2026-09-05T04:54:30Z
 - Tasks: 3; changed implementation, test, plan and evidence files: 17.
-- Actual tokens: 24189, rounded-up characters/4 over the committed diff from 2de787a through 163d0fc. The four counted commits are three task commits and this SUMMARY; shared-state tracking is separate.
+- Actual tokens: 24552, rounded-up characters/4 over the realized plan diff through dba9dec, excluding this SUMMARY. Six commits cover the three tasks, explicit native counter test, original SUMMARY and revised evidence/SUMMARY; shared-state tracking is separate.
 
 ## Accomplishments
 
@@ -87,8 +87,9 @@ Sync All now processes fixed source identities in an awaited worker, preserves s
 1. Task 02-1: `67b3e94`, `perf(08-02): isolate batch sync with typed durable source outcomes`.
 2. Task 02-2: `47fa4ed`, `feat(08-02): own Skills operations and terminal notices beyond views`.
 3. Task 02-3: `163d0fc`, `feat(08-02): connect persistent Skills progress and completion feedback`.
+4. Explicit native single-click/single-notice assertion: `dba9dec`, `test(08-02): assert one native sync click and completion notice`.
 
-## Verification
+## Executed Checks
 
 | Executed check | Actual result |
 | --- | --- |
@@ -102,7 +103,7 @@ Sync All now processes fixed source identities in an awaited worker, preserves s
 | `pnpm typecheck` | Passed, including final view publication changes. |
 | `pnpm lint:i18n` | Passed, 3742 locale keys in parity. |
 | Focused ESLint and native TypeScript checks | Passed. |
-| Rebuilt native Skills smoke | Final run passed 1 spec/1 test in 1.5 seconds with no WebDriver replay. Real local Git content persisted as a valid skill, all source paths stayed in the disposable native home, and the existing toast showed `workspace / native-local-git: 동기화를 완료했습니다.` |
+| Rebuilt native Skills smoke | Final run passed 1 spec/1 test in 1.5 seconds with no WebDriver replay; explicit counters assert exactly one Sync click and one rendered completion notice. Real local Git content persisted as a valid skill, all source paths stayed in the disposable native home, and the existing toast showed `workspace / native-local-git: 동기화를 완료했습니다.` |
 | GSD artifact check | 13/13 declared artifacts passed. |
 | JSON parse, rustfmt and `git diff --check` | Passed. |
 
@@ -113,7 +114,7 @@ The exact owned command row and portable proof are in `docs/performance/phase08-
 1. **[Rule 2 - Verification scope] Dev-only Tauri test support.** Added the existing Tauri dependency's dev-only `test` feature in Cargo.toml, generic AppHandle support for Sync All and a narrow erased progress emitter. This lets the test call the actual command wrapper with MockRuntime. The parent approved the scope addition. No dependency package, production test bridge or wire-event change was added.
 2. **[Rule 2 - Transaction correctness] Precise snapshot and outcome seams.** Extracted the per-snapshot loop as `skills_sync_all_sources_blocking`, added canonical path capture and returned the timestamp from the same guarded source commit. This prevents pre-turn symlink replacement and avoids a second registry read discarding already successful output. The public single-source helper still returns its original Vec payload. Additive `errorCode` records partial failure codes without string parsing. The plan records these corrections.
 3. **[Rule 2 - UI verification scope] Existing native smoke and view helpers.** Extended the native tracer to observe the existing toast. Added narrow admission/selector/view-scope inputs and tested the same inputs used by SkillsTab. Manual refresh retains its progress logs while guarding publication and cleanup by view/request identity.
-4. **[Rule 1 - Observed verification fixes] Test visibility and native runner timing.** The first Rust compile required the test hook to be crate-visible. The first direct native command reused the old binary and timed out; rebuilt following the Makefile sequence. A later rebuilt run passed after WebDriver replayed the script at 30 seconds. The spec now returns diagnostics after 25 seconds and uses observed progress, terminal notice and actual persisted Git effects, without assuming final progress-event ordering relative to invoke settlement. The final run passed in 1.5 seconds without replay. Failed/timed-out runs were not counted as successful evidence.
+4. **[Rule 1 - Observed verification fixes] Test visibility and native runner timing.** The first Rust compile required the test hook to be crate-visible. The first direct native command reused the old binary and timed out; rebuilt following the Makefile sequence. A later rebuilt run passed after WebDriver replayed the script at 30 seconds. The spec now returns diagnostics after 25 seconds and uses observed progress, terminal notice and actual persisted Git effects, without assuming final progress-event ordering relative to invoke settlement. The final run passed in 1.5 seconds without replay, including explicit `syncClicks=1` and `noticeCount=1` assertions. Failed/timed-out runs were not counted as successful evidence.
 
 ## Threat Dispositions and Handoff
 
