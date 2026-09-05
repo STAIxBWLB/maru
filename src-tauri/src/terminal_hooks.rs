@@ -23,7 +23,9 @@ use serde::Serialize;
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter, Manager, State};
 
-use crate::atomic_file::write_atomic_private;
+use crate::atomic_file::{
+    with_path_transactions, write_atomic_private, PathTransactionLease, PathTransactionRequest,
+};
 
 /// Canonical claude hook events → status token. The installer translates each
 /// agent's native lifecycle event into one of our tokens, so the frontend
@@ -57,9 +59,7 @@ const KIMI_HOOK_END: &str = "# maru:kimi-terminal-hooks v1 end";
 // ---------------------------------------------------------------------------
 
 fn maru_home() -> Result<PathBuf, String> {
-    dirs::home_dir()
-        .map(|home| home.join(".maru"))
-        .ok_or_else(|| "Could not determine home directory".to_string())
+    crate::skill_host::fs::maru_home()
 }
 
 fn runtime_terminal_dir() -> Result<PathBuf, String> {
@@ -428,15 +428,19 @@ fn claude_settings_path(work_path: Option<&str>, scope: &str) -> Result<PathBuf,
             work_path.ok_or_else(|| "workspace path required for project scope".to_string())?;
         Ok(PathBuf::from(work).join(".claude").join("settings.json"))
     } else {
-        Ok(dirs::home_dir()
-            .ok_or_else(|| "Could not determine home directory".to_string())?
+        Ok(crate::skill_host::fs::install_root_base()?
             .join(".claude")
             .join("settings.json"))
     }
 }
 
 fn kimi_config_path() -> Result<PathBuf, String> {
-    let home = dirs::home_dir().ok_or_else(|| "Could not determine home directory".to_string())?;
+    let home = crate::skill_host::fs::install_root_base()?;
+    // Fixture/native homes must also override an inherited Kimi profile.
+    #[cfg(any(test, feature = "native-e2e"))]
+    if cfg!(feature = "native-e2e") || std::env::var_os("MARU_TEST_HOME").is_some() {
+        return Ok(kimi_config_path_for(&home, None));
+    }
     let configured_home = std::env::var_os("KIMI_CODE_HOME")
         .filter(|value| !value.is_empty())
         .map(PathBuf::from);
@@ -584,15 +588,28 @@ fn codex_hint() -> String {
     )
 }
 
-#[tauri::command]
 pub fn terminal_hooks_status(
     work_path: Option<String>,
     scope: String,
 ) -> Result<TerminalHooksStatus, String> {
     let claude_path = claude_settings_path(work_path.as_deref(), &scope)?;
+    let kimi_path = kimi_config_path()?;
+    let request = PathTransactionRequest::new(vec![claude_path, kimi_path])?;
+    with_path_transactions(request, |lease| {
+        terminal_hooks_status_in_transaction(work_path, scope, lease)
+    })
+}
+
+fn terminal_hooks_status_in_transaction(
+    work_path: Option<String>,
+    scope: String,
+    lease: &PathTransactionLease,
+) -> Result<TerminalHooksStatus, String> {
+    let claude_path = claude_settings_path(work_path.as_deref(), &scope)?;
+    let kimi_path = kimi_config_path()?;
+    lease.ensure_covered(vec![claude_path.clone(), kimi_path.clone()])?;
     let claude_root = read_json_object(&claude_path)?;
     let claude_installed = claude_hooks_installed(&claude_root);
-    let kimi_path = kimi_config_path()?;
     let kimi_content = read_text_or_empty(&kimi_path)?;
     Ok(TerminalHooksStatus {
         scope,
@@ -604,44 +621,102 @@ pub fn terminal_hooks_status(
     })
 }
 
-#[tauri::command]
 pub fn terminal_hooks_install(
     work_path: Option<String>,
     scope: String,
 ) -> Result<TerminalHooksStatus, String> {
     let claude_path = claude_settings_path(work_path.as_deref(), &scope)?;
     let kimi_path = kimi_config_path()?;
-    let mut claude_root = read_json_object(&claude_path)?;
-    let kimi_content = read_text_or_empty(&kimi_path)?;
+    // Reserve both configuration files and the Kimi atomic writer's sibling
+    // directory, including physical symlink targets, before reading either file.
+    let kimi_target = if kimi_path.is_symlink() {
+        std::fs::canonicalize(&kimi_path)
+            .map_err(|err| format!("Cannot resolve Kimi config: {err}"))?
+    } else {
+        kimi_path.clone()
+    };
+    let request = PathTransactionRequest::new(vec![
+        claude_path.clone(),
+        kimi_path.clone(),
+        kimi_target
+            .parent()
+            .ok_or("Kimi config has no parent")?
+            .to_path_buf(),
+    ])?;
+    with_path_transactions(request, |lease| {
+        terminal_hooks_install_in_transaction(work_path, scope, &claude_path, &kimi_path, lease)
+    })
+}
+
+fn terminal_hooks_install_in_transaction(
+    work_path: Option<String>,
+    scope: String,
+    claude_path: &Path,
+    kimi_path: &Path,
+    lease: &PathTransactionLease,
+) -> Result<TerminalHooksStatus, String> {
+    lease.ensure_covered(vec![claude_path.to_path_buf(), kimi_path.to_path_buf()])?;
+    lease.before_effect()?;
+    let mut claude_root = read_json_object(claude_path)?;
+    let kimi_content = read_text_or_empty(kimi_path)?;
     let cli = resolve_maru_cli();
     let claude_changed = merge_claude_hooks(&mut claude_root, &cli);
     let next_kimi = upsert_kimi_hooks(&kimi_content, &cli);
     if next_kimi != kimi_content {
-        write_kimi_config(&kimi_path, &next_kimi)?;
+        write_kimi_config(kimi_path, &next_kimi)?;
     }
     if claude_changed {
-        write_json_pretty(&claude_path, &claude_root)?;
+        write_json_pretty(claude_path, &claude_root)?;
     }
-    terminal_hooks_status(work_path, scope)
+    terminal_hooks_status_in_transaction(work_path, scope, lease)
 }
 
-#[tauri::command]
 pub fn terminal_hooks_uninstall(
     work_path: Option<String>,
     scope: String,
 ) -> Result<TerminalHooksStatus, String> {
     let claude_path = claude_settings_path(work_path.as_deref(), &scope)?;
     let kimi_path = kimi_config_path()?;
-    let mut claude_root = read_json_object(&claude_path)?;
-    let kimi_content = read_text_or_empty(&kimi_path)?;
+    // Reserve both configuration files and the Kimi atomic writer's sibling
+    // directory, including physical symlink targets, before reading either file.
+    let kimi_target = if kimi_path.is_symlink() {
+        std::fs::canonicalize(&kimi_path)
+            .map_err(|err| format!("Cannot resolve Kimi config: {err}"))?
+    } else {
+        kimi_path.clone()
+    };
+    let request = PathTransactionRequest::new(vec![
+        claude_path.clone(),
+        kimi_path.clone(),
+        kimi_target
+            .parent()
+            .ok_or("Kimi config has no parent")?
+            .to_path_buf(),
+    ])?;
+    with_path_transactions(request, |lease| {
+        terminal_hooks_uninstall_in_transaction(work_path, scope, &claude_path, &kimi_path, lease)
+    })
+}
+
+fn terminal_hooks_uninstall_in_transaction(
+    work_path: Option<String>,
+    scope: String,
+    claude_path: &Path,
+    kimi_path: &Path,
+    lease: &PathTransactionLease,
+) -> Result<TerminalHooksStatus, String> {
+    lease.ensure_covered(vec![claude_path.to_path_buf(), kimi_path.to_path_buf()])?;
+    lease.before_effect()?;
+    let mut claude_root = read_json_object(claude_path)?;
+    let kimi_content = read_text_or_empty(kimi_path)?;
     let next_kimi = remove_kimi_hooks(&kimi_content);
     if next_kimi != kimi_content {
-        write_kimi_config(&kimi_path, &next_kimi)?;
+        write_kimi_config(kimi_path, &next_kimi)?;
     }
     if remove_claude_hooks(&mut claude_root) {
-        write_json_pretty(&claude_path, &claude_root)?;
+        write_json_pretty(claude_path, &claude_root)?;
     }
-    terminal_hooks_status(work_path, scope)
+    terminal_hooks_status_in_transaction(work_path, scope, lease)
 }
 
 // ---------------------------------------------------------------------------
@@ -721,12 +796,39 @@ fn hint_target_file(work: &Path, target: &str) -> Option<PathBuf> {
     }
 }
 
-#[tauri::command]
 pub fn write_agent_context_hint(
     work_path: String,
     targets: Vec<String>,
 ) -> Result<Vec<String>, String> {
     let work = PathBuf::from(&work_path);
+    if !work.is_dir() {
+        return Err(format!("Workspace path is not a directory: {work_path}"));
+    }
+    let paths: Vec<_> = targets
+        .iter()
+        .filter_map(|target| hint_target_file(&work, target))
+        .collect();
+    if paths.is_empty() {
+        return Ok(Vec::new());
+    }
+    let request = PathTransactionRequest::new(paths)?;
+    with_path_transactions(request, |lease| {
+        write_agent_context_hint_in_transaction(work_path, targets, lease)
+    })
+}
+
+fn write_agent_context_hint_in_transaction(
+    work_path: String,
+    targets: Vec<String>,
+    lease: &PathTransactionLease,
+) -> Result<Vec<String>, String> {
+    let work = PathBuf::from(&work_path);
+    lease.ensure_covered(
+        targets
+            .iter()
+            .filter_map(|target| hint_target_file(&work, target)),
+    )?;
+    lease.before_effect()?;
     if !work.is_dir() {
         return Err(format!("Workspace path is not a directory: {work_path}"));
     }
@@ -745,12 +847,36 @@ pub fn write_agent_context_hint(
     Ok(written)
 }
 
-#[tauri::command]
 pub fn remove_agent_context_hint(
     work_path: String,
     targets: Vec<String>,
 ) -> Result<Vec<String>, String> {
     let work = PathBuf::from(&work_path);
+    let paths: Vec<_> = targets
+        .iter()
+        .filter_map(|target| hint_target_file(&work, target))
+        .collect();
+    if paths.is_empty() {
+        return Ok(Vec::new());
+    }
+    let request = PathTransactionRequest::new(paths)?;
+    with_path_transactions(request, |lease| {
+        remove_agent_context_hint_in_transaction(work_path, targets, lease)
+    })
+}
+
+fn remove_agent_context_hint_in_transaction(
+    work_path: String,
+    targets: Vec<String>,
+    lease: &PathTransactionLease,
+) -> Result<Vec<String>, String> {
+    let work = PathBuf::from(&work_path);
+    lease.ensure_covered(
+        targets
+            .iter()
+            .filter_map(|target| hint_target_file(&work, target)),
+    )?;
+    lease.before_effect()?;
     let mut removed = Vec::new();
     for target in &targets {
         let Some(path) = hint_target_file(&work, target) else {
@@ -768,6 +894,99 @@ pub fn remove_agent_context_hint(
         }
     }
     Ok(removed)
+}
+
+// Owned input command boundary. All filesystem reads, admission waits, and
+// writes execute inside the blocking worker; synchronous CLI callers retain
+// the same functions and use the same admission entry points.
+pub mod ipc {
+    use super::*;
+    #[tauri::command]
+    pub async fn terminal_hooks_status(
+        work_path: Option<String>,
+        scope: String,
+    ) -> Result<TerminalHooksStatus, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            crate::atomic_file::PathTransactionLease::test_stage(
+                &[work_path.as_ref().map(PathBuf::from).unwrap_or_else(|| {
+                    crate::skill_host::fs::install_root_base().expect("fixture home")
+                })],
+                "worker:terminal_hooks_status",
+            );
+            super::terminal_hooks_status(work_path, scope)
+        })
+        .await
+        .map_err(|error| format!("terminal_hooks_status_task_failed: {error}"))?
+    }
+    #[tauri::command]
+    pub async fn terminal_hooks_install(
+        work_path: Option<String>,
+        scope: String,
+    ) -> Result<TerminalHooksStatus, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            crate::atomic_file::PathTransactionLease::test_stage(
+                &[work_path.as_ref().map(PathBuf::from).unwrap_or_else(|| {
+                    crate::skill_host::fs::install_root_base().expect("fixture home")
+                })],
+                "worker:terminal_hooks_install",
+            );
+            super::terminal_hooks_install(work_path, scope)
+        })
+        .await
+        .map_err(|error| format!("terminal_hooks_install_task_failed: {error}"))?
+    }
+    #[tauri::command]
+    pub async fn terminal_hooks_uninstall(
+        work_path: Option<String>,
+        scope: String,
+    ) -> Result<TerminalHooksStatus, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            crate::atomic_file::PathTransactionLease::test_stage(
+                &[work_path.as_ref().map(PathBuf::from).unwrap_or_else(|| {
+                    crate::skill_host::fs::install_root_base().expect("fixture home")
+                })],
+                "worker:terminal_hooks_uninstall",
+            );
+            super::terminal_hooks_uninstall(work_path, scope)
+        })
+        .await
+        .map_err(|error| format!("terminal_hooks_uninstall_task_failed: {error}"))?
+    }
+    #[tauri::command]
+    pub async fn write_agent_context_hint(
+        work_path: String,
+        targets: Vec<String>,
+    ) -> Result<Vec<String>, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            crate::atomic_file::PathTransactionLease::test_stage(
+                &[PathBuf::from(&work_path)],
+                "worker:write_agent_context_hint",
+            );
+            super::write_agent_context_hint(work_path, targets)
+        })
+        .await
+        .map_err(|error| format!("write_agent_context_hint_task_failed: {error}"))?
+    }
+    #[tauri::command]
+    pub async fn remove_agent_context_hint(
+        work_path: String,
+        targets: Vec<String>,
+    ) -> Result<Vec<String>, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            crate::atomic_file::PathTransactionLease::test_stage(
+                &[PathBuf::from(&work_path)],
+                "worker:remove_agent_context_hint",
+            );
+            super::remove_agent_context_hint(work_path, targets)
+        })
+        .await
+        .map_err(|error| format!("remove_agent_context_hint_task_failed: {error}"))?
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1045,5 +1264,435 @@ mod tests {
             remove_marked_block(original, HINT_START, HINT_END),
             original
         );
+    }
+}
+
+#[cfg(test)]
+mod phase08_15 {
+    use super::*;
+    use crate::atomic_file::phase08_06::{boundary, run, Held, Home};
+    use crate::atomic_file::PathTransactionTestHook;
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    fn start<F>(future: F) -> mpsc::Receiver<F::Output>
+    where
+        F: std::future::Future + Send + 'static,
+        F::Output: Send + 'static,
+    {
+        let (tx, rx) = mpsc::channel();
+        tauri::async_runtime::spawn(async move {
+            let _ = tx.send(future.await);
+        });
+        rx
+    }
+    fn done<T>(rx: mpsc::Receiver<T>) -> T {
+        rx.recv_timeout(Duration::from_secs(5))
+            .expect("hook command completion")
+    }
+    fn text(path: &Path) -> String {
+        path.to_string_lossy().into_owned()
+    }
+    fn targets() -> Vec<String> {
+        vec!["claude".into(), "agents".into()]
+    }
+
+    #[test]
+    fn phase08_15_hooks_all_wrappers_return_real_fixtures_and_legacy_errors() {
+        let home = Home::new();
+        let root = home.root.path();
+        let work = text(root);
+        std::fs::create_dir(root.join(".claude")).unwrap();
+        std::fs::write(
+            root.join(".claude/settings.json"),
+            r#"{"user":"preserved"}"#,
+        )
+        .unwrap();
+        let initial = run(ipc::terminal_hooks_status(
+            Some(work.clone()),
+            "project".into(),
+        ))
+        .unwrap();
+        assert_eq!(
+            initial.claude_path,
+            text(&root.join(".claude/settings.json"))
+        );
+        assert!(!initial.claude_installed);
+        let installed = run(ipc::terminal_hooks_install(
+            Some(work.clone()),
+            "project".into(),
+        ))
+        .unwrap();
+        assert!(installed.claude_installed && installed.kimi_installed);
+        assert!(installed.kimi_path.starts_with(&work));
+        assert_eq!(
+            read_json_object(&root.join(".claude/settings.json")).unwrap()["user"],
+            "preserved"
+        );
+        let written = run(ipc::write_agent_context_hint(work.clone(), targets())).unwrap();
+        assert_eq!(written.len(), 2);
+        assert!(std::fs::read_to_string(root.join("AGENTS.md"))
+            .unwrap()
+            .contains(HINT_START));
+        assert_eq!(
+            run(ipc::remove_agent_context_hint(work.clone(), targets()))
+                .unwrap()
+                .len(),
+            2
+        );
+        let removed = run(ipc::terminal_hooks_uninstall(
+            Some(work.clone()),
+            "project".into(),
+        ))
+        .unwrap();
+        assert!(!removed.claude_installed && !removed.kimi_installed);
+        assert_eq!(
+            run(ipc::terminal_hooks_status(None, "project".into()))
+                .err()
+                .unwrap(),
+            terminal_hooks_status(None, "project".into()).err().unwrap()
+        );
+        for install in [true, false] {
+            let error = if install {
+                run(ipc::terminal_hooks_install(None, "project".into()))
+            } else {
+                run(ipc::terminal_hooks_uninstall(None, "project".into()))
+            };
+            assert_eq!(
+                error.err().unwrap(),
+                "workspace path required for project scope"
+            );
+        }
+        let missing = text(&root.join("missing"));
+        assert_eq!(
+            run(ipc::write_agent_context_hint(missing.clone(), targets())).unwrap_err(),
+            write_agent_context_hint(missing.clone(), targets()).unwrap_err()
+        );
+        assert!(run(ipc::remove_agent_context_hint(missing, targets()))
+            .unwrap()
+            .is_empty());
+    }
+
+    #[test]
+    fn phase08_15_hooks_every_wrapper_yields_and_reports_join_failure() {
+        let home = Home::new();
+        let path = home.root.path().to_path_buf();
+        let work = text(&path);
+        boundary(
+            path.clone(),
+            "terminal_hooks_status",
+            ipc::terminal_hooks_status(Some(work.clone()), "project".into()),
+        );
+        boundary(
+            path.clone(),
+            "terminal_hooks_install",
+            ipc::terminal_hooks_install(Some(work.clone()), "project".into()),
+        );
+        boundary(
+            path.clone(),
+            "terminal_hooks_uninstall",
+            ipc::terminal_hooks_uninstall(Some(work.clone()), "project".into()),
+        );
+        boundary(
+            path.clone(),
+            "write_agent_context_hint",
+            ipc::write_agent_context_hint(work.clone(), targets()),
+        );
+        boundary(
+            path,
+            "remove_agent_context_hint",
+            ipc::remove_agent_context_hint(work, targets()),
+        );
+    }
+
+    #[test]
+    fn phase08_15_hooks_install_uninstall_same_target_both_orders() {
+        let home = Home::new();
+        for install_first in [true, false] {
+            let work = text(home.root.path());
+            let path = home.root.path().join(".claude/settings.json");
+            let held = Held::new(path.clone(), "admitted");
+            let first = if install_first {
+                start(ipc::terminal_hooks_install(
+                    Some(work.clone()),
+                    "project".into(),
+                ))
+            } else {
+                start(ipc::terminal_hooks_uninstall(
+                    Some(work.clone()),
+                    "project".into(),
+                ))
+            };
+            held.wait();
+            let wait = Held::new(path, "before-admission");
+            let second = if install_first {
+                start(ipc::terminal_hooks_uninstall(Some(work), "project".into()))
+            } else {
+                start(ipc::terminal_hooks_install(Some(work), "project".into()))
+            };
+            wait.wait();
+            wait.release();
+            assert!(second.recv_timeout(Duration::from_millis(30)).is_err());
+            held.release();
+            done(first).unwrap();
+            let final_status = done(second).unwrap();
+            assert_eq!(final_status.claude_installed, !install_first);
+            assert_eq!(final_status.kimi_installed, !install_first);
+        }
+    }
+
+    #[test]
+    fn phase08_15_hooks_hints_and_document_same_target_both_orders() {
+        let home = Home::new();
+        let root = home.root.path().to_path_buf();
+        for hint_first in [true, false] {
+            std::fs::write(root.join("CLAUDE.md"), "# original\n").unwrap();
+            let held = Held::new(root.join("CLAUDE.md"), "admitted");
+            let work = text(&root);
+            if hint_first {
+                let first = start(ipc::write_agent_context_hint(
+                    work.clone(),
+                    vec!["claude".into()],
+                ));
+                held.wait();
+                let wait = Held::new(root.join("CLAUDE.md"), "before-admission");
+                let second = start(crate::document::ipc::save_document(
+                    work,
+                    "CLAUDE.md".into(),
+                    "# saved\n".into(),
+                    None,
+                ));
+                wait.wait();
+                wait.release();
+                assert!(second.recv_timeout(Duration::from_millis(30)).is_err());
+                held.release();
+                done(first).unwrap();
+                done(second).unwrap();
+                assert_eq!(
+                    std::fs::read_to_string(root.join("CLAUDE.md")).unwrap(),
+                    "# saved\n"
+                );
+            } else {
+                let first = start(crate::document::ipc::save_document(
+                    work.clone(),
+                    "CLAUDE.md".into(),
+                    "# saved\n".into(),
+                    None,
+                ));
+                held.wait();
+                let wait = Held::new(root.join("CLAUDE.md"), "before-admission");
+                let second = start(ipc::write_agent_context_hint(work, vec!["claude".into()]));
+                wait.wait();
+                wait.release();
+                assert!(second.recv_timeout(Duration::from_millis(30)).is_err());
+                held.release();
+                done(first).unwrap();
+                done(second).unwrap();
+                let bytes = std::fs::read_to_string(root.join("CLAUDE.md")).unwrap();
+                assert!(bytes.starts_with("# saved\n") && bytes.contains(HINT_START));
+            }
+        }
+    }
+
+    #[test]
+    fn phase08_15_hooks_files_parent_rename_both_orders_no_recreation() {
+        let home = Home::new();
+        for hook_first in [true, false] {
+            let vault = home
+                .root
+                .path()
+                .join(if hook_first { "first" } else { "second" });
+            let root = vault.join("old");
+            std::fs::create_dir_all(&root).unwrap();
+            let held = Held::new(
+                if hook_first {
+                    root.join("CLAUDE.md")
+                } else {
+                    root.clone()
+                },
+                "admitted",
+            );
+            if hook_first {
+                let first = start(ipc::write_agent_context_hint(text(&root), targets()));
+                held.wait();
+                let wait = Held::new(root.clone(), "before-admission");
+                let second = start(crate::workspace_files::ipc::rename_workspace_entry(
+                    text(&vault),
+                    "old".into(),
+                    "new".into(),
+                ));
+                wait.wait();
+                wait.release();
+                assert!(second.recv_timeout(Duration::from_millis(30)).is_err());
+                held.release();
+                done(first).unwrap();
+                done(second).unwrap();
+                assert!(vault.join("new/CLAUDE.md").is_file());
+            } else {
+                let first = start(crate::workspace_files::ipc::rename_workspace_entry(
+                    text(&vault),
+                    "old".into(),
+                    "new".into(),
+                ));
+                held.wait();
+                let wait = Held::new(root.join("CLAUDE.md"), "before-admission");
+                let second = start(ipc::write_agent_context_hint(text(&root), targets()));
+                wait.wait();
+                wait.release();
+                assert!(second.recv_timeout(Duration::from_millis(30)).is_err());
+                held.release();
+                done(first).unwrap();
+                assert!(done(second).unwrap_err().contains("parent"));
+                assert!(!vault.join("new/CLAUDE.md").exists());
+            }
+            assert!(!root.exists());
+        }
+    }
+
+    #[test]
+    fn phase08_15_hooks_config_files_parent_rename_both_orders() {
+        let home = Home::new();
+        for install in [true, false] {
+            for hook_first in [true, false] {
+                let vault = home
+                    .root
+                    .path()
+                    .join(format!("config-{install}-{hook_first}"));
+                let root = vault.join("old");
+                std::fs::create_dir_all(&root).unwrap();
+                terminal_hooks_install(Some(text(&root)), "project".into()).unwrap();
+                let config = root.join(".claude/settings.json");
+                let held = Held::new(
+                    if hook_first {
+                        config.clone()
+                    } else {
+                        root.clone()
+                    },
+                    "admitted",
+                );
+                let hook = {
+                    let work = text(&root);
+                    async move {
+                        if install {
+                            ipc::terminal_hooks_install(Some(work), "project".into()).await
+                        } else {
+                            ipc::terminal_hooks_uninstall(Some(work), "project".into()).await
+                        }
+                    }
+                };
+                let rename = crate::workspace_files::ipc::rename_workspace_entry(
+                    text(&vault),
+                    "old".into(),
+                    "new".into(),
+                );
+                if hook_first {
+                    let first = start(hook);
+                    held.wait();
+                    let wait = Held::new(root.clone(), "before-admission");
+                    let second = start(rename);
+                    wait.wait();
+                    wait.release();
+                    assert!(second.recv_timeout(Duration::from_millis(30)).is_err());
+                    held.release();
+                    done(first).unwrap();
+                    done(second).unwrap();
+                    assert_eq!(
+                        claude_hooks_installed(
+                            &read_json_object(&vault.join("new/.claude/settings.json")).unwrap()
+                        ),
+                        install
+                    );
+                } else {
+                    let first = start(rename);
+                    held.wait();
+                    let wait = Held::new(config, "before-admission");
+                    let second = start(hook);
+                    wait.wait();
+                    wait.release();
+                    assert!(second.recv_timeout(Duration::from_millis(30)).is_err());
+                    held.release();
+                    done(first).unwrap();
+                    assert!(done(second).err().unwrap().contains("parent"));
+                }
+                assert!(!root.exists());
+            }
+        }
+    }
+
+    #[test]
+    fn phase08_15_hooks_settings_error_and_unwind_release_admission() {
+        let home = Home::new();
+        let root = home.root.path();
+        let work = text(root);
+        let config = root.join(".claude/settings.json");
+        std::fs::create_dir_all(config.parent().unwrap()).unwrap();
+        std::fs::write(&config, "invalid JSON").unwrap();
+        assert!(run(ipc::terminal_hooks_install(
+            Some(work.clone()),
+            "project".into()
+        ))
+        .err()
+        .unwrap()
+        .contains("Cannot parse"));
+        assert!(!root.join(".kimi-code").exists());
+        std::fs::write(&config, "{}").unwrap();
+        let panic =
+            PathTransactionTestHook::new(config.clone(), "pre-effect", || panic!("fixture unwind"));
+        assert!(run(ipc::terminal_hooks_install(
+            Some(work.clone()),
+            "project".into()
+        ))
+        .err()
+        .unwrap()
+        .starts_with("terminal_hooks_install_task_failed:"));
+        drop(panic);
+        assert!(
+            run(ipc::terminal_hooks_install(Some(work), "project".into()))
+                .unwrap()
+                .claude_installed
+        );
+        let entries: Vec<_> = std::fs::read_dir(root.join(".kimi-code"))
+            .unwrap()
+            .collect();
+        assert_eq!(entries.len(), 1, "atomic temporary siblings cleaned up");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn phase08_15_hooks_symlink_aliases_preserve_targets_and_serialize() {
+        use std::os::unix::fs::symlink;
+        let home = Home::new();
+        let root = home.root.path().join("real");
+        let alias = home.root.path().join("alias");
+        std::fs::create_dir(&root).unwrap();
+        symlink(&root, &alias).unwrap();
+        let held = Held::new(root.join("CLAUDE.md"), "admitted");
+        let first = start(ipc::write_agent_context_hint(text(&root), targets()));
+        held.wait();
+        let wait = Held::new(alias.join("CLAUDE.md"), "before-admission");
+        let second = start(ipc::remove_agent_context_hint(text(&alias), targets()));
+        wait.wait();
+        wait.release();
+        assert!(second.recv_timeout(Duration::from_millis(30)).is_err());
+        held.release();
+        done(first).unwrap();
+        assert_eq!(done(second).unwrap().len(), 2);
+        assert!(!std::fs::read_to_string(root.join("CLAUDE.md"))
+            .unwrap()
+            .contains(HINT_START));
+        let config = home.root.path().join(".kimi-code/config.toml");
+        std::fs::create_dir(config.parent().unwrap()).unwrap();
+        let physical = root.join("config.toml");
+        std::fs::write(&physical, "# user config\n").unwrap();
+        symlink(&physical, &config).unwrap();
+        run(ipc::terminal_hooks_install(
+            Some(text(&root)),
+            "project".into(),
+        ))
+        .unwrap();
+        assert!(config.is_symlink());
+        assert!(std::fs::read_to_string(&physical)
+            .unwrap()
+            .starts_with("# user config\n"));
     }
 }

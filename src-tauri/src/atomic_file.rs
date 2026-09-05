@@ -140,26 +140,35 @@ impl PathTransactionRequest {
             let alias = Self::physical_path(path)?;
             keys.push(Self::key(&alias));
             aliases.push(alias);
-            let mut parent = if path.is_dir() {
-                path.as_path()
-            } else {
-                path.parent().ok_or("Transaction path has no parent")?
-            };
-            while !parent.is_dir() {
-                parent = parent.parent().ok_or("Transaction parent does not exist")?;
+            let alias = aliases.last().expect("alias pushed").clone();
+            for candidate in [path.clone(), alias] {
+                let mut parent = if candidate.is_dir() {
+                    candidate.clone()
+                } else {
+                    candidate
+                        .parent()
+                        .ok_or("Transaction path has no parent")?
+                        .to_path_buf()
+                };
+                while !parent.is_dir() {
+                    parent = parent
+                        .parent()
+                        .ok_or("Transaction parent does not exist")?
+                        .to_path_buf();
+                }
+                // Keep an open directory handle: on Unix it also prevents inode
+                // reuse from disguising remove/recreate at the same pathname.
+                let handle = Self::open_parent(&parent)
+                    .map_err(|err| format!("Cannot capture transaction parent: {err}"))?;
+                Self::same_identity(
+                    &handle,
+                    &Self::open_parent(&parent).map_err(|err| err.to_string())?,
+                )?;
+                parents.push(PathTransactionParent {
+                    path: parent,
+                    handle: std::sync::Arc::new(handle),
+                });
             }
-            // Keep an open directory handle: on Unix it also prevents inode
-            // reuse from disguising remove/recreate at the same pathname.
-            let handle = Self::open_parent(parent)
-                .map_err(|err| format!("Cannot capture transaction parent: {err}"))?;
-            Self::same_identity(
-                &handle,
-                &Self::open_parent(parent).map_err(|err| err.to_string())?,
-            )?;
-            parents.push(PathTransactionParent {
-                path: parent.to_path_buf(),
-                handle: std::sync::Arc::new(handle),
-            });
         }
         keys.sort();
         keys.dedup();

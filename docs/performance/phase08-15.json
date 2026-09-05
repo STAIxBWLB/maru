@@ -1,0 +1,1161 @@
+{
+  "plan": "08-15",
+  "moduleIntegrationOwner": "08-15",
+  "commands": [
+    {
+      "name": "jobs_list",
+      "module": "src-tauri/src/jobs.rs",
+      "registrationPath": "src-tauri/src/lib.rs::jobs::ipc::jobs_list",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/jobs.rs::jobs_list_in takes the JOBS_LOCK-guarded fresh manifest snapshot via jobs_guard and load_jobs, then maps each record through status_for (label_for, guarded_plist_path, current_uid, print_launchd_state, launchd_disabled_labels); every read and launchctl status probe stays inside the owned blocking worker."
+      ],
+      "workerBoundary": "src-tauri/src/jobs.rs::ipc::jobs_list owns the work_path String and awaits tauri::async_runtime::spawn_blocking before any manifest read, launchctl status probe or admission wait; existing Vec<JobStatus> payloads remain unchanged and a JoinError stays a display-only jobs_list_task_failed String; no borrowed guard crosses await.",
+      "syncCallers": [
+        "src-tauri/src/jobs.rs::jobs_list and src-tauri/src/jobs.rs::jobs_list_in stay synchronous for Rust callers; src-tauri/src/cli.rs reaches jobs_list_in directly on the same read-only path."
+      ],
+      "mutationKey": {
+        "readOnly": true,
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "sharedAdmissionEntry": "No filesystem mutation is owned by this command: jobs_list only reads .maru/jobs.json and runs read-only launchctl print/list status probes.",
+        "postAdmissionPreconditions": [
+          "Job id and manifest shape validation remain inside the worker via validate_job_id and load_jobs."
+        ],
+        "domainLockOrder": "No command-owned filesystem mutation lease; JOBS_LOCK is scoped to the fresh manifest snapshot only and is never held across a launchctl probe."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_15_jobs",
+          "passed": 6,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/components/jobs/JobsTab.tsx"
+        ],
+        "payload": "JobsTab loadJobs owns the job list refresh and error surfacing; each row action awaits the wrapper result and updates local busy state, while JobsTab readLog owns the bounded log-tail viewer.",
+        "terminalNoticeOwner": "JobsTab owns current completion and error display. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_15_jobs_all_wrappers_nonempty_legacy_errors_and_lifecycle",
+          "phase08_15_jobs_each_wrapper_yields_same_poll_and_maps_join_failure",
+          "phase08_15_jobs_files_parent_both_orders_and_aliases_no_recreation",
+          "phase08_15_jobs_unwind_releases_admission_and_local_child_holds_lease_not_jobs_lock",
+          "phase08_15_jobs_descendant_alias_parents_revalidate_before_effects"
+        ],
+        "workerProof": "Each actual command future is held at spawn_blocking worker entry, manually polled on the same async task and yields before release; a panicked or cancelled worker maps to the display-only jobs_*_task_failed String while Ok payloads pass through unchanged.",
+        "platformScope": "macOS synthetic fixtures only: a fixed local launchctl emulator shell under a fixture HOME records enable/disable/bootstrap/bootout/print/kickstart calls, so the job script is never submitted to real launchd; shared Home lock with disposable MARU_TEST_HOME/MARU_TEST_CONFIG_DIR.",
+        "limits": "In-process path admission does not exclude independent external processes; real launchd state and other agents' plists stay outside the lease. No live launchd daemon proof; PERF-01/PERF-02 remain globally pending.",
+        "contract": "Existing JobStatus payloads, error strings and launchctl argv order are unchanged; JOBS_LOCK still only serializes the fresh .maru/jobs.json manifest snapshot inside the worker."
+      }
+    },
+    {
+      "name": "jobs_install",
+      "module": "src-tauri/src/jobs.rs",
+      "registrationPath": "src-tauri/src/lib.rs::jobs::ipc::jobs_install",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/jobs.rs::jobs_transaction_request captures the workspace and LaunchAgents parent snapshots (PathTransactionParent::capture) and builds the PathTransactionRequest over jobs_transaction_paths before src-tauri/src/jobs.rs::jobs_install_in enters src-tauri/src/atomic_file.rs::with_path_transactions.",
+        "src-tauri/src/jobs.rs::jobs_install_in_transaction re-checks coverage with lease.ensure_covered and lease.before_effect after a JOBS_LOCK-guarded fresh manifest snapshot (jobs_guard, load_jobs, find_job), then plist_for, write_atomic to the guarded plist, launchctl enable/bootstrap via run_launchctl and the existing status_for read-back; all of it inside the owned blocking worker."
+      ],
+      "workerBoundary": "src-tauri/src/jobs.rs::ipc::jobs_install owns the work_path and job_id Strings and awaits tauri::async_runtime::spawn_blocking before any manifest read, path admission, plist write or launchctl call; existing JobStatus payloads and error strings remain unchanged and a JoinError stays a display-only jobs_install_task_failed String; no borrowed guard crosses await.",
+      "syncCallers": [
+        "src-tauri/src/jobs.rs::jobs_install stays a stable synchronous Rust API delegating to jobs_install_in; src-tauri/src/cli.rs dispatches its jobs install action to crate::jobs::jobs_install_in with the same admission entry."
+      ],
+      "mutationKey": {
+        "lexicalPaths": [
+          "Workspace root, .maru/jobs.json manifest and workspace.config.yaml",
+          "LaunchAgents allocation directory and the job's guarded <label>.plist (write_atomic random sibling included by the allocation parent)",
+          "Job logs directory plus stdout.log/stderr.log, and the job program command plus path-like arguments resolved against the workspace"
+        ],
+        "aliasPaths": [
+          "Original lexical parents of the workspace and LaunchAgents captured before the manifest read by jobs_transaction_request",
+          "Physical aliases of symlinked descendants (logs dir, program command, path-like args) via canonical_work_path during jobs_transaction_paths"
+        ],
+        "sharedAdmissionEntry": "src-tauri/src/jobs.rs::jobs_transaction_request builds the src-tauri/src/atomic_file.rs::PathTransactionRequest with parent snapshots; src-tauri/src/jobs.rs::jobs_install_in enters src-tauri/src/atomic_file.rs::with_path_transactions and jobs_install_in_transaction revalidates coverage and calls lease.before_effect before the first effect.",
+        "postAdmissionPreconditions": [
+          "Fresh manifest snapshot under JOBS_LOCK still finds the job (job_not_installed/unknown-id errors unchanged)",
+          "ensure_covered revalidates every declared lexical path and alias before effects",
+          "lease.before_effect confirms parents still exist before plist write and launchctl bootstrap"
+        ],
+        "domainLockOrder": "Path admission is acquired before the plist write and launchctl bootstrap; JOBS_LOCK is nested only for the fresh manifest snapshot and released before ensure_covered, so no domain mutex is held across admission waits or the launchctl join."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_15_jobs",
+          "passed": 6,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/components/jobs/JobsTab.tsx"
+        ],
+        "payload": "JobsTab runAction owns per-job busy state and awaits jobsInstall, then refreshes the list from the returned JobStatus; install failure keeps the existing row state and error surface.",
+        "terminalNoticeOwner": "JobsTab owns current completion and error display. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_15_jobs_all_wrappers_nonempty_legacy_errors_and_lifecycle",
+          "phase08_15_jobs_each_wrapper_yields_same_poll_and_maps_join_failure",
+          "phase08_15_jobs_files_parent_both_orders_and_aliases_no_recreation",
+          "phase08_15_jobs_document_writers_both_orders_alias_and_start_stop_order",
+          "phase08_15_jobs_unwind_releases_admission_and_local_child_holds_lease_not_jobs_lock",
+          "phase08_15_jobs_descendant_alias_parents_revalidate_before_effects"
+        ],
+        "workerProof": "Each actual command future is held at spawn_blocking worker entry, manually polled on the same async task and yields before release; a panicked or cancelled worker maps to the display-only jobs_*_task_failed String while Ok payloads pass through unchanged.",
+        "platformScope": "macOS synthetic fixtures only: a fixed local launchctl emulator shell under a fixture HOME records enable/disable/bootstrap/bootout/print/kickstart calls, so the job script is never submitted to real launchd; shared Home lock with disposable MARU_TEST_HOME/MARU_TEST_CONFIG_DIR.",
+        "limits": "In-process path admission does not exclude independent external processes; real launchd state and other agents' plists stay outside the lease. No live launchd daemon proof; PERF-01/PERF-02 remain globally pending.",
+        "contract": "Existing JobStatus payloads, plist XML, error strings (job_not_installed, job_bootout_failed, plist_remove_failed) and launchctl argv order are unchanged; the admission failure surfaces as the existing lease conflict errors."
+      }
+    },
+    {
+      "name": "jobs_uninstall",
+      "module": "src-tauri/src/jobs.rs",
+      "registrationPath": "src-tauri/src/lib.rs::jobs::ipc::jobs_uninstall",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/jobs.rs::jobs_transaction_request captures workspace and LaunchAgents parent snapshots and builds the PathTransactionRequest over jobs_transaction_paths before src-tauri/src/jobs.rs::jobs_uninstall_in enters src-tauri/src/atomic_file.rs::with_path_transactions.",
+        "src-tauri/src/jobs.rs::jobs_uninstall_in_transaction re-checks coverage with lease.ensure_covered and lease.before_effect after the JOBS_LOCK-guarded snapshot (jobs_guard, load_jobs, find_job), then bootout via run_launchctl (tolerating not-loaded but never deleting a loaded service), fs::remove_file of the guarded plist and the existing status_for read-back inside the owned blocking worker."
+      ],
+      "workerBoundary": "src-tauri/src/jobs.rs::ipc::jobs_uninstall owns the work_path and job_id Strings and awaits tauri::async_runtime::spawn_blocking before any manifest read, path admission, plist removal or launchctl call; existing JobStatus payloads and error strings remain unchanged and a JoinError stays a display-only jobs_uninstall_task_failed String; no borrowed guard crosses await.",
+      "syncCallers": [
+        "src-tauri/src/jobs.rs::jobs_uninstall stays a stable synchronous Rust API delegating to jobs_uninstall_in; src-tauri/src/cli.rs dispatches its jobs uninstall action to crate::jobs::jobs_uninstall_in with the same admission entry."
+      ],
+      "mutationKey": {
+        "lexicalPaths": [
+          "Workspace root, .maru/jobs.json manifest and workspace.config.yaml",
+          "LaunchAgents allocation directory and the job's guarded <label>.plist slated for removal",
+          "Job logs directory plus stdout.log/stderr.log, and the job program command plus path-like arguments resolved against the workspace"
+        ],
+        "aliasPaths": [
+          "Original lexical parents of the workspace and LaunchAgents captured before the manifest read by jobs_transaction_request",
+          "Physical aliases of symlinked descendants (logs dir, program command, path-like args) via canonical_work_path during jobs_transaction_paths"
+        ],
+        "sharedAdmissionEntry": "src-tauri/src/jobs.rs::jobs_transaction_request builds the src-tauri/src/atomic_file.rs::PathTransactionRequest with parent snapshots; src-tauri/src/jobs.rs::jobs_uninstall_in enters src-tauri/src/atomic_file.rs::with_path_transactions and jobs_uninstall_in_transaction revalidates coverage and calls lease.before_effect before the first effect.",
+        "postAdmissionPreconditions": [
+          "Fresh manifest snapshot under JOBS_LOCK still finds the job",
+          "ensure_covered revalidates every declared lexical path and alias before effects",
+          "lease.before_effect confirms parents still exist before bootout and plist removal; a still-loaded service blocks removal with job_bootout_failed"
+        ],
+        "domainLockOrder": "Path admission is acquired before bootout and plist removal; JOBS_LOCK is nested only for the fresh manifest snapshot and released before ensure_covered, so no domain mutex is held across admission waits or the launchctl join."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_15_jobs",
+          "passed": 6,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/components/jobs/JobsTab.tsx"
+        ],
+        "payload": "JobsTab runAction owns per-job busy state and awaits jobsUninstall, then refreshes the list from the returned JobStatus; uninstall failure keeps the existing row state and error surface.",
+        "terminalNoticeOwner": "JobsTab owns current completion and error display. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_15_jobs_all_wrappers_nonempty_legacy_errors_and_lifecycle",
+          "phase08_15_jobs_each_wrapper_yields_same_poll_and_maps_join_failure",
+          "phase08_15_jobs_files_parent_both_orders_and_aliases_no_recreation",
+          "phase08_15_jobs_document_writers_both_orders_alias_and_start_stop_order",
+          "phase08_15_jobs_unwind_releases_admission_and_local_child_holds_lease_not_jobs_lock",
+          "phase08_15_jobs_descendant_alias_parents_revalidate_before_effects"
+        ],
+        "workerProof": "Each actual command future is held at spawn_blocking worker entry, manually polled on the same async task and yields before release; a panicked or cancelled worker maps to the display-only jobs_*_task_failed String while Ok payloads pass through unchanged.",
+        "platformScope": "macOS synthetic fixtures only: a fixed local launchctl emulator shell under a fixture HOME records enable/disable/bootstrap/bootout/print/kickstart calls, so the job script is never submitted to real launchd; shared Home lock with disposable MARU_TEST_HOME/MARU_TEST_CONFIG_DIR.",
+        "limits": "In-process path admission does not exclude independent external processes; real launchd state and other agents' plists stay outside the lease. No live launchd daemon proof; PERF-01/PERF-02 remain globally pending.",
+        "contract": "Existing JobStatus payloads, error strings (job_bootout_failed, plist_remove_failed, job_not_installed) and the never-delete-while-loaded rule are unchanged; a failed bootout leaves the plist on disk."
+      }
+    },
+    {
+      "name": "jobs_start",
+      "module": "src-tauri/src/jobs.rs",
+      "registrationPath": "src-tauri/src/lib.rs::jobs::ipc::jobs_start",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/jobs.rs::jobs_set_enabled_in admits through jobs_transaction_request and src-tauri/src/atomic_file.rs::with_path_transactions before src-tauri/src/jobs.rs::jobs_start_in_transaction revalidates coverage (lease.ensure_covered, lease.before_effect) after the JOBS_LOCK-guarded snapshot (jobs_guard, load_jobs, find_job).",
+        "src-tauri/src/jobs.rs::jobs_start_in_transaction with enabled=true requires the plist to exist (job_not_installed otherwise) and runs launchctl enable, an idempotent bootout and bootstrap via run_launchctl, then the existing status_for read-back; all inside the owned blocking worker."
+      ],
+      "workerBoundary": "src-tauri/src/jobs.rs::ipc::jobs_start owns the work_path and job_id Strings and awaits tauri::async_runtime::spawn_blocking before any manifest read, path admission or launchctl call; existing JobStatus payloads and error strings remain unchanged and a JoinError stays a display-only jobs_start_task_failed String; no borrowed guard crosses await.",
+      "syncCallers": [
+        "src-tauri/src/jobs.rs::jobs_start stays a stable synchronous Rust API delegating through jobs_start_in to jobs_set_enabled_in; src-tauri/src/cli.rs dispatches its jobs start action to crate::jobs::jobs_start_in with the same admission entry."
+      ],
+      "mutationKey": {
+        "lexicalPaths": [
+          "Workspace root, .maru/jobs.json manifest and workspace.config.yaml",
+          "LaunchAgents allocation directory and the job's guarded <label>.plist (write_atomic sibling covered by the allocation parent)",
+          "Job logs directory plus stdout.log/stderr.log, and the job program command plus path-like arguments resolved against the workspace"
+        ],
+        "aliasPaths": [
+          "Original lexical parents of the workspace and LaunchAgents captured before the manifest read by jobs_transaction_request",
+          "Physical aliases of symlinked descendants (logs dir, program command, path-like args) via canonical_work_path during jobs_transaction_paths"
+        ],
+        "sharedAdmissionEntry": "src-tauri/src/jobs.rs::jobs_transaction_request builds the src-tauri/src/atomic_file.rs::PathTransactionRequest with parent snapshots; src-tauri/src/jobs.rs::jobs_set_enabled_in enters src-tauri/src/atomic_file.rs::with_path_transactions and jobs_start_in_transaction revalidates coverage and calls lease.before_effect before the first effect.",
+        "postAdmissionPreconditions": [
+          "Fresh manifest snapshot under JOBS_LOCK still finds the job",
+          "ensure_covered revalidates every declared lexical path and alias before effects",
+          "lease.before_effect confirms parents still exist and the plist exists before enable/bootstrap"
+        ],
+        "domainLockOrder": "Path admission is acquired before enable/bootstrap; JOBS_LOCK is nested only for the fresh manifest snapshot and released before ensure_covered, so no domain mutex is held across admission waits or the launchctl join."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_15_jobs",
+          "passed": 6,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/components/jobs/JobsTab.tsx"
+        ],
+        "payload": "JobsTab runAction owns per-job busy state and awaits jobsStart, then refreshes the list from the returned JobStatus; start failure keeps the existing row state and error surface.",
+        "terminalNoticeOwner": "JobsTab owns current completion and error display. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_15_jobs_all_wrappers_nonempty_legacy_errors_and_lifecycle",
+          "phase08_15_jobs_each_wrapper_yields_same_poll_and_maps_join_failure",
+          "phase08_15_jobs_files_parent_both_orders_and_aliases_no_recreation",
+          "phase08_15_jobs_document_writers_both_orders_alias_and_start_stop_order",
+          "phase08_15_jobs_unwind_releases_admission_and_local_child_holds_lease_not_jobs_lock",
+          "phase08_15_jobs_descendant_alias_parents_revalidate_before_effects"
+        ],
+        "workerProof": "Each actual command future is held at spawn_blocking worker entry, manually polled on the same async task and yields before release; a panicked or cancelled worker maps to the display-only jobs_*_task_failed String while Ok payloads pass through unchanged.",
+        "platformScope": "macOS synthetic fixtures only: a fixed local launchctl emulator shell under a fixture HOME records enable/disable/bootstrap/bootout/print/kickstart calls, so the job script is never submitted to real launchd; shared Home lock with disposable MARU_TEST_HOME/MARU_TEST_CONFIG_DIR.",
+        "limits": "In-process path admission does not exclude independent external processes; real launchd state and other agents' plists stay outside the lease. No live launchd daemon proof; PERF-01/PERF-02 remain globally pending.",
+        "contract": "Existing JobStatus payloads, error strings and the enable-before-bootstrap ordering (job_not_installed when the plist is absent) are unchanged; start and stop serialize on the admitted job target."
+      }
+    },
+    {
+      "name": "jobs_stop",
+      "module": "src-tauri/src/jobs.rs",
+      "registrationPath": "src-tauri/src/lib.rs::jobs::ipc::jobs_stop",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/jobs.rs::jobs_set_enabled_in admits through jobs_transaction_request and src-tauri/src/atomic_file.rs::with_path_transactions before src-tauri/src/jobs.rs::jobs_start_in_transaction revalidates coverage (lease.ensure_covered, lease.before_effect) after the JOBS_LOCK-guarded snapshot (jobs_guard, load_jobs, find_job).",
+        "src-tauri/src/jobs.rs::jobs_start_in_transaction with enabled=false runs launchctl disable and an idempotent bootout via run_launchctl so the calendar timer stops now, then the existing status_for read-back; all inside the owned blocking worker."
+      ],
+      "workerBoundary": "src-tauri/src/jobs.rs::ipc::jobs_stop owns the work_path and job_id Strings and awaits tauri::async_runtime::spawn_blocking before any manifest read, path admission or launchctl call; existing JobStatus payloads and error strings remain unchanged and a JoinError stays a display-only jobs_stop_task_failed String; no borrowed guard crosses await.",
+      "syncCallers": [
+        "src-tauri/src/jobs.rs::jobs_stop stays a stable synchronous Rust API delegating through jobs_stop_in to jobs_set_enabled_in; src-tauri/src/cli.rs dispatches its jobs stop action to crate::jobs::jobs_stop_in with the same admission entry."
+      ],
+      "mutationKey": {
+        "lexicalPaths": [
+          "Workspace root, .maru/jobs.json manifest and workspace.config.yaml",
+          "LaunchAgents allocation directory and the job's guarded <label>.plist (write_atomic sibling covered by the allocation parent)",
+          "Job logs directory plus stdout.log/stderr.log, and the job program command plus path-like arguments resolved against the workspace"
+        ],
+        "aliasPaths": [
+          "Original lexical parents of the workspace and LaunchAgents captured before the manifest read by jobs_transaction_request",
+          "Physical aliases of symlinked descendants (logs dir, program command, path-like args) via canonical_work_path during jobs_transaction_paths"
+        ],
+        "sharedAdmissionEntry": "src-tauri/src/jobs.rs::jobs_transaction_request builds the src-tauri/src/atomic_file.rs::PathTransactionRequest with parent snapshots; src-tauri/src/jobs.rs::jobs_set_enabled_in enters src-tauri/src/atomic_file.rs::with_path_transactions and jobs_start_in_transaction revalidates coverage and calls lease.before_effect before the first effect.",
+        "postAdmissionPreconditions": [
+          "Fresh manifest snapshot under JOBS_LOCK still finds the job",
+          "ensure_covered revalidates every declared lexical path and alias before effects",
+          "lease.before_effect confirms parents still exist before disable/bootout"
+        ],
+        "domainLockOrder": "Path admission is acquired before disable/bootout; JOBS_LOCK is nested only for the fresh manifest snapshot and released before ensure_covered, so no domain mutex is held across admission waits or the launchctl join."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_15_jobs",
+          "passed": 6,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/components/jobs/JobsTab.tsx"
+        ],
+        "payload": "JobsTab runAction owns per-job busy state and awaits jobsStop, then refreshes the list from the returned JobStatus; stop failure keeps the existing row state and error surface.",
+        "terminalNoticeOwner": "JobsTab owns current completion and error display. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_15_jobs_all_wrappers_nonempty_legacy_errors_and_lifecycle",
+          "phase08_15_jobs_each_wrapper_yields_same_poll_and_maps_join_failure",
+          "phase08_15_jobs_files_parent_both_orders_and_aliases_no_recreation",
+          "phase08_15_jobs_document_writers_both_orders_alias_and_start_stop_order",
+          "phase08_15_jobs_unwind_releases_admission_and_local_child_holds_lease_not_jobs_lock",
+          "phase08_15_jobs_descendant_alias_parents_revalidate_before_effects"
+        ],
+        "workerProof": "Each actual command future is held at spawn_blocking worker entry, manually polled on the same async task and yields before release; a panicked or cancelled worker maps to the display-only jobs_*_task_failed String while Ok payloads pass through unchanged.",
+        "platformScope": "macOS synthetic fixtures only: a fixed local launchctl emulator shell under a fixture HOME records enable/disable/bootstrap/bootout/print/kickstart calls, so the job script is never submitted to real launchd; shared Home lock with disposable MARU_TEST_HOME/MARU_TEST_CONFIG_DIR.",
+        "limits": "In-process path admission does not exclude independent external processes; real launchd state and other agents' plists stay outside the lease. No live launchd daemon proof; PERF-01/PERF-02 remain globally pending.",
+        "contract": "Existing JobStatus payloads, error strings and the disable-plus-bootout semantics (an already-loaded service keeps firing after disable alone, so bootout stops it now) are unchanged."
+      }
+    },
+    {
+      "name": "jobs_run_now",
+      "module": "src-tauri/src/jobs.rs",
+      "registrationPath": "src-tauri/src/lib.rs::jobs::ipc::jobs_run_now",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/jobs.rs::jobs_transaction_request captures workspace and LaunchAgents parent snapshots and builds the PathTransactionRequest over jobs_transaction_paths before src-tauri/src/jobs.rs::jobs_run_now_in enters src-tauri/src/atomic_file.rs::with_path_transactions.",
+        "src-tauri/src/jobs.rs::jobs_run_now_in_transaction re-checks coverage with lease.ensure_covered and lease.before_effect after the JOBS_LOCK-guarded snapshot (jobs_guard, load_jobs, find_job), then launchctl kickstart -k via run_launchctl and the existing status_for read-back; all inside the owned blocking worker."
+      ],
+      "workerBoundary": "src-tauri/src/jobs.rs::ipc::jobs_run_now owns the work_path and job_id Strings and awaits tauri::async_runtime::spawn_blocking before any manifest read, path admission or launchctl call; existing JobStatus payloads and error strings remain unchanged and a JoinError stays a display-only jobs_run_now_task_failed String; no borrowed guard crosses await.",
+      "syncCallers": [
+        "src-tauri/src/jobs.rs::jobs_run_now stays a stable synchronous Rust API delegating to jobs_run_now_in; src-tauri/src/cli.rs dispatches its jobs run action to crate::jobs::jobs_run_now_in with the same admission entry."
+      ],
+      "mutationKey": {
+        "lexicalPaths": [
+          "Workspace root, .maru/jobs.json manifest and workspace.config.yaml",
+          "LaunchAgents allocation directory and the job's guarded <label>.plist",
+          "Job logs directory plus stdout.log/stderr.log (the kicked job appends to them), and the job program command plus path-like arguments resolved against the workspace"
+        ],
+        "aliasPaths": [
+          "Original lexical parents of the workspace and LaunchAgents captured before the manifest read by jobs_transaction_request",
+          "Physical aliases of symlinked descendants (logs dir, program command, path-like args) via canonical_work_path during jobs_transaction_paths"
+        ],
+        "sharedAdmissionEntry": "src-tauri/src/jobs.rs::jobs_transaction_request builds the src-tauri/src/atomic_file.rs::PathTransactionRequest with parent snapshots; src-tauri/src/jobs.rs::jobs_run_now_in enters src-tauri/src/atomic_file.rs::with_path_transactions and jobs_run_now_in_transaction revalidates coverage and calls lease.before_effect before the first effect.",
+        "postAdmissionPreconditions": [
+          "Fresh manifest snapshot under JOBS_LOCK still finds the job",
+          "ensure_covered revalidates every declared lexical path and alias before effects",
+          "lease.before_effect confirms parents still exist before kickstart; the fixture proves the lease survives into the local child run while JOBS_LOCK stays free"
+        ],
+        "domainLockOrder": "Path admission is acquired before kickstart and held through the local child effects; JOBS_LOCK is nested only for the fresh manifest snapshot and released before ensure_covered, so no domain mutex is held across admission waits or the launchctl join."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_15_jobs",
+          "passed": 6,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/components/jobs/JobsTab.tsx"
+        ],
+        "payload": "JobsTab runAction owns per-job busy state and awaits jobsRunNow, then refreshes the list from the returned JobStatus; run-now failure keeps the existing row state and error surface.",
+        "terminalNoticeOwner": "JobsTab owns current completion and error display. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_15_jobs_all_wrappers_nonempty_legacy_errors_and_lifecycle",
+          "phase08_15_jobs_each_wrapper_yields_same_poll_and_maps_join_failure",
+          "phase08_15_jobs_files_parent_both_orders_and_aliases_no_recreation",
+          "phase08_15_jobs_document_writers_both_orders_alias_and_start_stop_order",
+          "phase08_15_jobs_unwind_releases_admission_and_local_child_holds_lease_not_jobs_lock",
+          "phase08_15_jobs_descendant_alias_parents_revalidate_before_effects"
+        ],
+        "workerProof": "Each actual command future is held at spawn_blocking worker entry, manually polled on the same async task and yields before release; a panicked or cancelled worker maps to the display-only jobs_*_task_failed String while Ok payloads pass through unchanged.",
+        "platformScope": "macOS synthetic fixtures only: a fixed local launchctl emulator shell under a fixture HOME records enable/disable/bootstrap/bootout/print/kickstart calls, so the job script is never submitted to real launchd; shared Home lock with disposable MARU_TEST_HOME/MARU_TEST_CONFIG_DIR.",
+        "limits": "In-process path admission does not exclude independent external processes; real launchd state and other agents' plists stay outside the lease. No live launchd daemon proof; PERF-01/PERF-02 remain globally pending.",
+        "contract": "Existing JobStatus payloads, kickstart -k argv and the loaded-service precondition (the fixture fails kickstart for a not-loaded label) are unchanged."
+      }
+    },
+    {
+      "name": "jobs_read_log",
+      "module": "src-tauri/src/jobs.rs",
+      "registrationPath": "src-tauri/src/lib.rs::jobs::ipc::jobs_read_log",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/jobs.rs::jobs_read_log_in resolves the job via load_jobs, find_job and resolve_job_path, then tail_lines reads at most LOG_TAIL_BYTES (256 KiB) capped to LOG_TAIL_LINES from stdout.log and stderr.log; the bounded reads stay inside the owned blocking worker."
+      ],
+      "workerBoundary": "src-tauri/src/jobs.rs::ipc::jobs_read_log owns the work_path and job_id Strings and awaits tauri::async_runtime::spawn_blocking before any manifest read or bounded log-tail read; existing JobLogsTail payloads remain unchanged and a JoinError stays a display-only jobs_read_log_task_failed String; no borrowed guard crosses await.",
+      "syncCallers": [
+        "src-tauri/src/jobs.rs::jobs_read_log stays a stable synchronous Rust API delegating to jobs_read_log_in; src-tauri/src/cli.rs reaches the same read path for its jobs log command."
+      ],
+      "mutationKey": {
+        "readOnly": true,
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "sharedAdmissionEntry": "No filesystem mutation is owned by this command: jobs_read_log only reads .maru/jobs.json and the bounded stdout.log/stderr.log tails.",
+        "postAdmissionPreconditions": [
+          "Job id validation and logs-dir resolution remain inside the worker via find_job and resolve_job_path"
+        ],
+        "domainLockOrder": "No command-owned filesystem mutation lease and no mutex is taken; the byte-capped tail read cannot grow with log size."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_15_jobs",
+          "passed": 6,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/components/jobs/JobsTab.tsx"
+        ],
+        "payload": "JobsTab readLog owns the log viewer open/close and awaits jobsReadLog, rendering the bounded stdout/stderr tails it receives.",
+        "terminalNoticeOwner": "JobsTab owns current completion and error display. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_15_jobs_all_wrappers_nonempty_legacy_errors_and_lifecycle",
+          "phase08_15_jobs_each_wrapper_yields_same_poll_and_maps_join_failure",
+          "phase08_15_jobs_files_parent_both_orders_and_aliases_no_recreation",
+          "phase08_15_jobs_unwind_releases_admission_and_local_child_holds_lease_not_jobs_lock"
+        ],
+        "workerProof": "Each actual command future is held at spawn_blocking worker entry, manually polled on the same async task and yields before release; a panicked or cancelled worker maps to the display-only jobs_*_task_failed String while Ok payloads pass through unchanged.",
+        "platformScope": "macOS synthetic fixtures only: a fixed local launchctl emulator shell under a fixture HOME records enable/disable/bootstrap/bootout/print/kickstart calls, so the job script is never submitted to real launchd; shared Home lock with disposable MARU_TEST_HOME/MARU_TEST_CONFIG_DIR.",
+        "limits": "The 256 KiB byte cap bounds the read even for gigabyte logs but starts mid-line clipping; missing logs return empty strings as before. In-process admission does not exclude independent external processes; PERF-01/PERF-02 remain globally pending.",
+        "contract": "Existing JobLogsTail payload, LOG_TAIL_LINES count and empty-string-on-missing behavior are unchanged."
+      }
+    },
+    {
+      "name": "scheduler_list",
+      "module": "src-tauri/src/scheduler.rs",
+      "registrationPath": "src-tauri/src/lib.rs::scheduler::ipc::scheduler_list",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/scheduler.rs::scheduler_list normalizes the workspace with normalize_existing_dir and reads the finite schedules.json through load_schedules and schedules_path; the whole read stays inside the owned blocking worker."
+      ],
+      "workerBoundary": "src-tauri/src/scheduler.rs::ipc::scheduler_list owns the work_path String and awaits tauri::async_runtime::spawn_blocking before any directory normalization or schedules.json read; existing Vec<SchedulerSchedule> payloads remain unchanged and a JoinError stays a display-only scheduler_list_task_failed String; no borrowed guard crosses await.",
+      "syncCallers": [
+        "src-tauri/src/scheduler.rs::scheduler_list stays a stable synchronous Rust API; the desktop registration and AgentsPane listSchedules use the isolated ipc wrapper."
+      ],
+      "mutationKey": {
+        "readOnly": true,
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "sharedAdmissionEntry": "No filesystem mutation is owned by this command: scheduler_list only reads the finite .maru/schedules.json after directory normalization.",
+        "postAdmissionPreconditions": [
+          "Workspace existence normalization and corrupt-file errors (Cannot read/Cannot parse) remain inside the worker"
+        ],
+        "domainLockOrder": "No command-owned filesystem mutation lease and no scheduler mutex is taken; only the single finite JSON file is read."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_15_scheduler",
+          "passed": 8,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/components/agents/AgentsPane.tsx"
+        ],
+        "payload": "AgentsPane loadSchedules owns the schedule list refresh (including the empty state for no workspace) and re-runs it on scheduler://changed; errors keep the existing pane-level error surface.",
+        "terminalNoticeOwner": "AgentsPane owns current completion and error display. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_15_scheduler_every_wrapper_yields_and_preserves_join_error",
+          "phase08_15_scheduler_actual_wrappers_results_errors_and_fake_runner",
+          "phase08_15_scheduler_files_parent_and_document_both_orders_aliases"
+        ],
+        "workerProof": "Each actual wrapper future is held at spawn_blocking entry, manually polled on the same async task, yields before release and preserves JoinError as the display-only scheduler_*_task_failed String.",
+        "platformScope": "Mock-runtime AppHandle with recorded approvals and a PATH-cleared fake runner; the dispatch executor spawns the test binary itself as an exact harmless child. No real CLI, agent provider or daemon is started.",
+        "limits": "In-process admission does not exclude independent external processes; a corrupt schedules.json still surfaces its parse error instead of an empty list. No live provider proof; PERF-01/PERF-02 remain globally pending.",
+        "contract": "Existing SchedulerSchedule schema, empty-list-on-absent-file and Cannot read/Cannot parse errors are unchanged."
+      }
+    },
+    {
+      "name": "scheduler_add",
+      "module": "src-tauri/src/scheduler.rs",
+      "registrationPath": "src-tauri/src/lib.rs::scheduler::ipc::scheduler_add",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/scheduler.rs::scheduler_add_blocking normalizes the workspace, computes the lexical scheduler_admission_root and builds scheduler_transaction_request (.maru dir and schedules.json plus require_parent) before entering src-tauri/src/atomic_file.rs::with_path_transactions.",
+        "src-tauri/src/scheduler.rs::scheduler_add_in_transaction validates name/prompt/runtime, computes next_run_at, appends the new record and persists through save_schedules_in_transaction (lease.ensure_covered, lease.before_effect, write_atomic); the approval gate require_approval with the scheduler.add kind is consumed inside the worker; emit_scheduler_changed fires after the transaction."
+      ],
+      "workerBoundary": "src-tauri/src/scheduler.rs::ipc::scheduler_add owns the AppHandle, work_path, schedule input and approval id, and awaits tauri::async_runtime::spawn_blocking before any normalization, admission wait, approval check or schedules.json write; existing SchedulerSchedule payloads and scheduler://changed emission remain unchanged and a JoinError stays a display-only scheduler_add_task_failed String; no borrowed guard crosses await.",
+      "syncCallers": [
+        "src-tauri/src/scheduler.rs::scheduler_add is retained as a stable synchronous Rust API (marked allow(dead_code) because the desktop registration uses ipc); it performs the same with_path_transactions admission through scheduler_transaction_request."
+      ],
+      "mutationKey": {
+        "lexicalPaths": [
+          "Workspace .maru directory (atomic-allocation parent for schedules.json)",
+          "Workspace .maru/schedules.json being appended and rewritten"
+        ],
+        "aliasPaths": [
+          "Physical alias of a symlinked schedules.json via the .maru allocation parent and require_parent(work)",
+          "Lexical admission root retained when the caller path is a symlink so hooks and conflicts observe the caller spelling"
+        ],
+        "sharedAdmissionEntry": "src-tauri/src/scheduler.rs::scheduler_transaction_request builds the src-tauri/src/atomic_file.rs::PathTransactionRequest; src-tauri/src/scheduler.rs::scheduler_add_blocking enters src-tauri/src/atomic_file.rs::with_path_transactions and scheduler_add_in_transaction revalidates coverage through save_schedules_in_transaction before write_atomic.",
+        "postAdmissionPreconditions": [
+          "scheduler_name_required, scheduler_prompt_required and scheduler_time_invalid validation runs before persistence",
+          "require_approval with the scheduler.add approval kind passes inside the admitted transaction",
+          "lease.before_effect confirms parents still exist before the schedules.json rewrite"
+        ],
+        "domainLockOrder": "Path admission is acquired before the schedules.json write; the ApprovalState guard and approval map are consumed inside the blocking worker and no scheduler mutex (IN_FLIGHT, LAST_FIRED) is held during admission."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_15_scheduler",
+          "passed": 8,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/components/agents/AgentsPane.tsx"
+        ],
+        "payload": "AgentsPane schedule-add form prepares the scheduler.add approval, awaits addSchedule and refreshes the list on scheduler://changed; the approval denial path keeps the existing pane error surface.",
+        "terminalNoticeOwner": "AgentsPane owns current completion and error display. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_15_scheduler_every_wrapper_yields_and_preserves_join_error",
+          "phase08_15_scheduler_actual_wrappers_results_errors_and_fake_runner",
+          "phase08_15_scheduler_mutations_same_target_and_error_unwind_release",
+          "phase08_15_scheduler_accepted_run_remove_disable_siblings_and_duplicate_claim",
+          "phase08_15_scheduler_files_parent_and_document_both_orders_aliases"
+        ],
+        "workerProof": "Each actual wrapper future is held at spawn_blocking entry, manually polled on the same async task, yields before release and preserves JoinError as the display-only scheduler_*_task_failed String.",
+        "platformScope": "Mock-runtime AppHandle with recorded approvals and a PATH-cleared fake runner; the dispatch executor spawns the test binary itself as an exact harmless child. No real CLI, agent provider or daemon is started.",
+        "limits": "In-process admission does not exclude independent external processes or the background missions a schedule may dispatch; add failure surfaces the existing validation and approval errors. No live provider proof; PERF-01/PERF-02 remain globally pending.",
+        "contract": "Existing SchedulerSchedule/SchedulerScheduleInput schema, scheduler.add approval kind, scheduler://changed event and duplicate day-claim semantics are unchanged."
+      }
+    },
+    {
+      "name": "scheduler_remove",
+      "module": "src-tauri/src/scheduler.rs",
+      "registrationPath": "src-tauri/src/lib.rs::scheduler::ipc::scheduler_remove",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/scheduler.rs::scheduler_remove_blocking delegates to remove_impl, which validates the id, normalizes the workspace, computes scheduler_admission_root and admits scheduler_transaction_request (.maru dir and schedules.json) through src-tauri/src/atomic_file.rs::with_path_transactions.",
+        "remove_impl reloads via load_schedules, finds the index with find_schedule and persists the removal through save_schedules_in_transaction (lease.ensure_covered, lease.before_effect, write_atomic); emit_scheduler_changed fires after the transaction inside the owned blocking worker."
+      ],
+      "workerBoundary": "src-tauri/src/scheduler.rs::ipc::scheduler_remove owns the AppHandle, work_path and id Strings and awaits tauri::async_runtime::spawn_blocking before any normalization, admission wait or schedules.json write; the existing unit result and scheduler://changed emission remain unchanged and a JoinError stays a display-only scheduler_remove_task_failed String; no borrowed guard crosses await.",
+      "syncCallers": [
+        "src-tauri/src/scheduler.rs::scheduler_remove is retained as a stable synchronous Rust API (marked allow(dead_code) because the desktop registration uses ipc); it delegates to scheduler_remove_blocking with the same admission entry."
+      ],
+      "mutationKey": {
+        "lexicalPaths": [
+          "Workspace .maru directory (atomic-allocation parent for schedules.json)",
+          "Workspace .maru/schedules.json being rewritten without the removed record"
+        ],
+        "aliasPaths": [
+          "Physical alias of a symlinked schedules.json via the .maru allocation parent and require_parent(work)",
+          "Lexical admission root retained when the caller path is a symlink so hooks and conflicts observe the caller spelling"
+        ],
+        "sharedAdmissionEntry": "src-tauri/src/scheduler.rs::scheduler_transaction_request builds the src-tauri/src/atomic_file.rs::PathTransactionRequest; remove_impl enters src-tauri/src/atomic_file.rs::with_path_transactions and save_schedules_in_transaction revalidates coverage before write_atomic.",
+        "postAdmissionPreconditions": [
+          "validate_schedule_id rejects empty, over-long or non-alphanumeric ids before admission",
+          "scheduler_not_found surfaces when the id is absent from a freshly reloaded file",
+          "lease.before_effect confirms parents still exist before the schedules.json rewrite"
+        ],
+        "domainLockOrder": "Path admission is acquired before the schedules.json rewrite; no scheduler mutex (IN_FLIGHT, LAST_FIRED) is held during admission and an accepted run's later settlement never resurrects a removed schedule."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_15_scheduler",
+          "passed": 8,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/components/agents/AgentsPane.tsx"
+        ],
+        "payload": "AgentsPane schedule removal confirms, awaits removeSchedule and refreshes the list on scheduler://changed; removal of an accepted run leaves sibling schedules runnable.",
+        "terminalNoticeOwner": "AgentsPane owns current completion and error display. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_15_scheduler_every_wrapper_yields_and_preserves_join_error",
+          "phase08_15_scheduler_actual_wrappers_results_errors_and_fake_runner",
+          "phase08_15_scheduler_mutations_same_target_and_error_unwind_release",
+          "phase08_15_scheduler_accepted_run_remove_disable_siblings_and_duplicate_claim",
+          "phase08_15_scheduler_files_parent_and_document_both_orders_aliases"
+        ],
+        "workerProof": "Each actual wrapper future is held at spawn_blocking entry, manually polled on the same async task, yields before release and preserves JoinError as the display-only scheduler_*_task_failed String.",
+        "platformScope": "Mock-runtime AppHandle with recorded approvals and a PATH-cleared fake runner; the dispatch executor spawns the test binary itself as an exact harmless child. No real CLI, agent provider or daemon is started.",
+        "limits": "In-process admission does not exclude independent external processes; removing a schedule whose run is in flight relies on the existing claim/settlement no-resurrect rule rather than blocking on the mission. No live provider proof; PERF-01/PERF-02 remain globally pending.",
+        "contract": "Existing unit success payload, scheduler_not_found/scheduler_invalid_id errors and scheduler://changed event are unchanged."
+      }
+    },
+    {
+      "name": "scheduler_set_enabled",
+      "module": "src-tauri/src/scheduler.rs",
+      "registrationPath": "src-tauri/src/lib.rs::scheduler::ipc::scheduler_set_enabled",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/scheduler.rs::scheduler_set_enabled_blocking delegates to set_enabled_impl, which validates the id, normalizes the workspace, computes scheduler_admission_root and admits scheduler_transaction_request through src-tauri/src/atomic_file.rs::with_path_transactions.",
+        "set_enabled_impl reloads via load_schedules, finds the record with find_schedule, flips enabled, recomputes a missing next_run_at with compute_next_run and persists through save_schedules_in_transaction (lease.ensure_covered, lease.before_effect, write_atomic); emit_scheduler_changed fires after the transaction inside the owned blocking worker."
+      ],
+      "workerBoundary": "src-tauri/src/scheduler.rs::ipc::scheduler_set_enabled owns the AppHandle, work_path, id and enabled flag and awaits tauri::async_runtime::spawn_blocking before any normalization, admission wait or schedules.json write; existing SchedulerSchedule payloads and scheduler://changed emission remain unchanged and a JoinError stays a display-only scheduler_set_enabled_task_failed String; no borrowed guard crosses await.",
+      "syncCallers": [
+        "src-tauri/src/scheduler.rs::scheduler_set_enabled is retained as a stable synchronous Rust API (marked allow(dead_code) because the desktop registration uses ipc); it delegates to scheduler_set_enabled_blocking with the same admission entry."
+      ],
+      "mutationKey": {
+        "lexicalPaths": [
+          "Workspace .maru directory (atomic-allocation parent for schedules.json)",
+          "Workspace .maru/schedules.json record being flipped and rewritten"
+        ],
+        "aliasPaths": [
+          "Physical alias of a symlinked schedules.json via the .maru allocation parent and require_parent(work)",
+          "Lexical admission root retained when the caller path is a symlink so hooks and conflicts observe the caller spelling"
+        ],
+        "sharedAdmissionEntry": "src-tauri/src/scheduler.rs::scheduler_transaction_request builds the src-tauri/src/atomic_file.rs::PathTransactionRequest; set_enabled_impl enters src-tauri/src/atomic_file.rs::with_path_transactions and save_schedules_in_transaction revalidates coverage before write_atomic.",
+        "postAdmissionPreconditions": [
+          "validate_schedule_id rejects malformed ids before admission",
+          "scheduler_not_found surfaces when the id is absent from a freshly reloaded file",
+          "lease.before_effect confirms parents still exist before the enabled flag rewrite"
+        ],
+        "domainLockOrder": "Path admission is acquired before the schedules.json rewrite; no scheduler mutex (IN_FLIGHT, LAST_FIRED) is held during admission and a disabled agent's schedules are skipped before the ticker claims the day."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_15_scheduler",
+          "passed": 8,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/components/agents/AgentsPane.tsx"
+        ],
+        "payload": "AgentsPane enable toggle awaits setScheduleEnabled and refreshes the row from the returned schedule on scheduler://changed; disabling an agent-owned schedule keeps the existing paused-state display.",
+        "terminalNoticeOwner": "AgentsPane owns current completion and error display. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_15_scheduler_every_wrapper_yields_and_preserves_join_error",
+          "phase08_15_scheduler_actual_wrappers_results_errors_and_fake_runner",
+          "phase08_15_scheduler_mutations_same_target_and_error_unwind_release",
+          "phase08_15_scheduler_accepted_run_remove_disable_siblings_and_duplicate_claim",
+          "phase08_15_scheduler_timer_disable_remove_claim_failure_and_day_semantics",
+          "phase08_15_scheduler_files_parent_and_document_both_orders_aliases"
+        ],
+        "workerProof": "Each actual wrapper future is held at spawn_blocking entry, manually polled on the same async task, yields before release and preserves JoinError as the display-only scheduler_*_task_failed String.",
+        "platformScope": "Mock-runtime AppHandle with recorded approvals and a PATH-cleared fake runner; the dispatch executor spawns the test binary itself as an exact harmless child. No real CLI, agent provider or daemon is started.",
+        "limits": "In-process admission does not exclude independent external processes; pausing a schedule does not interrupt a run already dispatched. No live provider proof; PERF-01/PERF-02 remain globally pending.",
+        "contract": "Existing SchedulerSchedule payload, next_run_at recomputation on re-enable, agent_disabled skip and scheduler://changed event are unchanged."
+      }
+    },
+    {
+      "name": "scheduler_run_now",
+      "module": "src-tauri/src/scheduler.rs",
+      "registrationPath": "src-tauri/src/lib.rs::scheduler::ipc::scheduler_run_now",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/scheduler.rs::scheduler_run_now_blocking validates the id, normalizes the workspace, snapshots parents with scheduler_parent_snapshots and admits scheduler_transaction_request through src-tauri/src/atomic_file.rs::with_path_transactions; inside the lease it reloads, finds the schedule, calls lease.before_effect and takes the SchedulerClaim reservation (IN_FLIGHT) before dispatch.",
+        "src-tauri/src/scheduler.rs::dispatch_schedule resolves the agent/runtime/prompt (resolve_dispatch, build_dispatch_prompt) and hands the parent snapshots to src-tauri/src/skill_host/dispatch.rs::skills_dispatch_background_with_parents; scheduler_settle then re-admits the same request with the original parents and rewrites last_run_at/next_run_at only when the record is unchanged, emitting scheduler://fired or scheduler://error."
+      ],
+      "workerBoundary": "src-tauri/src/scheduler.rs::ipc::scheduler_run_now owns the AppHandle, work_path and id Strings and awaits tauri::async_runtime::spawn_blocking before any normalization, admission wait, claim or dispatch; the existing invocation-id result and scheduler://fired/scheduler://error emissions remain unchanged and a JoinError stays a display-only scheduler_run_now_task_failed String; no borrowed guard crosses await.",
+      "syncCallers": [
+        "src-tauri/src/scheduler.rs::scheduler_run_now is retained as a stable synchronous Rust API (marked allow(dead_code) because the desktop registration uses ipc); it delegates to scheduler_run_now_blocking with the same admission and claim order."
+      ],
+      "mutationKey": {
+        "lexicalPaths": [
+          "Workspace .maru directory (atomic-allocation parent for schedules.json)",
+          "Workspace .maru/schedules.json stamped with last_run_at and re-aligned next_run_at by scheduler_settle",
+          "Workspace root admitted as the dispatch cwd and passed as parent snapshots into the background dispatch admission"
+        ],
+        "aliasPaths": [
+          "Physical alias of a symlinked schedules.json via the .maru allocation parent and require_parent(work)",
+          "Original workspace and .maru parent snapshots captured before the claim and reused verbatim by scheduler_settle"
+        ],
+        "sharedAdmissionEntry": "src-tauri/src/scheduler.rs::scheduler_run_now_blocking builds scheduler_transaction_request with require_parent_snapshot for both captured parents and enters src-tauri/src/atomic_file.rs::with_path_transactions before SchedulerClaim::acquire; scheduler_settle rebuilds the same request with the original parents for the settlement write.",
+        "postAdmissionPreconditions": [
+          "validate_schedule_id and scheduler_not_found run against a freshly reloaded file inside the lease",
+          "lease.before_effect confirms parents still exist before the claim and dispatch",
+          "SchedulerClaim::acquire rejects a duplicate concurrent run with scheduler_busy and the claim is dropped before dispatch returns",
+          "scheduler_settle re-checks the record identity so a removed, disabled or concurrently edited schedule is never stamped"
+        ],
+        "domainLockOrder": "Path admission is acquired before the SchedulerClaim reservation and dispatch; the IN_FLIGHT claim is a short bookkeeping reservation never held across a path wait, and LAST_FIRED guards only the day claim around the admitted settlement."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_15_scheduler",
+          "passed": 8,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/components/agents/AgentsPane.tsx"
+        ],
+        "payload": "AgentsPane 지금 실행 awaits runScheduleNow and shows the returned invocation id; scheduler://fired and scheduler://error drive the existing run status and pane refresh surfaces.",
+        "terminalNoticeOwner": "AgentsPane owns current completion and error display. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_15_scheduler_every_wrapper_yields_and_preserves_join_error",
+          "phase08_15_scheduler_actual_wrappers_results_errors_and_fake_runner",
+          "phase08_15_scheduler_accepted_run_remove_disable_siblings_and_duplicate_claim",
+          "phase08_15_scheduler_timer_disable_remove_claim_failure_and_day_semantics",
+          "phase08_15_scheduler_dispatch_and_settlement_keep_original_workspace_and_maru",
+          "phase08_15_scheduler_files_parent_and_document_both_orders_aliases"
+        ],
+        "workerProof": "Each actual wrapper future is held at spawn_blocking entry, manually polled on the same async task, yields before release and preserves JoinError as the display-only scheduler_*_task_failed String.",
+        "platformScope": "Mock-runtime AppHandle with recorded approvals and a PATH-cleared fake runner; the dispatch executor spawns the test binary itself as an exact harmless child. No real CLI, agent provider or daemon is started.",
+        "limits": "In-process admission does not exclude independent external processes; the background mission the dispatch starts settles outside this lease and a persist failure still emits scheduler://error with next_run_at left in the past. No live provider proof; PERF-01/PERF-02 remain globally pending.",
+        "contract": "Existing invocation-id result, scheduler://fired/scheduler://error events, scheduler_busy duplicate claim, next_run_at strict realignment, day-claim semantics and the ticker contract (failed persist re-fires once) are unchanged."
+      }
+    },
+    {
+      "name": "detect_legacy_telegram_launchd",
+      "module": "src-tauri/src/launchd_migration.rs",
+      "registrationPath": "src-tauri/src/lib.rs::launchd_migration::ipc::detect_legacy_telegram_launchd",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/launchd_migration.rs::detect_legacy_telegram_launchd resolves launch_agents_dir and reads loaded labels via loaded_launchd_labels (launchctl list through the guarded launchctl_program) before detect_legacy_telegram_launchd_in enumerates the finite LaunchAgents directory, filtering with is_legacy_telegram_monitor_plist and label_from_plist; the directory walk and subprocess stay inside the owned blocking worker."
+      ],
+      "workerBoundary": "src-tauri/src/launchd_migration.rs::ipc::detect_legacy_telegram_launchd owns no borrowed state and awaits tauri::async_runtime::spawn_blocking before the LaunchAgents directory enumeration or the launchctl list subprocess; existing sorted Vec<LegacyLaunchdService> payloads remain unchanged and a JoinError stays a display-only detect_legacy_telegram_launchd_task_failed String.",
+      "syncCallers": [
+        "src-tauri/src/launchd_migration.rs::detect_legacy_telegram_launchd stays a stable synchronous Rust API; the desktop registration uses the isolated ipc wrapper and src-tauri/src/cli.rs keeps its own detection path."
+      ],
+      "mutationKey": {
+        "readOnly": true,
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "sharedAdmissionEntry": "No filesystem mutation is owned by this command: detect only enumerates and reads LaunchAgents plists and runs the read-only launchctl list probe.",
+        "postAdmissionPreconditions": [
+          "Missing LaunchAgents directory degrades to an empty list and a launchctl failure degrades to unloaded labels, both unchanged"
+        ],
+        "domainLockOrder": "No command-owned filesystem mutation lease and no mutex is taken; the finite directory enumeration and bounded plist reads run in the worker."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_15_launchd",
+          "passed": 6,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/App.tsx"
+        ],
+        "payload": "App startup legacy-detection owns the migration prompt state and re-runs detectLegacyTelegramLaunchd after each unload to refresh the remaining-service list.",
+        "terminalNoticeOwner": "App owns current completion and error display. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_15_launchd_real_wrappers_and_legacy_errors",
+          "phase08_15_launchd_both_workers_yield_and_join_errors",
+          "phase08_15_launchd_files_parent_race_both_orders_and_aliases",
+          "phase08_15_launchd_unwind_and_replaced_parent_release"
+        ],
+        "workerProof": "Actual command futures are held at spawn_blocking worker entry on a distinct blocking thread, manually polled on the same async task, yield before release and map a JoinError to the display-only detect_legacy_telegram_launchd_task_failed String.",
+        "platformScope": "macOS synthetic fixtures only: fixture LaunchAgents directories with harmless /usr/bin/true and /usr/bin/false launchctl programs under a shared Home lock and disposable MARU_TEST_HOME/MARU_TEST_CONFIG_DIR; no real Telegram monitor daemon or user LaunchAgents mutation outside the fixture.",
+        "limits": "In-process admission does not exclude independent external processes; real launchd state is probed read-only and stays outside any lease. No live legacy-daemon proof; PERF-01/PERF-02 remain globally pending.",
+        "contract": "Existing LegacyLaunchdService payload, label-sort order, keepcoder Telegram exclusion and unloaded-on-probe-failure semantics are unchanged."
+      }
+    },
+    {
+      "name": "unload_legacy_telegram_launchd",
+      "module": "src-tauri/src/launchd_migration.rs",
+      "registrationPath": "src-tauri/src/lib.rs::launchd_migration::ipc::unload_legacy_telegram_launchd",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/launchd_migration.rs::unload_legacy_telegram_launchd resolves launch_agents_dir and delegates to unload_legacy_telegram_launchd_in, which canonicalizes the selected plist and LaunchAgents root up front and builds the PathTransactionRequest (lexical paths, physical aliases, require_parent) before entering src-tauri/src/atomic_file.rs::with_path_transactions.",
+        "src-tauri/src/launchd_migration.rs::unload_legacy_telegram_launchd_in_transaction revalidates with lease.ensure_covered, re-canonicalizes to confirm the plist is still inside LaunchAgents and still the selected file, checks is_legacy_telegram_monitor_plist, calls lease.before_effect, then unload_launchctl (launchctl unload) and fs::remove_file while the lease is held through completion, errors and unwind."
+      ],
+      "workerBoundary": "src-tauri/src/launchd_migration.rs::ipc::unload_legacy_telegram_launchd owns the plist_path String and awaits tauri::async_runtime::spawn_blocking before any canonicalization, admission wait, launchctl unload or plist removal; existing LegacyLaunchdService payloads and error strings remain unchanged and a JoinError stays a display-only unload_legacy_telegram_launchd_task_failed String; no borrowed guard crosses await.",
+      "syncCallers": [
+        "src-tauri/src/launchd_migration.rs::unload_legacy_telegram_launchd stays a stable synchronous Rust API; the desktop registration uses the isolated ipc wrapper."
+      ],
+      "mutationKey": {
+        "lexicalPaths": [
+          "Selected plist path (lexically normalized, absolute or cwd-joined) slated for unload and removal",
+          "LaunchAgents directory and its allocation parent"
+        ],
+        "aliasPaths": [
+          "Canonical physical aliases of the selected plist and LaunchAgents root captured before the wait",
+          "Existing LaunchAgents parent pinned by require_parent so a renamed or replaced parent fails instead of recreating"
+        ],
+        "sharedAdmissionEntry": "src-tauri/src/launchd_migration.rs::unload_legacy_telegram_launchd_in builds the src-tauri/src/atomic_file.rs::PathTransactionRequest and enters src-tauri/src/atomic_file.rs::with_path_transactions; unload_legacy_telegram_launchd_in_transaction revalidates coverage and parent identity before lease.before_effect and holds the lease through unload and removal.",
+        "postAdmissionPreconditions": [
+          "plist_missing and launch_agents_missing surface before admission when canonicalization fails",
+          "Re-canonicalization inside the lease rejects a replaced plist or parent with plist_outside_launch_agents",
+          "not_legacy_telegram_monitor_plist still refuses non-monitor plists before any effect",
+          "lease.before_effect confirms parents still exist before launchctl unload"
+        ],
+        "domainLockOrder": "Path admission is acquired before the launchctl unload and removal and is held through completion and unwind; no separate domain lock or parent creation is necessary and no mutex is held across the subprocess."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_15_launchd",
+          "passed": 6,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/App.tsx"
+        ],
+        "payload": "App legacy-migration prompt awaits unloadLegacyTelegramLaunchd per selected service, then re-runs detection to refresh the remaining list; unload failure keeps the prompt open with the existing error surface.",
+        "terminalNoticeOwner": "App owns current completion and error display. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_15_launchd_real_wrappers_and_legacy_errors",
+          "phase08_15_launchd_both_workers_yield_and_join_errors",
+          "phase08_15_launchd_same_target_and_launch_failure_release",
+          "phase08_15_launchd_files_parent_race_both_orders_and_aliases",
+          "phase08_15_launchd_document_contention_both_orders_and_aliases",
+          "phase08_15_launchd_unwind_and_replaced_parent_release"
+        ],
+        "workerProof": "Actual command futures are held at spawn_blocking worker entry on a distinct blocking thread, manually polled on the same async task, yield before release and map a JoinError to the display-only unload_legacy_telegram_launchd_task_failed String.",
+        "platformScope": "macOS synthetic fixtures only: fixture LaunchAgents directories with harmless /usr/bin/true and /usr/bin/false launchctl programs under a shared Home lock and disposable MARU_TEST_HOME/MARU_TEST_CONFIG_DIR; no real Telegram monitor daemon or user LaunchAgents mutation outside the fixture.",
+        "limits": "In-process admission does not exclude independent external processes; a launchctl failure keeps the plist on disk and releases the lease without partial removal. No live legacy-daemon proof; PERF-01/PERF-02 remain globally pending.",
+        "contract": "Existing plist_outside_launch_agents, not_legacy_telegram_monitor_plist, plist_missing and launchctl_unload_failed errors, label-from-plist fallback and loaded:false success payload are unchanged."
+      }
+    },
+    {
+      "name": "terminal_hooks_status",
+      "module": "src-tauri/src/terminal_hooks.rs",
+      "registrationPath": "src-tauri/src/lib.rs::terminal_hooks::ipc::terminal_hooks_status",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/terminal_hooks.rs::terminal_hooks_status resolves claude_settings_path (project or global scope) and kimi_config_path, builds the PathTransactionRequest over both files and enters src-tauri/src/atomic_file.rs::with_path_transactions before terminal_hooks_status_in_transaction reads them (read_json_object, read_text_or_empty, claude_hooks_installed, kimi_hooks_installed, codex_hint) under lease.ensure_covered."
+      ],
+      "workerBoundary": "src-tauri/src/terminal_hooks.rs::ipc::terminal_hooks_status owns the optional work_path and scope Strings and awaits tauri::async_runtime::spawn_blocking before any settings-path resolution, admission wait or config read; existing TerminalHooksStatus payloads remain unchanged and a JoinError stays a display-only terminal_hooks_status_task_failed String; no borrowed guard crosses await.",
+      "syncCallers": [
+        "src-tauri/src/terminal_hooks.rs::terminal_hooks_status stays a stable synchronous Rust API sharing the same with_path_transactions entry; src-tauri/src/cli.rs run_terminal_hook keeps its own hook-reporting path."
+      ],
+      "mutationKey": {
+        "readOnly": true,
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "sharedAdmissionEntry": "No filesystem mutation is owned by this command: terminal_hooks_status only admits and reads the Claude settings JSON and Kimi config text (plus resolving the codex hint string).",
+        "postAdmissionPreconditions": [
+          "Scope resolution and settings-path validation run before admission; missing files read as empty/uninstalled"
+        ],
+        "domainLockOrder": "No command-owned filesystem mutation lease; the admission guard is not held across any process or network call."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_15_hooks",
+          "passed": 8,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/App.tsx"
+        ],
+        "payload": "App settings terminal-hook section loads status on open and after each toggle, owning the installed-state rendering and the codex hint display.",
+        "terminalNoticeOwner": "App owns current completion and error display. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_15_hooks_all_wrappers_return_real_fixtures_and_legacy_errors",
+          "phase08_15_hooks_every_wrapper_yields_and_reports_join_failure",
+          "phase08_15_hooks_files_parent_rename_both_orders_no_recreation",
+          "phase08_15_hooks_symlink_aliases_preserve_targets_and_serialize"
+        ],
+        "workerProof": "Actual wrapper futures are held at spawn_blocking entry, manually polled on the same async task, yield before release and map a JoinError to the display-only terminal_hooks_*_task_failed String.",
+        "platformScope": "Synthetic fixtures with a shared Home lock and disposable MARU_TEST_HOME/MARU_TEST_CONFIG_DIR; project-scope reads target fixture CLAUDE.md-adjacent settings.json and global-scope reads target fixture HOME files; no real user shell profiles are touched.",
+        "limits": "In-process admission does not exclude independent external editors of the same config files; codex remains hint-only by design. No live shell or provider proof; PERF-01/PERF-02 remain globally pending.",
+        "contract": "Existing TerminalHooksStatus payload, marked-block detection semantics and codex_hint text are unchanged."
+      }
+    },
+    {
+      "name": "terminal_hooks_install",
+      "module": "src-tauri/src/terminal_hooks.rs",
+      "registrationPath": "src-tauri/src/lib.rs::terminal_hooks::ipc::terminal_hooks_install",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/terminal_hooks.rs::terminal_hooks_install resolves claude_settings_path and kimi_config_path, canonicalizes a symlinked Kimi config and reserves its parent directory (the atomic writer's sibling allocation) in the PathTransactionRequest before entering src-tauri/src/atomic_file.rs::with_path_transactions.",
+        "src-tauri/src/terminal_hooks.rs::terminal_hooks_install_in_transaction revalidates with lease.ensure_covered and lease.before_effect, merges the Claude hooks (merge_claude_hooks, write_json_pretty) and upserts the Kimi marked block (upsert_kimi_hooks, write_kimi_config), then re-reads status under the same lease via terminal_hooks_status_in_transaction; all inside the owned blocking worker."
+      ],
+      "workerBoundary": "src-tauri/src/terminal_hooks.rs::ipc::terminal_hooks_install owns the optional work_path and scope Strings and awaits tauri::async_runtime::spawn_blocking before any settings-path resolution, admission wait or config write; existing TerminalHooksStatus payloads remain unchanged and a JoinError stays a display-only terminal_hooks_install_task_failed String; no borrowed guard crosses await.",
+      "syncCallers": [
+        "src-tauri/src/terminal_hooks.rs::terminal_hooks_install stays a stable synchronous Rust API sharing the same with_path_transactions entry; synchronous CLI callers keep the identical admission path."
+      ],
+      "mutationKey": {
+        "lexicalPaths": [
+          "Claude settings JSON for the selected project or global scope",
+          "Kimi config file and its parent directory (atomic-write sibling allocation)"
+        ],
+        "aliasPaths": [
+          "Canonical physical target when the Kimi config is a symlink, reserved alongside the lexical path",
+          "Existing settings/config parents pinned by the request so a renamed or replaced parent fails instead of recreating"
+        ],
+        "sharedAdmissionEntry": "src-tauri/src/terminal_hooks.rs::terminal_hooks_install builds the src-tauri/src/atomic_file.rs::PathTransactionRequest over both config files plus the Kimi parent and enters src-tauri/src/atomic_file.rs::with_path_transactions; terminal_hooks_install_in_transaction revalidates coverage and calls lease.before_effect before the first write.",
+        "postAdmissionPreconditions": [
+          "Settings-path resolution and Kimi symlink canonicalization succeed before admission",
+          "lease.ensure_covered revalidates both config paths before reading or writing",
+          "lease.before_effect confirms parents still exist before the Claude JSON and Kimi config rewrites",
+          "The post-write status re-read runs under the same lease"
+        ],
+        "domainLockOrder": "Path admission is acquired before either config write; no terminal-hook mutex or watcher guard is held across admission, and the hook watcher only reacts to changes after the lease is released."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_15_hooks",
+          "passed": 8,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/App.tsx"
+        ],
+        "payload": "App settings terminal-hook toggle awaits terminalHooksInstall and reloads status, owning the installed-state switch and its error surface.",
+        "terminalNoticeOwner": "App owns current completion and error display. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_15_hooks_all_wrappers_return_real_fixtures_and_legacy_errors",
+          "phase08_15_hooks_every_wrapper_yields_and_reports_join_failure",
+          "phase08_15_hooks_install_uninstall_same_target_both_orders",
+          "phase08_15_hooks_files_parent_rename_both_orders_no_recreation",
+          "phase08_15_hooks_config_files_parent_rename_both_orders",
+          "phase08_15_hooks_settings_error_and_unwind_release_admission",
+          "phase08_15_hooks_symlink_aliases_preserve_targets_and_serialize"
+        ],
+        "workerProof": "Actual wrapper futures are held at spawn_blocking entry, manually polled on the same async task, yield before release and map a JoinError to the display-only terminal_hooks_*_task_failed String.",
+        "platformScope": "Synthetic fixtures with a shared Home lock and disposable MARU_TEST_HOME/MARU_TEST_CONFIG_DIR; project-scope writes target fixture settings.json and global-scope writes target fixture HOME files; no real user shell profiles are touched.",
+        "limits": "In-process admission does not exclude independent external editors; the resolved maru CLI path is asserted before the hook block is written. No live shell or provider proof; PERF-01/PERF-02 remain globally pending.",
+        "contract": "Existing marked-block upsert semantics, settings error strings and the TerminalHooksStatus re-read are unchanged; install and uninstall serialize on the same admitted config target."
+      }
+    },
+    {
+      "name": "terminal_hooks_uninstall",
+      "module": "src-tauri/src/terminal_hooks.rs",
+      "registrationPath": "src-tauri/src/lib.rs::terminal_hooks::ipc::terminal_hooks_uninstall",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/terminal_hooks.rs::terminal_hooks_uninstall resolves claude_settings_path and kimi_config_path, canonicalizes a symlinked Kimi config and reserves its parent directory in the PathTransactionRequest before entering src-tauri/src/atomic_file.rs::with_path_transactions.",
+        "src-tauri/src/terminal_hooks.rs::terminal_hooks_uninstall_in_transaction revalidates with lease.ensure_covered and lease.before_effect, removes the Kimi marked block (remove_kimi_hooks, write_kimi_config) and the Claude hook entries (remove_claude_hooks, write_json_pretty), then re-reads status under the same lease via terminal_hooks_status_in_transaction; all inside the owned blocking worker."
+      ],
+      "workerBoundary": "src-tauri/src/terminal_hooks.rs::ipc::terminal_hooks_uninstall owns the optional work_path and scope Strings and awaits tauri::async_runtime::spawn_blocking before any settings-path resolution, admission wait or config write; existing TerminalHooksStatus payloads remain unchanged and a JoinError stays a display-only terminal_hooks_uninstall_task_failed String; no borrowed guard crosses await.",
+      "syncCallers": [
+        "src-tauri/src/terminal_hooks.rs::terminal_hooks_uninstall stays a stable synchronous Rust API sharing the same with_path_transactions entry; synchronous CLI callers keep the identical admission path."
+      ],
+      "mutationKey": {
+        "lexicalPaths": [
+          "Claude settings JSON for the selected project or global scope",
+          "Kimi config file and its parent directory (atomic-write sibling allocation)"
+        ],
+        "aliasPaths": [
+          "Canonical physical target when the Kimi config is a symlink, reserved alongside the lexical path",
+          "Existing settings/config parents pinned by the request so a renamed or replaced parent fails instead of recreating"
+        ],
+        "sharedAdmissionEntry": "src-tauri/src/terminal_hooks.rs::terminal_hooks_uninstall builds the src-tauri/src/atomic_file.rs::PathTransactionRequest over both config files plus the Kimi parent and enters src-tauri/src/atomic_file.rs::with_path_transactions; terminal_hooks_uninstall_in_transaction revalidates coverage and calls lease.before_effect before the first write.",
+        "postAdmissionPreconditions": [
+          "Settings-path resolution and Kimi symlink canonicalization succeed before admission",
+          "lease.ensure_covered revalidates both config paths before reading or writing",
+          "lease.before_effect confirms parents still exist before the Claude JSON and Kimi config rewrites",
+          "The post-write status re-read runs under the same lease"
+        ],
+        "domainLockOrder": "Path admission is acquired before either config rewrite; no terminal-hook mutex or watcher guard is held across admission, and the hook watcher only reacts to changes after the lease is released."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_15_hooks",
+          "passed": 8,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/App.tsx"
+        ],
+        "payload": "App settings terminal-hook toggle awaits terminalHooksUninstall and reloads status, owning the installed-state switch and its error surface.",
+        "terminalNoticeOwner": "App owns current completion and error display. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_15_hooks_all_wrappers_return_real_fixtures_and_legacy_errors",
+          "phase08_15_hooks_every_wrapper_yields_and_reports_join_failure",
+          "phase08_15_hooks_install_uninstall_same_target_both_orders",
+          "phase08_15_hooks_files_parent_rename_both_orders_no_recreation",
+          "phase08_15_hooks_config_files_parent_rename_both_orders",
+          "phase08_15_hooks_settings_error_and_unwind_release_admission",
+          "phase08_15_hooks_symlink_aliases_preserve_targets_and_serialize"
+        ],
+        "workerProof": "Actual wrapper futures are held at spawn_blocking entry, manually polled on the same async task, yield before release and map a JoinError to the display-only terminal_hooks_*_task_failed String.",
+        "platformScope": "Synthetic fixtures with a shared Home lock and disposable MARU_TEST_HOME/MARU_TEST_CONFIG_DIR; project-scope writes target fixture settings.json and global-scope writes target fixture HOME files; no real user shell profiles are touched.",
+        "limits": "In-process admission does not exclude independent external editors; unchanged files are not rewritten. No live shell or provider proof; PERF-01/PERF-02 remain globally pending.",
+        "contract": "Existing marked-block removal semantics (including blank-line trimming), settings error strings and the TerminalHooksStatus re-read are unchanged; install and uninstall serialize on the same admitted config target."
+      }
+    },
+    {
+      "name": "write_agent_context_hint",
+      "module": "src-tauri/src/terminal_hooks.rs",
+      "registrationPath": "src-tauri/src/lib.rs::terminal_hooks::ipc::write_agent_context_hint",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/terminal_hooks.rs::write_agent_context_hint validates the workspace directory, maps targets through hint_target_file (CLAUDE.md / AGENTS.md) and builds the PathTransactionRequest over the selected files before entering src-tauri/src/atomic_file.rs::with_path_transactions.",
+        "src-tauri/src/terminal_hooks.rs::write_agent_context_hint_in_transaction revalidates coverage with lease.ensure_covered and lease.before_effect, then upserts the marked hint block (agent_context_hint_block, upsert_marked_block) into each selected file preserving all other content; all inside the owned blocking worker."
+      ],
+      "workerBoundary": "src-tauri/src/terminal_hooks.rs::ipc::write_agent_context_hint owns the work_path and targets Vec and awaits tauri::async_runtime::spawn_blocking before any workspace validation, admission wait or file write; existing Vec<String> written-path payloads remain unchanged and a JoinError stays a display-only write_agent_context_hint_task_failed String; no borrowed guard crosses await.",
+      "syncCallers": [
+        "src-tauri/src/terminal_hooks.rs::write_agent_context_hint stays a stable synchronous Rust API sharing the same with_path_transactions entry; synchronous callers (workspace bootstrap) keep the identical admission path."
+      ],
+      "mutationKey": {
+        "lexicalPaths": [
+          "Workspace CLAUDE.md for the claude target",
+          "Workspace AGENTS.md for the agents target"
+        ],
+        "aliasPaths": [
+          "Existing workspace file handles pinned as request parents so a renamed or replaced file fails instead of recreating",
+          "Only explicitly targeted files are admitted; unknown targets are ignored as before"
+        ],
+        "sharedAdmissionEntry": "src-tauri/src/terminal_hooks.rs::write_agent_context_hint builds the src-tauri/src/atomic_file.rs::PathTransactionRequest over the selected hint files and enters src-tauri/src/atomic_file.rs::with_path_transactions; write_agent_context_hint_in_transaction revalidates coverage and calls lease.before_effect before the first write.",
+        "postAdmissionPreconditions": [
+          "Workspace is still a directory after admission (re-checked inside the lease)",
+          "lease.ensure_covered revalidates the selected hint paths before effects",
+          "lease.before_effect confirms parents still exist before the marked-block upsert"
+        ],
+        "domainLockOrder": "Path admission is acquired before the read-modify-write of each hint file; no workspace document mutex is held across admission and content outside the markers is preserved verbatim."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_15_hooks",
+          "passed": 8,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/App.tsx"
+        ],
+        "payload": "App workspace bootstrap owns the context-hint commands, awaiting writeAgentContextHint (or removeAgentContextHint) on workspace switch and surfacing the written-path list.",
+        "terminalNoticeOwner": "App owns current completion and error display. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_15_hooks_all_wrappers_return_real_fixtures_and_legacy_errors",
+          "phase08_15_hooks_every_wrapper_yields_and_reports_join_failure",
+          "phase08_15_hooks_hints_and_document_same_target_both_orders",
+          "phase08_15_hooks_files_parent_rename_both_orders_no_recreation",
+          "phase08_15_hooks_settings_error_and_unwind_release_admission"
+        ],
+        "workerProof": "Actual wrapper futures are held at spawn_blocking entry, manually polled on the same async task, yield before release and map a JoinError to the display-only write_agent_context_hint_task_failed String.",
+        "platformScope": "Synthetic fixtures with a shared Home lock and disposable MARU_TEST_HOME/MARU_TEST_CONFIG_DIR; hint writes target fixture workspace CLAUDE.md/AGENTS.md files; no real user workspaces are touched.",
+        "limits": "In-process admission does not exclude independent external editors of the same hint files; an upsert preserves user content outside the markers but concurrent human edits between read and write are resolved by the admission conflict, not merged. No live provider proof; PERF-01/PERF-02 remain globally pending.",
+        "contract": "Existing marked-block upsert/replace semantics, written-path list payload and unknown-target no-op behavior are unchanged."
+      }
+    },
+    {
+      "name": "remove_agent_context_hint",
+      "module": "src-tauri/src/terminal_hooks.rs",
+      "registrationPath": "src-tauri/src/lib.rs::terminal_hooks::ipc::remove_agent_context_hint",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/terminal_hooks.rs::remove_agent_context_hint maps targets through hint_target_file (CLAUDE.md / AGENTS.md) and builds the PathTransactionRequest over the selected files before entering src-tauri/src/atomic_file.rs::with_path_transactions.",
+        "src-tauri/src/terminal_hooks.rs::remove_agent_context_hint_in_transaction revalidates coverage with lease.ensure_covered and lease.before_effect, then removes the marked hint block (remove_marked_block) and rewrites the file only when the content changed; all inside the owned blocking worker."
+      ],
+      "workerBoundary": "src-tauri/src/terminal_hooks.rs::ipc::remove_agent_context_hint owns the work_path and targets Vec and awaits tauri::async_runtime::spawn_blocking before any admission wait or file write; existing Vec<String> removed-path payloads remain unchanged and a JoinError stays a display-only remove_agent_context_hint_task_failed String; no borrowed guard crosses await.",
+      "syncCallers": [
+        "src-tauri/src/terminal_hooks.rs::remove_agent_context_hint stays a stable synchronous Rust API sharing the same with_path_transactions entry; synchronous callers keep the identical admission path."
+      ],
+      "mutationKey": {
+        "lexicalPaths": [
+          "Workspace CLAUDE.md for the claude target",
+          "Workspace AGENTS.md for the agents target"
+        ],
+        "aliasPaths": [
+          "Existing workspace file handles pinned as request parents so a renamed or replaced file fails instead of recreating",
+          "Only explicitly targeted files are admitted; unknown targets are ignored as before"
+        ],
+        "sharedAdmissionEntry": "src-tauri/src/terminal_hooks.rs::remove_agent_context_hint builds the src-tauri/src/atomic_file.rs::PathTransactionRequest over the selected hint files and enters src-tauri/src/atomic_file.rs::with_path_transactions; remove_agent_context_hint_in_transaction revalidates coverage and calls lease.before_effect before the first write.",
+        "postAdmissionPreconditions": [
+          "lease.ensure_covered revalidates the selected hint paths before effects",
+          "lease.before_effect confirms parents still exist before the marked-block removal",
+          "Files whose content is unchanged (or absent) are not rewritten"
+        ],
+        "domainLockOrder": "Path admission is acquired before the read-modify-write of each hint file; no workspace document mutex is held across admission and content outside the markers is preserved verbatim."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_15_hooks",
+          "passed": 8,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/App.tsx"
+        ],
+        "payload": "App workspace bootstrap owns the context-hint commands, awaiting removeAgentContextHint (or writeAgentContextHint) on workspace switch and surfacing the removed-path list.",
+        "terminalNoticeOwner": "App owns current completion and error display. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_15_hooks_all_wrappers_return_real_fixtures_and_legacy_errors",
+          "phase08_15_hooks_every_wrapper_yields_and_reports_join_failure",
+          "phase08_15_hooks_hints_and_document_same_target_both_orders",
+          "phase08_15_hooks_files_parent_rename_both_orders_no_recreation",
+          "phase08_15_hooks_settings_error_and_unwind_release_admission"
+        ],
+        "workerProof": "Actual wrapper futures are held at spawn_blocking entry, manually polled on the same async task, yield before release and map a JoinError to the display-only remove_agent_context_hint_task_failed String.",
+        "platformScope": "Synthetic fixtures with a shared Home lock and disposable MARU_TEST_HOME/MARU_TEST_CONFIG_DIR; hint writes target fixture workspace CLAUDE.md/AGENTS.md files; no real user workspaces are touched.",
+        "limits": "In-process admission does not exclude independent external editors of the same hint files; removal preserves user content outside the markers. No live provider proof; PERF-01/PERF-02 remain globally pending.",
+        "contract": "Existing marked-block removal semantics (including blank-line trimming), removed-path list payload and absent-file no-op behavior are unchanged."
+      }
+    }
+  ]
+}

@@ -117,15 +117,11 @@ use inbox_settings::{
     read_inbox_runtime_config, read_inbox_settings, save_inbox_runtime_config, save_inbox_settings,
 };
 use inbox_watcher::{start_inbox_watcher, stop_inbox_watcher, InboxWatcherState};
-use jobs::{
-    jobs_install, jobs_list, jobs_read_log, jobs_run_now, jobs_start, jobs_stop, jobs_uninstall,
-};
 use kakao_relay::{
     enqueue_kakao_send, read_kakao_relay_messages, read_kakao_relay_status,
     read_kakao_send_results, stage_kakao_relay_new,
 };
 use korean_date::parse_korean_date_cmd;
-use launchd_migration::{detect_legacy_telegram_launchd, unload_legacy_telegram_launchd};
 use linter::gaejosik_lint;
 use maru_dir::{
     bootstrap_maru_dir, delete_maru_rule, delete_maru_template, list_maru_rules,
@@ -138,9 +134,6 @@ use mission_state::{list_ai_missions, read_ai_mission_log, stop_ai_mission, Miss
 use ops_catalog::watcher::{catalog_watcher_start, catalog_watcher_stop, CatalogWatcherState};
 use outlook_mso::{
     check_mso_auth, decide_outlook_item, decide_outlook_items, fetch_outlook_unread,
-};
-use scheduler::{
-    scheduler_add, scheduler_list, scheduler_remove, scheduler_run_now, scheduler_set_enabled,
 };
 use scratchpad_watcher::{
     start_scratchpad_watcher, stop_scratchpad_watcher, ScratchpadWatcherState,
@@ -168,11 +161,7 @@ use terminal::{
     terminal_selection, terminal_set_visibility, terminal_spawn, terminal_text, terminal_write,
     TerminalState,
 };
-use terminal_hooks::{
-    remove_agent_context_hint, start_terminal_hook_watcher, terminal_hooks_install,
-    terminal_hooks_status, terminal_hooks_uninstall, write_agent_context_hint,
-    TerminalHookWatcherState,
-};
+use terminal_hooks::{start_terminal_hook_watcher, TerminalHookWatcherState};
 use today_notify::today_notify_new_day;
 use vault_list::{
     add_workspace_root, list_workspace_roots, refresh_workspace_capabilities,
@@ -368,11 +357,11 @@ pub fn run() {
             gap::ipc::gap_reports_list,
             kg_refs::ipc::kg_document_refs,
             kg_refs::ipc::kg_refs_clear,
-            scheduler_list,
-            scheduler_add,
-            scheduler_remove,
-            scheduler_set_enabled,
-            scheduler_run_now,
+            scheduler::ipc::scheduler_list,
+            scheduler::ipc::scheduler_add,
+            scheduler::ipc::scheduler_remove,
+            scheduler::ipc::scheduler_set_enabled,
+            scheduler::ipc::scheduler_run_now,
             agents_list,
             agents_upsert,
             agents_delete,
@@ -397,11 +386,11 @@ pub fn run() {
             terminal_text,
             terminal_search,
             terminal_kill,
-            terminal_hooks_install,
-            terminal_hooks_uninstall,
-            terminal_hooks_status,
-            write_agent_context_hint,
-            remove_agent_context_hint,
+            terminal_hooks::ipc::terminal_hooks_install,
+            terminal_hooks::ipc::terminal_hooks_uninstall,
+            terminal_hooks::ipc::terminal_hooks_status,
+            terminal_hooks::ipc::write_agent_context_hint,
+            terminal_hooks::ipc::remove_agent_context_hint,
             inbox_classifier::ipc::build_inbox_classification_prompt,
             inbox_classifier::ipc::parse_inbox_classification,
             gmail_gws::ipc::fetch_gmail_unread,
@@ -424,20 +413,20 @@ pub fn run() {
             telegram_io::ipc::telegram_polling_status,
             read_telegram_monitor_config,
             save_telegram_monitor_config,
-            detect_legacy_telegram_launchd,
-            unload_legacy_telegram_launchd,
+            launchd_migration::ipc::detect_legacy_telegram_launchd,
+            launchd_migration::ipc::unload_legacy_telegram_launchd,
             read_kakao_relay_status,
             read_kakao_relay_messages,
             stage_kakao_relay_new,
             enqueue_kakao_send,
             read_kakao_send_results,
-            jobs_list,
-            jobs_install,
-            jobs_uninstall,
-            jobs_start,
-            jobs_stop,
-            jobs_run_now,
-            jobs_read_log,
+            jobs::ipc::jobs_list,
+            jobs::ipc::jobs_install,
+            jobs::ipc::jobs_uninstall,
+            jobs::ipc::jobs_start,
+            jobs::ipc::jobs_stop,
+            jobs::ipc::jobs_run_now,
+            jobs::ipc::jobs_read_log,
             dot_sync_overview,
             dot_sync_run,
             prepare_approval,

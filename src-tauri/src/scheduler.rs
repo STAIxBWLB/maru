@@ -6,13 +6,18 @@
 // schedule whose nextRunAt lies in the past fires exactly once (catch-up)
 // and is then re-aligned to its next future slot.
 
-use crate::agents::{
-    agent_can_run_standalone, get_agent, global_ai_settings, AgentRecord, GlobalAiSettings,
-};
+#[cfg(not(test))]
+use crate::agents::global_ai_settings;
+use crate::agents::{agent_can_run_standalone, get_agent, AgentRecord, GlobalAiSettings};
 use crate::approval::{require_approval, ApprovalState};
-use crate::atomic_file::write_atomic;
+use crate::atomic_file::{
+    with_path_transactions, write_atomic, PathTransactionLease, PathTransactionParent,
+    PathTransactionRequest,
+};
+#[cfg(not(test))]
 use crate::skill_host::store::resolve_skill_id;
-use crate::skill_host::{skills_dispatch_background, SkillDispatchBackgroundArgs};
+#[cfg(not(test))]
+use crate::skill_host::SkillDispatchBackgroundArgs;
 use chrono::{DateTime, Datelike, Days, Local, NaiveDate, TimeZone};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
@@ -22,7 +27,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::thread;
 use std::time::Duration as StdDuration;
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 use uuid::Uuid;
 
 const SCHEDULER_TICK_SECONDS: u64 = 60;
@@ -36,6 +41,54 @@ static TICKER_STARTED: AtomicBool = AtomicBool::new(false);
 /// persisted nextRunAt guard cannot be written (ENOSPC, read-only mount).
 /// ponytail: process-local only, entries are overwritten not evicted.
 static LAST_FIRED: Mutex<BTreeMap<(PathBuf, String), NaiveDate>> = Mutex::new(BTreeMap::new());
+
+// A short bookkeeping reservation, never a mutex held over dispatch or path waits.
+// Timer and explicit run-now share it; independent schedules remain runnable.
+static IN_FLIGHT: Mutex<BTreeSet<(PathBuf, String)>> = Mutex::new(BTreeSet::new());
+struct SchedulerClaim((PathBuf, String));
+impl SchedulerClaim {
+    fn acquire(work: &Path, id: &str) -> Result<Self, String> {
+        let key = (
+            fs::canonicalize(work).map_err(|err| err.to_string())?,
+            id.to_string(),
+        );
+        if !IN_FLIGHT
+            .lock()
+            .unwrap_or_else(|err| err.into_inner())
+            .insert(key.clone())
+        {
+            return Err("scheduler_busy".to_string());
+        }
+        Ok(Self(key))
+    }
+}
+impl Drop for SchedulerClaim {
+    fn drop(&mut self) {
+        IN_FLIGHT
+            .lock()
+            .unwrap_or_else(|err| err.into_inner())
+            .remove(&self.0);
+    }
+}
+
+// The admitted set keeps the command's lexical workspace root so a
+// symlinked caller path stays observable to hooks, conflicts and
+// alias-parent revalidation; canonical `work` remains the IO target.
+fn scheduler_admission_root(work_path: &str, work: &Path) -> PathBuf {
+    let lexical = crate::vault::lexical_normalize(std::path::Path::new(work_path));
+    if lexical.is_absolute() {
+        lexical
+    } else {
+        work.to_path_buf()
+    }
+}
+
+fn scheduler_parent_snapshots(work: &Path) -> Result<Vec<PathTransactionParent>, String> {
+    Ok(vec![
+        PathTransactionParent::capture(work)?,
+        PathTransactionParent::capture(&work.join(".maru"))?,
+    ])
+}
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -124,10 +177,30 @@ fn load_schedules(work: &Path) -> Result<Vec<SchedulerSchedule>, String> {
     serde_json::from_str(&raw).map_err(|err| format!("Cannot parse {}: {err}", path.display()))
 }
 
-fn save_schedules(work: &Path, schedules: &[SchedulerSchedule]) -> Result<(), String> {
+// The allocation parent covers atomic temporary siblings, including physical aliases
+// of a symlinked schedules.json. No scheduler mutex is held during admission.
+fn scheduler_transaction_request(work: &Path) -> Result<PathTransactionRequest, String> {
+    PathTransactionRequest::new(vec![work.join(".maru"), schedules_path(work)])?
+        .require_parent(work)
+}
+
+fn save_schedules_in_transaction(
+    work: &Path,
+    schedules: &[SchedulerSchedule],
+    lease: &PathTransactionLease,
+) -> Result<(), String> {
+    lease.ensure_covered([work.join(".maru"), schedules_path(work)])?;
+    lease.before_effect()?;
     let bytes = serde_json::to_vec_pretty(schedules)
         .map_err(|err| format!("Cannot serialize schedules: {err}"))?;
     write_atomic(&schedules_path(work), &bytes)
+}
+
+#[cfg(test)]
+fn save_schedules(work: &Path, schedules: &[SchedulerSchedule]) -> Result<(), String> {
+    with_path_transactions(scheduler_transaction_request(work)?, |lease| {
+        save_schedules_in_transaction(work, schedules, lease)
+    })
 }
 
 /// Next fire time strictly after `now`, honoring optional weekday filters.
@@ -207,8 +280,20 @@ fn validate_schedule_id(id: &str) -> Result<(), String> {
     Ok(())
 }
 
+#[cfg(test)]
 fn add_impl(work_path: &str, input: SchedulerScheduleInput) -> Result<SchedulerSchedule, String> {
     let work = crate::vault::normalize_existing_dir(work_path)?;
+    let admission = scheduler_admission_root(work_path, &work);
+    with_path_transactions(scheduler_transaction_request(&admission)?, |lease| {
+        scheduler_add_in_transaction(&work, input, lease)
+    })
+}
+
+fn scheduler_add_in_transaction(
+    work: &Path,
+    input: SchedulerScheduleInput,
+    lease: &PathTransactionLease,
+) -> Result<SchedulerSchedule, String> {
     let name = input.name.trim();
     if name.is_empty() {
         return Err("scheduler_name_required".to_string());
@@ -241,9 +326,9 @@ fn add_impl(work_path: &str, input: SchedulerScheduleInput) -> Result<SchedulerS
             None
         },
     };
-    let mut schedules = load_schedules(&work)?;
+    let mut schedules = load_schedules(work)?;
     schedules.push(schedule.clone());
-    save_schedules(&work, &schedules)?;
+    save_schedules_in_transaction(work, &schedules, lease)?;
     Ok(schedule)
 }
 
@@ -254,35 +339,55 @@ fn find_schedule(schedules: &[SchedulerSchedule], id: &str) -> Option<usize> {
 fn set_enabled_impl(work_path: &str, id: &str, enabled: bool) -> Result<SchedulerSchedule, String> {
     validate_schedule_id(id)?;
     let work = crate::vault::normalize_existing_dir(work_path)?;
-    let mut schedules = load_schedules(&work)?;
-    let index = find_schedule(&schedules, id).ok_or_else(|| "scheduler_not_found".to_string())?;
-    schedules[index].enabled = enabled;
-    if enabled && schedules[index].next_run_at.is_none() {
-        let schedule = &schedules[index];
-        schedules[index].next_run_at = compute_next_run(
-            Local::now(),
-            schedule.hour,
-            schedule.minute,
-            &schedule.days_of_week,
-        )
-        .map(|next| next.to_rfc3339());
-    }
-    save_schedules(&work, &schedules)?;
-    Ok(schedules[index].clone())
+    let admission = scheduler_admission_root(work_path, &work);
+    with_path_transactions(scheduler_transaction_request(&admission)?, |lease| {
+        let mut schedules = load_schedules(&work)?;
+        let index =
+            find_schedule(&schedules, id).ok_or_else(|| "scheduler_not_found".to_string())?;
+        schedules[index].enabled = enabled;
+        if enabled && schedules[index].next_run_at.is_none() {
+            let schedule = &schedules[index];
+            schedules[index].next_run_at = compute_next_run(
+                Local::now(),
+                schedule.hour,
+                schedule.minute,
+                &schedule.days_of_week,
+            )
+            .map(|next| next.to_rfc3339());
+        }
+        save_schedules_in_transaction(&work, &schedules, lease)?;
+        Ok(schedules[index].clone())
+    })
 }
 
 fn remove_impl(work_path: &str, id: &str) -> Result<(), String> {
     validate_schedule_id(id)?;
     let work = crate::vault::normalize_existing_dir(work_path)?;
-    let mut schedules = load_schedules(&work)?;
-    let index = find_schedule(&schedules, id).ok_or_else(|| "scheduler_not_found".to_string())?;
-    schedules.remove(index);
-    save_schedules(&work, &schedules)
+    let admission = scheduler_admission_root(work_path, &work);
+    with_path_transactions(scheduler_transaction_request(&admission)?, |lease| {
+        let mut schedules = load_schedules(&work)?;
+        let index =
+            find_schedule(&schedules, id).ok_or_else(|| "scheduler_not_found".to_string())?;
+        schedules.remove(index);
+        save_schedules_in_transaction(&work, &schedules, lease)
+    })
 }
 
 /// Record a fired run: stamp lastRunAt and re-align nextRunAt strictly after
 /// `now` so a missed window never triggers a burst of catch-up runs.
+#[cfg(test)]
 fn mark_fired(work: &Path, id: &str, now: DateTime<Local>) -> Result<SchedulerSchedule, String> {
+    with_path_transactions(scheduler_transaction_request(work)?, |lease| {
+        scheduler_run_now_in_transaction(work, id, now, lease)
+    })
+}
+
+fn scheduler_run_now_in_transaction(
+    work: &Path,
+    id: &str,
+    now: DateTime<Local>,
+    lease: &PathTransactionLease,
+) -> Result<SchedulerSchedule, String> {
     let mut schedules = load_schedules(work)?;
     let index = find_schedule(&schedules, id).ok_or_else(|| "scheduler_not_found".to_string())?;
     schedules[index].last_run_at = Some(now.to_rfc3339());
@@ -290,7 +395,7 @@ fn mark_fired(work: &Path, id: &str, now: DateTime<Local>) -> Result<SchedulerSc
     schedules[index].next_run_at =
         compute_next_run(now, schedule.hour, schedule.minute, &schedule.days_of_week)
             .map(|next| next.to_rfc3339());
-    save_schedules(work, &schedules)?;
+    save_schedules_in_transaction(work, &schedules, lease)?;
     Ok(schedules[index].clone())
 }
 
@@ -431,72 +536,110 @@ fn skill_name_of(skill_id: &str) -> String {
     skill_id.rsplit("::").next().unwrap_or(skill_id).to_string()
 }
 
-fn dispatch_schedule(
-    app: &AppHandle,
+fn dispatch_schedule<R: tauri::Runtime>(
+    app: &AppHandle<R>,
     work: &Path,
     schedule: &SchedulerSchedule,
+    parents: Vec<PathTransactionParent>,
 ) -> Result<String, String> {
-    let agent = schedule.agent_id.as_deref().and_then(get_agent);
-    let plan = resolve_dispatch(schedule, agent.as_ref(), &global_ai_settings())?;
-    let skill_id = resolve_skill_id(&plan.skill_ref)?;
-    let metadata = dispatch_metadata(schedule, &plan, &skill_id, work);
-    skills_dispatch_background(
-        app.clone(),
-        SkillDispatchBackgroundArgs {
-            skill_id: skill_id.clone(),
-            runtime: plan.runtime.clone(),
-            prompt: build_dispatch_prompt(work, &skill_id, &plan.prompt),
-            cwd: Some(work.to_string_lossy().to_string()),
-            context: None,
-            metadata: Some(metadata),
-            command_override: plan.command_override.clone(),
-            permission_mode: plan.permission_mode.clone(),
-        },
-    )
+    #[cfg(test)]
+    {
+        let _ = app;
+        PathTransactionLease::test_stage(&[work.to_path_buf()], "scheduler:dispatch");
+        let executor = PHASE08_15_EXECUTOR.lock().unwrap().clone();
+        if let Some(executor) = executor {
+            // Same original-parent admission expected from the real dispatch producer.
+            let mut request = scheduler_transaction_request(work)?;
+            for parent in &parents {
+                request = request.require_parent_snapshot(parent)?;
+            }
+            with_path_transactions(request, |lease| lease.before_effect())?;
+            return executor(work, schedule);
+        }
+        return Err("scheduler_fixture_executor_required".to_string());
+    }
+    #[cfg(not(test))]
+    {
+        let agent = schedule.agent_id.as_deref().and_then(get_agent);
+        let plan = resolve_dispatch(schedule, agent.as_ref(), &global_ai_settings())?;
+        let skill_id = resolve_skill_id(&plan.skill_ref)?;
+        let metadata = dispatch_metadata(schedule, &plan, &skill_id, work);
+        crate::skill_host::dispatch::skills_dispatch_background_with_parents(
+            app.clone(),
+            SkillDispatchBackgroundArgs {
+                skill_id: skill_id.clone(),
+                runtime: plan.runtime.clone(),
+                prompt: build_dispatch_prompt(work, &skill_id, &plan.prompt),
+                cwd: Some(work.to_string_lossy().to_string()),
+                context: None,
+                metadata: Some(metadata),
+                command_override: plan.command_override.clone(),
+                permission_mode: plan.permission_mode.clone(),
+            },
+            parents,
+        )
+    }
 }
 
-fn run_due_for_workspace(app: &AppHandle, work: &Path, now: DateTime<Local>) -> Result<(), String> {
+fn run_due_for_workspace<R: tauri::Runtime>(
+    app: &AppHandle<R>,
+    work: &Path,
+    now: DateTime<Local>,
+) -> Result<(), String> {
+    let parents = scheduler_parent_snapshots(work)?;
     let schedules = load_schedules(work)?;
-    for schedule in &schedules {
-        if !schedule.enabled {
-            continue;
+    for selected in schedules {
+        let mut request = scheduler_transaction_request(work)?;
+        for parent in &parents {
+            request = request.require_parent_snapshot(parent)?;
         }
-        // Checked before the day claim so a paused agent costs nothing and
-        // stays silent, rather than erroring once a minute forever.
-        if schedule_is_paused_by_agent(schedule) {
-            continue;
-        }
-        // A nextRunAt that no longer parses is re-aligned without firing:
-        // corrupt state must never launch an AI mission.
-        if let Some(next) = schedule.next_run_at.as_deref() {
-            if DateTime::parse_from_rfc3339(next).is_err() {
-                let realigned =
+        let ready = with_path_transactions(request, |lease| {
+            let mut current = load_schedules(work)?;
+            let Some(index) = find_schedule(&current, &selected.id) else {
+                return Ok(None);
+            };
+            let schedule = &current[index];
+            if !schedule.enabled || schedule_is_paused_by_agent(schedule) {
+                return Ok(None);
+            }
+            if schedule
+                .next_run_at
+                .as_deref()
+                .is_some_and(|next| DateTime::parse_from_rfc3339(next).is_err())
+            {
+                current[index].next_run_at =
                     compute_next_run(now, schedule.hour, schedule.minute, &schedule.days_of_week)
-                        .map(|value| value.to_rfc3339());
-                let mut updated = schedules.clone();
-                if let Some(index) = find_schedule(&updated, &schedule.id) {
-                    updated[index].next_run_at = realigned;
-                    save_schedules(work, &updated)?;
+                        .map(|v| v.to_rfc3339());
+                save_schedules_in_transaction(work, &current, lease)?;
+                return Ok(None);
+            }
+            if !is_due(schedule, now) {
+                return Ok(None);
+            }
+            let active = match SchedulerClaim::acquire(work, &schedule.id) {
+                Ok(active) => active,
+                Err(error) if error == "scheduler_busy" => return Ok(None),
+                Err(error) => return Err(error),
+            };
+            let claim = (
+                fs::canonicalize(work).map_err(|err| err.to_string())?,
+                schedule.id.clone(),
+            );
+            {
+                let mut claimed = LAST_FIRED.lock().unwrap_or_else(|err| err.into_inner());
+                if claimed.get(&claim) == Some(&now.date_naive()) {
+                    return Ok(None);
                 }
-                continue;
+                claimed.insert(claim, now.date_naive());
             }
-        }
-        if !is_due(schedule, now) {
+            lease.before_effect()?;
+            Ok(Some((schedule.clone(), active)))
+        })?;
+        let Some((schedule, _active)) = ready else {
             continue;
-        }
-        // Claim today's slot before dispatching: if the mark_fired write below
-        // fails, this is the only thing standing between a broken .maru/ and
-        // one child process per tick.
-        let claim = (work.to_path_buf(), schedule.id.clone());
-        {
-            let mut claimed = LAST_FIRED.lock().unwrap_or_else(|err| err.into_inner());
-            if claimed.get(&claim) == Some(&now.date_naive()) {
-                continue;
-            }
-            claimed.insert(claim.clone(), now.date_naive());
-        }
+        };
         let work_path = work.to_string_lossy().to_string();
-        match dispatch_schedule(app, work, schedule) {
+        match dispatch_schedule(app, work, &schedule, parents.clone()) {
             Ok(invocation_id) => {
                 let _ = app.emit(
                     "scheduler://fired",
@@ -518,23 +661,25 @@ fn run_due_for_workspace(app: &AppHandle, work: &Path, now: DateTime<Local>) -> 
                 );
             }
         }
-        // Record the attempt either way so a broken schedule does not retry
-        // every tick. A persisted nextRunAt is the real guard, so once it is
-        // written the day claim is released — that keeps a launch catch-up
-        // from swallowing the same day's regular slot.
-        match mark_fired(work, &schedule.id, now) {
-            Ok(_) => {
+        // An accepted run may complete after removal/disable. Settlement never
+        // resurrects that schedule or overwrites a concurrently edited record.
+        let settled = scheduler_settle(work, &parents, &schedule, now);
+        match settled {
+            Ok(()) => {
                 LAST_FIRED
                     .lock()
                     .unwrap_or_else(|err| err.into_inner())
-                    .remove(&claim);
+                    .remove(&(
+                        fs::canonicalize(work).unwrap_or_else(|_| work.to_path_buf()),
+                        schedule.id.clone(),
+                    ));
             }
             Err(message) => {
                 let _ = app.emit(
                     "scheduler://error",
                     SchedulerErrorEvent {
                         work_path,
-                        schedule_id: schedule.id.clone(),
+                        schedule_id: schedule.id,
                         message: format!("scheduler_persist_failed: {message}"),
                     },
                 );
@@ -542,6 +687,29 @@ fn run_due_for_workspace(app: &AppHandle, work: &Path, now: DateTime<Local>) -> 
         }
     }
     Ok(())
+}
+
+fn scheduler_settle(
+    work: &Path,
+    parents: &[PathTransactionParent],
+    selected: &SchedulerSchedule,
+    now: DateTime<Local>,
+) -> Result<(), String> {
+    let mut request = scheduler_transaction_request(work)?;
+    for parent in parents {
+        request = request.require_parent_snapshot(parent)?;
+    }
+    with_path_transactions(request, |lease| {
+        let current = load_schedules(work)?;
+        let Some(index) = find_schedule(&current, &selected.id) else {
+            return Ok(());
+        };
+        if &current[index] != selected {
+            return Ok(());
+        }
+        scheduler_run_now_in_transaction(work, &selected.id, now, lease)?;
+        Ok(())
+    })
 }
 
 #[cfg(not(test))]
@@ -581,7 +749,7 @@ pub fn start_scheduler_ticker(app: AppHandle) {
     });
 }
 
-fn emit_scheduler_changed(app: &AppHandle, work_path: &str) {
+fn emit_scheduler_changed<R: tauri::Runtime>(app: &AppHandle<R>, work_path: &str) {
     let _ = app.emit(
         "scheduler://changed",
         SchedulerChangedEvent {
@@ -590,13 +758,12 @@ fn emit_scheduler_changed(app: &AppHandle, work_path: &str) {
     );
 }
 
-#[tauri::command]
 pub fn scheduler_list(work_path: String) -> Result<Vec<SchedulerSchedule>, String> {
     let work = crate::vault::normalize_existing_dir(&work_path)?;
     load_schedules(&work)
 }
 
-#[tauri::command]
+#[allow(dead_code)] // Stable synchronous Rust API; desktop registration uses ipc.
 pub fn scheduler_add(
     approvals: tauri::State<'_, ApprovalState>,
     app: AppHandle,
@@ -604,22 +771,63 @@ pub fn scheduler_add(
     schedule: SchedulerScheduleInput,
     approval_id: Option<String>,
 ) -> Result<SchedulerSchedule, String> {
-    require_approval(&approvals, approval_id, SCHEDULER_ADD_KIND)?;
-    let schedule = add_impl(&work_path, schedule)?;
+    let work = crate::vault::normalize_existing_dir(&work_path)?;
+    let admission = scheduler_admission_root(&work_path, &work);
+    let result = with_path_transactions(scheduler_transaction_request(&admission)?, |lease| {
+        require_approval(&approvals, approval_id, SCHEDULER_ADD_KIND)?;
+        scheduler_add_in_transaction(&work, schedule, lease)
+    })?;
     emit_scheduler_changed(&app, &work_path);
-    Ok(schedule)
+    Ok(result)
 }
 
-#[tauri::command]
+fn scheduler_add_blocking<R: tauri::Runtime>(
+    app: AppHandle<R>,
+    work_path: String,
+    schedule: SchedulerScheduleInput,
+    approval_id: Option<String>,
+) -> Result<SchedulerSchedule, String> {
+    let work = crate::vault::normalize_existing_dir(&work_path)?;
+    let admission = scheduler_admission_root(&work_path, &work);
+    let result = with_path_transactions(scheduler_transaction_request(&admission)?, |lease| {
+        require_approval(
+            &app.state::<ApprovalState>(),
+            approval_id,
+            SCHEDULER_ADD_KIND,
+        )?;
+        scheduler_add_in_transaction(&work, schedule, lease)
+    })?;
+    emit_scheduler_changed(&app, &work_path);
+    Ok(result)
+}
+
+#[allow(dead_code)] // Stable synchronous Rust API; desktop registration uses ipc.
 pub fn scheduler_remove(app: AppHandle, work_path: String, id: String) -> Result<(), String> {
+    scheduler_remove_blocking(app, work_path, id)
+}
+
+fn scheduler_remove_blocking<R: tauri::Runtime>(
+    app: AppHandle<R>,
+    work_path: String,
+    id: String,
+) -> Result<(), String> {
     remove_impl(&work_path, &id)?;
     emit_scheduler_changed(&app, &work_path);
     Ok(())
 }
 
-#[tauri::command]
+#[allow(dead_code)] // Stable synchronous Rust API; desktop registration uses ipc.
 pub fn scheduler_set_enabled(
     app: AppHandle,
+    work_path: String,
+    id: String,
+    enabled: bool,
+) -> Result<SchedulerSchedule, String> {
+    scheduler_set_enabled_blocking(app, work_path, id, enabled)
+}
+
+fn scheduler_set_enabled_blocking<R: tauri::Runtime>(
+    app: AppHandle<R>,
     work_path: String,
     id: String,
     enabled: bool,
@@ -629,17 +837,36 @@ pub fn scheduler_set_enabled(
     Ok(schedule)
 }
 
-#[tauri::command]
+#[allow(dead_code)] // Stable synchronous Rust API; desktop registration uses ipc.
 pub fn scheduler_run_now(app: AppHandle, work_path: String, id: String) -> Result<String, String> {
+    scheduler_run_now_blocking(app, work_path, id)
+}
+
+fn scheduler_run_now_blocking<R: tauri::Runtime>(
+    app: AppHandle<R>,
+    work_path: String,
+    id: String,
+) -> Result<String, String> {
     validate_schedule_id(&id)?;
     let work = crate::vault::normalize_existing_dir(&work_path)?;
-    let schedules = load_schedules(&work)?;
-    let index = find_schedule(&schedules, &id).ok_or_else(|| "scheduler_not_found".to_string())?;
-    let invocation_id = dispatch_schedule(&app, &work, &schedules[index])?;
+    let admission = scheduler_admission_root(&work_path, &work);
+    let parents = scheduler_parent_snapshots(&work)?;
+    let (selected, _active) =
+        with_path_transactions(scheduler_transaction_request(&admission)?, |lease| {
+            let schedules = load_schedules(&work)?;
+            let index =
+                find_schedule(&schedules, &id).ok_or_else(|| "scheduler_not_found".to_string())?;
+            lease.before_effect()?;
+            Ok((
+                schedules[index].clone(),
+                SchedulerClaim::acquire(&work, &id)?,
+            ))
+        })?;
+    let invocation_id = dispatch_schedule(&app, &work, &selected, parents.clone())?;
     // Same contract as the ticker: a failed persist leaves nextRunAt in the past,
     // so the next tick will fire this schedule again. The day claim bounds that to
     // one extra run, but the user still has to be told persistence failed.
-    if let Err(message) = mark_fired(&work, &id, Local::now()) {
+    if let Err(message) = scheduler_settle(&work, &parents, &selected, Local::now()) {
         let _ = app.emit(
             "scheduler://error",
             SchedulerErrorEvent {
@@ -658,6 +885,89 @@ pub fn scheduler_run_now(app: AppHandle, work_path: String, id: String) -> Resul
         },
     );
     Ok(invocation_id)
+}
+
+// D-04: Settings/Agents callers keep their existing scheduler events and notices.
+// Plan25/26 owns navigation-safe completion; the existing mission runner owns work.
+pub mod ipc {
+    use super::*;
+    #[tauri::command]
+    pub async fn scheduler_list(work_path: String) -> Result<Vec<SchedulerSchedule>, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(&[PathBuf::from(&work_path)], "worker:scheduler_list");
+            super::scheduler_list(work_path)
+        })
+        .await
+        .map_err(|error| format!("scheduler_list_task_failed: {error}"))?
+    }
+    #[tauri::command]
+    pub async fn scheduler_add<R: tauri::Runtime>(
+        app: AppHandle<R>,
+        work_path: String,
+        schedule: SchedulerScheduleInput,
+        approval_id: Option<String>,
+    ) -> Result<SchedulerSchedule, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(&[PathBuf::from(&work_path)], "worker:scheduler_add");
+            super::scheduler_add_blocking(app, work_path, schedule, approval_id)
+        })
+        .await
+        .map_err(|error| format!("scheduler_add_task_failed: {error}"))?
+    }
+    #[tauri::command]
+    pub async fn scheduler_remove<R: tauri::Runtime>(
+        app: AppHandle<R>,
+        work_path: String,
+        id: String,
+    ) -> Result<(), String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(
+                &[PathBuf::from(&work_path)],
+                "worker:scheduler_remove",
+            );
+            super::scheduler_remove_blocking(app, work_path, id)
+        })
+        .await
+        .map_err(|error| format!("scheduler_remove_task_failed: {error}"))?
+    }
+    #[tauri::command]
+    pub async fn scheduler_set_enabled<R: tauri::Runtime>(
+        app: AppHandle<R>,
+        work_path: String,
+        id: String,
+        enabled: bool,
+    ) -> Result<SchedulerSchedule, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(
+                &[PathBuf::from(&work_path)],
+                "worker:scheduler_set_enabled",
+            );
+            super::scheduler_set_enabled_blocking(app, work_path, id, enabled)
+        })
+        .await
+        .map_err(|error| format!("scheduler_set_enabled_task_failed: {error}"))?
+    }
+    #[tauri::command]
+    pub async fn scheduler_run_now<R: tauri::Runtime>(
+        app: AppHandle<R>,
+        work_path: String,
+        id: String,
+    ) -> Result<String, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(
+                &[PathBuf::from(&work_path)],
+                "worker:scheduler_run_now",
+            );
+            super::scheduler_run_now_blocking(app, work_path, id)
+        })
+        .await
+        .map_err(|error| format!("scheduler_run_now_task_failed: {error}"))?
+    }
 }
 
 #[cfg(test)]
@@ -1258,5 +1568,602 @@ mod tests {
             build_dispatch_prompt(temp.path(), &schedule.skill_id, &schedule.prompt),
             baked
         );
+    }
+}
+
+#[cfg(test)]
+type Phase08Executor =
+    std::sync::Arc<dyn Fn(&Path, &SchedulerSchedule) -> Result<String, String> + Send + Sync>;
+#[cfg(test)]
+static PHASE08_15_EXECUTOR: Mutex<Option<Phase08Executor>> = Mutex::new(None);
+
+#[cfg(test)]
+mod phase08_15 {
+    use super::*;
+    use crate::atomic_file::phase08_06::{boundary, run, Held, Home};
+    use crate::atomic_file::PathTransactionTestHook;
+    use std::sync::{mpsc, Arc};
+    use std::time::Duration;
+    type TestApp = AppHandle<tauri::test::MockRuntime>;
+
+    struct Executor;
+    impl Executor {
+        fn new(
+            callback: impl Fn(&Path, &SchedulerSchedule) -> Result<String, String>
+                + Send
+                + Sync
+                + 'static,
+        ) -> Self {
+            *PHASE08_15_EXECUTOR.lock().unwrap() = Some(Arc::new(callback));
+            Self
+        }
+        fn success() -> Self {
+            Self::new(|_, schedule| {
+                // An existing exact harmless program. No shell, agent/provider or daemon.
+                let executable = std::env::current_exe().unwrap();
+                assert!(executable.is_file());
+                let output = std::process::Command::new(&executable)
+                    .args([
+                        "--exact",
+                        "scheduler::phase08_15::phase08_15_scheduler_harmless_child",
+                        "--nocapture",
+                    ])
+                    .env("MARU_PHASE08_15_SCHEDULER_CHILD", "1")
+                    .output()
+                    .unwrap();
+                assert!(output.status.success());
+                Ok(format!("fixture-run-{}", schedule.id))
+            })
+        }
+    }
+    impl Drop for Executor {
+        fn drop(&mut self) {
+            *PHASE08_15_EXECUTOR.lock().unwrap() = None;
+        }
+    }
+    #[test]
+    fn phase08_15_scheduler_harmless_child() {
+        // Also safe when included in the ordinary suite; never takes the shared Home lock.
+        if std::env::var_os("MARU_PHASE08_15_SCHEDULER_CHILD").is_some() {
+            assert!(Path::new(&std::env::var_os("MARU_TEST_HOME").unwrap()).is_dir());
+            println!("fixture scheduler child completed");
+        }
+    }
+    fn app() -> tauri::App<tauri::test::MockRuntime> {
+        let app = tauri::test::mock_app();
+        app.manage(ApprovalState::default());
+        app
+    }
+    fn text(path: &Path) -> String {
+        path.to_string_lossy().into_owned()
+    }
+    fn input(name: &str) -> SchedulerScheduleInput {
+        SchedulerScheduleInput {
+            name: name.into(),
+            skill_id: "fixture-skill".into(),
+            runtime: "claude".into(),
+            prompt: "Fixture only".into(),
+            hour: 9,
+            minute: 30,
+            days_of_week: vec![],
+            enabled: true,
+            agent_id: None,
+        }
+    }
+    fn approval(app: &TestApp) -> Option<String> {
+        let request = crate::approval::prepare_approval(
+            app.state(),
+            SCHEDULER_ADD_KIND.into(),
+            "Fixture schedule".into(),
+            None,
+            None,
+        )
+        .unwrap();
+        crate::approval::record_approval(
+            app.state(),
+            request.id.clone(),
+            crate::approval::ApprovalDecision::Approved,
+            None,
+        )
+        .unwrap();
+        Some(request.id)
+    }
+    fn start<F>(future: F) -> mpsc::Receiver<F::Output>
+    where
+        F: std::future::Future + Send + 'static,
+        F::Output: Send + 'static,
+    {
+        let (tx, rx) = mpsc::channel();
+        tauri::async_runtime::spawn(async move {
+            let _ = tx.send(future.await);
+        });
+        rx
+    }
+    fn done<T>(rx: mpsc::Receiver<T>) -> T {
+        rx.recv_timeout(Duration::from_secs(8))
+            .expect("scheduler command completed")
+    }
+    fn fixture(home: &Home) -> PathBuf {
+        let work = home.root.path().join("workspace");
+        fs::create_dir_all(work.join(".maru")).unwrap();
+        work
+    }
+    fn due(work: &Path) -> SchedulerSchedule {
+        let mut schedule = add_impl(&text(work), input("due")).unwrap();
+        schedule.next_run_at = Some("2000-01-01T00:00:00+00:00".into());
+        save_schedules(work, &[schedule.clone()]).unwrap();
+        schedule
+    }
+
+    #[test]
+    fn phase08_15_scheduler_every_wrapper_yields_and_preserves_join_error() {
+        let home = Home::new();
+        let work = fixture(&home);
+        let app = app();
+        boundary(
+            work.clone(),
+            "scheduler_list",
+            ipc::scheduler_list(text(&work)),
+        );
+        boundary(
+            work.clone(),
+            "scheduler_add",
+            ipc::scheduler_add(app.handle().clone(), text(&work), input("x"), None),
+        );
+        boundary(
+            work.clone(),
+            "scheduler_remove",
+            ipc::scheduler_remove(app.handle().clone(), text(&work), "id".into()),
+        );
+        boundary(
+            work.clone(),
+            "scheduler_set_enabled",
+            ipc::scheduler_set_enabled(app.handle().clone(), text(&work), "id".into(), false),
+        );
+        boundary(
+            work.clone(),
+            "scheduler_run_now",
+            ipc::scheduler_run_now(app.handle().clone(), text(&work), "id".into()),
+        );
+    }
+
+    #[test]
+    fn phase08_15_scheduler_actual_wrappers_results_errors_and_fake_runner() {
+        let home = Home::new();
+        let work = fixture(&home);
+        let app = app();
+        let _executor = Executor::success();
+        assert_eq!(
+            run(ipc::scheduler_add(
+                app.handle().clone(),
+                text(&work),
+                input("x"),
+                None
+            ))
+            .unwrap_err(),
+            "approval_required: scheduler.add"
+        );
+        let id = approval(app.handle());
+        let schedule = run(ipc::scheduler_add(
+            app.handle().clone(),
+            text(&work),
+            input("actual"),
+            id,
+        ))
+        .unwrap();
+        assert_eq!(
+            run(ipc::scheduler_list(text(&work))).unwrap(),
+            vec![schedule.clone()]
+        );
+        assert_eq!(
+            run(ipc::scheduler_remove(
+                app.handle().clone(),
+                text(&work),
+                "..".into()
+            ))
+            .unwrap_err(),
+            "scheduler_invalid_id"
+        );
+        assert_eq!(
+            run(ipc::scheduler_set_enabled(
+                app.handle().clone(),
+                text(&work),
+                "missing".into(),
+                true
+            ))
+            .unwrap_err(),
+            "scheduler_not_found"
+        );
+        let disabled = run(ipc::scheduler_set_enabled(
+            app.handle().clone(),
+            text(&work),
+            schedule.id.clone(),
+            false,
+        ))
+        .unwrap();
+        assert!(!disabled.enabled);
+        assert!(run(ipc::scheduler_run_now(
+            app.handle().clone(),
+            text(&work),
+            schedule.id.clone()
+        ))
+        .unwrap()
+        .starts_with("fixture-run-"));
+        assert!(!load_schedules(&work).unwrap()[0].enabled); // Explicit manual run on disabled retains old policy.
+        run(ipc::scheduler_remove(
+            app.handle().clone(),
+            text(&work),
+            schedule.id.clone(),
+        ))
+        .unwrap();
+        assert_eq!(
+            run(ipc::scheduler_run_now(
+                app.handle().clone(),
+                text(&work),
+                schedule.id
+            ))
+            .unwrap_err(),
+            "scheduler_not_found"
+        );
+        assert!(load_schedules(&work).unwrap().is_empty());
+    }
+
+    #[test]
+    fn phase08_15_scheduler_mutations_same_target_and_error_unwind_release() {
+        let home = Home::new();
+        let work = fixture(&home);
+        let app = app();
+        let schedule = add_impl(&text(&work), input("a")).unwrap();
+        let held = Held::new(work.join(".maru"), "admitted");
+        let first = start(ipc::scheduler_set_enabled(
+            app.handle().clone(),
+            text(&work),
+            schedule.id.clone(),
+            false,
+        ));
+        held.wait();
+        let wait = Held::new(work.join(".maru"), "before-admission");
+        let approval = approval(app.handle());
+        let second = start(ipc::scheduler_add(
+            app.handle().clone(),
+            text(&work),
+            input("sibling"),
+            approval,
+        ));
+        wait.wait();
+        wait.release();
+        assert!(second.recv_timeout(Duration::from_millis(30)).is_err());
+        held.release();
+        done(first).unwrap();
+        done(second).unwrap();
+        let current = load_schedules(&work).unwrap();
+        assert_eq!(current.len(), 2);
+        assert!(!current[0].enabled);
+        assert_eq!(
+            run(ipc::scheduler_remove(
+                app.handle().clone(),
+                text(&work),
+                "missing".into()
+            ))
+            .unwrap_err(),
+            "scheduler_not_found"
+        );
+        let panic = PathTransactionTestHook::new(work.join(".maru"), "pre-effect", || {
+            panic!("fixture schedule unwind")
+        });
+        assert!(run(ipc::scheduler_remove(
+            app.handle().clone(),
+            text(&work),
+            schedule.id.clone()
+        ))
+        .unwrap_err()
+        .starts_with("scheduler_remove_task_failed:"));
+        drop(panic);
+        run(ipc::scheduler_remove(
+            app.handle().clone(),
+            text(&work),
+            schedule.id,
+        ))
+        .unwrap();
+        assert_eq!(load_schedules(&work).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn phase08_15_scheduler_accepted_run_remove_disable_siblings_and_duplicate_claim() {
+        for remove in [false, true] {
+            let home = Home::new();
+            let work = fixture(&home);
+            let app = app();
+            let schedule = due(&work);
+            let (entered_tx, entered_rx) = mpsc::channel();
+            let (release_tx, release_rx) = mpsc::channel();
+            let release_rx = Mutex::new(release_rx);
+            let _executor = Executor::new(move |_, _| {
+                entered_tx.send(()).unwrap();
+                release_rx
+                    .lock()
+                    .unwrap()
+                    .recv_timeout(Duration::from_secs(5))
+                    .unwrap();
+                Ok("accepted-fixture".into())
+            });
+            let first = start(ipc::scheduler_run_now(
+                app.handle().clone(),
+                text(&work),
+                schedule.id.clone(),
+            ));
+            entered_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+            assert_eq!(
+                run(ipc::scheduler_run_now(
+                    app.handle().clone(),
+                    text(&work),
+                    schedule.id.clone()
+                ))
+                .unwrap_err(),
+                "scheduler_busy"
+            );
+            // Existing timer sees active reservation and cannot double dispatch.
+            run_due_for_workspace(app.handle(), &work, Local::now()).unwrap();
+            if remove {
+                run(ipc::scheduler_remove(
+                    app.handle().clone(),
+                    text(&work),
+                    schedule.id.clone(),
+                ))
+                .unwrap();
+            } else {
+                run(ipc::scheduler_set_enabled(
+                    app.handle().clone(),
+                    text(&work),
+                    schedule.id.clone(),
+                    false,
+                ))
+                .unwrap();
+            }
+            let sibling = add_impl(&text(&work), input("sibling")).unwrap();
+            release_tx.send(()).unwrap();
+            assert_eq!(done(first).unwrap(), "accepted-fixture");
+            let current = load_schedules(&work).unwrap();
+            assert!(current.contains(&sibling));
+            if remove {
+                assert_eq!(current, vec![sibling]);
+            } else {
+                let old = current.iter().find(|v| v.id == schedule.id).unwrap();
+                assert!(!old.enabled);
+                assert_eq!(old.last_run_at, None);
+            }
+            assert!(IN_FLIGHT.lock().unwrap().is_empty());
+        }
+    }
+
+    #[test]
+    fn phase08_15_scheduler_timer_disable_remove_claim_failure_and_day_semantics() {
+        let home = Home::new();
+        let work = fixture(&home);
+        let app = app();
+        let schedule = due(&work);
+        let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let count = calls.clone();
+        let _executor = Executor::new(move |_, _| {
+            count.fetch_add(1, Ordering::SeqCst);
+            Err("fixture_launch_failed".into())
+        });
+        set_enabled_impl(&text(&work), &schedule.id, false).unwrap();
+        run_due_for_workspace(app.handle(), &work, Local::now()).unwrap();
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+        set_enabled_impl(&text(&work), &schedule.id, true).unwrap();
+        run_due_for_workspace(app.handle(), &work, Local::now()).unwrap();
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        run_due_for_workspace(app.handle(), &work, Local::now()).unwrap();
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        // Explicit manual failure releases only its active ownership, leaves scheduled next-run unchanged.
+        let before = load_schedules(&work).unwrap();
+        assert_eq!(
+            run(ipc::scheduler_run_now(
+                app.handle().clone(),
+                text(&work),
+                schedule.id.clone()
+            ))
+            .unwrap_err(),
+            "fixture_launch_failed"
+        );
+        assert_eq!(load_schedules(&work).unwrap(), before);
+        assert!(IN_FLIGHT.lock().unwrap().is_empty());
+        assert!(LAST_FIRED
+            .lock()
+            .unwrap()
+            .get(&(work.clone(), schedule.id.clone()))
+            .is_none());
+        remove_impl(&text(&work), &schedule.id).unwrap();
+        run_due_for_workspace(app.handle(), &work, Local::now()).unwrap();
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+    }
+
+    #[test]
+    fn phase08_15_scheduler_dispatch_and_settlement_keep_original_workspace_and_maru() {
+        for maru in [false, true] {
+            for after_launch in [false, true] {
+                let home = Home::new();
+                let work = fixture(&home);
+                let app = app();
+                let schedule = due(&work);
+                let parent = if maru {
+                    work.join(".maru")
+                } else {
+                    work.clone()
+                };
+                let moved = home.root.path().join("moved");
+                let work_copy = work.clone();
+                let parent_copy = parent.clone();
+                let moved_copy = moved.clone();
+                let _executor = if after_launch {
+                    Executor::new(move |_, _| {
+                        fs::rename(&parent_copy, &moved_copy).unwrap();
+                        fs::create_dir_all(work_copy.join(".maru")).unwrap();
+                        fs::write(schedules_path(&work_copy), "[]").unwrap();
+                        Ok("already-started".into())
+                    })
+                } else {
+                    Executor::success()
+                };
+                let held = (!after_launch).then(|| Held::new(work.clone(), "scheduler:dispatch"));
+                let result = start(ipc::scheduler_run_now(
+                    app.handle().clone(),
+                    text(&work),
+                    schedule.id,
+                ));
+                if let Some(held) = &held {
+                    held.wait();
+                    fs::rename(&parent, &moved).unwrap();
+                    fs::create_dir_all(work.join(".maru")).unwrap();
+                    fs::write(schedules_path(&work), "[]").unwrap();
+                    held.release();
+                }
+                let result = done(result);
+                if after_launch {
+                    assert_eq!(result.unwrap(), "already-started");
+                } else {
+                    assert!(result.is_err());
+                }
+                assert_eq!(fs::read_to_string(schedules_path(&work)).unwrap(), "[]");
+                assert!(IN_FLIGHT.lock().unwrap().is_empty());
+            }
+        }
+    }
+
+    #[test]
+    fn phase08_15_scheduler_files_parent_and_document_both_orders_aliases() {
+        for alias in [false, true] {
+            for scheduler_first in [false, true] {
+                let home = Home::new();
+                let root = home.root.path();
+                let work = fixture(&home);
+                let app = app();
+                let selected = if alias {
+                    #[cfg(unix)]
+                    {
+                        let link = root.join("alias");
+                        std::os::unix::fs::symlink(&work, &link).unwrap();
+                        link
+                    }
+                    #[cfg(not(unix))]
+                    {
+                        work.clone()
+                    }
+                } else {
+                    work.clone()
+                };
+                let schedule = add_impl(&text(&selected), input("parent")).unwrap();
+                let held = Held::new(
+                    if scheduler_first {
+                        selected.join(".maru")
+                    } else {
+                        work.clone()
+                    },
+                    "admitted",
+                );
+                if scheduler_first {
+                    let first = start(ipc::scheduler_set_enabled(
+                        app.handle().clone(),
+                        text(&selected),
+                        schedule.id.clone(),
+                        false,
+                    ));
+                    held.wait();
+                    let wait = Held::new(work.clone(), "before-admission");
+                    let second = start(crate::workspace_files::ipc::rename_workspace_entry(
+                        text(root),
+                        "workspace".into(),
+                        "renamed".into(),
+                    ));
+                    wait.wait();
+                    wait.release();
+                    assert!(second.recv_timeout(Duration::from_millis(30)).is_err());
+                    held.release();
+                    done(first).unwrap();
+                    done(second).unwrap();
+                    assert!(!load_schedules(&root.join("renamed")).unwrap()[0].enabled);
+                } else {
+                    let first = start(crate::workspace_files::ipc::rename_workspace_entry(
+                        text(root),
+                        "workspace".into(),
+                        "renamed".into(),
+                    ));
+                    held.wait();
+                    let wait = Held::new(selected.join(".maru"), "before-admission");
+                    let second = start(ipc::scheduler_set_enabled(
+                        app.handle().clone(),
+                        text(&selected),
+                        schedule.id,
+                        false,
+                    ));
+                    wait.wait();
+                    wait.release();
+                    assert!(second.recv_timeout(Duration::from_millis(30)).is_err());
+                    held.release();
+                    done(first).unwrap();
+                    assert!(done(second).is_err());
+                    assert!(!work.exists());
+                }
+            }
+        }
+        for scheduler_first in [false, true] {
+            let home = Home::new();
+            let work = fixture(&home);
+            let app = app();
+            let schedule = add_impl(&text(&work), input("document")).unwrap();
+            let held = Held::new(
+                if scheduler_first {
+                    work.join(".maru")
+                } else {
+                    schedules_path(&work)
+                },
+                "admitted",
+            );
+            if scheduler_first {
+                let first = start(ipc::scheduler_set_enabled(
+                    app.handle().clone(),
+                    text(&work),
+                    schedule.id.clone(),
+                    false,
+                ));
+                held.wait();
+                let wait = Held::new(schedules_path(&work), "before-admission");
+                let second = start(crate::document::ipc::save_document(
+                    text(&work),
+                    ".maru/schedules.json".into(),
+                    "[]".into(),
+                    None,
+                ));
+                wait.wait();
+                wait.release();
+                assert!(second.recv_timeout(Duration::from_millis(30)).is_err());
+                held.release();
+                done(first).unwrap();
+                done(second).unwrap();
+                assert!(load_schedules(&work).unwrap().is_empty());
+            } else {
+                let first = start(crate::document::ipc::save_document(
+                    text(&work),
+                    ".maru/schedules.json".into(),
+                    "[]".into(),
+                    None,
+                ));
+                held.wait();
+                let wait = Held::new(work.join(".maru"), "before-admission");
+                let second = start(ipc::scheduler_set_enabled(
+                    app.handle().clone(),
+                    text(&work),
+                    schedule.id,
+                    false,
+                ));
+                wait.wait();
+                wait.release();
+                assert!(second.recv_timeout(Duration::from_millis(30)).is_err());
+                held.release();
+                done(first).unwrap();
+                assert_eq!(done(second).unwrap_err(), "scheduler_not_found");
+            }
+        }
     }
 }
