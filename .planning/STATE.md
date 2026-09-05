@@ -5,16 +5,16 @@ milestone_name: Felt Quality and Native Proof
 current_phase: 08
 current_phase_name: Main-Thread Responsiveness
 status: executing
-stopped_at: Completed 08-09-PLAN.md; next Plan10 wave11; Plan11 must consume Today capture borrowed lease
-last_updated: "2026-09-05T07:18:37.238Z"
+stopped_at: Completed 08-10-PLAN.md; next Plan11 wave12; Today capture borrowed lease handoff retained
+last_updated: "2026-09-05T07:43:39.887Z"
 last_activity: 2026-09-05
 last_activity_desc: Phase 08 execution started
-state_head: 8b68b53acbbeb71342861c903db8e94db300471f
+state_head: 0c4225de093f83fc00d8f5bfd1220f7335a964fc
 progress:
   total_phases: 6
   completed_phases: 2
   total_plans: 39
-  completed_plans: 20
+  completed_plans: 21
   percent: 33
 ---
 
@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-09-05)
 ## Current Position
 
 Phase: 08 (Main-Thread Responsiveness) — EXECUTING
-Plan: 11 of 29
+Plan: 12 of 29
 Status: Ready to execute
 Last Activity Description: Phase 08 execution started
 Last activity: 2026-09-05 — Phase 08 execution started
@@ -117,6 +117,7 @@ Progress: [███░░░░░░░] 33%
 | Phase 08 P07 | 15min | 2 tasks | 5 files |
 | Phase 08 P08 | 18min | 2 tasks | 7 files |
 | Phase 08 P09 | 10min | 2 tasks | 7 files |
+| Phase 08 P10 | 20 min | 2 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -241,6 +242,7 @@ Recent decisions affecting current work:
 - [Phase 08]: Earlier Skills/Git/env/dispatch/dot writers share complete path admission; initializing lists retain short conditional metadata transactions, while plain getters are read-only. Plan07 document races and Plans16/17 final adapter handoffs remain pending. — Keep source reservation before path waits, release registry admission for network stages, and retain original parent snapshots. Final 37 integration cases pass; the initial dispatch fixture escape has unknown external effects and remains disclosed in SUMMARY/overlay.
 - [Phase 08]: Document commands use complete path admission and borrowed managed-snapshot leases; actual Files and earlier Skills/Git document consumers pass in both orders and aliases. Production Git automatic maintenance lifetime is a separate root-coordinated Plan29 follow-up.
 - [Phase 08]: Thirty scratchpad/shelf/drafts/Gap commands await blocking workers with complete admission and actual production-policy proof. Plan09 must switch drafts task promotion to its borrowed task-creation adapter when adding task admission.
+- [Phase 08]: Plan10 isolates 34 Inbox/outbox/viewer/secret commands; batches retain original parents and settled siblings, local preparation suppresses sends and bytecode caches, and frontend lifetime closure remains Plans25/26.
 
 ### Pending Todos
 
@@ -277,8 +279,8 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-09-05T07:18:37.172Z
-Stopped at: Completed 08-09-PLAN.md; next Plan10 wave11; Plan11 must consume Today capture borrowed lease
+Last session: 2026-09-05T07:43:13.842Z
+Stopped at: Completed 08-10-PLAN.md; next Plan11 wave12; Today capture borrowed lease handoff retained
 Resume file: None
 
 ## Operator Next Steps
