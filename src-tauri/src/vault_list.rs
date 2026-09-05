@@ -197,11 +197,11 @@ fn preferred_app_config_path(file_name: &str) -> Result<PathBuf, String> {
     Ok(app_config_dir()?.join(APP_CONFIG_DIR).join(file_name))
 }
 
-fn workspace_registry_path() -> Result<PathBuf, String> {
+pub(crate) fn workspace_registry_path() -> Result<PathBuf, String> {
     preferred_app_config_path(WORKSPACE_REGISTRY_FILE)
 }
 
-fn legacy_vault_list_path() -> Result<PathBuf, String> {
+pub(crate) fn legacy_vault_list_path() -> Result<PathBuf, String> {
     preferred_app_config_path(LEGACY_VAULTS_FILE)
 }
 

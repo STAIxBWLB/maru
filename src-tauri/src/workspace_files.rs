@@ -1,3 +1,4 @@
+use crate::atomic_file::{with_path_transactions, PathTransactionLease, PathTransactionRequest};
 use crate::evidence_binder::rekey_document_states;
 use crate::paths::GENERATED_DIRS;
 use crate::vault::{
@@ -155,33 +156,74 @@ pub struct FileQueueSourceInfo {
     pub source_kind: FileQueueSourceKind,
 }
 
-#[tauri::command(async)]
 pub fn scan_workspace_files(
     vault_path: String,
     scan_options: Option<ScanOptions>,
 ) -> Result<Vec<WorkspaceFileEntry>, String> {
+    if !Path::new(&vault_path).is_dir() {
+        return Err("Workspace path is not a directory".to_string());
+    }
     let vault = normalize_existing_dir(&vault_path)?;
     let scan_filter = ScanFilter::from_options(scan_options)?;
     scan_workspace_files_at(&vault, &scan_filter)
 }
 
-#[tauri::command(async)]
 pub fn scan_workspace_entries(
     vault_path: String,
     scan_options: Option<ScanOptions>,
 ) -> Result<WorkspaceEntriesSnapshot, String> {
+    if !Path::new(&vault_path).is_dir() {
+        return Err("Workspace path is not a directory".to_string());
+    }
     let vault = normalize_existing_dir(&vault_path)?;
-    recover_rename_transactions(&vault)?;
+    if transaction_dir(&vault).is_dir() {
+        let request =
+            PathTransactionRequest::new(vec![vault.clone()])?.with_workspace_registry()?;
+        with_path_transactions(request, |lease| {
+            assert_files_mutation_allowed(&vault, WorkspaceWriteAction::RenameMove)?;
+            lease.before_effect()?;
+            recover_rename_transactions(&vault)
+        })?;
+    }
     let scan_filter = ScanFilter::from_options(scan_options)?;
     scan_workspace_entries_at(&vault, &scan_filter)
 }
 
-#[tauri::command]
 pub fn create_workspace_directory(
     vault_path: String,
     parent_path: String,
     name: String,
 ) -> Result<WorkspaceMutationOutcome, String> {
+    if !Path::new(&vault_path).is_dir() {
+        return Err("Workspace path is not a directory".to_string());
+    }
+    let vault = normalize_existing_dir(&vault_path)?;
+    let parent = resolve_inside_vault(&vault.to_string_lossy(), &parent_path)?;
+    validate_entry_name(&name)?;
+    let paths = vec![parent.join(&name)];
+    let request = PathTransactionRequest::new(paths)?
+        .with_workspace_registry()?
+        .require_parent(&vault)?;
+    with_path_transactions(request, |lease| {
+        create_workspace_directory_in_transaction(lease, vault_path, parent_path, name)
+    })
+}
+
+pub(crate) fn create_workspace_directory_in_transaction(
+    lease: &PathTransactionLease,
+    vault_path: String,
+    parent_path: String,
+    name: String,
+) -> Result<WorkspaceMutationOutcome, String> {
+    let vault = PathBuf::from(&vault_path)
+        .canonicalize()
+        .map_err(|_| "Workspace path is not a directory")?;
+    let parent = resolve_inside_vault(&vault.to_string_lossy(), &parent_path)?;
+    validate_entry_name(&name)?;
+    let paths = vec![parent.join(&name)];
+    lease.ensure_covered(paths)?;
+    lease.ensure_workspace_registry()?;
+
     let vault = normalize_existing_dir(&vault_path)?;
     assert_files_mutation_allowed(&vault, WorkspaceWriteAction::Create)?;
     validate_entry_name(&name)?;
@@ -196,16 +238,58 @@ pub fn create_workspace_directory(
     if path_entry_exists(&target) {
         return Err(format!("An item named {name} already exists"));
     }
+    lease.before_effect()?;
     fs::create_dir(&target).map_err(|err| format!("Cannot create directory: {err}"))?;
     Ok(success_outcome(None, Some(&target)))
 }
 
-#[tauri::command]
 pub fn rename_workspace_entry(
     vault_path: String,
     source_path: String,
     new_name: String,
 ) -> Result<WorkspaceMutationOutcome, String> {
+    if !Path::new(&vault_path).is_dir() {
+        return Err("Workspace path is not a directory".to_string());
+    }
+    let vault = normalize_existing_dir(&vault_path)?;
+    validate_entry_name(&new_name)?;
+    let source = resolve_inside_vault(&vault.to_string_lossy(), &source_path)?;
+    let parent = source.parent().ok_or("Source path has no parent")?;
+    let paths = vec![
+        source.clone(),
+        parent.join(&new_name),
+        transaction_dir(&vault),
+        vault.join(".maru/binder"),
+    ];
+    let request = PathTransactionRequest::new(paths)?
+        .with_workspace_registry()?
+        .require_parent(&vault)?;
+    with_path_transactions(request, |lease| {
+        rename_workspace_entry_in_transaction(lease, vault_path, source_path, new_name)
+    })
+}
+
+pub(crate) fn rename_workspace_entry_in_transaction(
+    lease: &PathTransactionLease,
+    vault_path: String,
+    source_path: String,
+    new_name: String,
+) -> Result<WorkspaceMutationOutcome, String> {
+    let vault = PathBuf::from(&vault_path)
+        .canonicalize()
+        .map_err(|_| "Workspace path is not a directory")?;
+    validate_entry_name(&new_name)?;
+    let source = resolve_inside_vault(&vault.to_string_lossy(), &source_path)?;
+    let parent = source.parent().ok_or("Source path has no parent")?;
+    let paths = vec![
+        source.clone(),
+        parent.join(&new_name),
+        transaction_dir(&vault),
+        vault.join(".maru/binder"),
+    ];
+    lease.ensure_covered(paths)?;
+    lease.ensure_workspace_registry()?;
+
     let vault = normalize_existing_dir(&vault_path)?;
     assert_files_mutation_allowed(&vault, WorkspaceWriteAction::RenameMove)?;
     validate_entry_name(&new_name)?;
@@ -225,6 +309,7 @@ pub fn rename_workspace_entry(
     if path_entry_exists(&target) && !is_same_entry(&source, &target) {
         return Err(format!("An item named {new_name} already exists"));
     }
+    lease.before_effect()?;
     journaled_rename(&vault, &source, &target)?;
     if let Err(err) = rekey_document_states(&vault, &source, &target) {
         if let Err(rollback_err) = journaled_rename(&vault, &target, &source) {
@@ -239,13 +324,54 @@ pub fn rename_workspace_entry(
     Ok(success_outcome(Some(&source), Some(&target)))
 }
 
-#[tauri::command(async)]
 pub fn duplicate_workspace_entries(
     vault_path: String,
     source_paths: Vec<String>,
 ) -> Result<Vec<WorkspaceMutationOutcome>, String> {
+    if !Path::new(&vault_path).is_dir() {
+        return Err("Workspace path is not a directory".to_string());
+    }
+    let vault = normalize_existing_dir(&vault_path)?;
+    let mut paths = Vec::new();
+    for raw in &source_paths {
+        if let Ok(source) = resolve_inside_vault(&vault.to_string_lossy(), raw) {
+            paths.push(source.parent().unwrap_or(&vault).to_path_buf());
+        }
+    }
+    if paths.is_empty() {
+        paths.push(vault.join(".maru/duplicate-admission"));
+    }
+    let request = PathTransactionRequest::new(paths)?
+        .with_workspace_registry()?
+        .require_parent(&vault)?;
+    with_path_transactions(request, |lease| {
+        duplicate_workspace_entries_in_transaction(lease, vault_path, source_paths)
+    })
+}
+
+pub(crate) fn duplicate_workspace_entries_in_transaction(
+    lease: &PathTransactionLease,
+    vault_path: String,
+    source_paths: Vec<String>,
+) -> Result<Vec<WorkspaceMutationOutcome>, String> {
+    let vault = PathBuf::from(&vault_path)
+        .canonicalize()
+        .map_err(|_| "Workspace path is not a directory")?;
+    let mut paths = Vec::new();
+    for raw in &source_paths {
+        if let Ok(source) = resolve_inside_vault(&vault.to_string_lossy(), raw) {
+            paths.push(source.parent().unwrap_or(&vault).to_path_buf());
+        }
+    }
+    if paths.is_empty() {
+        paths.push(vault.join(".maru/duplicate-admission"));
+    }
+    lease.ensure_covered(paths)?;
+    lease.ensure_workspace_registry()?;
+
     let vault = normalize_existing_dir(&vault_path)?;
     assert_files_mutation_allowed(&vault, WorkspaceWriteAction::Create)?;
+    lease.before_effect()?;
     let mut outcomes = Vec::with_capacity(source_paths.len());
     for raw_source in source_paths {
         let outcome = match resolve_workspace_entry(&vault, &raw_source) {
@@ -270,13 +396,63 @@ pub fn duplicate_workspace_entries(
     Ok(outcomes)
 }
 
-#[tauri::command(async)]
 pub fn paste_workspace_entries(
     vault_path: String,
     source_paths: Vec<String>,
     target_dir: String,
     operation: FileQueueOperation,
 ) -> Result<Vec<WorkspaceMutationOutcome>, String> {
+    if !Path::new(&vault_path).is_dir() {
+        return Err("Workspace path is not a directory".to_string());
+    }
+    let vault = normalize_existing_dir(&vault_path)?;
+    let target = resolve_inside_vault(&vault.to_string_lossy(), &target_dir)?;
+    let mut paths = vec![target];
+    for raw in &source_paths {
+        if let Ok(source) = resolve_inside_vault(&vault.to_string_lossy(), raw) {
+            paths.push(source);
+        }
+    }
+    if operation == FileQueueOperation::Move {
+        paths.extend([transaction_dir(&vault), vault.join(".maru/binder")]);
+    }
+    let request = PathTransactionRequest::new(paths)?
+        .with_workspace_registry()?
+        .require_parent(&vault)?;
+    with_path_transactions(request, |lease| {
+        paste_workspace_entries_in_transaction(
+            lease,
+            vault_path,
+            source_paths,
+            target_dir,
+            operation,
+        )
+    })
+}
+
+pub(crate) fn paste_workspace_entries_in_transaction(
+    lease: &PathTransactionLease,
+    vault_path: String,
+    source_paths: Vec<String>,
+    target_dir: String,
+    operation: FileQueueOperation,
+) -> Result<Vec<WorkspaceMutationOutcome>, String> {
+    let vault = PathBuf::from(&vault_path)
+        .canonicalize()
+        .map_err(|_| "Workspace path is not a directory")?;
+    let target = resolve_inside_vault(&vault.to_string_lossy(), &target_dir)?;
+    let mut paths = vec![target];
+    for raw in &source_paths {
+        if let Ok(source) = resolve_inside_vault(&vault.to_string_lossy(), raw) {
+            paths.push(source);
+        }
+    }
+    if operation == FileQueueOperation::Move {
+        paths.extend([transaction_dir(&vault), vault.join(".maru/binder")]);
+    }
+    lease.ensure_covered(paths)?;
+    lease.ensure_workspace_registry()?;
+
     let vault = normalize_existing_dir(&vault_path)?;
     let action = match operation {
         FileQueueOperation::Copy => WorkspaceWriteAction::Create,
@@ -291,6 +467,7 @@ pub fn paste_workspace_entries(
         return Err("Paste target is not a directory".to_string());
     }
 
+    lease.before_effect()?;
     let mut outcomes = Vec::with_capacity(source_paths.len());
     for raw_source in source_paths {
         let outcome = match resolve_workspace_entry(&vault, &raw_source) {
@@ -326,11 +503,53 @@ pub fn paste_workspace_entries(
     Ok(outcomes)
 }
 
-#[tauri::command(async)]
 pub fn trash_workspace_entries(
     vault_path: String,
     target_paths: Vec<String>,
 ) -> Result<Vec<WorkspaceMutationOutcome>, String> {
+    if !Path::new(&vault_path).is_dir() {
+        return Err("Workspace path is not a directory".to_string());
+    }
+    let vault = normalize_existing_dir(&vault_path)?;
+    let mut paths = Vec::new();
+    for raw in &target_paths {
+        if let Ok(target) = resolve_inside_vault(&vault.to_string_lossy(), raw) {
+            paths.push(target);
+        }
+    }
+    if paths.is_empty() {
+        paths.push(vault.join(".maru/trash-admission"));
+    }
+    let request = PathTransactionRequest::new(paths)?
+        .with_workspace_registry()?
+        .require_parent(&vault)?;
+    with_path_transactions(request, |lease| {
+        trash_workspace_entries_in_transaction(lease, vault_path, target_paths)
+    })
+}
+
+pub(crate) fn trash_workspace_entries_in_transaction(
+    lease: &PathTransactionLease,
+    vault_path: String,
+    target_paths: Vec<String>,
+) -> Result<Vec<WorkspaceMutationOutcome>, String> {
+    let vault = PathBuf::from(&vault_path)
+        .canonicalize()
+        .map_err(|_| "Workspace path is not a directory")?;
+    let mut paths = Vec::new();
+    for raw in &target_paths {
+        if let Ok(target) = resolve_inside_vault(&vault.to_string_lossy(), raw) {
+            paths.push(target);
+        }
+    }
+    if paths.is_empty() {
+        paths.push(vault.join(".maru/trash-admission"));
+    }
+    lease.ensure_covered(paths)?;
+    lease.ensure_workspace_registry()?;
+
+    assert_files_mutation_allowed(&vault, WorkspaceWriteAction::Delete)?;
+    lease.before_effect()?;
     trash_workspace_entries_with(&vault_path, target_paths, move_path_to_system_trash)
 }
 
@@ -389,7 +608,6 @@ fn promoted_target_is_protected(target: &Path, promoted_targets: &[PathBuf]) -> 
         .any(|protected| protected == target || protected.starts_with(target))
 }
 
-#[tauri::command]
 pub fn describe_file_queue_sources(paths: Vec<String>) -> Result<Vec<FileQueueSourceInfo>, String> {
     let mut sources = Vec::new();
     for path in paths {
@@ -427,15 +645,60 @@ pub fn describe_file_queue_sources(paths: Vec<String>) -> Result<Vec<FileQueueSo
     Ok(sources)
 }
 
-#[tauri::command(async)]
 pub fn apply_file_queue(
     vault_path: String,
     items: Vec<FileQueueApplyItem>,
 ) -> Result<Vec<FileQueueApplyOutcome>, String> {
+    if !Path::new(&vault_path).is_dir() {
+        return Err("Workspace path is not a directory".to_string());
+    }
+    let vault = normalize_existing_dir(&vault_path)?;
+    let mut paths = Vec::new();
+    for item in &items {
+        paths.push(PathBuf::from(&item.source_path));
+        paths.push(resolve_target_dir(&vault, &item.target_dir)?);
+        if item.operation == FileQueueOperation::Move {
+            paths.push(vault.join(".maru/binder"));
+        }
+    }
+    if paths.is_empty() {
+        return Ok(Vec::new());
+    }
+    let request = PathTransactionRequest::new(paths)?
+        .with_workspace_registry()?
+        .require_parent(&vault)?;
+    with_path_transactions(request, |lease| {
+        apply_file_queue_in_transaction(lease, vault_path, items)
+    })
+}
+
+pub(crate) fn apply_file_queue_in_transaction(
+    lease: &PathTransactionLease,
+    vault_path: String,
+    items: Vec<FileQueueApplyItem>,
+) -> Result<Vec<FileQueueApplyOutcome>, String> {
+    let vault = PathBuf::from(&vault_path)
+        .canonicalize()
+        .map_err(|_| "Workspace path is not a directory")?;
+    let mut paths = Vec::new();
+    for item in &items {
+        paths.push(PathBuf::from(&item.source_path));
+        paths.push(resolve_target_dir(&vault, &item.target_dir)?);
+        if item.operation == FileQueueOperation::Move {
+            paths.push(vault.join(".maru/binder"));
+        }
+    }
+    if paths.is_empty() {
+        return Ok(Vec::new());
+    }
+    lease.ensure_covered(paths)?;
+    lease.ensure_workspace_registry()?;
+
     if items.is_empty() {
         return Ok(Vec::new());
     }
     let vault = normalize_existing_dir(&vault_path)?;
+    lease.before_effect()?;
     let mut outcomes = Vec::new();
     for item in items {
         let action = match item.operation {
@@ -1074,6 +1337,10 @@ fn cleanup_transaction_dir(dir: &Path) {
 }
 
 fn move_path_to_system_trash(path: &Path) -> Result<(), String> {
+    #[cfg(test)]
+    if let Some(result) = phase08_06::trash_fixture(path) {
+        return result;
+    }
     #[cfg(target_os = "macos")]
     {
         use trash::macos::{DeleteMethod, TrashContextExtMacos};
@@ -1234,6 +1501,7 @@ mod tests {
 
     #[test]
     fn scanner_excludes_git_generated_hidden_and_maruignored_paths() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         let tmp = TempDir::new().unwrap();
         let root = tmp.path();
         write_file(root, "keep.md", b"# Keep\n");
@@ -1253,6 +1521,7 @@ mod tests {
 
     #[test]
     fn scanner_includes_dot_folder_only_when_allowlisted() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         let tmp = TempDir::new().unwrap();
         write_file(tmp.path(), "keep.md", b"# Keep\n");
         write_file(tmp.path(), ".github/workflows/ci.yml", b"name: ci\n");
@@ -1278,6 +1547,7 @@ mod tests {
 
     #[test]
     fn scanner_marks_binary_without_reading_large_files_fully() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         let tmp = TempDir::new().unwrap();
         write_file(tmp.path(), "report.pdf", b"%PDF-1.7\ntext");
         write_file(tmp.path(), "raw.bin", b"a\0b");
@@ -1294,6 +1564,7 @@ mod tests {
 
     #[test]
     fn entry_scanner_keeps_empty_directories_as_first_class_nodes() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         let tmp = TempDir::new().unwrap();
         fs::create_dir_all(tmp.path().join("assets/empty")).unwrap();
         write_file(tmp.path(), "assets/logo.png", b"\x89PNG\r\n");
@@ -1313,6 +1584,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn entry_scanner_reports_symlink_and_target_kind() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         let tmp = TempDir::new().unwrap();
         fs::create_dir_all(tmp.path().join("real")).unwrap();
         std::os::unix::fs::symlink("real", tmp.path().join("linked")).unwrap();
@@ -1333,6 +1605,7 @@ mod tests {
 
     #[test]
     fn file_manager_create_rename_duplicate_and_paste_are_collision_safe() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         let tmp = TempDir::new().unwrap();
         let vault = tmp.path().to_string_lossy().to_string();
         write_file(tmp.path(), "source.txt", b"source");
@@ -1370,6 +1643,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn entry_scanner_does_not_descend_into_symlinked_directories() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         let tmp = TempDir::new().unwrap();
         write_file(tmp.path(), "real/inner.txt", b"data");
         std::os::unix::fs::symlink("real", tmp.path().join("linked")).unwrap();
@@ -1393,6 +1667,7 @@ mod tests {
 
     #[test]
     fn rename_supports_case_only_changes() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         let tmp = TempDir::new().unwrap();
         let vault = tmp.path().to_string_lossy().to_string();
         write_file(tmp.path(), "notes.txt", b"case");
@@ -1416,6 +1691,7 @@ mod tests {
 
     #[test]
     fn entry_scan_recovers_an_interrupted_rename_transaction() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         let tmp = TempDir::new().unwrap();
         let root = tmp.path().canonicalize().unwrap();
         let source = root.join("before.txt");
@@ -1446,6 +1722,7 @@ mod tests {
 
     #[test]
     fn git_tracked_filter_metadata_falls_back_outside_repo() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         let tmp = TempDir::new().unwrap();
         write_file(tmp.path(), "note.md", b"# Note\n");
         let entries = scan_workspace_files_at(tmp.path(), &ScanFilter::default()).unwrap();
@@ -1455,6 +1732,7 @@ mod tests {
 
     #[test]
     fn queue_rejects_target_traversal() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         let tmp = TempDir::new().unwrap();
         let err = resolve_target_dir(tmp.path(), "../outside").unwrap_err();
         assert!(err.contains("escapes"));
@@ -1463,6 +1741,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn queue_rejects_target_symlink_to_outside_workspace() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         let workspace = TempDir::new().unwrap();
         let outside = TempDir::new().unwrap();
         std::os::unix::fs::symlink(outside.path(), workspace.path().join("external")).unwrap();
@@ -1473,6 +1752,7 @@ mod tests {
 
     #[test]
     fn queue_copy_uses_unique_target_name() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         let source_dir = TempDir::new().unwrap();
         let target_dir = TempDir::new().unwrap();
         write_file(source_dir.path(), "drop.pdf", b"new");
@@ -1497,6 +1777,7 @@ mod tests {
 
     #[test]
     fn queue_copies_directory_recursively_with_unique_name() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         let source_dir = TempDir::new().unwrap();
         let target_dir = TempDir::new().unwrap();
         write_file(source_dir.path(), "bundle/a.txt", b"a");
@@ -1526,6 +1807,7 @@ mod tests {
 
     #[test]
     fn queue_rejects_directory_target_inside_source() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         let workspace = TempDir::new().unwrap();
         write_file(workspace.path(), "source/a.txt", b"a");
 
@@ -1551,6 +1833,7 @@ mod tests {
 
     #[test]
     fn queue_moves_directory() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         let source_dir = TempDir::new().unwrap();
         let target_dir = TempDir::new().unwrap();
         write_file(source_dir.path(), "bundle/a.txt", b"a");
@@ -1576,6 +1859,7 @@ mod tests {
 
     #[test]
     fn trash_guard_protects_promoted_target_and_parent_but_keeps_batch_partial() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         let workspace = TempDir::new().unwrap();
         write_file(workspace.path(), "notes/protected.md", b"promoted");
         write_file(workspace.path(), "notes/other.md", b"unrelated");
@@ -1630,6 +1914,7 @@ mod tests {
 
     #[test]
     fn trash_guard_fails_closed_when_draft_index_is_invalid() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         let workspace = TempDir::new().unwrap();
         write_file(workspace.path(), "notes/protected.md", b"promoted");
         let index = workspace.path().join(".maru/drafts/index.json");
@@ -1649,5 +1934,749 @@ mod tests {
         assert!(result.is_err());
         assert!(trashed.is_empty());
         assert!(workspace.path().join("notes/protected.md").is_file());
+    }
+}
+
+/// Owned IPC scheduling; synchronous domain APIs remain available to Rust callers.
+pub mod ipc {
+    use super::*;
+    #[tauri::command]
+    pub async fn scan_workspace_files(
+        vault_path: String,
+        scan_options: Option<ScanOptions>,
+    ) -> Result<Vec<WorkspaceFileEntry>, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            crate::atomic_file::PathTransactionLease::test_stage(
+                &[PathBuf::from(&vault_path)],
+                "worker:scan_workspace_files",
+            );
+            super::scan_workspace_files(vault_path, scan_options)
+        })
+        .await
+        .map_err(|err| format!("scan_workspace_files_task_failed: {err}"))?
+    }
+    #[tauri::command]
+    pub async fn scan_workspace_entries(
+        vault_path: String,
+        scan_options: Option<ScanOptions>,
+    ) -> Result<WorkspaceEntriesSnapshot, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            crate::atomic_file::PathTransactionLease::test_stage(
+                &[PathBuf::from(&vault_path)],
+                "worker:scan_workspace_entries",
+            );
+            super::scan_workspace_entries(vault_path, scan_options)
+        })
+        .await
+        .map_err(|err| format!("scan_workspace_entries_task_failed: {err}"))?
+    }
+    #[tauri::command]
+    pub async fn create_workspace_directory(
+        vault_path: String,
+        parent_path: String,
+        name: String,
+    ) -> Result<WorkspaceMutationOutcome, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            crate::atomic_file::PathTransactionLease::test_stage(
+                &[PathBuf::from(&vault_path)],
+                "worker:create_workspace_directory",
+            );
+            super::create_workspace_directory(vault_path, parent_path, name)
+        })
+        .await
+        .map_err(|err| format!("create_workspace_directory_task_failed: {err}"))?
+    }
+    #[tauri::command]
+    pub async fn rename_workspace_entry(
+        vault_path: String,
+        source_path: String,
+        new_name: String,
+    ) -> Result<WorkspaceMutationOutcome, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            crate::atomic_file::PathTransactionLease::test_stage(
+                &[PathBuf::from(&vault_path)],
+                "worker:rename_workspace_entry",
+            );
+            super::rename_workspace_entry(vault_path, source_path, new_name)
+        })
+        .await
+        .map_err(|err| format!("rename_workspace_entry_task_failed: {err}"))?
+    }
+    #[tauri::command]
+    pub async fn duplicate_workspace_entries(
+        vault_path: String,
+        source_paths: Vec<String>,
+    ) -> Result<Vec<WorkspaceMutationOutcome>, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            crate::atomic_file::PathTransactionLease::test_stage(
+                &[PathBuf::from(&vault_path)],
+                "worker:duplicate_workspace_entries",
+            );
+            super::duplicate_workspace_entries(vault_path, source_paths)
+        })
+        .await
+        .map_err(|err| format!("duplicate_workspace_entries_task_failed: {err}"))?
+    }
+    #[tauri::command]
+    pub async fn paste_workspace_entries(
+        vault_path: String,
+        source_paths: Vec<String>,
+        target_dir: String,
+        operation: FileQueueOperation,
+    ) -> Result<Vec<WorkspaceMutationOutcome>, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            crate::atomic_file::PathTransactionLease::test_stage(
+                &[PathBuf::from(&vault_path)],
+                "worker:paste_workspace_entries",
+            );
+            super::paste_workspace_entries(vault_path, source_paths, target_dir, operation)
+        })
+        .await
+        .map_err(|err| format!("paste_workspace_entries_task_failed: {err}"))?
+    }
+    #[tauri::command]
+    pub async fn trash_workspace_entries(
+        vault_path: String,
+        target_paths: Vec<String>,
+    ) -> Result<Vec<WorkspaceMutationOutcome>, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            crate::atomic_file::PathTransactionLease::test_stage(
+                &[PathBuf::from(&vault_path)],
+                "worker:trash_workspace_entries",
+            );
+            super::trash_workspace_entries(vault_path, target_paths)
+        })
+        .await
+        .map_err(|err| format!("trash_workspace_entries_task_failed: {err}"))?
+    }
+    #[tauri::command]
+    pub async fn describe_file_queue_sources(
+        paths: Vec<String>,
+    ) -> Result<Vec<FileQueueSourceInfo>, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            if let Some(path) = paths.first() {
+                crate::atomic_file::PathTransactionLease::test_stage(
+                    &[PathBuf::from(path)],
+                    "worker:describe_file_queue_sources",
+                );
+            }
+            super::describe_file_queue_sources(paths)
+        })
+        .await
+        .map_err(|err| format!("describe_file_queue_sources_task_failed: {err}"))?
+    }
+    #[tauri::command]
+    pub async fn apply_file_queue(
+        vault_path: String,
+        items: Vec<FileQueueApplyItem>,
+    ) -> Result<Vec<FileQueueApplyOutcome>, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            crate::atomic_file::PathTransactionLease::test_stage(
+                &[PathBuf::from(&vault_path)],
+                "worker:apply_file_queue",
+            );
+            super::apply_file_queue(vault_path, items)
+        })
+        .await
+        .map_err(|err| format!("apply_file_queue_task_failed: {err}"))?
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod phase08_06 {
+    use super::*;
+    use crate::atomic_file::phase08_06::{boundary, run, Held, Home};
+    use std::sync::{mpsc, Mutex};
+    use std::time::Duration;
+
+    static TRASH: Mutex<Vec<(PathBuf, PathBuf)>> = Mutex::new(Vec::new());
+    pub(crate) struct TrashFixture(PathBuf);
+    impl TrashFixture {
+        pub(crate) fn new(source: PathBuf, destination: PathBuf) -> Self {
+            TRASH.lock().unwrap().push((source.clone(), destination));
+            Self(source)
+        }
+    }
+    impl Drop for TrashFixture {
+        fn drop(&mut self) {
+            TRASH.lock().unwrap().retain(|(path, _)| path != &self.0);
+        }
+    }
+    pub(super) fn trash_fixture(path: &Path) -> Option<Result<(), String>> {
+        let destination = TRASH
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|(source, _)| source == path)
+            .map(|(_, target)| target.clone());
+        destination.map(|target| fs::rename(path, target).map_err(|err| err.to_string()))
+    }
+    fn start<F>(future: F) -> mpsc::Receiver<F::Output>
+    where
+        F: std::future::Future + Send + 'static,
+        F::Output: Send + 'static,
+    {
+        let (tx, rx) = mpsc::channel();
+        tauri::async_runtime::spawn(async move {
+            let _ = tx.send(future.await);
+        });
+        rx
+    }
+    fn done<T>(rx: mpsc::Receiver<T>) -> T {
+        rx.recv_timeout(Duration::from_secs(5))
+            .expect("command completed")
+    }
+    fn text(path: &Path) -> String {
+        path.to_string_lossy().into_owned()
+    }
+
+    #[test]
+    fn phase08_06_every_files_wrapper_leaves_the_polling_task() {
+        let home = Home::new();
+        let root = home.root.path().to_path_buf();
+        let s = text(&root);
+        boundary(
+            root.clone(),
+            "scan_workspace_files",
+            ipc::scan_workspace_files(s.clone(), None),
+        );
+        boundary(
+            root.clone(),
+            "scan_workspace_entries",
+            ipc::scan_workspace_entries(s.clone(), None),
+        );
+        boundary(
+            root.clone(),
+            "create_workspace_directory",
+            ipc::create_workspace_directory(s.clone(), s.clone(), "new".into()),
+        );
+        boundary(
+            root.clone(),
+            "rename_workspace_entry",
+            ipc::rename_workspace_entry(s.clone(), "a".into(), "b".into()),
+        );
+        boundary(
+            root.clone(),
+            "duplicate_workspace_entries",
+            ipc::duplicate_workspace_entries(s.clone(), vec![]),
+        );
+        boundary(
+            root.clone(),
+            "paste_workspace_entries",
+            ipc::paste_workspace_entries(s.clone(), vec![], s.clone(), FileQueueOperation::Copy),
+        );
+        boundary(
+            root.clone(),
+            "trash_workspace_entries",
+            ipc::trash_workspace_entries(s.clone(), vec![]),
+        );
+        boundary(
+            root.clone(),
+            "describe_file_queue_sources",
+            ipc::describe_file_queue_sources(vec![s.clone()]),
+        );
+        boundary(root, "apply_file_queue", ipc::apply_file_queue(s, vec![]));
+    }
+
+    #[test]
+    fn phase08_06_actual_wrappers_return_files_and_preserve_legacy_errors() {
+        let home = Home::new();
+        let root = home.root.path();
+        let s = text(root);
+        fs::write(root.join("note.md"), "# fixture content").unwrap();
+        assert!(!run(ipc::scan_workspace_files(s.clone(), None))
+            .unwrap()
+            .is_empty());
+        assert!(!run(ipc::scan_workspace_entries(s.clone(), None))
+            .unwrap()
+            .entries
+            .is_empty());
+        assert_eq!(
+            run(ipc::describe_file_queue_sources(vec![text(
+                &root.join("note.md")
+            )]))
+            .unwrap()[0]
+                .file_name,
+            "note.md"
+        );
+        assert_eq!(
+            run(ipc::create_workspace_directory(
+                s.clone(),
+                s.clone(),
+                "..".into()
+            ))
+            .unwrap_err(),
+            "Name cannot contain path separators"
+        );
+        let created = run(ipc::create_workspace_directory(
+            s.clone(),
+            s.clone(),
+            "folder".into(),
+        ))
+        .unwrap();
+        assert_eq!(created.status, WorkspaceMutationStatus::Done);
+        let duplicate = run(ipc::duplicate_workspace_entries(
+            s.clone(),
+            vec!["note.md".into(), "missing".into()],
+        ))
+        .unwrap();
+        assert_eq!(duplicate[0].status, WorkspaceMutationStatus::Done);
+        assert_eq!(duplicate[1].status, WorkspaceMutationStatus::Error);
+        let paste = run(ipc::paste_workspace_entries(
+            s.clone(),
+            vec!["note.md".into()],
+            "folder".into(),
+            FileQueueOperation::Copy,
+        ))
+        .unwrap();
+        assert_eq!(paste[0].status, WorkspaceMutationStatus::Done);
+        let nested = PathTransactionRequest::new(vec![root.join("other")])
+            .unwrap()
+            .acquire()
+            .unwrap();
+        assert!(
+            create_workspace_directory_in_transaction(&nested, s.clone(), s, "denied".into())
+                .unwrap_err()
+                .contains("exceeds")
+        );
+        assert!(!root.join("denied").exists());
+    }
+
+    #[test]
+    fn phase08_06_nested_real_mutations_reuse_complete_lease_after_rename() {
+        let home = Home::new();
+        let root = home.root.path();
+        let a = root.join("a");
+        let b = root.join("b");
+        fs::create_dir(&a).unwrap();
+        let request = PathTransactionRequest::new(vec![
+            a,
+            b.clone(),
+            transaction_dir(root),
+            root.join(".maru/binder"),
+        ])
+        .unwrap()
+        .with_workspace_registry()
+        .unwrap()
+        .require_parent(root)
+        .unwrap();
+        with_path_transactions(request, |lease| {
+            rename_workspace_entry_in_transaction(lease, text(root), "a".into(), "b".into())?;
+            create_workspace_directory_in_transaction(
+                lease,
+                text(root),
+                text(&b),
+                "nested".into(),
+            )?;
+            assert!(create_workspace_directory_in_transaction(
+                lease,
+                text(root),
+                text(root),
+                "outside-set".into()
+            )
+            .is_err());
+            Ok(())
+        })
+        .unwrap();
+        assert!(b.join("nested").is_dir());
+        assert!(!root.join("outside-set").exists());
+    }
+
+    #[test]
+    fn phase08_06_parent_rename_trash_create_both_orders_keep_complete_tree() {
+        let _home = Home::new();
+        for trash in [false, true] {
+            for child_first in [false, true] {
+                let temp =
+                    tempfile::tempdir_in(std::env::temp_dir().canonicalize().unwrap()).unwrap();
+                let root = temp.path();
+                let a = root.join("a");
+                let b = root.join("b");
+                fs::create_dir(&a).unwrap();
+                fs::write(a.join("note.md"), "preserved bytes").unwrap();
+                let _trash = TrashFixture::new(a.clone(), b.clone());
+                let child = a.join("child");
+                let first = Held::new(
+                    if child_first {
+                        child.clone()
+                    } else {
+                        a.clone()
+                    },
+                    "pre-effect",
+                );
+                let waiting = Held::new(
+                    if child_first {
+                        a.clone()
+                    } else {
+                        child.clone()
+                    },
+                    "before-admission",
+                );
+                let parent = || {
+                    let root = text(root);
+                    let a = text(&a);
+                    start(async move {
+                        if trash {
+                            ipc::trash_workspace_entries(root, vec![a])
+                                .await
+                                .map(|rows| {
+                                    assert_eq!(rows[0].status, WorkspaceMutationStatus::Done)
+                                })
+                        } else {
+                            ipc::rename_workspace_entry(root, a, "b".into())
+                                .await
+                                .map(|_| ())
+                        }
+                    })
+                };
+                let create = || {
+                    start(ipc::create_workspace_directory(
+                        text(root),
+                        text(&a),
+                        "child".into(),
+                    ))
+                };
+                let (parent_rx, child_rx) = if child_first {
+                    let c = create();
+                    first.wait();
+                    let p = parent();
+                    waiting.wait();
+                    waiting.release();
+                    (p, c)
+                } else {
+                    let p = parent();
+                    first.wait();
+                    let c = create();
+                    waiting.wait();
+                    waiting.release();
+                    (p, c)
+                };
+                assert!(!b.exists());
+                first.release();
+                done(parent_rx).unwrap();
+                let child_result = done(child_rx);
+                if child_first {
+                    child_result.unwrap();
+                    assert!(b.join("child").is_dir());
+                } else {
+                    assert!(child_result.is_err());
+                    assert!(!b.join("child").exists());
+                }
+                assert!(!a.exists());
+                assert_eq!(fs::read(b.join("note.md")).unwrap(), b"preserved bytes");
+            }
+        }
+    }
+
+    #[test]
+    fn phase08_06_create_contention_and_unrelated_directory_progress() {
+        let home = Home::new();
+        let root = home.root.path();
+        let a = root.join("a");
+        let b = root.join("b");
+        fs::create_dir(&a).unwrap();
+        fs::create_dir(&b).unwrap();
+        let held = Held::new(a.join("child"), "pre-effect");
+        let first = start(ipc::create_workspace_directory(
+            text(root),
+            text(&a),
+            "child".into(),
+        ));
+        held.wait();
+        let second = start(ipc::create_workspace_directory(
+            text(root),
+            text(&a),
+            "child".into(),
+        ));
+        let unrelated = run(ipc::create_workspace_directory(
+            text(root),
+            text(&b),
+            "child".into(),
+        ))
+        .unwrap();
+        assert_eq!(unrelated.status, WorkspaceMutationStatus::Done);
+        assert!(!a.join("child").exists());
+        held.release();
+        done(first).unwrap();
+        assert!(done(second).unwrap_err().contains("already exists"));
+    }
+
+    #[cfg(any(windows, target_os = "macos"))]
+    #[test]
+    fn phase08_06_case_aliases_of_actual_directory_serialize() {
+        let home = Home::new();
+        let root = home.root.path();
+        let upper = root.join("CaseFolder");
+        let lower = root.join("casefolder");
+        fs::create_dir(&upper).unwrap();
+        let aliases = lower.is_dir();
+        eprintln!(
+            "fixture volume case aliases: {aliases}; canonicalize equal: {}",
+            lower.canonicalize().ok() == upper.canonicalize().ok()
+        );
+        if !aliases {
+            fs::create_dir(&lower).unwrap();
+        }
+        let held = Held::new(upper.join("child"), "pre-effect");
+        let first = start(ipc::create_workspace_directory(
+            text(root),
+            text(&upper),
+            "child".into(),
+        ));
+        held.wait();
+        let waiting = Held::new(lower.join("child"), "before-admission");
+        let second = start(ipc::create_workspace_directory(
+            text(root),
+            text(&lower),
+            "child".into(),
+        ));
+        waiting.wait();
+        waiting.release();
+        assert!(!upper.join("child").exists());
+        held.release();
+        done(first).unwrap();
+        let second = done(second);
+        if aliases {
+            assert!(second.unwrap_err().contains("already exists"));
+        } else {
+            second.unwrap();
+        }
+        assert!(upper.join("child").is_dir());
+    }
+
+    #[test]
+    fn phase08_06_duplicate_paste_queue_same_destination_preserve_both_results() {
+        let _home = Home::new();
+        for mode in ["duplicate", "paste", "queue"] {
+            let temp = tempfile::tempdir_in(std::env::temp_dir().canonicalize().unwrap()).unwrap();
+            let root = temp.path();
+            let source = root.join("source");
+            let target = root.join("target");
+            fs::create_dir(&source).unwrap();
+            fs::create_dir(&target).unwrap();
+            fs::write(source.join("note.md"), "original bytes").unwrap();
+            let destination = if mode == "duplicate" {
+                source.clone()
+            } else {
+                target.clone()
+            };
+            let held = Held::new(destination.clone(), "pre-effect");
+            let invoke = || {
+                let root = text(root);
+                let source = text(&source.join("note.md"));
+                let target = text(&target);
+                start(async move {
+                    match mode {
+                        "duplicate" => ipc::duplicate_workspace_entries(root, vec![source])
+                            .await
+                            .map(|rows| assert_eq!(rows[0].status, WorkspaceMutationStatus::Done)),
+                        "paste" => ipc::paste_workspace_entries(
+                            root,
+                            vec![source],
+                            target,
+                            FileQueueOperation::Copy,
+                        )
+                        .await
+                        .map(|rows| assert_eq!(rows[0].status, WorkspaceMutationStatus::Done)),
+                        _ => ipc::apply_file_queue(
+                            root,
+                            vec![FileQueueApplyItem {
+                                id: "fixture".into(),
+                                source_path: source,
+                                source_kind: FileQueueSourceKind::File,
+                                target_dir: target,
+                                operation: FileQueueOperation::Copy,
+                            }],
+                        )
+                        .await
+                        .map(|rows| assert_eq!(rows.len(), 1)),
+                    }
+                })
+            };
+            let first = invoke();
+            held.wait();
+            let waiting = Held::new(destination.clone(), "before-admission");
+            let second = invoke();
+            waiting.wait();
+            waiting.release();
+            held.release();
+            done(first).unwrap();
+            done(second).unwrap();
+            let files: Vec<_> = fs::read_dir(destination)
+                .unwrap()
+                .flatten()
+                .filter(|entry| entry.path().extension().is_some_and(|ext| ext == "md"))
+                .collect();
+            assert_eq!(files.len(), if mode == "duplicate" { 3 } else { 2 });
+            for file in files {
+                assert_eq!(fs::read(file.path()).unwrap(), b"original bytes");
+            }
+        }
+    }
+
+    #[test]
+    fn phase08_06_queue_parent_race_and_multi_item_move() {
+        let home = Home::new();
+        let root = home.root.path();
+        let a = root.join("a");
+        fs::create_dir(&a).unwrap();
+        let external = tempfile::tempdir().unwrap();
+        fs::write(external.path().join("note.md"), "queued bytes").unwrap();
+        let item = FileQueueApplyItem {
+            id: "item".into(),
+            source_path: text(&external.path().join("note.md")),
+            source_kind: FileQueueSourceKind::File,
+            target_dir: "a".into(),
+            operation: FileQueueOperation::Copy,
+        };
+        let held = Held::new(a.clone(), "pre-effect");
+        let rename = start(ipc::rename_workspace_entry(
+            text(root),
+            "a".into(),
+            "b".into(),
+        ));
+        held.wait();
+        let wait = Held::new(a.clone(), "before-admission");
+        let queue = start(ipc::apply_file_queue(text(root), vec![item.clone()]));
+        wait.wait();
+        wait.release();
+        held.release();
+        done(rename).unwrap();
+        assert!(done(queue).is_err());
+        assert!(!a.exists());
+        fs::create_dir(&a).unwrap();
+        fs::write(external.path().join("second.md"), "second").unwrap();
+        let mut first = item;
+        first.operation = FileQueueOperation::Move;
+        let mut second = first.clone();
+        second.source_path = text(&external.path().join("second.md"));
+        second.id = "second".into();
+        assert_eq!(
+            run(ipc::apply_file_queue(text(root), vec![first, second]))
+                .unwrap()
+                .len(),
+            2
+        );
+        assert_eq!(fs::read(a.join("note.md")).unwrap(), b"queued bytes");
+        assert_eq!(fs::read(a.join("second.md")).unwrap(), b"second");
+    }
+
+    #[test]
+    fn phase08_06_waiting_command_rechecks_parent_permission_and_migration() {
+        let home = Home::new();
+        let root = home.root.path().join("work");
+        fs::create_dir(&root).unwrap();
+        let a = root.join("a");
+        fs::create_dir(&a).unwrap();
+        for recreate in [false, true] {
+            let held = Held::new(a.join("new"), "before-admission");
+            let operation = start(ipc::create_workspace_directory(
+                text(&root),
+                text(&a),
+                "new".into(),
+            ));
+            held.wait();
+            fs::remove_dir(&a).unwrap();
+            if recreate {
+                fs::create_dir(&a).unwrap();
+            }
+            held.release();
+            assert!(done(operation).is_err());
+            assert!(!a.join("new").exists());
+            if !recreate {
+                fs::create_dir(&a).unwrap();
+            }
+        }
+        let registry = crate::vault_list::workspace_registry_path().unwrap();
+        fs::create_dir_all(registry.parent().unwrap()).unwrap();
+        let legacy = crate::vault_list::legacy_vault_list_path().unwrap();
+        let held = Held::new(a.join("new"), "before-admission");
+        let operation = start(ipc::create_workspace_directory(
+            text(&root),
+            text(&a),
+            "new".into(),
+        ));
+        held.wait();
+        fs::write(&legacy, r#"{"vaults":[]}"#).unwrap();
+        held.release();
+        assert!(done(operation).unwrap_err().contains("migration changed"));
+        assert!(!registry.exists());
+        fs::remove_file(&legacy).unwrap();
+        let held = Held::new(a.join("new"), "before-admission");
+        let operation = start(ipc::create_workspace_directory(
+            text(&root),
+            text(&a),
+            "new".into(),
+        ));
+        held.wait();
+        fs::write(&registry,serde_json::json!({"workspaces":[{"label":"fixture","visibility":"private","path":text(&root),"writePolicy":"readOnly"}]}).to_string()).unwrap();
+        held.release();
+        let error = done(operation).unwrap_err();
+        assert!(error.contains("blocked"), "{error}");
+        assert!(!a.join("new").exists());
+        fs::write(&registry, r#"{"workspaces":[]}"#).unwrap();
+        run(ipc::create_workspace_directory(
+            text(&root),
+            text(&a),
+            "new".into(),
+        ))
+        .unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn phase08_06_symlink_alias_create_and_rename_rekey_rollback() {
+        let home = Home::new();
+        let root = home.root.path();
+        let outside = tempfile::tempdir().unwrap();
+        let alias = root.join("alias");
+        std::os::unix::fs::symlink(outside.path(), &alias).unwrap();
+        run(ipc::create_workspace_directory(
+            text(root),
+            text(&alias),
+            "new".into(),
+        ))
+        .unwrap();
+        assert!(outside.path().join("new").is_dir());
+        let a = root.join("a");
+        fs::create_dir(&a).unwrap();
+        fs::write(a.join("note.md"), "original").unwrap();
+        let binder = root.join(".maru/binder");
+        fs::create_dir_all(&binder).unwrap();
+        fs::write(
+            binder.join("a-note.json"),
+            r#"{"docId":"a-note","documentPath":"a/note.md"}"#,
+        )
+        .unwrap();
+        // A target sidecar collision must roll back the entire directory rename.
+        fs::write(binder.join("b-note.json"), "collision").unwrap();
+        let result = run(ipc::rename_workspace_entry(
+            text(root),
+            "a".into(),
+            "b".into(),
+        ));
+        assert!(result.is_err());
+        assert!(a.join("note.md").exists());
+        assert!(!root.join("b").exists());
+        fs::remove_file(binder.join("b-note.json")).unwrap();
+        run(ipc::rename_workspace_entry(
+            text(root),
+            "a".into(),
+            "b".into(),
+        ))
+        .unwrap();
+        assert!(!a.exists());
+        assert_eq!(fs::read(root.join("b/note.md")).unwrap(), b"original");
+        assert!(!binder.join("a-note.json").exists());
+        assert!(binder.join("b-note.json").exists());
     }
 }

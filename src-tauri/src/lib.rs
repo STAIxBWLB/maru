@@ -102,7 +102,6 @@ use browser_passkeys::{
     browser_passkey_request_authorization, browser_passkey_status, BrowserPasskeyState,
 };
 use calendar_search::search_calendar_notes;
-use content_search::search_workspace_contents;
 use diagram::{
     diagram_backup_document, diagram_delete_document, diagram_export_blob,
     diagram_export_blob_to_path, diagram_list_documents, diagram_list_snapshots,
@@ -245,7 +244,6 @@ use today_outbox::{read_task_integrations, task_integrations_drain, task_integra
 use today_store::{
     read_task_events, today_finalize_setup, today_mutate, today_open, today_rollover,
 };
-use vault::{read_vault_cache, sample_workspace_path, scan_vault, scan_vault_paths};
 use vault_graph::{
     vault_graph_layout_read, vault_graph_layout_save, vault_graph_read, vault_graph_root,
 };
@@ -261,11 +259,6 @@ use web_actions::{
 };
 use workspace::{
     detect_workspace, list_workspaces, read_workspace_config, register_workspace_roots,
-};
-use workspace_files::{
-    apply_file_queue, create_workspace_directory, describe_file_queue_sources,
-    duplicate_workspace_entries, paste_workspace_entries, rename_workspace_entry,
-    scan_workspace_entries, scan_workspace_files, trash_workspace_entries,
 };
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -314,10 +307,10 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            sample_workspace_path,
-            scan_vault,
-            scan_vault_paths,
-            read_vault_cache,
+            vault::ipc::sample_workspace_path,
+            vault::ipc::scan_vault,
+            vault::ipc::scan_vault_paths,
+            vault::ipc::read_vault_cache,
             start_vault_watcher,
             stop_vault_watcher,
             start_scratchpad_watcher,
@@ -385,7 +378,7 @@ pub fn run() {
             append_meetings_log,
             read_meetings_log,
             search_calendar_notes,
-            search_workspace_contents,
+            content_search::ipc::search_workspace_contents,
             scan_task_notes,
             read_task_metadata,
             create_task_note,
@@ -532,15 +525,15 @@ pub fn run() {
             read_workspace_config,
             register_workspace_roots,
             list_workspaces,
-            scan_workspace_files,
-            scan_workspace_entries,
-            describe_file_queue_sources,
-            apply_file_queue,
-            create_workspace_directory,
-            rename_workspace_entry,
-            duplicate_workspace_entries,
-            paste_workspace_entries,
-            trash_workspace_entries,
+            workspace_files::ipc::scan_workspace_files,
+            workspace_files::ipc::scan_workspace_entries,
+            workspace_files::ipc::describe_file_queue_sources,
+            workspace_files::ipc::apply_file_queue,
+            workspace_files::ipc::create_workspace_directory,
+            workspace_files::ipc::rename_workspace_entry,
+            workspace_files::ipc::duplicate_workspace_entries,
+            workspace_files::ipc::paste_workspace_entries,
+            workspace_files::ipc::trash_workspace_entries,
             binary_viewer_classify,
             binary_viewer_prepare_asset,
             binary_viewer_read_text,

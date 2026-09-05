@@ -114,7 +114,6 @@ struct BoundedFiles {
     truncated: bool,
 }
 
-#[tauri::command(async)]
 pub fn search_workspace_contents(
     workspace_path: String,
     query: String,
@@ -1015,5 +1014,64 @@ mod tests {
             let (rg, fallback) = engine_results(dir.path(), query, &options);
             assert_eq!(rg, fallback, "engines differ for {query:?}");
         }
+    }
+}
+
+/// Owned IPC scheduling; synchronous domain APIs remain available to Rust callers.
+pub mod ipc {
+    use super::*;
+    #[tauri::command]
+    pub async fn search_workspace_contents(
+        workspace_path: String,
+        query: String,
+        options: Option<ContentSearchOptions>,
+    ) -> Result<ContentSearchResult, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            crate::atomic_file::PathTransactionLease::test_stage(
+                &[PathBuf::from(&workspace_path)],
+                "worker:search_workspace_contents",
+            );
+            super::search_workspace_contents(workspace_path, query, options)
+        })
+        .await
+        .map_err(|err| format!("search_workspace_contents_task_failed: {err}"))?
+    }
+}
+
+#[cfg(test)]
+mod phase08_06 {
+    use super::*;
+    use crate::atomic_file::phase08_06::{boundary, run, Home};
+    #[test]
+    fn phase08_06_search_worker_returns_real_hits_and_legacy_regex_error() {
+        let home = Home::new();
+        let root = home.root.path().to_path_buf();
+        let s = root.to_string_lossy().into_owned();
+        boundary(
+            root.clone(),
+            "search_workspace_contents",
+            ipc::search_workspace_contents(s.clone(), "needle".into(), None),
+        );
+        fs::write(root.join("note.md"), "fixture needle body").unwrap();
+        assert_eq!(
+            run(ipc::search_workspace_contents(
+                s.clone(),
+                "needle".into(),
+                None
+            ))
+            .unwrap()
+            .file_count,
+            1
+        );
+        let invalid = ContentSearchOptions {
+            regex: true,
+            ..Default::default()
+        };
+        assert!(
+            run(ipc::search_workspace_contents(s, "[".into(), Some(invalid)))
+                .unwrap_err()
+                .starts_with("invalid regex:")
+        );
     }
 }
