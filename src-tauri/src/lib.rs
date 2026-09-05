@@ -186,7 +186,6 @@ use terminal_hooks::{
     terminal_hooks_status, terminal_hooks_uninstall, write_agent_context_hint,
     TerminalHookWatcherState,
 };
-use today_ai::{today_apply_plan_result, today_build_plan_request};
 use today_calendar::{task_calendar_set_sync, today_calendar_commitments, today_calendar_publish};
 use today_notify::today_notify_new_day;
 use today_outbox::{read_task_integrations, task_integrations_drain, task_integrations_retry};
@@ -341,8 +340,8 @@ pub fn run() {
             today_store::ipc::today_rollover,
             today_store::ipc::read_task_events,
             // Maru Today (AI planning contracts)
-            today_build_plan_request,
-            today_apply_plan_result,
+            today_ai::ipc::today_build_plan_request,
+            today_ai::ipc::today_apply_plan_result,
             // Maru Today (task lifecycle + integrations)
             today_lifecycle::ipc::task_transition,
             today_lifecycle::ipc::task_trash,

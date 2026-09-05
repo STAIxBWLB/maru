@@ -1,0 +1,601 @@
+{
+  "plan": "08-11",
+  "moduleIntegrationOwner": "08-11",
+  "commands": [
+    {
+      "name": "today_open",
+      "module": "src-tauri/src/today_store.rs",
+      "registrationPath": "src-tauri/src/lib.rs::today_store::ipc::today_open",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/today_store.rs::today_open preserves the synchronous API; its filesystem reads, parsing, traversal and any reached mutation run entirely in the owned blocking worker.",
+        "src-tauri/src/today_store.rs::recover_finalize_journals handles existing domain work after isolation.",
+        "src-tauri/src/today_store.rs::rollover_inner handles existing domain work after isolation.",
+        "src-tauri/src/today_store.rs::project_journal handles existing domain work after isolation."
+      ],
+      "workerBoundary": "src-tauri/src/today_store.rs::ipc::today_open owns all String/Option/request/Vec inputs and awaits tauri::async_runtime::spawn_blocking before filesystem work or lock waits. Inner String or IpcError remains unchanged; only JoinError gains display-only command_task_failed context.",
+      "syncCallers": [
+        "src-tauri/src/today_store.rs::today_open remains synchronous for existing Rust callers. Today mutation is consumed by today_ai, today_calendar and web_actions; task_transition is consumed by web_actions; original low-level calendar/outbox consumers are explicitly assigned to Plan12 below."
+      ],
+      "mutationKey": {
+        "lexicalPaths": [
+          "Complete original workspace spellings and resolved Today state/revisions/events/outbox/finalize directories, tasks allocation/daily journal paths; lifecycle additionally source note, target bucket parent and .maru/trash/tasks, including rollback and conditional registry migration."
+        ],
+        "aliasPaths": [
+          "Each existing nested symlink endpoint is discovered with follow_links(true), including directory-to-file alias chains. PathTransactionRequest adds physical identities; original workspace/nearest existing parents stay pinned. Cycles or unreadable traversal fail before effects."
+        ],
+        "sharedAdmissionEntry": "src-tauri/src/today_store.rs::today_open constructs PathTransactionRequest and calls src-tauri/src/atomic_file.rs::with_path_transactions; typed results remain nested and unflattened.",
+        "postAdmissionPreconditions": [
+          "Borrowed adapters rescan/ensure_covered current endpoint sets and registry coverage, then before_effect verifies original parent and alias identities. Current capability, lexical containment, revision/hash and destination state remain authoritative."
+        ],
+        "domainLockOrder": "Shared complete path admission before Today work mutex, then event append mutex. Capture materialization borrows the same lease; no nested acquisition or guard across await."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_11",
+          "passed": 23,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/components/today/TodayPane.tsx",
+          "src/components/dashboard/useDashboardData.ts",
+          "src/App.tsx"
+        ],
+        "payload": "TodayPane reload owns loading/error and identity-checked snapshot; dashboard hook and App quick-create own their existing read result completion.",
+        "terminalNoticeOwner": "Existing initiating owner and notices remain unchanged. Shared navigation-safe lifetime, fulfilled-payload classification and exactly-one terminal notice closure are Plan25/26 responsibilities; this shard only records current ownership."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_11_store_all_wrappers_same_polling_task_yield_joinerror",
+          "phase08_11_store_finalize_capture_replay_events_and_incomplete_lease",
+          "phase08_11_store_every_writer_same_target_contention_and_failure_release",
+          "phase08_11_store_parent_rename_trash_both_orders_aliases",
+          "phase08_11_store_parent_replacement_and_unwind_release_before_domain_lock",
+          "phase08_11_store_finalize_rolls_back_capture_failure_then_manual_retry",
+          "phase08_11_store_current_alias_policy_blocks_every_writer_and_open_is_read_only",
+          "phase08_11_store_document_journal_races_both_orders_preserve_manual_content",
+          "phase08_11_store_nested_sidecar_aliases_contend_with_physical_parent",
+          "phase08_11_store_open_recovers_crash_journal_without_deleting_edited_siblings"
+        ],
+        "workerProof": "Actual wrapper futures yield on their polling task while a distinct worker is held, then surface JoinError. Separate real payload cases assert persisted data, structured conflict or unchanged legacy rejection; mutations use actual competing writer wrappers.",
+        "platformScope": "macOS disposable Home/config and synthetic files only; Files TrashFixture replaces native Trash. No model/provider/process/network/credential calls. Native saturation, Windows and shipped artifact proof remain later phase gates."
+      }
+    },
+    {
+      "name": "today_mutate",
+      "module": "src-tauri/src/today_store.rs",
+      "registrationPath": "src-tauri/src/lib.rs::today_store::ipc::today_mutate",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/today_store.rs::today_mutate preserves the synchronous API; its filesystem reads, parsing, traversal and any reached mutation run entirely in the owned blocking worker.",
+        "src-tauri/src/today_store.rs::snapshot_revision handles existing domain work after isolation.",
+        "src-tauri/src/today_store.rs::persist_snapshot handles existing domain work after isolation.",
+        "src-tauri/src/today_store.rs::project_journal handles existing domain work after isolation."
+      ],
+      "workerBoundary": "src-tauri/src/today_store.rs::ipc::today_mutate owns all String/Option/request/Vec inputs and awaits tauri::async_runtime::spawn_blocking before filesystem work or lock waits. Inner String or IpcError remains unchanged; only JoinError gains display-only command_task_failed context.",
+      "syncCallers": [
+        "src-tauri/src/today_store.rs::today_mutate remains synchronous for existing Rust callers. Today mutation is consumed by today_ai, today_calendar and web_actions; task_transition is consumed by web_actions; original low-level calendar/outbox consumers are explicitly assigned to Plan12 below."
+      ],
+      "mutationKey": {
+        "lexicalPaths": [
+          "Complete original workspace spellings and resolved Today state/revisions/events/outbox/finalize directories, tasks allocation/daily journal paths; lifecycle additionally source note, target bucket parent and .maru/trash/tasks, including rollback and conditional registry migration."
+        ],
+        "aliasPaths": [
+          "Each existing nested symlink endpoint is discovered with follow_links(true), including directory-to-file alias chains. PathTransactionRequest adds physical identities; original workspace/nearest existing parents stay pinned. Cycles or unreadable traversal fail before effects."
+        ],
+        "sharedAdmissionEntry": "src-tauri/src/today_store.rs::today_mutate constructs PathTransactionRequest and calls src-tauri/src/atomic_file.rs::with_path_transactions; typed results remain nested and unflattened.",
+        "postAdmissionPreconditions": [
+          "Borrowed adapters rescan/ensure_covered current endpoint sets and registry coverage, then before_effect verifies original parent and alias identities. Current capability, lexical containment, revision/hash and destination state remain authoritative."
+        ],
+        "domainLockOrder": "Shared complete path admission before Today work mutex, then event append mutex. Capture materialization borrows the same lease; no nested acquisition or guard across await."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_11",
+          "passed": 23,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/components/today/TodayPane.tsx",
+          "src/lib/todayPlan.ts"
+        ],
+        "payload": "TodayPane applyMutation owns its serialized mutation queue, identity-checked applySnapshot and refresh error; planner generation owns its completion.",
+        "terminalNoticeOwner": "Existing initiating owner and notices remain unchanged. Shared navigation-safe lifetime, fulfilled-payload classification and exactly-one terminal notice closure are Plan25/26 responsibilities; this shard only records current ownership."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_11_store_all_wrappers_same_polling_task_yield_joinerror",
+          "phase08_11_store_finalize_capture_replay_events_and_incomplete_lease",
+          "phase08_11_store_every_writer_same_target_contention_and_failure_release",
+          "phase08_11_store_parent_rename_trash_both_orders_aliases",
+          "phase08_11_store_parent_replacement_and_unwind_release_before_domain_lock",
+          "phase08_11_store_finalize_rolls_back_capture_failure_then_manual_retry",
+          "phase08_11_store_current_alias_policy_blocks_every_writer_and_open_is_read_only",
+          "phase08_11_store_document_journal_races_both_orders_preserve_manual_content",
+          "phase08_11_store_nested_sidecar_aliases_contend_with_physical_parent",
+          "phase08_11_store_open_recovers_crash_journal_without_deleting_edited_siblings"
+        ],
+        "workerProof": "Actual wrapper futures yield on their polling task while a distinct worker is held, then surface JoinError. Separate real payload cases assert persisted data, structured conflict or unchanged legacy rejection; mutations use actual competing writer wrappers.",
+        "platformScope": "macOS disposable Home/config and synthetic files only; Files TrashFixture replaces native Trash. No model/provider/process/network/credential calls. Native saturation, Windows and shipped artifact proof remain later phase gates."
+      }
+    },
+    {
+      "name": "today_finalize_setup",
+      "module": "src-tauri/src/today_store.rs",
+      "registrationPath": "src-tauri/src/lib.rs::today_store::ipc::today_finalize_setup",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/today_store.rs::today_finalize_setup preserves the synchronous API; its filesystem reads, parsing, traversal and any reached mutation run entirely in the owned blocking worker.",
+        "src-tauri/src/today_store.rs::recover_finalize_journals handles existing domain work after isolation.",
+        "src-tauri/src/today_store.rs::rollback_finalize_created_files handles existing domain work after isolation.",
+        "src-tauri/src/tasks.rs::materialize_capture_task_in_transaction consumes the same complete lease after read-only preparation; journal, task allocation and rollback never reacquire admission."
+      ],
+      "workerBoundary": "src-tauri/src/today_store.rs::ipc::today_finalize_setup owns all String/Option/request/Vec inputs and awaits tauri::async_runtime::spawn_blocking before filesystem work or lock waits. Inner String or IpcError remains unchanged; only JoinError gains display-only command_task_failed context.",
+      "syncCallers": [
+        "src-tauri/src/today_store.rs::today_finalize_setup remains synchronous for existing Rust callers. Today mutation is consumed by today_ai, today_calendar and web_actions; task_transition is consumed by web_actions; original low-level calendar/outbox consumers are explicitly assigned to Plan12 below."
+      ],
+      "mutationKey": {
+        "lexicalPaths": [
+          "Complete original workspace spellings and resolved Today state/revisions/events/outbox/finalize directories, tasks allocation/daily journal paths; lifecycle additionally source note, target bucket parent and .maru/trash/tasks, including rollback and conditional registry migration."
+        ],
+        "aliasPaths": [
+          "Each existing nested symlink endpoint is discovered with follow_links(true), including directory-to-file alias chains. PathTransactionRequest adds physical identities; original workspace/nearest existing parents stay pinned. Cycles or unreadable traversal fail before effects."
+        ],
+        "sharedAdmissionEntry": "src-tauri/src/today_store.rs::today_finalize_setup constructs PathTransactionRequest and calls src-tauri/src/atomic_file.rs::with_path_transactions; typed results remain nested and unflattened.",
+        "postAdmissionPreconditions": [
+          "Borrowed adapters rescan/ensure_covered current endpoint sets and registry coverage, then before_effect verifies original parent and alias identities. Current capability, lexical containment, revision/hash and destination state remain authoritative."
+        ],
+        "domainLockOrder": "Shared complete path admission before Today work mutex, then event append mutex. Capture materialization borrows the same lease; no nested acquisition or guard across await."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_11",
+          "passed": 23,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/components/today/TodayPane.tsx",
+          "src/components/today/useTodayPlanner.ts"
+        ],
+        "payload": "TodayPane finalizeSetup returns outcome and applies current-identity snapshot/error; useTodayPlanner owns planning/finally and setup completion.",
+        "terminalNoticeOwner": "Existing initiating owner and notices remain unchanged. Shared navigation-safe lifetime, fulfilled-payload classification and exactly-one terminal notice closure are Plan25/26 responsibilities; this shard only records current ownership."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_11_store_all_wrappers_same_polling_task_yield_joinerror",
+          "phase08_11_store_finalize_capture_replay_events_and_incomplete_lease",
+          "phase08_11_store_every_writer_same_target_contention_and_failure_release",
+          "phase08_11_store_parent_rename_trash_both_orders_aliases",
+          "phase08_11_store_parent_replacement_and_unwind_release_before_domain_lock",
+          "phase08_11_store_finalize_rolls_back_capture_failure_then_manual_retry",
+          "phase08_11_store_current_alias_policy_blocks_every_writer_and_open_is_read_only",
+          "phase08_11_store_document_journal_races_both_orders_preserve_manual_content",
+          "phase08_11_store_nested_sidecar_aliases_contend_with_physical_parent",
+          "phase08_11_store_open_recovers_crash_journal_without_deleting_edited_siblings"
+        ],
+        "workerProof": "Actual wrapper futures yield on their polling task while a distinct worker is held, then surface JoinError. Separate real payload cases assert persisted data, structured conflict or unchanged legacy rejection; mutations use actual competing writer wrappers.",
+        "platformScope": "macOS disposable Home/config and synthetic files only; Files TrashFixture replaces native Trash. No model/provider/process/network/credential calls. Native saturation, Windows and shipped artifact proof remain later phase gates."
+      }
+    },
+    {
+      "name": "today_rollover",
+      "module": "src-tauri/src/today_store.rs",
+      "registrationPath": "src-tauri/src/lib.rs::today_store::ipc::today_rollover",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/today_store.rs::today_rollover preserves the synchronous API; its filesystem reads, parsing, traversal and any reached mutation run entirely in the owned blocking worker.",
+        "src-tauri/src/today_store.rs::rollover_inner handles existing domain work after isolation.",
+        "src-tauri/src/today_store.rs::newest_prior_day handles existing domain work after isolation."
+      ],
+      "workerBoundary": "src-tauri/src/today_store.rs::ipc::today_rollover owns all String/Option/request/Vec inputs and awaits tauri::async_runtime::spawn_blocking before filesystem work or lock waits. Inner String or IpcError remains unchanged; only JoinError gains display-only command_task_failed context.",
+      "syncCallers": [
+        "src-tauri/src/today_store.rs::today_rollover remains synchronous for existing Rust callers. Today mutation is consumed by today_ai, today_calendar and web_actions; task_transition is consumed by web_actions; original low-level calendar/outbox consumers are explicitly assigned to Plan12 below."
+      ],
+      "mutationKey": {
+        "lexicalPaths": [
+          "Complete original workspace spellings and resolved Today state/revisions/events/outbox/finalize directories, tasks allocation/daily journal paths; lifecycle additionally source note, target bucket parent and .maru/trash/tasks, including rollback and conditional registry migration."
+        ],
+        "aliasPaths": [
+          "Each existing nested symlink endpoint is discovered with follow_links(true), including directory-to-file alias chains. PathTransactionRequest adds physical identities; original workspace/nearest existing parents stay pinned. Cycles or unreadable traversal fail before effects."
+        ],
+        "sharedAdmissionEntry": "src-tauri/src/today_store.rs::today_rollover constructs PathTransactionRequest and calls src-tauri/src/atomic_file.rs::with_path_transactions; typed results remain nested and unflattened.",
+        "postAdmissionPreconditions": [
+          "Borrowed adapters rescan/ensure_covered current endpoint sets and registry coverage, then before_effect verifies original parent and alias identities. Current capability, lexical containment, revision/hash and destination state remain authoritative."
+        ],
+        "domainLockOrder": "Shared complete path admission before Today work mutex, then event append mutex. Capture materialization borrows the same lease; no nested acquisition or guard across await."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_11",
+          "passed": 23,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/planningModeStore.ts"
+        ],
+        "payload": "Rollover tick owns rolloverInFlight through finally; cancelled/generation checks precede logical-day refresh and existing banner/native notification.",
+        "terminalNoticeOwner": "Existing initiating owner and notices remain unchanged. Shared navigation-safe lifetime, fulfilled-payload classification and exactly-one terminal notice closure are Plan25/26 responsibilities; this shard only records current ownership."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_11_store_all_wrappers_same_polling_task_yield_joinerror",
+          "phase08_11_store_finalize_capture_replay_events_and_incomplete_lease",
+          "phase08_11_store_every_writer_same_target_contention_and_failure_release",
+          "phase08_11_store_parent_rename_trash_both_orders_aliases",
+          "phase08_11_store_parent_replacement_and_unwind_release_before_domain_lock",
+          "phase08_11_store_finalize_rolls_back_capture_failure_then_manual_retry",
+          "phase08_11_store_current_alias_policy_blocks_every_writer_and_open_is_read_only",
+          "phase08_11_store_document_journal_races_both_orders_preserve_manual_content",
+          "phase08_11_store_nested_sidecar_aliases_contend_with_physical_parent",
+          "phase08_11_store_open_recovers_crash_journal_without_deleting_edited_siblings"
+        ],
+        "workerProof": "Actual wrapper futures yield on their polling task while a distinct worker is held, then surface JoinError. Separate real payload cases assert persisted data, structured conflict or unchanged legacy rejection; mutations use actual competing writer wrappers.",
+        "platformScope": "macOS disposable Home/config and synthetic files only; Files TrashFixture replaces native Trash. No model/provider/process/network/credential calls. Native saturation, Windows and shipped artifact proof remain later phase gates."
+      }
+    },
+    {
+      "name": "read_task_events",
+      "module": "src-tauri/src/today_store.rs",
+      "registrationPath": "src-tauri/src/lib.rs::today_store::ipc::read_task_events",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/today_store.rs::read_task_events preserves the synchronous API; its filesystem reads, parsing, traversal and any reached mutation run entirely in the owned blocking worker.",
+        "src-tauri/src/today_store.rs::read_events_at handles existing domain work after isolation."
+      ],
+      "workerBoundary": "src-tauri/src/today_store.rs::ipc::read_task_events owns all String/Option/request/Vec inputs and awaits tauri::async_runtime::spawn_blocking before filesystem work or lock waits. Inner String or IpcError remains unchanged; only JoinError gains display-only command_task_failed context.",
+      "syncCallers": [
+        "src-tauri/src/today_store.rs::read_task_events remains synchronous for existing Rust callers. Today mutation is consumed by today_ai, today_calendar and web_actions; task_transition is consumed by web_actions; original low-level calendar/outbox consumers are explicitly assigned to Plan12 below."
+      ],
+      "mutationKey": {
+        "readOnly": true,
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "reason": "Read-only filesystem normalization or snapshot/event reads; no mutation, directory initialization or registry migration."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_11",
+          "passed": 23,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/components/today/TodayExecute.tsx",
+          "src/components/today/TodayReview.tsx"
+        ],
+        "payload": "Execute and Review effects own event arrays and cancelled refresh guards; transition completion refreshes events.",
+        "terminalNoticeOwner": "Existing initiating owner and notices remain unchanged. Shared navigation-safe lifetime, fulfilled-payload classification and exactly-one terminal notice closure are Plan25/26 responsibilities; this shard only records current ownership."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_11_store_all_wrappers_same_polling_task_yield_joinerror",
+          "phase08_11_store_finalize_capture_replay_events_and_incomplete_lease",
+          "phase08_11_store_every_writer_same_target_contention_and_failure_release",
+          "phase08_11_store_parent_rename_trash_both_orders_aliases",
+          "phase08_11_store_parent_replacement_and_unwind_release_before_domain_lock",
+          "phase08_11_store_finalize_rolls_back_capture_failure_then_manual_retry",
+          "phase08_11_store_current_alias_policy_blocks_every_writer_and_open_is_read_only",
+          "phase08_11_store_document_journal_races_both_orders_preserve_manual_content",
+          "phase08_11_store_nested_sidecar_aliases_contend_with_physical_parent",
+          "phase08_11_store_open_recovers_crash_journal_without_deleting_edited_siblings"
+        ],
+        "workerProof": "Actual wrapper futures yield on their polling task while a distinct worker is held, then surface JoinError. Separate real payload cases assert persisted data, structured conflict or unchanged legacy rejection; mutations use actual competing writer wrappers.",
+        "platformScope": "macOS disposable Home/config and synthetic files only; Files TrashFixture replaces native Trash. No model/provider/process/network/credential calls. Native saturation, Windows and shipped artifact proof remain later phase gates."
+      }
+    },
+    {
+      "name": "today_logical_day",
+      "module": "src-tauri/src/today.rs",
+      "registrationPath": "src-tauri/src/lib.rs::today::ipc::today_logical_day",
+      "originalDisposition": "RETAIN",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/today.rs::today_logical_day preserves the synchronous API; its filesystem reads, parsing, traversal and any reached mutation run entirely in the owned blocking worker.",
+        "src-tauri/src/today.rs::logical_day handles existing domain work after isolation.",
+        "src-tauri/src/vault.rs::normalize_existing_dir performs filesystem canonicalization; the original RETAIN classification was not a positive pure bound."
+      ],
+      "workerBoundary": "src-tauri/src/today.rs::ipc::today_logical_day owns all String/Option/request/Vec inputs and awaits tauri::async_runtime::spawn_blocking before filesystem work or lock waits. Inner String or IpcError remains unchanged; only JoinError gains display-only command_task_failed context.",
+      "syncCallers": [
+        "src-tauri/src/today.rs::today_logical_day remains synchronous for existing Rust callers. Today mutation is consumed by today_ai, today_calendar and web_actions; task_transition is consumed by web_actions; original low-level calendar/outbox consumers are explicitly assigned to Plan12 below."
+      ],
+      "mutationKey": {
+        "readOnly": true,
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "reason": "Read-only filesystem normalization or snapshot/event reads; no mutation, directory initialization or registry migration."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_11",
+          "passed": 23,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/planningModeStore.ts"
+        ],
+        "payload": "Clock tick owns logical-day read and cancelled check before existing rollover control.",
+        "terminalNoticeOwner": "Existing initiating owner and notices remain unchanged. Shared navigation-safe lifetime, fulfilled-payload classification and exactly-one terminal notice closure are Plan25/26 responsibilities; this shard only records current ownership."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_11_logical_day_actual_boundary_payload_and_rejection"
+        ],
+        "workerProof": "Actual wrapper futures yield on their polling task while a distinct worker is held, then surface JoinError. Separate real payload cases assert persisted data, structured conflict or unchanged legacy rejection; mutations use actual competing writer wrappers.",
+        "platformScope": "macOS disposable Home/config and synthetic files only; Files TrashFixture replaces native Trash. No model/provider/process/network/credential calls. Native saturation, Windows and shipped artifact proof remain later phase gates."
+      }
+    },
+    {
+      "name": "task_transition",
+      "module": "src-tauri/src/today_lifecycle.rs",
+      "registrationPath": "src-tauri/src/lib.rs::today_lifecycle::ipc::task_transition",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/today_lifecycle.rs::task_transition preserves the synchronous API; its filesystem reads, parsing, traversal and any reached mutation run entirely in the owned blocking worker.",
+        "src-tauri/src/today_lifecycle.rs::load_context handles existing domain work after isolation.",
+        "src-tauri/src/today_lifecycle.rs::run_complete handles existing domain work after isolation.",
+        "src-tauri/src/today_lifecycle.rs::run_reopen handles existing domain work after isolation.",
+        "src-tauri/src/today_lifecycle.rs::run_cancel handles existing domain work after isolation.",
+        "src-tauri/src/today_lifecycle.rs::run_defer handles existing domain work after isolation."
+      ],
+      "workerBoundary": "src-tauri/src/today_lifecycle.rs::ipc::task_transition owns all String/Option/request/Vec inputs and awaits tauri::async_runtime::spawn_blocking before filesystem work or lock waits. Inner String or IpcError remains unchanged; only JoinError gains display-only command_task_failed context.",
+      "syncCallers": [
+        "src-tauri/src/today_lifecycle.rs::task_transition remains synchronous for existing Rust callers. Today mutation is consumed by today_ai, today_calendar and web_actions; task_transition is consumed by web_actions; original low-level calendar/outbox consumers are explicitly assigned to Plan12 below."
+      ],
+      "mutationKey": {
+        "lexicalPaths": [
+          "Complete original workspace spellings and resolved Today state/revisions/events/outbox/finalize directories, tasks allocation/daily journal paths; lifecycle additionally source note, target bucket parent and .maru/trash/tasks, including rollback and conditional registry migration."
+        ],
+        "aliasPaths": [
+          "Each existing nested symlink endpoint is discovered with follow_links(true), including directory-to-file alias chains. PathTransactionRequest adds physical identities; original workspace/nearest existing parents stay pinned. Cycles or unreadable traversal fail before effects."
+        ],
+        "sharedAdmissionEntry": "src-tauri/src/today_lifecycle.rs::task_transition constructs PathTransactionRequest and calls src-tauri/src/atomic_file.rs::with_path_transactions; typed results remain nested and unflattened.",
+        "postAdmissionPreconditions": [
+          "Borrowed adapters rescan/ensure_covered current endpoint sets and registry coverage, then before_effect verifies original parent and alias identities. Current capability, lexical containment, revision/hash and destination state remain authoritative."
+        ],
+        "domainLockOrder": "Shared complete path admission before Today work mutex, then event append mutex. Capture materialization borrows the same lease; no nested acquisition or guard across await."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_11",
+          "passed": 23,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/components/today/TodayExecute.tsx",
+          "src/components/today/TodayYesterday.tsx"
+        ],
+        "payload": "TodayExecute runTransition owns existing notices/conflict handling and task/event refresh; TodayYesterday busyTaskIds wraps each decision through finally.",
+        "terminalNoticeOwner": "Existing initiating owner and notices remain unchanged. Shared navigation-safe lifetime, fulfilled-payload classification and exactly-one terminal notice closure are Plan25/26 responsibilities; this shard only records current ownership."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_11_lifecycle_real_wrappers_preserve_payloads_outbox_and_rejections",
+          "phase08_11_lifecycle_wrappers_yield_on_same_task_distinct_worker_and_join_error",
+          "phase08_11_lifecycle_same_target_unwind_releases_admission_before_domain_lock",
+          "phase08_11_lifecycle_successful_transition_serializes_stale_trash_and_retry",
+          "phase08_11_lifecycle_policy_rechecked_inside_admission_and_error_releases",
+          "phase08_11_lifecycle_files_parent_rename_trash_both_orders_and_aliases",
+          "phase08_11_lifecycle_nested_destination_aliases_contend_with_real_files",
+          "phase08_11_lifecycle_document_save_both_orders_preserves_typed_staleness",
+          "phase08_11_lifecycle_parent_replacement_and_borrowed_coverage_fail_before_effect"
+        ],
+        "workerProof": "Actual wrapper futures yield on their polling task while a distinct worker is held, then surface JoinError. Separate real payload cases assert persisted data, structured conflict or unchanged legacy rejection; mutations use actual competing writer wrappers.",
+        "platformScope": "macOS disposable Home/config and synthetic files only; Files TrashFixture replaces native Trash. No model/provider/process/network/credential calls. Native saturation, Windows and shipped artifact proof remain later phase gates."
+      }
+    },
+    {
+      "name": "task_trash",
+      "module": "src-tauri/src/today_lifecycle.rs",
+      "registrationPath": "src-tauri/src/lib.rs::today_lifecycle::ipc::task_trash",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/today_lifecycle.rs::task_trash preserves the synchronous API; its filesystem reads, parsing, traversal and any reached mutation run entirely in the owned blocking worker.",
+        "src-tauri/src/today_lifecycle.rs::load_context handles existing domain work after isolation.",
+        "src-tauri/src/today_lifecycle.rs::unique_task_trash_path handles existing domain work after isolation.",
+        "src-tauri/src/today_lifecycle.rs::move_file handles existing domain work after isolation."
+      ],
+      "workerBoundary": "src-tauri/src/today_lifecycle.rs::ipc::task_trash owns all String/Option/request/Vec inputs and awaits tauri::async_runtime::spawn_blocking before filesystem work or lock waits. Inner String or IpcError remains unchanged; only JoinError gains display-only command_task_failed context.",
+      "syncCallers": [
+        "src-tauri/src/today_lifecycle.rs::task_trash remains synchronous for existing Rust callers. Today mutation is consumed by today_ai, today_calendar and web_actions; task_transition is consumed by web_actions; original low-level calendar/outbox consumers are explicitly assigned to Plan12 below."
+      ],
+      "mutationKey": {
+        "lexicalPaths": [
+          "Complete original workspace spellings and resolved Today state/revisions/events/outbox/finalize directories, tasks allocation/daily journal paths; lifecycle additionally source note, target bucket parent and .maru/trash/tasks, including rollback and conditional registry migration."
+        ],
+        "aliasPaths": [
+          "Each existing nested symlink endpoint is discovered with follow_links(true), including directory-to-file alias chains. PathTransactionRequest adds physical identities; original workspace/nearest existing parents stay pinned. Cycles or unreadable traversal fail before effects."
+        ],
+        "sharedAdmissionEntry": "src-tauri/src/today_lifecycle.rs::task_trash constructs PathTransactionRequest and calls src-tauri/src/atomic_file.rs::with_path_transactions; typed results remain nested and unflattened.",
+        "postAdmissionPreconditions": [
+          "Borrowed adapters rescan/ensure_covered current endpoint sets and registry coverage, then before_effect verifies original parent and alias identities. Current capability, lexical containment, revision/hash and destination state remain authoritative."
+        ],
+        "domainLockOrder": "Shared complete path admission before Today work mutex, then event append mutex. Capture materialization borrows the same lease; no nested acquisition or guard across await."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_11",
+          "passed": 23,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/today.ts"
+        ],
+        "payload": "Exported taskTrash API currently has no production component consumer; actual command outcome remains a local trash path.",
+        "terminalNoticeOwner": "Existing initiating owner and notices remain unchanged. Shared navigation-safe lifetime, fulfilled-payload classification and exactly-one terminal notice closure are Plan25/26 responsibilities; this shard only records current ownership."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_11_lifecycle_real_wrappers_preserve_payloads_outbox_and_rejections",
+          "phase08_11_lifecycle_wrappers_yield_on_same_task_distinct_worker_and_join_error",
+          "phase08_11_lifecycle_same_target_unwind_releases_admission_before_domain_lock",
+          "phase08_11_lifecycle_successful_transition_serializes_stale_trash_and_retry",
+          "phase08_11_lifecycle_policy_rechecked_inside_admission_and_error_releases",
+          "phase08_11_lifecycle_files_parent_rename_trash_both_orders_and_aliases",
+          "phase08_11_lifecycle_nested_destination_aliases_contend_with_real_files",
+          "phase08_11_lifecycle_document_save_both_orders_preserves_typed_staleness",
+          "phase08_11_lifecycle_parent_replacement_and_borrowed_coverage_fail_before_effect"
+        ],
+        "workerProof": "Actual wrapper futures yield on their polling task while a distinct worker is held, then surface JoinError. Separate real payload cases assert persisted data, structured conflict or unchanged legacy rejection; mutations use actual competing writer wrappers.",
+        "platformScope": "macOS disposable Home/config and synthetic files only; Files TrashFixture replaces native Trash. No model/provider/process/network/credential calls. Native saturation, Windows and shipped artifact proof remain later phase gates."
+      }
+    },
+    {
+      "name": "today_build_plan_request",
+      "module": "src-tauri/src/today_ai.rs",
+      "registrationPath": "src-tauri/src/lib.rs::today_ai::ipc::today_build_plan_request",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/today_ai.rs::today_build_plan_request preserves the synchronous API; its filesystem reads, parsing, traversal and any reached mutation run entirely in the owned blocking worker.",
+        "src-tauri/src/today_store.rs::load_snapshot reads the persisted snapshot for candidate and revision context."
+      ],
+      "workerBoundary": "src-tauri/src/today_ai.rs::ipc::today_build_plan_request owns all String/Option/request/Vec inputs and awaits tauri::async_runtime::spawn_blocking before filesystem work or lock waits. Inner String or IpcError remains unchanged; only JoinError gains display-only command_task_failed context.",
+      "syncCallers": [
+        "src-tauri/src/today_ai.rs::today_build_plan_request remains synchronous for existing Rust callers. Today mutation is consumed by today_ai, today_calendar and web_actions; task_transition is consumed by web_actions; original low-level calendar/outbox consumers are explicitly assigned to Plan12 below."
+      ],
+      "mutationKey": {
+        "readOnly": true,
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "reason": "Read-only filesystem normalization or snapshot/event reads; no mutation, directory initialization or registry migration."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_11",
+          "passed": 23,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/today.ts",
+          "src/components/today/useTodayPlanner.ts"
+        ],
+        "payload": "Exported AI request API is currently unmounted; current UI planner is deterministic and useTodayPlanner owns its existing planning/finally state.",
+        "terminalNoticeOwner": "Existing initiating owner and notices remain unchanged. Shared navigation-safe lifetime, fulfilled-payload classification and exactly-one terminal notice closure are Plan25/26 responsibilities; this shard only records current ownership."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_11_ai_request_apply_nonempty_roundtrip_and_errors",
+          "phase08_11_ai_wrappers_yield_on_same_polling_task_and_map_join_failure",
+          "phase08_11_ai_apply_same_target_contention_conflict_releases_admission"
+        ],
+        "workerProof": "Actual wrapper futures yield on their polling task while a distinct worker is held, then surface JoinError. Separate real payload cases assert persisted data, structured conflict or unchanged legacy rejection; mutations use actual competing writer wrappers.",
+        "platformScope": "macOS disposable Home/config and synthetic files only; Files TrashFixture replaces native Trash. No model/provider/process/network/credential calls. Native saturation, Windows and shipped artifact proof remain later phase gates."
+      }
+    },
+    {
+      "name": "today_apply_plan_result",
+      "module": "src-tauri/src/today_ai.rs",
+      "registrationPath": "src-tauri/src/lib.rs::today_ai::ipc::today_apply_plan_result",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/today_ai.rs::today_apply_plan_result preserves the synchronous API; its filesystem reads, parsing, traversal and any reached mutation run entirely in the owned blocking worker.",
+        "src-tauri/src/today_ai.rs::validate_plan_output handles existing domain work after isolation.",
+        "src-tauri/src/today_store.rs::today_mutate admits the complete mutation set and performs authoritative current revision validation."
+      ],
+      "workerBoundary": "src-tauri/src/today_ai.rs::ipc::today_apply_plan_result owns all String/Option/request/Vec inputs and awaits tauri::async_runtime::spawn_blocking before filesystem work or lock waits. Inner String or IpcError remains unchanged; only JoinError gains display-only command_task_failed context.",
+      "syncCallers": [
+        "src-tauri/src/today_ai.rs::today_apply_plan_result remains synchronous for existing Rust callers. Today mutation is consumed by today_ai, today_calendar and web_actions; task_transition is consumed by web_actions; original low-level calendar/outbox consumers are explicitly assigned to Plan12 below."
+      ],
+      "mutationKey": {
+        "lexicalPaths": [
+          "Complete original workspace spellings and resolved Today state/revisions/events/outbox/finalize directories, tasks allocation/daily journal paths; lifecycle additionally source note, target bucket parent and .maru/trash/tasks, including rollback and conditional registry migration."
+        ],
+        "aliasPaths": [
+          "Each existing nested symlink endpoint is discovered with follow_links(true), including directory-to-file alias chains. PathTransactionRequest adds physical identities; original workspace/nearest existing parents stay pinned. Cycles or unreadable traversal fail before effects."
+        ],
+        "sharedAdmissionEntry": "src-tauri/src/today_store.rs::today_mutate constructs PathTransactionRequest and calls src-tauri/src/atomic_file.rs::with_path_transactions; typed results remain nested and unflattened.",
+        "postAdmissionPreconditions": [
+          "Borrowed adapters rescan/ensure_covered current endpoint sets and registry coverage, then before_effect verifies original parent and alias identities. Current capability, lexical containment, revision/hash and destination state remain authoritative."
+        ],
+        "domainLockOrder": "Shared complete path admission before Today work mutex, then event append mutex. Capture materialization borrows the same lease; no nested acquisition or guard across await."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_11",
+          "passed": 23,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/today.ts",
+          "src/components/today/useTodayPlanner.ts",
+          "src/lib/todayPlan.ts"
+        ],
+        "payload": "Exported AI apply API is currently unmounted; synthetic captured model output tests invoke the real command without a model. Existing deterministic planner generation owns current UI completion.",
+        "terminalNoticeOwner": "Existing initiating owner and notices remain unchanged. Shared navigation-safe lifetime, fulfilled-payload classification and exactly-one terminal notice closure are Plan25/26 responsibilities; this shard only records current ownership."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_11_ai_request_apply_nonempty_roundtrip_and_errors",
+          "phase08_11_ai_wrappers_yield_on_same_polling_task_and_map_join_failure",
+          "phase08_11_ai_apply_same_target_contention_conflict_releases_admission"
+        ],
+        "workerProof": "Actual wrapper futures yield on their polling task while a distinct worker is held, then surface JoinError. Separate real payload cases assert persisted data, structured conflict or unchanged legacy rejection; mutations use actual competing writer wrappers.",
+        "platformScope": "macOS disposable Home/config and synthetic files only; Files TrashFixture replaces native Trash. No model/provider/process/network/credential calls. Native saturation, Windows and shipped artifact proof remain later phase gates."
+      }
+    }
+  ],
+  "consumerHandoffs": [
+    {
+      "owner": "08-12",
+      "caller": "src-tauri/src/today_calendar.rs::persist_item_sync",
+      "contract": "Existing work_lock_for guard surrounds snapshot_revision/persist_snapshot. Acquire complete Today state/revisions/events/outbox plus configured task journal aliases and registry admission before that guard; raw helper bodies stay synchronous borrowed participants. task_calendar_set_sync calls today_mutate directly and must call today_mutate_in_transaction if it gains an outer lease."
+    },
+    {
+      "owner": "08-12",
+      "caller": "src-tauri/src/today_outbox.rs",
+      "contract": "recover_outbox, enqueue_record, set_record_status and drain_record event appends remain raw helpers used under Plan11 outer leases. When Plan12 adds their own entry admission, expose borrowed adapters for Plan11 consumers and switch these callers instead of reacquiring; independent background/provider commit stages need fresh requests retaining original parent snapshots. No global safety claim over current unowned callers."
+    },
+    {
+      "owner": "08-12",
+      "caller": "src-tauri/src/web_actions.rs::apply_receipt",
+      "contract": "Today/task sync entry calls now admit internally. If web_actions adds outer shared admission use today_mutate_in_transaction and task_transition_in_transaction before any domain guard, with complete source/destination/Today/task/receipt/rekey set."
+    }
+  ]
+}
