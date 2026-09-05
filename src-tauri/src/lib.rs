@@ -43,6 +43,7 @@ mod kordoc_lite;
 mod korean_date;
 mod launchd_migration;
 mod linter;
+mod lock_recovery;
 mod maru_dir;
 mod maru_migration;
 mod meetings;
