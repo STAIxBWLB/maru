@@ -5,17 +5,17 @@ milestone_name: Felt Quality and Native Proof
 current_phase: 08
 current_phase_name: Main-Thread Responsiveness
 status: executing
-stopped_at: Completed 08-01-PLAN.md
-last_updated: "2026-09-05T04:38:41.838Z"
+stopped_at: Completed 08-02-PLAN.md
+last_updated: "2026-09-05T04:55:37.663Z"
 last_activity: 2026-09-05
 last_activity_desc: Phase 08 execution started
-state_head: ebb22e4715635a639aaf4dc55a9546137c161a78
+state_head: 2324ecc60ee17e76e2da7b3a7d4d461d6fc7de20
 progress:
   total_phases: 6
   completed_phases: 2
   total_plans: 39
-  completed_plans: 11
-  percent: 28
+  completed_plans: 12
+  percent: 31
 ---
 
 # Project State
@@ -30,12 +30,12 @@ See: .planning/PROJECT.md (updated 2026-09-05)
 ## Current Position
 
 Phase: 08 (Main-Thread Responsiveness) — EXECUTING
-Plan: 2 of 29
+Plan: 3 of 29
 Status: Ready to execute
 Last Activity Description: Phase 08 execution started
 Last activity: 2026-09-05 — Phase 08 execution started
 
-Progress: [███░░░░░░░] 28%
+Progress: [███░░░░░░░] 31%
 
 ## Performance Metrics
 
@@ -108,6 +108,7 @@ Progress: [███░░░░░░░] 28%
 | Phase 07-guardrails-before-churn P04 | 15min | 2 tasks | 1 files |
 | Phase 07-guardrails-before-churn P05 | 6min | 2 tasks | 10 files |
 | Phase 08 P01 | 15min | 2 tasks | 8 files |
+| Phase 08 P02 | 16min | 3 tasks | 17 files |
 
 ## Accumulated Context
 
@@ -223,6 +224,7 @@ Recent decisions affecting current work:
 - [Phase 07-guardrails-before-churn]: 07-05: outlinePaneStore empty-slice inbox key and test fixtures retired in Task 1, not Task 2 — the narrowed union made them typecheck errors, so the tracer gate could not pass otherwise; same prescribed edits, earlier commit slot
 - [Phase 07-guardrails-before-churn]: 07-05: persisted built-in view filters reset to All silently inside the existing pruneCustomDocumentFiltersInState pass via BUILT_IN_DOCUMENT_VIEWS/isBuiltInDocumentView — no signature change to the MainApp call site
 - [Phase 08]: 08-01 uses process-local UUID generations at registry saves and source/worktree reservations; cross-command path exclusion is explicitly staged to 08-29.
+- [Phase 08]: 08-02 keeps the complete batch in an awaited worker, pins source generations and canonical paths, and owns Skills operation settlement and deduplicated notices outside views; shared path integration remains 08-29.
 
 ### Pending Todos
 
@@ -259,8 +261,8 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-09-05T04:38:30.629Z
-Stopped at: Completed 08-01-PLAN.md
+Last session: 2026-09-05T04:55:37.609Z
+Stopped at: Completed 08-02-PLAN.md
 Resume file: None
 
 ## Operator Next Steps
