@@ -1,0 +1,741 @@
+{
+  "plan": "08-12",
+  "moduleIntegrationOwner": "08-12",
+  "commands": [
+    {
+      "name": "today_calendar_commitments",
+      "module": "src-tauri/src/today_calendar.rs",
+      "registrationPath": "src-tauri/src/lib.rs::today_calendar::ipc::today_calendar_commitments",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/today_calendar.rs::today_calendar_commitments retains its original synchronous domain API inside the worker.",
+        "src-tauri/src/today_calendar.rs::note_event_for preserves its existing domain work inside the owned blocking boundary.",
+        "src-tauri/src/today_calendar.rs::day_window preserves its existing domain work inside the owned blocking boundary."
+      ],
+      "workerBoundary": "src-tauri/src/today_calendar.rs::ipc::today_calendar_commitments owns original String/Option/Vec/request values and awaits tauri::async_runtime::spawn_blocking before filesystem traversal, process execution or lock waits. The inner Result is unchanged; only JoinError gains contextual display-only error.",
+      "syncCallers": [
+        "src-tauri/src/today_calendar.rs::today_calendar_commitments remains a synchronous public Rust API; qualified ipc wrapper calls it directly with the original owned inputs."
+      ],
+      "mutationKey": {
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "sharedAdmissionEntry": "Read-only command, no filesystem mutation or recovery write.",
+        "postAdmissionPreconditions": [
+          "Read-only traversal and parsing, no persisted mutation."
+        ],
+        "domainLockOrder": "No mutation/domain guard required for this read.",
+        "readOnly": true
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_12",
+          "passed": 33,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/components/today/useTodayCalendarSync.ts",
+          "src/components/today/useCalendarCommitments.ts",
+          "src/components/dashboard/useDashboardData.ts",
+          "src/lib/today.ts"
+        ],
+        "payload": "useTodayCalendarSync publishing/notice plus reload/finally owns publish settlement; manual retryItem first reselects then publishes. Selection UI uses the existing Today mutate context; taskCalendarSetSync remains an exported API. Commitment hooks retain cancelled/request identity checks.",
+        "terminalNoticeOwner": "Existing initiating owner remains; navigation-safe operation lifetime, fulfilled-payload classification and exactly-one terminal notice remain Plan25/26, not claimed closed here."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_12_calendar_all_wrappers_same_polling_task_yield_joinerror",
+          "phase08_12_calendar_nonempty_payload_errors_and_fake_success",
+          "phase08_12_calendar_duplicate_alias_insert_once_unrelated_progress",
+          "phase08_12_calendar_remote_success_stale_local_keeps_user_edit_and_event",
+          "phase08_12_calendar_same_target_stale_release_and_publish_unwind_release",
+          "phase08_12_calendar_provider_parent_removal_does_not_recreate_workspace",
+          "phase08_12_calendar_files_parent_both_orders_aliases_and_current_policy",
+          "phase08_12_calendar_own_state_alias_replacement_is_not_external_retarget",
+          "phase08_12_calendar_external_event_alias_retarget_rejects_provider_commit"
+        ],
+        "workerProof": "All actual owned wrapper futures yield in their polling task while a distinct blocking worker is held, then preserve JoinError. Separate cases assert nonempty real local outputs, typed or legacy errors, actual competing Files/document operations, and explicit selected captured fake provider outcomes.",
+        "platformScope": "macOS disposable Home/config and synthetic workspace only. Actual Files TrashFixture redirects native Trash. Provider proof is captured fake transport only, with exact existing executable selection; no real provider/network/auth/credential calls. Native saturation, Windows and release artifact proof remain later phase gates.",
+        "readOnlyEvidence": "Command only reads local files and returns parsed data; evidence_binder_read migrates legacy representation in memory, never persists it. No command-owned mutation admission is required."
+      }
+    },
+    {
+      "name": "task_calendar_set_sync",
+      "module": "src-tauri/src/today_calendar.rs",
+      "registrationPath": "src-tauri/src/lib.rs::today_calendar::ipc::task_calendar_set_sync",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/today_calendar.rs::task_calendar_set_sync retains its original synchronous domain API inside the worker.",
+        "src-tauri/src/today_store.rs::today_mutate preserves its existing domain work inside the owned blocking boundary.",
+        "src-tauri/src/today_store.rs::today_mutate_in_transaction preserves its existing domain work inside the owned blocking boundary."
+      ],
+      "workerBoundary": "src-tauri/src/today_calendar.rs::ipc::task_calendar_set_sync owns original String/Option/Vec/request values and awaits tauri::async_runtime::spawn_blocking before filesystem traversal, process execution or lock waits. The inner Result is unchanged; only JoinError gains contextual display-only error.",
+      "syncCallers": [
+        "src-tauri/src/today_calendar.rs::task_calendar_set_sync remains a synchronous public Rust API; qualified ipc wrapper calls it directly with the original owned inputs."
+      ],
+      "mutationKey": {
+        "lexicalPaths": [
+          "Publish complete lexical/canonical Today state, revisions, events and nested symlink endpoints; original workspace and existing Today directory handles plus original symlink destinations survive provider stage. Toggle consumes complete Plan11 Today paths via today_mutate."
+        ],
+        "aliasPaths": [
+          "PathTransactionRequest carries lexical and physical exclusion identities; explicit symlink endpoints and original parent handles prevent retarget or recreated-parent writes."
+        ],
+        "sharedAdmissionEntry": "src-tauri/src/today_calendar.rs::task_calendar_set_sync calls src-tauri/src/today_store.rs::today_mutate, whose complete request reaches src-tauri/src/atomic_file.rs::with_path_transactions before the Today domain lock; no redundant outer lease exists.",
+        "postAdmissionPreconditions": [
+          "ensure_covered and registry coverage; before_effect before first potential loader/write effect, current shared policy across matching aliases, current revision/config and required original parent identity."
+        ],
+        "domainLockOrder": "Shared complete path admission before Today/Binder/event domain guards. Provider process holds no path/domain guard; operation owner spans remote and local settlement."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_12",
+          "passed": 33,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/components/today/useTodayCalendarSync.ts",
+          "src/components/today/useCalendarCommitments.ts",
+          "src/components/dashboard/useDashboardData.ts",
+          "src/lib/today.ts"
+        ],
+        "payload": "useTodayCalendarSync publishing/notice plus reload/finally owns publish settlement; manual retryItem first reselects then publishes. Selection UI uses the existing Today mutate context; taskCalendarSetSync remains an exported API. Commitment hooks retain cancelled/request identity checks.",
+        "terminalNoticeOwner": "Existing initiating owner remains; navigation-safe operation lifetime, fulfilled-payload classification and exactly-one terminal notice remain Plan25/26, not claimed closed here."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_12_calendar_all_wrappers_same_polling_task_yield_joinerror",
+          "phase08_12_calendar_nonempty_payload_errors_and_fake_success",
+          "phase08_12_calendar_duplicate_alias_insert_once_unrelated_progress",
+          "phase08_12_calendar_remote_success_stale_local_keeps_user_edit_and_event",
+          "phase08_12_calendar_same_target_stale_release_and_publish_unwind_release",
+          "phase08_12_calendar_provider_parent_removal_does_not_recreate_workspace",
+          "phase08_12_calendar_files_parent_both_orders_aliases_and_current_policy",
+          "phase08_12_calendar_own_state_alias_replacement_is_not_external_retarget",
+          "phase08_12_calendar_external_event_alias_retarget_rejects_provider_commit"
+        ],
+        "workerProof": "All actual owned wrapper futures yield in their polling task while a distinct blocking worker is held, then preserve JoinError. Separate cases assert nonempty real local outputs, typed or legacy errors, actual competing Files/document operations, and explicit selected captured fake provider outcomes.",
+        "platformScope": "macOS disposable Home/config and synthetic workspace only. Actual Files TrashFixture redirects native Trash. Provider proof is captured fake transport only, with exact existing executable selection; no real provider/network/auth/credential calls. Native saturation, Windows and release artifact proof remain later phase gates."
+      }
+    },
+    {
+      "name": "today_calendar_publish",
+      "module": "src-tauri/src/today_calendar.rs",
+      "registrationPath": "src-tauri/src/lib.rs::today_calendar::ipc::today_calendar_publish",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/today_calendar.rs::today_calendar_publish retains its original synchronous domain API inside the worker.",
+        "src-tauri/src/today_calendar.rs::calendar_transaction_request preserves its existing domain work inside the owned blocking boundary.",
+        "src-tauri/src/today_calendar.rs::persist_item_sync preserves its existing domain work inside the owned blocking boundary.",
+        "src-tauri/src/today_store.rs::snapshot_revision preserves its existing domain work inside the owned blocking boundary.",
+        "src-tauri/src/today_store.rs::persist_snapshot preserves its existing domain work inside the owned blocking boundary."
+      ],
+      "workerBoundary": "src-tauri/src/today_calendar.rs::ipc::today_calendar_publish owns original String/Option/Vec/request values and awaits tauri::async_runtime::spawn_blocking before filesystem traversal, process execution or lock waits. The inner Result is unchanged; only JoinError gains contextual display-only error.",
+      "syncCallers": [
+        "src-tauri/src/today_calendar.rs::today_calendar_publish remains a synchronous public Rust API; qualified ipc wrapper calls it directly with the original owned inputs."
+      ],
+      "mutationKey": {
+        "lexicalPaths": [
+          "Publish complete lexical/canonical Today state, revisions, events and nested symlink endpoints; original workspace and existing Today directory handles plus original symlink destinations survive provider stage. Toggle consumes complete Plan11 Today paths via today_mutate."
+        ],
+        "aliasPaths": [
+          "PathTransactionRequest carries lexical and physical exclusion identities; explicit symlink endpoints and original parent handles prevent retarget or recreated-parent writes."
+        ],
+        "sharedAdmissionEntry": "src-tauri/src/today_calendar.rs::today_calendar_publish uses src-tauri/src/atomic_file.rs::with_path_transactions before domain guards; calendar toggle delegates to src-tauri/src/today_store.rs::today_mutate.",
+        "postAdmissionPreconditions": [
+          "ensure_covered and registry coverage; before_effect before first potential loader/write effect, current shared policy across matching aliases, current revision/config and required original parent identity."
+        ],
+        "domainLockOrder": "Shared complete path admission before Today/Binder/event domain guards. Provider process holds no path/domain guard; operation owner spans remote and local settlement."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_12",
+          "passed": 33,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/components/today/useTodayCalendarSync.ts",
+          "src/components/today/useCalendarCommitments.ts",
+          "src/components/dashboard/useDashboardData.ts",
+          "src/lib/today.ts"
+        ],
+        "payload": "useTodayCalendarSync publishing/notice plus reload/finally owns publish settlement; manual retryItem first reselects then publishes. Selection UI uses the existing Today mutate context; taskCalendarSetSync remains an exported API. Commitment hooks retain cancelled/request identity checks.",
+        "terminalNoticeOwner": "Existing initiating owner remains; navigation-safe operation lifetime, fulfilled-payload classification and exactly-one terminal notice remain Plan25/26, not claimed closed here."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_12_calendar_all_wrappers_same_polling_task_yield_joinerror",
+          "phase08_12_calendar_nonempty_payload_errors_and_fake_success",
+          "phase08_12_calendar_duplicate_alias_insert_once_unrelated_progress",
+          "phase08_12_calendar_remote_success_stale_local_keeps_user_edit_and_event",
+          "phase08_12_calendar_same_target_stale_release_and_publish_unwind_release",
+          "phase08_12_calendar_provider_parent_removal_does_not_recreate_workspace",
+          "phase08_12_calendar_files_parent_both_orders_aliases_and_current_policy",
+          "phase08_12_calendar_own_state_alias_replacement_is_not_external_retarget",
+          "phase08_12_calendar_external_event_alias_retarget_rejects_provider_commit"
+        ],
+        "workerProof": "All actual owned wrapper futures yield in their polling task while a distinct blocking worker is held, then preserve JoinError. Separate cases assert nonempty real local outputs, typed or legacy errors, actual competing Files/document operations, and explicit selected captured fake provider outcomes.",
+        "platformScope": "macOS disposable Home/config and synthetic workspace only. Actual Files TrashFixture redirects native Trash. Provider proof is captured fake transport only, with exact existing executable selection; no real provider/network/auth/credential calls. Native saturation, Windows and release artifact proof remain later phase gates.",
+        "negativeControl": "Temporarily removing only CalendarPublishReservation::acquire from the actual wrapper path produced captured insert count2 versus required1 and test exit101; source restored byte-for-byte, final full selector tests the protected count1. Reservation prevents concurrent duplicates only, not exactly-once delivery across process crashes or explicit retries of uncertain remote outcomes.",
+        "aliasSnapshot": "Original aliases are checked again inside each admitted local stage before its first effect. Only the exact successfully atomically persisted state path updates its expected alias under that lease; all other alias expectations and original directory handles remain unchanged. Real state-file symlink success and external event-file retarget rejection both pass."
+      }
+    },
+    {
+      "name": "task_integrations_drain",
+      "module": "src-tauri/src/today_outbox.rs",
+      "registrationPath": "src-tauri/src/lib.rs::today_outbox::ipc::task_integrations_drain",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/today_outbox.rs::task_integrations_drain retains its original synchronous domain API inside the worker.",
+        "src-tauri/src/today_outbox.rs::outbox_transaction_request preserves its existing domain work inside the owned blocking boundary.",
+        "src-tauri/src/today_outbox.rs::recover_outbox_in_transaction preserves its existing domain work inside the owned blocking boundary.",
+        "src-tauri/src/today_outbox.rs::drain_record preserves its existing domain work inside the owned blocking boundary."
+      ],
+      "workerBoundary": "src-tauri/src/today_outbox.rs::ipc::task_integrations_drain owns original String/Option/Vec/request values and awaits tauri::async_runtime::spawn_blocking before filesystem traversal, process execution or lock waits. The inner Result is unchanged; only JoinError gains contextual display-only error.",
+      "syncCallers": [
+        "src-tauri/src/today_outbox.rs::task_integrations_drain remains a synchronous public Rust API; qualified ipc wrapper calls it directly with the original owned inputs."
+      ],
+      "mutationKey": {
+        "lexicalPaths": [
+          "Complete Today/outbox/events and task paths from every stored record, tasks subtree and all nested symlink endpoints. Provider commit uses a fresh complete request with original caller/workspace/outbox/task/event parents, original record/task/event aliases and current Syncing revision."
+        ],
+        "aliasPaths": [
+          "PathTransactionRequest carries lexical and physical exclusion identities; explicit symlink endpoints and original parent handles prevent retarget or recreated-parent writes."
+        ],
+        "sharedAdmissionEntry": "src-tauri/src/today_outbox.rs::task_integrations_drain uses src-tauri/src/atomic_file.rs::with_path_transactions before domain guards; calendar toggle delegates to src-tauri/src/today_store.rs::today_mutate.",
+        "postAdmissionPreconditions": [
+          "ensure_covered and registry coverage; before_effect before first potential loader/write effect, current shared policy across matching aliases, current revision/config and required original parent identity."
+        ],
+        "domainLockOrder": "Shared complete path admission before Today/Binder/event domain guards. Provider process holds no path/domain guard; operation owner spans remote and local settlement."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_12",
+          "passed": 33,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/components/today/TodaySyncStatus.tsx",
+          "src/components/today/TodayExecute.tsx",
+          "src/lib/today.ts"
+        ],
+        "payload": "TodaySyncStatus busyRef/busy and try/finally reload own explicit retry/drain settlement; TodayExecute read has cancelled guard. Existing retry and auth-blocked/backoff states remain visible.",
+        "terminalNoticeOwner": "Plan26 MUST consume provider_outcome_unknown: and provider_succeeded_local_commit_failed: markers: show 외부 처리 결과 확인 필요 instead of authentication-required, disable normal UI retry while marked, retain successful siblings, and route deliberate reconciliation/verified retry. Backend rejects unknown Upsert without provider ID; known ID can explicitly retry as a patch. Current frontend classification/lifetime remains unfinished until26."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_12_outbox_success_without_id_is_manual_only_and_never_reinserts",
+          "phase08_12_outbox_all_wrappers_yield_in_polling_task_and_keep_legacy_errors",
+          "phase08_12_outbox_provider_overlap_has_one_external_effect_and_recovery_skips_owner",
+          "phase08_12_outbox_retry_same_target_contention_failed_and_unwind_release",
+          "phase08_12_outbox_real_alias_policy_denies_before_provider_then_releases",
+          "phase08_12_outbox_provider_success_is_distinct_from_rejected_local_commit",
+          "phase08_12_outbox_files_parent_contention_both_orders_never_recreates_parent",
+          "phase08_12_outbox_record_and_event_alias_retarget_rejects_identical_revision",
+          "phase08_12_outbox_provider_unwind_removes_owner_and_reuses_exact_key",
+          "phase08_12_outbox_moved_root_recovers_unknown_insert_as_manual_only"
+        ],
+        "workerProof": "All actual owned wrapper futures yield in their polling task while a distinct blocking worker is held, then preserve JoinError. Separate cases assert nonempty real local outputs, typed or legacy errors, actual competing Files/document operations, and explicit selected captured fake provider outcomes.",
+        "platformScope": "macOS disposable Home/config and synthetic workspace only. Actual Files TrashFixture redirects native Trash. Provider proof is captured fake transport only, with exact existing executable selection; no real provider/network/auth/credential calls. Native saturation, Windows and release artifact proof remain later phase gates.",
+        "providerOutcomeContract": "Before provider invocation Syncing stores provider_outcome_unknown:. Active owners skip recovery. Inactive marked rows recover to existing AuthBlocked; legacy markerless rows keep Ready recovery. Known successful provider IDs are saved on safely writable original outbox even if full local commit rejects. Unknown Upsert with no provider ID returns provider_outcome_requires_reconciliation: from ordinary retry; no automatic reinsertion. Normal provider failure and known-ID writeback backoff remain existing behavior."
+      }
+    },
+    {
+      "name": "task_integrations_retry",
+      "module": "src-tauri/src/today_outbox.rs",
+      "registrationPath": "src-tauri/src/lib.rs::today_outbox::ipc::task_integrations_retry",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/today_outbox.rs::task_integrations_retry retains its original synchronous domain API inside the worker.",
+        "src-tauri/src/today_outbox.rs::outbox_transaction_request preserves its existing domain work inside the owned blocking boundary.",
+        "src-tauri/src/today_outbox.rs::set_record_status_in_transaction preserves its existing domain work inside the owned blocking boundary."
+      ],
+      "workerBoundary": "src-tauri/src/today_outbox.rs::ipc::task_integrations_retry owns original String/Option/Vec/request values and awaits tauri::async_runtime::spawn_blocking before filesystem traversal, process execution or lock waits. The inner Result is unchanged; only JoinError gains contextual display-only error.",
+      "syncCallers": [
+        "src-tauri/src/today_outbox.rs::task_integrations_retry remains a synchronous public Rust API; qualified ipc wrapper calls it directly with the original owned inputs."
+      ],
+      "mutationKey": {
+        "lexicalPaths": [
+          "Complete Today/outbox/events and task paths from every stored record, tasks subtree and all nested symlink endpoints. Provider commit uses a fresh complete request with original caller/workspace/outbox/task/event parents, original record/task/event aliases and current Syncing revision."
+        ],
+        "aliasPaths": [
+          "PathTransactionRequest carries lexical and physical exclusion identities; explicit symlink endpoints and original parent handles prevent retarget or recreated-parent writes."
+        ],
+        "sharedAdmissionEntry": "src-tauri/src/today_outbox.rs::task_integrations_retry uses src-tauri/src/atomic_file.rs::with_path_transactions before domain guards; calendar toggle delegates to src-tauri/src/today_store.rs::today_mutate.",
+        "postAdmissionPreconditions": [
+          "ensure_covered and registry coverage; before_effect before first potential loader/write effect, current shared policy across matching aliases, current revision/config and required original parent identity."
+        ],
+        "domainLockOrder": "Shared complete path admission before Today/Binder/event domain guards. Provider process holds no path/domain guard; operation owner spans remote and local settlement."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_12",
+          "passed": 33,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/components/today/TodaySyncStatus.tsx",
+          "src/components/today/TodayExecute.tsx",
+          "src/lib/today.ts"
+        ],
+        "payload": "TodaySyncStatus busyRef/busy and try/finally reload own explicit retry/drain settlement; TodayExecute read has cancelled guard. Existing retry and auth-blocked/backoff states remain visible.",
+        "terminalNoticeOwner": "Plan26 MUST consume provider_outcome_unknown: and provider_succeeded_local_commit_failed: markers: show 외부 처리 결과 확인 필요 instead of authentication-required, disable normal UI retry while marked, retain successful siblings, and route deliberate reconciliation/verified retry. Backend rejects unknown Upsert without provider ID; known ID can explicitly retry as a patch. Current frontend classification/lifetime remains unfinished until26."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_12_outbox_success_without_id_is_manual_only_and_never_reinserts",
+          "phase08_12_outbox_all_wrappers_yield_in_polling_task_and_keep_legacy_errors",
+          "phase08_12_outbox_provider_overlap_has_one_external_effect_and_recovery_skips_owner",
+          "phase08_12_outbox_retry_same_target_contention_failed_and_unwind_release",
+          "phase08_12_outbox_real_alias_policy_denies_before_provider_then_releases",
+          "phase08_12_outbox_provider_success_is_distinct_from_rejected_local_commit",
+          "phase08_12_outbox_files_parent_contention_both_orders_never_recreates_parent",
+          "phase08_12_outbox_record_and_event_alias_retarget_rejects_identical_revision",
+          "phase08_12_outbox_provider_unwind_removes_owner_and_reuses_exact_key",
+          "phase08_12_outbox_moved_root_recovers_unknown_insert_as_manual_only"
+        ],
+        "workerProof": "All actual owned wrapper futures yield in their polling task while a distinct blocking worker is held, then preserve JoinError. Separate cases assert nonempty real local outputs, typed or legacy errors, actual competing Files/document operations, and explicit selected captured fake provider outcomes.",
+        "platformScope": "macOS disposable Home/config and synthetic workspace only. Actual Files TrashFixture redirects native Trash. Provider proof is captured fake transport only, with exact existing executable selection; no real provider/network/auth/credential calls. Native saturation, Windows and release artifact proof remain later phase gates.",
+        "providerOutcomeContract": "Before provider invocation Syncing stores provider_outcome_unknown:. Active owners skip recovery. Inactive marked rows recover to existing AuthBlocked; legacy markerless rows keep Ready recovery. Known successful provider IDs are saved on safely writable original outbox even if full local commit rejects. Unknown Upsert with no provider ID returns provider_outcome_requires_reconciliation: from ordinary retry; no automatic reinsertion. Normal provider failure and known-ID writeback backoff remain existing behavior."
+      }
+    },
+    {
+      "name": "read_task_integrations",
+      "module": "src-tauri/src/today_outbox.rs",
+      "registrationPath": "src-tauri/src/lib.rs::today_outbox::ipc::read_task_integrations",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/today_outbox.rs::read_task_integrations retains its original synchronous domain API inside the worker.",
+        "src-tauri/src/today_outbox.rs::list_records preserves its existing domain work inside the owned blocking boundary."
+      ],
+      "workerBoundary": "src-tauri/src/today_outbox.rs::ipc::read_task_integrations owns original String/Option/Vec/request values and awaits tauri::async_runtime::spawn_blocking before filesystem traversal, process execution or lock waits. The inner Result is unchanged; only JoinError gains contextual display-only error.",
+      "syncCallers": [
+        "src-tauri/src/today_outbox.rs::read_task_integrations remains a synchronous public Rust API; qualified ipc wrapper calls it directly with the original owned inputs."
+      ],
+      "mutationKey": {
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "sharedAdmissionEntry": "Read-only command, no filesystem mutation or recovery write.",
+        "postAdmissionPreconditions": [
+          "Read-only traversal and parsing, no persisted mutation."
+        ],
+        "domainLockOrder": "No mutation/domain guard required for this read.",
+        "readOnly": true
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_12",
+          "passed": 33,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/components/today/TodaySyncStatus.tsx",
+          "src/components/today/TodayExecute.tsx",
+          "src/lib/today.ts"
+        ],
+        "payload": "TodaySyncStatus busyRef/busy and try/finally reload own explicit retry/drain settlement; TodayExecute read has cancelled guard. Existing retry and auth-blocked/backoff states remain visible.",
+        "terminalNoticeOwner": "Plan26 MUST consume provider_outcome_unknown: and provider_succeeded_local_commit_failed: markers: show 외부 처리 결과 확인 필요 instead of authentication-required, disable normal UI retry while marked, retain successful siblings, and route deliberate reconciliation/verified retry. Backend rejects unknown Upsert without provider ID; known ID can explicitly retry as a patch. Current frontend classification/lifetime remains unfinished until26."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_12_outbox_success_without_id_is_manual_only_and_never_reinserts",
+          "phase08_12_outbox_all_wrappers_yield_in_polling_task_and_keep_legacy_errors",
+          "phase08_12_outbox_provider_overlap_has_one_external_effect_and_recovery_skips_owner",
+          "phase08_12_outbox_retry_same_target_contention_failed_and_unwind_release",
+          "phase08_12_outbox_real_alias_policy_denies_before_provider_then_releases",
+          "phase08_12_outbox_provider_success_is_distinct_from_rejected_local_commit",
+          "phase08_12_outbox_files_parent_contention_both_orders_never_recreates_parent",
+          "phase08_12_outbox_record_and_event_alias_retarget_rejects_identical_revision",
+          "phase08_12_outbox_provider_unwind_removes_owner_and_reuses_exact_key",
+          "phase08_12_outbox_moved_root_recovers_unknown_insert_as_manual_only"
+        ],
+        "workerProof": "All actual owned wrapper futures yield in their polling task while a distinct blocking worker is held, then preserve JoinError. Separate cases assert nonempty real local outputs, typed or legacy errors, actual competing Files/document operations, and explicit selected captured fake provider outcomes.",
+        "platformScope": "macOS disposable Home/config and synthetic workspace only. Actual Files TrashFixture redirects native Trash. Provider proof is captured fake transport only, with exact existing executable selection; no real provider/network/auth/credential calls. Native saturation, Windows and release artifact proof remain later phase gates.",
+        "readOnlyEvidence": "Command only reads local files and returns parsed data; evidence_binder_read migrates legacy representation in memory, never persists it. No command-owned mutation admission is required.",
+        "providerOutcomeContract": "Before provider invocation Syncing stores provider_outcome_unknown:. Active owners skip recovery. Inactive marked rows recover to existing AuthBlocked; legacy markerless rows keep Ready recovery. Known successful provider IDs are saved on safely writable original outbox even if full local commit rejects. Unknown Upsert with no provider ID returns provider_outcome_requires_reconciliation: from ordinary retry; no automatic reinsertion. Normal provider failure and known-ID writeback backoff remain existing behavior."
+      }
+    },
+    {
+      "name": "web_action_repair_task_list_linkage",
+      "module": "src-tauri/src/web_actions.rs",
+      "registrationPath": "src-tauri/src/lib.rs::web_actions::ipc::web_action_repair_task_list_linkage",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/web_actions.rs::web_action_repair_task_list_linkage retains its original synchronous domain API inside the worker.",
+        "src-tauri/src/web_actions.rs::receipt_for_web_action preserves its existing domain work inside the owned blocking boundary.",
+        "src-tauri/src/web_actions.rs::web_action_repair_task_list_linkage_in_transaction preserves its existing domain work inside the owned blocking boundary.",
+        "src-tauri/src/today_outbox.rs::write_record_in_transaction preserves its existing domain work inside the owned blocking boundary."
+      ],
+      "workerBoundary": "src-tauri/src/web_actions.rs::ipc::web_action_repair_task_list_linkage owns original String/Option/Vec/request values and awaits tauri::async_runtime::spawn_blocking before filesystem traversal, process execution or lock waits. The inner Result is unchanged; only JoinError gains contextual display-only error.",
+      "syncCallers": [
+        "src-tauri/src/web_actions.rs::web_action_repair_task_list_linkage remains a synchronous public Rust API; qualified ipc wrapper calls it directly with the original owned inputs."
+      ],
+      "mutationKey": {
+        "lexicalPaths": [
+          "Original lexical/canonical workspace subtree, resolved tasks, Today/trash task state, shared/web/task-actions pending/applied/ledger, exact note/record paths, all existing directory and symlink endpoints."
+        ],
+        "aliasPaths": [
+          "PathTransactionRequest carries lexical and physical exclusion identities; explicit symlink endpoints and original parent handles prevent retarget or recreated-parent writes."
+        ],
+        "sharedAdmissionEntry": "src-tauri/src/web_actions.rs::web_action_repair_task_list_linkage uses src-tauri/src/atomic_file.rs::with_path_transactions before domain guards; calendar toggle delegates to src-tauri/src/today_store.rs::today_mutate.",
+        "postAdmissionPreconditions": [
+          "ensure_covered and registry coverage; before_effect before first potential loader/write effect, current shared policy across matching aliases, current revision/config and required original parent identity."
+        ],
+        "domainLockOrder": "Shared complete path admission before Today/Binder/event domain guards. Provider process holds no path/domain guard; operation owner spans remote and local settlement."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_12",
+          "passed": 33,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/components/today/TodaySyncStatus.tsx",
+          "src/lib/today.ts"
+        ],
+        "payload": "TodaySyncStatus load owns scan/import preview; busyRef/busy and try/finally reload own repair/apply/import mutation settlement. Existing row reasons and successful siblings remain.",
+        "terminalNoticeOwner": "Existing initiating owner remains; navigation-safe operation lifetime, fulfilled-payload classification and exactly-one terminal notice remain Plan25/26, not claimed closed here."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_12_web_wrappers_preserve_real_payloads_typed_and_legacy_errors",
+          "phase08_12_web_all_wrappers_yield_on_same_task_and_preserve_join_errors",
+          "phase08_12_web_same_target_contention_unwind_releases_before_domain_locks",
+          "phase08_12_web_mutations_serialize_real_document_saves_and_release_on_errors",
+          "phase08_12_web_parent_files_rename_trash_both_orders_and_aliases",
+          "phase08_12_web_current_policy_in_both_alias_directions_denies_and_releases"
+        ],
+        "workerProof": "All actual owned wrapper futures yield in their polling task while a distinct blocking worker is held, then preserve JoinError. Separate cases assert nonempty real local outputs, typed or legacy errors, actual competing Files/document operations, and explicit selected captured fake provider outcomes.",
+        "platformScope": "macOS disposable Home/config and synthetic workspace only. Actual Files TrashFixture redirects native Trash. Provider proof is captured fake transport only, with exact existing executable selection; no real provider/network/auth/credential calls. Native saturation, Windows and release artifact proof remain later phase gates."
+      }
+    },
+    {
+      "name": "web_actions_import_top",
+      "module": "src-tauri/src/web_actions.rs",
+      "registrationPath": "src-tauri/src/lib.rs::web_actions::ipc::web_actions_import_top",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/web_actions.rs::web_actions_import_top retains its original synchronous domain API inside the worker.",
+        "src-tauri/src/web_actions.rs::read_journal_top preserves its existing domain work inside the owned blocking boundary.",
+        "src-tauri/src/web_actions.rs::web_actions_import_top_in_transaction preserves its existing domain work inside the owned blocking boundary.",
+        "src-tauri/src/today_store.rs::today_mutate_in_transaction preserves its existing domain work inside the owned blocking boundary."
+      ],
+      "workerBoundary": "src-tauri/src/web_actions.rs::ipc::web_actions_import_top owns original String/Option/Vec/request values and awaits tauri::async_runtime::spawn_blocking before filesystem traversal, process execution or lock waits. The inner Result is unchanged; only JoinError gains contextual display-only error.",
+      "syncCallers": [
+        "src-tauri/src/web_actions.rs::web_actions_import_top remains a synchronous public Rust API; qualified ipc wrapper calls it directly with the original owned inputs."
+      ],
+      "mutationKey": {
+        "lexicalPaths": [
+          "Original lexical/canonical workspace subtree, resolved tasks, Today/trash task state, shared/web/task-actions pending/applied/ledger, exact note/record paths, all existing directory and symlink endpoints."
+        ],
+        "aliasPaths": [
+          "PathTransactionRequest carries lexical and physical exclusion identities; explicit symlink endpoints and original parent handles prevent retarget or recreated-parent writes."
+        ],
+        "sharedAdmissionEntry": "src-tauri/src/web_actions.rs::web_actions_import_top uses src-tauri/src/atomic_file.rs::with_path_transactions before domain guards; calendar toggle delegates to src-tauri/src/today_store.rs::today_mutate.",
+        "postAdmissionPreconditions": [
+          "ensure_covered and registry coverage; before_effect before first potential loader/write effect, current shared policy across matching aliases, current revision/config and required original parent identity."
+        ],
+        "domainLockOrder": "Shared complete path admission before Today/Binder/event domain guards. Provider process holds no path/domain guard; operation owner spans remote and local settlement."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_12",
+          "passed": 33,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/components/today/TodaySyncStatus.tsx",
+          "src/lib/today.ts"
+        ],
+        "payload": "TodaySyncStatus load owns scan/import preview; busyRef/busy and try/finally reload own repair/apply/import mutation settlement. Existing row reasons and successful siblings remain.",
+        "terminalNoticeOwner": "Existing initiating owner remains; navigation-safe operation lifetime, fulfilled-payload classification and exactly-one terminal notice remain Plan25/26, not claimed closed here."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_12_web_wrappers_preserve_real_payloads_typed_and_legacy_errors",
+          "phase08_12_web_all_wrappers_yield_on_same_task_and_preserve_join_errors",
+          "phase08_12_web_same_target_contention_unwind_releases_before_domain_locks",
+          "phase08_12_web_mutations_serialize_real_document_saves_and_release_on_errors",
+          "phase08_12_web_parent_files_rename_trash_both_orders_and_aliases",
+          "phase08_12_web_current_policy_in_both_alias_directions_denies_and_releases"
+        ],
+        "workerProof": "All actual owned wrapper futures yield in their polling task while a distinct blocking worker is held, then preserve JoinError. Separate cases assert nonempty real local outputs, typed or legacy errors, actual competing Files/document operations, and explicit selected captured fake provider outcomes.",
+        "platformScope": "macOS disposable Home/config and synthetic workspace only. Actual Files TrashFixture redirects native Trash. Provider proof is captured fake transport only, with exact existing executable selection; no real provider/network/auth/credential calls. Native saturation, Windows and release artifact proof remain later phase gates."
+      }
+    },
+    {
+      "name": "web_actions_scan",
+      "module": "src-tauri/src/web_actions.rs",
+      "registrationPath": "src-tauri/src/lib.rs::web_actions::ipc::web_actions_scan",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/web_actions.rs::web_actions_scan retains its original synchronous domain API inside the worker.",
+        "src-tauri/src/web_actions.rs::pending_receipt_files preserves its existing domain work inside the owned blocking boundary.",
+        "src-tauri/src/web_actions.rs::receipt_files_under preserves its existing domain work inside the owned blocking boundary.",
+        "src-tauri/src/web_actions.rs::load_receipt preserves its existing domain work inside the owned blocking boundary."
+      ],
+      "workerBoundary": "src-tauri/src/web_actions.rs::ipc::web_actions_scan owns original String/Option/Vec/request values and awaits tauri::async_runtime::spawn_blocking before filesystem traversal, process execution or lock waits. The inner Result is unchanged; only JoinError gains contextual display-only error.",
+      "syncCallers": [
+        "src-tauri/src/web_actions.rs::web_actions_scan remains a synchronous public Rust API; qualified ipc wrapper calls it directly with the original owned inputs."
+      ],
+      "mutationKey": {
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "sharedAdmissionEntry": "Read-only command, no filesystem mutation or recovery write.",
+        "postAdmissionPreconditions": [
+          "Read-only traversal and parsing, no persisted mutation."
+        ],
+        "domainLockOrder": "No mutation/domain guard required for this read.",
+        "readOnly": true
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_12",
+          "passed": 33,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/components/today/TodaySyncStatus.tsx",
+          "src/lib/today.ts"
+        ],
+        "payload": "TodaySyncStatus load owns scan/import preview; busyRef/busy and try/finally reload own repair/apply/import mutation settlement. Existing row reasons and successful siblings remain.",
+        "terminalNoticeOwner": "Existing initiating owner remains; navigation-safe operation lifetime, fulfilled-payload classification and exactly-one terminal notice remain Plan25/26, not claimed closed here."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_12_web_wrappers_preserve_real_payloads_typed_and_legacy_errors",
+          "phase08_12_web_all_wrappers_yield_on_same_task_and_preserve_join_errors",
+          "phase08_12_web_same_target_contention_unwind_releases_before_domain_locks",
+          "phase08_12_web_mutations_serialize_real_document_saves_and_release_on_errors",
+          "phase08_12_web_parent_files_rename_trash_both_orders_and_aliases",
+          "phase08_12_web_current_policy_in_both_alias_directions_denies_and_releases"
+        ],
+        "workerProof": "All actual owned wrapper futures yield in their polling task while a distinct blocking worker is held, then preserve JoinError. Separate cases assert nonempty real local outputs, typed or legacy errors, actual competing Files/document operations, and explicit selected captured fake provider outcomes.",
+        "platformScope": "macOS disposable Home/config and synthetic workspace only. Actual Files TrashFixture redirects native Trash. Provider proof is captured fake transport only, with exact existing executable selection; no real provider/network/auth/credential calls. Native saturation, Windows and release artifact proof remain later phase gates.",
+        "readOnlyEvidence": "Command only reads local files and returns parsed data; evidence_binder_read migrates legacy representation in memory, never persists it. No command-owned mutation admission is required."
+      }
+    },
+    {
+      "name": "web_actions_apply",
+      "module": "src-tauri/src/web_actions.rs",
+      "registrationPath": "src-tauri/src/lib.rs::web_actions::ipc::web_actions_apply",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/web_actions.rs::web_actions_apply retains its original synchronous domain API inside the worker.",
+        "src-tauri/src/web_actions.rs::apply_receipt preserves its existing domain work inside the owned blocking boundary.",
+        "src-tauri/src/web_actions.rs::blob_sha preserves its existing domain work inside the owned blocking boundary.",
+        "src-tauri/src/today_lifecycle.rs::task_transition_in_transaction preserves its existing domain work inside the owned blocking boundary."
+      ],
+      "workerBoundary": "src-tauri/src/web_actions.rs::ipc::web_actions_apply owns original String/Option/Vec/request values and awaits tauri::async_runtime::spawn_blocking before filesystem traversal, process execution or lock waits. The inner Result is unchanged; only JoinError gains contextual display-only error.",
+      "syncCallers": [
+        "src-tauri/src/web_actions.rs::web_actions_apply remains a synchronous public Rust API; qualified ipc wrapper calls it directly with the original owned inputs."
+      ],
+      "mutationKey": {
+        "lexicalPaths": [
+          "Original lexical/canonical workspace subtree, resolved tasks, Today/trash task state, shared/web/task-actions pending/applied/ledger, exact note/record paths, all existing directory and symlink endpoints."
+        ],
+        "aliasPaths": [
+          "PathTransactionRequest carries lexical and physical exclusion identities; explicit symlink endpoints and original parent handles prevent retarget or recreated-parent writes."
+        ],
+        "sharedAdmissionEntry": "src-tauri/src/web_actions.rs::web_actions_apply uses src-tauri/src/atomic_file.rs::with_path_transactions before domain guards; calendar toggle delegates to src-tauri/src/today_store.rs::today_mutate.",
+        "postAdmissionPreconditions": [
+          "ensure_covered and registry coverage; before_effect before first potential loader/write effect, current shared policy across matching aliases, current revision/config and required original parent identity."
+        ],
+        "domainLockOrder": "Shared complete path admission before Today/Binder/event domain guards. Provider process holds no path/domain guard; operation owner spans remote and local settlement."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_12",
+          "passed": 33,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/components/today/TodaySyncStatus.tsx",
+          "src/lib/today.ts"
+        ],
+        "payload": "TodaySyncStatus load owns scan/import preview; busyRef/busy and try/finally reload own repair/apply/import mutation settlement. Existing row reasons and successful siblings remain.",
+        "terminalNoticeOwner": "Existing initiating owner remains; navigation-safe operation lifetime, fulfilled-payload classification and exactly-one terminal notice remain Plan25/26, not claimed closed here."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_12_web_wrappers_preserve_real_payloads_typed_and_legacy_errors",
+          "phase08_12_web_all_wrappers_yield_on_same_task_and_preserve_join_errors",
+          "phase08_12_web_same_target_contention_unwind_releases_before_domain_locks",
+          "phase08_12_web_mutations_serialize_real_document_saves_and_release_on_errors",
+          "phase08_12_web_parent_files_rename_trash_both_orders_and_aliases",
+          "phase08_12_web_current_policy_in_both_alias_directions_denies_and_releases"
+        ],
+        "workerProof": "All actual owned wrapper futures yield in their polling task while a distinct blocking worker is held, then preserve JoinError. Separate cases assert nonempty real local outputs, typed or legacy errors, actual competing Files/document operations, and explicit selected captured fake provider outcomes.",
+        "platformScope": "macOS disposable Home/config and synthetic workspace only. Actual Files TrashFixture redirects native Trash. Provider proof is captured fake transport only, with exact existing executable selection; no real provider/network/auth/credential calls. Native saturation, Windows and release artifact proof remain later phase gates."
+      }
+    },
+    {
+      "name": "evidence_binder_read",
+      "module": "src-tauri/src/evidence_binder.rs",
+      "registrationPath": "src-tauri/src/lib.rs::evidence_binder::ipc::evidence_binder_read",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/evidence_binder.rs::evidence_binder_read retains its original synchronous domain API inside the worker.",
+        "src-tauri/src/evidence_binder.rs::discover_candidates preserves its existing domain work inside the owned blocking boundary.",
+        "src-tauri/src/evidence_binder.rs::read_or_create_state preserves its existing domain work inside the owned blocking boundary."
+      ],
+      "workerBoundary": "src-tauri/src/evidence_binder.rs::ipc::evidence_binder_read owns original String/Option/Vec/request values and awaits tauri::async_runtime::spawn_blocking before filesystem traversal, process execution or lock waits. The inner Result is unchanged; only JoinError gains contextual display-only error.",
+      "syncCallers": [
+        "src-tauri/src/evidence_binder.rs::evidence_binder_read remains a synchronous public Rust API; qualified ipc wrapper calls it directly with the original owned inputs."
+      ],
+      "mutationKey": {
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "sharedAdmissionEntry": "Read-only command, no filesystem mutation or recovery write.",
+        "postAdmissionPreconditions": [
+          "Read-only traversal and parsing, no persisted mutation."
+        ],
+        "domainLockOrder": "No mutation/domain guard required for this read.",
+        "readOnly": true
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_12",
+          "passed": 33,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/evidenceBinder.ts",
+          "src/components/evidence/EvidenceBinderPane.tsx"
+        ],
+        "payload": "EvidenceBinderPane loadSeq/mutationSeq guard response publication; savingRef, optimistic rollback, revision-conflict reload and undo/finally own mutation completion.",
+        "terminalNoticeOwner": "Existing initiating owner remains; navigation-safe operation lifetime, fulfilled-payload classification and exactly-one terminal notice remain Plan25/26, not claimed closed here."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_12_binder_real_payload_legacy_and_typed_errors",
+          "phase08_12_binder_wrappers_yield_same_task_and_preserve_join_errors",
+          "phase08_12_binder_same_target_conflict_error_and_unwind_release",
+          "phase08_12_binder_denied_current_policy_and_parent_replacement_release",
+          "phase08_12_binder_document_save_both_orders",
+          "phase08_12_binder_exact_state_alias_document_contention_both_orders",
+          "phase08_12_binder_denied_alias_policy_both_registration_directions",
+          "phase08_12_binder_files_parent_both_orders_workspace_aliases_and_rekey"
+        ],
+        "workerProof": "All actual owned wrapper futures yield in their polling task while a distinct blocking worker is held, then preserve JoinError. Separate cases assert nonempty real local outputs, typed or legacy errors, actual competing Files/document operations, and explicit selected captured fake provider outcomes.",
+        "platformScope": "macOS disposable Home/config and synthetic workspace only. Actual Files TrashFixture redirects native Trash. Provider proof is captured fake transport only, with exact existing executable selection; no real provider/network/auth/credential calls. Native saturation, Windows and release artifact proof remain later phase gates.",
+        "readOnlyEvidence": "Command only reads local files and returns parsed data; evidence_binder_read migrates legacy representation in memory, never persists it. No command-owned mutation admission is required."
+      }
+    },
+    {
+      "name": "evidence_binder_mutate",
+      "module": "src-tauri/src/evidence_binder.rs",
+      "registrationPath": "src-tauri/src/lib.rs::evidence_binder::ipc::evidence_binder_mutate",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/evidence_binder.rs::evidence_binder_mutate retains its original synchronous domain API inside the worker.",
+        "src-tauri/src/evidence_binder.rs::evidence_binder_mutate_in_transaction preserves its existing domain work inside the owned blocking boundary.",
+        "src-tauri/src/evidence_binder.rs::discover_candidates preserves its existing domain work inside the owned blocking boundary.",
+        "src-tauri/src/evidence_binder.rs::apply_mutation preserves its existing domain work inside the owned blocking boundary.",
+        "src-tauri/src/evidence_binder.rs::write_state preserves its existing domain work inside the owned blocking boundary."
+      ],
+      "workerBoundary": "src-tauri/src/evidence_binder.rs::ipc::evidence_binder_mutate owns original String/Option/Vec/request values and awaits tauri::async_runtime::spawn_blocking before filesystem traversal, process execution or lock waits. The inner Result is unchanged; only JoinError gains contextual display-only error.",
+      "syncCallers": [
+        "src-tauri/src/evidence_binder.rs::evidence_binder_mutate remains a synchronous public Rust API; qualified ipc wrapper calls it directly with the original owned inputs."
+      ],
+      "mutationKey": {
+        "lexicalPaths": [
+          "Original lexical/canonical .maru/binder directory, exact doc-id state file physical alias, optional document source, atomic temporary replacement, conditional legacy workspace-registry migration."
+        ],
+        "aliasPaths": [
+          "PathTransactionRequest carries lexical and physical exclusion identities; explicit symlink endpoints and original parent handles prevent retarget or recreated-parent writes."
+        ],
+        "sharedAdmissionEntry": "src-tauri/src/evidence_binder.rs::evidence_binder_mutate uses src-tauri/src/atomic_file.rs::with_path_transactions before domain guards; calendar toggle delegates to src-tauri/src/today_store.rs::today_mutate.",
+        "postAdmissionPreconditions": [
+          "ensure_covered and registry coverage; before_effect before first potential loader/write effect, current shared policy across matching aliases, current revision/config and required original parent identity."
+        ],
+        "domainLockOrder": "Shared complete path admission before Today/Binder/event domain guards. Provider process holds no path/domain guard; operation owner spans remote and local settlement."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_12",
+          "passed": 33,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/evidenceBinder.ts",
+          "src/components/evidence/EvidenceBinderPane.tsx"
+        ],
+        "payload": "EvidenceBinderPane loadSeq/mutationSeq guard response publication; savingRef, optimistic rollback, revision-conflict reload and undo/finally own mutation completion.",
+        "terminalNoticeOwner": "Existing initiating owner remains; navigation-safe operation lifetime, fulfilled-payload classification and exactly-one terminal notice remain Plan25/26, not claimed closed here."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_12_binder_real_payload_legacy_and_typed_errors",
+          "phase08_12_binder_wrappers_yield_same_task_and_preserve_join_errors",
+          "phase08_12_binder_same_target_conflict_error_and_unwind_release",
+          "phase08_12_binder_denied_current_policy_and_parent_replacement_release",
+          "phase08_12_binder_document_save_both_orders",
+          "phase08_12_binder_exact_state_alias_document_contention_both_orders",
+          "phase08_12_binder_denied_alias_policy_both_registration_directions",
+          "phase08_12_binder_files_parent_both_orders_workspace_aliases_and_rekey"
+        ],
+        "workerProof": "All actual owned wrapper futures yield in their polling task while a distinct blocking worker is held, then preserve JoinError. Separate cases assert nonempty real local outputs, typed or legacy errors, actual competing Files/document operations, and explicit selected captured fake provider outcomes.",
+        "platformScope": "macOS disposable Home/config and synthetic workspace only. Actual Files TrashFixture redirects native Trash. Provider proof is captured fake transport only, with exact existing executable selection; no real provider/network/auth/credential calls. Native saturation, Windows and release artifact proof remain later phase gates."
+      }
+    }
+  ]
+}

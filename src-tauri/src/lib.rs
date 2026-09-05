@@ -105,7 +105,6 @@ use diagram::{
 };
 use dot_sync::{dot_sync_overview, dot_sync_run};
 use e2e_flow::{maru_e2e_read, maru_e2e_run};
-use evidence_binder::{evidence_binder_mutate, evidence_binder_read};
 use export::{export_dispatch, export_plan, export_validate};
 use gmail_gws::{
     check_gws_auth, decide_gmail_item, decide_gmail_items, fetch_gmail_unread, stage_gmail_items,
@@ -551,8 +550,8 @@ pub fn run() {
             agents_usage_status,
             maru_e2e_run,
             maru_e2e_read,
-            evidence_binder_read,
-            evidence_binder_mutate,
+            evidence_binder::ipc::evidence_binder_read,
+            evidence_binder::ipc::evidence_binder_mutate,
             // M1 Operations Catalog (Phase 3)
             catalog_scan,
             catalog_query,
