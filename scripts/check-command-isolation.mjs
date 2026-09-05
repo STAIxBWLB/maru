@@ -393,7 +393,19 @@ function validateOverlay(overlay, state) {
       for (const field of ["wholeCheckout", "gitDirectory", "gitCommonDirectory", "stagingRollback", "registrySidecars"]) insist(entry.writeSetCoverage?.[field] === true, `08-29 abbreviated write set: ${field}`);
     }
     insist(Array.isArray(entry.commandRefs), "08-29 commandRefs must be an array");
-    for (const ref of entry.commandRefs) insist(rows.has(ref.name) && owners.get(ref.name)?.module === ref.module && ref.module === entry.module, `08-29 invalid command reference ${ref.name}`);
+    const referencedCommands = new Set();
+    for (const ref of entry.commandRefs) {
+      insist(rows.has(ref.name) && owners.get(ref.name)?.module === ref.module && ref.module === entry.module, `08-29 invalid command reference ${ref.name}`);
+      insist(!referencedCommands.has(ref.name), `08-29 duplicate command reference ${ref.name}`);
+      referencedCommands.add(ref.name);
+    }
+    // Consume declared mutation routes from the existing owner shards without
+    // adding command rows or treating a single module symbol as full coverage.
+    for (const row of state.shards.flatMap((shard) => shard.commands).filter((row) => row.module === entry.module)) {
+      const key = row.mutationKey;
+      const readOnly = key?.readOnly === true || /\bno mutation\b|\bread.only\b/i.test(textOf(key));
+      if (!readOnly) insist(referencedCommands.has(row.name), `08-29 missing writer command reference ${row.name}`);
+    }
     insist(Array.isArray(entry.testCases) && entry.testCases.length, "08-29 missing produced testCases");
     for (const record of entry.testCases) {
       sources.refs(record.entryPair, "08-29 actual entryPair");

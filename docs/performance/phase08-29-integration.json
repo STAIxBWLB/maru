@@ -1,0 +1,1421 @@
+{
+  "plan": "08-29",
+  "commandCount": 365,
+  "verificationStatus": "produced-phase29-rust-tests-passed",
+  "executionResults": [
+    {
+      "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_29",
+      "passed": 37,
+      "failed": 0,
+      "ignored": 0,
+      "durationSeconds": 17.32,
+      "source": "Parent confirmed final serialized run after source identity/new-file cases and all five domain same-polling-task boundary tests."
+    },
+    {
+      "command": "node --test scripts/check-command-isolation.test.mjs",
+      "passed": 91,
+      "failed": 0,
+      "skipped": 0
+    }
+  ],
+  "integrations": [
+    {
+      "id": "phase08-29-skill_host-store",
+      "module": "src-tauri/src/skill_host/store.rs",
+      "commandRefs": [
+        {
+          "module": "src-tauri/src/skill_host/store.rs",
+          "name": "skills_sync_source"
+        },
+        {
+          "module": "src-tauri/src/skill_host/store.rs",
+          "name": "skills_sync_all_sources"
+        },
+        {
+          "module": "src-tauri/src/skill_host/store.rs",
+          "name": "skills_list_sources"
+        },
+        {
+          "module": "src-tauri/src/skill_host/store.rs",
+          "name": "skills_add_source"
+        },
+        {
+          "module": "src-tauri/src/skill_host/store.rs",
+          "name": "skills_remove_source"
+        },
+        {
+          "module": "src-tauri/src/skill_host/store.rs",
+          "name": "skills_rescan_source"
+        },
+        {
+          "module": "src-tauri/src/skill_host/store.rs",
+          "name": "skills_list_skills"
+        },
+        {
+          "module": "src-tauri/src/skill_host/store.rs",
+          "name": "skills_read_skill"
+        },
+        {
+          "module": "src-tauri/src/skill_host/store.rs",
+          "name": "skills_read_skill_file"
+        },
+        {
+          "module": "src-tauri/src/skill_host/store.rs",
+          "name": "skills_save_skill_file"
+        },
+        {
+          "module": "src-tauri/src/skill_host/store.rs",
+          "name": "skills_save_skill_as"
+        },
+        {
+          "module": "src-tauri/src/skill_host/store.rs",
+          "name": "skills_create_skill"
+        },
+        {
+          "module": "src-tauri/src/skill_host/store.rs",
+          "name": "skills_delete_skill"
+        },
+        {
+          "module": "src-tauri/src/skill_host/store.rs",
+          "name": "skills_list_installs"
+        },
+        {
+          "module": "src-tauri/src/skill_host/store.rs",
+          "name": "skills_install_skill"
+        },
+        {
+          "module": "src-tauri/src/skill_host/store.rs",
+          "name": "skills_uninstall_skill"
+        },
+        {
+          "module": "src-tauri/src/skill_host/store.rs",
+          "name": "skills_adopt_external_links"
+        },
+        {
+          "module": "src-tauri/src/skill_host/store.rs",
+          "name": "skills_reset_registry"
+        },
+        {
+          "module": "src-tauri/src/skill_host/store.rs",
+          "name": "skills_doctor"
+        },
+        {
+          "module": "src-tauri/src/skill_host/store.rs",
+          "name": "skills_list_dirty"
+        },
+        {
+          "module": "src-tauri/src/skill_host/store.rs",
+          "name": "skills_reconcile_skill"
+        },
+        {
+          "module": "src-tauri/src/skill_host/store.rs",
+          "name": "skills_import_external"
+        },
+        {
+          "module": "src-tauri/src/skill_host/store.rs",
+          "name": "skills_import_unmanage"
+        },
+        {
+          "module": "src-tauri/src/skill_host/store.rs",
+          "name": "skills_bundle_status"
+        },
+        {
+          "module": "src-tauri/src/skill_host/store.rs",
+          "name": "skills_check_bundle_update"
+        },
+        {
+          "module": "src-tauri/src/skill_host/store.rs",
+          "name": "skills_apply_bundle_update"
+        }
+      ],
+      "stageOwner": "08-29",
+      "finalModuleOwner": "08-29",
+      "entrySymbols": [
+        "src-tauri/src/skill_host/store.rs::skills_list_sources",
+        "src-tauri/src/skill_host/store.rs::skills_list_skills",
+        "src-tauri/src/skill_host/store.rs::skills_add_source",
+        "src-tauri/src/skill_host/store.rs::skills_remove_source",
+        "src-tauri/src/skill_host/store.rs::skills_sync_source",
+        "src-tauri/src/skill_host/store.rs::skills_sync_all_sources",
+        "src-tauri/src/skill_host/store.rs::skills_save_skill_file",
+        "src-tauri/src/skill_host/store.rs::skills_apply_bundle_update_blocking",
+        "src-tauri/src/skill_host/store.rs::default_public_env_setup",
+        "src-tauri/src/skill_host/store.rs::run_env_repair_blocking",
+        "src-tauri/src/skill_host/store.rs::skills_add_source_blocking",
+        "src-tauri/src/skill_host/store.rs::sync_source_transaction"
+      ],
+      "pathSources": [
+        "src-tauri/src/skill_host/store.rs::source_mutation_paths",
+        "src-tauri/src/skill_host/store.rs::registry_mutation_paths",
+        "src-tauri/src/skill_host/store.rs::default_mutation_paths",
+        "src-tauri/src/skill_host/store.rs::install_mutation_paths",
+        "src-tauri/src/skill_host/store.rs::bundle_mutation_paths",
+        "src-tauri/src/skill_host/store.rs#validate_network_mutation_paths"
+      ],
+      "admissionEntry": "src-tauri/src/skill_host/store.rs::admit_defaults",
+      "lexicalPaths": [
+        "Complete selected source tree and canonical Git top-level, .git directory and common Git directory",
+        "Registry JSON as a separate finite metadata admission; never the global skills parent during checkout network work",
+        "Only actually missing managed/imported/default bundle targets and active recovery journal/cache paths",
+        "Clone staging and destination, builtin next/active/backup, bundle cache/state/journal, install entrypoints and host_fs-resolved tool roots including CODEX_HOME",
+        "Environment root plus frozen setup parent tree for nested repair"
+      ],
+      "sourceReservationOrder": "Nonqueued source ID and canonical checkout reservation first; release bookkeeping mutex before shared path admission; brief registry snapshots never retain REGISTRY_LOCK while waiting.",
+      "domainLockOrder": "Complete shared path admission before REGISTRY_LOCK; source reservation survives network lease release and fresh complete commit acquisition.",
+      "notes": [
+        "load_registry_unlocked and get_skill are pure reads. Lists take bounded registry/default initialization admission only for actually missing defaults, preserving healthy network-stage metadata access.",
+        "Checkout network lease excludes registry. Fresh commit atomically reacquires checkout plus registry/sidecars, revalidates source incarnation/config/content and rescans without retry.",
+        "Skill-specific mutation admission is implemented by SkillMutationAdmission.acquire and validate; the source checker resolves module functions and does not encode impl names.",
+        "Clone admits destination and unique staging during Git work, then reacquires both plus registry and rechecks generation/staged bytes before rename/commit. Bundle admits next/active/pristine/cache/env for preparation, then reacquires registry/install sidecars and rechecks prepared/pristine hashes, active state and dirty content before swap/rollback.",
+        "Synchronous run_env_repair_blocking uses configure_env_command cache overrides and creates temp under the owning precomputed bundle/environment admission; environment effects remain idempotent and unjournaled per the existing setup contract.",
+        "Selected symlink file targets are admitted in addition to the skill tree; target bytes and absent/new-file expectations are revalidated after waiting. Exact Git topology changes, including a new Git repository or metadata retarget inside an already covered tree, reject save/sync before mutation."
+      ],
+      "aliasPaths": [
+        "Lexically normalized absolute full write set plus canonical physical aliases from PathTransactionRequest, including nearest existing ancestors; authorization stays lexical."
+      ],
+      "parentPreconditions": [
+        "Pinned owned existing-parent handles validate original directory identity after wait; complete alias set is revalidated before first effect. Independent callbacks retain original snapshots; no recapture after replacement."
+      ],
+      "lifetime": {
+        "scope": "finite",
+        "admissionHeldThroughEffects": true,
+        "admissionHeldThroughRollback": true,
+        "evidence": "src-tauri/src/skill_host/store.rs::admit_defaults"
+      },
+      "networkRegistryAvailability": {
+        "networkWork": true,
+        "evidence": "src-tauri/src/skill_host/store.rs::admit_defaults",
+        "registryReleasedDuringNetwork": true,
+        "registryReleasedDuringAdmissionWait": true,
+        "listAndMetadataRemoveProgress": true,
+        "sourceDuplicateReturnsBusy": true,
+        "batchBusySourceSkipped": true
+      },
+      "writeSetCoverage": {
+        "wholeCheckout": true,
+        "gitDirectory": true,
+        "gitCommonDirectory": true,
+        "stagingRollback": true,
+        "registrySidecars": true
+      },
+      "testCases": [
+        {
+          "module": "src-tauri/src/skill_host/store.rs",
+          "entryPair": [
+            "src-tauri/src/skill_host/store.rs::skills_save_skill_file",
+            "src-tauri/src/workspace_files.rs::ipc::rename_workspace_entry"
+          ],
+          "orders": [
+            "writer-first",
+            "other-first"
+          ],
+          "aliases": [
+            "lexical",
+            "symlink",
+            "ancestor"
+          ],
+          "failureRelease": "Original parent identity rejection, child failure and RAII unwind release are covered by the named fixture suite. Execution state is recorded separately.",
+          "outcome": "Fixtures require no overlapping effects, no stale parent recreation and complete persisted bytes before parent movement.",
+          "tests": [
+            {
+              "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_29",
+              "passed": 37,
+              "failed": 0,
+              "ignored": 0,
+              "executionStatus": "passed",
+              "countScope": "Complete selector run; module attribution is reported once at overlay.testAttribution."
+            }
+          ],
+          "evidence": {
+            "behaviorCases": [
+              "phase08_29_skills_symlink_file_target_parent_rename_both_orders",
+              "phase08_29_skills_symlink_target_content_change_while_waiting_is_not_overwritten",
+              "phase08_29_skills_new_file_save_preserves_creation_and_rejects_concurrent_creation",
+              "phase08_29_skills_source_becoming_git_while_waiting_rejects_save_and_sync",
+              "phase08_29_skills_git_dir_retarget_inside_already_covered_tree_rejects_save_and_sync",
+              "phase08_29_skills_actual_wrappers_same_polling_task_progress",
+              "phase08_29_skills_save_rename_trash_both_orders",
+              "phase08_29_skills_sync_rename_trash_both_orders",
+              "phase08_29_skills_alias_save_sync_rename_trash_both_orders",
+              "phase08_29_skills_path_and_network_wait_keep_metadata_and_duplicate_admission_available",
+              "phase08_29_skills_network_rejects_checkout_containing_registry"
+            ]
+          }
+        },
+        {
+          "module": "src-tauri/src/skill_host/store.rs",
+          "entryPair": [
+            "src-tauri/src/skill_host/store.rs::skills_save_skill_file",
+            "src-tauri/src/workspace_files.rs::ipc::trash_workspace_entries"
+          ],
+          "orders": [
+            "writer-first",
+            "other-first"
+          ],
+          "aliases": [
+            "lexical",
+            "symlink",
+            "ancestor"
+          ],
+          "failureRelease": "Original parent identity rejection, child failure and RAII unwind release are covered by the named fixture suite. Execution state is recorded separately.",
+          "outcome": "Fixtures require no overlapping effects, no stale parent recreation and complete persisted bytes before parent movement.",
+          "tests": [
+            {
+              "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_29",
+              "passed": 37,
+              "failed": 0,
+              "ignored": 0,
+              "executionStatus": "passed",
+              "countScope": "Complete selector run; module attribution is reported once at overlay.testAttribution."
+            }
+          ],
+          "evidence": {
+            "behaviorCases": [
+              "phase08_29_skills_symlink_file_target_parent_rename_both_orders",
+              "phase08_29_skills_symlink_target_content_change_while_waiting_is_not_overwritten",
+              "phase08_29_skills_new_file_save_preserves_creation_and_rejects_concurrent_creation",
+              "phase08_29_skills_source_becoming_git_while_waiting_rejects_save_and_sync",
+              "phase08_29_skills_git_dir_retarget_inside_already_covered_tree_rejects_save_and_sync",
+              "phase08_29_skills_actual_wrappers_same_polling_task_progress",
+              "phase08_29_skills_save_rename_trash_both_orders",
+              "phase08_29_skills_sync_rename_trash_both_orders",
+              "phase08_29_skills_alias_save_sync_rename_trash_both_orders",
+              "phase08_29_skills_path_and_network_wait_keep_metadata_and_duplicate_admission_available"
+            ]
+          }
+        },
+        {
+          "module": "src-tauri/src/skill_host/store.rs",
+          "entryPair": [
+            "src-tauri/src/skill_host/store.rs::skills_sync_source",
+            "src-tauri/src/workspace_files.rs::ipc::rename_workspace_entry"
+          ],
+          "orders": [
+            "writer-first",
+            "other-first"
+          ],
+          "aliases": [
+            "lexical",
+            "symlink",
+            "ancestor"
+          ],
+          "failureRelease": "Original parent identity rejection, child failure and RAII unwind release are covered by the named fixture suite. Execution state is recorded separately.",
+          "outcome": "Fixtures require no overlapping effects, no stale parent recreation and complete persisted bytes before parent movement.",
+          "tests": [
+            {
+              "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_29",
+              "passed": 37,
+              "failed": 0,
+              "ignored": 0,
+              "executionStatus": "passed",
+              "countScope": "Complete selector run; module attribution is reported once at overlay.testAttribution."
+            }
+          ],
+          "evidence": {
+            "behaviorCases": [
+              "phase08_29_skills_symlink_file_target_parent_rename_both_orders",
+              "phase08_29_skills_symlink_target_content_change_while_waiting_is_not_overwritten",
+              "phase08_29_skills_new_file_save_preserves_creation_and_rejects_concurrent_creation",
+              "phase08_29_skills_source_becoming_git_while_waiting_rejects_save_and_sync",
+              "phase08_29_skills_git_dir_retarget_inside_already_covered_tree_rejects_save_and_sync",
+              "phase08_29_skills_actual_wrappers_same_polling_task_progress",
+              "phase08_29_skills_save_rename_trash_both_orders",
+              "phase08_29_skills_sync_rename_trash_both_orders",
+              "phase08_29_skills_alias_save_sync_rename_trash_both_orders",
+              "phase08_29_skills_path_and_network_wait_keep_metadata_and_duplicate_admission_available"
+            ]
+          }
+        },
+        {
+          "module": "src-tauri/src/skill_host/store.rs",
+          "entryPair": [
+            "src-tauri/src/skill_host/store.rs::skills_sync_source",
+            "src-tauri/src/workspace_files.rs::ipc::trash_workspace_entries"
+          ],
+          "orders": [
+            "writer-first",
+            "other-first"
+          ],
+          "aliases": [
+            "lexical",
+            "symlink",
+            "ancestor"
+          ],
+          "failureRelease": "Original parent identity rejection, child failure and RAII unwind release are covered by the named fixture suite. Execution state is recorded separately.",
+          "outcome": "Fixtures require no overlapping effects, no stale parent recreation and complete persisted bytes before parent movement.",
+          "tests": [
+            {
+              "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_29",
+              "passed": 37,
+              "failed": 0,
+              "ignored": 0,
+              "executionStatus": "passed",
+              "countScope": "Complete selector run; module attribution is reported once at overlay.testAttribution."
+            }
+          ],
+          "evidence": {
+            "behaviorCases": [
+              "phase08_29_skills_symlink_file_target_parent_rename_both_orders",
+              "phase08_29_skills_symlink_target_content_change_while_waiting_is_not_overwritten",
+              "phase08_29_skills_new_file_save_preserves_creation_and_rejects_concurrent_creation",
+              "phase08_29_skills_source_becoming_git_while_waiting_rejects_save_and_sync",
+              "phase08_29_skills_git_dir_retarget_inside_already_covered_tree_rejects_save_and_sync",
+              "phase08_29_skills_actual_wrappers_same_polling_task_progress",
+              "phase08_29_skills_save_rename_trash_both_orders",
+              "phase08_29_skills_sync_rename_trash_both_orders",
+              "phase08_29_skills_alias_save_sync_rename_trash_both_orders",
+              "phase08_29_skills_path_and_network_wait_keep_metadata_and_duplicate_admission_available"
+            ]
+          }
+        }
+      ],
+      "evidence": "Actual final phase08_29 selector: 37 passed, 0 failed, 0 ignored in 17.35 seconds. All five domain polling-task boundary cases are included. Shared dispatch/event proof does not add unique test counts.",
+      "networkLayoutGuard": {
+        "symbol": "validate_network_mutation_paths",
+        "contract": "Reject source_layout_conflict before network admission when a lexical or physical checkout subtree contains Skills registry metadata. Never reserve a shared registry ancestor across network work.",
+        "test": "phase08_29_skills_network_rejects_checkout_containing_registry"
+      }
+    },
+    {
+      "id": "phase08-29-skill_host-env",
+      "module": "src-tauri/src/skill_host/env.rs",
+      "commandRefs": [
+        {
+          "module": "src-tauri/src/skill_host/env.rs",
+          "name": "skills_env_status"
+        },
+        {
+          "module": "src-tauri/src/skill_host/env.rs",
+          "name": "skills_env_bootstrap"
+        },
+        {
+          "module": "src-tauri/src/skill_host/env.rs",
+          "name": "skills_env_repair"
+        }
+      ],
+      "stageOwner": "08-29",
+      "finalModuleOwner": "08-29",
+      "entrySymbols": [
+        "src-tauri/src/skill_host/env.rs::skills_env_status",
+        "src-tauri/src/skill_host/env.rs::skills_env_bootstrap",
+        "src-tauri/src/skill_host/env.rs::skills_env_repair",
+        "src-tauri/src/skill_host/env.rs::bootstrap_in_transaction",
+        "src-tauri/src/skill_host/env.rs::env_status_in_transaction",
+        "src-tauri/src/skill_host/env.rs::write_status_in_transaction",
+        "src-tauri/src/skill_host/env.rs::configure_env_command"
+      ],
+      "pathSources": [
+        "src-tauri/src/skill_host/env.rs::env_mutation_paths",
+        "src-tauri/src/skill_host/env.rs::env_parent_snapshot",
+        "src-tauri/src/skill_host/env.rs::configure_env_command"
+      ],
+      "admissionEntry": "src-tauri/src/skill_host/env.rs::skills_env_bootstrap",
+      "lexicalPaths": [
+        "host_fs::env_root subtree: .venv, status.json, node_modules, node, input/hwp, input/pdf, output/text, output/tables, output/images, temp, logs, .cache",
+        "Frozen setup parent subtree: uv.lock, pnpm-lock.yaml and installation metadata",
+        "TMPDIR, UV_CACHE_DIR, UV_PYTHON_INSTALL_DIR, XDG_CACHE_HOME, npm_config_cache and npm_config_store_dir resolve under the admitted environment"
+      ],
+      "sourceReservationOrder": "Capture original existing environment parent, resolve/materialize default_public_env_setup in its finite store transaction, then acquire the complete environment/setup set.",
+      "domainLockOrder": "Shared admission before environment mkdir/status writes and subprocess launch; default store registry guards end before owned background admission.",
+      "notes": [
+        "Owned lease moves into the dedicated thread and remains through actual child wait, both stream joins, status write and done event. Dry-run and no-setup creation use explicit lease adapters.",
+        "Frozen setup uv self-install and brew/apt system package-manager effects require a final boundary disposition; environment subtree coverage alone does not establish full global installer coverage."
+      ],
+      "aliasPaths": [
+        "Lexically normalized absolute full write set plus canonical physical aliases from PathTransactionRequest, including nearest existing ancestors; authorization stays lexical."
+      ],
+      "parentPreconditions": [
+        "Pinned owned existing-parent handles validate original directory identity after wait; complete alias set is revalidated before first effect. Independent callbacks retain original snapshots; no recapture after replacement."
+      ],
+      "lifetime": {
+        "scope": "background",
+        "admissionHeldThroughEffects": true,
+        "admissionHeldThroughRollback": true,
+        "evidence": "src-tauri/src/skill_host/env.rs::skills_env_bootstrap",
+        "backgroundCallbacksCovered": true
+      },
+      "networkRegistryAvailability": {
+        "networkWork": true,
+        "evidence": "src-tauri/src/skill_host/env.rs::skills_env_bootstrap",
+        "registryReleasedDuringNetwork": true,
+        "registryReleasedDuringAdmissionWait": true,
+        "listAndMetadataRemoveProgress": true
+      },
+      "testCases": [
+        {
+          "module": "src-tauri/src/skill_host/env.rs",
+          "entryPair": [
+            "src-tauri/src/skill_host/env.rs::ipc::skills_env_bootstrap",
+            "src-tauri/src/workspace_files.rs::ipc::rename_workspace_entry"
+          ],
+          "orders": [
+            "writer-first",
+            "other-first"
+          ],
+          "aliases": [
+            "lexical",
+            "symlink",
+            "ancestor"
+          ],
+          "failureRelease": "Original parent identity rejection, child failure and RAII unwind release are covered by the named fixture suite. Execution state is recorded separately.",
+          "outcome": "Fixtures require no overlapping effects, no stale parent recreation and complete persisted bytes before parent movement.",
+          "tests": [
+            {
+              "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_29",
+              "passed": 37,
+              "failed": 0,
+              "ignored": 0,
+              "executionStatus": "passed",
+              "countScope": "Complete selector run; module attribution is reported once at overlay.testAttribution."
+            }
+          ],
+          "evidence": {
+            "behaviorCases": [
+              "background_bootstrap_rename_both_orders_and_aliases",
+              "background_bootstrap_trash_both_orders_and_aliases",
+              "output_stream_is_joined_before_status_and_done",
+              "nested_status_rejects_incomplete_lease_and_no_setup_releases",
+              "actual_wrappers_yield_on_the_same_polling_task_before_environment_work"
+            ]
+          }
+        },
+        {
+          "module": "src-tauri/src/skill_host/env.rs",
+          "entryPair": [
+            "src-tauri/src/skill_host/env.rs::ipc::skills_env_bootstrap",
+            "src-tauri/src/workspace_files.rs::ipc::trash_workspace_entries"
+          ],
+          "orders": [
+            "writer-first",
+            "other-first"
+          ],
+          "aliases": [
+            "lexical",
+            "symlink",
+            "ancestor"
+          ],
+          "failureRelease": "Original parent identity rejection, child failure and RAII unwind release are covered by the named fixture suite. Execution state is recorded separately.",
+          "outcome": "Fixtures require no overlapping effects, no stale parent recreation and complete persisted bytes before parent movement.",
+          "tests": [
+            {
+              "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_29",
+              "passed": 37,
+              "failed": 0,
+              "ignored": 0,
+              "executionStatus": "passed",
+              "countScope": "Complete selector run; module attribution is reported once at overlay.testAttribution."
+            }
+          ],
+          "evidence": {
+            "behaviorCases": [
+              "background_bootstrap_rename_both_orders_and_aliases",
+              "background_bootstrap_trash_both_orders_and_aliases",
+              "output_stream_is_joined_before_status_and_done",
+              "nested_status_rejects_incomplete_lease_and_no_setup_releases",
+              "actual_wrappers_yield_on_the_same_polling_task_before_environment_work"
+            ]
+          }
+        }
+      ],
+      "evidence": "Actual final phase08_29 selector: 37 passed, 0 failed, 0 ignored in 17.35 seconds. All five domain polling-task boundary cases are included. Shared dispatch/event proof does not add unique test counts."
+    },
+    {
+      "id": "phase08-29-skill_host-dispatch",
+      "module": "src-tauri/src/skill_host/dispatch.rs",
+      "commandRefs": [
+        {
+          "module": "src-tauri/src/skill_host/dispatch.rs",
+          "name": "skills_runtime_status"
+        },
+        {
+          "module": "src-tauri/src/skill_host/dispatch.rs",
+          "name": "skills_dispatch_compose"
+        },
+        {
+          "module": "src-tauri/src/skill_host/dispatch.rs",
+          "name": "skills_dispatch_terminal"
+        },
+        {
+          "module": "src-tauri/src/skill_host/dispatch.rs",
+          "name": "skills_dispatch_background"
+        }
+      ],
+      "stageOwner": "08-29",
+      "finalModuleOwner": "08-29",
+      "entrySymbols": [
+        "src-tauri/src/skill_host/dispatch.rs::skills_runtime_status",
+        "src-tauri/src/skill_host/dispatch.rs::skills_dispatch_compose",
+        "src-tauri/src/skill_host/dispatch.rs::skills_dispatch_terminal",
+        "src-tauri/src/skill_host/dispatch.rs::skills_dispatch_background",
+        "src-tauri/src/skill_host/dispatch.rs::spawn_background",
+        "src-tauri/src/skill_host/dispatch.rs::spawn_line_pump"
+      ],
+      "pathSources": [
+        "src-tauri/src/skill_host/dispatch.rs::dispatch_mutation_paths",
+        "src-tauri/src/skill_host/dispatch.rs::add_dirs"
+      ],
+      "admissionEntry": "src-tauri/src/skill_host/dispatch.rs::spawn_background",
+      "lexicalPaths": [
+        "cwd/.maru/runs/skills/invocation_id/events.jsonl",
+        "host_fs mission state root: invocation_id.json, invocation_id.json.tmp, invocation_id.log",
+        "Approved local-writing subprocess cwd plus declared add_dirs roots, combined atomically with event and mission paths"
+      ],
+      "sourceReservationOrder": "Capture initiating cwd, mission parent and approved write-root identities before dispatch; retain reusable original snapshots for independently admitted proposal callbacks.",
+      "domainLockOrder": "Shared admission before callback serialization, append_lock_for and MissionState missions/pids guards; approved child callbacks reuse their owned lease.",
+      "notes": [
+        "Proposal-only work admits finite event/mission callbacks with original parent snapshots. Approved writing subprocess retains complete roots through child completion and stream settlement.",
+        "Moved/deleted cwd suppresses stale event path recreation while terminal mission settlement uses its own pinned home parent. Existing approval and terminal completion behavior remain authoritative.",
+        "DispatchWrites.new/request/transaction/event implement owned and callback admission; method names are described here because source refs resolve module function names."
+      ],
+      "aliasPaths": [
+        "Lexically normalized absolute full write set plus canonical physical aliases from PathTransactionRequest, including nearest existing ancestors; authorization stays lexical."
+      ],
+      "parentPreconditions": [
+        "Pinned owned existing-parent handles validate original directory identity after wait; complete alias set is revalidated before first effect. Independent callbacks retain original snapshots; no recapture after replacement."
+      ],
+      "lifetime": {
+        "scope": "background",
+        "admissionHeldThroughEffects": true,
+        "admissionHeldThroughRollback": true,
+        "evidence": "src-tauri/src/skill_host/dispatch.rs::spawn_background",
+        "backgroundCallbacksCovered": true
+      },
+      "networkRegistryAvailability": {
+        "networkWork": false,
+        "evidence": "src-tauri/src/skill_host/dispatch.rs::spawn_background",
+        "reason": "Finite local event/mission persistence has no network calls or skills registry guard; dispatch child execution has no registry mutation admission."
+      },
+      "testCases": [
+        {
+          "module": "src-tauri/src/skill_host/dispatch.rs",
+          "entryPair": [
+            "src-tauri/src/skill_host/dispatch.rs::ipc::skills_dispatch_background",
+            "src-tauri/src/workspace_files.rs::ipc::rename_workspace_entry"
+          ],
+          "orders": [
+            "writer-first",
+            "other-first"
+          ],
+          "aliases": [
+            "lexical",
+            "symlink",
+            "ancestor"
+          ],
+          "failureRelease": "Original parent identity rejection, child failure and RAII unwind release are covered by the named fixture suite. Execution state is recorded separately.",
+          "outcome": "Fixtures require no overlapping effects, no stale parent recreation and complete persisted bytes before parent movement.",
+          "tests": [
+            {
+              "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_29",
+              "passed": 37,
+              "failed": 0,
+              "ignored": 0,
+              "executionStatus": "passed",
+              "countScope": "Complete selector run; module attribution is reported once at overlay.testAttribution."
+            }
+          ],
+          "evidence": {
+            "behaviorCases": [
+              "phase08_29_dispatch_wrapper_same_polling_task_progress_and_join_failure",
+              "phase08_29_dispatch_approved_wrapper_rename_trash_both_orders_and_alias",
+              "phase08_29_dispatch_proposal_callback_parent_replacement_does_not_recreate",
+              "phase08_29_dispatch_direct_event_and_mission_wait_before_effect_and_release",
+              "phase08_29_dispatch_real_proposal_callbacks_after_rename_trash_and_alias",
+              "phase08_29_dispatch_runtime_error_flushes_streams_and_releases_roots",
+              "phase08_29_dispatch_launch_error_and_unwind_release_owned_roots"
+            ]
+          }
+        },
+        {
+          "module": "src-tauri/src/skill_host/dispatch.rs",
+          "entryPair": [
+            "src-tauri/src/skill_host/dispatch.rs::ipc::skills_dispatch_background",
+            "src-tauri/src/workspace_files.rs::ipc::trash_workspace_entries"
+          ],
+          "orders": [
+            "writer-first",
+            "other-first"
+          ],
+          "aliases": [
+            "lexical",
+            "symlink",
+            "ancestor"
+          ],
+          "failureRelease": "Original parent identity rejection, child failure and RAII unwind release are covered by the named fixture suite. Execution state is recorded separately.",
+          "outcome": "Fixtures require no overlapping effects, no stale parent recreation and complete persisted bytes before parent movement.",
+          "tests": [
+            {
+              "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_29",
+              "passed": 37,
+              "failed": 0,
+              "ignored": 0,
+              "executionStatus": "passed",
+              "countScope": "Complete selector run; module attribution is reported once at overlay.testAttribution."
+            }
+          ],
+          "evidence": {
+            "behaviorCases": [
+              "phase08_29_dispatch_wrapper_same_polling_task_progress_and_join_failure",
+              "phase08_29_dispatch_approved_wrapper_rename_trash_both_orders_and_alias",
+              "phase08_29_dispatch_proposal_callback_parent_replacement_does_not_recreate",
+              "phase08_29_dispatch_direct_event_and_mission_wait_before_effect_and_release",
+              "phase08_29_dispatch_real_proposal_callbacks_after_rename_trash_and_alias",
+              "phase08_29_dispatch_runtime_error_flushes_streams_and_releases_roots",
+              "phase08_29_dispatch_launch_error_and_unwind_release_owned_roots"
+            ]
+          }
+        }
+      ],
+      "evidence": "Actual final phase08_29 selector: 37 passed, 0 failed, 0 ignored in 17.35 seconds. All five domain polling-task boundary cases are included. Shared dispatch/event proof does not add unique test counts."
+    },
+    {
+      "id": "phase08-29-git",
+      "module": "src-tauri/src/git.rs",
+      "commandRefs": [
+        {
+          "module": "src-tauri/src/git.rs",
+          "name": "git_status"
+        },
+        {
+          "module": "src-tauri/src/git.rs",
+          "name": "git_changes"
+        },
+        {
+          "module": "src-tauri/src/git.rs",
+          "name": "git_diff"
+        },
+        {
+          "module": "src-tauri/src/git.rs",
+          "name": "git_generate_commit_message"
+        },
+        {
+          "module": "src-tauri/src/git.rs",
+          "name": "git_sync_scan"
+        },
+        {
+          "module": "src-tauri/src/git.rs",
+          "name": "list_workspace_submodules"
+        },
+        {
+          "module": "src-tauri/src/git.rs",
+          "name": "git_sync_pull_rebase"
+        },
+        {
+          "module": "src-tauri/src/git.rs",
+          "name": "git_sync_commit_push"
+        },
+        {
+          "module": "src-tauri/src/git.rs",
+          "name": "git_commit"
+        }
+      ],
+      "stageOwner": "08-29",
+      "finalModuleOwner": "08-29",
+      "entrySymbols": [
+        "src-tauri/src/git.rs::git_generate_commit_message",
+        "src-tauri/src/git.rs::git_sync_pull_rebase",
+        "src-tauri/src/git.rs::git_sync_commit_push",
+        "src-tauri/src/git.rs::git_commit",
+        "src-tauri/src/git.rs::admit_git_mutation",
+        "src-tauri/src/git.rs::revalidate_git_mutation_paths"
+      ],
+      "pathSources": [
+        "src-tauri/src/git.rs::git_mutation_paths",
+        "src-tauri/src/git.rs::git_toplevel",
+        "src-tauri/src/git.rs#preflight_git_permission"
+      ],
+      "admissionEntry": "src-tauri/src/git.rs::admit_git_mutation",
+      "lexicalPaths": [
+        "Requested repository path and full git --show-toplevel checkout",
+        "Resolved git --absolute-git-dir and git --git-common-dir, including linked worktrees",
+        "Workspace registry migration paths only when required by permission loader"
+      ],
+      "sourceReservationOrder": "Short registry/legacy metadata admission checks initial permission before any Git process, then releases before fixed-argv read-only Git root discovery and complete checkout/Git metadata admission. Under GIT_ACTION_LOCK check permission again before post-admission Git identity revalidation or mutation.",
+      "domainLockOrder": "Shared admission before GIT_ACTION_LOCK and permission/approval checks; re-resolve Git topology after admission before stash/pull/rebase/pop or add/commit/push.",
+      "notes": [
+        "Git subprocess uses fixed argv. Owned admission spans stash/error settlement; no automatic retry or force push."
+      ],
+      "aliasPaths": [
+        "Lexically normalized absolute full write set plus canonical physical aliases from PathTransactionRequest, including nearest existing ancestors; authorization stays lexical."
+      ],
+      "parentPreconditions": [
+        "Pinned owned existing-parent handles validate original directory identity after wait; complete alias set is revalidated before first effect. Independent callbacks retain original snapshots; no recapture after replacement."
+      ],
+      "lifetime": {
+        "scope": "finite",
+        "admissionHeldThroughEffects": true,
+        "admissionHeldThroughRollback": true,
+        "evidence": "src-tauri/src/git.rs::admit_git_mutation"
+      },
+      "networkRegistryAvailability": {
+        "networkWork": true,
+        "evidence": "src-tauri/src/git.rs::admit_git_mutation",
+        "registryReleasedDuringNetwork": true,
+        "registryReleasedDuringAdmissionWait": true,
+        "listAndMetadataRemoveProgress": true
+      },
+      "writeSetCoverage": {
+        "wholeCheckout": true,
+        "gitDirectory": true,
+        "gitCommonDirectory": true,
+        "stagingRollback": true,
+        "registrySidecars": true
+      },
+      "testCases": [
+        {
+          "module": "src-tauri/src/git.rs",
+          "entryPair": [
+            "src-tauri/src/git.rs::ipc::git_sync_pull_rebase",
+            "src-tauri/src/workspace_files.rs::ipc::rename_workspace_entry"
+          ],
+          "orders": [
+            "writer-first",
+            "other-first"
+          ],
+          "aliases": [
+            "lexical",
+            "symlink",
+            "ancestor"
+          ],
+          "failureRelease": "Original parent identity rejection, child failure and RAII unwind release are covered by the named fixture suite. Execution state is recorded separately.",
+          "outcome": "Fixtures require no overlapping effects, no stale parent recreation and complete persisted bytes before parent movement.",
+          "tests": [
+            {
+              "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_29",
+              "passed": 37,
+              "failed": 0,
+              "ignored": 0,
+              "executionStatus": "passed",
+              "countScope": "Complete selector run; module attribution is reported once at overlay.testAttribution."
+            }
+          ],
+          "evidence": {
+            "behaviorCases": [
+              "phase08_29_git_pull_wrapper_yields_on_same_task_and_joins_worker_failure",
+              "phase08_29_git_pull_rename_both_orders",
+              "phase08_29_git_pull_trash_both_orders",
+              "phase08_29_git_alias_pull_rename_trash_both_orders",
+              "phase08_29_git_error_retains_dirty_stash_and_releases_complete_set",
+              "phase08_29_git_linked_worktree_reserves_checkout_git_and_common_roots",
+              "phase08_29_git_deleted_recreated_parent_fails_before_any_effect"
+            ]
+          }
+        },
+        {
+          "module": "src-tauri/src/git.rs",
+          "entryPair": [
+            "src-tauri/src/git.rs::ipc::git_sync_pull_rebase",
+            "src-tauri/src/workspace_files.rs::ipc::trash_workspace_entries"
+          ],
+          "orders": [
+            "writer-first",
+            "other-first"
+          ],
+          "aliases": [
+            "lexical",
+            "symlink",
+            "ancestor"
+          ],
+          "failureRelease": "Original parent identity rejection, child failure and RAII unwind release are covered by the named fixture suite. Execution state is recorded separately.",
+          "outcome": "Fixtures require no overlapping effects, no stale parent recreation and complete persisted bytes before parent movement.",
+          "tests": [
+            {
+              "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_29",
+              "passed": 37,
+              "failed": 0,
+              "ignored": 0,
+              "executionStatus": "passed",
+              "countScope": "Complete selector run; module attribution is reported once at overlay.testAttribution."
+            }
+          ],
+          "evidence": {
+            "behaviorCases": [
+              "phase08_29_git_pull_wrapper_yields_on_same_task_and_joins_worker_failure",
+              "phase08_29_git_pull_rename_both_orders",
+              "phase08_29_git_pull_trash_both_orders",
+              "phase08_29_git_alias_pull_rename_trash_both_orders",
+              "phase08_29_git_error_retains_dirty_stash_and_releases_complete_set",
+              "phase08_29_git_linked_worktree_reserves_checkout_git_and_common_roots",
+              "phase08_29_git_deleted_recreated_parent_fails_before_any_effect"
+            ]
+          }
+        }
+      ],
+      "evidence": "Actual final phase08_29 selector: 37 passed, 0 failed, 0 ignored in 17.35 seconds. All five domain polling-task boundary cases are included. Shared dispatch/event proof does not add unique test counts."
+    },
+    {
+      "id": "phase08-29-dot_sync",
+      "module": "src-tauri/src/dot_sync.rs",
+      "commandRefs": [
+        {
+          "module": "src-tauri/src/dot_sync.rs",
+          "name": "dot_sync_overview"
+        },
+        {
+          "module": "src-tauri/src/dot_sync.rs",
+          "name": "dot_sync_run"
+        }
+      ],
+      "stageOwner": "08-29",
+      "finalModuleOwner": "08-29",
+      "entrySymbols": [
+        "src-tauri/src/dot_sync.rs::run_dot_action",
+        "src-tauri/src/dot_sync.rs::run_dot_action_in_transaction",
+        "src-tauri/src/dot_sync.rs::dot_mutation_paths",
+        "src-tauri/src/dot_sync.rs::dot_read_only",
+        "src-tauri/src/dot_sync.rs::validate_dot_action"
+      ],
+      "pathSources": [
+        "src-tauri/src/dot_sync.rs::dot_mutation_paths",
+        "src-tauri/src/dot_sync.rs::dot_local_path",
+        "src-tauri/src/dot_sync.rs::dot_read_optional"
+      ],
+      "admissionEntry": "src-tauri/src/dot_sync.rs::run_dot_action",
+      "lexicalPaths": [
+        "Versioned status workspacePath and storeDir, complete workspace bootstrap/.gitignore/recovery effects",
+        "profile or mirror logPath/includePath/excludePath/ignorePath/allowPath and storeDir/config.yaml",
+        "target.kind=local target.path for both transfer directions; ssh host is never treated as a local filesystem path",
+        "homePathsPath with finite relative entries resolved under local home; .dot-peer-conflicts and .ssh",
+        "Platform cache dotfiles peer.lock/sync.lock; scheduler setup Library/LaunchAgents, .config/systemd/user and .local/log"
+      ],
+      "sourceReservationOrder": "Discover validated versioned status/profile/config and finite home paths before waiting; pin original workspace/home identities and hash/re-read the mapping after admission.",
+      "domainLockOrder": "Complete shared admission before DOT_ACTION_LOCK; re-read target/config identity before subprocess effects and retain admission until output/status settlement.",
+      "notes": [
+        "PeerDiff and PeerDoctor call mutating peerBootstrap and participate in admission, including store/.gitignore/.ssh effects.",
+        "ReadFilter, ReadLog and ReadPeerHomePaths have positive read-only bootstrap evidence. InstallCli/UpdateCli fail before launch because schema1 declares no finite dependency/hook target set.",
+        "RunMirror push/pull and RunPeer cover local source/destination and home paths. Later independent daemon writes remain outside process-local exclusion."
+      ],
+      "schemaSources": [
+        "status.schemaVersion=1 and kind mirror or peer",
+        "peer.profile.schemaVersion=1 and kind=peer-profile",
+        "workspacePath, storeDir, target.kind/path/host, logPath, includePath, excludePath, ignorePath, allowPath, homePathsPath"
+      ],
+      "aliasPaths": [
+        "Lexically normalized absolute full write set plus canonical physical aliases from PathTransactionRequest, including nearest existing ancestors; authorization stays lexical."
+      ],
+      "parentPreconditions": [
+        "Pinned owned existing-parent handles validate original directory identity after wait; complete alias set is revalidated before first effect. Independent callbacks retain original snapshots; no recapture after replacement."
+      ],
+      "lifetime": {
+        "scope": "finite",
+        "admissionHeldThroughEffects": true,
+        "admissionHeldThroughRollback": true,
+        "evidence": "src-tauri/src/dot_sync.rs::run_dot_action"
+      },
+      "networkRegistryAvailability": {
+        "networkWork": true,
+        "evidence": "src-tauri/src/dot_sync.rs::run_dot_action",
+        "registryReleasedDuringNetwork": true,
+        "registryReleasedDuringAdmissionWait": true,
+        "listAndMetadataRemoveProgress": true
+      },
+      "testCases": [
+        {
+          "module": "src-tauri/src/dot_sync.rs",
+          "entryPair": [
+            "src-tauri/src/dot_sync.rs::run_dot_action",
+            "src-tauri/src/workspace_files.rs::ipc::rename_workspace_entry"
+          ],
+          "orders": [
+            "writer-first",
+            "other-first"
+          ],
+          "aliases": [
+            "lexical",
+            "symlink",
+            "ancestor"
+          ],
+          "failureRelease": "Original parent identity rejection, child failure and RAII unwind release are covered by the named fixture suite. Execution state is recorded separately.",
+          "outcome": "Fixtures require no overlapping effects, no stale parent recreation and complete persisted bytes before parent movement.",
+          "tests": [
+            {
+              "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_29",
+              "passed": 37,
+              "failed": 0,
+              "ignored": 0,
+              "executionStatus": "passed",
+              "countScope": "Complete selector run; module attribution is reported once at overlay.testAttribution."
+            }
+          ],
+          "evidence": {
+            "behaviorCases": [
+              "phase08_29_dot_actual_wrapper_yields_on_the_polling_task",
+              "phase08_29_dot_mirror_push_pull_peer_rename_trash_both_orders_and_aliases",
+              "phase08_29_dot_separate_local_target_waits_and_rejects_relocated_destination",
+              "phase08_29_dot_changed_config_parent_and_unknown_targets_fail_before_effect",
+              "phase08_29_dot_failure_unwind_release_and_home_path_coverage",
+              "phase08_29_dot_read_only_actions_do_not_wait_for_mutation_admission"
+            ]
+          }
+        },
+        {
+          "module": "src-tauri/src/dot_sync.rs",
+          "entryPair": [
+            "src-tauri/src/dot_sync.rs::run_dot_action",
+            "src-tauri/src/workspace_files.rs::ipc::trash_workspace_entries"
+          ],
+          "orders": [
+            "writer-first",
+            "other-first"
+          ],
+          "aliases": [
+            "lexical",
+            "symlink",
+            "ancestor"
+          ],
+          "failureRelease": "Original parent identity rejection, child failure and RAII unwind release are covered by the named fixture suite. Execution state is recorded separately.",
+          "outcome": "Fixtures require no overlapping effects, no stale parent recreation and complete persisted bytes before parent movement.",
+          "tests": [
+            {
+              "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_29",
+              "passed": 37,
+              "failed": 0,
+              "ignored": 0,
+              "executionStatus": "passed",
+              "countScope": "Complete selector run; module attribution is reported once at overlay.testAttribution."
+            }
+          ],
+          "evidence": {
+            "behaviorCases": [
+              "phase08_29_dot_actual_wrapper_yields_on_the_polling_task",
+              "phase08_29_dot_mirror_push_pull_peer_rename_trash_both_orders_and_aliases",
+              "phase08_29_dot_separate_local_target_waits_and_rejects_relocated_destination",
+              "phase08_29_dot_changed_config_parent_and_unknown_targets_fail_before_effect",
+              "phase08_29_dot_failure_unwind_release_and_home_path_coverage",
+              "phase08_29_dot_read_only_actions_do_not_wait_for_mutation_admission"
+            ]
+          }
+        }
+      ],
+      "evidence": "Actual final phase08_29 selector: 37 passed, 0 failed, 0 ignored in 17.35 seconds. All five domain polling-task boundary cases are included. Shared dispatch/event proof does not add unique test counts."
+    },
+    {
+      "id": "phase08-29-mission_state",
+      "module": "src-tauri/src/mission_state.rs",
+      "commandRefs": [
+        {
+          "module": "src-tauri/src/mission_state.rs",
+          "name": "list_ai_missions"
+        },
+        {
+          "module": "src-tauri/src/mission_state.rs",
+          "name": "stop_ai_mission"
+        },
+        {
+          "module": "src-tauri/src/mission_state.rs",
+          "name": "read_ai_mission_log"
+        }
+      ],
+      "stageOwner": "08-29",
+      "finalModuleOwner": "08-16",
+      "entrySymbols": [
+        "src-tauri/src/mission_state.rs::register_mission_with_metadata_in_transaction",
+        "src-tauri/src/mission_state.rs::touch_output_in_transaction",
+        "src-tauri/src/mission_state.rs::finish_mission_in_transaction",
+        "src-tauri/src/mission_state.rs::fail_mission_in_transaction",
+        "src-tauri/src/mission_state.rs::stop_in_transaction",
+        "src-tauri/src/mission_state.rs::hydrate_from_disk_in_transaction",
+        "src-tauri/src/mission_state.rs::mark_idle_if_stale_in_transaction",
+        "src-tauri/src/mission_state.rs::persist_record_in_transaction",
+        "src-tauri/src/mission_state.rs::append_output_in_transaction"
+      ],
+      "pathSources": [
+        "src-tauri/src/mission_state.rs::mission_mutation_paths",
+        "src-tauri/src/mission_state.rs::mission_parent_snapshot"
+      ],
+      "admissionEntry": "src-tauri/src/mission_state.rs::mission_transaction",
+      "lexicalPaths": [
+        "Mission directory invocation_id.json, invocation_id.json.tmp, invocation_id.log",
+        "Hydration and stale status updates admit their complete selected mission file set"
+      ],
+      "sourceReservationOrder": "Direct callers acquire finite shared requests; detached dispatch callbacks reuse original mission-home snapshots or approved child lease.",
+      "domainLockOrder": "Shared admission before MissionState missions/pids guards and persisted record/log writes.",
+      "notes": [
+        "Plan29 supplies prerequisite adapters only; final module conversion and tested handoff belong to08-16.",
+        "Owned child lease can be borrowed by stop settlement without waiting for the same child to exit."
+      ],
+      "aliasPaths": [
+        "Lexically normalized absolute full write set plus canonical physical aliases from PathTransactionRequest, including nearest existing ancestors; authorization stays lexical."
+      ],
+      "parentPreconditions": [
+        "Pinned owned existing-parent handles validate original directory identity after wait; complete alias set is revalidated before first effect. Independent callbacks retain original snapshots; no recapture after replacement."
+      ],
+      "lifetime": {
+        "scope": "finite",
+        "admissionHeldThroughEffects": true,
+        "admissionHeldThroughRollback": true,
+        "evidence": "src-tauri/src/mission_state.rs::mission_transaction"
+      },
+      "networkRegistryAvailability": {
+        "networkWork": false,
+        "evidence": "src-tauri/src/mission_state.rs::mission_transaction",
+        "reason": "Finite local event/mission persistence has no network calls or skills registry guard; dispatch child execution has no registry mutation admission."
+      },
+      "testCases": [
+        {
+          "module": "src-tauri/src/skill_host/dispatch.rs",
+          "entryPair": [
+            "src-tauri/src/mission_state.rs::register_mission_with_metadata_in_transaction",
+            "src-tauri/src/workspace_files.rs::ipc::rename_workspace_entry"
+          ],
+          "orders": [
+            "writer-first",
+            "other-first"
+          ],
+          "aliases": [
+            "lexical",
+            "symlink",
+            "ancestor"
+          ],
+          "failureRelease": "Original parent identity rejection, child failure and RAII unwind release are covered by the named fixture suite. Execution state is recorded separately.",
+          "outcome": "Fixtures require no overlapping effects, no stale parent recreation and complete persisted bytes before parent movement.",
+          "tests": [
+            {
+              "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_29",
+              "passed": 37,
+              "failed": 0,
+              "ignored": 0,
+              "executionStatus": "passed",
+              "countScope": "Complete selector run; module attribution is reported once at overlay.testAttribution."
+            }
+          ],
+          "evidence": {
+            "behaviorCases": [
+              "phase08_29_dispatch_wrapper_same_polling_task_progress_and_join_failure",
+              "phase08_29_dispatch_approved_wrapper_rename_trash_both_orders_and_alias",
+              "phase08_29_dispatch_proposal_callback_parent_replacement_does_not_recreate",
+              "phase08_29_dispatch_direct_event_and_mission_wait_before_effect_and_release",
+              "phase08_29_dispatch_real_proposal_callbacks_after_rename_trash_and_alias",
+              "phase08_29_dispatch_runtime_error_flushes_streams_and_releases_roots",
+              "phase08_29_dispatch_launch_error_and_unwind_release_owned_roots"
+            ]
+          }
+        },
+        {
+          "module": "src-tauri/src/skill_host/dispatch.rs",
+          "entryPair": [
+            "src-tauri/src/mission_state.rs::register_mission_with_metadata_in_transaction",
+            "src-tauri/src/workspace_files.rs::ipc::trash_workspace_entries"
+          ],
+          "orders": [
+            "writer-first",
+            "other-first"
+          ],
+          "aliases": [
+            "lexical",
+            "symlink",
+            "ancestor"
+          ],
+          "failureRelease": "Original parent identity rejection, child failure and RAII unwind release are covered by the named fixture suite. Execution state is recorded separately.",
+          "outcome": "Fixtures require no overlapping effects, no stale parent recreation and complete persisted bytes before parent movement.",
+          "tests": [
+            {
+              "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_29",
+              "passed": 37,
+              "failed": 0,
+              "ignored": 0,
+              "executionStatus": "passed",
+              "countScope": "Complete selector run; module attribution is reported once at overlay.testAttribution."
+            }
+          ],
+          "evidence": {
+            "behaviorCases": [
+              "phase08_29_dispatch_wrapper_same_polling_task_progress_and_join_failure",
+              "phase08_29_dispatch_approved_wrapper_rename_trash_both_orders_and_alias",
+              "phase08_29_dispatch_proposal_callback_parent_replacement_does_not_recreate",
+              "phase08_29_dispatch_direct_event_and_mission_wait_before_effect_and_release",
+              "phase08_29_dispatch_real_proposal_callbacks_after_rename_trash_and_alias",
+              "phase08_29_dispatch_runtime_error_flushes_streams_and_releases_roots",
+              "phase08_29_dispatch_launch_error_and_unwind_release_owned_roots"
+            ]
+          }
+        }
+      ],
+      "evidence": "Actual final phase08_29 selector: 37 passed, 0 failed, 0 ignored in 17.35 seconds. All five domain polling-task boundary cases are included. Shared dispatch/event proof does not add unique test counts.",
+      "adapterVerification": {
+        "module": "src-tauri/src/mission_state.rs",
+        "tests": [
+          {
+            "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_29",
+            "passed": 37,
+            "failed": 0,
+            "ignored": 0
+          }
+        ],
+        "evidence": {
+          "behaviorCases": [
+            "phase08_29_dispatch_stop_reuses_owned_child_lease_without_waiting_for_exit"
+          ]
+        },
+        "attribution": "One mission adapter case, already included in the 36 unique cases."
+      }
+    },
+    {
+      "id": "phase08-29-agent_host-event_store",
+      "module": "src-tauri/src/agent_host/event_store.rs",
+      "commandRefs": [
+        {
+          "module": "src-tauri/src/agent_host/event_store.rs",
+          "name": "agent_read_run_events"
+        },
+        {
+          "module": "src-tauri/src/agent_host/event_store.rs",
+          "name": "agent_replay_run_summary"
+        }
+      ],
+      "stageOwner": "08-29",
+      "finalModuleOwner": "08-17",
+      "entrySymbols": [
+        "src-tauri/src/agent_host/event_store.rs::append_run_event",
+        "src-tauri/src/agent_host/event_store.rs::append_run_event_at",
+        "src-tauri/src/agent_host/event_store.rs::append_run_event_at_in_transaction",
+        "src-tauri/src/agent_host/event_store.rs::append_run_event_payload",
+        "src-tauri/src/agent_host/event_store.rs::append_run_event_payload_in_transaction"
+      ],
+      "pathSources": [
+        "src-tauri/src/agent_host/event_store.rs::run_events_path"
+      ],
+      "admissionEntry": "src-tauri/src/agent_host/event_store.rs::append_run_event_at",
+      "lexicalPaths": [
+        "run_events_path(cwd,run_id): cwd/.maru/runs/skills/run_id/events.jsonl and nearest existing directory identity"
+      ],
+      "sourceReservationOrder": "Direct append owns finite shared admission; approved dispatch callbacks borrow the child lease and proposal callbacks carry the original cwd parent snapshot.",
+      "domainLockOrder": "Shared admission before append_lock_for and append-mode filesystem write.",
+      "notes": [
+        "Plan29 supplies prerequisite direct/borrowed adapters; final module conversion and tested handoff belong to08-17."
+      ],
+      "aliasPaths": [
+        "Lexically normalized absolute full write set plus canonical physical aliases from PathTransactionRequest, including nearest existing ancestors; authorization stays lexical."
+      ],
+      "parentPreconditions": [
+        "Pinned owned existing-parent handles validate original directory identity after wait; complete alias set is revalidated before first effect. Independent callbacks retain original snapshots; no recapture after replacement."
+      ],
+      "lifetime": {
+        "scope": "finite",
+        "admissionHeldThroughEffects": true,
+        "admissionHeldThroughRollback": true,
+        "evidence": "src-tauri/src/agent_host/event_store.rs::append_run_event_at"
+      },
+      "networkRegistryAvailability": {
+        "networkWork": false,
+        "evidence": "src-tauri/src/agent_host/event_store.rs::append_run_event_at",
+        "reason": "Finite local event/mission persistence has no network calls or skills registry guard; dispatch child execution has no registry mutation admission."
+      },
+      "testCases": [
+        {
+          "module": "src-tauri/src/skill_host/dispatch.rs",
+          "entryPair": [
+            "src-tauri/src/agent_host/event_store.rs::append_run_event_at_in_transaction",
+            "src-tauri/src/workspace_files.rs::ipc::rename_workspace_entry"
+          ],
+          "orders": [
+            "writer-first",
+            "other-first"
+          ],
+          "aliases": [
+            "lexical",
+            "symlink",
+            "ancestor"
+          ],
+          "failureRelease": "Original parent identity rejection, child failure and RAII unwind release are covered by the named fixture suite. Execution state is recorded separately.",
+          "outcome": "Fixtures require no overlapping effects, no stale parent recreation and complete persisted bytes before parent movement.",
+          "tests": [
+            {
+              "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_29",
+              "passed": 37,
+              "failed": 0,
+              "ignored": 0,
+              "executionStatus": "passed",
+              "countScope": "Complete selector run; module attribution is reported once at overlay.testAttribution."
+            }
+          ],
+          "evidence": {
+            "behaviorCases": [
+              "phase08_29_dispatch_wrapper_same_polling_task_progress_and_join_failure",
+              "phase08_29_dispatch_approved_wrapper_rename_trash_both_orders_and_alias",
+              "phase08_29_dispatch_proposal_callback_parent_replacement_does_not_recreate",
+              "phase08_29_dispatch_direct_event_and_mission_wait_before_effect_and_release",
+              "phase08_29_dispatch_real_proposal_callbacks_after_rename_trash_and_alias",
+              "phase08_29_dispatch_runtime_error_flushes_streams_and_releases_roots",
+              "phase08_29_dispatch_launch_error_and_unwind_release_owned_roots"
+            ]
+          }
+        },
+        {
+          "module": "src-tauri/src/skill_host/dispatch.rs",
+          "entryPair": [
+            "src-tauri/src/agent_host/event_store.rs::append_run_event_at_in_transaction",
+            "src-tauri/src/workspace_files.rs::ipc::trash_workspace_entries"
+          ],
+          "orders": [
+            "writer-first",
+            "other-first"
+          ],
+          "aliases": [
+            "lexical",
+            "symlink",
+            "ancestor"
+          ],
+          "failureRelease": "Original parent identity rejection, child failure and RAII unwind release are covered by the named fixture suite. Execution state is recorded separately.",
+          "outcome": "Fixtures require no overlapping effects, no stale parent recreation and complete persisted bytes before parent movement.",
+          "tests": [
+            {
+              "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_29",
+              "passed": 37,
+              "failed": 0,
+              "ignored": 0,
+              "executionStatus": "passed",
+              "countScope": "Complete selector run; module attribution is reported once at overlay.testAttribution."
+            }
+          ],
+          "evidence": {
+            "behaviorCases": [
+              "phase08_29_dispatch_wrapper_same_polling_task_progress_and_join_failure",
+              "phase08_29_dispatch_approved_wrapper_rename_trash_both_orders_and_alias",
+              "phase08_29_dispatch_proposal_callback_parent_replacement_does_not_recreate",
+              "phase08_29_dispatch_direct_event_and_mission_wait_before_effect_and_release",
+              "phase08_29_dispatch_real_proposal_callbacks_after_rename_trash_and_alias",
+              "phase08_29_dispatch_runtime_error_flushes_streams_and_releases_roots",
+              "phase08_29_dispatch_launch_error_and_unwind_release_owned_roots"
+            ]
+          }
+        }
+      ],
+      "evidence": "Actual final phase08_29 selector: 37 passed, 0 failed, 0 ignored in 17.35 seconds. All five domain polling-task boundary cases are included. Shared dispatch/event proof does not add unique test counts."
+    }
+  ],
+  "documentRaceConsumer": {
+    "plan": "08-07",
+    "selector": "phase08_07_earlier_writer_document_races",
+    "status": "awaiting-producer",
+    "requiredPairs": [
+      {
+        "entryPair": [
+          "skills_save_skill_file",
+          "save_document"
+        ],
+        "orders": [
+          "writer-first",
+          "other-first"
+        ],
+        "aliases": [
+          "lexical",
+          "symlink",
+          "ancestor"
+        ]
+      },
+      {
+        "entryPair": [
+          "skills_save_skill_file",
+          "create_document"
+        ],
+        "orders": [
+          "writer-first",
+          "other-first"
+        ],
+        "aliases": [
+          "lexical",
+          "symlink",
+          "ancestor"
+        ]
+      },
+      {
+        "entryPair": [
+          "skills_sync_source",
+          "save_document"
+        ],
+        "orders": [
+          "writer-first",
+          "other-first"
+        ],
+        "aliases": [
+          "lexical",
+          "symlink",
+          "ancestor"
+        ]
+      },
+      {
+        "entryPair": [
+          "skills_sync_source",
+          "create_document"
+        ],
+        "orders": [
+          "writer-first",
+          "other-first"
+        ],
+        "aliases": [
+          "lexical",
+          "symlink",
+          "ancestor"
+        ]
+      },
+      {
+        "entryPair": [
+          "git_sync_pull_rebase",
+          "save_document"
+        ],
+        "orders": [
+          "writer-first",
+          "other-first"
+        ],
+        "aliases": [
+          "lexical",
+          "symlink",
+          "ancestor"
+        ]
+      },
+      {
+        "entryPair": [
+          "git_sync_pull_rebase",
+          "create_document"
+        ],
+        "orders": [
+          "writer-first",
+          "other-first"
+        ],
+        "aliases": [
+          "lexical",
+          "symlink",
+          "ancestor"
+        ]
+      }
+    ]
+  },
+  "stagedHandoffs": [
+    {
+      "plan": "08-16",
+      "module": "src-tauri/src/mission_state.rs",
+      "status": "awaiting-final-owner",
+      "required": "Final owner must provide moduleIntegrations complete record with actual tested adapter evidence before --all closure."
+    },
+    {
+      "plan": "08-17",
+      "module": "src-tauri/src/agent_host/event_store.rs",
+      "status": "awaiting-final-owner",
+      "required": "Final owner must provide moduleIntegrations complete record with actual tested adapter evidence before --all closure."
+    }
+  ],
+  "testAttribution": {
+    "uniqueRustTests": 37,
+    "modules": {
+      "skill_host/store": 11,
+      "git": 7,
+      "skill_host/env": 5,
+      "skill_host/dispatch": 7,
+      "mission_state": 1,
+      "dot_sync": 6
+    },
+    "sharedEvidence": {
+      "agent_host/event_store": "Direct append and event callback proofs execute within the seven dispatch cases; no additional unique test is counted."
+    }
+  },
+  "fixtureIsolationAudit": {
+    "initialDispatchFailure": "An initial dispatch launch-error fixture did not pin the actually selected binary and escaped its intended synthetic process boundary. External effects of that initial launch are unknown; the full execution history is not claimed isolated.",
+    "dispatchCorrection": "The corrected fixture asserts the actual selected fake executable path and forces ENOENT at launch. Later passing results apply to the corrected fixture.",
+    "environmentCorrection": "Test-only environment bootstrap pins /bin/bash on Unix and removes inherited BASH_ENV and ENV; production binary selection and environment behavior are unchanged.",
+    "verificationBoundary": "The final confirmed 37-test run includes all five domain same-polling-task cases and the hardened fixture boundaries. This result does not establish isolation of the initial escaped dispatch launch."
+  },
+  "regressionNotes": [
+    "The former concurrent same-source save test now accepts immediate source_busy and performs an explicit retry after both original attempts settle, preserving D-02 and successful siblings.",
+    "The Git permission regression separately proves initial denial launches no Git, and a policy flip after authorized discovery launches no subsequent Git process."
+  ]
+}

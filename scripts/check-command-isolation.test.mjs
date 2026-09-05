@@ -262,3 +262,80 @@ test("final closure rejects pending integration outside early staged modules", (
 test("store/git cannot relabel network work to omit registry availability", (t) => { const f = overlayFixture(t); f.overlay.integrations[0].networkRegistryAvailability = { networkWork: false, reason: "Assumed no network", evidence: "src-tauri/src/git.rs::git_sync_pull_rebase" }; f.saveOverlay(); fail(f.run("--integration", "29"), /store\/git must prove network/); });
 test("env/dispatch cannot relabel callback lifetime as finite", (t) => { const f = overlayFixture(t); f.overlay.integrations[1].lifetime.scope = "finite"; f.saveOverlay(); fail(f.run("--integration", "29"), /env\/dispatch require background/); });
 test("explicit processing caller source path must exist", (t) => { const f = fixture(t); f.row.processingCaller.path = "src/lib/nonexistent.ts::invoke"; f.save(); fail(f.run("--plan", "06"), /Missing source\/helper path/); });
+
+// Plan 29 consumes the earlier shards' mutation declarations. A physically
+// valid module record cannot silently omit a writer that its shard still owns.
+function declareFixtureWriter(f, name) {
+  const row = [...f.shards.values()].flatMap((shard) => shard.commands).find((command) => command.name === name);
+  row.mutationKey = {
+    lexicalPaths: ["fixture/checkout"], aliasPaths: ["fixture/physical-checkout"],
+    postAdmissionPreconditions: ["Pinned original existing parent remains identical"],
+    domainLockOrder: "Shared admission before registry guard",
+    sharedAdmissionEntry: "integrationRequired: 08-29",
+  };
+  f.save();
+  return row;
+}
+test("integration29 rejects a mutating command omitted from its module references", (t) => {
+  const f = overlayFixture(t);
+  declareFixtureWriter(f, "skills_sync_source");
+  fail(f.run("--integration", "29"), /missing writer command reference skills_sync_source/);
+});
+test("integration29 accepts all declared writers with unchanged inventory ownership", (t) => {
+  const f = overlayFixture(t);
+  const row = declareFixtureWriter(f, "skills_sync_source");
+  f.overlay.integrations[0].commandRefs.push({ module: row.module, name: row.name });
+  f.saveOverlay();
+  pass(f.run("--integration", "29"));
+});
+test("integration29 rejects duplicated module command references", (t) => {
+  const f = overlayFixture(t);
+  f.overlay.integrations[0].commandRefs.push({ ...f.overlay.integrations[0].commandRefs[0] });
+  f.saveOverlay();
+  fail(f.run("--integration", "29"), /duplicate command reference/);
+});
+for (const field of ["lexicalPaths", "aliasPaths", "parentPreconditions", "sourceReservationOrder", "pathSources", "admissionEntry"]) {
+  test(`integration29 rejects omitted ${field} from an otherwise complete producer`, (t) => {
+    const f = overlayFixture(t);
+    delete f.overlay.integrations[1][field];
+    f.saveOverlay();
+    fail(f.run("--integration", "29"), new RegExp(`missing ${field}`));
+  });
+}
+for (const field of ["registryReleasedDuringAdmissionWait", "listAndMetadataRemoveProgress", "sourceDuplicateReturnsBusy", "batchBusySourceSkipped"]) {
+  test(`integration29 rejects lost source contract ${field}`, (t) => {
+    const f = overlayFixture(t);
+    f.overlay.integrations[0].networkRegistryAvailability[field] = false;
+    f.saveOverlay();
+    fail(f.run("--integration", "29"), /network (?:registry exclusion violation|source regression)/);
+  });
+}
+for (const field of ["gitDirectory", "gitCommonDirectory", "stagingRollback", "registrySidecars"]) {
+  test(`integration29 rejects missing checkout coverage ${field}`, (t) => {
+    const f = overlayFixture(t);
+    delete f.overlay.integrations[3].writeSetCoverage[field];
+    f.saveOverlay();
+    fail(f.run("--integration", "29"), /abbreviated write set/);
+  });
+}
+test("integration29 requires both lifetime effects and rollback settlement", (t) => {
+  for (const field of ["admissionHeldThroughEffects", "admissionHeldThroughRollback"]) {
+    const f = overlayFixture(t);
+    f.overlay.integrations[1].lifetime[field] = false;
+    f.saveOverlay();
+    fail(f.run("--integration", "29"), /incomplete admission lifetime/);
+  }
+});
+test("integration29 validates the exact future document pair matrix without claiming results", (t) => {
+  const f = overlayFixture(t);
+  // Future obligations intentionally do not contain executed-result evidence.
+  for (const pair of f.overlay.documentRaceConsumer.requiredPairs) {
+    delete pair.tests;
+    delete pair.evidence;
+  }
+  f.saveOverlay();
+  pass(f.run("--integration", "29"));
+  f.overlay.documentRaceConsumer.requiredPairs.pop();
+  f.saveOverlay();
+  fail(f.run("--integration", "29"), /missing git_sync_pull_rebase\/create_document pair/);
+});
