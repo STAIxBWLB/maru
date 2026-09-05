@@ -35,7 +35,7 @@ nothing in the existing suite would notice.
   registry fresh rather than writing back a pre-network copy. A source removed
   concurrently must not be resurrected by the sync that was already in flight.
 
-- [ ] **PERF-03**: A panic under one of the six named process-global locks
+- [x] **PERF-03**: A panic under one of the six named process-global locks
   (`REGISTRY_LOCK`, `JOBS_LOCK`, `DOT_ACTION_LOCK`, `BINDER_WRITE_LOCK`, and the
   terminal registry and killer locks) leaves that feature usable instead of
   bricked until app restart. Each lock carries its own recorded justification for
@@ -186,7 +186,7 @@ Deferred. Acknowledged but not in this roadmap.
 |-------------|-------|--------|
 | PERF-01 | Phase 8 | Pending |
 | PERF-02 | Phase 8 | Pending |
-| PERF-03 | Phase 7 | Pending |
+| PERF-03 | Phase 7 | Complete |
 | PERF-04 | Phase 7 | Pending |
 | PERF-05 | Phase 10 | Pending |
 | PERF-06 | Phase 7 | Pending |

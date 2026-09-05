@@ -75,13 +75,13 @@ Plans:
   3. `make verify` fails the moment a new `dangerouslySetInnerHTML` value in `src/` does not trace to a DOMPurify-backed helper, proven by a deliberate red-then-green break of the guard itself.
   4. The document index holds zero `inbox/...` entries through every path that produces one - full scan, targeted rescan, and cache read - while the Inbox pane still lists pending items and drop/auto arrivals, and the Files browser and content search still resolve `inbox/` paths. The Inbox view is gone from the documents view switcher rather than left permanently empty.
 
-**Plans**: 1/5 plans executed in 1 wave (all file-disjoint; 07-01 leads as the phase tracer)
+**Plans**: 2/5 plans executed in 1 wave (all file-disjoint; 07-01 leads as the phase tracer)
 
 Plans:
 **Wave 1**
 
 - [x] 07-01-PLAN.md - SEC-02 sanitizer guard: check-dom-sanitizer.mjs, red-then-green proof, make verify wiring (phase tracer)
-- [ ] 07-02-PLAN.md - PERF-03 lock poison recovery: shared recover_guard helper, six named locks, per-lock D-03 justifications
+- [x] 07-02-PLAN.md - PERF-03 lock poison recovery: shared recover_guard helper, six named locks, per-lock D-03 justifications
 - [ ] 07-03-PLAN.md - PERF-04 watcher prune: paths::is_under_generated_dir predicate at all five recursive-watch sites
 - [ ] 07-04-PLAN.md - PERF-06 backend: shared non-document-roots list excluding the settings-driven inbox root at all three vault call sites
 - [ ] 07-05-PLAN.md - PERF-06 frontend: Inbox view removal from the documents switcher, persisted-filter reset, i18n cleanup
@@ -152,7 +152,7 @@ Phases execute in numeric order: 6 → 7 → 8 → 9 → 10 → 11
 | Phase | Plans Complete | Status | Completed |
 |-------|-----------------|--------|-----------|
 | 6. Native E2E Runner Foundation | 5/5 | Complete    | 2026-08-29 |
-| 7. Guardrails Before Churn | 1/5 | In Progress|  |
+| 7. Guardrails Before Churn | 2/5 | In Progress|  |
 | 8. Main-Thread Responsiveness | 0/TBD | Not started | - |
 | 9. Durability and Session Lifecycle | 0/TBD | Not started | - |
 | 10. Bundle and Build Hardening | 0/TBD | Not started | - |

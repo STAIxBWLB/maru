@@ -5,16 +5,16 @@ milestone_name: Felt Quality and Native Proof
 current_phase: 7
 current_phase_name: Guardrails Before Churn
 status: executing
-stopped_at: Completed 07-01-PLAN.md
-last_updated: "2026-09-05T00:34:16.476Z"
+stopped_at: Completed 07-02-PLAN.md
+last_updated: "2026-09-05T00:48:29.259Z"
 last_activity: 2026-09-05
 last_activity_desc: Phase 7 execution started
-state_head: e933a355f7d5e136222949cd9215cc9c67a02a73
+state_head: 96cbe60ee7b21e8aa27caeb8016172f4a3706d67
 progress:
   total_phases: 6
   completed_phases: 1
   total_plans: 10
-  completed_plans: 6
+  completed_plans: 7
   percent: 17
 ---
 
@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-08-28)
 ## Current Position
 
 Phase: 7 (Guardrails Before Churn) — EXECUTING
-Plan: 2 of 5
+Plan: 3 of 5
 Status: Ready to execute
 Last activity: 2026-09-05 — Phase 7 execution started
 
@@ -101,6 +101,7 @@ Progress: [██░░░░░░░░] 17%
 | Phase 06 P04 | 32min | 2 tasks | 6 files |
 | Phase 06 P05 | cross-session (checkpoint-gated) | 3 tasks | 6 files |
 | Phase 07 P01 | 10min | 3 tasks | 5 files |
+| Phase 07 P02 | 11min | 3 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -205,6 +206,8 @@ Recent decisions affecting current work:
 - [Phase 7]: [Phase 7]: 07-01 authored a permanent behavioral test (scripts/check-dom-sanitizer.behavior.test.ts) for the tdd=true tracer beyond the plan files list; the TDD gate requires a committed RED test and the live red/green proof complements Task 3 hermetic policy pin
 - [Phase 7]: [Phase 7]: 07-01 EditorPane dynamic-import provenance regex matches previewBaseHtml case-insensitively (setter setPreviewBaseHtml is capital P); pattern stays narrow and file-scoped
 - [Phase 7]: [Phase 7]: SEC-02 unclassified edge row resolves fail-closed, drill-proven via the Task 1 probe and Task 2 red fixture, both exercising the no-match path
+- [Phase 7]: [Phase 7]: 07-02 terminal warn-line lock names are TERMINAL_SESSIONS/TERMINAL_RESERVATIONS/TERMINAL_KILLER so five sites sharing two retired strings stay distinguishable in stderr
+- [Phase 7]: [Phase 7]: 07-02 into_inner recovery does not clear the mutex poison flag; every later acquisition still returns Err and recovers again (repeated recoveries each emit one warn) - the recovered-guard contract callers must assume
 
 ### Pending Todos
 
@@ -241,8 +244,8 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-09-05T00:34:16.446Z
-Stopped at: Completed 07-01-PLAN.md
+Last session: 2026-09-05T00:48:29.222Z
+Stopped at: Completed 07-02-PLAN.md
 Resume file: None
 
 ## Operator Next Steps
