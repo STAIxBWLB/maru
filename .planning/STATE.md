@@ -5,16 +5,16 @@ milestone_name: Felt Quality and Native Proof
 current_phase: 08
 current_phase_name: Main-Thread Responsiveness
 status: executing
-stopped_at: Completed 08-06-PLAN.md; next Plan29 wave7
-last_updated: "2026-09-05T06:07:01.678Z"
+stopped_at: Completed 08-29-PLAN.md; next Plan07 wave8
+last_updated: "2026-09-05T06:32:05.080Z"
 last_activity: 2026-09-05
 last_activity_desc: Phase 08 execution started
-state_head: 146335c0cfb58c7a7d020cc31682e64b58114978
+state_head: 53e8909042ca8d32590accbd314f18fb370cc306
 progress:
   total_phases: 6
   completed_phases: 2
   total_plans: 39
-  completed_plans: 16
+  completed_plans: 17
   percent: 33
 ---
 
@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-09-05)
 ## Current Position
 
 Phase: 08 (Main-Thread Responsiveness) — EXECUTING
-Plan: 7 of 29
+Plan: 8 of 29
 Status: Ready to execute
 Last Activity Description: Phase 08 execution started
 Last activity: 2026-09-05 — Phase 08 execution started
@@ -113,6 +113,7 @@ Progress: [███░░░░░░░] 33%
 | Phase 08 P04 | 14min | 2 tasks | 7 files |
 | Phase 08 P05 | 13min | 2 tasks | 5 files |
 | Phase 08 P06 | 23min | 2 tasks | 9 files |
+| Phase 08 P29 | 25min | 3 tasks | 10 files |
 
 ## Accumulated Context
 
@@ -234,6 +235,7 @@ Recent decisions affecting current work:
 - [Phase 08]: Bundle recovery is local and guarded; env repair is outside REGISTRY_LOCK with builtin reservation and fresh source/state/dirty validation. Shared admission remains 08-29.
 - [Phase 08]: Git IPC owns AppHandle and resolves ApprovalState only inside a blocking worker; Git domain transactions serialize aliases until Plan29 shared admission.
 - [Phase 08]: Shared path admission pins parent handles; Plan29 wave7 consumes fresh requests, reusable original-parent snapshots and explicit nested leases before Plan07.
+- [Phase 08]: Earlier Skills/Git/env/dispatch/dot writers share complete path admission; initializing lists retain short conditional metadata transactions, while plain getters are read-only. Plan07 document races and Plans16/17 final adapter handoffs remain pending. — Keep source reservation before path waits, release registry admission for network stages, and retain original parent snapshots. Final 37 integration cases pass; the initial dispatch fixture escape has unknown external effects and remains disclosed in SUMMARY/overlay.
 
 ### Pending Todos
 
@@ -270,8 +272,8 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-09-05T06:07:01.617Z
-Stopped at: Completed 08-06-PLAN.md; next Plan29 wave7
+Last session: 2026-09-05T06:31:22.991Z
+Stopped at: Completed 08-29-PLAN.md; next Plan07 wave8
 Resume file: None
 
 ## Operator Next Steps

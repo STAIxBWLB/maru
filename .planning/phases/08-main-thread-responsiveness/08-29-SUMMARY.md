@@ -90,7 +90,7 @@ Earlier filesystem writers now share complete hierarchical admission with the re
 - Git commit, selected commit/push and pull/rebase reserve the full lexical worktree and separate Git/common metadata before GIT_ACTION_LOCK. A short registry/legacy-loader preflight preserves initial permission denial before any Git subprocess; migration coverage is explicit. After full admission and the domain lock, permissions are checked before further Git identity discovery or mutation. Existing approval, sensitive-path, stash/rebase/pop and failure retention behavior stays intact. Read-only Git probes disable optional index writes.
 - Environment status/bootstrap/repair resolve store defaults separately, retain the original parent snapshot, then admit env and setup-owned trees. The lease moves into the existing background worker and lasts through child exit, both output joins and final status.json. Target node/input/output/temp/log trees and setup-local lockfile/cache effects are represented. Cache destinations are explicit; tests pin /bin/bash and remove BASH_ENV/ENV. System package-manager and external uv bootstrap effects are existing delegated effects, not a claimed universally protected write graph.
 - Dispatch proposal callbacks admit finite event and mission transactions using the original cwd/home snapshots. A moved/deleted cwd is not recreated; independent mission completion can still persist under its unchanged original home. Approved execution reserves declared cwd/add_dirs plus event and mission json/tmp/log paths through child exit and stream join. DispatchChild reaps on error/unwind. Explicit shared lease binding lets stop signal an admitted child without waiting for that child's exit; callback serialization also protects mission temporary files.
-- Event-store direct and borrowed append APIs admit before append_lock_for. Mission registration, touch, finish, fail, hydration/idle persistence and stop follow admission before missions/pids guards. Direct synchronous APIs remain available. Their final module owners remain Plans17 and16 respectively.
+- Event-store direct and borrowed append APIs admit before append_lock_for. Mission registration, touch, finish, fail, hydration/idle persistence and stop follow admission before missions/pids guards. Direct synchronous APIs remain available. Their final module owners remain Plans 17 and 16 respectively.
 
 ## Dot Source Contract
 
@@ -122,9 +122,9 @@ The accepted schema is version1. Evidence came from local dotfiles-v2 tag v2.63.
 | node scripts/check-command-isolation.mjs --integration 29 | Passed: seven modules, 365 production registrations, zero added command evidence rows. |
 | git diff --check | Passed. |
 
-Produced test attribution is store11, Git7, env5, dispatch7, mission1 and dot6, totaling37. Event-store proof is shared with dispatch cases and is not counted again. Every domain has an actual wrapper proof that polls the command and yields on the same async task while a distinct blocking worker is held; spare-worker availability is not used as the new responsiveness proof. Structural checker validation does not rerun or replace behavioral tests.
+Produced test attribution is store 11, Git 7, env 5, dispatch 7, mission 1 and dot 6, totaling 37. Event-store proof is shared with dispatch cases and is not counted again. Every domain has an actual wrapper proof that polls the command and yields on the same async task while a distinct blocking worker is held; spare-worker availability is not used as the new responsiveness proof. Structural checker validation does not rerun or replace behavioral tests.
 
-A combined phase08_ diagnostic run reported106/108 before correcting the last permission-test expectation and the new parent-Git fixture. Final focused cases and relevant regression suites above pass. Existing today_ai/scheduler test-build warnings remain unrelated; production clippy is clean. Windows runtime/compile and native artifact saturation were not exercised on this macOS host.
+A combined phase08_ diagnostic run reported 106/108 before correcting the last permission-test expectation and the new parent-Git fixture. Final focused cases and relevant regression suites above pass. Existing today_ai/scheduler test-build warnings remain unrelated; production clippy is clean. Windows runtime/compile and native artifact saturation were not exercised on this macOS host.
 
 ## Deviations, Failures and Fixture Isolation
 
@@ -142,10 +142,10 @@ A combined phase08_ diagnostic run reported106/108 before correcting the last pe
 - T-08-29-02: nonqueued source reservation, no domain-lock-held path wait, separate network/commit sets, borrowed callback adapters, stop-lease reuse and error/unwind tests mitigate the new deadlock/availability surface.
 - T-08-29-03: corrected synthetic fixture selection and explicit initial-escape disclosure constrain the evidence claim. Historical external effects remain unknown.
 - Plan29 owns final integration for store, Git, env, dispatch and dot. Mission-state and event-store adapters are staged prerequisites; Plans16/17 must provide their final tested moduleIntegrations handoffs.
-- documentRaceConsumer is exactly08-07 with selector phase08_07_earlier_writer_document_races: Skills save, Skills sync and Git pull each versus document save/create, both orders and aliases. Those six document pairs are pending production by Plan07, not passing evidence here.
-- Plan28 --all closure additionally requires those actual document cases and completed16/17 handoffs. The current --integration29 pass is deliberately narrower. PERF-01 and PERF-02 are not globally completed: requirements.ready-ids returned0/2 ready because sibling plans remain unfinished.
+- documentRaceConsumer is exactly 08-07 with selector phase08_07_earlier_writer_document_races: Skills save, Skills sync and Git pull each versus document save/create, both orders and aliases. Those six document pairs are pending production by Plan07, not passing evidence here.
+- Plan28 --all closure additionally requires those actual document cases and completed 16/17 handoffs. The current --integration29 pass is deliberately narrower. PERF-01 and PERF-02 are not globally completed: requirements.ready-ids returned 0/2 ready because sibling plans remain unfinished.
 - No automatic retry, duplicate queue, new job service, Phase09 quit behavior or new command owner was added. Ready for Plan07, wave8.
 
 ## Self-Check: PASSED
 
-All three task commits, ten source/evidence artifacts and the37 named produced tests exist. Required produced checks pass, the seven-module overlay adds no command rows, later obligations remain explicit, and unrelated dirty state is preserved.
+All three task commits, ten source/evidence artifacts and the 37 named produced tests exist. Required produced checks pass, the seven-module overlay adds no command rows, later obligations remain explicit, and unrelated dirty state is preserved.
