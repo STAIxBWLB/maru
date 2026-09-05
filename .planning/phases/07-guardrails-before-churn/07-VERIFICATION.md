@@ -1,53 +1,22 @@
 ---
 phase: 07-guardrails-before-churn
-verified: 2026-09-05T02:09:12Z
-status: human_needed
-score: 31/35 must-have truths verified
-behavior_unverified: 4
+verified: 2026-09-05T02:54:34Z
+status: passed
+score: 37/37 must-have truths verified
+behavior_unverified: 0
 overrides_applied: 0
-behavior_unverified_items:
-  - truth: "The switcher's static rows (All, Drafts, Archive, Recently Updated) are visible and clickable while document counts are still settling after app load (07-05 backstop)"
-    test: "Launch the app against a workspace with a large document index; watch the documents switcher during the first seconds of load while counts resolve"
-    expected: "All four static rows render and accept clicks before count badges settle; no row flickers in or pops layout"
-    why_human: "Settling-time UI state cannot be exercised by grep or unit tests; presence checks see the memo but not the transient render window"
-  - truth: "Count badges render correctly at zero, one, and many documents for each remaining built-in view (07-05 backstop)"
-    test: "Open the documents switcher in a workspace with 0, then 1, then reference-workload document volumes per built-in view"
-    expected: "Badges show 0 / 1 / N correctly per view with no overflow, negative, or stale values"
-    why_human: "Badge rendering at boundary volumes is a visual/runtime property no static or unit assertion covers"
-  - truth: "The Inbox pane lists pending items and drop/auto arrivals with its pre-removal row layout and actions intact (07-05 backstop)"
-    test: "Open the standalone Inbox pane (app mode) and verify pending items and drops list with the existing row layout and actions"
-    expected: "Queue renders exactly as before the switcher removal; no layout or action regression"
-    why_human: "Held-out visual check per UI-SPEC; the plan deliberately added no automated test beyond the existing e2e surface"
-  - truth: "The Inbox pane renders its existing empty state (no pending items) unchanged (07-05 backstop)"
-    test: "Open the Inbox pane in a workspace with no pending items"
-    expected: "The pre-removal empty state renders unchanged"
-    why_human: "Same held-out visual-check reasoning as the populated state"
-human_verification:
-  - test: "Run `pnpm exec playwright test e2e/inbox*.spec.ts` (the deferred phase-gate regression watch from plans 07-04 and 07-05)"
-    expected: "All inbox e2e specs pass — the standalone Inbox pane still lists pending/drop items after the index exclusion (07-04) and switcher removal (07-05)"
-    why_human: "Deferred by both plans' own verification blocks to /gsd-verify-work time; Playwright needs a built app / webserver, which verifier spot-check constraints (no servers, <10s per check) deliberately exclude"
-  - test: "Backstop UI check: switcher static rows visible/clickable while counts settle"
-    expected: "All -> Drafts -> Archive -> Recently Updated render and accept clicks during count settling"
-    why_human: "Transient render-window state; grep/unit tests cannot see it (see behavior_unverified_items)"
-  - test: "Backstop UI check: count badges at 0 / 1 / many documents per remaining built-in view"
-    expected: "Correct badge values at all three volumes"
-    why_human: "Visual/runtime boundary-volume behavior outside automated coverage"
-  - test: "Backstop UI check: Inbox pane populated state (pending + drops, row layout and actions)"
-    expected: "Identical to pre-removal behavior"
-    why_human: "Held-out visual check per UI-SPEC flagged assumptions"
-  - test: "Backstop UI check: Inbox pane empty state"
-    expected: "Existing empty state renders unchanged"
-    why_human: "Held-out visual check per UI-SPEC flagged assumptions"
+behavior_unverified_items: []
+human_verification: []
 ---
 
 # Phase 7: Guardrails Before Churn Verification Report
 
 **Phase Goal:** The locks, watchers, and sanitizer boundary that this milestone's own later work will stress are hardened first, so those later phases inherit a safety net instead of a race to add one after an incident. PERF-06 rides along: it narrows what the scanner layer carries, the same shape of change as PERF-04's watcher prune and in the same vault.rs / ScanFilter region.
 **Verified:** 2026-09-05T02:09:12Z
-**Status:** human_needed
-**Re-verification:** No — initial verification
+**Status:** passed
+**Re-verification:** Yes, direct UAT completed by Codex on user instruction; evidence in 07-UAT.md.
 
-_Note on dispatch: this verification ran under the generic-agent workaround (typed gsd-verifier dispatch unavailable in this runtime); the role definition at `~/.claude/agents/gsd-verifier.md` was read and followed, including VERIFICATION.md format and the FORCE stance. All SUMMARY claims below were re-proven against the live tree, not trusted._
+_Note on dispatch: this verification ran under the generic-agent workaround (typed gsd-verifier dispatch unavailable in this runtime); the role definition at `~/.claude/agents/gsd-verifier.md` was read and followed, including VERIFICATION.md format and the FORCE stance. The implementation evidence below retains its original provenance, including explicitly attributed SUMMARY results. This follow-up freshly executed the five UAT items and focused security/backend checks; it did not rerun every historical full-suite command._
 
 ## Goal Achievement
 
@@ -81,19 +50,19 @@ _Note on dispatch: this verification ran under the generic-agent workaround (typ
 | 24 | Fail-open resolution; empty-rel guard makes whole-vault exclusion impossible (07-04) | ✓ VERIFIED | `scan_vault_fails_open_when_inbox_root_unresolvable` passes; rel-prefix helper keeps the `rel.is_empty() -> None` guard (:296-298) |
 | 25 | Prefix siblings (inbox-backup, authored inbox/) are not excluded (07-04) | ✓ VERIFIED | Adjacency assertions folded into `scan_vault_skips_inbox_root` and `scan_vault_paths_skips_inbox_root`, both passing |
 | 26 | No new static/mutex/shared mutable state; concurrent scans each resolve their own roots (07-04) | ✓ VERIFIED | List derived per call from settings + vault path (plain fn, no static); clippy `-D warnings` claimed green by summaries; structure grep confirms |
-| 27 | Inbox pane queue, Files browser, content search still resolve inbox/ paths (07-04) | ✓ VERIFIED | Backend regression watch: summaries report full `cargo test --lib` 1268 green including inbox/workspace_files/content_search; exclusion lives only in the scan domain; Playwright e2e deferred item recorded in Human Verification |
+| 27 | Inbox pane queue, Files browser, content search still resolve inbox/ paths (07-04) | ✓ VERIFIED | Backend regression watch: summaries report full `cargo test --lib` 1268 green including inbox/workspace_files/content_search; exclusion lives only in the scan domain; fresh Inbox E2E 8/8 and direct populated/empty UI checks pass in 07-UAT.md |
 | 28 | Switcher renders exactly All -> Drafts -> Archive -> Recently Updated -> custom views, no Inbox row (07-05) | ✓ VERIFIED | `builtInViews` memo (Sidebar.tsx:87-95) has exactly 3 entries; no `Inbox` lucide import; no `view: "inbox"` anywhere in src/ except the intentional workspaceStore test fixture |
 | 29 | builtInDocumentViewCounts carries exactly the three remaining entries; union narrowed (07-05) | ✓ VERIFIED | App.tsx:1301-1309 has drafts/archive/recentlyUpdated only under `Record<BuiltInDocumentView, number>`; union at documentIndex.ts:5 is exactly the three members; `case "inbox"` deleted (grep: zero hits in documentIndex.ts) |
 | 30 | Persisted { kind: "view", view: "inbox" } filter resets to { kind: "all" } silently at load (07-05) | ✓ VERIFIED | `pruneCustomDocumentFiltersInState` (:228-245) adds the built-in-view prune arm via `isBuiltInDocumentView`; test `pruneCustomDocumentFiltersInState resets persisted filters holding a removed built-in view` passes (55 frontend tests across 5 files run this verification); diff adds no toast/banner/log (summary review of 424e87e) |
 | 31 | Files browser and content search continue resolving inbox/ paths after the removal (07-05) | ✓ VERIFIED | Removal confined to the switcher/counts/locales; backend surfaces untouched by 07-05 (only frontend files in its diff); full-suite green per summary (1975 tests) |
 | 32 | sidebar.view.inbox removed from en.ts and ko.ts in the same change; lint:i18n passes (07-05) | ✓ VERIFIED | Zero `sidebar.view.inbox` hits in src/lib/i18n/ (grep); `pnpm lint:i18n` run this verification: "ok — 3738 keys in parity" |
 | 33 | outlinePaneStore.test.ts and documentIndex.test.ts no longer reference the removed view; assertions pass (07-05) | ✓ VERIFIED | `view: "inbox"` zero hits in both test files (grep); outlinePaneStore fixtures repointed at drafts; both suites pass (run this verification) |
-| 34 | (backstop) Static rows visible/clickable while counts settle (07-05) | ⚠️ BACKSTOP -> human | See behavior_unverified_items |
-| 35 | (backstop) Count badges at 0/1/many (07-05) | ⚠️ BACKSTOP -> human | See behavior_unverified_items |
-| 36 | (backstop) Inbox pane populated state intact (07-05) | ⚠️ BACKSTOP -> human | See behavior_unverified_items |
-| 37 | (backstop) Inbox pane empty state unchanged (07-05) | ⚠️ BACKSTOP -> human | See behavior_unverified_items |
+| 34 | (backstop) Static rows visible/clickable while counts settle (07-05) | VERIFIED | Direct runtime UAT and inspected screenshots, 07-UAT.md test 2 |
+| 35 | (backstop) Count badges at 0/1/many (07-05) | VERIFIED | Direct runtime UAT and inspected screenshots, 07-UAT.md test 3 |
+| 36 | (backstop) Inbox pane populated state intact (07-05) | VERIFIED | Direct runtime UAT and inspected screenshots, 07-UAT.md test 4 |
+| 37 | (backstop) Inbox pane empty state unchanged (07-05) | VERIFIED | Direct runtime UAT and inspected screenshots, 07-UAT.md test 5 |
 
-**Score:** 33 truths listed above; 31 verified programmatically, 4 backstop UI items routed to human verification (the two 07-05 coverage items D1/D5 that the summaries already flagged `human_judgment: true` map onto this same set). Per the role's backstop rule, the four `verification: backstop` statements are non-inferable and resolve to human verification items, not to the verified score.
+**Score:** 37/37 listed truths verified: 33 implementation truths plus four direct UI backstops. Corrected the initial report's inconsistent 31/35 arithmetic to match its 37 numbered rows.
 
 ### Prohibitions (judgment-tier, non-authoritative LLM-judge verdicts — human review recommended per ADR-550 D3)
 
@@ -164,7 +133,7 @@ No `scripts/*/tests/probe-*.sh` probes exist for this phase; the deliberate red-
 | PERF-03 | 07-02 | Poison recovery for the six named locks with per-lock justification, not extended beyond them | ✓ SATISFIED | recover_guard + 10 call sites, 4 passing behavioral tests, retired strings zero live producers, other locks untouched |
 | PERF-04 | 07-03 | Watchers do not emit events for generated-dir paths | ✓ SATISFIED | SSOT predicate + all five sites wired + WR-01 root-collision regression tests |
 | SEC-02 | 07-01 | make verify fails on untraced dangerouslySetInnerHTML | ✓ SATISFIED | Live guard run + red drills + verify chain entry + policy pin tests |
-| PERF-06 | 07-04, 07-05 | Inbox root excluded from document index across all three paths; built-in Inbox view removed; pane/files/search regression watch | ✓ SATISFIED (automated half) / HUMAN (e2e half) | Backend three-site exclusion tests pass; frontend removal verified by grep + 55 tests + lint:i18n; the Playwright Inbox-pane regression watch is deferred by both plans to verify-work — recorded in Human Verification, not failed |
+| PERF-06 | 07-04, 07-05 | Inbox root excluded from document index across all three paths; built-in Inbox view removed; pane/files/search regression watch | ✓ SATISFIED | Backend three-site exclusion tests pass; frontend removal verified by grep + 55 tests + lint:i18n; 8/8 existing Inbox E2E checks and all four direct UI backstops pass, recorded in 07-UAT.md |
 
 All four requirement IDs from the plan frontmatter (PERF-03, PERF-04, SEC-02, PERF-06) are accounted for. REQUIREMENTS.md traceability maps exactly these four IDs to Phase 7 — no orphaned requirements.
 
@@ -176,19 +145,13 @@ All four requirement IDs from the plan frontmatter (PERF-03, PERF-04, SEC-02, PE
 
 Review findings CR-01 (multi-line sink fail-open) and WR-01 (root-named-generated-dir silent watcher death) were fixed in commits 30e23b0 and f91755e/a54bae4 per 07-REVIEW-FIX.md; both fixes were independently re-verified live this run (multi-line probe exits 1 via the reconciliation path; the two WR-01 regression tests pass and the single-root watchers now strip the root before the predicate). Info findings IN-01 through IN-04 were intentionally not addressed (fix_scope critical_warning) — IN-01 (self-referential doc parenthetical in lock_recovery.rs:30-33) remains visible in the current tree; cosmetic only.
 
-### Human Verification Required
+### Direct UAT Resolution
 
-1. **Playwright Inbox-pane regression watch (deferred phase gate, plans 07-04 and 07-05).** Run `pnpm exec playwright test e2e/inbox*.spec.ts`. Expected: all inbox specs pass — the standalone Inbox pane still lists pending/drop items after the index exclusion and switcher removal. Deferred by both plans' own verification blocks to verify-work time; needs a running app, which automated spot-check constraints exclude.
-2. **Backstop: switcher static rows visible/clickable while counts settle.** Expected: All -> Drafts -> Archive -> Recently Updated render and accept clicks before count badges settle.
-3. **Backstop: count badges at 0 / 1 / many documents.** Expected: correct badge values at all three volumes per remaining built-in view.
-4. **Backstop: Inbox pane populated state.** Expected: pending items and drops list with pre-removal row layout and actions.
-5. **Backstop: Inbox pane empty state.** Expected: existing empty state renders unchanged.
-
-The nine judgment-tier prohibitions (table above) carry non-authoritative LLM-judge PASS verdicts with evidence; per ADR-550 D3 they should be eyeballed by a human at the same checkpoint. None was observed violated.
+All five deferred items passed under the user's instruction to verify directly. The actual existing E2E suite replaces the nonexistent inbox filename glob. Chromium fixtures cover delayed scan settlement, 0/1/9582 badges, populated Inbox selection and Process/Cancel, and empty states. See 07-UAT.md and uat-evidence/ for commands, observations, screenshots and the existing right-panel overlap limitation. No native or live-provider claim is made for these browser checks.
 
 ### Gaps Summary
 
-No gaps. All 31 programmatically verifiable must-have truths pass with fresh evidence; the CR-01 and WR-01 review fixes hold in the current tree. The phase goal — locks, watchers, and the sanitizer boundary hardened before the Phase 8-10 churn — is achieved in the codebase: SEC-02 is a live make-verify gate proven in both sink shapes, PERF-03 recovery spans exactly the six named locks, PERF-04 pruning covers all five watchers through one SSOT predicate, and PERF-06 removes inbox content from the document index across all three producing paths plus the frontend switcher. The only open surface is the plan-deferred Playwright Inbox-pane watch and the four UI-SPEC backstop checks, all routed to human verification rather than treated as failures.
+No Phase 7 gaps. The 33 implementation truths and four UI backstops are verified. The deferred E2E watch passed 8/8, and security verification closed the existing 15-threat register. The unrelated existing right-panel overlap remains recorded in 07-UAT.md.
 
 ---
 

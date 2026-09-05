@@ -27,6 +27,13 @@ WKWebView DOM, PTY output, synthetic IME composition, and menu commands; the
 CI verdict is ci-viable (hosted macOS evidence in docs/native-e2e.md), the
 suite runs from `release-preflight`, and ship isolation is guard-enforced.
 
+Phase 7 (Guardrails Before Churn) completed 2026-09-05: lock poisoning
+recovery, generated-directory watcher pruning, the sanitizer build guard and
+three-path Inbox index exclusion are verified. Direct UAT passed 5/5 and
+existing Inbox E2E passed 8/8. Phase 8 is ready to plan. The pre-existing
+Inbox/right-panel overlap is recorded in 07-UAT.md as an unresolved layout
+limitation outside this removal regression.
+
 ## Requirements
 
 ### Validated
@@ -76,6 +83,10 @@ suite runs from `release-preflight`, and ship isolation is guard-enforced.
   `TerminalPanel` use four-input facades, all 18 modes route through lazy
   registry adapters, `MainApp` is 15 `useState` / 24 `useEffect`, D-20 native
   UAT 5/5, verification 8/8)
+
+- ✓ Phase 7 guardrails - scoped poison recovery (PERF-03), watcher pruning
+  (PERF-04), sanitizer provenance gate (SEC-02), and independent Inbox/index
+  behavior (PERF-06); UAT 5/5, existing security register 15/15 closed.
 
 ### Active
 
@@ -272,4 +283,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-08-29 — Phase 6 complete*
+*Last updated: 2026-09-05 - Phase 7 complete; Phase 8 ready to plan*

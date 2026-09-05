@@ -2,45 +2,45 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Felt Quality and Native Proof
-current_phase: 7
-current_phase_name: Guardrails Before Churn
-status: verifying
-stopped_at: Completed 07-05-PLAN.md
-last_updated: "2026-09-05T01:18:39.707Z"
+current_phase: 8
+current_phase_name: Main-Thread Responsiveness
+status: planning
+stopped_at: Phase 7 complete, ready to plan Phase 8
+last_updated: "2026-09-05T02:54:41.665Z"
 last_activity: 2026-09-05
-last_activity_desc: Phase 7 execution started
-state_head: 424e87e821fc46ee57230ad2e0bedbff7446cfa5
+last_activity_desc: Phase 7 complete, transitioned to Phase 8
+state_head: a512891b173d48aa6246db3f23b11a87635d7fc4
 progress:
   total_phases: 6
-  completed_phases: 1
+  completed_phases: 2
   total_plans: 10
   completed_plans: 10
-  percent: 17
+  percent: 33
 ---
 
 # Project State
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-08-28)
+See: .planning/PROJECT.md (updated 2026-09-05)
 
 **Core value:** The filesystem stays the source of truth, everything Maru shows is derived from real files the user owns, and nothing is lost if Maru is uninstalled.
-**Current focus:** Phase 7 — Guardrails Before Churn
+**Current focus:** Phase 8 - Main-Thread Responsiveness
 
 ## Current Position
 
-Phase: 7 (Guardrails Before Churn) — EXECUTING
-Plan: 5 of 5
-Status: Phase complete — ready for verification
-Last activity: 2026-09-05 — Phase 7 execution started
+Phase: 8 — Main-Thread Responsiveness
+Plan: Not started
+Status: Ready to plan
+Last activity: 2026-09-05 — Phase 7 complete, transitioned to Phase 8
 
-Progress: [██░░░░░░░░] 17%
+Progress: [███░░░░░░░] 33%
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 37
+- Total plans completed: 42
 - Average duration: -
 - Total execution time: -
 
@@ -54,6 +54,7 @@ Progress: [██░░░░░░░░] 17%
 | 04 | 7 | - | - |
 | 05 | 11 | - | - |
 | 06 | 5 | - | - |
+| 7 | 5 | - | - |
 
 **Recent Trend:**
 
@@ -256,9 +257,9 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-09-05T01:18:39.676Z
-Stopped at: Completed 07-05-PLAN.md
+Stopped at: Phase 7 complete, ready to plan Phase 8
 Resume file: None
 
 ## Operator Next Steps
 
-- Plan Phase 6 with `/gsd-plan-phase 6`
+- Plan Phase 8 with `/gsd-plan-phase 8`
