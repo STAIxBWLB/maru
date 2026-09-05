@@ -2016,6 +2016,18 @@ mod phase08_06 {
         }
         let entries = run(ipc::scan_vault(s.clone(), None)).unwrap();
         assert_eq!(entries.len(), 1);
+        let mut stale = entries.clone();
+        for rel in [
+            "node_modules/hidden.md",
+            "scratchpad/hidden.md",
+            "inbox/downloads/hidden.md",
+        ] {
+            let mut entry = entries[0].clone();
+            entry.rel_path = rel.to_string();
+            entry.path = root.join(rel).to_string_lossy().into_owned();
+            stale.push(entry);
+        }
+        write_vault_cache(&root, &stale).unwrap();
         assert_eq!(
             run(ipc::scan_vault_paths(
                 s.clone(),

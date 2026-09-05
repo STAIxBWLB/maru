@@ -101,7 +101,6 @@ use binary_viewer::{
 use browser_passkeys::{
     browser_passkey_request_authorization, browser_passkey_status, BrowserPasskeyState,
 };
-use calendar_search::search_calendar_notes;
 use diagram::{
     diagram_backup_document, diagram_delete_document, diagram_export_blob,
     diagram_export_blob_to_path, diagram_list_documents, diagram_list_snapshots,
@@ -377,7 +376,7 @@ pub fn run() {
             read_meeting_guides,
             append_meetings_log,
             read_meetings_log,
-            search_calendar_notes,
+            calendar_search::ipc::search_calendar_notes,
             content_search::ipc::search_workspace_contents,
             scan_task_notes,
             read_task_metadata,

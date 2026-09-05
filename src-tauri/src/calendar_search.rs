@@ -7,7 +7,6 @@ use walkdir::WalkDir;
 
 const MAX_RESULTS: usize = 500;
 
-#[tauri::command]
 pub fn search_calendar_notes(
     work_path: String,
     roots: Vec<String>,
@@ -167,5 +166,65 @@ mod tests {
         )
         .unwrap();
         assert_eq!(hits.len(), 1);
+    }
+}
+
+/// Owned IPC scheduling; synchronous domain APIs remain available to Rust callers.
+pub mod ipc {
+    #[tauri::command]
+    pub async fn search_calendar_notes(
+        work_path: String,
+        roots: Vec<String>,
+        query: String,
+    ) -> Result<Vec<String>, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            crate::atomic_file::PathTransactionLease::test_stage(
+                &[std::path::PathBuf::from(&work_path)],
+                "worker:search_calendar_notes",
+            );
+            super::search_calendar_notes(work_path, roots, query)
+        })
+        .await
+        .map_err(|err| format!("search_calendar_notes_task_failed: {err}"))?
+    }
+}
+
+#[cfg(test)]
+mod phase08_06 {
+    use super::*;
+    use crate::atomic_file::phase08_06::{boundary, run, Home};
+    #[test]
+    fn phase08_06_calendar_worker_returns_real_hits_and_legacy_errors() {
+        let home = Home::new();
+        let root = home.root.path().to_path_buf();
+        let s = root.to_string_lossy().into_owned();
+        boundary(
+            root.clone(),
+            "search_calendar_notes",
+            ipc::search_calendar_notes(s.clone(), vec!["tasks".into()], "needle".into()),
+        );
+        fs::create_dir(root.join("tasks")).unwrap();
+        fs::write(root.join("tasks/note.md"), "calendar needle").unwrap();
+        assert_eq!(
+            run(ipc::search_calendar_notes(
+                s,
+                vec!["tasks".into()],
+                "needle".into()
+            ))
+            .unwrap(),
+            vec!["tasks/note.md"]
+        );
+        let not_dir = root.join("file");
+        fs::write(&not_dir, "x").unwrap();
+        assert_eq!(
+            run(ipc::search_calendar_notes(
+                not_dir.to_string_lossy().into_owned(),
+                vec!["tasks".into()],
+                "needle".into()
+            ))
+            .unwrap_err(),
+            "Workspace path is not a directory"
+        );
     }
 }

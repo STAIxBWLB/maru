@@ -177,12 +177,27 @@ pub fn scan_workspace_entries(
     }
     let vault = normalize_existing_dir(&vault_path)?;
     if transaction_dir(&vault).is_dir() {
-        let request =
-            PathTransactionRequest::new(vec![vault.clone()])?.with_workspace_registry()?;
+        let mut paths = vec![vault.clone()];
+        for entry in fs::read_dir(transaction_dir(&vault))
+            .map_err(|error| error.to_string())?
+            .flatten()
+        {
+            if let Ok(bytes) = fs::read(entry.path()) {
+                if let Ok(transaction) = serde_json::from_slice::<RenameTransaction>(&bytes) {
+                    for raw in [transaction.source_path, transaction.target_path] {
+                        let path = lexical_normalize(Path::new(&raw));
+                        if path.starts_with(&vault) {
+                            paths.push(path);
+                        }
+                    }
+                }
+            }
+        }
+        let request = PathTransactionRequest::new(paths)?.with_workspace_registry()?;
         with_path_transactions(request, |lease| {
             assert_files_mutation_allowed(&vault, WorkspaceWriteAction::RenameMove)?;
             lease.before_effect()?;
-            recover_rename_transactions(&vault)
+            recover_rename_transactions(&vault, lease)
         })?;
     }
     let scan_filter = ScanFilter::from_options(scan_options)?;
@@ -1290,7 +1305,7 @@ fn journaled_rename(vault: &Path, source: &Path, target: &Path) -> Result<(), St
     }
 }
 
-fn recover_rename_transactions(vault: &Path) -> Result<(), String> {
+fn recover_rename_transactions(vault: &Path, lease: &PathTransactionLease) -> Result<(), String> {
     let dir = transaction_dir(vault);
     if !dir.is_dir() {
         return Ok(());
@@ -1308,18 +1323,38 @@ fn recover_rename_transactions(vault: &Path) -> Result<(), String> {
         let Ok(transaction) = serde_json::from_slice::<RenameTransaction>(&content) else {
             continue;
         };
-        let source = PathBuf::from(transaction.source_path);
-        let target = PathBuf::from(transaction.target_path);
-        if !source.starts_with(vault) || !target.starts_with(vault) {
+        let source = lexical_normalize(Path::new(&transaction.source_path));
+        let target = lexical_normalize(Path::new(&transaction.target_path));
+        if source == vault
+            || target == vault
+            || !source.starts_with(vault)
+            || !target.starts_with(vault)
+        {
             continue;
         }
+        lease.ensure_covered(vec![
+            source.clone(),
+            target.clone(),
+            vault.join(".maru/binder"),
+        ])?;
         let source_exists = path_entry_exists(&source);
         let target_exists = path_entry_exists(&target);
         if source_exists && !target_exists {
             if fs::rename(&source, &target).is_ok() {
+                if let Err(error) = rekey_document_states(vault, &source, &target) {
+                    fs::rename(&target, &source).map_err(|rollback| {
+                        format!("Recovery rekey failed: {error}; rollback failed: {rollback}")
+                    })?;
+                    return Err(format!(
+                        "Recovery rekey failed; rename rolled back: {error}"
+                    ));
+                }
                 let _ = fs::remove_file(&path);
             }
         } else if !source_exists {
+            if target_exists {
+                rekey_document_states(vault, &source, &target)?;
+            }
             let _ = fs::remove_file(&path);
         }
     }
@@ -1697,6 +1732,13 @@ mod tests {
         let source = root.join("before.txt");
         let target = root.join("after.txt");
         write_file(&root, "before.txt", b"recover");
+        let binder = root.join(".maru/binder");
+        fs::create_dir_all(&binder).unwrap();
+        fs::write(
+            binder.join("stable.json"),
+            r#"{"docId":"stable","documentPath":"before.txt"}"#,
+        )
+        .unwrap();
         let journal_dir = transaction_dir(&root);
         fs::create_dir_all(&journal_dir).unwrap();
         fs::write(
@@ -1718,6 +1760,9 @@ mod tests {
             .iter()
             .any(|entry| entry.rel_path == "after.txt"));
         assert!(!journal_dir.exists());
+        let state: serde_json::Value =
+            serde_json::from_slice(&fs::read(binder.join("stable.json")).unwrap()).unwrap();
+        assert_eq!(state["documentPath"], "after.txt");
     }
 
     #[test]
@@ -2568,6 +2613,48 @@ pub(crate) mod phase08_06 {
         );
         assert_eq!(fs::read(a.join("note.md")).unwrap(), b"queued bytes");
         assert_eq!(fs::read(a.join("second.md")).unwrap(), b"second");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn phase08_06_recovery_normalizes_paths_preserves_aliases_and_rekeys() {
+        let home = Home::new();
+        let root = home.root.path().join("work");
+        fs::create_dir(&root).unwrap();
+        let external = tempfile::tempdir().unwrap();
+        let alias = root.join("alias");
+        std::os::unix::fs::symlink(external.path(), &alias).unwrap();
+        fs::write(external.path().join("before.md"), "recover alias").unwrap();
+        let journals = transaction_dir(&root);
+        fs::create_dir_all(&journals).unwrap();
+        let valid = RenameTransaction {
+            source_path: text(&alias.join("before.md")),
+            target_path: text(&alias.join("after.md")),
+        };
+        fs::write(
+            journals.join("valid.json"),
+            serde_json::to_vec(&valid).unwrap(),
+        )
+        .unwrap();
+        let outside = home.root.path().join("outside.md");
+        fs::write(&outside, "do not move").unwrap();
+        let invalid = RenameTransaction {
+            source_path: text(&root.join("../outside.md")),
+            target_path: text(&root.join("stolen.md")),
+        };
+        fs::write(
+            journals.join("invalid.json"),
+            serde_json::to_vec(&invalid).unwrap(),
+        )
+        .unwrap();
+        run(ipc::scan_workspace_entries(text(&root), None)).unwrap();
+        assert_eq!(
+            fs::read(external.path().join("after.md")).unwrap(),
+            b"recover alias"
+        );
+        assert_eq!(fs::read(&outside).unwrap(), b"do not move");
+        assert!(!root.join("stolen.md").exists());
+        assert!(journals.join("invalid.json").exists());
     }
 
     #[test]
