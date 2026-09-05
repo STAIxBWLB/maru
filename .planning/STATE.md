@@ -5,16 +5,16 @@ milestone_name: Felt Quality and Native Proof
 current_phase: 08
 current_phase_name: Main-Thread Responsiveness
 status: executing
-stopped_at: Completed 08-05-PLAN.md
-last_updated: "2026-09-05T05:42:04.313Z"
+stopped_at: Completed 08-06-PLAN.md; next Plan29 wave7
+last_updated: "2026-09-05T06:07:01.678Z"
 last_activity: 2026-09-05
 last_activity_desc: Phase 08 execution started
-state_head: 5d1756528154a528a3b5dbca25ab5a7e9d0e3e84
+state_head: 146335c0cfb58c7a7d020cc31682e64b58114978
 progress:
   total_phases: 6
   completed_phases: 2
   total_plans: 39
-  completed_plans: 15
+  completed_plans: 16
   percent: 33
 ---
 
@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-09-05)
 ## Current Position
 
 Phase: 08 (Main-Thread Responsiveness) — EXECUTING
-Plan: 6 of 29
+Plan: 7 of 29
 Status: Ready to execute
 Last Activity Description: Phase 08 execution started
 Last activity: 2026-09-05 — Phase 08 execution started
@@ -112,6 +112,7 @@ Progress: [███░░░░░░░] 33%
 | Phase 08 P03 | 17min | 2 tasks | 6 files |
 | Phase 08 P04 | 14min | 2 tasks | 7 files |
 | Phase 08 P05 | 13min | 2 tasks | 5 files |
+| Phase 08 P06 | 23min | 2 tasks | 9 files |
 
 ## Accumulated Context
 
@@ -232,6 +233,7 @@ Recent decisions affecting current work:
 - [Phase 08]: Only pending clone generations survive unrelated saves while absent; remove/reset and inventory pruning invalidate old identities.
 - [Phase 08]: Bundle recovery is local and guarded; env repair is outside REGISTRY_LOCK with builtin reservation and fresh source/state/dirty validation. Shared admission remains 08-29.
 - [Phase 08]: Git IPC owns AppHandle and resolves ApprovalState only inside a blocking worker; Git domain transactions serialize aliases until Plan29 shared admission.
+- [Phase 08]: Shared path admission pins parent handles; Plan29 wave7 consumes fresh requests, reusable original-parent snapshots and explicit nested leases before Plan07.
 
 ### Pending Todos
 
@@ -268,8 +270,8 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-09-05T05:42:04.247Z
-Stopped at: Completed 08-05-PLAN.md
+Last session: 2026-09-05T06:07:01.617Z
+Stopped at: Completed 08-06-PLAN.md; next Plan29 wave7
 Resume file: None
 
 ## Operator Next Steps
