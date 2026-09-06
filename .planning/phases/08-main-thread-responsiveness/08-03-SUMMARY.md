@@ -133,4 +133,3 @@ No package, persisted registry schema, new endpoint, retry queue, job center or 
 ## Self-Check: PASSED
 
 Both task commits exist, all declared artifacts and the 24-row shard exist, required final tests are nonempty and pass, and no tracked file was deleted. Unrelated dirty Phase 7 files and untracked runtime/planning files are preserved. Shared IDs remain pending.
-
