@@ -328,7 +328,7 @@
           "phase08_05::approved_commit_push_and_dirty_pull_use_only_local_remote",
           "phase08_05::local_pull_failure_retains_stash_and_releases_transaction",
           "phase08_05::rebase_conflict_preserves_stash_and_does_not_automatically_retry",
-          "phase08_05::pull_and_commit_push_wait_for_transaction_before_validation_or_process"
+          "phase08_05::pull_waits_for_transaction_and_denied_push_launches_no_mutation"
         ],
         "bounds": "All transitive filesystem/subprocess work and lock waits occur in spawn_blocking; payload caps are not runtime bounds. Same-task async probe and worker thread IDs prevent spare async workers from producing a false pass. Native saturation remains08-27.",
         "platform": "Executed on macOS. Fixed NoWindow cfg on Windows retains behavior; Windows runtime not claimed. Git children disable inherited global/system config, signing, hooks, credentials and non-file transports only under cfg(test). No live repository/remote or dot service invoked."
@@ -383,7 +383,7 @@
         "behaviorCases": [
           "phase08_05::approved_commit_push_and_dirty_pull_use_only_local_remote",
           "phase08_05::selected_commit_and_denied_approval_preserve_disk_and_contract",
-          "phase08_05::pull_and_commit_push_wait_for_transaction_before_validation_or_process"
+          "phase08_05::pull_waits_for_transaction_and_denied_push_launches_no_mutation"
         ],
         "bounds": "All transitive filesystem/subprocess work and lock waits occur in spawn_blocking; payload caps are not runtime bounds. Same-task async probe and worker thread IDs prevent spare async workers from producing a false pass. Native saturation remains08-27.",
         "platform": "Executed on macOS. Fixed NoWindow cfg on Windows retains behavior; Windows runtime not claimed. Git children disable inherited global/system config, signing, hooks, credentials and non-file transports only under cfg(test). No live repository/remote or dot service invoked."
