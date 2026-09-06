@@ -50,6 +50,12 @@
         ],
         "payload": "Existing String errors and data payload pass through untouched. Query responses are view-owned; reads do not create user-processing jobs.",
         "terminalNoticeOwner": "Current src/lib/api.ts caller and initiating view own response/error publication; completion-lifetime finalization is assigned to Plans25/26."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=sample_workspace_path"
       },
       "evidence": {
         "behaviorCases": [
@@ -109,6 +115,12 @@
         ],
         "payload": "Existing String errors and data payload pass through untouched. Query responses are view-owned; reads do not create user-processing jobs.",
         "terminalNoticeOwner": "Current src/lib/api.ts caller and initiating view own response/error publication; completion-lifetime finalization is assigned to Plans25/26."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=scan_vault"
       },
       "evidence": {
         "behaviorCases": [
@@ -168,6 +180,12 @@
         ],
         "payload": "Existing String errors and data payload pass through untouched. Query responses are view-owned; reads do not create user-processing jobs.",
         "terminalNoticeOwner": "Current src/lib/api.ts caller and initiating view own response/error publication; completion-lifetime finalization is assigned to Plans25/26."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=scan_vault_paths"
       },
       "evidence": {
         "behaviorCases": [
@@ -227,6 +245,12 @@
         ],
         "payload": "Existing String errors and data payload pass through untouched. Query responses are view-owned; reads do not create user-processing jobs.",
         "terminalNoticeOwner": "Current src/lib/api.ts caller and initiating view own response/error publication; completion-lifetime finalization is assigned to Plans25/26."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=read_vault_cache"
       },
       "evidence": {
         "behaviorCases": [
@@ -275,6 +299,12 @@
         ],
         "payload": "Existing String errors and data payload pass through untouched. Query responses are view-owned; reads do not create user-processing jobs.",
         "terminalNoticeOwner": "Current src/lib/api.ts caller and initiating view own response/error publication; completion-lifetime finalization is assigned to Plans25/26."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=scan_workspace_files"
       },
       "evidence": {
         "behaviorCases": [
@@ -342,6 +372,12 @@
         ],
         "payload": "Existing String errors and data payload pass through untouched. Query responses are view-owned; reads do not create user-processing jobs.",
         "terminalNoticeOwner": "Current src/lib/api.ts caller and initiating view own response/error publication; completion-lifetime finalization is assigned to Plans25/26."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=scan_workspace_entries"
       },
       "evidence": {
         "behaviorCases": [
@@ -410,6 +446,12 @@
         ],
         "payload": "Existing String errors and data payload pass through untouched. Query responses are view-owned; reads do not create user-processing jobs.",
         "terminalNoticeOwner": "Current src/lib/api.ts caller and initiating view own response/error publication; completion-lifetime finalization is assigned to Plans25/26."
+      ,
+        "classifier": "classifyWorkspaceMutationCompletion (src/lib/api.ts:1452)",
+        "successRetention": "payload returned unchanged to the caller; ProcessingOperationRecord.completion.succeeded retains successful item/output references after navigation",
+        "failureReasons": "per-item error strings trimmed into completion.failed[].reason; IPC rejection mapped by rejectionReason() (message + code); component no longer publishes a second error toast",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=create_workspace_directory"
       },
       "evidence": {
         "behaviorCases": [
@@ -477,6 +519,12 @@
         ],
         "payload": "Existing String errors and data payload pass through untouched. Query responses are view-owned; reads do not create user-processing jobs.",
         "terminalNoticeOwner": "Current src/lib/api.ts caller and initiating view own response/error publication; completion-lifetime finalization is assigned to Plans25/26."
+      ,
+        "classifier": "classifyWorkspaceMutationCompletion (src/lib/api.ts:1452)",
+        "successRetention": "payload returned unchanged to the caller; ProcessingOperationRecord.completion.succeeded retains successful item/output references after navigation",
+        "failureReasons": "per-item error strings trimmed into completion.failed[].reason; IPC rejection mapped by rejectionReason() (message + code); component no longer publishes a second error toast",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=rename_workspace_entry"
       },
       "evidence": {
         "behaviorCases": [
@@ -544,6 +592,12 @@
         ],
         "payload": "Fulfilled Vec<WorkspaceMutationOutcome> can mix done/error; FilesWorkbench.runMutation filters errors and retains successful target selection before onFilesystemMutated.",
         "terminalNoticeOwner": "Current FilesWorkbench.runMutation sets errors/busy and refresh callbacks; Plans25/26 must retain one terminal notice across unmount."
+      ,
+        "classifier": "classifyWorkspaceMutationCompletion (src/lib/api.ts:1452)",
+        "successRetention": "payload returned unchanged to the caller; ProcessingOperationRecord.completion.succeeded retains successful item/output references after navigation",
+        "failureReasons": "per-item error strings trimmed into completion.failed[].reason; IPC rejection mapped by rejectionReason() (message + code); component no longer publishes a second error toast",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=duplicate_workspace_entries"
       },
       "evidence": {
         "behaviorCases": [
@@ -611,6 +665,12 @@
         ],
         "payload": "Fulfilled Vec<WorkspaceMutationOutcome> can mix done/error; FilesWorkbench.runMutation filters errors and retains successful target selection before onFilesystemMutated.",
         "terminalNoticeOwner": "Current FilesWorkbench.runMutation sets errors/busy and refresh callbacks; Plans25/26 must retain one terminal notice across unmount."
+      ,
+        "classifier": "classifyWorkspaceMutationCompletion (src/lib/api.ts:1452)",
+        "successRetention": "payload returned unchanged to the caller; ProcessingOperationRecord.completion.succeeded retains successful item/output references after navigation",
+        "failureReasons": "per-item error strings trimmed into completion.failed[].reason; IPC rejection mapped by rejectionReason() (message + code); component no longer publishes a second error toast",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=paste_workspace_entries"
       },
       "evidence": {
         "behaviorCases": [
@@ -678,6 +738,12 @@
         ],
         "payload": "Fulfilled Vec<WorkspaceMutationOutcome> can mix done/error; FilesWorkbench.runMutation filters errors and retains successful target selection before onFilesystemMutated.",
         "terminalNoticeOwner": "Current FilesWorkbench.runMutation sets errors/busy and refresh callbacks; Plans25/26 must retain one terminal notice across unmount."
+      ,
+        "classifier": "classifyWorkspaceMutationCompletion (src/lib/api.ts:1452)",
+        "successRetention": "payload returned unchanged to the caller; ProcessingOperationRecord.completion.succeeded retains successful item/output references after navigation",
+        "failureReasons": "per-item error strings trimmed into completion.failed[].reason; IPC rejection mapped by rejectionReason() (message + code); component no longer publishes a second error toast",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=trash_workspace_entries"
       },
       "evidence": {
         "behaviorCases": [
@@ -733,6 +799,12 @@
         ],
         "payload": "Existing String errors and data payload pass through untouched. Query responses are view-owned; reads do not create user-processing jobs.",
         "terminalNoticeOwner": "Current src/lib/api.ts caller and initiating view own response/error publication; completion-lifetime finalization is assigned to Plans25/26."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=describe_file_queue_sources"
       },
       "evidence": {
         "behaviorCases": [
@@ -799,6 +871,12 @@
         ],
         "payload": "Vec<FileQueueApplyOutcome> reports successful items; existing early error can follow persisted earlier work. App.applyQueuedFiles Promise.all across workspaces can reject after another group succeeds; retain those successes in Plans25/26.",
         "terminalNoticeOwner": "Current App.applyQueuedFiles and outlinePaneStore own queue completion, error and refresh; Plans25/26 consolidate lifetime and one terminal notice."
+      ,
+        "classifier": "null classifier: rejection-only contract (src/lib/api.ts:1560)",
+        "successRetention": "payload returned unchanged to the caller; ProcessingOperationRecord.completion.succeeded retains successful item/output references after navigation",
+        "failureReasons": "per-item error strings trimmed into completion.failed[].reason; IPC rejection mapped by rejectionReason() (message + code); component no longer publishes a second error toast",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=apply_file_queue"
       },
       "evidence": {
         "behaviorCases": [
@@ -854,6 +932,12 @@
         ],
         "payload": "Existing String errors and data payload pass through untouched. Query responses are view-owned; reads do not create user-processing jobs.",
         "terminalNoticeOwner": "Current src/lib/api.ts caller and initiating view own response/error publication; completion-lifetime finalization is assigned to Plans25/26."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=search_workspace_contents"
       },
       "evidence": {
         "behaviorCases": [
@@ -899,6 +983,12 @@
         ],
         "payload": "Existing String errors and data payload pass through untouched. Query responses are view-owned; reads do not create user-processing jobs.",
         "terminalNoticeOwner": "Current src/lib/api.ts caller and initiating view own response/error publication; completion-lifetime finalization is assigned to Plans25/26."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=search_calendar_notes"
       },
       "evidence": {
         "behaviorCases": [

@@ -35,6 +35,12 @@
         ],
         "payload": "api.ts readDocument; App selectEntry and documentOpsModeLifecycle prepareDocument/reloadDocument own request-scoped view responses and keyed editor state.",
         "terminalNoticeOwner": "Existing initiating App/editor callback owns completion/errors; query/validation results remain view-scoped. Plans25/26 own final cross-navigation lifetime and single-notice closure; this shard does not claim that UI work is implemented."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=read_document"
       },
       "mutationKey": {
         "readOnly": true,
@@ -85,6 +91,12 @@
         ],
         "payload": "App.tsx saveTab captures initiating tab/workspace, stores returned bytes by tab ID and routes errors to setError or Files editorError; saveCurrent and documentOpsModeLifecycle saveDocument delegate.",
         "terminalNoticeOwner": "Existing initiating App/editor callback owns completion/errors; query/validation results remain view-scoped. Plans25/26 own final cross-navigation lifetime and single-notice closure; this shard does not claim that UI work is implemented."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=save_document"
       },
       "mutationKey": {
         "lexicalPaths": [
@@ -148,6 +160,12 @@
         ],
         "payload": "App.tsx updateField applies the returned payload to initiating tab while preserving unsaved body draft; setError owns current failures.",
         "terminalNoticeOwner": "Existing initiating App/editor callback owns completion/errors; query/validation results remain view-scoped. Plans25/26 own final cross-navigation lifetime and single-notice closure; this shard does not claim that UI work is implemented."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=update_frontmatter_field"
       },
       "mutationKey": {
         "lexicalPaths": [
@@ -211,6 +229,12 @@
         ],
         "payload": "App.tsx createDocumentAndOpen and onCreateDocumentDialogSubmit retain created payload and initiating workspace; existing tab activation behavior needs Plan25/26 lifetime review.",
         "terminalNoticeOwner": "Existing initiating App/editor callback owns completion/errors; query/validation results remain view-scoped. Plans25/26 own final cross-navigation lifetime and single-notice closure; this shard does not claim that UI work is implemented."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=create_document"
       },
       "mutationKey": {
         "lexicalPaths": [
@@ -274,6 +298,12 @@
         ],
         "payload": "App.tsx renameTabDocument/moveTabDocument use initiating tab/workspace, refreshAfterDocumentMutation and replaceMovedTab, with setError on failure.",
         "terminalNoticeOwner": "Existing initiating App/editor callback owns completion/errors; query/validation results remain view-scoped. Plans25/26 own final cross-navigation lifetime and single-notice closure; this shard does not claim that UI work is implemented."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=move_document"
       },
       "mutationKey": {
         "lexicalPaths": [
@@ -337,6 +367,12 @@
         ],
         "payload": "App.tsx duplicateTabDocument retains new payload then activates a new tab; existing navigation behavior requires Plan25/26 lifetime finalization.",
         "terminalNoticeOwner": "Existing initiating App/editor callback owns completion/errors; query/validation results remain view-scoped. Plans25/26 own final cross-navigation lifetime and single-notice closure; this shard does not claim that UI work is implemented."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=duplicate_document"
       },
       "mutationKey": {
         "lexicalPaths": [
@@ -400,6 +436,12 @@
         ],
         "payload": "App.tsx trashTabDocument refreshes initiating workspace, closes original tab and publishes editor.tabs.delete.success; backend keeps workspace-local recoverable trash.",
         "terminalNoticeOwner": "Existing initiating App/editor callback owns completion/errors; query/validation results remain view-scoped. Plans25/26 own final cross-navigation lifetime and single-notice closure; this shard does not claim that UI work is implemented."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=trash_document"
       },
       "mutationKey": {
         "lexicalPaths": [
@@ -463,6 +505,12 @@
         ],
         "payload": "App.tsx snapshotTab and snapshot-before-apply callbacks retain VersionSnapshot and publish snapshot.success through existing setError surface.",
         "terminalNoticeOwner": "Existing initiating App/editor callback owns completion/errors; query/validation results remain view-scoped. Plans25/26 own final cross-navigation lifetime and single-notice closure; this shard does not claim that UI work is implemented."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=create_version"
       },
       "mutationKey": {
         "lexicalPaths": [
@@ -526,6 +574,12 @@
         ],
         "payload": "App.tsx revealTargetInFinder and Files/Studio actions plus BinaryViewerPane reveal use api.ts; observed callbacks include setError/reportError and existing fire-and-forget sites.",
         "terminalNoticeOwner": "Existing initiating App/editor callback owns completion/errors; query/validation results remain view-scoped. Plans25/26 own final cross-navigation lifetime and single-notice closure; this shard does not claim that UI work is implemented."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=reveal_in_file_manager"
       },
       "mutationKey": {
         "readOnly": true,
@@ -577,6 +631,12 @@
         ],
         "payload": "App.tsx Files open/open-containing-folder actions call api.ts and catch into setError.",
         "terminalNoticeOwner": "Existing initiating App/editor callback owns completion/errors; query/validation results remain view-scoped. Plans25/26 own final cross-navigation lifetime and single-notice closure; this shard does not claim that UI work is implemented."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=open_in_file_manager"
       },
       "mutationKey": {
         "readOnly": true,
@@ -627,6 +687,12 @@
         ],
         "payload": "EditorPane.tsx 500ms debounced validation owns cancellation-scoped schemaReport; api.ts returns VaultSchemaReport including valid=false as fulfilled validation data.",
         "terminalNoticeOwner": "Existing initiating App/editor callback owns completion/errors; query/validation results remain view-scoped. Plans25/26 own final cross-navigation lifetime and single-notice closure; this shard does not claim that UI work is implemented."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=vault_validate_note"
       },
       "mutationKey": {
         "readOnly": true,

@@ -49,6 +49,12 @@
         "terminalNoticeOwner": "existing runBackendProgressOperation and Skills operation progress surface",
         "retry": "manual only; wrapper failure tests assert exactly one invocation",
         "lifetime": "started Rust blocking closure owns AppHandle and progress ID until settlement; frontend screen-survival changes belong to 08-02"
+      ,
+        "classifier": "built-in SyncAllOutcome classifier in startSkillOperation (success/skipped/failed with stale detection)",
+        "successRetention": "SkillOperation.result retains the payload; component refresh is viewScope.request-guarded; optimistic removal guarded by captured isCurrent() closure",
+        "failureReasons": "explicit classify reason strings (per-item failure messages joined); built-in path merges syncAllComplete summary with per-source errors and detects skills_source_stale",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=skills_sync_source"
       },
       "evidence": {
         "nativeArtifact": "test-results/native-e2e/phase08-01-skills-sync.json",

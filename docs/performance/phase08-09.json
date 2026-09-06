@@ -35,6 +35,12 @@
         ],
         "payload": "TasksPane load sets rows/loading/errors; Today hooks and dashboard widget loaders consume task rows.",
         "terminalNoticeOwner": "Existing initiating component/hook and existing error surface retain completion ownership. Metadata cancellation remains local; durable workspace-scoped lifetime/terminal notices and stale refresh closure remain Plans25/26. Workers complete independently of UI polling; no new service or final D04 claim."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=scan_task_notes"
       },
       "mutationKey": {
         "readOnly": true,
@@ -93,6 +99,12 @@
         ],
         "payload": "Metadata effects use cancellation before publishing local state; TaskSheet load owns detail completion.",
         "terminalNoticeOwner": "Existing initiating component/hook and existing error surface retain completion ownership. Metadata cancellation remains local; durable workspace-scoped lifetime/terminal notices and stale refresh closure remain Plans25/26. Workers complete independently of UI polling; no new service or final D04 claim."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=read_task_metadata"
       },
       "mutationKey": {
         "readOnly": true,
@@ -153,6 +165,12 @@
         ],
         "payload": "TasksPane createTask awaits create then reload; AgentChatTab handoff owns returned row and local state.",
         "terminalNoticeOwner": "Existing initiating component/hook and existing error surface retain completion ownership. Metadata cancellation remains local; durable workspace-scoped lifetime/terminal notices and stale refresh closure remain Plans25/26. Workers complete independently of UI polling; no new service or final D04 claim."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=create_task_note"
       },
       "mutationKey": {
         "lexicalPaths": [
@@ -217,6 +235,12 @@
         ],
         "payload": "setStatus replaces current row and selection or reports local error.",
         "terminalNoticeOwner": "Existing initiating component/hook and existing error surface retain completion ownership. Metadata cancellation remains local; durable workspace-scoped lifetime/terminal notices and stale refresh closure remain Plans25/26. Workers complete independently of UI polling; no new service or final D04 claim."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=update_task_status"
       },
       "mutationKey": {
         "lexicalPaths": [
@@ -280,6 +304,12 @@
         ],
         "payload": "Exported API wrapper currently has no live component caller; synchronous API remains available.",
         "terminalNoticeOwner": "Existing initiating component/hook and existing error surface retain completion ownership. Metadata cancellation remains local; durable workspace-scoped lifetime/terminal notices and stale refresh closure remain Plans25/26. Workers complete independently of UI polling; no new service or final D04 claim."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=update_task_schedule_fields"
       },
       "mutationKey": {
         "lexicalPaths": [
@@ -345,6 +375,12 @@
         ],
         "payload": "TasksPane updateDetails replaces row and clears editor dirtiness; TaskSheet awaits save callback.",
         "terminalNoticeOwner": "Existing initiating component/hook and existing error surface retain completion ownership. Metadata cancellation remains local; durable workspace-scoped lifetime/terminal notices and stale refresh closure remain Plans25/26. Workers complete independently of UI polling; no new service or final D04 claim."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=update_task_details"
       },
       "mutationKey": {
         "lexicalPaths": [
@@ -408,6 +444,12 @@
         ],
         "payload": "Exported API wrapper currently has no live component caller; synchronous API remains available.",
         "terminalNoticeOwner": "Existing initiating component/hook and existing error surface retain completion ownership. Metadata cancellation remains local; durable workspace-scoped lifetime/terminal notices and stale refresh closure remain Plans25/26. Workers complete independently of UI polling; no new service or final D04 claim."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=move_task_note"
       },
       "mutationKey": {
         "lexicalPaths": [
@@ -473,6 +515,12 @@
         ],
         "payload": "Task AI run completion and TasksRunsPanel audit handling await append before their existing completion handling.",
         "terminalNoticeOwner": "Existing initiating component/hook and existing error surface retain completion ownership. Metadata cancellation remains local; durable workspace-scoped lifetime/terminal notices and stale refresh closure remain Plans25/26. Workers complete independently of UI polling; no new service or final D04 claim."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=append_tasks_log"
       },
       "mutationKey": {
         "lexicalPaths": [
@@ -535,6 +583,12 @@
         ],
         "payload": "Exported API wrapper currently has no live component caller; log read returns newest capped rows.",
         "terminalNoticeOwner": "Existing initiating component/hook and existing error surface retain completion ownership. Metadata cancellation remains local; durable workspace-scoped lifetime/terminal notices and stale refresh closure remain Plans25/26. Workers complete independently of UI polling; no new service or final D04 claim."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=read_tasks_log"
       },
       "mutationKey": {
         "readOnly": true,
@@ -592,6 +646,12 @@
         ],
         "payload": "MeetingsPane refresh at scan call owns rows/loading/error/finally.",
         "terminalNoticeOwner": "Existing initiating component/hook and existing error surface retain completion ownership. Metadata cancellation remains local; durable workspace-scoped lifetime/terminal notices and stale refresh closure remain Plans25/26. Workers complete independently of UI polling; no new service or final D04 claim."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=scan_meeting_notes"
       },
       "mutationKey": {
         "readOnly": true,
@@ -645,6 +705,12 @@
         ],
         "payload": "MeetingsPane metadata effect owns cancellation and metadataLoading.",
         "terminalNoticeOwner": "Existing initiating component/hook and existing error surface retain completion ownership. Metadata cancellation remains local; durable workspace-scoped lifetime/terminal notices and stale refresh closure remain Plans25/26. Workers complete independently of UI polling; no new service or final D04 claim."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=read_meeting_metadata"
       },
       "mutationKey": {
         "readOnly": true,
@@ -698,6 +764,12 @@
         ],
         "payload": "External run preparation awaits guides inside busy try/finally.",
         "terminalNoticeOwner": "Existing initiating component/hook and existing error surface retain completion ownership. Metadata cancellation remains local; durable workspace-scoped lifetime/terminal notices and stale refresh closure remain Plans25/26. Workers complete independently of UI polling; no new service or final D04 claim."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=read_meeting_guides"
       },
       "mutationKey": {
         "readOnly": true,
@@ -751,6 +823,12 @@
         ],
         "payload": "Clear/undo append with catch; followup/retry/writeAuditLine await append inside existing review/run handlers.",
         "terminalNoticeOwner": "Existing initiating component/hook and existing error surface retain completion ownership. Metadata cancellation remains local; durable workspace-scoped lifetime/terminal notices and stale refresh closure remain Plans25/26. Workers complete independently of UI polling; no new service or final D04 claim."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=append_meetings_log"
       },
       "mutationKey": {
         "lexicalPaths": [
@@ -810,6 +888,12 @@
         ],
         "payload": "Activity refresh owns loading/error/finally.",
         "terminalNoticeOwner": "Existing initiating component/hook and existing error surface retain completion ownership. Metadata cancellation remains local; durable workspace-scoped lifetime/terminal notices and stale refresh closure remain Plans25/26. Workers complete independently of UI polling; no new service or final D04 claim."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=read_meetings_log"
       },
       "mutationKey": {
         "readOnly": true,
@@ -864,6 +948,12 @@
         ],
         "payload": "Dashboard useWidgetData Promise.all owns project activity completion and current widget generation.",
         "terminalNoticeOwner": "Existing initiating component/hook and existing error surface retain completion ownership. Metadata cancellation remains local; durable workspace-scoped lifetime/terminal notices and stale refresh closure remain Plans25/26. Workers complete independently of UI polling; no new service or final D04 claim."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=scan_project_activity"
       },
       "mutationKey": {
         "readOnly": true,

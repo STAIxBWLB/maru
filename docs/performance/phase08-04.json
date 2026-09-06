@@ -49,6 +49,12 @@
         "terminalNoticeOwner": "Existing SkillsTab handleDone for skills-env://done or AI mission/run consumer for ai://done and ai://error; no extra notifier",
         "lifetime": "Dedicated worker owns child and stream lifetime after IPC return. Existing screen refresh/notice lifetime closure remains25/26; no app-quit durability claim.",
         "retry": "Manual only; wrapper invokes one domain operation, no replay"
+      ,
+        "classifier": "n/a: read; promise resolution returns data to the caller",
+        "successRetention": "result stored in component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=skills_env_status"
       },
       "evidence": {
         "boundaryCase": "phase08_04::every_environment_wrapper_uses_blocking_worker_and_preserves_join_error invokes every actual owned wrapper, holds work until same-runtime yielded probe succeeds, compares blocking vs invoking thread and asserts contextual panic JoinError",
@@ -111,6 +117,12 @@
         "terminalNoticeOwner": "Existing SkillsTab handleDone for skills-env://done or AI mission/run consumer for ai://done and ai://error; no extra notifier",
         "lifetime": "Dedicated worker owns child and stream lifetime after IPC return. Existing screen refresh/notice lifetime closure remains25/26; no app-quit durability claim.",
         "retry": "Manual only; wrapper invokes one domain operation, no replay"
+      ,
+        "classifier": "skillsEnvStatus re-read after done; failure states render the env status row",
+        "successRetention": "env status state retained in the tab",
+        "failureReasons": "skills-env://error payload and status read failure message",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=skills_env_bootstrap"
       },
       "evidence": {
         "boundaryCase": "phase08_04::every_environment_wrapper_uses_blocking_worker_and_preserves_join_error invokes every actual owned wrapper, holds work until same-runtime yielded probe succeeds, compares blocking vs invoking thread and asserts contextual panic JoinError",
@@ -173,6 +185,12 @@
         "terminalNoticeOwner": "Existing SkillsTab handleDone for skills-env://done or AI mission/run consumer for ai://done and ai://error; no extra notifier",
         "lifetime": "Dedicated worker owns child and stream lifetime after IPC return. Existing screen refresh/notice lifetime closure remains25/26; no app-quit durability claim.",
         "retry": "Manual only; wrapper invokes one domain operation, no replay"
+      ,
+        "classifier": "n/a",
+        "successRetention": "n/a",
+        "failureReasons": "n/a",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=skills_env_repair"
       },
       "evidence": {
         "boundaryCase": "phase08_04::every_environment_wrapper_uses_blocking_worker_and_preserves_join_error invokes every actual owned wrapper, holds work until same-runtime yielded probe succeeds, compares blocking vs invoking thread and asserts contextual panic JoinError",
@@ -228,6 +246,12 @@
         "terminalNoticeOwner": "Existing SkillsTab handleDone for skills-env://done or AI mission/run consumer for ai://done and ai://error; no extra notifier",
         "lifetime": "Dedicated worker owns child and stream lifetime after IPC return. Existing screen refresh/notice lifetime closure remains25/26; no app-quit durability claim.",
         "retry": "Manual only; wrapper invokes one domain operation, no replay"
+      ,
+        "classifier": "n/a: read; promise resolution returns data to the caller",
+        "successRetention": "result stored in component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=skills_runtime_status"
       },
       "evidence": {
         "boundaryCase": "phase08_04::every_dispatch_wrapper_uses_blocking_worker_and_preserves_join_error invokes every actual owned wrapper, holds work until same-runtime yielded probe succeeds, compares blocking vs invoking thread and asserts contextual panic JoinError",
@@ -285,6 +309,12 @@
         "terminalNoticeOwner": "Existing SkillsTab handleDone for skills-env://done or AI mission/run consumer for ai://done and ai://error; no extra notifier",
         "lifetime": "Dedicated worker owns child and stream lifetime after IPC return. Existing screen refresh/notice lifetime closure remains25/26; no app-quit durability claim.",
         "retry": "Manual only; wrapper invokes one domain operation, no replay"
+      ,
+        "classifier": "exit status + structured output parsed in-dialog",
+        "successRetention": "result kept in dialog state until closed",
+        "failureReasons": "IPC error shown in the dialog error region",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=skills_dispatch_compose"
       },
       "evidence": {
         "boundaryCase": "phase08_04::every_dispatch_wrapper_uses_blocking_worker_and_preserves_join_error invokes every actual owned wrapper, holds work until same-runtime yielded probe succeeds, compares blocking vs invoking thread and asserts contextual panic JoinError",
@@ -343,6 +373,12 @@
         "terminalNoticeOwner": "Existing SkillsTab handleDone for skills-env://done or AI mission/run consumer for ai://done and ai://error; no extra notifier",
         "lifetime": "Dedicated worker owns child and stream lifetime after IPC return. Existing screen refresh/notice lifetime closure remains25/26; no app-quit durability claim.",
         "retry": "Manual only; wrapper invokes one domain operation, no replay"
+      ,
+        "classifier": "exit status + structured output parsed in-dialog",
+        "successRetention": "result kept in dialog state until closed",
+        "failureReasons": "IPC error shown in the dialog error region",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=skills_dispatch_terminal"
       },
       "evidence": {
         "boundaryCase": "phase08_04::every_dispatch_wrapper_uses_blocking_worker_and_preserves_join_error invokes every actual owned wrapper, holds work until same-runtime yielded probe succeeds, compares blocking vs invoking thread and asserts contextual panic JoinError",
@@ -406,6 +442,12 @@
         "terminalNoticeOwner": "Existing SkillsTab handleDone for skills-env://done or AI mission/run consumer for ai://done and ai://error; no extra notifier",
         "lifetime": "Dedicated worker owns child and stream lifetime after IPC return. Existing screen refresh/notice lifetime closure remains25/26; no app-quit durability claim.",
         "retry": "Manual only; wrapper invokes one domain operation, no replay"
+      ,
+        "classifier": "mission terminal state from stream/done events; proposal callbacks re-validate caller parents before applying",
+        "successRetention": "mission record retained in the tracked-missions store; per-workspace grouping by origin",
+        "failureReasons": "mission terminal error + log tail; ai://done parse failures surface as mission failure",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=skills_dispatch_background"
       },
       "evidence": {
         "boundaryCase": "phase08_04::every_dispatch_wrapper_uses_blocking_worker_and_preserves_join_error invokes every actual owned wrapper, holds work until same-runtime yielded probe succeeds, compares blocking vs invoking thread and asserts contextual panic JoinError",

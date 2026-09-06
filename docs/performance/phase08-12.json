@@ -45,6 +45,12 @@
         ],
         "payload": "useTodayCalendarSync publishing/notice plus reload/finally owns publish settlement; manual retryItem first reselects then publishes. Selection UI uses the existing Today mutate context; taskCalendarSetSync remains an exported API. Commitment hooks retain cancelled/request identity checks.",
         "terminalNoticeOwner": "Existing initiating owner remains; navigation-safe operation lifetime, fulfilled-payload classification and exactly-one terminal notice remain Plan25/26, not claimed closed here."
+      ,
+        "classifier": "pane-local outcome rendering (RetryOutcome/DrainOutcome counts; TodaySnapshot for mutations)",
+        "successRetention": "snapshot stored in todayContext; successful rows clear their problem state",
+        "failureReasons": "record.error with today_conflict revision handling; reconciliation markers per Plan-12 handoff",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=today_calendar_commitments"
       },
       "evidence": {
         "behaviorCases": [
@@ -109,6 +115,12 @@
         ],
         "payload": "useTodayCalendarSync publishing/notice plus reload/finally owns publish settlement; manual retryItem first reselects then publishes. Selection UI uses the existing Today mutate context; taskCalendarSetSync remains an exported API. Commitment hooks retain cancelled/request identity checks.",
         "terminalNoticeOwner": "Existing initiating owner remains; navigation-safe operation lifetime, fulfilled-payload classification and exactly-one terminal notice remain Plan25/26, not claimed closed here."
+      ,
+        "classifier": "pane-local outcome rendering (RetryOutcome/DrainOutcome counts; TodaySnapshot for mutations)",
+        "successRetention": "snapshot stored in todayContext; successful rows clear their problem state",
+        "failureReasons": "record.error with today_conflict revision handling; reconciliation markers per Plan-12 handoff",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=task_calendar_set_sync"
       },
       "evidence": {
         "behaviorCases": [
@@ -174,6 +186,12 @@
         ],
         "payload": "useTodayCalendarSync publishing/notice plus reload/finally owns publish settlement; manual retryItem first reselects then publishes. Selection UI uses the existing Today mutate context; taskCalendarSetSync remains an exported API. Commitment hooks retain cancelled/request identity checks.",
         "terminalNoticeOwner": "Existing initiating owner remains; navigation-safe operation lifetime, fulfilled-payload classification and exactly-one terminal notice remain Plan25/26, not claimed closed here."
+      ,
+        "classifier": "pane-local outcome rendering (RetryOutcome/DrainOutcome counts; TodaySnapshot for mutations)",
+        "successRetention": "snapshot stored in todayContext; successful rows clear their problem state",
+        "failureReasons": "record.error with today_conflict revision handling; reconciliation markers per Plan-12 handoff",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=today_calendar_publish"
       },
       "evidence": {
         "behaviorCases": [
@@ -239,6 +257,12 @@
         ],
         "payload": "TodaySyncStatus busyRef/busy and try/finally reload own explicit retry/drain settlement; TodayExecute read has cancelled guard. Existing retry and auth-blocked/backoff states remain visible.",
         "terminalNoticeOwner": "Plan26 MUST consume provider_outcome_unknown: and provider_succeeded_local_commit_failed: markers: show 외부 처리 결과 확인 필요 instead of authentication-required, disable normal UI retry while marked, retain successful siblings, and route deliberate reconciliation/verified retry. Backend rejects unknown Upsert without provider ID; known ID can explicitly retry as a patch. Current frontend classification/lifetime remains unfinished until26."
+      ,
+        "classifier": "pane-local outcome rendering (RetryOutcome/DrainOutcome counts; TodaySnapshot for mutations)",
+        "successRetention": "snapshot stored in todayContext; successful rows clear their problem state",
+        "failureReasons": "record.error with today_conflict revision handling; reconciliation markers per Plan-12 handoff",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=task_integrations_drain"
       },
       "evidence": {
         "behaviorCases": [
@@ -303,6 +327,12 @@
         ],
         "payload": "TodaySyncStatus busyRef/busy and try/finally reload own explicit retry/drain settlement; TodayExecute read has cancelled guard. Existing retry and auth-blocked/backoff states remain visible.",
         "terminalNoticeOwner": "Plan26 MUST consume provider_outcome_unknown: and provider_succeeded_local_commit_failed: markers: show 외부 처리 결과 확인 필요 instead of authentication-required, disable normal UI retry while marked, retain successful siblings, and route deliberate reconciliation/verified retry. Backend rejects unknown Upsert without provider ID; known ID can explicitly retry as a patch. Current frontend classification/lifetime remains unfinished until26."
+      ,
+        "classifier": "pane-local outcome rendering (RetryOutcome/DrainOutcome counts; TodaySnapshot for mutations)",
+        "successRetention": "snapshot stored in todayContext; successful rows clear their problem state",
+        "failureReasons": "record.error with today_conflict revision handling; reconciliation markers per Plan-12 handoff",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=task_integrations_retry"
       },
       "evidence": {
         "behaviorCases": [
@@ -363,6 +393,12 @@
         ],
         "payload": "TodaySyncStatus busyRef/busy and try/finally reload own explicit retry/drain settlement; TodayExecute read has cancelled guard. Existing retry and auth-blocked/backoff states remain visible.",
         "terminalNoticeOwner": "Plan26 MUST consume provider_outcome_unknown: and provider_succeeded_local_commit_failed: markers: show 외부 처리 결과 확인 필요 instead of authentication-required, disable normal UI retry while marked, retain successful siblings, and route deliberate reconciliation/verified retry. Backend rejects unknown Upsert without provider ID; known ID can explicitly retry as a patch. Current frontend classification/lifetime remains unfinished until26."
+      ,
+        "classifier": "pane-local outcome rendering (RetryOutcome/DrainOutcome counts; TodaySnapshot for mutations)",
+        "successRetention": "snapshot stored in todayContext; successful rows clear their problem state",
+        "failureReasons": "record.error with today_conflict revision handling; reconciliation markers per Plan-12 handoff",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=read_task_integrations"
       },
       "evidence": {
         "behaviorCases": [
@@ -428,6 +464,12 @@
         ],
         "payload": "TodaySyncStatus load owns scan/import preview; busyRef/busy and try/finally reload own repair/apply/import mutation settlement. Existing row reasons and successful siblings remain.",
         "terminalNoticeOwner": "Existing initiating owner remains; navigation-safe operation lifetime, fulfilled-payload classification and exactly-one terminal notice remain Plan25/26, not claimed closed here."
+      ,
+        "classifier": "pane-local outcome rendering (RetryOutcome/DrainOutcome counts; TodaySnapshot for mutations)",
+        "successRetention": "snapshot stored in todayContext; successful rows clear their problem state",
+        "failureReasons": "record.error with today_conflict revision handling; reconciliation markers per Plan-12 handoff",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=web_action_repair_task_list_linkage"
       },
       "evidence": {
         "behaviorCases": [
@@ -487,6 +529,12 @@
         ],
         "payload": "TodaySyncStatus load owns scan/import preview; busyRef/busy and try/finally reload own repair/apply/import mutation settlement. Existing row reasons and successful siblings remain.",
         "terminalNoticeOwner": "Existing initiating owner remains; navigation-safe operation lifetime, fulfilled-payload classification and exactly-one terminal notice remain Plan25/26, not claimed closed here."
+      ,
+        "classifier": "pane-local outcome rendering (RetryOutcome/DrainOutcome counts; TodaySnapshot for mutations)",
+        "successRetention": "snapshot stored in todayContext; successful rows clear their problem state",
+        "failureReasons": "record.error with today_conflict revision handling; reconciliation markers per Plan-12 handoff",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=web_actions_import_top"
       },
       "evidence": {
         "behaviorCases": [
@@ -543,6 +591,12 @@
         ],
         "payload": "TodaySyncStatus load owns scan/import preview; busyRef/busy and try/finally reload own repair/apply/import mutation settlement. Existing row reasons and successful siblings remain.",
         "terminalNoticeOwner": "Existing initiating owner remains; navigation-safe operation lifetime, fulfilled-payload classification and exactly-one terminal notice remain Plan25/26, not claimed closed here."
+      ,
+        "classifier": "pane-local outcome rendering (RetryOutcome/DrainOutcome counts; TodaySnapshot for mutations)",
+        "successRetention": "snapshot stored in todayContext; successful rows clear their problem state",
+        "failureReasons": "record.error with today_conflict revision handling; reconciliation markers per Plan-12 handoff",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=web_actions_scan"
       },
       "evidence": {
         "behaviorCases": [
@@ -603,6 +657,12 @@
         ],
         "payload": "TodaySyncStatus load owns scan/import preview; busyRef/busy and try/finally reload own repair/apply/import mutation settlement. Existing row reasons and successful siblings remain.",
         "terminalNoticeOwner": "Existing initiating owner remains; navigation-safe operation lifetime, fulfilled-payload classification and exactly-one terminal notice remain Plan25/26, not claimed closed here."
+      ,
+        "classifier": "pane-local outcome rendering (RetryOutcome/DrainOutcome counts; TodaySnapshot for mutations)",
+        "successRetention": "snapshot stored in todayContext; successful rows clear their problem state",
+        "failureReasons": "record.error with today_conflict revision handling; reconciliation markers per Plan-12 handoff",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=web_actions_apply"
       },
       "evidence": {
         "behaviorCases": [
@@ -658,6 +718,12 @@
         ],
         "payload": "EvidenceBinderPane loadSeq/mutationSeq guard response publication; savingRef, optimistic rollback, revision-conflict reload and undo/finally own mutation completion.",
         "terminalNoticeOwner": "Existing initiating owner remains; navigation-safe operation lifetime, fulfilled-payload classification and exactly-one terminal notice remain Plan25/26, not claimed closed here."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=evidence_binder_read"
       },
       "evidence": {
         "behaviorCases": [
@@ -721,6 +787,12 @@
         ],
         "payload": "EvidenceBinderPane loadSeq/mutationSeq guard response publication; savingRef, optimistic rollback, revision-conflict reload and undo/finally own mutation completion.",
         "terminalNoticeOwner": "Existing initiating owner remains; navigation-safe operation lifetime, fulfilled-payload classification and exactly-one terminal notice remain Plan25/26, not claimed closed here."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=evidence_binder_mutate"
       },
       "evidence": {
         "behaviorCases": [

@@ -41,6 +41,12 @@
         ],
         "payload": "prepareHtmlEditorAssets (src/lib/api.ts:3670) invokes prepare_html_editor_assets with vaultPath and documentPath; the HTML editor surface keeps owning the asset-preparation flow regardless of screen changes.",
         "terminalNoticeOwner": "The HTML editor surface that calls this api.ts helper owns busy state, the returned document directory and error toasts. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=prepare_html_editor_assets"
       },
       "evidence": {
         "behaviorCases": [
@@ -92,6 +98,12 @@
         ],
         "payload": "browserPasskeyStatus (src/lib/browserPasskeys.ts:35) invokes browser_passkey_status; the passkey settings surface keeps owning the status display flow regardless of screen changes.",
         "terminalNoticeOwner": "The browser passkey settings surface that calls this helper owns busy state, the returned status and error toasts. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=browser_passkey_status"
       },
       "evidence": {
         "behaviorCases": [
@@ -143,6 +155,12 @@
         ],
         "payload": "browserPasskeyRequestAuthorization (src/lib/browserPasskeys.ts:56) invokes browser_passkey_request_authorization; the passkey settings surface keeps owning the authorization prompt flow regardless of screen changes.",
         "terminalNoticeOwner": "The browser passkey settings surface that calls this helper owns busy state, the returned status and error toasts, including the already-in-progress rejection. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=browser_passkey_request_authorization"
       },
       "evidence": {
         "behaviorCases": [
@@ -194,6 +212,12 @@
         ],
         "payload": "openSiteView (src/lib/siteView.ts:71) invokes site_view_open with tabId, url and bounds; the Sites surface keeps owning the tab lifecycle flow regardless of screen changes.",
         "terminalNoticeOwner": "The Sites surface that calls this helper owns busy state, tab display and error toasts. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=site_view_open"
       },
       "evidence": {
         "behaviorCases": [
@@ -244,6 +268,12 @@
         ],
         "payload": "navigateSiteView (src/lib/siteView.ts:82) invokes site_view_navigate with tabId and url; the Sites surface keeps owning the tab lifecycle flow regardless of screen changes.",
         "terminalNoticeOwner": "The Sites surface that calls this helper owns busy state, tab display and error toasts. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=site_view_navigate"
       },
       "evidence": {
         "behaviorCases": [
@@ -296,6 +326,12 @@
         ],
         "payload": "setSiteViewBounds (src/lib/siteView.ts:91) invokes site_view_set_bounds with tabId and bounds; the Sites surface keeps owning the tab lifecycle flow regardless of screen changes.",
         "terminalNoticeOwner": "The Sites surface that calls this helper owns busy state, tab display and error toasts. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=site_view_set_bounds"
       },
       "evidence": {
         "behaviorCases": [
@@ -348,6 +384,12 @@
         ],
         "payload": "showSiteView (src/lib/siteView.ts:102) invokes site_view_show with tabId; the Sites surface keeps owning the tab lifecycle flow regardless of screen changes.",
         "terminalNoticeOwner": "The Sites surface that calls this helper owns busy state, tab display and error toasts. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=site_view_show"
       },
       "evidence": {
         "behaviorCases": [
@@ -400,6 +442,12 @@
         ],
         "payload": "hideSiteView (src/lib/siteView.ts:119) invokes site_view_hide; the Sites surface keeps owning the tab lifecycle flow regardless of screen changes.",
         "terminalNoticeOwner": "The Sites surface that calls this helper owns busy state, tab display and error toasts. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=site_view_hide"
       },
       "evidence": {
         "behaviorCases": [
@@ -452,6 +500,12 @@
         ],
         "payload": "closeSiteView (src/lib/siteView.ts:129) invokes site_view_close with tabId; the Sites surface keeps owning the tab lifecycle flow regardless of screen changes.",
         "terminalNoticeOwner": "The Sites surface that calls this helper owns busy state, tab display and error toasts. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=site_view_close"
       },
       "evidence": {
         "behaviorCases": [
@@ -504,6 +558,12 @@
         ],
         "payload": "closeAllSiteViews (src/lib/siteView.ts:136) invokes site_view_close_all; the Sites surface keeps owning the tab lifecycle flow regardless of screen changes.",
         "terminalNoticeOwner": "The Sites surface that calls this helper owns busy state, tab display and error toasts. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=site_view_close_all"
       },
       "evidence": {
         "behaviorCases": [
@@ -556,6 +616,12 @@
         ],
         "payload": "reloadSiteView (src/lib/siteView.ts:141) invokes site_view_reload with tabId; the Sites surface keeps owning the tab lifecycle flow regardless of screen changes.",
         "terminalNoticeOwner": "The Sites surface that calls this helper owns busy state, tab display and error toasts. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=site_view_reload"
       },
       "evidence": {
         "behaviorCases": [
@@ -608,6 +674,12 @@
         ],
         "payload": "siteViewBack (src/lib/siteView.ts:146) invokes site_view_back with tabId; the Sites surface keeps owning the tab lifecycle flow regardless of screen changes.",
         "terminalNoticeOwner": "The Sites surface that calls this helper owns busy state, tab display and error toasts. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=site_view_back"
       },
       "evidence": {
         "behaviorCases": [
@@ -660,6 +732,12 @@
         ],
         "payload": "siteViewForward (src/lib/siteView.ts:151) invokes site_view_forward with tabId; the Sites surface keeps owning the tab lifecycle flow regardless of screen changes.",
         "terminalNoticeOwner": "The Sites surface that calls this helper owns busy state, tab display and error toasts. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=site_view_forward"
       },
       "evidence": {
         "behaviorCases": [
@@ -713,6 +791,12 @@
         ],
         "payload": "openSiteViewExternal (src/lib/siteView.ts:159) invokes site_view_open_external with url; the Sites surface keeps owning the external-open flow regardless of screen changes.",
         "terminalNoticeOwner": "The Sites surface that calls this helper owns busy state and error toasts. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=site_view_open_external"
       },
       "evidence": {
         "behaviorCases": [
@@ -764,6 +848,12 @@
         ],
         "payload": "openSiteViewInSafari (src/lib/siteView.ts:169) invokes site_view_open_safari with url; the Sites surface keeps owning the Safari-open flow regardless of screen changes.",
         "terminalNoticeOwner": "The Sites surface that calls this helper owns busy state and error toasts. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=site_view_open_safari"
       },
       "evidence": {
         "behaviorCases": [
@@ -815,6 +905,12 @@
         ],
         "payload": "takeOpenedSiteUrls (src/lib/siteView.ts:174) invokes site_view_take_opened_urls and receives the drained URL list; the Sites surface keeps owning the opened-URL handoff flow regardless of screen changes.",
         "terminalNoticeOwner": "The Sites surface that calls this helper owns the drained-list consumption and error toasts. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=site_view_take_opened_urls"
       },
       "evidence": {
         "behaviorCases": [
@@ -866,6 +962,12 @@
         ],
         "payload": "notifyNewDay (src/lib/today.ts:617) invokes today_notify_new_day with the work path, logical day and optional title/body; the Today surface keeps owning the new-day notification flow regardless of screen changes.",
         "terminalNoticeOwner": "The Today surface that calls this helper owns busy state, the sent/permission outcome display and error toasts. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "pane-local outcome rendering (RetryOutcome/DrainOutcome counts; TodaySnapshot for mutations)",
+        "successRetention": "snapshot stored in todayContext; successful rows clear their problem state",
+        "failureReasons": "record.error with today_conflict revision handling; reconciliation markers per Plan-12 handoff",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=today_notify_new_day"
       },
       "evidence": {
         "behaviorCases": [
@@ -917,6 +1019,12 @@
         ],
         "payload": "prepareApproval (src/lib/api.ts:939) invokes prepare_approval with kind, summary, target and payloadPreview; the approval-gated surfaces keep owning the prompt flow regardless of screen changes.",
         "terminalNoticeOwner": "The approval-gated surfaces that call this api.ts helper own busy state, the returned request display and error toasts. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=prepare_approval"
       },
       "evidence": {
         "behaviorCases": [
@@ -969,6 +1077,12 @@
         ],
         "payload": "recordApproval (src/lib/api.ts:962) invokes record_approval with id, decision and rememberKind; the approval-gated surfaces keep owning the decision flow regardless of screen changes.",
         "terminalNoticeOwner": "The approval-gated surfaces that call this api.ts helper own busy state, the recorded-request display and error toasts. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=record_approval"
       },
       "evidence": {
         "behaviorCases": [
@@ -1021,6 +1135,12 @@
         ],
         "payload": "parseKoreanDate (src/lib/koreanDate.ts:34) invokes parse_korean_date_cmd with the trimmed input and the current clock as RFC3339; the scheduling and editor surfaces keep owning the parse flow regardless of screen changes.",
         "terminalNoticeOwner": "The scheduling and editor surfaces that call this helper own busy state, the parsed-date display and error toasts. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=parse_korean_date_cmd"
       },
       "evidence": {
         "behaviorCases": [
@@ -1072,6 +1192,12 @@
         ],
         "payload": "gaejosikLint (src/lib/studio.ts:402) invokes gaejosik_lint with the markdown text and dismissed ids; the Studio lint surface keeps owning the lint flow regardless of screen changes.",
         "terminalNoticeOwner": "The Studio lint surface that calls this helper owns busy state, the issue-list display and error toasts. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=gaejosik_lint"
       },
       "evidence": {
         "behaviorCases": [

@@ -113,6 +113,12 @@
         "lifetime": "operation promise and progress listener belong to the workspace/source-keyed module store, not a component subscription; late registration is disposed and listener setup failure does not suppress mutation settlement",
         "viewPublication": "SkillsTab subscribes to initiating workspace progress; createSkillViewScope guards refresh responses with workspace, monotonic view generation and request sequence, including A -> B -> A",
         "retry": "manual explicit action only; duplicate source/batch starts return the existing promise; busy batch sources are skipped while independent work proceeds"
+      ,
+        "classifier": "built-in SyncAllOutcome classifier in startSkillOperation",
+        "successRetention": "SkillOperation.result retains the payload; component refresh is viewScope.request-guarded; optimistic removal guarded by captured isCurrent() closure",
+        "failureReasons": "explicit classify reason strings (per-item failure messages joined); built-in path merges syncAllComplete summary with per-source errors and detects skills_source_stale",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=skills_sync_all_sources"
       },
       "evidence": {
         "batchCases": [

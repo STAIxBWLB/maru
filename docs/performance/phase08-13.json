@@ -42,6 +42,12 @@
         ],
         "payload": "vaultGraphRead and GraphView loadOverlay own refreshing, enrichment and failure hint. overlayRequestRef prevents superseded publication; missing report degrades to live graph.",
         "terminalNoticeOwner": "Existing initiating UI owner is recorded here. Navigation-safe completion lifetime, fulfilled-payload classification and exactly-one terminal notice remain Plan25/26 work; this shard does not claim that frontend contract is complete."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=vault_graph_read"
       },
       "evidence": {
         "behaviorCases": [
@@ -92,6 +98,12 @@
         ],
         "payload": "vaultGraphRoot feeds nestedVault selection; GraphModeAdapter effect guards stale completion with cancelled and keeps existing workspace fallback on null/error.",
         "terminalNoticeOwner": "Existing initiating UI owner is recorded here. Navigation-safe completion lifetime, fulfilled-payload classification and exactly-one terminal notice remain Plan25/26 work; this shard does not claim that frontend contract is complete."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=vault_graph_root"
       },
       "evidence": {
         "behaviorCases": [
@@ -143,6 +155,12 @@
         ],
         "payload": "vaultGraphLayoutRead catches read failure as null. GraphView effect owns sanitized seeds, pinned ids and layoutCacheReady with cancelled guard.",
         "terminalNoticeOwner": "Existing initiating UI owner is recorded here. Navigation-safe completion lifetime, fulfilled-payload classification and exactly-one terminal notice remain Plan25/26 work; this shard does not claim that frontend contract is complete."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=vault_graph_layout_read"
       },
       "evidence": {
         "behaviorCases": [
@@ -198,6 +216,12 @@
         ],
         "payload": "GraphView debounced complete-node-set save is fire-and-forget after node identity/finite coordinate checks. vaultGraphLayoutSave deliberately swallows disposable-cache failures; no visible terminal notice exists.",
         "terminalNoticeOwner": "Existing initiating UI owner is recorded here. Navigation-safe completion lifetime, fulfilled-payload classification and exactly-one terminal notice remain Plan25/26 work; this shard does not claim that frontend contract is complete."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=vault_graph_layout_save"
       },
       "evidence": {
         "behaviorCases": [
@@ -258,6 +282,12 @@
         ],
         "payload": "kgDocumentRefs callers in App own graph focus and highlight. Focus request verifies request/owner/tab/editor identities before publication or panel opening; highlight toggle directly sets highlight. Failures use App setError; highlight lifetime still needs Plan25/26 review.",
         "terminalNoticeOwner": "Existing initiating UI owner is recorded here. Navigation-safe completion lifetime, fulfilled-payload classification and exactly-one terminal notice remain Plan25/26 work; this shard does not claim that frontend contract is complete."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=kg_document_refs"
       },
       "evidence": {
         "behaviorCases": [
@@ -314,6 +344,12 @@
         ],
         "payload": "kgRefsClear is an exported API returning removal count. Current source search found no production UI invocation, so no initiating UI notice owner exists for this API.",
         "terminalNoticeOwner": "Existing initiating UI owner is recorded here. Navigation-safe completion lifetime, fulfilled-payload classification and exactly-one terminal notice remain Plan25/26 work; this shard does not claim that frontend contract is complete."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=kg_refs_clear"
       },
       "evidence": {
         "behaviorCases": [
@@ -372,6 +408,12 @@
         ],
         "payload": "GraphRelationReviewDialog effect owns proposal/loading/error, guards stale result with cancelled, and requires user review before Apply.",
         "terminalNoticeOwner": "Existing initiating UI owner is recorded here. Navigation-safe completion lifetime, fulfilled-payload classification and exactly-one terminal notice remain Plan25/26 work; this shard does not claim that frontend contract is complete."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=graph_link_preview"
       },
       "evidence": {
         "behaviorCases": [
@@ -433,6 +475,12 @@
         ],
         "payload": "Dialog apply owns applying/error; success calls onApplied and closes dialog, failure preserves dialog and shows String reason, finally clears applying. Returned documents are not separately classified or retained by this caller.",
         "terminalNoticeOwner": "Existing initiating UI owner is recorded here. Navigation-safe completion lifetime, fulfilled-payload classification and exactly-one terminal notice remain Plan25/26 work; this shard does not claim that frontend contract is complete."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=graph_link_apply"
       },
       "evidence": {
         "behaviorCases": [
@@ -496,6 +544,12 @@
         ],
         "payload": "CatalogPane refresh owns report/entries/error/loading for initial, watcher and manual refresh. Scan report including warnings is set before query, retaining that successful scan if query fails; no navigation-safe terminal notice yet.",
         "terminalNoticeOwner": "Existing initiating UI owner is recorded here. Navigation-safe completion lifetime, fulfilled-payload classification and exactly-one terminal notice remain Plan25/26 work; this shard does not claim that frontend contract is complete."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=catalog_scan"
       },
       "evidence": {
         "behaviorCases": [
@@ -549,6 +603,12 @@
         ],
         "payload": "CatalogPane refresh publishes query entries after scan, displays failure through error and clears loading in finally. Existing entries remain until a successful replacement.",
         "terminalNoticeOwner": "Existing initiating UI owner is recorded here. Navigation-safe completion lifetime, fulfilled-payload classification and exactly-one terminal notice remain Plan25/26 work; this shard does not claim that frontend contract is complete."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=catalog_query"
       },
       "evidence": {
         "behaviorCases": [
@@ -603,6 +663,12 @@
         ],
         "payload": "DrilldownDialog effect owns data/error/loading with cancelled guard. Missing entry remains empty-success; closing or replacing entry suppresses stale publication.",
         "terminalNoticeOwner": "Existing initiating UI owner is recorded here. Navigation-safe completion lifetime, fulfilled-payload classification and exactly-one terminal notice remain Plan25/26 work; this shard does not claim that frontend contract is complete."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=catalog_drilldown"
       },
       "evidence": {
         "behaviorCases": [

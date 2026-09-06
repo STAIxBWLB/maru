@@ -41,6 +41,12 @@
         ],
         "payload": "readMaruWorkspace (src/lib/maruDir.ts:412) invokes read_maru_workspace with the workspace path; that surface keeps owning the load/save flow regardless of screen changes.",
         "terminalNoticeOwner": "The settings/workspace surfaces that call readMaruWorkspace own busy state, current value display and error toasts for this call. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=read_maru_workspace"
       },
       "evidence": {
         "behaviorCases": [
@@ -92,6 +98,12 @@
         ],
         "payload": "readMaruIgnore (src/lib/maruDir.ts:476) invokes read_maru_ignore with the workspace path; that surface keeps owning the load/save flow regardless of screen changes.",
         "terminalNoticeOwner": "The settings/workspace surfaces that call readMaruIgnore own busy state, current value display and error toasts for this call. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=read_maru_ignore"
       },
       "evidence": {
         "behaviorCases": [
@@ -143,6 +155,12 @@
         ],
         "payload": "listMaruRules (src/lib/maruDir.ts:442) invokes list_maru_rules with the workspace path; that surface keeps owning the load/save flow regardless of screen changes.",
         "terminalNoticeOwner": "The settings/workspace surfaces that call listMaruRules own busy state, current value display and error toasts for this call. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=list_maru_rules"
       },
       "evidence": {
         "behaviorCases": [
@@ -194,6 +212,12 @@
         ],
         "payload": "readMaruRule (src/lib/maruDir.ts:449) invokes read_maru_rule with the workspace path; that surface keeps owning the load/save flow regardless of screen changes.",
         "terminalNoticeOwner": "The settings/workspace surfaces that call readMaruRule own busy state, current value display and error toasts for this call. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=read_maru_rule"
       },
       "evidence": {
         "behaviorCases": [
@@ -245,6 +269,12 @@
         ],
         "payload": "listMaruTemplates (src/lib/maruDir.ts:547) invokes list_maru_templates with the workspace path; that surface keeps owning the load/save flow regardless of screen changes.",
         "terminalNoticeOwner": "The settings/workspace surfaces that call listMaruTemplates own busy state, current value display and error toasts for this call. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=list_maru_templates"
       },
       "evidence": {
         "behaviorCases": [
@@ -296,6 +326,12 @@
         ],
         "payload": "readMaruTemplate (src/lib/maruDir.ts:554) invokes read_maru_template with the workspace path; that surface keeps owning the load/save flow regardless of screen changes.",
         "terminalNoticeOwner": "The settings/workspace surfaces that call readMaruTemplate own busy state, current value display and error toasts for this call. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=read_maru_template"
       },
       "evidence": {
         "behaviorCases": [
@@ -347,6 +383,12 @@
         ],
         "payload": "readMaruMcp (src/lib/maruDir.ts:577) invokes read_maru_mcp with the workspace path; that surface keeps owning the load/save flow regardless of screen changes.",
         "terminalNoticeOwner": "The settings/workspace surfaces that call readMaruMcp own busy state, current value display and error toasts for this call. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=read_maru_mcp"
       },
       "evidence": {
         "behaviorCases": [
@@ -398,6 +440,12 @@
         ],
         "payload": "readMaruProjects (src/lib/maruDir.ts:587) invokes read_maru_projects with the workspace path; that surface keeps owning the load/save flow regardless of screen changes.",
         "terminalNoticeOwner": "The settings/workspace surfaces that call readMaruProjects own busy state, current value display and error toasts for this call. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=read_maru_projects"
       },
       "evidence": {
         "behaviorCases": [
@@ -449,6 +497,12 @@
         ],
         "payload": "listWorkspaceProjects (src/lib/maruDir.ts:604) invokes list_workspace_projects with the workspace path; that surface keeps owning the load/save flow regardless of screen changes.",
         "terminalNoticeOwner": "The settings/workspace surfaces that call listWorkspaceProjects own busy state, current value display and error toasts for this call. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=list_workspace_projects"
       },
       "evidence": {
         "behaviorCases": [
@@ -500,6 +554,12 @@
         ],
         "payload": "readMaruSkills (src/lib/maruDir.ts:617) invokes read_maru_skills with the workspace path; that surface keeps owning the load/save flow regardless of screen changes.",
         "terminalNoticeOwner": "The settings/workspace surfaces that call readMaruSkills own busy state, current value display and error toasts for this call. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a",
+        "successRetention": "n/a",
+        "failureReasons": "n/a",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=read_maru_skills"
       },
       "evidence": {
         "behaviorCases": [
@@ -560,6 +620,12 @@
         ],
         "payload": "updateMaruWorkspace (src/lib/maruDir.ts:432) invokes update_maru_workspace with the workspace path; that surface keeps owning the load/save flow regardless of screen changes.",
         "terminalNoticeOwner": "The settings/workspace surfaces that call updateMaruWorkspace own busy state, current value display and error toasts for this call. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=update_maru_workspace"
       },
       "evidence": {
         "behaviorCases": [
@@ -623,6 +689,12 @@
         ],
         "payload": "bootstrapMaruDir (src/lib/maruDir.ts:405) invokes bootstrap_maru_dir with the workspace path; that surface keeps owning the load/save flow regardless of screen changes.",
         "terminalNoticeOwner": "The settings/workspace surfaces that call bootstrapMaruDir own busy state, current value display and error toasts for this call. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=bootstrap_maru_dir"
       },
       "evidence": {
         "behaviorCases": [
@@ -685,6 +757,12 @@
         ],
         "payload": "saveMaruRule (src/lib/maruDir.ts:460) invokes save_maru_rule with the workspace path; that surface keeps owning the load/save flow regardless of screen changes.",
         "terminalNoticeOwner": "The settings/workspace surfaces that call saveMaruRule own busy state, current value display and error toasts for this call. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=save_maru_rule"
       },
       "evidence": {
         "behaviorCases": [
@@ -748,6 +826,12 @@
         ],
         "payload": "deleteMaruRule (src/lib/maruDir.ts:540) invokes delete_maru_rule with the workspace path; that surface keeps owning the load/save flow regardless of screen changes.",
         "terminalNoticeOwner": "The settings/workspace surfaces that call deleteMaruRule own busy state, current value display and error toasts for this call. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=delete_maru_rule"
       },
       "evidence": {
         "behaviorCases": [
@@ -810,6 +894,12 @@
         ],
         "payload": "saveMaruTemplate (src/lib/maruDir.ts:565) invokes save_maru_template with the workspace path; that surface keeps owning the load/save flow regardless of screen changes.",
         "terminalNoticeOwner": "The settings/workspace surfaces that call saveMaruTemplate own busy state, current value display and error toasts for this call. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=save_maru_template"
       },
       "evidence": {
         "behaviorCases": [
@@ -872,6 +962,12 @@
         ],
         "payload": "deleteMaruTemplate (src/lib/maruDir.ts:570) invokes delete_maru_template with the workspace path; that surface keeps owning the load/save flow regardless of screen changes.",
         "terminalNoticeOwner": "The settings/workspace surfaces that call deleteMaruTemplate own busy state, current value display and error toasts for this call. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=delete_maru_template"
       },
       "evidence": {
         "behaviorCases": [
@@ -934,6 +1030,12 @@
         ],
         "payload": "saveMaruMcp (src/lib/maruDir.ts:582) invokes save_maru_mcp with the workspace path; that surface keeps owning the load/save flow regardless of screen changes.",
         "terminalNoticeOwner": "The settings/workspace surfaces that call saveMaruMcp own busy state, current value display and error toasts for this call. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=save_maru_mcp"
       },
       "evidence": {
         "behaviorCases": [
@@ -996,6 +1098,12 @@
         ],
         "payload": "saveMaruProjects (src/lib/maruDir.ts:612) invokes save_maru_projects with the workspace path; that surface keeps owning the load/save flow regardless of screen changes.",
         "terminalNoticeOwner": "The settings/workspace surfaces that call saveMaruProjects own busy state, current value display and error toasts for this call. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=save_maru_projects"
       },
       "evidence": {
         "behaviorCases": [
@@ -1056,6 +1164,12 @@
         ],
         "payload": "saveMaruIgnore (src/lib/maruDir.ts:486) invokes save_maru_ignore with the workspace path and pattern list; the settings surface keeps owning that save flow regardless of screen changes.",
         "terminalNoticeOwner": "The settings/workspace surfaces that call saveMaruIgnore own busy state, current value display and error toasts for this call. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=save_maru_ignore"
       },
       "evidence": {
         "behaviorCases": [
@@ -1119,6 +1233,12 @@
         ],
         "payload": "saveMaruSettings (src/lib/maruDir.ts:704) invokes save_maru_settings with the workspace path, merged value and optional base value for revision checking; the settings surface keeps owning that flow regardless of screen changes.",
         "terminalNoticeOwner": "The settings/workspace surfaces that call saveMaruSettings own busy state, current value display and error toasts for this call. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=save_maru_settings"
       },
       "evidence": {
         "behaviorCases": [
@@ -1184,6 +1304,12 @@
         ],
         "payload": "readMaruSettings (src/lib/maruDir.ts:676) invokes read_maru_settings with the workspace path; the settings surface keeps owning that flow regardless of screen changes.",
         "terminalNoticeOwner": "The settings/workspace surfaces that call readMaruSettings own busy state, current value display and error toasts for this call. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=read_maru_settings"
       },
       "evidence": {
         "behaviorCases": [
@@ -1246,6 +1372,12 @@
         ],
         "payload": "listWorkspaceRoots (src/lib/api.ts:1233) invokes list_workspace_roots; the workspace-registry surface keeps owning that flow regardless of screen changes.",
         "terminalNoticeOwner": "The workspace-registry settings surface that calls listWorkspaceRoots owns busy state, current registry display and error toasts for this call. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=list_workspace_roots"
       },
       "evidence": {
         "behaviorCases": [
@@ -1307,6 +1439,12 @@
         ],
         "payload": "addWorkspaceRoot (src/lib/api.ts:1240) invokes add_workspace_root with the root entry; the workspace-registry surface keeps owning that flow regardless of screen changes.",
         "terminalNoticeOwner": "The workspace-registry settings surface that calls addWorkspaceRoot owns busy state, current registry display and error toasts for this call. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=add_workspace_root"
       },
       "evidence": {
         "behaviorCases": [
@@ -1367,6 +1505,12 @@
         ],
         "payload": "refreshWorkspaceCapabilities (src/lib/api.ts:1258) invokes refresh_workspace_capabilities with the root path; the workspace-registry surface keeps owning that flow regardless of screen changes.",
         "terminalNoticeOwner": "The workspace-registry settings surface that calls refreshWorkspaceCapabilities owns busy state, current registry display and error toasts for this call. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=refresh_workspace_capabilities"
       },
       "evidence": {
         "behaviorCases": [
@@ -1427,6 +1571,12 @@
         ],
         "payload": "removeWorkspaceRoot (src/lib/api.ts:1245) invokes remove_workspace_root with the root path; the workspace-registry surface keeps owning that flow regardless of screen changes.",
         "terminalNoticeOwner": "The workspace-registry settings surface that calls removeWorkspaceRoot owns busy state, current registry display and error toasts for this call. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=remove_workspace_root"
       },
       "evidence": {
         "behaviorCases": [
@@ -1487,6 +1637,12 @@
         ],
         "payload": "setActiveWorkspaceRoot (src/lib/api.ts:1253) invokes set_active_workspace_root with the root path and visibility; the workspace-registry surface keeps owning that flow regardless of screen changes.",
         "terminalNoticeOwner": "The workspace-registry settings surface that calls setActiveWorkspaceRoot owns busy state, current registry display and error toasts for this call. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=set_active_workspace_root"
       },
       "evidence": {
         "behaviorCases": [
@@ -1540,6 +1696,12 @@
         ],
         "payload": "detectWorkspace (src/lib/maruDir.ts:184) invokes detect_workspace with the picked directory path during workspace onboarding; the onboarding flow keeps owning that probe regardless of screen changes.",
         "terminalNoticeOwner": "The workspace onboarding flow that calls detectWorkspace owns busy state and error toasts for this probe. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=detect_workspace"
       },
       "evidence": {
         "behaviorCases": [
@@ -1591,6 +1753,12 @@
         ],
         "payload": "readWorkspaceConfig (src/lib/maruDir.ts:191) invokes read_workspace_config with the detected work path during workspace onboarding; the onboarding flow keeps owning that load regardless of screen changes.",
         "terminalNoticeOwner": "The workspace onboarding flow that calls readWorkspaceConfig owns busy state and error toasts for this load. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=read_workspace_config"
       },
       "evidence": {
         "behaviorCases": [
@@ -1653,6 +1821,12 @@
         ],
         "payload": "registerWorkspaceRoots (src/lib/maruDir.ts:285) invokes register_workspace_roots with the picked config directory during workspace onboarding; the onboarding flow keeps owning that registration regardless of screen changes.",
         "terminalNoticeOwner": "The workspace onboarding flow that calls registerWorkspaceRoots owns busy state and error toasts for this registration. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=register_workspace_roots"
       },
       "evidence": {
         "behaviorCases": [
@@ -1713,6 +1887,12 @@
         ],
         "payload": "listWorkspaces (src/lib/maruDir.ts:290) invokes list_workspaces for the workspace settings/diagnostics surfaces; those surfaces keep owning that load regardless of screen changes.",
         "terminalNoticeOwner": "The workspace settings surface that calls listWorkspaces owns busy state and error toasts for this load. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=list_workspaces"
       },
       "evidence": {
         "behaviorCases": [

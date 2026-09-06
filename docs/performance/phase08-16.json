@@ -41,6 +41,12 @@
         ],
         "payload": "The agents settings pane owns the list refresh: it awaits agents_list, renders the merged seed+override rows and surfaces the returned error string on failure.",
         "terminalNoticeOwner": "SkillRunsPanel and the agents settings pane own current completion and error display for these flows. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=agents_list"
       },
       "evidence": {
         "behaviorCases": [
@@ -97,6 +103,12 @@
         ],
         "payload": "The agents settings pane owns the create/edit form: it awaits agents_upsert, applies the returned merged row to local state and surfaces agent_* validation errors inline.",
         "terminalNoticeOwner": "SkillRunsPanel and the agents settings pane own current completion and error display for these flows. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=agents_upsert"
       },
       "evidence": {
         "behaviorCases": [
@@ -155,6 +167,12 @@
         ],
         "payload": "The agents settings pane owns the delete action: it awaits agents_delete, replaces local rows with the returned merged registry and surfaces agent_builtin_not_deletable inline.",
         "terminalNoticeOwner": "SkillRunsPanel and the agents settings pane own current completion and error display for these flows. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=agents_delete"
       },
       "evidence": {
         "behaviorCases": [
@@ -211,6 +229,12 @@
         ],
         "payload": "The agents settings pane owns the reset-to-default action: it awaits agents_reset and replaces the edited row with the returned seed record.",
         "terminalNoticeOwner": "SkillRunsPanel and the agents settings pane own current completion and error display for these flows. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=agents_reset"
       },
       "evidence": {
         "behaviorCases": [
@@ -268,6 +292,12 @@
         ],
         "payload": "startClaude/startAgent own the headless invocation call: they await the wrapper for the immediate ai-* id, keep polling list_ai_missions for completion and surface the terminal error string on failure.",
         "terminalNoticeOwner": "SkillRunsPanel and the agents settings pane own current completion and error display for these flows. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "mission terminal state from stream/done events; proposal callbacks re-validate caller parents before applying",
+        "successRetention": "mission record retained in the tracked-missions store; per-workspace grouping by origin",
+        "failureReasons": "mission terminal error + log tail; ai://done parse failures surface as mission failure",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=start_agent_cli_invocation"
       },
       "evidence": {
         "behaviorCases": [
@@ -325,6 +355,12 @@
         ],
         "payload": "The legacy startClaude call sites own the immediate id and keep polling list_ai_missions for completion; the empty-prompt rejection stays a caller-side form guard.",
         "terminalNoticeOwner": "SkillRunsPanel and the agents settings pane own current completion and error display for these flows. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=start_claude_cli_invocation"
       },
       "evidence": {
         "behaviorCases": [
@@ -376,6 +412,12 @@
         ],
         "payload": "SkillRunsPanel and the mission list consumers own the poll loop: they await list_ai_missions on an interval, diff records by id and render status transitions.",
         "terminalNoticeOwner": "SkillRunsPanel and the agents settings pane own current completion and error display for these flows. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "mission terminal state from stream/done events; proposal callbacks re-validate caller parents before applying",
+        "successRetention": "mission record retained in the tracked-missions store; per-workspace grouping by origin",
+        "failureReasons": "mission terminal error + log tail; ai://done parse failures surface as mission failure",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=list_ai_missions"
       },
       "evidence": {
         "behaviorCases": [
@@ -432,6 +474,12 @@
         ],
         "payload": "SkillRunsPanel owns the stop action: it awaits stop_ai_mission, marks the row stopping and reconciles the final record from the next poll.",
         "terminalNoticeOwner": "SkillRunsPanel and the agents settings pane own current completion and error display for these flows. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "mission terminal state from stream/done events; proposal callbacks re-validate caller parents before applying",
+        "successRetention": "mission record retained in the tracked-missions store; per-workspace grouping by origin",
+        "failureReasons": "mission terminal error + log tail; ai://done parse failures surface as mission failure",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=stop_ai_mission"
       },
       "evidence": {
         "behaviorCases": [
@@ -485,6 +533,12 @@
         ],
         "payload": "SkillRunsPanel owns the log viewer: it awaits read_ai_mission_log with a bounded tail, appends lines to the run transcript and surfaces mission_id_invalid inline.",
         "terminalNoticeOwner": "SkillRunsPanel and the agents settings pane own current completion and error display for these flows. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "mission terminal state from stream/done events; proposal callbacks re-validate caller parents before applying",
+        "successRetention": "mission record retained in the tracked-missions store; per-workspace grouping by origin",
+        "failureReasons": "mission terminal error + log tail; ai://done parse failures surface as mission failure",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=read_ai_mission_log"
       },
       "evidence": {
         "behaviorCases": [
@@ -536,6 +590,12 @@
         ],
         "payload": "The skill run review flow owns the parse call: it awaits agent_parse_skill_proposal on the raw model output and surfaces skill_proposal_* parse errors before apply is offered.",
         "terminalNoticeOwner": "SkillRunsPanel and the agents settings pane own current completion and error display for these flows. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "proposal parse result (agent_parse_skill_proposal) or approval outcome (agent_apply_skill_proposal)",
+        "successRetention": "proposal/summary retained in panel state until applied or dismissed",
+        "failureReasons": "parse/apply error message in the panel",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=agent_parse_skill_proposal"
       },
       "evidence": {
         "behaviorCases": [
@@ -595,6 +655,12 @@
         ],
         "payload": "SkillRunsPanel owns the apply action: it awaits agent_apply_skill_proposal with the stored approval id, renders the ProposalApplyReport per-file outcomes and keeps the review transcript on failure.",
         "terminalNoticeOwner": "SkillRunsPanel and the agents settings pane own current completion and error display for these flows. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "proposal parse result (agent_parse_skill_proposal) or approval outcome (agent_apply_skill_proposal)",
+        "successRetention": "proposal/summary retained in panel state until applied or dismissed",
+        "failureReasons": "parse/apply error message in the panel",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=agent_apply_skill_proposal"
       },
       "evidence": {
         "behaviorCases": [
@@ -656,6 +722,12 @@
         ],
         "payload": "SkillRunsPanel owns the structured-run action: it awaits agent_run_structured_loop for the immediate run id, then follows run events (proposal.created, run.completed) through the existing review transcript.",
         "terminalNoticeOwner": "SkillRunsPanel and the agents settings pane own current completion and error display for these flows. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "exit status + structured output parsed in-dialog",
+        "successRetention": "result kept in dialog state until closed",
+        "failureReasons": "IPC error shown in the dialog error region",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=agent_run_structured_loop"
       },
       "evidence": {
         "behaviorCases": [

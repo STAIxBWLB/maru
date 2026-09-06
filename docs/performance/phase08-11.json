@@ -48,6 +48,12 @@
         ],
         "payload": "TodayPane reload owns loading/error and identity-checked snapshot; dashboard hook and App quick-create own their existing read result completion.",
         "terminalNoticeOwner": "Existing initiating owner and notices remain unchanged. Shared navigation-safe lifetime, fulfilled-payload classification and exactly-one terminal notice closure are Plan25/26 responsibilities; this shard only records current ownership."
+      ,
+        "classifier": "pane-local outcome rendering (RetryOutcome/DrainOutcome counts; TodaySnapshot for mutations)",
+        "successRetention": "snapshot stored in todayContext; successful rows clear their problem state",
+        "failureReasons": "record.error with today_conflict revision handling; reconciliation markers per Plan-12 handoff",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=today_open"
       },
       "evidence": {
         "behaviorCases": [
@@ -111,6 +117,12 @@
         ],
         "payload": "TodayPane applyMutation owns its serialized mutation queue, identity-checked applySnapshot and refresh error; planner generation owns its completion.",
         "terminalNoticeOwner": "Existing initiating owner and notices remain unchanged. Shared navigation-safe lifetime, fulfilled-payload classification and exactly-one terminal notice closure are Plan25/26 responsibilities; this shard only records current ownership."
+      ,
+        "classifier": "pane-local outcome rendering (RetryOutcome/DrainOutcome counts; TodaySnapshot for mutations)",
+        "successRetention": "snapshot stored in todayContext; successful rows clear their problem state",
+        "failureReasons": "record.error with today_conflict revision handling; reconciliation markers per Plan-12 handoff",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=today_mutate"
       },
       "evidence": {
         "behaviorCases": [
@@ -174,6 +186,12 @@
         ],
         "payload": "TodayPane finalizeSetup returns outcome and applies current-identity snapshot/error; useTodayPlanner owns planning/finally and setup completion.",
         "terminalNoticeOwner": "Existing initiating owner and notices remain unchanged. Shared navigation-safe lifetime, fulfilled-payload classification and exactly-one terminal notice closure are Plan25/26 responsibilities; this shard only records current ownership."
+      ,
+        "classifier": "pane-local outcome rendering (RetryOutcome/DrainOutcome counts; TodaySnapshot for mutations)",
+        "successRetention": "snapshot stored in todayContext; successful rows clear their problem state",
+        "failureReasons": "record.error with today_conflict revision handling; reconciliation markers per Plan-12 handoff",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=today_finalize_setup"
       },
       "evidence": {
         "behaviorCases": [
@@ -235,6 +253,12 @@
         ],
         "payload": "Rollover tick owns rolloverInFlight through finally; cancelled/generation checks precede logical-day refresh and existing banner/native notification.",
         "terminalNoticeOwner": "Existing initiating owner and notices remain unchanged. Shared navigation-safe lifetime, fulfilled-payload classification and exactly-one terminal notice closure are Plan25/26 responsibilities; this shard only records current ownership."
+      ,
+        "classifier": "pane-local outcome rendering (RetryOutcome/DrainOutcome counts; TodaySnapshot for mutations)",
+        "successRetention": "snapshot stored in todayContext; successful rows clear their problem state",
+        "failureReasons": "record.error with today_conflict revision handling; reconciliation markers per Plan-12 handoff",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=today_rollover"
       },
       "evidence": {
         "behaviorCases": [
@@ -289,6 +313,12 @@
         ],
         "payload": "Execute and Review effects own event arrays and cancelled refresh guards; transition completion refreshes events.",
         "terminalNoticeOwner": "Existing initiating owner and notices remain unchanged. Shared navigation-safe lifetime, fulfilled-payload classification and exactly-one terminal notice closure are Plan25/26 responsibilities; this shard only records current ownership."
+      ,
+        "classifier": "pane-local outcome rendering (RetryOutcome/DrainOutcome counts; TodaySnapshot for mutations)",
+        "successRetention": "snapshot stored in todayContext; successful rows clear their problem state",
+        "failureReasons": "record.error with today_conflict revision handling; reconciliation markers per Plan-12 handoff",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=read_task_events"
       },
       "evidence": {
         "behaviorCases": [
@@ -343,6 +373,12 @@
         ],
         "payload": "Clock tick owns logical-day read and cancelled check before existing rollover control.",
         "terminalNoticeOwner": "Existing initiating owner and notices remain unchanged. Shared navigation-safe lifetime, fulfilled-payload classification and exactly-one terminal notice closure are Plan25/26 responsibilities; this shard only records current ownership."
+      ,
+        "classifier": "pane-local outcome rendering (RetryOutcome/DrainOutcome counts; TodaySnapshot for mutations)",
+        "successRetention": "snapshot stored in todayContext; successful rows clear their problem state",
+        "failureReasons": "record.error with today_conflict revision handling; reconciliation markers per Plan-12 handoff",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=today_logical_day"
       },
       "evidence": {
         "behaviorCases": [
@@ -399,6 +435,12 @@
         ],
         "payload": "TodayExecute runTransition owns existing notices/conflict handling and task/event refresh; TodayYesterday busyTaskIds wraps each decision through finally.",
         "terminalNoticeOwner": "Existing initiating owner and notices remain unchanged. Shared navigation-safe lifetime, fulfilled-payload classification and exactly-one terminal notice closure are Plan25/26 responsibilities; this shard only records current ownership."
+      ,
+        "classifier": "pane-local outcome rendering (RetryOutcome/DrainOutcome counts; TodaySnapshot for mutations)",
+        "successRetention": "snapshot stored in todayContext; successful rows clear their problem state",
+        "failureReasons": "record.error with today_conflict revision handling; reconciliation markers per Plan-12 handoff",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=task_transition"
       },
       "evidence": {
         "behaviorCases": [
@@ -460,6 +502,12 @@
         ],
         "payload": "Exported taskTrash API currently has no production component consumer; actual command outcome remains a local trash path.",
         "terminalNoticeOwner": "Existing initiating owner and notices remain unchanged. Shared navigation-safe lifetime, fulfilled-payload classification and exactly-one terminal notice closure are Plan25/26 responsibilities; this shard only records current ownership."
+      ,
+        "classifier": "pane-local outcome rendering (RetryOutcome/DrainOutcome counts; TodaySnapshot for mutations)",
+        "successRetention": "snapshot stored in todayContext; successful rows clear their problem state",
+        "failureReasons": "record.error with today_conflict revision handling; reconciliation markers per Plan-12 handoff",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=task_trash"
       },
       "evidence": {
         "behaviorCases": [
@@ -513,6 +561,12 @@
         ],
         "payload": "Exported AI request API is currently unmounted; current UI planner is deterministic and useTodayPlanner owns its existing planning/finally state.",
         "terminalNoticeOwner": "Existing initiating owner and notices remain unchanged. Shared navigation-safe lifetime, fulfilled-payload classification and exactly-one terminal notice closure are Plan25/26 responsibilities; this shard only records current ownership."
+      ,
+        "classifier": "pane-local outcome rendering (RetryOutcome/DrainOutcome counts; TodaySnapshot for mutations)",
+        "successRetention": "snapshot stored in todayContext; successful rows clear their problem state",
+        "failureReasons": "record.error with today_conflict revision handling; reconciliation markers per Plan-12 handoff",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=today_build_plan_request"
       },
       "evidence": {
         "behaviorCases": [
@@ -569,6 +623,12 @@
         ],
         "payload": "Exported AI apply API is currently unmounted; synthetic captured model output tests invoke the real command without a model. Existing deterministic planner generation owns current UI completion.",
         "terminalNoticeOwner": "Existing initiating owner and notices remain unchanged. Shared navigation-safe lifetime, fulfilled-payload classification and exactly-one terminal notice closure are Plan25/26 responsibilities; this shard only records current ownership."
+      ,
+        "classifier": "pane-local outcome rendering (RetryOutcome/DrainOutcome counts; TodaySnapshot for mutations)",
+        "successRetention": "snapshot stored in todayContext; successful rows clear their problem state",
+        "failureReasons": "record.error with today_conflict revision handling; reconciliation markers per Plan-12 handoff",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=today_apply_plan_result"
       },
       "evidence": {
         "behaviorCases": [

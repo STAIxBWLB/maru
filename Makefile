@@ -183,6 +183,15 @@ check-dom-sanitizer: ## Static guard: every dangerouslySetInnerHTML sink in src/
 check-native-e2e-isolation: ## Static guard: no native-e2e runner affordances in the production bundle or Cargo manifest (D-10)
 	$(NODE) scripts/check-native-e2e-isolation.mjs
 
+# Phase 08 closure gate (PERF-01/PERF-02): every registered production
+# command must carry final justified evidence (worker boundary, mutation
+# admission, processing-caller closure) and the live generate_handler
+# registration set must still match the 365-command research inventory.
+# Hermetic - source and recorded evidence only, no binary or browser needed.
+.PHONY: check-command-isolation
+check-command-isolation: ## Phase 08 closure gate: 365 production commands carry final justified evidence
+	$(NODE) scripts/check-command-isolation.mjs --all --expected-count 365
+
 # The type scale is the single source of truth (PR #137). A raw px font-size in
 # styles.css silently opts that rule out of any future --type-* retune, so the
 # pane drifts away from the rest of the app. graph.css/diagram.css still carry
@@ -356,7 +365,7 @@ homebrew-fetch: ## Fetch Maru Homebrew cask and CLI formula in HOMEBREW_TAP_DIR
 # ---------------------------------------------------------------------------
 
 .PHONY: verify
-verify: typecheck lint release-version-check icons-check lint-i18n check-select-chrome check-dom-sanitizer check-type-tokens test-ts test-rust fmt-check clippy build-frontend ## Full verification: typecheck + ESLint gate + release versions + generated assets + guards + tests + Rust format check + Rust lint gate + frontend build
+verify: typecheck lint release-version-check icons-check lint-i18n check-select-chrome check-dom-sanitizer check-type-tokens test-ts test-rust fmt-check clippy build-frontend check-command-isolation ## Full verification: typecheck + ESLint gate + release versions + generated assets + guards + tests + Rust format check + Rust lint gate + frontend build + Phase 08 evidence closure
 
 # ---------------------------------------------------------------------------
 # Clean

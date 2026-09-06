@@ -34,6 +34,12 @@
         ],
         "payload": "listScratchpad; ScratchpadPane refresh and workspace loading own list state.",
         "terminalNoticeOwner": "Existing initiating component/dialog callback and current local/global error surface own settlement; Rust workers finish independently of view polling. Plans25/26 remain responsible for shared cross-navigation lifetime and single completion notice. No new job service or final lifecycle claim in this shard."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=scratchpad_list"
       },
       "mutationKey": {
         "lexicalPaths": [
@@ -98,6 +104,12 @@
         ],
         "payload": "readScratchpadDocument; ScratchpadPane open/reload/overwrite own selected document and revision.",
         "terminalNoticeOwner": "Existing initiating component/dialog callback and current local/global error surface own settlement; Rust workers finish independently of view polling. Plans25/26 remain responsible for shared cross-navigation lifetime and single completion notice. No new job service or final lifecycle claim in this shard."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=scratchpad_read"
       },
       "mutationKey": {
         "lexicalPaths": [
@@ -162,6 +174,12 @@
         ],
         "payload": "saveScratchpadDocument; ScratchpadPane flushCurrent owns autosave/copy promise, revision and local error state.",
         "terminalNoticeOwner": "Existing initiating component/dialog callback and current local/global error surface own settlement; Rust workers finish independently of view polling. Plans25/26 remain responsible for shared cross-navigation lifetime and single completion notice. No new job service or final lifecycle claim in this shard."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=scratchpad_save"
       },
       "mutationKey": {
         "lexicalPaths": [
@@ -226,6 +244,12 @@
         ],
         "payload": "renameScratchpadDocument; ScratchpadPane renameCurrent awaits rename then refreshes editor/workspace.",
         "terminalNoticeOwner": "Existing initiating component/dialog callback and current local/global error surface own settlement; Rust workers finish independently of view polling. Plans25/26 remain responsible for shared cross-navigation lifetime and single completion notice. No new job service or final lifecycle claim in this shard."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=scratchpad_rename"
       },
       "mutationKey": {
         "lexicalPaths": [
@@ -290,6 +314,12 @@
         ],
         "payload": "trashScratchpadDocument; ScratchpadPane trashCurrent confirms then awaits deletion and refresh.",
         "terminalNoticeOwner": "Existing initiating component/dialog callback and current local/global error surface own settlement; Rust workers finish independently of view polling. Plans25/26 remain responsible for shared cross-navigation lifetime and single completion notice. No new job service or final lifecycle claim in this shard."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=scratchpad_trash"
       },
       "mutationKey": {
         "lexicalPaths": [
@@ -354,6 +384,12 @@
         ],
         "payload": "createScratchpadIdea; ScratchpadPane explicit idea creation owns returned editor and refresh.",
         "terminalNoticeOwner": "Existing initiating component/dialog callback and current local/global error surface own settlement; Rust workers finish independently of view polling. Plans25/26 remain responsible for shared cross-navigation lifetime and single completion notice. No new job service or final lifecycle claim in this shard."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=scratchpad_create_idea"
       },
       "mutationKey": {
         "lexicalPaths": [
@@ -418,6 +454,12 @@
         ],
         "payload": "transitionScratchpadIdea; ScratchpadPane transition handler owns lifecycle result and refresh.",
         "terminalNoticeOwner": "Existing initiating component/dialog callback and current local/global error surface own settlement; Rust workers finish independently of view polling. Plans25/26 remain responsible for shared cross-navigation lifetime and single completion notice. No new job service or final lifecycle claim in this shard."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=scratchpad_transition_idea"
       },
       "mutationKey": {
         "lexicalPaths": [
@@ -482,6 +524,12 @@
         ],
         "payload": "planScratchpadTempCleanup; ScratchpadPane reviewTempCleanup owns candidate query and selection.",
         "terminalNoticeOwner": "Existing initiating component/dialog callback and current local/global error surface own settlement; Rust workers finish independently of view polling. Plans25/26 remain responsible for shared cross-navigation lifetime and single completion notice. No new job service or final lifecycle claim in this shard."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=scratchpad_cleanup_plan"
       },
       "mutationKey": {
         "lexicalPaths": [
@@ -546,6 +594,12 @@
         ],
         "payload": "applyScratchpadTempCleanup; ScratchpadPane applyTempCleanup retains trashed/skipped sibling outcomes.",
         "terminalNoticeOwner": "Existing initiating component/dialog callback and current local/global error surface own settlement; Rust workers finish independently of view polling. Plans25/26 remain responsible for shared cross-navigation lifetime and single completion notice. No new job service or final lifecycle claim in this shard."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=scratchpad_cleanup_apply"
       },
       "mutationKey": {
         "lexicalPaths": [
@@ -610,6 +664,12 @@
         ],
         "payload": "migrateLegacyMemos; ScratchpadPane migrateMemos owns migrated/skipped status and workspace refresh.",
         "terminalNoticeOwner": "Existing initiating component/dialog callback and current local/global error surface own settlement; Rust workers finish independently of view polling. Plans25/26 remain responsible for shared cross-navigation lifetime and single completion notice. No new job service or final lifecycle claim in this shard."
+      ,
+        "classifier": "n/a",
+        "successRetention": "n/a",
+        "failureReasons": "n/a",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=scratchpad_migrate_legacy_memos"
       },
       "mutationKey": {
         "lexicalPaths": [
@@ -674,6 +734,12 @@
         ],
         "payload": "Compatibility export in Rust and API where present; source audit finds no current component caller. storeShelfFiles/storeShelfFilesAs remain exported API definitions; list/read/save/delete memo have no current TypeScript invocation.",
         "terminalNoticeOwner": "Existing initiating component/dialog callback and current local/global error surface own settlement; Rust workers finish independently of view polling. Plans25/26 remain responsible for shared cross-navigation lifetime and single completion notice. No new job service or final lifecycle claim in this shard."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=store_shelf_files"
       },
       "mutationKey": {
         "lexicalPaths": [
@@ -735,6 +801,12 @@
         ],
         "payload": "Compatibility export in Rust and API where present; source audit finds no current component caller. storeShelfFiles/storeShelfFilesAs remain exported API definitions; list/read/save/delete memo have no current TypeScript invocation.",
         "terminalNoticeOwner": "Existing initiating component/dialog callback and current local/global error surface own settlement; Rust workers finish independently of view polling. Plans25/26 remain responsible for shared cross-navigation lifetime and single completion notice. No new job service or final lifecycle claim in this shard."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=store_shelf_files_as"
       },
       "mutationKey": {
         "lexicalPaths": [
@@ -796,6 +868,12 @@
         ],
         "payload": "Compatibility export in Rust and API where present; source audit finds no current component caller. storeShelfFiles/storeShelfFilesAs remain exported API definitions; list/read/save/delete memo have no current TypeScript invocation.",
         "terminalNoticeOwner": "Existing initiating component/dialog callback and current local/global error surface own settlement; Rust workers finish independently of view polling. Plans25/26 remain responsible for shared cross-navigation lifetime and single completion notice. No new job service or final lifecycle claim in this shard."
+      ,
+        "classifier": "n/a",
+        "successRetention": "n/a",
+        "failureReasons": "n/a",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=list_memos"
       },
       "mutationKey": {
         "lexicalPaths": [
@@ -857,6 +935,12 @@
         ],
         "payload": "Compatibility export in Rust and API where present; source audit finds no current component caller. storeShelfFiles/storeShelfFilesAs remain exported API definitions; list/read/save/delete memo have no current TypeScript invocation.",
         "terminalNoticeOwner": "Existing initiating component/dialog callback and current local/global error surface own settlement; Rust workers finish independently of view polling. Plans25/26 remain responsible for shared cross-navigation lifetime and single completion notice. No new job service or final lifecycle claim in this shard."
+      ,
+        "classifier": "n/a",
+        "successRetention": "n/a",
+        "failureReasons": "n/a",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=read_memo"
       },
       "mutationKey": {
         "lexicalPaths": [
@@ -918,6 +1002,12 @@
         ],
         "payload": "Compatibility export in Rust and API where present; source audit finds no current component caller. storeShelfFiles/storeShelfFilesAs remain exported API definitions; list/read/save/delete memo have no current TypeScript invocation.",
         "terminalNoticeOwner": "Existing initiating component/dialog callback and current local/global error surface own settlement; Rust workers finish independently of view polling. Plans25/26 remain responsible for shared cross-navigation lifetime and single completion notice. No new job service or final lifecycle claim in this shard."
+      ,
+        "classifier": "n/a",
+        "successRetention": "n/a",
+        "failureReasons": "n/a",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=save_memo"
       },
       "mutationKey": {
         "lexicalPaths": [
@@ -979,6 +1069,12 @@
         ],
         "payload": "Compatibility export in Rust and API where present; source audit finds no current component caller. storeShelfFiles/storeShelfFilesAs remain exported API definitions; list/read/save/delete memo have no current TypeScript invocation.",
         "terminalNoticeOwner": "Existing initiating component/dialog callback and current local/global error surface own settlement; Rust workers finish independently of view polling. Plans25/26 remain responsible for shared cross-navigation lifetime and single completion notice. No new job service or final lifecycle claim in this shard."
+      ,
+        "classifier": "n/a",
+        "successRetention": "n/a",
+        "failureReasons": "n/a",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=delete_memo"
       },
       "mutationKey": {
         "lexicalPaths": [
@@ -1040,6 +1136,12 @@
         ],
         "payload": "saveMemoAs; ScratchpadPane saveAs awaits export and routes errors to local/global error state.",
         "terminalNoticeOwner": "Existing initiating component/dialog callback and current local/global error surface own settlement; Rust workers finish independently of view polling. Plans25/26 remain responsible for shared cross-navigation lifetime and single completion notice. No new job service or final lifecycle claim in this shard."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=save_memo_as"
       },
       "mutationKey": {
         "lexicalPaths": [
@@ -1105,6 +1207,12 @@
         ],
         "payload": "listDrafts; DraftsPane refresh and dashboard load own list results; listing may adopt orphan bodies.",
         "terminalNoticeOwner": "Existing initiating component/dialog callback and current local/global error surface own settlement; Rust workers finish independently of view polling. Plans25/26 remain responsible for shared cross-navigation lifetime and single completion notice. No new job service or final lifecycle claim in this shard."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=drafts_list"
       },
       "mutationKey": {
         "lexicalPaths": [
@@ -1174,6 +1282,12 @@
         ],
         "payload": "draftsPromoteDefaultDir; PromoteDraftDialog default-directory query owns dialog field.",
         "terminalNoticeOwner": "Existing initiating component/dialog callback and current local/global error surface own settlement; Rust workers finish independently of view polling. Plans25/26 remain responsible for shared cross-navigation lifetime and single completion notice. No new job service or final lifecycle claim in this shard."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=drafts_promote_default_dir"
       },
       "mutationKey": {
         "lexicalPaths": [
@@ -1243,6 +1357,12 @@
         ],
         "payload": "readDraft; DraftsPane selection and GapPane draft read own selected content.",
         "terminalNoticeOwner": "Existing initiating component/dialog callback and current local/global error surface own settlement; Rust workers finish independently of view polling. Plans25/26 remain responsible for shared cross-navigation lifetime and single completion notice. No new job service or final lifecycle claim in this shard."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=drafts_read"
       },
       "mutationKey": {
         "lexicalPaths": [
@@ -1313,6 +1433,12 @@
         ],
         "payload": "saveDraft; DraftsPane save handler owns expectedUpdatedAt, returned body and error feedback.",
         "terminalNoticeOwner": "Existing initiating component/dialog callback and current local/global error surface own settlement; Rust workers finish independently of view polling. Plans25/26 remain responsible for shared cross-navigation lifetime and single completion notice. No new job service or final lifecycle claim in this shard."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=drafts_save"
       },
       "mutationKey": {
         "lexicalPaths": [
@@ -1383,6 +1509,12 @@
         ],
         "payload": "createDraft; NewDraftDialog and taskIngestion own explicit creation, return payload and refresh.",
         "terminalNoticeOwner": "Existing initiating component/dialog callback and current local/global error surface own settlement; Rust workers finish independently of view polling. Plans25/26 remain responsible for shared cross-navigation lifetime and single completion notice. No new job service or final lifecycle claim in this shard."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=drafts_create"
       },
       "mutationKey": {
         "lexicalPaths": [
@@ -1453,6 +1585,12 @@
         ],
         "payload": "setDraftStatus; DraftsPane status handler awaits index update and refresh.",
         "terminalNoticeOwner": "Existing initiating component/dialog callback and current local/global error surface own settlement; Rust workers finish independently of view polling. Plans25/26 remain responsible for shared cross-navigation lifetime and single completion notice. No new job service or final lifecycle claim in this shard."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=drafts_set_status"
       },
       "mutationKey": {
         "lexicalPaths": [
@@ -1523,6 +1661,12 @@
         ],
         "payload": "discardDraft; DraftsPane discard handler owns confirmation, result and refresh.",
         "terminalNoticeOwner": "Existing initiating component/dialog callback and current local/global error surface own settlement; Rust workers finish independently of view polling. Plans25/26 remain responsible for shared cross-navigation lifetime and single completion notice. No new job service or final lifecycle claim in this shard."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=drafts_discard"
       },
       "mutationKey": {
         "lexicalPaths": [
@@ -1593,6 +1737,12 @@
         ],
         "payload": "promoteDraft; PromoteDraftDialog binds approval, target and result; existing drafts-changed event informs refresh.",
         "terminalNoticeOwner": "Existing initiating component/dialog callback and current local/global error surface own settlement; Rust workers finish independently of view polling. Plans25/26 remain responsible for shared cross-navigation lifetime and single completion notice. No new job service or final lifecycle claim in this shard."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=drafts_promote"
       },
       "mutationKey": {
         "lexicalPaths": [
@@ -1663,6 +1813,12 @@
         ],
         "payload": "draftsRelinkPromoted; GapPane relinkSelected owns baseline-preserving relink result and refresh.",
         "terminalNoticeOwner": "Existing initiating component/dialog callback and current local/global error surface own settlement; Rust workers finish independently of view polling. Plans25/26 remain responsible for shared cross-navigation lifetime and single completion notice. No new job service or final lifecycle claim in this shard."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=drafts_relink_promoted"
       },
       "mutationKey": {
         "lexicalPaths": [
@@ -1728,6 +1884,12 @@
         ],
         "payload": "gapAnalyze; GapPane analysis request tracks selected draft and rejects stale response identity.",
         "terminalNoticeOwner": "Existing initiating component/dialog callback and current local/global error surface own settlement; Rust workers finish independently of view polling. Plans25/26 remain responsible for shared cross-navigation lifetime and single completion notice. No new job service or final lifecycle claim in this shard."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=gap_analyze"
       },
       "mutationKey": {
         "lexicalPaths": [
@@ -1789,6 +1951,12 @@
         ],
         "payload": "gapAppendLog; GapPane saveToLog owns savingLog/logSaved and refreshLog, errors to setLocalError/setError.",
         "terminalNoticeOwner": "Existing initiating component/dialog callback and current local/global error surface own settlement; Rust workers finish independently of view polling. Plans25/26 remain responsible for shared cross-navigation lifetime and single completion notice. No new job service or final lifecycle claim in this shard."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=gap_append_log"
       },
       "mutationKey": {
         "lexicalPaths": [
@@ -1850,6 +2018,12 @@
         ],
         "payload": "gapLogList; GapPane refreshLog owns log entries; scheduler retains separate synchronous read_gap_log_entries.",
         "terminalNoticeOwner": "Existing initiating component/dialog callback and current local/global error surface own settlement; Rust workers finish independently of view polling. Plans25/26 remain responsible for shared cross-navigation lifetime and single completion notice. No new job service or final lifecycle claim in this shard."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=gap_log_list"
       },
       "mutationKey": {
         "lexicalPaths": [
@@ -1911,6 +2085,12 @@
         ],
         "payload": "gapReportsList; GapPane refreshReports owns analyzable list and selected report.",
         "terminalNoticeOwner": "Existing initiating component/dialog callback and current local/global error surface own settlement; Rust workers finish independently of view polling. Plans25/26 remain responsible for shared cross-navigation lifetime and single completion notice. No new job service or final lifecycle claim in this shard."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=gap_reports_list"
       },
       "mutationKey": {
         "lexicalPaths": [

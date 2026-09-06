@@ -49,6 +49,12 @@
     ],
     "payload": "startScratchpadWatcher (src/lib/api.ts:3084) invokes start_scratchpad_watcher with workPath when the Scratchpad surface activates and stopScratchpadWatcher (src/lib/api.ts:3089) stops it on switch/quit; the surface keeps owning scratchpad://changed and scratchpad://error subscription regardless of screen changes.",
     "terminalNoticeOwner": "The Scratchpad surface owns current watcher-event display and error toasts. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+   ,
+     "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+     "successRetention": "updated record retained in component state",
+     "failureReasons": "call-site catch error message (single publisher)",
+     "singleTerminalNoticeOwner": true,
+     "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=start_scratchpad_watcher"
    },
    "evidence": {
     "behaviorCases": [
@@ -104,6 +110,12 @@
     ],
     "payload": "stopScratchpadWatcher (src/lib/api.ts:3089) invokes stop_scratchpad_watcher on Scratchpad surface switch/quit; the surface disposes its scratchpad://changed and scratchpad://error subscriptions on stop.",
     "terminalNoticeOwner": "The Scratchpad surface owns current watcher-event display and error toasts. Navigation-safe terminal notices remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+   ,
+     "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+     "successRetention": "updated record retained in component state",
+     "failureReasons": "call-site catch error message (single publisher)",
+     "singleTerminalNoticeOwner": true,
+     "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=stop_scratchpad_watcher"
    },
    "evidence": {
     "behaviorCases": [
@@ -157,6 +169,12 @@
     ],
     "payload": "startInboxWatcher (src/lib/api.ts:1518) invokes start_inbox_watcher with vaultPath on vault activation and stopInboxWatcher (src/lib/api.ts:1523) stops it on switch/quit; the Inbox surface re-runs scan_inbox_drop on each inbox://file_events batch and keeps owning that refresh regardless of screen changes.",
     "terminalNoticeOwner": "The Inbox surface owns current file-event refresh and error display. Navigation-safe terminal notices remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+   ,
+     "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+     "successRetention": "updated record retained in component state",
+     "failureReasons": "call-site catch error message (single publisher)",
+     "singleTerminalNoticeOwner": true,
+     "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=start_inbox_watcher"
    },
    "evidence": {
     "behaviorCases": [
@@ -209,6 +227,12 @@
     ],
     "payload": "stopInboxWatcher (src/lib/api.ts:1523) invokes stop_inbox_watcher on vault switch/quit; the Inbox surface disposes its inbox://file_events subscription on stop.",
     "terminalNoticeOwner": "The Inbox surface owns current file-event refresh and error display. Navigation-safe terminal notices remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+   ,
+     "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+     "successRetention": "updated record retained in component state",
+     "failureReasons": "call-site catch error message (single publisher)",
+     "singleTerminalNoticeOwner": true,
+     "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=stop_inbox_watcher"
    },
    "evidence": {
     "behaviorCases": [
@@ -262,6 +286,12 @@
     ],
     "payload": "startVaultWatcher (src/lib/api.ts:337) invokes start_vault_watcher with workspacePath on workspace activation and stopVaultWatcher (src/lib/api.ts:342) stops it on switch/quit; vault://index-delta consumers keep owning their incremental index refresh regardless of screen changes.",
     "terminalNoticeOwner": "The vault index consumer owns current index-delta refresh and error display. Navigation-safe terminal notices remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+   ,
+     "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+     "successRetention": "updated record retained in component state",
+     "failureReasons": "call-site catch error message (single publisher)",
+     "singleTerminalNoticeOwner": true,
+     "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=start_vault_watcher"
    },
    "evidence": {
     "behaviorCases": [
@@ -313,6 +343,12 @@
     ],
     "payload": "stopVaultWatcher (src/lib/api.ts:342) invokes stop_vault_watcher on workspace switch/quit; vault://index-delta consumers dispose their subscriptions on stop.",
     "terminalNoticeOwner": "The vault index consumer owns current index-delta refresh and error display. Navigation-safe terminal notices remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+   ,
+     "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+     "successRetention": "updated record retained in component state",
+     "failureReasons": "call-site catch error message (single publisher)",
+     "singleTerminalNoticeOwner": true,
+     "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=stop_vault_watcher"
    },
    "evidence": {
     "behaviorCases": [
@@ -366,6 +402,12 @@
     ],
     "payload": "CatalogPane (src/components/catalog/CatalogPane.tsx:103) invokes catalog_watcher_start with workspaceRoot when the pane mounts and catalog_watcher_stop (src/components/catalog/CatalogPane.tsx:125) on unmount; the pane keeps owning the follow-up catalog_scan refresh on each catalog://refresh event regardless of screen changes.",
     "terminalNoticeOwner": "CatalogPane owns current catalog refresh and failure display (it already logs a console warning when start fails). Navigation-safe terminal notices remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+   ,
+     "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+     "successRetention": "updated record retained in component state",
+     "failureReasons": "call-site catch error message (single publisher)",
+     "singleTerminalNoticeOwner": true,
+     "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=catalog_watcher_start"
    },
    "evidence": {
     "behaviorCases": [
@@ -417,6 +459,12 @@
     ],
     "payload": "CatalogPane (src/components/catalog/CatalogPane.tsx:125) invokes catalog_watcher_stop on unmount and ignores a missing watcher; the pane stops its catalog://refresh subscription on stop.",
     "terminalNoticeOwner": "CatalogPane owns current catalog refresh and failure display. Navigation-safe terminal notices remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+   ,
+     "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+     "successRetention": "updated record retained in component state",
+     "failureReasons": "call-site catch error message (single publisher)",
+     "singleTerminalNoticeOwner": true,
+     "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=catalog_watcher_stop"
    },
    "evidence": {
     "behaviorCases": [

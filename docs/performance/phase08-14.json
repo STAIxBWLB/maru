@@ -48,6 +48,12 @@
         ],
         "payload": "App processCommsChannelNow / decideInboxKeys keep existing busy/finally, successful siblings and errors. Readiness uses current request ownership. KakaoRelayPanel owns viewer state and explicit queue/send-result polling; Telegram polling uses existing events/status.",
         "terminalNoticeOwner": "Existing initiating component owns current completion. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "accept/reject/stage outcome per item",
+        "successRetention": "pane state refresh after mutation",
+        "failureReasons": "pane-local catch error message",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=fetch_telegram_recent"
       },
       "evidence": {
         "behaviorCases": [
@@ -117,6 +123,12 @@
         ],
         "payload": "App processCommsChannelNow / decideInboxKeys keep existing busy/finally, successful siblings and errors. Readiness uses current request ownership. KakaoRelayPanel owns viewer state and explicit queue/send-result polling; Telegram polling uses existing events/status.",
         "terminalNoticeOwner": "Existing initiating component owns current completion. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "accept/reject/stage outcome per item",
+        "successRetention": "pane state refresh after mutation",
+        "failureReasons": "pane-local catch error message",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=accept_telegram_item"
       },
       "evidence": {
         "behaviorCases": [
@@ -177,6 +189,12 @@
         ],
         "payload": "App processCommsChannelNow / decideInboxKeys keep existing busy/finally, successful siblings and errors. Readiness uses current request ownership. KakaoRelayPanel owns viewer state and explicit queue/send-result polling; Telegram polling uses existing events/status.",
         "terminalNoticeOwner": "Existing initiating component owns current completion. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "accept/reject/stage outcome per item",
+        "successRetention": "pane state refresh after mutation",
+        "failureReasons": "pane-local catch error message",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=reject_telegram_item"
       },
       "evidence": {
         "behaviorCases": [
@@ -245,6 +263,12 @@
         ],
         "payload": "App processCommsChannelNow / decideInboxKeys keep existing busy/finally, successful siblings and errors. Readiness uses current request ownership. KakaoRelayPanel owns viewer state and explicit queue/send-result polling; Telegram polling uses existing events/status.",
         "terminalNoticeOwner": "Existing initiating component owns current completion. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "accept/reject/stage outcome per item",
+        "successRetention": "pane state refresh after mutation",
+        "failureReasons": "pane-local catch error message",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=stage_telegram_items"
       },
       "evidence": {
         "behaviorCases": [
@@ -311,6 +335,12 @@
         ],
         "payload": "App processCommsChannelNow / decideInboxKeys keep existing busy/finally, successful siblings and errors. Readiness uses current request ownership. KakaoRelayPanel owns viewer state and explicit queue/send-result polling; Telegram polling uses existing events/status.",
         "terminalNoticeOwner": "Existing initiating component owns current completion. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "accept/reject/stage outcome per item",
+        "successRetention": "pane state refresh after mutation",
+        "failureReasons": "pane-local catch error message",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=check_telegram_auth"
       },
       "evidence": {
         "behaviorCases": [
@@ -378,6 +408,12 @@
         ],
         "payload": "App processCommsChannelNow / decideInboxKeys keep existing busy/finally, successful siblings and errors. Readiness uses current request ownership. KakaoRelayPanel owns viewer state and explicit queue/send-result polling; Telegram polling uses existing events/status.",
         "terminalNoticeOwner": "Existing initiating component owns current completion. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "accept/reject/stage outcome per item",
+        "successRetention": "pane state refresh after mutation",
+        "failureReasons": "pane-local catch error message",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=start_telegram_polling"
       },
       "evidence": {
         "behaviorCases": [
@@ -439,6 +475,12 @@
         ],
         "payload": "App processCommsChannelNow / decideInboxKeys keep existing busy/finally, successful siblings and errors. Readiness uses current request ownership. KakaoRelayPanel owns viewer state and explicit queue/send-result polling; Telegram polling uses existing events/status.",
         "terminalNoticeOwner": "Existing initiating component owns current completion. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "accept/reject/stage outcome per item",
+        "successRetention": "pane state refresh after mutation",
+        "failureReasons": "pane-local catch error message",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=stop_telegram_polling"
       },
       "evidence": {
         "behaviorCases": [
@@ -499,6 +541,12 @@
         ],
         "payload": "App processCommsChannelNow / decideInboxKeys keep existing busy/finally, successful siblings and errors. Readiness uses current request ownership. KakaoRelayPanel owns viewer state and explicit queue/send-result polling; Telegram polling uses existing events/status.",
         "terminalNoticeOwner": "Existing initiating component owns current completion. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "accept/reject/stage outcome per item",
+        "successRetention": "pane state refresh after mutation",
+        "failureReasons": "pane-local catch error message",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=telegram_polling_status"
       },
       "evidence": {
         "behaviorCases": [
@@ -559,6 +607,12 @@
         ],
         "payload": "App processCommsChannelNow / decideInboxKeys keep existing busy/finally, successful siblings and errors. Readiness uses current request ownership. KakaoRelayPanel owns viewer state and explicit queue/send-result polling; Telegram polling uses existing events/status.",
         "terminalNoticeOwner": "Existing initiating component owns current completion. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "decision outcome ok/error per item",
+        "successRetention": "carry updates applied only while the ticket is current",
+        "failureReasons": "outcome.error per item into the gmail error state",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=fetch_gmail_unread"
       },
       "evidence": {
         "behaviorCases": [
@@ -623,6 +677,12 @@
         ],
         "payload": "App processCommsChannelNow / decideInboxKeys keep existing busy/finally, successful siblings and errors. Readiness uses current request ownership. KakaoRelayPanel owns viewer state and explicit queue/send-result polling; Telegram polling uses existing events/status.",
         "terminalNoticeOwner": "Existing initiating component owns current completion. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "decision outcome ok/error per item",
+        "successRetention": "carry updates applied only while the ticket is current",
+        "failureReasons": "outcome.error per item into the gmail error state",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=stage_gmail_items"
       },
       "evidence": {
         "behaviorCases": [
@@ -679,6 +739,12 @@
         ],
         "payload": "App processCommsChannelNow / decideInboxKeys keep existing busy/finally, successful siblings and errors. Readiness uses current request ownership. KakaoRelayPanel owns viewer state and explicit queue/send-result polling; Telegram polling uses existing events/status.",
         "terminalNoticeOwner": "Existing initiating component owns current completion. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=check_gws_auth"
       },
       "evidence": {
         "behaviorCases": [
@@ -735,6 +801,12 @@
         ],
         "payload": "App processCommsChannelNow / decideInboxKeys keep existing busy/finally, successful siblings and errors. Readiness uses current request ownership. KakaoRelayPanel owns viewer state and explicit queue/send-result polling; Telegram polling uses existing events/status.",
         "terminalNoticeOwner": "Existing initiating component owns current completion. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "decision outcome ok/error per item",
+        "successRetention": "carry updates applied only while the ticket is current",
+        "failureReasons": "outcome.error per item into the gmail error state",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=decide_gmail_item"
       },
       "evidence": {
         "behaviorCases": [
@@ -791,6 +863,12 @@
         ],
         "payload": "App processCommsChannelNow / decideInboxKeys keep existing busy/finally, successful siblings and errors. Readiness uses current request ownership. KakaoRelayPanel owns viewer state and explicit queue/send-result polling; Telegram polling uses existing events/status.",
         "terminalNoticeOwner": "Existing initiating component owns current completion. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "decision outcome ok/error per item",
+        "successRetention": "carry updates applied only while the ticket is current",
+        "failureReasons": "outcome.error per item into the gmail error state",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=decide_gmail_items"
       },
       "evidence": {
         "behaviorCases": [
@@ -847,6 +925,12 @@
         ],
         "payload": "App processCommsChannelNow / decideInboxKeys keep existing busy/finally, successful siblings and errors. Readiness uses current request ownership. KakaoRelayPanel owns viewer state and explicit queue/send-result polling; Telegram polling uses existing events/status.",
         "terminalNoticeOwner": "Existing initiating component owns current completion. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=fetch_outlook_unread"
       },
       "evidence": {
         "behaviorCases": [
@@ -912,6 +996,12 @@
         ],
         "payload": "App processCommsChannelNow / decideInboxKeys keep existing busy/finally, successful siblings and errors. Readiness uses current request ownership. KakaoRelayPanel owns viewer state and explicit queue/send-result polling; Telegram polling uses existing events/status.",
         "terminalNoticeOwner": "Existing initiating component owns current completion. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=stage_outlook_items"
       },
       "evidence": {
         "behaviorCases": [
@@ -969,6 +1059,12 @@
         ],
         "payload": "App processCommsChannelNow / decideInboxKeys keep existing busy/finally, successful siblings and errors. Readiness uses current request ownership. KakaoRelayPanel owns viewer state and explicit queue/send-result polling; Telegram polling uses existing events/status.",
         "terminalNoticeOwner": "Existing initiating component owns current completion. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=check_mso_auth"
       },
       "evidence": {
         "behaviorCases": [
@@ -1026,6 +1122,12 @@
         ],
         "payload": "App processCommsChannelNow / decideInboxKeys keep existing busy/finally, successful siblings and errors. Readiness uses current request ownership. KakaoRelayPanel owns viewer state and explicit queue/send-result polling; Telegram polling uses existing events/status.",
         "terminalNoticeOwner": "Existing initiating component owns current completion. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=decide_outlook_item"
       },
       "evidence": {
         "behaviorCases": [
@@ -1084,6 +1186,12 @@
         ],
         "payload": "App processCommsChannelNow / decideInboxKeys keep existing busy/finally, successful siblings and errors. Readiness uses current request ownership. KakaoRelayPanel owns viewer state and explicit queue/send-result polling; Telegram polling uses existing events/status.",
         "terminalNoticeOwner": "Existing initiating component owns current completion. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=decide_outlook_items"
       },
       "evidence": {
         "behaviorCases": [
@@ -1142,6 +1250,12 @@
         ],
         "payload": "App processCommsChannelNow owns staging preview/approval/staged outcome and inbox refresh. KakaoRelayPanel loadMessages owns viewer loading/error; explicit send owns queued result and existing bounded backoff result polling with pollSeqRef invalidated on unmount. Enqueue success means local queued only, not remote delivery.",
         "terminalNoticeOwner": "Existing initiating component owns current completion. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=read_kakao_relay_status"
       },
       "evidence": {
         "behaviorCases": [
@@ -1197,6 +1311,12 @@
         ],
         "payload": "App processCommsChannelNow owns staging preview/approval/staged outcome and inbox refresh. KakaoRelayPanel loadMessages owns viewer loading/error; explicit send owns queued result and existing bounded backoff result polling with pollSeqRef invalidated on unmount. Enqueue success means local queued only, not remote delivery.",
         "terminalNoticeOwner": "Existing initiating component owns current completion. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=read_kakao_relay_messages"
       },
       "evidence": {
         "behaviorCases": [
@@ -1259,6 +1379,12 @@
         ],
         "payload": "App processCommsChannelNow owns staging preview/approval/staged outcome and inbox refresh. KakaoRelayPanel loadMessages owns viewer loading/error; explicit send owns queued result and existing bounded backoff result polling with pollSeqRef invalidated on unmount. Enqueue success means local queued only, not remote delivery.",
         "terminalNoticeOwner": "Existing initiating component owns current completion. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=stage_kakao_relay_new"
       },
       "evidence": {
         "behaviorCases": [
@@ -1322,6 +1448,12 @@
         ],
         "payload": "App processCommsChannelNow owns staging preview/approval/staged outcome and inbox refresh. KakaoRelayPanel loadMessages owns viewer loading/error; explicit send owns queued result and existing bounded backoff result polling with pollSeqRef invalidated on unmount. Enqueue success means local queued only, not remote delivery.",
         "terminalNoticeOwner": "Existing initiating component owns current completion. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=enqueue_kakao_send"
       },
       "evidence": {
         "behaviorCases": [
@@ -1377,6 +1509,12 @@
         ],
         "payload": "App processCommsChannelNow owns staging preview/approval/staged outcome and inbox refresh. KakaoRelayPanel loadMessages owns viewer loading/error; explicit send owns queued result and existing bounded backoff result polling with pollSeqRef invalidated on unmount. Enqueue success means local queued only, not remote delivery.",
         "terminalNoticeOwner": "Existing initiating component owns current completion. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=read_kakao_send_results"
       },
       "evidence": {
         "behaviorCases": [

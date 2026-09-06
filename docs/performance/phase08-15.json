@@ -41,6 +41,12 @@
         ],
         "payload": "JobsTab loadJobs owns the job list refresh and error surfacing; each row action awaits the wrapper result and updates local busy state, while JobsTab readLog owns the bounded log-tail viewer.",
         "terminalNoticeOwner": "JobsTab owns current completion and error display. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=jobs_list"
       },
       "evidence": {
         "behaviorCases": [
@@ -104,6 +110,12 @@
         ],
         "payload": "JobsTab runAction owns per-job busy state and awaits jobsInstall, then refreshes the list from the returned JobStatus; install failure keeps the existing row state and error surface.",
         "terminalNoticeOwner": "JobsTab owns current completion and error display. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=jobs_install"
       },
       "evidence": {
         "behaviorCases": [
@@ -168,6 +180,12 @@
         ],
         "payload": "JobsTab runAction owns per-job busy state and awaits jobsUninstall, then refreshes the list from the returned JobStatus; uninstall failure keeps the existing row state and error surface.",
         "terminalNoticeOwner": "JobsTab owns current completion and error display. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=jobs_uninstall"
       },
       "evidence": {
         "behaviorCases": [
@@ -232,6 +250,12 @@
         ],
         "payload": "JobsTab runAction owns per-job busy state and awaits jobsStart, then refreshes the list from the returned JobStatus; start failure keeps the existing row state and error surface.",
         "terminalNoticeOwner": "JobsTab owns current completion and error display. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=jobs_start"
       },
       "evidence": {
         "behaviorCases": [
@@ -296,6 +320,12 @@
         ],
         "payload": "JobsTab runAction owns per-job busy state and awaits jobsStop, then refreshes the list from the returned JobStatus; stop failure keeps the existing row state and error surface.",
         "terminalNoticeOwner": "JobsTab owns current completion and error display. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=jobs_stop"
       },
       "evidence": {
         "behaviorCases": [
@@ -360,6 +390,12 @@
         ],
         "payload": "JobsTab runAction owns per-job busy state and awaits jobsRunNow, then refreshes the list from the returned JobStatus; run-now failure keeps the existing row state and error surface.",
         "terminalNoticeOwner": "JobsTab owns current completion and error display. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=jobs_run_now"
       },
       "evidence": {
         "behaviorCases": [
@@ -415,6 +451,12 @@
         ],
         "payload": "JobsTab readLog owns the log viewer open/close and awaits jobsReadLog, rendering the bounded stdout/stderr tails it receives.",
         "terminalNoticeOwner": "JobsTab owns current completion and error display. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=jobs_read_log"
       },
       "evidence": {
         "behaviorCases": [
@@ -468,6 +510,12 @@
         ],
         "payload": "AgentsPane loadSchedules owns the schedule list refresh (including the empty state for no workspace) and re-runs it on scheduler://changed; errors keep the existing pane-level error surface.",
         "terminalNoticeOwner": "AgentsPane owns current completion and error display. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=scheduler_list"
       },
       "evidence": {
         "behaviorCases": [
@@ -528,6 +576,12 @@
         ],
         "payload": "AgentsPane schedule-add form prepares the scheduler.add approval, awaits addSchedule and refreshes the list on scheduler://changed; the approval denial path keeps the existing pane error surface.",
         "terminalNoticeOwner": "AgentsPane owns current completion and error display. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=scheduler_add"
       },
       "evidence": {
         "behaviorCases": [
@@ -590,6 +644,12 @@
         ],
         "payload": "AgentsPane schedule removal confirms, awaits removeSchedule and refreshes the list on scheduler://changed; removal of an accepted run leaves sibling schedules runnable.",
         "terminalNoticeOwner": "AgentsPane owns current completion and error display. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=scheduler_remove"
       },
       "evidence": {
         "behaviorCases": [
@@ -652,6 +712,12 @@
         ],
         "payload": "AgentsPane enable toggle awaits setScheduleEnabled and refreshes the row from the returned schedule on scheduler://changed; disabling an agent-owned schedule keeps the existing paused-state display.",
         "terminalNoticeOwner": "AgentsPane owns current completion and error display. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=scheduler_set_enabled"
       },
       "evidence": {
         "behaviorCases": [
@@ -717,6 +783,12 @@
         ],
         "payload": "AgentsPane 지금 실행 awaits runScheduleNow and shows the returned invocation id; scheduler://fired and scheduler://error drive the existing run status and pane refresh surfaces.",
         "terminalNoticeOwner": "AgentsPane owns current completion and error display. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=scheduler_run_now"
       },
       "evidence": {
         "behaviorCases": [
@@ -772,6 +844,12 @@
         ],
         "payload": "App startup legacy-detection owns the migration prompt state and re-runs detectLegacyTelegramLaunchd after each unload to refresh the remaining-service list.",
         "terminalNoticeOwner": "App owns current completion and error display. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "accept/reject/stage outcome per item",
+        "successRetention": "pane state refresh after mutation",
+        "failureReasons": "pane-local catch error message",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=detect_legacy_telegram_launchd"
       },
       "evidence": {
         "behaviorCases": [
@@ -834,6 +912,12 @@
         ],
         "payload": "App legacy-migration prompt awaits unloadLegacyTelegramLaunchd per selected service, then re-runs detection to refresh the remaining list; unload failure keeps the prompt open with the existing error surface.",
         "terminalNoticeOwner": "App owns current completion and error display. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "accept/reject/stage outcome per item",
+        "successRetention": "pane state refresh after mutation",
+        "failureReasons": "pane-local catch error message",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=unload_legacy_telegram_launchd"
       },
       "evidence": {
         "behaviorCases": [
@@ -889,6 +973,12 @@
         ],
         "payload": "App settings terminal-hook section loads status on open and after each toggle, owning the installed-state rendering and the codex hint display.",
         "terminalNoticeOwner": "App owns current completion and error display. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=terminal_hooks_status"
       },
       "evidence": {
         "behaviorCases": [
@@ -951,6 +1041,12 @@
         ],
         "payload": "App settings terminal-hook toggle awaits terminalHooksInstall and reloads status, owning the installed-state switch and its error surface.",
         "terminalNoticeOwner": "App owns current completion and error display. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=terminal_hooks_install"
       },
       "evidence": {
         "behaviorCases": [
@@ -1016,6 +1112,12 @@
         ],
         "payload": "App settings terminal-hook toggle awaits terminalHooksUninstall and reloads status, owning the installed-state switch and its error surface.",
         "terminalNoticeOwner": "App owns current completion and error display. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=terminal_hooks_uninstall"
       },
       "evidence": {
         "behaviorCases": [
@@ -1080,6 +1182,12 @@
         ],
         "payload": "App workspace bootstrap owns the context-hint commands, awaiting writeAgentContextHint (or removeAgentContextHint) on workspace switch and surfacing the written-path list.",
         "terminalNoticeOwner": "App owns current completion and error display. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=write_agent_context_hint"
       },
       "evidence": {
         "behaviorCases": [
@@ -1142,6 +1250,12 @@
         ],
         "payload": "App workspace bootstrap owns the context-hint commands, awaiting removeAgentContextHint (or writeAgentContextHint) on workspace switch and surfacing the removed-path list.",
         "terminalNoticeOwner": "App owns current completion and error display. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=remove_agent_context_hint"
       },
       "evidence": {
         "behaviorCases": [

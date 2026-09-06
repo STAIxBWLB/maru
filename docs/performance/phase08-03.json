@@ -62,6 +62,12 @@
         "terminalNoticeOwner": "Existing SkillsTab runOperation/runBackendProgressOperation or the invoking API consumer; no new duplicate notifier added",
         "lifetime": "Owned blocking closure continues after view unmount; frontend processing lifetime/refresh closure belongs to 08-25/08-26 where applicable. Source sync lifetime and toast proof remain in 08-02.",
         "retry": "Manual only. Wrapper awaits one blocking task and does not replay failed operations."
+      ,
+        "classifier": "n/a: read; promise resolution returns data to the caller",
+        "successRetention": "result stored in component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=skills_list_sources"
       },
       "evidence": {
         "bounds": "Finite request-response domain work; scan cardinality, recursive file bytes or subprocess duration are not claimed constant. All work is isolated from the async executor.",
@@ -125,6 +131,12 @@
         "terminalNoticeOwner": "Existing SkillsTab runOperation/runBackendProgressOperation or the invoking API consumer; no new duplicate notifier added",
         "lifetime": "Owned blocking closure continues after view unmount; frontend processing lifetime/refresh closure belongs to 08-25/08-26 where applicable. Source sync lifetime and toast proof remain in 08-02.",
         "retry": "Manual only. Wrapper awaits one blocking task and does not replay failed operations."
+      ,
+        "classifier": "explicit classify: success / skills.operation.complete",
+        "successRetention": "SkillOperation.result retains the payload; component refresh is viewScope.request-guarded; optimistic removal guarded by captured isCurrent() closure",
+        "failureReasons": "explicit classify reason strings (per-item failure messages joined); built-in path merges syncAllComplete summary with per-source errors and detects skills_source_stale",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=skills_add_source"
       },
       "evidence": {
         "bounds": "Finite request-response domain work; scan cardinality, recursive file bytes or subprocess duration are not claimed constant. All work is isolated from the async executor.",
@@ -187,6 +199,12 @@
         "terminalNoticeOwner": "Existing SkillsTab runOperation/runBackendProgressOperation or the invoking API consumer; no new duplicate notifier added",
         "lifetime": "Owned blocking closure continues after view unmount; frontend processing lifetime/refresh closure belongs to 08-25/08-26 where applicable. Source sync lifetime and toast proof remain in 08-02.",
         "retry": "Manual only. Wrapper awaits one blocking task and does not replay failed operations."
+      ,
+        "classifier": "explicit classify: success / skills.operation.complete",
+        "successRetention": "SkillOperation.result retains the payload; component refresh is viewScope.request-guarded; optimistic removal guarded by captured isCurrent() closure",
+        "failureReasons": "explicit classify reason strings (per-item failure messages joined); built-in path merges syncAllComplete summary with per-source errors and detects skills_source_stale",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=skills_remove_source"
       },
       "evidence": {
         "bounds": "AUDIT closure: single registry/request file access is finite in count but disk latency/file bytes are not bounded by the API, and registry validation scales with persisted entries. Positive blocking disposition is ISOLATED rather than retained based on absence of a regex match.",
@@ -243,6 +261,12 @@
         "terminalNoticeOwner": "Existing SkillsTab runOperation/runBackendProgressOperation or the invoking API consumer; no new duplicate notifier added",
         "lifetime": "Owned blocking closure continues after view unmount; frontend processing lifetime/refresh closure belongs to 08-25/08-26 where applicable. Source sync lifetime and toast proof remain in 08-02.",
         "retry": "Manual only. Wrapper awaits one blocking task and does not replay failed operations."
+      ,
+        "classifier": "explicit classify: skills.operation.complete with rescanComplete reason",
+        "successRetention": "SkillOperation.result retains the payload; component refresh is viewScope.request-guarded; optimistic removal guarded by captured isCurrent() closure",
+        "failureReasons": "explicit classify reason strings (per-item failure messages joined); built-in path merges syncAllComplete summary with per-source errors and detects skills_source_stale",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=skills_rescan_source"
       },
       "evidence": {
         "bounds": "Finite request-response domain work; scan cardinality, recursive file bytes or subprocess duration are not claimed constant. All work is isolated from the async executor.",
@@ -299,6 +323,12 @@
         "terminalNoticeOwner": "Existing SkillsTab runOperation/runBackendProgressOperation or the invoking API consumer; no new duplicate notifier added",
         "lifetime": "Owned blocking closure continues after view unmount; frontend processing lifetime/refresh closure belongs to 08-25/08-26 where applicable. Source sync lifetime and toast proof remain in 08-02.",
         "retry": "Manual only. Wrapper awaits one blocking task and does not replay failed operations."
+      ,
+        "classifier": "n/a: read; promise resolution returns data to the caller",
+        "successRetention": "result stored in component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=skills_list_skills"
       },
       "evidence": {
         "bounds": "Finite request-response domain work; scan cardinality, recursive file bytes or subprocess duration are not claimed constant. All work is isolated from the async executor.",
@@ -354,6 +384,12 @@
         "terminalNoticeOwner": "Existing SkillsTab runOperation/runBackendProgressOperation or the invoking API consumer; no new duplicate notifier added",
         "lifetime": "Owned blocking closure continues after view unmount; frontend processing lifetime/refresh closure belongs to 08-25/08-26 where applicable. Source sync lifetime and toast proof remain in 08-02.",
         "retry": "Manual only. Wrapper awaits one blocking task and does not replay failed operations."
+      ,
+        "classifier": "n/a: bounded editor save/read, not a file-processing batch",
+        "successRetention": "saved payload retained in the editor; SkillsTab refreshes on SKILLS_UPDATED_EVENT",
+        "failureReasons": "window-local catch surfaces the IPC error message",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=skills_read_skill"
       },
       "evidence": {
         "bounds": "AUDIT closure: single registry/request file access is finite in count but disk latency/file bytes are not bounded by the API, and registry validation scales with persisted entries. Positive blocking disposition is ISOLATED rather than retained based on absence of a regex match.",
@@ -409,6 +445,12 @@
         "terminalNoticeOwner": "Existing SkillsTab runOperation/runBackendProgressOperation or the invoking API consumer; no new duplicate notifier added",
         "lifetime": "Owned blocking closure continues after view unmount; frontend processing lifetime/refresh closure belongs to 08-25/08-26 where applicable. Source sync lifetime and toast proof remain in 08-02.",
         "retry": "Manual only. Wrapper awaits one blocking task and does not replay failed operations."
+      ,
+        "classifier": "n/a: bounded editor save/read, not a file-processing batch",
+        "successRetention": "saved payload retained in the editor; SkillsTab refreshes on SKILLS_UPDATED_EVENT",
+        "failureReasons": "window-local catch surfaces the IPC error message",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=skills_read_skill_file"
       },
       "evidence": {
         "bounds": "AUDIT closure: single registry/request file access is finite in count but disk latency/file bytes are not bounded by the API, and registry validation scales with persisted entries. Positive blocking disposition is ISOLATED rather than retained based on absence of a regex match.",
@@ -465,6 +507,12 @@
         "terminalNoticeOwner": "Existing SkillsTab runOperation/runBackendProgressOperation or the invoking API consumer; no new duplicate notifier added",
         "lifetime": "Owned blocking closure continues after view unmount; frontend processing lifetime/refresh closure belongs to 08-25/08-26 where applicable. Source sync lifetime and toast proof remain in 08-02.",
         "retry": "Manual only. Wrapper awaits one blocking task and does not replay failed operations."
+      ,
+        "classifier": "n/a: bounded editor save/read, not a file-processing batch",
+        "successRetention": "saved payload retained in the editor; SkillsTab refreshes on SKILLS_UPDATED_EVENT",
+        "failureReasons": "window-local catch surfaces the IPC error message",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=skills_save_skill_file"
       },
       "evidence": {
         "bounds": "Finite request-response domain work; scan cardinality, recursive file bytes or subprocess duration are not claimed constant. All work is isolated from the async executor.",
@@ -521,6 +569,12 @@
         "terminalNoticeOwner": "Existing SkillsTab runOperation/runBackendProgressOperation or the invoking API consumer; no new duplicate notifier added",
         "lifetime": "Owned blocking closure continues after view unmount; frontend processing lifetime/refresh closure belongs to 08-25/08-26 where applicable. Source sync lifetime and toast proof remain in 08-02.",
         "retry": "Manual only. Wrapper awaits one blocking task and does not replay failed operations."
+      ,
+        "classifier": "n/a: bounded editor save/read, not a file-processing batch",
+        "successRetention": "saved payload retained in the editor; SkillsTab refreshes on SKILLS_UPDATED_EVENT",
+        "failureReasons": "window-local catch surfaces the IPC error message",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=skills_save_skill_as"
       },
       "evidence": {
         "bounds": "Finite request-response domain work; scan cardinality, recursive file bytes or subprocess duration are not claimed constant. All work is isolated from the async executor.",
@@ -577,6 +631,12 @@
         "terminalNoticeOwner": "Existing SkillsTab runOperation/runBackendProgressOperation or the invoking API consumer; no new duplicate notifier added",
         "lifetime": "Owned blocking closure continues after view unmount; frontend processing lifetime/refresh closure belongs to 08-25/08-26 where applicable. Source sync lifetime and toast proof remain in 08-02.",
         "retry": "Manual only. Wrapper awaits one blocking task and does not replay failed operations."
+      ,
+        "classifier": "explicit classify: success / skills.operation.complete",
+        "successRetention": "SkillOperation.result retains the payload; component refresh is viewScope.request-guarded; optimistic removal guarded by captured isCurrent() closure",
+        "failureReasons": "explicit classify reason strings (per-item failure messages joined); built-in path merges syncAllComplete summary with per-source errors and detects skills_source_stale",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=skills_create_skill"
       },
       "evidence": {
         "bounds": "Finite request-response domain work; scan cardinality, recursive file bytes or subprocess duration are not claimed constant. All work is isolated from the async executor.",
@@ -633,6 +693,12 @@
         "terminalNoticeOwner": "Existing SkillsTab runOperation/runBackendProgressOperation or the invoking API consumer; no new duplicate notifier added",
         "lifetime": "Owned blocking closure continues after view unmount; frontend processing lifetime/refresh closure belongs to 08-25/08-26 where applicable. Source sync lifetime and toast proof remain in 08-02.",
         "retry": "Manual only. Wrapper awaits one blocking task and does not replay failed operations."
+      ,
+        "classifier": "n/a",
+        "successRetention": "n/a",
+        "failureReasons": "n/a",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=skills_delete_skill"
       },
       "evidence": {
         "bounds": "Finite request-response domain work; scan cardinality, recursive file bytes or subprocess duration are not claimed constant. All work is isolated from the async executor.",
@@ -689,6 +755,12 @@
         "terminalNoticeOwner": "Existing SkillsTab runOperation/runBackendProgressOperation or the invoking API consumer; no new duplicate notifier added",
         "lifetime": "Owned blocking closure continues after view unmount; frontend processing lifetime/refresh closure belongs to 08-25/08-26 where applicable. Source sync lifetime and toast proof remain in 08-02.",
         "retry": "Manual only. Wrapper awaits one blocking task and does not replay failed operations."
+      ,
+        "classifier": "n/a: read; promise resolution returns data to the caller",
+        "successRetention": "result stored in component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=skills_list_installs"
       },
       "evidence": {
         "bounds": "Finite request-response domain work; scan cardinality, recursive file bytes or subprocess duration are not claimed constant. All work is isolated from the async executor.",
@@ -746,6 +818,12 @@
         "terminalNoticeOwner": "Existing SkillsTab runOperation/runBackendProgressOperation or the invoking API consumer; no new duplicate notifier added",
         "lifetime": "Owned blocking closure continues after view unmount; frontend processing lifetime/refresh closure belongs to 08-25/08-26 where applicable. Source sync lifetime and toast proof remain in 08-02.",
         "retry": "Manual only. Wrapper awaits one blocking task and does not replay failed operations."
+      ,
+        "classifier": "explicit classify per counts: success (0 failures) / info skills.operation.partial (some) / error (all failed)",
+        "successRetention": "SkillOperation.result retains the payload; component refresh is viewScope.request-guarded; optimistic removal guarded by captured isCurrent() closure",
+        "failureReasons": "explicit classify reason strings (per-item failure messages joined); built-in path merges syncAllComplete summary with per-source errors and detects skills_source_stale",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=skills_install_skill"
       },
       "evidence": {
         "bounds": "Finite request-response domain work; scan cardinality, recursive file bytes or subprocess duration are not claimed constant. All work is isolated from the async executor.",
@@ -803,6 +881,12 @@
         "terminalNoticeOwner": "Existing SkillsTab runOperation/runBackendProgressOperation or the invoking API consumer; no new duplicate notifier added",
         "lifetime": "Owned blocking closure continues after view unmount; frontend processing lifetime/refresh closure belongs to 08-25/08-26 where applicable. Source sync lifetime and toast proof remain in 08-02.",
         "retry": "Manual only. Wrapper awaits one blocking task and does not replay failed operations."
+      ,
+        "classifier": "explicit classify per counts: success / info partial / error",
+        "successRetention": "SkillOperation.result retains the payload; component refresh is viewScope.request-guarded; optimistic removal guarded by captured isCurrent() closure",
+        "failureReasons": "explicit classify reason strings (per-item failure messages joined); built-in path merges syncAllComplete summary with per-source errors and detects skills_source_stale",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=skills_uninstall_skill"
       },
       "evidence": {
         "bounds": "Finite request-response domain work; scan cardinality, recursive file bytes or subprocess duration are not claimed constant. All work is isolated from the async executor.",
@@ -859,6 +943,12 @@
         "terminalNoticeOwner": "Existing SkillsTab runOperation/runBackendProgressOperation or the invoking API consumer; no new duplicate notifier added",
         "lifetime": "Owned blocking closure continues after view unmount; frontend processing lifetime/refresh closure belongs to 08-25/08-26 where applicable. Source sync lifetime and toast proof remain in 08-02.",
         "retry": "Manual only. Wrapper awaits one blocking task and does not replay failed operations."
+      ,
+        "classifier": "explicit classify: success when adopted>0 else info, adoptComplete reason",
+        "successRetention": "SkillOperation.result retains the payload; component refresh is viewScope.request-guarded; optimistic removal guarded by captured isCurrent() closure",
+        "failureReasons": "explicit classify reason strings (per-item failure messages joined); built-in path merges syncAllComplete summary with per-source errors and detects skills_source_stale",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=skills_adopt_external_links"
       },
       "evidence": {
         "bounds": "Finite request-response domain work; scan cardinality, recursive file bytes or subprocess duration are not claimed constant. All work is isolated from the async executor.",
@@ -922,6 +1012,12 @@
         "terminalNoticeOwner": "Existing SkillsTab runOperation/runBackendProgressOperation or the invoking API consumer; no new duplicate notifier added",
         "lifetime": "Owned blocking closure continues after view unmount; frontend processing lifetime/refresh closure belongs to 08-25/08-26 where applicable. Source sync lifetime and toast proof remain in 08-02.",
         "retry": "Manual only. Wrapper awaits one blocking task and does not replay failed operations."
+      ,
+        "classifier": "explicit classify: success / skills.operation.complete",
+        "successRetention": "SkillOperation.result retains the payload; component refresh is viewScope.request-guarded; optimistic removal guarded by captured isCurrent() closure",
+        "failureReasons": "explicit classify reason strings (per-item failure messages joined); built-in path merges syncAllComplete summary with per-source errors and detects skills_source_stale",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=skills_reset_registry"
       },
       "evidence": {
         "bounds": "Finite request-response domain work; scan cardinality, recursive file bytes or subprocess duration are not claimed constant. All work is isolated from the async executor.",
@@ -967,6 +1063,12 @@
         "terminalNoticeOwner": "Existing SkillsTab runOperation/runBackendProgressOperation or the invoking API consumer; no new duplicate notifier added",
         "lifetime": "Owned blocking closure continues after view unmount; frontend processing lifetime/refresh closure belongs to 08-25/08-26 where applicable. Source sync lifetime and toast proof remain in 08-02.",
         "retry": "Manual only. Wrapper awaits one blocking task and does not replay failed operations."
+      ,
+        "classifier": "n/a",
+        "successRetention": "n/a",
+        "failureReasons": "n/a",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=skills_doctor"
       },
       "evidence": {
         "bounds": "Finite request-response domain work; scan cardinality, recursive file bytes or subprocess duration are not claimed constant. All work is isolated from the async executor.",
@@ -1023,6 +1125,12 @@
         "terminalNoticeOwner": "Existing SkillsTab runOperation/runBackendProgressOperation or the invoking API consumer; no new duplicate notifier added",
         "lifetime": "Owned blocking closure continues after view unmount; frontend processing lifetime/refresh closure belongs to 08-25/08-26 where applicable. Source sync lifetime and toast proof remain in 08-02.",
         "retry": "Manual only. Wrapper awaits one blocking task and does not replay failed operations."
+      ,
+        "classifier": "n/a",
+        "successRetention": "n/a",
+        "failureReasons": "n/a",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=skills_list_dirty"
       },
       "evidence": {
         "bounds": "Finite request-response domain work; scan cardinality, recursive file bytes or subprocess duration are not claimed constant. All work is isolated from the async executor.",
@@ -1087,6 +1195,12 @@
         "terminalNoticeOwner": "Existing SkillsTab runOperation/runBackendProgressOperation or the invoking API consumer; no new duplicate notifier added",
         "lifetime": "Owned blocking closure continues after view unmount; frontend processing lifetime/refresh closure belongs to 08-25/08-26 where applicable. Source sync lifetime and toast proof remain in 08-02.",
         "retry": "Manual only. Wrapper awaits one blocking task and does not replay failed operations."
+      ,
+        "classifier": "n/a",
+        "successRetention": "n/a",
+        "failureReasons": "n/a",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=skills_reconcile_skill"
       },
       "evidence": {
         "bounds": "Finite request-response domain work; scan cardinality, recursive file bytes or subprocess duration are not claimed constant. All work is isolated from the async executor.",
@@ -1145,6 +1259,12 @@
         "terminalNoticeOwner": "Existing SkillsTab runOperation/runBackendProgressOperation or the invoking API consumer; no new duplicate notifier added",
         "lifetime": "Owned blocking closure continues after view unmount; frontend processing lifetime/refresh closure belongs to 08-25/08-26 where applicable. Source sync lifetime and toast proof remain in 08-02.",
         "retry": "Manual only. Wrapper awaits one blocking task and does not replay failed operations."
+      ,
+        "classifier": "n/a",
+        "successRetention": "n/a",
+        "failureReasons": "n/a",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=skills_import_external"
       },
       "evidence": {
         "bounds": "Finite request-response domain work; scan cardinality, recursive file bytes or subprocess duration are not claimed constant. All work is isolated from the async executor.",
@@ -1204,6 +1324,12 @@
         "terminalNoticeOwner": "Existing SkillsTab runOperation/runBackendProgressOperation or the invoking API consumer; no new duplicate notifier added",
         "lifetime": "Owned blocking closure continues after view unmount; frontend processing lifetime/refresh closure belongs to 08-25/08-26 where applicable. Source sync lifetime and toast proof remain in 08-02.",
         "retry": "Manual only. Wrapper awaits one blocking task and does not replay failed operations."
+      ,
+        "classifier": "n/a",
+        "successRetention": "n/a",
+        "failureReasons": "n/a",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=skills_import_unmanage"
       },
       "evidence": {
         "bounds": "Finite request-response domain work; scan cardinality, recursive file bytes or subprocess duration are not claimed constant. All work is isolated from the async executor.",
@@ -1265,6 +1391,12 @@
         "terminalNoticeOwner": "Existing SkillsTab runOperation/runBackendProgressOperation or the invoking API consumer; no new duplicate notifier added",
         "lifetime": "Owned blocking closure continues after view unmount; frontend processing lifetime/refresh closure belongs to 08-25/08-26 where applicable. Source sync lifetime and toast proof remain in 08-02.",
         "retry": "Manual only. Wrapper awaits one blocking task and does not replay failed operations."
+      ,
+        "classifier": "n/a: read; promise resolution returns data to the caller",
+        "successRetention": "result stored in component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=skills_bundle_status"
       },
       "evidence": {
         "bounds": "Finite request-response domain work; scan cardinality, recursive file bytes or subprocess duration are not claimed constant. All work is isolated from the async executor.",
@@ -1328,6 +1460,12 @@
         "terminalNoticeOwner": "Existing SkillsTab runOperation/runBackendProgressOperation or the invoking API consumer; no new duplicate notifier added",
         "lifetime": "Owned blocking closure continues after view unmount; frontend processing lifetime/refresh closure belongs to 08-25/08-26 where applicable. Source sync lifetime and toast proof remain in 08-02.",
         "retry": "Manual only. Wrapper awaits one blocking task and does not replay failed operations."
+      ,
+        "classifier": "n/a: read; promise resolution returns data to the caller",
+        "successRetention": "result stored in component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=skills_check_bundle_update"
       },
       "evidence": {
         "bounds": "Finite request-response domain work; scan cardinality, recursive file bytes or subprocess duration are not claimed constant. All work is isolated from the async executor.",
@@ -1393,6 +1531,12 @@
         "terminalNoticeOwner": "Existing SkillsTab runOperation/runBackendProgressOperation or the invoking API consumer; no new duplicate notifier added",
         "lifetime": "Owned blocking closure continues after view unmount; frontend processing lifetime/refresh closure belongs to 08-25/08-26 where applicable. Source sync lifetime and toast proof remain in 08-02.",
         "retry": "Manual only. Wrapper awaits one blocking task and does not replay failed operations."
+      ,
+        "classifier": "explicit classify: null outcome -> error / skills.operation.error",
+        "successRetention": "SkillOperation.result retains the payload; component refresh is viewScope.request-guarded; optimistic removal guarded by captured isCurrent() closure",
+        "failureReasons": "explicit classify reason strings (per-item failure messages joined); built-in path merges syncAllComplete summary with per-source errors and detects skills_source_stale",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=skills_apply_bundle_update"
       },
       "evidence": {
         "bounds": "Finite request-response domain work; scan cardinality, recursive file bytes or subprocess duration are not claimed constant. All work is isolated from the async executor.",

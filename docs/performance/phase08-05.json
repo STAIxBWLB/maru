@@ -38,6 +38,12 @@
         "payload": "Existing nonempty/empty read result is a view refresh, not a user-started processing completion.",
         "terminalNoticeOwner": "Existing badge/dashboard/CommitDialog/workspaceStore view refresh owner; scan participates in CommitDialog runGitSync without an independent completion notice.",
         "lifetime": "Awaited worker continues after view unmount; it does not provide app-quit durability. Manual retry only. The initiating workspace remains the caller's existing scope; final shared notice/retained partial successes classification belongs25/26."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=git_status"
       },
       "evidence": {
         "boundaryCase": "phase08_05::every_git_wrapper_holds_a_distinct_worker_and_same_task_yields",
@@ -82,6 +88,12 @@
         "payload": "Existing nonempty/empty read result is a view refresh, not a user-started processing completion.",
         "terminalNoticeOwner": "Existing badge/dashboard/CommitDialog/workspaceStore view refresh owner; scan participates in CommitDialog runGitSync without an independent completion notice.",
         "lifetime": "Awaited worker continues after view unmount; it does not provide app-quit durability. Manual retry only. The initiating workspace remains the caller's existing scope; final shared notice/retained partial successes classification belongs25/26."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=git_changes"
       },
       "evidence": {
         "boundaryCase": "phase08_05::every_git_wrapper_holds_a_distinct_worker_and_same_task_yields",
@@ -126,6 +138,12 @@
         "payload": "Existing nonempty/empty read result is a view refresh, not a user-started processing completion.",
         "terminalNoticeOwner": "Existing badge/dashboard/CommitDialog/workspaceStore view refresh owner; scan participates in CommitDialog runGitSync without an independent completion notice.",
         "lifetime": "Awaited worker continues after view unmount; it does not provide app-quit durability. Manual retry only. The initiating workspace remains the caller's existing scope; final shared notice/retained partial successes classification belongs25/26."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=git_diff"
       },
       "evidence": {
         "boundaryCase": "phase08_05::every_git_wrapper_holds_a_distinct_worker_and_same_task_yields",
@@ -180,6 +198,12 @@
         "payload": "Nonempty subject String populates commit message; rejected provider has existing actionable legacy failure.",
         "terminalNoticeOwner": "Existing CommitDialog handleCommit/handleAutoCommit/runGitSync owns onCommitted/onClose and setError/syncReport; component-unmount notification lifetime closes in08-25/08-26.",
         "lifetime": "Awaited worker continues after view unmount; it does not provide app-quit durability. Manual retry only. The initiating workspace remains the caller's existing scope; final shared notice/retained partial successes classification belongs25/26."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=git_generate_commit_message"
       },
       "evidence": {
         "boundaryCase": "phase08_05::every_git_wrapper_holds_a_distinct_worker_and_same_task_yields",
@@ -224,6 +248,12 @@
         "payload": "Existing nonempty/empty read result is a view refresh, not a user-started processing completion.",
         "terminalNoticeOwner": "Existing badge/dashboard/CommitDialog/workspaceStore view refresh owner; scan participates in CommitDialog runGitSync without an independent completion notice.",
         "lifetime": "Awaited worker continues after view unmount; it does not provide app-quit durability. Manual retry only. The initiating workspace remains the caller's existing scope; final shared notice/retained partial successes classification belongs25/26."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=git_sync_scan"
       },
       "evidence": {
         "boundaryCase": "phase08_05::every_git_wrapper_holds_a_distinct_worker_and_same_task_yields",
@@ -268,6 +298,12 @@
         "payload": "Existing nonempty/empty read result is a view refresh, not a user-started processing completion.",
         "terminalNoticeOwner": "Existing badge/dashboard/CommitDialog/workspaceStore view refresh owner; scan participates in CommitDialog runGitSync without an independent completion notice.",
         "lifetime": "Awaited worker continues after view unmount; it does not provide app-quit durability. Manual retry only. The initiating workspace remains the caller's existing scope; final shared notice/retained partial successes classification belongs25/26."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=list_workspace_submodules"
       },
       "evidence": {
         "boundaryCase": "phase08_05::every_git_wrapper_holds_a_distinct_worker_and_same_task_yields",
@@ -321,6 +357,12 @@
         "payload": "GitSyncPullResult stashed flag and stdout/stderr report completed pull; rejection retains stash/conflict state and prior repository successes.",
         "terminalNoticeOwner": "Existing CommitDialog handleCommit/handleAutoCommit/runGitSync owns onCommitted/onClose and setError/syncReport; component-unmount notification lifetime closes in08-25/08-26.",
         "lifetime": "Awaited worker continues after view unmount; it does not provide app-quit durability. Manual retry only. The initiating workspace remains the caller's existing scope; final shared notice/retained partial successes classification belongs25/26."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=git_sync_pull_rebase"
       },
       "evidence": {
         "boundaryCase": "phase08_05::every_git_wrapper_holds_a_distinct_worker_and_same_task_yields",
@@ -377,6 +419,12 @@
         "payload": "GitSyncCommitPushResult committed/pushed and stdout fields mean completed local commit+push; rejected push may follow retained local commit.",
         "terminalNoticeOwner": "Existing CommitDialog handleCommit/handleAutoCommit/runGitSync owns onCommitted/onClose and setError/syncReport; component-unmount notification lifetime closes in08-25/08-26.",
         "lifetime": "Awaited worker continues after view unmount; it does not provide app-quit durability. Manual retry only. The initiating workspace remains the caller's existing scope; final shared notice/retained partial successes classification belongs25/26."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=git_sync_commit_push"
       },
       "evidence": {
         "boundaryCase": "phase08_05::every_git_wrapper_holds_a_distinct_worker_and_same_task_yields",
@@ -432,6 +480,12 @@
         "payload": "GitStatus reflects post-commit current disk; unselected changes remain dirty.",
         "terminalNoticeOwner": "Existing CommitDialog handleCommit/handleAutoCommit/runGitSync owns onCommitted/onClose and setError/syncReport; component-unmount notification lifetime closes in08-25/08-26.",
         "lifetime": "Awaited worker continues after view unmount; it does not provide app-quit durability. Manual retry only. The initiating workspace remains the caller's existing scope; final shared notice/retained partial successes classification belongs25/26."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=git_commit"
       },
       "evidence": {
         "boundaryCase": "phase08_05::every_git_wrapper_holds_a_distinct_worker_and_same_task_yields",
@@ -478,6 +532,12 @@
         "payload": "DotSyncOverview available/compatible, mirror/peer status is read refresh; unavailable CLI is not a successful sync.",
         "terminalNoticeOwner": "Existing DotSyncPanel refresh/applyOverview read owner.",
         "lifetime": "Existing backend worker continues after component unmount; no retry, duplicate queue or new job service. Final retained-success/actionable-failure classification belongs25/26."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=dot_sync_overview"
       },
       "evidence": {
         "boundaryCase": "phase08_05::dot_wrappers_hold_distinct_workers_and_same_task_yields",
@@ -533,6 +593,12 @@
         "payload": "DotSyncActionResult stdout/stderr plus refreshed overview only resolves after command sequence and refresh. A refresh failure can follow retained action effects; final classifier must not assume rollback.",
         "terminalNoticeOwner": "Existing DotSyncPanel execute owns busy/error/output/applyOverview and confirmations. Screen-independent terminal notice closure belongs08-25/08-26.",
         "lifetime": "Existing backend worker continues after component unmount; no retry, duplicate queue or new job service. Final retained-success/actionable-failure classification belongs25/26."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=dot_sync_run"
       },
       "evidence": {
         "boundaryCase": "phase08_05::dot_wrappers_hold_distinct_workers_and_same_task_yields",

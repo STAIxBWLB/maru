@@ -41,6 +41,12 @@
         ],
         "payload": "readInboxRuntimeConfig (src/lib/api.ts:911) invokes read_inbox_runtime_config with the workspace path; that surface keeps owning the load/save flow regardless of screen changes.",
         "terminalNoticeOwner": "The Inbox and Telegram settings surfaces that call these api.ts helpers own busy state, current value display and error toasts for these calls. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=read_inbox_runtime_config"
       },
       "evidence": {
         "behaviorCases": [
@@ -99,6 +105,12 @@
         ],
         "payload": "saveInboxRuntimeConfig (src/lib/api.ts:917) invokes save_inbox_runtime_config with the workspace path and config; that surface keeps owning the load/save flow regardless of screen changes.",
         "terminalNoticeOwner": "The Inbox and Telegram settings surfaces that call these api.ts helpers own busy state, current value display and error toasts for these calls. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=save_inbox_runtime_config"
       },
       "evidence": {
         "behaviorCases": [
@@ -152,6 +164,12 @@
         ],
         "payload": "readInboxSettings (src/lib/api.ts:2835) invokes read_inbox_settings with the vault path; that surface keeps owning the load/save flow regardless of screen changes.",
         "terminalNoticeOwner": "The Inbox and Telegram settings surfaces that call these api.ts helpers own busy state, current value display and error toasts for these calls. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=read_inbox_settings"
       },
       "evidence": {
         "behaviorCases": [
@@ -210,6 +228,12 @@
         ],
         "payload": "saveInboxSettings (src/lib/api.ts:2841) invokes save_inbox_settings with the vault path and settings; that surface keeps owning the load/save flow regardless of screen changes.",
         "terminalNoticeOwner": "The Inbox and Telegram settings surfaces that call these api.ts helpers own busy state, current value display and error toasts for these calls. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=save_inbox_settings"
       },
       "evidence": {
         "behaviorCases": [
@@ -263,6 +287,12 @@
         ],
         "payload": "readTelegramMonitorConfig (src/lib/api.ts:2443) invokes read_telegram_monitor_config with the optional work path and monitor config path; that surface keeps owning the load/save flow regardless of screen changes.",
         "terminalNoticeOwner": "The Inbox and Telegram settings surfaces that call these api.ts helpers own busy state, current value display and error toasts for these calls. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "accept/reject/stage outcome per item",
+        "successRetention": "pane state refresh after mutation",
+        "failureReasons": "pane-local catch error message",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=read_telegram_monitor_config"
       },
       "evidence": {
         "behaviorCases": [
@@ -321,6 +351,12 @@
         ],
         "payload": "saveTelegramMonitorConfig (src/lib/api.ts:2452) invokes save_telegram_monitor_config with the optional work path, monitor config path and save payload; that surface keeps owning the load/save flow regardless of screen changes.",
         "terminalNoticeOwner": "The Inbox and Telegram settings surfaces that call these api.ts helpers own busy state, current value display and error toasts for these calls. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "accept/reject/stage outcome per item",
+        "successRetention": "pane state refresh after mutation",
+        "failureReasons": "pane-local catch error message",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=save_telegram_monitor_config"
       },
       "evidence": {
         "behaviorCases": [
@@ -380,6 +416,12 @@
         ],
         "payload": "readSites (src/lib/maruDir.ts:631) invokes read_sites; that surface keeps owning the load/save flow regardless of screen changes.",
         "terminalNoticeOwner": "The sites import/settings surface that calls these maruDir.ts helpers owns busy state, current value display and error toasts for these calls. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=read_sites"
       },
       "evidence": {
         "behaviorCases": [
@@ -438,6 +480,12 @@
         ],
         "payload": "saveSites (src/lib/maruDir.ts:638) invokes save_sites with the registry value; that surface keeps owning the load/save flow regardless of screen changes.",
         "terminalNoticeOwner": "The sites import/settings surface that calls these maruDir.ts helpers owns busy state, current value display and error toasts for these calls. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=save_sites"
       },
       "evidence": {
         "behaviorCases": [
@@ -491,6 +539,12 @@
         ],
         "payload": "scanWorkSites (src/lib/maruDir.ts:658) invokes scan_work_sites with the directory to scan; that surface keeps owning the import-dialog flow regardless of screen changes.",
         "terminalNoticeOwner": "The sites import/settings surface that calls these maruDir.ts helpers owns busy state, current value display and error toasts for these calls. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=scan_work_sites"
       },
       "evidence": {
         "behaviorCases": [
@@ -548,6 +602,12 @@
         ],
         "payload": "runE2EFlow (src/lib/e2eFlow.ts:310) invokes maru_e2e_run with the workspace path and optional baseline average; that surface keeps owning the run flow regardless of screen changes.",
         "terminalNoticeOwner": "The E2E flow surface that calls these e2eFlow.ts helpers owns run state, progress display and error toasts for these calls. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a",
+        "successRetention": "n/a",
+        "failureReasons": "n/a",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=maru_e2e_run"
       },
       "evidence": {
         "behaviorCases": [
@@ -601,6 +661,12 @@
         ],
         "payload": "readE2EFlow (src/lib/e2eFlow.ts:326) invokes maru_e2e_read with the workspace path and run id; that surface keeps owning the run flow regardless of screen changes.",
         "terminalNoticeOwner": "The E2E flow surface that calls these e2eFlow.ts helpers owns run state, progress display and error toasts for these calls. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a",
+        "successRetention": "n/a",
+        "failureReasons": "n/a",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=maru_e2e_read"
       },
       "evidence": {
         "behaviorCases": [

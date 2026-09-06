@@ -308,6 +308,9 @@ function validateRow(row, shard, state) {
   if (staged) insist(shard.integrationRequired === "08-29" && shard.moduleIntegrationOwner === "08-29", `${label}: missing explicit 08-29 integration obligation/owner`);
   const key = row.mutationKey;
   if (!(key?.readOnly === true || /\bno mutation\b|\bread.only\b/i.test(textOf(key)))) {
+    const mutationText = textOf(key);
+    insist(!/exact[- ]?(?:path|target|file)[- ]only|per[- ](?:path|file) exclusion only|locks? only the exact/i.test(mutationText), `${label}: exact-path-only mutation exclusion cannot close a mutation row`);
+    insist(!/existing (?:domain )?guard exemption|domain guard (?:is )?(?:sufficient|an exemption)|exempt(?:ed)? by (?:the )?(?:existing )?(?:domain )?guard/i.test(mutationText), `${label}: existing-domain-guard exemption cannot replace shared admission`);
     for (const field of ["lexicalPaths", "aliasPaths", "postAdmissionPreconditions", "domainLockOrder", "sharedAdmissionEntry"]) insist(nonempty(key[field]), `${label}: missing mutationKey.${field}`);
     if (!staged || all) {
       const overlay = state.overlay?.integrations.find((entry) => entry.module === row.module);
@@ -323,6 +326,11 @@ function validateRow(row, shard, state) {
   if (all) {
     for (const field of ["classifier", "successRetention", "failureReasons"]) insist(nonempty(row.processingCaller[field]), `${label}: final processingCaller missing ${field}`);
     insist(row.processingCaller.singleTerminalNoticeOwner === true, `${label}: final processingCaller requires a single terminal-notice owner`);
+    if (row.name === "skills_sync_all_sources") {
+      insist(registration.fn.async && /\bspawn_blocking\b/.test(registration.fn.body), `${label}: synchronous skills_sync_all_sources boundary`);
+      const batchCases = row.evidence.batchCases;
+      insist(Array.isArray(batchCases) && batchCases.some((name) => /actual_wrapper|same_runtime/i.test(textOf(name))), `${label}: missing actual-wrapper same-runtime batch test`);
+    }
   }
   validateTests(row, sources, label);
 }

@@ -33,6 +33,12 @@
     ],
     "payload": "terminalSpawn (src/lib/api.ts) invokes terminal_spawn with the args bundle and onEvent channel; src/components/TerminalPanel.tsx starts sessions with it and owns the returned handle plus channel lifecycle.",
     "terminalNoticeOwner": "src/components/TerminalPanel.tsx owns per-session completion and error display for terminal operations (frame channel lifecycle, spawn/kill sequencing, swallowed write/ack errors). Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+   ,
+     "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+     "successRetention": "updated record retained in component state",
+     "failureReasons": "call-site catch error message (single publisher)",
+     "singleTerminalNoticeOwner": true,
+     "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=terminal_spawn"
    },
    "evidence": {
     "behaviorCases": [
@@ -86,6 +92,12 @@
     ],
     "payload": "terminalWrite (src/lib/api.ts) invokes terminal_write; no production component calls it today - TerminalPanel batches keystrokes through terminalInputBatch - so the wrapper remains a stable wire API for direct writes.",
     "terminalNoticeOwner": "src/components/TerminalPanel.tsx owns per-session completion and error display for terminal operations (frame channel lifecycle, spawn/kill sequencing, swallowed write/ack errors). Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+   ,
+     "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+     "successRetention": "updated record retained in component state",
+     "failureReasons": "call-site catch error message (single publisher)",
+     "singleTerminalNoticeOwner": true,
+     "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=terminal_write"
    },
    "evidence": {
     "behaviorCases": [
@@ -139,6 +151,12 @@
     ],
     "payload": "terminalInput (src/lib/api.ts) invokes terminal_input; no production component calls it today (TerminalPanel uses terminalInputBatch), and the single-key wire shape is preserved for direct input.",
     "terminalNoticeOwner": "src/components/TerminalPanel.tsx owns per-session completion and error display for terminal operations (frame channel lifecycle, spawn/kill sequencing, swallowed write/ack errors). Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+   ,
+     "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+     "successRetention": "updated record retained in component state",
+     "failureReasons": "call-site catch error message (single publisher)",
+     "singleTerminalNoticeOwner": true,
+     "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=terminal_input"
    },
    "evidence": {
     "behaviorCases": [
@@ -191,6 +209,12 @@
     ],
     "payload": "terminalInputBatch (src/lib/api.ts) invokes terminal_input_batch; src/components/TerminalPanel.tsx sends every queued keystroke/mouse batch with the client sequence number.",
     "terminalNoticeOwner": "src/components/TerminalPanel.tsx owns per-session completion and error display for terminal operations (frame channel lifecycle, spawn/kill sequencing, swallowed write/ack errors). Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+   ,
+     "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+     "successRetention": "updated record retained in component state",
+     "failureReasons": "call-site catch error message (single publisher)",
+     "singleTerminalNoticeOwner": true,
+     "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=terminal_input_batch"
    },
    "evidence": {
     "behaviorCases": [
@@ -243,6 +267,12 @@
     ],
     "payload": "terminalAck (src/lib/api.ts) invokes terminal_ack; src/components/TerminalPanel.tsx acks each streamed frame seq to keep the credit window open.",
     "terminalNoticeOwner": "src/components/TerminalPanel.tsx owns per-session completion and error display for terminal operations (frame channel lifecycle, spawn/kill sequencing, swallowed write/ack errors). Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+   ,
+     "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+     "successRetention": "updated record retained in component state",
+     "failureReasons": "call-site catch error message (single publisher)",
+     "singleTerminalNoticeOwner": true,
+     "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=terminal_ack"
    },
    "evidence": {
     "behaviorCases": [
@@ -295,6 +325,12 @@
     ],
     "payload": "terminalRequestFull (src/lib/api.ts) invokes terminal_request_full; src/components/TerminalPanel.tsx requests a full repaint on demand.",
     "terminalNoticeOwner": "src/components/TerminalPanel.tsx owns per-session completion and error display for terminal operations (frame channel lifecycle, spawn/kill sequencing, swallowed write/ack errors). Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+   ,
+     "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+     "successRetention": "updated record retained in component state",
+     "failureReasons": "call-site catch error message (single publisher)",
+     "singleTerminalNoticeOwner": true,
+     "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=terminal_request_full"
    },
    "evidence": {
     "behaviorCases": [
@@ -347,6 +383,12 @@
     ],
     "payload": "terminalSetVisibility (src/lib/api.ts) invokes terminal_set_visibility; src/components/TerminalPanel.tsx toggles stream visibility per session tab.",
     "terminalNoticeOwner": "src/components/TerminalPanel.tsx owns per-session completion and error display for terminal operations (frame channel lifecycle, spawn/kill sequencing, swallowed write/ack errors). Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+   ,
+     "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+     "successRetention": "updated record retained in component state",
+     "failureReasons": "call-site catch error message (single publisher)",
+     "singleTerminalNoticeOwner": true,
+     "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=terminal_set_visibility"
    },
    "evidence": {
     "behaviorCases": [
@@ -399,6 +441,12 @@
     ],
     "payload": "terminalSelection (src/lib/api.ts) invokes terminal_selection; src/components/TerminalPanel.tsx drives start/update/finish/clear/select-all for mouse selection.",
     "terminalNoticeOwner": "src/components/TerminalPanel.tsx owns per-session completion and error display for terminal operations (frame channel lifecycle, spawn/kill sequencing, swallowed write/ack errors). Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+   ,
+     "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+     "successRetention": "updated record retained in component state",
+     "failureReasons": "call-site catch error message (single publisher)",
+     "singleTerminalNoticeOwner": true,
+     "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=terminal_selection"
    },
    "evidence": {
     "behaviorCases": [
@@ -451,6 +499,12 @@
     ],
     "payload": "terminalCopySelection (src/lib/api.ts) invokes terminal_copy_selection; src/components/TerminalPanel.tsx copies the model selection to the clipboard.",
     "terminalNoticeOwner": "src/components/TerminalPanel.tsx owns per-session completion and error display for terminal operations (frame channel lifecycle, spawn/kill sequencing, swallowed write/ack errors). Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+   ,
+     "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+     "successRetention": "updated record retained in component state",
+     "failureReasons": "call-site catch error message (single publisher)",
+     "singleTerminalNoticeOwner": true,
+     "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=terminal_copy_selection"
    },
    "evidence": {
     "behaviorCases": [
@@ -503,6 +557,12 @@
     ],
     "payload": "terminalScroll (src/lib/api.ts) invokes terminal_scroll; src/components/TerminalPanel.tsx scrolls the viewport through scrollback.",
     "terminalNoticeOwner": "src/components/TerminalPanel.tsx owns per-session completion and error display for terminal operations (frame channel lifecycle, spawn/kill sequencing, swallowed write/ack errors). Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+   ,
+     "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+     "successRetention": "updated record retained in component state",
+     "failureReasons": "call-site catch error message (single publisher)",
+     "singleTerminalNoticeOwner": true,
+     "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=terminal_scroll"
    },
    "evidence": {
     "behaviorCases": [
@@ -555,6 +615,12 @@
     ],
     "payload": "terminalClear (src/lib/api.ts) invokes terminal_clear; src/components/TerminalPanel.tsx runs the Cmd+K clear for the active session.",
     "terminalNoticeOwner": "src/components/TerminalPanel.tsx owns per-session completion and error display for terminal operations (frame channel lifecycle, spawn/kill sequencing, swallowed write/ack errors). Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+   ,
+     "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+     "successRetention": "updated record retained in component state",
+     "failureReasons": "call-site catch error message (single publisher)",
+     "singleTerminalNoticeOwner": true,
+     "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=terminal_clear"
    },
    "evidence": {
     "behaviorCases": [
@@ -607,6 +673,12 @@
     ],
     "payload": "terminalText (src/lib/api.ts) invokes terminal_text; src/components/TerminalPanel.tsx and the native e2e bridge (src/lib/nativeE2eBridge.ts) read plain-text snapshots.",
     "terminalNoticeOwner": "src/components/TerminalPanel.tsx owns per-session completion and error display for terminal operations (frame channel lifecycle, spawn/kill sequencing, swallowed write/ack errors). Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+   ,
+     "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+     "successRetention": "updated record retained in component state",
+     "failureReasons": "call-site catch error message (single publisher)",
+     "singleTerminalNoticeOwner": true,
+     "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=terminal_text"
    },
    "evidence": {
     "behaviorCases": [
@@ -660,6 +732,12 @@
     ],
     "payload": "terminalSearch (src/lib/api.ts) invokes terminal_search; src/components/TerminalPanel.tsx searches scrollback and reveals the hit.",
     "terminalNoticeOwner": "src/components/TerminalPanel.tsx owns per-session completion and error display for terminal operations (frame channel lifecycle, spawn/kill sequencing, swallowed write/ack errors). Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+   ,
+     "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+     "successRetention": "updated record retained in component state",
+     "failureReasons": "call-site catch error message (single publisher)",
+     "singleTerminalNoticeOwner": true,
+     "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=terminal_search"
    },
    "evidence": {
     "behaviorCases": [
@@ -712,6 +790,12 @@
     ],
     "payload": "terminalResize (src/lib/api.ts) invokes terminal_resize; src/components/TerminalPanel.tsx resizes the PTY with the pane.",
     "terminalNoticeOwner": "src/components/TerminalPanel.tsx owns per-session completion and error display for terminal operations (frame channel lifecycle, spawn/kill sequencing, swallowed write/ack errors). Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+   ,
+     "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+     "successRetention": "updated record retained in component state",
+     "failureReasons": "call-site catch error message (single publisher)",
+     "singleTerminalNoticeOwner": true,
+     "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=terminal_resize"
    },
    "evidence": {
     "behaviorCases": [
@@ -764,6 +848,12 @@
     ],
     "payload": "terminalKill (src/lib/api.ts) invokes terminal_kill; src/components/TerminalPanel.tsx kills sessions on tab close and swallows the already-dead error.",
     "terminalNoticeOwner": "src/components/TerminalPanel.tsx owns per-session completion and error display for terminal operations (frame channel lifecycle, spawn/kill sequencing, swallowed write/ack errors). Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+   ,
+     "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+     "successRetention": "updated record retained in component state",
+     "failureReasons": "call-site catch error message (single publisher)",
+     "singleTerminalNoticeOwner": true,
+     "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=terminal_kill"
    },
    "evidence": {
     "behaviorCases": [

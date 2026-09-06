@@ -56,6 +56,16 @@ const PLUGIN_CRATE_UNDERSCORED = "tauri_plugin_wdio_webdriver";
 // contain it: the whole module is behind cfg(feature = "native-e2e"), so a
 // hit means the gate leaked exactly the way this scan exists to catch.
 const RESPONSIVENESS_HOOK_MARKER = "MARU_NATIVE_RESPONSIVENESS_HOOK";
+// The two native-only commands registered by the harness (feature-gated
+// entries in src-tauri/src/lib.rs's generate_handler, allowlisted in
+// docs/performance/phase08-native-allowlist.json). Rust embeds the underscored
+// command fn names in the unstripped binary's symbols, and the frontend
+// bridge embeds the same names as invoke() string literals — in a
+// default-feature build the whole native_e2e module is cfg'd out and a
+// production bundle dead-code-eliminates the VITE_NATIVE_E2E-gated bridge, so
+// both artifacts must be free of these names. If the commands are renamed,
+// update this constant and the allowlist in the same change.
+const NATIVE_ONLY_COMMANDS = ["native_e2e_async_probe", "native_e2e_load_control"];
 
 const violations = [];
 
@@ -87,15 +97,19 @@ function checkBundle() {
     );
     process.exit(1);
   }
+  const needles = [BRIDGE_NAMESPACE, ...NATIVE_ONLY_COMMANDS];
   const offenders = readdirSync(assetsDir)
     .filter((file) => file.endsWith(".js"))
-    .filter((file) =>
-      readFileSync(join(assetsDir, file), "utf8").includes(BRIDGE_NAMESPACE),
-    );
+    .flatMap((file) => {
+      const content = readFileSync(join(assetsDir, file), "utf8");
+      return needles
+        .filter((needle) => content.includes(needle))
+        .map((needle) => `dist/assets/${file} contains "${needle}"`);
+    });
   if (offenders.length > 0) {
     violations.push(
-      `production bundle carries the native-e2e debug bridge (${BRIDGE_NAMESPACE}):\n` +
-        `  ${offenders.map((f) => `dist/assets/${f}`).join("\n  ")}\n` +
+      `production bundle carries native-e2e debug bridge markers:\n` +
+        `  ${offenders.join("\n  ")}\n` +
         "  This dist/ was most likely produced by `make test-e2e-native` or " +
         "`pnpm build:frontend:native-e2e` — a correct failure on a build that " +
         "was never meant to ship. Re-run `pnpm build:frontend`.",
@@ -194,18 +208,20 @@ function checkBinary(binaryPath) {
     process.exit(1);
   }
   const bytes = readFileSync(binaryPath);
+  const needleMessage = (needle) =>
+    needle === RESPONSIVENESS_HOOK_MARKER
+      ? `${binaryPath} contains "${needle}" — the 08-27 responsiveness harness compiled into a default-feature build. The whole native_e2e module is cfg(feature = "native-e2e"), so a hit means the gate leaked exactly the way this scan exists to catch.`
+      : NATIVE_ONLY_COMMANDS.includes(needle)
+        ? `${binaryPath} contains "${needle}" — a native-only test command compiled into a default-feature build (allowlisted in docs/performance/phase08-native-allowlist.json, never shippable).`
+        : `${binaryPath} contains "${needle}" — the embedded WebDriver plugin compiled into a default-feature build (D-10, T-06-01b). A feature arriving through a dependency or a stray build flag is exactly what this scan exists to catch.`;
   for (const needle of [
     PLUGIN_CRATE_HYPHENATED,
     PLUGIN_CRATE_UNDERSCORED,
     RESPONSIVENESS_HOOK_MARKER,
+    ...NATIVE_ONLY_COMMANDS,
   ]) {
     if (bytes.indexOf(needle) !== -1) {
-      violations.push(
-        `${binaryPath} contains "${needle}" — the embedded WebDriver plugin ` +
-          "compiled into a default-feature build (D-10, T-06-01b). A feature " +
-          "arriving through a dependency or a stray build flag is exactly " +
-          "what this scan exists to catch.",
-      );
+      violations.push(needleMessage(needle));
     }
   }
 }
@@ -227,6 +243,6 @@ if (violations.length > 0) {
 }
 console.log(
   args.binary
-    ? `native-e2e-isolation: ${args.binary} and Cargo manifest carry no embedded WebDriver plugin`
+    ? `native-e2e-isolation: ${args.binary} and Cargo manifest carry no embedded WebDriver plugin, responsiveness hook or native-only commands`
     : "native-e2e-isolation: bundle and Cargo manifest carry no native-e2e affordances",
 );

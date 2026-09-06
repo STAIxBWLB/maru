@@ -42,6 +42,12 @@
     ],
     "payload": "listStudioStates (src/lib/studio.ts:311) invokes studio_state_list with workPath whenever the Studio surface lists saved states; the Studio surface keeps owning that refresh regardless of screen changes.",
     "terminalNoticeOwner": "The Studio surface (src/components/studio) owns current Studio state display and error toasts. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+   ,
+     "classifier": "n/a: read; data returned to the caller",
+     "successRetention": "result stored in caller component state",
+     "failureReasons": "call-site catch retains the error (component-owned read failure)",
+     "singleTerminalNoticeOwner": true,
+     "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=studio_state_list"
    },
    "evidence": {
     "behaviorCases": [
@@ -94,6 +100,12 @@
     ],
     "payload": "readStudioState (src/lib/studio.ts:319) invokes studio_state_read with workPath and docId when the Studio surface opens a saved state; the Studio surface keeps owning that load regardless of screen changes.",
     "terminalNoticeOwner": "The Studio surface (src/components/studio) owns current Studio state display and error toasts. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+   ,
+     "classifier": "n/a: read; data returned to the caller",
+     "successRetention": "result stored in caller component state",
+     "failureReasons": "call-site catch retains the error (component-owned read failure)",
+     "singleTerminalNoticeOwner": true,
+     "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=studio_state_read"
    },
    "evidence": {
     "behaviorCases": [
@@ -153,6 +165,12 @@
     ],
     "payload": "saveStudioState (src/lib/studio.ts:326) invokes studio_state_save with workPath and the normalized StudioState on every Studio autosave and explicit save; the Studio surface keeps owning the save promise and its error display regardless of screen changes.",
     "terminalNoticeOwner": "The Studio surface (src/components/studio) owns current Studio state display and error toasts. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+   ,
+     "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+     "successRetention": "updated record retained in component state",
+     "failureReasons": "call-site catch error message (single publisher)",
+     "singleTerminalNoticeOwner": true,
+     "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=studio_state_save"
    },
    "evidence": {
     "behaviorCases": [
@@ -214,6 +232,12 @@
     ],
     "payload": "deleteStudioState (src/lib/studio.ts:331) invokes studio_state_delete with workPath and docId when the user deletes a saved Studio state; the Studio surface keeps owning the follow-up list refresh regardless of screen changes.",
     "terminalNoticeOwner": "The Studio surface (src/components/studio) owns current Studio state display and error toasts. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+   ,
+     "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+     "successRetention": "updated record retained in component state",
+     "failureReasons": "call-site catch error message (single publisher)",
+     "singleTerminalNoticeOwner": true,
+     "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=studio_state_delete"
    },
    "evidence": {
     "behaviorCases": [
@@ -273,6 +297,12 @@
     ],
     "payload": "applyStudioBody (src/lib/studio.ts:340) invokes studio_apply_body with workPath, documentPath and bodyMarkdown when the user applies the drafted body to the source document; the Studio surface keeps owning the returned DocumentPayload refresh and its error display regardless of screen changes.",
     "terminalNoticeOwner": "The Studio surface (src/components/studio) owns current Studio state display and error toasts. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+   ,
+     "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+     "successRetention": "updated record retained in component state",
+     "failureReasons": "call-site catch error message (single publisher)",
+     "singleTerminalNoticeOwner": true,
+     "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=studio_apply_body"
    },
    "evidence": {
     "behaviorCases": [
@@ -334,6 +364,12 @@
     ],
     "payload": "saveDiagram (src/lib/diagram.ts:67) invokes diagram_save_document with workspace, name and body on Diagram save/autosave; the Diagram surface keeps owning that save promise and its error display regardless of screen changes.",
     "terminalNoticeOwner": "The Diagram surface (src/components/diagram) owns current diagram list, snapshot and export display and error toasts. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+   ,
+     "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+     "successRetention": "updated record retained in component state",
+     "failureReasons": "call-site catch error message (single publisher)",
+     "singleTerminalNoticeOwner": true,
+     "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=diagram_save_document"
    },
    "evidence": {
     "behaviorCases": [
@@ -388,6 +424,12 @@
     ],
     "payload": "loadDiagram (src/lib/diagram.ts:83) invokes diagram_load_document with workspace and name when the Diagram surface opens a saved diagram; the Diagram surface keeps owning that load regardless of screen changes.",
     "terminalNoticeOwner": "The Diagram surface (src/components/diagram) owns current diagram list, snapshot and export display and error toasts. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+   ,
+     "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+     "successRetention": "updated record retained in component state",
+     "failureReasons": "call-site catch error message (single publisher)",
+     "singleTerminalNoticeOwner": true,
+     "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=diagram_load_document"
    },
    "evidence": {
     "behaviorCases": [
@@ -440,6 +482,12 @@
     ],
     "payload": "listDiagrams (src/lib/diagram.ts:113) invokes diagram_list_documents with workspace whenever the Diagram surface lists documents; the Diagram surface keeps owning that refresh regardless of screen changes.",
     "terminalNoticeOwner": "The Diagram surface (src/components/diagram) owns current diagram list, snapshot and export display and error toasts. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+   ,
+     "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+     "successRetention": "updated record retained in component state",
+     "failureReasons": "call-site catch error message (single publisher)",
+     "singleTerminalNoticeOwner": true,
+     "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=diagram_list_documents"
    },
    "evidence": {
     "behaviorCases": [
@@ -500,6 +548,12 @@
     ],
     "payload": "deleteDiagram (src/lib/diagram.ts:128) invokes diagram_delete_document with workspace and name when the user deletes a diagram; the Diagram surface keeps owning the follow-up list refresh regardless of screen changes.",
     "terminalNoticeOwner": "The Diagram surface (src/components/diagram) owns current diagram list, snapshot and export display and error toasts. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+   ,
+     "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+     "successRetention": "updated record retained in component state",
+     "failureReasons": "call-site catch error message (single publisher)",
+     "singleTerminalNoticeOwner": true,
+     "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=diagram_delete_document"
    },
    "evidence": {
     "behaviorCases": [
@@ -560,6 +614,12 @@
     ],
     "payload": "exportDiagramBlob (src/lib/diagram.ts:151) invokes diagram_export_blob with workspace, name, kind and the rendered bytes for in-workspace exports; the Diagram surface keeps owning the export promise and its error display regardless of screen changes.",
     "terminalNoticeOwner": "The Diagram surface (src/components/diagram) owns current diagram list, snapshot and export display and error toasts. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+   ,
+     "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+     "successRetention": "updated record retained in component state",
+     "failureReasons": "call-site catch error message (single publisher)",
+     "singleTerminalNoticeOwner": true,
+     "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=diagram_export_blob"
    },
    "evidence": {
     "behaviorCases": [
@@ -619,6 +679,12 @@
     ],
     "payload": "exportDiagramBlobToPath (src/lib/diagram.ts:165) invokes diagram_export_blob_to_path with targetPath, kind and the rendered bytes from the Import/Export dialog (src/components/diagram/modals/ImportExportDialog.tsx); the dialog keeps owning the export promise and its error display regardless of screen changes.",
     "terminalNoticeOwner": "The Diagram surface (src/components/diagram) owns current diagram list, snapshot and export display and error toasts. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+   ,
+     "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+     "successRetention": "updated record retained in component state",
+     "failureReasons": "call-site catch error message (single publisher)",
+     "singleTerminalNoticeOwner": true,
+     "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=diagram_export_blob_to_path"
    },
    "evidence": {
     "behaviorCases": [
@@ -678,6 +744,12 @@
     ],
     "payload": "backupDiagram (src/lib/diagram.ts:232) invokes diagram_backup_document with workspace and name before the first v8 save overwrites a v7 document; the Diagram surface keeps owning the backup promise and its error display regardless of screen changes.",
     "terminalNoticeOwner": "The Diagram surface (src/components/diagram) owns current diagram list, snapshot and export display and error toasts. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+   ,
+     "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+     "successRetention": "updated record retained in component state",
+     "failureReasons": "call-site catch error message (single publisher)",
+     "singleTerminalNoticeOwner": true,
+     "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=diagram_backup_document"
    },
    "evidence": {
     "behaviorCases": [
@@ -738,6 +810,12 @@
     ],
     "payload": "saveDiagramSnapshot (src/lib/diagram.ts:179) invokes diagram_save_snapshot with workspace, docId, snapshotTs and content on each Diagram version save; the Diagram surface keeps owning that save promise and its error display regardless of screen changes.",
     "terminalNoticeOwner": "The Diagram surface (src/components/diagram) owns current diagram list, snapshot and export display and error toasts. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+   ,
+     "classifier": "n/a: read; data returned to the caller",
+     "successRetention": "result stored in caller component state",
+     "failureReasons": "call-site catch retains the error (component-owned read failure)",
+     "singleTerminalNoticeOwner": true,
+     "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=diagram_save_snapshot"
    },
    "evidence": {
     "behaviorCases": [
@@ -790,6 +868,12 @@
     ],
     "payload": "listDiagramSnapshots (src/lib/diagram.ts:192) invokes diagram_list_snapshots with workspace and docId when the Diagram history panel opens; the Diagram surface keeps owning that refresh regardless of screen changes.",
     "terminalNoticeOwner": "The Diagram surface (src/components/diagram) owns current diagram list, snapshot and export display and error toasts. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+   ,
+     "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+     "successRetention": "updated record retained in component state",
+     "failureReasons": "call-site catch error message (single publisher)",
+     "singleTerminalNoticeOwner": true,
+     "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=diagram_list_snapshots"
    },
    "evidence": {
     "behaviorCases": [
@@ -842,6 +926,12 @@
     ],
     "payload": "restoreDiagramSnapshot (src/lib/diagram.ts:204) invokes diagram_restore_snapshot with workspace, docId and snapshotTs when the user restores a Diagram history entry; the Diagram surface keeps owning the restored content and its error display regardless of screen changes.",
     "terminalNoticeOwner": "The Diagram surface (src/components/diagram) owns current diagram list, snapshot and export display and error toasts. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+   ,
+     "classifier": "n/a: read; data returned to the caller",
+     "successRetention": "result stored in caller component state",
+     "failureReasons": "call-site catch retains the error (component-owned read failure)",
+     "singleTerminalNoticeOwner": true,
+     "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=diagram_restore_snapshot"
    },
    "evidence": {
     "behaviorCases": [
@@ -902,6 +992,12 @@
     ],
     "payload": "writeDiagramReportAsset (src/lib/diagram.ts:360) invokes diagram_write_report_asset with workspace, docId, fileName and bytes; src/lib/diagram/reportInsert.ts splices the returned attachments/diagrams/<doc_id>/<file_name> path into a maru-diagram:v1 managed block; both keep owning the insert promise and its error display regardless of screen changes.",
     "terminalNoticeOwner": "The Diagram surface (src/components/diagram) owns current diagram list, snapshot and export display and error toasts. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+   ,
+     "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+     "successRetention": "updated record retained in component state",
+     "failureReasons": "call-site catch error message (single publisher)",
+     "singleTerminalNoticeOwner": true,
+     "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=diagram_write_report_asset"
    },
    "evidence": {
     "behaviorCases": [
@@ -961,6 +1057,12 @@
     ],
     "payload": "saveDiagramPattern (src/lib/diagram.ts:263) invokes diagram_pattern_save with workspace, name and body when the user saves a Report Pattern Studio preset; the Diagram surface keeps owning that save promise and its error display regardless of screen changes.",
     "terminalNoticeOwner": "The Diagram surface (src/components/diagram) owns current diagram list, snapshot and export display and error toasts. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+   ,
+     "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+     "successRetention": "updated record retained in component state",
+     "failureReasons": "call-site catch error message (single publisher)",
+     "singleTerminalNoticeOwner": true,
+     "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=diagram_pattern_save"
    },
    "evidence": {
     "behaviorCases": [
@@ -1013,6 +1115,12 @@
     ],
     "payload": "listDiagramPatterns (src/lib/diagram.ts:292) invokes diagram_pattern_list with workspace when the preset picker opens; the Diagram surface keeps owning that refresh regardless of screen changes.",
     "terminalNoticeOwner": "The Diagram surface (src/components/diagram) owns current diagram list, snapshot and export display and error toasts. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+   ,
+     "classifier": "n/a: read; data returned to the caller",
+     "successRetention": "result stored in caller component state",
+     "failureReasons": "call-site catch retains the error (component-owned read failure)",
+     "singleTerminalNoticeOwner": true,
+     "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=diagram_pattern_list"
    },
    "evidence": {
     "behaviorCases": [
@@ -1073,6 +1181,12 @@
     ],
     "payload": "deleteDiagramPattern (src/lib/diagram.ts:329) invokes diagram_pattern_delete with workspace and name when the user deletes a preset; the Diagram surface keeps owning the follow-up preset list refresh regardless of screen changes.",
     "terminalNoticeOwner": "The Diagram surface (src/components/diagram) owns current diagram list, snapshot and export display and error toasts. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+   ,
+     "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+     "successRetention": "updated record retained in component state",
+     "failureReasons": "call-site catch error message (single publisher)",
+     "singleTerminalNoticeOwner": true,
+     "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=diagram_pattern_delete"
    },
    "evidence": {
     "behaviorCases": [

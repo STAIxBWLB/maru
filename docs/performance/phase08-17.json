@@ -32,6 +32,12 @@
         ],
         "payload": "agentsAccountStatus (src/lib/api.ts) invokes agents_account_status and the agents settings pane renders the installed/auth rows from the returned array.",
         "terminalNoticeOwner": "The agents settings pane owns completion and error display for the account refresh. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=agents_account_status"
       },
       "evidence": {
         "behaviorCases": [
@@ -83,6 +89,12 @@
         ],
         "payload": "agentsUsageStatus (src/lib/api.ts) invokes agents_usage_status and the agents settings pane renders per-provider usage windows from the returned array.",
         "terminalNoticeOwner": "The agents settings pane owns completion and error display for the usage refresh. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=agents_usage_status"
       },
       "evidence": {
         "behaviorCases": [
@@ -137,6 +149,12 @@
         ],
         "payload": "agentReadRunEvents (src/lib/skills.ts) invokes agent_read_run_events; SkillRunsPanel, TasksRunsPanel and InboxRunsPanel render the run timeline from the returned AgentRunEvent array.",
         "terminalNoticeOwner": "The run panels own completion and error display for run-event loads. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "proposal parse result (agent_parse_skill_proposal) or approval outcome (agent_apply_skill_proposal)",
+        "successRetention": "proposal/summary retained in panel state until applied or dismissed",
+        "failureReasons": "parse/apply error message in the panel",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=agent_read_run_events"
       },
       "evidence": {
         "behaviorCases": [
@@ -189,6 +207,12 @@
         ],
         "payload": "agentReplayRunSummary (src/lib/skills.ts) invokes agent_replay_run_summary and SkillRunsPanel renders the replay summary counts from the returned RunReplaySummary.",
         "terminalNoticeOwner": "SkillRunsPanel owns completion and error display for replay summaries. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "proposal parse result (agent_parse_skill_proposal) or approval outcome (agent_apply_skill_proposal)",
+        "successRetention": "proposal/summary retained in panel state until applied or dismissed",
+        "failureReasons": "parse/apply error message in the panel",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=agent_replay_run_summary"
       },
       "evidence": {
         "behaviorCases": [
@@ -241,6 +265,12 @@
         ],
         "payload": "agentExportRedactedRunSummary (src/lib/skills.ts) invokes agent_export_redacted_run_summary and SkillRunsPanel renders the redacted summary for cloud review.",
         "terminalNoticeOwner": "SkillRunsPanel owns completion and error display for redacted-summary exports. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "proposal parse result (agent_parse_skill_proposal) or approval outcome (agent_apply_skill_proposal)",
+        "successRetention": "proposal/summary retained in panel state until applied or dismissed",
+        "failureReasons": "parse/apply error message in the panel",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=agent_export_redacted_run_summary"
       },
       "evidence": {
         "behaviorCases": [
@@ -296,6 +326,12 @@
         ],
         "payload": "agentWriteRedactedRunSummary (src/lib/skills.ts) invokes agent_write_redacted_run_summary with the user-selected target path and SkillRunsPanel shows the returned written path; there is no JS-side file write.",
         "terminalNoticeOwner": "SkillRunsPanel owns completion and error display for redacted-summary writes. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "proposal parse result (agent_parse_skill_proposal) or approval outcome (agent_apply_skill_proposal)",
+        "successRetention": "proposal/summary retained in panel state until applied or dismissed",
+        "failureReasons": "parse/apply error message in the panel",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=agent_write_redacted_run_summary"
       },
       "evidence": {
         "behaviorCases": [
@@ -352,6 +388,12 @@
         ],
         "payload": "hubStatus (src/lib/hubClient.ts) invokes hub_status and CatalogPane renders the connection/queue state from the returned HubStatus.",
         "terminalNoticeOwner": "CatalogPane owns completion and error display for hub status refreshes. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=hub_status"
       },
       "evidence": {
         "behaviorCases": [
@@ -406,6 +448,12 @@
         ],
         "payload": "hubFetchCatalog (src/lib/hubClient.ts) invokes hub_fetch_catalog for catalog resources and renders the returned HubFetchResponse body for browse/search flows.",
         "terminalNoticeOwner": "The catalog pane owns completion and error display for catalog fetches. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=hub_fetch_catalog"
       },
       "evidence": {
         "behaviorCases": [
@@ -463,6 +511,12 @@
         ],
         "payload": "hubSubmitGate (src/lib/hubClient.ts) invokes hub_submit_gate with the prepared gate request and surfaces the returned state (pending, queued_offline or blocked_by_safety) to the dispatch flow.",
         "terminalNoticeOwner": "The dispatch flow owns completion and error display for gate submissions. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=hub_submit_gate"
       },
       "evidence": {
         "behaviorCases": [
@@ -522,6 +576,12 @@
         ],
         "payload": "hubQueueDrain (src/lib/hubClient.ts) invokes hub_queue_drain and CatalogPane shows the drain result (attempted/submitted/failed/remaining) for the offline queue.",
         "terminalNoticeOwner": "CatalogPane owns completion and error display for queue drains. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=hub_queue_drain"
       },
       "evidence": {
         "behaviorCases": [
@@ -578,6 +638,12 @@
         ],
         "payload": "hub_poll_gate is registered for future gate-status polling; src/lib/hubClient.ts currently wires hub_status, hub_fetch_catalog, hub_submit_gate and hub_queue_drain only, so no frontend flow invokes the poll yet.",
         "terminalNoticeOwner": "No frontend terminal-notice owner exists yet for hub_poll_gate; future callers own their completion and error display. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a",
+        "successRetention": "n/a",
+        "failureReasons": "n/a",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=hub_poll_gate"
       },
       "evidence": {
         "behaviorCases": [

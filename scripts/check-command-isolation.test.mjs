@@ -339,3 +339,60 @@ test("integration29 validates the exact future document pair matrix without clai
   f.saveOverlay();
   fail(f.run("--integration", "29"), /missing git_sync_pull_rebase\/create_document pair/);
 });
+
+// Plan 28 final closure: the whole-batch wrapper must keep its async
+// spawn_blocking boundary and its actual-wrapper same-runtime batch proof.
+function batchClosureFixture(t) {
+  const f = overlayFixture(t);
+  completeFinal(f);
+  const name = "skills_sync_all_sources";
+  const module = "src-tauri/src/skill_host/store.rs";
+  f.specs.push({ name, module, plan: "04" });
+  f.write(module, f.read(module) + `
+#[tauri::command]
+pub async fn ${name}() -> u32 { tauri::async_runtime::spawn_blocking(move || ${name}_blocking()).await.unwrap() }
+fn ${name}_blocking() -> u32 { std::fs::read("fixture").unwrap().len() as u32 }
+#[cfg(test)] mod tests_${name} { #[test] fn ${name}_behavior() { assert_eq!(1, 1); } }
+#[cfg(test)] mod phase08_batch_transactions { #[test] fn actual_wrapper_allows_async_progress() { assert_eq!(1, 1); } }
+`);
+  f.write(`${PHASE}/08-COMMAND-INVENTORY.md`, f.read(`${PHASE}/08-COMMAND-INVENTORY.md`) + `\n| \`${name}\` | \`${module}:1\` | sync | **CONVERT**: research |`);
+  f.write(`${PHASE}/08-PLAN-MAP.md`, f.read(`${PHASE}/08-PLAN-MAP.md`) + `\n| 08-04 | \`${module}\` | \`${name}\` |`);
+  f.write("src-tauri/src/lib.rs", f.read("src-tauri/src/lib.rs").replace("];", `,skill_host::store::${name}];`));
+  const row = JSON.parse(JSON.stringify(f.row).replaceAll("skills_save_skill_file", name));
+  row.registrationPath = `src-tauri/src/lib.rs::skill_host::store::${name}`;
+  row.tests = [{ command: "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_batch_transactions", passed: 2, failed: 0, ignored: 0 }];
+  row.evidence = { behaviorCases: [`tests_${name}::${name}_behavior`], batchCases: ["actual_wrapper_allows_async_progress"], bounds: "Actual wrapper batch proof fixture" };
+  f.shards.get("04").commands.push(row);
+  f.overlay.commandCount = f.specs.length;
+  f.save(); f.saveOverlay();
+  return f;
+}
+test("final closure passes with the actual-wrapper same-runtime batch proof", (t) => { const f = batchClosureFixture(t); pass(f.run("--all")); });
+test("final closure rejects missing actual-wrapper same-runtime batch test", (t) => {
+  const f = batchClosureFixture(t);
+  const row = f.shards.get("04").commands.find((command) => command.name === "skills_sync_all_sources");
+  delete row.evidence.batchCases;
+  f.save(); fail(f.run("--all"), /missing actual-wrapper same-runtime batch test/);
+  row.evidence.batchCases = ["renamed_case"];
+  f.save(); fail(f.run("--all"), /missing actual-wrapper same-runtime batch test/);
+});
+test("final closure rejects a synchronous skills_sync_all_sources boundary", (t) => {
+  const f = batchClosureFixture(t);
+  const module = "src-tauri/src/skill_host/store.rs";
+  f.write(module, f.read(module).replace(`pub async fn skills_sync_all_sources`, "pub fn skills_sync_all_sources"));
+  fail(f.run("--all"), /synchronous skills_sync_all_sources boundary|not async fn/);
+});
+test("final closure rejects exact-path-only mutation exclusion", (t) => {
+  const f = overlayFixture(t); completeFinal(f);
+  const row = f.shards.get("04").commands.find((command) => command.name === "skills_sync_source");
+  f.overlay.integrations[0].commandRefs.push({ module: row.module, name: row.name });
+  row.mutationKey = { lexicalPaths: ["fixture/checkout"], aliasPaths: ["fixture/canonical-checkout"], postAdmissionPreconditions: ["Pinned parent remains identical"], domainLockOrder: "Shared admission before domain lock", sharedAdmissionEntry: "exact-path-only lock on the single target file" };
+  f.save(); f.saveOverlay(); fail(f.run("--all"), /exact-path-only mutation exclusion/);
+});
+test("final closure rejects existing-domain-guard exemption from shared admission", (t) => {
+  const f = overlayFixture(t); completeFinal(f);
+  const row = f.shards.get("04").commands.find((command) => command.name === "skills_sync_source");
+  f.overlay.integrations[0].commandRefs.push({ module: row.module, name: row.name });
+  row.mutationKey = { lexicalPaths: ["fixture/checkout"], aliasPaths: ["fixture/canonical-checkout"], postAdmissionPreconditions: ["Pinned parent remains identical"], domainLockOrder: "Shared admission before domain lock", sharedAdmissionEntry: "existing domain guard exemption; no shared path admission" };
+  f.save(); f.saveOverlay(); fail(f.run("--all"), /existing-domain-guard exemption/);
+});
