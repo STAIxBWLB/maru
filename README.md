@@ -4,7 +4,7 @@ Maru is a local-first desktop workspace for Korean knowledge and document
 operations. It combines a React 19 and TypeScript interface with a Tauri 2 Rust
 core, and treats the filesystem as the source of truth.
 
-The current product release is **v1.1.3, Semantic Titles**. Releases
+The current product release is **v1.1.4, Off the Main Thread**. Releases
 before v0.3.0 shipped under the name Anchor; v0.3.0 completed the application
 identifier and on-disk migration to Maru.
 
@@ -12,12 +12,13 @@ identifier and on-disk migration to Maru.
 
 | Area | State | Evidence |
 |------|-------|----------|
-| Product release | v1.1.3 | Signed desktop bundles and standalone CLI for macOS, Windows, and Linux |
-| Planning milestone | v1.1 Felt Quality and Native Proof | Phases 6-11; phase 6 complete with 5 plans |
+| Product release | v1.1.4 | Signed desktop bundles and standalone CLI for macOS, Windows, and Linux |
+| Planning milestone | v1.1 Felt Quality and Native Proof | Phases 6-11; phases 6-8 complete (39 plans) |
 | Application shell | Complete | 18 lazy modes; `MainApp` held to 15 `useState` and 24 `useEffect` calls |
 | Verification | Passing | Typecheck, ESLint, unit tests, Rust fmt/clippy, E2E, build, and bundle budgets |
 | Typed IPC | ERR-06 closed | Every conflict-emitting command preserves `{ code, message }`; recursive source guard active |
-| Active milestone | v1.1, planning phase 10 | Releases ship as 1.1.x while v1.1 is open |
+| Main-thread isolation | PERF-01/02 closed | All 365 production commands off the UI thread (356 ISOLATED + 9 UI); native load proof keeps loaded p95 at 2ms with the negative control at 4789ms |
+| Active milestone | v1.1, phase 08 complete | Phase 09 (Durability and Session Lifecycle) is next; releases ship as 1.1.x while v1.1 is open |
 
 The milestone archive, audit, retrospective, and summary live under
 `.planning/milestones/`, `.planning/RETROSPECTIVE.md`, and
@@ -118,6 +119,7 @@ brew upgrade maru-cli
 | terminal PTY + screen model  graph + diagram + Studio         |
 | skill host + agent host      Hub client + export pipeline     |
 | write policy + approval      atomic files + revision guards   |
+| worker-isolated commands     path-transaction admission       |
 +---------------+-------------------------------+---------------+
                 | stdio                         | fixed argv
 +---------------v--------------+  +-------------v---------------+
@@ -138,6 +140,12 @@ brew upgrade maru-cli
   boundaries. Nothing imports `src/App.tsx`.
 - Shared UI state follows keyed module-store plus `useSyncExternalStore`
   patterns. No additional global state library or provider tree is used.
+- Production commands never block the UI/shared async worker thread: 356
+  ISOLATED commands run on awaited `spawn_blocking` workers and 9
+  native-window commands stay UI-bound, and every filesystem mutation passes
+  shared path-transaction admission before taking domain locks. The
+  365-command inventory, worker-boundary, and admission evidence are gated by
+  `check-command-isolation` in `make verify`.
 
 ## Capability Highlights
 
