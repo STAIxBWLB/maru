@@ -22,7 +22,7 @@ operative rule is in README's Release Process section.
 
 - [x] **Phase 6: Native E2E Runner Foundation** - A native runner drives the real app against the real backend, and the CI-vs-local question is settled by a spike rather than assumed. (completed 2026-08-29)
 - [x] **Phase 7: Guardrails Before Churn** - Lock poisoning recovers, the watcher and the document index stop carrying trees they never serve, and a sanitizer guard lands before the milestone's own later work can trip it. (completed 2026-09-05)
-- [ ] **Phase 8: Main-Thread Responsiveness** - The skills registry lock narrows and the main-thread-blocking commands move off it, proven by a concurrency load test rather than the absence of a visible freeze.
+- [x] **Phase 8: Main-Thread Responsiveness** - The skills registry lock narrows and the main-thread-blocking commands move off it, proven by a concurrency load test rather than the absence of a visible freeze. (completed 2026-09-06)
 - [ ] **Phase 9: Durability and Session Lifecycle** - A SIGHUP-trapping terminal can still be killed, a pending edit is saved (or its failure surfaced) on unmount and app quit, and a scheduled job's own PATH resolves as written.
 - [ ] **Phase 10: Bundle and Build Hardening** - The packaged CSP drops an unused directive and per-mode CSS restores the budget headroom spent since v0.4.46.
 - [ ] **Phase 11: Milestone Verification & Evidence** - Coverage is measured, the narrowed CI trace configuration is proven, and v1.0's closeout evidence debt is retired.
@@ -99,7 +99,7 @@ Plans:
   2. Every command that reaches the network, a subprocess, or an unbounded filesystem walk is off the main thread. The 37 commands counted during research are the known set at kickoff, not the definition: that count came from scanning each command's first 80 lines, so a command that blocks further down is equally in scope and the set must be re-measured when the phase starts.
   3. A concurrency load test fires several converted commands at once and shows an unrelated command's latency stays flat (not merely the absence of a visible freeze, which cannot by itself distinguish a real fix from one that relocated the block onto Tauri's shared async worker pool).
 
-**Plans**: 28/29 plans executed across 29 waves
+**Plans**: 29/29 plans executed across 29 waves
 
 Plans:
 **Wave 1**
@@ -216,7 +216,7 @@ Plans:
 
 **Wave 29** *(blocked on Wave 28 completion)*
 
-- [ ] 08-28-PLAN.md - Exhaustive closure and production isolation
+- [x] 08-28-PLAN.md - Exhaustive closure and production isolation
 
 **Cross-cutting constraints:**
 
@@ -279,7 +279,7 @@ Phases execute in numeric order: 6 → 7 → 8 → 9 → 10 → 11
 |-------|-----------------|--------|-----------|
 | 6. Native E2E Runner Foundation | 5/5 | Complete    | 2026-08-29 |
 | 7. Guardrails Before Churn | 5/5 | Complete    | 2026-09-05 |
-| 8. Main-Thread Responsiveness | 28/29 | In Progress|  |
+| 8. Main-Thread Responsiveness | 29/29 | Complete    | 2026-09-06 |
 | 9. Durability and Session Lifecycle | 0/TBD | Not started | - |
 | 10. Bundle and Build Hardening | 0/TBD | Not started | - |
 | 11. Milestone Verification & Evidence | 0/TBD | Not started | - |

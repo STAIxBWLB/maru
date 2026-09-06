@@ -4,18 +4,18 @@ milestone: v1.1
 milestone_name: Felt Quality and Native Proof
 current_phase: 08
 current_phase_name: Main-Thread Responsiveness
-status: executing
-stopped_at: Completed 08-27-PLAN.md; next Plan28 wave29; Plan25/26 provider completion and stale UI ownership pending; Plan26 provider reconciliation markers preserved
-last_updated: "2026-09-06T00:27:19.000Z"
+status: phase-complete
+stopped_at: Phase 08 complete (29/29 plans); make verify and make release-checks green; next is Phase 09 planning (gsd-plan-phase)
+last_updated: "2026-09-06T01:14:19.000Z"
 last_activity: 2026-09-05
-last_activity_desc: Phase 08 execution started
+last_activity_desc: Phase 08 completed
 state_head: da6fe9eb664fca99b12fc881bda1781a507af00f
 progress:
   total_phases: 6
   completed_phases: 2
   total_plans: 39
-  completed_plans: 38
-  percent: 33
+  completed_plans: 39
+  percent: 50
 ---
 
 # Project State
@@ -31,11 +31,11 @@ See: .planning/PROJECT.md (updated 2026-09-05)
 
 Phase: 08 (Main-Thread Responsiveness) — EXECUTING
 Plan: 29 of 29
-Status: Ready to execute
+Status: Complete
 Last Activity Description: Phase 08 execution started
 Last activity: 2026-09-05 — Phase 08 execution started
 
-Progress: [███░░░░░░░] 33%
+Progress: [█████░░░░░] 50%
 
 ## Performance Metrics
 
@@ -135,6 +135,7 @@ Progress: [███░░░░░░░] 33%
 | Phase 08 P25 | 55min | 2 tasks | 12 files |
 | Phase 08 P26 | 50min | 2 tasks | 10 files |
 | Phase 08 P27 | cross-session (timeout+resume) | 2 tasks | 14 files |
+| Phase 08 P28 | 2h | 2 tasks | 32 files |
 
 ## Accumulated Context
 
@@ -300,10 +301,10 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-09-06T00:27:19.000Z
-Stopped at: Completed 08-27-PLAN.md; next Plan28 wave29; Plan25/26 provider completion and stale UI ownership pending; Plan26 provider reconciliation markers preserved
+Last session: 2026-09-06T01:14:19.000Z
+Stopped at: Phase 08 complete (29/29 plans); make verify and make release-checks green; next is Phase 09 planning (gsd-plan-phase)
 Resume file: None
 
 ## Operator Next Steps
 
-- Execute Phase 8 with `/gsd-execute-phase 8`
+- Plan Phase 9 (Durability and Session Lifecycle) with `/gsd-plan-phase 9`

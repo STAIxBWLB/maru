@@ -16,7 +16,7 @@
     {
       "number": "8",
       "name": "Main-Thread Responsiveness",
-      "status": "in_progress"
+      "status": "complete"
     },
     {
       "number": "9",
@@ -37,7 +37,7 @@
   "next": {
     "command": "/gsd:progress --next",
     "label": "Advance to the next step",
-    "reason": "Phase 8 of 6 · 33% · executing"
+    "reason": "Phase 8 of 6 · 50% · phase 08 complete; next phase 09 planning"
   },
-  "updated_at": "2026-09-06T00:27:19.000Z"
+  "updated_at": "2026-09-06T01:14:19.000Z"
 }
