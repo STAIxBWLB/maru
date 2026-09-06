@@ -421,6 +421,7 @@ mod tests {
         use super::*;
         use crate::atomic_file::phase08_06::{boundary, run};
         use std::sync::{Mutex, MutexGuard};
+        use tauri::Manager;
 
         // The synthetic worker-hook key is module-global, so the stage-hook
         // tests must not overlap: a hook registered by one test would
