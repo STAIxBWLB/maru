@@ -2070,7 +2070,13 @@ mod tests {
     use std::io::Write as _;
     use tempfile::TempDir;
 
-    fn workspace() -> (TempDir, String) {
+    fn workspace() -> (TempDir, String, std::sync::MutexGuard<'static, ()>) {
+        // The workspace registry lives in the ambient config dir, and the
+        // phase08 Home fixtures rewrite it mid-transaction on purpose. Hold
+        // the shared home lock so this test's admission window cannot race
+        // their legacy-registry writes ("Nested mutation exceeds the admitted
+        // path set").
+        let guard = crate::skill_host::fs::test_maru_home_lock();
         let temp = TempDir::new().unwrap();
         fs::write(
             temp.path().join("workspace.config.yaml"),
@@ -2085,7 +2091,7 @@ mod tests {
         )
         .unwrap();
         let work = temp.path().to_string_lossy().to_string();
-        (temp, work)
+        (temp, work, guard)
     }
 
     fn set_stale(path: &Path) {
@@ -2101,7 +2107,7 @@ mod tests {
 
     #[test]
     fn root_config_requires_absolute_inside_work() {
-        let (temp, work) = workspace();
+        let (temp, work, _home_guard) = workspace();
         assert_eq!(
             resolve_scratchpad_root(Path::new(&work)).unwrap(),
             temp.path().join("scratchpad")
@@ -2118,7 +2124,7 @@ mod tests {
 
     #[test]
     fn configured_drafts_subdir_resolves_the_drafts_collection() {
-        let (temp, work) = workspace();
+        let (temp, work, _home_guard) = workspace();
         let scratchpad = temp.path().join("scratchpad");
         fs::write(
             temp.path().join("workspace.config.yaml"),
@@ -2137,7 +2143,7 @@ mod tests {
 
     #[test]
     fn drafts_subdir_must_be_safe_relative() {
-        let (temp, work) = workspace();
+        let (temp, work, _home_guard) = workspace();
         let scratchpad = temp.path().join("scratchpad");
         fs::write(
             temp.path().join("workspace.config.yaml"),
@@ -2154,7 +2160,7 @@ mod tests {
 
     #[test]
     fn drafts_subdir_overlap_with_ideation_is_rejected() {
-        let (temp, work) = workspace();
+        let (temp, work, _home_guard) = workspace();
         let scratchpad = temp.path().join("scratchpad");
         fs::write(
             temp.path().join("workspace.config.yaml"),
@@ -2171,7 +2177,7 @@ mod tests {
 
     #[test]
     fn drafts_subdir_spelling_aliases_cannot_bypass_overlap_validation() {
-        let (temp, work) = workspace();
+        let (temp, work, _home_guard) = workspace();
         let scratchpad = temp.path().join("scratchpad");
         fs::write(
             temp.path().join("workspace.config.yaml"),
@@ -2188,7 +2194,7 @@ mod tests {
 
     #[test]
     fn list_is_recursive_and_classifies_sources_and_stages() {
-        let (temp, work) = workspace();
+        let (temp, work, _home_guard) = workspace();
         fs::create_dir_all(temp.path().join("scratchpad/temp/runtime/claude/run")).unwrap();
         fs::create_dir_all(temp.path().join("scratchpad/ideation/seeds")).unwrap();
         fs::write(
@@ -2218,7 +2224,7 @@ mod tests {
 
     #[test]
     fn save_is_revision_checked_and_atomic() {
-        let (_temp, work) = workspace();
+        let (_temp, work, _home_guard) = workspace();
         let created = scratchpad_save(
             work.clone(),
             ScratchpadCollection::Memos,
@@ -2255,7 +2261,7 @@ mod tests {
 
     #[test]
     fn forced_save_still_requires_the_current_revision() {
-        let (_temp, work) = workspace();
+        let (_temp, work, _home_guard) = workspace();
         let created = scratchpad_save(
             work.clone(),
             ScratchpadCollection::Memos,
@@ -2304,7 +2310,7 @@ mod tests {
 
     #[test]
     fn overlapping_collection_roots_block_cleanup_before_touching_durable_files() {
-        let (temp, work) = workspace();
+        let (temp, work, _home_guard) = workspace();
         let root = temp.path().join("scratchpad");
         fs::create_dir_all(root.join("ideation/seeds")).unwrap();
         fs::create_dir_all(root.join("memos")).unwrap();
@@ -2331,7 +2337,7 @@ mod tests {
 
     #[test]
     fn traversal_and_symlinks_are_rejected() {
-        let (temp, work) = workspace();
+        let (temp, work, _home_guard) = workspace();
         let error = scratchpad_read(
             work.clone(),
             ScratchpadCollection::Memos,
@@ -2370,7 +2376,7 @@ mod tests {
 
     #[test]
     fn idea_creation_and_transition_are_safe() {
-        let (_temp, work) = workspace();
+        let (_temp, work, _home_guard) = workspace();
         let idea = scratchpad_create_idea(work.clone(), "Agent Governance".to_string()).unwrap();
         assert_eq!(idea.entry.ideation_stage, Some(IdeationStage::Seed));
         assert!(idea
@@ -2390,7 +2396,7 @@ mod tests {
 
     #[test]
     fn idea_transition_updates_linked_implementation_lineage() {
-        let (temp, work) = workspace();
+        let (temp, work, _home_guard) = workspace();
         let idea = scratchpad_create_idea(work.clone(), "Lineage update".to_string()).unwrap();
         let old_path = idea.entry.relative_path.clone();
         let new_path = old_path.replacen("seeds/", "developing/", 1);
@@ -2428,7 +2434,7 @@ mod tests {
 
     #[test]
     fn file_idea_transition_rolls_back_when_lineage_index_read_fails() {
-        let (temp, work) = workspace();
+        let (temp, work, _home_guard) = workspace();
         let idea = scratchpad_create_idea(work.clone(), "Read rollback".to_string()).unwrap();
         let old_path = idea.entry.relative_path.clone();
         let new_path = old_path.replacen("seeds/", "developing/", 1);
@@ -2470,7 +2476,7 @@ mod tests {
 
     #[test]
     fn file_idea_transition_rolls_back_when_lineage_index_write_fails() {
-        let (temp, work) = workspace();
+        let (temp, work, _home_guard) = workspace();
         let idea = scratchpad_create_idea(work.clone(), "File rollback".to_string()).unwrap();
         let old_path = idea.entry.relative_path.clone();
         let new_path = old_path.replacen("seeds/", "developing/", 1);
@@ -2512,7 +2518,7 @@ mod tests {
 
     #[test]
     fn directory_idea_transition_rolls_back_when_lineage_index_write_fails() {
-        let (temp, work) = workspace();
+        let (temp, work, _home_guard) = workspace();
         let root = temp.path().join("scratchpad/ideation");
         fs::create_dir_all(root.join("seeds/rollback/assets")).unwrap();
         fs::write(root.join("seeds/rollback/main.md"), "main").unwrap();
@@ -2603,7 +2609,7 @@ mod tests {
 
     #[test]
     fn directory_idea_moves_all_siblings_and_assets_without_overwrite() {
-        let (temp, work) = workspace();
+        let (temp, work, _home_guard) = workspace();
         let root = temp.path().join("scratchpad/ideation");
         fs::create_dir_all(root.join("seeds/slug/assets")).unwrap();
         fs::write(root.join("seeds/slug/main.md"), "main").unwrap();
@@ -2690,7 +2696,7 @@ mod tests {
 
     #[test]
     fn rename_never_overwrites_an_existing_target() {
-        let (temp, work) = workspace();
+        let (temp, work, _home_guard) = workspace();
         let root = temp.path().join("scratchpad/memos");
         fs::create_dir_all(&root).unwrap();
         fs::write(root.join("source.md"), "source").unwrap();
@@ -2719,7 +2725,7 @@ mod tests {
 
     #[test]
     fn legacy_migration_verifies_and_removes_sources() {
-        let (temp, work) = workspace();
+        let (temp, work, _home_guard) = workspace();
         let legacy = temp.path().join(".maru/memos");
         fs::create_dir_all(&legacy).unwrap();
         fs::write(legacy.join("memo.txt"), "legacy").unwrap();
@@ -2736,7 +2742,7 @@ mod tests {
 
     #[test]
     fn legacy_migration_reuses_identical_verified_target() {
-        let (temp, work) = workspace();
+        let (temp, work, _home_guard) = workspace();
         let legacy = temp.path().join(".maru/memos");
         let target = temp.path().join("scratchpad/memos");
         fs::create_dir_all(&legacy).unwrap();
@@ -2753,7 +2759,7 @@ mod tests {
 
     #[test]
     fn rerun_migration_never_reuses_a_previous_staging_path() {
-        let (temp, work) = workspace();
+        let (temp, work, _home_guard) = workspace();
         let legacy = temp.path().join(".maru/memos");
         fs::create_dir_all(&legacy).unwrap();
         fs::write(legacy.join("memo.txt"), "first run").unwrap();
@@ -2784,7 +2790,7 @@ mod tests {
 
     #[test]
     fn cleanup_plan_includes_unsupported_files() {
-        let (temp, work) = workspace();
+        let (temp, work, _home_guard) = workspace();
         let root = temp.path().join("scratchpad/temp/codex");
         fs::create_dir_all(&root).unwrap();
         let path = root.join("artifact.bin");
@@ -2797,7 +2803,7 @@ mod tests {
 
     #[test]
     fn cleanup_apply_revision_checks_every_selection() {
-        let (temp, work) = workspace();
+        let (temp, work, _home_guard) = workspace();
         let root = temp.path().join("scratchpad/temp/codex");
         fs::create_dir_all(&root).unwrap();
         let trashed = root.join("old.bin");
@@ -2831,7 +2837,7 @@ mod tests {
 
     #[test]
     fn edit_limit_marks_large_file_read_only() {
-        let (temp, work) = workspace();
+        let (temp, work, _home_guard) = workspace();
         let root = temp.path().join("scratchpad/memos");
         fs::create_dir_all(&root).unwrap();
         let mut file = File::create(root.join("large.md")).unwrap();
