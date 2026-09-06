@@ -13,6 +13,9 @@ use std::os::unix::fs::PermissionsExt;
 use std::sync::{Mutex, MutexGuard, OnceLock};
 
 pub fn home_dir() -> Result<PathBuf, String> {
+    if let Some(home) = crate::paths::native_e2e_dir_override(crate::paths::NATIVE_E2E_HOME_VAR)? {
+        return Ok(home);
+    }
     dirs::home_dir().ok_or_else(|| "Cannot resolve home directory".to_string())
 }
 
@@ -55,6 +58,9 @@ pub fn install_root_base() -> Result<PathBuf, String> {
 pub fn codex_home() -> Result<PathBuf, String> {
     if let Some(path) = test_maru_home_override() {
         return Ok(path.join(".codex"));
+    }
+    if let Some(home) = crate::paths::native_e2e_dir_override(crate::paths::NATIVE_E2E_HOME_VAR)? {
+        return Ok(home.join(".codex"));
     }
     let home = home_dir()?;
     Ok(resolve_codex_home(
@@ -260,6 +266,22 @@ mod tests {
     use super::*;
     use serde_json::json;
     use tempfile::TempDir;
+
+    #[test]
+    #[cfg(not(feature = "native-e2e"))]
+    fn phase08_01_normal_build_ignores_native_home_override() {
+        let _guard = test_maru_home_lock();
+        let previous = std::env::var_os(crate::paths::NATIVE_E2E_HOME_VAR);
+        std::env::set_var(crate::paths::NATIVE_E2E_HOME_VAR, "relative-native-home");
+        let result = home_dir();
+        if let Some(previous) = previous {
+            std::env::set_var(crate::paths::NATIVE_E2E_HOME_VAR, previous);
+        } else {
+            std::env::remove_var(crate::paths::NATIVE_E2E_HOME_VAR);
+        }
+        assert_eq!(result.unwrap(), dirs::home_dir().unwrap());
+        assert!(!Path::new("relative-native-home").exists());
+    }
 
     #[test]
     fn pretty_json_atomically_replaces_an_existing_file() {

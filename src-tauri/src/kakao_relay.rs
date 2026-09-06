@@ -21,9 +21,11 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value as JsonValue};
-use tauri::State;
+use tauri::Manager;
 
-use crate::atomic_file::write_atomic;
+use crate::atomic_file::{
+    with_path_transactions, write_atomic, PathTransactionLease, PathTransactionRequest,
+};
 use crate::inbox_drop::sanitize_filename;
 use crate::inbox_settings;
 use crate::telegram_io::workspace_provider_string;
@@ -426,6 +428,78 @@ fn stage_inner(
     dry_run: bool,
 ) -> Result<KakaoRelayStageOutcome, String> {
     let root = resolve_relay_root(work)?;
+    let config = match inbox_settings::load_runtime_config_or_legacy(work) {
+        Ok(config) => config,
+        Err(error) => {
+            return Ok(KakaoRelayStageOutcome {
+                errors: vec![error],
+                ..Default::default()
+            })
+        }
+    };
+    let inbox = inbox_settings::resolve_runtime_root(work, &config)?;
+    let drop_dir = resolve_kakao_drop_dir(work)?;
+    let mut paths = vec![
+        root.clone(),
+        inbox,
+        drop_dir.clone(),
+        cursor_path(work),
+        work.join(".maru/cache"),
+        work.join("workspace.config.yaml"),
+        work.join(".maru/inbox.json"),
+    ];
+    if !work.join(".maru").exists() {
+        paths.push(work.join(".maru"));
+    }
+    for room in read_rooms(&root) {
+        for (_, source) in list_room_message_files(&root, &room.slug) {
+            if let Some(name) = source.file_name() {
+                paths.push(drop_dir.join("messages").join(name));
+            }
+            paths.push(source);
+        }
+    }
+    if let Ok(entries) = fs::read_dir(root.join("media/_incoming")) {
+        for entry in entries.flatten() {
+            paths.extend([entry.path(), drop_dir.join("files").join(entry.file_name())]);
+        }
+    }
+    paths.extend(
+        paths
+            .clone()
+            .into_iter()
+            .filter_map(|path| path.canonicalize().ok()),
+    );
+    let request = PathTransactionRequest::new(paths)?
+        .require_parent(work)?
+        .require_parent(&root)?
+        .with_workspace_registry()?;
+    with_path_transactions(request, |lease| {
+        if resolve_relay_root(work)? != root
+            || inbox_settings::load_runtime_config_or_legacy(work)? != config
+        {
+            return Err("Kakao configuration changed; retry the operation".into());
+        }
+        lease.ensure_workspace_registry()?;
+        lease.before_effect()?;
+        if !dry_run {
+            crate::vault_list::assert_maru_can_write(
+                &work.to_string_lossy(),
+                crate::vault_list::WorkspaceWriteAction::Create,
+            )?;
+        }
+        stage_kakao_relay_new_in_transaction(lease, work, media_stable_age, dry_run)
+    })
+}
+
+fn stage_kakao_relay_new_in_transaction(
+    lease: &PathTransactionLease,
+    work: &Path,
+    media_stable_age: Duration,
+    dry_run: bool,
+) -> Result<KakaoRelayStageOutcome, String> {
+    lease.ensure_covered(vec![cursor_path(work), resolve_kakao_drop_dir(work)?])?;
+    let root = resolve_relay_root(work)?;
     let mut outcome = KakaoRelayStageOutcome::default();
     let drop_dir = match resolve_kakao_drop_dir(work) {
         Ok(dir) => Some(dir),
@@ -471,6 +545,10 @@ fn stage_inner(
             {
                 let count = outcome.per_room.entry(room.slug.clone()).or_default();
                 for (key, path) in &files {
+                    lease.ensure_covered(vec![
+                        path.clone(),
+                        messages_dir.join(path.file_name().ok_or("message filename missing")?),
+                    ])?;
                     if seen.contains(key) {
                         continue;
                     }
@@ -552,6 +630,7 @@ fn stage_inner(
             }
             entries.sort_by(|left, right| left.0.cmp(&right.0));
             for (name, path, meta) in entries {
+                lease.ensure_covered(vec![path.clone(), drop_dir.join("files").join(&name)])?;
                 if name.starts_with('.') {
                     continue;
                 }
@@ -617,6 +696,72 @@ fn enqueue_send_inner(
     text: &str,
     attachment_path: Option<&str>,
 ) -> Result<KakaoSendEnqueueResult, String> {
+    // Preserve argument rejection order before resolving configured paths.
+    if chat.trim().is_empty() {
+        return Err("chat_required".into());
+    }
+    if text.trim().is_empty()
+        && attachment_path
+            .map(str::trim)
+            .filter(|path| !path.is_empty())
+            .is_none()
+    {
+        return Err("text_or_attachment_required".into());
+    }
+    let root = resolve_relay_root(work)?;
+    let mut paths = vec![
+        root.join("outbox"),
+        root.join("outbox/pending"),
+        root.join("outbox/attachments"),
+        root.clone(),
+        work.join("workspace.config.yaml"),
+    ];
+    if let Some(source) = attachment_path.filter(|source| !source.trim().is_empty()) {
+        let source = PathBuf::from(source.trim());
+        paths.push(if source.is_absolute() {
+            source
+        } else {
+            std::env::current_dir()
+                .map_err(|err| err.to_string())?
+                .join(source)
+        });
+    }
+    paths.extend(
+        paths
+            .clone()
+            .into_iter()
+            .filter_map(|path| path.canonicalize().ok()),
+    );
+    let request = PathTransactionRequest::new(paths)?
+        .require_parent(work)?
+        .require_parent(&root)?
+        .with_workspace_registry()?;
+    with_path_transactions(request, |lease| {
+        if resolve_relay_root(work)? != root {
+            return Err("Kakao configuration changed; retry the operation".into());
+        }
+        lease.ensure_workspace_registry()?;
+        lease.before_effect()?;
+        crate::vault_list::assert_maru_can_write(
+            &work.to_string_lossy(),
+            crate::vault_list::WorkspaceWriteAction::Create,
+        )?;
+        crate::vault_list::assert_maru_can_write(
+            &root.to_string_lossy(),
+            crate::vault_list::WorkspaceWriteAction::Create,
+        )?;
+        enqueue_kakao_send_in_transaction(lease, work, chat, text, attachment_path)
+    })
+}
+
+fn enqueue_kakao_send_in_transaction(
+    lease: &PathTransactionLease,
+    work: &Path,
+    chat: &str,
+    text: &str,
+    attachment_path: Option<&str>,
+) -> Result<KakaoSendEnqueueResult, String> {
+    lease.ensure_covered(vec![resolve_relay_root(work)?.join("outbox")])?;
     let chat = chat.trim();
     if chat.is_empty() {
         return Err("chat_required".to_string());
@@ -634,6 +779,14 @@ fn enqueue_send_inner(
     let mut attachment_field = JsonValue::Null;
     if let Some(source) = attachment_path {
         let source_path = PathBuf::from(source);
+        let source_key = if source_path.is_absolute() {
+            source_path.clone()
+        } else {
+            std::env::current_dir()
+                .map_err(|err| err.to_string())?
+                .join(&source_path)
+        };
+        lease.ensure_covered(vec![source_key])?;
         if !source_path.is_file() {
             return Err(format!("attachment_not_found: {source}"));
         }
@@ -743,6 +896,8 @@ fn require_stage_approval(
 #[tauri::command]
 pub async fn read_kakao_relay_status(work_path: String) -> Result<KakaoRelayStatus, String> {
     tauri::async_runtime::spawn_blocking(move || -> Result<KakaoRelayStatus, String> {
+        #[cfg(test)]
+        PathTransactionLease::test_stage(&[PathBuf::from(&work_path)], "worker:kakao_relay");
         let work = resolve_inside_vault(&work_path, ".")?;
         Ok(read_status_inner(&work))
     })
@@ -757,6 +912,8 @@ pub async fn read_kakao_relay_messages(
     limit: Option<u32>,
 ) -> Result<Vec<JsonValue>, String> {
     tauri::async_runtime::spawn_blocking(move || -> Result<Vec<JsonValue>, String> {
+        #[cfg(test)]
+        PathTransactionLease::test_stage(&[PathBuf::from(&work_path)], "worker:kakao_relay");
         let work = resolve_inside_vault(&work_path, ".")?;
         read_messages_inner(&work, &room_slug, limit)
     })
@@ -765,14 +922,20 @@ pub async fn read_kakao_relay_messages(
 }
 
 #[tauri::command]
-pub async fn stage_kakao_relay_new(
-    approvals: State<'_, crate::approval::ApprovalState>,
+pub async fn stage_kakao_relay_new<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
     work_path: String,
     dry_run: bool,
     approval_id: Option<String>,
 ) -> Result<KakaoRelayStageOutcome, String> {
-    require_stage_approval(&approvals, dry_run, approval_id)?;
     tauri::async_runtime::spawn_blocking(move || -> Result<KakaoRelayStageOutcome, String> {
+        #[cfg(test)]
+        PathTransactionLease::test_stage(&[PathBuf::from(&work_path)], "worker:kakao_relay");
+        require_stage_approval(
+            &app.state::<crate::approval::ApprovalState>(),
+            dry_run,
+            approval_id,
+        )?;
         let work = resolve_inside_vault(&work_path, ".")?;
         stage_inner(&work, MEDIA_STABLE_AGE, dry_run)
     })
@@ -781,16 +944,22 @@ pub async fn stage_kakao_relay_new(
 }
 
 #[tauri::command]
-pub async fn enqueue_kakao_send(
-    approvals: State<'_, crate::approval::ApprovalState>,
+pub async fn enqueue_kakao_send<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
     work_path: String,
     chat: String,
     text: String,
     attachment_path: Option<String>,
     approval_id: Option<String>,
 ) -> Result<KakaoSendEnqueueResult, String> {
-    crate::approval::require_approval(&approvals, approval_id, KAKAO_SEND_KIND)?;
     tauri::async_runtime::spawn_blocking(move || -> Result<KakaoSendEnqueueResult, String> {
+        #[cfg(test)]
+        PathTransactionLease::test_stage(&[PathBuf::from(&work_path)], "worker:kakao_relay");
+        crate::approval::require_approval(
+            &app.state::<crate::approval::ApprovalState>(),
+            approval_id,
+            KAKAO_SEND_KIND,
+        )?;
         let work = resolve_inside_vault(&work_path, ".")?;
         enqueue_send_inner(&work, &chat, &text, attachment_path.as_deref())
     })
@@ -804,6 +973,8 @@ pub async fn read_kakao_send_results(
     ids: Vec<String>,
 ) -> Result<Vec<KakaoSendResult>, String> {
     tauri::async_runtime::spawn_blocking(move || -> Result<Vec<KakaoSendResult>, String> {
+        #[cfg(test)]
+        PathTransactionLease::test_stage(&[PathBuf::from(&work_path)], "worker:kakao_relay");
         let work = resolve_inside_vault(&work_path, ".")?;
         read_send_results_inner(&work, &ids)
     })
@@ -1413,5 +1584,494 @@ io:
         assert_eq!(results[2].ok, Some(false));
         assert_eq!(results[2].error.as_deref(), Some("kmsg_timeout"));
         assert_eq!(results[3].status, "unknown");
+    }
+
+    fn phase08_14_app() -> tauri::App<tauri::test::MockRuntime> {
+        let app = tauri::test::mock_app();
+        app.manage(crate::approval::ApprovalState::default());
+        app
+    }
+    fn phase08_14_approval(
+        app: &tauri::App<tauri::test::MockRuntime>,
+        kind: &str,
+    ) -> Option<String> {
+        let request = crate::approval::prepare_approval(
+            app.state(),
+            kind.into(),
+            "fixture".into(),
+            None,
+            None,
+        )
+        .unwrap();
+        crate::approval::record_approval(
+            app.state(),
+            request.id.clone(),
+            crate::approval::ApprovalDecision::Approved,
+            None,
+        )
+        .unwrap();
+        Some(request.id)
+    }
+    fn phase08_14_fixture(home: &crate::atomic_file::phase08_06::Home) -> Fixture {
+        let work = tempfile::tempdir_in(home.root.path()).unwrap();
+        let relay = tempfile::tempdir_in(home.root.path()).unwrap();
+        assert!(
+            work.path().starts_with(home.root.path()) && relay.path().starts_with(home.root.path())
+        );
+        fs::write(work.path().join("workspace.config.yaml"), format!("inbox:\n  root: inbox\n  channels:\n    kakao:\n      provider: kakao\n      kind: bundle\n      dedupe: sha256\n      drop_paths: [drop/kakao]\nio:\n  providers:\n    kakao:\n      relay_root: {}\n", relay.path().display())).unwrap();
+        fs::create_dir_all(work.path().join("inbox/drop/kakao/messages")).unwrap();
+        fs::create_dir_all(relay.path().join("outbox/pending")).unwrap();
+        write_rooms(
+            relay.path(),
+            r#"{"rooms":[{"name":"Fixture","slug":"room","managed":true,"send_allowed":true}]}"#,
+        );
+        write_envelope(
+            &relay.path().join("messages/room/2026-09-05"),
+            "120000-fixture",
+            "synthetic",
+        );
+        crate::scratchpad::phase08_08::registry(work.path(), "direct");
+        Fixture { work, relay }
+    }
+    async fn phase08_14_write(
+        app: tauri::AppHandle<tauri::test::MockRuntime>,
+        work: String,
+        approval: Option<String>,
+        send: bool,
+    ) -> Result<String, String> {
+        if send {
+            enqueue_kakao_send(
+                app,
+                work,
+                "fixture room".into(),
+                "synthetic message".into(),
+                None,
+                approval,
+            )
+            .await
+            .map(|out| out.path)
+        } else {
+            stage_kakao_relay_new(app, work, false, approval)
+                .await
+                .map(|out| out.staged_messages.to_string())
+        }
+    }
+    fn phase08_14_waiting(
+        path: PathBuf,
+    ) -> (
+        crate::atomic_file::PathTransactionTestHook,
+        std::sync::mpsc::Receiver<()>,
+    ) {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let hook =
+            crate::atomic_file::PathTransactionTestHook::new(path, "before-admission", move || {
+                let _ = tx.send(());
+            });
+        (hook, rx)
+    }
+    #[test]
+    fn phase08_14_kakao_all_wrappers_preserve_fixture_outputs_and_rejections() {
+        use crate::atomic_file::phase08_06::{run, Home};
+        let home = Home::new();
+        let fixture = phase08_14_fixture(&home);
+        let app = phase08_14_app();
+        let work = fixture.work.path().to_string_lossy().into_owned();
+        assert_eq!(
+            run(read_kakao_relay_status(work.clone())).unwrap().rooms[0].name,
+            "Fixture"
+        );
+        assert_eq!(
+            run(read_kakao_relay_messages(
+                work.clone(),
+                "room".into(),
+                Some(3)
+            ))
+            .unwrap()[0]["message"]["text"],
+            "synthetic"
+        );
+        assert!(run(read_kakao_relay_messages(
+            work.clone(),
+            "../bad".into(),
+            None
+        ))
+        .unwrap_err()
+        .contains("invalid_room_slug"));
+        let approval = phase08_14_approval(&app, KAKAO_STAGE_KIND);
+        assert_eq!(
+            run(stage_kakao_relay_new(
+                app.handle().clone(),
+                work.clone(),
+                false,
+                approval
+            ))
+            .unwrap()
+            .staged_messages,
+            1
+        );
+        assert_eq!(
+            run(stage_kakao_relay_new(
+                app.handle().clone(),
+                work.clone(),
+                true,
+                None
+            ))
+            .unwrap()
+            .staged_messages,
+            0
+        );
+        assert!(run(stage_kakao_relay_new(
+            app.handle().clone(),
+            work.clone(),
+            false,
+            None
+        ))
+        .unwrap_err()
+        .contains("approval_required"));
+        let source = fixture.work.path().join("attachment.txt");
+        fs::write(&source, "synthetic attachment").unwrap();
+        let approval = phase08_14_approval(&app, KAKAO_SEND_KIND);
+        let out = run(enqueue_kakao_send(
+            app.handle().clone(),
+            work.clone(),
+            "room".into(),
+            "fixture".into(),
+            Some(source.to_string_lossy().into_owned()),
+            approval,
+        ))
+        .unwrap();
+        assert!(Path::new(&out.path).starts_with(fixture.relay.path()));
+        assert_eq!(
+            run(read_kakao_send_results(work.clone(), vec![out.id.clone()])).unwrap()[0].status,
+            "queued"
+        );
+        assert!(run(enqueue_kakao_send(
+            app.handle().clone(),
+            work.clone(),
+            "room".into(),
+            "fixture".into(),
+            None,
+            None
+        ))
+        .unwrap_err()
+        .contains("approval_required"));
+        fs::create_dir_all(fixture.relay.path().join("outbox/done")).unwrap();
+        fs::write(
+            fixture
+                .relay
+                .path()
+                .join("outbox/done")
+                .join(format!("{}.json", out.id)),
+            r#"{"result":{"ok":true}}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            run(read_kakao_send_results(work, vec![out.id])).unwrap()[0].ok,
+            Some(true)
+        );
+    }
+    #[test]
+    fn phase08_14_kakao_every_actual_wrapper_yields_same_task_and_join_error() {
+        use crate::atomic_file::phase08_06::{boundary, Home};
+        let home = Home::new();
+        let fixture = phase08_14_fixture(&home);
+        let app = phase08_14_app();
+        let key = fixture.work.path().to_path_buf();
+        let work = key.to_string_lossy().into_owned();
+        boundary(
+            key.clone(),
+            "kakao_relay",
+            read_kakao_relay_status(work.clone()),
+        );
+        boundary(
+            key.clone(),
+            "kakao_relay",
+            read_kakao_relay_messages(work.clone(), "room".into(), None),
+        );
+        boundary(
+            key.clone(),
+            "kakao_relay",
+            read_kakao_send_results(work.clone(), vec!["fixture".into()]),
+        );
+        boundary(
+            key.clone(),
+            "kakao_relay",
+            stage_kakao_relay_new(app.handle().clone(), work.clone(), true, None),
+        );
+        boundary(
+            key,
+            "kakao_relay",
+            enqueue_kakao_send(
+                app.handle().clone(),
+                work,
+                "room".into(),
+                "fixture".into(),
+                None,
+                None,
+            ),
+        );
+    }
+    #[test]
+    fn phase08_14_kakao_writers_serialize_release_error_unwind_and_deny_policy() {
+        use crate::atomic_file::phase08_06::{run, Held, Home};
+        use crate::atomic_file::PathTransactionTestHook;
+        for send in [false, true] {
+            let home = Home::new();
+            let fixture = phase08_14_fixture(&home);
+            let app = phase08_14_app();
+            let work = fixture.work.path().to_string_lossy().into_owned();
+            let key = if send {
+                fixture.relay.path().join("outbox")
+            } else {
+                fixture.work.path().join("inbox/drop/kakao")
+            };
+            let kind = if send {
+                KAKAO_SEND_KIND
+            } else {
+                KAKAO_STAGE_KIND
+            };
+            let held = Held::new(key.clone(), "admitted");
+            let first = tauri::async_runtime::spawn(phase08_14_write(
+                app.handle().clone(),
+                work.clone(),
+                phase08_14_approval(&app, kind),
+                send,
+            ));
+            held.wait();
+            let (_waiting, arrived) = phase08_14_waiting(key.clone());
+            let (tx, rx) = std::sync::mpsc::channel();
+            let second = phase08_14_write(
+                app.handle().clone(),
+                work.clone(),
+                phase08_14_approval(&app, kind),
+                send,
+            );
+            tauri::async_runtime::spawn(async move {
+                tx.send(second.await).unwrap();
+            });
+            arrived.recv_timeout(Duration::from_secs(5)).unwrap();
+            assert!(rx.recv_timeout(Duration::from_millis(50)).is_err());
+            held.release();
+            assert!(run(first).unwrap().is_ok());
+            assert!(rx.recv_timeout(Duration::from_secs(5)).unwrap().is_ok());
+            drop(held);
+            let hook =
+                PathTransactionTestHook::new(key, "admitted", || panic!("synthetic failure"));
+            assert!(run(phase08_14_write(
+                app.handle().clone(),
+                work.clone(),
+                phase08_14_approval(&app, kind),
+                send
+            ))
+            .unwrap_err()
+            .contains("kakao_relay_task_failed"));
+            drop(hook);
+            crate::scratchpad::phase08_08::registry(fixture.work.path(), "readOnly");
+            assert!(run(phase08_14_write(
+                app.handle().clone(),
+                work.clone(),
+                phase08_14_approval(&app, kind),
+                send
+            ))
+            .is_err());
+            crate::scratchpad::phase08_08::registry(fixture.work.path(), "direct");
+            assert!(run(phase08_14_write(
+                app.handle().clone(),
+                work,
+                phase08_14_approval(&app, kind),
+                send
+            ))
+            .is_ok());
+        }
+    }
+    #[test]
+    fn phase08_14_kakao_real_files_parent_races_both_orders_and_aliases() {
+        use crate::atomic_file::phase08_06::{run, Held, Home};
+        for send in [false, true] {
+            for parent_first in [false, true] {
+                for alias in [false, true] {
+                    for trash in [false, true] {
+                        let home = Home::new();
+                        let fixture = phase08_14_fixture(&home);
+                        let app = phase08_14_app();
+                        let selected = if send {
+                            fixture.relay.path().join("outbox")
+                        } else {
+                            fixture.work.path().join("inbox")
+                        };
+                        let root = if send {
+                            fixture.relay.path()
+                        } else {
+                            fixture.work.path()
+                        };
+                        let mut work = fixture.work.path().to_path_buf();
+                        #[cfg(unix)]
+                        if alias {
+                            let link = home.root.path().join("alias");
+                            std::os::unix::fs::symlink(fixture.work.path(), &link).unwrap();
+                            work = link;
+                        }
+                        let key = if parent_first {
+                            selected.clone()
+                        } else if send {
+                            selected.clone()
+                        } else {
+                            fixture.work.path().join("inbox/drop/kakao")
+                        };
+                        let held = Held::new(key.clone(), "admitted");
+                        let kind = if send {
+                            KAKAO_SEND_KIND
+                        } else {
+                            KAKAO_STAGE_KIND
+                        };
+                        let writer = phase08_14_write(
+                            app.handle().clone(),
+                            work.to_string_lossy().into_owned(),
+                            phase08_14_approval(&app, kind),
+                            send,
+                        );
+                        let _trash = crate::workspace_files::phase08_06::TrashFixture::new(
+                            selected.clone(),
+                            root.join("moved"),
+                        );
+                        let root_arg = root.to_string_lossy().into_owned();
+                        let selected_arg = selected.to_string_lossy().into_owned();
+                        let parent = async move {
+                            if trash {
+                                crate::workspace_files::ipc::trash_workspace_entries(
+                                    root_arg,
+                                    vec![selected_arg],
+                                )
+                                .await
+                                .map(|rows| {
+                                    assert!(rows.iter().all(|row| row.status
+                                        == crate::workspace_files::WorkspaceMutationStatus::Done));
+                                })
+                            } else {
+                                crate::workspace_files::ipc::rename_workspace_entry(
+                                    root_arg,
+                                    selected_arg,
+                                    "moved".into(),
+                                )
+                                .await
+                                .map(|_| ())
+                            }
+                        };
+                        if parent_first {
+                            let parent = tauri::async_runtime::spawn(parent);
+                            held.wait();
+                            let (_waiting, arrived) = phase08_14_waiting(selected.clone());
+                            let (tx, rx) = std::sync::mpsc::channel();
+                            tauri::async_runtime::spawn(async move {
+                                tx.send(writer.await).unwrap();
+                            });
+                            arrived.recv_timeout(Duration::from_secs(5)).unwrap();
+                            assert!(rx.recv_timeout(Duration::from_millis(50)).is_err());
+                            held.release();
+                            assert!(run(parent).unwrap().is_ok());
+                            assert!(rx.recv_timeout(Duration::from_secs(5)).unwrap().is_err());
+                        } else {
+                            let writer = tauri::async_runtime::spawn(writer);
+                            held.wait();
+                            let (_waiting, arrived) = phase08_14_waiting(selected.clone());
+                            let (tx, rx) = std::sync::mpsc::channel();
+                            tauri::async_runtime::spawn(async move {
+                                tx.send(parent.await).unwrap();
+                            });
+                            arrived.recv_timeout(Duration::from_secs(5)).unwrap();
+                            assert!(rx.recv_timeout(Duration::from_millis(50)).is_err());
+                            held.release();
+                            assert!(run(writer).unwrap().is_ok());
+                            assert!(rx.recv_timeout(Duration::from_secs(5)).unwrap().is_ok());
+                        }
+                        assert!(!selected.exists());
+                        assert!(root.join("moved").exists());
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn phase08_14_kakao_attachment_document_race_keeps_typed_conflicts_and_current_bytes() {
+        use crate::atomic_file::phase08_06::{run, Held, Home};
+        for document_first in [false, true] {
+            let home = Home::new();
+            let fixture = phase08_14_fixture(&home);
+            let app = phase08_14_app();
+            let work = fixture.work.path().to_string_lossy().into_owned();
+            let source = fixture.work.path().join("source.md");
+            fs::write(&source, "# Before\n").unwrap();
+            let revision = crate::document::read_document(work.clone(), "source.md".into())
+                .unwrap()
+                .revision;
+            let hold = Held::new(source.clone(), "admitted");
+            let send = enqueue_kakao_send(
+                app.handle().clone(),
+                work.clone(),
+                "fixture room".into(),
+                "synthetic".into(),
+                Some(source.to_string_lossy().into_owned()),
+                phase08_14_approval(&app, KAKAO_SEND_KIND),
+            );
+            let document = crate::document::ipc::save_document(
+                work.clone(),
+                "source.md".into(),
+                "# After\n".into(),
+                Some(revision.clone()),
+            );
+            let outcome = if document_first {
+                let document = tauri::async_runtime::spawn(document);
+                hold.wait();
+                let (_waiting, arrived) = phase08_14_waiting(source.clone());
+                let (tx, rx) = std::sync::mpsc::channel();
+                tauri::async_runtime::spawn(async move {
+                    tx.send(send.await).unwrap();
+                });
+                arrived.recv_timeout(Duration::from_secs(5)).unwrap();
+                assert!(rx.recv_timeout(Duration::from_millis(50)).is_err());
+                hold.release();
+                run(document).unwrap().unwrap();
+                rx.recv_timeout(Duration::from_secs(5)).unwrap().unwrap()
+            } else {
+                let send = tauri::async_runtime::spawn(send);
+                hold.wait();
+                let (_waiting, arrived) = phase08_14_waiting(source.clone());
+                let (tx, rx) = std::sync::mpsc::channel();
+                tauri::async_runtime::spawn(async move {
+                    tx.send(document.await).unwrap();
+                });
+                arrived.recv_timeout(Duration::from_secs(5)).unwrap();
+                assert!(rx.recv_timeout(Duration::from_millis(50)).is_err());
+                hold.release();
+                let out = run(send).unwrap().unwrap();
+                rx.recv_timeout(Duration::from_secs(5)).unwrap().unwrap();
+                out
+            };
+            let queued = read_json_file(Path::new(&outcome.path)).unwrap();
+            let bytes = fs::read_to_string(
+                fixture
+                    .relay
+                    .path()
+                    .join(queued["attachment"].as_str().unwrap()),
+            )
+            .unwrap();
+            assert_eq!(
+                bytes,
+                if document_first {
+                    "# After\n"
+                } else {
+                    "# Before\n"
+                }
+            );
+            let error = run(crate::document::ipc::save_document(
+                work,
+                "source.md".into(),
+                "stale".into(),
+                Some(revision),
+            ))
+            .unwrap_err();
+            assert_eq!(error.code, crate::ipc_error::DOCUMENT_CONFLICT);
+            assert_eq!(fs::read_to_string(source).unwrap(), "# After\n");
+        }
     }
 }

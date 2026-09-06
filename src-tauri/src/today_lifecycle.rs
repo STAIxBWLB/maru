@@ -18,7 +18,9 @@
 // status, drops it otherwise. A crash between 3 and 4 leaves a done note in
 // its old bucket — cosmetic, the provider op is preserved.
 
-use crate::atomic_file::write_atomic;
+use crate::atomic_file::{
+    with_path_transactions, write_atomic, PathTransactionLease, PathTransactionRequest,
+};
 use crate::document::revision_for;
 use crate::frontmatter::{update_frontmatter_content, FrontmatterValue};
 use crate::ipc_error::{IpcError, TASK_CONFLICT};
@@ -54,6 +56,7 @@ struct TransitionContext {
 /// Step 1 of `complete`, factored out so the durable-before-local ordering
 /// is directly testable: the `prepared` record exists on disk before any
 /// local mutation happens.
+#[allow(dead_code)] // Retained independent synchronous helper.
 pub(crate) fn prepare_complete_op(
     work: &Path,
     rel_path: &str,
@@ -157,17 +160,24 @@ fn outcome_for(
 }
 
 fn run_complete(
+    lease: &PathTransactionLease,
     ctx: TransitionContext,
     request: &TaskTransitionRequest,
 ) -> Result<TaskTransitionOutcome, String> {
     // 1. Durable prepared record FIRST (see module docs for recovery rules).
     let prepared = match &ctx.google_task_id {
-        Some(google_task_id) => Some(prepare_complete_op(
+        Some(google_task_id) => Some(today_outbox::enqueue_record_in_transaction(
+            lease,
             &ctx.work,
-            &ctx.rel_path,
-            google_task_id,
-            ctx.google_task_list_id.clone(),
-            request.web_action_id.clone(),
+            today_outbox::OutboxRecordDraft {
+                op: OutboxOp::Complete,
+                task_path: ctx.rel_path.clone(),
+                google_task_id: google_task_id.clone(),
+                google_task_list_id: ctx.google_task_list_id.clone(),
+                payload: None,
+                status: OutboxStatus::Prepared,
+                web_action_id: request.web_action_id.clone(),
+            },
             &ctx.now_iso,
         )?),
         None => None,
@@ -193,7 +203,8 @@ fn run_complete(
     // until this lands, recovery owns the record.
     let sync_status = match prepared {
         Some(mut record) => {
-            today_outbox::set_record_status(
+            today_outbox::set_record_status_in_transaction(
+                lease,
                 &ctx.work,
                 &mut record,
                 OutboxStatus::Ready,
@@ -234,14 +245,19 @@ fn run_complete(
     )
 }
 
-fn run_reopen(ctx: TransitionContext, task_id: &str) -> Result<TaskTransitionOutcome, String> {
+fn run_reopen(
+    lease: &PathTransactionLease,
+    ctx: TransitionContext,
+    task_id: &str,
+) -> Result<TaskTransitionOutcome, String> {
     // Same durable ordering as complete: the provider mirror (only when a
     // complete op already drained — a reopen of a task the provider never
     // saw needs no remote call) is recorded `prepared` BEFORE the local
     // mutation, promoted to `ready` after the patch and before the move.
     let prepared = match &ctx.google_task_id {
         Some(google_task_id) if today_outbox::has_synced_complete(&ctx.work, google_task_id)? => {
-            Some(today_outbox::enqueue_record(
+            Some(today_outbox::enqueue_record_in_transaction(
+                lease,
                 &ctx.work,
                 today_outbox::OutboxRecordDraft {
                     op: OutboxOp::Reopen,
@@ -267,7 +283,8 @@ fn run_reopen(ctx: TransitionContext, task_id: &str) -> Result<TaskTransitionOut
     write_atomic(&ctx.path, updated.as_bytes())?;
     let sync_status = match prepared {
         Some(mut record) => {
-            today_outbox::set_record_status(
+            today_outbox::set_record_status_in_transaction(
+                lease,
                 &ctx.work,
                 &mut record,
                 OutboxStatus::Ready,
@@ -363,14 +380,148 @@ fn run_defer(
 
 /// Apply an explicit task lifecycle transition. Concurrency: the note's
 /// sha256 must equal `expected_task_hash` or the transition is rejected;
-/// the workspace lock serializes the hash-check-then-write against other
-/// in-app transitions and today mutations (external editors stay unguarded
-/// — their window is the ms between check and write).
-#[tauri::command]
+/// shared path admission precedes the Today workspace lock and serializes
+/// the hash-check-then-write against Files, document saves and task writers.
+/// External editors remain outside process-local admission.
 pub fn task_transition(
     work_path: String,
     request: TaskTransitionRequest,
 ) -> Result<TaskTransitionOutcome, IpcError> {
+    let work = normalize_existing_dir(&work_path)?;
+    let source = resolve_inside_vault(&work_path, &request.task_path)?;
+    let lexical_work = if Path::new(&work_path).is_absolute() {
+        PathBuf::from(&work_path)
+    } else {
+        std::env::current_dir()
+            .map_err(|err| format!("Cannot resolve task cwd: {err}"))?
+            .join(&work_path)
+    };
+    // Reserve whole allocation directories: bucket and outbox/trash names are
+    // chosen only after admission. Include lexical aliases as well as resolved
+    // paths so renaming a workspace symlink cannot race its descendants.
+    let tasks_root = resolve_tasks_root(&work, "tasks")?;
+    let mut paths = vec![
+        source.clone(),
+        tasks_root.clone(),
+        tasks_root.join("active"),
+        tasks_root.join("archive"),
+        work.join(".maru"),
+        work.join(".maru/today"),
+        work.join(".maru/today/events"),
+        work.join(".maru/today/outbox"),
+        work.join(".maru/trash"),
+        work.join(".maru/trash/tasks"),
+    ];
+    let target = match request.kind {
+        TaskTransitionKind::Complete | TaskTransitionKind::Cancel => Some(TaskBucket::Archive),
+        TaskTransitionKind::Reopen => Some(TaskBucket::Active),
+        TaskTransitionKind::Defer => None,
+    };
+    if let Some(bucket) = target {
+        let destination = target_path_for_bucket(&tasks_root, &source, bucket)?;
+        paths.push(
+            destination
+                .parent()
+                .ok_or_else(|| "Task target has no parent".to_string())?
+                .to_path_buf(),
+        );
+    }
+    // A parent reservation does not cover a child's distinct physical
+    // symlink destination. Reserve existing endpoints independently, including
+    // linked event files and linked allocation directories.
+    for root in [
+        &tasks_root,
+        &work.join(".maru/today"),
+        &work.join(".maru/trash"),
+    ] {
+        if root.is_dir() {
+            for entry in walkdir::WalkDir::new(root).follow_links(true) {
+                let entry =
+                    entry.map_err(|err| format!("Cannot inspect task transaction paths: {err}"))?;
+                if entry.path_is_symlink() {
+                    paths.push(entry.into_path());
+                }
+            }
+        }
+    }
+    let paths = paths.into_iter().flat_map(|path| {
+        let alias = path
+            .strip_prefix(&work)
+            .map(|rel| lexical_work.join(rel))
+            .unwrap_or_else(|_| path.clone());
+        [path, alias]
+    });
+    let admission = PathTransactionRequest::new(paths)?
+        .require_parent(&work)?
+        .require_parent(
+            source
+                .parent()
+                .ok_or_else(|| "Task has no parent".to_string())?,
+        )?
+        .with_workspace_registry()?;
+    with_path_transactions(admission, |lease| {
+        Ok(task_transition_in_transaction(lease, work_path, request))
+    })?
+}
+
+/// Borrowed entry for callers already holding the complete write set. Lock
+/// order remains shared admission -> Today work lock -> event append lock;
+/// outbox and day reflection helpers do not reacquire admission.
+pub(crate) fn task_transition_in_transaction(
+    lease: &PathTransactionLease,
+    work_path: String,
+    request: TaskTransitionRequest,
+) -> Result<TaskTransitionOutcome, IpcError> {
+    let work = normalize_existing_dir(&work_path)?;
+    let source = resolve_inside_vault(&work_path, &request.task_path)?;
+    let tasks_root = resolve_tasks_root(&work, "tasks")?;
+    let mut paths = vec![
+        source.clone(),
+        tasks_root.clone(),
+        tasks_root.join("active"),
+        tasks_root.join("archive"),
+        work.join(".maru"),
+        work.join(".maru/today"),
+        work.join(".maru/today/events"),
+        work.join(".maru/today/outbox"),
+        work.join(".maru/trash"),
+        work.join(".maru/trash/tasks"),
+    ];
+    let target = match request.kind {
+        TaskTransitionKind::Complete | TaskTransitionKind::Cancel => Some(TaskBucket::Archive),
+        TaskTransitionKind::Reopen => Some(TaskBucket::Active),
+        TaskTransitionKind::Defer => None,
+    };
+    if let Some(bucket) = target {
+        let destination = target_path_for_bucket(&tasks_root, &source, bucket)?;
+        paths.push(
+            destination
+                .parent()
+                .ok_or_else(|| "Task target has no parent".to_string())?
+                .to_path_buf(),
+        );
+    }
+    // A parent reservation does not cover a child's distinct physical
+    // symlink destination. Reserve existing endpoints independently, including
+    // linked event files and linked allocation directories.
+    for root in [
+        &tasks_root,
+        &work.join(".maru/today"),
+        &work.join(".maru/trash"),
+    ] {
+        if root.is_dir() {
+            for entry in walkdir::WalkDir::new(root).follow_links(true) {
+                let entry =
+                    entry.map_err(|err| format!("Cannot inspect task transaction paths: {err}"))?;
+                if entry.path_is_symlink() {
+                    paths.push(entry.into_path());
+                }
+            }
+        }
+    }
+    lease.ensure_covered(paths)?;
+    lease.ensure_workspace_registry()?;
+    lease.before_effect()?;
     assert_maru_can_write(&work_path, WorkspaceWriteAction::Modify)?;
     let work = normalize_existing_dir(&work_path)?;
     let lock = crate::today_store::work_lock_for(&work)?;
@@ -387,11 +538,11 @@ pub fn task_transition(
     let outcome = match request.kind {
         TaskTransitionKind::Complete => {
             assert_maru_can_write(&work_path, WorkspaceWriteAction::RenameMove)?;
-            run_complete(ctx, &request)
+            run_complete(lease, ctx, &request)
         }
         TaskTransitionKind::Reopen => {
             assert_maru_can_write(&work_path, WorkspaceWriteAction::RenameMove)?;
-            run_reopen(ctx, &request.task_id)
+            run_reopen(lease, ctx, &request.task_id)
         }
         TaskTransitionKind::Cancel => {
             assert_maru_can_write(&work_path, WorkspaceWriteAction::RenameMove)?;
@@ -447,13 +598,121 @@ pub(crate) fn move_file(source: &Path, target: &Path) -> Result<(), String> {
 
 /// Move a task note to `.maru/trash/tasks/`. Provider deletion is opt-in:
 /// only `remote_delete: true` with a googleTaskId queues a `delete` op.
-#[tauri::command]
 pub fn task_trash(
     work_path: String,
     task_path: String,
     expected_task_hash: String,
     remote_delete: Option<bool>,
 ) -> Result<TaskTrashOutcome, IpcError> {
+    let work = normalize_existing_dir(&work_path)?;
+    let source = resolve_inside_vault(&work_path, &task_path)?;
+    let lexical_work = if Path::new(&work_path).is_absolute() {
+        PathBuf::from(&work_path)
+    } else {
+        std::env::current_dir()
+            .map_err(|err| format!("Cannot resolve task cwd: {err}"))?
+            .join(&work_path)
+    };
+    let tasks_root = resolve_tasks_root(&work, "tasks")?;
+    let mut paths = vec![
+        source.clone(),
+        tasks_root.clone(),
+        tasks_root.join("active"),
+        tasks_root.join("archive"),
+        work.join(".maru"),
+        work.join(".maru/today"),
+        work.join(".maru/today/events"),
+        work.join(".maru/today/outbox"),
+        work.join(".maru/trash"),
+        work.join(".maru/trash/tasks"),
+    ];
+    // A parent reservation does not cover a child's distinct physical
+    // symlink destination. Reserve existing endpoints independently, including
+    // linked event files and linked allocation directories.
+    for root in [
+        &tasks_root,
+        &work.join(".maru/today"),
+        &work.join(".maru/trash"),
+    ] {
+        if root.is_dir() {
+            for entry in walkdir::WalkDir::new(root).follow_links(true) {
+                let entry =
+                    entry.map_err(|err| format!("Cannot inspect task transaction paths: {err}"))?;
+                if entry.path_is_symlink() {
+                    paths.push(entry.into_path());
+                }
+            }
+        }
+    }
+    let paths = paths.into_iter().flat_map(|path| {
+        let alias = path
+            .strip_prefix(&work)
+            .map(|rel| lexical_work.join(rel))
+            .unwrap_or_else(|_| path.clone());
+        [path, alias]
+    });
+    let admission = PathTransactionRequest::new(paths)?
+        .require_parent(&work)?
+        .require_parent(
+            source
+                .parent()
+                .ok_or_else(|| "Task has no parent".to_string())?,
+        )?
+        .with_workspace_registry()?;
+    with_path_transactions(admission, |lease| {
+        Ok(task_trash_in_transaction(
+            lease,
+            work_path,
+            task_path,
+            expected_task_hash,
+            remote_delete,
+        ))
+    })?
+}
+
+pub(crate) fn task_trash_in_transaction(
+    lease: &PathTransactionLease,
+    work_path: String,
+    task_path: String,
+    expected_task_hash: String,
+    remote_delete: Option<bool>,
+) -> Result<TaskTrashOutcome, IpcError> {
+    let work = normalize_existing_dir(&work_path)?;
+    let source = resolve_inside_vault(&work_path, &task_path)?;
+    let tasks_root = resolve_tasks_root(&work, "tasks")?;
+    let mut paths = vec![
+        source.clone(),
+        tasks_root.clone(),
+        tasks_root.join("active"),
+        tasks_root.join("archive"),
+        work.join(".maru"),
+        work.join(".maru/today"),
+        work.join(".maru/today/events"),
+        work.join(".maru/today/outbox"),
+        work.join(".maru/trash"),
+        work.join(".maru/trash/tasks"),
+    ];
+    // A parent reservation does not cover a child's distinct physical
+    // symlink destination. Reserve existing endpoints independently, including
+    // linked event files and linked allocation directories.
+    for root in [
+        &tasks_root,
+        &work.join(".maru/today"),
+        &work.join(".maru/trash"),
+    ] {
+        if root.is_dir() {
+            for entry in walkdir::WalkDir::new(root).follow_links(true) {
+                let entry =
+                    entry.map_err(|err| format!("Cannot inspect task transaction paths: {err}"))?;
+                if entry.path_is_symlink() {
+                    paths.push(entry.into_path());
+                }
+            }
+        }
+    }
+    lease.ensure_covered(paths)?;
+    lease.ensure_workspace_registry()?;
+    lease.before_effect()?;
     assert_maru_can_write(&work_path, WorkspaceWriteAction::Delete)?;
     let work = normalize_existing_dir(&work_path)?;
     let lock = crate::today_store::work_lock_for(&work)?;
@@ -469,7 +728,8 @@ pub fn task_trash(
     move_file(&ctx.path, &trash_path)?;
     if remote_delete.unwrap_or(false) {
         if let Some(google_task_id) = &ctx.google_task_id {
-            today_outbox::enqueue_record(
+            today_outbox::enqueue_record_in_transaction(
+                lease,
                 &ctx.work,
                 today_outbox::OutboxRecordDraft {
                     op: OutboxOp::Delete,
@@ -500,6 +760,46 @@ pub fn task_trash(
     Ok(TaskTrashOutcome {
         trashed_path: rel_path_for(&ctx.work, &trash_path),
     })
+}
+
+/// Owned command inputs cross to the blocking pool before filesystem access
+/// or either admission/domain lock can wait. The synchronous APIs also serve
+/// web_actions; no caller must enter these adapters while holding a work lock.
+pub mod ipc {
+    use super::*;
+
+    #[tauri::command]
+    pub async fn task_transition(
+        work_path: String,
+        request: TaskTransitionRequest,
+    ) -> Result<TaskTransitionOutcome, IpcError> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(
+                &[PathBuf::from(&work_path)],
+                "worker:task_transition",
+            );
+            super::task_transition(work_path, request)
+        })
+        .await
+        .map_err(|err| IpcError::from(format!("task_transition_task_failed: {err}")))?
+    }
+
+    #[tauri::command]
+    pub async fn task_trash(
+        work_path: String,
+        task_path: String,
+        expected_task_hash: String,
+        remote_delete: Option<bool>,
+    ) -> Result<TaskTrashOutcome, IpcError> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(&[PathBuf::from(&work_path)], "worker:task_trash");
+            super::task_trash(work_path, task_path, expected_task_hash, remote_delete)
+        })
+        .await
+        .map_err(|err| IpcError::from(format!("task_trash_task_failed: {err}")))?
+    }
 }
 
 #[cfg(test)]
@@ -796,5 +1096,605 @@ mod tests {
         assert!(err
             .to_string()
             .starts_with("task_conflict: expected hash bogus, found "));
+    }
+}
+
+#[cfg(test)]
+mod phase08_11 {
+    use super::*;
+    use crate::atomic_file::phase08_06::{boundary, run, Held, Home};
+    use crate::atomic_file::PathTransactionTestHook;
+    use crate::scratchpad::phase08_08::registry;
+    use std::sync::{
+        atomic::{AtomicBool, Ordering},
+        mpsc,
+    };
+    use std::time::Duration;
+
+    const REL: &str = "tasks/active/task.md";
+    const DAY: &str = "2026-09-05";
+    const RAW: &str = "---\ntitle: Original\nstatus: active\ncustom: preserved\n---\n# Original\n";
+
+    fn text(path: &Path) -> String {
+        path.to_string_lossy().into_owned()
+    }
+    fn fixture(home: &Home) -> tempfile::TempDir {
+        let tmp = tempfile::tempdir_in(home.root.path()).unwrap();
+        fs::create_dir_all(tmp.path().join("tasks/active")).unwrap();
+        fs::create_dir(tmp.path().join(".maru")).unwrap();
+        fs::write(tmp.path().join(REL), RAW).unwrap();
+        tmp
+    }
+    fn request(kind: TaskTransitionKind, task_path: &str, hash: String) -> TaskTransitionRequest {
+        TaskTransitionRequest {
+            task_id: "fixture-task".into(),
+            task_path: task_path.into(),
+            kind,
+            expected_task_hash: hash,
+            defer_date: Some("2026-09-06".into()),
+            date: Some(DAY.into()),
+            now_iso: Some("2026-09-05T09:00:00+09:00".into()),
+            web_action_id: None,
+            payload: json!({}),
+        }
+    }
+    async fn mutate(op: &'static str, work: String, hash: String) -> Result<(), IpcError> {
+        match op {
+            "transition" => {
+                ipc::task_transition(work, request(TaskTransitionKind::Defer, REL, hash))
+                    .await
+                    .map(|_| ())
+            }
+            "trash" => ipc::task_trash(work, REL.into(), hash, None)
+                .await
+                .map(|_| ()),
+            _ => unreachable!(),
+        }
+    }
+    fn start<F: std::future::Future + Send + 'static>(future: F) -> mpsc::Receiver<F::Output>
+    where
+        F::Output: Send + 'static,
+    {
+        let (tx, rx) = mpsc::channel();
+        tauri::async_runtime::spawn(async move {
+            let _ = tx.send(future.await);
+        });
+        rx
+    }
+    fn done<T>(rx: mpsc::Receiver<T>) -> T {
+        rx.recv_timeout(Duration::from_secs(10))
+            .expect("bounded lifecycle completion")
+    }
+
+    #[test]
+    fn phase08_11_lifecycle_real_wrappers_preserve_payloads_outbox_and_rejections() {
+        let home = Home::new();
+        let tmp = fixture(&home);
+        let root = tmp.path();
+        let w = text(root);
+        let raw = RAW.replace(
+            "status: active",
+            "status: active\ngoogleTaskId: fixture-google-task",
+        );
+        fs::write(root.join(REL), &raw).unwrap();
+        let completed = run(ipc::task_transition(
+            w.clone(),
+            request(TaskTransitionKind::Complete, REL, revision_for(&raw)),
+        ))
+        .unwrap();
+        assert_eq!(completed.bucket, "archive");
+        assert_eq!(completed.sync_status, TaskSyncStatus::Syncing);
+        let archived = "tasks/archive/task.md";
+        let after = fs::read_to_string(root.join(archived)).unwrap();
+        assert!(after.contains("custom: preserved"));
+        assert!(after.contains("# Original"));
+        assert_eq!(completed.new_task_hash, revision_for(&after));
+        let records = today_outbox::list_records(root).unwrap();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].status, OutboxStatus::Ready);
+        let reopened = run(ipc::task_transition(
+            w.clone(),
+            request(
+                TaskTransitionKind::Reopen,
+                archived,
+                completed.new_task_hash,
+            ),
+        ))
+        .unwrap();
+        assert_eq!(reopened.bucket, "active");
+        let deferred = run(ipc::task_transition(
+            w.clone(),
+            request(TaskTransitionKind::Defer, REL, reopened.new_task_hash),
+        ))
+        .unwrap();
+        let raw = fs::read_to_string(root.join(REL)).unwrap();
+        assert!(raw.contains("deferDate: 2026-09-06"));
+        let stale = run(ipc::task_transition(
+            w.clone(),
+            request(TaskTransitionKind::Cancel, REL, "stale".into()),
+        ))
+        .unwrap_err();
+        assert_eq!(stale.code, TASK_CONFLICT);
+        let mut invalid = request(
+            TaskTransitionKind::Defer,
+            REL,
+            deferred.new_task_hash.clone(),
+        );
+        invalid.defer_date = None;
+        let invalid = run(ipc::task_transition(w.clone(), invalid)).unwrap_err();
+        assert!(invalid.code.is_empty());
+        assert_eq!(invalid.message, "task_defer_date_required");
+        let cancelled = run(ipc::task_transition(
+            w.clone(),
+            request(TaskTransitionKind::Cancel, REL, deferred.new_task_hash),
+        ))
+        .unwrap();
+        assert_eq!(cancelled.bucket, "archive");
+        let stale = run(ipc::task_trash(
+            w.clone(),
+            archived.into(),
+            "stale".into(),
+            Some(true),
+        ))
+        .unwrap_err();
+        assert_eq!(stale.code, TASK_CONFLICT);
+        let trashed = run(ipc::task_trash(
+            w,
+            archived.into(),
+            cancelled.new_task_hash,
+            Some(true),
+        ))
+        .unwrap();
+        assert!(trashed.trashed_path.starts_with(".maru/trash/tasks/"));
+        assert!(root.join(&trashed.trashed_path).is_file());
+        assert!(!root.join(archived).exists());
+        let records = today_outbox::list_records(root).unwrap();
+        assert!(records
+            .iter()
+            .any(|record| record.op == OutboxOp::Delete && record.status == OutboxStatus::Ready));
+        let events = fs::read_dir(root.join(".maru/today/events"))
+            .unwrap()
+            .map(|entry| fs::read_to_string(entry.unwrap().path()).unwrap())
+            .collect::<Vec<_>>()
+            .join("\n");
+        for kind in [
+            "task_completed",
+            "task_reopened",
+            "task_deferred",
+            "task_cancelled",
+            "task_trashed",
+        ] {
+            assert!(events.contains(kind));
+        }
+    }
+
+    #[test]
+    fn phase08_11_lifecycle_wrappers_yield_on_same_task_distinct_worker_and_join_error() {
+        let home = Home::new();
+        for op in ["transition", "trash"] {
+            let tmp = fixture(&home);
+            let root = tmp.path().to_path_buf();
+            let work = text(&root);
+            let command = if op == "transition" {
+                "task_transition"
+            } else {
+                "task_trash"
+            };
+            boundary(root, command, async move {
+                match mutate(op, work, revision_for(RAW)).await {
+                    Ok(()) => Ok(()),
+                    Err(error) => {
+                        // Boundary checks the display-only JoinError contract;
+                        // typed mutation conflicts never cross this conversion.
+                        assert!(error.code.is_empty());
+                        Err(error.message)
+                    }
+                }
+            });
+        }
+    }
+
+    #[test]
+    fn phase08_11_lifecycle_same_target_unwind_releases_admission_before_domain_lock() {
+        let home = Home::new();
+        for op in ["transition", "trash"] {
+            let tmp = fixture(&home);
+            let root = tmp.path();
+            let work = text(root);
+            let source = root.join(REL);
+            let held = Held::new(source.clone(), "admitted");
+            let first = start(mutate(op, work.clone(), revision_for(RAW)));
+            held.wait();
+            let waiting = Held::new(source.clone(), "before-admission");
+            let second = start(mutate(op, work, revision_for(RAW)));
+            waiting.wait();
+            waiting.release();
+            assert!(second.recv_timeout(Duration::from_millis(30)).is_err());
+            let once = AtomicBool::new(false);
+            let injection = PathTransactionTestHook::new(source, "pre-effect", move || {
+                if !once.swap(true, Ordering::SeqCst) {
+                    panic!("fixture lifecycle failure before domain lock");
+                }
+            });
+            held.release();
+            let error = done(first).unwrap_err();
+            assert!(error.code.is_empty());
+            assert!(error.message.contains("_task_failed:"));
+            done(second).unwrap();
+            drop(injection);
+            if op == "transition" {
+                assert!(fs::read_to_string(root.join(REL))
+                    .unwrap()
+                    .contains("deferDate:"));
+            } else {
+                assert!(!root.join(REL).exists());
+                assert_eq!(
+                    fs::read_dir(root.join(".maru/trash/tasks"))
+                        .unwrap()
+                        .count(),
+                    1
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn phase08_11_lifecycle_successful_transition_serializes_stale_trash_and_retry() {
+        let home = Home::new();
+        let tmp = fixture(&home);
+        let root = tmp.path();
+        let source = root.join(REL);
+        let held = Held::new(source.clone(), "admitted");
+        let first = start(mutate("transition", text(root), revision_for(RAW)));
+        held.wait();
+        let waiting = Held::new(source.clone(), "before-admission");
+        let second = start(mutate("trash", text(root), revision_for(RAW)));
+        waiting.wait();
+        waiting.release();
+        assert!(second.recv_timeout(Duration::from_millis(30)).is_err());
+        held.release();
+        done(first).unwrap();
+        assert_eq!(done(second).unwrap_err().code, TASK_CONFLICT);
+        let raw = fs::read_to_string(source).unwrap();
+        assert!(raw.contains("deferDate:"));
+        assert!(!root.join(".maru/trash").exists());
+        run(mutate("trash", text(root), revision_for(&raw))).unwrap();
+        assert!(!root.join(REL).exists());
+    }
+
+    #[test]
+    fn phase08_11_lifecycle_policy_rechecked_inside_admission_and_error_releases() {
+        let home = Home::new();
+        for op in ["transition", "trash"] {
+            let tmp = fixture(&home);
+            let root = tmp.path();
+            registry(root, "direct");
+            let held = Held::new(root.join(REL), "admitted");
+            let first = start(mutate(op, text(root), revision_for(RAW)));
+            held.wait();
+            registry(root, "readOnly");
+            held.release();
+            let error = done(first).unwrap_err();
+            assert!(error.code.is_empty());
+            assert!(error.message.contains("Workspace writes are blocked"));
+            assert_eq!(fs::read_to_string(root.join(REL)).unwrap(), RAW);
+            assert!(!root.join(".maru/today").exists());
+            assert!(!root.join(".maru/trash").exists());
+            registry(root, "direct");
+            run(mutate(op, text(root), revision_for(RAW))).unwrap();
+        }
+    }
+
+    async fn parent_mutation(
+        operation: &'static str,
+        work: String,
+        source: String,
+        new_name: String,
+    ) -> Result<(), String> {
+        if operation == "rename" {
+            crate::workspace_files::ipc::rename_workspace_entry(work, source, new_name).await?;
+        } else {
+            let outcomes =
+                crate::workspace_files::ipc::trash_workspace_entries(work, vec![source]).await?;
+            assert_eq!(outcomes.len(), 1);
+            assert_eq!(
+                outcomes[0].status,
+                crate::workspace_files::WorkspaceMutationStatus::Done
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn phase08_11_lifecycle_files_parent_rename_trash_both_orders_and_aliases() {
+        let home = Home::new();
+        for op in ["transition", "trash"] {
+            for files_op in ["rename", "trash"] {
+                for parent_first in [false, true] {
+                    for alias in [false, true] {
+                        if alias && !cfg!(unix) {
+                            continue;
+                        }
+                        let tmp = fixture(&home);
+                        let root = tmp.path();
+                        let parent = root.parent().unwrap();
+                        let mut parent_work = text(parent);
+                        #[cfg(unix)]
+                        if alias {
+                            let alias_path = parent.join(format!(
+                                "alias-{}",
+                                root.file_name().unwrap().to_string_lossy()
+                            ));
+                            std::os::unix::fs::symlink(parent, &alias_path).unwrap();
+                            parent_work = text(&alias_path);
+                        }
+                        let source = root.file_name().unwrap().to_string_lossy().into_owned();
+                        let new_name = format!("moved-{source}");
+                        let moved = parent.join(&new_name);
+                        let _trash = crate::workspace_files::phase08_06::TrashFixture::new(
+                            root.to_path_buf(),
+                            moved.clone(),
+                        );
+                        if parent_first {
+                            let held = Held::new(root.to_path_buf(), "admitted");
+                            let first =
+                                start(parent_mutation(files_op, parent_work, source, new_name));
+                            held.wait();
+                            let waiting = Held::new(root.join(REL), "before-admission");
+                            let second = start(mutate(op, text(root), revision_for(RAW)));
+                            waiting.wait();
+                            waiting.release();
+                            assert!(second.recv_timeout(Duration::from_millis(30)).is_err());
+                            held.release();
+                            done(first).unwrap();
+                            assert!(done(second).is_err());
+                            assert_eq!(fs::read_to_string(moved.join(REL)).unwrap(), RAW);
+                            assert!(!moved.join(".maru/today").exists());
+                            assert!(!root.exists());
+                        } else {
+                            let held = Held::new(root.join(REL), "admitted");
+                            let first = start(mutate(op, text(root), revision_for(RAW)));
+                            held.wait();
+                            let waiting = Held::new(root.to_path_buf(), "before-admission");
+                            let second =
+                                start(parent_mutation(files_op, parent_work, source, new_name));
+                            waiting.wait();
+                            waiting.release();
+                            assert!(second.recv_timeout(Duration::from_millis(30)).is_err());
+                            held.release();
+                            done(first).unwrap();
+                            done(second).unwrap();
+                            assert!(!root.exists());
+                            if op == "transition" {
+                                assert!(fs::read_to_string(moved.join(REL))
+                                    .unwrap()
+                                    .contains("deferDate:"));
+                            } else {
+                                assert_eq!(
+                                    fs::read_dir(moved.join(".maru/trash/tasks"))
+                                        .unwrap()
+                                        .count(),
+                                    1
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn phase08_11_lifecycle_nested_destination_aliases_contend_with_real_files() {
+        let home = Home::new();
+        for endpoint in [
+            "archive",
+            "events",
+            "event-file",
+            "double-event-file",
+            "outbox",
+            "trash",
+        ] {
+            for parent_first in [false, true] {
+                let tmp = fixture(&home);
+                let root = tmp.path();
+                let target = tempfile::tempdir_in(home.root.path()).unwrap();
+                let external = target.path();
+                let destination = match endpoint {
+                    "archive" => root.join("tasks/archive"),
+                    "events" | "double-event-file" => root.join(".maru/today/events"),
+                    "event-file" => root.join(".maru/today/events/2026-09.jsonl"),
+                    "outbox" => root.join(".maru/today/outbox"),
+                    "trash" => root.join(".maru/trash/tasks"),
+                    _ => unreachable!(),
+                };
+                fs::create_dir_all(destination.parent().unwrap()).unwrap();
+                // Keep the intermediary directory alive: the event directory
+                // links here, and its month file links to a second physical root.
+                let intermediary = tempfile::tempdir_in(home.root.path()).unwrap();
+                if endpoint == "double-event-file" {
+                    fs::write(external.join("events.jsonl"), "").unwrap();
+                    std::os::unix::fs::symlink(
+                        external.join("events.jsonl"),
+                        intermediary.path().join("2026-09.jsonl"),
+                    )
+                    .unwrap();
+                    std::os::unix::fs::symlink(intermediary.path(), &destination).unwrap();
+                } else if endpoint == "event-file" {
+                    fs::write(external.join("events.jsonl"), "").unwrap();
+                    std::os::unix::fs::symlink(external.join("events.jsonl"), &destination)
+                        .unwrap();
+                } else {
+                    std::os::unix::fs::symlink(external, &destination).unwrap();
+                }
+                let raw = RAW.replace(
+                    "status: active",
+                    "status: active\ngoogleTaskId: fixture-google-task",
+                );
+                fs::write(root.join(REL), &raw).unwrap();
+                let work = text(root);
+                let hash = revision_for(&raw);
+                let lifecycle = async move {
+                    if endpoint == "trash" {
+                        ipc::task_trash(work, REL.into(), hash, Some(true))
+                            .await
+                            .map(|_| ())
+                    } else {
+                        ipc::task_transition(work, request(TaskTransitionKind::Complete, REL, hash))
+                            .await
+                            .map(|_| ())
+                    }
+                };
+                let source = external.file_name().unwrap().to_string_lossy().into_owned();
+                let new_name = format!("moved-{source}");
+                let moved = home.root.path().join(&new_name);
+                let files = parent_mutation("rename", text(home.root.path()), source, new_name);
+                if parent_first {
+                    let held = Held::new(external.to_path_buf(), "admitted");
+                    let first = start(files);
+                    held.wait();
+                    let waiting = Held::new(root.join(REL), "before-admission");
+                    let second = start(lifecycle);
+                    waiting.wait();
+                    waiting.release();
+                    assert!(
+                        second.recv_timeout(Duration::from_millis(30)).is_err(),
+                        "{endpoint}"
+                    );
+                    held.release();
+                    done(first).unwrap();
+                    assert!(done(second).is_err(), "{endpoint}");
+                    assert_eq!(fs::read_to_string(root.join(REL)).unwrap(), raw);
+                    assert!(!external.exists());
+                } else {
+                    let held = Held::new(root.join(REL), "admitted");
+                    let first = start(lifecycle);
+                    held.wait();
+                    let waiting = Held::new(external.to_path_buf(), "before-admission");
+                    let second = start(files);
+                    waiting.wait();
+                    waiting.release();
+                    assert!(
+                        second.recv_timeout(Duration::from_millis(30)).is_err(),
+                        "{endpoint}"
+                    );
+                    held.release();
+                    done(first).unwrap();
+                    done(second).unwrap();
+                    assert!(!root.join(REL).exists());
+                    assert!(!external.exists());
+                    assert!(fs::read_dir(&moved).unwrap().next().is_some(), "{endpoint}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn phase08_11_lifecycle_document_save_both_orders_preserves_typed_staleness() {
+        let home = Home::new();
+        for op in ["transition", "trash"] {
+            for lifecycle_first in [false, true] {
+                let tmp = fixture(&home);
+                let root = tmp.path();
+                let work = text(root);
+                let source = root.join(REL);
+                let save = crate::document::ipc::save_document(
+                    work.clone(),
+                    text(&source),
+                    RAW.replace("Original", "Editor"),
+                    Some(revision_for(RAW)),
+                );
+                if lifecycle_first {
+                    let held = Held::new(source.clone(), "admitted");
+                    let first = start(mutate(op, work.clone(), revision_for(RAW)));
+                    held.wait();
+                    let waiting = Held::new(source, "before-admission");
+                    let second = start(save);
+                    waiting.wait();
+                    waiting.release();
+                    assert!(second.recv_timeout(Duration::from_millis(30)).is_err());
+                    held.release();
+                    done(first).unwrap();
+                    assert_eq!(
+                        done(second).unwrap_err().code,
+                        crate::ipc_error::DOCUMENT_CONFLICT
+                    );
+                    assert_eq!(root.join(REL).exists(), op == "transition");
+                } else {
+                    let held = Held::new(source.clone(), "admitted");
+                    let first = start(save);
+                    held.wait();
+                    let waiting = Held::new(source.clone(), "before-admission");
+                    let second = start(mutate(op, work.clone(), revision_for(RAW)));
+                    waiting.wait();
+                    waiting.release();
+                    assert!(second.recv_timeout(Duration::from_millis(30)).is_err());
+                    held.release();
+                    done(first).unwrap();
+                    assert_eq!(done(second).unwrap_err().code, TASK_CONFLICT);
+                    let raw = fs::read_to_string(source).unwrap();
+                    assert!(raw.contains("Editor"));
+                    assert!(!raw.contains("deferDate:"));
+                    assert!(!root.join(".maru/today").exists());
+                    run(mutate(op, work, revision_for(&raw))).unwrap();
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn phase08_11_lifecycle_parent_replacement_and_borrowed_coverage_fail_before_effect() {
+        let home = Home::new();
+        for op in ["transition", "trash"] {
+            let tmp = fixture(&home);
+            let root = tmp.path();
+            let source = root.join(REL);
+            let held = Held::new(source, "before-admission");
+            let first = start(mutate(op, text(root), revision_for(RAW)));
+            held.wait();
+            let original = root.join("tasks/active");
+            let moved = root.join("tasks/original-active");
+            fs::rename(&original, &moved).unwrap();
+            fs::create_dir(&original).unwrap();
+            fs::write(original.join("task.md"), RAW).unwrap();
+            held.release();
+            assert!(done(first).is_err());
+            assert_eq!(fs::read_to_string(moved.join("task.md")).unwrap(), RAW);
+            assert_eq!(fs::read_to_string(root.join(REL)).unwrap(), RAW);
+            assert!(!root.join(".maru/today").exists());
+            assert!(!root.join(".maru/trash").exists());
+            let admission = PathTransactionRequest::new(vec![root.join(".maru")])
+                .unwrap()
+                .with_workspace_registry()
+                .unwrap();
+            let error = with_path_transactions(admission, |lease| {
+                Ok(if op == "transition" {
+                    task_transition_in_transaction(
+                        lease,
+                        text(root),
+                        request(TaskTransitionKind::Defer, REL, revision_for(RAW)),
+                    )
+                    .map(|_| ())
+                } else {
+                    task_trash_in_transaction(
+                        lease,
+                        text(root),
+                        REL.into(),
+                        revision_for(RAW),
+                        None,
+                    )
+                    .map(|_| ())
+                })
+            })
+            .unwrap()
+            .unwrap_err();
+            assert!(error.code.is_empty());
+            assert_eq!(
+                error.message,
+                "Nested mutation exceeds the admitted path set"
+            );
+            run(mutate(op, text(root), revision_for(RAW))).unwrap();
+        }
     }
 }

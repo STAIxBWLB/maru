@@ -1,3 +1,6 @@
+use crate::atomic_file::{
+    with_path_transactions, write_atomic_private, PathTransactionLease, PathTransactionRequest,
+};
 use crate::paths::GENERATED_DIRS;
 use crate::vault::lexical_normalize;
 use serde::{Deserialize, Serialize};
@@ -121,18 +124,15 @@ impl SecretsPaths {
     }
 }
 
-#[tauri::command]
 pub fn secrets_scan(work_path: String) -> Result<SecretsScanReport, String> {
     let work = normalize_work_path(&work_path)?;
     scan_at(&work)
 }
 
-#[tauri::command]
 pub fn secrets_doctor(work_path: String) -> Result<SecretsScanReport, String> {
     secrets_scan(work_path)
 }
 
-#[tauri::command]
 pub fn secrets_migrate(
     work_path: String,
     dry_run: Option<bool>,
@@ -142,7 +142,6 @@ pub fn secrets_migrate(
     migrate_at(&work, dry_run.unwrap_or(true), selected)
 }
 
-#[tauri::command]
 pub fn secrets_read_text(
     work_path: String,
     rel_path: String,
@@ -151,7 +150,6 @@ pub fn secrets_read_text(
     read_text_at(&work, &rel_path)
 }
 
-#[tauri::command]
 pub fn secrets_write_text(
     work_path: String,
     rel_path: String,
@@ -161,14 +159,12 @@ pub fn secrets_write_text(
     write_text_at(&work, SecretTextWriteRequest { rel_path, contents })
 }
 
-#[tauri::command]
 pub fn secrets_delete_text(
     work_path: String,
     rel_path: String,
 ) -> Result<SecretsScanReport, String> {
     let work = normalize_work_path(&work_path)?;
-    delete_text_at(&work, &rel_path)?;
-    scan_at(&work)
+    delete_text_at(&work, &rel_path)
 }
 
 pub fn primary_root(work: &Path) -> PathBuf {
@@ -213,8 +209,61 @@ fn migrate_at(
     dry_run: bool,
     selected: Option<Vec<String>>,
 ) -> Result<SecretsMigrationReport, String> {
+    let paths = SecretsPaths::new(work);
+    // The workspace root is deliberately part of the admitted set. Migration
+    // discovers candidates dynamically, so reserving the root covers every
+    // source, destination, generated parent and compatibility symlink even if
+    // another writer adds a candidate while admission is pending.
+    let before = scan_at(work)?;
+    let mut transaction_paths = vec![
+        paths.work.clone(),
+        paths.primary.clone(),
+        paths.legacy.clone(),
+        paths.work.join(".maru"),
+        paths.work.join("workspace.config.yaml"),
+        paths.work.join(".gitignore"),
+        paths.work.join(".maruignore"),
+    ];
+    for candidate in before
+        .candidates
+        .iter()
+        .chain(before.legacy_symlinks.iter())
+    {
+        transaction_paths.push(PathBuf::from(&candidate.abs_path));
+        transaction_paths.push(PathBuf::from(&candidate.recommended_abs_path));
+    }
+    let request = PathTransactionRequest::new(transaction_paths)?;
+    with_path_transactions(request, |lease| {
+        migrate_in_transaction(lease, work, dry_run, selected)
+    })
+}
+
+fn migrate_in_transaction(
+    lease: &PathTransactionLease,
+    work: &Path,
+    dry_run: bool,
+    selected: Option<Vec<String>>,
+) -> Result<SecretsMigrationReport, String> {
     let before = scan_at(work)?;
     let paths = SecretsPaths::new(work);
+    let mut refreshed_paths = vec![
+        paths.work.clone(),
+        paths.primary.clone(),
+        paths.legacy.clone(),
+    ];
+    for candidate in before
+        .candidates
+        .iter()
+        .chain(before.legacy_symlinks.iter())
+    {
+        refreshed_paths.push(PathBuf::from(&candidate.abs_path));
+        refreshed_paths.push(PathBuf::from(&candidate.recommended_abs_path));
+    }
+    // Re-scan inside admission, then cover every path discovered by that scan
+    // before the first effect. This catches a newly introduced physical alias
+    // that the initial planning snapshot could not have reserved.
+    lease.ensure_covered(refreshed_paths)?;
+    lease.before_effect()?;
     let selected = selected.unwrap_or_default();
     let selected_all = selected.is_empty();
     let mut actions = Vec::new();
@@ -390,6 +439,29 @@ fn write_text_at(
 ) -> Result<SecretInventoryItem, String> {
     let paths = SecretsPaths::new(work);
     let (path, normalized_rel) = resolve_primary_secret_path(&paths, &request.rel_path)?;
+    let transaction = PathTransactionRequest::new(vec![
+        paths.work.clone(),
+        paths.primary.clone(),
+        path.clone(),
+    ])?;
+    with_path_transactions(transaction, |lease| {
+        write_text_in_transaction(lease, &paths, path, normalized_rel, request)
+    })
+}
+
+fn write_text_in_transaction(
+    lease: &PathTransactionLease,
+    paths: &SecretsPaths,
+    path: PathBuf,
+    normalized_rel: String,
+    request: SecretTextWriteRequest,
+) -> Result<SecretInventoryItem, String> {
+    lease.ensure_covered(vec![
+        paths.work.clone(),
+        paths.primary.clone(),
+        path.clone(),
+    ])?;
+    lease.before_effect()?;
     ensure_text_secret_path(&normalized_rel)?;
     if looks_binary(request.contents.as_bytes()) {
         return Err("secret_binary_unsupported".to_string());
@@ -402,16 +474,39 @@ fn write_text_at(
             return Err("secret_text_file_required".to_string());
         }
     }
-    ensure_secret_parent_dirs(&paths, &path)?;
-    write_secret_text_file(&path, &request.contents)
+    ensure_secret_parent_dirs(paths, &path)?;
+    write_atomic_private(&path, request.contents.as_bytes())
         .map_err(|err| format!("Cannot write secret text file: {err}"))?;
     set_file_private(&path)?;
     inventory_item_for_path(&paths.primary, "primary", &path, normalized_rel)
 }
 
-fn delete_text_at(work: &Path, rel_path: &str) -> Result<(), String> {
+fn delete_text_at(work: &Path, rel_path: &str) -> Result<SecretsScanReport, String> {
     let paths = SecretsPaths::new(work);
     let (path, normalized_rel) = resolve_primary_secret_path(&paths, rel_path)?;
+    let transaction = PathTransactionRequest::new(vec![
+        paths.work.clone(),
+        paths.primary.clone(),
+        path.clone(),
+    ])?;
+    with_path_transactions(transaction, |lease| {
+        delete_text_in_transaction(lease, &paths, path, normalized_rel)?;
+        scan_at(work)
+    })
+}
+
+fn delete_text_in_transaction(
+    lease: &PathTransactionLease,
+    paths: &SecretsPaths,
+    path: PathBuf,
+    normalized_rel: String,
+) -> Result<(), String> {
+    lease.ensure_covered(vec![
+        paths.work.clone(),
+        paths.primary.clone(),
+        path.clone(),
+    ])?;
+    lease.before_effect()?;
     ensure_text_secret_path(&normalized_rel)?;
     let meta = fs::symlink_metadata(&path)
         .map_err(|err| format!("Cannot inspect secret text file: {err}"))?;
@@ -738,6 +833,14 @@ fn resolve_primary_secret_path(
     let primary = lexical_normalize(&paths.primary);
     let path = lexical_normalize(&primary.join(&normalized_rel));
     if !path.starts_with(&primary) {
+        return Err("secret_path_outside_primary".to_string());
+    }
+    // Lexical containment alone would allow an existing symlinked directory
+    // below .maru/secrets to redirect reads or writes outside the managed root.
+    // Reserve and validate the physical endpoint as well.
+    let physical_primary = canonical_or_lexical(&primary);
+    let physical_path = canonical_or_lexical(&path);
+    if !physical_path.starts_with(&physical_primary) {
         return Err("secret_path_outside_primary".to_string());
     }
     Ok((path, normalized_rel.to_string_lossy().replace('\\', "/")))
@@ -1157,19 +1260,6 @@ fn set_file_private(path: &Path) -> Result<(), String> {
     Ok(())
 }
 
-fn write_secret_text_file(path: &Path, contents: &str) -> std::io::Result<()> {
-    use std::io::Write;
-    let mut options = fs::OpenOptions::new();
-    options.write(true).create(true).truncate(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.mode(0o600);
-    }
-    let mut file = options.open(path)?;
-    file.write_all(contents.as_bytes())
-}
-
 fn set_dir_private(path: &Path) -> Result<(), String> {
     #[cfg(unix)]
     {
@@ -1196,6 +1286,105 @@ fn file_mode(path: &Path) -> Option<String> {
     {
         let _ = path;
         None
+    }
+}
+
+/// IPC boundaries own their inputs; filesystem traversal, parsing and
+/// transaction admission run on dedicated blocking workers. The synchronous
+/// functions above remain available to the CLI and other Rust callers.
+pub mod ipc {
+    use super::*;
+
+    #[tauri::command]
+    pub async fn secrets_scan(work_path: String) -> Result<SecretsScanReport, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(&[PathBuf::from(&work_path)], "worker:secrets_scan");
+            super::secrets_scan(work_path)
+        })
+        .await
+        .map_err(|error| format!("secrets_scan_task_failed: {error}"))?
+    }
+
+    #[tauri::command]
+    pub async fn secrets_doctor(work_path: String) -> Result<SecretsScanReport, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(&[PathBuf::from(&work_path)], "worker:secrets_doctor");
+            super::secrets_doctor(work_path)
+        })
+        .await
+        .map_err(|error| format!("secrets_doctor_task_failed: {error}"))?
+    }
+
+    #[tauri::command]
+    pub async fn secrets_migrate(
+        work_path: String,
+        dry_run: Option<bool>,
+        selected: Option<Vec<String>>,
+    ) -> Result<SecretsMigrationReport, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(
+                &[PathBuf::from(&work_path)],
+                "worker:secrets_migrate",
+            );
+            super::secrets_migrate(work_path, dry_run, selected)
+        })
+        .await
+        .map_err(|error| format!("secrets_migrate_task_failed: {error}"))?
+    }
+
+    #[tauri::command]
+    pub async fn secrets_read_text(
+        work_path: String,
+        rel_path: String,
+    ) -> Result<SecretTextDocument, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(
+                &[PathBuf::from(&work_path)],
+                "worker:secrets_read_text",
+            );
+            super::secrets_read_text(work_path, rel_path)
+        })
+        .await
+        .map_err(|error| format!("secrets_read_text_task_failed: {error}"))?
+    }
+
+    #[tauri::command]
+    pub async fn secrets_write_text(
+        work_path: String,
+        rel_path: String,
+        contents: String,
+    ) -> Result<SecretInventoryItem, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(
+                &[PathBuf::from(&work_path)],
+                "worker:secrets_write_text",
+            );
+            super::secrets_write_text(work_path, rel_path, contents)
+        })
+        .await
+        .map_err(|error| format!("secrets_write_text_task_failed: {error}"))?
+    }
+
+    #[tauri::command]
+    pub async fn secrets_delete_text(
+        work_path: String,
+        rel_path: String,
+    ) -> Result<SecretsScanReport, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(
+                &[PathBuf::from(&work_path)],
+                "worker:secrets_delete_text",
+            );
+            super::secrets_delete_text(work_path, rel_path)
+        })
+        .await
+        .map_err(|error| format!("secrets_delete_text_task_failed: {error}"))?
     }
 }
 
@@ -1403,5 +1592,581 @@ mod tests {
             },
         )
         .is_err());
+    }
+}
+
+#[cfg(test)]
+mod phase08_10 {
+    use super::*;
+    use crate::atomic_file::phase08_06::{boundary, run, Held, Home};
+    use crate::atomic_file::PathTransactionTestHook;
+    use crate::workspace_files::phase08_06::TrashFixture;
+    use std::future::Future;
+    use std::sync::{
+        atomic::{AtomicBool, Ordering},
+        mpsc,
+    };
+    use std::time::Duration;
+    use tempfile::TempDir;
+
+    fn text(path: &Path) -> String {
+        path.to_string_lossy().into_owned()
+    }
+
+    fn start<F, T>(future: F) -> mpsc::Receiver<T>
+    where
+        F: Future<Output = T> + Send + 'static,
+        T: Send + 'static,
+    {
+        let (tx, rx) = mpsc::channel();
+        tauri::async_runtime::spawn(async move {
+            let _ = tx.send(future.await);
+        });
+        rx
+    }
+
+    fn done<T>(receiver: mpsc::Receiver<T>) -> T {
+        receiver
+            .recv_timeout(Duration::from_secs(10))
+            .expect("secret fixture completion")
+    }
+
+    #[test]
+    fn phase08_10_secrets_all_six_wrappers_yield_on_same_polling_task() {
+        let home = Home::new();
+        let root = home.root.path();
+        let work = text(root);
+        boundary(
+            root.to_path_buf(),
+            "secrets_scan",
+            ipc::secrets_scan(work.clone()),
+        );
+        boundary(
+            root.to_path_buf(),
+            "secrets_doctor",
+            ipc::secrets_doctor(work.clone()),
+        );
+        boundary(
+            root.to_path_buf(),
+            "secrets_migrate",
+            ipc::secrets_migrate(work.clone(), Some(true), None),
+        );
+        boundary(
+            root.to_path_buf(),
+            "secrets_read_text",
+            ipc::secrets_read_text(work.clone(), "services/demo.env".into()),
+        );
+        boundary(
+            root.to_path_buf(),
+            "secrets_write_text",
+            ipc::secrets_write_text(work.clone(), "services/demo.env".into(), "fixture".into()),
+        );
+        boundary(
+            root.to_path_buf(),
+            "secrets_delete_text",
+            ipc::secrets_delete_text(work, "services/demo.env".into()),
+        );
+    }
+
+    #[test]
+    fn phase08_10_secrets_real_fixture_payloads_and_legacy_errors() {
+        let home = Home::new();
+        let tmp = TempDir::new_in(home.root.path()).unwrap();
+        let work = text(tmp.path());
+        let item = run(ipc::secrets_write_text(
+            work.clone(),
+            "services/demo.env".into(),
+            "TOKEN=fixture-value\n".into(),
+        ))
+        .unwrap();
+        assert_eq!(item.rel_path, "services/demo.env");
+        assert_eq!(
+            run(ipc::secrets_read_text(
+                work.clone(),
+                "services/demo.env".into()
+            ))
+            .unwrap()
+            .contents,
+            "TOKEN=fixture-value\n"
+        );
+        assert!(run(ipc::secrets_scan(work.clone())).unwrap().ok);
+        assert!(run(ipc::secrets_doctor(work.clone())).unwrap().ok);
+        assert_eq!(
+            run(ipc::secrets_write_text(
+                work.clone(),
+                "../outside.env".into(),
+                "TOKEN=denied\n".into(),
+            ))
+            .unwrap_err(),
+            "secret_path_traversal_unsupported"
+        );
+        assert!(run(ipc::secrets_read_text(
+            work.clone(),
+            "/tmp/outside.env".into(),
+        ))
+        .unwrap_err()
+        .contains("secret_path_absolute_unsupported"));
+        let migration = run(ipc::secrets_migrate(work.clone(), Some(true), None)).unwrap();
+        assert!(!migration.applied);
+        assert!(
+            run(ipc::secrets_delete_text(
+                work.clone(),
+                "services/demo.env".into()
+            ))
+            .unwrap()
+            .ok
+        );
+        assert_eq!(
+            run(ipc::secrets_read_text(work, "services/demo.env".into())).unwrap_err(),
+            "Cannot inspect secret text file: No such file or directory (os error 2)"
+        );
+    }
+
+    #[test]
+    fn phase08_10_secrets_writer_contention_and_error_release() {
+        let home = Home::new();
+        let tmp = TempDir::new_in(home.root.path()).unwrap();
+        let root = tmp.path().to_path_buf();
+        let work = text(&root);
+        let held = Held::new(root.clone(), "admitted");
+        let first = start(ipc::secrets_write_text(
+            work.clone(),
+            "services/contended.env".into(),
+            "TOKEN=first\n".into(),
+        ));
+        held.wait();
+
+        let waiting = Held::new(root.clone(), "before-admission");
+        let second = start(ipc::secrets_write_text(
+            work.clone(),
+            "services/contended.env".into(),
+            "TOKEN=second\n".into(),
+        ));
+        waiting.wait();
+        waiting.release();
+        assert!(second.recv_timeout(Duration::from_millis(30)).is_err());
+
+        let failed_once = AtomicBool::new(false);
+        let injection = PathTransactionTestHook::new(root.clone(), "pre-effect", move || {
+            if !failed_once.swap(true, Ordering::SeqCst) {
+                panic!("fixture transaction failure");
+            }
+        });
+        held.release();
+        assert!(done(first)
+            .unwrap_err()
+            .starts_with("secrets_write_text_task_failed:"));
+        done(second).unwrap();
+        drop(injection);
+        assert_eq!(
+            fs::read_to_string(root.join(".maru/secrets/services/contended.env")).unwrap(),
+            "TOKEN=second\n"
+        );
+    }
+
+    #[test]
+    fn phase08_10_secrets_migration_contention_and_error_release() {
+        let home = Home::new();
+        let tmp = TempDir::new_in(home.root.path()).unwrap();
+        let root = tmp.path().to_path_buf();
+        fs::create_dir_all(root.join("sites/demo")).unwrap();
+        fs::write(
+            root.join("sites/demo/.env.local"),
+            "TOKEN=migration-fixture\n",
+        )
+        .unwrap();
+        let work = text(&root);
+
+        let held = Held::new(root.clone(), "admitted");
+        let first = start(ipc::secrets_migrate(work.clone(), Some(false), None));
+        held.wait();
+        let waiting = Held::new(root.clone(), "before-admission");
+        let second = start(ipc::secrets_migrate(work.clone(), Some(false), None));
+        waiting.wait();
+        waiting.release();
+        assert!(second.recv_timeout(Duration::from_millis(30)).is_err());
+        let failed_once = AtomicBool::new(false);
+        let injection = PathTransactionTestHook::new(root.clone(), "pre-effect", move || {
+            if !failed_once.swap(true, Ordering::SeqCst) {
+                panic!("fixture migration failure");
+            }
+        });
+        held.release();
+        assert!(done(first)
+            .unwrap_err()
+            .starts_with("secrets_migrate_task_failed:"));
+        done(second).unwrap();
+        drop(injection);
+        assert!(root.join(".maru/secrets/sites/demo/local.env").is_file());
+        assert!(root.join("sites/demo/.env.local").is_symlink());
+    }
+
+    #[test]
+    fn phase08_10_secrets_delete_contention_and_error_release() {
+        let home = Home::new();
+        let tmp = TempDir::new_in(home.root.path()).unwrap();
+        let root = tmp.path().to_path_buf();
+        let work = text(&root);
+        run(ipc::secrets_write_text(
+            work.clone(),
+            "services/delete.env".into(),
+            "TOKEN=delete-fixture\n".into(),
+        ))
+        .unwrap();
+
+        let held = Held::new(root.clone(), "admitted");
+        let first = start(ipc::secrets_delete_text(
+            work.clone(),
+            "services/delete.env".into(),
+        ));
+        held.wait();
+        let waiting = Held::new(root.clone(), "before-admission");
+        let second = start(ipc::secrets_delete_text(
+            work.clone(),
+            "services/delete.env".into(),
+        ));
+        waiting.wait();
+        waiting.release();
+        assert!(second.recv_timeout(Duration::from_millis(30)).is_err());
+        let failed_once = AtomicBool::new(false);
+        let injection = PathTransactionTestHook::new(root.clone(), "pre-effect", move || {
+            if !failed_once.swap(true, Ordering::SeqCst) {
+                panic!("fixture deletion failure");
+            }
+        });
+        held.release();
+        assert!(done(first)
+            .unwrap_err()
+            .starts_with("secrets_delete_text_task_failed:"));
+        done(second).unwrap();
+        drop(injection);
+        assert!(!root.join(".maru/secrets/services/delete.env").exists());
+    }
+
+    #[test]
+    fn phase08_10_secrets_writer_serializes_with_files_rename() {
+        let home = Home::new();
+        let parent = home.root.path();
+        let root = parent.join("work-rename");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("note.md"), "# fixture\n").unwrap();
+        let work = text(&root);
+
+        let held = Held::new(root.clone(), "admitted");
+        let first = start(ipc::secrets_write_text(
+            work.clone(),
+            "services/rename.env".into(),
+            "TOKEN=rename\n".into(),
+        ));
+        held.wait();
+        let waiting = Held::new(root.clone(), "before-admission");
+        let rename = start(crate::workspace_files::ipc::rename_workspace_entry(
+            text(parent),
+            "work-rename".into(),
+            "renamed-work".into(),
+        ));
+        waiting.wait();
+        waiting.release();
+        assert!(rename.recv_timeout(Duration::from_millis(30)).is_err());
+        held.release();
+        done(first).unwrap();
+        done(rename).unwrap();
+        let moved = parent.join("renamed-work");
+        assert!(moved.join("note.md").is_file());
+        assert!(moved.join(".maru/secrets/services/rename.env").is_file());
+
+        // Reverse order: the parent operation owns the workspace first, and
+        // the secret writer waits before its original workspace disappears.
+        let reverse_root = parent.join("work-rename-reverse");
+        fs::create_dir_all(&reverse_root).unwrap();
+        fs::write(reverse_root.join("note.md"), "# fixture\n").unwrap();
+        let reverse_work = text(&reverse_root);
+        let document_held = Held::new(reverse_root.clone(), "pre-effect");
+        let document = start(crate::workspace_files::ipc::rename_workspace_entry(
+            text(parent),
+            "work-rename-reverse".into(),
+            "renamed-work-reverse".into(),
+        ));
+        document_held.wait();
+        let secret_waiting = Held::new(reverse_root.clone(), "before-admission");
+        let secret = start(ipc::secrets_write_text(
+            reverse_work,
+            "services/reverse-rename.env".into(),
+            "TOKEN=reverse-rename\n".into(),
+        ));
+        secret_waiting.wait();
+        secret_waiting.release();
+        assert!(secret.recv_timeout(Duration::from_millis(30)).is_err());
+        document_held.release();
+        done(document).unwrap();
+        assert!(done(secret).is_err());
+        assert!(parent
+            .join("renamed-work-reverse")
+            .join("note.md")
+            .is_file());
+        assert!(!reverse_root.exists());
+    }
+
+    #[test]
+    fn phase08_10_secrets_writer_serializes_with_files_trash() {
+        let home = Home::new();
+        let parent = home.root.path();
+        let root = parent.join("work-trash");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("note.md"), "# fixture\n").unwrap();
+        let trashed = parent.join("trashed-work");
+        let _trash = TrashFixture::new(root.clone(), trashed.clone());
+        let work = text(&root);
+
+        let held = Held::new(root.clone(), "admitted");
+        let first = start(ipc::secrets_write_text(
+            work.clone(),
+            "services/trash.env".into(),
+            "TOKEN=trash\n".into(),
+        ));
+        held.wait();
+        let waiting = Held::new(root.clone(), "before-admission");
+        let trash = start(crate::workspace_files::ipc::trash_workspace_entries(
+            text(parent),
+            vec!["work-trash".into()],
+        ));
+        waiting.wait();
+        waiting.release();
+        assert!(trash.recv_timeout(Duration::from_millis(30)).is_err());
+        held.release();
+        done(first).unwrap();
+        done(trash).unwrap();
+        assert!(!root.exists());
+        assert!(trashed.join("note.md").is_file());
+        assert!(trashed.join(".maru/secrets/services/trash.env").is_file());
+
+        // Reverse order: the Files trash move completes while the secret
+        // writer is waiting on the original workspace identity.
+        let reverse_root = parent.join("work-trash-reverse");
+        fs::create_dir_all(&reverse_root).unwrap();
+        fs::write(reverse_root.join("note.md"), "# fixture\n").unwrap();
+        let reverse_trashed = parent.join("trashed-work-reverse");
+        let _reverse_trash = TrashFixture::new(reverse_root.clone(), reverse_trashed.clone());
+        let reverse_work = text(&reverse_root);
+        let document_held = Held::new(reverse_root.clone(), "pre-effect");
+        let document = start(crate::workspace_files::ipc::trash_workspace_entries(
+            text(parent),
+            vec!["work-trash-reverse".into()],
+        ));
+        document_held.wait();
+        let secret_waiting = Held::new(reverse_root.clone(), "before-admission");
+        let secret = start(ipc::secrets_write_text(
+            reverse_work,
+            "services/reverse-trash.env".into(),
+            "TOKEN=reverse-trash\n".into(),
+        ));
+        secret_waiting.wait();
+        secret_waiting.release();
+        assert!(secret.recv_timeout(Duration::from_millis(30)).is_err());
+        document_held.release();
+        done(document).unwrap();
+        assert!(done(secret).is_err());
+        assert!(reverse_trashed.join("note.md").is_file());
+        assert!(!reverse_root.exists());
+    }
+
+    async fn matrix_mutation(op: &str, work: String) -> Result<(), String> {
+        match op {
+            "migrate" => ipc::secrets_migrate(work, Some(false), None)
+                .await
+                .map(|_| ()),
+            "write" => {
+                ipc::secrets_write_text(work, "services/matrix.env".into(), "TOKEN=matrix\n".into())
+                    .await
+                    .map(|_| ())
+            }
+            "delete" => ipc::secrets_delete_text(work, "services/matrix.env".into())
+                .await
+                .map(|_| ()),
+            _ => unreachable!("unknown secret matrix operation"),
+        }
+    }
+
+    #[test]
+    fn phase08_10_secrets_all_mutators_parent_rename_trash_both_orders_and_aliases() {
+        let home = Home::new();
+        for op in ["migrate", "write", "delete"] {
+            for parent_first in [false, true] {
+                for trash_parent in [false, true] {
+                    for alias in [false, true] {
+                        #[cfg(not(unix))]
+                        if alias {
+                            continue;
+                        }
+                        let suffix = format!("{op}-{parent_first}-{trash_parent}-{alias}");
+                        let parent = home.root.path();
+                        let root = parent.join(format!("matrix-work-{suffix}"));
+                        let moved = parent.join(format!("matrix-moved-{suffix}"));
+                        fs::create_dir_all(&root).unwrap();
+                        fs::write(root.join("note.md"), "# fixture\n").unwrap();
+                        if op == "migrate" {
+                            fs::create_dir_all(root.join("sites/demo")).unwrap();
+                            fs::write(
+                                root.join("sites/demo/.env.local"),
+                                "TOKEN=migration-matrix\n",
+                            )
+                            .unwrap();
+                        } else if op == "delete" {
+                            run(ipc::secrets_write_text(
+                                text(&root),
+                                "services/matrix.env".into(),
+                                "TOKEN=delete-matrix\n".into(),
+                            ))
+                            .unwrap();
+                        }
+
+                        let parent_alias = parent.join(format!("matrix-parent-alias-{suffix}"));
+                        let parent_work = if alias {
+                            #[cfg(unix)]
+                            {
+                                std::os::unix::fs::symlink(parent, &parent_alias).unwrap();
+                                text(&parent_alias)
+                            }
+                            #[cfg(not(unix))]
+                            {
+                                unreachable!()
+                            }
+                        } else {
+                            text(parent)
+                        };
+                        let source = text(&root);
+                        let new_name = moved.file_name().unwrap().to_string_lossy().into_owned();
+                        let _parent_trash = if trash_parent {
+                            Some(TrashFixture::new(root.clone(), moved.clone()))
+                        } else {
+                            None
+                        };
+                        let parent_future = async move {
+                            if trash_parent {
+                                crate::workspace_files::ipc::trash_workspace_entries(
+                                    parent_work,
+                                    vec![source],
+                                )
+                                .await
+                                .map(|_| ())
+                            } else {
+                                crate::workspace_files::ipc::rename_workspace_entry(
+                                    parent_work,
+                                    source,
+                                    new_name,
+                                )
+                                .await
+                                .map(|_| ())
+                            }
+                        };
+                        if parent_first {
+                            let held = Held::new(root.clone(), "admitted");
+                            let first = start(parent_future);
+                            held.wait();
+                            let waiting = Held::new(root.clone(), "before-admission");
+                            let second = start(matrix_mutation(op, text(&root)));
+                            waiting.wait();
+                            waiting.release();
+                            assert!(second.recv_timeout(Duration::from_millis(30)).is_err());
+                            held.release();
+                            done(first).unwrap();
+                            assert!(done(second).is_err(), "{op} must reject vanished parent");
+                        } else {
+                            let held = Held::new(root.clone(), "admitted");
+                            let first = start(matrix_mutation(op, text(&root)));
+                            held.wait();
+                            let waiting = Held::new(root.clone(), "before-admission");
+                            let second = start(parent_future);
+                            waiting.wait();
+                            waiting.release();
+                            assert!(second.recv_timeout(Duration::from_millis(30)).is_err());
+                            held.release();
+                            done(first).unwrap();
+                            done(second).unwrap();
+                        }
+                        assert!(!root.exists(), "vanished workspace recreated: {op}");
+                        assert!(moved.exists());
+                        if !parent_first {
+                            match op {
+                                "migrate" => assert!(moved
+                                    .join(".maru/secrets/sites/demo/local.env")
+                                    .is_file()),
+                                "write" => assert!(moved
+                                    .join(".maru/secrets/services/matrix.env")
+                                    .is_file()),
+                                "delete" => assert!(!moved
+                                    .join(".maru/secrets/services/matrix.env")
+                                    .exists()),
+                                _ => unreachable!(),
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn phase08_10_secrets_migration_rejects_new_physical_alias_before_effect() {
+        let home = Home::new();
+        let tmp = TempDir::new_in(home.root.path()).unwrap();
+        let outside = TempDir::new_in(home.root.path()).unwrap();
+        let root = tmp.path().to_path_buf();
+        let outside_secret = outside.path().join(".secrets/escape.env");
+        fs::create_dir_all(outside_secret.parent().unwrap()).unwrap();
+        fs::write(&outside_secret, "TOKEN=outside\n").unwrap();
+        let alias = root.join("legacy-link");
+        let alias_for_hook = alias.clone();
+        let outside_for_hook = outside_secret.clone();
+        let hook = PathTransactionTestHook::new(root.clone(), "admitted", move || {
+            if !alias_for_hook.exists() {
+                std::os::unix::fs::symlink(&outside_for_hook, &alias_for_hook).unwrap();
+            }
+        });
+        let error = run(ipc::secrets_migrate(text(&root), Some(false), None)).unwrap_err();
+        drop(hook);
+        assert!(
+            error.contains("Nested mutation exceeds the admitted path set"),
+            "{error}"
+        );
+        assert_eq!(
+            fs::read_to_string(outside_secret).unwrap(),
+            "TOKEN=outside\n"
+        );
+        assert!(!root.join(".maru").exists());
+        fs::remove_file(alias).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn phase08_10_secrets_write_rejects_stale_maru_alias_before_effect() {
+        let home = Home::new();
+        let tmp = TempDir::new_in(home.root.path()).unwrap();
+        let outside = TempDir::new_in(home.root.path()).unwrap();
+        let root = tmp.path().to_path_buf();
+        let stale_maru = outside.path().join("maru");
+        fs::create_dir_all(&stale_maru).unwrap();
+        let maru = root.join(".maru");
+        let maru_for_hook = maru.clone();
+        let stale_for_hook = stale_maru.clone();
+        let hook = PathTransactionTestHook::new(root.clone(), "admitted", move || {
+            if !maru_for_hook.exists() {
+                std::os::unix::fs::symlink(&stale_for_hook, &maru_for_hook).unwrap();
+            }
+        });
+        let error = run(ipc::secrets_write_text(
+            text(&root),
+            "services/stale.env".into(),
+            "TOKEN=stale\n".into(),
+        ))
+        .unwrap_err();
+        drop(hook);
+        assert!(
+            error.contains("Nested mutation exceeds the admitted path set"),
+            "{error}"
+        );
+        assert!(!stale_maru.join("secrets/services/stale.env").exists());
+        fs::remove_file(maru).unwrap();
     }
 }

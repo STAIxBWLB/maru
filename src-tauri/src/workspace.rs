@@ -4,10 +4,12 @@
 // Standalone single-folder workspaces still work — this module is a no-op
 // for any folder lacking the YAML.
 
+use crate::atomic_file::{with_path_transactions, PathTransactionLease, PathTransactionRequest};
 use crate::maru_dir::{ensure_maru_dir, set_owner_name, set_paired_vault_path};
 use crate::vault_list::{
-    list_workspace_roots, set_active_workspace_root, upsert_workspace_root,
-    ProviderPermissionSummary, WorkspaceCapabilities, WorkspaceRegistry, WorkspaceRootEntry,
+    legacy_vault_list_path, list_workspace_roots, set_active_workspace_root_in_transaction,
+    upsert_workspace_root_in_transaction, workspace_registry_path, ProviderPermissionSummary,
+    WorkspaceCapabilities, WorkspaceRegistry, WorkspaceRootEntry,
 };
 use serde::{Deserialize, Serialize};
 use serde_yaml::Value;
@@ -303,7 +305,6 @@ fn detect_at(work_path: &Path) -> Result<Option<WorkspaceDetect>, String> {
     }))
 }
 
-#[tauri::command]
 pub fn detect_workspace(path: String) -> Result<Option<WorkspaceDetect>, String> {
     let raw = PathBuf::from(&path);
     if !raw.exists() {
@@ -316,7 +317,6 @@ pub fn detect_workspace(path: String) -> Result<Option<WorkspaceDetect>, String>
 /// Read `workspace.config.yaml` from a known work path. Errors if the
 /// file is missing — used after `detect_workspace` returned Some, so
 /// missing here means a race / external delete.
-#[tauri::command]
 pub fn read_workspace_config(work_path: String) -> Result<WorkspaceConfig, String> {
     let work = canonicalize_or_self(&PathBuf::from(&work_path));
     let config_path = work.join(CONFIG_FILE);
@@ -340,7 +340,6 @@ pub fn read_workspace_config(work_path: String) -> Result<WorkspaceConfig, Strin
 /// 7. Set the active private root.
 ///
 /// Idempotent — re-running the same call yields the same registry state.
-#[tauri::command]
 pub fn register_workspace_roots(work_path: String) -> Result<RegisterOutcome, String> {
     let raw = PathBuf::from(&work_path);
     if !raw.exists() {
@@ -361,9 +360,45 @@ pub fn register_workspace_roots(work_path: String) -> Result<RegisterOutcome, St
         .unwrap_or_else(|| config_root.to_string_lossy().to_string());
     let private_path = PathBuf::from(&private);
 
+    // Admit the whole flow up front: the private `.maru/` skeleton, its
+    // `.maruignore`, and the workspace registry the upserts rewrite. The
+    // registry write set comes from the same resolution the upserts use, so
+    // no nested mutation escapes the admitted set.
+    let admission = PathTransactionRequest::new([
+        private_path.join(".maru"),
+        private_path.join(".maruignore"),
+        workspace_registry_path()?,
+        legacy_vault_list_path()?,
+    ])?
+    .require_parent(&private_path)?
+    .with_workspace_registry()?;
+    with_path_transactions(admission, |lease| {
+        lease.ensure_workspace_registry()?;
+        lease.ensure_covered([
+            workspace_registry_path()?,
+            private_path.join(".maru"),
+            private_path.join(".maruignore"),
+        ])?;
+        lease.before_effect()?;
+        register_workspace_roots_in_transaction(&private_path, detected, lease)
+    })
+}
+
+fn register_workspace_roots_in_transaction(
+    private_path: &Path,
+    detected: Option<WorkspaceDetect>,
+    lease: &PathTransactionLease,
+) -> Result<RegisterOutcome, String> {
+    lease.ensure_covered([
+        workspace_registry_path()?,
+        private_path.join(".maru"),
+        private_path.join(".maruignore"),
+    ])?;
+    let private = private_path.to_string_lossy().to_string();
+
     // Bootstrap .maru/ before touching the registry — if it fails the
     // registry stays untouched.
-    ensure_maru_dir(&private_path)?;
+    ensure_maru_dir(private_path)?;
 
     // Derive labels. Prefer config owner.name when registering the work
     // half (label tells the user which workspace it is); fall back to
@@ -380,16 +415,19 @@ pub fn register_workspace_roots(work_path: String) -> Result<RegisterOutcome, St
                 .to_string()
         });
 
-    upsert_workspace_root(WorkspaceRootEntry {
-        label: private_label,
-        path: private.clone(),
-        visibility: "private".to_string(),
-        provider: "local".to_string(),
-        provider_id: None,
-        external_writer: None,
-        write_policy: "direct".to_string(),
-        permission_summary: None,
-    })?;
+    upsert_workspace_root_in_transaction(
+        WorkspaceRootEntry {
+            label: private_label,
+            path: private.clone(),
+            visibility: "private".to_string(),
+            provider: "local".to_string(),
+            provider_id: None,
+            external_writer: None,
+            write_policy: "direct".to_string(),
+            permission_summary: None,
+        },
+        lease,
+    )?;
 
     let mut registered_public_paths: Vec<String> = Vec::new();
     if let Some(detected) = detected.as_ref() {
@@ -399,41 +437,49 @@ pub fn register_workspace_roots(work_path: String) -> Result<RegisterOutcome, St
             .filter(|workspace| workspace.exists)
         {
             let role = public.role.clone();
-            upsert_workspace_root(WorkspaceRootEntry {
-                label: public.label.clone(),
-                path: public.path.clone(),
-                visibility: "public".to_string(),
-                provider: public.provider.clone(),
-                provider_id: public.provider_id.clone(),
-                external_writer: public.external_writer.clone(),
-                write_policy: public.write_policy.clone(),
-                permission_summary: role.map(|role| ProviderPermissionSummary {
-                    role: Some(role),
-                    source: "manual".to_string(),
-                    checked_at: None,
-                    capabilities: WorkspaceCapabilities::default(),
-                    warning: None,
-                }),
-            })?;
+            upsert_workspace_root_in_transaction(
+                WorkspaceRootEntry {
+                    label: public.label.clone(),
+                    path: public.path.clone(),
+                    visibility: "public".to_string(),
+                    provider: public.provider.clone(),
+                    provider_id: public.provider_id.clone(),
+                    external_writer: public.external_writer.clone(),
+                    write_policy: public.write_policy.clone(),
+                    permission_summary: role.map(|role| ProviderPermissionSummary {
+                        role: Some(role),
+                        source: "manual".to_string(),
+                        checked_at: None,
+                        capabilities: WorkspaceCapabilities::default(),
+                        warning: None,
+                    }),
+                },
+                lease,
+            )?;
             registered_public_paths.push(public.path.clone());
         }
     }
     if let Some(first_public) = registered_public_paths.first() {
-        set_active_workspace_root(first_public.clone(), "public".to_string())?;
+        set_active_workspace_root_in_transaction(
+            first_public.clone(),
+            "public".to_string(),
+            lease,
+        )?;
     }
     let public_workspace_path = registered_public_paths.first().cloned();
 
     // Stamp maru's workspace meta with the optional public root + owner.
-    set_paired_vault_path(&private_path, public_workspace_path.clone())?;
+    set_paired_vault_path(private_path, public_workspace_path.clone())?;
     if let Some(owner) = detected
         .as_ref()
         .and_then(|d| d.config.owner.as_ref())
         .and_then(|o| o.name.clone())
     {
-        set_owner_name(&private_path, Some(owner))?;
+        set_owner_name(private_path, Some(owner))?;
     }
 
-    let workspace_registry = set_active_workspace_root(private.clone(), "private".to_string())?;
+    let workspace_registry =
+        set_active_workspace_root_in_transaction(private.clone(), "private".to_string(), lease)?;
 
     Ok(RegisterOutcome {
         workspace_registry,
@@ -443,7 +489,6 @@ pub fn register_workspace_roots(work_path: String) -> Result<RegisterOutcome, St
 }
 
 /// Surface workspace-shaped registry data for settings and diagnostics.
-#[tauri::command]
 pub fn list_workspaces() -> Result<Vec<WorkspaceSummary>, String> {
     let registry = list_workspace_roots()?;
     let mut by_root: BTreeMap<String, WorkspaceSummary> = BTreeMap::new();
@@ -481,6 +526,64 @@ pub struct WorkspaceSummary {
     pub private_path: Option<String>,
     pub public_label: Option<String>,
     pub public_path: Option<String>,
+}
+
+/// Owned IPC boundaries; the synchronous entry points remain available to
+/// Rust callers.
+pub mod ipc {
+    use super::*;
+
+    #[tauri::command]
+    pub async fn detect_workspace(path: String) -> Result<Option<WorkspaceDetect>, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(&[PathBuf::from(&path)], "worker:detect_workspace");
+            super::detect_workspace(path)
+        })
+        .await
+        .map_err(|err| format!("detect_workspace_task_failed: {err}"))?
+    }
+
+    #[tauri::command]
+    pub async fn read_workspace_config(work_path: String) -> Result<WorkspaceConfig, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(
+                &[PathBuf::from(&work_path)],
+                "worker:read_workspace_config",
+            );
+            super::read_workspace_config(work_path)
+        })
+        .await
+        .map_err(|err| format!("read_workspace_config_task_failed: {err}"))?
+    }
+
+    #[tauri::command]
+    pub async fn register_workspace_roots(work_path: String) -> Result<RegisterOutcome, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(
+                &[PathBuf::from(&work_path)],
+                "worker:register_workspace_roots",
+            );
+            super::register_workspace_roots(work_path)
+        })
+        .await
+        .map_err(|err| format!("register_workspace_roots_task_failed: {err}"))?
+    }
+
+    #[tauri::command]
+    pub async fn list_workspaces() -> Result<Vec<WorkspaceSummary>, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            if let Ok(registry) = crate::vault_list::workspace_registry_path() {
+                PathTransactionLease::test_stage(&[registry], "worker:list_workspaces");
+            }
+            super::list_workspaces()
+        })
+        .await
+        .map_err(|err| format!("list_workspaces_task_failed: {err}"))?
+    }
 }
 
 #[cfg(test)]
@@ -618,5 +721,246 @@ mod tests {
             .unwrap()
             .unwrap();
         assert!(detected.config.extra.contains_key("future_key"));
+    }
+}
+
+#[cfg(test)]
+mod phase08_22 {
+    use super::*;
+    use crate::atomic_file::phase08_06::{boundary, run, Held, Home};
+    use std::sync::mpsc::Receiver;
+    use std::time::Duration;
+
+    fn text(path: &Path) -> String {
+        path.to_string_lossy().into_owned()
+    }
+
+    fn write_minimal_config(work: &Path, public_path: Option<&Path>) {
+        let public_line = match public_path {
+            Some(v) => format!("  vault: {}\n", v.display()),
+            None => String::new(),
+        };
+        let yaml = format!(
+            "version: 1\nowner:\n  name: 이영준\npaths:\n  primary: {}\n{}ssot:\n  rules: {}/_sys/rules\n",
+            work.display(),
+            public_line,
+            work.display()
+        );
+        fs::write(work.join("workspace.config.yaml"), yaml).unwrap();
+    }
+
+    fn start<F, T>(future: F) -> Receiver<T>
+    where
+        F: std::future::Future<Output = T> + Send + 'static,
+        T: Send + 'static,
+    {
+        let (tx, rx) = std::sync::mpsc::channel();
+        tauri::async_runtime::spawn(async move {
+            let _ = tx.send(future.await);
+        });
+        rx
+    }
+
+    fn done<T>(rx: Receiver<T>) -> T {
+        rx.recv_timeout(Duration::from_secs(10))
+            .expect("fixture completion")
+    }
+
+    #[test]
+    fn phase08_22_workspace_wrappers_yield_same_poll_and_map_join_failure() {
+        let home = Home::new();
+        let work_path = home.root.path().join("boundary");
+        fs::create_dir_all(&work_path).unwrap();
+        let work = text(&work_path);
+        let registry = workspace_registry_path().unwrap();
+        boundary(
+            work_path.clone().into(),
+            "detect_workspace",
+            ipc::detect_workspace(work.clone()),
+        );
+        boundary(
+            work_path.clone().into(),
+            "read_workspace_config",
+            ipc::read_workspace_config(work.clone()),
+        );
+        boundary(
+            work_path.clone().into(),
+            "register_workspace_roots",
+            ipc::register_workspace_roots(work),
+        );
+        boundary(registry.into(), "list_workspaces", ipc::list_workspaces());
+    }
+
+    #[test]
+    fn phase08_22_workspace_real_fixture_results_and_rejections() {
+        let home = Home::new();
+        let work_path = home.root.path().join("fixture");
+        let public_path = home.root.path().join("fixture-public");
+        fs::create_dir_all(&work_path).unwrap();
+        fs::create_dir_all(&public_path).unwrap();
+        write_minimal_config(&work_path, Some(&public_path));
+        let work = text(&work_path);
+
+        let detected = run(ipc::detect_workspace(work.clone())).unwrap().unwrap();
+        assert_eq!(detected.config.version, 1);
+        assert!(detected.resolved_private_exists);
+        assert!(detected.resolved_public_exists);
+
+        let config = run(ipc::read_workspace_config(work.clone())).unwrap();
+        assert_eq!(config.version, 1);
+
+        let outcome = run(ipc::register_workspace_roots(work.clone())).unwrap();
+        let private_canonical = text(&work_path.canonicalize().unwrap());
+        let public_canonical = text(&public_path.canonicalize().unwrap());
+        assert_eq!(outcome.private_workspace_path, private_canonical);
+        assert_eq!(
+            outcome.public_workspace_path.as_deref(),
+            Some(public_canonical.as_str())
+        );
+        assert_eq!(
+            outcome
+                .workspace_registry
+                .active_by_visibility
+                .private
+                .as_deref(),
+            Some(private_canonical.as_str())
+        );
+        assert_eq!(
+            outcome
+                .workspace_registry
+                .active_by_visibility
+                .public
+                .as_deref(),
+            Some(public_canonical.as_str())
+        );
+
+        let meta = crate::maru_dir::ipc::read_maru_workspace(work.clone());
+        let meta = run(meta).unwrap();
+        assert_eq!(
+            meta.paired_vault_path.as_deref(),
+            Some(public_canonical.as_str())
+        );
+        assert_eq!(meta.owner_name.as_deref(), Some("이영준"));
+
+        let summaries = run(ipc::list_workspaces()).unwrap();
+        assert_eq!(summaries.len(), 2);
+        assert!(summaries
+            .iter()
+            .any(|summary| summary.private_path.as_deref() == Some(private_canonical.as_str())));
+        assert!(summaries
+            .iter()
+            .any(|summary| summary.public_path.as_deref() == Some(public_canonical.as_str())));
+
+        // Unchanged rejections.
+        let missing = text(&home.root.path().join("missing"));
+        assert!(run(ipc::detect_workspace(missing))
+            .unwrap_err()
+            .contains("Path does not exist"));
+        let plain = home.root.path().join("plain");
+        fs::create_dir_all(&plain).unwrap();
+        assert!(run(ipc::read_workspace_config(text(&plain)))
+            .unwrap_err()
+            .contains("workspace.config.yaml not found"));
+        // Standalone folders keep their existing behavior: registration
+        // bootstraps .maru/ and registers the folder as the private root.
+        let standalone = run(ipc::register_workspace_roots(text(&plain))).unwrap();
+        assert_eq!(
+            standalone.private_workspace_path,
+            text(&plain.canonicalize().unwrap())
+        );
+    }
+
+    #[test]
+    fn phase08_22_register_serializes_with_concurrent_add_both_orders() {
+        let home = Home::new();
+        for swap in [false, true] {
+            let work_path = home.root.path().join(format!("reg-{swap}"));
+            fs::create_dir_all(&work_path).unwrap();
+            write_minimal_config(&work_path, None);
+            let extra_root = home.root.path().join(format!("reg-extra-{swap}"));
+            fs::create_dir_all(&extra_root).unwrap();
+            let registry = workspace_registry_path().unwrap();
+            let extra_entry = WorkspaceRootEntry {
+                label: "Extra".to_string(),
+                path: text(&extra_root),
+                visibility: "private".to_string(),
+                provider: "local".to_string(),
+                provider_id: None,
+                external_writer: None,
+                write_policy: "direct".to_string(),
+                permission_summary: None,
+            };
+            let work = text(&work_path);
+
+            let admitted = Held::new(registry.clone(), "admitted");
+            let first_work = work.clone();
+            let first_extra = extra_entry.clone();
+            let first: Receiver<Result<(), String>> = if swap {
+                start(async move {
+                    crate::vault_list::ipc::add_workspace_root(first_extra)
+                        .await
+                        .map(|_| ())
+                })
+            } else {
+                start(async move { ipc::register_workspace_roots(first_work).await.map(|_| ()) })
+            };
+            admitted.wait();
+            let waiting = Held::new(registry.clone(), "before-admission");
+            let second: Receiver<Result<(), String>> = if swap {
+                start(async move { ipc::register_workspace_roots(work).await.map(|_| ()) })
+            } else {
+                start(async move {
+                    crate::vault_list::ipc::add_workspace_root(extra_entry)
+                        .await
+                        .map(|_| ())
+                })
+            };
+            waiting.wait();
+            waiting.release();
+            assert!(
+                second.recv_timeout(Duration::from_millis(30)).is_err(),
+                "registry writer must wait while the other holds admission"
+            );
+            admitted.release();
+            done(first).unwrap();
+            done(second).unwrap();
+
+            let listed = crate::vault_list::load_registry().unwrap();
+            let paths: Vec<&str> = listed
+                .workspaces
+                .iter()
+                .map(|entry| entry.path.as_str())
+                .collect();
+            let private_canonical = text(&work_path.canonicalize().unwrap());
+            assert!(
+                paths.contains(&private_canonical.as_str()),
+                "registered private root must survive the concurrent add"
+            );
+            assert!(
+                paths.contains(&text(&extra_root).as_str()),
+                "concurrently added root must not be overwritten"
+            );
+        }
+    }
+
+    #[test]
+    fn phase08_22_register_error_releases_admission_and_retry_recovers() {
+        let home = Home::new();
+        let work_path = home.root.path().join("reg-error");
+        fs::create_dir_all(&work_path).unwrap();
+        write_minimal_config(&work_path, None);
+        // Block .maru bootstrap: the resolved private root is the work path
+        // itself, so a file at <work>/.maru fails ensure_maru_dir.
+        fs::write(work_path.join(".maru"), "not a directory").unwrap();
+        let err = run(ipc::register_workspace_roots(text(&work_path))).unwrap_err();
+        assert!(err.contains("Cannot create .maru"), "{err}");
+        let registry = workspace_registry_path().unwrap();
+        assert!(
+            !registry.exists(),
+            "registry must stay untouched when bootstrap fails"
+        );
+        fs::remove_file(work_path.join(".maru")).unwrap();
+        run(ipc::register_workspace_roots(text(&work_path))).unwrap();
+        assert!(work_path.join(".maru/workspace.json").exists());
     }
 }

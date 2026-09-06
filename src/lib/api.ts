@@ -24,6 +24,12 @@ import { getViewerCategory, type ViewerCategory } from "./binaryViewer";
 import { denseMockEntries } from "./graph/fixtures";
 import { invokeE2EOverride } from "./e2eInvoke";
 import { normalizeIpcError } from "./ipcError";
+import {
+  runProcessingOperation,
+  type ProcessingCompletion,
+  type ProcessingWrapperOptions,
+} from "./processingOperations";
+import type { ShareOutboxResult, ShareOutboxSource } from "./shareOutbox";
 import type {
   KakaoEnqueueResult,
   KakaoRelayEnvelope,
@@ -870,6 +876,7 @@ export async function trashInboxItems(
   workPath: string,
   targets: InboxTrashTarget[],
   approvalId: string,
+  options?: ProcessingWrapperOptions,
 ): Promise<InboxTrashOutcome[]> {
   if (!isTauri()) {
     return targets.map((target) => ({
@@ -880,12 +887,22 @@ export async function trashInboxItems(
       error: null,
     }));
   }
-  return invoke<InboxTrashOutcome[]>("trash_inbox_items", { workPath, targets, approvalId });
+  return runProcessingOperation(
+    {
+      operationId: options?.operationId ?? crypto.randomUUID(),
+      workspace: workPath,
+      labelKey: "processing.label.trashInboxItems",
+      outerOperationId: options?.outerOperationId ?? null,
+    },
+    () => invoke<InboxTrashOutcome[]>("trash_inbox_items", { workPath, targets, approvalId }),
+    classifyInboxCompletion,
+  );
 }
 
 export async function stageInboxDropFiles(
   workPath: string,
   request: InboxDropStageRequest,
+  options?: ProcessingWrapperOptions,
 ): Promise<InboxDropStageOutcome[]> {
   if (!isTauri()) {
     return request.sourcePaths.map((sourcePath) => ({
@@ -899,12 +916,22 @@ export async function stageInboxDropFiles(
       error: null,
     }));
   }
-  return invoke<InboxDropStageOutcome[]>("stage_inbox_drop_files", {
-    workPath,
-    channel: request.channel ?? null,
-    dropPath: request.dropPath ?? null,
-    sourcePaths: request.sourcePaths,
-  });
+  return runProcessingOperation(
+    {
+      operationId: options?.operationId ?? crypto.randomUUID(),
+      workspace: workPath,
+      labelKey: "processing.label.stageInboxDropFiles",
+      outerOperationId: options?.outerOperationId ?? null,
+    },
+    () =>
+      invoke<InboxDropStageOutcome[]>("stage_inbox_drop_files", {
+        workPath,
+        channel: request.channel ?? null,
+        dropPath: request.dropPath ?? null,
+        sourcePaths: request.sourcePaths,
+      }),
+    classifyInboxCompletion,
+  );
 }
 
 export async function readInboxRuntimeConfig(workPath: string): Promise<InboxRuntimeConfig> {
@@ -967,6 +994,7 @@ export async function acceptInboxItem(
   id: string,
   targetFolder: string,
   approvalId: string,
+  options?: ProcessingWrapperOptions,
 ): Promise<InboxDecisionOutcome> {
   if (!isTauri()) {
     return {
@@ -979,18 +1007,29 @@ export async function acceptInboxItem(
       error: null,
     };
   }
-  return invoke<InboxDecisionOutcome>("accept_inbox_item", {
-    vaultPath,
-    id,
-    targetFolder,
-    approvalId,
-  });
+  return runProcessingOperation(
+    {
+      operationId: options?.operationId ?? crypto.randomUUID(),
+      workspace: vaultPath,
+      labelKey: "processing.label.acceptInboxItem",
+      outerOperationId: options?.outerOperationId ?? null,
+    },
+    () =>
+      invoke<InboxDecisionOutcome>("accept_inbox_item", {
+        vaultPath,
+        id,
+        targetFolder,
+        approvalId,
+      }),
+    classifyInboxCompletion,
+  );
 }
 
 export async function acceptInboxItems(
   vaultPath: string,
   items: InboxAcceptRequest[],
   approvalId: string,
+  options?: ProcessingWrapperOptions,
 ): Promise<InboxDecisionOutcome[]> {
   if (!isTauri()) {
     return items.map((item) => ({
@@ -1003,13 +1042,23 @@ export async function acceptInboxItems(
       error: null,
     }));
   }
-  return invoke<InboxDecisionOutcome[]>("accept_inbox_items", { vaultPath, items, approvalId });
+  return runProcessingOperation(
+    {
+      operationId: options?.operationId ?? crypto.randomUUID(),
+      workspace: vaultPath,
+      labelKey: "processing.label.acceptInboxItem",
+      outerOperationId: options?.outerOperationId ?? null,
+    },
+    () => invoke<InboxDecisionOutcome[]>("accept_inbox_items", { vaultPath, items, approvalId }),
+    classifyInboxCompletion,
+  );
 }
 
 export async function applyInboxDecisions(
   workPath: string,
   decisions: InboxApplyDecision[],
   approvalId: string,
+  options?: ProcessingWrapperOptions,
 ): Promise<InboxDecisionOutcome[]> {
   if (!isTauri()) {
     return decisions.map((decision) => {
@@ -1026,13 +1075,23 @@ export async function applyInboxDecisions(
       };
     });
   }
-  return invoke<InboxDecisionOutcome[]>("apply_inbox_decisions", { workPath, decisions, approvalId });
+  return runProcessingOperation(
+    {
+      operationId: options?.operationId ?? crypto.randomUUID(),
+      workspace: workPath,
+      labelKey: "processing.label.applyInboxDecisions",
+      outerOperationId: options?.outerOperationId ?? null,
+    },
+    () => invoke<InboxDecisionOutcome[]>("apply_inbox_decisions", { workPath, decisions, approvalId }),
+    classifyInboxCompletion,
+  );
 }
 
 export async function rejectInboxItem(
   vaultPath: string,
   id: string,
   approvalId: string,
+  options?: ProcessingWrapperOptions,
 ): Promise<InboxDecisionOutcome> {
   if (!isTauri()) {
     return {
@@ -1045,13 +1104,23 @@ export async function rejectInboxItem(
       error: null,
     };
   }
-  return invoke<InboxDecisionOutcome>("reject_inbox_item", { vaultPath, id, approvalId });
+  return runProcessingOperation(
+    {
+      operationId: options?.operationId ?? crypto.randomUUID(),
+      workspace: vaultPath,
+      labelKey: "processing.label.rejectInboxItem",
+      outerOperationId: options?.outerOperationId ?? null,
+    },
+    () => invoke<InboxDecisionOutcome>("reject_inbox_item", { vaultPath, id, approvalId }),
+    classifyInboxCompletion,
+  );
 }
 
 export async function rejectInboxItems(
   vaultPath: string,
   ids: string[],
   approvalId: string,
+  options?: ProcessingWrapperOptions,
 ): Promise<InboxDecisionOutcome[]> {
   if (!isTauri()) {
     return ids.map((id) => ({
@@ -1064,7 +1133,16 @@ export async function rejectInboxItems(
       error: null,
     }));
   }
-  return invoke<InboxDecisionOutcome[]>("reject_inbox_items", { vaultPath, ids, approvalId });
+  return runProcessingOperation(
+    {
+      operationId: options?.operationId ?? crypto.randomUUID(),
+      workspace: vaultPath,
+      labelKey: "processing.label.rejectInboxItem",
+      outerOperationId: options?.outerOperationId ?? null,
+    },
+    () => invoke<InboxDecisionOutcome[]>("reject_inbox_items", { vaultPath, ids, approvalId }),
+    classifyInboxCompletion,
+  );
 }
 
 export async function readDocument(
@@ -1366,9 +1444,98 @@ export async function openInFileManager(
   await invoke("open_in_file_manager", { vaultPath, targetPath });
 }
 
+type InboxProcessingOutcome =
+  | InboxDecisionOutcome
+  | InboxTrashOutcome
+  | InboxDropStageOutcome;
+
+export function classifyWorkspaceMutationCompletion(
+  result: WorkspaceMutationOutcome | WorkspaceMutationOutcome[],
+): ProcessingCompletion {
+  const outcomes = Array.isArray(result) ? result : [result];
+  if (outcomes.length === 0) return { status: "empty", succeeded: [], failed: [] };
+  const succeeded = outcomes
+    .filter((outcome) => outcome.status === "done")
+    .map((outcome) => outcome.targetPath ?? outcome.sourcePath ?? outcome.name);
+  const failed = outcomes
+    .filter((outcome) => outcome.status !== "done")
+    .map((outcome) => ({
+      label: outcome.name || outcome.sourcePath || "item",
+      reason: outcome.error?.trim() || "mutation failed",
+    }));
+  if (failed.length === 0) return { status: "all-success", succeeded, failed };
+  if (succeeded.length === 0) return { status: "all-failed", succeeded, failed };
+  return { status: "partial-success", succeeded, failed };
+}
+
+export function classifyInboxCompletion(
+  result: InboxProcessingOutcome | InboxProcessingOutcome[],
+): ProcessingCompletion {
+  const outcomes = Array.isArray(result) ? result : [result];
+  if (outcomes.length === 0) return { status: "empty", succeeded: [], failed: [] };
+  const succeeded = outcomes
+    .filter((outcome) => outcome.ok)
+    .map((outcome) =>
+      "originalPath" in outcome
+        ? outcome.originalPath
+        : (outcome.targetPath ?? outcome.sourcePath),
+    );
+  const failed = outcomes
+    .filter((outcome) => !outcome.ok)
+    .map((outcome) => ({
+      label:
+        ("originalPath" in outcome && outcome.originalPath) ||
+        ("fileName" in outcome && outcome.fileName) ||
+        outcome.id,
+      reason: outcome.error?.trim() || "operation failed",
+    }));
+  if (failed.length === 0) return { status: "all-success", succeeded, failed };
+  if (succeeded.length === 0) return { status: "all-failed", succeeded, failed };
+  return { status: "partial-success", succeeded, failed };
+}
+
+export function classifyShareOutboxCompletion(
+  result: ShareOutboxResult[],
+): ProcessingCompletion {
+  if (result.length === 0) return { status: "empty", succeeded: [], failed: [] };
+  const succeeded = result
+    .filter((entry) => entry.ok)
+    .map((entry) => entry.output ?? entry.source);
+  const failed = result
+    .filter((entry) => !entry.ok)
+    .map((entry) => ({ label: entry.source, reason: entry.error?.trim() || "prepare failed" }));
+  if (failed.length === 0) return { status: "all-success", succeeded, failed };
+  if (succeeded.length === 0) return { status: "all-failed", succeeded, failed };
+  return { status: "partial-success", succeeded, failed };
+}
+
+export function classifyBinaryViewerHwpxCompletion(
+  result: BinaryViewerHwpxPreview,
+): ProcessingCompletion {
+  if (result.html.trim().length === 0) {
+    return {
+      status: "all-failed",
+      succeeded: [],
+      failed: [
+        {
+          label: "hwpx",
+          reason: result.warnings.join("; ").trim() || "empty extraction",
+        },
+      ],
+    };
+  }
+  return {
+    status: "all-success",
+    succeeded: [`${result.sections} sections`],
+    failed: [],
+    detail: result.warnings.join("; ").trim(),
+  };
+}
+
 export async function applyFileQueue(
   vaultPath: string,
   items: FileQueueApplyItem[],
+  options?: ProcessingWrapperOptions,
 ): Promise<FileQueueApplyOutcome[]> {
   if (!isTauri()) {
     return items.map((item) => {
@@ -1382,13 +1549,23 @@ export async function applyFileQueue(
       };
     });
   }
-  return invoke<FileQueueApplyOutcome[]>("apply_file_queue", { vaultPath, items });
+  return runProcessingOperation(
+    {
+      operationId: options?.operationId ?? crypto.randomUUID(),
+      workspace: vaultPath,
+      labelKey: "processing.label.applyFileQueue",
+      outerOperationId: options?.outerOperationId ?? null,
+    },
+    () => invoke<FileQueueApplyOutcome[]>("apply_file_queue", { vaultPath, items }),
+    () => null,
+  );
 }
 
 export async function createWorkspaceDirectory(
   vaultPath: string,
   parentPath: string,
   name: string,
+  options?: ProcessingWrapperOptions,
 ): Promise<WorkspaceMutationOutcome> {
   if (!isTauri()) {
     const targetPath = `${parentPath.replace(/\/$/, "")}/${name}`;
@@ -1400,17 +1577,28 @@ export async function createWorkspaceDirectory(
       error: null,
     };
   }
-  return invoke<WorkspaceMutationOutcome>("create_workspace_directory", {
-    vaultPath,
-    parentPath,
-    name,
-  });
+  return runProcessingOperation(
+    {
+      operationId: options?.operationId ?? crypto.randomUUID(),
+      workspace: vaultPath,
+      labelKey: "processing.label.createWorkspaceDirectory",
+      outerOperationId: options?.outerOperationId ?? null,
+    },
+    () =>
+      invoke<WorkspaceMutationOutcome>("create_workspace_directory", {
+        vaultPath,
+        parentPath,
+        name,
+      }),
+    classifyWorkspaceMutationCompletion,
+  );
 }
 
 export async function renameWorkspaceEntry(
   vaultPath: string,
   sourcePath: string,
   newName: string,
+  options?: ProcessingWrapperOptions,
 ): Promise<WorkspaceMutationOutcome> {
   if (!isTauri()) {
     const parent = sourcePath.split("/").slice(0, -1).join("/");
@@ -1422,16 +1610,27 @@ export async function renameWorkspaceEntry(
       error: null,
     };
   }
-  return invoke<WorkspaceMutationOutcome>("rename_workspace_entry", {
-    vaultPath,
-    sourcePath,
-    newName,
-  });
+  return runProcessingOperation(
+    {
+      operationId: options?.operationId ?? crypto.randomUUID(),
+      workspace: vaultPath,
+      labelKey: "processing.label.renameWorkspaceEntry",
+      outerOperationId: options?.outerOperationId ?? null,
+    },
+    () =>
+      invoke<WorkspaceMutationOutcome>("rename_workspace_entry", {
+        vaultPath,
+        sourcePath,
+        newName,
+      }),
+    classifyWorkspaceMutationCompletion,
+  );
 }
 
 export async function duplicateWorkspaceEntries(
   vaultPath: string,
   sourcePaths: string[],
+  options?: ProcessingWrapperOptions,
 ): Promise<WorkspaceMutationOutcome[]> {
   if (!isTauri()) {
     return sourcePaths.map((sourcePath) => {
@@ -1445,10 +1644,20 @@ export async function duplicateWorkspaceEntries(
       };
     });
   }
-  return invoke<WorkspaceMutationOutcome[]>("duplicate_workspace_entries", {
-    vaultPath,
-    sourcePaths,
-  });
+  return runProcessingOperation(
+    {
+      operationId: options?.operationId ?? crypto.randomUUID(),
+      workspace: vaultPath,
+      labelKey: "processing.label.duplicateWorkspaceEntries",
+      outerOperationId: options?.outerOperationId ?? null,
+    },
+    () =>
+      invoke<WorkspaceMutationOutcome[]>("duplicate_workspace_entries", {
+        vaultPath,
+        sourcePaths,
+      }),
+    classifyWorkspaceMutationCompletion,
+  );
 }
 
 export async function pasteWorkspaceEntries(
@@ -1456,6 +1665,7 @@ export async function pasteWorkspaceEntries(
   sourcePaths: string[],
   targetDir: string,
   operation: FileStoreOperation,
+  options?: ProcessingWrapperOptions,
 ): Promise<WorkspaceMutationOutcome[]> {
   if (!isTauri()) {
     return sourcePaths.map((sourcePath) => {
@@ -1469,17 +1679,28 @@ export async function pasteWorkspaceEntries(
       };
     });
   }
-  return invoke<WorkspaceMutationOutcome[]>("paste_workspace_entries", {
-    vaultPath,
-    sourcePaths,
-    targetDir,
-    operation,
-  });
+  return runProcessingOperation(
+    {
+      operationId: options?.operationId ?? crypto.randomUUID(),
+      workspace: vaultPath,
+      labelKey: "processing.label.pasteWorkspaceEntries",
+      outerOperationId: options?.outerOperationId ?? null,
+    },
+    () =>
+      invoke<WorkspaceMutationOutcome[]>("paste_workspace_entries", {
+        vaultPath,
+        sourcePaths,
+        targetDir,
+        operation,
+      }),
+    classifyWorkspaceMutationCompletion,
+  );
 }
 
 export async function trashWorkspaceEntries(
   vaultPath: string,
   targetPaths: string[],
+  options?: ProcessingWrapperOptions,
 ): Promise<WorkspaceMutationOutcome[]> {
   if (!isTauri()) {
     return targetPaths.map((sourcePath) => ({
@@ -1490,10 +1711,20 @@ export async function trashWorkspaceEntries(
       error: null,
     }));
   }
-  return invoke<WorkspaceMutationOutcome[]>("trash_workspace_entries", {
-    vaultPath,
-    targetPaths,
-  });
+  return runProcessingOperation(
+    {
+      operationId: options?.operationId ?? crypto.randomUUID(),
+      workspace: vaultPath,
+      labelKey: "processing.label.trashWorkspaceEntries",
+      outerOperationId: options?.outerOperationId ?? null,
+    },
+    () =>
+      invoke<WorkspaceMutationOutcome[]>("trash_workspace_entries", {
+        vaultPath,
+        targetPaths,
+      }),
+    classifyWorkspaceMutationCompletion,
+  );
 }
 
 export async function describeFileQueueSources(paths: string[]): Promise<FileQueueSourceInfo[]> {
@@ -3704,14 +3935,56 @@ export async function binaryViewerReadArchive(
 export async function binaryViewerExtractHwpx(
   vaultPath: string,
   targetPath: string,
+  options?: ProcessingWrapperOptions,
 ): Promise<BinaryViewerHwpxPreview> {
   if (!isTauri()) {
     throw new Error("binaryViewerExtractHwpx requires the Tauri app.");
   }
-  return invoke<BinaryViewerHwpxPreview>("binary_viewer_extract_hwpx", {
-    vaultPath,
-    targetPath,
-  });
+  return runProcessingOperation(
+    {
+      operationId: options?.operationId ?? crypto.randomUUID(),
+      workspace: vaultPath,
+      labelKey: "processing.label.binaryViewerExtractHwpx",
+      outerOperationId: options?.outerOperationId ?? null,
+    },
+    () =>
+      invoke<BinaryViewerHwpxPreview>("binary_viewer_extract_hwpx", {
+        vaultPath,
+        targetPath,
+      }),
+    classifyBinaryViewerHwpxCompletion,
+  );
+}
+
+export async function prepareShareOutboxFiles(
+  workPath: string,
+  sources: ShareOutboxSource[],
+  options: {
+    author?: string | null;
+    replace?: boolean;
+    dryRun?: boolean;
+  },
+  operationOptions?: ProcessingWrapperOptions,
+): Promise<ShareOutboxResult[]> {
+  return runProcessingOperation(
+    {
+      operationId: operationOptions?.operationId ?? crypto.randomUUID(),
+      workspace: workPath,
+      labelKey: "processing.label.prepareShareOutboxFiles",
+      outerOperationId: operationOptions?.outerOperationId ?? null,
+    },
+    () =>
+      invoke<ShareOutboxResult[]>("prepare_share_outbox_files", {
+        workPath,
+        sources,
+        options: {
+          author: options.author ?? null,
+          replace: options.replace ?? false,
+          dryRun: options.dryRun ?? false,
+        },
+      }),
+    classifyShareOutboxCompletion,
+  );
 }
 
 export async function binaryViewerOpenExternal(

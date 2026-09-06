@@ -7,7 +7,9 @@
 //! unchanged. Outputs are built and validated in a sibling staging directory
 //! and only then atomically published into the workspace.
 
-use crate::atomic_file::write_atomic;
+use crate::atomic_file::{
+    with_path_transactions, write_atomic, PathTransactionLease, PathTransactionRequest,
+};
 use crate::cli_path::{augmented_path, is_executable, resolve_program};
 use crate::command_output::{
     run_command_with_timeout_and_limits, CommandTermination, OutputLimits,
@@ -422,6 +424,64 @@ fn parse_native_fill_report(
     Ok(report)
 }
 
+pub fn hwp_cli_template_fields(
+    request: HwpCliTemplateFieldsRequest,
+) -> Result<HwpCliTemplateFieldsResponse, String> {
+    let bin = hwp_bin()?;
+    fields_with_bin(&bin, &request.source, &request.template_key)
+}
+
+pub fn hwp_cli_template_fill(
+    work_path: String,
+    request: HwpCliTemplateFillRequest,
+) -> Result<HwpCliTemplateFillResponse, String> {
+    fill_impl(&work_path, &request, None)
+}
+
+fn fill_impl(
+    work_path: &str,
+    request: &HwpCliTemplateFillRequest,
+    bin_override: Option<PathBuf>,
+) -> Result<HwpCliTemplateFillResponse, String> {
+    if request.values.is_empty() {
+        return Err("hwp_cli_skill requires at least one template value".to_string());
+    }
+    let (alias, _) = canonical_template(&request.source, &request.template_key)?;
+    let output = output_path(work_path, alias, request.output_path.clone())?;
+    let parent = output
+        .parent()
+        .ok_or_else(|| "hwp_cli_skill output path has no parent".to_string())?
+        .to_path_buf();
+    let root = resolve_inside_vault(work_path, ".")?;
+    let admission = PathTransactionRequest::new(vec![output.clone(), parent.clone()])?
+        .require_parent(&root)?
+        .with_workspace_registry()?;
+    with_path_transactions(admission, |lease| {
+        lease.ensure_workspace_registry()?;
+        lease.ensure_covered(vec![output.clone(), parent.clone()])?;
+        let bin = match bin_override {
+            Some(path) => select_hwp_bin(Some(path), Vec::new())?,
+            None => hwp_bin()?,
+        };
+        let write_action = if output.is_file() {
+            WorkspaceWriteAction::Modify
+        } else {
+            WorkspaceWriteAction::Create
+        };
+        assert_maru_can_write(work_path, write_action)?;
+        lease.before_effect()?;
+        fill_with_bin(
+            &bin,
+            work_path,
+            &request.source,
+            &request.template_key,
+            &request.values,
+            request.output_path.clone(),
+            lease,
+        )
+    })
+}
+
 fn fill_with_bin(
     bin: &Path,
     work_path: &str,
@@ -429,26 +489,20 @@ fn fill_with_bin(
     template_key: &str,
     values: &BTreeMap<String, String>,
     requested_output: Option<String>,
+    lease: &PathTransactionLease,
 ) -> Result<HwpCliTemplateFillResponse, String> {
-    if values.is_empty() {
-        return Err("hwp_cli_skill requires at least one template value".to_string());
-    }
     let (alias, slug) = canonical_template(source, template_key)?;
     ensure_released_version(bin)?;
     let output = output_path(work_path, alias, requested_output)?;
-    let write_action = if output.is_file() {
-        WorkspaceWriteAction::Modify
-    } else {
-        WorkspaceWriteAction::Create
-    };
-    assert_maru_can_write(work_path, write_action)?;
     let parent = output
         .parent()
-        .ok_or_else(|| "hwp_cli_skill output path has no parent".to_string())?;
-    fs::create_dir_all(parent).map_err(|err| format!("Cannot create output directory: {err}"))?;
+        .ok_or_else(|| "hwp_cli_skill output path has no parent".to_string())?
+        .to_path_buf();
+    lease.ensure_covered(vec![output.clone(), parent.clone()])?;
+    fs::create_dir_all(&parent).map_err(|err| format!("Cannot create output directory: {err}"))?;
     let stage = tempfile::Builder::new()
         .prefix(".maru-hwp-cli-")
-        .tempdir_in(parent)
+        .tempdir_in(&parent)
         .map_err(|err| format!("hwp_stage_failed: {err}"))?;
     let template = native_template_path(stage.path());
     let staged_output = stage.path().join("filled.hwpx");
@@ -497,28 +551,40 @@ fn fill_with_bin(
     })
 }
 
-#[tauri::command]
-pub fn hwp_cli_template_fields(
-    request: HwpCliTemplateFieldsRequest,
-) -> Result<HwpCliTemplateFieldsResponse, String> {
-    let bin = hwp_bin()?;
-    fields_with_bin(&bin, &request.source, &request.template_key)
-}
-
-#[tauri::command]
-pub fn hwp_cli_template_fill(
-    work_path: String,
-    request: HwpCliTemplateFillRequest,
-) -> Result<HwpCliTemplateFillResponse, String> {
-    let bin = hwp_bin()?;
-    fill_with_bin(
-        &bin,
-        &work_path,
-        &request.source,
-        &request.template_key,
-        &request.values,
-        request.output_path,
-    )
+/// Owned IPC boundaries; the synchronous entry points remain available to Rust callers.
+pub mod ipc {
+    use super::*;
+    #[tauri::command]
+    pub async fn hwp_cli_template_fields(
+        request: HwpCliTemplateFieldsRequest,
+    ) -> Result<HwpCliTemplateFieldsResponse, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(
+                &[std::env::temp_dir()],
+                "worker:hwp_cli_template_fields",
+            );
+            super::hwp_cli_template_fields(request)
+        })
+        .await
+        .map_err(|err| format!("hwp_cli_template_fields_task_failed: {err}"))?
+    }
+    #[tauri::command]
+    pub async fn hwp_cli_template_fill(
+        work_path: String,
+        request: HwpCliTemplateFillRequest,
+    ) -> Result<HwpCliTemplateFillResponse, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(
+                &[PathBuf::from(&work_path)],
+                "worker:hwp_cli_template_fill",
+            );
+            super::hwp_cli_template_fill(work_path, request)
+        })
+        .await
+        .map_err(|err| format!("hwp_cli_template_fill_task_failed: {err}"))?
+    }
 }
 
 #[cfg(test)]
@@ -715,6 +781,28 @@ esac
     }
 
     #[cfg(unix)]
+    fn fill_with_test_bin(
+        binary: &Path,
+        work_path: &str,
+        source: &str,
+        template_key: &str,
+        values: &BTreeMap<String, String>,
+        requested_output: Option<String>,
+    ) -> Result<HwpCliTemplateFillResponse, String> {
+        let _home = crate::atomic_file::phase08_06::Home::new();
+        fill_impl(
+            work_path,
+            &HwpCliTemplateFillRequest {
+                source: source.to_string(),
+                template_key: template_key.to_string(),
+                values: values.clone(),
+                output_path: requested_output,
+            },
+            Some(binary.to_path_buf()),
+        )
+    }
+
+    #[cfg(unix)]
     #[test]
     fn failed_validation_never_publishes_a_native_template() {
         let tmp = tempfile::tempdir().unwrap();
@@ -724,7 +812,7 @@ esac
             true,
             r#"{"output":"filled.hwpx","mode":"placeholders","replaced":1,"counts":{"기관명":1},"warnings":[]}"#,
         );
-        let result = fill_with_bin(
+        let result = fill_with_test_bin(
             &binary,
             tmp.path().to_str().unwrap(),
             "hwp_cli_skill",
@@ -748,7 +836,7 @@ esac
         );
         let output = tmp.path().join("published.hwpx");
         fs::write(&output, "old output").unwrap();
-        let response = fill_with_bin(
+        let response = fill_with_test_bin(
             &binary,
             tmp.path().to_str().unwrap(),
             "hwp_cli_skill",
@@ -774,7 +862,7 @@ esac
             false,
             r#"{"output":"filled.hwpx","mode":"placeholders","replaced":2,"counts":{"기관명":2},"warnings":["native warning"]}"#,
         );
-        let response = fill_with_bin(
+        let response = fill_with_test_bin(
             &binary,
             tmp.path().to_str().unwrap(),
             "hwp_cli_skill",
@@ -807,7 +895,7 @@ esac
             false,
             r#"{"output":"filled.hwpx","mode":"placeholders","replaced":1,"counts":{"기관명":1,"없는필드":0},"warnings":["native unmatched"]}"#,
         );
-        let unmatched = fill_with_bin(
+        let unmatched = fill_with_test_bin(
             &unmatched_binary,
             tmp.path().to_str().unwrap(),
             "hwp_cli_skill",
@@ -820,7 +908,7 @@ esac
         assert_eq!(fs::read_to_string(&output).unwrap(), "old output");
 
         let malformed_binary = fake_hwp(tmp.path(), "0.12.1", false, "not json");
-        let malformed = fill_with_bin(
+        let malformed = fill_with_test_bin(
             &malformed_binary,
             tmp.path().to_str().unwrap(),
             "hwp_cli_skill",
@@ -831,5 +919,267 @@ esac
         .unwrap_err();
         assert!(malformed.contains("hwp_fill_invalid_json"));
         assert_eq!(fs::read_to_string(&output).unwrap(), "old output");
+    }
+}
+
+#[cfg(test)]
+mod phase08_21 {
+    use super::*;
+    use crate::atomic_file::phase08_06::{boundary, run, Held, Home};
+    use std::path::Path;
+    use std::sync::MutexGuard;
+    use std::time::Duration;
+
+    struct EnvGuard {
+        _lock: MutexGuard<'static, ()>,
+    }
+    impl EnvGuard {
+        fn set_hwp(value: &Path) -> Self {
+            let guard = crate::hwped::PHASE08_21_ENV_LOCK
+                .lock()
+                .unwrap_or_else(|poison| poison.into_inner());
+            std::env::set_var("MARU_HWP_BIN", value);
+            Self { _lock: guard }
+        }
+    }
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            std::env::remove_var("MARU_HWP_BIN");
+        }
+    }
+
+    fn text(path: &Path) -> String {
+        path.to_string_lossy().into_owned()
+    }
+
+    fn fill_request(values: BTreeMap<String, String>, output: &str) -> HwpCliTemplateFillRequest {
+        HwpCliTemplateFillRequest {
+            source: HWP_CLI_SKILL_SOURCE.to_string(),
+            template_key: "보고서".to_string(),
+            values,
+            output_path: Some(output.to_string()),
+        }
+    }
+
+    fn values(marker: &str) -> BTreeMap<String, String> {
+        BTreeMap::from([("기관명".to_string(), marker.to_string())])
+    }
+
+    /// Fake released hwp whose fill publishes the values JSON it received, so
+    /// the last admitted writer is visible in the published bytes.
+    #[cfg(unix)]
+    fn fake_hwp_publishing_values(dir: &Path) -> PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+
+        let binary = dir.join("hwp");
+        let script = r#"#!/bin/sh
+case "$1" in
+  --version) echo "hwp 0.12.1" ;;
+  new)
+    shift
+    while [ "$#" -gt 0 ]; do
+      if [ "$1" = "-o" ]; then shift; printf 'template' > "$1"; exit 0; fi
+      shift
+    done
+    exit 2 ;;
+  slots) echo '{"placeholders":[{"name":"기관명","occurrences":1}]}' ;;
+  fill)
+    output=""; data=""
+    while [ "$#" -gt 0 ]; do
+      if [ "$1" = "-o" ]; then shift; output="$1"; fi
+      if [ "$1" = "--data" ]; then shift; data="$1"; fi
+      shift
+    done
+    [ -n "$output" ] && [ -n "$data" ] || exit 2
+    cp "$data" "$output"
+    printf '%s\n' '{"output":"filled.hwpx","mode":"placeholders","replaced":1,"counts":{"기관명":1},"warnings":[]}'
+    exit 0 ;;
+  validate) exit 0 ;;
+  *) exit 2 ;;
+esac
+"#;
+        std::fs::write(&binary, script).unwrap();
+        let mut permissions = std::fs::metadata(&binary).unwrap().permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(&binary, permissions).unwrap();
+        binary
+    }
+
+    #[test]
+    fn phase08_21_hwp_cli_template_each_wrapper_yields_same_poll_and_maps_join_failure() {
+        let home = Home::new();
+        let root = home.root.path();
+        boundary(
+            std::env::temp_dir(),
+            "hwp_cli_template_fields",
+            ipc::hwp_cli_template_fields(HwpCliTemplateFieldsRequest {
+                source: HWP_CLI_SKILL_SOURCE.to_string(),
+                template_key: "보고서".to_string(),
+            }),
+        );
+        boundary(
+            root.into(),
+            "hwp_cli_template_fill",
+            ipc::hwp_cli_template_fill(text(root), fill_request(values("x"), "filled.hwpx")),
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn phase08_21_hwp_cli_template_real_fixture_results_and_legacy_rejections() {
+        let home = Home::new();
+        let root = home.root.path().join("work");
+        std::fs::create_dir_all(&root).unwrap();
+        let bin_dir = home.root.path().join("bin");
+        std::fs::create_dir_all(&bin_dir).unwrap();
+        let _env = EnvGuard::set_hwp(&fake_hwp_publishing_values(&bin_dir));
+        let work = text(&root);
+
+        let fields = run(ipc::hwp_cli_template_fields(HwpCliTemplateFieldsRequest {
+            source: HWP_CLI_SKILL_SOURCE.to_string(),
+            template_key: "보고서".to_string(),
+        }))
+        .unwrap();
+        assert_eq!(fields.template_alias, "보고서");
+        assert_eq!(fields.template_slug, "report");
+        assert_eq!(fields.fields[0].key, "기관명");
+
+        let filled = run(ipc::hwp_cli_template_fill(
+            work.clone(),
+            fill_request(values("제주한라대학교"), "published.hwpx"),
+        ))
+        .unwrap();
+        assert!(filled.validation_ok);
+        assert_eq!(filled.replaced_count, 1);
+        assert_eq!(
+            std::fs::read_to_string(root.join("published.hwpx")).unwrap(),
+            serde_json::to_string(&values("제주한라대학교")).unwrap()
+        );
+
+        let fields_err = run(ipc::hwp_cli_template_fields(HwpCliTemplateFieldsRequest {
+            source: "hwpx_skill".to_string(),
+            template_key: "보고서".to_string(),
+        }))
+        .unwrap_err();
+        assert!(fields_err.contains("template_source_invalid"));
+        let fields_err = run(ipc::hwp_cli_template_fields(HwpCliTemplateFieldsRequest {
+            source: HWP_CLI_SKILL_SOURCE.to_string(),
+            template_key: "공고문".to_string(),
+        }))
+        .unwrap_err();
+        assert!(fields_err.contains("template_alias_invalid"));
+        let fill_err = run(ipc::hwp_cli_template_fill(
+            work.clone(),
+            fill_request(BTreeMap::new(), "published.hwpx"),
+        ))
+        .unwrap_err();
+        assert!(fill_err.contains("requires at least one template value"));
+        let fill_err = run(ipc::hwp_cli_template_fill(
+            work,
+            fill_request(values("x"), "published.docx"),
+        ))
+        .unwrap_err();
+        assert!(fill_err.contains("must end with .hwpx"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn phase08_21_hwp_cli_template_fill_serializes_same_target_both_orders() {
+        let home = Home::new();
+        let bin_dir = home.root.path().join("bin");
+        std::fs::create_dir_all(&bin_dir).unwrap();
+        let _env = EnvGuard::set_hwp(&fake_hwp_publishing_values(&bin_dir));
+        for swap in [false, true] {
+            let root = home.root.path().join(format!("fill-{swap}"));
+            std::fs::create_dir_all(&root).unwrap();
+            let work = text(&root);
+            let target = root.join("published.hwpx");
+            let first_marker = if swap { "second" } else { "first" };
+            let second_marker = if swap { "first" } else { "second" };
+            let held = Held::new(target.clone(), "admitted");
+            let first = start(ipc::hwp_cli_template_fill(
+                work.clone(),
+                fill_request(values(first_marker), "published.hwpx"),
+            ));
+            held.wait();
+            let waiting = Held::new(target.clone(), "before-admission");
+            let second = start(ipc::hwp_cli_template_fill(
+                work.clone(),
+                fill_request(values(second_marker), "published.hwpx"),
+            ));
+            waiting.wait();
+            waiting.release();
+            assert!(second.recv_timeout(Duration::from_millis(30)).is_err());
+            held.release();
+            done(first).unwrap();
+            let written = done(second).unwrap();
+            assert!(written.validation_ok);
+            assert_eq!(
+                std::fs::read_to_string(&target).unwrap(),
+                serde_json::to_string(&values(second_marker)).unwrap()
+            );
+            let _ = work;
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn phase08_21_hwp_cli_template_denied_and_error_release_admission() {
+        let home = Home::new();
+        let root = home.root.path().join("policy");
+        std::fs::create_dir_all(&root).unwrap();
+        let bin_dir = home.root.path().join("bin-policy");
+        std::fs::create_dir_all(&bin_dir).unwrap();
+        let _env = EnvGuard::set_hwp(&fake_hwp_publishing_values(&bin_dir));
+        let work = text(&root);
+        crate::scratchpad::phase08_08::registry(&root, "readOnly");
+        let err = run(ipc::hwp_cli_template_fill(
+            work.clone(),
+            fill_request(values("x"), "published.hwpx"),
+        ))
+        .unwrap_err();
+        assert!(err.contains("Workspace writes are blocked"));
+        assert!(!root.join("published.hwpx").exists());
+        crate::scratchpad::phase08_08::registry(&root, "direct");
+        run(ipc::hwp_cli_template_fill(
+            work.clone(),
+            fill_request(values("allowed"), "published.hwpx"),
+        ))
+        .unwrap();
+
+        std::fs::write(root.join("blocked"), "not a directory").unwrap();
+        let err = run(ipc::hwp_cli_template_fill(
+            work.clone(),
+            fill_request(values("x"), "blocked/published.hwpx"),
+        ))
+        .unwrap_err();
+        assert!(err.contains("Cannot create output directory"));
+        std::fs::remove_file(root.join("blocked")).unwrap();
+        run(ipc::hwp_cli_template_fill(
+            work,
+            fill_request(values("recovered"), "blocked/published.hwpx"),
+        ))
+        .unwrap();
+        assert_eq!(
+            std::fs::read_to_string(root.join("blocked/published.hwpx")).unwrap(),
+            serde_json::to_string(&values("recovered")).unwrap()
+        );
+    }
+
+    fn start<F, T>(future: F) -> std::sync::mpsc::Receiver<T>
+    where
+        F: std::future::Future<Output = T> + Send + 'static,
+        T: Send + 'static,
+    {
+        let (tx, rx) = std::sync::mpsc::channel();
+        tauri::async_runtime::spawn(async move {
+            let _ = tx.send(future.await);
+        });
+        rx
+    }
+
+    fn done<T>(rx: std::sync::mpsc::Receiver<T>) -> T {
+        rx.recv_timeout(Duration::from_secs(10))
+            .expect("fixture completion")
     }
 }

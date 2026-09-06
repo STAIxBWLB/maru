@@ -2,7 +2,20 @@ import { frontmatterScalar } from "./document";
 import type { DocumentViewDefinition, SortKey } from "./settings";
 import type { VaultEntry } from "./types";
 
-export type BuiltInDocumentView = "inbox" | "drafts" | "archive" | "recentlyUpdated";
+export type BuiltInDocumentView = "drafts" | "archive" | "recentlyUpdated";
+
+/** The surviving built-in document views, in switcher order. The TS union
+ *  leaves no runtime trace, so the persisted-filter prune checks against this
+ *  list to reset filters that reference a removed built-in view (PERF-06). */
+export const BUILT_IN_DOCUMENT_VIEWS: readonly BuiltInDocumentView[] = [
+  "drafts",
+  "archive",
+  "recentlyUpdated",
+];
+
+export function isBuiltInDocumentView(value: string): value is BuiltInDocumentView {
+  return (BUILT_IN_DOCUMENT_VIEWS as readonly string[]).includes(value);
+}
 
 export type DocumentFilter =
   | { kind: "all" }
@@ -270,8 +283,6 @@ function matchesBuiltInView(
   now: Date,
 ): boolean {
   switch (view) {
-    case "inbox":
-      return record.entry.relPath.startsWith("inbox/");
     case "drafts":
       return frontmatterScalar(record.entry.frontmatter, "status") === "draft";
     case "archive": {

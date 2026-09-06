@@ -13,12 +13,15 @@ use crate::agent_host::contracts::{
     AgentRunContextItem, AgentRunRequest, CompletionRequest, AGENT_RUN_REQUEST_SCHEMA_VERSION,
     COMPLETION_REQUEST_SCHEMA_VERSION,
 };
-use crate::agent_host::event_store::append_run_event_payload;
+use crate::agent_host::event_store::{append_run_event_payload_in_transaction, run_events_path};
 use crate::agent_host::proposal::parse_skill_proposal;
 use crate::agent_host::provider::{
     build_cli_command, normalize_permission_mode, resolve_provider_binary, CliProviderKind,
 };
 use crate::ai_router::{AiDoneEvent, AiErrorEvent, AiOutputEvent};
+use crate::atomic_file::{
+    with_path_transactions, PathTransactionLease, PathTransactionParent, PathTransactionRequest,
+};
 use crate::mission_state;
 use crate::skill_host::fs as host_fs;
 use crate::skill_host::store::{env_vars_for_runs, get_skill};
@@ -70,7 +73,6 @@ pub struct SkillRuntimeStatus {
     pub suggested_action: Option<String>,
 }
 
-#[tauri::command]
 pub fn skills_runtime_status(
     runtime: String,
     command_override: Option<String>,
@@ -78,7 +80,6 @@ pub fn skills_runtime_status(
     runtime_status(runtime, command_override.as_deref())
 }
 
-#[tauri::command]
 pub fn skills_dispatch_compose(
     skill_id: String,
     prompt: String,
@@ -88,7 +89,6 @@ pub fn skills_dispatch_compose(
     compose(skill_id, prompt, cwd, context.unwrap_or_default())
 }
 
-#[tauri::command]
 pub fn skills_dispatch_terminal(
     skill_id: String,
     runtime: String,
@@ -218,10 +218,19 @@ pub struct SkillDispatchBackgroundArgs {
     pub permission_mode: Option<String>,
 }
 
-#[tauri::command]
-pub fn skills_dispatch_background(
-    app: AppHandle,
+pub fn skills_dispatch_background<R: tauri::Runtime>(
+    app: AppHandle<R>,
     args: SkillDispatchBackgroundArgs,
+) -> Result<String, String> {
+    skills_dispatch_background_with_parents(app, args, Vec::new())
+}
+
+/// Preserve the caller's accepted workspace identity after releasing its
+/// transaction, including every later stream and completion callback.
+pub(crate) fn skills_dispatch_background_with_parents<R: tauri::Runtime>(
+    app: AppHandle<R>,
+    args: SkillDispatchBackgroundArgs,
+    parents: Vec<PathTransactionParent>,
 ) -> Result<String, String> {
     let SkillDispatchBackgroundArgs {
         skill_id,
@@ -286,6 +295,12 @@ pub fn skills_dispatch_background(
             metadata,
             run_request,
             retry_payload,
+            parents,
+            write_roots: if approved_execution {
+                add_dirs.into_iter().map(PathBuf::from).collect()
+            } else {
+                Vec::new()
+            },
         },
     )
 }
@@ -441,10 +456,143 @@ struct BackgroundRunInfo {
     metadata: Option<JsonValue>,
     run_request: AgentRunRequest,
     retry_payload: JsonValue,
+    write_roots: Vec<PathBuf>,
+    parents: Vec<PathTransactionParent>,
 }
 
-fn spawn_background(
-    app: AppHandle,
+/// One explicit transaction context shared by the setup, stream pumps and exit
+/// callback. Proposal-only children hold no cwd lease between finite callbacks.
+struct DispatchWrites {
+    paths: Vec<PathBuf>,
+    event_path: PathBuf,
+    mission_paths: Vec<PathBuf>,
+    parents: Vec<PathTransactionParent>,
+    caller_parents: Vec<PathTransactionParent>,
+    owned: Option<Arc<PathTransactionLease>>,
+    serial: Arc<Mutex<()>>,
+}
+
+fn dispatch_mutation_paths(cwd: &str, id: &str) -> Result<Vec<PathBuf>, String> {
+    let mut paths = vec![run_events_path(cwd, id)?];
+    paths.extend(mission_state::mission_mutation_paths(id)?);
+    Ok(paths)
+}
+
+impl DispatchWrites {
+    fn new(
+        cwd: &str,
+        id: &str,
+        write_roots: Vec<PathBuf>,
+        caller_parents: Vec<PathTransactionParent>,
+    ) -> Result<Self, String> {
+        let mut paths = dispatch_mutation_paths(cwd, id)?;
+        let mut parents = vec![
+            PathTransactionParent::capture(Path::new(cwd))?,
+            mission_state::mission_parent_snapshot()?,
+        ];
+        for root in &write_roots {
+            parents.push(PathTransactionParent::capture(root)?);
+        }
+        let approved = !write_roots.is_empty();
+        paths.extend(write_roots);
+        let mut context = Self {
+            event_path: run_events_path(cwd, id)?,
+            mission_paths: mission_state::mission_mutation_paths(id)?,
+            paths,
+            parents,
+            caller_parents,
+            owned: None,
+            serial: Arc::new(Mutex::new(())),
+        };
+        if approved {
+            let lease = context.request()?.acquire()?;
+            lease.before_effect()?;
+            context.owned = Some(Arc::new(lease));
+        }
+        Ok(context)
+    }
+
+    fn request(&self) -> Result<PathTransactionRequest, String> {
+        let mut request = PathTransactionRequest::new(self.paths.clone())?;
+        for parent in &self.parents {
+            request = request.require_parent_snapshot(parent)?;
+        }
+        self.require_caller_parents(request)
+    }
+
+    fn require_caller_parents(
+        &self,
+        mut request: PathTransactionRequest,
+    ) -> Result<PathTransactionRequest, String> {
+        for parent in &self.caller_parents {
+            request = request.require_parent_snapshot(parent)?;
+        }
+        Ok(request)
+    }
+
+    fn transaction<T>(
+        &self,
+        work: impl FnOnce(&PathTransactionLease) -> Result<T, String>,
+    ) -> Result<T, String> {
+        if let Some(lease) = &self.owned {
+            let _guard = self
+                .serial
+                .lock()
+                .map_err(|_| "dispatch_transaction_poisoned".to_string())?;
+            work(lease)
+        } else {
+            let request = PathTransactionRequest::new(self.mission_paths.clone())?
+                .require_parent_snapshot(&self.parents[1])?;
+            with_path_transactions(self.require_caller_parents(request)?, work)
+        }
+    }
+
+    fn event(
+        &self,
+        cwd: &str,
+        id: &str,
+        kind: &str,
+        actor: &str,
+        payload: JsonValue,
+    ) -> Result<(), String> {
+        let append = |lease: &PathTransactionLease| {
+            append_run_event_payload_in_transaction(cwd, id, kind, actor, payload, lease)?;
+            Ok(())
+        };
+        if self.owned.is_some() {
+            self.transaction(append)
+        } else {
+            let request = PathTransactionRequest::new(vec![self.event_path.clone()])?
+                .require_parent_snapshot(&self.parents[0])?;
+            with_path_transactions(self.require_caller_parents(request)?, append)
+        }
+    }
+}
+
+struct DispatchChild {
+    child: std::process::Child,
+    _writes: Arc<DispatchWrites>,
+}
+impl std::ops::Deref for DispatchChild {
+    type Target = std::process::Child;
+    fn deref(&self) -> &Self::Target {
+        &self.child
+    }
+}
+impl std::ops::DerefMut for DispatchChild {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.child
+    }
+}
+impl Drop for DispatchChild {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+fn spawn_background<R: tauri::Runtime>(
+    app: AppHandle<R>,
     invocation_id: String,
     mut cmd: Command,
     cwd: String,
@@ -456,8 +604,16 @@ fn spawn_background(
         metadata,
         run_request,
         retry_payload,
+        write_roots,
+        parents,
     } = run_info;
-    let _ = append_run_event_payload(
+    let writes = Arc::new(DispatchWrites::new(
+        &cwd,
+        &invocation_id,
+        write_roots,
+        parents,
+    )?);
+    writes.event(
         &cwd,
         &invocation_id,
         "run.started",
@@ -466,7 +622,7 @@ fn spawn_background(
             "request": run_request,
             "dispatch": retry_payload,
         }),
-    );
+    )?;
     cmd.current_dir(&cwd)
         .stdin(if stdin_payload.is_some() {
             Stdio::piped()
@@ -480,10 +636,13 @@ fn spawn_background(
     }
     cmd.no_window();
     let mut child = match cmd.spawn() {
-        Ok(child) => child,
+        Ok(child) => DispatchChild {
+            child,
+            _writes: writes.clone(),
+        },
         Err(err) => {
             let message = format_spawn_error(&err);
-            let _ = append_run_event_payload(
+            let _ = writes.event(
                 &cwd,
                 &invocation_id,
                 "run.failed",
@@ -511,116 +670,153 @@ fn spawn_background(
         .ok_or_else(|| "stderr_capture_failed".to_string())?;
     let stdout_buffer = Arc::new(Mutex::new(String::new()));
     let stderr_buffer = Arc::new(Mutex::new(String::new()));
-    spawn_line_pump(
+    if let Err(error) = writes.transaction(|lease| {
+        if let Some(owned) = &writes.owned {
+            mission_state::bind_execution_lease(&app, &invocation_id, owned, &writes.serial)?;
+        }
+        mission_state::register_mission_with_metadata_in_transaction(
+            &app,
+            &invocation_id,
+            "skill",
+            child_pid,
+            metadata,
+            lease,
+        )
+    }) {
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err(error);
+    }
+    let stdout_pump = spawn_line_pump(
         app.clone(),
         invocation_id.clone(),
         cwd.clone(),
         "stdout".to_string(),
         stdout,
         Some(stdout_buffer.clone()),
+        writes.clone(),
     );
-    spawn_line_pump(
+    let stderr_pump = spawn_line_pump(
         app.clone(),
         invocation_id.clone(),
         cwd.clone(),
         "stderr".to_string(),
         stderr,
         Some(stderr_buffer.clone()),
-    );
-    let _ = mission_state::register_mission_with_metadata(
-        &app,
-        &invocation_id,
-        "skill",
-        child_pid,
-        metadata,
+        writes.clone(),
     );
     let app_done = app.clone();
     let id_done = invocation_id.clone();
     let cwd_done = cwd.clone();
-    thread::spawn(move || match child.wait() {
-        Ok(status) => {
-            if !status.success() {
-                let raw_error = stderr_buffer
-                    .lock()
-                    .map(|buffer| buffer.clone())
-                    .unwrap_or_default();
-                let error_kind = classify_runtime_error(&raw_error, "runtime_failed");
-                let message = raw_error
-                    .lines()
-                    .next()
-                    .filter(|line| !line.trim().is_empty())
-                    .unwrap_or("runtime_failed")
-                    .to_string();
-                let _ = append_run_event_payload(
+    thread::spawn(move || {
+        let result = child.wait();
+        if result.is_err() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+        // The owned child transaction ends only after both callback streams.
+        let _ = stdout_pump.join();
+        let _ = stderr_pump.join();
+        match result {
+            Ok(status) => {
+                if !status.success() {
+                    let raw_error = stderr_buffer
+                        .lock()
+                        .map(|buffer| buffer.clone())
+                        .unwrap_or_default();
+                    let error_kind = classify_runtime_error(&raw_error, "runtime_failed");
+                    let message = raw_error
+                        .lines()
+                        .next()
+                        .filter(|line| !line.trim().is_empty())
+                        .unwrap_or("runtime_failed")
+                        .to_string();
+                    let _ = writes.event(
+                        &cwd_done,
+                        &id_done,
+                        "run.failed",
+                        "maru.skill_host",
+                        serde_json::json!({
+                            "errorKind": error_kind,
+                            "message": message,
+                            "exitCode": status.code(),
+                        }),
+                    );
+                    let _ = app_done.emit(
+                        "ai://error",
+                        AiErrorEvent {
+                            invocation_id: id_done.clone(),
+                            kind: error_kind.to_string(),
+                            message,
+                        },
+                    );
+                }
+                if status.success() {
+                    if let Ok(raw) = stdout_buffer.lock().map(|buffer| buffer.clone()) {
+                        if let Ok(proposal) = parse_skill_proposal(&raw) {
+                            let _ = writes.event(
+                                &cwd_done,
+                                &id_done,
+                                "proposal.created",
+                                "maru.skill_host",
+                                serde_json::json!({ "proposal": proposal }),
+                            );
+                        }
+                    }
+                }
+                let _ = writes.event(
+                    &cwd_done,
+                    &id_done,
+                    "run.completed",
+                    "maru.skill_host",
+                    serde_json::json!({
+                        "exitCode": status.code(),
+                        "success": status.success(),
+                    }),
+                );
+                let _ = writes.transaction(|lease| {
+                    mission_state::finish_mission_in_transaction(
+                        &app_done,
+                        &id_done,
+                        status.code(),
+                        status.success(),
+                        lease,
+                    )
+                });
+                let _ = app_done.emit(
+                    "ai://done",
+                    AiDoneEvent {
+                        invocation_id: id_done,
+                        exit_code: status.code(),
+                        success: status.success(),
+                    },
+                );
+            }
+            Err(err) => {
+                let _ = writes.event(
                     &cwd_done,
                     &id_done,
                     "run.failed",
                     "maru.skill_host",
-                    serde_json::json!({
-                        "errorKind": error_kind,
-                        "message": message,
-                        "exitCode": status.code(),
-                    }),
+                    serde_json::json!({ "error": err.to_string() }),
                 );
+                let _ = writes.transaction(|lease| {
+                    mission_state::fail_mission_in_transaction(
+                        &app_done,
+                        &id_done,
+                        &err.to_string(),
+                        lease,
+                    )
+                });
                 let _ = app_done.emit(
                     "ai://error",
                     AiErrorEvent {
-                        invocation_id: id_done.clone(),
-                        kind: error_kind.to_string(),
-                        message,
+                        invocation_id: id_done,
+                        kind: "wait_failed".to_string(),
+                        message: err.to_string(),
                     },
                 );
             }
-            if status.success() {
-                if let Ok(raw) = stdout_buffer.lock().map(|buffer| buffer.clone()) {
-                    if let Ok(proposal) = parse_skill_proposal(&raw) {
-                        let _ = append_run_event_payload(
-                            &cwd_done,
-                            &id_done,
-                            "proposal.created",
-                            "maru.skill_host",
-                            serde_json::json!({ "proposal": proposal }),
-                        );
-                    }
-                }
-            }
-            let _ = append_run_event_payload(
-                &cwd_done,
-                &id_done,
-                "run.completed",
-                "maru.skill_host",
-                serde_json::json!({
-                    "exitCode": status.code(),
-                    "success": status.success(),
-                }),
-            );
-            mission_state::finish_mission(&app_done, &id_done, status.code(), status.success());
-            let _ = app_done.emit(
-                "ai://done",
-                AiDoneEvent {
-                    invocation_id: id_done,
-                    exit_code: status.code(),
-                    success: status.success(),
-                },
-            );
-        }
-        Err(err) => {
-            let _ = append_run_event_payload(
-                &cwd_done,
-                &id_done,
-                "run.failed",
-                "maru.skill_host",
-                serde_json::json!({ "error": err.to_string() }),
-            );
-            mission_state::fail_mission(&app_done, &id_done, &err.to_string());
-            let _ = app_done.emit(
-                "ai://error",
-                AiErrorEvent {
-                    invocation_id: id_done,
-                    kind: "wait_failed".to_string(),
-                    message: err.to_string(),
-                },
-            );
         }
     });
     Ok(invocation_id)
@@ -831,15 +1027,17 @@ fn metadata_bool(metadata: &Option<JsonValue>, key: &str) -> bool {
         .unwrap_or(false)
 }
 
-fn spawn_line_pump<R>(
-    app: AppHandle,
+fn spawn_line_pump<R: tauri::Runtime, S>(
+    app: AppHandle<R>,
     invocation_id: String,
     cwd: String,
     stream_name: String,
-    source: R,
+    source: S,
     buffer: Option<Arc<Mutex<String>>>,
-) where
-    R: Read + Send + 'static,
+    writes: Arc<DispatchWrites>,
+) -> thread::JoinHandle<()>
+where
+    S: Read + Send + 'static,
 {
     thread::spawn(move || {
         let reader = BufReader::new(source);
@@ -861,7 +1059,7 @@ fn spawn_line_pump<R>(
                     line: line.clone(),
                 },
             );
-            let _ = append_run_event_payload(
+            let _ = writes.event(
                 &cwd,
                 &invocation_id,
                 "provider.output",
@@ -871,9 +1069,17 @@ fn spawn_line_pump<R>(
                     "line": line.clone(),
                 }),
             );
-            mission_state::touch_output(&app, &invocation_id, &stream_name, &line);
+            let _ = writes.transaction(|lease| {
+                mission_state::touch_output_in_transaction(
+                    &app,
+                    &invocation_id,
+                    &stream_name,
+                    &line,
+                    lease,
+                )
+            });
         }
-    });
+    })
 }
 
 fn format_spawn_error(err: &std::io::Error) -> String {
@@ -1055,11 +1261,837 @@ exit 1
     }
 
     #[cfg(unix)]
-    fn write_fake_cli(path: PathBuf, script: &str) -> PathBuf {
+    pub(super) fn write_fake_cli(path: PathBuf, script: &str) -> PathBuf {
         fs::write(&path, script).unwrap();
         let mut perms = fs::metadata(&path).unwrap().permissions();
         perms.set_mode(0o755);
         fs::set_permissions(&path, perms).unwrap();
+        assert_eq!(
+            crate::cli_path::resolve_program(&path.to_string_lossy()),
+            Some(path.clone()),
+            "temporary CLI must be executable and resolve to itself",
+        );
         path
+    }
+}
+
+/// Only finite setup occupies the blocking pool; readers and child waits own dedicated threads.
+pub mod ipc {
+    use super::*;
+    #[tauri::command]
+    pub async fn skills_runtime_status(
+        runtime: String,
+        command_override: Option<String>,
+    ) -> Result<SkillRuntimeStatus, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            phase08_04::at_edge("skills_runtime_status");
+            crate::skill_host::skills_runtime_status(runtime, command_override)
+        })
+        .await
+        .map_err(|err| format!("skills_runtime_status_task_failed: {err}"))?
+    }
+
+    #[tauri::command]
+    pub async fn skills_dispatch_compose(
+        skill_id: String,
+        prompt: String,
+        cwd: Option<String>,
+        context: Option<Vec<SkillContextItem>>,
+    ) -> Result<DispatchComposition, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            phase08_04::at_edge("skills_dispatch_compose");
+            crate::skill_host::skills_dispatch_compose(skill_id, prompt, cwd, context)
+        })
+        .await
+        .map_err(|err| format!("skills_dispatch_compose_task_failed: {err}"))?
+    }
+
+    #[tauri::command]
+    pub async fn skills_dispatch_terminal(
+        skill_id: String,
+        runtime: String,
+        prompt: String,
+        cwd: Option<String>,
+        context: Option<Vec<SkillContextItem>>,
+        command_override: Option<String>,
+    ) -> Result<TerminalDispatchSpec, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            phase08_04::at_edge("skills_dispatch_terminal");
+            crate::skill_host::skills_dispatch_terminal(
+                skill_id,
+                runtime,
+                prompt,
+                cwd,
+                context,
+                command_override,
+            )
+        })
+        .await
+        .map_err(|err| format!("skills_dispatch_terminal_task_failed: {err}"))?
+    }
+
+    #[tauri::command]
+    pub async fn skills_dispatch_background<R: tauri::Runtime>(
+        app: AppHandle<R>,
+        args: SkillDispatchBackgroundArgs,
+    ) -> Result<String, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            {
+                phase08_04::at_edge("skills_dispatch_background");
+                if let Some(cwd) = args.cwd.as_deref() {
+                    PathTransactionLease::test_stage(
+                        &[PathBuf::from(cwd)],
+                        "worker:skills_dispatch_background",
+                    );
+                }
+            }
+            crate::skill_host::skills_dispatch_background(app, args)
+        })
+        .await
+        .map_err(|err| format!("skills_dispatch_background_task_failed: {err}"))?
+    }
+}
+
+#[cfg(test)]
+mod phase08_04 {
+    use super::*;
+    use std::sync::{mpsc, Arc, Mutex};
+    use std::time::Duration;
+    type Hook = Arc<dyn Fn(&str) + Send + Sync>;
+    static HOOK: Mutex<Option<Hook>> = Mutex::new(None);
+    pub(super) fn at_edge(name: &str) {
+        let hook = HOOK.lock().unwrap().clone();
+        if let Some(hook) = hook {
+            hook(name);
+        }
+    }
+    struct Reset;
+    impl Drop for Reset {
+        fn drop(&mut self) {
+            *HOOK.lock().unwrap() = None;
+        }
+    }
+    fn worker<T: Send + 'static>(
+        name: &'static str,
+        future: impl std::future::Future<Output = Result<T, String>> + Send + 'static,
+    ) {
+        let (entered_tx, entered_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let release_rx = Mutex::new(release_rx);
+        *HOOK.lock().unwrap() = Some(Arc::new(move |edge| {
+            if edge == name {
+                entered_tx.send(std::thread::current().id()).unwrap();
+                release_rx
+                    .lock()
+                    .unwrap()
+                    .recv_timeout(Duration::from_secs(5))
+                    .unwrap();
+                panic!("fixture boundary panic");
+            }
+        }));
+        let _reset = Reset;
+        let (caller_tx, caller_rx) = mpsc::channel();
+        let task = tauri::async_runtime::spawn(async move {
+            caller_tx.send(std::thread::current().id()).unwrap();
+            future.await
+        });
+        let entered = entered_rx.recv_timeout(Duration::from_secs(5));
+        let caller = caller_rx.recv_timeout(Duration::from_secs(5));
+        let (probe_tx, probe_rx) = mpsc::channel();
+        tauri::async_runtime::spawn(async move {
+            let mut yielded = false;
+            std::future::poll_fn(|cx| {
+                if yielded {
+                    std::task::Poll::Ready(())
+                } else {
+                    yielded = true;
+                    cx.waker().wake_by_ref();
+                    std::task::Poll::Pending
+                }
+            })
+            .await;
+            probe_tx.send(()).unwrap();
+        });
+        let progress = probe_rx.recv_timeout(Duration::from_secs(2));
+        let _ = release_tx.send(());
+        let result = tauri::async_runtime::block_on(task).unwrap();
+        assert!(progress.is_ok(), "{name}: async progress stalled");
+        assert_ne!(
+            entered.unwrap(),
+            caller.unwrap(),
+            "{name}: shared async thread"
+        );
+        assert!(matches!(result, Err(ref e) if e.starts_with(&format!("{name}_task_failed:"))));
+    }
+
+    fn denied_args(command_override: Option<String>) -> SkillDispatchBackgroundArgs {
+        SkillDispatchBackgroundArgs {
+            skill_id: "missing::denied".into(),
+            runtime: "claude".into(),
+            prompt: "".into(),
+            cwd: None,
+            context: None,
+            metadata: None,
+            command_override,
+            permission_mode: Some("plan".into()),
+        }
+    }
+    #[test]
+    fn every_dispatch_wrapper_uses_blocking_worker_and_preserves_join_error() {
+        let _home = host_fs::test_home_for_bundle_tests();
+        let app = tauri::test::mock_app();
+        worker(
+            "skills_runtime_status",
+            ipc::skills_runtime_status("invalid".into(), None),
+        );
+        worker(
+            "skills_dispatch_compose",
+            ipc::skills_dispatch_compose("id".into(), "".into(), None, None),
+        );
+        worker(
+            "skills_dispatch_terminal",
+            ipc::skills_dispatch_terminal(
+                "id".into(),
+                "claude".into(),
+                "".into(),
+                None,
+                None,
+                None,
+            ),
+        );
+        worker(
+            "skills_dispatch_background",
+            ipc::skills_dispatch_background(app.handle().clone(), denied_args(None)),
+        );
+    }
+    #[test]
+    fn denied_dispatch_has_zero_process_launch_and_preserves_inner_error() {
+        let _home = host_fs::test_home_for_bundle_tests();
+        let app = tauri::test::mock_app();
+        let root = tempfile::tempdir().unwrap();
+        let marker = root.path().join("launched");
+        let cli = root.path().join("provider");
+        std::fs::write(&cli, format!("#!/bin/sh\ntouch '{}'\n", marker.display())).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&cli, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let result = tauri::async_runtime::block_on(ipc::skills_dispatch_background(
+            app.handle().clone(),
+            denied_args(Some(cli.to_string_lossy().into())),
+        ));
+        assert_eq!(result.unwrap_err(), "skill_prompt_required");
+        let mut missing = denied_args(Some(cli.to_string_lossy().into()));
+        missing.prompt = "Summarize".into();
+        let result = tauri::async_runtime::block_on(ipc::skills_dispatch_background(
+            app.handle().clone(),
+            missing,
+        ));
+        assert_eq!(result.unwrap_err(), "unknown_skill: missing::denied");
+        assert!(!marker.exists());
+        assert!(!root.path().join(".maru").exists());
+    }
+    #[test]
+    fn successful_local_composition_preserves_plan_argv_and_owned_environment() {
+        let _home = host_fs::test_home_for_bundle_tests();
+        let skill = crate::skill_host::store::skills_create_skill("phase04".into(), None).unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let cwd = root.path().to_string_lossy().to_string();
+        let composition = tauri::async_runtime::block_on(ipc::skills_dispatch_compose(
+            skill.id.clone(),
+            "Summarize".into(),
+            Some(cwd.clone()),
+            None,
+        ))
+        .unwrap();
+        assert!(composition.prompt.contains("Summarize"));
+        assert!(!composition.extra_env.is_empty());
+        let spec = tauri::async_runtime::block_on(ipc::skills_dispatch_terminal(
+            skill.id,
+            "claude".into(),
+            "Summarize".into(),
+            Some(cwd),
+            None,
+            None,
+        ))
+        .unwrap();
+        assert!(spec
+            .extra_args
+            .windows(2)
+            .any(|p| p == ["--permission-mode", "plan"]));
+        assert_eq!(spec.extra_env, composition.extra_env);
+    }
+    #[test]
+    fn spawn_failure_records_failure_without_mission_or_completion() {
+        use tauri::{Listener, Manager};
+        let _home = host_fs::test_home_for_bundle_tests();
+        let app = tauri::test::mock_app();
+        app.manage(mission_state::MissionState::default());
+        let root = tempfile::tempdir().unwrap();
+        let cwd = root.path().to_string_lossy().to_string();
+        let (tx, rx) = mpsc::channel();
+        app.listen("ai://done", move |_| {
+            tx.send(()).unwrap();
+        });
+        let composition = DispatchComposition {
+            skill_id: "test::skill".into(),
+            skill_name: "skill".into(),
+            cwd: cwd.clone(),
+            prompt: "test".into(),
+            context: vec![],
+            extra_env: BTreeMap::new(),
+        };
+        let result = spawn_background(
+            app.handle().clone(),
+            "phase04-failed".into(),
+            Command::new(root.path().join("absent-cli")),
+            cwd.clone(),
+            BTreeMap::new(),
+            None,
+            BackgroundRunInfo {
+                metadata: None,
+                run_request: build_agent_run_request(&composition, "claude", "background", None)
+                    .unwrap(),
+                retry_payload: serde_json::json!({}),
+                write_roots: Vec::new(),
+                parents: Vec::new(),
+            },
+        );
+        assert!(result.unwrap_err().starts_with("cli_missing:"));
+        assert!(rx.try_recv().is_err());
+        let path = crate::agent_host::event_store::run_events_path(&cwd, "phase04-failed").unwrap();
+        let log = std::fs::read_to_string(path).unwrap();
+        assert!(log.contains("run.failed"));
+        assert!(!log.contains("run.completed"));
+    }
+}
+
+#[cfg(all(test, unix))]
+mod phase08_29_dispatch {
+    use super::*;
+    use crate::atomic_file::phase08_06::{run, Held, Home};
+    use crate::workspace_files::{
+        ipc as files_ipc, phase08_06::TrashFixture, WorkspaceMutationStatus,
+    };
+    use std::fs;
+    use std::sync::mpsc;
+    use std::time::Duration;
+    use tauri::{Listener, Manager};
+
+    fn start<F>(future: F) -> mpsc::Receiver<F::Output>
+    where
+        F: std::future::Future + Send + 'static,
+        F::Output: Send + 'static,
+    {
+        let (tx, rx) = mpsc::channel();
+        tauri::async_runtime::spawn(async move {
+            let _ = tx.send(future.await);
+        });
+        rx
+    }
+    fn done<T>(rx: mpsc::Receiver<T>) -> T {
+        rx.recv_timeout(Duration::from_secs(10))
+            .expect("dispatch fixture completed")
+    }
+    fn text(path: &Path) -> String {
+        path.to_string_lossy().into_owned()
+    }
+    fn args(skill: &str, cwd: &Path, cli: &Path, approved: bool) -> SkillDispatchBackgroundArgs {
+        assert_eq!(
+            resolve_provider_binary(CliProviderKind::Claude, Some(&text(cli))),
+            Some(cli.to_path_buf()),
+            "every dispatch fixture must resolve its explicit CLI without fallback",
+        );
+        SkillDispatchBackgroundArgs {
+            skill_id: skill.into(),
+            runtime: "claude".into(),
+            prompt: "Local fixture".into(),
+            cwd: Some(text(cwd)),
+            context: None,
+            metadata: Some(serde_json::json!({ "approvedExecution": approved })),
+            command_override: Some(text(cli)),
+            permission_mode: Some("plan".into()),
+        }
+    }
+    fn parent(root: &Path, source: &Path, trash: bool) -> mpsc::Receiver<Result<(), String>> {
+        let root = text(root);
+        let source = text(source);
+        start(async move {
+            if trash {
+                let outcomes = files_ipc::trash_workspace_entries(root, vec![source]).await?;
+                if outcomes[0].status != WorkspaceMutationStatus::Done {
+                    return Err("trash failed".into());
+                }
+            } else {
+                files_ipc::rename_workspace_entry(root, source, "moved".into()).await?;
+            }
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn phase08_15_dispatch_caller_parents_reject_replacement_before_first_effect() {
+        let _home = Home::new();
+        let skill =
+            crate::skill_host::store::skills_create_skill("phase15-first".into(), None).unwrap();
+        for approved in [false, true] {
+            for replace_maru in [false, true] {
+                let temp =
+                    tempfile::tempdir_in(std::env::temp_dir().canonicalize().unwrap()).unwrap();
+                let root = temp.path();
+                let workspace = root.join("work");
+                let maru = workspace.join(".maru");
+                fs::create_dir_all(&maru).unwrap();
+                let parents = vec![
+                    PathTransactionParent::capture(&workspace).unwrap(),
+                    PathTransactionParent::capture(&maru).unwrap(),
+                ];
+                let marker = root.join("launched");
+                let cli = tests::write_fake_cli(
+                    root.join("provider"),
+                    &format!(
+                        "#!/bin/sh\nprintf 'unexpected' > {}\n",
+                        shell_quote(&text(&marker))
+                    ),
+                );
+                let args = args(&skill.id, &workspace, &cli, approved);
+                let replaced = if replace_maru { &maru } else { &workspace };
+                fs::rename(replaced, root.join("original")).unwrap();
+                fs::create_dir_all(&maru).unwrap();
+                fs::write(maru.join("sentinel"), b"replacement").unwrap();
+                let app = tauri::test::mock_app();
+                app.manage(mission_state::MissionState::default());
+                let error =
+                    skills_dispatch_background_with_parents(app.handle().clone(), args, parents)
+                        .unwrap_err();
+                assert!(error.contains("Transaction parent changed"), "{error}");
+                assert!(!marker.exists(), "stale selection launched its provider");
+                assert!(!maru.join("runs").exists(), "first event was written");
+                assert_eq!(fs::read(maru.join("sentinel")).unwrap(), b"replacement");
+            }
+        }
+    }
+
+    #[test]
+    fn phase08_15_dispatch_caller_parents_survive_into_real_proposal_callbacks() {
+        let _home = Home::new();
+        let skill =
+            crate::skill_host::store::skills_create_skill("phase15-callback".into(), None).unwrap();
+        for replace_maru in [false, true] {
+            let temp = tempfile::tempdir_in(std::env::temp_dir().canonicalize().unwrap()).unwrap();
+            let root = temp.path();
+            let workspace = root.join("work");
+            let maru = workspace.join(".maru");
+            fs::create_dir_all(&maru).unwrap();
+            let parents = vec![
+                PathTransactionParent::capture(&workspace).unwrap(),
+                PathTransactionParent::capture(&maru).unwrap(),
+            ];
+            let gate = root.join("release");
+            let cli = tests::write_fake_cli(
+                root.join("provider"),
+                &format!(
+                    "#!/bin/sh\ni=0\nwhile [ ! -f {} ]; do i=$((i+1)); [ \"$i\" -lt 500 ] || exit 2; sleep 0.01; done\nprintf 'late output\\n'\n",
+                    shell_quote(&text(&gate))
+                ),
+            );
+            let app = tauri::test::mock_app();
+            app.manage(mission_state::MissionState::default());
+            let (tx, rx) = mpsc::channel();
+            app.listen("ai://done", move |_| {
+                let _ = tx.send(());
+            });
+            let id = skills_dispatch_background_with_parents(
+                app.handle().clone(),
+                args(&skill.id, &workspace, &cli, false),
+                parents,
+            )
+            .unwrap();
+            let event = run_events_path(&text(&workspace), &id).unwrap();
+            let event_before = fs::read(&event).unwrap();
+            let mission = mission_state::mission_mutation_paths(&id).unwrap();
+            let mission_before = fs::read(&mission[1]).unwrap();
+            let log_before = fs::read(&mission[2]).ok();
+            let moved = root.join("original");
+            let replaced = if replace_maru { &maru } else { &workspace };
+            let moved_event = moved.join(event.strip_prefix(replaced).unwrap());
+            fs::rename(replaced, &moved).unwrap();
+            fs::create_dir_all(&maru).unwrap();
+            fs::write(&gate, b"release").unwrap();
+            rx.recv_timeout(Duration::from_secs(5)).unwrap();
+            assert_eq!(fs::read(moved_event).unwrap(), event_before);
+            assert!(
+                !maru.join("runs").exists(),
+                "callback wrote into replacement"
+            );
+            assert_eq!(fs::read(&mission[1]).unwrap(), mission_before);
+            assert_eq!(fs::read(&mission[2]).ok(), log_before);
+        }
+    }
+
+    #[test]
+    fn phase08_29_dispatch_wrapper_same_polling_task_progress_and_join_failure() {
+        let _home = Home::new();
+        let root = tempfile::tempdir_in(std::env::temp_dir().canonicalize().unwrap()).unwrap();
+        let app = tauri::test::mock_app();
+        let cli = tests::write_fake_cli(root.path().join("never-launched"), "#!/bin/sh\nexit 0\n");
+        // The shared boundary helper polls this exact future, yields on that
+        // same async task while its blocking worker is held, then awaits the
+        // injected worker panic through the original wrapper's join mapping.
+        // A spare runtime task cannot make this assertion pass.
+        crate::atomic_file::phase08_06::boundary(
+            root.path().to_path_buf(),
+            "skills_dispatch_background",
+            ipc::skills_dispatch_background(
+                app.handle().clone(),
+                args("never-composed", root.path(), &cli, false),
+            ),
+        );
+    }
+
+    #[test]
+    fn phase08_29_dispatch_approved_wrapper_rename_trash_both_orders_and_alias() {
+        let _home = Home::new();
+        let skill =
+            crate::skill_host::store::skills_create_skill("phase29-dispatch".into(), None).unwrap();
+        for trash in [false, true] {
+            for child_first in [false, true] {
+                for alias in [false, true] {
+                    let temp =
+                        tempfile::tempdir_in(std::env::temp_dir().canonicalize().unwrap()).unwrap();
+                    let root = temp.path();
+                    let source = root.join("work");
+                    let target = root.join("moved");
+                    fs::create_dir(&source).unwrap();
+                    fs::write(source.join("original"), b"unchanged").unwrap();
+                    let cwd = if alias {
+                        let alias = root.join("alias");
+                        std::os::unix::fs::symlink(&source, &alias).unwrap();
+                        alias
+                    } else {
+                        source.clone()
+                    };
+                    let cli = tests::write_fake_cli(root.join("provider"), "#!/bin/sh\nprintf 'actual child bytes' > child-output\nprintf 'stream record\\n'\n");
+                    let app = tauri::test::mock_app();
+                    app.manage(mission_state::MissionState::default());
+                    let (tx, rx) = mpsc::channel();
+                    app.listen("ai://done", move |_| {
+                        let _ = tx.send(());
+                    });
+                    let _trash = TrashFixture::new(source.clone(), target.clone());
+                    let held = Held::new(source.clone(), "pre-effect");
+                    let dispatch = || {
+                        start(ipc::skills_dispatch_background(
+                            app.handle().clone(),
+                            args(&skill.id, &cwd, &cli, true),
+                        ))
+                    };
+                    let (parent_rx, dispatch_rx) = if child_first {
+                        let child = dispatch();
+                        held.wait();
+                        let waiting = Held::new(source.clone(), "before-admission");
+                        let p = parent(root, &source, trash);
+                        waiting.wait();
+                        waiting.release();
+                        assert!(p.recv_timeout(Duration::from_millis(40)).is_err());
+                        (p, child)
+                    } else {
+                        let p = parent(root, &source, trash);
+                        held.wait();
+                        let waiting = Held::new(source.clone(), "before-admission");
+                        let child = dispatch();
+                        waiting.wait();
+                        waiting.release();
+                        assert!(child.recv_timeout(Duration::from_millis(40)).is_err());
+                        (p, child)
+                    };
+                    // A sibling real command remains available during contention.
+                    run(files_ipc::create_workspace_directory(
+                        text(root),
+                        text(root),
+                        "sibling".into(),
+                    ))
+                    .unwrap();
+                    assert!(!target.exists());
+                    held.release();
+                    let dispatched = done(dispatch_rx);
+                    done(parent_rx).unwrap();
+                    if child_first {
+                        let id = dispatched.unwrap();
+                        rx.recv_timeout(Duration::from_secs(5)).unwrap();
+                        assert_eq!(
+                            fs::read(target.join("child-output")).unwrap(),
+                            b"actual child bytes"
+                        );
+                        let event = target
+                            .join(".maru/runs/skills")
+                            .join(&id)
+                            .join("events.jsonl");
+                        let raw = fs::read_to_string(event).unwrap();
+                        assert!(raw.contains("provider.output") && raw.contains("run.completed"));
+                        let mission = mission_state::mission_mutation_paths(&id).unwrap();
+                        assert!(mission
+                            .iter()
+                            .any(|path| path.extension().is_some_and(|ext| ext == "json")
+                                && path.is_file()));
+                    } else {
+                        assert!(dispatched.is_err());
+                        assert!(!target.join("child-output").exists());
+                    }
+                    assert!(!source.exists());
+                    assert_eq!(fs::read(target.join("original")).unwrap(), b"unchanged");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn phase08_29_dispatch_proposal_callback_parent_replacement_does_not_recreate() {
+        let _home = Home::new();
+        let temp = tempfile::tempdir_in(std::env::temp_dir().canonicalize().unwrap()).unwrap();
+        let root = temp.path();
+        let source = root.join("work");
+        fs::create_dir(&source).unwrap();
+        let cwd = text(&source);
+        let context = DispatchWrites::new(&cwd, "callback", vec![], vec![]).unwrap();
+        context
+            .event(
+                &cwd,
+                "callback",
+                "run.started",
+                "test",
+                serde_json::json!({}),
+            )
+            .unwrap();
+        run(files_ipc::rename_workspace_entry(
+            text(root),
+            cwd.clone(),
+            "moved".into(),
+        ))
+        .unwrap();
+        assert!(context
+            .event(
+                &cwd,
+                "callback",
+                "run.completed",
+                "test",
+                serde_json::json!({})
+            )
+            .is_err());
+        assert!(!source.exists());
+        fs::create_dir(&source).unwrap();
+        assert!(context
+            .event(
+                &cwd,
+                "callback",
+                "run.completed",
+                "test",
+                serde_json::json!({})
+            )
+            .is_err());
+        assert!(!source.join(".maru").exists());
+    }
+
+    #[test]
+    fn phase08_29_dispatch_direct_event_and_mission_wait_before_effect_and_release() {
+        let _home = Home::new();
+        let temp = tempfile::tempdir_in(std::env::temp_dir().canonicalize().unwrap()).unwrap();
+        let cwd = text(temp.path());
+        let id = "direct";
+        let event = run_events_path(&cwd, id).unwrap();
+        let mission_paths = mission_state::mission_mutation_paths(id).unwrap();
+        let lease = PathTransactionRequest::new(vec![
+            temp.path().to_path_buf(),
+            host_fs::maru_home().unwrap(),
+        ])
+        .unwrap()
+        .acquire()
+        .unwrap();
+        let waiting = Held::new(event.clone(), "before-admission");
+        let event_cwd = cwd.clone();
+        let event_thread = std::thread::spawn(move || {
+            crate::agent_host::event_store::append_run_event_payload(
+                &event_cwd,
+                id,
+                "run.started",
+                "test",
+                serde_json::json!({}),
+            )
+        });
+        waiting.wait();
+        waiting.release();
+        let app = tauri::test::mock_app();
+        app.manage(mission_state::MissionState::default());
+        let handle = app.handle().clone();
+        let mission_wait = Held::new(mission_paths[1].clone(), "before-admission");
+        let mission_thread = std::thread::spawn(move || {
+            mission_state::register_mission_with_metadata(&handle, id, "fixture", 999999, None)
+        });
+        mission_wait.wait();
+        mission_wait.release();
+        assert!(!event.exists());
+        assert!(!mission_paths[1].exists());
+        drop(lease);
+        event_thread.join().unwrap().unwrap();
+        mission_thread.join().unwrap().unwrap();
+        mission_state::finish_mission(app.handle(), id, Some(0), true);
+        assert!(event.exists() && mission_paths[1].exists());
+    }
+
+    #[test]
+    fn phase08_29_dispatch_real_proposal_callbacks_after_rename_trash_and_alias() {
+        let _home = Home::new();
+        let skill =
+            crate::skill_host::store::skills_create_skill("phase29-proposal".into(), None).unwrap();
+        for trash in [false, true] {
+            for alias in [false, true] {
+                let temp =
+                    tempfile::tempdir_in(std::env::temp_dir().canonicalize().unwrap()).unwrap();
+                let root = temp.path();
+                let source = root.join("work");
+                let target = root.join("moved");
+                fs::create_dir(&source).unwrap();
+                let cwd = if alias {
+                    let path = root.join("alias");
+                    std::os::unix::fs::symlink(&source, &path).unwrap();
+                    path
+                } else {
+                    source.clone()
+                };
+                let gate = root.join("release");
+                let script = format!("#!/bin/sh\nprintf 'first output\\n'\ni=0\nwhile [ ! -f {} ]; do i=$((i+1)); [ \"$i\" -lt 500 ] || exit 2; sleep 0.01; done\nprintf 'late output\\n'\n", shell_quote(&text(&gate)));
+                let cli = tests::write_fake_cli(root.join("provider"), &script);
+                let app = tauri::test::mock_app();
+                app.manage(mission_state::MissionState::default());
+                let (output_tx, output_rx) = mpsc::channel();
+                app.listen("ai://output", move |_| {
+                    let _ = output_tx.send(());
+                });
+                let (done_tx, done_rx) = mpsc::channel();
+                app.listen("ai://done", move |_| {
+                    let _ = done_tx.send(());
+                });
+                let id = run(ipc::skills_dispatch_background(
+                    app.handle().clone(),
+                    args(&skill.id, &cwd, &cli, false),
+                ))
+                .unwrap();
+                output_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+                let _trash = TrashFixture::new(source.clone(), target.clone());
+                done(parent(root, &source, trash)).unwrap();
+                fs::write(&gate, b"release").unwrap();
+                done_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+                assert!(!source.exists(), "late callback recreated workspace");
+                let raw = fs::read_to_string(
+                    target
+                        .join(".maru/runs/skills")
+                        .join(&id)
+                        .join("events.jsonl"),
+                )
+                .unwrap();
+                assert!(raw.contains("run.started"));
+                assert!(!raw.contains("late output") && !raw.contains("run.completed"));
+                let mission = mission_state::mission_mutation_paths(&id).unwrap();
+                let record: mission_state::MissionRecord =
+                    serde_json::from_slice(&fs::read(&mission[1]).unwrap()).unwrap();
+                assert_eq!(record.status, mission_state::MissionStatus::Done);
+                assert!(fs::read_to_string(&mission[2])
+                    .unwrap()
+                    .contains("late output"));
+            }
+        }
+    }
+
+    #[test]
+    fn phase08_29_dispatch_runtime_error_flushes_streams_and_releases_roots() {
+        let _home = Home::new();
+        let skill =
+            crate::skill_host::store::skills_create_skill("phase29-runtime-error".into(), None)
+                .unwrap();
+        let temp = tempfile::tempdir_in(std::env::temp_dir().canonicalize().unwrap()).unwrap();
+        let source = temp.path().join("work");
+        fs::create_dir(&source).unwrap();
+        let cli = tests::write_fake_cli(
+            temp.path().join("provider"),
+            "#!/bin/sh\nprintf 'fixture failure\\n' >&2\nexit 9\n",
+        );
+        let app = tauri::test::mock_app();
+        app.manage(mission_state::MissionState::default());
+        let (tx, rx) = mpsc::channel();
+        app.listen("ai://done", move |_| {
+            let _ = tx.send(());
+        });
+        let id = run(ipc::skills_dispatch_background(
+            app.handle().clone(),
+            args(&skill.id, &source, &cli, true),
+        ))
+        .unwrap();
+        rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        let target = temp.path().join("moved");
+        done(parent(temp.path(), &source, false)).unwrap();
+        let raw = fs::read_to_string(
+            target
+                .join(".maru/runs/skills")
+                .join(&id)
+                .join("events.jsonl"),
+        )
+        .unwrap();
+        assert!(
+            raw.contains("fixture failure")
+                && raw.contains("run.failed")
+                && raw.contains("run.completed")
+        );
+        let mission = mission_state::mission_mutation_paths(&id).unwrap();
+        let record: mission_state::MissionRecord =
+            serde_json::from_slice(&fs::read(&mission[1]).unwrap()).unwrap();
+        assert_eq!(record.status, mission_state::MissionStatus::Failed);
+    }
+
+    #[test]
+    fn phase08_29_dispatch_launch_error_and_unwind_release_owned_roots() {
+        let _home = Home::new();
+        let skill =
+            crate::skill_host::store::skills_create_skill("phase29-failure".into(), None).unwrap();
+        let temp = tempfile::tempdir_in(std::env::temp_dir().canonicalize().unwrap()).unwrap();
+        let source = temp.path().join("work");
+        fs::create_dir(&source).unwrap();
+        let app = tauri::test::mock_app();
+        app.manage(mission_state::MissionState::default());
+        // The provider resolver falls back to installed binaries when an
+        // override does not exist. Keep this override present and executable,
+        // but give it an absent interpreter so spawn fails hermetically.
+        let cli = tests::write_fake_cli(
+            temp.path().join("unlaunchable-provider"),
+            &format!("#!{}\n", temp.path().join("missing-interpreter").display()),
+        );
+        assert_eq!(
+            resolve_provider_binary(CliProviderKind::Claude, Some(&text(&cli))),
+            Some(cli.clone()),
+            "fixture must select the explicit executable, never installed CLI fallback",
+        );
+        let result = run(ipc::skills_dispatch_background(
+            app.handle().clone(),
+            args(&skill.id, &source, &cli, true),
+        ));
+        assert!(result.unwrap_err().starts_with("cli_missing:"));
+        let cwd = text(&source);
+        assert!(std::panic::catch_unwind(|| {
+            let _context =
+                DispatchWrites::new(&cwd, "unwind", vec![source.clone()], vec![]).unwrap();
+            panic!("fixture unwind");
+        })
+        .is_err());
+        run(files_ipc::rename_workspace_entry(
+            text(temp.path()),
+            cwd,
+            "moved".into(),
+        ))
+        .unwrap();
+        assert!(!source.exists());
     }
 }

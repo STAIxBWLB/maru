@@ -67,7 +67,6 @@ pub struct Classification {
 /// instructions are deliberately strict: single-line JSON, no markdown
 /// fences, closed category set. Robust parsing on the other side picks
 /// up the slack when Claude wraps the JSON in fences anyway.
-#[tauri::command]
 pub fn build_inbox_classification_prompt(item: InboxDropItem) -> String {
     let received_at = item.received_at.as_deref().unwrap_or("unknown");
     format!(
@@ -92,9 +91,9 @@ Decide based on filename + source. Do not invent fields.\n",
 /// - leading/trailing whitespace
 /// - ```json … ``` or ``` … ``` fences
 /// - extra prose before the first `{` / after the last `}`
+///
 /// Unknown categories collapse to `noise`. Empty / non-string fields
 /// surface as the typed `Option::None`.
-#[tauri::command]
 pub fn parse_inbox_classification(raw: String) -> Result<Classification, String> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
@@ -142,6 +141,36 @@ fn extract_json_object(s: &str) -> Option<&str> {
         return None;
     }
     Some(&s[start..=end])
+}
+
+/// IPC owns classifier inputs and runs the synchronous helpers on a dedicated
+/// blocking worker. The synchronous functions above remain available to Rust
+/// callers and tests, while the wire command names stay unchanged through the
+/// nested module registration in `lib.rs`.
+pub mod ipc {
+    use super::*;
+
+    #[tauri::command]
+    pub async fn build_inbox_classification_prompt(item: InboxDropItem) -> Result<String, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            super::phase08_10_hooks::stage("build_inbox_classification_prompt");
+            super::build_inbox_classification_prompt(item)
+        })
+        .await
+        .map_err(|error| format!("build_inbox_classification_prompt_task_failed: {error}"))
+    }
+
+    #[tauri::command]
+    pub async fn parse_inbox_classification(raw: String) -> Result<Classification, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            super::phase08_10_hooks::stage("parse_inbox_classification");
+            super::parse_inbox_classification(raw)
+        })
+        .await
+        .map_err(|error| format!("parse_inbox_classification_task_failed: {error}"))?
+    }
 }
 
 #[cfg(test)]
@@ -254,5 +283,224 @@ mod tests {
         let result = parse_inbox_classification(raw.to_string()).unwrap();
         assert_eq!(result.suggested_folder, None);
         assert_eq!(result.extracted_date, None);
+    }
+}
+
+#[cfg(test)]
+mod phase08_10_hooks {
+    use std::sync::{Arc, Mutex, OnceLock};
+
+    type Callback = Arc<dyn Fn() + Send + Sync>;
+
+    static STAGES: OnceLock<Mutex<Vec<(u64, String, Callback)>>> = OnceLock::new();
+    static TEST_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    static NEXT_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+    fn stages() -> &'static Mutex<Vec<(u64, String, Callback)>> {
+        STAGES.get_or_init(|| Mutex::new(Vec::new()))
+    }
+
+    pub(crate) fn lock() -> std::sync::MutexGuard<'static, ()> {
+        TEST_LOCK.get_or_init(|| Mutex::new(())).lock().unwrap()
+    }
+
+    pub(crate) struct StageHook(u64);
+
+    impl StageHook {
+        pub(crate) fn new(command: &str, callback: impl Fn() + Send + Sync + 'static) -> Self {
+            let id = NEXT_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            stages()
+                .lock()
+                .unwrap()
+                .push((id, command.to_string(), Arc::new(callback)));
+            Self(id)
+        }
+    }
+
+    impl Drop for StageHook {
+        fn drop(&mut self) {
+            stages().lock().unwrap().retain(|(id, _, _)| *id != self.0);
+        }
+    }
+
+    pub(crate) fn stage(command: &str) {
+        let callbacks: Vec<_> = stages()
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(_, registered, _)| registered == command)
+            .map(|(_, _, callback)| callback.clone())
+            .collect();
+        for callback in callbacks {
+            callback();
+        }
+    }
+}
+
+#[cfg(test)]
+mod phase08_10 {
+    use super::*;
+    use std::sync::{mpsc, Mutex};
+    use std::thread;
+    use std::time::Duration;
+
+    fn fixture_item() -> InboxDropItem {
+        InboxDropItem {
+            id: "inbox/downloads/fixture/budget.pdf".to_string(),
+            path: "/tmp/maru-phase08-10/inbox/downloads/fixture/budget.pdf".to_string(),
+            rel_path: "inbox/downloads/fixture/budget.pdf".to_string(),
+            title: "budget.pdf".to_string(),
+            source: "fixture".to_string(),
+            size_bytes: 2_048,
+            received_at: Some("2026-09-05T10:00:00+09:00".to_string()),
+        }
+    }
+
+    fn run<F>(future: F) -> F::Output
+    where
+        F: std::future::Future + Send + 'static,
+        F::Output: Send + 'static,
+    {
+        let (tx, rx) = mpsc::channel();
+        tauri::async_runtime::spawn(async move {
+            let _ = tx.send(future.await);
+        });
+        rx.recv_timeout(Duration::from_secs(10))
+            .expect("classifier fixture runtime completion")
+    }
+
+    #[test]
+    fn phase08_10_actual_wrappers_return_nonempty_fixture_payloads() {
+        let _test_guard = phase08_10_hooks::lock();
+        let prompt = run(ipc::build_inbox_classification_prompt(fixture_item())).unwrap();
+        assert!(!prompt.is_empty());
+        assert!(prompt.contains("budget.pdf"));
+
+        let parsed = run(ipc::parse_inbox_classification(
+            r#"{"category":"task","summary":"예산 검토 회신 필요","suggestedFolder":"projects/rise","extractedDate":null}"#.to_string(),
+        ))
+        .unwrap();
+        assert_eq!(parsed.category, "task");
+        assert!(!parsed.summary.is_empty());
+    }
+
+    #[test]
+    fn phase08_10_parse_wrapper_preserves_domain_rejection() {
+        let _test_guard = phase08_10_hooks::lock();
+        let error = run(ipc::parse_inbox_classification("not json".to_string())).unwrap_err();
+        assert_eq!(error, "No JSON object found in classifier output.");
+    }
+
+    #[test]
+    fn phase08_10_build_wrapper_yields_on_same_polling_task() {
+        let _test_guard = phase08_10_hooks::lock();
+        let (entered_tx, mut entered_rx) = tauri::async_runtime::channel(1);
+        let (release_tx, release_rx) = mpsc::channel();
+        let release_rx = Mutex::new(release_rx);
+        let _hook =
+            phase08_10_hooks::StageHook::new("build_inbox_classification_prompt", move || {
+                entered_tx.blocking_send(thread::current().id()).unwrap();
+                release_rx
+                    .lock()
+                    .unwrap()
+                    .recv_timeout(Duration::from_secs(5))
+                    .expect("release build classifier worker");
+            });
+        run(async move {
+            let caller = thread::current().id();
+            let mut future = Box::pin(ipc::build_inbox_classification_prompt(fixture_item()));
+            assert!(std::future::poll_fn(|cx| {
+                std::task::Poll::Ready(std::future::Future::poll(future.as_mut(), cx))
+            })
+            .await
+            .is_pending());
+            let worker = entered_rx.recv().await.expect("build worker entered");
+            let mut yielded = false;
+            std::future::poll_fn(|cx| {
+                if yielded {
+                    std::task::Poll::Ready(())
+                } else {
+                    yielded = true;
+                    cx.waker().wake_by_ref();
+                    std::task::Poll::Pending
+                }
+            })
+            .await;
+            assert_ne!(caller, worker);
+            release_tx.send(()).unwrap();
+            assert!(!future.await.unwrap().is_empty());
+        });
+    }
+
+    #[test]
+    fn phase08_10_parse_wrapper_yields_on_same_polling_task() {
+        let _test_guard = phase08_10_hooks::lock();
+        let (entered_tx, mut entered_rx) = tauri::async_runtime::channel(1);
+        let (release_tx, release_rx) = mpsc::channel();
+        let release_rx = Mutex::new(release_rx);
+        let _hook = phase08_10_hooks::StageHook::new("parse_inbox_classification", move || {
+            entered_tx.blocking_send(thread::current().id()).unwrap();
+            release_rx
+                .lock()
+                .unwrap()
+                .recv_timeout(Duration::from_secs(5))
+                .expect("release parse classifier worker");
+        });
+        run(async move {
+            let caller = thread::current().id();
+            let raw = r#"{"category":"reference","summary":"fixture"}"#.to_string();
+            let mut future = Box::pin(ipc::parse_inbox_classification(raw));
+            assert!(std::future::poll_fn(|cx| {
+                std::task::Poll::Ready(std::future::Future::poll(future.as_mut(), cx))
+            })
+            .await
+            .is_pending());
+            let worker = entered_rx.recv().await.expect("parse worker entered");
+            let mut yielded = false;
+            std::future::poll_fn(|cx| {
+                if yielded {
+                    std::task::Poll::Ready(())
+                } else {
+                    yielded = true;
+                    cx.waker().wake_by_ref();
+                    std::task::Poll::Pending
+                }
+            })
+            .await;
+            assert_ne!(caller, worker);
+            release_tx.send(()).unwrap();
+            assert_eq!(future.await.unwrap().category, "reference");
+        });
+    }
+
+    #[test]
+    fn phase08_10_each_wrapper_adds_context_to_join_failure() {
+        let _test_guard = phase08_10_hooks::lock();
+        let build_hook =
+            phase08_10_hooks::StageHook::new("build_inbox_classification_prompt", || {
+                panic!("phase08_10 build worker fixture failure")
+            });
+        let build_error = run(ipc::build_inbox_classification_prompt(fixture_item())).unwrap_err();
+        assert!(build_error.starts_with("build_inbox_classification_prompt_task_failed:"));
+        drop(build_hook);
+
+        let parse_hook = phase08_10_hooks::StageHook::new("parse_inbox_classification", || {
+            panic!("phase08_10 parse worker fixture failure")
+        });
+        let parse_error = run(ipc::parse_inbox_classification("{}".to_string())).unwrap_err();
+        assert!(parse_error.starts_with("parse_inbox_classification_task_failed:"));
+        drop(parse_hook);
+    }
+
+    #[test]
+    fn phase08_10_synchronous_helpers_remain_available_to_rust_callers() {
+        let prompt = build_inbox_classification_prompt(fixture_item());
+        assert!(prompt.contains("Source: fixture"));
+        assert_eq!(
+            parse_inbox_classification(r#"{"category":"admin","summary":"x"}"#.to_string())
+                .unwrap()
+                .category,
+            "admin"
+        );
     }
 }

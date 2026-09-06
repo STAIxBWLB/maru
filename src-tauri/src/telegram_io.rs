@@ -1,19 +1,23 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::{mpsc, Arc, Mutex};
+use std::sync::{mpsc, Arc, Condvar, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use serde_yaml::Value as YamlValue;
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 
+#[cfg(test)]
+use crate::atomic_file::PathTransactionLease;
+use crate::atomic_file::{with_path_transactions, PathTransactionParent, PathTransactionRequest};
 use crate::cli_path::{augmented_path, is_executable};
 use crate::command_output::{run_command_with_timeout, BoundedOutput, CommandTermination};
 use crate::inbox_drop::{
-    auth_status, stage_message_json, stage_message_outcome, ProviderAuthStatus, StageOutcome,
+    auth_status, stage_message_json_with_parent, stage_message_outcome_with_parent,
+    ProviderAuthStatus, StageOutcome,
 };
 use crate::secrets;
 use crate::skill_host::{fs as host_fs, store};
@@ -31,10 +35,11 @@ const PROVIDER_READINESS_TIMEOUT: Duration = Duration::from_secs(10);
 #[cfg(test)]
 const PROVIDER_READINESS_TIMEOUT: Duration = Duration::from_millis(300);
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct TelegramIoState {
-    run_lock: Arc<Mutex<()>>,
-    poller: Mutex<Option<TelegramPollerHandle>>,
+    run_lock: Arc<(Mutex<bool>, Condvar)>,
+    lifecycle: Arc<Mutex<()>>,
+    poller: Arc<Mutex<Option<TelegramPollerHandle>>>,
     status: Arc<Mutex<TelegramPollingStatus>>,
 }
 
@@ -121,22 +126,38 @@ struct TelegramScriptOutput {
     messages: Vec<TelegramMessage>,
 }
 
-#[tauri::command]
+#[allow(dead_code)] // Preserved synchronous API for Rust callers.
 pub fn fetch_telegram_recent(
     state: State<'_, TelegramIoState>,
+    options: TelegramFetchOptions,
+) -> Result<Vec<TelegramMessage>, String> {
+    fetch_telegram_recent_blocking(state.inner().clone(), options)
+}
+
+fn fetch_telegram_recent_blocking(
+    state: TelegramIoState,
     options: TelegramFetchOptions,
 ) -> Result<Vec<TelegramMessage>, String> {
     fetch_telegram_recent_inner(&state.run_lock, options)
 }
 
-#[tauri::command]
+#[allow(dead_code)] // Preserved synchronous API for Rust callers.
 pub fn accept_telegram_item(
     approvals: State<'_, crate::approval::ApprovalState>,
     work_path: String,
     message: TelegramMessage,
     approval_id: Option<String>,
 ) -> Result<TelegramDecisionOutcome, String> {
-    crate::approval::require_approval(&approvals, approval_id, TELEGRAM_ACCEPT_KIND)?;
+    accept_telegram_item_blocking(&approvals, work_path, message, approval_id)
+}
+
+fn accept_telegram_item_blocking(
+    approvals: &crate::approval::ApprovalState,
+    work_path: String,
+    message: TelegramMessage,
+    approval_id: Option<String>,
+) -> Result<TelegramDecisionOutcome, String> {
+    crate::approval::require_approval(approvals, approval_id, TELEGRAM_ACCEPT_KIND)?;
     let target = write_telegram_message_to_inbox(&work_path, &message)?;
     Ok(TelegramDecisionOutcome {
         message_id: message.id,
@@ -147,13 +168,21 @@ pub fn accept_telegram_item(
     })
 }
 
-#[tauri::command]
+#[allow(dead_code)] // Preserved synchronous API for Rust callers.
 pub fn reject_telegram_item(
     approvals: State<'_, crate::approval::ApprovalState>,
     message_id: String,
     approval_id: Option<String>,
 ) -> Result<TelegramDecisionOutcome, String> {
-    crate::approval::require_approval(&approvals, approval_id, TELEGRAM_REJECT_KIND)?;
+    reject_telegram_item_blocking(&approvals, message_id, approval_id)
+}
+
+fn reject_telegram_item_blocking(
+    approvals: &crate::approval::ApprovalState,
+    message_id: String,
+    approval_id: Option<String>,
+) -> Result<TelegramDecisionOutcome, String> {
+    crate::approval::require_approval(approvals, approval_id, TELEGRAM_REJECT_KIND)?;
     Ok(TelegramDecisionOutcome {
         message_id,
         decision: "rejected".to_string(),
@@ -163,22 +192,41 @@ pub fn reject_telegram_item(
     })
 }
 
-#[tauri::command]
+#[allow(dead_code)] // Preserved synchronous API for Rust callers.
 pub fn stage_telegram_items(
     approvals: State<'_, crate::approval::ApprovalState>,
     work_path: String,
     messages: Vec<TelegramMessage>,
     approval_id: Option<String>,
 ) -> Result<Vec<StageOutcome>, String> {
+    stage_telegram_items_blocking(&approvals, work_path, messages, approval_id)
+}
+
+fn stage_telegram_items_blocking(
+    approvals: &crate::approval::ApprovalState,
+    work_path: String,
+    messages: Vec<TelegramMessage>,
+    approval_id: Option<String>,
+) -> Result<Vec<StageOutcome>, String> {
     crate::approval::require_approval_any(
-        &approvals,
+        approvals,
         approval_id,
         &[TELEGRAM_STAGE_KIND, INBOX_BULK_KIND],
     )?;
     let work = resolve_inside_vault(&work_path, ".")?;
+    let parent = PathTransactionParent::capture(&work)?;
     Ok(messages
         .into_iter()
-        .map(|message| stage_message_outcome(&work, "telegram", "telegram", &message.id, &message))
+        .map(|message| {
+            stage_message_outcome_with_parent(
+                &work,
+                "telegram",
+                "telegram",
+                &message.id,
+                &message,
+                &parent,
+            )
+        })
         .collect())
 }
 
@@ -186,9 +234,20 @@ pub fn stage_telegram_items(
 pub async fn check_telegram_auth(
     options: TelegramFetchOptions,
 ) -> Result<ProviderAuthStatus, String> {
-    tauri::async_runtime::spawn_blocking(move || check_telegram_auth_now(options))
-        .await
-        .map_err(|err| format!("telegram_probe_task_failed: {err}"))?
+    tauri::async_runtime::spawn_blocking(move || {
+        #[cfg(test)]
+        PathTransactionLease::test_stage(
+            &[options
+                .work_path
+                .as_deref()
+                .map(PathBuf::from)
+                .unwrap_or_else(std::env::temp_dir)],
+            "worker:check_telegram_auth",
+        );
+        check_telegram_auth_now(options)
+    })
+    .await
+    .map_err(|err| format!("telegram_probe_task_failed: {err}"))?
 }
 
 fn check_telegram_auth_now(options: TelegramFetchOptions) -> Result<ProviderAuthStatus, String> {
@@ -199,6 +258,58 @@ fn check_telegram_auth_now(options: TelegramFetchOptions) -> Result<ProviderAuth
             return Ok(auth_status("telegram", state, Some(err), None, None));
         }
     };
+    let session_work = options.work_path.as_deref().filter(|work| {
+        let work = Path::new(work);
+        config.session_file.starts_with(work)
+            || config
+                .session_file
+                .parent()
+                .and_then(|p| p.canonicalize().ok())
+                .zip(work.canonicalize().ok())
+                .is_some_and(|(session, work)| session.starts_with(work))
+    });
+    if let Some(work) = session_work {
+        // Finish any legacy registry migration before acquiring the provider's
+        // local-write lease; no global registry reservation spans the process.
+        with_path_transactions(
+            PathTransactionRequest::new([Path::new(work).join("workspace.config.yaml")])?
+                .with_workspace_registry()?,
+            |lease| {
+                lease.ensure_workspace_registry()?;
+                lease.before_effect()?;
+                crate::vault_list::assert_maru_can_write(
+                    work,
+                    crate::vault_list::WorkspaceWriteAction::Modify,
+                )
+            },
+        )?;
+    }
+    // Telethon opens SQLite even for reads. Reserve the session allocation
+    // parent, both possible session names, and SQLite journal/WAL/SHM siblings.
+    // This is a finite local-write lease, not a held session/domain mutex.
+    let session_parent = config
+        .session_file
+        .parent()
+        .ok_or("session_file_has_no_parent")?;
+    let mut session_paths = vec![session_parent.to_path_buf(), config.session_file.clone()];
+    for session in [
+        config.session_file.clone(),
+        PathBuf::from(format!("{}.session", config.session_file.display())),
+    ] {
+        session_paths.push(session.clone());
+        for suffix in ["-journal", "-wal", "-shm"] {
+            session_paths.push(PathBuf::from(format!("{}{suffix}", session.display())));
+        }
+    }
+    let session_lease = PathTransactionRequest::new(session_paths)?.acquire()?;
+    if let Some(work) = session_work {
+        session_lease.ensure_workspace_registry()?;
+        crate::vault_list::assert_maru_can_write(
+            work,
+            crate::vault_list::WorkspaceWriteAction::Modify,
+        )?;
+    }
+    session_lease.before_effect()?;
     let mut cmd = Command::new(&config.python_path);
     cmd.env("PATH", augmented_path())
         .env(
@@ -223,6 +334,7 @@ fn check_telegram_auth_now(options: TelegramFetchOptions) -> Result<ProviderAuth
     );
     let output = run_command_with_timeout(&mut cmd, PROVIDER_READINESS_TIMEOUT, |_, _| false)
         .map_err(|err| format!("telegram_spawn_failed: {err}"))?;
+    drop(session_lease);
     let detail = output.diagnostic_tail(4096).unwrap_or_default();
     if output.termination == CommandTermination::TimedOut {
         if classify_telegram_auth_state(&detail) == "auth_required" {
@@ -282,14 +394,32 @@ fn provider_failure_detail(output: &BoundedOutput, fallback: &str) -> String {
         .unwrap_or_else(|| fallback.to_string())
 }
 
-#[tauri::command]
-pub fn start_telegram_polling(
-    app: AppHandle,
+#[allow(dead_code)] // Preserved synchronous API for Rust callers.
+pub fn start_telegram_polling<R: tauri::Runtime>(
+    app: AppHandle<R>,
     state: State<'_, TelegramIoState>,
     options: TelegramFetchOptions,
     interval_seconds: Option<u64>,
 ) -> Result<TelegramPollingStatus, String> {
-    stop_telegram_polling_state(&state)?;
+    start_telegram_polling_blocking(app, state.inner().clone(), options, interval_seconds)
+}
+
+fn start_telegram_polling_blocking<R: tauri::Runtime>(
+    app: AppHandle<R>,
+    state: TelegramIoState,
+    options: TelegramFetchOptions,
+    interval_seconds: Option<u64>,
+) -> Result<TelegramPollingStatus, String> {
+    let _lifecycle = state
+        .lifecycle
+        .lock()
+        .map_err(|_| "telegram_lifecycle_poisoned".to_string())?;
+    stop_telegram_polling_state_ref(&state)?;
+    let parent = options
+        .work_path
+        .as_deref()
+        .map(|work| PathTransactionParent::capture(Path::new(work)))
+        .transpose()?;
     let interval = interval_seconds
         .unwrap_or(DEFAULT_POLL_INTERVAL_SECONDS)
         .max(MIN_POLL_INTERVAL_SECONDS);
@@ -314,7 +444,8 @@ pub fn start_telegram_polling(
     let work_path = options.work_path.clone();
     let state_status = state.status.clone();
     let join = thread::spawn(move || loop {
-        match fetch_telegram_recent_inner(&run_lock, options.clone()) {
+        let result = fetch_telegram_recent_inner(&run_lock, options.clone());
+        let publish = |result: Result<Vec<TelegramMessage>, String>| match result {
             Ok(messages) => {
                 let mut status = status_store.lock().unwrap_or_else(|err| err.into_inner());
                 status.running = true;
@@ -349,6 +480,22 @@ pub fn start_telegram_polling(
                     },
                 );
             }
+        };
+        if let (Some(work), Some(parent)) = (work_path.as_deref(), parent.as_ref()) {
+            let settlement = PathTransactionRequest::new([PathBuf::from(work)])
+                .and_then(|request| request.require_parent_snapshot(parent))
+                .and_then(|request| {
+                    with_path_transactions(request, |lease| {
+                        lease.before_effect()?;
+                        publish(result);
+                        Ok(())
+                    })
+                });
+            if let Err(error) = settlement {
+                publish(Err(error));
+            }
+        } else {
+            publish(result);
         }
         match rx.recv_timeout(Duration::from_secs(interval)) {
             Ok(()) | Err(mpsc::RecvTimeoutError::Disconnected) => break,
@@ -362,20 +509,34 @@ pub fn start_telegram_polling(
         shutdown: tx,
         join: Some(join),
     });
-    telegram_polling_status(state)
+    telegram_polling_status_blocking(state.clone())
 }
 
-#[tauri::command]
+#[allow(dead_code)] // Preserved synchronous API for Rust callers.
 pub fn stop_telegram_polling(
     state: State<'_, TelegramIoState>,
 ) -> Result<TelegramPollingStatus, String> {
-    stop_telegram_polling_state(&state)?;
-    telegram_polling_status(state)
+    stop_telegram_polling_blocking(state.inner().clone())
 }
 
-#[tauri::command]
+fn stop_telegram_polling_blocking(state: TelegramIoState) -> Result<TelegramPollingStatus, String> {
+    let _lifecycle = state
+        .lifecycle
+        .lock()
+        .map_err(|_| "telegram_lifecycle_poisoned".to_string())?;
+    stop_telegram_polling_state_ref(&state)?;
+    telegram_polling_status_blocking(state.clone())
+}
+
+#[allow(dead_code)] // Preserved synchronous API for Rust callers.
 pub fn telegram_polling_status(
     state: State<'_, TelegramIoState>,
+) -> Result<TelegramPollingStatus, String> {
+    telegram_polling_status_blocking(state.inner().clone())
+}
+
+fn telegram_polling_status_blocking(
+    state: TelegramIoState,
 ) -> Result<TelegramPollingStatus, String> {
     Ok(state
         .status
@@ -385,20 +546,16 @@ pub fn telegram_polling_status(
 }
 
 pub fn stop_poller_on_exit(state: &TelegramIoState) {
-    let _ = stop_telegram_polling_state_ref(state);
-}
-
-fn stop_telegram_polling_state(state: &State<'_, TelegramIoState>) -> Result<(), String> {
-    stop_telegram_polling_state_ref(state.inner())
+    let _ = stop_telegram_polling_blocking(state.clone());
 }
 
 fn stop_telegram_polling_state_ref(state: &TelegramIoState) -> Result<(), String> {
-    if let Some(mut handle) = state
+    let handle = state
         .poller
         .lock()
         .map_err(|_| "telegram_poller_poisoned".to_string())?
-        .take()
-    {
+        .take();
+    if let Some(mut handle) = handle {
         let _ = handle.shutdown.send(());
         if let Some(join) = handle.join.take() {
             let _ = join.join();
@@ -413,13 +570,162 @@ fn stop_telegram_polling_state_ref(state: &TelegramIoState) -> Result<(), String
 }
 
 fn fetch_telegram_recent_inner(
-    run_lock: &Arc<Mutex<()>>,
+    run_lock: &Arc<(Mutex<bool>, Condvar)>,
     options: TelegramFetchOptions,
 ) -> Result<Vec<TelegramMessage>, String> {
-    let _guard = run_lock
+    let parent = options
+        .work_path
+        .as_deref()
+        .map(|work| PathTransactionParent::capture(Path::new(work)))
+        .transpose()?;
+    // Setup admits its own registry paths before the session reservation.
+    let config = resolve_telegram_command_config(&options)?;
+    let mut snapshots = Vec::new();
+    if let Some(work) = options.work_path.as_deref() {
+        snapshots.push(Path::new(work).join("workspace.config.yaml"));
+        if config.legacy_auto_drop {
+            snapshots.push(Path::new(work).join(".maru/inbox.json"));
+        }
+    }
+    if let Some(path) = &config.monitor_config_path {
+        snapshots.push(path.clone());
+    }
+    let snapshots: Vec<_> = snapshots
+        .into_iter()
+        .map(|path| {
+            let bytes = fs::read(&path).ok();
+            (path, bytes)
+        })
+        .collect();
+
+    let session_work = options.work_path.as_deref().filter(|work| {
+        let work = Path::new(work);
+        config.legacy_auto_drop
+            || config.session_file.starts_with(work)
+            || config
+                .session_file
+                .parent()
+                .and_then(|p| p.canonicalize().ok())
+                .zip(work.canonicalize().ok())
+                .is_some_and(|(session, work)| session.starts_with(work))
+    });
+    if let Some(work) = session_work {
+        // Finish any legacy registry migration before acquiring the provider's
+        // local-write lease; no global registry reservation spans the process.
+        with_path_transactions(
+            PathTransactionRequest::new([Path::new(work).join("workspace.config.yaml")])?
+                .with_workspace_registry()?,
+            |lease| {
+                lease.ensure_workspace_registry()?;
+                lease.before_effect()?;
+                crate::vault_list::assert_maru_can_write(
+                    work,
+                    crate::vault_list::WorkspaceWriteAction::Modify,
+                )
+            },
+        )?;
+    }
+    // Telethon opens SQLite even for reads. Reserve the session allocation
+    // parent, both possible session names, and SQLite journal/WAL/SHM siblings.
+    // This is a finite local-write lease, not a held session/domain mutex.
+    let session_parent = config
+        .session_file
+        .parent()
+        .ok_or("session_file_has_no_parent")?;
+    let mut session_paths = vec![session_parent.to_path_buf(), config.session_file.clone()];
+    for session in [
+        config.session_file.clone(),
+        PathBuf::from(format!("{}.session", config.session_file.display())),
+    ] {
+        session_paths.push(session.clone());
+        for suffix in ["-journal", "-wal", "-shm"] {
+            session_paths.push(PathBuf::from(format!("{}{suffix}", session.display())));
+        }
+    }
+    // Legacy scripts may write the declared inbox tree directly. Preserve
+    // their argv and reserve that complete configured local output set. A
+    // custom script without a workspace retains its external-tool boundary.
+    let legacy_inbox = if config.legacy_auto_drop {
+        options
+            .work_path
+            .as_deref()
+            .map(|work| {
+                let work = PathBuf::from(work);
+                let inbox = crate::inbox_settings::load_runtime_config_or_legacy(&work)?;
+                let root = crate::inbox_settings::resolve_runtime_root(&work, &inbox)?;
+                session_paths.extend([
+                    work.clone(),
+                    root.clone(),
+                    work.join("workspace.config.yaml"),
+                    work.join(".maru/inbox.json"),
+                ]);
+                for channel in inbox.channels.values() {
+                    for drop_path in &channel.drop_paths {
+                        session_paths.push(crate::inbox_settings::lexical_normalize_path(
+                            &root.join(drop_path),
+                        ));
+                    }
+                }
+                if root.exists() {
+                    for entry in walkdir::WalkDir::new(&root).follow_links(false) {
+                        let entry = entry.map_err(|error| error.to_string())?;
+                        if entry.file_type().is_symlink() {
+                            session_paths.push(entry.path().to_path_buf());
+                        }
+                    }
+                }
+                Ok::<_, String>((work, inbox))
+            })
+            .transpose()?
+    } else {
+        None
+    };
+    let mut session_request = PathTransactionRequest::new(session_paths)?;
+    if legacy_inbox.is_some() {
+        if let Some(parent) = &parent {
+            session_request = session_request.require_parent_snapshot(parent)?;
+        }
+    }
+    let (active, ready) = &**run_lock;
+    let mut running = active
         .lock()
         .map_err(|_| "telegram_run_lock_poisoned".to_string())?;
-    let config = resolve_telegram_command_config(&options)?;
+    while *running {
+        running = ready
+            .wait(running)
+            .map_err(|_| "telegram_run_lock_poisoned".to_string())?;
+    }
+    *running = true;
+    drop(running);
+    struct Reservation(Arc<(Mutex<bool>, Condvar)>);
+    impl Drop for Reservation {
+        fn drop(&mut self) {
+            let (active, ready) = &*self.0;
+            *active.lock().unwrap_or_else(|err| err.into_inner()) = false;
+            ready.notify_all();
+        }
+    }
+    let _reservation = Reservation(run_lock.clone());
+    for (path, bytes) in &snapshots {
+        if fs::read(path).ok() != *bytes {
+            return Err("Telegram configuration changed; retry the operation".into());
+        }
+    }
+
+    let session_lease = session_request.acquire()?;
+    if let Some((work, inbox)) = &legacy_inbox {
+        if crate::inbox_settings::load_runtime_config_or_legacy(work)? != *inbox {
+            return Err("Inbox configuration changed; retry the operation".into());
+        }
+    }
+    if let Some(work) = session_work {
+        session_lease.ensure_workspace_registry()?;
+        crate::vault_list::assert_maru_can_write(
+            work,
+            crate::vault_list::WorkspaceWriteAction::Modify,
+        )?;
+    }
+    session_lease.before_effect()?;
     let mut cmd = Command::new(&config.python_path);
     cmd.env("PATH", augmented_path())
         .env(
@@ -448,6 +754,7 @@ fn fetch_telegram_recent_inner(
         )
         .output()
         .map_err(|err| format!("telegram_spawn_failed: {err}"))?;
+    drop(session_lease);
     if !output.status.success() {
         let detail = String::from_utf8_lossy(&output.stderr).trim().to_string();
         let kind = if classify_telegram_auth_state(&detail) == "auth_required" {
@@ -456,6 +763,25 @@ fn fetch_telegram_recent_inner(
             "telegram_failed"
         };
         return Err(format!("{kind}: {detail}"));
+    }
+    drop(_reservation);
+    let mut paths: Vec<_> = snapshots.iter().map(|(path, _)| path.clone()).collect();
+    if let Some(work) = options.work_path.as_deref() {
+        paths.push(PathBuf::from(work));
+    }
+    if !paths.is_empty() {
+        let mut request = PathTransactionRequest::new(paths)?;
+        if let Some(parent) = parent.as_ref() {
+            request = request.require_parent_snapshot(parent)?;
+        }
+        with_path_transactions(request, |lease| {
+            for (path, bytes) in &snapshots {
+                if fs::read(path).ok() != *bytes {
+                    return Err("Telegram configuration changed; retry the operation".into());
+                }
+            }
+            lease.before_effect()
+        })?;
     }
     if config.legacy_auto_drop {
         return Ok(Vec::new());
@@ -579,7 +905,8 @@ fn write_telegram_message_to_inbox(
     message: &TelegramMessage,
 ) -> Result<String, String> {
     let work = resolve_inside_vault(work_path, ".")?;
-    stage_message_json(&work, "telegram", "telegram", &message.id, message)
+    let parent = PathTransactionParent::capture(&work)?;
+    stage_message_json_with_parent(&work, "telegram", "telegram", &message.id, message, &parent)
 }
 
 pub fn classify_telegram_auth_state(detail: &str) -> &'static str {
@@ -722,6 +1049,155 @@ fn extract_json_fragment(raw: &str) -> Option<&str> {
     None
 }
 
+/// The owned handle is resolved only inside the blocking worker; borrowed State
+/// never crosses the async boundary. The wire command names remain unchanged.
+pub mod ipc {
+    use super::*;
+    #[tauri::command]
+    pub async fn fetch_telegram_recent(
+        state: State<'_, TelegramIoState>,
+        options: TelegramFetchOptions,
+    ) -> Result<Vec<TelegramMessage>, String> {
+        let state = state.inner().clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(
+                &[options
+                    .work_path
+                    .as_deref()
+                    .map(PathBuf::from)
+                    .unwrap_or_else(std::env::temp_dir)],
+                "worker:fetch_telegram_recent",
+            );
+            super::fetch_telegram_recent_blocking(state, options)
+        })
+        .await
+        .map_err(|err| format!("fetch_telegram_recent_task_failed: {err}"))?
+    }
+    #[tauri::command]
+    pub async fn accept_telegram_item<R: tauri::Runtime>(
+        app: AppHandle<R>,
+        work_path: String,
+        message: TelegramMessage,
+        approval_id: Option<String>,
+    ) -> Result<TelegramDecisionOutcome, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(
+                &[PathBuf::from(&work_path)],
+                "worker:accept_telegram_item",
+            );
+            super::accept_telegram_item_blocking(
+                &app.state::<crate::approval::ApprovalState>(),
+                work_path,
+                message,
+                approval_id,
+            )
+        })
+        .await
+        .map_err(|err| format!("accept_telegram_item_task_failed: {err}"))?
+    }
+    #[tauri::command]
+    pub async fn reject_telegram_item<R: tauri::Runtime>(
+        app: AppHandle<R>,
+        message_id: String,
+        approval_id: Option<String>,
+    ) -> Result<TelegramDecisionOutcome, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(
+                &[std::env::temp_dir()],
+                "worker:reject_telegram_item",
+            );
+            super::reject_telegram_item_blocking(
+                &app.state::<crate::approval::ApprovalState>(),
+                message_id,
+                approval_id,
+            )
+        })
+        .await
+        .map_err(|err| format!("reject_telegram_item_task_failed: {err}"))?
+    }
+    #[tauri::command]
+    pub async fn stage_telegram_items<R: tauri::Runtime>(
+        app: AppHandle<R>,
+        work_path: String,
+        messages: Vec<TelegramMessage>,
+        approval_id: Option<String>,
+    ) -> Result<Vec<StageOutcome>, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(
+                &[PathBuf::from(&work_path)],
+                "worker:stage_telegram_items",
+            );
+            super::stage_telegram_items_blocking(
+                &app.state::<crate::approval::ApprovalState>(),
+                work_path,
+                messages,
+                approval_id,
+            )
+        })
+        .await
+        .map_err(|err| format!("stage_telegram_items_task_failed: {err}"))?
+    }
+    #[tauri::command]
+    pub async fn start_telegram_polling<R: tauri::Runtime>(
+        app: AppHandle<R>,
+        state: State<'_, TelegramIoState>,
+        options: TelegramFetchOptions,
+        interval_seconds: Option<u64>,
+    ) -> Result<TelegramPollingStatus, String> {
+        let state = state.inner().clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(
+                &[options
+                    .work_path
+                    .as_deref()
+                    .map(PathBuf::from)
+                    .unwrap_or_else(std::env::temp_dir)],
+                "worker:start_telegram_polling",
+            );
+            super::start_telegram_polling_blocking(app, state, options, interval_seconds)
+        })
+        .await
+        .map_err(|err| format!("start_telegram_polling_task_failed: {err}"))?
+    }
+    #[tauri::command]
+    pub async fn stop_telegram_polling(
+        state: State<'_, TelegramIoState>,
+    ) -> Result<TelegramPollingStatus, String> {
+        let state = state.inner().clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(
+                &[std::env::temp_dir()],
+                "worker:stop_telegram_polling",
+            );
+            super::stop_telegram_polling_blocking(state)
+        })
+        .await
+        .map_err(|err| format!("stop_telegram_polling_task_failed: {err}"))?
+    }
+    #[tauri::command]
+    pub async fn telegram_polling_status(
+        state: State<'_, TelegramIoState>,
+    ) -> Result<TelegramPollingStatus, String> {
+        let state = state.inner().clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(
+                &[std::env::temp_dir()],
+                "worker:telegram_polling_status",
+            );
+            super::telegram_polling_status_blocking(state)
+        })
+        .await
+        .map_err(|err| format!("telegram_polling_status_task_failed: {err}"))?
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -853,5 +1329,873 @@ mod tests {
 
         assert_eq!(detail, "Telegram command failed without a safe diagnostic");
         assert!(!detail.contains("TELEGRAM-SECRET"));
+    }
+}
+
+#[cfg(all(test, unix))]
+mod phase08_14 {
+    use super::*;
+    use crate::atomic_file::phase08_06::{boundary, run, Held, Home};
+    use crate::scratchpad::phase08_08::{registry, PrimaryWorkspaceAccessFixture};
+    use std::os::unix::fs::PermissionsExt;
+
+    type TestApp = AppHandle<tauri::test::MockRuntime>;
+
+    fn app() -> tauri::App<tauri::test::MockRuntime> {
+        let app = tauri::test::mock_app();
+        app.manage(crate::approval::ApprovalState::default());
+        app.manage(TelegramIoState::default());
+        app
+    }
+
+    fn fixture(home: &Home) -> (TelegramFetchOptions, PrimaryWorkspaceAccessFixture) {
+        let work = home.root.path().join("work");
+        fs::create_dir_all(work.join("inbox/drop/telegram")).unwrap();
+        fs::write(
+            work.join("workspace.config.yaml"),
+            "inbox:\n  root: inbox\n",
+        )
+        .unwrap();
+        let python = home.root.path().join("fixture-python");
+        fs::write(&python, "#!/bin/sh\nprintf '%s\\n' '{\"messages\":[{\"id\":\"fixture-1\",\"chatId\":\"42\",\"chatTitle\":\"Fixture\",\"sender\":\"Synthetic\",\"text\":\"hello\",\"date\":\"2026-01-01\",\"permalink\":null}]}'\n").unwrap();
+        fs::set_permissions(&python, fs::Permissions::from_mode(0o700)).unwrap();
+        let script = home.root.path().join("fixture-monitor.py");
+        fs::write(&script, "synthetic fixture, never interpreted").unwrap();
+        let config = home.root.path().join("fixture-config.yaml");
+        fs::write(&config, "fixture: true\n").unwrap();
+        let options = TelegramFetchOptions {
+            work_path: Some(work.to_string_lossy().into_owned()),
+            max: Some(3),
+            python_path: Some(python.to_string_lossy().into_owned()),
+            script_path: Some(script.to_string_lossy().into_owned()),
+            session_file: Some(
+                home.root
+                    .path()
+                    .join("fixture.session")
+                    .to_string_lossy()
+                    .into_owned(),
+            ),
+            monitor_config_path: Some(config.to_string_lossy().into_owned()),
+            legacy_auto_drop: Some(false),
+        };
+        assert!(python.is_file() && is_executable(&python));
+        assert_eq!(
+            resolve_telegram_command_config(&options)
+                .unwrap()
+                .python_path,
+            python
+        );
+        registry(&work, "direct");
+        let access = PrimaryWorkspaceAccessFixture::new(work);
+        (options, access)
+    }
+
+    fn message() -> TelegramMessage {
+        TelegramMessage {
+            id: "fixture-1".into(),
+            chat_id: "42".into(),
+            chat_title: "Fixture".into(),
+            sender: "Synthetic".into(),
+            text: "hello".into(),
+            date: "2026-01-01".into(),
+            permalink: None,
+        }
+    }
+
+    fn approval(app: &TestApp, kind: &str) -> Option<String> {
+        let request = crate::approval::prepare_approval(
+            app.state(),
+            kind.into(),
+            "synthetic".into(),
+            None,
+            None,
+        )
+        .unwrap();
+        crate::approval::record_approval(
+            app.state(),
+            request.id.clone(),
+            crate::approval::ApprovalDecision::Approved,
+            None,
+        )
+        .unwrap();
+        Some(request.id)
+    }
+
+    async fn invoke(
+        command: &str,
+        app: TestApp,
+        options: TelegramFetchOptions,
+        approval_id: Option<String>,
+    ) -> Result<serde_json::Value, String> {
+        let work = options.work_path.clone().unwrap();
+        match command {
+            "check_telegram_auth" => check_telegram_auth(options)
+                .await
+                .map(|v| serde_json::to_value(v).unwrap()),
+            "fetch_telegram_recent" => ipc::fetch_telegram_recent(app.state(), options)
+                .await
+                .map(|v| serde_json::to_value(v).unwrap()),
+            "accept_telegram_item" => ipc::accept_telegram_item(app, work, message(), approval_id)
+                .await
+                .map(|v| serde_json::to_value(v).unwrap()),
+            "reject_telegram_item" => {
+                ipc::reject_telegram_item(app, "fixture-1".into(), approval_id)
+                    .await
+                    .map(|v| serde_json::to_value(v).unwrap())
+            }
+            "stage_telegram_items" => {
+                ipc::stage_telegram_items(app, work, vec![message()], approval_id)
+                    .await
+                    .map(|v| serde_json::to_value(v).unwrap())
+            }
+            "start_telegram_polling" => {
+                ipc::start_telegram_polling(app.clone(), app.state(), options, Some(30))
+                    .await
+                    .map(|v| serde_json::to_value(v).unwrap())
+            }
+            "stop_telegram_polling" => ipc::stop_telegram_polling(app.state())
+                .await
+                .map(|v| serde_json::to_value(v).unwrap()),
+            "telegram_polling_status" => ipc::telegram_polling_status(app.state())
+                .await
+                .map(|v| serde_json::to_value(v).unwrap()),
+            _ => panic!("unknown fixture command"),
+        }
+    }
+
+    #[test]
+    fn phase08_14_telegram_every_wrapper_yields_and_preserves_join_errors() {
+        let home = Home::new();
+        let (options, _access) = fixture(&home);
+        let app = app();
+        for command in [
+            "fetch_telegram_recent",
+            "accept_telegram_item",
+            "reject_telegram_item",
+            "stage_telegram_items",
+            "start_telegram_polling",
+            "stop_telegram_polling",
+            "telegram_polling_status",
+        ] {
+            let path = if matches!(
+                command,
+                "reject_telegram_item" | "stop_telegram_polling" | "telegram_polling_status"
+            ) {
+                std::env::temp_dir()
+            } else {
+                PathBuf::from(options.work_path.as_ref().unwrap())
+            };
+            let handle = app.handle().clone();
+            let options = options.clone();
+            boundary(path, command, async move {
+                invoke(command, handle, options, None).await
+            });
+        }
+    }
+
+    #[test]
+    fn phase08_14_telegram_retained_auth_yields_and_preserves_probe_error() {
+        let home = Home::new();
+        let (options, _access) = fixture(&home);
+        boundary(
+            PathBuf::from(options.work_path.as_ref().unwrap()),
+            "check_telegram_auth",
+            async move {
+                check_telegram_auth(options).await.map_err(|error| {
+                    assert!(error.starts_with("telegram_probe_task_failed:"));
+                    error.replacen(
+                        "telegram_probe_task_failed:",
+                        "check_telegram_auth_task_failed:",
+                        1,
+                    )
+                })
+            },
+        );
+    }
+
+    #[test]
+    fn phase08_14_telegram_actual_entries_nonempty_results_approvals_auth_and_polling() {
+        let home = Home::new();
+        let (options, _access) = fixture(&home);
+        let app = app();
+        let call = |command: &'static str, auth| {
+            let handle = app.handle().clone();
+            let options = options.clone();
+            run(async move { invoke(command, handle, options, auth).await })
+        };
+        assert_eq!(
+            call("fetch_telegram_recent", None).unwrap()[0]["text"],
+            "hello"
+        );
+        assert_eq!(
+            run(check_telegram_auth(options.clone())).unwrap().state,
+            "ok"
+        );
+        for (command, kind) in [
+            ("accept_telegram_item", TELEGRAM_ACCEPT_KIND),
+            ("reject_telegram_item", TELEGRAM_REJECT_KIND),
+            ("stage_telegram_items", TELEGRAM_STAGE_KIND),
+        ] {
+            assert_eq!(
+                call(command, None).unwrap_err(),
+                format!("approval_required: {kind}")
+            );
+            let result = call(command, approval(app.handle(), kind)).unwrap();
+            if command == "stage_telegram_items" {
+                assert_eq!(result[0]["ok"], true);
+            } else {
+                assert_eq!(result["ok"], true);
+            }
+        }
+        assert_eq!(
+            call("telegram_polling_status", None).unwrap()["running"],
+            false
+        );
+        assert_eq!(
+            call("start_telegram_polling", None).unwrap()["running"],
+            true
+        );
+        assert_eq!(
+            call("start_telegram_polling", None).unwrap()["running"],
+            true
+        );
+        assert_eq!(
+            call("stop_telegram_polling", None).unwrap()["running"],
+            false
+        );
+        assert!(app
+            .state::<TelegramIoState>()
+            .poller
+            .lock()
+            .unwrap()
+            .is_none());
+    }
+
+    #[test]
+    fn phase08_14_telegram_raw_writers_policy_alias_and_error_release() {
+        let home = Home::new();
+        let (options, _access) = fixture(&home);
+        let work = PathBuf::from(options.work_path.as_ref().unwrap());
+        let alias = home.root.path().join("alias");
+        std::os::unix::fs::symlink(&work, &alias).unwrap();
+        let app = app();
+        for command in ["accept_telegram_item", "stage_telegram_items"] {
+            for (registered, caller) in [(&work, &alias), (&alias, &work)] {
+                for policy in ["readOnly", "delegated", "direct"] {
+                    registry(registered, policy);
+                    let kind = if command == "accept_telegram_item" {
+                        TELEGRAM_ACCEPT_KIND
+                    } else {
+                        TELEGRAM_STAGE_KIND
+                    };
+                    let auth = approval(app.handle(), kind);
+                    let handle = app.handle().clone();
+                    let mut options = options.clone();
+                    options.work_path = Some(caller.to_string_lossy().into_owned());
+                    let result = run(async move { invoke(command, handle, options, auth).await });
+                    if policy == "direct" {
+                        assert!(result.is_ok());
+                    } else if command == "accept_telegram_item" {
+                        assert!(result.unwrap_err().contains("Workspace writes are blocked"));
+                    } else {
+                        assert_eq!(result.unwrap()[0]["ok"], false);
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn phase08_14_telegram_fetch_discards_replaced_parent_and_releases_reservation() {
+        let home = Home::new();
+        let (options, _access) = fixture(&home);
+        let app = app();
+        let work = PathBuf::from(options.work_path.as_ref().unwrap());
+        let state = app.state::<TelegramIoState>().inner().clone();
+        // Hold provider-session admission, then replace the captured workspace.
+        *state.run_lock.0.lock().unwrap() = true;
+        let (tx, rx) = mpsc::channel();
+        let options_copy = options.clone();
+        let state_copy = state.clone();
+        let held = Held::new(
+            host_fs::skills_root().unwrap().join("registry.json"),
+            "admitted",
+        );
+        let worker = thread::spawn(move || {
+            tx.send(fetch_telegram_recent_blocking(state_copy, options_copy))
+                .unwrap();
+        });
+        held.wait();
+        fs::rename(&work, home.root.path().join("old-work")).unwrap();
+        fs::create_dir(&work).unwrap();
+        held.release();
+        *state.run_lock.0.lock().unwrap() = false;
+        state.run_lock.1.notify_all();
+        assert!(rx.recv_timeout(Duration::from_secs(5)).unwrap().is_err());
+        worker.join().unwrap();
+        assert!(!*state.run_lock.0.lock().unwrap());
+        assert!(!work.join("inbox").exists());
+    }
+    #[test]
+    fn phase08_14_telegram_writers_contend_with_files_both_orders() {
+        let home = Home::new();
+        for command in ["accept_telegram_item", "stage_telegram_items"] {
+            for files_first in [false, true] {
+                for trash in [false, true] {
+                    for use_alias in [false, true] {
+                        let (mut options, _access) = fixture(&home);
+                        let app = app();
+                        let work = PathBuf::from(options.work_path.as_ref().unwrap());
+                        let alias = home.root.path().join("raw-work-alias");
+                        std::os::unix::fs::symlink(&work, &alias).unwrap();
+                        if use_alias {
+                            options.work_path = Some(alias.to_string_lossy().into_owned());
+                        }
+                        // resolve_inside_vault canonicalizes the selected root.
+                        let target = work.join("inbox/drop/telegram");
+                        let _trash = crate::workspace_files::phase08_06::TrashFixture::new(
+                            work.join("inbox"),
+                            work.join("moved"),
+                        );
+                        let kind = if command == "accept_telegram_item" {
+                            TELEGRAM_ACCEPT_KIND
+                        } else {
+                            TELEGRAM_STAGE_KIND
+                        };
+                        let auth = approval(app.handle(), kind);
+                        let held = Held::new(
+                            if files_first {
+                                work.join("inbox")
+                            } else {
+                                target.clone()
+                            },
+                            "admitted",
+                        );
+                        let (writer_tx, writer_rx) = mpsc::channel();
+                        let (files_tx, files_rx) = mpsc::channel();
+                        let handle = app.handle().clone();
+                        let writer = move || {
+                            writer_tx
+                                .send(run(
+                                    async move { invoke(command, handle, options, auth).await },
+                                ))
+                                .unwrap();
+                        };
+                        let root = work.to_string_lossy().into_owned();
+                        let files = move || {
+                            let result = if trash {
+                                crate::workspace_files::trash_workspace_entries(
+                                    root,
+                                    vec!["inbox".into()],
+                                )
+                                .map(|items| {
+                                    assert!(items.iter().all(|item| item.error.is_none()));
+                                })
+                            } else {
+                                crate::workspace_files::rename_workspace_entry(
+                                    root,
+                                    "inbox".into(),
+                                    "moved".into(),
+                                )
+                                .map(|_| ())
+                            };
+                            files_tx.send(result).unwrap();
+                        };
+                        let (first, second) = if files_first {
+                            let first = thread::spawn(files);
+                            held.wait();
+                            let waiting = Held::new(target.clone(), "before-admission");
+                            let second = thread::spawn(writer);
+                            waiting.wait();
+                            waiting.release();
+                            assert!(writer_rx.recv_timeout(Duration::from_millis(40)).is_err());
+                            held.release();
+                            (first, second)
+                        } else {
+                            let first = thread::spawn(writer);
+                            held.wait();
+                            let waiting = Held::new(work.join("inbox"), "before-admission");
+                            let second = thread::spawn(files);
+                            waiting.wait();
+                            waiting.release();
+                            assert!(files_rx.recv_timeout(Duration::from_millis(40)).is_err());
+                            held.release();
+                            (first, second)
+                        };
+                        first.join().unwrap();
+                        second.join().unwrap();
+                        assert!(files_rx
+                            .recv_timeout(Duration::from_secs(5))
+                            .unwrap()
+                            .is_ok());
+                        let result = writer_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+                        if files_first {
+                            if command == "stage_telegram_items" {
+                                assert_eq!(result.unwrap()[0]["ok"], false);
+                            } else {
+                                assert!(result.is_err());
+                            }
+                        } else {
+                            assert!(result.is_ok());
+                        }
+                        assert!(!work.join("inbox").exists());
+                        fs::remove_dir_all(work.join("moved")).unwrap();
+                        fs::remove_file(alias).unwrap();
+                        fs::remove_dir_all(&work).unwrap();
+                    }
+                }
+            }
+        }
+    }
+    #[test]
+    fn phase08_14_telegram_same_target_contention_and_actual_unwind_release() {
+        use crate::atomic_file::PathTransactionTestHook;
+        use std::sync::atomic::{AtomicBool, Ordering};
+        let home = Home::new();
+        let (options, _access) = fixture(&home);
+        let app = app();
+        let target = Path::new(options.work_path.as_ref().unwrap()).join("inbox/drop/telegram");
+        for command in ["accept_telegram_item", "stage_telegram_items"] {
+            let kind = if command == "accept_telegram_item" {
+                TELEGRAM_ACCEPT_KIND
+            } else {
+                TELEGRAM_STAGE_KIND
+            };
+            let auth = approval(app.handle(), kind);
+            let handle = app.handle().clone();
+            let first_options = options.clone();
+            let held = Held::new(target.clone(), "admitted");
+            let first = thread::spawn(move || {
+                run(async move { invoke(command, handle, first_options, auth).await })
+            });
+            held.wait();
+            let waiting = Held::new(target.clone(), "before-admission");
+            let auth = approval(app.handle(), kind);
+            let handle = app.handle().clone();
+            let second_options = options.clone();
+            let (tx, rx) = mpsc::channel();
+            let second = thread::spawn(move || {
+                tx.send(run(async move {
+                    invoke(command, handle, second_options, auth).await
+                }))
+                .unwrap()
+            });
+            waiting.wait();
+            waiting.release();
+            assert!(rx.recv_timeout(Duration::from_millis(40)).is_err());
+            held.release();
+            assert!(first.join().unwrap().is_ok());
+            assert!(rx.recv_timeout(Duration::from_secs(5)).unwrap().is_ok());
+            second.join().unwrap();
+            drop(held);
+            drop(waiting);
+            let once = AtomicBool::new(false);
+            let hook = PathTransactionTestHook::new(target.clone(), "pre-effect", move || {
+                if !once.swap(true, Ordering::SeqCst) {
+                    panic!("synthetic raw-stage unwind");
+                }
+            });
+            let auth = approval(app.handle(), kind);
+            let handle = app.handle().clone();
+            let next = options.clone();
+            let err = run(async move { invoke(command, handle, next, auth).await }).unwrap_err();
+            assert!(err.starts_with(&format!("{command}_task_failed:")));
+            drop(hook);
+            let auth = approval(app.handle(), kind);
+            let handle = app.handle().clone();
+            let next = options.clone();
+            assert!(run(async move { invoke(command, handle, next, auth).await }).is_ok());
+        }
+    }
+
+    #[test]
+    fn phase08_14_telegram_polling_callback_rejects_replaced_parent_without_locking_status() {
+        let home = Home::new();
+        let (options, _access) = fixture(&home);
+        let app = app();
+        let work = PathBuf::from(options.work_path.as_ref().unwrap());
+        let held = Held::new(
+            host_fs::skills_root().unwrap().join("registry.json"),
+            "admitted",
+        );
+        let handle = app.handle().clone();
+        let next = options.clone();
+        assert_eq!(
+            run(async move { invoke("start_telegram_polling", handle, next, None).await }).unwrap()
+                ["running"],
+            true
+        );
+        held.wait();
+        let handle = app.handle().clone();
+        let next = options.clone();
+        assert_eq!(
+            run(async move { invoke("telegram_polling_status", handle, next, None).await })
+                .unwrap()["running"],
+            true
+        );
+        fs::rename(&work, home.root.path().join("old-work")).unwrap();
+        fs::create_dir(&work).unwrap();
+        held.release();
+        let state = app.state::<TelegramIoState>().inner().clone();
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            if state.status.lock().unwrap().last_error.is_some() {
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "bounded late callback"
+            );
+            thread::sleep(Duration::from_millis(5));
+        }
+        let handle = app.handle().clone();
+        let next = options.clone();
+        assert_eq!(
+            run(async move { invoke("stop_telegram_polling", handle, next, None).await }).unwrap()
+                ["running"],
+            false
+        );
+        assert_eq!(state.status.lock().unwrap().last_message_count, 0);
+        assert!(state.poller.lock().unwrap().is_none());
+        assert!(!work.join("inbox").exists());
+    }
+    #[test]
+    fn phase08_14_telegram_fetch_auth_session_writers_files_both_orders_aliases() {
+        let home = Home::new();
+        for command in ["fetch_telegram_recent", "check_telegram_auth"] {
+            for files_first in [false, true] {
+                for use_alias in [false, true] {
+                    let (mut options, _access) = fixture(&home);
+                    let work = PathBuf::from(options.work_path.as_ref().unwrap());
+                    let session_dir = work.join("sessions");
+                    fs::create_dir_all(&session_dir).unwrap();
+                    let alias = home.root.path().join("session-alias");
+                    std::os::unix::fs::symlink(&session_dir, &alias).unwrap();
+                    let selected = if use_alias {
+                        alias.clone()
+                    } else {
+                        session_dir.clone()
+                    };
+                    options.session_file = Some(
+                        selected
+                            .join("fixture.session")
+                            .to_string_lossy()
+                            .into_owned(),
+                    );
+                    let python = PathBuf::from(options.python_path.as_ref().unwrap());
+                    let original = fs::read_to_string(&python).unwrap();
+                    let writer_script = r#"#!/bin/sh
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = '--session-file' ]; then shift; session="$1"; fi
+  shift
+done
+printf 'synthetic SQLite' > "$session"
+printf 'synthetic WAL' > "$session-wal"
+"#;
+                    fs::write(
+                        &python,
+                        format!(
+                            "{writer_script}{}",
+                            original.strip_prefix("#!/bin/sh\n").unwrap()
+                        ),
+                    )
+                    .unwrap();
+                    assert!(python.is_file() && is_executable(&python));
+                    assert_eq!(
+                        resolve_telegram_command_config(&options)
+                            .unwrap()
+                            .python_path,
+                        python
+                    );
+                    let app = app();
+                    let held = Held::new(
+                        if files_first {
+                            session_dir.clone()
+                        } else {
+                            selected.clone()
+                        },
+                        "admitted",
+                    );
+                    let (writer_tx, writer_rx) = mpsc::channel();
+                    let (files_tx, files_rx) = mpsc::channel();
+                    let handle = app.handle().clone();
+                    let writer = move || {
+                        writer_tx
+                            .send(run(
+                                async move { invoke(command, handle, options, None).await },
+                            ))
+                            .unwrap();
+                    };
+                    let root = work.to_string_lossy().into_owned();
+                    let files = move || {
+                        files_tx
+                            .send(crate::workspace_files::rename_workspace_entry(
+                                root,
+                                "sessions".into(),
+                                "moved-sessions".into(),
+                            ))
+                            .unwrap();
+                    };
+                    let (first, second) = if files_first {
+                        let first = thread::spawn(files);
+                        held.wait();
+                        let waiting = Held::new(selected, "before-admission");
+                        let second = thread::spawn(writer);
+                        waiting.wait();
+                        waiting.release();
+                        assert!(writer_rx.recv_timeout(Duration::from_millis(40)).is_err());
+                        held.release();
+                        (first, second)
+                    } else {
+                        let first = thread::spawn(writer);
+                        held.wait();
+                        let waiting = Held::new(session_dir, "before-admission");
+                        let second = thread::spawn(files);
+                        waiting.wait();
+                        waiting.release();
+                        assert!(files_rx.recv_timeout(Duration::from_millis(40)).is_err());
+                        held.release();
+                        (first, second)
+                    };
+                    first.join().unwrap();
+                    second.join().unwrap();
+                    assert!(files_rx
+                        .recv_timeout(Duration::from_secs(5))
+                        .unwrap()
+                        .is_ok());
+                    let result = writer_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+                    if files_first {
+                        assert!(result.is_err());
+                    } else {
+                        assert!(result.is_ok());
+                        assert!(work.join("moved-sessions/fixture.session").exists());
+                        assert!(work.join("moved-sessions/fixture.session-wal").exists());
+                    }
+                    assert!(!work.join("sessions").exists());
+                    fs::remove_file(alias).unwrap();
+                    fs::remove_dir_all(&work).unwrap();
+                }
+            }
+        }
+    }
+    #[test]
+    fn phase08_14_telegram_concurrent_actual_starts_status_and_stop_reap() {
+        let home = Home::new();
+        let (options, _access) = fixture(&home);
+        let app = app();
+        let work = PathBuf::from(options.work_path.as_ref().unwrap());
+        let held = Held::new(work, "worker:start_telegram_polling");
+        let handle = app.handle().clone();
+        let next = options.clone();
+        let first = thread::spawn(move || {
+            run(async move { invoke("start_telegram_polling", handle, next, None).await })
+        });
+        held.wait();
+        let handle = app.handle().clone();
+        let next = options.clone();
+        assert_eq!(
+            run(async move { invoke("start_telegram_polling", handle, next, None).await }).unwrap()
+                ["running"],
+            true
+        );
+        let handle = app.handle().clone();
+        let next = options.clone();
+        assert_eq!(
+            run(async move { invoke("telegram_polling_status", handle, next, None).await })
+                .unwrap()["running"],
+            true
+        );
+        held.release();
+        assert_eq!(first.join().unwrap().unwrap()["running"], true);
+        let handle = app.handle().clone();
+        assert_eq!(
+            run(async move { invoke("stop_telegram_polling", handle, options, None).await })
+                .unwrap()["running"],
+            false
+        );
+        assert!(app
+            .state::<TelegramIoState>()
+            .poller
+            .lock()
+            .unwrap()
+            .is_none());
+    }
+
+    #[test]
+    fn phase08_14_telegram_session_policy_rechecked_after_admission_and_released() {
+        let home = Home::new();
+        for command in ["fetch_telegram_recent", "check_telegram_auth"] {
+            for use_alias in [false, true] {
+                let (mut options, _access) = fixture(&home);
+                let work = PathBuf::from(options.work_path.as_ref().unwrap());
+                let sessions = work.join("sessions");
+                fs::create_dir_all(&sessions).unwrap();
+                let alias = home.root.path().join("policy-session-alias");
+                std::os::unix::fs::symlink(&sessions, &alias).unwrap();
+                let selected = if use_alias {
+                    alias.clone()
+                } else {
+                    sessions.clone()
+                };
+                options.session_file = Some(
+                    selected
+                        .join("fixture.session")
+                        .to_string_lossy()
+                        .into_owned(),
+                );
+                let marker = home.root.path().join("provider-invoked");
+                let python = PathBuf::from(options.python_path.as_ref().unwrap());
+                let original = fs::read_to_string(&python).unwrap();
+                fs::write(
+                    &python,
+                    format!(
+                        "#!/bin/sh\nprintf invoked > '{}'\n{}",
+                        marker.display(),
+                        original.strip_prefix("#!/bin/sh\n").unwrap()
+                    ),
+                )
+                .unwrap();
+                assert!(python.is_file() && is_executable(&python));
+                assert_eq!(
+                    resolve_telegram_command_config(&options)
+                        .unwrap()
+                        .python_path,
+                    python
+                );
+                let app = app();
+                let held = Held::new(selected, "admitted");
+                let handle = app.handle().clone();
+                let next = options.clone();
+                let worker = thread::spawn(move || {
+                    run(async move { invoke(command, handle, next, None).await })
+                });
+                held.wait();
+                registry(&work, "readOnly");
+                held.release();
+                assert!(worker
+                    .join()
+                    .unwrap()
+                    .unwrap_err()
+                    .contains("Workspace writes are blocked"));
+                assert!(!marker.exists());
+                drop(held);
+                registry(&work, "direct");
+                let handle = app.handle().clone();
+                assert!(run(async move { invoke(command, handle, options, None).await }).is_ok());
+                assert!(marker.exists());
+                fs::remove_file(marker).unwrap();
+                fs::remove_file(alias).unwrap();
+                fs::remove_dir_all(work).unwrap();
+            }
+        }
+    }
+    #[test]
+    fn phase08_14_telegram_legacy_configured_drop_preserves_argv_files_races_and_aliases() {
+        let home = Home::new();
+        for files_first in [false, true] {
+            for use_alias in [false, true] {
+                let (mut options, _access) = fixture(&home);
+                let work = PathBuf::from(options.work_path.as_ref().unwrap());
+                let alias = home.root.path().join("legacy-work-alias");
+                std::os::unix::fs::symlink(&work, &alias).unwrap();
+                let selected = if use_alias {
+                    alias.clone()
+                } else {
+                    work.clone()
+                };
+                options.work_path = Some(selected.to_string_lossy().into_owned());
+                options.legacy_auto_drop = Some(true);
+                let argv = home.root.path().join("legacy-argv");
+                let target = selected.join("inbox/drop/telegram");
+                let python = PathBuf::from(options.python_path.as_ref().unwrap());
+                fs::write(&python, format!("#!/bin/sh\nprintf '%s\n' \"$@\" > '{}'\nmkdir -p '{}'\nprintf 'synthetic legacy drop' > '{}/legacy.txt'\n", argv.display(), target.display(), target.display())).unwrap();
+                assert!(python.is_file() && is_executable(&python));
+                assert_eq!(
+                    resolve_telegram_command_config(&options)
+                        .unwrap()
+                        .python_path,
+                    python
+                );
+                let app = app();
+                let held = Held::new(
+                    if files_first {
+                        work.join("inbox")
+                    } else {
+                        selected.clone()
+                    },
+                    "admitted",
+                );
+                let (writer_tx, writer_rx) = mpsc::channel();
+                let (files_tx, files_rx) = mpsc::channel();
+                let handle = app.handle().clone();
+                let writer = move || {
+                    writer_tx
+                        .send(run(async move {
+                            invoke("fetch_telegram_recent", handle, options, None).await
+                        }))
+                        .unwrap();
+                };
+                let root = work.to_string_lossy().into_owned();
+                let files = move || {
+                    files_tx
+                        .send(crate::workspace_files::rename_workspace_entry(
+                            root,
+                            "inbox".into(),
+                            "moved-inbox".into(),
+                        ))
+                        .unwrap();
+                };
+                let (first, second) = if files_first {
+                    let first = thread::spawn(files);
+                    held.wait();
+                    let waiting = Held::new(selected, "before-admission");
+                    let second = thread::spawn(writer);
+                    waiting.wait();
+                    waiting.release();
+                    assert!(writer_rx.recv_timeout(Duration::from_millis(40)).is_err());
+                    held.release();
+                    (first, second)
+                } else {
+                    let first = thread::spawn(writer);
+                    held.wait();
+                    let waiting = Held::new(work.join("inbox"), "before-admission");
+                    let second = thread::spawn(files);
+                    waiting.wait();
+                    waiting.release();
+                    assert!(files_rx.recv_timeout(Duration::from_millis(40)).is_err());
+                    held.release();
+                    (first, second)
+                };
+                first.join().unwrap();
+                second.join().unwrap();
+                assert!(files_rx
+                    .recv_timeout(Duration::from_secs(5))
+                    .unwrap()
+                    .is_ok());
+                let result = writer_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+                if files_first {
+                    assert!(result.is_err());
+                    assert!(!argv.exists());
+                } else {
+                    assert_eq!(result.unwrap(), serde_json::json!([]));
+                    assert_eq!(
+                        fs::read_to_string(work.join("moved-inbox/drop/telegram/legacy.txt"))
+                            .unwrap(),
+                        "synthetic legacy drop"
+                    );
+                    let args = fs::read_to_string(&argv).unwrap();
+                    assert!(
+                        args.contains("--once")
+                            && args.contains("--session-file")
+                            && args.contains("--config-file")
+                    );
+                    assert!(!args.contains("--output-json"));
+                    fs::remove_file(argv).unwrap();
+                }
+                assert!(!work.join("inbox").exists());
+                fs::remove_file(alias).unwrap();
+                fs::remove_dir_all(work).unwrap();
+            }
+        }
     }
 }

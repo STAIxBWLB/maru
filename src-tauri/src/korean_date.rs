@@ -16,11 +16,38 @@ use regex::Regex;
 /// Tauri-facing wrapper. Frontend passes `now_iso` (RFC3339 with offset) so
 /// the parse anchors against the user's local clock without sneaking
 /// system-time access into pure logic.
-#[tauri::command]
 pub fn parse_korean_date_cmd(input: String, now_iso: String) -> Result<Option<String>, String> {
     let now = DateTime::parse_from_rfc3339(&now_iso)
         .map_err(|err| format!("now_iso must be RFC3339: {err}"))?;
     Ok(parse_korean_date(&input, now).map(|dt| dt.to_rfc3339()))
+}
+
+#[cfg(test)]
+const WORKER_HOOK_KEY: &str = "/maru/phase08_24/korean_date";
+
+/// Owned IPC boundary; the synchronous parser command remains the Rust/CLI
+/// API and the unbounded-in-size input scan runs on a finite blocking worker
+/// instead of the main thread.
+pub mod ipc {
+    #[cfg(test)]
+    use super::WORKER_HOOK_KEY;
+
+    #[tauri::command]
+    pub async fn parse_korean_date_cmd(
+        input: String,
+        now_iso: String,
+    ) -> Result<Option<String>, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            crate::atomic_file::PathTransactionLease::test_stage(
+                &[std::path::PathBuf::from(WORKER_HOOK_KEY)],
+                "worker:parse_korean_date_cmd",
+            );
+            super::parse_korean_date_cmd(input, now_iso)
+        })
+        .await
+        .map_err(|err| format!("parse_korean_date_cmd_task_failed: {err}"))?
+    }
 }
 
 /// Parse a Korean natural-language date phrase against an maru `now`.
@@ -333,5 +360,61 @@ mod tests {
     fn rejects_invalid_calendar_dates() {
         // Feb 30 doesn't exist — parser must return None rather than rolling.
         assert_eq!(parse_korean_date("2월 30일", now()), None);
+    }
+
+    mod phase08_24 {
+        use super::*;
+        use crate::atomic_file::phase08_06::{boundary, run};
+        use std::sync::{Mutex, MutexGuard};
+
+        // The synthetic worker-hook key is module-global, so these tests must
+        // not overlap with each other.
+        static TEST_LOCK: Mutex<()> = Mutex::new(());
+        fn serialized() -> MutexGuard<'static, ()> {
+            TEST_LOCK
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+        }
+
+        const NOW_ISO: &str = "2026-04-28T09:00:00+09:00";
+
+        #[test]
+        fn phase08_24_korean_date_wrappers_yield_same_poll_and_map_join_failure() {
+            let _guard = serialized();
+            boundary(
+                std::path::PathBuf::from(WORKER_HOOK_KEY),
+                "parse_korean_date_cmd",
+                ipc::parse_korean_date_cmd("내일".into(), NOW_ISO.into()),
+            );
+        }
+
+        #[test]
+        fn phase08_24_korean_date_real_fixture_results_and_rejections() {
+            let _guard = serialized();
+            run(async {
+                let parsed = ipc::parse_korean_date_cmd("내일".into(), NOW_ISO.into())
+                    .await
+                    .unwrap();
+                assert_eq!(parsed.as_deref(), Some("2026-04-29T09:00:00+09:00"));
+
+                let parsed = ipc::parse_korean_date_cmd("오늘 오후 3시".into(), NOW_ISO.into())
+                    .await
+                    .unwrap();
+                assert_eq!(parsed.as_deref(), Some("2026-04-28T15:00:00+09:00"));
+
+                let unknown = ipc::parse_korean_date_cmd("랜덤한 텍스트".into(), NOW_ISO.into())
+                    .await
+                    .unwrap();
+                assert_eq!(unknown, None);
+
+                let error = ipc::parse_korean_date_cmd("내일".into(), "not-a-date".into())
+                    .await
+                    .unwrap_err();
+                assert!(
+                    error.starts_with("now_iso must be RFC3339:"),
+                    "unexpected error: {error}"
+                );
+            });
+        }
     }
 }

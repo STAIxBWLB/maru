@@ -12,13 +12,38 @@
 //   note gone) is marked `ready` (sync is still owed); otherwise it is
 //   dropped (the mutation never happened, so nothing to sync).
 // - `syncing`: set while a gws call is in flight. A crash leaves it behind;
-//   recovery/drain treat it as `ready` (gws ops are idempotent, so a repeat
-//   is safe).
+//   legacy markerless records recover as `ready`. A provider-outcome marker
+//   recovers as `authBlocked`, requiring explicit reconciliation/retry.
 // - `retryNeeded`: retried once `nextRetryAt <= now` on the backoff schedule
 //   1, 5, 15, 60 minutes, then hourly.
 // - `authBlocked`: skipped by drain until `task_integrations_retry` requeues.
 
-use crate::atomic_file::write_atomic;
+use crate::atomic_file::{
+    with_path_transactions, write_atomic, PathTransactionLease, PathTransactionParent,
+    PathTransactionRequest,
+};
+use std::sync::{Arc, Mutex, Weak};
+
+// Only process-local ownership survives while a provider call runs. No domain or
+// path guard spans the subprocess; dead weak entries are crash/unwind recoverable.
+static ACTIVE_OUTBOX: Mutex<Vec<(PathBuf, Weak<()>)>> = Mutex::new(Vec::new());
+// Persisted lastError prefixes, using existing schema fields. Plan26 must show
+// "외부 처리 결과 확인 필요" instead of an authentication label for either prefix.
+// An outcome-unknown Upsert without a provider ID must never offer ordinary retry.
+const PROVIDER_OUTCOME_UNKNOWN: &str = "provider_outcome_unknown:";
+const PROVIDER_LOCAL_COMMIT_FAILED: &str = "provider_succeeded_local_commit_failed:";
+
+/// RAII owns only a process-local reservation, never a filesystem/domain lock.
+/// Remove the exact owner on every return and unwind so keys are immediately reusable.
+struct OutboxFlight(Arc<()>);
+impl Drop for OutboxFlight {
+    fn drop(&mut self) {
+        ACTIVE_OUTBOX
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .retain(|(_, owner)| owner.as_ptr() != Arc::as_ptr(&self.0));
+    }
+}
 use crate::cli_path::{augmented_path, is_executable, resolve_program};
 use crate::frontmatter::{update_frontmatter_content, FrontmatterValue};
 use crate::gmail_gws::classify_gws_auth_state;
@@ -145,6 +170,31 @@ fn validate_record_id(id: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Complete local mutation set, including symlink endpoints. Recovery reads task
+/// state; provider completion may write it and append a Today event.
+fn outbox_transaction_request(work: &Path) -> Result<PathTransactionRequest, String> {
+    let mut paths = vec![today_dir(work), work.join("tasks")];
+    for root in [today_dir(work), work.join("tasks")] {
+        if root.is_dir() {
+            for entry in walkdir::WalkDir::new(root).follow_links(true) {
+                let entry = entry.map_err(|err| format!("Cannot inspect outbox paths: {err}"))?;
+                if entry.path_is_symlink() {
+                    paths.push(entry.into_path());
+                }
+            }
+        }
+    }
+    for record in list_records(work)? {
+        paths.push(crate::vault::resolve_inside_vault(
+            &work.to_string_lossy(),
+            &record.task_path,
+        )?);
+    }
+    PathTransactionRequest::new(paths)?
+        .require_parent(work)?
+        .with_workspace_registry()
+}
+
 /// Read one exact outbox record for a guarded operation. Unlike `list_records`,
 /// malformed JSON is an error rather than an entry silently omitted from a UI
 /// listing.
@@ -247,6 +297,21 @@ pub(crate) fn enqueue_record(
     draft: OutboxRecordDraft,
     now_iso: &str,
 ) -> Result<OutboxRecord, String> {
+    with_path_transactions(outbox_transaction_request(work)?, |lease| {
+        enqueue_record_in_transaction(lease, work, draft, now_iso)
+    })
+}
+
+pub(crate) fn enqueue_record_in_transaction(
+    lease: &PathTransactionLease,
+    work: &Path,
+    draft: OutboxRecordDraft,
+    now_iso: &str,
+) -> Result<OutboxRecord, String> {
+    lease.ensure_covered([outbox_dir_for(work)])?;
+    lease.ensure_workspace_registry()?;
+    lease.before_effect()?;
+    assert_maru_can_write(&work.to_string_lossy(), WorkspaceWriteAction::Modify)?;
     let OutboxRecordDraft {
         op,
         task_path,
@@ -274,11 +339,41 @@ pub(crate) fn enqueue_record(
         updated_at: now_iso.to_string(),
         record_revision: None,
     };
-    write_record(work, &record)?;
+    write_record_in_transaction(lease, work, &record)?;
     Ok(record)
 }
 
+pub(crate) fn write_record_in_transaction(
+    lease: &PathTransactionLease,
+    work: &Path,
+    record: &OutboxRecord,
+) -> Result<(), String> {
+    validate_record_id(&record.id)?;
+    lease.ensure_covered([record_path(work, &record.id)])?;
+    lease.ensure_workspace_registry()?;
+    lease.before_effect()?;
+    assert_maru_can_write(&work.to_string_lossy(), WorkspaceWriteAction::Modify)?;
+    write_record(work, record)
+}
+
+#[allow(dead_code)] // Retained synchronous internal entry for independent callers.
 pub(crate) fn set_record_status(
+    work: &Path,
+    record: &mut OutboxRecord,
+    status: OutboxStatus,
+    now_iso: &str,
+) -> Result<(), String> {
+    with_path_transactions(outbox_transaction_request(work)?, |lease| {
+        let current = read_record(work, &record.id)?;
+        if record_revision(&current) != record_revision(record) {
+            return Err("outbox_record_changed: retry the operation".into());
+        }
+        set_record_status_in_transaction(lease, work, record, status, now_iso)
+    })
+}
+
+pub(crate) fn set_record_status_in_transaction(
+    lease: &PathTransactionLease,
     work: &Path,
     record: &mut OutboxRecord,
     status: OutboxStatus,
@@ -286,7 +381,7 @@ pub(crate) fn set_record_status(
 ) -> Result<(), String> {
     record.status = status;
     record.updated_at = now_iso.to_string();
-    write_record(work, record)
+    write_record_in_transaction(lease, work, record)
 }
 
 /// True when a `complete` op for this provider task already drained
@@ -314,20 +409,65 @@ pub(crate) fn has_web_action(work: &Path, web_action_id: &str) -> Result<bool, S
 /// Reconcile crash-interrupted records. Tolerant by design: callers (e.g.
 /// `today_open`) treat a failure here as log-worthy, never fatal.
 pub fn recover_outbox(work: &Path) -> Result<OutboxRecovery, String> {
+    with_path_transactions(outbox_transaction_request(work)?, |lease| {
+        recover_outbox_in_transaction(lease, work)
+    })
+}
+
+pub(crate) fn recover_outbox_in_transaction(
+    lease: &PathTransactionLease,
+    work: &Path,
+) -> Result<OutboxRecovery, String> {
+    lease.ensure_covered([outbox_dir_for(work), work.join("tasks")])?;
+    lease.ensure_workspace_registry()?;
+    lease.before_effect()?;
+    assert_maru_can_write(&work.to_string_lossy(), WorkspaceWriteAction::Modify)?;
     let now = Utc::now().to_rfc3339();
     let mut outcome = OutboxRecovery {
         recovered: 0,
         dropped: 0,
     };
     for mut record in list_records(work)? {
+        lease.ensure_covered([record_path(work, &record.id)])?;
         match record.status {
             OutboxStatus::Syncing => {
-                set_record_status(work, &mut record, OutboxStatus::Ready, &now)?;
+                let key = record_path(work, &record.id)
+                    .canonicalize()
+                    .map_err(|err| format!("Cannot identify outbox record: {err}"))?;
+                let stable = record_path(
+                    &normalize_existing_dir(&work.to_string_lossy())?,
+                    &record.id,
+                );
+                let active = ACTIVE_OUTBOX
+                    .lock()
+                    .map_err(|_| "outbox ownership poisoned")?;
+                if active.iter().any(|(path, owner)| {
+                    (*path == key || *path == stable) && owner.upgrade().is_some()
+                }) {
+                    continue;
+                }
+                drop(active);
+                let recovered_status = if record
+                    .last_error
+                    .as_deref()
+                    .is_some_and(|error| error.starts_with(PROVIDER_OUTCOME_UNKNOWN))
+                {
+                    OutboxStatus::AuthBlocked
+                } else {
+                    OutboxStatus::Ready
+                };
+                set_record_status_in_transaction(lease, work, &mut record, recovered_status, &now)?;
                 outcome.recovered += 1;
             }
             OutboxStatus::Prepared => {
                 if local_mutation_landed(work, &record) {
-                    set_record_status(work, &mut record, OutboxStatus::Ready, &now)?;
+                    set_record_status_in_transaction(
+                        lease,
+                        work,
+                        &mut record,
+                        OutboxStatus::Ready,
+                        &now,
+                    )?;
                     outcome.recovered += 1;
                 } else {
                     fs::remove_file(record_path(work, &record.id))
@@ -593,139 +733,380 @@ fn record_due(record: &OutboxRecord, now: DateTime<chrono::FixedOffset>) -> bool
 
 /// Process one due record against the provider. Status transitions are
 /// persisted before and after the gws call so a crash mid-drain leaves a
-/// `syncing` record that recovery can requeue.
+/// `syncing` record whose durable outcome marker requires manual recovery.
 fn drain_record(
     work: &Path,
     gws_bin: &Path,
     record: &OutboxRecord,
     now_iso: &str,
     now: DateTime<chrono::FixedOffset>,
+    caller_parent: &PathTransactionParent,
 ) -> Result<OutboxStatus, String> {
-    let mut record = record.clone();
-    set_record_status(work, &mut record, OutboxStatus::Syncing, now_iso)?;
+    let selected_note =
+        crate::vault::resolve_inside_vault(&work.to_string_lossy(), &record.task_path)?;
+    let alias_for = |path: &Path| -> Result<PathBuf, String> {
+        let mut existing = path;
+        while !existing.exists() {
+            existing = existing.parent().ok_or("Outbox alias parent missing")?;
+        }
+        let physical = existing
+            .canonicalize()
+            .map_err(|err| format!("Cannot identify outbox alias: {err}"))?;
+        Ok(physical.join(
+            path.strip_prefix(existing)
+                .map_err(|err| format!("Cannot identify outbox alias suffix: {err}"))?,
+        ))
+    };
+    let selected_alias = alias_for(&selected_note)?;
+    let parent = PathTransactionParent::capture(work)?;
+    let outbox_parent = PathTransactionParent::capture(&outbox_dir_for(work))?;
+    let mut originals = vec![parent.clone(), caller_parent.clone()];
+    for path in [
+        outbox_dir_for(work),
+        work.join(&record.task_path)
+            .parent()
+            .unwrap_or(work)
+            .to_path_buf(),
+        today_dir(work).join("events"),
+    ] {
+        let mut existing = path.as_path();
+        while !existing.is_dir() {
+            existing = existing.parent().ok_or("Outbox parent missing")?;
+        }
+        originals.push(PathTransactionParent::capture(existing)?);
+    }
+    let owner = OutboxFlight(Arc::new(()));
+    let claimed = with_path_transactions(
+        outbox_transaction_request(work)?.require_parent_snapshot(caller_parent)?,
+        |lease| {
+            lease.before_effect()?;
+            assert_maru_can_write(&work.to_string_lossy(), WorkspaceWriteAction::Modify)?;
+            let mut current = read_record(work, &record.id)?;
+            if record_revision(&current) != record_revision(record) || !record_due(&current, now) {
+                return Ok(None);
+            }
+            // Both the stable workspace identity and selected physical record
+            // identity own this operation, including an alias retarget mid-flight.
+            let stable = record_path(work, &current.id);
+            let key = stable
+                .canonicalize()
+                .map_err(|err| format!("Cannot identify outbox record: {err}"))?;
+            {
+                let active = ACTIVE_OUTBOX
+                    .lock()
+                    .map_err(|_| "outbox ownership poisoned")?;
+                if active.iter().any(|(path, owner)| {
+                    (*path == key || *path == stable) && owner.upgrade().is_some()
+                }) {
+                    return Ok(None);
+                }
+            }
+            // Validate lexical containment before the external effect.
+            crate::vault::resolve_inside_vault(&work.to_string_lossy(), &current.task_path)?;
+            // Durable before the provider call: even a moved root or revoked
+            // policy cannot later turn an unknown result into an automatic insert.
+            current.last_error = Some(format!(
+                "{PROVIDER_OUTCOME_UNKNOWN} verify the external result before retry"
+            ));
+            set_record_status_in_transaction(
+                lease,
+                work,
+                &mut current,
+                OutboxStatus::Syncing,
+                now_iso,
+            )?;
+            let mut active = ACTIVE_OUTBOX
+                .lock()
+                .map_err(|_| "outbox ownership poisoned")?;
+            active.retain(|(_, owner)| owner.upgrade().is_some());
+            active.push((key.clone(), Arc::downgrade(&owner.0)));
+            if stable != key {
+                active.push((stable, Arc::downgrade(&owner.0)));
+            }
+            drop(active);
+            // Pin the selected commit aliases after our own Syncing write. Atomic
+            // replacement can itself replace a record-file symlink; later external
+            // retargeting must not redirect this provider result to a different file.
+            let mut selected_paths = vec![
+                today_dir(work),
+                outbox_dir_for(work),
+                record_path(work, &current.id),
+                selected_note.clone(),
+                today_dir(work)
+                    .join("events")
+                    .join(format!("{}.jsonl", &now_iso[..7])),
+            ];
+            for root in [today_dir(work), work.join("tasks")] {
+                if root.is_dir() {
+                    for entry in walkdir::WalkDir::new(root).follow_links(true) {
+                        let entry = entry.map_err(|err| {
+                            format!("Cannot inspect selected outbox aliases: {err}")
+                        })?;
+                        if entry.path_is_symlink() {
+                            selected_paths.push(entry.into_path());
+                        }
+                    }
+                }
+            }
+            let selected_aliases = selected_paths
+                .into_iter()
+                .map(|path| {
+                    let alias = alias_for(&path)?;
+                    Ok((path, alias))
+                })
+                .collect::<Result<Vec<_>, String>>()?;
+            Ok(Some((current, selected_aliases)))
+        },
+    )?;
+    let Some((mut record, selected_aliases)) = claimed else {
+        return Ok(OutboxStatus::Syncing);
+    };
+    let claimed_revision = record_revision(&record);
+    let mut last_owned_revision = claimed_revision.clone();
+    let settlement_id = record.id.clone();
+    let settlement_path = record_path(work, &settlement_id);
+    let settlement_alias = alias_for(&settlement_path)?;
     let output = Command::new(gws_bin)
         .env("PATH", augmented_path())
         .args(gws_args(&record))
         .no_window()
         .output();
-    let next = match output {
-        Ok(output) if output.status.success() => {
-            // The attempt counter is NOT reset here: an upsert whose local
-            // follow-up work fails still has to back off on the documented
-            // schedule, or a persistently unwritable note would drive a remote
-            // patch every minute forever. It is cleared only once the record
-            // is genuinely done, below.
-            let back_off = |record: &mut OutboxRecord, error: String| -> Result<(), String> {
-                record.attempts = record.attempts.saturating_add(1);
-                let retry_at = now + Duration::minutes(backoff_minutes(record.attempts));
-                record.next_retry_at = Some(retry_at.to_rfc3339_opts(SecondsFormat::Secs, true));
-                record.last_error = Some(error);
-                set_record_status(work, record, OutboxStatus::RetryNeeded, now_iso)
-            };
-            if record.op == OutboxOp::Upsert {
-                if record.google_task_id.is_empty() {
-                    let Some(created) = task_id_from_stdout(&output.stdout) else {
-                        // A success exit with no id in the body: treat it like
-                        // any other failure so it backs off and stays visible.
-                        back_off(
+    #[cfg(test)]
+    PathTransactionLease::test_stage(
+        &[work.to_path_buf()],
+        "provider-return:task_integrations_drain",
+    );
+    let provider_succeeded = output.as_ref().is_ok_and(|result| result.status.success());
+    let provider_id = if record.google_task_id.is_empty() {
+        output
+            .as_ref()
+            .ok()
+            .filter(|result| result.status.success())
+            .and_then(|result| task_id_from_stdout(&result.stdout))
+    } else {
+        Some(record.google_task_id.clone())
+    };
+    let commit = || {
+        let mut request = outbox_transaction_request(work)?;
+        for snapshot in &originals {
+            request = request.require_parent_snapshot(snapshot)?;
+        }
+        with_path_transactions(request, |lease| {
+            lease.before_effect()?;
+            assert_maru_can_write(&work.to_string_lossy(), WorkspaceWriteAction::Modify)?;
+            for (path, alias) in &selected_aliases {
+                if alias_for(path)? != *alias {
+                    return Err("Outbox selected alias changed; local commit rejected".into());
+                }
+                lease.ensure_covered([path.clone()])?;
+            }
+            let current = read_record(work, &record.id)?;
+            if current.status != OutboxStatus::Syncing
+                || record_revision(&current) != claimed_revision
+            {
+                return Err(
+                    "outbox_record_changed: provider completed; local commit rejected".into(),
+                );
+            }
+            let selected =
+                crate::vault::resolve_inside_vault(&work.to_string_lossy(), &record.task_path)?;
+            if alias_for(&selected)? != selected_alias {
+                return Err("Outbox task alias changed; local commit rejected".into());
+            }
+            lease.ensure_covered([selected])?;
+            let next = match output {
+                Ok(output) if output.status.success() => {
+                    // The attempt counter is NOT reset here: an upsert whose local
+                    // follow-up work fails still has to back off on the documented
+                    // schedule, or a persistently unwritable note would drive a remote
+                    // patch every minute forever. It is cleared only once the record
+                    // is genuinely done, below.
+                    let back_off = |record: &mut OutboxRecord,
+                                    error: String|
+                     -> Result<(), String> {
+                        record.attempts = record.attempts.saturating_add(1);
+                        let retry_at = now + Duration::minutes(backoff_minutes(record.attempts));
+                        record.next_retry_at =
+                            Some(retry_at.to_rfc3339_opts(SecondsFormat::Secs, true));
+                        record.last_error = Some(error);
+                        set_record_status_in_transaction(
+                            lease,
+                            work,
+                            record,
+                            OutboxStatus::RetryNeeded,
+                            now_iso,
+                        )
+                    };
+                    if record.op == OutboxOp::Upsert {
+                        if record.google_task_id.is_empty() {
+                            let Some(created) = task_id_from_stdout(&output.stdout) else {
+                                record.last_error = Some(format!(
+                                    "{PROVIDER_OUTCOME_UNKNOWN} upsert_response_missing_id: {}",
+                                    String::from_utf8_lossy(&output.stdout).trim()
+                                ));
+                                set_record_status_in_transaction(
+                                    lease,
+                                    work,
+                                    &mut record,
+                                    OutboxStatus::AuthBlocked,
+                                    now_iso,
+                                )?;
+                                return Ok(OutboxStatus::AuthBlocked);
+                            };
+                            // Persist the id BEFORE marking synced: a crash here leaves
+                            // a record whose retry patches rather than inserting again.
+                            record.google_task_id = created;
+                            write_record_in_transaction(lease, work, &record)?;
+                            last_owned_revision = record_revision(&record);
+                        }
+                        // The note is where later completes and reopens look up the
+                        // task, so the record is not done until the ids land there.
+                        // Staying recoverable is what stops a note that never received
+                        // its googleTaskId from being upserted again later as a new
+                        // task; the retry patches, so it cannot duplicate.
+                        if let Err(err) = write_back_provider_ids(work, &record) {
+                            back_off(&mut record, format!("write_back_failed: {err}"))?;
+                            return Ok(OutboxStatus::RetryNeeded);
+                        }
+                    }
+                    record.attempts = 0;
+                    record.next_retry_at = None;
+                    record.last_error = None;
+                    OutboxStatus::Synced
+                }
+                Ok(output) => {
+                    let detail = [output.stderr.as_slice(), output.stdout.as_slice()]
+                        .into_iter()
+                        .map(|bytes| String::from_utf8_lossy(bytes).trim().to_string())
+                        .filter(|value| !value.is_empty())
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    if is_auth_error(&detail) {
+                        record.last_error = Some(detail);
+                        OutboxStatus::AuthBlocked
+                    } else if is_terminal_error(&detail) && upsert_needs_recreate(&record) {
+                        // The remote task behind a stale googleTaskId is gone, but an
+                        // upsert is not satisfied by its absence the way a complete or
+                        // a delete is: the requested update still has to land. Clear
+                        // the id so the retry inserts instead of patching. If the
+                        // tasklist itself is what 404s, the insert 404s too and falls
+                        // through to the discharge below, so this converges.
+                        record.google_task_id = String::new();
+                        record.attempts = record.attempts.saturating_add(1);
+                        let retry_at = now + Duration::minutes(backoff_minutes(record.attempts));
+                        record.next_retry_at =
+                            Some(retry_at.to_rfc3339_opts(SecondsFormat::Secs, true));
+                        record.last_error =
+                            Some(format!("upsert_task_missing_recreating: {detail}"));
+                        set_record_status_in_transaction(
+                            lease,
+                            work,
                             &mut record,
-                            format!(
-                                "upsert_response_missing_id: {}",
-                                String::from_utf8_lossy(&output.stdout).trim()
-                            ),
+                            OutboxStatus::RetryNeeded,
+                            now_iso,
                         )?;
                         return Ok(OutboxStatus::RetryNeeded);
-                    };
-                    // Persist the id BEFORE marking synced: a crash here leaves
-                    // a record whose retry patches rather than inserting again.
-                    record.google_task_id = created;
-                    write_record(work, &record)?;
+                    } else if is_terminal_error(&detail) {
+                        // Remote task/list is gone: the op is moot. Discharge the
+                        // record (delete + event) instead of retrying forever; count
+                        // it as drained.
+                        fs::remove_file(record_path(work, &record.id))
+                            .map_err(|err| format!("Cannot drop terminal outbox record: {err}"))?;
+                        let _ = crate::today_store::append_task_event_for(
+                            work,
+                            now_iso.get(..10).unwrap_or(now_iso),
+                            "outbox_dropped_terminal",
+                            None,
+                            json!({ "id": record.id, "op": record.op, "error": detail }),
+                            now_iso.to_string(),
+                        );
+                        return Ok(OutboxStatus::Synced);
+                    } else {
+                        record.attempts = record.attempts.saturating_add(1);
+                        let retry_at = now + Duration::minutes(backoff_minutes(record.attempts));
+                        record.next_retry_at =
+                            Some(retry_at.to_rfc3339_opts(SecondsFormat::Secs, true));
+                        record.last_error = Some(detail);
+                        OutboxStatus::RetryNeeded
+                    }
                 }
-                // The note is where later completes and reopens look up the
-                // task, so the record is not done until the ids land there.
-                // Staying recoverable is what stops a note that never received
-                // its googleTaskId from being upserted again later as a new
-                // task; the retry patches, so it cannot duplicate.
-                if let Err(err) = write_back_provider_ids(work, &record) {
-                    back_off(&mut record, format!("write_back_failed: {err}"))?;
-                    return Ok(OutboxStatus::RetryNeeded);
+                Err(err) => {
+                    record.attempts = record.attempts.saturating_add(1);
+                    let retry_at = now + Duration::minutes(backoff_minutes(record.attempts));
+                    record.next_retry_at =
+                        Some(retry_at.to_rfc3339_opts(SecondsFormat::Secs, true));
+                    record.last_error = Some(format!("gws_spawn_failed: {err}"));
+                    OutboxStatus::RetryNeeded
                 }
-            }
-            record.attempts = 0;
-            record.next_retry_at = None;
-            record.last_error = None;
-            OutboxStatus::Synced
-        }
-        Ok(output) => {
-            let detail = [output.stderr.as_slice(), output.stdout.as_slice()]
-                .into_iter()
-                .map(|bytes| String::from_utf8_lossy(bytes).trim().to_string())
-                .filter(|value| !value.is_empty())
-                .collect::<Vec<_>>()
-                .join("\n");
-            if is_auth_error(&detail) {
-                record.last_error = Some(detail);
-                OutboxStatus::AuthBlocked
-            } else if is_terminal_error(&detail) && upsert_needs_recreate(&record) {
-                // The remote task behind a stale googleTaskId is gone, but an
-                // upsert is not satisfied by its absence the way a complete or
-                // a delete is: the requested update still has to land. Clear
-                // the id so the retry inserts instead of patching. If the
-                // tasklist itself is what 404s, the insert 404s too and falls
-                // through to the discharge below, so this converges.
-                record.google_task_id = String::new();
-                record.attempts = record.attempts.saturating_add(1);
-                let retry_at = now + Duration::minutes(backoff_minutes(record.attempts));
-                record.next_retry_at = Some(retry_at.to_rfc3339_opts(SecondsFormat::Secs, true));
-                record.last_error = Some(format!("upsert_task_missing_recreating: {detail}"));
-                set_record_status(work, &mut record, OutboxStatus::RetryNeeded, now_iso)?;
-                return Ok(OutboxStatus::RetryNeeded);
-            } else if is_terminal_error(&detail) {
-                // Remote task/list is gone: the op is moot. Discharge the
-                // record (delete + event) instead of retrying forever; count
-                // it as drained.
-                fs::remove_file(record_path(work, &record.id))
-                    .map_err(|err| format!("Cannot drop terminal outbox record: {err}"))?;
-                let _ = crate::today_store::append_task_event_for(
-                    work,
-                    now_iso.get(..10).unwrap_or(now_iso),
-                    "outbox_dropped_terminal",
-                    None,
-                    json!({ "id": record.id, "op": record.op, "error": detail }),
-                    now_iso.to_string(),
-                );
-                return Ok(OutboxStatus::Synced);
-            } else {
-                record.attempts = record.attempts.saturating_add(1);
-                let retry_at = now + Duration::minutes(backoff_minutes(record.attempts));
-                record.next_retry_at = Some(retry_at.to_rfc3339_opts(SecondsFormat::Secs, true));
-                record.last_error = Some(detail);
-                OutboxStatus::RetryNeeded
-            }
-        }
-        Err(err) => {
-            record.attempts = record.attempts.saturating_add(1);
-            let retry_at = now + Duration::minutes(backoff_minutes(record.attempts));
-            record.next_retry_at = Some(retry_at.to_rfc3339_opts(SecondsFormat::Secs, true));
-            record.last_error = Some(format!("gws_spawn_failed: {err}"));
-            OutboxStatus::RetryNeeded
-        }
+            };
+            set_record_status_in_transaction(lease, work, &mut record, next, now_iso)?;
+            Ok(next)
+        })
     };
-    set_record_status(work, &mut record, next, now_iso)?;
-    Ok(next)
+    match commit() {
+        Ok(status) => Ok(status),
+        Err(error) if provider_succeeded => {
+            let detail = format!("{PROVIDER_LOCAL_COMMIT_FAILED} {error}");
+            // The task/events selection may be stale, while the original outbox
+            // still safely accepts a provider receipt. This fresh narrow lease
+            // never recreates a vanished root and never overwrites a changed row.
+            let settle = || -> Result<(), String> {
+                let request =
+                    PathTransactionRequest::new([outbox_dir_for(work), settlement_path.clone()])?
+                        .require_parent_snapshot(&parent)?
+                        .require_parent_snapshot(&outbox_parent)?
+                        .with_workspace_registry()?;
+                with_path_transactions(request, |lease| {
+                    lease.before_effect()?;
+                    assert_maru_can_write(&work.to_string_lossy(), WorkspaceWriteAction::Modify)?;
+                    if alias_for(&settlement_path)? != settlement_alias {
+                        return Err("Outbox receipt alias changed".into());
+                    }
+                    let mut stored = read_record(work, &settlement_id)?;
+                    if stored.status != OutboxStatus::Syncing
+                        || record_revision(&stored) != last_owned_revision
+                    {
+                        return Err("Outbox receipt revision changed".into());
+                    }
+                    if let Some(id) = &provider_id {
+                        stored.google_task_id = id.clone();
+                    }
+                    stored.last_error = Some(
+                        if stored.op == OutboxOp::Upsert && stored.google_task_id.is_empty() {
+                            format!("{PROVIDER_OUTCOME_UNKNOWN} {detail}")
+                        } else {
+                            detail.clone()
+                        },
+                    );
+                    set_record_status_in_transaction(
+                        lease,
+                        work,
+                        &mut stored,
+                        OutboxStatus::AuthBlocked,
+                        now_iso,
+                    )
+                })
+            };
+            match settle() {
+                Ok(()) => Err(detail),
+                Err(settlement_error) => Err(format!(
+                    "{detail}; settlement_record_failed: {settlement_error}"
+                )),
+            }
+        }
+        Err(error) => Err(error),
+    }
 }
 
 /// Drain due outbox records (`ready`, or `retryNeeded` past `nextRetryAt`)
 /// through `gws`. Idempotent: records that are not due are untouched, and a
 /// second drain with no changes is a no-op. `authBlocked` records are
 /// skipped until `task_integrations_retry` requeues them.
-#[tauri::command]
 pub fn task_integrations_drain(
     work_path: String,
     now_iso: String,
     gws_path: Option<String>,
 ) -> Result<DrainOutcome, String> {
-    assert_maru_can_write(&work_path, WorkspaceWriteAction::Modify)?;
     let work = normalize_existing_dir(&work_path)?;
     let now = parse_now(&now_iso)?;
     let mut outcome = DrainOutcome {
@@ -733,8 +1114,13 @@ pub fn task_integrations_drain(
         failed: 0,
         blocked: 0,
     };
-    // A `syncing` record left by a crashed drain is treated as ready.
-    let _ = recover_outbox(&work);
+    // Legacy interrupted records recover as ready; marked provider calls require
+    // manual settlement and cannot be automatically replayed.
+    let caller_parent = PathTransactionParent::capture(Path::new(&work_path))?;
+    with_path_transactions(
+        outbox_transaction_request(&work)?.require_parent_snapshot(&caller_parent)?,
+        |lease| recover_outbox_in_transaction(lease, &work),
+    )?;
     let due: Vec<OutboxRecord> = list_records(&work)?
         .into_iter()
         .filter(|record| record_due(record, now))
@@ -744,9 +1130,10 @@ pub fn task_integrations_drain(
     }
     let gws_bin = resolve_gws(gws_path.as_deref())?;
     for record in due {
-        match drain_record(&work, &gws_bin, &record, &now_iso, now)? {
+        match drain_record(&work, &gws_bin, &record, &now_iso, now, &caller_parent)? {
             OutboxStatus::Synced => outcome.drained += 1,
             OutboxStatus::AuthBlocked => outcome.blocked += 1,
+            OutboxStatus::Syncing => {} // Another drain owns this record.
             _ => outcome.failed += 1,
         }
     }
@@ -755,17 +1142,46 @@ pub fn task_integrations_drain(
 
 /// Requeue `retryNeeded`/`authBlocked` records (all, or only `ids`) so the
 /// next drain attempts them again immediately.
-#[tauri::command]
 pub fn task_integrations_retry(
     work_path: String,
     ids: Option<Vec<String>>,
     now_iso: String,
 ) -> Result<RetryOutcome, String> {
-    assert_maru_can_write(&work_path, WorkspaceWriteAction::Modify)?;
     let work = normalize_existing_dir(&work_path)?;
     parse_now(&now_iso)?;
+    with_path_transactions(
+        outbox_transaction_request(&work)?.require_parent(Path::new(&work_path))?,
+        |lease| task_integrations_retry_in_transaction(lease, &work, ids, &now_iso),
+    )
+}
+
+pub(crate) fn task_integrations_retry_in_transaction(
+    lease: &PathTransactionLease,
+    work: &Path,
+    ids: Option<Vec<String>>,
+    now_iso: &str,
+) -> Result<RetryOutcome, String> {
+    lease.ensure_covered([outbox_dir_for(work)])?;
+    lease.ensure_workspace_registry()?;
+    lease.before_effect()?;
+    assert_maru_can_write(&work.to_string_lossy(), WorkspaceWriteAction::Modify)?;
+    let records = list_records(work)?;
+    if records.iter().any(|record| {
+        matches!(
+            record.status,
+            OutboxStatus::RetryNeeded | OutboxStatus::AuthBlocked
+        ) && ids.as_ref().map_or(true, |ids| ids.contains(&record.id))
+            && record.op == OutboxOp::Upsert
+            && record.google_task_id.is_empty()
+            && record
+                .last_error
+                .as_deref()
+                .is_some_and(|error| error.starts_with(PROVIDER_OUTCOME_UNKNOWN))
+    }) {
+        return Err("provider_outcome_requires_reconciliation: external result is unknown and no safe provider task ID is available".into());
+    }
     let mut requeued = 0;
-    for mut record in list_records(&work)? {
+    for mut record in records {
         if !matches!(
             record.status,
             OutboxStatus::RetryNeeded | OutboxStatus::AuthBlocked
@@ -778,17 +1194,69 @@ pub fn task_integrations_retry(
             }
         }
         record.next_retry_at = None;
-        set_record_status(&work, &mut record, OutboxStatus::Ready, &now_iso)?;
+        set_record_status_in_transaction(lease, work, &mut record, OutboxStatus::Ready, now_iso)?;
         requeued += 1;
     }
     Ok(RetryOutcome { requeued })
 }
 
 /// All outbox records, for the frontend sync-status surface.
-#[tauri::command]
 pub fn read_task_integrations(work_path: String) -> Result<Vec<OutboxRecord>, String> {
     let work = normalize_existing_dir(&work_path)?;
     list_records(&work)
+}
+
+/// IPC owns its arguments; filesystem walks, admission waits and gws all run
+/// on blocking workers. The original synchronous entries serve Rust callers.
+pub mod ipc {
+    use super::*;
+    #[tauri::command]
+    pub async fn task_integrations_drain(
+        work_path: String,
+        now_iso: String,
+        gws_path: Option<String>,
+    ) -> Result<DrainOutcome, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(
+                &[PathBuf::from(&work_path)],
+                "worker:task_integrations_drain",
+            );
+            super::task_integrations_drain(work_path, now_iso, gws_path)
+        })
+        .await
+        .map_err(|err| format!("task_integrations_drain_task_failed: {err}"))?
+    }
+    #[tauri::command]
+    pub async fn task_integrations_retry(
+        work_path: String,
+        ids: Option<Vec<String>>,
+        now_iso: String,
+    ) -> Result<RetryOutcome, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(
+                &[PathBuf::from(&work_path)],
+                "worker:task_integrations_retry",
+            );
+            super::task_integrations_retry(work_path, ids, now_iso)
+        })
+        .await
+        .map_err(|err| format!("task_integrations_retry_task_failed: {err}"))?
+    }
+    #[tauri::command]
+    pub async fn read_task_integrations(work_path: String) -> Result<Vec<OutboxRecord>, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(
+                &[PathBuf::from(&work_path)],
+                "worker:read_task_integrations",
+            );
+            super::read_task_integrations(work_path)
+        })
+        .await
+        .map_err(|err| format!("read_task_integrations_task_failed: {err}"))?
+    }
 }
 
 #[cfg(test)]
@@ -805,6 +1273,7 @@ mod tests {
             use std::os::unix::fs::PermissionsExt;
             fs::set_permissions(&bin, fs::Permissions::from_mode(0o755)).unwrap();
         }
+        assert_eq!(resolve_gws(Some(bin.to_str().unwrap())).unwrap(), bin);
         bin
     }
 
@@ -1329,28 +1798,56 @@ mod tests {
     }
 
     #[test]
-    fn upsert_success_without_an_id_backs_off_instead_of_reporting_synced() {
-        let tmp = tempfile::tempdir().unwrap();
-        let work_path = tmp.path().to_string_lossy().to_string();
-        let fake = write_fake_gws(tmp.path(), "gws-empty", "#!/bin/sh\necho '{}'\nexit 0\n");
-        upsert_record(tmp.path(), "");
-
-        let outcome = task_integrations_drain(
+    fn phase08_12_outbox_success_without_id_is_manual_only_and_never_reinserts() {
+        use crate::atomic_file::phase08_06::{run, Home};
+        let home = Home::new();
+        let tmp = tempfile::tempdir_in(home.root.path()).unwrap();
+        let root = tmp.path();
+        let work_path = root.to_string_lossy().into_owned();
+        let trace = root.join("calls");
+        let fake = write_fake_gws(
+            root,
+            "gws-empty",
+            &format!(
+                "#!/bin/sh\necho call >> '{}'\necho '{{}}'\n",
+                trace.display()
+            ),
+        );
+        let queued = upsert_record(root, "");
+        let outcome = run(ipc::task_integrations_drain(
             work_path.clone(),
-            NOW.to_string(),
-            Some(fake.to_string_lossy().to_string()),
-        )
+            NOW.into(),
+            Some(fake.to_string_lossy().into_owned()),
+        ))
         .unwrap();
-        assert_eq!(outcome.failed, 1);
+        assert_eq!(outcome.blocked, 1);
         assert_eq!(outcome.drained, 0);
-        let record = &read_task_integrations(work_path).unwrap()[0];
-        assert_eq!(record.status, OutboxStatus::RetryNeeded);
-        assert_eq!(record.google_task_id, "");
+        let record = read_record(root, &queued.id).unwrap();
+        assert_eq!(record.status, OutboxStatus::AuthBlocked);
+        assert!(record.google_task_id.is_empty());
         assert!(record
             .last_error
             .as_deref()
             .unwrap()
-            .starts_with("upsert_response_missing_id"));
+            .starts_with(PROVIDER_OUTCOME_UNKNOWN));
+        assert!(run(ipc::task_integrations_retry(
+            work_path.clone(),
+            None,
+            NOW.into()
+        ))
+        .unwrap_err()
+        .starts_with("provider_outcome_requires_reconciliation:"));
+        assert_eq!(
+            run(ipc::task_integrations_drain(
+                work_path,
+                NOW.into(),
+                Some(fake.to_string_lossy().into_owned())
+            ))
+            .unwrap()
+            .drained,
+            0
+        );
+        assert_eq!(fs::read_to_string(trace).unwrap().lines().count(), 1);
     }
 
     #[test]
@@ -1559,5 +2056,697 @@ mod tests {
         sample_record(work, OutboxOp::Complete, OutboxStatus::Synced);
         assert!(has_synced_complete(work, "gtask-1").unwrap());
         assert!(!has_synced_complete(work, "gtask-other").unwrap());
+    }
+    #[test]
+    fn phase08_12_outbox_all_wrappers_yield_in_polling_task_and_keep_legacy_errors() {
+        use crate::atomic_file::phase08_06::{boundary, run, Home};
+        let home = Home::new();
+        let tmp = tempfile::tempdir_in(home.root.path()).unwrap();
+        let root = tmp.path();
+        let w = root.to_string_lossy().into_owned();
+        boundary(
+            root.to_path_buf(),
+            "task_integrations_drain",
+            ipc::task_integrations_drain(
+                w.clone(),
+                NOW.into(),
+                Some(root.join("never-gws").to_string_lossy().into_owned()),
+            ),
+        );
+        boundary(
+            root.to_path_buf(),
+            "task_integrations_retry",
+            ipc::task_integrations_retry(w.clone(), None, NOW.into()),
+        );
+        boundary(
+            root.to_path_buf(),
+            "read_task_integrations",
+            ipc::read_task_integrations(w.clone()),
+        );
+        assert!(
+            run(ipc::task_integrations_retry(w.clone(), None, "bad".into()))
+                .unwrap_err()
+                .starts_with("now_iso must be RFC3339:")
+        );
+        let record = sample_record(root, OutboxOp::Complete, OutboxStatus::AuthBlocked);
+        assert_eq!(
+            run(ipc::read_task_integrations(w.clone())).unwrap()[0].id,
+            record.id
+        );
+        assert_eq!(
+            run(ipc::task_integrations_retry(
+                w.clone(),
+                Some(vec![record.id]),
+                NOW.into()
+            ))
+            .unwrap()
+            .requeued,
+            1
+        );
+        let fake = write_fake_gws(root, "fixture-gws", "#!/bin/sh\necho '{}'\n");
+        assert_eq!(resolve_gws(Some(fake.to_str().unwrap())).unwrap(), fake);
+        assert_eq!(
+            run(ipc::task_integrations_drain(
+                w,
+                NOW.into(),
+                Some(fake.to_string_lossy().into_owned())
+            ))
+            .unwrap()
+            .drained,
+            1
+        );
+    }
+
+    #[test]
+    fn phase08_12_outbox_provider_overlap_has_one_external_effect_and_recovery_skips_owner() {
+        use crate::atomic_file::phase08_06::{run, Held, Home};
+        let home = Home::new();
+        let tmp = tempfile::tempdir_in(home.root.path()).unwrap();
+        let root = tmp.path();
+        let w = root.to_string_lossy().into_owned();
+        let record = upsert_record(root, "");
+        let trace = root.join("calls");
+        let fake = write_fake_gws(
+            root,
+            "fixture-gws",
+            &format!(
+                "#!/bin/sh\nprintf 'call\\n' >> '{}'\necho '{{\"id\":\"created-once\"}}'\n",
+                trace.display()
+            ),
+        );
+        assert_eq!(resolve_gws(Some(fake.to_str().unwrap())).unwrap(), fake);
+        let held = Held::new(
+            root.to_path_buf(),
+            "provider-return:task_integrations_drain",
+        );
+        let (tx, rx) = std::sync::mpsc::channel();
+        let first_w = w.clone();
+        let first_fake = fake.clone();
+        tauri::async_runtime::spawn(async move {
+            tx.send(
+                ipc::task_integrations_drain(
+                    first_w,
+                    NOW.into(),
+                    Some(first_fake.to_string_lossy().into_owned()),
+                )
+                .await,
+            )
+            .unwrap();
+        });
+        held.wait();
+        assert_eq!(recover_outbox(root).unwrap().recovered, 0);
+        #[cfg(not(unix))]
+        let duplicate_work = w.clone();
+        #[cfg(unix)]
+        let duplicate_work = {
+            let alias = home.root.path().join("duplicate-work-alias");
+            std::os::unix::fs::symlink(root, &alias).unwrap();
+            assert_eq!(recover_outbox(&alias).unwrap().recovered, 0);
+            alias.to_string_lossy().into_owned()
+        };
+        let second = run(ipc::task_integrations_drain(
+            duplicate_work,
+            NOW.into(),
+            Some(fake.to_string_lossy().into_owned()),
+        ))
+        .unwrap();
+        assert_eq!(second.drained, 0);
+        assert_eq!(fs::read_to_string(&trace).unwrap().lines().count(), 1);
+        // Retry acquires admission during the provider stage; no guard spans it.
+        assert_eq!(
+            run(ipc::task_integrations_retry(w, None, NOW.into()))
+                .unwrap()
+                .requeued,
+            0
+        );
+        held.release();
+        assert_eq!(
+            rx.recv_timeout(std::time::Duration::from_secs(5))
+                .unwrap()
+                .unwrap()
+                .drained,
+            1
+        );
+        assert!(!ACTIVE_OUTBOX
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|(key, _)| key.starts_with(root)));
+        let stored = read_record(root, &record.id).unwrap();
+        assert_eq!(stored.status, OutboxStatus::Synced);
+        assert_eq!(stored.google_task_id, "created-once");
+        assert!(fs::read_to_string(root.join(&stored.task_path))
+            .unwrap()
+            .contains("created-once"));
+    }
+
+    #[test]
+    fn phase08_12_outbox_retry_same_target_contention_failed_and_unwind_release() {
+        use crate::atomic_file::{
+            phase08_06::{run, Held, Home},
+            PathTransactionTestHook,
+        };
+        let home = Home::new();
+        let tmp = tempfile::tempdir_in(home.root.path()).unwrap();
+        let root = tmp.path();
+        let w = root.to_string_lossy().into_owned();
+        sample_record(root, OutboxOp::Complete, OutboxStatus::RetryNeeded);
+        let held = Held::new(today_dir(root), "admitted");
+        let (tx, rx) = std::sync::mpsc::channel();
+        let first = w.clone();
+        tauri::async_runtime::spawn(async move {
+            tx.send(ipc::task_integrations_retry(first, None, NOW.into()).await)
+                .unwrap();
+        });
+        held.wait();
+        let waiting = Held::new(today_dir(root), "before-admission");
+        let (tx2, rx2) = std::sync::mpsc::channel();
+        let second = w.clone();
+        tauri::async_runtime::spawn(async move {
+            tx2.send(ipc::task_integrations_retry(second, None, NOW.into()).await)
+                .unwrap();
+        });
+        waiting.wait();
+        waiting.release();
+        assert!(rx2.try_recv().is_err());
+        held.release();
+        assert_eq!(
+            rx.recv_timeout(std::time::Duration::from_secs(5))
+                .unwrap()
+                .unwrap()
+                .requeued,
+            1
+        );
+        assert_eq!(
+            rx2.recv_timeout(std::time::Duration::from_secs(5))
+                .unwrap()
+                .unwrap()
+                .requeued,
+            0
+        );
+        drop(held);
+        drop(waiting);
+        let hook =
+            PathTransactionTestHook::new(today_dir(root), "admitted", || panic!("fixture unwind"));
+        assert!(
+            run(ipc::task_integrations_retry(w.clone(), None, NOW.into()))
+                .unwrap_err()
+                .contains("task_failed")
+        );
+        drop(hook);
+        assert_eq!(
+            run(ipc::task_integrations_retry(w.clone(), None, NOW.into()))
+                .unwrap()
+                .requeued,
+            0
+        );
+        let record = sample_record(root, OutboxOp::Complete, OutboxStatus::Ready);
+        let fake = write_fake_gws(
+            root,
+            "fixture-fail",
+            "#!/bin/sh\necho 'temporary failure' >&2\nexit 1\n",
+        );
+        assert_eq!(resolve_gws(Some(fake.to_str().unwrap())).unwrap(), fake);
+        assert_eq!(
+            run(ipc::task_integrations_drain(
+                w.clone(),
+                NOW.into(),
+                Some(fake.to_string_lossy().into_owned())
+            ))
+            .unwrap()
+            .failed,
+            2
+        );
+        assert_eq!(read_record(root, &record.id).unwrap().attempts, 1);
+        assert_eq!(
+            run(ipc::task_integrations_retry(w, None, NOW.into()))
+                .unwrap()
+                .requeued,
+            2
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn phase08_12_outbox_real_alias_policy_denies_before_provider_then_releases() {
+        use crate::atomic_file::phase08_06::{run, Home};
+        use crate::scratchpad::phase08_08::registry;
+        let home = Home::new();
+        let tmp = tempfile::tempdir_in(home.root.path()).unwrap();
+        let root = tmp.path();
+        let record = sample_record(root, OutboxOp::Complete, OutboxStatus::AuthBlocked);
+        let original = fs::read(record_path(root, &record.id)).unwrap();
+        let alias = home.root.path().join("alias");
+        std::os::unix::fs::symlink(root, &alias).unwrap();
+        let trace = root.join("calls");
+        let fake = write_fake_gws(
+            root,
+            "fixture-gws",
+            &format!(
+                "#!/bin/sh\necho call >> '{}'\necho '{{}}'\n",
+                trace.display()
+            ),
+        );
+        assert_eq!(resolve_gws(Some(fake.to_str().unwrap())).unwrap(), fake);
+        for (registered, caller) in [(root, alias.as_path()), (alias.as_path(), root)] {
+            for policy in ["readOnly", "delegated"] {
+                registry(registered, policy);
+                assert!(run(ipc::task_integrations_retry(
+                    caller.to_string_lossy().into_owned(),
+                    None,
+                    NOW.into()
+                ))
+                .is_err());
+                assert!(run(ipc::task_integrations_drain(
+                    caller.to_string_lossy().into_owned(),
+                    NOW.into(),
+                    Some(fake.to_string_lossy().into_owned())
+                ))
+                .is_err());
+                assert!(!trace.exists());
+                assert_eq!(fs::read(record_path(root, &record.id)).unwrap(), original);
+            }
+        }
+        registry(root, "direct");
+        assert_eq!(
+            run(ipc::task_integrations_retry(
+                root.to_string_lossy().into_owned(),
+                None,
+                NOW.into()
+            ))
+            .unwrap()
+            .requeued,
+            1
+        );
+    }
+
+    #[test]
+    fn phase08_12_outbox_provider_success_is_distinct_from_rejected_local_commit() {
+        use crate::atomic_file::{
+            phase08_06::{run, Home},
+            PathTransactionTestHook,
+        };
+        use crate::scratchpad::phase08_08::registry;
+        let home = Home::new();
+        for rejection in ["parent", "policy", "revision"] {
+            let tmp = tempfile::tempdir_in(home.root.path()).unwrap();
+            let root = tmp.path();
+            let record = upsert_record(root, "");
+            let work_path = root.to_string_lossy().into_owned();
+            let trace = root.join("calls");
+            let fake = write_fake_gws(
+                root,
+                "fixture-gws",
+                &format!(
+                    "#!/bin/sh\necho \"$3\" >> '{}'\necho '{{\"id\":\"provider-created\"}}'\n",
+                    trace.display()
+                ),
+            );
+            let selected = root.to_path_buf();
+            let record_id = record.id.clone();
+            let hook = PathTransactionTestHook::new(
+                root.to_path_buf(),
+                "provider-return:task_integrations_drain",
+                move || match rejection {
+                    "parent" => {
+                        fs::rename(selected.join("tasks"), selected.join("moved-tasks")).unwrap()
+                    }
+                    "policy" => registry(&selected, "readOnly"),
+                    _ => {
+                        let mut current = read_record(&selected, &record_id).unwrap();
+                        current.attempts = 7;
+                        write_record(&selected, &current).unwrap();
+                    }
+                },
+            );
+            let err = run(ipc::task_integrations_drain(
+                work_path.clone(),
+                NOW.into(),
+                Some(fake.to_string_lossy().into_owned()),
+            ))
+            .unwrap_err();
+            assert!(
+                err.starts_with(PROVIDER_LOCAL_COMMIT_FAILED),
+                "{rejection}: {err}"
+            );
+            drop(hook);
+            if rejection == "policy" {
+                registry(root, "direct");
+            }
+            // The next drain may recover durable state, but cannot repeat the effect.
+            assert_eq!(
+                run(ipc::task_integrations_drain(
+                    work_path.clone(),
+                    NOW.into(),
+                    Some(fake.to_string_lossy().into_owned())
+                ))
+                .unwrap()
+                .drained,
+                0
+            );
+            let stored = read_record(root, &record.id).unwrap();
+            assert_eq!(stored.status, OutboxStatus::AuthBlocked);
+            assert_eq!(
+                fs::read_to_string(&trace)
+                    .unwrap()
+                    .lines()
+                    .collect::<Vec<_>>(),
+                ["insert"]
+            );
+            if rejection == "parent" {
+                assert!(!root.join("tasks").exists());
+                assert_eq!(stored.google_task_id, "provider-created");
+                fs::rename(root.join("moved-tasks"), root.join("tasks")).unwrap();
+                assert_eq!(
+                    run(ipc::task_integrations_retry(
+                        work_path.clone(),
+                        None,
+                        NOW.into()
+                    ))
+                    .unwrap()
+                    .requeued,
+                    1
+                );
+                assert_eq!(
+                    run(ipc::task_integrations_drain(
+                        work_path.clone(),
+                        NOW.into(),
+                        Some(fake.to_string_lossy().into_owned())
+                    ))
+                    .unwrap()
+                    .drained,
+                    1
+                );
+                assert_eq!(
+                    fs::read_to_string(&trace)
+                        .unwrap()
+                        .lines()
+                        .collect::<Vec<_>>(),
+                    ["insert", "patch"]
+                );
+            } else {
+                assert!(stored.google_task_id.is_empty());
+                assert!(
+                    run(ipc::task_integrations_retry(work_path, None, NOW.into()))
+                        .unwrap_err()
+                        .starts_with("provider_outcome_requires_reconciliation:")
+                );
+            }
+            assert!(!ACTIVE_OUTBOX
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|(key, _)| key.starts_with(root)));
+        }
+    }
+
+    #[test]
+    fn phase08_12_outbox_files_parent_contention_both_orders_never_recreates_parent() {
+        use crate::atomic_file::phase08_06::{run, Held, Home};
+        let home = Home::new();
+        for parent_first in [false, true] {
+            let tmp = tempfile::tempdir_in(home.root.path()).unwrap();
+            let root = tmp.path();
+            let record = sample_record(root, OutboxOp::Complete, OutboxStatus::RetryNeeded);
+            let name = root.file_name().unwrap().to_string_lossy().into_owned();
+            let renamed = format!("moved-{name}");
+            let moved = home.root.path().join(&renamed);
+            let w = root.to_string_lossy().into_owned();
+            let parent = home.root.path().to_string_lossy().into_owned();
+            if parent_first {
+                let held = Held::new(root.to_path_buf(), "admitted");
+                let first = std::thread::spawn(move || {
+                    run(crate::workspace_files::ipc::rename_workspace_entry(
+                        parent, name, renamed,
+                    ))
+                });
+                held.wait();
+                let waiting = Held::new(today_dir(root), "before-admission");
+                let (tx, rx) = std::sync::mpsc::channel();
+                let second = std::thread::spawn(move || {
+                    tx.send(run(ipc::task_integrations_retry(w, None, NOW.into())))
+                        .unwrap();
+                });
+                waiting.wait();
+                waiting.release();
+                assert!(rx.try_recv().is_err());
+                held.release();
+                first.join().unwrap().unwrap();
+                assert!(rx
+                    .recv_timeout(std::time::Duration::from_secs(5))
+                    .unwrap()
+                    .is_err());
+                second.join().unwrap();
+                assert_eq!(
+                    read_record(&moved, &record.id).unwrap().status,
+                    OutboxStatus::RetryNeeded
+                );
+            } else {
+                let held = Held::new(today_dir(root), "admitted");
+                let first = std::thread::spawn(move || {
+                    run(ipc::task_integrations_retry(w, None, NOW.into()))
+                });
+                held.wait();
+                let waiting = Held::new(root.to_path_buf(), "before-admission");
+                let (tx, rx) = std::sync::mpsc::channel();
+                let second = std::thread::spawn(move || {
+                    tx.send(run(crate::workspace_files::ipc::rename_workspace_entry(
+                        parent, name, renamed,
+                    )))
+                    .unwrap();
+                });
+                waiting.wait();
+                waiting.release();
+                assert!(rx.try_recv().is_err());
+                held.release();
+                assert_eq!(first.join().unwrap().unwrap().requeued, 1);
+                rx.recv_timeout(std::time::Duration::from_secs(5))
+                    .unwrap()
+                    .unwrap();
+                second.join().unwrap();
+                assert_eq!(
+                    read_record(&moved, &record.id).unwrap().status,
+                    OutboxStatus::Ready
+                );
+            }
+            assert!(!root.exists());
+            fs::remove_dir_all(moved).unwrap();
+        }
+    }
+    #[cfg(unix)]
+    #[test]
+    fn phase08_12_outbox_record_and_event_alias_retarget_rejects_identical_revision() {
+        use crate::atomic_file::{
+            phase08_06::{run, Home},
+            PathTransactionTestHook,
+        };
+        let home = Home::new();
+        for event_alias in [false, true] {
+            let tmp = tempfile::tempdir_in(home.root.path()).unwrap();
+            let root = tmp.path();
+            let record = sample_record(root, OutboxOp::Complete, OutboxStatus::Ready);
+            let events = today_dir(root).join("events");
+            fs::create_dir_all(&events).unwrap();
+            let event = events.join("2026-07.jsonl");
+            fs::write(&event, "original-event\n").unwrap();
+            let alternate = root.join("alternate");
+            fs::write(&alternate, "original-event\n").unwrap();
+            let target = if event_alias {
+                event.clone()
+            } else {
+                record_path(root, &record.id)
+            };
+            let alternate_hook = alternate.clone();
+            let recovery_work = root.to_path_buf();
+            let hook = PathTransactionTestHook::new(
+                root.to_path_buf(),
+                "provider-return:task_integrations_drain",
+                move || {
+                    if !event_alias {
+                        fs::copy(&target, &alternate_hook).unwrap();
+                    }
+                    fs::remove_file(&target).unwrap();
+                    std::os::unix::fs::symlink(&alternate_hook, &target).unwrap();
+                    assert_eq!(recover_outbox(&recovery_work).unwrap().recovered, 0);
+                },
+            );
+            let fake = write_fake_gws(root, "fixture-gws", "#!/bin/sh\necho '{}'\n");
+            assert_eq!(resolve_gws(Some(fake.to_str().unwrap())).unwrap(), fake);
+            let err = run(ipc::task_integrations_drain(
+                root.to_string_lossy().into_owned(),
+                NOW.into(),
+                Some(fake.to_string_lossy().into_owned()),
+            ))
+            .unwrap_err();
+            assert!(
+                err.starts_with("provider_succeeded_local_commit_failed:"),
+                "{err}"
+            );
+            assert!(err.contains("alias changed"), "{err}");
+            assert_eq!(
+                read_record(root, &record.id).unwrap().status,
+                if event_alias {
+                    OutboxStatus::AuthBlocked
+                } else {
+                    OutboxStatus::Syncing
+                }
+            );
+            if event_alias {
+                assert_eq!(fs::read_to_string(alternate).unwrap(), "original-event\n");
+            }
+            assert!(!ACTIVE_OUTBOX
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|(key, _)| key.starts_with(root)));
+            drop(hook);
+        }
+    }
+
+    #[test]
+    fn phase08_12_outbox_provider_unwind_removes_owner_and_reuses_exact_key() {
+        use crate::atomic_file::{
+            phase08_06::{run, Home},
+            PathTransactionTestHook,
+        };
+        let home = Home::new();
+        let tmp = tempfile::tempdir_in(home.root.path()).unwrap();
+        let root = tmp.path();
+        let record = sample_record(root, OutboxOp::Complete, OutboxStatus::Ready);
+        let fake = write_fake_gws(root, "fixture-gws", "#!/bin/sh\necho '{}'\n");
+        assert_eq!(resolve_gws(Some(fake.to_str().unwrap())).unwrap(), fake);
+        let hook = PathTransactionTestHook::new(
+            root.to_path_buf(),
+            "provider-return:task_integrations_drain",
+            || panic!("fixture provider unwind"),
+        );
+        assert!(run(ipc::task_integrations_drain(
+            root.to_string_lossy().into_owned(),
+            NOW.into(),
+            Some(fake.to_string_lossy().into_owned())
+        ))
+        .unwrap_err()
+        .contains("task_failed"));
+        drop(hook);
+        assert!(!ACTIVE_OUTBOX
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|(key, _)| key.starts_with(root)));
+        assert_eq!(recover_outbox(root).unwrap().recovered, 1);
+        assert_eq!(
+            read_record(root, &record.id).unwrap().status,
+            OutboxStatus::AuthBlocked
+        );
+        assert_eq!(
+            run(ipc::task_integrations_drain(
+                root.to_string_lossy().into_owned(),
+                NOW.into(),
+                Some(fake.to_string_lossy().into_owned())
+            ))
+            .unwrap()
+            .drained,
+            0
+        );
+        assert_eq!(
+            run(ipc::task_integrations_retry(
+                root.to_string_lossy().into_owned(),
+                None,
+                NOW.into()
+            ))
+            .unwrap()
+            .requeued,
+            1
+        );
+        assert_eq!(
+            run(ipc::task_integrations_drain(
+                root.to_string_lossy().into_owned(),
+                NOW.into(),
+                Some(fake.to_string_lossy().into_owned())
+            ))
+            .unwrap()
+            .drained,
+            1
+        );
+        assert_eq!(
+            read_record(root, &record.id).unwrap().status,
+            OutboxStatus::Synced
+        );
+        assert!(!ACTIVE_OUTBOX
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|(key, _)| key.starts_with(root)));
+    }
+    #[test]
+    fn phase08_12_outbox_moved_root_recovers_unknown_insert_as_manual_only() {
+        use crate::atomic_file::{
+            phase08_06::{run, Home},
+            PathTransactionTestHook,
+        };
+        let home = Home::new();
+        let tmp = tempfile::tempdir_in(home.root.path()).unwrap();
+        let root = tmp.path();
+        let queued = upsert_record(root, "");
+        let trace = home.root.path().join("moved-root-calls");
+        let fake = write_fake_gws(
+            root,
+            "fixture-gws",
+            &format!(
+                "#!/bin/sh\necho call >> '{}'\necho '{{\"id\":\"remote-created\"}}'\n",
+                trace.display()
+            ),
+        );
+        let moved = home.root.path().join("moved-root");
+        let old = root.to_path_buf();
+        let destination = moved.clone();
+        let hook = PathTransactionTestHook::new(
+            root.to_path_buf(),
+            "provider-return:task_integrations_drain",
+            move || fs::rename(&old, &destination).unwrap(),
+        );
+        let err = run(ipc::task_integrations_drain(
+            root.to_string_lossy().into_owned(),
+            NOW.into(),
+            Some(fake.to_string_lossy().into_owned()),
+        ))
+        .unwrap_err();
+        assert!(err.starts_with(PROVIDER_LOCAL_COMMIT_FAILED), "{err}");
+        assert!(!root.exists());
+        drop(hook);
+        assert_eq!(recover_outbox(&moved).unwrap().recovered, 1);
+        let stored = read_record(&moved, &queued.id).unwrap();
+        assert_eq!(stored.status, OutboxStatus::AuthBlocked);
+        assert!(stored.google_task_id.is_empty());
+        assert!(stored
+            .last_error
+            .as_deref()
+            .unwrap()
+            .starts_with(PROVIDER_OUTCOME_UNKNOWN));
+        let moved_fake = moved.join("fixture-gws");
+        assert_eq!(
+            resolve_gws(Some(moved_fake.to_str().unwrap())).unwrap(),
+            moved_fake
+        );
+        assert_eq!(
+            run(ipc::task_integrations_drain(
+                moved.to_string_lossy().into_owned(),
+                NOW.into(),
+                Some(moved_fake.to_string_lossy().into_owned())
+            ))
+            .unwrap()
+            .drained,
+            0
+        );
+        assert!(run(ipc::task_integrations_retry(
+            moved.to_string_lossy().into_owned(),
+            None,
+            NOW.into()
+        ))
+        .unwrap_err()
+        .starts_with("provider_outcome_requires_reconciliation:"));
+        assert_eq!(fs::read_to_string(trace).unwrap().lines().count(), 1);
+        assert!(!root.exists());
+        fs::remove_dir_all(moved).unwrap();
     }
 }

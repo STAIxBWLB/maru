@@ -110,7 +110,7 @@ const EMPTY_SIDEBAR_SLICE: OutlineSidebarSlice = {
   contentCount: 0,
   typeCounts: [],
   documentViews: [],
-  viewCounts: { inbox: 0, drafts: 0, archive: 0, recentlyUpdated: 0 },
+  viewCounts: { drafts: 0, archive: 0, recentlyUpdated: 0 },
   customViewCounts: {},
   submodulePaths: [],
   submoduleCounts: {},

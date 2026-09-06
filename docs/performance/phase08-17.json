@@ -1,0 +1,700 @@
+{
+  "plan": "08-17",
+  "moduleIntegrationOwner": "08-17",
+  "commands": [
+    {
+      "name": "agents_account_status",
+      "module": "src-tauri/src/agent_host/status.rs",
+      "registrationPath": "src-tauri/src/lib.rs::agent_host::status::ipc::agents_account_status",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/agent_host/status.rs::ipc::agents_account_status delegates to src-tauri/src/agent_host/status.rs::agents_account_status, which probes each CLI provider through src-tauri/src/agent_host/status.rs::account_status and src-tauri/src/agent_host/status.rs::run_cli inside the same blocking worker.",
+        "src-tauri/src/agent_host/status.rs::probe_claude_account, src-tauri/src/agent_host/status.rs::probe_codex_account, src-tauri/src/agent_host/status.rs::probe_kimi_account and src-tauri/src/agent_host/status.rs::probe_kiro_account only exec the resolved or overridden provider binary and read finite credential JSON via src-tauri/src/agent_host/status.rs::home_file; no filesystem mutation is owned."
+      ],
+      "workerBoundary": "src-tauri/src/agent_host/status.rs::ipc::agents_account_status awaits tauri::async_runtime::spawn_blocking before any CLI probe runs; the success payload stays the existing Vec<AgentAccountStatus> (the sync fn returns the same Vec, wrapped in Ok by the worker), and only a JoinError maps to the display-only agents_account_status_task_failed String.",
+      "syncCallers": [
+        "src-tauri/src/agent_host/mod.rs re-exports agents_account_status for Rust callers; no scheduler or other command invokes it synchronously, so all frontend traffic crosses the async worker boundary."
+      ],
+      "mutationKey": {
+        "readOnly": true,
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "sharedAdmissionEntry": "No filesystem mutation is owned by this command: account probes only execute the caller-overridden or PATH-resolved CLI binary and read finite credential files under the user home directory.",
+        "postAdmissionPreconditions": [
+          "A command override keeps the probe on the caller-selected absolute binary path; without an override the provider binary resolves from PATH exactly as before the conversion."
+        ],
+        "domainLockOrder": "No command-owned filesystem mutation lease exists; the whole probe runs inside the isolated blocking worker."
+      },
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts"
+        ],
+        "payload": "agentsAccountStatus (src/lib/api.ts) invokes agents_account_status and the agents settings pane renders the installed/auth rows from the returned array.",
+        "terminalNoticeOwner": "The agents settings pane owns completion and error display for the account refresh. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=agents_account_status"
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_17_status_account_and_usage_fixture_results_and_legacy_rejections",
+          "phase08_17_status_each_wrapper_yields_same_poll_and_maps_join_failure"
+        ],
+        "workerProof": "Each agents_* future is held at spawn_blocking worker entry (worker:agents_account_status stage), manually polled on the same async task and yields before release; a panicked or cancelled worker maps to the display-only agents_account_status_task_failed String while the Ok(Vec<AgentAccountStatus>) payload passes through unchanged.",
+        "platformScope": "macOS and synthetic fixtures only: disposable MARU_TEST_HOME/MARU_TEST_CONFIG_DIR under the shared Home lock with fake shell CLIs selected through command_overrides; no real provider binary, Keychain item or live account endpoint is touched, and the test-only credential-home seam keeps reads inside the fixture home.",
+        "limits": "In-process path admission does not exclude independent external processes; a real CLI provider or another agent's filesystem access stays outside the lease. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
+        "contract": "Existing AgentAccountStatus payloads and error strings are unchanged; the only new rejection path is the JoinError-to-String mapping at the worker boundary."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_17",
+          "passed": 13,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ]
+    },
+    {
+      "name": "agents_usage_status",
+      "module": "src-tauri/src/agent_host/status.rs",
+      "registrationPath": "src-tauri/src/lib.rs::agent_host::status::ipc::agents_usage_status",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/agent_host/status.rs::ipc::agents_usage_status delegates to src-tauri/src/agent_host/status.rs::agents_usage_status and src-tauri/src/agent_host/status.rs::usage_status, which probe each provider through src-tauri/src/agent_host/status.rs::probe_usage inside the same blocking worker.",
+        "src-tauri/src/agent_host/status.rs::claude_usage_windows and src-tauri/src/agent_host/status.rs::codex_usage_windows read finite OAuth/auth JSON files via src-tauri/src/agent_host/status.rs::home_file and scan rollout tails through src-tauri/src/agent_host/status.rs::recent_rollout_files; the probes only exec provider CLIs through src-tauri/src/agent_host/status.rs::run_cli and never mutate the filesystem."
+      ],
+      "workerBoundary": "src-tauri/src/agent_host/status.rs::ipc::agents_usage_status awaits tauri::async_runtime::spawn_blocking before any usage probe or rollout walk runs; the success payload stays the existing Vec<AgentUsageStatus> (wrapped in Ok by the worker), and only a JoinError maps to the display-only agents_usage_status_task_failed String.",
+      "syncCallers": [
+        "src-tauri/src/agent_host/mod.rs re-exports agents_usage_status for Rust callers; no scheduler or other command invokes it synchronously, so all frontend traffic crosses the async worker boundary."
+      ],
+      "mutationKey": {
+        "readOnly": true,
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "sharedAdmissionEntry": "No filesystem mutation is owned by this command: usage probes only execute provider CLIs and read finite credential or rollout-tail files under the user home directory.",
+        "postAdmissionPreconditions": [
+          "The in-memory usage cache (usage_cache) still short-circuits repeated probes within its TTL; the force flag bypasses it exactly as before the conversion."
+        ],
+        "domainLockOrder": "No command-owned filesystem mutation lease exists; the whole probe runs inside the isolated blocking worker."
+      },
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts"
+        ],
+        "payload": "agentsUsageStatus (src/lib/api.ts) invokes agents_usage_status and the agents settings pane renders per-provider usage windows from the returned array.",
+        "terminalNoticeOwner": "The agents settings pane owns completion and error display for the usage refresh. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=agents_usage_status"
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_17_status_account_and_usage_fixture_results_and_legacy_rejections",
+          "phase08_17_status_each_wrapper_yields_same_poll_and_maps_join_failure"
+        ],
+        "workerProof": "Each agents_* future is held at spawn_blocking worker entry (worker:agents_usage_status stage), manually polled on the same async task and yields before release; a panicked or cancelled worker maps to the display-only agents_usage_status_task_failed String while the Ok(Vec<AgentUsageStatus>) payload passes through unchanged.",
+        "platformScope": "macOS and synthetic fixtures only: disposable MARU_TEST_HOME/MARU_TEST_CONFIG_DIR under the shared Home lock with fake shell CLIs and an unsigned-JWT kimi credential fixture; no live account usage endpoint is called, per the plan's test boundary.",
+        "limits": "In-process path admission does not exclude independent external processes; a real CLI provider or another agent's filesystem access stays outside the lease. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
+        "contract": "Existing AgentUsageStatus payloads, cache TTL semantics and error strings are unchanged; the only new rejection path is the JoinError-to-String mapping at the worker boundary."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_17",
+          "passed": 13,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ]
+    },
+    {
+      "name": "agent_read_run_events",
+      "module": "src-tauri/src/agent_host/event_store.rs",
+      "registrationPath": "src-tauri/src/lib.rs::agent_host::event_store::ipc::agent_read_run_events",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/agent_host/event_store.rs::ipc::agent_read_run_events delegates to src-tauri/src/agent_host/event_store.rs::agent_read_run_events and src-tauri/src/agent_host/event_store.rs::read_run_events, resolving the run file through src-tauri/src/agent_host/event_store.rs::run_events_path and parsing it via src-tauri/src/agent_host/event_store.rs::read_run_events_at inside the same blocking worker.",
+        "The 08-29 staged append adapters src-tauri/src/agent_host/event_store.rs::append_run_event_at_in_transaction and src-tauri/src/agent_host/event_store.rs::append_run_event_payload_in_transaction stay synchronous for their dispatch callers; this read command performs no append and owns no mutation."
+      ],
+      "workerBoundary": "src-tauri/src/agent_host/event_store.rs::ipc::agent_read_run_events awaits tauri::async_runtime::spawn_blocking before any run-events file is read; the success payload stays the existing Vec<AgentRunEvent> (an empty Vec is returned for a missing run file, unchanged), and only a JoinError maps to the display-only agent_read_run_events_task_failed String.",
+      "syncCallers": [
+        "src-tauri/src/agent_host/event_store.rs::read_run_events and src-tauri/src/agent_host/event_store.rs::replay_run_summary stay synchronous for Rust callers (dispatch and replay flows read through the same helpers); the frontend path crosses the async worker boundary."
+      ],
+      "mutationKey": {
+        "readOnly": true,
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "sharedAdmissionEntry": "No filesystem mutation is owned by this command: agent_read_run_events only reads the finite events.jsonl run file inside the workspace .maru/runs tree.",
+        "postAdmissionPreconditions": [
+          "run_id validation (validate_run_id) still rejects path traversal before the file is opened; a missing run file yields an empty event list exactly as before."
+        ],
+        "domainLockOrder": "No command-owned filesystem mutation lease exists; the read runs inside the isolated blocking worker."
+      },
+      "processingCaller": {
+        "path": [
+          "src/lib/skills.ts",
+          "src/components/skills/SkillRunsPanel.tsx",
+          "src/components/tasks/TasksRunsPanel.tsx",
+          "src/components/inbox/InboxRunsPanel.tsx"
+        ],
+        "payload": "agentReadRunEvents (src/lib/skills.ts) invokes agent_read_run_events; SkillRunsPanel, TasksRunsPanel and InboxRunsPanel render the run timeline from the returned AgentRunEvent array.",
+        "terminalNoticeOwner": "The run panels own completion and error display for run-event loads. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "proposal parse result (agent_parse_skill_proposal) or approval outcome (agent_apply_skill_proposal)",
+        "successRetention": "proposal/summary retained in panel state until applied or dismissed",
+        "failureReasons": "parse/apply error message in the panel",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=agent_read_run_events"
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_17_event_store_wrappers_round_trip_and_legacy_rejections",
+          "phase08_17_event_store_wrappers_yield_same_poll_and_map_join_failure"
+        ],
+        "workerProof": "Each event-store future is held at spawn_blocking worker entry (worker:agent_read_run_events stage on the resolved run-events path), manually polled on the same async task and yields before release; a panicked or cancelled worker maps to the display-only agent_read_run_events_task_failed String while Ok payloads pass through unchanged.",
+        "platformScope": "Synthetic workspace fixtures only: disposable temp workspaces under MARU_TEST_HOME; no live run registry or user workspace is touched.",
+        "limits": "In-process path admission does not exclude independent external processes; a concurrently running agent writing the same events.jsonl stays outside the lease. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
+        "contract": "Existing AgentRunEvent payloads, empty-list-on-missing-run semantics and error strings are unchanged; the only new rejection path is the JoinError-to-String mapping at the worker boundary."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_17",
+          "passed": 13,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ]
+    },
+    {
+      "name": "agent_replay_run_summary",
+      "module": "src-tauri/src/agent_host/event_store.rs",
+      "registrationPath": "src-tauri/src/lib.rs::agent_host::event_store::ipc::agent_replay_run_summary",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/agent_host/event_store.rs::ipc::agent_replay_run_summary delegates to src-tauri/src/agent_host/event_store.rs::agent_replay_run_summary and src-tauri/src/agent_host/event_store.rs::replay_run_summary, reading the run file through src-tauri/src/agent_host/event_store.rs::read_run_events and folding it via src-tauri/src/agent_host/event_store.rs::summarize_events inside the same blocking worker.",
+        "The summarize step is pure in-memory aggregation over the parsed events; no helper in the chain writes to disk."
+      ],
+      "workerBoundary": "src-tauri/src/agent_host/event_store.rs::ipc::agent_replay_run_summary awaits tauri::async_runtime::spawn_blocking before any run-events file is read; the success payload stays the existing RunReplaySummary shape, and only a JoinError maps to the display-only agent_replay_run_summary_task_failed String.",
+      "syncCallers": [
+        "src-tauri/src/agent_host/event_store.rs::replay_run_summary stays synchronous for Rust callers; the frontend path crosses the async worker boundary."
+      ],
+      "mutationKey": {
+        "readOnly": true,
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "sharedAdmissionEntry": "No filesystem mutation is owned by this command: agent_replay_run_summary only reads the finite events.jsonl run file and aggregates it in memory.",
+        "postAdmissionPreconditions": [
+          "run_id validation (validate_run_id) still rejects path traversal before the file is opened; a missing run file yields a zeroed summary exactly as before."
+        ],
+        "domainLockOrder": "No command-owned filesystem mutation lease exists; the read and fold run inside the isolated blocking worker."
+      },
+      "processingCaller": {
+        "path": [
+          "src/lib/skills.ts",
+          "src/components/skills/SkillRunsPanel.tsx"
+        ],
+        "payload": "agentReplayRunSummary (src/lib/skills.ts) invokes agent_replay_run_summary and SkillRunsPanel renders the replay summary counts from the returned RunReplaySummary.",
+        "terminalNoticeOwner": "SkillRunsPanel owns completion and error display for replay summaries. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "proposal parse result (agent_parse_skill_proposal) or approval outcome (agent_apply_skill_proposal)",
+        "successRetention": "proposal/summary retained in panel state until applied or dismissed",
+        "failureReasons": "parse/apply error message in the panel",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=agent_replay_run_summary"
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_17_event_store_wrappers_round_trip_and_legacy_rejections",
+          "phase08_17_event_store_wrappers_yield_same_poll_and_map_join_failure"
+        ],
+        "workerProof": "Each event-store future is held at spawn_blocking worker entry (worker:agent_replay_run_summary stage on the resolved run-events path), manually polled on the same async task and yields before release; a panicked or cancelled worker maps to the display-only agent_replay_run_summary_task_failed String while Ok payloads pass through unchanged.",
+        "platformScope": "Synthetic workspace fixtures only: disposable temp workspaces under MARU_TEST_HOME; no live run registry or user workspace is touched.",
+        "limits": "In-process path admission does not exclude independent external processes; a concurrently running agent writing the same events.jsonl stays outside the lease. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
+        "contract": "Existing RunReplaySummary payloads and error strings are unchanged; the only new rejection path is the JoinError-to-String mapping at the worker boundary."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_17",
+          "passed": 13,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ]
+    },
+    {
+      "name": "agent_export_redacted_run_summary",
+      "module": "src-tauri/src/agent_host/cloud_dashboard.rs",
+      "registrationPath": "src-tauri/src/lib.rs::agent_host::cloud_dashboard::ipc::agent_export_redacted_run_summary",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/agent_host/cloud_dashboard.rs::ipc::agent_export_redacted_run_summary delegates to src-tauri/src/agent_host/cloud_dashboard.rs::agent_export_redacted_run_summary and src-tauri/src/agent_host/cloud_dashboard.rs::export_redacted_run_summary, which read the run file via src-tauri/src/agent_host/event_store.rs::read_run_events, fold it via src-tauri/src/agent_host/event_store.rs::summarize_events and redact payloads through src-tauri/src/agent_host/cloud_dashboard.rs::redact_summary inside the same blocking worker.",
+        "Every helper in the chain is a finite read or pure in-memory transform; no helper writes to disk."
+      ],
+      "workerBoundary": "src-tauri/src/agent_host/cloud_dashboard.rs::ipc::agent_export_redacted_run_summary awaits tauri::async_runtime::spawn_blocking before any run-events file is read; the success payload stays the existing RedactedRunSummary shape, and only a JoinError maps to the display-only agent_export_redacted_run_summary_task_failed String.",
+      "syncCallers": [
+        "src-tauri/src/agent_host/cloud_dashboard.rs::export_redacted_run_summary stays synchronous for Rust callers (the write variant reuses it before admission); the frontend path crosses the async worker boundary."
+      ],
+      "mutationKey": {
+        "readOnly": true,
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "sharedAdmissionEntry": "No filesystem mutation is owned by this command: agent_export_redacted_run_summary only reads the finite events.jsonl run file and returns the redacted summary as data.",
+        "postAdmissionPreconditions": [
+          "The same run_id validation and missing-run semantics as agent_read_run_events apply before redaction; redaction keeps only provider/skill identifiers from payloads."
+        ],
+        "domainLockOrder": "No command-owned filesystem mutation lease exists; the read and redaction run inside the isolated blocking worker."
+      },
+      "processingCaller": {
+        "path": [
+          "src/lib/skills.ts",
+          "src/components/skills/SkillRunsPanel.tsx"
+        ],
+        "payload": "agentExportRedactedRunSummary (src/lib/skills.ts) invokes agent_export_redacted_run_summary and SkillRunsPanel renders the redacted summary for cloud review.",
+        "terminalNoticeOwner": "SkillRunsPanel owns completion and error display for redacted-summary exports. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "proposal parse result (agent_parse_skill_proposal) or approval outcome (agent_apply_skill_proposal)",
+        "successRetention": "proposal/summary retained in panel state until applied or dismissed",
+        "failureReasons": "parse/apply error message in the panel",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=agent_export_redacted_run_summary"
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_17_cloud_wrappers_round_trip_and_legacy_rejections",
+          "phase08_17_cloud_wrappers_yield_same_poll_and_map_join_failure"
+        ],
+        "workerProof": "Each cloud-dashboard future is held at spawn_blocking worker entry (worker:agent_export_redacted_run_summary stage on the resolved run-events path), manually polled on the same async task and yields before release; a panicked or cancelled worker maps to the display-only agent_export_redacted_run_summary_task_failed String while Ok payloads pass through unchanged.",
+        "platformScope": "Synthetic workspace fixtures only: disposable temp workspaces under MARU_TEST_HOME with seeded run events; no live run registry or user workspace is touched.",
+        "limits": "In-process path admission does not exclude independent external processes; a concurrently running agent writing the same events.jsonl stays outside the lease. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
+        "contract": "Existing RedactedRunSummary payloads and error strings are unchanged; the only new rejection path is the JoinError-to-String mapping at the worker boundary."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_17",
+          "passed": 13,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ]
+    },
+    {
+      "name": "agent_write_redacted_run_summary",
+      "module": "src-tauri/src/agent_host/cloud_dashboard.rs",
+      "registrationPath": "src-tauri/src/lib.rs::agent_host::cloud_dashboard::ipc::agent_write_redacted_run_summary",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/agent_host/cloud_dashboard.rs::ipc::agent_write_redacted_run_summary delegates to src-tauri/src/agent_host/cloud_dashboard.rs::agent_write_redacted_run_summary and src-tauri/src/agent_host/cloud_dashboard.rs::write_redacted_run_summary, which validate the target, export the summary through src-tauri/src/agent_host/cloud_dashboard.rs::export_redacted_run_summary and resolve the write set via src-tauri/src/agent_host/cloud_dashboard.rs::absolute_export_target before entering shared path admission.",
+        "Inside the lease, src-tauri/src/agent_host/cloud_dashboard.rs::write_redacted_run_summary_in_transaction runs ensure_covered and before_effect revalidation, then create_dir_all and the single-file std::fs::write; every filesystem effect happens after admission."
+      ],
+      "workerBoundary": "src-tauri/src/agent_host/cloud_dashboard.rs::ipc::agent_write_redacted_run_summary awaits tauri::async_runtime::spawn_blocking before any export read or target write; the success payload stays the caller's target_path String, and only a JoinError maps to the display-only agent_write_redacted_run_summary_task_failed String.",
+      "syncCallers": [
+        "src-tauri/src/agent_host/cloud_dashboard.rs::agent_write_redacted_run_summary stays synchronous for Rust callers; the frontend path crosses the async worker boundary."
+      ],
+      "mutationKey": {
+        "lexicalPaths": [
+          "absolute_export_target(target_path): the lexical-normalized absolute export file; relative targets resolve against std::env::current_dir() so the write lands exactly where the prior std::fs::write placement put it."
+        ],
+        "aliasPaths": [
+          "Canonical physical alias of the export file plus nearest-existing-ancestor directory handles are reserved at admission, so a renamed or symlinked parent is revalidated before the first effect."
+        ],
+        "postAdmissionPreconditions": [
+          "An empty target is rejected as redacted_summary_target_required before admission; the redacted summary is fully serialized before the lease is acquired; the parent directory is created only after before_effect revalidation inside the lease."
+        ],
+        "domainLockOrder": "Shared path admission is acquired before any create_dir_all or write effect; before_effect revalidation runs before the first filesystem effect of the command.",
+        "sharedAdmissionEntry": "src-tauri/src/agent_host/cloud_dashboard.rs::write_redacted_run_summary_in_transaction entered through with_path_transactions in src-tauri/src/agent_host/cloud_dashboard.rs::write_redacted_run_summary."
+      },
+      "processingCaller": {
+        "path": [
+          "src/lib/skills.ts",
+          "src/components/skills/SkillRunsPanel.tsx"
+        ],
+        "payload": "agentWriteRedactedRunSummary (src/lib/skills.ts) invokes agent_write_redacted_run_summary with the user-selected target path and SkillRunsPanel shows the returned written path; there is no JS-side file write.",
+        "terminalNoticeOwner": "SkillRunsPanel owns completion and error display for redacted-summary writes. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "proposal parse result (agent_parse_skill_proposal) or approval outcome (agent_apply_skill_proposal)",
+        "successRetention": "proposal/summary retained in panel state until applied or dismissed",
+        "failureReasons": "parse/apply error message in the panel",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=agent_write_redacted_run_summary"
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_17_cloud_wrappers_round_trip_and_legacy_rejections",
+          "phase08_17_cloud_wrappers_yield_same_poll_and_map_join_failure",
+          "phase08_17_cloud_write_parent_both_orders_and_aliases_no_recreation",
+          "phase08_17_cloud_write_error_and_unwind_release_admission"
+        ],
+        "workerProof": "The write future is held at spawn_blocking worker entry (worker:agent_write_redacted_run_summary stage on the resolved absolute target), manually polled on the same async task and yields before release; a panicked or cancelled worker maps to the display-only agent_write_redacted_run_summary_task_failed String while Ok payloads pass through unchanged.",
+        "parentRace": "phase08_17_cloud_write_parent_both_orders_and_aliases_no_recreation serializes the admitted export file against Files rename_workspace_entry and trash_workspace_entries in both admission orders and in lexical and symlink-alias forms: the loser fails revalidation with the original parent recreated nowhere, and the winner's export lands inside the moved parent.",
+        "failureRelease": "phase08_17_cloud_write_error_and_unwind_release_admission covers the empty-target rejection and a panicked pre-effect hook: the lease unwinds through Drop and a later write on the same target succeeds, proving admission release on error paths.",
+        "platformScope": "Synthetic workspace fixtures only: disposable temp workspaces under MARU_TEST_HOME with seeded run events; no user workspace or live path is touched.",
+        "limits": "In-process path admission does not exclude independent external processes; a concurrently running agent writing the same target stays outside the lease. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
+        "contract": "Existing success payloads and error strings are unchanged; the write set is the single resolved export file, and the only new rejection path is the JoinError-to-String mapping at the worker boundary."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_17",
+          "passed": 13,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ]
+    },
+    {
+      "name": "hub_status",
+      "module": "src-tauri/src/hub_client/mod.rs",
+      "registrationPath": "src-tauri/src/lib.rs::hub_client::ipc::hub_status",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/hub_client/mod.rs::ipc::hub_status delegates to src-tauri/src/hub_client/mod.rs::hub_status, which loads the config through src-tauri/src/hub_client/mod.rs::load_hub_config and reads queue/cache metadata via src-tauri/src/hub_client/cache.rs::queue_depth, src-tauri/src/hub_client/cache.rs::list_cached_etags and src-tauri/src/hub_client/cache.rs::last_fetch_at inside the same blocking worker.",
+        "The optional reachability probe src-tauri/src/hub_client/mod.rs::probe_health builds a client with src-tauri/src/hub_client/http.rs::build_client and performs one GET; every helper is a finite read or one bounded network call with no filesystem effect."
+      ],
+      "workerBoundary": "src-tauri/src/hub_client/mod.rs::ipc::hub_status awaits tauri::async_runtime::spawn_blocking before any config read or health probe; the success payload stays the existing HubStatus shape, and only a JoinError maps to the display-only hub_status_task_failed String.",
+      "syncCallers": [
+        "src-tauri/src/hub_client/mod.rs::hub_status stays synchronous for Rust callers; the frontend path crosses the async worker boundary."
+      ],
+      "mutationKey": {
+        "readOnly": true,
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "sharedAdmissionEntry": "No filesystem mutation is owned by this command: hub_status only reads workspace.config.yaml, the cache etag index and the queue depth, plus one optional bounded health GET when enabled.",
+        "postAdmissionPreconditions": [
+          "A missing or invalid hub config block still yields the default disabled HubStatus; the reachability probe is best-effort and maps network failure to reachable=false."
+        ],
+        "domainLockOrder": "No command-owned filesystem mutation lease exists; the whole status read runs inside the isolated blocking worker."
+      },
+      "processingCaller": {
+        "path": [
+          "src/lib/hubClient.ts",
+          "src/components/catalog/CatalogPane.tsx"
+        ],
+        "payload": "hubStatus (src/lib/hubClient.ts) invokes hub_status and CatalogPane renders the connection/queue state from the returned HubStatus.",
+        "terminalNoticeOwner": "CatalogPane owns completion and error display for hub status refreshes. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=hub_status"
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_17_hub_all_wrappers_round_trip_and_legacy_rejections",
+          "phase08_17_hub_each_wrapper_yields_same_poll_and_maps_join_failure"
+        ],
+        "workerProof": "The hub_status future is held at spawn_blocking worker entry (worker:hub_status stage on the workspace config path), manually polled on the same async task and yields before release; a panicked or cancelled worker maps to the display-only hub_status_task_failed String while Ok payloads pass through unchanged.",
+        "platformScope": "Synthetic workspace fixtures only: disposable temp workspaces with an inline hub config; the localhost fixture server answers a fixed health body and no external network is touched.",
+        "limits": "In-process path admission does not exclude independent external processes; another process editing workspace.config.yaml concurrently stays outside the lease. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
+        "contract": "Existing HubStatus payloads and error strings are unchanged; the only new rejection path is the JoinError-to-String mapping at the worker boundary."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_17",
+          "passed": 13,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ]
+    },
+    {
+      "name": "hub_fetch_catalog",
+      "module": "src-tauri/src/hub_client/mod.rs",
+      "registrationPath": "src-tauri/src/lib.rs::hub_client::ipc::hub_fetch_catalog",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/hub_client/mod.rs::ipc::hub_fetch_catalog delegates to src-tauri/src/hub_client/mod.rs::hub_fetch_catalog; the disabled path stays a read-only cache lookup via src-tauri/src/hub_client/cache.rs::load_cached_resource with no lease.",
+        "The enabled path admits cfg.cache_root as one coherent store and runs src-tauri/src/hub_client/mod.rs::hub_fetch_catalog_in_transaction: ensure_covered plus before_effect, then src-tauri/src/hub_client/http.rs::fetch_with_cache (src-tauri/src/hub_client/http.rs::build_client, cache save through src-tauri/src/hub_client/cache.rs::save_resource) with a cache fallback through src-tauri/src/hub_client/cache.rs::load_cached_resource; the shared etags index couples every cache write, so the whole cache tree is admitted before the first effect."
+      ],
+      "workerBoundary": "src-tauri/src/hub_client/mod.rs::ipc::hub_fetch_catalog awaits tauri::async_runtime::spawn_blocking before any config read or HTTP fetch; the success payload keeps the existing HubFetchResponse shape (from_cache distinguishes 304 cache hits from 200 fetches, unchanged), and only a JoinError maps to the display-only hub_fetch_catalog_task_failed String.",
+      "syncCallers": [
+        "src-tauri/src/hub_client/mod.rs::hub_fetch_catalog stays synchronous for Rust callers; the frontend path crosses the async worker boundary."
+      ],
+      "mutationKey": {
+        "lexicalPaths": [
+          "<workspace_root>/.maru/cache/hub (cfg.cache_root) is admitted as a single coherent store because the shared etags index couples every cache write."
+        ],
+        "aliasPaths": [
+          "Canonical physical alias of the cache root plus nearest-existing-ancestor directory handles are reserved at admission, so a renamed or symlinked .maru parent is revalidated before the first effect."
+        ],
+        "postAdmissionPreconditions": [
+          "A disabled hub performs the cache lookup with no lease; an enabled hub persists only through cache::save_resource inside the lease and falls back to the cached resource when the network fails."
+        ],
+        "domainLockOrder": "Shared path admission is acquired before the HTTP fetch and cache-write effects; before_effect revalidation runs before src-tauri/src/hub_client/cache.rs::save_resource persists anything.",
+        "sharedAdmissionEntry": "src-tauri/src/hub_client/mod.rs::hub_fetch_catalog_in_transaction entered through with_path_transactions in src-tauri/src/hub_client/mod.rs::hub_fetch_catalog."
+      },
+      "processingCaller": {
+        "path": [
+          "src/lib/hubClient.ts"
+        ],
+        "payload": "hubFetchCatalog (src/lib/hubClient.ts) invokes hub_fetch_catalog for catalog resources and renders the returned HubFetchResponse body for browse/search flows.",
+        "terminalNoticeOwner": "The catalog pane owns completion and error display for catalog fetches. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=hub_fetch_catalog"
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_17_hub_all_wrappers_round_trip_and_legacy_rejections",
+          "phase08_17_hub_each_wrapper_yields_same_poll_and_maps_join_failure",
+          "phase08_17_hub_cache_fetch_contention_and_parent_revalidation"
+        ],
+        "workerProof": "The fetch future is held at spawn_blocking worker entry (worker:hub_fetch_catalog stage on the cache root), manually polled on the same async task and yields before release; a panicked or cancelled worker maps to the display-only hub_fetch_catalog_task_failed String while Ok payloads pass through unchanged.",
+        "cacheBehavior": "phase08_17_hub_all_wrappers_round_trip_and_legacy_rejections drives a localhost fixture: first fetch returns the body with an etag and persists the cache index, a revalidate fetch receives the fixture 304 and returns from_cache=true with the cached body, and an unreachable hub falls back to the cached resource.",
+        "parentRace": "phase08_17_hub_cache_fetch_contention_and_parent_revalidation serializes two same-target fetches on the admitted cache root (second waits at before-admission until the held first fetch passes pre-effect) and revalidates against a Files rename of .maru: a fetch that waited through the rename fails instead of recreating .maru.",
+        "platformScope": "Synthetic workspace fixtures only: disposable temp workspaces plus a localhost TcpListener fixture with a fixed body and etag; no external network is touched.",
+        "limits": "In-process path admission does not exclude independent external processes; another process editing the cache tree concurrently stays outside the lease. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
+        "contract": "Existing HubFetchResponse payloads (including from_cache semantics), fallback behavior and error strings are unchanged; the only new rejection path is the JoinError-to-String mapping at the worker boundary."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_17",
+          "passed": 13,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ]
+    },
+    {
+      "name": "hub_submit_gate",
+      "module": "src-tauri/src/hub_client/mod.rs",
+      "registrationPath": "src-tauri/src/lib.rs::hub_client::ipc::hub_submit_gate",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/hub_client/mod.rs::ipc::hub_submit_gate delegates to src-tauri/src/hub_client/mod.rs::hub_submit_gate: src-tauri/src/hub_client/mod.rs::preflight_submit_gate may block the submission for safety before any filesystem effect, and an enabled hub posts through src-tauri/src/hub_client/mod.rs::post_submit_gate (client from src-tauri/src/hub_client/http.rs::build_client).",
+        "Only the durable enqueue takes shared admission: src-tauri/src/hub_client/mod.rs::enqueue_submit_gate_admitted admits src-tauri/src/hub_client/cache.rs::queue_root, runs ensure_covered plus before_effect, then persists via src-tauri/src/hub_client/cache.rs::enqueue_submit_gate; a POST failure with the hub enabled falls into the same enqueue path."
+      ],
+      "workerBoundary": "src-tauri/src/hub_client/mod.rs::ipc::hub_submit_gate awaits tauri::async_runtime::spawn_blocking before any preflight, POST or enqueue; the success payload keeps the existing HubSubmitGateResponse shape (state pending for an accepted online submission, queued_offline for the durable enqueue, blocked_by_safety for preflight rejections), and only a JoinError maps to the display-only hub_submit_gate_task_failed String.",
+      "syncCallers": [
+        "src-tauri/src/hub_client/mod.rs::hub_submit_gate stays synchronous for Rust callers; the frontend path crosses the async worker boundary."
+      ],
+      "mutationKey": {
+        "lexicalPaths": [
+          "<workspace_root>/.maru/queue/hub (cache::queue_root) is the admitted write set for the durable submit-gate enqueue."
+        ],
+        "aliasPaths": [
+          "Canonical physical alias of the queue root plus nearest-existing-ancestor directory handles are reserved at admission, so a renamed or symlinked .maru parent is revalidated before the queue file is written."
+        ],
+        "postAdmissionPreconditions": [
+          "Preflight safety blocking returns blocked_by_safety without touching the queue; an enabled hub attempts the POST before enqueueing, and only a POST failure or a disabled hub reaches the admitted enqueue."
+        ],
+        "domainLockOrder": "Shared path admission is acquired in src-tauri/src/hub_client/mod.rs::enqueue_submit_gate_admitted before src-tauri/src/hub_client/cache.rs::enqueue_submit_gate writes the queue file; before_effect revalidation runs before the first filesystem effect.",
+        "sharedAdmissionEntry": "src-tauri/src/hub_client/mod.rs::enqueue_submit_gate_admitted entered from src-tauri/src/hub_client/mod.rs::hub_submit_gate."
+      },
+      "processingCaller": {
+        "path": [
+          "src/lib/hubClient.ts"
+        ],
+        "payload": "hubSubmitGate (src/lib/hubClient.ts) invokes hub_submit_gate with the prepared gate request and surfaces the returned state (pending, queued_offline or blocked_by_safety) to the dispatch flow.",
+        "terminalNoticeOwner": "The dispatch flow owns completion and error display for gate submissions. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=hub_submit_gate"
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_17_hub_all_wrappers_round_trip_and_legacy_rejections",
+          "phase08_17_hub_each_wrapper_yields_same_poll_and_maps_join_failure",
+          "phase08_17_hub_queue_parent_both_orders_and_aliases_no_recreation",
+          "phase08_17_hub_queue_error_release_and_drain_contention"
+        ],
+        "workerProof": "The submit future is held at spawn_blocking worker entry (worker:hub_submit_gate stage on the queue root), manually polled on the same async task and yields before release; a panicked or cancelled worker maps to the display-only hub_submit_gate_task_failed String while Ok payloads pass through unchanged.",
+        "parentRace": "phase08_17_hub_queue_parent_both_orders_and_aliases_no_recreation serializes the admitted queue tree against Files rename_workspace_entry and trash_workspace_entries in both admission orders and in lexical and symlink-alias forms: the loser fails revalidation with the original .maru parent recreated nowhere, and the winner's queued item lands inside the moved parent.",
+        "failureRelease": "phase08_17_hub_queue_error_release_and_drain_contention panics a pre-effect hook on the queue root and verifies the lease unwinds: a subsequent submit succeeds and the queue depth reaches one.",
+        "platformScope": "Synthetic workspace fixtures only: disposable temp workspaces plus a localhost fixture for the online submission; no external network or live hub is touched.",
+        "limits": "In-process path admission does not exclude independent external processes; another process editing the queue tree concurrently stays outside the lease. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
+        "contract": "Existing HubSubmitGateResponse payloads, preflight blocking semantics and error strings are unchanged; the only new rejection path is the JoinError-to-String mapping at the worker boundary."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_17",
+          "passed": 13,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ]
+    },
+    {
+      "name": "hub_queue_drain",
+      "module": "src-tauri/src/hub_client/mod.rs",
+      "registrationPath": "src-tauri/src/lib.rs::hub_client::ipc::hub_queue_drain",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/hub_client/mod.rs::ipc::hub_queue_drain delegates to src-tauri/src/hub_client/mod.rs::hub_queue_drain; with the hub disabled it is a read-only backlog report over src-tauri/src/hub_client/cache.rs::list_queue and src-tauri/src/hub_client/cache.rs::queue_depth with no lease.",
+        "With the hub enabled it snapshots the queue via src-tauri/src/hub_client/cache.rs::list_queue before admission, then src-tauri/src/hub_client/mod.rs::hub_queue_drain_in_transaction runs ensure_covered plus before_effect and per item either removes through src-tauri/src/hub_client/cache.rs::remove_queued or records src-tauri/src/hub_client/cache.rs::mark_retry after the src-tauri/src/hub_client/mod.rs::post_submit_gate attempt."
+      ],
+      "workerBoundary": "src-tauri/src/hub_client/mod.rs::ipc::hub_queue_drain awaits tauri::async_runtime::spawn_blocking before any queue scan or drain attempt; the success payload keeps the existing HubQueueDrainResult shape (attempted=0 with the disabled no-op report), and only a JoinError maps to the display-only hub_queue_drain_task_failed String.",
+      "syncCallers": [
+        "src-tauri/src/hub_client/mod.rs::hub_queue_drain stays synchronous for Rust callers; the frontend path crosses the async worker boundary."
+      ],
+      "mutationKey": {
+        "lexicalPaths": [
+          "<workspace_root>/.maru/queue/hub (cache::queue_root) is admitted as the write set whenever the enabled drain can touch queue files; the disabled path takes no lease."
+        ],
+        "aliasPaths": [
+          "Canonical physical alias of the queue root plus nearest-existing-ancestor directory handles are reserved at admission, so a renamed or symlinked .maru parent is revalidated before any queue file is removed or rewritten."
+        ],
+        "postAdmissionPreconditions": [
+          "The queue snapshot is taken before admission so items enqueued after the snapshot are left for the next drain; per-item preflight blocking marks the retry without a network attempt."
+        ],
+        "domainLockOrder": "Shared path admission is acquired before any remove_queued/mark_retry effect; before_effect revalidation runs before the first queue mutation of the drain.",
+        "sharedAdmissionEntry": "src-tauri/src/hub_client/mod.rs::hub_queue_drain_in_transaction entered through with_path_transactions in src-tauri/src/hub_client/mod.rs::hub_queue_drain."
+      },
+      "processingCaller": {
+        "path": [
+          "src/lib/hubClient.ts",
+          "src/components/catalog/CatalogPane.tsx"
+        ],
+        "payload": "hubQueueDrain (src/lib/hubClient.ts) invokes hub_queue_drain and CatalogPane shows the drain result (attempted/submitted/failed/remaining) for the offline queue.",
+        "terminalNoticeOwner": "CatalogPane owns completion and error display for queue drains. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=hub_queue_drain"
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_17_hub_all_wrappers_round_trip_and_legacy_rejections",
+          "phase08_17_hub_each_wrapper_yields_same_poll_and_maps_join_failure",
+          "phase08_17_hub_queue_error_release_and_drain_contention"
+        ],
+        "workerProof": "The drain future is held at spawn_blocking worker entry (worker:hub_queue_drain stage on the queue root), manually polled on the same async task and yields before release; a panicked or cancelled worker maps to the display-only hub_queue_drain_task_failed String while Ok payloads pass through unchanged.",
+        "contention": "phase08_17_hub_queue_error_release_and_drain_contention drives two serialized drains against an unroutable hub: the second drain waits at before-admission while the held first drain passes pre-effect, each reports attempted=1, the item stays queued and retry_count accumulates once per failed drain.",
+        "platformScope": "Synthetic workspace fixtures only: disposable temp workspaces and an RFC1918 blackhole endpoint that fails fast; no external network or live hub is touched.",
+        "limits": "In-process path admission does not exclude independent external processes; another process editing the queue tree concurrently stays outside the lease. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
+        "contract": "Existing HubQueueDrainResult payloads, disabled no-op semantics and error strings are unchanged; the only new rejection path is the JoinError-to-String mapping at the worker boundary."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_17",
+          "passed": 13,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ]
+    },
+    {
+      "name": "hub_poll_gate",
+      "module": "src-tauri/src/hub_client/mod.rs",
+      "registrationPath": "src-tauri/src/lib.rs::hub_client::ipc::hub_poll_gate",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/hub_client/mod.rs::ipc::hub_poll_gate delegates to src-tauri/src/hub_client/mod.rs::hub_poll_gate; the disabled path is a read-only cache lookup via src-tauri/src/hub_client/cache.rs::load_cached_resource with no lease.",
+        "The enabled path admits cfg.cache_root and runs an inline in-transaction closure: ensure_covered plus before_effect, then src-tauri/src/hub_client/http.rs::fetch_with_cache with revalidate=true, falling back to src-tauri/src/hub_client/cache.rs::load_cached_resource on error; the shared etags index couples every cache write, so the whole cache tree is admitted before the first effect."
+      ],
+      "workerBoundary": "src-tauri/src/hub_client/mod.rs::ipc::hub_poll_gate awaits tauri::async_runtime::spawn_blocking before any cache read or HTTP poll; the success payload keeps the existing HubFetchResponse shape, and only a JoinError maps to the display-only hub_poll_gate_task_failed String.",
+      "syncCallers": [
+        "src-tauri/src/hub_client/mod.rs::hub_poll_gate stays synchronous for Rust callers; no frontend caller invokes hub_poll_gate today (src/lib/hubClient.ts wires hub_status/fetch/submit/drain only), so the exposed boundary serves future and internal callers."
+      ],
+      "mutationKey": {
+        "lexicalPaths": [
+          "<workspace_root>/.maru/cache/hub (cfg.cache_root) is admitted as a single coherent store for the enabled poll because the shared etags index couples every cache write."
+        ],
+        "aliasPaths": [
+          "Canonical physical alias of the cache root plus nearest-existing-ancestor directory handles are reserved at admission, so a renamed or symlinked .maru parent is revalidated before the first effect."
+        ],
+        "postAdmissionPreconditions": [
+          "A disabled hub performs the cache lookup with no lease; an enabled hub persists only through cache::save_resource inside the lease and falls back to the cached resource when the network fails."
+        ],
+        "domainLockOrder": "Shared path admission is acquired before the HTTP poll and cache-write effects; before_effect revalidation runs before src-tauri/src/hub_client/cache.rs::save_resource persists anything.",
+        "sharedAdmissionEntry": "Inline in-transaction closure in src-tauri/src/hub_client/mod.rs::hub_poll_gate entered through with_path_transactions."
+      },
+      "processingCaller": {
+        "path": [
+          "src/lib/hubClient.ts"
+        ],
+        "payload": "hub_poll_gate is registered for future gate-status polling; src/lib/hubClient.ts currently wires hub_status, hub_fetch_catalog, hub_submit_gate and hub_queue_drain only, so no frontend flow invokes the poll yet.",
+        "terminalNoticeOwner": "No frontend terminal-notice owner exists yet for hub_poll_gate; future callers own their completion and error display. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a",
+        "successRetention": "n/a",
+        "failureReasons": "n/a",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=hub_poll_gate"
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_17_hub_all_wrappers_round_trip_and_legacy_rejections",
+          "phase08_17_hub_each_wrapper_yields_same_poll_and_maps_join_failure"
+        ],
+        "workerProof": "The poll future is held at spawn_blocking worker entry (worker:hub_poll_gate stage on the cache root), manually polled on the same async task and yields before release; a panicked or cancelled worker maps to the display-only hub_poll_gate_task_failed String while Ok payloads pass through unchanged.",
+        "roundTrip": "phase08_17_hub_all_wrappers_round_trip_and_legacy_rejections covers the disabled cache-miss error, the gate_id path-segment rejection and an enabled poll against the localhost fixture that persists the cache index; the shared cache tree serializes with fetch through the same admitted root.",
+        "platformScope": "Synthetic workspace fixtures only: disposable temp workspaces plus a localhost TcpListener fixture; no external network or live hub is touched.",
+        "limits": "In-process path admission does not exclude independent external processes; another process editing the cache tree concurrently stays outside the lease. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
+        "contract": "Existing HubFetchResponse payloads, disabled cache-lookup semantics and error strings are unchanged; the only new rejection path is the JoinError-to-String mapping at the worker boundary."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_17",
+          "passed": 13,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ]
+    }
+  ],
+  "moduleIntegrations": [
+    {
+      "integrationId": "phase08-29-agent_host-event_store",
+      "status": "complete",
+      "module": "src-tauri/src/agent_host/event_store.rs",
+      "entrySymbols": [
+        "src-tauri/src/agent_host/event_store.rs::append_run_event",
+        "src-tauri/src/agent_host/event_store.rs::append_run_event_at",
+        "src-tauri/src/agent_host/event_store.rs::append_run_event_at_in_transaction",
+        "src-tauri/src/agent_host/event_store.rs::append_run_event_payload",
+        "src-tauri/src/agent_host/event_store.rs::append_run_event_payload_in_transaction"
+      ],
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_17",
+          "passed": 13,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "evidence": {
+        "behaviorCases": [
+          "phase08_17_event_store_wrappers_round_trip_and_legacy_rejections",
+          "phase08_17_event_store_wrappers_yield_same_poll_and_map_join_failure"
+        ],
+        "handoff": "The 08-29 staged append adapters stay synchronous for their dispatch/git/dot_sync callers and remain the module's admission entry symbols; this final module conversion moved only the two read commands behind async spawn_blocking wrappers, and both wrappers pass the shared boundary and legacy-rejection fixtures in this shard."
+      }
+    }
+  ]
+}

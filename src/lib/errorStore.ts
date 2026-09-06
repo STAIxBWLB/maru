@@ -49,3 +49,40 @@ export function useError(): ErrorValue {
     () => errorValue,
   );
 }
+
+/** Terminal Skills notices share the existing toast surface. Dismissal advances
+ * to the next completion, so concurrent sources cannot overwrite each other. */
+export interface OperationNotice {
+  operationId: string;
+  kind: "success" | "info" | "error";
+  message: string;
+}
+
+const operationNoticeIds = new Set<string>();
+let operationNotices: readonly OperationNotice[] = [];
+const noticeSubscribers = new Set<() => void>();
+
+export function publishOperationNotice(notice: OperationNotice): boolean {
+  if (operationNoticeIds.has(notice.operationId)) return false;
+  operationNoticeIds.add(notice.operationId);
+  operationNotices = [...operationNotices, Object.freeze({ ...notice })];
+  for (const subscriber of noticeSubscribers) subscriber();
+  return true;
+}
+
+export function dismissOperationNotice(operationId: string): void {
+  operationNotices = operationNotices.filter((notice) => notice.operationId !== operationId);
+  for (const subscriber of noticeSubscribers) subscriber();
+}
+
+export function getOperationNotice(): OperationNotice | null {
+  return operationNotices[0] ?? null;
+}
+
+export function useOperationNotice(): OperationNotice | null {
+  return useSyncExternalStore(
+    (subscriber) => { noticeSubscribers.add(subscriber); return () => { noticeSubscribers.delete(subscriber); }; },
+    getOperationNotice,
+    getOperationNotice,
+  );
+}

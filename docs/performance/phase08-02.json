@@ -1,0 +1,148 @@
+{
+  "plan": "08-02",
+  "moduleIntegrationOwner": "08-29",
+  "integrationRequired": "08-29",
+  "commands": [
+    {
+      "name": "skills_sync_all_sources",
+      "module": "src-tauri/src/skill_host/store.rs",
+      "registrationPath": "src-tauri/src/lib.rs::skill_host::store::skills_sync_all_sources",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "skills_sync_all_sources<R> moves owned AppHandle, work_path and progress_id into awaited tauri::async_runtime::spawn_blocking; ProgressReporter is constructed inside the worker",
+        "skills_sync_all_sources_impl ensures defaults, saves defaults, and captures source generations and canonical paths under the short registry guard inside that worker",
+        "skills_sync_all_sources_blocking processes the immutable snapshot set and calls sync_source_transaction with expected identity for each item",
+        "sync_source_transaction uses nonqueued source/worktree reservations, validates current generation/path before network and fresh guarded commit, and returns skills plus the timestamp from that exact commit",
+        "Batch Git pull uses fixed argv; each success persists independently; busy, failed and successful results each consume one snapshot identity"
+      ],
+      "workerBoundary": "src-tauri/src/skill_host/store.rs::skills_sync_all_sources -> tauri::async_runtime::spawn_blocking before reporter construction, defaults, registry admission, lock waits, snapshot, Git, scans and assembly; outer JoinError alone becomes display-only IpcError",
+      "syncCallers": [
+        "skills_sync_all_sources_impl remains synchronous",
+        "skills_sync_source_impl remains synchronous and returns Vec<SkillRecord> with typed errors",
+        "cargo check -p maru-cli passes against the shared store module"
+      ],
+      "mutationKey": {
+        "sourceReservation": "registry_path/source_id plus canonical Git worktree root, using the existing atomic RAII SourceOperationLease; busy does not queue",
+        "lexicalPaths": [
+          "configured source.path and skills_subdir",
+          "skills_root/registry.json",
+          "default source materialization paths through ensure_default_sources"
+        ],
+        "aliasPaths": [
+          "snapshot canonical source path",
+          "canonical Git worktree root for nested/symlink aliases"
+        ],
+        "postAdmissionPreconditions": [
+          "current source exists",
+          "incarnation/config_revision UUID equals captured identity",
+          "canonical path equals the batch snapshot and admission path",
+          "fresh registry is reloaded before source scan and atomic save"
+        ],
+        "domainLockOrder": "source lease bookkeeping is released before registry guards; network runs outside registry guard; commit holds fresh registry guard through scan/save; success timestamp is taken from the same committed registry",
+        "sharedAdmissionEntry": "integrationRequired: 08-29, after shared path admission producer 08-06; defaults and source commit integration remain explicit later obligations",
+        "deletionScope": "metadata deletion/replacement wins over old source commit; hierarchical cross-command filesystem exclusion is owned by 08-29"
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_batch_transactions",
+          "passed": 5,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_source_transactions",
+          "passed": 12,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib ipc_error::tests",
+          "passed": 4,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "command": "pnpm exec vitest run src/lib/skills.test.ts src/lib/skillOperations.test.ts src/lib/errorStore.test.tsx src/lib/types.test.ts",
+          "passed": 36,
+          "failed": 0
+        },
+        {
+          "command": "pnpm test:e2e:native --spec ./e2e-native/specs/skills-sync.spec.ts",
+          "passed": 1,
+          "failed": 0,
+          "scope": "rebuilt native frontend and feature binary; real Git tracer with terminal success notice"
+        },
+        {
+          "command": "cargo check --manifest-path src-tauri/Cargo.toml -p maru-cli",
+          "exitCode": 0
+        },
+        {
+          "command": "cargo clippy --manifest-path src-tauri/Cargo.toml --lib -- -D warnings",
+          "exitCode": 0
+        },
+        {
+          "command": "pnpm typecheck",
+          "exitCode": 0
+        },
+        {
+          "command": "pnpm lint:i18n",
+          "exitCode": 0,
+          "localeKeys": 3742
+        },
+        {
+          "command": "pnpm exec tsc --noEmit -p tsconfig.e2e-native.json",
+          "exitCode": 0
+        },
+        {
+          "command": "pnpm exec eslint src/App.tsx src/components/settings/tabs/SkillsTab.tsx src/lib/skills.ts src/lib/skills.test.ts src/lib/skillOperations.ts src/lib/skillOperations.test.ts src/lib/errorStore.ts src/lib/errorStore.test.tsx e2e-native/specs/skills-sync.spec.ts",
+          "exitCode": 0
+        },
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_",
+          "passed": 18,
+          "failed": 0,
+          "ignored": 0,
+          "scope": "final shared source-path/typed-error changes: 5 batch, 12 single-source, 1 normal-build home-isolation case"
+        }
+      ],
+      "processingCaller": {
+        "path": "SkillsTab::syncAllSources -> startSkillOperation -> skillsSyncAllSources",
+        "payload": "total = results.length = succeeded + failed + skipped; skipped entries are not success/failure and have no new timestamp; partial failure reasons and successful sibling data are retained",
+        "terminalNoticeOwner": "src/lib/skillOperations.ts::startSkillOperation publishes exactly one deduplicated OperationNotice; errorStore retains concurrent notices until dismissal; App renders its existing toast region",
+        "lifetime": "operation promise and progress listener belong to the workspace/source-keyed module store, not a component subscription; late registration is disposed and listener setup failure does not suppress mutation settlement",
+        "viewPublication": "SkillsTab subscribes to initiating workspace progress; createSkillViewScope guards refresh responses with workspace, monotonic view generation and request sequence, including A -> B -> A",
+        "retry": "manual explicit action only; duplicate source/batch starts return the existing promise; busy batch sources are skipped while independent work proceeds"
+      ,
+        "classifier": "built-in SyncAllOutcome classifier in startSkillOperation",
+        "successRetention": "SkillOperation.result retains the payload; component refresh is viewScope.request-guarded; optimistic removal guarded by captured isCurrent() closure",
+        "failureReasons": "explicit classify reason strings (per-item failure messages joined); built-in path merges syncAllComplete summary with per-source errors and detects skills_source_stale",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=skills_sync_all_sources"
+      },
+      "evidence": {
+        "batchCases": [
+          "actual_wrapper_allows_async_progress",
+          "empty_and_single_source_counters_reconcile",
+          "busy_a_skips_while_b_persists_and_c_fails_then_manual_retry",
+          "missing_and_replaced_snapshot_identity_never_syncs_replacement",
+          "retargeted_symlink_before_batch_turn_rejects_old_snapshot"
+        ],
+        "runtimeProof": "Actual async command wrapper with Tauri MockRuntime AppHandle; separately hold defaults and per-source work, require a yielding same-runtime probe before release, and assert the held worker thread differs from the invoking async thread. Always release barriers before assertions. This is boundary proof, not final saturation/latency evidence.",
+        "nativeArtifact": "test-results/native-e2e/phase08-01-skills-sync.json",
+        "nativeResult": {
+          "sourceId": "native-local-git",
+          "realGit": true,
+          "persisted": true,
+          "fixtureHomeOnly": true,
+          "successNotice": "workspace / native-local-git: 동기화를 완료했습니다.",
+          "syncClicks": 1,
+          "noticeCount": 1,
+          "driverReplay": false
+        },
+        "verificationCorrection": "The initial direct native runner invocation reused the prior binary and timed out; it is not counted as passing. Rebuilt using the Makefile native frontend, build.rs touch, and cargo --features native-e2e sequence before successful focused verification. A later rebuilt run passed after the driver replayed a timed-out script. The spec now returns diagnostics at 25 seconds (before the driver timeout) and asserts observed progress plus terminal success notice and actual persisted Git effects, without assuming final progress-event ordering relative to invoke settlement.",
+        "safety": "No live credentials or services, dependency package, retry framework, persisted job center, runtime test IPC bridge, navigation side effect, permission bypass, push or release. Tauri test support is dev-only. Final production artifact isolation and native saturation/navigation scenarios remain 08-27/28; cross-domain path integration remains 08-29."
+      }
+    }
+  ]
+}

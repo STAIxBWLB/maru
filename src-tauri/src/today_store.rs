@@ -8,12 +8,14 @@
 //   events/YYYY-MM.jsonl           append-only TaskEvent lines
 //   outbox/                        reserved for the integration outbox
 
-use crate::atomic_file::write_atomic;
+use crate::atomic_file::{
+    with_path_transactions, write_atomic, PathTransactionLease, PathTransactionRequest,
+};
 use crate::document::revision_for;
 use crate::ipc_error::{IpcError, TODAY_CONFLICT};
 use crate::tasks::{
-    materialize_capture_task, prepare_capture_task_materialization, resolve_tasks_root,
-    CreateTaskDraft, TaskBucket,
+    materialize_capture_task_in_transaction, prepare_capture_task_materialization,
+    resolve_tasks_root, CreateTaskDraft, TaskBucket,
 };
 use crate::today::{
     logical_day, parse_day_start, parse_sleep_start, parse_timezone, validate_plan,
@@ -527,7 +529,6 @@ pub(crate) fn check_revision(
 /// revision the day starts fresh. Creating a fresh day runs the rollover
 /// (close + seed the newest prior day) first, so a failed or skipped
 /// `today_rollover` call at boot can never permanently orphan the prior day.
-#[tauri::command]
 pub fn today_open(
     work_path: String,
     now_iso: String,
@@ -535,6 +536,88 @@ pub fn today_open(
     day_start: String,
     sleep_start: String,
 ) -> Result<TodaySnapshot, String> {
+    let work = normalize_existing_dir(&work_path)?;
+    let lexical_work = if Path::new(&work_path).is_absolute() {
+        PathBuf::from(&work_path)
+    } else {
+        std::env::current_dir()
+            .map_err(|err| format!("Cannot resolve Today cwd: {err}"))?
+            .join(&work_path)
+    };
+    // Allocation, recovery, revision retention, events and journal rollback all
+    // belong to this operation. Include nested symlink endpoints independently.
+    let mut paths = vec![
+        work.join(".maru/today"),
+        work.join(".maru/today/revisions"),
+        work.join(".maru/today/events"),
+        work.join(".maru/today/outbox"),
+        work.join(".maru/today/finalize"),
+        work.join("tasks"),
+        work.join("tasks/active"),
+        work.join("tasks/daily"),
+    ];
+    for root in [today_dir(&work), work.join("tasks")] {
+        if root.is_dir() {
+            for entry in walkdir::WalkDir::new(&root).follow_links(true) {
+                let entry = entry.map_err(|err| err.to_string())?;
+                if entry.path_is_symlink() {
+                    paths.push(entry.into_path());
+                }
+            }
+        }
+    }
+    let paths = paths
+        .into_iter()
+        .flat_map(|path| {
+            let alias = path
+                .strip_prefix(&work)
+                .map(|rel| lexical_work.join(rel))
+                .unwrap_or_else(|_| path.clone());
+            [path, alias]
+        })
+        .collect::<Vec<_>>();
+    let admission = PathTransactionRequest::new(paths)?
+        .require_parent(&work)?
+        .with_workspace_registry()?;
+    with_path_transactions(admission, |lease| {
+        today_open_in_transaction(lease, work_path, now_iso, timezone, day_start, sleep_start)
+    })
+}
+
+pub(crate) fn today_open_in_transaction(
+    lease: &PathTransactionLease,
+    work_path: String,
+    now_iso: String,
+    timezone: String,
+    day_start: String,
+    sleep_start: String,
+) -> Result<TodaySnapshot, String> {
+    let work = normalize_existing_dir(&work_path)?;
+    let mut paths = vec![
+        work.join(".maru/today"),
+        work.join(".maru/today/revisions"),
+        work.join(".maru/today/events"),
+        work.join(".maru/today/outbox"),
+        work.join(".maru/today/finalize"),
+        work.join("tasks"),
+        work.join("tasks/active"),
+        work.join("tasks/daily"),
+    ];
+    // A new nested alias introduced while waiting must not expand this lease.
+    for root in [today_dir(&work), work.join("tasks")] {
+        if root.is_dir() {
+            for entry in walkdir::WalkDir::new(&root).follow_links(true) {
+                let entry = entry
+                    .map_err(|err| format!("Cannot inspect Today transaction paths: {err}"))?;
+                if entry.path_is_symlink() {
+                    paths.push(entry.into_path());
+                }
+            }
+        }
+    }
+    lease.ensure_covered(paths)?;
+    lease.ensure_workspace_registry()?;
+    lease.before_effect()?;
     let work = normalize_existing_dir(&work_path)?;
     let tz = parse_timezone(&timezone)?;
     let day_start_time = parse_day_start(&day_start)?;
@@ -545,10 +628,13 @@ pub fn today_open(
     let day = logical_day(now, day_start_time)
         .format("%Y-%m-%d")
         .to_string();
+    if let Err(error) = assert_maru_can_write(&work_path, WorkspaceWriteAction::Modify) {
+        return load_snapshot(&work, &day).map_err(|_| error);
+    }
     // Best-effort integration-outbox recovery: reconcile crash-interrupted
     // `prepared`/`syncing` records. Never fails open — a recovery error is
     // logged to the day's event log and opening continues.
-    if let Err(err) = crate::today_outbox::recover_outbox(&work) {
+    if let Err(err) = crate::today_outbox::recover_outbox_in_transaction(lease, &work) {
         let _ = append_task_event(
             &work,
             &day,
@@ -604,13 +690,99 @@ pub fn today_open(
 /// concurrency: `expected_revision` must match the stored revision, and the
 /// whole read-check-write runs under the workspace lock so two concurrent
 /// callers with the same revision cannot both win.
-#[tauri::command]
 pub fn today_mutate(
     work_path: String,
     logical_day: String,
     expected_revision: String,
     mutation: TodayMutation,
 ) -> Result<TodaySnapshot, IpcError> {
+    let work = normalize_existing_dir(&work_path)?;
+    let lexical_work = if Path::new(&work_path).is_absolute() {
+        PathBuf::from(&work_path)
+    } else {
+        std::env::current_dir()
+            .map_err(|err| format!("Cannot resolve Today cwd: {err}"))?
+            .join(&work_path)
+    };
+    // Allocation, recovery, revision retention, events and journal rollback all
+    // belong to this operation. Include nested symlink endpoints independently.
+    let mut paths = vec![
+        work.join(".maru/today"),
+        work.join(".maru/today/revisions"),
+        work.join(".maru/today/events"),
+        work.join(".maru/today/outbox"),
+        work.join(".maru/today/finalize"),
+        work.join("tasks"),
+        work.join("tasks/active"),
+        work.join("tasks/daily"),
+    ];
+    for root in [today_dir(&work), work.join("tasks")] {
+        if root.is_dir() {
+            for entry in walkdir::WalkDir::new(&root).follow_links(true) {
+                let entry = entry.map_err(|err| err.to_string())?;
+                if entry.path_is_symlink() {
+                    paths.push(entry.into_path());
+                }
+            }
+        }
+    }
+    let paths = paths
+        .into_iter()
+        .flat_map(|path| {
+            let alias = path
+                .strip_prefix(&work)
+                .map(|rel| lexical_work.join(rel))
+                .unwrap_or_else(|_| path.clone());
+            [path, alias]
+        })
+        .collect::<Vec<_>>();
+    let admission = PathTransactionRequest::new(paths)?
+        .require_parent(&work)?
+        .with_workspace_registry()?;
+    with_path_transactions(admission, |lease| {
+        Ok(today_mutate_in_transaction(
+            lease,
+            work_path,
+            logical_day,
+            expected_revision,
+            mutation,
+        ))
+    })?
+}
+
+pub(crate) fn today_mutate_in_transaction(
+    lease: &PathTransactionLease,
+    work_path: String,
+    logical_day: String,
+    expected_revision: String,
+    mutation: TodayMutation,
+) -> Result<TodaySnapshot, IpcError> {
+    let work = normalize_existing_dir(&work_path)?;
+    let mut paths = vec![
+        work.join(".maru/today"),
+        work.join(".maru/today/revisions"),
+        work.join(".maru/today/events"),
+        work.join(".maru/today/outbox"),
+        work.join(".maru/today/finalize"),
+        work.join("tasks"),
+        work.join("tasks/active"),
+        work.join("tasks/daily"),
+    ];
+    // A new nested alias introduced while waiting must not expand this lease.
+    for root in [today_dir(&work), work.join("tasks")] {
+        if root.is_dir() {
+            for entry in walkdir::WalkDir::new(&root).follow_links(true) {
+                let entry = entry
+                    .map_err(|err| format!("Cannot inspect Today transaction paths: {err}"))?;
+                if entry.path_is_symlink() {
+                    paths.push(entry.into_path());
+                }
+            }
+        }
+    }
+    lease.ensure_covered(paths)?;
+    lease.ensure_workspace_registry()?;
+    lease.before_effect()?;
     validate_logical_day(&logical_day)?;
     assert_maru_can_write(&work_path, WorkspaceWriteAction::Modify)?;
     let work = normalize_existing_dir(&work_path)?;
@@ -669,11 +841,91 @@ pub fn today_mutate(
 /// Atomically finish (or skip) Prepare. Capture task notes and the rewritten
 /// day snapshot are coordinated through a durable journal so retrying the same
 /// request is safe and crash recovery never removes user-modified files.
-#[tauri::command]
 pub fn today_finalize_setup(
     work_path: String,
     request: TodayFinalizeSetupRequest,
 ) -> Result<TodayFinalizeSetupOutcome, IpcError> {
+    let work = normalize_existing_dir(&work_path)?;
+    let lexical_work = if Path::new(&work_path).is_absolute() {
+        PathBuf::from(&work_path)
+    } else {
+        std::env::current_dir()
+            .map_err(|err| format!("Cannot resolve Today cwd: {err}"))?
+            .join(&work_path)
+    };
+    // Allocation, recovery, revision retention, events and journal rollback all
+    // belong to this operation. Include nested symlink endpoints independently.
+    let mut paths = vec![
+        work.join(".maru/today"),
+        work.join(".maru/today/revisions"),
+        work.join(".maru/today/events"),
+        work.join(".maru/today/outbox"),
+        work.join(".maru/today/finalize"),
+        work.join("tasks"),
+        work.join("tasks/active"),
+        work.join("tasks/daily"),
+    ];
+    for root in [today_dir(&work), work.join("tasks")] {
+        if root.is_dir() {
+            for entry in walkdir::WalkDir::new(&root).follow_links(true) {
+                let entry = entry.map_err(|err| err.to_string())?;
+                if entry.path_is_symlink() {
+                    paths.push(entry.into_path());
+                }
+            }
+        }
+    }
+    let paths = paths
+        .into_iter()
+        .flat_map(|path| {
+            let alias = path
+                .strip_prefix(&work)
+                .map(|rel| lexical_work.join(rel))
+                .unwrap_or_else(|_| path.clone());
+            [path, alias]
+        })
+        .collect::<Vec<_>>();
+    let admission = PathTransactionRequest::new(paths)?
+        .require_parent(&work)?
+        .with_workspace_registry()?;
+    with_path_transactions(admission, |lease| {
+        Ok(today_finalize_setup_in_transaction(
+            lease, work_path, request,
+        ))
+    })?
+}
+
+pub(crate) fn today_finalize_setup_in_transaction(
+    lease: &PathTransactionLease,
+    work_path: String,
+    request: TodayFinalizeSetupRequest,
+) -> Result<TodayFinalizeSetupOutcome, IpcError> {
+    let work = normalize_existing_dir(&work_path)?;
+    let mut paths = vec![
+        work.join(".maru/today"),
+        work.join(".maru/today/revisions"),
+        work.join(".maru/today/events"),
+        work.join(".maru/today/outbox"),
+        work.join(".maru/today/finalize"),
+        work.join("tasks"),
+        work.join("tasks/active"),
+        work.join("tasks/daily"),
+    ];
+    // A new nested alias introduced while waiting must not expand this lease.
+    for root in [today_dir(&work), work.join("tasks")] {
+        if root.is_dir() {
+            for entry in walkdir::WalkDir::new(&root).follow_links(true) {
+                let entry = entry
+                    .map_err(|err| format!("Cannot inspect Today transaction paths: {err}"))?;
+                if entry.path_is_symlink() {
+                    paths.push(entry.into_path());
+                }
+            }
+        }
+    }
+    lease.ensure_covered(paths)?;
+    lease.ensure_workspace_registry()?;
+    lease.before_effect()?;
     validate_logical_day(&request.logical_day)?;
     if request.idempotency_key.trim().is_empty() {
         return Err("today_finalize_idempotency_key_required".to_string().into());
@@ -856,7 +1108,7 @@ pub fn today_finalize_setup(
                     });
                     write_finalize_journal(&journal_path, &journal)?;
                 }
-                let write = materialize_capture_task(&work, &prepared)?;
+                let write = materialize_capture_task_in_transaction(lease, &work, &prepared)?;
                 let task_id = write
                     .row
                     .frontmatter
@@ -1225,7 +1477,6 @@ fn newest_prior_day(work: &Path, new_day: &str) -> Option<String> {
 
 /// Close the previous logical day (if it was touched) and initialize the
 /// new one. Idempotent: a second run for the same logical day is a no-op.
-#[tauri::command]
 pub fn today_rollover(
     work_path: String,
     now_iso: String,
@@ -1233,6 +1484,88 @@ pub fn today_rollover(
     day_start: String,
     sleep_start: String,
 ) -> Result<TodayRolloverOutcome, String> {
+    let work = normalize_existing_dir(&work_path)?;
+    let lexical_work = if Path::new(&work_path).is_absolute() {
+        PathBuf::from(&work_path)
+    } else {
+        std::env::current_dir()
+            .map_err(|err| format!("Cannot resolve Today cwd: {err}"))?
+            .join(&work_path)
+    };
+    // Allocation, recovery, revision retention, events and journal rollback all
+    // belong to this operation. Include nested symlink endpoints independently.
+    let mut paths = vec![
+        work.join(".maru/today"),
+        work.join(".maru/today/revisions"),
+        work.join(".maru/today/events"),
+        work.join(".maru/today/outbox"),
+        work.join(".maru/today/finalize"),
+        work.join("tasks"),
+        work.join("tasks/active"),
+        work.join("tasks/daily"),
+    ];
+    for root in [today_dir(&work), work.join("tasks")] {
+        if root.is_dir() {
+            for entry in walkdir::WalkDir::new(&root).follow_links(true) {
+                let entry = entry.map_err(|err| err.to_string())?;
+                if entry.path_is_symlink() {
+                    paths.push(entry.into_path());
+                }
+            }
+        }
+    }
+    let paths = paths
+        .into_iter()
+        .flat_map(|path| {
+            let alias = path
+                .strip_prefix(&work)
+                .map(|rel| lexical_work.join(rel))
+                .unwrap_or_else(|_| path.clone());
+            [path, alias]
+        })
+        .collect::<Vec<_>>();
+    let admission = PathTransactionRequest::new(paths)?
+        .require_parent(&work)?
+        .with_workspace_registry()?;
+    with_path_transactions(admission, |lease| {
+        today_rollover_in_transaction(lease, work_path, now_iso, timezone, day_start, sleep_start)
+    })
+}
+
+pub(crate) fn today_rollover_in_transaction(
+    lease: &PathTransactionLease,
+    work_path: String,
+    now_iso: String,
+    timezone: String,
+    day_start: String,
+    sleep_start: String,
+) -> Result<TodayRolloverOutcome, String> {
+    let work = normalize_existing_dir(&work_path)?;
+    let mut paths = vec![
+        work.join(".maru/today"),
+        work.join(".maru/today/revisions"),
+        work.join(".maru/today/events"),
+        work.join(".maru/today/outbox"),
+        work.join(".maru/today/finalize"),
+        work.join("tasks"),
+        work.join("tasks/active"),
+        work.join("tasks/daily"),
+    ];
+    // A new nested alias introduced while waiting must not expand this lease.
+    for root in [today_dir(&work), work.join("tasks")] {
+        if root.is_dir() {
+            for entry in walkdir::WalkDir::new(&root).follow_links(true) {
+                let entry = entry
+                    .map_err(|err| format!("Cannot inspect Today transaction paths: {err}"))?;
+                if entry.path_is_symlink() {
+                    paths.push(entry.into_path());
+                }
+            }
+        }
+    }
+    lease.ensure_covered(paths)?;
+    lease.ensure_workspace_registry()?;
+    lease.before_effect()?;
     assert_maru_can_write(&work_path, WorkspaceWriteAction::Modify)?;
     let work = normalize_existing_dir(&work_path)?;
     let tz = parse_timezone(&timezone)?;
@@ -1414,7 +1747,6 @@ fn rollover_inner(
 /// Read appended task events for a month (`YYYY-MM`) or, when `day` is
 /// given, only events belonging to that logical day (falling back to the
 /// UTC timestamp prefix for legacy records without a `day` field).
-#[tauri::command]
 pub fn read_task_events(
     work_path: String,
     month: Option<String>,
@@ -2508,5 +2840,789 @@ mod tests {
         )
         .unwrap_err();
         assert!(err.to_string().starts_with("today_block_crosses_sleep"));
+    }
+}
+
+/// Owned IPC boundaries; all filesystem work and admission waits run in the worker.
+pub mod ipc {
+    use super::*;
+    #[tauri::command]
+    pub async fn today_open(
+        work_path: String,
+        now_iso: String,
+        timezone: String,
+        day_start: String,
+        sleep_start: String,
+    ) -> Result<TodaySnapshot, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(&[PathBuf::from(&work_path)], "worker:today_open");
+            super::today_open(work_path, now_iso, timezone, day_start, sleep_start)
+        })
+        .await
+        .map_err(|err| format!("today_open_task_failed: {err}"))?
+    }
+    #[tauri::command]
+    pub async fn today_mutate(
+        work_path: String,
+        logical_day: String,
+        expected_revision: String,
+        mutation: TodayMutation,
+    ) -> Result<TodaySnapshot, IpcError> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(&[PathBuf::from(&work_path)], "worker:today_mutate");
+            super::today_mutate(work_path, logical_day, expected_revision, mutation)
+        })
+        .await
+        .map_err(|err| IpcError::from(format!("today_mutate_task_failed: {err}")))?
+    }
+    #[tauri::command]
+    pub async fn today_finalize_setup(
+        work_path: String,
+        request: TodayFinalizeSetupRequest,
+    ) -> Result<TodayFinalizeSetupOutcome, IpcError> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(
+                &[PathBuf::from(&work_path)],
+                "worker:today_finalize_setup",
+            );
+            super::today_finalize_setup(work_path, request)
+        })
+        .await
+        .map_err(|err| IpcError::from(format!("today_finalize_setup_task_failed: {err}")))?
+    }
+    #[tauri::command]
+    pub async fn today_rollover(
+        work_path: String,
+        now_iso: String,
+        timezone: String,
+        day_start: String,
+        sleep_start: String,
+    ) -> Result<TodayRolloverOutcome, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(&[PathBuf::from(&work_path)], "worker:today_rollover");
+            super::today_rollover(work_path, now_iso, timezone, day_start, sleep_start)
+        })
+        .await
+        .map_err(|err| format!("today_rollover_task_failed: {err}"))?
+    }
+    #[tauri::command]
+    pub async fn read_task_events(
+        work_path: String,
+        month: Option<String>,
+        day: Option<String>,
+    ) -> Result<Vec<TaskEvent>, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(
+                &[PathBuf::from(&work_path)],
+                "worker:read_task_events",
+            );
+            super::read_task_events(work_path, month, day)
+        })
+        .await
+        .map_err(|err| format!("read_task_events_task_failed: {err}"))?
+    }
+}
+
+#[cfg(test)]
+mod phase08_11 {
+    use super::*;
+    use crate::atomic_file::{
+        phase08_06::{boundary, run, Held, Home},
+        PathTransactionTestHook,
+    };
+    use crate::today::{CaptureMaterializationInput, DailyPlanItem, DailyPlanV1, PlanLane};
+    use crate::workspace_files::phase08_06::TrashFixture;
+    use std::{future::Future, sync::mpsc, time::Duration};
+    const DAY: &str = "2026-07-21";
+    fn text(path: &Path) -> String {
+        path.to_string_lossy().into_owned()
+    }
+    fn open(work: String) -> TodaySnapshot {
+        run(ipc::today_open(
+            work,
+            "2026-07-21T09:00:00+09:00".into(),
+            "Asia/Seoul".into(),
+            "03:30".into(),
+            "21:30".into(),
+        ))
+        .unwrap()
+    }
+    fn fixture(home: &Home) -> tempfile::TempDir {
+        let tmp = tempfile::tempdir_in(home.root.path()).unwrap();
+        fs::create_dir_all(tmp.path().join("tasks/active")).unwrap();
+        open(text(tmp.path()));
+        tmp
+    }
+    fn request(snapshot: &TodaySnapshot) -> TodayFinalizeSetupRequest {
+        TodayFinalizeSetupRequest {
+            logical_day: DAY.into(),
+            expected_revision: snapshot.revision.clone(),
+            idempotency_key: "capture-finish".into(),
+            action: TodayFinalizeAction::Confirm,
+            plan: Some(DailyPlanV1 {
+                logical_day: DAY.into(),
+                input_revision: snapshot.revision.clone(),
+                top: vec![],
+                flexible: vec![DailyPlanItem {
+                    item_ref: PlanItemRef::Capture {
+                        capture_id: "capture-1".into(),
+                    },
+                    lane: PlanLane::Flexible,
+                    order: 0,
+                    outcome: Some("Ship capture".into()),
+                    estimate_minutes: Some(30),
+                    estimate_provisional: false,
+                    pinned: false,
+                    proposed_block: None,
+                    calendar_sync: CalendarSyncState::none(),
+                }],
+                overflow: vec![],
+                reasons: vec![],
+                warnings: vec![],
+            }),
+            captures: vec![CaptureMaterializationInput {
+                capture_id: "capture-1".into(),
+                title: "Synthetic capture".into(),
+                summary: "Preserve receipt".into(),
+                project: None,
+                due_date: None,
+                estimate_minutes: Some(30),
+            }],
+            unresolved_policy: UnresolvedPolicy::KeepLater,
+        }
+    }
+    async fn write(
+        op: &'static str,
+        work: String,
+        snapshot: TodaySnapshot,
+    ) -> Result<TodaySnapshot, IpcError> {
+        match op {
+            "today_open" => ipc::today_open(
+                work,
+                "2026-07-22T09:00:00+09:00".into(),
+                "Asia/Seoul".into(),
+                "03:30".into(),
+                "21:30".into(),
+            )
+            .await
+            .map_err(IpcError::from),
+            "today_rollover" => ipc::today_rollover(
+                work,
+                "2026-07-22T09:00:00+09:00".into(),
+                "Asia/Seoul".into(),
+                "03:30".into(),
+                "21:30".into(),
+            )
+            .await
+            .map(|_| snapshot)
+            .map_err(IpcError::from),
+            "today_mutate" => {
+                ipc::today_mutate(
+                    work,
+                    DAY.into(),
+                    snapshot.revision,
+                    TodayMutation::SetBrainDump {
+                        brain_dump: "persisted work".into(),
+                    },
+                )
+                .await
+            }
+            "today_finalize_setup" => ipc::today_finalize_setup(work, request(&snapshot))
+                .await
+                .map(|v| v.snapshot),
+            _ => unreachable!(),
+        }
+    }
+    fn start<F: Future + Send + 'static>(future: F) -> mpsc::Receiver<F::Output>
+    where
+        F::Output: Send + 'static,
+    {
+        let (tx, rx) = mpsc::channel();
+        tauri::async_runtime::spawn(async move {
+            let _ = tx.send(future.await);
+        });
+        rx
+    }
+    fn done<T>(rx: mpsc::Receiver<T>) -> T {
+        rx.recv_timeout(Duration::from_secs(10))
+            .expect("bounded completion")
+    }
+    #[test]
+    fn phase08_11_store_all_wrappers_same_polling_task_yield_joinerror() {
+        let home = Home::new();
+        let tmp = fixture(&home);
+        let root = tmp.path();
+        let w = text(root);
+        let snapshot = load_snapshot(root, DAY).unwrap();
+        for op in [
+            "today_open",
+            "today_mutate",
+            "today_finalize_setup",
+            "today_rollover",
+        ] {
+            let w = w.clone();
+            let s = snapshot.clone();
+            boundary(root.into(), op, async move {
+                write(op, w, s).await.map_err(|err| {
+                    assert!(err.code.is_empty());
+                    err.message
+                })
+            });
+        }
+        boundary(
+            root.into(),
+            "read_task_events",
+            ipc::read_task_events(w, None, Some(DAY.into())),
+        );
+    }
+    #[test]
+    fn phase08_11_store_finalize_capture_replay_events_and_incomplete_lease() {
+        let home = Home::new();
+        let tmp = fixture(&home);
+        let root = tmp.path();
+        let w = text(root);
+        let snapshot = load_snapshot(root, DAY).unwrap();
+        let req = request(&snapshot);
+        let incomplete = PathTransactionRequest::new([today_dir(root)])
+            .unwrap()
+            .with_workspace_registry()
+            .unwrap();
+        let denied = with_path_transactions(incomplete, |lease| {
+            Ok(today_finalize_setup_in_transaction(
+                lease,
+                w.clone(),
+                req.clone(),
+            ))
+        })
+        .unwrap()
+        .unwrap_err();
+        assert!(denied.message.contains("exceeds the admitted"));
+        assert_eq!(fs::read_dir(root.join("tasks/active")).unwrap().count(), 0);
+        let outcome = run(ipc::today_finalize_setup(w.clone(), req.clone())).unwrap();
+        assert_eq!(outcome.materialized.len(), 1);
+        assert!(!outcome.replayed);
+        assert!(root.join(&outcome.materialized[0].task_path).is_file());
+        assert!(root.join("tasks/daily/2026-07-21.md").is_file());
+        assert!(
+            run(ipc::today_finalize_setup(w.clone(), req))
+                .unwrap()
+                .replayed
+        );
+        assert!(
+            !run(ipc::read_task_events(w.clone(), None, Some(DAY.into())))
+                .unwrap()
+                .is_empty()
+        );
+        let err = run(ipc::today_mutate(
+            w.clone(),
+            DAY.into(),
+            snapshot.revision,
+            TodayMutation::QuickSkip,
+        ))
+        .unwrap_err();
+        assert_eq!(err.code, TODAY_CONFLICT);
+        assert_eq!(
+            run(ipc::read_task_events(w, None, None)).unwrap_err(),
+            "today_month_required"
+        );
+    }
+    #[test]
+    fn phase08_11_store_every_writer_same_target_contention_and_failure_release() {
+        let home = Home::new();
+        for op in [
+            "today_open",
+            "today_mutate",
+            "today_finalize_setup",
+            "today_rollover",
+        ] {
+            let tmp = fixture(&home);
+            let root = tmp.path();
+            let w = text(root);
+            let snapshot = load_snapshot(root, DAY).unwrap();
+            let key = today_dir(root);
+            let held = Held::new(key.clone(), "admitted");
+            let first = start(write(op, w.clone(), snapshot.clone()));
+            held.wait();
+            let waiting = Held::new(key, "before-admission");
+            let second = start(write(op, w.clone(), snapshot));
+            waiting.wait();
+            waiting.release();
+            assert!(second.recv_timeout(Duration::from_millis(30)).is_err());
+            held.release();
+            done(first).unwrap();
+            let next = done(second);
+            if op == "today_mutate" {
+                assert_eq!(next.unwrap_err().code, TODAY_CONFLICT);
+            } else {
+                next.unwrap();
+            }
+            assert_eq!(open(w).logical_day, DAY);
+        }
+    }
+    #[test]
+    fn phase08_11_store_parent_rename_trash_both_orders_aliases() {
+        let home = Home::new();
+        for op in [
+            "today_open",
+            "today_mutate",
+            "today_finalize_setup",
+            "today_rollover",
+        ] {
+            for parent_op in ["rename", "trash"] {
+                for parent_first in [false, true] {
+                    for alias in [false, true] {
+                        let tmp = fixture(&home);
+                        let root = tmp.path().to_path_buf();
+                        let owner = root.parent().unwrap();
+                        let snapshot = load_snapshot(&root, DAY).unwrap();
+                        let alias_path = owner.join(format!(
+                            "alias-{}",
+                            root.file_name().unwrap().to_string_lossy()
+                        ));
+                        #[cfg(unix)]
+                        if alias {
+                            std::os::unix::fs::symlink(&root, &alias_path).unwrap();
+                        }
+                        let w = if alias {
+                            text(&alias_path)
+                        } else {
+                            text(&root)
+                        };
+                        let moved = owner.join(format!(
+                            "moved-{}",
+                            root.file_name().unwrap().to_string_lossy()
+                        ));
+                        let trash = owner.join(format!(
+                            "trash-{}",
+                            root.file_name().unwrap().to_string_lossy()
+                        ));
+                        let _trash = TrashFixture::new(root.clone(), trash.clone());
+                        let parent_w = text(owner);
+                        let source = text(&root);
+                        let new_name = moved.file_name().unwrap().to_string_lossy().into_owned();
+                        let parent = async move {
+                            if parent_op == "rename" {
+                                crate::workspace_files::ipc::rename_workspace_entry(
+                                    parent_w, source, new_name,
+                                )
+                                .await
+                                .map(|v| assert!(v.error.is_none()))
+                            } else {
+                                crate::workspace_files::ipc::trash_workspace_entries(
+                                    parent_w,
+                                    vec![source],
+                                )
+                                .await
+                                .map(|v| assert!(v[0].error.is_none()))
+                            }
+                        };
+                        let key = if alias {
+                            alias_path.join(".maru/today")
+                        } else {
+                            today_dir(&root)
+                        };
+                        if parent_first {
+                            let held = Held::new(root.clone(), "admitted");
+                            let first = start(parent);
+                            held.wait();
+                            let wait = Held::new(key, "before-admission");
+                            let second = start(write(op, w, snapshot));
+                            wait.wait();
+                            wait.release();
+                            assert!(second.recv_timeout(Duration::from_millis(20)).is_err());
+                            held.release();
+                            done(first).unwrap();
+                            assert!(done(second).is_err(), "{op}/{parent_op}");
+                        } else {
+                            let held = Held::new(key, "admitted");
+                            let first = start(write(op, w, snapshot));
+                            held.wait();
+                            let wait = Held::new(root.clone(), "before-admission");
+                            let second = start(parent);
+                            wait.wait();
+                            wait.release();
+                            assert!(second.recv_timeout(Duration::from_millis(20)).is_err());
+                            held.release();
+                            done(first).unwrap();
+                            done(second).unwrap();
+                            let final_root = if parent_op == "rename" {
+                                &moved
+                            } else {
+                                &trash
+                            };
+                            assert!(final_root.join(".maru/today/2026-07-21.json").is_file());
+                            if op == "today_finalize_setup" {
+                                assert_eq!(
+                                    fs::read_dir(final_root.join("tasks/active"))
+                                        .unwrap()
+                                        .count(),
+                                    1
+                                );
+                            }
+                        }
+                        assert!(!root.exists(), "old workspace not recreated");
+                        #[cfg(unix)]
+                        if alias {
+                            fs::remove_file(alias_path).unwrap();
+                        }
+                    }
+                }
+            }
+        }
+    }
+    #[test]
+    fn phase08_11_store_parent_replacement_and_unwind_release_before_domain_lock() {
+        let home = Home::new();
+        for op in [
+            "today_open",
+            "today_mutate",
+            "today_finalize_setup",
+            "today_rollover",
+        ] {
+            let tmp = fixture(&home);
+            let root = tmp.path();
+            let snapshot = load_snapshot(root, DAY).unwrap();
+            let moved = root.with_extension("old");
+            let key = today_dir(root);
+            let held = Held::new(key.clone(), "before-admission");
+            let pending = start(write(op, text(root), snapshot.clone()));
+            held.wait();
+            fs::rename(root, &moved).unwrap();
+            fs::create_dir(root).unwrap();
+            held.release();
+            assert!(done(pending).is_err());
+            assert!(!root.join(".maru").exists());
+            fs::remove_dir(root).unwrap();
+            fs::rename(&moved, root).unwrap();
+            drop(held);
+            let hook = PathTransactionTestHook::new(key, "admitted", || {
+                panic!("fixture transaction unwind")
+            });
+            let err = run(write(op, text(root), snapshot.clone())).unwrap_err();
+            assert!(err.message.contains("task_failed"));
+            assert!(err.code.is_empty());
+            drop(hook);
+            run(write(op, text(root), snapshot)).unwrap();
+        }
+    }
+    #[test]
+    fn phase08_11_store_finalize_rolls_back_capture_failure_then_manual_retry() {
+        let home = Home::new();
+        let tmp = fixture(&home);
+        let root = tmp.path();
+        let w = text(root);
+        let snapshot = load_snapshot(root, DAY).unwrap();
+        let mut req = request(&snapshot);
+        let mut second = req.captures[0].clone();
+        second.capture_id = "capture-2".into();
+        req.captures.push(second);
+        let plan = req.plan.as_mut().unwrap();
+        let mut item = plan.flexible[0].clone();
+        item.item_ref = PlanItemRef::Capture {
+            capture_id: "capture-2".into(),
+        };
+        item.order = 1;
+        plan.flexible.push(item);
+        let prepared = prepare_capture_task_materialization(
+            root,
+            DAY,
+            "capture-2",
+            CreateTaskDraft {
+                slug: "Synthetic capture".into(),
+                title: "Synthetic capture".into(),
+                frontmatter: BTreeMap::new(),
+                body: "fixture".into(),
+                bucket: TaskBucket::Active,
+            },
+        )
+        .unwrap();
+        let blocker = root.join(&prepared.rel_path);
+        fs::create_dir(&blocker).unwrap();
+        assert!(run(ipc::today_finalize_setup(w.clone(), req.clone())).is_err());
+        assert_eq!(fs::read_dir(root.join("tasks/active")).unwrap().count(), 1);
+        assert_eq!(
+            load_snapshot(root, DAY).unwrap().revision,
+            snapshot.revision
+        );
+        let journal: FinalizeJournal = serde_json::from_slice(
+            &fs::read(finalize_journal_path(root, &req.idempotency_key)).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(journal.phase, FinalizeJournalPhase::RolledBack);
+        fs::remove_dir(blocker).unwrap();
+        let outcome = run(ipc::today_finalize_setup(w, req)).unwrap();
+        assert_eq!(outcome.materialized.len(), 2);
+        assert_eq!(fs::read_dir(root.join("tasks/active")).unwrap().count(), 2);
+    }
+    #[test]
+    fn phase08_11_store_current_alias_policy_blocks_every_writer_and_open_is_read_only() {
+        use crate::scratchpad::phase08_08::registry;
+        let home = Home::new();
+        let tmp = fixture(&home);
+        let root = tmp.path();
+        let snapshot = load_snapshot(root, DAY).unwrap();
+        let original = fs::read(state_path(root, DAY)).unwrap();
+        let alias = home.root.path().join("store-alias");
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(root, alias.as_path()).unwrap();
+        for reverse in [false, true] {
+            for policy in ["readOnly", "delegated"] {
+                let (registered, caller) = if reverse {
+                    (alias.as_path(), root)
+                } else {
+                    (root, alias.as_path())
+                };
+                registry(registered, policy);
+                for op in [
+                    "today_open",
+                    "today_mutate",
+                    "today_finalize_setup",
+                    "today_rollover",
+                ] {
+                    assert!(
+                        run(write(op, text(caller), snapshot.clone())).is_err(),
+                        "{op}/{policy}"
+                    );
+                }
+                let read = open(text(caller));
+                assert_eq!(read.revision, snapshot.revision);
+                assert_eq!(fs::read(state_path(root, DAY)).unwrap(), original);
+                assert_eq!(fs::read_dir(root.join("tasks/active")).unwrap().count(), 0);
+            }
+        }
+        registry(root, "direct");
+        let registry_path = crate::vault_list::workspace_registry_path().unwrap();
+        let mut value: JsonValue =
+            serde_json::from_slice(&fs::read(&registry_path).unwrap()).unwrap();
+        value["workspaces"].as_array_mut().unwrap().push(json!({"label":"denied alias","path":text(&alias),"visibility":"private","provider":"local","writePolicy":"readOnly"}));
+        fs::write(registry_path, value.to_string()).unwrap();
+        assert!(run(write("today_finalize_setup", text(root), snapshot.clone())).is_err());
+        registry(root, "direct");
+        let held = Held::new(today_dir(root), "admitted");
+        let pending = start(write("today_finalize_setup", text(root), snapshot.clone()));
+        held.wait();
+        registry(root, "readOnly");
+        held.release();
+        assert!(done(pending).is_err());
+        registry(root, "direct");
+        run(write("today_finalize_setup", text(root), snapshot)).unwrap();
+    }
+    #[test]
+    fn phase08_11_store_document_journal_races_both_orders_preserve_manual_content() {
+        let home = Home::new();
+        for op in [
+            "today_open",
+            "today_mutate",
+            "today_finalize_setup",
+            "today_rollover",
+        ] {
+            for document_first in [false, true] {
+                let tmp = fixture(&home);
+                let root = tmp.path();
+                let w = text(root);
+                let mut snapshot = load_snapshot(root, DAY).unwrap();
+                if matches!(op, "today_open" | "today_rollover") {
+                    snapshot = run(ipc::today_mutate(
+                        w.clone(),
+                        DAY.into(),
+                        snapshot.revision,
+                        TodayMutation::QuickSkip,
+                    ))
+                    .unwrap();
+                }
+                let path = root.join("tasks/daily/2026-07-21.md");
+                fs::create_dir_all(path.parent().unwrap()).unwrap();
+                fs::write(&path, "# Manual original\n").unwrap();
+                let doc = crate::document::ipc::save_document(
+                    w.clone(),
+                    text(&path),
+                    "# Manual edited\n".into(),
+                    Some(revision_for("# Manual original\n")),
+                );
+                let writer = async move {
+                    if op == "today_mutate" {
+                        ipc::today_mutate(
+                            w,
+                            DAY.into(),
+                            snapshot.revision,
+                            TodayMutation::QuickSkip,
+                        )
+                        .await
+                    } else {
+                        write(op, w, snapshot).await
+                    }
+                };
+                if document_first {
+                    let held = Held::new(path.clone(), "admitted");
+                    let first = start(doc);
+                    held.wait();
+                    let waiting = Held::new(today_dir(root), "before-admission");
+                    let second = start(writer);
+                    waiting.wait();
+                    waiting.release();
+                    assert!(second.recv_timeout(Duration::from_millis(20)).is_err());
+                    held.release();
+                    done(first).unwrap();
+                    done(second).unwrap();
+                    assert!(fs::read_to_string(&path)
+                        .unwrap()
+                        .contains("# Manual edited"));
+                } else {
+                    let held = Held::new(today_dir(root), "admitted");
+                    let first = start(writer);
+                    held.wait();
+                    let waiting = Held::new(path.clone(), "before-admission");
+                    let second = start(doc);
+                    waiting.wait();
+                    waiting.release();
+                    assert!(second.recv_timeout(Duration::from_millis(20)).is_err());
+                    held.release();
+                    done(first).unwrap();
+                    assert_eq!(
+                        done(second).unwrap_err().code,
+                        crate::ipc_error::DOCUMENT_CONFLICT
+                    );
+                    assert!(fs::read_to_string(&path)
+                        .unwrap()
+                        .contains("# Manual original"));
+                }
+                assert!(fs::read_to_string(path)
+                    .unwrap()
+                    .contains(JOURNAL_START_MARKER));
+            }
+        }
+    }
+    #[cfg(unix)]
+    #[test]
+    fn phase08_11_store_nested_sidecar_aliases_contend_with_physical_parent() {
+        let home = Home::new();
+        for (rel, op) in [
+            ("tasks/active", "today_finalize_setup"),
+            ("tasks/daily", "today_finalize_setup"),
+            (".maru/today/events", "today_mutate"),
+            (".maru/today/revisions", "today_mutate"),
+            (".maru/today/finalize", "today_finalize_setup"),
+            (".maru/today/outbox", "today_open"),
+        ] {
+            for parent_first in [false, true] {
+                let tmp = fixture(&home);
+                let root = tmp.path();
+                let snapshot = load_snapshot(root, DAY).unwrap();
+                let target = root.join(rel);
+                let physical = home
+                    .root
+                    .path()
+                    .join(format!("physical-{}", uuid::Uuid::new_v4()));
+                if target.exists() {
+                    fs::rename(&target, &physical).unwrap();
+                } else {
+                    fs::create_dir(&physical).unwrap();
+                }
+                fs::create_dir_all(target.parent().unwrap()).unwrap();
+                std::os::unix::fs::symlink(&physical, &target).unwrap();
+                if rel.ends_with("outbox") {
+                    crate::today_outbox::enqueue_record(
+                        root,
+                        crate::today_outbox::OutboxRecordDraft {
+                            op: crate::today_outbox::OutboxOp::Complete,
+                            task_path: "tasks/active/missing.md".into(),
+                            google_task_id: "synthetic".into(),
+                            google_task_list_id: None,
+                            payload: None,
+                            status: crate::today_outbox::OutboxStatus::Syncing,
+                            web_action_id: None,
+                        },
+                        "2026-07-21T09:00:00+09:00",
+                    )
+                    .unwrap();
+                }
+                let moved_name =
+                    format!("moved-{}", physical.file_name().unwrap().to_string_lossy());
+                let moved = home.root.path().join(&moved_name);
+                let parent = crate::workspace_files::ipc::rename_workspace_entry(
+                    text(home.root.path()),
+                    text(&physical),
+                    moved_name,
+                );
+                if parent_first {
+                    let held = Held::new(physical.clone(), "admitted");
+                    let first = start(parent);
+                    held.wait();
+                    let waiting = Held::new(today_dir(root), "before-admission");
+                    let second = start(write(op, text(root), snapshot));
+                    waiting.wait();
+                    waiting.release();
+                    assert!(second.recv_timeout(Duration::from_millis(20)).is_err());
+                    held.release();
+                    done(first).unwrap();
+                    assert!(done(second).is_err());
+                } else {
+                    let held = Held::new(today_dir(root), "admitted");
+                    let first = start(write(op, text(root), snapshot));
+                    held.wait();
+                    let waiting = Held::new(physical.clone(), "before-admission");
+                    let second = start(parent);
+                    waiting.wait();
+                    waiting.release();
+                    assert!(second.recv_timeout(Duration::from_millis(20)).is_err());
+                    held.release();
+                    done(first).unwrap();
+                    done(second).unwrap();
+                    assert!(
+                        fs::read_dir(&moved).unwrap().next().is_some(),
+                        "{rel} has actual effect"
+                    );
+                }
+                assert!(!physical.exists());
+                assert!(moved.is_dir());
+                fs::remove_file(target).unwrap();
+            }
+        }
+    }
+    #[test]
+    fn phase08_11_store_open_recovers_crash_journal_without_deleting_edited_siblings() {
+        let home = Home::new();
+        let tmp = fixture(&home);
+        let root = tmp.path();
+        let snapshot = load_snapshot(root, DAY).unwrap();
+        let req = request(&snapshot);
+        fs::write(root.join("tasks/active/unchanged.md"), "original").unwrap();
+        fs::write(root.join("tasks/active/edited.md"), "user edited").unwrap();
+        let path = finalize_journal_path(root, &req.idempotency_key);
+        write_finalize_journal(
+            &path,
+            &FinalizeJournal {
+                request_hash: "crash".into(),
+                request: req,
+                phase: FinalizeJournalPhase::Materializing,
+                created_files: vec![
+                    FinalizeCreatedFile {
+                        rel_path: "tasks/active/unchanged.md".into(),
+                        content_hash: revision_for("original"),
+                    },
+                    FinalizeCreatedFile {
+                        rel_path: "tasks/active/edited.md".into(),
+                        content_hash: revision_for("original"),
+                    },
+                ],
+                materialized: vec![],
+                outcome: None,
+            },
+        )
+        .unwrap();
+        assert_eq!(open(text(root)).revision, snapshot.revision);
+        assert!(!root.join("tasks/active/unchanged.md").exists());
+        assert_eq!(
+            fs::read_to_string(root.join("tasks/active/edited.md")).unwrap(),
+            "user edited"
+        );
+        let journal: FinalizeJournal = serde_json::from_slice(&fs::read(path).unwrap()).unwrap();
+        assert_eq!(journal.phase, FinalizeJournalPhase::RolledBack);
+        assert_eq!(journal.created_files.len(), 1);
     }
 }

@@ -1,3 +1,4 @@
+use crate::atomic_file::{with_path_transactions, PathTransactionLease, PathTransactionRequest};
 use crate::kordoc_lite::{self, KordocLiteCheck, LiteField};
 use crate::vault::resolve_inside_vault;
 use crate::vault_list::{assert_maru_can_write, WorkspaceWriteAction};
@@ -88,7 +89,6 @@ struct HwpxSlotsResponse {
     fields: Vec<TemplateField>,
 }
 
-#[tauri::command]
 pub fn template_get_fields(
     work_path: String,
     request: TemplateFieldRequest,
@@ -167,7 +167,6 @@ pub fn template_get_fields(
     })
 }
 
-#[tauri::command]
 pub fn template_prepare_hwpx_template(
     work_path: String,
     source_path: String,
@@ -202,7 +201,6 @@ pub fn template_prepare_hwpx_template(
     Err("Template preparation supports .hwpx and .hwp files".to_string())
 }
 
-#[tauri::command]
 pub fn template_fill_hwpx(
     work_path: String,
     request: TemplateFillRequest,
@@ -210,18 +208,45 @@ pub fn template_fill_hwpx(
     if request.values.is_empty() {
         return Err("No template values provided".to_string());
     }
-    let (template_path, _) =
-        resolve_template_path(&work_path, request.template_key, request.template_path)?;
+    let (template_path, _) = resolve_template_path(
+        &work_path,
+        request.template_key.clone(),
+        request.template_path.clone(),
+    )?;
     if !has_extension(&template_path, "hwpx") {
         return Err("Template fill requires a .hwpx template".to_string());
     }
-    let output_path = resolve_output_path(&work_path, &template_path, request.output_path)?;
-    let write_action = if output_path.is_file() {
-        WorkspaceWriteAction::Modify
-    } else {
-        WorkspaceWriteAction::Create
-    };
-    assert_maru_can_write(&work_path, write_action)?;
+    let output_path = resolve_output_path(&work_path, &template_path, request.output_path.clone())?;
+    let parent = output_path
+        .parent()
+        .ok_or_else(|| "Template fill output path has no parent".to_string())?
+        .to_path_buf();
+    let root = resolve_inside_vault(&work_path, ".")?;
+    let admission = PathTransactionRequest::new(vec![output_path.clone(), parent])?
+        .require_parent(&root)?
+        .with_workspace_registry()?;
+    with_path_transactions(admission, |lease| {
+        lease.ensure_workspace_registry()?;
+        lease.ensure_covered(std::iter::once(output_path.clone()))?;
+        let write_action = if output_path.is_file() {
+            WorkspaceWriteAction::Modify
+        } else {
+            WorkspaceWriteAction::Create
+        };
+        assert_maru_can_write(&work_path, write_action)?;
+        lease.before_effect()?;
+        template_fill_hwpx_in_transaction(work_path, request, template_path, output_path, lease)
+    })
+}
+
+fn template_fill_hwpx_in_transaction(
+    _work_path: String,
+    request: TemplateFillRequest,
+    template_path: PathBuf,
+    output_path: PathBuf,
+    lease: &PathTransactionLease,
+) -> Result<TemplateFillResponse, String> {
+    lease.ensure_covered(std::iter::once(output_path.clone()))?;
     if let Some(parent) = output_path.parent() {
         fs::create_dir_all(parent)
             .map_err(|err| format!("Cannot create output directory: {err}"))?;
@@ -570,6 +595,59 @@ fn is_executable(path: &Path) -> bool {
     }
 }
 
+/// Owned IPC boundaries; the synchronous entry points remain available to Rust callers.
+pub mod ipc {
+    use super::*;
+    #[tauri::command]
+    pub async fn template_get_fields(
+        work_path: String,
+        request: TemplateFieldRequest,
+    ) -> Result<TemplateFieldResponse, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(
+                &[PathBuf::from(&work_path)],
+                "worker:template_get_fields",
+            );
+            super::template_get_fields(work_path, request)
+        })
+        .await
+        .map_err(|err| format!("template_get_fields_task_failed: {err}"))?
+    }
+    #[tauri::command]
+    pub async fn template_prepare_hwpx_template(
+        work_path: String,
+        source_path: String,
+    ) -> Result<TemplatePrepareResponse, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(
+                &[PathBuf::from(&work_path)],
+                "worker:template_prepare_hwpx_template",
+            );
+            super::template_prepare_hwpx_template(work_path, source_path)
+        })
+        .await
+        .map_err(|err| format!("template_prepare_hwpx_template_task_failed: {err}"))?
+    }
+    #[tauri::command]
+    pub async fn template_fill_hwpx(
+        work_path: String,
+        request: TemplateFillRequest,
+    ) -> Result<TemplateFillResponse, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(
+                &[PathBuf::from(&work_path)],
+                "worker:template_fill_hwpx",
+            );
+            super::template_fill_hwpx(work_path, request)
+        })
+        .await
+        .map_err(|err| format!("template_fill_hwpx_task_failed: {err}"))?
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -646,5 +724,332 @@ mod tests {
     fn parses_total_replaced_count() {
         let stderr = "[hwpx] {{제목}} → 1건\n[hwpx] 3건 치환 → out.hwpx\n";
         assert_eq!(parse_replaced_count(stderr.as_bytes()), 3);
+    }
+}
+
+#[cfg(test)]
+mod phase08_21 {
+    use super::*;
+    use crate::atomic_file::phase08_06::{boundary, run, Held, Home};
+    use std::io::{Read, Write};
+    use std::path::Path;
+    use std::sync::MutexGuard;
+    use std::time::Duration;
+    use zip::write::SimpleFileOptions;
+
+    struct EnvGuard {
+        _lock: MutexGuard<'static, ()>,
+    }
+    impl EnvGuard {
+        fn set_hwpx(value: &Path) -> Self {
+            let guard = crate::hwped::PHASE08_21_ENV_LOCK
+                .lock()
+                .unwrap_or_else(|poison| poison.into_inner());
+            std::env::set_var("MARU_HWPX_BIN", value);
+            Self { _lock: guard }
+        }
+    }
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            std::env::remove_var("MARU_HWPX_BIN");
+        }
+    }
+
+    fn text(path: &Path) -> String {
+        path.to_string_lossy().into_owned()
+    }
+
+    fn write_hwpx_fixture(path: &Path, section_xml: &str) {
+        let file = std::fs::File::create(path).unwrap();
+        let mut zip = zip::ZipWriter::new(file);
+        let options =
+            SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
+        zip.start_file("mimetype", options).unwrap();
+        zip.write_all(b"application/hwp+zip").unwrap();
+        zip.start_file("Contents/content.hpf", options).unwrap();
+        zip.write_all(b"<package />").unwrap();
+        zip.start_file("Contents/section0.xml", options).unwrap();
+        zip.write_all(section_xml.as_bytes()).unwrap();
+        zip.finish().unwrap();
+    }
+
+    fn read_section(path: &Path) -> String {
+        let file = std::fs::File::open(path).unwrap();
+        let mut archive = zip::ZipArchive::new(file).unwrap();
+        let mut entry = archive.by_name("Contents/section0.xml").unwrap();
+        let mut xml = String::new();
+        entry.read_to_string(&mut xml).unwrap();
+        xml
+    }
+
+    /// Fake hwpx tool whose fill publishes the values JSON it received, so the
+    /// last admitted writer is visible in the output bytes.
+    #[cfg(unix)]
+    fn fake_hwpx(dir: &Path) -> PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+
+        let binary = dir.join("hwpx");
+        let script = r#"#!/bin/sh
+case "$1" in
+  slots) echo '{"fields":[]}' ;;
+  fill)
+    template="$2"
+    output=""
+    while [ "$#" -gt 0 ]; do
+      if [ "$1" = "-o" ]; then shift; output="$1"; fi
+      shift
+    done
+    [ -n "$output" ] && [ -f "$template" ] || exit 2
+    cp "$template" "$output"
+    echo "1건 치환" >&2
+    exit 0 ;;
+  validate) exit 0 ;;
+  *) exit 2 ;;
+esac
+"#;
+        std::fs::write(&binary, script).unwrap();
+        let mut permissions = std::fs::metadata(&binary).unwrap().permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(&binary, permissions).unwrap();
+        binary
+    }
+
+    fn fill_request(
+        values: BTreeMap<String, String>,
+        output: Option<String>,
+    ) -> TemplateFillRequest {
+        TemplateFillRequest {
+            template_key: None,
+            template_path: Some("templates/form.hwpx".to_string()),
+            values,
+            output_path: output,
+        }
+    }
+
+    fn values(marker: &str) -> BTreeMap<String, String> {
+        BTreeMap::from([("제목".to_string(), marker.to_string())])
+    }
+
+    #[test]
+    fn phase08_21_template_fill_each_wrapper_yields_same_poll_and_maps_join_failure() {
+        let home = Home::new();
+        let root = home.root.path();
+        let work = text(root);
+        boundary(
+            root.into(),
+            "template_get_fields",
+            ipc::template_get_fields(
+                work.clone(),
+                TemplateFieldRequest {
+                    template_key: None,
+                    template_path: Some("templates/form.hwpx".to_string()),
+                },
+            ),
+        );
+        boundary(
+            root.into(),
+            "template_prepare_hwpx_template",
+            ipc::template_prepare_hwpx_template(work.clone(), "templates/form.hwpx".to_string()),
+        );
+        boundary(
+            root.into(),
+            "template_fill_hwpx",
+            ipc::template_fill_hwpx(work, fill_request(values("x"), None)),
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn phase08_21_template_real_fixture_results_and_legacy_rejections() {
+        let home = Home::new();
+        let root = home.root.path().join("work");
+        std::fs::create_dir_all(root.join("templates")).unwrap();
+        write_hwpx_fixture(
+            &root.join("templates/form.hwpx"),
+            "<hp:sec><hp:p><hp:t>{{제목}}</hp:t></hp:p></hp:sec>",
+        );
+        let bin_dir = home.root.path().join("bin");
+        std::fs::create_dir_all(&bin_dir).unwrap();
+        let _env = EnvGuard::set_hwpx(&fake_hwpx(&bin_dir));
+        let work = text(&root);
+
+        let fields = run(ipc::template_get_fields(
+            work.clone(),
+            TemplateFieldRequest {
+                template_key: None,
+                template_path: Some("templates/form.hwpx".to_string()),
+            },
+        ))
+        .unwrap();
+        assert_eq!(fields.source, "workspace");
+        assert!(fields.fields.iter().any(|field| field.key == "제목"));
+
+        let prepared = run(ipc::template_prepare_hwpx_template(
+            work.clone(),
+            "templates/form.hwpx".to_string(),
+        ))
+        .unwrap();
+        assert_eq!(prepared.status, "ready");
+
+        let filled = run(ipc::template_fill_hwpx(
+            work.clone(),
+            fill_request(values("제목값"), Some("out/filled.hwpx".to_string())),
+        ))
+        .unwrap();
+        assert_eq!(filled.replaced_count, 1);
+        assert!(filled.validation_ok);
+        assert!(filled.unmatched_fields.is_empty());
+        assert!(
+            read_section(&root.join("out/filled.hwpx")).contains("제목값"),
+            "marker value should be substituted into the filled hwpx"
+        );
+
+        std::fs::write(root.join("templates/form.docx"), b"docx").unwrap();
+        assert!(run(ipc::template_get_fields(
+            work.clone(),
+            TemplateFieldRequest {
+                template_key: None,
+                template_path: Some("templates/form.docx".to_string()),
+            },
+        ))
+        .unwrap_err()
+        .contains("requires a .hwpx template"));
+        assert!(run(ipc::template_prepare_hwpx_template(
+            work.clone(),
+            "templates/missing.hwpx".to_string(),
+        ))
+        .unwrap_err()
+        .contains("Template file does not exist"));
+        assert_eq!(
+            run(ipc::template_prepare_hwpx_template(
+                work.clone(),
+                "templates/form.hwpx".to_string()
+            ))
+            .unwrap()
+            .status,
+            "ready"
+        );
+        assert!(run(ipc::template_fill_hwpx(
+            work.clone(),
+            fill_request(BTreeMap::new(), None),
+        ))
+        .unwrap_err()
+        .contains("No template values provided"));
+        let mut not_template = fill_request(values("x"), None);
+        not_template.template_path = Some("templates/form.docx".to_string());
+        assert!(run(ipc::template_fill_hwpx(work, not_template))
+            .unwrap_err()
+            .contains("requires a .hwpx template"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn phase08_21_template_fill_serializes_same_target_both_orders() {
+        let home = Home::new();
+        let bin_dir = home.root.path().join("bin-orders");
+        std::fs::create_dir_all(&bin_dir).unwrap();
+        let _env = EnvGuard::set_hwpx(&fake_hwpx(&bin_dir));
+        for swap in [false, true] {
+            let root = home.root.path().join(format!("fill-{swap}"));
+            std::fs::create_dir_all(root.join("templates")).unwrap();
+            write_hwpx_fixture(
+                &root.join("templates/form.hwpx"),
+                "<hp:sec><hp:p><hp:t>{{제목}}</hp:t></hp:p></hp:sec>",
+            );
+            let work = text(&root);
+            let target = root.join("out/filled.hwpx");
+            let first_marker = if swap { "second" } else { "first" };
+            let second_marker = if swap { "first" } else { "second" };
+            let held = Held::new(target.clone(), "admitted");
+            let first = start(ipc::template_fill_hwpx(
+                work.clone(),
+                fill_request(values(first_marker), Some("out/filled.hwpx".to_string())),
+            ));
+            held.wait();
+            let waiting = Held::new(target.clone(), "before-admission");
+            let second = start(ipc::template_fill_hwpx(
+                work.clone(),
+                fill_request(values(second_marker), Some("out/filled.hwpx".to_string())),
+            ));
+            waiting.wait();
+            waiting.release();
+            assert!(second.recv_timeout(Duration::from_millis(30)).is_err());
+            held.release();
+            done(first).unwrap();
+            let written = done(second).unwrap();
+            assert_eq!(written.replaced_count, 1);
+            assert!(
+                read_section(&target).contains(second_marker),
+                "second admitted writer must own the final bytes"
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn phase08_21_template_denied_and_error_release_admission() {
+        let home = Home::new();
+        let root = home.root.path().join("policy");
+        std::fs::create_dir_all(root.join("templates")).unwrap();
+        write_hwpx_fixture(
+            &root.join("templates/form.hwpx"),
+            "<hp:sec><hp:p><hp:t>{{제목}}</hp:t></hp:p></hp:sec>",
+        );
+        let bin_dir = home.root.path().join("bin-policy");
+        std::fs::create_dir_all(&bin_dir).unwrap();
+        let _env = EnvGuard::set_hwpx(&fake_hwpx(&bin_dir));
+        let work = text(&root);
+        crate::scratchpad::phase08_08::registry(&root, "readOnly");
+        let err = run(ipc::template_fill_hwpx(
+            work.clone(),
+            fill_request(values("x"), Some("published.hwpx".to_string())),
+        ))
+        .unwrap_err();
+        assert!(err.contains("Workspace writes are blocked"));
+        assert!(!root.join("published.hwpx").exists());
+        crate::scratchpad::phase08_08::registry(&root, "direct");
+        run(ipc::template_fill_hwpx(
+            work.clone(),
+            fill_request(values("allowed"), Some("published.hwpx".to_string())),
+        ))
+        .unwrap();
+
+        std::fs::write(root.join("blocked"), "not a directory").unwrap();
+        let err = run(ipc::template_fill_hwpx(
+            work.clone(),
+            fill_request(values("x"), Some("blocked/published.hwpx".to_string())),
+        ))
+        .unwrap_err();
+        assert!(err.contains("Cannot create output directory"));
+        std::fs::remove_file(root.join("blocked")).unwrap();
+        run(ipc::template_fill_hwpx(
+            work,
+            fill_request(
+                values("recovered"),
+                Some("blocked/published.hwpx".to_string()),
+            ),
+        ))
+        .unwrap();
+        assert!(
+            read_section(&root.join("blocked/published.hwpx")).contains("recovered"),
+            "retry after admission error must publish the recovered fill"
+        );
+    }
+
+    fn start<F, T>(future: F) -> std::sync::mpsc::Receiver<T>
+    where
+        F: std::future::Future<Output = T> + Send + 'static,
+        T: Send + 'static,
+    {
+        let (tx, rx) = std::sync::mpsc::channel();
+        tauri::async_runtime::spawn(async move {
+            let _ = tx.send(future.await);
+        });
+        rx
+    }
+
+    fn done<T>(rx: std::sync::mpsc::Receiver<T>) -> T {
+        rx.recv_timeout(Duration::from_secs(10))
+            .expect("fixture completion")
     }
 }

@@ -36,9 +36,9 @@ describe("i18n", () => {
     expect(t("ko", "system.skills.syncAll")).toBe("전체 동기화");
     expect(t("en", "system.skills.syncAll")).toBe("Sync all");
     expect(t("en", "system.skills.neverSynced")).toBe("Never synced");
-    expect(t("en", "system.skills.syncAllComplete", { succeeded: 2, failed: 1 })).toBe(
-      "Sync all complete: 2 ok, 1 failed",
-    );
+    expect(
+      t("en", "system.skills.syncAllComplete", { succeeded: 2, failed: 1, skipped: 3 }),
+    ).toBe("Sync all complete: 2 ok, 1 failed, 3 skipped");
     expect(t("en", "system.skills.installConfirm", { count: 1, target: "Claude", mode: "Copy" })).toBe(
       "Proceed with 1 Claude install task(s) (Copy)?",
     );

@@ -32,9 +32,12 @@
 // index of the blank-line-separated block containing the span start, counted
 // over the whole raw document (the frontmatter block counts as paragraph 0).
 
-use crate::atomic_file::write_atomic;
+use crate::atomic_file::{
+    with_path_transactions, write_atomic, PathTransactionLease, PathTransactionRequest,
+};
 use crate::vault::{
-    normalize_existing_dir, read_vault_cache, resolve_inside_vault, scan_vault, VaultEntry,
+    normalize_existing_dir, read_vault_cache_in_transaction, resolve_inside_vault,
+    scan_vault_in_transaction, vault_cache_path, VaultEntry,
 };
 use chrono::Utc;
 use regex::Regex;
@@ -283,8 +286,10 @@ fn cache_file_path(work: &Path, doc_rel: &str) -> PathBuf {
 /// invariant). Missing/unparseable cache → "none", which never matches a
 /// computed stamp (compute runs scan_vault first, which writes the cache), so
 /// it degrades to a miss.
-fn vault_stamp(work: &Path) -> String {
-    let Ok(Some(entries)) = read_vault_cache(work.to_string_lossy().to_string()) else {
+fn vault_stamp(lease: &PathTransactionLease, work: &Path) -> String {
+    let Ok(Some(entries)) =
+        read_vault_cache_in_transaction(lease, work.to_string_lossy().to_string())
+    else {
         return "none".to_string();
     };
     let mut ids: Vec<String> = entries
@@ -336,12 +341,13 @@ impl RefBuilder {
 /// regex pass over the document per vault title/alias — O(vault notes x doc
 /// bytes), bounded by the entity caps, cached on disk afterwards.
 fn compute_document_refs(
+    lease: &PathTransactionLease,
     work: &Path,
     work_path: &str,
     doc_rel: &str,
     content: &str,
 ) -> Result<DocumentRefMap, String> {
-    let entries = scan_vault(work_path.to_string(), None)?;
+    let entries = scan_vault_in_transaction(lease, work_path.to_string(), None)?;
     let index = build_entry_index(&entries);
     let paragraphs = paragraph_starts(content);
     let mut wikilinks = RefBuilder::new();
@@ -473,7 +479,7 @@ fn compute_document_refs(
     Ok(DocumentRefMap {
         doc_path: doc_rel.to_string(),
         doc_hash: sha256_hex(content.as_bytes()),
-        vault_stamp: vault_stamp(work),
+        vault_stamp: vault_stamp(lease, work),
         refs,
         computed_at: Utc::now().to_rfc3339(),
     })
@@ -483,14 +489,49 @@ fn compute_document_refs(
 /// when the cache is missing, the document changed (content hash), or the
 /// vault scan cache changed (vault stamp).
 ///
-/// `async` so a cache miss (full scan_vault + one regex pass per vault
-/// title/alias) runs on Tauri's blocking pool instead of hard-blocking the
-/// window; the body stays synchronous.
-#[tauri::command(async)]
+/// The IPC adapter owns this full synchronous scan/cache transaction.
 pub fn kg_document_refs(work_path: String, doc_path: String) -> Result<DocumentRefMap, String> {
     let work = normalize_existing_dir(&work_path)?;
     let path = resolve_inside_vault(&work_path, &doc_path)?;
+    let doc_rel = normalize_rel(&path.strip_prefix(&work).unwrap_or(&path).to_string_lossy());
+    let cache_file = cache_file_path(&work, &doc_rel);
+    // The scan reads the entire source tree and may migrate registry state.
+    // Include exact cache endpoints as well as allocation directories so
+    // deliberate cache/source aliases outside the tree conflict too.
+    let mut paths = vec![
+        PathBuf::from(&work_path),
+        work.clone(),
+        path,
+        cache_file.clone(),
+        cache_file.parent().unwrap().to_path_buf(),
+        vault_cache_path(&work),
+        work.join(".maru/cache"),
+        crate::vault_list::workspace_registry_path()?,
+        crate::vault_list::legacy_vault_list_path()?,
+    ];
+    paths.extend(
+        paths
+            .clone()
+            .into_iter()
+            .filter_map(|path| path.canonicalize().ok()),
+    );
+    let request = PathTransactionRequest::new(paths)?
+        .require_parent(Path::new(&work_path))?
+        .require_parent(&work)?;
+    with_path_transactions(request, |lease| {
+        kg_document_refs_in_transaction(lease, work_path, doc_path)
+    })
+}
+
+fn kg_document_refs_in_transaction(
+    lease: &PathTransactionLease,
+    work_path: String,
+    doc_path: String,
+) -> Result<DocumentRefMap, String> {
+    let work = normalize_existing_dir(&work_path)?;
+    let path = resolve_inside_vault(&work_path, &doc_path)?;
     let vault_root = resolve_inside_vault(&work_path, ".")?;
+    lease.ensure_covered(vec![path.clone(), vault_cache_path(&work)])?;
     let content =
         fs::read_to_string(&path).map_err(|err| format!("Cannot read document: {err}"))?;
     let doc_rel = normalize_rel(
@@ -500,7 +541,7 @@ pub fn kg_document_refs(work_path: String, doc_path: String) -> Result<DocumentR
             .to_string_lossy(),
     );
     let doc_hash = sha256_hex(content.as_bytes());
-    let stamp = vault_stamp(&work);
+    let stamp = vault_stamp(lease, &work);
     let cache_file = cache_file_path(&work, &doc_rel);
     if let Ok(raw) = fs::read_to_string(&cache_file) {
         if let Ok(cached) = serde_json::from_str::<DocumentRefMap>(&raw) {
@@ -512,10 +553,12 @@ pub fn kg_document_refs(work_path: String, doc_path: String) -> Result<DocumentR
             }
         }
     }
-    let map = compute_document_refs(&work, &work_path, &doc_rel, &content)?;
+    let map = compute_document_refs(lease, &work, &work_path, &doc_rel, &content)?;
     debug_assert_eq!(map.doc_hash, doc_hash);
     // A cache-write failure degrades to "recompute next time", never an error.
     if let Ok(serialized) = serde_json::to_string(&map) {
+        lease.ensure_covered(vec![cache_file.clone()])?;
+        lease.before_effect()?;
         let _ = write_atomic(&cache_file, serialized.as_bytes());
     }
     Ok(map)
@@ -523,9 +566,50 @@ pub fn kg_document_refs(work_path: String, doc_path: String) -> Result<DocumentR
 
 /// Drop kg-cache entries: one document's entry when `doc_path` is given
 /// (returns 0 or 1), or every entry when omitted. Returns entries removed.
-#[tauri::command]
 pub fn kg_refs_clear(work_path: String, doc_path: Option<String>) -> Result<u32, String> {
     let work = normalize_existing_dir(&work_path)?;
+    let dir = KG_CACHE_REL
+        .iter()
+        .fold(work.clone(), |acc, part| acc.join(part));
+    let mut paths = vec![
+        PathBuf::from(&work_path).join(".maru/kg-cache"),
+        dir.clone(),
+    ];
+    if let Some(doc) = &doc_path {
+        let path = resolve_inside_vault(&work_path, doc)?;
+        let rel = normalize_rel(&path.strip_prefix(&work).unwrap_or(&path).to_string_lossy());
+        paths.extend([path, cache_file_path(&work, &rel)]);
+    } else if dir.is_dir() {
+        for entry in fs::read_dir(&dir).map_err(|err| format!("Cannot read kg cache dir: {err}"))? {
+            let path = entry
+                .map_err(|err| format!("Cannot read kg cache dir: {err}"))?
+                .path();
+            if path.is_file() && path.extension().and_then(|ext| ext.to_str()) == Some("json") {
+                paths.push(path);
+            }
+        }
+    }
+    paths.extend(
+        paths
+            .clone()
+            .into_iter()
+            .filter_map(|path| path.canonicalize().ok()),
+    );
+    let request = PathTransactionRequest::new(paths)?
+        .require_parent(Path::new(&work_path))?
+        .require_parent(&work)?;
+    with_path_transactions(request, |lease| {
+        kg_refs_clear_in_transaction(lease, work_path, doc_path)
+    })
+}
+
+fn kg_refs_clear_in_transaction(
+    lease: &PathTransactionLease,
+    work_path: String,
+    doc_path: Option<String>,
+) -> Result<u32, String> {
+    let work = normalize_existing_dir(&work_path)?;
+    lease.before_effect()?;
     if let Some(doc_path) = doc_path {
         let path = resolve_inside_vault(&work_path, &doc_path)?;
         let vault_root = resolve_inside_vault(&work_path, ".")?;
@@ -537,6 +621,8 @@ pub fn kg_refs_clear(work_path: String, doc_path: Option<String>) -> Result<u32,
         );
         let cache_file = cache_file_path(&work, &doc_rel);
         if cache_file.is_file() {
+            lease.ensure_covered(vec![cache_file.clone()])?;
+            lease.before_effect()?;
             fs::remove_file(&cache_file)
                 .map_err(|err| format!("Cannot remove kg cache entry: {err}"))?;
             return Ok(1);
@@ -552,6 +638,8 @@ pub fn kg_refs_clear(work_path: String, doc_path: Option<String>) -> Result<u32,
         let entry = entry.map_err(|err| format!("Cannot read kg cache dir: {err}"))?;
         let path = entry.path();
         if path.is_file() && path.extension().and_then(|ext| ext.to_str()) == Some("json") {
+            lease.ensure_covered(vec![path.clone()])?;
+            lease.before_effect()?;
             fs::remove_file(&path).map_err(|err| format!("Cannot remove kg cache entry: {err}"))?;
             removed += 1;
         }
@@ -559,9 +647,42 @@ pub fn kg_refs_clear(work_path: String, doc_path: Option<String>) -> Result<u32,
     Ok(removed)
 }
 
+pub mod ipc {
+    use super::*;
+
+    #[tauri::command]
+    pub async fn kg_document_refs(
+        work_path: String,
+        doc_path: String,
+    ) -> Result<DocumentRefMap, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(
+                &[PathBuf::from(&work_path)],
+                "worker:kg_document_refs",
+            );
+            super::kg_document_refs(work_path, doc_path)
+        })
+        .await
+        .map_err(|err| format!("kg_document_refs_task_failed: {err}"))?
+    }
+
+    #[tauri::command]
+    pub async fn kg_refs_clear(work_path: String, doc_path: Option<String>) -> Result<u32, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(&[PathBuf::from(&work_path)], "worker:kg_refs_clear");
+            super::kg_refs_clear(work_path, doc_path)
+        })
+        .await
+        .map_err(|err| format!("kg_refs_clear_task_failed: {err}"))?
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::vault::scan_vault;
     use tempfile::TempDir;
 
     fn workspace() -> (TempDir, String) {
@@ -615,6 +736,7 @@ mod tests {
 
     #[test]
     fn wikilinks_carry_byte_spans_and_paragraph_indices() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         let (temp, work) = workspace();
         write_file(temp.path(), "Alpha.md", "# Alpha\n");
         let doc = "---\nproject: \"[[Alpha]]\"\n---\n# 주간 보고\n\n첫 문단에서 [[Alpha]]를 참조한다.\n\n둘째 문단.\n\n셋째 문단 [[Alpha|별칭]] 다시.\n";
@@ -638,6 +760,7 @@ mod tests {
 
     #[test]
     fn strip_ext_only_cuts_at_char_boundaries() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         assert_eq!(strip_ext("인공지능"), "인공지능");
         assert_eq!(strip_ext("회의.html"), "회의.html");
         assert_eq!(strip_ext("note.md"), "note");
@@ -647,6 +770,7 @@ mod tests {
 
     #[test]
     fn hangul_wikilink_target_resolves() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         let (temp, work) = workspace();
         write_file(temp.path(), "ai.md", "# 인공지능\n");
         write_file(temp.path(), "doc.md", "# Doc\n\n[[인공지능]]을 참조한다.\n");
@@ -657,6 +781,7 @@ mod tests {
 
     #[test]
     fn korean_named_non_markdown_note_is_indexable() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         let (temp, work) = workspace();
         write_file(temp.path(), "notes/회의.html", "<h1>회의록</h1>");
         write_file(temp.path(), "doc.md", "# Doc\n\n위키링크가 없는 본문.\n");
@@ -673,6 +798,7 @@ mod tests {
 
     #[test]
     fn wikilink_resolution_by_title_filename_and_path() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         let (temp, work) = workspace();
         write_file(temp.path(), "notes/deep-note.md", "# Deep Title\n");
         write_file(
@@ -692,6 +818,7 @@ mod tests {
 
     #[test]
     fn unresolved_wikilinks_are_skipped() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         let (temp, work) = workspace();
         write_file(temp.path(), "doc.md", "# Doc\n\nSee [[Nowhere]].\n");
         let map = kg_document_refs(work, "doc.md".to_string()).unwrap();
@@ -700,6 +827,7 @@ mod tests {
 
     #[test]
     fn entity_match_whole_phrase_and_ascii_boundary() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         let (temp, work) = workspace();
         write_file(temp.path(), "rise.md", "# Rise\n");
         // "arises" and "RISE2" must not match; the standalone "RISE" must.
@@ -714,6 +842,7 @@ mod tests {
 
     #[test]
     fn entity_match_korean_substring_and_aliases() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         let (temp, work) = workspace();
         write_file(temp.path(), "ai.md", "# 인공지능\n");
         write_file(
@@ -747,6 +876,7 @@ mod tests {
 
     #[test]
     fn entity_match_skips_short_titles_self_and_frontmatter() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         let (temp, work) = workspace();
         write_file(temp.path(), "q.md", "# Q\n"); // 1-char title: skipped
         write_file(temp.path(), "omega.md", "# Omega\n");
@@ -764,6 +894,7 @@ mod tests {
 
     #[test]
     fn self_reference_is_excluded_for_both_kinds() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         let (temp, work) = workspace();
         write_file(
             temp.path(),
@@ -780,6 +911,7 @@ mod tests {
 
     #[test]
     fn entity_spans_overlapping_wikilinks_are_excluded() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         let (temp, work) = workspace();
         write_file(temp.path(), "Beta.md", "# Beta\n");
         let doc = "# Doc\n\nSee [[Beta]] first. Later Beta again.\n";
@@ -796,6 +928,7 @@ mod tests {
 
     #[test]
     fn entity_caps_per_note_and_total() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         let (temp, work) = workspace();
         // Per-note cap: 25 mentions of Gamma -> 20 spans.
         write_file(temp.path(), "gamma.md", "# Gamma\n");
@@ -827,6 +960,7 @@ mod tests {
 
     #[test]
     fn cache_hit_serves_stored_entry_and_doc_change_recomputes() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         let (temp, work) = workspace();
         write_file(temp.path(), "Alpha.md", "# Alpha\n");
         write_file(temp.path(), "doc.md", "# Doc\n\nSee [[Alpha]].\n");
@@ -860,6 +994,7 @@ mod tests {
 
     #[test]
     fn vault_stamp_change_recomputes_but_unscanned_edit_does_not() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         let (temp, work) = workspace();
         write_file(temp.path(), "Alpha.md", "# Alpha\n");
         write_file(temp.path(), "doc.md", "# Doc\n\nSee [[Alpha]].\n");
@@ -883,6 +1018,7 @@ mod tests {
 
     #[test]
     fn unrelated_note_body_edit_keeps_the_cached_entry() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         let (temp, work) = workspace();
         write_file(temp.path(), "Alpha.md", "# Alpha\n");
         write_file(temp.path(), "other.md", "# Other\n\nfirst body\n");
@@ -903,6 +1039,7 @@ mod tests {
 
     #[test]
     fn clear_by_doc_and_clear_all() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         let (temp, work) = workspace();
         write_file(temp.path(), "Alpha.md", "# Alpha\n");
         write_file(temp.path(), "a.md", "# A\n\n[[Alpha]]\n");
@@ -928,6 +1065,7 @@ mod tests {
 
     #[test]
     fn traversal_is_rejected() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         let (temp, work) = workspace();
         write_file(temp.path(), "doc.md", "# Doc\n");
         for bad in ["../escape.md", "notes/../../escape.md", "/etc/passwd"] {
@@ -940,9 +1078,439 @@ mod tests {
 
     #[test]
     fn missing_document_is_an_error() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         let (_temp, work) = workspace();
         let result = kg_document_refs(work, "nope.md".to_string());
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("Cannot read document"));
+    }
+}
+
+#[cfg(test)]
+mod phase08_13 {
+    use super::*;
+    use crate::atomic_file::phase08_06::{boundary, run, Held, Home};
+    use crate::atomic_file::PathTransactionTestHook;
+    use crate::vault_graph::{ipc as graph_ipc, GraphLayoutCache};
+    use std::sync::{
+        atomic::{AtomicBool, Ordering},
+        mpsc,
+    };
+    use std::time::Duration;
+
+    fn text(path: &Path) -> String {
+        path.to_string_lossy().into_owned()
+    }
+    struct Fixture {
+        temp: tempfile::TempDir,
+        _access: crate::scratchpad::phase08_08::PrimaryWorkspaceAccessFixture,
+    }
+    impl Fixture {
+        fn path(&self) -> &Path {
+            self.temp.path()
+        }
+    }
+    fn fixture(home: &Home) -> Fixture {
+        let temp = tempfile::tempdir_in(home.root.path()).unwrap();
+        fs::create_dir_all(temp.path().join("work/.maru/kg-cache")).unwrap();
+        fs::create_dir_all(temp.path().join("work/.maru/cache")).unwrap();
+        fs::write(temp.path().join("work/doc.md"), "# Doc\n\n[[Alpha]]\n").unwrap();
+        fs::write(temp.path().join("work/Alpha.md"), "# Alpha\n").unwrap();
+        fs::write(cache_file_path(&temp.path().join("work"), "doc.md"), "{}").unwrap();
+        let work = temp.path().join("work");
+        crate::scratchpad::phase08_08::registry(&work, "direct");
+        let access = crate::scratchpad::phase08_08::PrimaryWorkspaceAccessFixture::new(work);
+        Fixture {
+            temp,
+            _access: access,
+        }
+    }
+    fn start<F>(future: F) -> mpsc::Receiver<F::Output>
+    where
+        F: std::future::Future + Send + 'static,
+        F::Output: Send + 'static,
+    {
+        let (tx, rx) = mpsc::channel();
+        tauri::async_runtime::spawn(async move {
+            let _ = tx.send(future.await);
+        });
+        rx
+    }
+    fn done<T>(rx: mpsc::Receiver<T>) -> T {
+        rx.recv_timeout(Duration::from_secs(10))
+            .expect("bounded graph/cache completion")
+    }
+    fn target(root: &Path, writer: &str) -> PathBuf {
+        if writer == "layout" {
+            root.join(".maru/cache/graph-layout.json")
+        } else {
+            cache_file_path(root, "doc.md")
+        }
+    }
+    async fn write(writer: &'static str, work: String) -> Result<(), String> {
+        match writer {
+            "layout" => graph_ipc::vault_graph_layout_save(work, GraphLayoutCache::default()).await,
+            "refs" => ipc::kg_document_refs(work, "doc.md".into())
+                .await
+                .map(|map| assert!(!map.refs.is_empty())),
+            "clear" => ipc::kg_refs_clear(work, Some("doc.md".into()))
+                .await
+                .map(|_| ()),
+            _ => unreachable!(),
+        }
+    }
+
+    #[test]
+    fn phase08_13_refs_wrappers_yield_same_task_and_report_join_failure() {
+        let home = Home::new();
+        let root = text(home.root.path());
+        boundary(
+            root.clone().into(),
+            "kg_document_refs",
+            ipc::kg_document_refs(root.clone(), "doc.md".into()),
+        );
+        boundary(
+            root.clone().into(),
+            "kg_refs_clear",
+            ipc::kg_refs_clear(root, None),
+        );
+    }
+
+    #[test]
+    fn phase08_13_refs_wrappers_preserve_payload_cache_hits_clear_counts_and_errors() {
+        let home = Home::new();
+        let temp = fixture(&home);
+        let root = temp.path().join("work");
+        let work = text(&root);
+        let map = run(ipc::kg_document_refs(work.clone(), "doc.md".into())).unwrap();
+        assert_eq!(map.refs[0].node_path, "Alpha.md");
+        assert_eq!(map.doc_hash, sha256_hex(b"# Doc\n\n[[Alpha]]\n"));
+        let hit = run(ipc::kg_document_refs(work.clone(), "doc.md".into())).unwrap();
+        assert_eq!(map, hit);
+        assert!(vault_cache_path(&root).is_file());
+        assert_eq!(
+            run(ipc::kg_refs_clear(work.clone(), Some("doc.md".into()))).unwrap(),
+            1
+        );
+        assert_eq!(
+            run(ipc::kg_refs_clear(work.clone(), Some("doc.md".into()))).unwrap(),
+            0
+        );
+        run(ipc::kg_document_refs(work.clone(), "doc.md".into())).unwrap();
+        assert_eq!(run(ipc::kg_refs_clear(work.clone(), None)).unwrap(), 1);
+        for bad in ["../escape.md", "missing.md"] {
+            let expected = kg_document_refs(work.clone(), bad.into()).unwrap_err();
+            assert_eq!(
+                run(ipc::kg_document_refs(work.clone(), bad.into())).unwrap_err(),
+                expected
+            );
+        }
+        let expected = kg_refs_clear(work.clone(), Some("../escape.md".into())).unwrap_err();
+        assert_eq!(
+            run(ipc::kg_refs_clear(work, Some("../escape.md".into()))).unwrap_err(),
+            expected
+        );
+    }
+
+    #[test]
+    fn phase08_13_each_cache_writer_serializes_and_releases_on_error_and_unwind() {
+        let home = Home::new();
+        for writer in ["layout", "refs", "clear"] {
+            for outcome in ["success", "error", "unwind"] {
+                let temp = fixture(&home);
+                let root = temp.path().join("work");
+                let path = target(&root, writer);
+                // Missing graph cache is legitimate until the first layout write.
+                let held = Held::new(path.clone(), "admitted");
+                let first = start(write(writer, text(&root)));
+                held.wait();
+                let waiting = Held::new(path.clone(), "before-admission");
+                let second = start(write(writer, text(&root)));
+                waiting.wait();
+                waiting.release();
+                assert!(second.recv_timeout(Duration::from_millis(30)).is_err());
+                let used = AtomicBool::new(false);
+                let _panic = if outcome == "unwind" {
+                    Some(PathTransactionTestHook::new(
+                        path.clone(),
+                        "pre-effect",
+                        move || {
+                            if !used.swap(true, Ordering::SeqCst) {
+                                panic!("fixture graph cache unwind");
+                            }
+                        },
+                    ))
+                } else {
+                    None
+                };
+                if outcome == "error" {
+                    // Replace the original pinned cache parent while the first
+                    // admitted command waits; both original selections reject.
+                    let parent = path.parent().unwrap();
+                    fs::rename(parent, parent.with_extension("moved")).unwrap();
+                    fs::create_dir(parent).unwrap();
+                }
+                held.release();
+                let first = done(first);
+                let second = done(second);
+                if outcome == "success" {
+                    first.unwrap();
+                    second.unwrap();
+                } else {
+                    assert!(first.is_err(), "{writer}/{outcome}");
+                }
+                drop(_panic);
+                // A fresh real command proves the whole lease was released.
+                if writer == "clear" {
+                    fs::write(&path, "{}").unwrap();
+                }
+                run(write(writer, text(&root))).unwrap();
+            }
+        }
+    }
+
+    #[test]
+    fn phase08_13_cache_files_parent_rename_trash_both_orders_and_workspace_aliases() {
+        let home = Home::new();
+        for parent_kind in ["rename", "trash"] {
+            for writer in ["layout", "refs", "clear"] {
+                for parent_first in [false, true] {
+                    for alias in [false, true] {
+                        let temp = fixture(&home);
+                        let root = temp.path().join("work");
+                        let selected = if alias {
+                            #[cfg(unix)]
+                            std::os::unix::fs::symlink(&root, temp.path().join("alias")).unwrap();
+                            #[cfg(not(unix))]
+                            continue;
+                            temp.path().join("alias")
+                        } else {
+                            root.clone()
+                        };
+                        let path = if writer == "layout" {
+                            target(&selected, writer)
+                        } else {
+                            target(&root, writer)
+                        };
+                        let _trash = crate::workspace_files::phase08_06::TrashFixture::new(
+                            root.clone(),
+                            temp.path().join("moved"),
+                        );
+                        let parent_root = text(temp.path());
+                        let parent = async move {
+                            if parent_kind == "rename" {
+                                crate::workspace_files::ipc::rename_workspace_entry(
+                                    parent_root,
+                                    "work".into(),
+                                    "moved".into(),
+                                )
+                                .await
+                                .map(|outcome| assert!(outcome.error.is_none()))
+                            } else {
+                                crate::workspace_files::ipc::trash_workspace_entries(
+                                    parent_root,
+                                    vec!["work".into()],
+                                )
+                                .await
+                                .map(|outcomes| {
+                                    assert_eq!(outcomes.len(), 1);
+                                    assert!(outcomes[0].error.is_none());
+                                })
+                            }
+                        };
+                        let child = write(writer, text(&selected));
+                        if parent_first {
+                            let held = Held::new(root.clone(), "pre-effect");
+                            let p = start(parent);
+                            held.wait();
+                            let waiting = Held::new(path.clone(), "before-admission");
+                            let c = start(child);
+                            waiting.wait();
+                            waiting.release();
+                            assert!(c.recv_timeout(Duration::from_millis(30)).is_err());
+                            held.release();
+                            done(p).unwrap();
+                            assert!(done(c).is_err());
+                        } else {
+                            let held = Held::new(path, "pre-effect");
+                            let c = start(child);
+                            held.wait();
+                            let waiting = Held::new(root.clone(), "before-admission");
+                            let p = start(parent);
+                            waiting.wait();
+                            waiting.release();
+                            assert!(p.recv_timeout(Duration::from_millis(30)).is_err());
+                            held.release();
+                            done(c).unwrap();
+                            done(p).unwrap();
+                        }
+                        assert!(
+                            !root.exists(),
+                            "{writer} must never recreate moved workspace"
+                        );
+                        assert!(temp.path().join("moved/doc.md").is_file());
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn phase08_13_refs_and_document_save_both_orders_preserve_current_bytes_and_typed_conflict() {
+        let home = Home::new();
+        for refs_first in [false, true] {
+            let temp = fixture(&home);
+            let root = temp.path().join("work");
+            let cache = cache_file_path(&root, "doc.md");
+            let doc = root.join("doc.md");
+            let original = fs::read_to_string(&doc).unwrap();
+            let revision = crate::document::revision_for(&original);
+            let body = "# Doc\n\n[[Alpha]] [[Alpha]]\n";
+            let save = crate::document::ipc::save_document(
+                text(&root),
+                "doc.md".into(),
+                body.into(),
+                Some(revision.clone()),
+            );
+            let refs = ipc::kg_document_refs(text(&root), "doc.md".into());
+            let map = if refs_first {
+                let held = Held::new(cache, "pre-effect");
+                let r = start(refs);
+                held.wait();
+                let waiting = Held::new(doc, "before-admission");
+                let s = start(save);
+                waiting.wait();
+                waiting.release();
+                assert!(s.recv_timeout(Duration::from_millis(30)).is_err());
+                held.release();
+                let map = done(r).unwrap();
+                done(s).unwrap();
+                map
+            } else {
+                let held = Held::new(doc, "pre-effect");
+                let s = start(save);
+                held.wait();
+                let waiting = Held::new(cache, "before-admission");
+                let r = start(refs);
+                waiting.wait();
+                waiting.release();
+                assert!(r.recv_timeout(Duration::from_millis(30)).is_err());
+                held.release();
+                done(s).unwrap();
+                done(r).unwrap()
+            };
+            assert_eq!(map.refs[0].spans.len(), if refs_first { 1 } else { 2 });
+            assert_eq!(fs::read_to_string(root.join("doc.md")).unwrap(), body);
+            let error = run(crate::document::ipc::save_document(
+                text(&root),
+                "doc.md".into(),
+                "stale".into(),
+                Some(revision),
+            ))
+            .unwrap_err();
+            assert_eq!(error.code, crate::ipc_error::DOCUMENT_CONFLICT);
+            assert_eq!(
+                run(ipc::kg_document_refs(text(&root), "doc.md".into()))
+                    .unwrap()
+                    .refs[0]
+                    .spans
+                    .len(),
+                2
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn phase08_13_cache_file_alias_document_and_physical_parent_races_both_orders() {
+        let home = Home::new();
+        for writer in ["layout", "refs", "clear"] {
+            for external_first in [false, true] {
+                for external in ["document", "parent"] {
+                    let temp = fixture(&home);
+                    let root = temp.path().join("work");
+                    let selected = temp.path().join("workspace-alias");
+                    std::os::unix::fs::symlink(&root, &selected).unwrap();
+                    let external_root = temp.path().join("external");
+                    fs::create_dir(&external_root).unwrap();
+                    let external_doc = external_root.join("note.md");
+                    fs::write(&external_doc, "# before").unwrap();
+                    let cache = target(&root, writer);
+                    let _ = fs::remove_file(&cache);
+                    std::os::unix::fs::symlink(&external_doc, &cache).unwrap();
+                    let parent_path = external_root.clone();
+                    let parent_work = text(temp.path());
+                    let ext_work = text(&external_root);
+                    let operation = async move {
+                        if external == "document" {
+                            crate::document::ipc::save_document(
+                                ext_work,
+                                "note.md".into(),
+                                "# after".into(),
+                                None,
+                            )
+                            .await
+                            .map(|_| ())
+                        } else {
+                            crate::workspace_files::ipc::rename_workspace_entry(
+                                parent_work,
+                                "external".into(),
+                                "moved".into(),
+                            )
+                            .await
+                            .map_err(crate::ipc_error::IpcError::from)
+                            .map(|outcome| assert!(outcome.error.is_none()))
+                        }
+                    };
+                    let entry = if external == "document" {
+                        external_doc.clone()
+                    } else {
+                        parent_path
+                    };
+                    let child = write(writer, text(&selected));
+                    if external_first {
+                        let held = Held::new(entry, "pre-effect");
+                        let e = start(operation);
+                        held.wait();
+                        let waiting = Held::new(cache.clone(), "before-admission");
+                        let c = start(child);
+                        waiting.wait();
+                        waiting.release();
+                        assert!(c.recv_timeout(Duration::from_millis(30)).is_err());
+                        held.release();
+                        done(e).unwrap();
+                        if external == "parent" {
+                            assert!(done(c).is_err());
+                        } else {
+                            done(c).unwrap();
+                        }
+                    } else {
+                        let held = Held::new(cache.clone(), "pre-effect");
+                        let c = start(child);
+                        held.wait();
+                        let waiting = Held::new(entry, "before-admission");
+                        let e = start(operation);
+                        waiting.wait();
+                        waiting.release();
+                        assert!(e.recv_timeout(Duration::from_millis(30)).is_err());
+                        held.release();
+                        done(c).unwrap();
+                        done(e).unwrap();
+                    }
+                    if external == "document" {
+                        assert_eq!(fs::read_to_string(external_doc).unwrap(), "# after");
+                    } else {
+                        assert!(
+                            !external_root.exists(),
+                            "cache write must never recreate physical parent"
+                        );
+                        assert_eq!(
+                            fs::read_to_string(temp.path().join("moved/note.md")).unwrap(),
+                            "# before"
+                        );
+                    }
+                }
+            }
+        }
     }
 }

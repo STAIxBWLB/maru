@@ -1,0 +1,122 @@
+[
+  {
+    "test": "switcher",
+    "volume": 0,
+    "labels": [
+      "전체",
+      "Drafts",
+      "Archive",
+      "최근 업데이트"
+    ],
+    "counts": [
+      {
+        "text": "0",
+        "client": 7,
+        "scroll": 7
+      },
+      {
+        "text": "0",
+        "client": 7,
+        "scroll": 7
+      },
+      {
+        "text": "0",
+        "client": 7,
+        "scroll": 7
+      },
+      {
+        "text": "0",
+        "client": 7,
+        "scroll": 7
+      }
+    ],
+    "clicksBeforeScanResolved": 4,
+    "clicksAfterScanResolved": 4,
+    "errors": []
+  },
+  {
+    "test": "inbox-empty",
+    "emptyStates": [
+      "설정된 인박스 항목이 없습니다설정된 드롭 파일과 대기 매니페스트가 여기에 표시됩니다.",
+      "처리된 항목이 없습니다inbox/items의 완료·실패·중복 항목이 여기에 표시됩니다.",
+      "처리할 파일이 없습니다위에서 파일을 드롭하거나 선택해 설정된 인박스에 추가하세요."
+    ]
+  },
+  {
+    "test": "switcher",
+    "volume": 1,
+    "labels": [
+      "전체",
+      "Drafts",
+      "Archive",
+      "최근 업데이트"
+    ],
+    "counts": [
+      {
+        "text": "1",
+        "client": 6,
+        "scroll": 6
+      },
+      {
+        "text": "1",
+        "client": 6,
+        "scroll": 6
+      },
+      {
+        "text": "1",
+        "client": 6,
+        "scroll": 6
+      },
+      {
+        "text": "1",
+        "client": 6,
+        "scroll": 6
+      }
+    ],
+    "clicksBeforeScanResolved": 4,
+    "clicksAfterScanResolved": 4,
+    "errors": []
+  },
+  {
+    "test": "inbox-populated",
+    "configuredRows": 2,
+    "dropFiles": 2,
+    "selection": true,
+    "processComposerClicked": true
+  },
+  {
+    "test": "switcher",
+    "volume": 9582,
+    "labels": [
+      "전체",
+      "Drafts",
+      "Archive",
+      "최근 업데이트"
+    ],
+    "counts": [
+      {
+        "text": "9582",
+        "client": 29,
+        "scroll": 29
+      },
+      {
+        "text": "9582",
+        "client": 29,
+        "scroll": 29
+      },
+      {
+        "text": "9582",
+        "client": 29,
+        "scroll": 29
+      },
+      {
+        "text": "9582",
+        "client": 29,
+        "scroll": 29
+      }
+    ],
+    "clicksBeforeScanResolved": 4,
+    "clicksAfterScanResolved": 4,
+    "errors": []
+  }
+]

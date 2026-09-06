@@ -1,0 +1,880 @@
+{
+ "plan": "08-18",
+ "moduleIntegrationOwner": "08-18",
+ "commands": [
+  {
+   "name": "terminal_spawn",
+   "module": "src-tauri/src/terminal/mod.rs",
+   "registrationPath": "src-tauri/src/lib.rs::terminal::ipc::terminal_spawn",
+   "originalDisposition": "CONVERT",
+   "disposition": "ISOLATED",
+   "helperChain": [
+    "src-tauri/src/terminal/mod.rs::ipc::terminal_spawn owns its inputs, clones the managed TerminalState, and awaits tauri::async_runtime::spawn_blocking calling src-tauri/src/terminal/mod.rs::terminal_spawn inside the worker; a JoinError becomes the display-only terminal_spawn_task_failed String.",
+    "src-tauri/src/terminal/mod.rs::terminal_spawn keeps generation tokens, SessionReservation admission and rollback, then builds the launcher through src-tauri/src/terminal/mod.rs::build_terminal_command_spec and src-tauri/src/terminal/mod.rs::resolve_terminal_program, opens the PTY, spawns the child and registers the session before starting the output pump and exit waiter threads, all inside the same blocking worker."
+   ],
+   "workerBoundary": "src-tauri/src/terminal/mod.rs::ipc::terminal_spawn awaits tauri::async_runtime::spawn_blocking before any registry, model, writer or process work runs; only a JoinError maps to the display-only terminal_spawn_task_failed String while the typed success payload and every domain error string pass through unchanged.",
+   "syncCallers": [
+    "No Rust or CLI caller invokes terminal_spawn synchronously; src-tauri/src/lib.rs registers only terminal::ipc::terminal_spawn, so all traffic crosses the async worker boundary and the original synchronous src-tauri/src/terminal/mod.rs::terminal_spawn stays available for Rust callers."
+   ],
+   "mutationKey": {
+    "readOnly": true,
+    "lexicalPaths": [],
+    "aliasPaths": [],
+    "sharedAdmissionEntry": "No filesystem mutation is owned by terminal_spawn: it touches only the in-memory session registry, the terminal model and the PTY master; the cwd resolution reads directories without writing.",
+    "postAdmissionPreconditions": [
+     "Session id reservation, generation token and rollback run first inside the worker: a failed launcher build releases the reservation so the id stays reusable, and a live id still rejects duplicates with terminal_session_id_in_use."
+    ],
+    "domainLockOrder": "No command-owned filesystem mutation lease exists; the registry, model, writer and killer lock waits all run inside the isolated blocking worker and none is held across an await or a process join."
+   },
+   "processingCaller": {
+    "path": [
+     "src/lib/api.ts",
+     "src/components/TerminalPanel.tsx"
+    ],
+    "payload": "terminalSpawn (src/lib/api.ts) invokes terminal_spawn with the args bundle and onEvent channel; src/components/TerminalPanel.tsx starts sessions with it and owns the returned handle plus channel lifecycle.",
+    "terminalNoticeOwner": "src/components/TerminalPanel.tsx owns per-session completion and error display for terminal operations (frame channel lifecycle, spawn/kill sequencing, swallowed write/ack errors). Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+   ,
+     "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+     "successRetention": "updated record retained in component state",
+     "failureReasons": "call-site catch error message (single publisher)",
+     "singleTerminalNoticeOwner": true,
+     "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=terminal_spawn"
+   },
+   "evidence": {
+    "behaviorCases": [
+     "phase08_18_each_wrapper_yields_same_poll_and_maps_join_failure",
+     "phase08_18_real_pty_fixture_results_and_legacy_rejections",
+     "phase08_18_spawn_rollback_releases_reservation_and_recycles_identity"
+    ],
+    "workerProof": "terminal::phase08_18::phase08_18_each_wrapper_yields_same_poll_and_maps_join_failure holds the terminal_spawn future at spawn_blocking worker entry via a #[cfg(test)] worker-stage hook keyed to the test's managed TerminalState, manually polls it on the same async task and proves progress while a distinct worker thread stays blocked; the panicked worker maps to the display-only terminal_spawn_task_failed String.",
+    "platformScope": "macOS unit fixtures only: tauri::test::mock_app with a fresh managed TerminalState per test and a real /bin/cat PTY behind the unix-gated fixtures; no user shell history, live workspace, credential or network endpoint is touched, and the worker-stage hook is test-only code.",
+    "limits": "In-process registry validation protects session identity, not other processes; the PTY child is a disposable fixture and no live terminal session claim is made. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
+    "contract": "Existing payloads, generation/stale-handle rejection strings, reservation and kill semantics are unchanged; the only new failure path is the JoinError-to-String mapping at the worker boundary (terminal_spawn_task_failed)."
+   },
+   "tests": [
+    {
+     "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_18",
+     "passed": 4,
+     "failed": 0,
+     "ignored": 0,
+     "exitCode": 0
+    }
+   ]
+  },
+  {
+   "name": "terminal_write",
+   "module": "src-tauri/src/terminal/mod.rs",
+   "registrationPath": "src-tauri/src/lib.rs::terminal::ipc::terminal_write",
+   "originalDisposition": "CONVERT",
+   "disposition": "ISOLATED",
+   "helperChain": [
+    "src-tauri/src/terminal/mod.rs::ipc::terminal_write owns its inputs, clones the managed TerminalState, and awaits tauri::async_runtime::spawn_blocking calling src-tauri/src/terminal/mod.rs::terminal_write inside the worker; a JoinError becomes the display-only terminal_write_task_failed String.",
+    "src-tauri/src/terminal/mod.rs::terminal_write re-validates the generation-bearing handle through src-tauri/src/terminal/mod.rs::get_session_generation and appends the payload through the per-session shared writer (src-tauri/src/terminal/model.rs::write_shared) inside the blocking worker."
+   ],
+   "workerBoundary": "src-tauri/src/terminal/mod.rs::ipc::terminal_write awaits tauri::async_runtime::spawn_blocking before any registry, model, writer or process work runs; only a JoinError maps to the display-only terminal_write_task_failed String while the typed success payload and every domain error string pass through unchanged.",
+   "syncCallers": [
+    "No Rust or CLI caller invokes terminal_write synchronously; src-tauri/src/lib.rs registers only terminal::ipc::terminal_write, so all traffic crosses the async worker boundary and the original synchronous src-tauri/src/terminal/mod.rs::terminal_write stays available for Rust callers."
+   ],
+   "mutationKey": {
+    "readOnly": true,
+    "lexicalPaths": [],
+    "aliasPaths": [],
+    "sharedAdmissionEntry": "No filesystem mutation is owned by terminal_write: it touches only the in-memory session registry, the terminal model and the PTY master; the cwd resolution reads directories without writing.",
+    "postAdmissionPreconditions": [
+     "The per-session SharedTerminalWriter mutex still serializes whole payloads in launch order; concurrent writes stay byte-contiguous in both launch orders."
+    ],
+    "domainLockOrder": "No command-owned filesystem mutation lease exists; the registry, model, writer and killer lock waits all run inside the isolated blocking worker and none is held across an await or a process join."
+   },
+   "processingCaller": {
+    "path": [
+     "src/lib/api.ts",
+     "src/components/TerminalPanel.tsx"
+    ],
+    "payload": "terminalWrite (src/lib/api.ts) invokes terminal_write; no production component calls it today - TerminalPanel batches keystrokes through terminalInputBatch - so the wrapper remains a stable wire API for direct writes.",
+    "terminalNoticeOwner": "src/components/TerminalPanel.tsx owns per-session completion and error display for terminal operations (frame channel lifecycle, spawn/kill sequencing, swallowed write/ack errors). Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+   ,
+     "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+     "successRetention": "updated record retained in component state",
+     "failureReasons": "call-site catch error message (single publisher)",
+     "singleTerminalNoticeOwner": true,
+     "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=terminal_write"
+   },
+   "evidence": {
+    "behaviorCases": [
+     "phase08_18_each_wrapper_yields_same_poll_and_maps_join_failure",
+     "phase08_18_real_pty_fixture_results_and_legacy_rejections",
+     "phase08_18_concurrent_writes_serialize_per_session_in_both_launch_orders"
+    ],
+    "workerProof": "terminal::phase08_18::phase08_18_each_wrapper_yields_same_poll_and_maps_join_failure holds the terminal_write future at spawn_blocking worker entry via a #[cfg(test)] worker-stage hook keyed to the test's managed TerminalState, manually polls it on the same async task and proves progress while a distinct worker thread stays blocked; the panicked worker maps to the display-only terminal_write_task_failed String.",
+    "platformScope": "macOS unit fixtures only: tauri::test::mock_app with a fresh managed TerminalState per test and a real /bin/cat PTY behind the unix-gated fixtures; no user shell history, live workspace, credential or network endpoint is touched, and the worker-stage hook is test-only code.",
+    "limits": "In-process registry validation protects session identity, not other processes; the PTY child is a disposable fixture and no live terminal session claim is made. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
+    "contract": "Existing payloads, generation/stale-handle rejection strings, reservation and kill semantics are unchanged; the only new failure path is the JoinError-to-String mapping at the worker boundary (terminal_write_task_failed)."
+   },
+   "tests": [
+    {
+     "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_18",
+     "passed": 4,
+     "failed": 0,
+     "ignored": 0,
+     "exitCode": 0
+    }
+   ]
+  },
+  {
+   "name": "terminal_input",
+   "module": "src-tauri/src/terminal/mod.rs",
+   "registrationPath": "src-tauri/src/lib.rs::terminal::ipc::terminal_input",
+   "originalDisposition": "CONVERT",
+   "disposition": "ISOLATED",
+   "helperChain": [
+    "src-tauri/src/terminal/mod.rs::ipc::terminal_input owns its inputs, clones the managed TerminalState, and awaits tauri::async_runtime::spawn_blocking calling src-tauri/src/terminal/mod.rs::terminal_input inside the worker; a JoinError becomes the display-only terminal_input_task_failed String.",
+    "src-tauri/src/terminal/mod.rs::terminal_input re-validates the handle through src-tauri/src/terminal/mod.rs::get_session_generation, scrolls back to the prompt when needed, encodes the input command and writes the bytes through the per-session shared writer inside the blocking worker."
+   ],
+   "workerBoundary": "src-tauri/src/terminal/mod.rs::ipc::terminal_input awaits tauri::async_runtime::spawn_blocking before any registry, model, writer or process work runs; only a JoinError maps to the display-only terminal_input_task_failed String while the typed success payload and every domain error string pass through unchanged.",
+   "syncCallers": [
+    "No Rust or CLI caller invokes terminal_input synchronously; src-tauri/src/lib.rs registers only terminal::ipc::terminal_input, so all traffic crosses the async worker boundary and the original synchronous src-tauri/src/terminal/mod.rs::terminal_input stays available for Rust callers."
+   ],
+   "mutationKey": {
+    "readOnly": true,
+    "lexicalPaths": [],
+    "aliasPaths": [],
+    "sharedAdmissionEntry": "No filesystem mutation is owned by terminal_input: it touches only the in-memory session registry, the terminal model and the PTY master; the cwd resolution reads directories without writing.",
+    "postAdmissionPreconditions": [
+     "Keyboard input still scrolls the model to the bottom first when the display offset is non-zero, exactly as before the conversion."
+    ],
+    "domainLockOrder": "No command-owned filesystem mutation lease exists; the registry, model, writer and killer lock waits all run inside the isolated blocking worker and none is held across an await or a process join."
+   },
+   "processingCaller": {
+    "path": [
+     "src/lib/api.ts",
+     "src/components/TerminalPanel.tsx"
+    ],
+    "payload": "terminalInput (src/lib/api.ts) invokes terminal_input; no production component calls it today (TerminalPanel uses terminalInputBatch), and the single-key wire shape is preserved for direct input.",
+    "terminalNoticeOwner": "src/components/TerminalPanel.tsx owns per-session completion and error display for terminal operations (frame channel lifecycle, spawn/kill sequencing, swallowed write/ack errors). Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+   ,
+     "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+     "successRetention": "updated record retained in component state",
+     "failureReasons": "call-site catch error message (single publisher)",
+     "singleTerminalNoticeOwner": true,
+     "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=terminal_input"
+   },
+   "evidence": {
+    "behaviorCases": [
+     "phase08_18_each_wrapper_yields_same_poll_and_maps_join_failure",
+     "phase08_18_real_pty_fixture_results_and_legacy_rejections"
+    ],
+    "workerProof": "terminal::phase08_18::phase08_18_each_wrapper_yields_same_poll_and_maps_join_failure holds the terminal_input future at spawn_blocking worker entry via a #[cfg(test)] worker-stage hook keyed to the test's managed TerminalState, manually polls it on the same async task and proves progress while a distinct worker thread stays blocked; the panicked worker maps to the display-only terminal_input_task_failed String.",
+    "platformScope": "macOS unit fixtures only: tauri::test::mock_app with a fresh managed TerminalState per test and a real /bin/cat PTY behind the unix-gated fixtures; no user shell history, live workspace, credential or network endpoint is touched, and the worker-stage hook is test-only code.",
+    "limits": "In-process registry validation protects session identity, not other processes; the PTY child is a disposable fixture and no live terminal session claim is made. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
+    "contract": "Existing payloads, generation/stale-handle rejection strings, reservation and kill semantics are unchanged; the only new failure path is the JoinError-to-String mapping at the worker boundary (terminal_input_task_failed)."
+   },
+   "tests": [
+    {
+     "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_18",
+     "passed": 4,
+     "failed": 0,
+     "ignored": 0,
+     "exitCode": 0
+    }
+   ]
+  },
+  {
+   "name": "terminal_input_batch",
+   "module": "src-tauri/src/terminal/mod.rs",
+   "registrationPath": "src-tauri/src/lib.rs::terminal::ipc::terminal_input_batch",
+   "originalDisposition": "CONVERT",
+   "disposition": "ISOLATED",
+   "helperChain": [
+    "src-tauri/src/terminal/mod.rs::ipc::terminal_input_batch owns its inputs, clones the managed TerminalState, and awaits tauri::async_runtime::spawn_blocking calling src-tauri/src/terminal/mod.rs::terminal_input_batch inside the worker; a JoinError becomes the display-only terminal_input_batch_task_failed String.",
+    "src-tauri/src/terminal/mod.rs::terminal_input_batch re-validates the handle through src-tauri/src/terminal/mod.rs::get_session_generation, coalesces the batch into one ordered byte run and writes it through the per-session shared writer inside the blocking worker."
+   ],
+   "workerBoundary": "src-tauri/src/terminal/mod.rs::ipc::terminal_input_batch awaits tauri::async_runtime::spawn_blocking before any registry, model, writer or process work runs; only a JoinError maps to the display-only terminal_input_batch_task_failed String while the typed success payload and every domain error string pass through unchanged.",
+   "syncCallers": [
+    "No Rust or CLI caller invokes terminal_input_batch synchronously; src-tauri/src/lib.rs registers only terminal::ipc::terminal_input_batch, so all traffic crosses the async worker boundary and the original synchronous src-tauri/src/terminal/mod.rs::terminal_input_batch stays available for Rust callers."
+   ],
+   "mutationKey": {
+    "readOnly": true,
+    "lexicalPaths": [],
+    "aliasPaths": [],
+    "sharedAdmissionEntry": "No filesystem mutation is owned by terminal_input_batch: it touches only the in-memory session registry, the terminal model and the PTY master; the cwd resolution reads directories without writing.",
+    "postAdmissionPreconditions": [
+     "The batch still coalesces to one ordered write per session; the client sequence number is accepted and ignored by the backend as before."
+    ],
+    "domainLockOrder": "No command-owned filesystem mutation lease exists; the registry, model, writer and killer lock waits all run inside the isolated blocking worker and none is held across an await or a process join."
+   },
+   "processingCaller": {
+    "path": [
+     "src/lib/api.ts",
+     "src/components/TerminalPanel.tsx"
+    ],
+    "payload": "terminalInputBatch (src/lib/api.ts) invokes terminal_input_batch; src/components/TerminalPanel.tsx sends every queued keystroke/mouse batch with the client sequence number.",
+    "terminalNoticeOwner": "src/components/TerminalPanel.tsx owns per-session completion and error display for terminal operations (frame channel lifecycle, spawn/kill sequencing, swallowed write/ack errors). Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+   ,
+     "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+     "successRetention": "updated record retained in component state",
+     "failureReasons": "call-site catch error message (single publisher)",
+     "singleTerminalNoticeOwner": true,
+     "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=terminal_input_batch"
+   },
+   "evidence": {
+    "behaviorCases": [
+     "phase08_18_each_wrapper_yields_same_poll_and_maps_join_failure",
+     "phase08_18_real_pty_fixture_results_and_legacy_rejections"
+    ],
+    "workerProof": "terminal::phase08_18::phase08_18_each_wrapper_yields_same_poll_and_maps_join_failure holds the terminal_input_batch future at spawn_blocking worker entry via a #[cfg(test)] worker-stage hook keyed to the test's managed TerminalState, manually polls it on the same async task and proves progress while a distinct worker thread stays blocked; the panicked worker maps to the display-only terminal_input_batch_task_failed String.",
+    "platformScope": "macOS unit fixtures only: tauri::test::mock_app with a fresh managed TerminalState per test and a real /bin/cat PTY behind the unix-gated fixtures; no user shell history, live workspace, credential or network endpoint is touched, and the worker-stage hook is test-only code.",
+    "limits": "In-process registry validation protects session identity, not other processes; the PTY child is a disposable fixture and no live terminal session claim is made. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
+    "contract": "Existing payloads, generation/stale-handle rejection strings, reservation and kill semantics are unchanged; the only new failure path is the JoinError-to-String mapping at the worker boundary (terminal_input_batch_task_failed)."
+   },
+   "tests": [
+    {
+     "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_18",
+     "passed": 4,
+     "failed": 0,
+     "ignored": 0,
+     "exitCode": 0
+    }
+   ]
+  },
+  {
+   "name": "terminal_ack",
+   "module": "src-tauri/src/terminal/mod.rs",
+   "registrationPath": "src-tauri/src/lib.rs::terminal::ipc::terminal_ack",
+   "originalDisposition": "RETAIN",
+   "disposition": "ISOLATED",
+   "helperChain": [
+    "src-tauri/src/terminal/mod.rs::ipc::terminal_ack owns its inputs, clones the managed TerminalState, and awaits tauri::async_runtime::spawn_blocking calling src-tauri/src/terminal/mod.rs::terminal_ack inside the worker; a JoinError becomes the display-only terminal_ack_task_failed String.",
+    "src-tauri/src/terminal/mod.rs::terminal_ack re-validates the handle through src-tauri/src/terminal/mod.rs::get_session_generation and applies the atomic ack to the session stream credit window inside the blocking worker."
+   ],
+   "workerBoundary": "src-tauri/src/terminal/mod.rs::ipc::terminal_ack awaits tauri::async_runtime::spawn_blocking before any registry, model, writer or process work runs; only a JoinError maps to the display-only terminal_ack_task_failed String while the typed success payload and every domain error string pass through unchanged.",
+   "syncCallers": [
+    "No Rust or CLI caller invokes terminal_ack synchronously; src-tauri/src/lib.rs registers only terminal::ipc::terminal_ack, so all traffic crosses the async worker boundary and the original synchronous src-tauri/src/terminal/mod.rs::terminal_ack stays available for Rust callers."
+   ],
+   "mutationKey": {
+    "readOnly": true,
+    "lexicalPaths": [],
+    "aliasPaths": [],
+    "sharedAdmissionEntry": "No filesystem mutation is owned by terminal_ack: it touches only the in-memory session registry, the terminal model and the PTY master; the cwd resolution reads directories without writing.",
+    "postAdmissionPreconditions": [
+     "The credit window still allows at most two unacknowledged frames; acks still wake the frame emitter."
+    ],
+    "domainLockOrder": "No command-owned filesystem mutation lease exists; the registry, model, writer and killer lock waits all run inside the isolated blocking worker and none is held across an await or a process join."
+   },
+   "processingCaller": {
+    "path": [
+     "src/lib/api.ts",
+     "src/components/TerminalPanel.tsx"
+    ],
+    "payload": "terminalAck (src/lib/api.ts) invokes terminal_ack; src/components/TerminalPanel.tsx acks each streamed frame seq to keep the credit window open.",
+    "terminalNoticeOwner": "src/components/TerminalPanel.tsx owns per-session completion and error display for terminal operations (frame channel lifecycle, spawn/kill sequencing, swallowed write/ack errors). Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+   ,
+     "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+     "successRetention": "updated record retained in component state",
+     "failureReasons": "call-site catch error message (single publisher)",
+     "singleTerminalNoticeOwner": true,
+     "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=terminal_ack"
+   },
+   "evidence": {
+    "behaviorCases": [
+     "phase08_18_each_wrapper_yields_same_poll_and_maps_join_failure",
+     "phase08_18_real_pty_fixture_results_and_legacy_rejections"
+    ],
+    "workerProof": "terminal::phase08_18::phase08_18_each_wrapper_yields_same_poll_and_maps_join_failure holds the terminal_ack future at spawn_blocking worker entry via a #[cfg(test)] worker-stage hook keyed to the test's managed TerminalState, manually polls it on the same async task and proves progress while a distinct worker thread stays blocked; the panicked worker maps to the display-only terminal_ack_task_failed String.",
+    "platformScope": "macOS unit fixtures only: tauri::test::mock_app with a fresh managed TerminalState per test and a real /bin/cat PTY behind the unix-gated fixtures; no user shell history, live workspace, credential or network endpoint is touched, and the worker-stage hook is test-only code.",
+    "limits": "In-process registry validation protects session identity, not other processes; the PTY child is a disposable fixture and no live terminal session claim is made. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
+    "contract": "Existing payloads, generation/stale-handle rejection strings, reservation and kill semantics are unchanged; the only new failure path is the JoinError-to-String mapping at the worker boundary (terminal_ack_task_failed)."
+   },
+   "tests": [
+    {
+     "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_18",
+     "passed": 4,
+     "failed": 0,
+     "ignored": 0,
+     "exitCode": 0
+    }
+   ]
+  },
+  {
+   "name": "terminal_request_full",
+   "module": "src-tauri/src/terminal/mod.rs",
+   "registrationPath": "src-tauri/src/lib.rs::terminal::ipc::terminal_request_full",
+   "originalDisposition": "RETAIN",
+   "disposition": "ISOLATED",
+   "helperChain": [
+    "src-tauri/src/terminal/mod.rs::ipc::terminal_request_full owns its inputs, clones the managed TerminalState, and awaits tauri::async_runtime::spawn_blocking calling src-tauri/src/terminal/mod.rs::terminal_request_full inside the worker; a JoinError becomes the display-only terminal_request_full_task_failed String.",
+    "src-tauri/src/terminal/mod.rs::terminal_request_full re-validates the handle through src-tauri/src/terminal/mod.rs::get_session_generation and sets the stream force-full flag inside the blocking worker."
+   ],
+   "workerBoundary": "src-tauri/src/terminal/mod.rs::ipc::terminal_request_full awaits tauri::async_runtime::spawn_blocking before any registry, model, writer or process work runs; only a JoinError maps to the display-only terminal_request_full_task_failed String while the typed success payload and every domain error string pass through unchanged.",
+   "syncCallers": [
+    "No Rust or CLI caller invokes terminal_request_full synchronously; src-tauri/src/lib.rs registers only terminal::ipc::terminal_request_full, so all traffic crosses the async worker boundary and the original synchronous src-tauri/src/terminal/mod.rs::terminal_request_full stays available for Rust callers."
+   ],
+   "mutationKey": {
+    "readOnly": true,
+    "lexicalPaths": [],
+    "aliasPaths": [],
+    "sharedAdmissionEntry": "No filesystem mutation is owned by terminal_request_full: it touches only the in-memory session registry, the terminal model and the PTY master; the cwd resolution reads directories without writing.",
+    "postAdmissionPreconditions": [
+     "The force-full flag still coalesces with damage marking before the emitter wakes."
+    ],
+    "domainLockOrder": "No command-owned filesystem mutation lease exists; the registry, model, writer and killer lock waits all run inside the isolated blocking worker and none is held across an await or a process join."
+   },
+   "processingCaller": {
+    "path": [
+     "src/lib/api.ts",
+     "src/components/TerminalPanel.tsx"
+    ],
+    "payload": "terminalRequestFull (src/lib/api.ts) invokes terminal_request_full; src/components/TerminalPanel.tsx requests a full repaint on demand.",
+    "terminalNoticeOwner": "src/components/TerminalPanel.tsx owns per-session completion and error display for terminal operations (frame channel lifecycle, spawn/kill sequencing, swallowed write/ack errors). Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+   ,
+     "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+     "successRetention": "updated record retained in component state",
+     "failureReasons": "call-site catch error message (single publisher)",
+     "singleTerminalNoticeOwner": true,
+     "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=terminal_request_full"
+   },
+   "evidence": {
+    "behaviorCases": [
+     "phase08_18_each_wrapper_yields_same_poll_and_maps_join_failure",
+     "phase08_18_real_pty_fixture_results_and_legacy_rejections"
+    ],
+    "workerProof": "terminal::phase08_18::phase08_18_each_wrapper_yields_same_poll_and_maps_join_failure holds the terminal_request_full future at spawn_blocking worker entry via a #[cfg(test)] worker-stage hook keyed to the test's managed TerminalState, manually polls it on the same async task and proves progress while a distinct worker thread stays blocked; the panicked worker maps to the display-only terminal_request_full_task_failed String.",
+    "platformScope": "macOS unit fixtures only: tauri::test::mock_app with a fresh managed TerminalState per test and a real /bin/cat PTY behind the unix-gated fixtures; no user shell history, live workspace, credential or network endpoint is touched, and the worker-stage hook is test-only code.",
+    "limits": "In-process registry validation protects session identity, not other processes; the PTY child is a disposable fixture and no live terminal session claim is made. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
+    "contract": "Existing payloads, generation/stale-handle rejection strings, reservation and kill semantics are unchanged; the only new failure path is the JoinError-to-String mapping at the worker boundary (terminal_request_full_task_failed)."
+   },
+   "tests": [
+    {
+     "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_18",
+     "passed": 4,
+     "failed": 0,
+     "ignored": 0,
+     "exitCode": 0
+    }
+   ]
+  },
+  {
+   "name": "terminal_set_visibility",
+   "module": "src-tauri/src/terminal/mod.rs",
+   "registrationPath": "src-tauri/src/lib.rs::terminal::ipc::terminal_set_visibility",
+   "originalDisposition": "RETAIN",
+   "disposition": "ISOLATED",
+   "helperChain": [
+    "src-tauri/src/terminal/mod.rs::ipc::terminal_set_visibility owns its inputs, clones the managed TerminalState, and awaits tauri::async_runtime::spawn_blocking calling src-tauri/src/terminal/mod.rs::terminal_set_visibility inside the worker; a JoinError becomes the display-only terminal_set_visibility_task_failed String.",
+    "src-tauri/src/terminal/mod.rs::terminal_set_visibility re-validates the handle through src-tauri/src/terminal/mod.rs::get_session_generation and flips the stream visibility atomic inside the blocking worker."
+   ],
+   "workerBoundary": "src-tauri/src/terminal/mod.rs::ipc::terminal_set_visibility awaits tauri::async_runtime::spawn_blocking before any registry, model, writer or process work runs; only a JoinError maps to the display-only terminal_set_visibility_task_failed String while the typed success payload and every domain error string pass through unchanged.",
+   "syncCallers": [
+    "No Rust or CLI caller invokes terminal_set_visibility synchronously; src-tauri/src/lib.rs registers only terminal::ipc::terminal_set_visibility, so all traffic crosses the async worker boundary and the original synchronous src-tauri/src/terminal/mod.rs::terminal_set_visibility stays available for Rust callers."
+   ],
+   "mutationKey": {
+    "readOnly": true,
+    "lexicalPaths": [],
+    "aliasPaths": [],
+    "sharedAdmissionEntry": "No filesystem mutation is owned by terminal_set_visibility: it touches only the in-memory session registry, the terminal model and the PTY master; the cwd resolution reads directories without writing.",
+    "postAdmissionPreconditions": [
+     "Becoming visible still requests a full frame; becoming hidden still only signals the emitter."
+    ],
+    "domainLockOrder": "No command-owned filesystem mutation lease exists; the registry, model, writer and killer lock waits all run inside the isolated blocking worker and none is held across an await or a process join."
+   },
+   "processingCaller": {
+    "path": [
+     "src/lib/api.ts",
+     "src/components/TerminalPanel.tsx"
+    ],
+    "payload": "terminalSetVisibility (src/lib/api.ts) invokes terminal_set_visibility; src/components/TerminalPanel.tsx toggles stream visibility per session tab.",
+    "terminalNoticeOwner": "src/components/TerminalPanel.tsx owns per-session completion and error display for terminal operations (frame channel lifecycle, spawn/kill sequencing, swallowed write/ack errors). Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+   ,
+     "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+     "successRetention": "updated record retained in component state",
+     "failureReasons": "call-site catch error message (single publisher)",
+     "singleTerminalNoticeOwner": true,
+     "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=terminal_set_visibility"
+   },
+   "evidence": {
+    "behaviorCases": [
+     "phase08_18_each_wrapper_yields_same_poll_and_maps_join_failure",
+     "phase08_18_real_pty_fixture_results_and_legacy_rejections"
+    ],
+    "workerProof": "terminal::phase08_18::phase08_18_each_wrapper_yields_same_poll_and_maps_join_failure holds the terminal_set_visibility future at spawn_blocking worker entry via a #[cfg(test)] worker-stage hook keyed to the test's managed TerminalState, manually polls it on the same async task and proves progress while a distinct worker thread stays blocked; the panicked worker maps to the display-only terminal_set_visibility_task_failed String.",
+    "platformScope": "macOS unit fixtures only: tauri::test::mock_app with a fresh managed TerminalState per test and a real /bin/cat PTY behind the unix-gated fixtures; no user shell history, live workspace, credential or network endpoint is touched, and the worker-stage hook is test-only code.",
+    "limits": "In-process registry validation protects session identity, not other processes; the PTY child is a disposable fixture and no live terminal session claim is made. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
+    "contract": "Existing payloads, generation/stale-handle rejection strings, reservation and kill semantics are unchanged; the only new failure path is the JoinError-to-String mapping at the worker boundary (terminal_set_visibility_task_failed)."
+   },
+   "tests": [
+    {
+     "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_18",
+     "passed": 4,
+     "failed": 0,
+     "ignored": 0,
+     "exitCode": 0
+    }
+   ]
+  },
+  {
+   "name": "terminal_selection",
+   "module": "src-tauri/src/terminal/mod.rs",
+   "registrationPath": "src-tauri/src/lib.rs::terminal::ipc::terminal_selection",
+   "originalDisposition": "RETAIN",
+   "disposition": "ISOLATED",
+   "helperChain": [
+    "src-tauri/src/terminal/mod.rs::ipc::terminal_selection owns its inputs, clones the managed TerminalState, and awaits tauri::async_runtime::spawn_blocking calling src-tauri/src/terminal/mod.rs::terminal_selection inside the worker; a JoinError becomes the display-only terminal_selection_task_failed String.",
+    "src-tauri/src/terminal/mod.rs::terminal_selection re-validates the handle through src-tauri/src/terminal/mod.rs::get_session_generation and mutates the terminal model selection under the model lock inside the blocking worker."
+   ],
+   "workerBoundary": "src-tauri/src/terminal/mod.rs::ipc::terminal_selection awaits tauri::async_runtime::spawn_blocking before any registry, model, writer or process work runs; only a JoinError maps to the display-only terminal_selection_task_failed String while the typed success payload and every domain error string pass through unchanged.",
+   "syncCallers": [
+    "No Rust or CLI caller invokes terminal_selection synchronously; src-tauri/src/lib.rs registers only terminal::ipc::terminal_selection, so all traffic crosses the async worker boundary and the original synchronous src-tauri/src/terminal/mod.rs::terminal_selection stays available for Rust callers."
+   ],
+   "mutationKey": {
+    "readOnly": true,
+    "lexicalPaths": [],
+    "aliasPaths": [],
+    "sharedAdmissionEntry": "No filesystem mutation is owned by terminal_selection: it touches only the in-memory session registry, the terminal model and the PTY master; the cwd resolution reads directories without writing.",
+    "postAdmissionPreconditions": [
+     "Selection start/update/finish/clear/select-all semantics and the repaint request are unchanged."
+    ],
+    "domainLockOrder": "No command-owned filesystem mutation lease exists; the registry, model, writer and killer lock waits all run inside the isolated blocking worker and none is held across an await or a process join."
+   },
+   "processingCaller": {
+    "path": [
+     "src/lib/api.ts",
+     "src/components/TerminalPanel.tsx"
+    ],
+    "payload": "terminalSelection (src/lib/api.ts) invokes terminal_selection; src/components/TerminalPanel.tsx drives start/update/finish/clear/select-all for mouse selection.",
+    "terminalNoticeOwner": "src/components/TerminalPanel.tsx owns per-session completion and error display for terminal operations (frame channel lifecycle, spawn/kill sequencing, swallowed write/ack errors). Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+   ,
+     "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+     "successRetention": "updated record retained in component state",
+     "failureReasons": "call-site catch error message (single publisher)",
+     "singleTerminalNoticeOwner": true,
+     "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=terminal_selection"
+   },
+   "evidence": {
+    "behaviorCases": [
+     "phase08_18_each_wrapper_yields_same_poll_and_maps_join_failure",
+     "phase08_18_real_pty_fixture_results_and_legacy_rejections"
+    ],
+    "workerProof": "terminal::phase08_18::phase08_18_each_wrapper_yields_same_poll_and_maps_join_failure holds the terminal_selection future at spawn_blocking worker entry via a #[cfg(test)] worker-stage hook keyed to the test's managed TerminalState, manually polls it on the same async task and proves progress while a distinct worker thread stays blocked; the panicked worker maps to the display-only terminal_selection_task_failed String.",
+    "platformScope": "macOS unit fixtures only: tauri::test::mock_app with a fresh managed TerminalState per test and a real /bin/cat PTY behind the unix-gated fixtures; no user shell history, live workspace, credential or network endpoint is touched, and the worker-stage hook is test-only code.",
+    "limits": "In-process registry validation protects session identity, not other processes; the PTY child is a disposable fixture and no live terminal session claim is made. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
+    "contract": "Existing payloads, generation/stale-handle rejection strings, reservation and kill semantics are unchanged; the only new failure path is the JoinError-to-String mapping at the worker boundary (terminal_selection_task_failed)."
+   },
+   "tests": [
+    {
+     "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_18",
+     "passed": 4,
+     "failed": 0,
+     "ignored": 0,
+     "exitCode": 0
+    }
+   ]
+  },
+  {
+   "name": "terminal_copy_selection",
+   "module": "src-tauri/src/terminal/mod.rs",
+   "registrationPath": "src-tauri/src/lib.rs::terminal::ipc::terminal_copy_selection",
+   "originalDisposition": "RETAIN",
+   "disposition": "ISOLATED",
+   "helperChain": [
+    "src-tauri/src/terminal/mod.rs::ipc::terminal_copy_selection owns its inputs, clones the managed TerminalState, and awaits tauri::async_runtime::spawn_blocking calling src-tauri/src/terminal/mod.rs::terminal_copy_selection inside the worker; a JoinError becomes the display-only terminal_copy_selection_task_failed String.",
+    "src-tauri/src/terminal/mod.rs::terminal_copy_selection re-validates the handle through src-tauri/src/terminal/mod.rs::get_session_generation and reads the selection text under the model lock inside the blocking worker."
+   ],
+   "workerBoundary": "src-tauri/src/terminal/mod.rs::ipc::terminal_copy_selection awaits tauri::async_runtime::spawn_blocking before any registry, model, writer or process work runs; only a JoinError maps to the display-only terminal_copy_selection_task_failed String while the typed success payload and every domain error string pass through unchanged.",
+   "syncCallers": [
+    "No Rust or CLI caller invokes terminal_copy_selection synchronously; src-tauri/src/lib.rs registers only terminal::ipc::terminal_copy_selection, so all traffic crosses the async worker boundary and the original synchronous src-tauri/src/terminal/mod.rs::terminal_copy_selection stays available for Rust callers."
+   ],
+   "mutationKey": {
+    "readOnly": true,
+    "lexicalPaths": [],
+    "aliasPaths": [],
+    "sharedAdmissionEntry": "No filesystem mutation is owned by terminal_copy_selection: it touches only the in-memory session registry, the terminal model and the PTY master; the cwd resolution reads directories without writing.",
+    "postAdmissionPreconditions": [
+     "Copied text is still whatever the model selection holds; a no-op on an empty selection."
+    ],
+    "domainLockOrder": "No command-owned filesystem mutation lease exists; the registry, model, writer and killer lock waits all run inside the isolated blocking worker and none is held across an await or a process join."
+   },
+   "processingCaller": {
+    "path": [
+     "src/lib/api.ts",
+     "src/components/TerminalPanel.tsx"
+    ],
+    "payload": "terminalCopySelection (src/lib/api.ts) invokes terminal_copy_selection; src/components/TerminalPanel.tsx copies the model selection to the clipboard.",
+    "terminalNoticeOwner": "src/components/TerminalPanel.tsx owns per-session completion and error display for terminal operations (frame channel lifecycle, spawn/kill sequencing, swallowed write/ack errors). Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+   ,
+     "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+     "successRetention": "updated record retained in component state",
+     "failureReasons": "call-site catch error message (single publisher)",
+     "singleTerminalNoticeOwner": true,
+     "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=terminal_copy_selection"
+   },
+   "evidence": {
+    "behaviorCases": [
+     "phase08_18_each_wrapper_yields_same_poll_and_maps_join_failure",
+     "phase08_18_real_pty_fixture_results_and_legacy_rejections"
+    ],
+    "workerProof": "terminal::phase08_18::phase08_18_each_wrapper_yields_same_poll_and_maps_join_failure holds the terminal_copy_selection future at spawn_blocking worker entry via a #[cfg(test)] worker-stage hook keyed to the test's managed TerminalState, manually polls it on the same async task and proves progress while a distinct worker thread stays blocked; the panicked worker maps to the display-only terminal_copy_selection_task_failed String.",
+    "platformScope": "macOS unit fixtures only: tauri::test::mock_app with a fresh managed TerminalState per test and a real /bin/cat PTY behind the unix-gated fixtures; no user shell history, live workspace, credential or network endpoint is touched, and the worker-stage hook is test-only code.",
+    "limits": "In-process registry validation protects session identity, not other processes; the PTY child is a disposable fixture and no live terminal session claim is made. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
+    "contract": "Existing payloads, generation/stale-handle rejection strings, reservation and kill semantics are unchanged; the only new failure path is the JoinError-to-String mapping at the worker boundary (terminal_copy_selection_task_failed)."
+   },
+   "tests": [
+    {
+     "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_18",
+     "passed": 4,
+     "failed": 0,
+     "ignored": 0,
+     "exitCode": 0
+    }
+   ]
+  },
+  {
+   "name": "terminal_scroll",
+   "module": "src-tauri/src/terminal/mod.rs",
+   "registrationPath": "src-tauri/src/lib.rs::terminal::ipc::terminal_scroll",
+   "originalDisposition": "RETAIN",
+   "disposition": "ISOLATED",
+   "helperChain": [
+    "src-tauri/src/terminal/mod.rs::ipc::terminal_scroll owns its inputs, clones the managed TerminalState, and awaits tauri::async_runtime::spawn_blocking calling src-tauri/src/terminal/mod.rs::terminal_scroll inside the worker; a JoinError becomes the display-only terminal_scroll_task_failed String.",
+    "src-tauri/src/terminal/mod.rs::terminal_scroll re-validates the handle through src-tauri/src/terminal/mod.rs::get_session_generation and scrolls the model viewport under the model lock inside the blocking worker."
+   ],
+   "workerBoundary": "src-tauri/src/terminal/mod.rs::ipc::terminal_scroll awaits tauri::async_runtime::spawn_blocking before any registry, model, writer or process work runs; only a JoinError maps to the display-only terminal_scroll_task_failed String while the typed success payload and every domain error string pass through unchanged.",
+   "syncCallers": [
+    "No Rust or CLI caller invokes terminal_scroll synchronously; src-tauri/src/lib.rs registers only terminal::ipc::terminal_scroll, so all traffic crosses the async worker boundary and the original synchronous src-tauri/src/terminal/mod.rs::terminal_scroll stays available for Rust callers."
+   ],
+   "mutationKey": {
+    "readOnly": true,
+    "lexicalPaths": [],
+    "aliasPaths": [],
+    "sharedAdmissionEntry": "No filesystem mutation is owned by terminal_scroll: it touches only the in-memory session registry, the terminal model and the PTY master; the cwd resolution reads directories without writing.",
+    "postAdmissionPreconditions": [
+     "Scrolling still updates the shared input modes and requests a full frame."
+    ],
+    "domainLockOrder": "No command-owned filesystem mutation lease exists; the registry, model, writer and killer lock waits all run inside the isolated blocking worker and none is held across an await or a process join."
+   },
+   "processingCaller": {
+    "path": [
+     "src/lib/api.ts",
+     "src/components/TerminalPanel.tsx"
+    ],
+    "payload": "terminalScroll (src/lib/api.ts) invokes terminal_scroll; src/components/TerminalPanel.tsx scrolls the viewport through scrollback.",
+    "terminalNoticeOwner": "src/components/TerminalPanel.tsx owns per-session completion and error display for terminal operations (frame channel lifecycle, spawn/kill sequencing, swallowed write/ack errors). Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+   ,
+     "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+     "successRetention": "updated record retained in component state",
+     "failureReasons": "call-site catch error message (single publisher)",
+     "singleTerminalNoticeOwner": true,
+     "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=terminal_scroll"
+   },
+   "evidence": {
+    "behaviorCases": [
+     "phase08_18_each_wrapper_yields_same_poll_and_maps_join_failure",
+     "phase08_18_real_pty_fixture_results_and_legacy_rejections"
+    ],
+    "workerProof": "terminal::phase08_18::phase08_18_each_wrapper_yields_same_poll_and_maps_join_failure holds the terminal_scroll future at spawn_blocking worker entry via a #[cfg(test)] worker-stage hook keyed to the test's managed TerminalState, manually polls it on the same async task and proves progress while a distinct worker thread stays blocked; the panicked worker maps to the display-only terminal_scroll_task_failed String.",
+    "platformScope": "macOS unit fixtures only: tauri::test::mock_app with a fresh managed TerminalState per test and a real /bin/cat PTY behind the unix-gated fixtures; no user shell history, live workspace, credential or network endpoint is touched, and the worker-stage hook is test-only code.",
+    "limits": "In-process registry validation protects session identity, not other processes; the PTY child is a disposable fixture and no live terminal session claim is made. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
+    "contract": "Existing payloads, generation/stale-handle rejection strings, reservation and kill semantics are unchanged; the only new failure path is the JoinError-to-String mapping at the worker boundary (terminal_scroll_task_failed)."
+   },
+   "tests": [
+    {
+     "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_18",
+     "passed": 4,
+     "failed": 0,
+     "ignored": 0,
+     "exitCode": 0
+    }
+   ]
+  },
+  {
+   "name": "terminal_clear",
+   "module": "src-tauri/src/terminal/mod.rs",
+   "registrationPath": "src-tauri/src/lib.rs::terminal::ipc::terminal_clear",
+   "originalDisposition": "CONVERT",
+   "disposition": "ISOLATED",
+   "helperChain": [
+    "src-tauri/src/terminal/mod.rs::ipc::terminal_clear owns its inputs, clones the managed TerminalState, and awaits tauri::async_runtime::spawn_blocking calling src-tauri/src/terminal/mod.rs::terminal_clear inside the worker; a JoinError becomes the display-only terminal_clear_task_failed String.",
+    "src-tauri/src/terminal/mod.rs::terminal_clear re-validates the handle through src-tauri/src/terminal/mod.rs::get_session_generation, clears the model and sends the form-feed byte through the per-session shared writer inside the blocking worker."
+   ],
+   "workerBoundary": "src-tauri/src/terminal/mod.rs::ipc::terminal_clear awaits tauri::async_runtime::spawn_blocking before any registry, model, writer or process work runs; only a JoinError maps to the display-only terminal_clear_task_failed String while the typed success payload and every domain error string pass through unchanged.",
+   "syncCallers": [
+    "No Rust or CLI caller invokes terminal_clear synchronously; src-tauri/src/lib.rs registers only terminal::ipc::terminal_clear, so all traffic crosses the async worker boundary and the original synchronous src-tauri/src/terminal/mod.rs::terminal_clear stays available for Rust callers."
+   ],
+   "mutationKey": {
+    "readOnly": true,
+    "lexicalPaths": [],
+    "aliasPaths": [],
+    "sharedAdmissionEntry": "No filesystem mutation is owned by terminal_clear: it touches only the in-memory session registry, the terminal model and the PTY master; the cwd resolution reads directories without writing.",
+    "postAdmissionPreconditions": [
+     "The clear is still a no-op on the alternate screen and still best-effort on the form-feed write after the model is cleared."
+    ],
+    "domainLockOrder": "No command-owned filesystem mutation lease exists; the registry, model, writer and killer lock waits all run inside the isolated blocking worker and none is held across an await or a process join."
+   },
+   "processingCaller": {
+    "path": [
+     "src/lib/api.ts",
+     "src/components/TerminalPanel.tsx"
+    ],
+    "payload": "terminalClear (src/lib/api.ts) invokes terminal_clear; src/components/TerminalPanel.tsx runs the Cmd+K clear for the active session.",
+    "terminalNoticeOwner": "src/components/TerminalPanel.tsx owns per-session completion and error display for terminal operations (frame channel lifecycle, spawn/kill sequencing, swallowed write/ack errors). Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+   ,
+     "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+     "successRetention": "updated record retained in component state",
+     "failureReasons": "call-site catch error message (single publisher)",
+     "singleTerminalNoticeOwner": true,
+     "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=terminal_clear"
+   },
+   "evidence": {
+    "behaviorCases": [
+     "phase08_18_each_wrapper_yields_same_poll_and_maps_join_failure",
+     "phase08_18_real_pty_fixture_results_and_legacy_rejections"
+    ],
+    "workerProof": "terminal::phase08_18::phase08_18_each_wrapper_yields_same_poll_and_maps_join_failure holds the terminal_clear future at spawn_blocking worker entry via a #[cfg(test)] worker-stage hook keyed to the test's managed TerminalState, manually polls it on the same async task and proves progress while a distinct worker thread stays blocked; the panicked worker maps to the display-only terminal_clear_task_failed String.",
+    "platformScope": "macOS unit fixtures only: tauri::test::mock_app with a fresh managed TerminalState per test and a real /bin/cat PTY behind the unix-gated fixtures; no user shell history, live workspace, credential or network endpoint is touched, and the worker-stage hook is test-only code.",
+    "limits": "In-process registry validation protects session identity, not other processes; the PTY child is a disposable fixture and no live terminal session claim is made. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
+    "contract": "Existing payloads, generation/stale-handle rejection strings, reservation and kill semantics are unchanged; the only new failure path is the JoinError-to-String mapping at the worker boundary (terminal_clear_task_failed)."
+   },
+   "tests": [
+    {
+     "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_18",
+     "passed": 4,
+     "failed": 0,
+     "ignored": 0,
+     "exitCode": 0
+    }
+   ]
+  },
+  {
+   "name": "terminal_text",
+   "module": "src-tauri/src/terminal/mod.rs",
+   "registrationPath": "src-tauri/src/lib.rs::terminal::ipc::terminal_text",
+   "originalDisposition": "RETAIN",
+   "disposition": "ISOLATED",
+   "helperChain": [
+    "src-tauri/src/terminal/mod.rs::ipc::terminal_text owns its inputs, clones the managed TerminalState, and awaits tauri::async_runtime::spawn_blocking calling src-tauri/src/terminal/mod.rs::terminal_text inside the worker; a JoinError becomes the display-only terminal_text_task_failed String.",
+    "src-tauri/src/terminal/mod.rs::terminal_text re-validates the handle through src-tauri/src/terminal/mod.rs::get_session_generation and renders the model text snapshot under the model lock inside the blocking worker."
+   ],
+   "workerBoundary": "src-tauri/src/terminal/mod.rs::ipc::terminal_text awaits tauri::async_runtime::spawn_blocking before any registry, model, writer or process work runs; only a JoinError maps to the display-only terminal_text_task_failed String while the typed success payload and every domain error string pass through unchanged.",
+   "syncCallers": [
+    "No Rust or CLI caller invokes terminal_text synchronously; src-tauri/src/lib.rs registers only terminal::ipc::terminal_text, so all traffic crosses the async worker boundary and the original synchronous src-tauri/src/terminal/mod.rs::terminal_text stays available for Rust callers."
+   ],
+   "mutationKey": {
+    "readOnly": true,
+    "lexicalPaths": [],
+    "aliasPaths": [],
+    "sharedAdmissionEntry": "No filesystem mutation is owned by terminal_text: it touches only the in-memory session registry, the terminal model and the PTY master; the cwd resolution reads directories without writing.",
+    "postAdmissionPreconditions": [
+     "The text snapshot still covers grid plus scrollback and still requires the current generation handle."
+    ],
+    "domainLockOrder": "No command-owned filesystem mutation lease exists; the registry, model, writer and killer lock waits all run inside the isolated blocking worker and none is held across an await or a process join."
+   },
+   "processingCaller": {
+    "path": [
+     "src/lib/api.ts",
+     "src/components/TerminalPanel.tsx"
+    ],
+    "payload": "terminalText (src/lib/api.ts) invokes terminal_text; src/components/TerminalPanel.tsx and the native e2e bridge (src/lib/nativeE2eBridge.ts) read plain-text snapshots.",
+    "terminalNoticeOwner": "src/components/TerminalPanel.tsx owns per-session completion and error display for terminal operations (frame channel lifecycle, spawn/kill sequencing, swallowed write/ack errors). Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+   ,
+     "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+     "successRetention": "updated record retained in component state",
+     "failureReasons": "call-site catch error message (single publisher)",
+     "singleTerminalNoticeOwner": true,
+     "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=terminal_text"
+   },
+   "evidence": {
+    "behaviorCases": [
+     "phase08_18_each_wrapper_yields_same_poll_and_maps_join_failure",
+     "phase08_18_real_pty_fixture_results_and_legacy_rejections",
+     "phase08_18_concurrent_writes_serialize_per_session_in_both_launch_orders"
+    ],
+    "workerProof": "terminal::phase08_18::phase08_18_each_wrapper_yields_same_poll_and_maps_join_failure holds the terminal_text future at spawn_blocking worker entry via a #[cfg(test)] worker-stage hook keyed to the test's managed TerminalState, manually polls it on the same async task and proves progress while a distinct worker thread stays blocked; the panicked worker maps to the display-only terminal_text_task_failed String.",
+    "platformScope": "macOS unit fixtures only: tauri::test::mock_app with a fresh managed TerminalState per test and a real /bin/cat PTY behind the unix-gated fixtures; no user shell history, live workspace, credential or network endpoint is touched, and the worker-stage hook is test-only code.",
+    "limits": "In-process registry validation protects session identity, not other processes; the PTY child is a disposable fixture and no live terminal session claim is made. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
+    "contract": "Existing payloads, generation/stale-handle rejection strings, reservation and kill semantics are unchanged; the only new failure path is the JoinError-to-String mapping at the worker boundary (terminal_text_task_failed)."
+   },
+   "tests": [
+    {
+     "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_18",
+     "passed": 4,
+     "failed": 0,
+     "ignored": 0,
+     "exitCode": 0
+    }
+   ]
+  },
+  {
+   "name": "terminal_search",
+   "module": "src-tauri/src/terminal/mod.rs",
+   "registrationPath": "src-tauri/src/lib.rs::terminal::ipc::terminal_search",
+   "originalDisposition": "RETAIN",
+   "disposition": "ISOLATED",
+   "helperChain": [
+    "src-tauri/src/terminal/mod.rs::ipc::terminal_search owns its inputs, clones the managed TerminalState, and awaits tauri::async_runtime::spawn_blocking calling src-tauri/src/terminal/mod.rs::terminal_search inside the worker; a JoinError becomes the display-only terminal_search_task_failed String.",
+    "src-tauri/src/terminal/mod.rs::terminal_search re-validates the handle through src-tauri/src/terminal/mod.rs::get_session_generation and runs the bounded grid+scrollback search under the model lock inside the blocking worker."
+   ],
+   "workerBoundary": "src-tauri/src/terminal/mod.rs::ipc::terminal_search awaits tauri::async_runtime::spawn_blocking before any registry, model, writer or process work runs; only a JoinError maps to the display-only terminal_search_task_failed String while the typed success payload and every domain error string pass through unchanged.",
+   "syncCallers": [
+    "No Rust or CLI caller invokes terminal_search synchronously; src-tauri/src/lib.rs registers only terminal::ipc::terminal_search, so all traffic crosses the async worker boundary and the original synchronous src-tauri/src/terminal/mod.rs::terminal_search stays available for Rust callers."
+   ],
+   "mutationKey": {
+    "readOnly": true,
+    "lexicalPaths": [],
+    "aliasPaths": [],
+    "sharedAdmissionEntry": "No filesystem mutation is owned by terminal_search: it touches only the in-memory session registry, the terminal model and the PTY master; the cwd resolution reads directories without writing.",
+    "postAdmissionPreconditions": [
+     "Search still scans the bounded grid plus scrollback with next/previous direction and case flag semantics unchanged."
+    ],
+    "domainLockOrder": "No command-owned filesystem mutation lease exists; the registry, model, writer and killer lock waits all run inside the isolated blocking worker and none is held across an await or a process join."
+   },
+   "processingCaller": {
+    "path": [
+     "src/lib/api.ts",
+     "src/components/TerminalPanel.tsx"
+    ],
+    "payload": "terminalSearch (src/lib/api.ts) invokes terminal_search; src/components/TerminalPanel.tsx searches scrollback and reveals the hit.",
+    "terminalNoticeOwner": "src/components/TerminalPanel.tsx owns per-session completion and error display for terminal operations (frame channel lifecycle, spawn/kill sequencing, swallowed write/ack errors). Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+   ,
+     "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+     "successRetention": "updated record retained in component state",
+     "failureReasons": "call-site catch error message (single publisher)",
+     "singleTerminalNoticeOwner": true,
+     "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=terminal_search"
+   },
+   "evidence": {
+    "behaviorCases": [
+     "phase08_18_each_wrapper_yields_same_poll_and_maps_join_failure",
+     "phase08_18_real_pty_fixture_results_and_legacy_rejections"
+    ],
+    "workerProof": "terminal::phase08_18::phase08_18_each_wrapper_yields_same_poll_and_maps_join_failure holds the terminal_search future at spawn_blocking worker entry via a #[cfg(test)] worker-stage hook keyed to the test's managed TerminalState, manually polls it on the same async task and proves progress while a distinct worker thread stays blocked; the panicked worker maps to the display-only terminal_search_task_failed String.",
+    "platformScope": "macOS unit fixtures only: tauri::test::mock_app with a fresh managed TerminalState per test and a real /bin/cat PTY behind the unix-gated fixtures; no user shell history, live workspace, credential or network endpoint is touched, and the worker-stage hook is test-only code.",
+    "limits": "In-process registry validation protects session identity, not other processes; the PTY child is a disposable fixture and no live terminal session claim is made. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
+    "contract": "Existing payloads, generation/stale-handle rejection strings, reservation and kill semantics are unchanged; the only new failure path is the JoinError-to-String mapping at the worker boundary (terminal_search_task_failed)."
+   },
+   "tests": [
+    {
+     "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_18",
+     "passed": 4,
+     "failed": 0,
+     "ignored": 0,
+     "exitCode": 0
+    }
+   ]
+  },
+  {
+   "name": "terminal_resize",
+   "module": "src-tauri/src/terminal/mod.rs",
+   "registrationPath": "src-tauri/src/lib.rs::terminal::ipc::terminal_resize",
+   "originalDisposition": "CONVERT",
+   "disposition": "ISOLATED",
+   "helperChain": [
+    "src-tauri/src/terminal/mod.rs::ipc::terminal_resize owns its inputs, clones the managed TerminalState, and awaits tauri::async_runtime::spawn_blocking calling src-tauri/src/terminal/mod.rs::terminal_resize inside the worker; a JoinError becomes the display-only terminal_resize_task_failed String.",
+    "src-tauri/src/terminal/mod.rs::terminal_resize re-validates the handle through src-tauri/src/terminal/mod.rs::get_session_generation, then holds the resize lock and model lock across the master resize ioctl exactly as before, inside the blocking worker."
+   ],
+   "workerBoundary": "src-tauri/src/terminal/mod.rs::ipc::terminal_resize awaits tauri::async_runtime::spawn_blocking before any registry, model, writer or process work runs; only a JoinError maps to the display-only terminal_resize_task_failed String while the typed success payload and every domain error string pass through unchanged.",
+   "syncCallers": [
+    "No Rust or CLI caller invokes terminal_resize synchronously; src-tauri/src/lib.rs registers only terminal::ipc::terminal_resize, so all traffic crosses the async worker boundary and the original synchronous src-tauri/src/terminal/mod.rs::terminal_resize stays available for Rust callers."
+   ],
+   "mutationKey": {
+    "readOnly": true,
+    "lexicalPaths": [],
+    "aliasPaths": [],
+    "sharedAdmissionEntry": "No filesystem mutation is owned by terminal_resize: it touches only the in-memory session registry, the terminal model and the PTY master; the cwd resolution reads directories without writing.",
+    "postAdmissionPreconditions": [
+     "Cols and rows are still clamped to the existing bounds and the model lock is still held across the ioctl so a TUI redraw cannot parse into the old grid."
+    ],
+    "domainLockOrder": "No command-owned filesystem mutation lease exists; the registry, model, writer and killer lock waits all run inside the isolated blocking worker and none is held across an await or a process join."
+   },
+   "processingCaller": {
+    "path": [
+     "src/lib/api.ts",
+     "src/components/TerminalPanel.tsx"
+    ],
+    "payload": "terminalResize (src/lib/api.ts) invokes terminal_resize; src/components/TerminalPanel.tsx resizes the PTY with the pane.",
+    "terminalNoticeOwner": "src/components/TerminalPanel.tsx owns per-session completion and error display for terminal operations (frame channel lifecycle, spawn/kill sequencing, swallowed write/ack errors). Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+   ,
+     "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+     "successRetention": "updated record retained in component state",
+     "failureReasons": "call-site catch error message (single publisher)",
+     "singleTerminalNoticeOwner": true,
+     "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=terminal_resize"
+   },
+   "evidence": {
+    "behaviorCases": [
+     "phase08_18_each_wrapper_yields_same_poll_and_maps_join_failure",
+     "phase08_18_real_pty_fixture_results_and_legacy_rejections"
+    ],
+    "workerProof": "terminal::phase08_18::phase08_18_each_wrapper_yields_same_poll_and_maps_join_failure holds the terminal_resize future at spawn_blocking worker entry via a #[cfg(test)] worker-stage hook keyed to the test's managed TerminalState, manually polls it on the same async task and proves progress while a distinct worker thread stays blocked; the panicked worker maps to the display-only terminal_resize_task_failed String.",
+    "platformScope": "macOS unit fixtures only: tauri::test::mock_app with a fresh managed TerminalState per test and a real /bin/cat PTY behind the unix-gated fixtures; no user shell history, live workspace, credential or network endpoint is touched, and the worker-stage hook is test-only code.",
+    "limits": "In-process registry validation protects session identity, not other processes; the PTY child is a disposable fixture and no live terminal session claim is made. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
+    "contract": "Existing payloads, generation/stale-handle rejection strings, reservation and kill semantics are unchanged; the only new failure path is the JoinError-to-String mapping at the worker boundary (terminal_resize_task_failed)."
+   },
+   "tests": [
+    {
+     "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_18",
+     "passed": 4,
+     "failed": 0,
+     "ignored": 0,
+     "exitCode": 0
+    }
+   ]
+  },
+  {
+   "name": "terminal_kill",
+   "module": "src-tauri/src/terminal/mod.rs",
+   "registrationPath": "src-tauri/src/lib.rs::terminal::ipc::terminal_kill",
+   "originalDisposition": "CONVERT",
+   "disposition": "ISOLATED",
+   "helperChain": [
+    "src-tauri/src/terminal/mod.rs::ipc::terminal_kill owns its inputs, clones the managed TerminalState, and awaits tauri::async_runtime::spawn_blocking calling src-tauri/src/terminal/mod.rs::terminal_kill inside the worker; a JoinError becomes the display-only terminal_kill_task_failed String.",
+    "src-tauri/src/terminal/mod.rs::terminal_kill re-validates the handle through src-tauri/src/terminal/mod.rs::get_session_generation, latches the closing flag, kills the child under the killer lock and unregisters the session by Arc identity inside the blocking worker; unknown kills stay idempotent."
+   ],
+   "workerBoundary": "src-tauri/src/terminal/mod.rs::ipc::terminal_kill awaits tauri::async_runtime::spawn_blocking before any registry, model, writer or process work runs; only a JoinError maps to the display-only terminal_kill_task_failed String while the typed success payload and every domain error string pass through unchanged.",
+   "syncCallers": [
+    "No Rust or CLI caller invokes terminal_kill synchronously; src-tauri/src/lib.rs registers only terminal::ipc::terminal_kill, so all traffic crosses the async worker boundary and the original synchronous src-tauri/src/terminal/mod.rs::terminal_kill stays available for Rust callers."
+   ],
+   "mutationKey": {
+    "readOnly": true,
+    "lexicalPaths": [],
+    "aliasPaths": [],
+    "sharedAdmissionEntry": "No filesystem mutation is owned by terminal_kill: it touches only the in-memory session registry, the terminal model and the PTY master; the cwd resolution reads directories without writing.",
+    "postAdmissionPreconditions": [
+     "The closing flag still latches across duplicate kills, a failed kill still unlatches it, and removal is still guarded by Arc identity so a later exit cannot unregister a recycled session."
+    ],
+    "domainLockOrder": "No command-owned filesystem mutation lease exists; the registry, model, writer and killer lock waits all run inside the isolated blocking worker and none is held across an await or a process join."
+   },
+   "processingCaller": {
+    "path": [
+     "src/lib/api.ts",
+     "src/components/TerminalPanel.tsx"
+    ],
+    "payload": "terminalKill (src/lib/api.ts) invokes terminal_kill; src/components/TerminalPanel.tsx kills sessions on tab close and swallows the already-dead error.",
+    "terminalNoticeOwner": "src/components/TerminalPanel.tsx owns per-session completion and error display for terminal operations (frame channel lifecycle, spawn/kill sequencing, swallowed write/ack errors). Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+   ,
+     "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+     "successRetention": "updated record retained in component state",
+     "failureReasons": "call-site catch error message (single publisher)",
+     "singleTerminalNoticeOwner": true,
+     "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=terminal_kill"
+   },
+   "evidence": {
+    "behaviorCases": [
+     "phase08_18_each_wrapper_yields_same_poll_and_maps_join_failure",
+     "phase08_18_real_pty_fixture_results_and_legacy_rejections",
+     "phase08_18_spawn_rollback_releases_reservation_and_recycles_identity"
+    ],
+    "workerProof": "terminal::phase08_18::phase08_18_each_wrapper_yields_same_poll_and_maps_join_failure holds the terminal_kill future at spawn_blocking worker entry via a #[cfg(test)] worker-stage hook keyed to the test's managed TerminalState, manually polls it on the same async task and proves progress while a distinct worker thread stays blocked; the panicked worker maps to the display-only terminal_kill_task_failed String.",
+    "platformScope": "macOS unit fixtures only: tauri::test::mock_app with a fresh managed TerminalState per test and a real /bin/cat PTY behind the unix-gated fixtures; no user shell history, live workspace, credential or network endpoint is touched, and the worker-stage hook is test-only code.",
+    "limits": "In-process registry validation protects session identity, not other processes; the PTY child is a disposable fixture and no live terminal session claim is made. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
+    "contract": "Existing payloads, generation/stale-handle rejection strings, reservation and kill semantics are unchanged; the only new failure path is the JoinError-to-String mapping at the worker boundary (terminal_kill_task_failed)."
+   },
+   "tests": [
+    {
+     "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_18",
+     "passed": 4,
+     "failed": 0,
+     "ignored": 0,
+     "exitCode": 0
+    }
+   ]
+  }
+ ]
+}

@@ -798,7 +798,6 @@ pub struct LogicalDayInfo {
     pub is_new_day_boundary: bool,
 }
 
-#[tauri::command]
 pub fn today_logical_day(
     work_path: String,
     now_iso: String,
@@ -1135,5 +1134,67 @@ mod tests {
         .unwrap();
         assert_eq!(info.logical_day, "2026-07-21");
         assert!(info.is_new_day_boundary);
+    }
+}
+
+/// Directory normalization is filesystem I/O even though the calendar arithmetic is bounded.
+pub mod ipc {
+    use super::*;
+    #[tauri::command]
+    pub async fn today_logical_day(
+        work_path: String,
+        now_iso: String,
+        timezone: String,
+        day_start: String,
+    ) -> Result<LogicalDayInfo, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            crate::atomic_file::PathTransactionLease::test_stage(
+                &[std::path::PathBuf::from(&work_path)],
+                "worker:today_logical_day",
+            );
+            super::today_logical_day(work_path, now_iso, timezone, day_start)
+        })
+        .await
+        .map_err(|err| format!("today_logical_day_task_failed: {err}"))?
+    }
+}
+
+#[cfg(test)]
+mod phase08_11 {
+    use super::*;
+    use crate::atomic_file::phase08_06::{boundary, run, Home};
+    #[test]
+    fn phase08_11_logical_day_actual_boundary_payload_and_rejection() {
+        let home = Home::new();
+        let root = home.root.path();
+        let work = root.to_string_lossy().into_owned();
+        boundary(
+            root.into(),
+            "today_logical_day",
+            ipc::today_logical_day(
+                work.clone(),
+                "2026-07-21T02:00:00+09:00".into(),
+                "Asia/Seoul".into(),
+                "03:30".into(),
+            ),
+        );
+        let value = run(ipc::today_logical_day(
+            work.clone(),
+            "2026-07-21T02:00:00+09:00".into(),
+            "Asia/Seoul".into(),
+            "03:30".into(),
+        ))
+        .unwrap();
+        assert_eq!(value.logical_day, "2026-07-20");
+        assert_eq!(value.previous_logical_day, "2026-07-19");
+        assert!(run(ipc::today_logical_day(
+            work,
+            "invalid".into(),
+            "Asia/Seoul".into(),
+            "03:30".into()
+        ))
+        .unwrap_err()
+        .contains("RFC3339"));
     }
 }

@@ -43,6 +43,72 @@ Chromium against the Vite dev server with mocked IPC. `make test-e2e-native`
 is WebdriverIO against the real backend in the real app. They share no runner
 and no premise, so a green result from one says nothing about the other.
 
+## Phase 08 responsiveness harness (plans 08-27/08-28)
+
+Plan 08-27 added a feature-gated saturation/source-race harness on this runner
+(PERF-01/PERF-02); plan 08-28 closed the phase with production-isolation
+proofs. What exists and where it lives:
+
+- **Feature-gated Rust harness** (`src-tauri/src/native_e2e.rs`, behind
+  `cfg(feature = "native-e2e")`): installs a deterministic two-worker Tokio
+  runtime (`TOKIO_WORKER_THREADS=2`, exported in `e2e-native/wdio.conf.ts`
+  `onPrepare` before the launcher spawns the app), serves a same-runtime
+  async probe (`native_e2e_async_probe`), and drives allowlisted load control
+  (`native_e2e_load_control`) that holds a 2500ms pre-work window inside the
+  real blocking closures of `git_status`, `scan_vault` and
+  `skills_sync_source`. Both commands are registered in the feature-gated
+  `generate_handler` entries and allowlisted in
+  `docs/performance/phase08-native-allowlist.json`; neither exists in a
+  default-feature build.
+- **Fixed fixtures, disposable roots:** every fixture lives under a per-run
+  `mkdtemp` root reached only through `MARU_NATIVE_E2E_HOME`; the
+  change/revert seam refuses any source whose canonical path escapes that
+  root. No live workspace, credential or public remote is touched (bare
+  remotes are local bare repos). The spec's `after` reseeds checkouts and
+  restores the registry from the seeded backup; it never deletes directories,
+  so the app-side filesystem watchers survive.
+- **Calibration / negative control / fixed run:** the spec first calibrates
+  idle probe/parse p95, freezes thresholds from those samples, then proves
+  the `blockingAsync` negative control *violates* the frozen probe bound
+  (loaded p95 4789ms vs the 27ms bound — the stall is the measurement), and
+  finally proves the isolated saturation run meets the bounds with four
+  overlapping real operations on two workers across three rounds (probe p95
+  2ms, parse p95 7ms, max stall 9ms, zero missing samples). Measured numbers
+  land in `artifacts/native-responsiveness/{calibration,thresholds,negative-control,fixed-run}.json`
+  (untracked, local only).
+- **Ship isolation (`scripts/check-native-e2e-isolation.mjs`, D-09/D-10):**
+  the bundle half (runs inside `pnpm build:frontend`, so every `make verify`)
+  scans `dist/assets/*.js` for the bridge namespace `__MARU_NATIVE_E2E__` and
+  both native-only command names; the binary half (`--binary <path>`, wired
+  into `make release-checks` before the debug-artifact prune) scans the
+  produced executable for the WebDriver plugin crate names, the
+  `MARU_NATIVE_RESPONSIVENESS_HOOK` marker and both command symbols. A
+  feature-on artifact fails both halves observably — verified 2026-09-06:
+  the feature binary was rejected with exit 1 reporting all five markers,
+  and the native-e2e dist was rejected with exit 1 reporting all three
+  bundle markers.
+
+Exact commands to reproduce the normal-artifact proof from a tree that last
+built the runner:
+
+```bash
+pnpm build:frontend                                    # normal dist, scans itself
+touch src-tauri/build.rs                               # force re-embed of dist
+cd src-tauri && cargo build && cd ..                   # default-feature binary
+node scripts/check-native-e2e-isolation.mjs            # dist + manifest half
+node scripts/check-native-e2e-isolation.mjs --binary src-tauri/target/debug/maru
+```
+
+Both scans must print their PASS line. If the last build was
+`make test-e2e-native`, expect the first scan to fail — that is the guard
+working; the rebuild commands above restore a shippable artifact.
+
+The phase-level evidence closure gate
+(`node scripts/check-command-isolation.mjs --all --expected-count 365`, also
+a `make verify` step via `check-command-isolation`) is hermetic — it reads
+sources and recorded evidence only, and never builds or launches the app.
+
+
 ## CI placement
 
 Verdict: **ci-viable** (per-condition evidence in `## Spike log` below).

@@ -14,6 +14,8 @@ pub mod safety;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+use crate::atomic_file::{with_path_transactions, PathTransactionLease, PathTransactionRequest};
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HubConfig {
     pub endpoint: String,
@@ -49,7 +51,6 @@ pub struct HubStatus {
     pub queue_depth: usize,
 }
 
-#[tauri::command]
 pub fn hub_status(workspace_root: String) -> Result<HubStatus, String> {
     let root = PathBuf::from(&workspace_root);
     let cfg = load_hub_config(&root).map_err(|e| e.to_string())?;
@@ -108,7 +109,6 @@ pub struct HubFetchResponse {
     pub fetched_at: String,
 }
 
-#[tauri::command]
 pub fn hub_fetch_catalog(req: HubFetchRequest) -> Result<HubFetchResponse, String> {
     let root = PathBuf::from(&req.workspace_root);
     let cfg = load_hub_config(&root).map_err(|e| e.to_string())?;
@@ -120,8 +120,23 @@ pub fn hub_fetch_catalog(req: HubFetchRequest) -> Result<HubFetchResponse, Strin
     }
 
     // Online path — HTTP GET with ETag revalidation. On error, fall back to
-    // the cache so the UI keeps working when the Hub is unreachable.
-    match http::fetch_with_cache(&cfg, &req.resource, &req.params, req.revalidate) {
+    // the cache so the UI keeps working when the Hub is unreachable. The
+    // shared etags index makes every cache write one coherent store, so the
+    // whole cache tree is admitted before the first effect.
+    with_path_transactions(
+        PathTransactionRequest::new(vec![cfg.cache_root.clone()])?,
+        |lease| hub_fetch_catalog_in_transaction(&cfg, &req, lease),
+    )
+}
+
+fn hub_fetch_catalog_in_transaction(
+    cfg: &HubConfig,
+    req: &HubFetchRequest,
+    lease: &PathTransactionLease,
+) -> Result<HubFetchResponse, String> {
+    lease.ensure_covered(vec![cfg.cache_root.clone()])?;
+    lease.before_effect()?;
+    match http::fetch_with_cache(cfg, &req.resource, &req.params, req.revalidate) {
         Ok(resp) => Ok(resp),
         Err(err) => {
             eprintln!("[hub_client] fetch error ({}): {}", req.resource, err);
@@ -245,7 +260,6 @@ fn preflight_submit_gate(cfg: &HubConfig, req: &HubSubmitGateRequest) -> Result<
 /// runs; with the Hub enabled the POST is attempted immediately and any
 /// failure falls back to the durable offline queue (drained by
 /// `hub_queue_drain`), so a submit is never lost.
-#[tauri::command]
 pub fn hub_submit_gate(req: HubSubmitGateRequest) -> Result<HubSubmitGateResponse, String> {
     let root = PathBuf::from(&req.workspace_root);
     let cfg = load_hub_config(&root).map_err(|e| e.to_string())?;
@@ -270,12 +284,25 @@ pub fn hub_submit_gate(req: HubSubmitGateRequest) -> Result<HubSubmitGateRespons
         }
     }
 
-    cache::enqueue_submit_gate(&root, &req).map_err(|e| e.to_string())?;
+    enqueue_submit_gate_admitted(&root, &req)?;
     Ok(HubSubmitGateResponse {
         gate_id: None,
         state: "queued_offline".to_string(),
         queued_at: Some(chrono::Utc::now().to_rfc3339()),
         created_at: None,
+    })
+}
+
+fn enqueue_submit_gate_admitted(
+    root: &std::path::Path,
+    req: &HubSubmitGateRequest,
+) -> Result<(), String> {
+    let queue = cache::queue_root(root);
+    with_path_transactions(PathTransactionRequest::new(vec![queue.clone()])?, |lease| {
+        lease.ensure_covered(vec![queue])?;
+        lease.before_effect()?;
+        cache::enqueue_submit_gate(root, req).map_err(|e| e.to_string())?;
+        Ok(())
     })
 }
 
@@ -299,55 +326,79 @@ pub struct HubQueueDrainResult {
 /// success removes it, failure records `retry_count`/`last_error` and keeps
 /// it for the next drain. With the Hub disabled this is a no-op that only
 /// reports the backlog (`remaining`).
-#[tauri::command]
 pub fn hub_queue_drain(workspace_root: String) -> Result<HubQueueDrainResult, String> {
     let root = PathBuf::from(&workspace_root);
     let cfg = load_hub_config(&root).map_err(|e| e.to_string())?;
     let queued = cache::list_queue(&root).map_err(|e| e.to_string())?;
 
+    if !cfg.enabled {
+        // Read-only backlog report; no queue file is touched.
+        let remaining = cache::queue_depth(&root).unwrap_or(0);
+        return Ok(HubQueueDrainResult {
+            attempted: 0,
+            submitted: 0,
+            failed: 0,
+            remaining,
+            items: Vec::new(),
+        });
+    }
+
+    let queue = cache::queue_root(&root);
+    with_path_transactions(PathTransactionRequest::new(vec![queue])?, |lease| {
+        lease.ensure_covered(vec![cache::queue_root(&root)])?;
+        lease.before_effect()?;
+        hub_queue_drain_in_transaction(&root, &cfg, &queued, lease)
+    })
+}
+
+fn hub_queue_drain_in_transaction(
+    root: &std::path::Path,
+    cfg: &HubConfig,
+    queued: &[(std::path::PathBuf, cache::QueuedSubmitGate)],
+    lease: &PathTransactionLease,
+) -> Result<HubQueueDrainResult, String> {
     let mut items = Vec::new();
     let mut submitted = 0usize;
     let mut failed = 0usize;
 
-    if cfg.enabled {
-        for (path, entry) in &queued {
-            if let Err(reason) = preflight_submit_gate(&cfg, &entry.body) {
-                let msg = format!("blocked_by_safety:{}", reason);
-                let _ = cache::mark_retry(path, &msg);
+    for (path, entry) in queued {
+        if let Err(reason) = preflight_submit_gate(cfg, &entry.body) {
+            let msg = format!("blocked_by_safety:{}", reason);
+            let _ = cache::mark_retry(path, &msg);
+            failed += 1;
+            items.push(HubQueueDrainItem {
+                request_id: entry.request_id.clone(),
+                outcome: "failed".to_string(),
+                error: Some(msg),
+            });
+            continue;
+        }
+        match post_submit_gate(cfg, &entry.body) {
+            Ok(_) => {
+                let _ = cache::remove_queued(path);
+                submitted += 1;
+                items.push(HubQueueDrainItem {
+                    request_id: entry.request_id.clone(),
+                    outcome: "submitted".to_string(),
+                    error: None,
+                });
+            }
+            Err(err) => {
+                let _ = cache::mark_retry(path, &err);
                 failed += 1;
                 items.push(HubQueueDrainItem {
                     request_id: entry.request_id.clone(),
                     outcome: "failed".to_string(),
-                    error: Some(msg),
+                    error: Some(err),
                 });
-                continue;
-            }
-            match post_submit_gate(&cfg, &entry.body) {
-                Ok(_) => {
-                    let _ = cache::remove_queued(path);
-                    submitted += 1;
-                    items.push(HubQueueDrainItem {
-                        request_id: entry.request_id.clone(),
-                        outcome: "submitted".to_string(),
-                        error: None,
-                    });
-                }
-                Err(err) => {
-                    let _ = cache::mark_retry(path, &err);
-                    failed += 1;
-                    items.push(HubQueueDrainItem {
-                        request_id: entry.request_id.clone(),
-                        outcome: "failed".to_string(),
-                        error: Some(err),
-                    });
-                }
             }
         }
     }
+    let _ = lease;
 
-    let remaining = cache::queue_depth(&root).unwrap_or(0);
+    let remaining = cache::queue_depth(root).unwrap_or(0);
     Ok(HubQueueDrainResult {
-        attempted: if cfg.enabled { queued.len() } else { 0 },
+        attempted: queued.len(),
         submitted,
         failed,
         remaining,
@@ -355,7 +406,6 @@ pub fn hub_queue_drain(workspace_root: String) -> Result<HubQueueDrainResult, St
     })
 }
 
-#[tauri::command]
 pub fn hub_poll_gate(workspace_root: String, gate_id: String) -> Result<HubFetchResponse, String> {
     let root = PathBuf::from(&workspace_root);
     let cfg = load_hub_config(&root).map_err(|e| e.to_string())?;
@@ -368,18 +418,114 @@ pub fn hub_poll_gate(workspace_root: String, gate_id: String) -> Result<HubFetch
             .map_err(|e| e.to_string());
     }
 
-    match http::fetch_with_cache(&cfg, &resource, &params, true) {
-        Ok(resp) => Ok(resp),
-        Err(err) => {
-            eprintln!("[hub_client] poll gate error ({}): {}", gate_id, err);
-            cache::load_cached_resource(&cfg.cache_root, &resource, &params).map_err(|e| {
-                format!(
-                    "hub poll gate failed and cache empty: hub={} cache={}",
-                    err, e
-                )
-            })
-        }
+    with_path_transactions(
+        PathTransactionRequest::new(vec![cfg.cache_root.clone()])?,
+        |lease| {
+            lease.ensure_covered(vec![cfg.cache_root.clone()])?;
+            lease.before_effect()?;
+            match http::fetch_with_cache(&cfg, &resource, &params, true) {
+                Ok(resp) => Ok(resp),
+                Err(err) => {
+                    eprintln!("[hub_client] poll gate error ({}): {}", gate_id, err);
+                    cache::load_cached_resource(&cfg.cache_root, &resource, &params).map_err(|e| {
+                        format!(
+                            "hub poll gate failed and cache empty: hub={} cache={}",
+                            err, e
+                        )
+                    })
+                }
+            }
+        },
+    )
+}
+
+pub mod ipc {
+    use super::*;
+
+    #[tauri::command]
+    pub async fn hub_status(workspace_root: String) -> Result<HubStatus, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(
+                &[PathBuf::from(&workspace_root).join("workspace.config.yaml")],
+                "worker:hub_status",
+            );
+            super::hub_status(workspace_root)
+        })
+        .await
+        .map_err(|err| format!("hub_status_task_failed: {err}"))?
     }
+
+    #[tauri::command]
+    pub async fn hub_fetch_catalog(req: HubFetchRequest) -> Result<HubFetchResponse, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(&[hub_cache_root(&req)], "worker:hub_fetch_catalog");
+            super::hub_fetch_catalog(req)
+        })
+        .await
+        .map_err(|err| format!("hub_fetch_catalog_task_failed: {err}"))?
+    }
+
+    #[tauri::command]
+    pub async fn hub_submit_gate(
+        req: HubSubmitGateRequest,
+    ) -> Result<HubSubmitGateResponse, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(&[hub_queue_root(&req)], "worker:hub_submit_gate");
+            super::hub_submit_gate(req)
+        })
+        .await
+        .map_err(|err| format!("hub_submit_gate_task_failed: {err}"))?
+    }
+
+    #[tauri::command]
+    pub async fn hub_queue_drain(workspace_root: String) -> Result<HubQueueDrainResult, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(
+                &[cache::queue_root(std::path::Path::new(&workspace_root))],
+                "worker:hub_queue_drain",
+            );
+            super::hub_queue_drain(workspace_root)
+        })
+        .await
+        .map_err(|err| format!("hub_queue_drain_task_failed: {err}"))?
+    }
+
+    #[tauri::command]
+    pub async fn hub_poll_gate(
+        workspace_root: String,
+        gate_id: String,
+    ) -> Result<HubFetchResponse, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(
+                &[PathBuf::from(&workspace_root)
+                    .join(".maru")
+                    .join("cache")
+                    .join("hub")],
+                "worker:hub_poll_gate",
+            );
+            super::hub_poll_gate(workspace_root, gate_id)
+        })
+        .await
+        .map_err(|err| format!("hub_poll_gate_task_failed: {err}"))?
+    }
+}
+
+#[cfg(test)]
+fn hub_cache_root(req: &HubFetchRequest) -> PathBuf {
+    PathBuf::from(&req.workspace_root)
+        .join(".maru")
+        .join("cache")
+        .join("hub")
+}
+
+#[cfg(test)]
+fn hub_queue_root(req: &HubSubmitGateRequest) -> PathBuf {
+    cache::queue_root(std::path::Path::new(&req.workspace_root))
 }
 
 /// workspace.config.yaml의 hub: 블록을 읽어 HubConfig 생성.
@@ -616,5 +762,443 @@ mod tests {
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].1.retry_count, 1);
         assert!(items[0].1.last_error.is_some());
+    }
+}
+
+#[cfg(test)]
+mod phase08_17 {
+    use super::ipc;
+    use super::*;
+    use crate::atomic_file::phase08_06::{boundary, run, Held, Home};
+    use crate::atomic_file::PathTransactionTestHook;
+    use crate::workspace_files::{ipc as files_ipc, phase08_06::TrashFixture};
+    use std::io::{Read, Write};
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    fn text(path: &std::path::Path) -> String {
+        path.to_string_lossy().into_owned()
+    }
+
+    fn start<F>(future: F) -> mpsc::Receiver<F::Output>
+    where
+        F: std::future::Future + Send + 'static,
+        F::Output: Send + 'static,
+    {
+        let (tx, rx) = mpsc::channel();
+        tauri::async_runtime::spawn(async move {
+            let _ = tx.send(future.await);
+        });
+        rx
+    }
+
+    fn done<T>(rx: mpsc::Receiver<T>) -> T {
+        rx.recv_timeout(Duration::from_secs(10))
+            .expect("hub fixture completion")
+    }
+
+    fn disabled_workspace(yaml: &str) -> (tempfile::TempDir, String) {
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::fs::write(tmp.path().join("workspace.config.yaml"), yaml).unwrap();
+        let root = text(tmp.path());
+        (tmp, root)
+    }
+
+    /// Minimal localhost HTTP fixture: answers `requests` connections with a
+    /// fixed JSON body and ETag, then stops. No external network is touched.
+    struct HubServer {
+        endpoint: String,
+        handle: Option<std::thread::JoinHandle<()>>,
+    }
+
+    impl HubServer {
+        fn start(body: &'static str, requests: usize) -> Self {
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            let port = listener.local_addr().unwrap().port();
+            let handle = std::thread::spawn(move || {
+                listener.set_nonblocking(true).unwrap();
+                let deadline = std::time::Instant::now() + Duration::from_secs(30);
+                let mut served = 0usize;
+                while served < requests {
+                    let (mut stream, _) = match listener.accept() {
+                        Ok(accepted) => accepted,
+                        Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
+                            if std::time::Instant::now() >= deadline {
+                                break;
+                            }
+                            std::thread::sleep(Duration::from_millis(5));
+                            continue;
+                        }
+                        Err(_) => break,
+                    };
+                    served += 1;
+                    let mut buf = Vec::new();
+                    let mut chunk = [0u8; 1024];
+                    while !buf.windows(4).any(|w| w == b"\r\n\r\n") {
+                        let Ok(n) = stream.read(&mut chunk) else {
+                            break;
+                        };
+                        if n == 0 {
+                            break;
+                        };
+                        buf.extend_from_slice(&chunk[..n]);
+                    }
+                    let head = if String::from_utf8_lossy(&buf)
+                        .to_ascii_lowercase()
+                        .contains("if-none-match")
+                    {
+                        "HTTP/1.1 304 Not Modified\r\netag: \"tag-1\"\r\ncontent-length: 0\r\nconnection: close\r\n\r\n".to_string()
+                    } else {
+                        format!(
+                            "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\netag: \"tag-1\"\r\ncontent-length: {}\r\nconnection: close\r\n\r\n",
+                            body.len()
+                        )
+                    };
+                    let _ = stream.write_all(head.as_bytes());
+                    if !head.starts_with("HTTP/1.1 304") {
+                        let _ = stream.write_all(body.as_bytes());
+                    }
+                }
+            });
+            Self {
+                endpoint: format!("http://127.0.0.1:{port}/api/v1"),
+                handle: Some(handle),
+            }
+        }
+    }
+
+    impl Drop for HubServer {
+        fn drop(&mut self) {
+            if let Some(handle) = self.handle.take() {
+                let _ = handle.join();
+            }
+        }
+    }
+
+    fn fetch_templates(root: &str) -> HubFetchRequest {
+        HubFetchRequest {
+            workspace_root: root.to_string(),
+            resource: "templates".to_string(),
+            params: std::collections::HashMap::new(),
+            revalidate: false,
+        }
+    }
+
+    #[test]
+    fn phase08_17_hub_all_wrappers_round_trip_and_legacy_rejections() {
+        let (_tmp, root) = disabled_workspace("hub:\n  enabled: false\n");
+
+        let status = run(ipc::hub_status(root.clone())).unwrap();
+        assert!(!status.enabled);
+        assert!(!status.reachable);
+        assert_eq!(status.queue_depth, 0);
+
+        let fetched = run(ipc::hub_fetch_catalog(fetch_templates(&root))).unwrap();
+        assert!(!fetched.from_cache);
+        assert!(fetched.body_json.is_empty());
+
+        let submitted = run(ipc::hub_submit_gate(test_request(&root))).unwrap();
+        assert_eq!(submitted.state, "queued_offline");
+        assert_eq!(cache::queue_depth(std::path::Path::new(&root)).unwrap(), 1);
+
+        let drained = run(ipc::hub_queue_drain(root.clone())).unwrap();
+        assert_eq!(drained.attempted, 0);
+        assert_eq!(drained.remaining, 1);
+
+        assert_eq!(
+            run(ipc::hub_poll_gate(root.clone(), "../gate".into())).unwrap_err(),
+            "hub_path_segment_invalid"
+        );
+
+        // Online round trips against the local fixture server, covering the
+        // admitted cache writes for fetch and poll.
+        let server = HubServer::start(r#"{"items":[1,2,3]}"#, 4);
+        let (_online_tmp, online_root) = disabled_workspace(&format!(
+            "hub:\n  enabled: true\n  endpoint: {}\n  timeout_ms: 2000\n",
+            server.endpoint
+        ));
+        let fetched = run(ipc::hub_fetch_catalog(fetch_templates(&online_root))).unwrap();
+        assert!(!fetched.from_cache);
+        assert_eq!(fetched.body_json, r#"{"items":[1,2,3]}"#);
+        assert!(cache::etag_index_path(&cache_root(&online_root)).is_file());
+
+        let mut revalidated = fetch_templates(&online_root);
+        revalidated.revalidate = true;
+        let cached = run(ipc::hub_fetch_catalog(revalidated)).unwrap();
+        assert!(cached.from_cache);
+        assert_eq!(cached.body_json, r#"{"items":[1,2,3]}"#);
+
+        let polled = run(ipc::hub_poll_gate(online_root.clone(), "gate_123".into())).unwrap();
+        assert_eq!(polled.body_json, r#"{"items":[1,2,3]}"#);
+        assert!(cache::etag_index_path(&cache_root(&online_root)).is_file());
+
+        let submitted = run(ipc::hub_submit_gate(test_request(&online_root))).unwrap();
+        assert_eq!(submitted.state, "pending");
+        assert!(submitted.gate_id.is_none());
+        assert_eq!(
+            cache::queue_depth(std::path::Path::new(&online_root)).unwrap(),
+            0
+        );
+    }
+
+    fn cache_root(root: &str) -> PathBuf {
+        PathBuf::from(root).join(".maru").join("cache").join("hub")
+    }
+
+    fn test_request(root: &str) -> HubSubmitGateRequest {
+        HubSubmitGateRequest {
+            workspace_root: root.to_string(),
+            program_id: "prg_1".to_string(),
+            business_unit_id: "bu_1".to_string(),
+            document_uri: "projects/x/doc.md".to_string(),
+            document_type: "change-request".to_string(),
+            document_sha256: "a".repeat(64),
+            submission_kind: "external-dispatch".to_string(),
+            target_org: "Demo Org".to_string(),
+            deadline: None,
+            evidence_sha256_list: vec![],
+            frontmatter_snapshot: serde_json::json!({"title": "X"}),
+            notes: None,
+        }
+    }
+
+    #[test]
+    fn phase08_17_hub_each_wrapper_yields_same_poll_and_maps_join_failure() {
+        let (_tmp, root) = disabled_workspace("hub:\n  enabled: false\n");
+        let config_path = PathBuf::from(&root).join("workspace.config.yaml");
+        let queue = cache::queue_root(std::path::Path::new(&root));
+        let cache = cache_root(&root);
+
+        boundary(config_path, "hub_status", ipc::hub_status(root.clone()));
+        boundary(
+            cache.clone(),
+            "hub_fetch_catalog",
+            ipc::hub_fetch_catalog(fetch_templates(&root)),
+        );
+        boundary(
+            queue.clone(),
+            "hub_submit_gate",
+            ipc::hub_submit_gate(test_request(&root)),
+        );
+        boundary(queue, "hub_queue_drain", ipc::hub_queue_drain(root.clone()));
+        boundary(
+            cache,
+            "hub_poll_gate",
+            ipc::hub_poll_gate(root, "gate_1".into()),
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn phase08_17_hub_queue_parent_both_orders_and_aliases_no_recreation() {
+        let home = Home::new();
+        let root = home.root.path();
+        for parent in ["rename", "trash"] {
+            for parent_first in [false, true] {
+                for alias in [false, true] {
+                    if alias && parent == "trash" {
+                        continue;
+                    }
+                    let fixture = tempfile::tempdir_in(root).unwrap();
+                    let fixture_root = fixture.path();
+                    std::fs::write(
+                        fixture_root.join("workspace.config.yaml"),
+                        "hub:\n  enabled: false\n",
+                    )
+                    .unwrap();
+                    let maru_dir = fixture_root.join(".maru");
+                    let key = maru_dir.join("queue").join("hub");
+                    let external = fixture_root.join("external");
+                    std::fs::create_dir(&external).unwrap();
+                    let (selected, key) = if alias {
+                        std::os::unix::fs::symlink(&external, &maru_dir).unwrap();
+                        (external.clone(), key)
+                    } else {
+                        std::fs::create_dir(&maru_dir).unwrap();
+                        (maru_dir.clone(), key)
+                    };
+                    let trash_target = fixture_root.join("trash-target");
+                    let vault = text(fixture_root);
+                    let selected_for_parent = selected.clone();
+                    let trash_target_for_parent = trash_target.clone();
+                    let parent_future = async move {
+                        if parent == "rename" {
+                            files_ipc::rename_workspace_entry(
+                                vault,
+                                text(&selected_for_parent),
+                                "moved".into(),
+                            )
+                            .await
+                            .map(|outcome| assert!(outcome.error.is_none()))
+                        } else {
+                            let _trash = TrashFixture::new(
+                                selected_for_parent.clone(),
+                                trash_target_for_parent.clone(),
+                            );
+                            files_ipc::trash_workspace_entries(
+                                vault,
+                                vec![text(&selected_for_parent)],
+                            )
+                            .await
+                            .map(|outcomes| assert!(outcomes[0].error.is_none()))
+                        }
+                    };
+                    let child_future = ipc::hub_submit_gate(test_request(&text(fixture_root)));
+                    if parent_first {
+                        let held = Held::new(selected.clone(), "pre-effect");
+                        let p = start(parent_future);
+                        held.wait();
+                        let waiting = Held::new(key.clone(), "before-admission");
+                        let c = start(child_future);
+                        waiting.wait();
+                        waiting.release();
+                        assert!(c.recv_timeout(Duration::from_millis(20)).is_err());
+                        held.release();
+                        done(p).unwrap();
+                        assert!(
+                            done(c).is_err(),
+                            "{parent}/{alias}: renamed queue parent must fail revalidation"
+                        );
+                    } else {
+                        let held = Held::new(key.clone(), "pre-effect");
+                        let c = start(child_future);
+                        held.wait();
+                        let waiting = Held::new(selected.clone(), "before-admission");
+                        let p = start(parent_future);
+                        waiting.wait();
+                        waiting.release();
+                        assert!(p.recv_timeout(Duration::from_millis(20)).is_err());
+                        held.release();
+                        done(c).unwrap();
+                        done(p).unwrap();
+                        let moved = if parent == "rename" {
+                            fixture_root.join("moved")
+                        } else {
+                            trash_target.clone()
+                        };
+                        assert_eq!(
+                            std::fs::read_dir(moved.join("queue").join("hub"))
+                                .unwrap()
+                                .count(),
+                            1,
+                            "{parent}/{alias}: queued item must land in the moved parent"
+                        );
+                    }
+                    assert!(
+                        !selected.exists(),
+                        "{parent}/{alias}: original queue parent recreated"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn phase08_17_hub_queue_error_release_and_drain_contention() {
+        let (_tmp, root) = disabled_workspace("hub:\n  enabled: false\n");
+        let queue = cache::queue_root(std::path::Path::new(&root));
+
+        // An unwinding submit worker releases the admitted queue tree.
+        {
+            let _panic = PathTransactionTestHook::new(queue.clone(), "pre-effect", || {
+                panic!("fixture hub submit unwind")
+            });
+            assert!(run(ipc::hub_submit_gate(test_request(&root)))
+                .unwrap_err()
+                .starts_with("hub_submit_gate_task_failed:"));
+        }
+        let submitted = run(ipc::hub_submit_gate(test_request(&root))).unwrap();
+        assert_eq!(submitted.state, "queued_offline");
+        assert_eq!(cache::queue_depth(std::path::Path::new(&root)).unwrap(), 1);
+
+        // Drain against an unroutable hub keeps the item; two drains serialize
+        // on the admitted queue tree.
+        std::fs::write(
+            PathBuf::from(&root).join("workspace.config.yaml"),
+            "hub:\n  enabled: true\n  endpoint: http://10.255.255.1:9/api/v1\n  timeout_ms: 300\n",
+        )
+        .unwrap();
+        for _round in 0..2 {
+            let first = ipc::hub_queue_drain(root.clone());
+            let second = ipc::hub_queue_drain(root.clone());
+            let held = Held::new(queue.clone(), "pre-effect");
+            let a = start(first);
+            held.wait();
+            let waiting = Held::new(queue.clone(), "before-admission");
+            let b = start(second);
+            waiting.wait();
+            waiting.release();
+            assert!(b.recv_timeout(Duration::from_millis(20)).is_err());
+            held.release();
+            let ra = done(a);
+            let rb = done(b);
+            assert_eq!(ra.unwrap().attempted, 1);
+            assert_eq!(rb.unwrap().attempted, 1);
+            assert_eq!(cache::queue_depth(std::path::Path::new(&root)).unwrap(), 1);
+        }
+        let items = cache::list_queue(std::path::Path::new(&root)).unwrap();
+        assert_eq!(items[0].1.retry_count, 4);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn phase08_17_hub_cache_fetch_contention_and_parent_revalidation() {
+        let home = Home::new();
+        let fixture = tempfile::tempdir_in(home.root.path()).unwrap();
+        let fixture_root = fixture.path();
+        let server = HubServer::start(r#"{"ok":true}"#, 4);
+        std::fs::write(
+            fixture_root.join("workspace.config.yaml"),
+            format!(
+                "hub:\n  enabled: true\n  endpoint: {}\n  timeout_ms: 2000\n",
+                server.endpoint
+            ),
+        )
+        .unwrap();
+        let root = text(fixture_root);
+        let cache = cache_root(&root);
+
+        // Same-target cache contention: the second fetch waits at admission
+        // until the held first fetch passes pre-effect.
+        for _round in 0..2 {
+            let first = ipc::hub_fetch_catalog(fetch_templates(&root));
+            let second = ipc::hub_fetch_catalog(fetch_templates(&root));
+            let held = Held::new(cache.clone(), "pre-effect");
+            let a = start(first);
+            held.wait();
+            let waiting = Held::new(cache.clone(), "before-admission");
+            let b = start(second);
+            waiting.wait();
+            waiting.release();
+            assert!(b.recv_timeout(Duration::from_millis(20)).is_err());
+            held.release();
+            assert_eq!(done(a).unwrap().body_json, r#"{"ok":true}"#);
+            assert_eq!(done(b).unwrap().body_json, r#"{"ok":true}"#);
+        }
+        assert!(cache::etag_index_path(&cache).is_file());
+
+        // Parent rename wins the admission order: a fetch that waited through
+        // a Files rename of .maru fails revalidation instead of recreating it.
+        let maru_dir = fixture_root.join(".maru");
+        let moved = fixture_root.join("maru-moved");
+        let held = Held::new(maru_dir.clone(), "pre-effect");
+        let vault = text(fixture_root);
+        let source = text(&maru_dir);
+        let p = start(async move {
+            files_ipc::rename_workspace_entry(vault, source, "maru-moved".into())
+                .await
+                .map(|outcome| assert!(outcome.error.is_none()))
+        });
+        held.wait();
+        let waiting = Held::new(cache.clone(), "before-admission");
+        let f = start(ipc::hub_fetch_catalog(fetch_templates(&root)));
+        waiting.wait();
+        waiting.release();
+        assert!(f.recv_timeout(Duration::from_millis(20)).is_err());
+        held.release();
+        done(p).unwrap();
+        assert!(done(f).is_err());
+        assert!(moved.is_dir());
+        assert!(!fixture_root.join(".maru").exists());
     }
 }

@@ -1,0 +1,1203 @@
+{
+ "plan": "08-20",
+ "moduleIntegrationOwner": "08-20",
+ "commands": [
+  {
+   "name": "studio_state_list",
+   "module": "src-tauri/src/studio/mod.rs",
+   "registrationPath": "src-tauri/src/lib.rs::studio::ipc::studio_state_list",
+   "originalDisposition": "CONVERT",
+   "disposition": "ISOLATED",
+   "helperChain": [
+    "src-tauri/src/studio/mod.rs::ipc::studio_state_list owns the work_path String and awaits tauri::async_runtime::spawn_blocking calling src-tauri/src/studio/mod.rs::studio_state_list inside the worker; a JoinError becomes the display-only studio_state_list_task_failed String.",
+    "src-tauri/src/studio/mod.rs::studio_state_list resolves the .maru/studio root through src-tauri/src/studio/mod.rs::studio_root and src-tauri/src/studio/mod.rs::state_path-style resolution (src-tauri/src/vault.rs::resolve_inside_vault lexical containment), then performs a bounded fs::read_dir loop that skips unreadable entries, so the converted chain reaches no network call, process wait or unbounded walk."
+   ],
+   "workerBoundary": "src-tauri/src/studio/mod.rs::ipc::studio_state_list awaits tauri::async_runtime::spawn_blocking before any filesystem access or lock wait runs; only a JoinError maps to the display-only studio_state_list_task_failed String while the Vec<StudioStateSummary> payload and every domain error string pass through unchanged; owned Strings cross the await, never a borrowed State or guard.",
+   "syncCallers": [
+    "No Rust or CLI caller invokes studio_state_list synchronously today; src-tauri/src/lib.rs registers only studio::ipc::studio_state_list, and the original synchronous src-tauri/src/studio/mod.rs::studio_state_list keeps its name and signature for Rust callers (the inline legacy tests exercise it directly)."
+   ],
+   "mutationKey": {
+    "readOnly": true,
+    "lexicalPaths": [],
+    "aliasPaths": [],
+    "sharedAdmissionEntry": "No filesystem mutation is owned by studio_state_list: it only reads state.json files under the resolved .maru/studio root and sorts the summaries in memory, so no filesystem mutation admission is required.",
+    "postAdmissionPreconditions": [
+     "No mutation admission is required: the command performs no filesystem mutation, so there is no transaction key to admit and nothing to release"
+    ],
+    "domainLockOrder": "No path admission exists; the command takes no domain lock, so there is no admission-before-domain-lock order to record."
+   },
+   "tests": [
+    {
+     "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_20",
+     "passed": 9,
+     "failed": 0,
+     "ignored": 0,
+     "exitCode": 0
+    }
+   ],
+   "processingCaller": {
+    "path": [
+     "src/lib/studio.ts",
+     "src/lib/studio.test.ts"
+    ],
+    "payload": "listStudioStates (src/lib/studio.ts:311) invokes studio_state_list with workPath whenever the Studio surface lists saved states; the Studio surface keeps owning that refresh regardless of screen changes.",
+    "terminalNoticeOwner": "The Studio surface (src/components/studio) owns current Studio state display and error toasts. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+   ,
+     "classifier": "n/a: read; data returned to the caller",
+     "successRetention": "result stored in caller component state",
+     "failureReasons": "call-site catch retains the error (component-owned read failure)",
+     "singleTerminalNoticeOwner": true,
+     "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=studio_state_list"
+   },
+   "evidence": {
+    "behaviorCases": [
+     "phase08_20_studio_each_wrapper_yields_same_poll_and_maps_join_failure",
+     "phase08_20_studio_real_fixture_results_and_legacy_rejections"
+    ],
+    "workerProof": "studio::phase08_20::phase08_20_studio_each_wrapper_yields_same_poll_and_maps_join_failure holds the studio_state_list future at spawn_blocking worker entry via a #[cfg(test)] worker-stage hook keyed to the fixture workspace root, manually polls it on the same async task and proves progress while a distinct worker thread stays blocked; the panicked worker maps to the display-only studio_state_list_task_failed String.",
+    "platformScope": "macOS unit fixtures only: atomic_file::phase08_06::Home isolation, disposable tempdir workspaces and the test-only worker-stage hook; no live workspace, credential, network endpoint or native test hook is touched.",
+    "limits": "Shared admission serializes cooperating in-process writers only; external editor processes are outside the in-process guarantee. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
+    "contract": "The Vec<StudioStateSummary> payload, the empty-list semantics for a missing .maru/studio root and the skip-invalid-entries behavior are unchanged; the only new failure path is the JoinError-to-String mapping at the worker boundary."
+   }
+  },
+  {
+   "name": "studio_state_read",
+   "module": "src-tauri/src/studio/mod.rs",
+   "registrationPath": "src-tauri/src/lib.rs::studio::ipc::studio_state_read",
+   "originalDisposition": "AUDIT",
+   "disposition": "ISOLATED",
+   "helperChain": [
+    "src-tauri/src/studio/mod.rs::ipc::studio_state_read owns the work_path and doc_id Strings and awaits tauri::async_runtime::spawn_blocking calling src-tauri/src/studio/mod.rs::studio_state_read inside the worker; a JoinError becomes the display-only studio_state_read_task_failed String.",
+    "src-tauri/src/studio/mod.rs::studio_state_read resolves the state file through src-tauri/src/studio/mod.rs::state_path (src-tauri/src/studio/mod.rs::validate_doc_id plus src-tauri/src/studio/mod.rs::ensure_within lexical containment under the .maru/studio root) and parses it with src-tauri/src/studio/mod.rs::read_state_file, which re-checks the schema version and doc id; the audited chain reads one finite file and reaches no filesystem write, network call, process wait or unbounded walk."
+   ],
+   "workerBoundary": "src-tauri/src/studio/mod.rs::ipc::studio_state_read awaits tauri::async_runtime::spawn_blocking before any filesystem access or lock wait runs; only a JoinError maps to the display-only studio_state_read_task_failed String while the Option<StudioState> payload and every domain error string pass through unchanged; owned Strings cross the await, never a borrowed State or guard.",
+   "syncCallers": [
+    "No Rust or CLI caller invokes studio_state_read synchronously today; src-tauri/src/lib.rs registers only studio::ipc::studio_state_read, and the original synchronous src-tauri/src/studio/mod.rs::studio_state_read keeps its name and signature for Rust callers."
+   ],
+   "mutationKey": {
+    "readOnly": true,
+    "lexicalPaths": [],
+    "aliasPaths": [],
+    "sharedAdmissionEntry": "No filesystem mutation is owned by studio_state_read: it only reads and schema-validates one state.json file, so no filesystem mutation admission is required.",
+    "postAdmissionPreconditions": [
+     "No mutation admission is required: the command performs no filesystem mutation, so there is no transaction key to admit and nothing to release"
+    ],
+    "domainLockOrder": "No path admission exists; the command takes no domain lock, so there is no admission-before-domain-lock order to record."
+   },
+   "tests": [
+    {
+     "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_20",
+     "passed": 9,
+     "failed": 0,
+     "ignored": 0,
+     "exitCode": 0
+    }
+   ],
+   "processingCaller": {
+    "path": [
+     "src/lib/studio.ts",
+     "src/lib/studio.test.ts"
+    ],
+    "payload": "readStudioState (src/lib/studio.ts:319) invokes studio_state_read with workPath and docId when the Studio surface opens a saved state; the Studio surface keeps owning that load regardless of screen changes.",
+    "terminalNoticeOwner": "The Studio surface (src/components/studio) owns current Studio state display and error toasts. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+   ,
+     "classifier": "n/a: read; data returned to the caller",
+     "successRetention": "result stored in caller component state",
+     "failureReasons": "call-site catch retains the error (component-owned read failure)",
+     "singleTerminalNoticeOwner": true,
+     "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=studio_state_read"
+   },
+   "evidence": {
+    "behaviorCases": [
+     "phase08_20_studio_each_wrapper_yields_same_poll_and_maps_join_failure",
+     "phase08_20_studio_real_fixture_results_and_legacy_rejections"
+    ],
+    "workerProof": "studio::phase08_20::phase08_20_studio_each_wrapper_yields_same_poll_and_maps_join_failure holds the studio_state_read future at spawn_blocking worker entry via the workspace-root-keyed #[cfg(test)] worker-stage hook, manually polls it on the same async task and proves progress while a distinct worker thread stays blocked; the panicked worker maps to the display-only studio_state_read_task_failed String.",
+    "platformScope": "macOS unit fixtures only: atomic_file::phase08_06::Home isolation, disposable tempdir workspaces and the test-only worker-stage hook; no live workspace, credential or network endpoint is touched.",
+    "limits": "The AUDIT disposition is closed by the finite single-file read chain; external processes racing the read are outside the in-process guarantee. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
+    "contract": "The Option<StudioState> payload, the None semantics for a missing state file and the Invalid Studio doc id / schema rejection strings are unchanged; the only new failure path is the JoinError-to-String mapping at the worker boundary."
+   }
+  },
+  {
+   "name": "studio_state_save",
+   "module": "src-tauri/src/studio/mod.rs",
+   "registrationPath": "src-tauri/src/lib.rs::studio::ipc::studio_state_save",
+   "originalDisposition": "AUDIT",
+   "disposition": "ISOLATED",
+   "helperChain": [
+    "src-tauri/src/studio/mod.rs::ipc::studio_state_save owns the work_path String and the StudioState value and awaits tauri::async_runtime::spawn_blocking calling src-tauri/src/studio/mod.rs::studio_state_save inside the worker; a JoinError becomes the display-only studio_state_save_task_failed String.",
+    "src-tauri/src/studio/mod.rs::studio_state_save validates the doc id, resolves the state file through src-tauri/src/studio/mod.rs::state_path and the state directory, then builds a src-tauri/src/atomic_file.rs::PathTransactionRequest over the complete write set (state directory, state.json, pinned workspace-root parent via PathTransactionRequest::require_parent, workspace-registry precondition) and enters src-tauri/src/atomic_file.rs::with_path_transactions.",
+    "src-tauri/src/studio/mod.rs::studio_state_save_in_transaction revalidates coverage with PathTransactionLease::ensure_covered and PathTransactionLease::ensure_workspace_registry, stamps the schema version and updated_at, re-runs the create/modify policy check (src-tauri/src/vault_list.rs::assert_maru_can_write) and calls PathTransactionLease::before_effect before create_dir_all and the fs::write of the pretty-printed state."
+   ],
+   "workerBoundary": "src-tauri/src/studio/mod.rs::ipc::studio_state_save awaits tauri::async_runtime::spawn_blocking before any filesystem access or lock wait runs; only a JoinError maps to the display-only studio_state_save_task_failed String while the StudioState payload and every domain error string pass through unchanged; owned Strings cross the await, never a borrowed State or guard.",
+   "syncCallers": [
+    "No Rust or CLI caller invokes studio_state_save synchronously today; src-tauri/src/lib.rs registers only studio::ipc::studio_state_save, and the original synchronous src-tauri/src/studio/mod.rs::studio_state_save keeps its name and signature for Rust callers."
+   ],
+   "mutationKey": {
+    "lexicalPaths": [
+     "The Studio state directory <work>/.maru/studio/<doc_id> and its state.json file, resolved by src-tauri/src/studio/mod.rs::state_path from the validated doc id; both are admitted so directory creation, the write and a concurrent delete of the same state directory serialize"
+    ],
+    "aliasPaths": [
+     "Physical alias key of the state file and directory plus the pinned existing-ancestor parents captured by src-tauri/src/atomic_file.rs::PathTransactionRequest::new; intentional symlinks inside the workspace keep their lexical authorization while alias revalidation follows physical resolution"
+    ],
+    "sharedAdmissionEntry": "src-tauri/src/studio/mod.rs::studio_state_save builds the src-tauri/src/atomic_file.rs::PathTransactionRequest (state directory, state.json, workspace-root parent snapshot, workspace-registry precondition) and enters src-tauri/src/atomic_file.rs::with_path_transactions inside the blocking worker; src-tauri/src/studio/mod.rs::studio_state_save_in_transaction revalidates coverage with PathTransactionLease::ensure_covered plus PathTransactionLease::ensure_workspace_registry and calls PathTransactionLease::before_effect before the first filesystem effect.",
+    "postAdmissionPreconditions": [
+     "src-tauri/src/studio/mod.rs::validate_doc_id rejects empty, dotted, traversal or non-ASCII-alphanumeric doc ids before admission",
+     "PathTransactionLease::ensure_covered revalidates the resolved state file against the admitted set after the wait",
+     "src-tauri/src/vault_list.rs::assert_maru_can_write runs inside the transaction and rejects read-only or delegated workspaces before any effect",
+     "PathTransactionLease::before_effect confirms the pinned workspace-root parent and workspace registry before create_dir_all and the write"
+    ],
+    "domainLockOrder": "Shared path admission is acquired inside the blocking worker before any domain policy check or effect; the workspace write-policy check runs inside the admitted transaction; no domain mutex exists for Studio state, and no guard is held across an await."
+   },
+   "tests": [
+    {
+     "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_20",
+     "passed": 9,
+     "failed": 0,
+     "ignored": 0,
+     "exitCode": 0
+    }
+   ],
+   "processingCaller": {
+    "path": [
+     "src/lib/studio.ts",
+     "src/lib/studio.test.ts"
+    ],
+    "payload": "saveStudioState (src/lib/studio.ts:326) invokes studio_state_save with workPath and the normalized StudioState on every Studio autosave and explicit save; the Studio surface keeps owning the save promise and its error display regardless of screen changes.",
+    "terminalNoticeOwner": "The Studio surface (src/components/studio) owns current Studio state display and error toasts. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+   ,
+     "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+     "successRetention": "updated record retained in component state",
+     "failureReasons": "call-site catch error message (single publisher)",
+     "singleTerminalNoticeOwner": true,
+     "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=studio_state_save"
+   },
+   "evidence": {
+    "behaviorCases": [
+     "phase08_20_studio_each_wrapper_yields_same_poll_and_maps_join_failure",
+     "phase08_20_studio_real_fixture_results_and_legacy_rejections",
+     "phase08_20_studio_save_serializes_same_target_both_orders",
+     "phase08_20_studio_denied_and_error_release_admission"
+    ],
+    "workerProof": "studio::phase08_20::phase08_20_studio_each_wrapper_yields_same_poll_and_maps_join_failure holds the studio_state_save future at spawn_blocking worker entry via the workspace-root-keyed #[cfg(test)] worker-stage hook, manually polls it on the same async task and proves progress while a distinct worker thread stays blocked; the panicked worker maps to the display-only studio_state_save_task_failed String.",
+    "platformScope": "macOS unit fixtures only: atomic_file::phase08_06::Home isolation, disposable tempdir workspaces, the scratchpad phase08_08 fixture registry for the read-only denial and the test-only worker-stage hook; no live workspace, credential or network endpoint is touched.",
+    "limits": "Shared admission serializes cooperating in-process writers only; the last admitted writer wins the file, matching the previous single-writer Studio behavior. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
+    "contract": "The StudioState payload, the schema-version stamp, the updated_at stamp, the Invalid Studio doc id rejection and the workspace write-policy denial strings are unchanged; the only new failure paths are the JoinError-to-String mapping and the shared admission conflict string."
+   }
+  },
+  {
+   "name": "studio_state_delete",
+   "module": "src-tauri/src/studio/mod.rs",
+   "registrationPath": "src-tauri/src/lib.rs::studio::ipc::studio_state_delete",
+   "originalDisposition": "CONVERT",
+   "disposition": "ISOLATED",
+   "helperChain": [
+    "src-tauri/src/studio/mod.rs::ipc::studio_state_delete owns the work_path and doc_id Strings and awaits tauri::async_runtime::spawn_blocking calling src-tauri/src/studio/mod.rs::studio_state_delete inside the worker; a JoinError becomes the display-only studio_state_delete_task_failed String.",
+    "src-tauri/src/studio/mod.rs::studio_state_delete resolves the state directory through src-tauri/src/studio/mod.rs::state_dir (src-tauri/src/studio/mod.rs::validate_doc_id plus src-tauri/src/studio/mod.rs::ensure_within), builds a src-tauri/src/atomic_file.rs::PathTransactionRequest over that directory with the pinned workspace-root parent and workspace-registry precondition, and enters src-tauri/src/atomic_file.rs::with_path_transactions.",
+    "src-tauri/src/studio/mod.rs::studio_state_delete_in_transaction revalidates coverage with PathTransactionLease::ensure_covered and PathTransactionLease::ensure_workspace_registry, keeps the original missing-directory Ok(false) fast path, re-runs the delete policy check and calls PathTransactionLease::before_effect before fs::remove_dir_all."
+   ],
+   "workerBoundary": "src-tauri/src/studio/mod.rs::ipc::studio_state_delete awaits tauri::async_runtime::spawn_blocking before any filesystem access or lock wait runs; only a JoinError maps to the display-only studio_state_delete_task_failed String while the bool payload and every domain error string pass through unchanged; owned Strings cross the await, never a borrowed State or guard.",
+   "syncCallers": [
+    "No Rust or CLI caller invokes studio_state_delete synchronously today; src-tauri/src/lib.rs registers only studio::ipc::studio_state_delete, and the original synchronous src-tauri/src/studio/mod.rs::studio_state_delete keeps its name and signature for Rust callers."
+   ],
+   "mutationKey": {
+    "lexicalPaths": [
+     "The Studio state directory <work>/.maru/studio/<doc_id>, resolved by src-tauri/src/studio/mod.rs::state_dir from the validated doc id; admitting the directory covers the recursive remove_dir_all and serializes against a concurrent save of the same state.json"
+    ],
+    "aliasPaths": [
+     "Physical alias key of the state directory plus the pinned existing-ancestor parents captured by src-tauri/src/atomic_file.rs::PathTransactionRequest::new, so a renamed or replaced ancestor fails revalidation instead of deleting into a recreated tree"
+    ],
+    "sharedAdmissionEntry": "src-tauri/src/studio/mod.rs::studio_state_delete builds the src-tauri/src/atomic_file.rs::PathTransactionRequest (state directory, workspace-root parent snapshot, workspace-registry precondition) and enters src-tauri/src/atomic_file.rs::with_path_transactions inside the blocking worker; src-tauri/src/studio/mod.rs::studio_state_delete_in_transaction revalidates coverage with PathTransactionLease::ensure_covered plus PathTransactionLease::ensure_workspace_registry and calls PathTransactionLease::before_effect before the recursive delete.",
+    "postAdmissionPreconditions": [
+     "src-tauri/src/studio/mod.rs::validate_doc_id rejects unsafe doc ids before admission",
+     "The missing-directory Ok(false) fast path is preserved before the policy check, matching the original wire behavior",
+     "src-tauri/src/vault_list.rs::assert_maru_can_write with the Delete action runs inside the transaction before any effect",
+     "PathTransactionLease::before_effect confirms the pinned parents before fs::remove_dir_all"
+    ],
+    "domainLockOrder": "Shared path admission is acquired inside the blocking worker before the policy check and the delete; no domain mutex exists for Studio state, and no guard is held across an await."
+   },
+   "tests": [
+    {
+     "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_20",
+     "passed": 9,
+     "failed": 0,
+     "ignored": 0,
+     "exitCode": 0
+    }
+   ],
+   "processingCaller": {
+    "path": [
+     "src/lib/studio.ts",
+     "src/lib/studio.test.ts"
+    ],
+    "payload": "deleteStudioState (src/lib/studio.ts:331) invokes studio_state_delete with workPath and docId when the user deletes a saved Studio state; the Studio surface keeps owning the follow-up list refresh regardless of screen changes.",
+    "terminalNoticeOwner": "The Studio surface (src/components/studio) owns current Studio state display and error toasts. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+   ,
+     "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+     "successRetention": "updated record retained in component state",
+     "failureReasons": "call-site catch error message (single publisher)",
+     "singleTerminalNoticeOwner": true,
+     "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=studio_state_delete"
+   },
+   "evidence": {
+    "behaviorCases": [
+     "phase08_20_studio_each_wrapper_yields_same_poll_and_maps_join_failure",
+     "phase08_20_studio_real_fixture_results_and_legacy_rejections"
+    ],
+    "workerProof": "studio::phase08_20::phase08_20_studio_each_wrapper_yields_same_poll_and_maps_join_failure holds the studio_state_delete future at spawn_blocking worker entry via the workspace-root-keyed #[cfg(test)] worker-stage hook, manually polls it on the same async task and proves progress while a distinct worker thread stays blocked; the panicked worker maps to the display-only studio_state_delete_task_failed String.",
+    "platformScope": "macOS unit fixtures only: atomic_file::phase08_06::Home isolation, disposable tempdir workspaces and the test-only worker-stage hook; no live workspace, credential or network endpoint is touched.",
+    "limits": "Shared admission serializes cooperating in-process writers only; external processes racing the delete are outside the in-process guarantee. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
+    "contract": "The bool payload, the missing-directory Ok(false) fast path, the Invalid Studio doc id rejection and the workspace write-policy denial strings are unchanged; the only new failure paths are the JoinError-to-String mapping and the shared admission conflict string."
+   }
+  },
+  {
+   "name": "studio_apply_body",
+   "module": "src-tauri/src/studio/mod.rs",
+   "registrationPath": "src-tauri/src/lib.rs::studio::ipc::studio_apply_body",
+   "originalDisposition": "AUDIT",
+   "disposition": "ISOLATED",
+   "helperChain": [
+    "src-tauri/src/studio/mod.rs::ipc::studio_apply_body owns the work_path, document_path and body_markdown Strings and awaits tauri::async_runtime::spawn_blocking calling src-tauri/src/studio/mod.rs::studio_apply_body inside the worker; a JoinError becomes the display-only studio_apply_body_task_failed String.",
+    "src-tauri/src/studio/mod.rs::studio_apply_body resolves the target document through src-tauri/src/vault.rs::resolve_inside_vault (lexical containment inside the canonical workspace), builds a src-tauri/src/atomic_file.rs::PathTransactionRequest over the document path with the pinned workspace-root parent and workspace-registry precondition, and enters src-tauri/src/atomic_file.rs::with_path_transactions.",
+    "src-tauri/src/studio/mod.rs::studio_apply_body_in_transaction revalidates coverage with PathTransactionLease::ensure_covered and PathTransactionLease::ensure_workspace_registry, re-runs the Modify policy check, calls PathTransactionLease::before_effect, then reads the document, replaces the body while preserving the frontmatter bytes via src-tauri/src/studio/mod.rs::replace_body_preserving_frontmatter and src-tauri/src/studio/mod.rs::frontmatter_prefix_len, writes it back and reloads the payload through src-tauri/src/document.rs::read_document."
+   ],
+   "workerBoundary": "src-tauri/src/studio/mod.rs::ipc::studio_apply_body awaits tauri::async_runtime::spawn_blocking before any filesystem access or lock wait runs; only a JoinError maps to the display-only studio_apply_body_task_failed String while the DocumentPayload payload and every domain error string pass through unchanged; owned Strings cross the await, never a borrowed State or guard.",
+   "syncCallers": [
+    "No Rust or CLI caller invokes studio_apply_body synchronously today; src-tauri/src/lib.rs registers only studio::ipc::studio_apply_body, and the original synchronous src-tauri/src/studio/mod.rs::studio_apply_body keeps its name and signature for Rust callers."
+   ],
+   "mutationKey": {
+    "lexicalPaths": [
+     "The target document path inside the workspace, resolved by src-tauri/src/vault.rs::resolve_inside_vault from the command document_path; the same normalized path is admitted by src-tauri/src/document.rs::save_document, so Studio body application and the document writer serialize on one key"
+    ],
+    "aliasPaths": [
+     "Physical alias key of the document plus the pinned existing-ancestor parents captured by src-tauri/src/atomic_file.rs::PathTransactionRequest::new, including the pinned workspace-root parent, so a renamed or replaced ancestor fails revalidation"
+    ],
+    "sharedAdmissionEntry": "src-tauri/src/studio/mod.rs::studio_apply_body builds the src-tauri/src/atomic_file.rs::PathTransactionRequest (document path, workspace-root parent snapshot, workspace-registry precondition) and enters src-tauri/src/atomic_file.rs::with_path_transactions inside the blocking worker; src-tauri/src/studio/mod.rs::studio_apply_body_in_transaction revalidates coverage with PathTransactionLease::ensure_covered plus PathTransactionLease::ensure_workspace_registry and calls PathTransactionLease::before_effect before the read-modify-write.",
+    "postAdmissionPreconditions": [
+     "Lexical containment inside the workspace is re-resolved after admission",
+     "src-tauri/src/vault_list.rs::assert_maru_can_write with the Modify action runs inside the transaction before any effect",
+     "The Document file does not exist rejection is preserved after admission, before effects",
+     "PathTransactionLease::before_effect confirms the pinned parents and workspace registry before the read-modify-write"
+    ],
+    "domainLockOrder": "Shared path admission is acquired inside the blocking worker before the document policy check and the read-modify-write; the document module has no separate domain mutex for this path, and no guard is held across an await."
+   },
+   "tests": [
+    {
+     "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_20",
+     "passed": 9,
+     "failed": 0,
+     "ignored": 0,
+     "exitCode": 0
+    }
+   ],
+   "processingCaller": {
+    "path": [
+     "src/lib/studio.ts",
+     "src/lib/studio.test.ts"
+    ],
+    "payload": "applyStudioBody (src/lib/studio.ts:340) invokes studio_apply_body with workPath, documentPath and bodyMarkdown when the user applies the drafted body to the source document; the Studio surface keeps owning the returned DocumentPayload refresh and its error display regardless of screen changes.",
+    "terminalNoticeOwner": "The Studio surface (src/components/studio) owns current Studio state display and error toasts. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+   ,
+     "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+     "successRetention": "updated record retained in component state",
+     "failureReasons": "call-site catch error message (single publisher)",
+     "singleTerminalNoticeOwner": true,
+     "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=studio_apply_body"
+   },
+   "evidence": {
+    "behaviorCases": [
+     "phase08_20_studio_each_wrapper_yields_same_poll_and_maps_join_failure",
+     "phase08_20_studio_real_fixture_results_and_legacy_rejections",
+     "phase08_20_studio_apply_body_contends_with_document_save_both_orders"
+    ],
+    "workerProof": "studio::phase08_20::phase08_20_studio_each_wrapper_yields_same_poll_and_maps_join_failure holds the studio_apply_body future at spawn_blocking worker entry via the workspace-root-keyed #[cfg(test)] worker-stage hook, manually polls it on the same async task and proves progress while a distinct worker thread stays blocked; the panicked worker maps to the display-only studio_apply_body_task_failed String.",
+    "platformScope": "macOS unit fixtures only: atomic_file::phase08_06::Home isolation, disposable tempdir workspaces and the test-only worker-stage hook; no live workspace, credential or network endpoint is touched.",
+    "limits": "Shared admission serializes cooperating in-process writers only; the both-orders fixture proves studio_apply_body and src-tauri/src/document.rs::save_document contend on the same admitted document path in either launch order. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
+    "contract": "The DocumentPayload payload, the frontmatter-preserving byte transformation and the Document file does not exist rejection string are unchanged; the only new failure paths are the JoinError-to-String mapping and the shared admission conflict string."
+   }
+  },
+  {
+   "name": "diagram_save_document",
+   "module": "src-tauri/src/diagram/mod.rs",
+   "registrationPath": "src-tauri/src/lib.rs::diagram::ipc::diagram_save_document",
+   "originalDisposition": "AUDIT",
+   "disposition": "ISOLATED",
+   "helperChain": [
+    "src-tauri/src/diagram/mod.rs::ipc::diagram_save_document owns the workspace, name and body Strings and awaits tauri::async_runtime::spawn_blocking calling src-tauri/src/diagram/mod.rs::diagram_save_document inside the worker; a JoinError becomes the display-only diagram_save_document_task_failed String.",
+    "src-tauri/src/diagram/mod.rs::diagram_save_document resolves the target through src-tauri/src/diagram/mod.rs::diagram_file_path (src-tauri/src/diagram/mod.rs::validate_name traversal rejection plus src-tauri/src/diagram/mod.rs::ensure_within containment) and enters shared admission over the complete write set.",
+    "src-tauri/src/diagram/mod.rs::diagram_save_document builds the src-tauri/src/atomic_file.rs::PathTransactionRequest (the diagrams/<name>.cmd.json target file, workspace-root parent snapshot via PathTransactionRequest::require_parent, workspace-registry precondition) and enters src-tauri/src/atomic_file.rs::with_path_transactions inside the blocking worker; src-tauri/src/diagram/mod.rs::diagram_save_document_in_transaction revalidates coverage with PathTransactionLease::ensure_covered plus PathTransactionLease::ensure_workspace_registry and calls PathTransactionLease::before_effect before the first filesystem effect.",
+    "src-tauri/src/diagram/mod.rs::diagram_save_document_in_transaction re-resolves the target, re-runs the create/modify policy check and publishes the payload (trailing-newline normalization preserved) through src-tauri/src/atomic_file.rs::write_atomic."
+   ],
+   "workerBoundary": "src-tauri/src/diagram/mod.rs::ipc::diagram_save_document awaits tauri::async_runtime::spawn_blocking before any filesystem access runs (the #[cfg(test)] worker-stage hook keyed to the fixture workspace root fires at worker entry); only a JoinError maps to the display-only diagram_save_document_task_failed String while the unit payload and every domain error string pass through unchanged; owned Strings and Vec<u8> cross the await, never a borrowed State or guard.",
+   "syncCallers": [
+    "No Rust or CLI caller invokes diagram_save_document synchronously today; src-tauri/src/lib.rs registers only diagram::ipc::diagram_save_document, and the original synchronous src-tauri/src/diagram/mod.rs::diagram_save_document keeps its name and signature for Rust callers (the inline legacy tests exercise it directly)."
+   ],
+   "mutationKey": {
+    "lexicalPaths": [
+     "The diagram file <workspace>/diagrams/<name>.cmd.json, resolved by src-tauri/src/diagram/mod.rs::diagram_file_path; it is the same normalized path admitted by src-tauri/src/document.rs::save_document, so the diagram writer and the document writer serialize on one key"
+    ],
+    "aliasPaths": [
+     "Physical alias key of the diagram file plus the pinned existing-ancestor parents captured by src-tauri/src/atomic_file.rs::PathTransactionRequest::new (the diagrams directory when present, otherwise the workspace root), with the workspace-root parent pinned by PathTransactionRequest::require_parent"
+    ],
+    "sharedAdmissionEntry": "src-tauri/src/diagram/mod.rs::diagram_save_document builds the src-tauri/src/atomic_file.rs::PathTransactionRequest (the diagrams/<name>.cmd.json target file, workspace-root parent snapshot via PathTransactionRequest::require_parent, workspace-registry precondition) and enters src-tauri/src/atomic_file.rs::with_path_transactions inside the blocking worker; src-tauri/src/diagram/mod.rs::diagram_save_document_in_transaction revalidates coverage with PathTransactionLease::ensure_covered plus PathTransactionLease::ensure_workspace_registry and calls PathTransactionLease::before_effect before the first filesystem effect.",
+    "postAdmissionPreconditions": [
+     "src-tauri/src/diagram/mod.rs::validate_name rejects traversal, control-character, leading-dot and over-long names before admission",
+     "PathTransactionLease::ensure_covered revalidates the resolved target after the wait",
+     "src-tauri/src/vault_list.rs::assert_maru_can_write with the Create or Modify action runs inside the transaction before any effect",
+     "PathTransactionLease::before_effect confirms the pinned parents and workspace registry before src-tauri/src/atomic_file.rs::write_atomic"
+    ],
+    "domainLockOrder": "Shared path admission is acquired inside the blocking worker before the workspace write-policy check and the effects; Diagram mode has no domain mutex of its own, and no guard is held across an await."
+   },
+   "tests": [
+    {
+     "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_20",
+     "passed": 9,
+     "failed": 0,
+     "ignored": 0,
+     "exitCode": 0
+    }
+   ],
+   "processingCaller": {
+    "path": [
+     "src/lib/diagram.ts",
+     "src/lib/diagram.test.ts"
+    ],
+    "payload": "saveDiagram (src/lib/diagram.ts:67) invokes diagram_save_document with workspace, name and body on Diagram save/autosave; the Diagram surface keeps owning that save promise and its error display regardless of screen changes.",
+    "terminalNoticeOwner": "The Diagram surface (src/components/diagram) owns current diagram list, snapshot and export display and error toasts. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+   ,
+     "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+     "successRetention": "updated record retained in component state",
+     "failureReasons": "call-site catch error message (single publisher)",
+     "singleTerminalNoticeOwner": true,
+     "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=diagram_save_document"
+   },
+   "evidence": {
+    "behaviorCases": [
+     "phase08_20_diagram_each_wrapper_yields_same_poll_and_maps_join_failure",
+     "phase08_20_diagram_real_fixture_results_and_legacy_rejections",
+     "phase08_20_diagram_save_contends_with_document_save_both_orders",
+     "phase08_20_diagram_delete_then_save_serializes_and_error_releases"
+    ],
+    "workerProof": "diagram::phase08_20::phase08_20_diagram_each_wrapper_yields_same_poll_and_maps_join_failure holds the diagram_save_document future at spawn_blocking worker entry via the workspace-root-keyed (or export-target-keyed for diagram_export_blob_to_path) #[cfg(test)] worker-stage hook, manually polls it on the same async task and proves progress while a distinct worker thread stays blocked; the panicked worker maps to the display-only diagram_save_document_task_failed String.",
+    "platformScope": "macOS unit fixtures only: atomic_file::phase08_06::Home isolation, disposable tempdir workspaces with a seeded .maru directory and the test-only worker-stage hook; no live workspace, credential or network endpoint is touched.",
+    "limits": "Shared admission serializes cooperating in-process writers only; the both-orders fixture proves diagram_save_document and src-tauri/src/document.rs::save_document contend on the same admitted path in either launch order, and the delete-then-save fixture proves a rejected writer releases admission. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
+    "contract": "The unit/String payloads, the validation and not-found error strings, exported byte identity and snapshot identity are unchanged; the only new failure path is the JoinError-to-String mapping at the worker boundary."
+   }
+  },
+  {
+   "name": "diagram_load_document",
+   "module": "src-tauri/src/diagram/mod.rs",
+   "registrationPath": "src-tauri/src/lib.rs::diagram::ipc::diagram_load_document",
+   "originalDisposition": "AUDIT",
+   "disposition": "ISOLATED",
+   "helperChain": [
+    "src-tauri/src/diagram/mod.rs::ipc::diagram_load_document owns the workspace and name Strings and awaits tauri::async_runtime::spawn_blocking calling src-tauri/src/diagram/mod.rs::diagram_load_document inside the worker; a JoinError becomes the display-only diagram_load_document_task_failed String.",
+    "src-tauri/src/diagram/mod.rs::diagram_load_document resolves the target through src-tauri/src/diagram/mod.rs::diagram_file_path and reads the single finite file with fs::read_to_string; the audited chain reaches no filesystem write, network call, process wait or unbounded walk."
+   ],
+   "workerBoundary": "src-tauri/src/diagram/mod.rs::ipc::diagram_load_document awaits tauri::async_runtime::spawn_blocking before any filesystem access runs (the #[cfg(test)] worker-stage hook keyed to the fixture workspace root fires at worker entry); only a JoinError maps to the display-only diagram_load_document_task_failed String while the String payload and every domain error string pass through unchanged; owned Strings and Vec<u8> cross the await, never a borrowed State or guard.",
+   "syncCallers": [
+    "No Rust or CLI caller invokes diagram_load_document synchronously today; src-tauri/src/lib.rs registers only diagram::ipc::diagram_load_document, and the original synchronous src-tauri/src/diagram/mod.rs::diagram_load_document keeps its name and signature for Rust callers (the inline legacy tests exercise it directly)."
+   ],
+   "mutationKey": {
+    "readOnly": true,
+    "lexicalPaths": [],
+    "aliasPaths": [],
+    "sharedAdmissionEntry": "No filesystem mutation is owned by diagram_load_document: it only reads one diagram file after name validation, so no filesystem mutation admission is required.",
+    "postAdmissionPreconditions": [
+     "No mutation admission is required: the command performs no filesystem mutation, so there is no transaction key to admit and nothing to release"
+    ],
+    "domainLockOrder": "No path admission exists; the command takes no domain lock, so there is no admission-before-domain-lock order to record."
+   },
+   "tests": [
+    {
+     "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_20",
+     "passed": 9,
+     "failed": 0,
+     "ignored": 0,
+     "exitCode": 0
+    }
+   ],
+   "processingCaller": {
+    "path": [
+     "src/lib/diagram.ts",
+     "src/lib/diagram.test.ts"
+    ],
+    "payload": "loadDiagram (src/lib/diagram.ts:83) invokes diagram_load_document with workspace and name when the Diagram surface opens a saved diagram; the Diagram surface keeps owning that load regardless of screen changes.",
+    "terminalNoticeOwner": "The Diagram surface (src/components/diagram) owns current diagram list, snapshot and export display and error toasts. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+   ,
+     "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+     "successRetention": "updated record retained in component state",
+     "failureReasons": "call-site catch error message (single publisher)",
+     "singleTerminalNoticeOwner": true,
+     "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=diagram_load_document"
+   },
+   "evidence": {
+    "behaviorCases": [
+     "phase08_20_diagram_each_wrapper_yields_same_poll_and_maps_join_failure",
+     "phase08_20_diagram_real_fixture_results_and_legacy_rejections"
+    ],
+    "workerProof": "diagram::phase08_20::phase08_20_diagram_each_wrapper_yields_same_poll_and_maps_join_failure holds the diagram_load_document future at spawn_blocking worker entry via the workspace-root-keyed (or export-target-keyed for diagram_export_blob_to_path) #[cfg(test)] worker-stage hook, manually polls it on the same async task and proves progress while a distinct worker thread stays blocked; the panicked worker maps to the display-only diagram_load_document_task_failed String.",
+    "platformScope": "macOS unit fixtures only: atomic_file::phase08_06::Home isolation, disposable tempdir workspaces with a seeded .maru directory and the test-only worker-stage hook; no live workspace, credential or network endpoint is touched.",
+    "limits": "The AUDIT disposition is closed by the finite single-file read chain. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
+    "contract": "The String payload and the Diagram not found rejection string are unchanged; the only new failure path is the JoinError-to-String mapping at the worker boundary."
+   }
+  },
+  {
+   "name": "diagram_list_documents",
+   "module": "src-tauri/src/diagram/mod.rs",
+   "registrationPath": "src-tauri/src/lib.rs::diagram::ipc::diagram_list_documents",
+   "originalDisposition": "CONVERT",
+   "disposition": "ISOLATED",
+   "helperChain": [
+    "src-tauri/src/diagram/mod.rs::ipc::diagram_list_documents owns the workspace String and awaits tauri::async_runtime::spawn_blocking calling src-tauri/src/diagram/mod.rs::diagram_list_documents inside the worker; a JoinError becomes the display-only diagram_list_documents_task_failed String.",
+    "src-tauri/src/diagram/mod.rs::diagram_list_documents resolves the diagrams root, performs a bounded fs::read_dir loop over one directory level, probes at most TITLE_PROBE_BYTES (1024) of each candidate through src-tauri/src/diagram/mod.rs::extract_doc_title and sorts by mtime; the converted chain is a finite single-directory scan with no network call, process wait or recursive walk."
+   ],
+   "workerBoundary": "src-tauri/src/diagram/mod.rs::ipc::diagram_list_documents awaits tauri::async_runtime::spawn_blocking before any filesystem access runs (the #[cfg(test)] worker-stage hook keyed to the fixture workspace root fires at worker entry); only a JoinError maps to the display-only diagram_list_documents_task_failed String while the Vec<DiagramFile> payload and every domain error string pass through unchanged; owned Strings and Vec<u8> cross the await, never a borrowed State or guard.",
+   "syncCallers": [
+    "No Rust or CLI caller invokes diagram_list_documents synchronously today; src-tauri/src/lib.rs registers only diagram::ipc::diagram_list_documents, and the original synchronous src-tauri/src/diagram/mod.rs::diagram_list_documents keeps its name and signature for Rust callers (the inline legacy tests exercise it directly)."
+   ],
+   "mutationKey": {
+    "readOnly": true,
+    "lexicalPaths": [],
+    "aliasPaths": [],
+    "sharedAdmissionEntry": "No filesystem mutation is owned by diagram_list_documents: it only reads one directory level and probes finite title prefixes, so no filesystem mutation admission is required.",
+    "postAdmissionPreconditions": [
+     "No mutation admission is required: the command performs no filesystem mutation, so there is no transaction key to admit and nothing to release"
+    ],
+    "domainLockOrder": "No path admission exists; the command takes no domain lock, so there is no admission-before-domain-lock order to record."
+   },
+   "tests": [
+    {
+     "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_20",
+     "passed": 9,
+     "failed": 0,
+     "ignored": 0,
+     "exitCode": 0
+    }
+   ],
+   "processingCaller": {
+    "path": [
+     "src/lib/diagram.ts",
+     "src/lib/diagram.test.ts"
+    ],
+    "payload": "listDiagrams (src/lib/diagram.ts:113) invokes diagram_list_documents with workspace whenever the Diagram surface lists documents; the Diagram surface keeps owning that refresh regardless of screen changes.",
+    "terminalNoticeOwner": "The Diagram surface (src/components/diagram) owns current diagram list, snapshot and export display and error toasts. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+   ,
+     "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+     "successRetention": "updated record retained in component state",
+     "failureReasons": "call-site catch error message (single publisher)",
+     "singleTerminalNoticeOwner": true,
+     "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=diagram_list_documents"
+   },
+   "evidence": {
+    "behaviorCases": [
+     "phase08_20_diagram_each_wrapper_yields_same_poll_and_maps_join_failure",
+     "phase08_20_diagram_real_fixture_results_and_legacy_rejections"
+    ],
+    "workerProof": "diagram::phase08_20::phase08_20_diagram_each_wrapper_yields_same_poll_and_maps_join_failure holds the diagram_list_documents future at spawn_blocking worker entry via the workspace-root-keyed (or export-target-keyed for diagram_export_blob_to_path) #[cfg(test)] worker-stage hook, manually polls it on the same async task and proves progress while a distinct worker thread stays blocked; the panicked worker maps to the display-only diagram_list_documents_task_failed String.",
+    "platformScope": "macOS unit fixtures only: atomic_file::phase08_06::Home isolation, disposable tempdir workspaces with a seeded .maru directory and the test-only worker-stage hook; no live workspace, credential or network endpoint is touched.",
+    "limits": "The directory scan is bounded to a single level of the diagrams folder; external writers racing a listing are outside the in-process guarantee. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
+    "contract": "The Vec<DiagramFile> payload, the mtime-descending sort and the empty-list semantics for a missing diagrams folder are unchanged; the only new failure path is the JoinError-to-String mapping at the worker boundary."
+   }
+  },
+  {
+   "name": "diagram_delete_document",
+   "module": "src-tauri/src/diagram/mod.rs",
+   "registrationPath": "src-tauri/src/lib.rs::diagram::ipc::diagram_delete_document",
+   "originalDisposition": "AUDIT",
+   "disposition": "ISOLATED",
+   "helperChain": [
+    "src-tauri/src/diagram/mod.rs::ipc::diagram_delete_document owns the workspace and name Strings and awaits tauri::async_runtime::spawn_blocking calling src-tauri/src/diagram/mod.rs::diagram_delete_document inside the worker; a JoinError becomes the display-only diagram_delete_document_task_failed String.",
+    "src-tauri/src/diagram/mod.rs::diagram_delete_document resolves the target through src-tauri/src/diagram/mod.rs::diagram_file_path and enters shared admission over the target file.",
+    "src-tauri/src/diagram/mod.rs::diagram_delete_document builds the src-tauri/src/atomic_file.rs::PathTransactionRequest (the diagrams/<name>.cmd.json target file, workspace-root parent snapshot via PathTransactionRequest::require_parent, workspace-registry precondition) and enters src-tauri/src/atomic_file.rs::with_path_transactions inside the blocking worker; src-tauri/src/diagram/mod.rs::diagram_delete_document_in_transaction revalidates coverage with PathTransactionLease::ensure_covered plus PathTransactionLease::ensure_workspace_registry and calls PathTransactionLease::before_effect before the first filesystem effect.",
+    "src-tauri/src/diagram/mod.rs::diagram_delete_document_in_transaction preserves the original missing-file Ok(false) fast path, re-runs the Delete policy check and removes the file only after PathTransactionLease::before_effect."
+   ],
+   "workerBoundary": "src-tauri/src/diagram/mod.rs::ipc::diagram_delete_document awaits tauri::async_runtime::spawn_blocking before any filesystem access runs (the #[cfg(test)] worker-stage hook keyed to the fixture workspace root fires at worker entry); only a JoinError maps to the display-only diagram_delete_document_task_failed String while the bool payload and every domain error string pass through unchanged; owned Strings and Vec<u8> cross the await, never a borrowed State or guard.",
+   "syncCallers": [
+    "No Rust or CLI caller invokes diagram_delete_document synchronously today; src-tauri/src/lib.rs registers only diagram::ipc::diagram_delete_document, and the original synchronous src-tauri/src/diagram/mod.rs::diagram_delete_document keeps its name and signature for Rust callers (the inline legacy tests exercise it directly)."
+   ],
+   "mutationKey": {
+    "lexicalPaths": [
+     "The diagram file <workspace>/diagrams/<name>.cmd.json, resolved by src-tauri/src/diagram/mod.rs::diagram_file_path; admitting the file serializes the delete against a concurrent save or document write of the same path"
+    ],
+    "aliasPaths": [
+     "Physical alias key of the diagram file plus the pinned existing-ancestor parents captured by src-tauri/src/atomic_file.rs::PathTransactionRequest::new, with the workspace-root parent pinned by PathTransactionRequest::require_parent"
+    ],
+    "sharedAdmissionEntry": "src-tauri/src/diagram/mod.rs::diagram_delete_document builds the src-tauri/src/atomic_file.rs::PathTransactionRequest (the diagrams/<name>.cmd.json target file, workspace-root parent snapshot via PathTransactionRequest::require_parent, workspace-registry precondition) and enters src-tauri/src/atomic_file.rs::with_path_transactions inside the blocking worker; src-tauri/src/diagram/mod.rs::diagram_delete_document_in_transaction revalidates coverage with PathTransactionLease::ensure_covered plus PathTransactionLease::ensure_workspace_registry and calls PathTransactionLease::before_effect before the first filesystem effect.",
+    "postAdmissionPreconditions": [
+     "src-tauri/src/diagram/mod.rs::validate_name rejects unsafe names before admission",
+     "The missing-file Ok(false) fast path is preserved before the policy check, matching the original wire behavior",
+     "src-tauri/src/vault_list.rs::assert_maru_can_write with the Delete action runs inside the transaction before any effect",
+     "PathTransactionLease::before_effect confirms the pinned parents before fs::remove_file"
+    ],
+    "domainLockOrder": "Shared path admission is acquired inside the blocking worker before the workspace write-policy check and the effects; Diagram mode has no domain mutex of its own, and no guard is held across an await."
+   },
+   "tests": [
+    {
+     "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_20",
+     "passed": 9,
+     "failed": 0,
+     "ignored": 0,
+     "exitCode": 0
+    }
+   ],
+   "processingCaller": {
+    "path": [
+     "src/lib/diagram.ts",
+     "src/lib/diagram.test.ts"
+    ],
+    "payload": "deleteDiagram (src/lib/diagram.ts:128) invokes diagram_delete_document with workspace and name when the user deletes a diagram; the Diagram surface keeps owning the follow-up list refresh regardless of screen changes.",
+    "terminalNoticeOwner": "The Diagram surface (src/components/diagram) owns current diagram list, snapshot and export display and error toasts. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+   ,
+     "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+     "successRetention": "updated record retained in component state",
+     "failureReasons": "call-site catch error message (single publisher)",
+     "singleTerminalNoticeOwner": true,
+     "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=diagram_delete_document"
+   },
+   "evidence": {
+    "behaviorCases": [
+     "phase08_20_diagram_each_wrapper_yields_same_poll_and_maps_join_failure",
+     "phase08_20_diagram_real_fixture_results_and_legacy_rejections",
+     "phase08_20_diagram_delete_then_save_serializes_and_error_releases"
+    ],
+    "workerProof": "diagram::phase08_20::phase08_20_diagram_each_wrapper_yields_same_poll_and_maps_join_failure holds the diagram_delete_document future at spawn_blocking worker entry via the workspace-root-keyed (or export-target-keyed for diagram_export_blob_to_path) #[cfg(test)] worker-stage hook, manually polls it on the same async task and proves progress while a distinct worker thread stays blocked; the panicked worker maps to the display-only diagram_delete_document_task_failed String.",
+    "platformScope": "macOS unit fixtures only: atomic_file::phase08_06::Home isolation, disposable tempdir workspaces with a seeded .maru directory and the test-only worker-stage hook; no live workspace, credential or network endpoint is touched.",
+    "limits": "Shared admission serializes cooperating in-process writers only; the delete-then-save fixture proves a delete holding admission blocks a same-path save until release, after which the save recreates the file deterministically. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
+    "contract": "The bool payload, the missing-file Ok(false) fast path and the workspace write-policy denial strings are unchanged; the only new failure paths are the JoinError-to-String mapping and the shared admission conflict string."
+   }
+  },
+  {
+   "name": "diagram_export_blob",
+   "module": "src-tauri/src/diagram/mod.rs",
+   "registrationPath": "src-tauri/src/lib.rs::diagram::ipc::diagram_export_blob",
+   "originalDisposition": "AUDIT",
+   "disposition": "ISOLATED",
+   "helperChain": [
+    "src-tauri/src/diagram/mod.rs::ipc::diagram_export_blob owns the workspace, name, kind and bytes arguments and awaits tauri::async_runtime::spawn_blocking calling src-tauri/src/diagram/mod.rs::diagram_export_blob inside the worker; a JoinError becomes the display-only diagram_export_blob_task_failed String.",
+    "src-tauri/src/diagram/mod.rs::diagram_export_blob validates the name and the export kind (src-tauri/src/diagram/mod.rs::validate_name, src-tauri/src/diagram/mod.rs::validate_export_kind), resolves the candidate under the diagrams root with src-tauri/src/diagram/mod.rs::ensure_within containment and enters shared admission over the export target.",
+    "src-tauri/src/diagram/mod.rs::diagram_export_blob builds the src-tauri/src/atomic_file.rs::PathTransactionRequest (the diagrams/<name>.<ext> export target, workspace-root parent snapshot via PathTransactionRequest::require_parent, workspace-registry precondition) and enters src-tauri/src/atomic_file.rs::with_path_transactions inside the blocking worker; src-tauri/src/diagram/mod.rs::diagram_export_blob_in_transaction revalidates coverage with PathTransactionLease::ensure_covered plus PathTransactionLease::ensure_workspace_registry and calls PathTransactionLease::before_effect before the first filesystem effect.",
+    "src-tauri/src/diagram/mod.rs::diagram_export_blob_in_transaction re-runs the create/modify policy check and writes the exact owned bytes after PathTransactionLease::before_effect, preserving the exported byte identity."
+   ],
+   "workerBoundary": "src-tauri/src/diagram/mod.rs::ipc::diagram_export_blob awaits tauri::async_runtime::spawn_blocking before any filesystem access runs (the #[cfg(test)] worker-stage hook keyed to the fixture workspace root fires at worker entry); only a JoinError maps to the display-only diagram_export_blob_task_failed String while the returned export path String and every domain error string pass through unchanged; owned Strings and Vec<u8> cross the await, never a borrowed State or guard.",
+   "syncCallers": [
+    "No Rust or CLI caller invokes diagram_export_blob synchronously today; src-tauri/src/lib.rs registers only diagram::ipc::diagram_export_blob, and the original synchronous src-tauri/src/diagram/mod.rs::diagram_export_blob keeps its name and signature for Rust callers (the inline legacy tests exercise it directly)."
+   ],
+   "mutationKey": {
+    "lexicalPaths": [
+     "The export file <workspace>/diagrams/<name>.<ext>, resolved after src-tauri/src/diagram/mod.rs::validate_export_kind normalization (jpg/jpeg, mmd/mermaid, md/markdown and html/htm aliases map to their canonical extension)"
+    ],
+    "aliasPaths": [
+     "Physical alias key of the export file plus the pinned existing-ancestor parents captured by src-tauri/src/atomic_file.rs::PathTransactionRequest::new, with the workspace-root parent pinned by PathTransactionRequest::require_parent"
+    ],
+    "sharedAdmissionEntry": "src-tauri/src/diagram/mod.rs::diagram_export_blob builds the src-tauri/src/atomic_file.rs::PathTransactionRequest (the diagrams/<name>.<ext> export target, workspace-root parent snapshot via PathTransactionRequest::require_parent, workspace-registry precondition) and enters src-tauri/src/atomic_file.rs::with_path_transactions inside the blocking worker; src-tauri/src/diagram/mod.rs::diagram_export_blob_in_transaction revalidates coverage with PathTransactionLease::ensure_covered plus PathTransactionLease::ensure_workspace_registry and calls PathTransactionLease::before_effect before the first filesystem effect.",
+    "postAdmissionPreconditions": [
+     "src-tauri/src/diagram/mod.rs::validate_name and src-tauri/src/diagram/mod.rs::validate_export_kind run before admission",
+     "src-tauri/src/vault_list.rs::assert_maru_can_write with the Create or Modify action runs inside the transaction before any effect",
+     "PathTransactionLease::before_effect confirms the pinned parents and workspace registry before the byte-exact fs::write"
+    ],
+    "domainLockOrder": "Shared path admission is acquired inside the blocking worker before the workspace write-policy check and the effects; Diagram mode has no domain mutex of its own, and no guard is held across an await."
+   },
+   "tests": [
+    {
+     "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_20",
+     "passed": 9,
+     "failed": 0,
+     "ignored": 0,
+     "exitCode": 0
+    }
+   ],
+   "processingCaller": {
+    "path": [
+     "src/lib/diagram.ts",
+     "src/lib/diagram.test.ts"
+    ],
+    "payload": "exportDiagramBlob (src/lib/diagram.ts:151) invokes diagram_export_blob with workspace, name, kind and the rendered bytes for in-workspace exports; the Diagram surface keeps owning the export promise and its error display regardless of screen changes.",
+    "terminalNoticeOwner": "The Diagram surface (src/components/diagram) owns current diagram list, snapshot and export display and error toasts. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+   ,
+     "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+     "successRetention": "updated record retained in component state",
+     "failureReasons": "call-site catch error message (single publisher)",
+     "singleTerminalNoticeOwner": true,
+     "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=diagram_export_blob"
+   },
+   "evidence": {
+    "behaviorCases": [
+     "phase08_20_diagram_each_wrapper_yields_same_poll_and_maps_join_failure",
+     "phase08_20_diagram_real_fixture_results_and_legacy_rejections"
+    ],
+    "workerProof": "diagram::phase08_20::phase08_20_diagram_each_wrapper_yields_same_poll_and_maps_join_failure holds the diagram_export_blob future at spawn_blocking worker entry via the workspace-root-keyed (or export-target-keyed for diagram_export_blob_to_path) #[cfg(test)] worker-stage hook, manually polls it on the same async task and proves progress while a distinct worker thread stays blocked; the panicked worker maps to the display-only diagram_export_blob_task_failed String.",
+    "platformScope": "macOS unit fixtures only: atomic_file::phase08_06::Home isolation, disposable tempdir workspaces with a seeded .maru directory and the test-only worker-stage hook; no live workspace, credential or network endpoint is touched.",
+    "limits": "Export bytes are written exactly as provided; the in-workspace export target is inside the lexical diagrams root, so no new write capability is introduced. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
+    "contract": "The returned path String, the export kind whitelist (including tabular codecs), the Unsupported export kind rejection and the exported byte identity are unchanged; the only new failure paths are the JoinError-to-String mapping and the shared admission conflict string."
+   }
+  },
+  {
+   "name": "diagram_export_blob_to_path",
+   "module": "src-tauri/src/diagram/mod.rs",
+   "registrationPath": "src-tauri/src/lib.rs::diagram::ipc::diagram_export_blob_to_path",
+   "originalDisposition": "AUDIT",
+   "disposition": "ISOLATED",
+   "helperChain": [
+    "src-tauri/src/diagram/mod.rs::ipc::diagram_export_blob_to_path owns the target_path, kind and bytes arguments and awaits tauri::async_runtime::spawn_blocking calling src-tauri/src/diagram/mod.rs::diagram_export_blob_to_path inside the worker; a JoinError becomes the display-only diagram_export_blob_to_path_task_failed String.",
+    "src-tauri/src/diagram/mod.rs::diagram_export_blob_to_path validates the selected path through src-tauri/src/diagram/mod.rs::validate_export_target_path (extension/kind match, file-name and directory rejection) and enters shared admission over the selected target; no workspace parent is required because the target is user-selected and outside the workspace contract.",
+    "src-tauri/src/diagram/mod.rs::diagram_export_blob_to_path_in_transaction revalidates coverage with PathTransactionLease::ensure_covered, calls PathTransactionLease::before_effect, creates the bounded parent chain and writes the exact owned bytes, preserving the exported byte identity."
+   ],
+   "workerBoundary": "src-tauri/src/diagram/mod.rs::ipc::diagram_export_blob_to_path awaits tauri::async_runtime::spawn_blocking before any filesystem access runs (the #[cfg(test)] worker-stage hook keyed to the selected export target path fires at worker entry); only a JoinError maps to the display-only diagram_export_blob_to_path_task_failed String while the returned export path String and every domain error string pass through unchanged; owned Strings and Vec<u8> cross the await, never a borrowed State or guard.",
+   "syncCallers": [
+    "No Rust or CLI caller invokes diagram_export_blob_to_path synchronously today; src-tauri/src/lib.rs registers only diagram::ipc::diagram_export_blob_to_path, and the original synchronous src-tauri/src/diagram/mod.rs::diagram_export_blob_to_path keeps its name and signature for Rust callers (the inline legacy tests exercise it directly)."
+   ],
+   "mutationKey": {
+    "lexicalPaths": [
+     "The user-selected export target file validated by src-tauri/src/diagram/mod.rs::validate_export_target_path; admission covers the file itself so two exports to the same selected path serialize"
+    ],
+    "aliasPaths": [
+     "Physical alias key of the selected target plus the pinned deepest existing ancestors captured by src-tauri/src/atomic_file.rs::PathTransactionRequest::new for both the lexical path and its physical alias"
+    ],
+    "sharedAdmissionEntry": "src-tauri/src/diagram/mod.rs::diagram_export_blob_to_path builds the src-tauri/src/atomic_file.rs::PathTransactionRequest over the selected target and enters src-tauri/src/atomic_file.rs::with_path_transactions inside the blocking worker; src-tauri/src/diagram/mod.rs::diagram_export_blob_to_path_in_transaction revalidates coverage with PathTransactionLease::ensure_covered and calls PathTransactionLease::before_effect before the first filesystem effect; no workspace-registry precondition applies because the target is outside the workspace and cannot race workspace registry migration.",
+    "postAdmissionPreconditions": [
+     "src-tauri/src/diagram/mod.rs::validate_export_target_path rejects empty, NUL-bearing, extension-mismatched and directory targets before admission",
+     "PathTransactionLease::ensure_covered revalidates the resolved target after the wait",
+     "PathTransactionLease::before_effect confirms the pinned existing ancestors before the bounded create_dir_all and the byte-exact fs::write"
+    ],
+    "domainLockOrder": "Shared path admission is acquired inside the blocking worker before the bounded parent creation and the write; the command takes no domain lock, and no guard is held across an await."
+   },
+   "tests": [
+    {
+     "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_20",
+     "passed": 9,
+     "failed": 0,
+     "ignored": 0,
+     "exitCode": 0
+    }
+   ],
+   "processingCaller": {
+    "path": [
+     "src/lib/diagram.ts",
+     "src/components/diagram/modals/ImportExportDialog.tsx",
+     "src/lib/diagram.test.ts"
+    ],
+    "payload": "exportDiagramBlobToPath (src/lib/diagram.ts:165) invokes diagram_export_blob_to_path with targetPath, kind and the rendered bytes from the Import/Export dialog (src/components/diagram/modals/ImportExportDialog.tsx); the dialog keeps owning the export promise and its error display regardless of screen changes.",
+    "terminalNoticeOwner": "The Diagram surface (src/components/diagram) owns current diagram list, snapshot and export display and error toasts. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+   ,
+     "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+     "successRetention": "updated record retained in component state",
+     "failureReasons": "call-site catch error message (single publisher)",
+     "singleTerminalNoticeOwner": true,
+     "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=diagram_export_blob_to_path"
+   },
+   "evidence": {
+    "behaviorCases": [
+     "phase08_20_diagram_each_wrapper_yields_same_poll_and_maps_join_failure",
+     "phase08_20_diagram_real_fixture_results_and_legacy_rejections"
+    ],
+    "workerProof": "diagram::phase08_20::phase08_20_diagram_each_wrapper_yields_same_poll_and_maps_join_failure holds the diagram_export_blob_to_path future at spawn_blocking worker entry via the export-target-keyed #[cfg(test)] worker-stage hook, manually polls it on the same async task and proves progress while a distinct worker thread stays blocked; the panicked worker maps to the display-only diagram_export_blob_to_path_task_failed String.",
+    "platformScope": "macOS unit fixtures only: atomic_file::phase08_06::Home isolation, disposable tempdir workspaces with a seeded .maru directory and the test-only worker-stage hook; no live workspace, credential or network endpoint is touched.",
+    "limits": "The user-selected target keeps its pre-existing validation-only contract; admission adds in-process serialization against other cooperating writers targeting the same path without narrowing or widening the selectable set. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
+    "contract": "The returned path String, the extension/kind matching rules and the exported byte identity are unchanged; the only new failure paths are the JoinError-to-String mapping and the shared admission conflict string."
+   }
+  },
+  {
+   "name": "diagram_backup_document",
+   "module": "src-tauri/src/diagram/mod.rs",
+   "registrationPath": "src-tauri/src/lib.rs::diagram::ipc::diagram_backup_document",
+   "originalDisposition": "AUDIT",
+   "disposition": "ISOLATED",
+   "helperChain": [
+    "src-tauri/src/diagram/mod.rs::ipc::diagram_backup_document owns the workspace and name Strings and awaits tauri::async_runtime::spawn_blocking calling src-tauri/src/diagram/mod.rs::diagram_backup_document inside the worker; a JoinError becomes the display-only diagram_backup_document_task_failed String.",
+    "src-tauri/src/diagram/mod.rs::diagram_backup_document validates the name, confirms the source exists, computes the millisecond timestamp once and builds a src-tauri/src/atomic_file.rs::PathTransactionRequest over the complete copy set (source file, timestamped backup destination and temporary file, pinned workspace-root parent, workspace-registry precondition) before entering src-tauri/src/atomic_file.rs::with_path_transactions.",
+    "src-tauri/src/diagram/mod.rs::diagram_backup_document_in_transaction revalidates coverage with PathTransactionLease::ensure_covered and PathTransactionLease::ensure_workspace_registry, re-runs the Create policy check, calls PathTransactionLease::before_effect, then performs the temp-file copy plus rename publish exactly as before."
+   ],
+   "workerBoundary": "src-tauri/src/diagram/mod.rs::ipc::diagram_backup_document awaits tauri::async_runtime::spawn_blocking before any filesystem access runs (the #[cfg(test)] worker-stage hook keyed to the fixture workspace root fires at worker entry); only a JoinError maps to the display-only diagram_backup_document_task_failed String while the returned backup path String and every domain error string pass through unchanged; owned Strings and Vec<u8> cross the await, never a borrowed State or guard.",
+   "syncCallers": [
+    "No Rust or CLI caller invokes diagram_backup_document synchronously today; src-tauri/src/lib.rs registers only diagram::ipc::diagram_backup_document, and the original synchronous src-tauri/src/diagram/mod.rs::diagram_backup_document keeps its name and signature for Rust callers (the inline legacy tests exercise it directly)."
+   ],
+   "mutationKey": {
+    "lexicalPaths": [
+     "The v7 source file <workspace>/diagrams/<name>.cmd.json plus the timestamped destination and temporary file under <workspace>/.maru/diagrams/backups, all resolved before admission with the timestamp computed once so the admitted set equals the written set"
+    ],
+    "aliasPaths": [
+     "Physical alias keys of the source, destination and temporary file plus the pinned existing-ancestor parents captured by src-tauri/src/atomic_file.rs::PathTransactionRequest::new, with the workspace-root parent pinned by PathTransactionRequest::require_parent"
+    ],
+    "sharedAdmissionEntry": "src-tauri/src/diagram/mod.rs::diagram_backup_document builds the src-tauri/src/atomic_file.rs::PathTransactionRequest (the v7 source file, the timestamped backup destination and the temporary file, workspace-root parent snapshot via PathTransactionRequest::require_parent, workspace-registry precondition) and enters src-tauri/src/atomic_file.rs::with_path_transactions inside the blocking worker; src-tauri/src/diagram/mod.rs::diagram_backup_document_in_transaction revalidates coverage with PathTransactionLease::ensure_covered plus PathTransactionLease::ensure_workspace_registry and calls PathTransactionLease::before_effect before the first filesystem effect.",
+    "postAdmissionPreconditions": [
+     "src-tauri/src/diagram/mod.rs::validate_name and the Diagram not found source check run before admission",
+     "The millisecond timestamp is computed once and passed to the in-transaction adapter, so the admitted destination and temporary paths are exactly the written paths",
+     "src-tauri/src/vault_list.rs::assert_maru_can_write with the Create action runs inside the transaction before any effect",
+     "PathTransactionLease::before_effect confirms the pinned parents and workspace registry before the copy and rename publish"
+    ],
+    "domainLockOrder": "Shared path admission is acquired inside the blocking worker before the workspace write-policy check and the effects; Diagram mode has no domain mutex of its own, and no guard is held across an await."
+   },
+   "tests": [
+    {
+     "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_20",
+     "passed": 9,
+     "failed": 0,
+     "ignored": 0,
+     "exitCode": 0
+    }
+   ],
+   "processingCaller": {
+    "path": [
+     "src/lib/diagram.ts",
+     "src/lib/diagram.test.ts"
+    ],
+    "payload": "backupDiagram (src/lib/diagram.ts:232) invokes diagram_backup_document with workspace and name before the first v8 save overwrites a v7 document; the Diagram surface keeps owning the backup promise and its error display regardless of screen changes.",
+    "terminalNoticeOwner": "The Diagram surface (src/components/diagram) owns current diagram list, snapshot and export display and error toasts. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+   ,
+     "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+     "successRetention": "updated record retained in component state",
+     "failureReasons": "call-site catch error message (single publisher)",
+     "singleTerminalNoticeOwner": true,
+     "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=diagram_backup_document"
+   },
+   "evidence": {
+    "behaviorCases": [
+     "phase08_20_diagram_each_wrapper_yields_same_poll_and_maps_join_failure",
+     "phase08_20_diagram_real_fixture_results_and_legacy_rejections"
+    ],
+    "workerProof": "diagram::phase08_20::phase08_20_diagram_each_wrapper_yields_same_poll_and_maps_join_failure holds the diagram_backup_document future at spawn_blocking worker entry via the workspace-root-keyed (or export-target-keyed for diagram_export_blob_to_path) #[cfg(test)] worker-stage hook, manually polls it on the same async task and proves progress while a distinct worker thread stays blocked; the panicked worker maps to the display-only diagram_backup_document_task_failed String.",
+    "platformScope": "macOS unit fixtures only: atomic_file::phase08_06::Home isolation, disposable tempdir workspaces with a seeded .maru directory and the test-only worker-stage hook; no live workspace, credential or network endpoint is touched.",
+    "limits": "The one-time v7 backup copy keeps its temp-file plus rename publish; admission adds in-process serialization against writers touching the same source or backup directory. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
+    "contract": "The returned backup path String, the timestamped backup naming, the Diagram not found rejection and the crash-safe copy semantics are unchanged; the only new failure paths are the JoinError-to-String mapping and the shared admission conflict string."
+   }
+  },
+  {
+   "name": "diagram_save_snapshot",
+   "module": "src-tauri/src/diagram/mod.rs",
+   "registrationPath": "src-tauri/src/lib.rs::diagram::ipc::diagram_save_snapshot",
+   "originalDisposition": "CONVERT",
+   "disposition": "ISOLATED",
+   "helperChain": [
+    "src-tauri/src/diagram/mod.rs::ipc::diagram_save_snapshot owns the workspace, doc_id, snapshot_ts and content Strings and awaits tauri::async_runtime::spawn_blocking calling src-tauri/src/diagram/mod.rs::diagram_save_snapshot inside the worker; a JoinError becomes the display-only diagram_save_snapshot_task_failed String.",
+    "src-tauri/src/diagram/mod.rs::diagram_save_snapshot resolves the snapshot directory and file through src-tauri/src/diagram/mod.rs::snapshot_dir and src-tauri/src/diagram/mod.rs::snapshot_file (name and timestamp validation, src-tauri/src/diagram/mod.rs::ensure_within containment) and enters shared admission over the directory and file.",
+    "src-tauri/src/diagram/mod.rs::diagram_save_snapshot builds the src-tauri/src/atomic_file.rs::PathTransactionRequest (the .maru/diagrams/history/<doc_id> snapshot directory and the snapshot-<ts>.json file, workspace-root parent snapshot via PathTransactionRequest::require_parent, workspace-registry precondition) and enters src-tauri/src/atomic_file.rs::with_path_transactions inside the blocking worker; src-tauri/src/diagram/mod.rs::diagram_save_snapshot_in_transaction revalidates coverage with PathTransactionLease::ensure_covered plus PathTransactionLease::ensure_workspace_registry and calls PathTransactionLease::before_effect before the first filesystem effect.",
+    "src-tauri/src/diagram/mod.rs::diagram_save_snapshot_in_transaction re-runs the create/modify policy check, writes the snapshot, reads back its size and prunes the history through src-tauri/src/diagram/mod.rs::prune_snapshots (SNAPSHOT_CAP 20) while the directory admission covers every prune deletion."
+   ],
+   "workerBoundary": "src-tauri/src/diagram/mod.rs::ipc::diagram_save_snapshot awaits tauri::async_runtime::spawn_blocking before any filesystem access runs (the #[cfg(test)] worker-stage hook keyed to the fixture workspace root fires at worker entry); only a JoinError maps to the display-only diagram_save_snapshot_task_failed String while the SnapshotMeta payload and every domain error string pass through unchanged; owned Strings and Vec<u8> cross the await, never a borrowed State or guard.",
+   "syncCallers": [
+    "No Rust or CLI caller invokes diagram_save_snapshot synchronously today; src-tauri/src/lib.rs registers only diagram::ipc::diagram_save_snapshot, and the original synchronous src-tauri/src/diagram/mod.rs::diagram_save_snapshot keeps its name and signature for Rust callers (the inline legacy tests exercise it directly)."
+   ],
+   "mutationKey": {
+    "lexicalPaths": [
+     "The snapshot directory <workspace>/.maru/diagrams/history/<doc_id> and the snapshot-<ts>.json file inside it, resolved by src-tauri/src/diagram/mod.rs::snapshot_dir and src-tauri/src/diagram/mod.rs::snapshot_file; admitting the directory covers every file the SNAPSHOT_CAP prune may delete"
+    ],
+    "aliasPaths": [
+     "Physical alias keys of the snapshot directory and file plus the pinned existing-ancestor parents captured by src-tauri/src/atomic_file.rs::PathTransactionRequest::new, with the workspace-root parent pinned by PathTransactionRequest::require_parent"
+    ],
+    "sharedAdmissionEntry": "src-tauri/src/diagram/mod.rs::diagram_save_snapshot builds the src-tauri/src/atomic_file.rs::PathTransactionRequest (the snapshot directory and the snapshot-<ts>.json file, workspace-root parent snapshot via PathTransactionRequest::require_parent, workspace-registry precondition) and enters src-tauri/src/atomic_file.rs::with_path_transactions inside the blocking worker; src-tauri/src/diagram/mod.rs::diagram_save_snapshot_in_transaction revalidates coverage with PathTransactionLease::ensure_covered plus PathTransactionLease::ensure_workspace_registry and calls PathTransactionLease::before_effect before the first filesystem effect.",
+    "postAdmissionPreconditions": [
+     "src-tauri/src/diagram/mod.rs::validate_doc_id and src-tauri/src/diagram/mod.rs::validate_snapshot_ts reject unsafe ids and timestamps before admission",
+     "src-tauri/src/vault_list.rs::assert_maru_can_write with the Create or Modify action runs inside the transaction before any effect",
+     "PathTransactionLease::before_effect confirms the pinned parents and workspace registry before the directory creation, the snapshot write and the prune",
+     "The size read-back and SnapshotMeta construction follow the same write, keeping snapshot identity unchanged"
+    ],
+    "domainLockOrder": "Shared path admission is acquired inside the blocking worker before the workspace write-policy check and the effects; Diagram mode has no domain mutex of its own, and no guard is held across an await."
+   },
+   "tests": [
+    {
+     "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_20",
+     "passed": 9,
+     "failed": 0,
+     "ignored": 0,
+     "exitCode": 0
+    }
+   ],
+   "processingCaller": {
+    "path": [
+     "src/lib/diagram.ts",
+     "src/lib/diagram.test.ts"
+    ],
+    "payload": "saveDiagramSnapshot (src/lib/diagram.ts:179) invokes diagram_save_snapshot with workspace, docId, snapshotTs and content on each Diagram version save; the Diagram surface keeps owning that save promise and its error display regardless of screen changes.",
+    "terminalNoticeOwner": "The Diagram surface (src/components/diagram) owns current diagram list, snapshot and export display and error toasts. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+   ,
+     "classifier": "n/a: read; data returned to the caller",
+     "successRetention": "result stored in caller component state",
+     "failureReasons": "call-site catch retains the error (component-owned read failure)",
+     "singleTerminalNoticeOwner": true,
+     "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=diagram_save_snapshot"
+   },
+   "evidence": {
+    "behaviorCases": [
+     "phase08_20_diagram_each_wrapper_yields_same_poll_and_maps_join_failure",
+     "phase08_20_diagram_real_fixture_results_and_legacy_rejections"
+    ],
+    "workerProof": "diagram::phase08_20::phase08_20_diagram_each_wrapper_yields_same_poll_and_maps_join_failure holds the diagram_save_snapshot future at spawn_blocking worker entry via the workspace-root-keyed (or export-target-keyed for diagram_export_blob_to_path) #[cfg(test)] worker-stage hook, manually polls it on the same async task and proves progress while a distinct worker thread stays blocked; the panicked worker maps to the display-only diagram_save_snapshot_task_failed String.",
+    "platformScope": "macOS unit fixtures only: atomic_file::phase08_06::Home isolation, disposable tempdir workspaces with a seeded .maru directory and the test-only worker-stage hook; no live workspace, credential or network endpoint is touched.",
+    "limits": "The prune is bounded by the admitted snapshot directory, so a concurrent restore or save of the same doc id serializes; the cap of 20 snapshots is unchanged. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
+    "contract": "The SnapshotMeta payload (doc id, timestamp, size), the trailing-newline normalization and the SNAPSHOT_CAP prune semantics are unchanged; the only new failure paths are the JoinError-to-String mapping and the shared admission conflict string."
+   }
+  },
+  {
+   "name": "diagram_list_snapshots",
+   "module": "src-tauri/src/diagram/mod.rs",
+   "registrationPath": "src-tauri/src/lib.rs::diagram::ipc::diagram_list_snapshots",
+   "originalDisposition": "CONVERT",
+   "disposition": "ISOLATED",
+   "helperChain": [
+    "src-tauri/src/diagram/mod.rs::ipc::diagram_list_snapshots owns the workspace and doc_id Strings and awaits tauri::async_runtime::spawn_blocking calling src-tauri/src/diagram/mod.rs::diagram_list_snapshots inside the worker; a JoinError becomes the display-only diagram_list_snapshots_task_failed String.",
+    "src-tauri/src/diagram/mod.rs::diagram_list_snapshots resolves the snapshot directory through src-tauri/src/diagram/mod.rs::snapshot_dir and performs a bounded single-directory fs::read_dir loop; the converted chain reaches no filesystem write, network call, process wait or unbounded walk."
+   ],
+   "workerBoundary": "src-tauri/src/diagram/mod.rs::ipc::diagram_list_snapshots awaits tauri::async_runtime::spawn_blocking before any filesystem access runs (the #[cfg(test)] worker-stage hook keyed to the fixture workspace root fires at worker entry); only a JoinError maps to the display-only diagram_list_snapshots_task_failed String while the Vec<SnapshotMeta> payload and every domain error string pass through unchanged; owned Strings and Vec<u8> cross the await, never a borrowed State or guard.",
+   "syncCallers": [
+    "No Rust or CLI caller invokes diagram_list_snapshots synchronously today; src-tauri/src/lib.rs registers only diagram::ipc::diagram_list_snapshots, and the original synchronous src-tauri/src/diagram/mod.rs::diagram_list_snapshots keeps its name and signature for Rust callers (the inline legacy tests exercise it directly)."
+   ],
+   "mutationKey": {
+    "readOnly": true,
+    "lexicalPaths": [],
+    "aliasPaths": [],
+    "sharedAdmissionEntry": "No filesystem mutation is owned by diagram_list_snapshots: it only reads the snapshot directory of one doc id, so no filesystem mutation admission is required.",
+    "postAdmissionPreconditions": [
+     "No mutation admission is required: the command performs no filesystem mutation, so there is no transaction key to admit and nothing to release"
+    ],
+    "domainLockOrder": "No path admission exists; the command takes no domain lock, so there is no admission-before-domain-lock order to record."
+   },
+   "tests": [
+    {
+     "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_20",
+     "passed": 9,
+     "failed": 0,
+     "ignored": 0,
+     "exitCode": 0
+    }
+   ],
+   "processingCaller": {
+    "path": [
+     "src/lib/diagram.ts",
+     "src/lib/diagram.test.ts"
+    ],
+    "payload": "listDiagramSnapshots (src/lib/diagram.ts:192) invokes diagram_list_snapshots with workspace and docId when the Diagram history panel opens; the Diagram surface keeps owning that refresh regardless of screen changes.",
+    "terminalNoticeOwner": "The Diagram surface (src/components/diagram) owns current diagram list, snapshot and export display and error toasts. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+   ,
+     "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+     "successRetention": "updated record retained in component state",
+     "failureReasons": "call-site catch error message (single publisher)",
+     "singleTerminalNoticeOwner": true,
+     "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=diagram_list_snapshots"
+   },
+   "evidence": {
+    "behaviorCases": [
+     "phase08_20_diagram_each_wrapper_yields_same_poll_and_maps_join_failure",
+     "phase08_20_diagram_real_fixture_results_and_legacy_rejections"
+    ],
+    "workerProof": "diagram::phase08_20::phase08_20_diagram_each_wrapper_yields_same_poll_and_maps_join_failure holds the diagram_list_snapshots future at spawn_blocking worker entry via the workspace-root-keyed (or export-target-keyed for diagram_export_blob_to_path) #[cfg(test)] worker-stage hook, manually polls it on the same async task and proves progress while a distinct worker thread stays blocked; the panicked worker maps to the display-only diagram_list_snapshots_task_failed String.",
+    "platformScope": "macOS unit fixtures only: atomic_file::phase08_06::Home isolation, disposable tempdir workspaces with a seeded .maru directory and the test-only worker-stage hook; no live workspace, credential or network endpoint is touched.",
+    "limits": "The listing is bounded to one doc id's snapshot directory; external writers racing a listing are outside the in-process guarantee. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
+    "contract": "The Vec<SnapshotMeta> payload, the timestamp-descending sort and the empty-list semantics for a missing history directory are unchanged; the only new failure path is the JoinError-to-String mapping at the worker boundary."
+   }
+  },
+  {
+   "name": "diagram_restore_snapshot",
+   "module": "src-tauri/src/diagram/mod.rs",
+   "registrationPath": "src-tauri/src/lib.rs::diagram::ipc::diagram_restore_snapshot",
+   "originalDisposition": "AUDIT",
+   "disposition": "ISOLATED",
+   "helperChain": [
+    "src-tauri/src/diagram/mod.rs::ipc::diagram_restore_snapshot owns the workspace, doc_id and snapshot_ts Strings and awaits tauri::async_runtime::spawn_blocking calling src-tauri/src/diagram/mod.rs::diagram_restore_snapshot inside the worker; a JoinError becomes the display-only diagram_restore_snapshot_task_failed String.",
+    "src-tauri/src/diagram/mod.rs::diagram_restore_snapshot resolves the snapshot file through src-tauri/src/diagram/mod.rs::snapshot_file and reads the single finite file; the audited chain reaches no filesystem write, network call, process wait or unbounded walk."
+   ],
+   "workerBoundary": "src-tauri/src/diagram/mod.rs::ipc::diagram_restore_snapshot awaits tauri::async_runtime::spawn_blocking before any filesystem access runs (the #[cfg(test)] worker-stage hook keyed to the fixture workspace root fires at worker entry); only a JoinError maps to the display-only diagram_restore_snapshot_task_failed String while the String payload and every domain error string pass through unchanged; owned Strings and Vec<u8> cross the await, never a borrowed State or guard.",
+   "syncCallers": [
+    "No Rust or CLI caller invokes diagram_restore_snapshot synchronously today; src-tauri/src/lib.rs registers only diagram::ipc::diagram_restore_snapshot, and the original synchronous src-tauri/src/diagram/mod.rs::diagram_restore_snapshot keeps its name and signature for Rust callers (the inline legacy tests exercise it directly)."
+   ],
+   "mutationKey": {
+    "readOnly": true,
+    "lexicalPaths": [],
+    "aliasPaths": [],
+    "sharedAdmissionEntry": "No filesystem mutation is owned by diagram_restore_snapshot: it only reads one snapshot file, so no filesystem mutation admission is required.",
+    "postAdmissionPreconditions": [
+     "No mutation admission is required: the command performs no filesystem mutation, so there is no transaction key to admit and nothing to release"
+    ],
+    "domainLockOrder": "No path admission exists; the command takes no domain lock, so there is no admission-before-domain-lock order to record."
+   },
+   "tests": [
+    {
+     "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_20",
+     "passed": 9,
+     "failed": 0,
+     "ignored": 0,
+     "exitCode": 0
+    }
+   ],
+   "processingCaller": {
+    "path": [
+     "src/lib/diagram.ts",
+     "src/lib/diagram.test.ts"
+    ],
+    "payload": "restoreDiagramSnapshot (src/lib/diagram.ts:204) invokes diagram_restore_snapshot with workspace, docId and snapshotTs when the user restores a Diagram history entry; the Diagram surface keeps owning the restored content and its error display regardless of screen changes.",
+    "terminalNoticeOwner": "The Diagram surface (src/components/diagram) owns current diagram list, snapshot and export display and error toasts. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+   ,
+     "classifier": "n/a: read; data returned to the caller",
+     "successRetention": "result stored in caller component state",
+     "failureReasons": "call-site catch retains the error (component-owned read failure)",
+     "singleTerminalNoticeOwner": true,
+     "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=diagram_restore_snapshot"
+   },
+   "evidence": {
+    "behaviorCases": [
+     "phase08_20_diagram_each_wrapper_yields_same_poll_and_maps_join_failure",
+     "phase08_20_diagram_real_fixture_results_and_legacy_rejections"
+    ],
+    "workerProof": "diagram::phase08_20::phase08_20_diagram_each_wrapper_yields_same_poll_and_maps_join_failure holds the diagram_restore_snapshot future at spawn_blocking worker entry via the workspace-root-keyed (or export-target-keyed for diagram_export_blob_to_path) #[cfg(test)] worker-stage hook, manually polls it on the same async task and proves progress while a distinct worker thread stays blocked; the panicked worker maps to the display-only diagram_restore_snapshot_task_failed String.",
+    "platformScope": "macOS unit fixtures only: atomic_file::phase08_06::Home isolation, disposable tempdir workspaces with a seeded .maru directory and the test-only worker-stage hook; no live workspace, credential or network endpoint is touched.",
+    "limits": "The AUDIT disposition is closed by the finite single-file read chain. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
+    "contract": "The String payload and the snapshot not found rejection string are unchanged; the only new failure path is the JoinError-to-String mapping at the worker boundary."
+   }
+  },
+  {
+   "name": "diagram_write_report_asset",
+   "module": "src-tauri/src/diagram/mod.rs",
+   "registrationPath": "src-tauri/src/lib.rs::diagram::ipc::diagram_write_report_asset",
+   "originalDisposition": "AUDIT",
+   "disposition": "ISOLATED",
+   "helperChain": [
+    "src-tauri/src/diagram/mod.rs::ipc::diagram_write_report_asset owns the workspace, doc_id, file_name and bytes arguments and awaits tauri::async_runtime::spawn_blocking calling src-tauri/src/diagram/mod.rs::diagram_write_report_asset inside the worker; a JoinError becomes the display-only diagram_write_report_asset_task_failed String.",
+    "src-tauri/src/diagram/mod.rs::diagram_write_report_asset validates the doc id and the machine-generated asset name (src-tauri/src/diagram/mod.rs::validate_report_file_name ASCII allowlist and svg/png/json extension gate), resolves the managed-block path under attachments/diagrams with src-tauri/src/diagram/mod.rs::ensure_within containment and enters shared admission over the asset file.",
+    "src-tauri/src/diagram/mod.rs::diagram_write_report_asset builds the src-tauri/src/atomic_file.rs::PathTransactionRequest (the attachments/diagrams/<doc_id>/<file_name> report asset, workspace-root parent snapshot via PathTransactionRequest::require_parent, workspace-registry precondition) and enters src-tauri/src/atomic_file.rs::with_path_transactions inside the blocking worker; src-tauri/src/diagram/mod.rs::diagram_write_report_asset_in_transaction revalidates coverage with PathTransactionLease::ensure_covered plus PathTransactionLease::ensure_workspace_registry and calls PathTransactionLease::before_effect before the first filesystem effect.",
+    "src-tauri/src/diagram/mod.rs::diagram_write_report_asset_in_transaction re-runs the create/modify policy check and publishes the bytes through src-tauri/src/atomic_file.rs::write_atomic, returning the same workspace-relative path string."
+   ],
+   "workerBoundary": "src-tauri/src/diagram/mod.rs::ipc::diagram_write_report_asset awaits tauri::async_runtime::spawn_blocking before any filesystem access runs (the #[cfg(test)] worker-stage hook keyed to the fixture workspace root fires at worker entry); only a JoinError maps to the display-only diagram_write_report_asset_task_failed String while the workspace-relative asset path String and every domain error string pass through unchanged; owned Strings and Vec<u8> cross the await, never a borrowed State or guard.",
+   "syncCallers": [
+    "No Rust or CLI caller invokes diagram_write_report_asset synchronously today; src-tauri/src/lib.rs registers only diagram::ipc::diagram_write_report_asset, and the original synchronous src-tauri/src/diagram/mod.rs::diagram_write_report_asset keeps its name and signature for Rust callers (the inline legacy tests exercise it directly)."
+   ],
+   "mutationKey": {
+    "lexicalPaths": [
+     "The managed report asset <workspace>/attachments/diagrams/<doc_id>/<file_name>, the only write target outside diagrams/ and .maru/ that Diagram mode is allowed to touch; the parent chain created by the atomic write stays bounded by the admitted ancestors"
+    ],
+    "aliasPaths": [
+     "Physical alias key of the report asset plus the pinned existing-ancestor parents captured by src-tauri/src/atomic_file.rs::PathTransactionRequest::new, with the workspace-root parent pinned by PathTransactionRequest::require_parent"
+    ],
+    "sharedAdmissionEntry": "src-tauri/src/diagram/mod.rs::diagram_write_report_asset builds the src-tauri/src/atomic_file.rs::PathTransactionRequest (the attachments/diagrams/<doc_id>/<file_name> report asset, workspace-root parent snapshot via PathTransactionRequest::require_parent, workspace-registry precondition) and enters src-tauri/src/atomic_file.rs::with_path_transactions inside the blocking worker; src-tauri/src/diagram/mod.rs::diagram_write_report_asset_in_transaction revalidates coverage with PathTransactionLease::ensure_covered plus PathTransactionLease::ensure_workspace_registry and calls PathTransactionLease::before_effect before the first filesystem effect.",
+    "postAdmissionPreconditions": [
+     "src-tauri/src/diagram/mod.rs::validate_doc_id, the ASCII component gate and src-tauri/src/diagram/mod.rs::validate_report_file_name run before admission",
+     "src-tauri/src/vault_list.rs::assert_maru_can_write with the Create or Modify action runs inside the transaction before any effect",
+     "PathTransactionLease::before_effect confirms the pinned parents and workspace registry before src-tauri/src/atomic_file.rs::write_atomic"
+    ],
+    "domainLockOrder": "Shared path admission is acquired inside the blocking worker before the workspace write-policy check and the effects; Diagram mode has no domain mutex of its own, and no guard is held across an await."
+   },
+   "tests": [
+    {
+     "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_20",
+     "passed": 9,
+     "failed": 0,
+     "ignored": 0,
+     "exitCode": 0
+    }
+   ],
+   "processingCaller": {
+    "path": [
+     "src/lib/diagram.ts",
+     "src/lib/diagram/reportInsert.ts",
+     "src/lib/diagram.test.ts"
+    ],
+    "payload": "writeDiagramReportAsset (src/lib/diagram.ts:360) invokes diagram_write_report_asset with workspace, docId, fileName and bytes; src/lib/diagram/reportInsert.ts splices the returned attachments/diagrams/<doc_id>/<file_name> path into a maru-diagram:v1 managed block; both keep owning the insert promise and its error display regardless of screen changes.",
+    "terminalNoticeOwner": "The Diagram surface (src/components/diagram) owns current diagram list, snapshot and export display and error toasts. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+   ,
+     "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+     "successRetention": "updated record retained in component state",
+     "failureReasons": "call-site catch error message (single publisher)",
+     "singleTerminalNoticeOwner": true,
+     "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=diagram_write_report_asset"
+   },
+   "evidence": {
+    "behaviorCases": [
+     "phase08_20_diagram_each_wrapper_yields_same_poll_and_maps_join_failure",
+     "phase08_20_diagram_real_fixture_results_and_legacy_rejections"
+    ],
+    "workerProof": "diagram::phase08_20::phase08_20_diagram_each_wrapper_yields_same_poll_and_maps_join_failure holds the diagram_write_report_asset future at spawn_blocking worker entry via the workspace-root-keyed (or export-target-keyed for diagram_export_blob_to_path) #[cfg(test)] worker-stage hook, manually polls it on the same async task and proves progress while a distinct worker thread stays blocked; the panicked worker maps to the display-only diagram_write_report_asset_task_failed String.",
+    "platformScope": "macOS unit fixtures only: atomic_file::phase08_06::Home isolation, disposable tempdir workspaces with a seeded .maru directory and the test-only worker-stage hook; no live workspace, credential or network endpoint is touched.",
+    "limits": "Hash-named assets make re-renders idempotent and the atomic write leaves no temp files; admission serializes against other cooperating writers of the same asset path. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
+    "contract": "The workspace-relative path String, the ASCII allowlist, the svg/png/json extension gate and the managed report asset guard are unchanged; the only new failure paths are the JoinError-to-String mapping and the shared admission conflict string."
+   }
+  },
+  {
+   "name": "diagram_pattern_save",
+   "module": "src-tauri/src/diagram/mod.rs",
+   "registrationPath": "src-tauri/src/lib.rs::diagram::ipc::diagram_pattern_save",
+   "originalDisposition": "AUDIT",
+   "disposition": "ISOLATED",
+   "helperChain": [
+    "src-tauri/src/diagram/mod.rs::ipc::diagram_pattern_save owns the workspace, name and body Strings and awaits tauri::async_runtime::spawn_blocking calling src-tauri/src/diagram/mod.rs::diagram_pattern_save inside the worker; a JoinError becomes the display-only diagram_pattern_save_task_failed String.",
+    "src-tauri/src/diagram/mod.rs::diagram_pattern_save resolves the preset through src-tauri/src/diagram/mod.rs::pattern_file_path (src-tauri/src/diagram/mod.rs::validate_name plus src-tauri/src/diagram/mod.rs::ensure_within under .maru/diagram-patterns) and enters shared admission over the preset file.",
+    "src-tauri/src/diagram/mod.rs::diagram_pattern_save builds the src-tauri/src/atomic_file.rs::PathTransactionRequest (the .maru/diagram-patterns/<name>.pattern.json preset file, workspace-root parent snapshot via PathTransactionRequest::require_parent, workspace-registry precondition) and enters src-tauri/src/atomic_file.rs::with_path_transactions inside the blocking worker; src-tauri/src/diagram/mod.rs::diagram_pattern_save_in_transaction revalidates coverage with PathTransactionLease::ensure_covered plus PathTransactionLease::ensure_workspace_registry and calls PathTransactionLease::before_effect before the first filesystem effect.",
+    "src-tauri/src/diagram/mod.rs::diagram_pattern_save_in_transaction re-runs the create/modify policy check and publishes the payload through src-tauri/src/atomic_file.rs::write_atomic with the trailing-newline normalization preserved."
+   ],
+   "workerBoundary": "src-tauri/src/diagram/mod.rs::ipc::diagram_pattern_save awaits tauri::async_runtime::spawn_blocking before any filesystem access runs (the #[cfg(test)] worker-stage hook keyed to the fixture workspace root fires at worker entry); only a JoinError maps to the display-only diagram_pattern_save_task_failed String while the unit payload and every domain error string pass through unchanged; owned Strings and Vec<u8> cross the await, never a borrowed State or guard.",
+   "syncCallers": [
+    "No Rust or CLI caller invokes diagram_pattern_save synchronously today; src-tauri/src/lib.rs registers only diagram::ipc::diagram_pattern_save, and the original synchronous src-tauri/src/diagram/mod.rs::diagram_pattern_save keeps its name and signature for Rust callers (the inline legacy tests exercise it directly)."
+   ],
+   "mutationKey": {
+    "lexicalPaths": [
+     "The pattern preset file <workspace>/.maru/diagram-patterns/<name>.pattern.json, resolved by src-tauri/src/diagram/mod.rs::pattern_file_path"
+    ],
+    "aliasPaths": [
+     "Physical alias key of the preset file plus the pinned existing-ancestor parents captured by src-tauri/src/atomic_file.rs::PathTransactionRequest::new, with the workspace-root parent pinned by PathTransactionRequest::require_parent"
+    ],
+    "sharedAdmissionEntry": "src-tauri/src/diagram/mod.rs::diagram_pattern_save builds the src-tauri/src/atomic_file.rs::PathTransactionRequest (the .maru/diagram-patterns/<name>.pattern.json preset file, workspace-root parent snapshot via PathTransactionRequest::require_parent, workspace-registry precondition) and enters src-tauri/src/atomic_file.rs::with_path_transactions inside the blocking worker; src-tauri/src/diagram/mod.rs::diagram_pattern_save_in_transaction revalidates coverage with PathTransactionLease::ensure_covered plus PathTransactionLease::ensure_workspace_registry and calls PathTransactionLease::before_effect before the first filesystem effect.",
+    "postAdmissionPreconditions": [
+     "src-tauri/src/diagram/mod.rs::validate_name rejects unsafe preset names before admission",
+     "src-tauri/src/vault_list.rs::assert_maru_can_write with the Create or Modify action runs inside the transaction before any effect",
+     "PathTransactionLease::before_effect confirms the pinned parents and workspace registry before src-tauri/src/atomic_file.rs::write_atomic"
+    ],
+    "domainLockOrder": "Shared path admission is acquired inside the blocking worker before the workspace write-policy check and the effects; Diagram mode has no domain mutex of its own, and no guard is held across an await."
+   },
+   "tests": [
+    {
+     "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_20",
+     "passed": 9,
+     "failed": 0,
+     "ignored": 0,
+     "exitCode": 0
+    }
+   ],
+   "processingCaller": {
+    "path": [
+     "src/lib/diagram.ts",
+     "src/lib/diagram.test.ts"
+    ],
+    "payload": "saveDiagramPattern (src/lib/diagram.ts:263) invokes diagram_pattern_save with workspace, name and body when the user saves a Report Pattern Studio preset; the Diagram surface keeps owning that save promise and its error display regardless of screen changes.",
+    "terminalNoticeOwner": "The Diagram surface (src/components/diagram) owns current diagram list, snapshot and export display and error toasts. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+   ,
+     "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+     "successRetention": "updated record retained in component state",
+     "failureReasons": "call-site catch error message (single publisher)",
+     "singleTerminalNoticeOwner": true,
+     "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=diagram_pattern_save"
+   },
+   "evidence": {
+    "behaviorCases": [
+     "phase08_20_diagram_each_wrapper_yields_same_poll_and_maps_join_failure",
+     "phase08_20_diagram_real_fixture_results_and_legacy_rejections"
+    ],
+    "workerProof": "diagram::phase08_20::phase08_20_diagram_each_wrapper_yields_same_poll_and_maps_join_failure holds the diagram_pattern_save future at spawn_blocking worker entry via the workspace-root-keyed (or export-target-keyed for diagram_export_blob_to_path) #[cfg(test)] worker-stage hook, manually polls it on the same async task and proves progress while a distinct worker thread stays blocked; the panicked worker maps to the display-only diagram_pattern_save_task_failed String.",
+    "platformScope": "macOS unit fixtures only: atomic_file::phase08_06::Home isolation, disposable tempdir workspaces with a seeded .maru directory and the test-only worker-stage hook; no live workspace, credential or network endpoint is touched.",
+    "limits": "Shared admission serializes cooperating in-process writers only; the preset lives under .maru, so the workspace-registry precondition participates in admission. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
+    "contract": "The unit payload, the trailing-newline normalization and the name validation rejections are unchanged; the only new failure paths are the JoinError-to-String mapping and the shared admission conflict string."
+   }
+  },
+  {
+   "name": "diagram_pattern_list",
+   "module": "src-tauri/src/diagram/mod.rs",
+   "registrationPath": "src-tauri/src/lib.rs::diagram::ipc::diagram_pattern_list",
+   "originalDisposition": "CONVERT",
+   "disposition": "ISOLATED",
+   "helperChain": [
+    "src-tauri/src/diagram/mod.rs::ipc::diagram_pattern_list owns the workspace String and awaits tauri::async_runtime::spawn_blocking calling src-tauri/src/diagram/mod.rs::diagram_pattern_list inside the worker; a JoinError becomes the display-only diagram_pattern_list_task_failed String.",
+    "src-tauri/src/diagram/mod.rs::diagram_pattern_list resolves the .maru/diagram-patterns root and performs a bounded single-directory fs::read_dir loop with the same finite title probe; the converted chain reaches no filesystem write, network call, process wait or unbounded walk."
+   ],
+   "workerBoundary": "src-tauri/src/diagram/mod.rs::ipc::diagram_pattern_list awaits tauri::async_runtime::spawn_blocking before any filesystem access runs (the #[cfg(test)] worker-stage hook keyed to the fixture workspace root fires at worker entry); only a JoinError maps to the display-only diagram_pattern_list_task_failed String while the Vec<DiagramFile> payload and every domain error string pass through unchanged; owned Strings and Vec<u8> cross the await, never a borrowed State or guard.",
+   "syncCallers": [
+    "No Rust or CLI caller invokes diagram_pattern_list synchronously today; src-tauri/src/lib.rs registers only diagram::ipc::diagram_pattern_list, and the original synchronous src-tauri/src/diagram/mod.rs::diagram_pattern_list keeps its name and signature for Rust callers (the inline legacy tests exercise it directly)."
+   ],
+   "mutationKey": {
+    "readOnly": true,
+    "lexicalPaths": [],
+    "aliasPaths": [],
+    "sharedAdmissionEntry": "No filesystem mutation is owned by diagram_pattern_list: it only reads one directory level of pattern presets, so no filesystem mutation admission is required.",
+    "postAdmissionPreconditions": [
+     "No mutation admission is required: the command performs no filesystem mutation, so there is no transaction key to admit and nothing to release"
+    ],
+    "domainLockOrder": "No path admission exists; the command takes no domain lock, so there is no admission-before-domain-lock order to record."
+   },
+   "tests": [
+    {
+     "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_20",
+     "passed": 9,
+     "failed": 0,
+     "ignored": 0,
+     "exitCode": 0
+    }
+   ],
+   "processingCaller": {
+    "path": [
+     "src/lib/diagram.ts",
+     "src/lib/diagram.test.ts"
+    ],
+    "payload": "listDiagramPatterns (src/lib/diagram.ts:292) invokes diagram_pattern_list with workspace when the preset picker opens; the Diagram surface keeps owning that refresh regardless of screen changes.",
+    "terminalNoticeOwner": "The Diagram surface (src/components/diagram) owns current diagram list, snapshot and export display and error toasts. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+   ,
+     "classifier": "n/a: read; data returned to the caller",
+     "successRetention": "result stored in caller component state",
+     "failureReasons": "call-site catch retains the error (component-owned read failure)",
+     "singleTerminalNoticeOwner": true,
+     "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=diagram_pattern_list"
+   },
+   "evidence": {
+    "behaviorCases": [
+     "phase08_20_diagram_each_wrapper_yields_same_poll_and_maps_join_failure",
+     "phase08_20_diagram_real_fixture_results_and_legacy_rejections"
+    ],
+    "workerProof": "diagram::phase08_20::phase08_20_diagram_each_wrapper_yields_same_poll_and_maps_join_failure holds the diagram_pattern_list future at spawn_blocking worker entry via the workspace-root-keyed (or export-target-keyed for diagram_export_blob_to_path) #[cfg(test)] worker-stage hook, manually polls it on the same async task and proves progress while a distinct worker thread stays blocked; the panicked worker maps to the display-only diagram_pattern_list_task_failed String.",
+    "platformScope": "macOS unit fixtures only: atomic_file::phase08_06::Home isolation, disposable tempdir workspaces with a seeded .maru directory and the test-only worker-stage hook; no live workspace, credential or network endpoint is touched.",
+    "limits": "The scan is bounded to a single level of .maru/diagram-patterns; external writers racing a listing are outside the in-process guarantee. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
+    "contract": "The Vec<DiagramFile> payload, the mtime-descending sort and the empty-list semantics for a missing preset directory are unchanged; the only new failure path is the JoinError-to-String mapping at the worker boundary."
+   }
+  },
+  {
+   "name": "diagram_pattern_delete",
+   "module": "src-tauri/src/diagram/mod.rs",
+   "registrationPath": "src-tauri/src/lib.rs::diagram::ipc::diagram_pattern_delete",
+   "originalDisposition": "AUDIT",
+   "disposition": "ISOLATED",
+   "helperChain": [
+    "src-tauri/src/diagram/mod.rs::ipc::diagram_pattern_delete owns the workspace and name Strings and awaits tauri::async_runtime::spawn_blocking calling src-tauri/src/diagram/mod.rs::diagram_pattern_delete inside the worker; a JoinError becomes the display-only diagram_pattern_delete_task_failed String.",
+    "src-tauri/src/diagram/mod.rs::diagram_pattern_delete resolves the preset through src-tauri/src/diagram/mod.rs::pattern_file_path and enters shared admission over the preset file.",
+    "src-tauri/src/diagram/mod.rs::diagram_pattern_delete builds the src-tauri/src/atomic_file.rs::PathTransactionRequest (the .maru/diagram-patterns/<name>.pattern.json preset file, workspace-root parent snapshot via PathTransactionRequest::require_parent, workspace-registry precondition) and enters src-tauri/src/atomic_file.rs::with_path_transactions inside the blocking worker; src-tauri/src/diagram/mod.rs::diagram_pattern_delete_in_transaction revalidates coverage with PathTransactionLease::ensure_covered plus PathTransactionLease::ensure_workspace_registry and calls PathTransactionLease::before_effect before the first filesystem effect.",
+    "src-tauri/src/diagram/mod.rs::diagram_pattern_delete_in_transaction preserves the original missing-file Ok(false) fast path, re-runs the Delete policy check and removes the file only after PathTransactionLease::before_effect."
+   ],
+   "workerBoundary": "src-tauri/src/diagram/mod.rs::ipc::diagram_pattern_delete awaits tauri::async_runtime::spawn_blocking before any filesystem access runs (the #[cfg(test)] worker-stage hook keyed to the fixture workspace root fires at worker entry); only a JoinError maps to the display-only diagram_pattern_delete_task_failed String while the bool payload and every domain error string pass through unchanged; owned Strings and Vec<u8> cross the await, never a borrowed State or guard.",
+   "syncCallers": [
+    "No Rust or CLI caller invokes diagram_pattern_delete synchronously today; src-tauri/src/lib.rs registers only diagram::ipc::diagram_pattern_delete, and the original synchronous src-tauri/src/diagram/mod.rs::diagram_pattern_delete keeps its name and signature for Rust callers (the inline legacy tests exercise it directly)."
+   ],
+   "mutationKey": {
+    "lexicalPaths": [
+     "The pattern preset file <workspace>/.maru/diagram-patterns/<name>.pattern.json, resolved by src-tauri/src/diagram/mod.rs::pattern_file_path"
+    ],
+    "aliasPaths": [
+     "Physical alias key of the preset file plus the pinned existing-ancestor parents captured by src-tauri/src/atomic_file.rs::PathTransactionRequest::new, with the workspace-root parent pinned by PathTransactionRequest::require_parent"
+    ],
+    "sharedAdmissionEntry": "src-tauri/src/diagram/mod.rs::diagram_pattern_delete builds the src-tauri/src/atomic_file.rs::PathTransactionRequest (the .maru/diagram-patterns/<name>.pattern.json preset file, workspace-root parent snapshot via PathTransactionRequest::require_parent, workspace-registry precondition) and enters src-tauri/src/atomic_file.rs::with_path_transactions inside the blocking worker; src-tauri/src/diagram/mod.rs::diagram_pattern_delete_in_transaction revalidates coverage with PathTransactionLease::ensure_covered plus PathTransactionLease::ensure_workspace_registry and calls PathTransactionLease::before_effect before the first filesystem effect.",
+    "postAdmissionPreconditions": [
+     "src-tauri/src/diagram/mod.rs::validate_name rejects unsafe preset names before admission",
+     "The missing-file Ok(false) fast path is preserved before the policy check, matching the original wire behavior",
+     "src-tauri/src/vault_list.rs::assert_maru_can_write with the Delete action runs inside the transaction before any effect",
+     "PathTransactionLease::before_effect confirms the pinned parents before fs::remove_file"
+    ],
+    "domainLockOrder": "Shared path admission is acquired inside the blocking worker before the workspace write-policy check and the effects; Diagram mode has no domain mutex of its own, and no guard is held across an await."
+   },
+   "tests": [
+    {
+     "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_20",
+     "passed": 9,
+     "failed": 0,
+     "ignored": 0,
+     "exitCode": 0
+    }
+   ],
+   "processingCaller": {
+    "path": [
+     "src/lib/diagram.ts",
+     "src/lib/diagram.test.ts"
+    ],
+    "payload": "deleteDiagramPattern (src/lib/diagram.ts:329) invokes diagram_pattern_delete with workspace and name when the user deletes a preset; the Diagram surface keeps owning the follow-up preset list refresh regardless of screen changes.",
+    "terminalNoticeOwner": "The Diagram surface (src/components/diagram) owns current diagram list, snapshot and export display and error toasts. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+   ,
+     "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+     "successRetention": "updated record retained in component state",
+     "failureReasons": "call-site catch error message (single publisher)",
+     "singleTerminalNoticeOwner": true,
+     "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=diagram_pattern_delete"
+   },
+   "evidence": {
+    "behaviorCases": [
+     "phase08_20_diagram_each_wrapper_yields_same_poll_and_maps_join_failure",
+     "phase08_20_diagram_real_fixture_results_and_legacy_rejections"
+    ],
+    "workerProof": "diagram::phase08_20::phase08_20_diagram_each_wrapper_yields_same_poll_and_maps_join_failure holds the diagram_pattern_delete future at spawn_blocking worker entry via the workspace-root-keyed (or export-target-keyed for diagram_export_blob_to_path) #[cfg(test)] worker-stage hook, manually polls it on the same async task and proves progress while a distinct worker thread stays blocked; the panicked worker maps to the display-only diagram_pattern_delete_task_failed String.",
+    "platformScope": "macOS unit fixtures only: atomic_file::phase08_06::Home isolation, disposable tempdir workspaces with a seeded .maru directory and the test-only worker-stage hook; no live workspace, credential or network endpoint is touched.",
+    "limits": "Shared admission serializes cooperating in-process writers only; external processes racing the delete are outside the in-process guarantee. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
+    "contract": "The bool payload, the missing-file Ok(false) fast path and the name validation rejections are unchanged; the only new failure paths are the JoinError-to-String mapping and the shared admission conflict string."
+   }
+  }
+ ]
+}

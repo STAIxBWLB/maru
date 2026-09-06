@@ -35,14 +35,14 @@ nothing in the existing suite would notice.
   registry fresh rather than writing back a pre-network copy. A source removed
   concurrently must not be resurrected by the sync that was already in flight.
 
-- [ ] **PERF-03**: A panic under one of the six named process-global locks
+- [x] **PERF-03**: A panic under one of the six named process-global locks
   (`REGISTRY_LOCK`, `JOBS_LOCK`, `DOT_ACTION_LOCK`, `BINDER_WRITE_LOCK`, and the
   terminal registry and killer locks) leaves that feature usable instead of
   bricked until app restart. Each lock carries its own recorded justification for
   why recovery is safe for the data it protects; the recovery is not extended to
   any lock outside the six.
 
-- [ ] **PERF-04**: A recursive filesystem watcher does not generate events for
+- [x] **PERF-04**: A recursive filesystem watcher does not generate events for
   paths under the shared generated-directory prune list, so a watched root that
   gains a heavy subtree does not become an event-volume bottleneck.
 
@@ -51,7 +51,7 @@ nothing in the existing suite would notice.
   spent since v0.4.46. The budget numbers themselves are not raised, and no mode
   shows unstyled content on its first activation.
 
-- [ ] **PERF-06**: The document index excludes the inbox root the way it already
+- [x] **PERF-06**: The document index excludes the inbox root the way it already
   excludes Scratchpad - a tree browsed in its own pane is not document-index
   content. The exclusion covers all three paths that carry the scratchpad
   exclusion today (`scan_vault`, `scan_vault_paths`, and the
@@ -103,7 +103,7 @@ nothing in the existing suite would notice.
   rather than a dev server, since this class of removal can pass in development
   and fail only in the shipped bundle.
 
-- [ ] **SEC-02**: `make verify` fails when a `dangerouslySetInnerHTML` value in
+- [x] **SEC-02**: `make verify` fails when a `dangerouslySetInnerHTML` value in
   `src/` does not trace to a DOMPurify-backed helper. The guard is a static
   check in the shape of the existing `scripts/check-*.mjs` family, not a new lint
   framework.
@@ -186,16 +186,16 @@ Deferred. Acknowledged but not in this roadmap.
 |-------------|-------|--------|
 | PERF-01 | Phase 8 | Pending |
 | PERF-02 | Phase 8 | Pending |
-| PERF-03 | Phase 7 | Pending |
-| PERF-04 | Phase 7 | Pending |
+| PERF-03 | Phase 7 | Complete |
+| PERF-04 | Phase 7 | Complete |
 | PERF-05 | Phase 10 | Pending |
-| PERF-06 | Phase 7 | Pending |
+| PERF-06 | Phase 7 | Complete |
 | REL-01 | Phase 9 | Pending |
 | REL-02 | Phase 9 | Pending |
 | REL-03 | Phase 9 | Pending |
 | REL-04 | Phase 9 | Pending |
 | SEC-01 | Phase 10 | Pending |
-| SEC-02 | Phase 7 | Pending |
+| SEC-02 | Phase 7 | Complete |
 | SEC-03 | Phase 11 | Pending |
 | TEST-01 | Phase 6 | Complete |
 | TEST-02 | Phase 11 | Pending |

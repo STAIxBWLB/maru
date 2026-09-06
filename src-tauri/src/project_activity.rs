@@ -45,7 +45,6 @@ pub struct ProjectActivityReport {
     pub elapsed_ms: u64,
 }
 
-#[tauri::command(async)]
 pub fn scan_project_activity(
     work_path: String,
     meeting_window_days: Option<u32>,
@@ -61,6 +60,8 @@ pub(crate) fn scan_project_activity_impl(
     let started = std::time::Instant::now();
     let mut warnings = Vec::new();
 
+    // This lookup reads .maru/projects.json or project-registry.yaml directly;
+    // it does not call ensure_maru_dir or migrate/write workspace configuration.
     let projects = workspace_project_entries(work, false)?;
     let window_days = meeting_window_days.unwrap_or(DEFAULT_MEETING_WINDOW_DAYS);
 
@@ -391,6 +392,58 @@ projects:
     }
 
     #[test]
+    fn phase08_09_project_activity_wrapper_yields_and_preserves_join_error() {
+        let home = crate::atomic_file::phase08_06::Home::new();
+        crate::atomic_file::phase08_06::boundary(
+            home.root.path().into(),
+            "scan_project_activity",
+            ipc::scan_project_activity(home.root.path().to_string_lossy().into_owned(), None),
+        );
+        assert!(!home.root.path().join(".maru").exists());
+    }
+
+    #[test]
+    fn phase08_09_project_activity_payload_errors_and_no_implicit_writes() {
+        use crate::atomic_file::phase08_06::{run, Home};
+        let home = Home::new();
+        let root = home.root.path();
+        setup(root);
+        meeting(
+            root,
+            &format!("{}-meeting.md", today_stamp(2)),
+            "project: rise\n",
+        );
+        let work = root.to_string_lossy().into_owned();
+        let report = run(ipc::scan_project_activity(work.clone(), Some(30))).unwrap();
+        assert_eq!(report.rows.len(), 4);
+        let rise = report.rows.iter().find(|row| row.id == "rise").unwrap();
+        assert!(rise.last_activity_at.is_some());
+        assert!(rise.last_meeting_day.is_some());
+        assert!(
+            !root.join(".maru").exists(),
+            "registry lookup must not initialize or migrate state"
+        );
+        fs::write(root.join("project-registry.yaml"), "projects: [").unwrap();
+        assert!(run(ipc::scan_project_activity(work.clone(), None))
+            .unwrap_err()
+            .starts_with("Cannot parse project-registry.yaml:"));
+        assert!(!root.join(".maru").exists());
+        assert!(run(ipc::scan_project_activity(format!("{work}/missing"), None)).is_err());
+        fs::remove_file(root.join("project-registry.yaml")).unwrap();
+        fs::create_dir(root.join(".maru")).unwrap();
+        let json = r#"{"projects":[{"id":"json-project","name":"JSON","path":"projects/rise"}]}"#;
+        fs::write(root.join(".maru/projects.json"), json).unwrap();
+        let report = run(ipc::scan_project_activity(work, None)).unwrap();
+        assert_eq!(report.rows.len(), 1);
+        assert_eq!(report.rows[0].id, "json-project");
+        assert_eq!(
+            fs::read_to_string(root.join(".maru/projects.json")).unwrap(),
+            json
+        );
+        assert_eq!(fs::read_dir(root.join(".maru")).unwrap().count(), 1);
+    }
+
+    #[test]
     fn rows_cover_registry_projects_including_sub_projects() {
         let tmp = tempfile::tempdir().expect("tempdir");
         setup(tmp.path());
@@ -591,5 +644,26 @@ projects:
         assert_eq!(meeting_day_from_file_name("meeting-foo.md"), None);
         assert_eq!(meeting_day_from_file_name("2608-short.md"), None);
         assert_eq!(meeting_day_from_file_name("269917-badmonth.md"), None);
+    }
+}
+
+/// Keep traversal and registry parsing off the shared async worker.
+pub mod ipc {
+    use super::*;
+    #[tauri::command]
+    pub async fn scan_project_activity(
+        work_path: String,
+        meeting_window_days: Option<u32>,
+    ) -> Result<ProjectActivityReport, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            crate::atomic_file::PathTransactionLease::test_stage(
+                &[std::path::PathBuf::from(&work_path)],
+                "worker:scan_project_activity",
+            );
+            super::scan_project_activity(work_path, meeting_window_days)
+        })
+        .await
+        .map_err(|error| format!("scan_project_activity_task_failed: {error}"))?
     }
 }

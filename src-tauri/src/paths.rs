@@ -56,6 +56,22 @@ pub const GENERATED_DIRS: &[&str] = &[
     "__pycache__",
 ];
 
+/// True when any component of `path` is a generated-directory name
+/// ([`GENERATED_DIRS`]). Root-agnostic on purpose: recursive watchers watch
+/// multiple roots (ops_catalog registers one per business unit), so this
+/// matches on absolute path components, unlike the root-relative
+/// `vault::ScanFilter::is_excluded_path`. Exact-name semantics, no globs or
+/// regex — a sibling directory that merely shares a prefix (e.g.
+/// `node_modules_backup`) is not pruned (PERF-04, D-05).
+pub fn is_under_generated_dir(path: &Path) -> bool {
+    path.components().any(|component| {
+        let std::path::Component::Normal(name) = component else {
+            return false;
+        };
+        GENERATED_DIRS.contains(&name.to_string_lossy().as_ref())
+    })
+}
+
 /// Containment check: `child` must resolve (lexically — symlinks untouched)
 /// to a path under `parent`. Canonical example for new path-accepting
 /// commands (SCAN-03).
@@ -163,6 +179,34 @@ mod tests {
     #[test]
     fn require_absolute_rejects_relative_path() {
         assert!(require_absolute(PathBuf::from("relative-home")).is_err());
+    }
+
+    #[test]
+    fn is_under_generated_dir_matches_deep_component() {
+        assert!(is_under_generated_dir(Path::new(
+            "/work/a/target/debug/x.o"
+        )));
+    }
+
+    #[test]
+    fn is_under_generated_dir_rejects_prefix_sibling() {
+        assert!(!is_under_generated_dir(Path::new(
+            "/work/node_modules_backup/notes.md"
+        )));
+    }
+
+    #[test]
+    fn is_under_generated_dir_rejects_root_and_empty_path() {
+        assert!(!is_under_generated_dir(Path::new("/work")));
+        assert!(!is_under_generated_dir(Path::new("")));
+    }
+
+    #[test]
+    fn is_under_generated_dir_prunes_every_generated_dir_entry() {
+        for dir in GENERATED_DIRS {
+            let path = Path::new("/work/x").join(dir).join("file");
+            assert!(is_under_generated_dir(&path), "entry {dir} must prune");
+        }
     }
 
     #[test]

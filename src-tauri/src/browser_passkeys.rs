@@ -179,7 +179,7 @@ fn has_browser_passkey_entitlement() -> bool {
 }
 
 #[cfg(target_os = "macos")]
-fn shared_manager(app: &AppHandle) -> Result<*mut AnyObject, String> {
+fn shared_manager<R: tauri::Runtime>(app: &AppHandle<R>) -> Result<*mut AnyObject, String> {
     let state = app.state::<BrowserPasskeyState>();
     let mut manager = state
         .manager
@@ -205,37 +205,42 @@ fn shared_manager(app: &AppHandle) -> Result<*mut AnyObject, String> {
 }
 
 #[cfg(target_os = "macos")]
-fn native_status(app: &AppHandle) -> Result<BrowserPasskeyStatus, String> {
+fn native_status<R: tauri::Runtime>(app: &AppHandle<R>) -> Result<BrowserPasskeyStatus, String> {
     if !has_browser_passkey_entitlement() || !manager_is_available() {
         return Ok(unsupported_status());
     }
     let manager = shared_manager(app)?;
     // SAFETY: all access to the non-atomic Objective-C property is dispatched
-    // to the main thread by the command wrapper.
+    // to the main thread by the caller.
     let authorization: isize =
         unsafe { msg_send![manager, authorizationStateForPlatformCredentials] };
     Ok(status_from_runtime_capabilities(true, true, authorization))
 }
 
+/// Dispatches the inspection to the main thread and blocks the calling thread
+/// until the platform answers; the command wrapper only invokes this from an
+/// owned blocking worker so the shared async runtime never waits.
 #[cfg(target_os = "macos")]
-async fn status_on_main_thread(app: AppHandle) -> Result<BrowserPasskeyStatus, String> {
-    let (sender, mut receiver) = tauri::async_runtime::channel(1);
+fn status_on_main_thread<R: tauri::Runtime>(
+    app: AppHandle<R>,
+) -> Result<BrowserPasskeyStatus, String> {
+    let (sender, receiver) = std::sync::mpsc::channel();
     let main_app = app.clone();
     app.run_on_main_thread(move || {
-        let _ = sender.try_send(native_status(&main_app));
+        let _ = sender.send(native_status(&main_app));
     })
     .map_err(|err| format!("Cannot inspect browser passkey authorization: {err}"))?;
     receiver
         .recv()
-        .await
-        .ok_or_else(|| "Browser passkey status did not complete".to_string())?
+        .map_err(|_| "Browser passkey status did not complete".to_string())?
 }
 
-#[tauri::command]
-pub async fn browser_passkey_status(app: AppHandle) -> Result<BrowserPasskeyStatus, String> {
+pub fn browser_passkey_status<R: tauri::Runtime>(
+    app: AppHandle<R>,
+) -> Result<BrowserPasskeyStatus, String> {
     #[cfg(target_os = "macos")]
     {
-        status_on_main_thread(app).await
+        status_on_main_thread(app)
     }
     #[cfg(not(target_os = "macos"))]
     {
@@ -252,40 +257,38 @@ impl Drop for InFlightGuard {
     }
 }
 
-#[tauri::command]
-pub async fn browser_passkey_request_authorization(
-    app: AppHandle,
-    state: tauri::State<'_, BrowserPasskeyState>,
+pub fn browser_passkey_request_authorization<R: tauri::Runtime>(
+    app: AppHandle<R>,
+    request_in_flight: Arc<AtomicBool>,
 ) -> Result<BrowserPasskeyStatus, String> {
-    if state
-        .request_in_flight
+    if request_in_flight
         .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
         .is_err()
     {
         return Err("A browser passkey authorization request is already in progress".to_string());
     }
-    let _guard = InFlightGuard(Arc::clone(&state.request_in_flight));
+    let _guard = InFlightGuard(Arc::clone(&request_in_flight));
 
     #[cfg(target_os = "macos")]
     {
-        let (sender, mut receiver) = tauri::async_runtime::channel(1);
+        let (sender, receiver) = std::sync::mpsc::channel();
         let main_app = app.clone();
         app.run_on_main_thread(move || {
             if !has_browser_passkey_entitlement() || !manager_is_available() {
-                let _ = sender.try_send(Ok(unsupported_status()));
+                let _ = sender.send(Ok(unsupported_status()));
                 return;
             }
             let manager = match shared_manager(&main_app) {
                 Ok(manager) => manager,
                 Err(err) => {
-                    let _ = sender.try_send(Err(err));
+                    let _ = sender.send(Err(err));
                     return;
                 }
             };
             // The state owns the manager for the app lifetime. The system
             // copies this block for the asynchronous authorization prompt.
             let completion = RcBlock::new(move |authorization: isize| {
-                let _ = sender.try_send(Ok(BrowserPasskeyStatus {
+                let _ = sender.send(Ok(BrowserPasskeyStatus {
                     supported: true,
                     authorization: authorization_from_raw(authorization),
                     requires_managed_entitlement: true,
@@ -305,13 +308,56 @@ pub async fn browser_passkey_request_authorization(
 
         receiver
             .recv()
-            .await
-            .ok_or_else(|| "Browser passkey authorization did not complete".to_string())?
+            .map_err(|_| "Browser passkey authorization did not complete".to_string())?
     }
     #[cfg(not(target_os = "macos"))]
     {
         let _ = app;
         Ok(unsupported_status())
+    }
+}
+
+#[cfg(test)]
+const WORKER_HOOK_KEY: &str = "/maru/phase08_24/browser_passkeys";
+
+/// Owned IPC boundaries; the synchronous functions remain the Rust/CLI API and
+/// every entitlement check, framework load and main-thread dispatch runs in a
+/// finite blocking worker with an operation-specific join error.
+pub mod ipc {
+    use super::*;
+
+    #[tauri::command]
+    pub async fn browser_passkey_status<R: tauri::Runtime>(
+        app: AppHandle<R>,
+    ) -> Result<BrowserPasskeyStatus, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            crate::atomic_file::PathTransactionLease::test_stage(
+                &[std::path::PathBuf::from(WORKER_HOOK_KEY)],
+                "worker:browser_passkey_status",
+            );
+            super::browser_passkey_status(app)
+        })
+        .await
+        .map_err(|err| format!("browser_passkey_status_task_failed: {err}"))?
+    }
+
+    #[tauri::command]
+    pub async fn browser_passkey_request_authorization<R: tauri::Runtime>(
+        app: AppHandle<R>,
+        state: tauri::State<'_, BrowserPasskeyState>,
+    ) -> Result<BrowserPasskeyStatus, String> {
+        let request_in_flight = state.request_in_flight.clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            crate::atomic_file::PathTransactionLease::test_stage(
+                &[std::path::PathBuf::from(WORKER_HOOK_KEY)],
+                "worker:browser_passkey_request_authorization",
+            );
+            super::browser_passkey_request_authorization(app, request_in_flight)
+        })
+        .await
+        .map_err(|err| format!("browser_passkey_request_authorization_task_failed: {err}"))?
     }
 }
 
@@ -369,5 +415,80 @@ mod tests {
         let flag = Arc::new(AtomicBool::new(true));
         drop(InFlightGuard(Arc::clone(&flag)));
         assert!(!flag.load(Ordering::Acquire));
+    }
+
+    mod phase08_24 {
+        use super::*;
+        use crate::atomic_file::phase08_06::{boundary, run};
+        use std::sync::{Mutex, MutexGuard};
+        use tauri::Manager;
+
+        // The synthetic worker-hook key is module-global, so the stage-hook
+        // tests must not overlap: a hook registered by one test would
+        // otherwise intercept a parallel test's worker at the same stage.
+        static TEST_LOCK: Mutex<()> = Mutex::new(());
+        fn serialized() -> MutexGuard<'static, ()> {
+            TEST_LOCK
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+        }
+
+        fn mock_app() -> tauri::App<tauri::test::MockRuntime> {
+            let app = tauri::test::mock_app();
+            app.manage(BrowserPasskeyState::default());
+            app
+        }
+
+        #[test]
+        fn phase08_24_browser_passkey_wrappers_yield_same_poll_and_map_join_failure() {
+            let _guard = serialized();
+            let key = std::path::PathBuf::from(WORKER_HOOK_KEY);
+            let app = mock_app();
+            let status_app = app.handle().clone();
+            boundary(key.clone(), "browser_passkey_status", async move {
+                ipc::browser_passkey_status(status_app).await
+            });
+            let request_app = app.handle().clone();
+            boundary(key, "browser_passkey_request_authorization", async move {
+                ipc::browser_passkey_request_authorization(request_app.clone(), request_app.state())
+                    .await
+            });
+        }
+
+        #[test]
+        fn phase08_24_browser_passkey_real_results_and_in_flight_rejection() {
+            let _guard = serialized();
+            let app = mock_app();
+            let app = app.handle().clone();
+            run(async move {
+                let status = ipc::browser_passkey_status(app.clone()).await.unwrap();
+                assert_eq!(status, unsupported_status());
+
+                let requested =
+                    ipc::browser_passkey_request_authorization(app.clone(), app.state())
+                        .await
+                        .unwrap();
+                assert_eq!(requested, unsupported_status());
+
+                app.state::<BrowserPasskeyState>()
+                    .request_in_flight
+                    .store(true, Ordering::Release);
+                let error = ipc::browser_passkey_request_authorization(app.clone(), app.state())
+                    .await
+                    .unwrap_err();
+                assert_eq!(
+                    error,
+                    "A browser passkey authorization request is already in progress"
+                );
+                app.state::<BrowserPasskeyState>()
+                    .request_in_flight
+                    .store(false, Ordering::Release);
+                let recovered =
+                    ipc::browser_passkey_request_authorization(app.clone(), app.state())
+                        .await
+                        .unwrap();
+                assert_eq!(recovered, unsupported_status());
+            });
+        }
     }
 }

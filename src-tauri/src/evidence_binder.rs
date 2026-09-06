@@ -1,4 +1,6 @@
-use crate::atomic_file::write_atomic;
+use crate::atomic_file::{
+    with_path_transactions, write_atomic, PathTransactionLease, PathTransactionRequest,
+};
 use crate::ipc_error::{IpcError, EVIDENCE_BINDER_REVISION_CONFLICT};
 use crate::kordoc_lite::{self, DocumentFormat, KordocLiteCheck};
 use crate::paths::GENERATED_DIRS;
@@ -21,6 +23,9 @@ const MAX_TARGETS_PER_CATEGORY: usize = 50;
 const MAX_TARGET_LENGTH: usize = 200;
 const MAX_NOTE_LENGTH: usize = 2_000;
 const MAX_INSPECTION_CACHE_ENTRIES: usize = 512;
+// D-03: BINDER_WRITE_LOCK serializes writers of the `.maru/binder/` state,
+// which is read from disk after acquisition, so the in-memory unit carries
+// no invariant and recovering the guard cannot serve tainted state.
 static BINDER_WRITE_LOCK: Mutex<()> = Mutex::new(());
 static INSPECTION_CACHE: OnceLock<Mutex<HashMap<CandidateInspectionKey, CandidateInspection>>> =
     OnceLock::new();
@@ -239,7 +244,6 @@ impl ProcessedManifestFile {
     }
 }
 
-#[tauri::command(async)]
 pub fn evidence_binder_read(
     req: EvidenceBinderReadRequest,
 ) -> Result<EvidenceBinderResponse, String> {
@@ -255,16 +259,68 @@ pub fn evidence_binder_read(
     })
 }
 
-#[tauri::command(async)]
 pub fn evidence_binder_mutate(
     req: EvidenceBinderMutateRequest,
 ) -> Result<EvidenceBinderResponse, IpcError> {
     let work = normalize_existing_dir(&req.work_path)?;
-    assert_maru_can_write(&req.work_path, WorkspaceWriteAction::Modify)?;
+    let lexical = PathBuf::from(&req.work_path);
+    let lexical = if lexical.is_absolute() {
+        crate::vault::lexical_normalize(&lexical)
+    } else {
+        crate::vault::lexical_normalize(
+            &std::env::current_dir()
+                .map_err(|err| format!("Cannot resolve binder workspace: {err}"))?
+                .join(lexical),
+        )
+    };
     let doc_id = sanitize_doc_id(&req.doc_id)?;
-    let _guard = BINDER_WRITE_LOCK
-        .lock()
-        .map_err(|_| "evidence_binder_lock_poisoned".to_string())?;
+    // Reserve the directory (including atomic temporary files/rekey) and the
+    // exact file so a state-file symlink also participates by physical identity.
+    // Keep the original workspace alias alongside the canonical IO location.
+    let mut paths = vec![
+        lexical.join(".maru/binder"),
+        work.join(".maru/binder"),
+        state_path(&lexical, &doc_id)?,
+        state_path(&work, &doc_id)?,
+    ];
+    if let Some(document) = req.document_path.as_deref() {
+        paths.extend([lexical.join(document), work.join(document)]);
+    }
+    let request = PathTransactionRequest::new(paths)?
+        .with_workspace_registry()?
+        .require_parent(&lexical)?
+        .require_parent(&work)?;
+    // Admission errors are display-only, while inner revision conflicts retain
+    // their typed wire payload. No domain mutex is held during admission.
+    with_path_transactions(request, |lease| {
+        Ok(evidence_binder_mutate_in_transaction(lease, req))
+    })?
+}
+
+fn evidence_binder_mutate_in_transaction(
+    lease: &PathTransactionLease,
+    req: EvidenceBinderMutateRequest,
+) -> Result<EvidenceBinderResponse, IpcError> {
+    lease.ensure_workspace_registry()?;
+    let work = normalize_existing_dir(&req.work_path)?;
+    let doc_id = sanitize_doc_id(&req.doc_id)?;
+    let mut paths = vec![work.join(".maru/binder"), state_path(&work, &doc_id)?];
+    if let Some(document) = req.document_path.as_deref() {
+        paths.push(work.join(document));
+    }
+    lease.ensure_covered(paths)?;
+    // The permission loader can migrate the legacy workspace registry.
+    // Revalidate original parents before that first possible disk effect.
+    lease.before_effect()?;
+    assert_maru_can_write(&req.work_path, WorkspaceWriteAction::Modify)?;
+    // D-03: the guarded `.maru/binder/` state is read from disk after
+    // acquisition (see the BINDER_WRITE_LOCK declaration), so recovering a
+    // poisoned guard is safe.
+    let _guard = crate::lock_recovery::recover_guard(
+        BINDER_WRITE_LOCK.lock(),
+        "evidence_binder",
+        "BINDER_WRITE_LOCK",
+    );
     let candidates = discover_candidates(&work, req.document_path.as_deref())?;
     let mut state = read_or_create_state(&work, &doc_id, req.document_path.clone(), &candidates)?;
     let actual_revision = state_revision(&state)?;
@@ -284,6 +340,7 @@ pub fn evidence_binder_mutate(
         state.document_path = req.document_path;
     }
     state.updated_at = chrono::Utc::now().to_rfc3339();
+    lease.before_effect()?;
     write_state(&work, &state)?;
     let revision = state_revision(&state)?;
     Ok(EvidenceBinderResponse {
@@ -291,6 +348,44 @@ pub fn evidence_binder_mutate(
         candidates,
         revision,
     })
+}
+
+/// Blocking discovery, full-file hashing and domain lock waits all run on the
+/// blocking pool. The original synchronous API remains available to Rust/CLI.
+pub mod ipc {
+    use super::*;
+
+    #[tauri::command]
+    pub async fn evidence_binder_read(
+        req: EvidenceBinderReadRequest,
+    ) -> Result<EvidenceBinderResponse, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(
+                &[PathBuf::from(&req.work_path)],
+                "worker:evidence_binder_read",
+            );
+            super::evidence_binder_read(req)
+        })
+        .await
+        .map_err(|err| format!("evidence_binder_read_task_failed: {err}"))?
+    }
+
+    #[tauri::command]
+    pub async fn evidence_binder_mutate(
+        req: EvidenceBinderMutateRequest,
+    ) -> Result<EvidenceBinderResponse, IpcError> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(
+                &[PathBuf::from(&req.work_path)],
+                "worker:evidence_binder_mutate",
+            );
+            super::evidence_binder_mutate(req)
+        })
+        .await
+        .map_err(|err| IpcError::from(format!("evidence_binder_mutate_task_failed: {err}")))?
+    }
 }
 
 fn read_or_create_state(
@@ -645,14 +740,21 @@ struct PendingRekey {
     updated: Vec<u8>,
 }
 
+// Low-level participant: Files/document rename already owns the complete
+// source/destination/binder lease before entering this domain mutex.
 pub(crate) fn rekey_document_states(
     work: &Path,
     old_path: &Path,
     new_path: &Path,
 ) -> Result<(), String> {
-    let _guard = BINDER_WRITE_LOCK
-        .lock()
-        .map_err(|_| "evidence_binder_lock_poisoned".to_string())?;
+    // D-03: the guarded `.maru/binder/` state is read from disk after
+    // acquisition (see the BINDER_WRITE_LOCK declaration), so recovering a
+    // poisoned guard is safe.
+    let _guard = crate::lock_recovery::recover_guard(
+        BINDER_WRITE_LOCK.lock(),
+        "evidence_binder",
+        "BINDER_WRITE_LOCK",
+    );
     let binder_dir = work.join(".maru").join("binder");
     if !binder_dir.is_dir() {
         return Ok(());
@@ -1952,6 +2054,529 @@ files:
         assert_eq!(
             fs::read_to_string(work.join(".maru/binder/corrupt.json")).unwrap(),
             "{broken"
+        );
+    }
+}
+
+#[cfg(test)]
+mod phase08_12 {
+    use super::*;
+    use crate::atomic_file::phase08_06::{boundary, run, Held, Home};
+    use crate::atomic_file::PathTransactionTestHook;
+    use crate::scratchpad::phase08_08::registry;
+    use crate::workspace_files::phase08_06::TrashFixture;
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    fn text(path: &Path) -> String {
+        path.to_string_lossy().into_owned()
+    }
+    fn start<F>(future: F) -> mpsc::Receiver<F::Output>
+    where
+        F: std::future::Future + Send + 'static,
+        F::Output: Send + 'static,
+    {
+        let (tx, rx) = mpsc::channel();
+        tauri::async_runtime::spawn(async move {
+            let _ = tx.send(future.await);
+        });
+        rx
+    }
+    fn done<T>(receiver: mpsc::Receiver<T>) -> T {
+        receiver.recv_timeout(Duration::from_secs(10)).unwrap()
+    }
+    fn read_request(root: &Path) -> EvidenceBinderReadRequest {
+        EvidenceBinderReadRequest {
+            work_path: text(root),
+            doc_id: "report".into(),
+            document_path: Some("projects/demo/report.md".into()),
+        }
+    }
+    fn fixture(home: &Home) -> (tempfile::TempDir, EvidenceBinderResponse) {
+        let tmp = tempfile::tempdir_in(home.root.path()).unwrap();
+        let root = tmp.path();
+        fs::create_dir_all(root.join("projects/demo")).unwrap();
+        fs::write(root.join("projects/demo/report.md"), "# Original\nbody\n").unwrap();
+        fs::write(
+            root.join("projects/demo/receipt.pdf"),
+            b"%PDF-1.4\nfixture receipt\n%%EOF",
+        )
+        .unwrap();
+        fs::write(
+            root.join("projects/demo/receipt.pdf.evidence.yaml"),
+            "kind: receipt\nstatus: pending\nsummary: synthetic receipt\n",
+        )
+        .unwrap();
+        let initial = run(ipc::evidence_binder_read(read_request(root))).unwrap();
+        assert_eq!(initial.candidates.len(), 1);
+        assert!(
+            !root.join(".maru/binder").exists(),
+            "read must have no filesystem effects"
+        );
+        let linked = run(ipc::evidence_binder_mutate(EvidenceBinderMutateRequest {
+            work_path: text(root),
+            doc_id: "report".into(),
+            document_path: Some("projects/demo/report.md".into()),
+            expected_revision: initial.revision,
+            mutation: EvidenceBinderMutation::Link {
+                candidate_id: initial.candidates[0].id.clone(),
+            },
+        }))
+        .unwrap();
+        assert_eq!(linked.state.bindings.len(), 1);
+        assert!(linked.state.bindings[0]
+            .evidence_sha256
+            .as_ref()
+            .is_some_and(|hash| hash.len() == 64));
+        (tmp, linked)
+    }
+    fn note_request(root: &Path, state: &EvidenceBinderResponse) -> EvidenceBinderMutateRequest {
+        EvidenceBinderMutateRequest {
+            work_path: text(root),
+            doc_id: "report".into(),
+            document_path: Some("projects/demo/report.md".into()),
+            expected_revision: state.revision.clone(),
+            mutation: EvidenceBinderMutation::SetNote {
+                binding_id: state.state.bindings[0].binding_id.clone(),
+                note: Some("updated fixture evidence".into()),
+            },
+        }
+    }
+
+    #[test]
+    fn phase08_12_binder_real_payload_legacy_and_typed_errors() {
+        let home = Home::new();
+        let (tmp, initial) = fixture(&home);
+        let root = tmp.path();
+        let request = note_request(root, &initial);
+        let updated = run(ipc::evidence_binder_mutate(request.clone())).unwrap();
+        assert_eq!(
+            updated.state.bindings[0].note.as_deref(),
+            Some("updated fixture evidence")
+        );
+        let stale = run(ipc::evidence_binder_mutate(request)).unwrap_err();
+        assert_eq!(stale.code, EVIDENCE_BINDER_REVISION_CONFLICT);
+        let mut missing = note_request(root, &updated);
+        missing.mutation = EvidenceBinderMutation::Unlink {
+            binding_id: "absent".into(),
+        };
+        let error = run(ipc::evidence_binder_mutate(missing)).unwrap_err();
+        assert!(error.code.is_empty());
+        assert_eq!(error.message, "evidence_binder_binding_not_found");
+        let mut invalid = read_request(root);
+        invalid.doc_id = "../invalid".into();
+        assert_eq!(
+            run(ipc::evidence_binder_read(invalid)).unwrap_err(),
+            "evidence_binder_doc_id_invalid"
+        );
+        assert_eq!(
+            run(ipc::evidence_binder_read(read_request(root)))
+                .unwrap()
+                .revision,
+            updated.revision
+        );
+        // Schema-v1 migration remains an in-memory read and does not rewrite disk.
+        let legacy_path = state_path(root, "legacy").unwrap();
+        let legacy = serde_json::json!({"schemaVersion":1,"docId":"legacy","bindings":[{"candidateId":"ev_missing","note":"old evidence"}],"updatedAt":"2026-09-05T00:00:00Z"}).to_string();
+        fs::write(&legacy_path, &legacy).unwrap();
+        let mut request = read_request(root);
+        request.doc_id = "legacy".into();
+        let migrated = run(ipc::evidence_binder_read(request)).unwrap();
+        assert_eq!(migrated.state.schema_version, 2);
+        assert_eq!(
+            migrated.state.bindings[0].note.as_deref(),
+            Some("old evidence")
+        );
+        assert_eq!(fs::read_to_string(legacy_path).unwrap(), legacy);
+    }
+
+    #[test]
+    fn phase08_12_binder_wrappers_yield_same_task_and_preserve_join_errors() {
+        let home = Home::new();
+        let (tmp, state) = fixture(&home);
+        boundary(
+            tmp.path().into(),
+            "evidence_binder_read",
+            ipc::evidence_binder_read(read_request(tmp.path())),
+        );
+        let request = note_request(tmp.path(), &state);
+        boundary(tmp.path().into(), "evidence_binder_mutate", async move {
+            ipc::evidence_binder_mutate(request).await.map_err(|error| {
+                assert!(error.code.is_empty());
+                error.message
+            })
+        });
+    }
+
+    #[test]
+    fn phase08_12_binder_same_target_conflict_error_and_unwind_release() {
+        let home = Home::new();
+        let (tmp, state) = fixture(&home);
+        let root = tmp.path();
+        let key = root.join(".maru/binder");
+        let held = Held::new(key.clone(), "pre-effect");
+        let first = start(ipc::evidence_binder_mutate(note_request(root, &state)));
+        held.wait();
+        let attempt = Held::new(key.clone(), "before-admission");
+        let second = start(ipc::evidence_binder_mutate(note_request(root, &state)));
+        attempt.wait();
+        attempt.release();
+        assert!(second.recv_timeout(Duration::from_millis(30)).is_err());
+        held.release();
+        let updated = done(first).unwrap();
+        assert_eq!(
+            done(second).unwrap_err().code,
+            EVIDENCE_BINDER_REVISION_CONFLICT
+        );
+        drop(held);
+        drop(attempt);
+        let panic = PathTransactionTestHook::new(key, "pre-effect", || {
+            panic!("binder effect fixture unwind")
+        });
+        let error = run(ipc::evidence_binder_mutate(note_request(root, &updated))).unwrap_err();
+        assert!(error.code.is_empty());
+        assert!(error
+            .message
+            .starts_with("evidence_binder_mutate_task_failed:"));
+        drop(panic);
+        // The failed worker released shared admission; the next real mutation
+        // also enters the unchanged recoverable domain guard and completes.
+        let final_state = run(ipc::evidence_binder_mutate(note_request(root, &updated))).unwrap();
+        assert_eq!(final_state.state.bindings.len(), 1);
+        assert_eq!(
+            run(ipc::evidence_binder_read(read_request(root)))
+                .unwrap()
+                .revision,
+            final_state.revision
+        );
+    }
+
+    #[test]
+    fn phase08_12_binder_denied_current_policy_and_parent_replacement_release() {
+        let home = Home::new();
+        let (tmp, state) = fixture(&home);
+        let root = tmp.path();
+        let original = fs::read(state_path(root, "report").unwrap()).unwrap();
+        let held = Held::new(root.join(".maru/binder"), "admitted");
+        let waiting = start(ipc::evidence_binder_mutate(note_request(root, &state)));
+        held.wait();
+        registry(root, "readOnly");
+        held.release();
+        let denied = done(waiting).unwrap_err();
+        assert!(denied.code.is_empty());
+        assert!(
+            denied.message.contains("read-only")
+                || denied.message.contains("read_only")
+                || denied.message.contains("readOnly"),
+            "{}",
+            denied.message
+        );
+        assert_eq!(
+            fs::read(state_path(root, "report").unwrap()).unwrap(),
+            original
+        );
+        registry(root, "direct");
+        drop(held);
+        let request = note_request(root, &state);
+        let selected = Held::new(root.join(".maru/binder"), "before-admission");
+        let waiting = start(ipc::evidence_binder_mutate(request));
+        selected.wait();
+        fs::rename(
+            root.join(".maru/binder"),
+            root.join(".maru/original-binder"),
+        )
+        .unwrap();
+        fs::create_dir(root.join(".maru/binder")).unwrap();
+        selected.release();
+        let rejected = done(waiting).unwrap_err();
+        assert!(rejected.message.contains("parent changed"));
+        assert!(!state_path(root, "report").unwrap().exists());
+        fs::remove_dir(root.join(".maru/binder")).unwrap();
+        fs::rename(
+            root.join(".maru/original-binder"),
+            root.join(".maru/binder"),
+        )
+        .unwrap();
+        run(ipc::evidence_binder_mutate(note_request(root, &state))).unwrap();
+    }
+
+    #[test]
+    fn phase08_12_binder_document_save_both_orders() {
+        let home = Home::new();
+        for binder_first in [false, true] {
+            let (tmp, state) = fixture(&home);
+            let root = tmp.path();
+            let binder = ipc::evidence_binder_mutate(note_request(root, &state));
+            let document = crate::document::ipc::save_document(
+                text(root),
+                "projects/demo/report.md".into(),
+                "# Saved\nmanual body\n".into(),
+                Some(crate::document::revision_for("# Original\nbody\n")),
+            );
+            if binder_first {
+                let held = Held::new(root.join(".maru/binder"), "pre-effect");
+                let first = start(binder);
+                held.wait();
+                let wait = Held::new(root.join("projects/demo/report.md"), "before-admission");
+                let second = start(document);
+                wait.wait();
+                wait.release();
+                assert!(second.recv_timeout(Duration::from_millis(30)).is_err());
+                held.release();
+                done(first).unwrap();
+                done(second).unwrap();
+            } else {
+                let held = Held::new(root.join("projects/demo/report.md"), "pre-effect");
+                let first = start(document);
+                held.wait();
+                let wait = Held::new(root.join(".maru/binder"), "before-admission");
+                let second = start(binder);
+                wait.wait();
+                wait.release();
+                assert!(second.recv_timeout(Duration::from_millis(30)).is_err());
+                held.release();
+                done(first).unwrap();
+                done(second).unwrap();
+            }
+            assert_eq!(
+                fs::read_to_string(root.join("projects/demo/report.md")).unwrap(),
+                "# Saved\nmanual body\n"
+            );
+            assert_eq!(
+                run(ipc::evidence_binder_read(read_request(root)))
+                    .unwrap()
+                    .state
+                    .bindings[0]
+                    .note
+                    .as_deref(),
+                Some("updated fixture evidence")
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn phase08_12_binder_exact_state_alias_document_contention_both_orders() {
+        let home = Home::new();
+        for binder_first in [false, true] {
+            let (tmp, state) = fixture(&home);
+            let root = tmp.path();
+            let target = root.join("state-alias/report.md");
+            fs::create_dir(target.parent().unwrap()).unwrap();
+            let state_file = state_path(root, "report").unwrap();
+            let original = fs::read_to_string(&state_file).unwrap();
+            fs::write(&target, &original).unwrap();
+            fs::remove_file(&state_file).unwrap();
+            std::os::unix::fs::symlink(&target, &state_file).unwrap();
+            let mut changed: serde_json::Value = serde_json::from_str(&original).unwrap();
+            changed["updatedAt"] = serde_json::json!("2026-01-01T00:00:00Z");
+            let changed = changed.to_string();
+            let binder = ipc::evidence_binder_mutate(note_request(root, &state));
+            let document = crate::document::ipc::save_document(
+                text(root),
+                "state-alias/report.md".into(),
+                changed.clone(),
+                Some(crate::document::revision_for(&original)),
+            );
+            if binder_first {
+                let held = Held::new(state_file.clone(), "pre-effect");
+                let first = start(binder);
+                held.wait();
+                let wait = Held::new(target.clone(), "before-admission");
+                let second = start(document);
+                wait.wait();
+                wait.release();
+                assert!(second.recv_timeout(Duration::from_millis(30)).is_err());
+                held.release();
+                assert_eq!(
+                    done(first).unwrap().state.bindings[0].note.as_deref(),
+                    Some("updated fixture evidence")
+                );
+                done(second).unwrap();
+                // Atomic replacement preserves the existing behavior: the
+                // binder's symlink entry becomes its new regular state file.
+                assert!(!fs::symlink_metadata(&state_file)
+                    .unwrap()
+                    .file_type()
+                    .is_symlink());
+            } else {
+                let held = Held::new(target.clone(), "pre-effect");
+                let first = start(document);
+                held.wait();
+                let wait = Held::new(state_file.clone(), "before-admission");
+                let second = start(binder);
+                wait.wait();
+                wait.release();
+                assert!(second.recv_timeout(Duration::from_millis(30)).is_err());
+                held.release();
+                done(first).unwrap();
+                assert_eq!(
+                    done(second).unwrap_err().code,
+                    EVIDENCE_BINDER_REVISION_CONFLICT
+                );
+                let current = run(ipc::evidence_binder_read(read_request(root))).unwrap();
+                run(ipc::evidence_binder_mutate(note_request(root, &current))).unwrap();
+            }
+            assert_eq!(fs::read_to_string(target).unwrap(), changed);
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn phase08_12_binder_denied_alias_policy_both_registration_directions() {
+        let home = Home::new();
+        let (tmp, state) = fixture(&home);
+        let root = tmp.path();
+        let alias = home.root.path().join("denied-binder-alias");
+        std::os::unix::fs::symlink(root, &alias).unwrap();
+        let original = fs::read(state_path(root, "report").unwrap()).unwrap();
+        for reverse in [false, true] {
+            for policy in ["readOnly", "delegated"] {
+                let (registered, caller) = if reverse {
+                    (alias.as_path(), root)
+                } else {
+                    (root, alias.as_path())
+                };
+                registry(registered, policy);
+                let error =
+                    run(ipc::evidence_binder_mutate(note_request(caller, &state))).unwrap_err();
+                assert!(error.code.is_empty());
+                assert_eq!(
+                    fs::read(state_path(root, "report").unwrap()).unwrap(),
+                    original
+                );
+                assert_eq!(
+                    run(ipc::evidence_binder_read(read_request(caller)))
+                        .unwrap()
+                        .state
+                        .bindings
+                        .len(),
+                    1
+                );
+            }
+        }
+        registry(root, "direct");
+        run(ipc::evidence_binder_mutate(note_request(&alias, &state))).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn phase08_12_binder_files_parent_both_orders_workspace_aliases_and_rekey() {
+        let home = Home::new();
+        for operation in ["rename", "trash"] {
+            for parent_first in [false, true] {
+                for alias in [false, true] {
+                    let (tmp, state) = fixture(&home);
+                    let root = tmp.path();
+                    let alias_path = home.root.path().join("binder-workspace-alias");
+                    if alias {
+                        std::os::unix::fs::symlink(root, &alias_path).unwrap();
+                    }
+                    let caller = if alias { alias_path.as_path() } else { root };
+                    let req = note_request(caller, &state);
+                    let moved = home.root.path().join("binder-moved");
+                    let trashed = home.root.path().join("binder-fixture-trash");
+                    let _trash = TrashFixture::new(root.into(), trashed.clone());
+                    let owner = text(home.root.path());
+                    let source = text(root);
+                    let parent = async move {
+                        if operation == "rename" {
+                            crate::workspace_files::ipc::rename_workspace_entry(
+                                owner,
+                                source,
+                                "binder-moved".into(),
+                            )
+                            .await
+                            .map(|v| assert!(v.error.is_none(), "{:?}", v.error))
+                        } else {
+                            crate::workspace_files::ipc::trash_workspace_entries(
+                                owner,
+                                vec![source],
+                            )
+                            .await
+                            .map(|v| assert!(v[0].error.is_none(), "{:?}", v[0].error))
+                        }
+                    };
+                    let child = ipc::evidence_binder_mutate(req);
+                    if parent_first {
+                        let held = Held::new(root.into(), "pre-effect");
+                        let first = start(parent);
+                        held.wait();
+                        let wait = Held::new(caller.join(".maru/binder"), "before-admission");
+                        let second = start(child);
+                        wait.wait();
+                        wait.release();
+                        assert!(second.recv_timeout(Duration::from_millis(30)).is_err());
+                        held.release();
+                        done(first).unwrap();
+                        assert!(done(second).is_err());
+                    } else {
+                        let held = Held::new(caller.join(".maru/binder"), "pre-effect");
+                        let first = start(child);
+                        held.wait();
+                        let wait = Held::new(root.into(), "before-admission");
+                        let second = start(parent);
+                        wait.wait();
+                        wait.release();
+                        assert!(second.recv_timeout(Duration::from_millis(30)).is_err());
+                        held.release();
+                        done(first).unwrap();
+                        done(second).unwrap();
+                    }
+                    assert!(!root.exists(), "old workspace was recreated");
+                    let destination = if operation == "rename" {
+                        &moved
+                    } else {
+                        &trashed
+                    };
+                    let value: serde_json::Value = serde_json::from_slice(
+                        &fs::read(destination.join(".maru/binder/report.json")).unwrap(),
+                    )
+                    .unwrap();
+                    assert_eq!(
+                        value["bindings"][0]["note"],
+                        if parent_first {
+                            "synthetic receipt"
+                        } else {
+                            "updated fixture evidence"
+                        }
+                    );
+                    if alias {
+                        fs::remove_file(&alias_path).unwrap();
+                    }
+                    fs::remove_dir_all(destination).unwrap();
+                }
+            }
+        }
+        // A Files rename with a binder inside the owning workspace rekeys under
+        // its existing outer lease; mutation must not reacquire that lease.
+        let (tmp, state) = fixture(&home);
+        let root = tmp.path();
+        let held = Held::new(root.join(".maru/binder"), "pre-effect");
+        let binder = start(ipc::evidence_binder_mutate(note_request(root, &state)));
+        held.wait();
+        let wait = Held::new(root.join("projects/demo"), "before-admission");
+        let rename = start(crate::workspace_files::ipc::rename_workspace_entry(
+            text(root),
+            "projects/demo".into(),
+            "renamed".into(),
+        ));
+        wait.wait();
+        wait.release();
+        assert!(rename.recv_timeout(Duration::from_millis(30)).is_err());
+        held.release();
+        done(binder).unwrap();
+        assert!(done(rename).unwrap().error.is_none());
+        let stored: EvidenceBinderState =
+            serde_json::from_slice(&fs::read(state_path(root, "report").unwrap()).unwrap())
+                .unwrap();
+        assert_eq!(
+            stored.document_path.as_deref(),
+            Some("projects/renamed/report.md")
+        );
+        assert_eq!(
+            stored.bindings[0].note.as_deref(),
+            Some("updated fixture evidence")
         );
     }
 }

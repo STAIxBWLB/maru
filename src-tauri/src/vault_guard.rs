@@ -149,7 +149,6 @@ fn validate_note_content(content: &str) -> VaultSchemaReport {
 
 /// Stateless schema check for the editor validation strip (500ms debounce).
 /// Paths outside `notes/**/*.md` always report valid (no schema there).
-#[tauri::command]
 pub fn vault_validate_note(content: String, rel_path: String) -> Result<VaultSchemaReport, String> {
     if !is_vault_note(&rel_path) {
         return Ok(VaultSchemaReport {
@@ -158,6 +157,27 @@ pub fn vault_validate_note(content: String, rel_path: String) -> Result<VaultSch
         });
     }
     Ok(validate_note_content(&content))
+}
+
+pub mod ipc {
+    use super::VaultSchemaReport;
+
+    #[tauri::command]
+    pub async fn vault_validate_note(
+        content: String,
+        rel_path: String,
+    ) -> Result<VaultSchemaReport, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            crate::atomic_file::PathTransactionLease::test_stage(
+                &[std::path::PathBuf::from(&rel_path)],
+                "worker:vault_validate_note",
+            );
+            super::vault_validate_note(content, rel_path)
+        })
+        .await
+        .map_err(|err| format!("vault_validate_note_task_failed: {err}"))?
+    }
 }
 
 /// Whether a workspace root is registered with `write_policy: "managed"`.
@@ -280,5 +300,67 @@ mod tests {
         // with invalid content — the gate only arms for managed roots.
         let result = validate_managed_write("/tmp/not-registered", "notes/a.md", "junk");
         assert!(result.is_ok());
+    }
+}
+
+#[cfg(test)]
+mod phase08_07_tests {
+    use super::*;
+    use crate::atomic_file::phase08_06::{boundary, run};
+
+    #[test]
+    fn phase08_07_vault_validation_actual_wrapper_preserves_nonempty_reports() {
+        let valid = "---\ndescription: Actual worker fixture\ntype: insight\ndomain: operations\ntopics: ['[[operations]]']\n---\nNonempty body\n".to_string();
+        run(async move {
+            for (content, path) in [
+                (valid.clone(), "notes/fixture.md"),
+                (
+                    valid.replace("domain: operations\n", ""),
+                    "notes/missing-domain.md",
+                ),
+                (
+                    valid.replace("type: insight", "type: invalid"),
+                    "notes/invalid-type.md",
+                ),
+                ("invalid content".to_string(), "templates/fixture.md"),
+            ] {
+                let expected = vault_validate_note(content.clone(), path.to_string()).unwrap();
+                let actual = ipc::vault_validate_note(content, path.to_string())
+                    .await
+                    .unwrap();
+                assert_eq!(
+                    serde_json::to_value(&actual).unwrap(),
+                    serde_json::to_value(expected).unwrap()
+                );
+                if path.contains("missing-domain") {
+                    assert!(!actual.valid);
+                    assert!(actual
+                        .issues
+                        .iter()
+                        .any(|issue| issue.field == "domain" && issue.code == "missing"));
+                }
+                if path.contains("invalid-type") {
+                    assert!(!actual.valid);
+                    assert!(actual
+                        .issues
+                        .iter()
+                        .any(|issue| issue.field == "type" && issue.code == "invalid_enum"));
+                }
+            }
+        });
+    }
+
+    #[test]
+    fn phase08_07_vault_validation_actual_wrapper_yields_on_same_polling_task() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("notes/fixture.md");
+        boundary(
+            path.clone(),
+            "vault_validate_note",
+            ipc::vault_validate_note(
+                "nonempty validation content".to_string(),
+                path.to_string_lossy().into_owned(),
+            ),
+        );
     }
 }

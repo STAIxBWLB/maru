@@ -12,7 +12,9 @@ use walkdir::WalkDir;
 
 use include_dir::{include_dir, Dir};
 
-use crate::atomic_file::write_atomic;
+use crate::atomic_file::{
+    with_path_transactions, write_atomic, PathTransactionLease, PathTransactionRequest,
+};
 use crate::paths::GENERATED_DIRS;
 use crate::scratchpad::{assert_scratchpad_workspace_access, resolve_scratchpad_root};
 use crate::skill_host::fs as host_fs;
@@ -256,23 +258,57 @@ fn excluded_scratchpad_root(vault: &Path) -> Option<PathBuf> {
     resolve_scratchpad_root(vault).ok()
 }
 
-/// `excluded_scratchpad_root` expressed as a `relPath` prefix (with trailing
-/// slash) for filtering already-indexed entries.
-fn excluded_scratchpad_rel_prefix(vault: &Path) -> Option<String> {
-    let root = excluded_scratchpad_root(vault)?;
-    let rel = root.strip_prefix(vault).ok()?;
-    let rel = rel.to_string_lossy().replace('\\', "/");
-    if rel.is_empty() {
-        return None;
-    }
-    Some(format!("{rel}/"))
+/// The Inbox root, resolved exactly the way the Inbox scanner resolves it
+/// (`inbox.rs::scan_inbox_with_settings`): per-vault `InboxSettings` via
+/// `inbox_settings::load`, then this module's own `resolve_inside_vault`
+/// lexical-containment helper. `None` fails open (keep listing) when the
+/// settings are missing, malformed, or point outside the vault — a settings
+/// problem can never brick scanning, mirroring `excluded_scratchpad_root`.
+fn excluded_inbox_root(vault: &Path) -> Option<PathBuf> {
+    let settings = crate::inbox_settings::load(vault);
+    resolve_inside_vault(&vault.to_string_lossy(), settings.inbox_root.as_str()).ok()
 }
 
-#[tauri::command(async)]
+/// D-09: every root whose tree is browsed in its own pane rather than served
+/// by the documents surface — today the Scratchpad root and the Inbox root.
+/// A tree browsed in its own pane is not document-index content. A future
+/// non-document root is a one-line addition to this list (D-09). The list is
+/// derived per call from settings plus the vault path (no static, mutex, or
+/// shared mutable state), so concurrent scans each resolve their own roots.
+fn excluded_non_document_roots(vault: &Path) -> Vec<PathBuf> {
+    excluded_scratchpad_root(vault)
+        .into_iter()
+        .chain(excluded_inbox_root(vault))
+        .collect()
+}
+
+/// `excluded_non_document_roots` expressed as `relPath` prefixes (with
+/// trailing slash) for filtering already-indexed entries, so a stale cache
+/// written before an exclusion existed self-heals at read time. The
+/// empty-rel guard is load-bearing: a root that resolves to the vault itself
+/// contributes no prefix, so excluding the whole vault is impossible.
+fn excluded_non_document_rel_prefixes(vault: &Path) -> Vec<String> {
+    excluded_non_document_roots(vault)
+        .iter()
+        .filter_map(|root| {
+            let rel = root.strip_prefix(vault).ok()?;
+            let rel = rel.to_string_lossy().replace('\\', "/");
+            if rel.is_empty() {
+                return None;
+            }
+            Some(format!("{rel}/"))
+        })
+        .collect()
+}
+
 pub fn sample_workspace_path() -> Result<String, String> {
     let root = host_fs::maru_home()?.join("sample-workspace");
-    host_fs::ensure_dir(&root)?;
-    seed_dir_if_missing(&SAMPLE_WORKSPACE_DIR, &root)?;
+    let request = PathTransactionRequest::new(vec![root.clone()])?;
+    with_path_transactions(request, |lease| {
+        lease.before_effect()?;
+        host_fs::ensure_dir(&root)?;
+        seed_dir_if_missing(&SAMPLE_WORKSPACE_DIR, &root)
+    })?;
     Ok(root.to_string_lossy().to_string())
 }
 
@@ -302,17 +338,49 @@ fn seed_dir_if_missing(dir: &Dir<'_>, root: &Path) -> Result<(), String> {
     Ok(())
 }
 
-#[tauri::command(async)]
 pub fn scan_vault(
     vault_path: String,
     scan_options: Option<ScanOptions>,
 ) -> Result<Vec<VaultEntry>, String> {
+    let vault = PathBuf::from(&vault_path)
+        .canonicalize()
+        .map_err(|_| "Workspace path is not a directory")?;
+    if !vault.is_dir() {
+        return Err("Workspace path is not a directory".to_string());
+    }
+    let registry = crate::vault_list::workspace_registry_path()?;
+    let legacy = crate::vault_list::legacy_vault_list_path()?;
+    let paths = vec![registry, legacy];
+    let mut cache_paths = paths.clone();
+    cache_paths.push(vault_cache_path(&vault));
+    let request =
+        PathTransactionRequest::new(cache_paths).or_else(|_| PathTransactionRequest::new(paths))?;
+    let request = request.require_parent(&vault)?;
+    with_path_transactions(request, |lease| {
+        scan_vault_in_transaction(lease, vault_path, scan_options)
+    })
+}
+
+pub(crate) fn scan_vault_in_transaction(
+    lease: &PathTransactionLease,
+    vault_path: String,
+    scan_options: Option<ScanOptions>,
+) -> Result<Vec<VaultEntry>, String> {
+    lease.ensure_covered(vec![
+        crate::vault_list::workspace_registry_path()?,
+        crate::vault_list::legacy_vault_list_path()?,
+    ])?;
+    lease.before_effect()?;
+
+    if !Path::new(&vault_path).is_dir() {
+        return Err("Workspace path is not a directory".to_string());
+    }
     let vault = normalize_existing_dir(&vault_path)?;
     let scan_filter = ScanFilter::from_options(scan_options)?;
     let ignore_patterns = load_maruignore(&vault);
     let version_names = collect_version_names(&vault);
     let nested_roots = registered_nested_roots(&vault);
-    let scratchpad_root = excluded_scratchpad_root(&vault);
+    let non_document_roots = excluded_non_document_roots(&vault);
     let cached = read_vault_cache_envelope(&vault).ok().flatten();
     let cached_entries: HashMap<String, VaultEntry> = cached
         .as_ref()
@@ -347,7 +415,7 @@ pub fn scan_vault(
             if nested_roots.iter().any(|root| path == root) {
                 return false;
             }
-            if scratchpad_root.as_deref() == Some(path) {
+            if non_document_roots.iter().any(|root| root.as_path() == path) {
                 return false;
             }
             if scan_filter.is_excluded_path(path, &vault, GENERATED_DIRS) {
@@ -394,7 +462,10 @@ pub fn scan_vault(
             .cmp(&a.updated_at)
             .then_with(|| a.title.to_lowercase().cmp(&b.title.to_lowercase()))
     });
-    if !scan_filter.includes_dot_folders() {
+    if !scan_filter.includes_dot_folders()
+        && lease.ensure_covered(vec![vault_cache_path(&vault)]).is_ok()
+        && lease.before_effect().is_ok()
+    {
         let _ = write_vault_cache(&vault, &entries);
     }
     Ok(entries)
@@ -403,9 +474,8 @@ pub fn scan_vault(
 /// Delta-targeted companion to `scan_vault`: the vault watcher already knows
 /// which rel paths changed, so the frontend asks for just those entries
 /// instead of paying for a full-tree walk on every keystroke-adjacent save.
-/// `#[tauri::command(async)]` + sync body like `scan_vault` — Tauri runs it
-/// off the main thread, and a delta batch is a handful of files, so rayon
-/// adds nothing here.
+/// The ipc wrapper offloads this synchronous body to a blocking worker.
+/// A delta batch is a handful of files, so rayon adds nothing here.
 ///
 /// A touched path that is excluded (`.maruignore`, a nested registered
 /// workspace, the scratchpad root, dot folders / generated dirs), missing, or
@@ -413,12 +483,42 @@ pub fn scan_vault(
 /// as removal, which is exactly the watcher Remove case. The nested-root
 /// check is what stops a watcher on the outer workspace from double-applying
 /// changes that the inner workspace's own scan will pick up.
-#[tauri::command(async)]
 pub fn scan_vault_paths(
     vault_path: String,
     rel_paths: Vec<String>,
     scan_options: Option<ScanOptions>,
 ) -> Result<Vec<VaultEntry>, String> {
+    let vault = PathBuf::from(&vault_path)
+        .canonicalize()
+        .map_err(|_| "Workspace path is not a directory")?;
+    if !vault.is_dir() {
+        return Err("Workspace path is not a directory".to_string());
+    }
+    let registry = crate::vault_list::workspace_registry_path()?;
+    let legacy = crate::vault_list::legacy_vault_list_path()?;
+    let paths = vec![registry, legacy];
+    let request = PathTransactionRequest::new(paths)?;
+    let request = request.require_parent(&vault)?;
+    with_path_transactions(request, |lease| {
+        scan_vault_paths_in_transaction(lease, vault_path, rel_paths, scan_options)
+    })
+}
+
+pub(crate) fn scan_vault_paths_in_transaction(
+    lease: &PathTransactionLease,
+    vault_path: String,
+    rel_paths: Vec<String>,
+    scan_options: Option<ScanOptions>,
+) -> Result<Vec<VaultEntry>, String> {
+    lease.ensure_covered(vec![
+        crate::vault_list::workspace_registry_path()?,
+        crate::vault_list::legacy_vault_list_path()?,
+    ])?;
+    lease.before_effect()?;
+
+    if !Path::new(&vault_path).is_dir() {
+        return Err("Workspace path is not a directory".to_string());
+    }
     let vault = normalize_existing_dir(&vault_path)?;
     let scan_filter = ScanFilter::from_options(scan_options)?;
     let ignore_patterns = load_maruignore(&vault);
@@ -426,7 +526,7 @@ pub fn scan_vault_paths(
     // a full scan would report.
     let version_names = collect_version_names(&vault);
     let nested_roots = registered_nested_roots(&vault);
-    let scratchpad_root = excluded_scratchpad_root(&vault);
+    let non_document_roots = excluded_non_document_roots(&vault);
     let mut entries = Vec::new();
     for rel in rel_paths {
         let normalized = rel.replace('\\', "/");
@@ -453,10 +553,7 @@ pub fn scan_vault_paths(
         {
             continue;
         }
-        if scratchpad_root
-            .as_deref()
-            .is_some_and(|root| path.starts_with(root))
-        {
+        if non_document_roots.iter().any(|root| path.starts_with(root)) {
             continue;
         }
         if scan_filter.is_excluded_path(&path, &vault, GENERATED_DIRS) {
@@ -487,22 +584,54 @@ pub fn scan_vault_paths(
     Ok(entries)
 }
 
-#[tauri::command(async)]
 pub fn read_vault_cache(vault_path: String) -> Result<Option<Vec<VaultEntry>>, String> {
+    let vault = PathBuf::from(&vault_path)
+        .canonicalize()
+        .map_err(|_| "Workspace path is not a directory")?;
+    if !vault.is_dir() {
+        return Err("Workspace path is not a directory".to_string());
+    }
+    let registry = crate::vault_list::workspace_registry_path()?;
+    let legacy = crate::vault_list::legacy_vault_list_path()?;
+    let paths = vec![registry, legacy];
+    let request = PathTransactionRequest::new(paths)?;
+    let request = request.require_parent(&vault)?;
+    with_path_transactions(request, |lease| {
+        read_vault_cache_in_transaction(lease, vault_path)
+    })
+}
+
+pub(crate) fn read_vault_cache_in_transaction(
+    lease: &PathTransactionLease,
+    vault_path: String,
+) -> Result<Option<Vec<VaultEntry>>, String> {
+    lease.ensure_covered(vec![
+        crate::vault_list::workspace_registry_path()?,
+        crate::vault_list::legacy_vault_list_path()?,
+    ])?;
+    lease.before_effect()?;
+
+    if !Path::new(&vault_path).is_dir() {
+        return Err("Workspace path is not a directory".to_string());
+    }
     let vault = normalize_existing_dir(&vault_path)?;
-    // A cache written before scratchpad exclusion still holds those entries;
-    // drop them here so the first paint matches what the scan will return.
-    let scratchpad_prefix = excluded_scratchpad_rel_prefix(&vault);
-    Ok(
-        read_vault_cache_envelope(&vault)?.map(|cache| match scratchpad_prefix {
-            Some(prefix) => cache
-                .entries
-                .into_iter()
-                .filter(|entry| !entry.rel_path.starts_with(&prefix))
-                .collect(),
-            None => cache.entries,
-        }),
-    )
+    // A cache written before non-document-root exclusion (scratchpad, inbox)
+    // still holds those entries; drop them here so the first paint matches
+    // what the scan will return.
+    let non_document_prefixes = excluded_non_document_rel_prefixes(&vault);
+    let scan_filter = ScanFilter::from_options(None)?;
+    Ok(read_vault_cache_envelope(&vault)?.map(|cache| {
+        cache
+            .entries
+            .into_iter()
+            .filter(|entry| {
+                !scan_filter.is_excluded_path(&vault.join(&entry.rel_path), &vault, GENERATED_DIRS)
+                    && !non_document_prefixes
+                        .iter()
+                        .any(|prefix| entry.rel_path.starts_with(prefix))
+            })
+            .collect()
+    }))
 }
 
 fn read_vault_cache_envelope(vault: &Path) -> Result<Option<VaultCacheEnvelope>, String> {
@@ -539,10 +668,6 @@ pub(crate) fn is_document_extension(ext: &str) -> bool {
 
 pub fn normalize_existing_dir(input: &str) -> Result<PathBuf, String> {
     let path = PathBuf::from(input);
-    if !path.exists() {
-        fs::create_dir_all(&path)
-            .map_err(|err| format!("Cannot create workspace directory: {err}"))?;
-    }
     let canonical = path
         .canonicalize()
         .map_err(|err| format!("Cannot open workspace directory: {err}"))?;
@@ -932,7 +1057,7 @@ fn collect_version_names(vault: &Path) -> Vec<String> {
         .collect()
 }
 
-fn vault_cache_path(vault: &Path) -> PathBuf {
+pub(crate) fn vault_cache_path(vault: &Path) -> PathBuf {
     VAULT_CACHE_REL
         .iter()
         .fold(vault.to_path_buf(), |acc, part| acc.join(part))
@@ -977,6 +1102,7 @@ mod tests {
 
     #[test]
     fn scan_vault_finds_deep_notes() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         let tmp = TempDir::new().unwrap();
         let root = tmp.path();
         write_file(root, "top.md", "# Top\n");
@@ -992,6 +1118,7 @@ mod tests {
 
     #[test]
     fn is_document_extension_matches_case_insensitively() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         for ext in [
             "md", "MD", "markdown", "Markdown", "html", "HTML", "htm", "Htm",
         ] {
@@ -1004,6 +1131,7 @@ mod tests {
 
     #[test]
     fn scan_vault_finds_uppercase_html_documents() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         let tmp = TempDir::new().unwrap();
         let root = tmp.path();
         write_file(
@@ -1020,6 +1148,7 @@ mod tests {
 
     #[test]
     fn scan_vault_respects_maruignore() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         let tmp = TempDir::new().unwrap();
         let root = tmp.path();
         write_file(root, ".maruignore", "skipme\n_sys/env\n");
@@ -1035,6 +1164,7 @@ mod tests {
 
     #[test]
     fn maruignore_matches_wildcards() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         let patterns = vec![
             "*.tmp.md".to_string(),
             "archive/2019-*".to_string(),
@@ -1067,6 +1197,7 @@ mod tests {
 
     #[test]
     fn scan_vault_exposes_raw_frontmatter() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         let tmp = TempDir::new().unwrap();
         let root = tmp.path();
         write_file(
@@ -1091,6 +1222,7 @@ mod tests {
 
     #[test]
     fn scan_vault_extracts_wikilinks_from_body_and_frontmatter() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         let tmp = TempDir::new().unwrap();
         let root = tmp.path();
         write_file(
@@ -1123,6 +1255,7 @@ mod tests {
 
     #[test]
     fn frontmatter_with_template_placeholders_is_json_serializable() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         // `{{date}}` parses as a YAML flow mapping keyed by a mapping —
         // without sanitization the JSON IPC serialization of the whole scan
         // failed with "key must be a string" (0 documents + error toast).
@@ -1137,6 +1270,7 @@ mod tests {
 
     #[test]
     fn resolve_inside_vault_accepts_relative_path() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         let tmp = TempDir::new().unwrap();
         write_file(tmp.path(), "note.md", "# X\n");
         let resolved = resolve_inside_vault(tmp.path().to_str().unwrap(), "note.md").unwrap();
@@ -1145,6 +1279,7 @@ mod tests {
 
     #[test]
     fn resolve_inside_vault_accepts_absolute_path_inside_vault() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         let tmp = TempDir::new().unwrap();
         write_file(tmp.path(), "sub/note.md", "# X\n");
         let canonical_vault = tmp.path().canonicalize().unwrap();
@@ -1156,6 +1291,7 @@ mod tests {
 
     #[test]
     fn resolve_inside_vault_rejects_path_traversal() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         let tmp = TempDir::new().unwrap();
         write_file(tmp.path(), "note.md", "# X\n");
         // Try to climb out via `..`
@@ -1165,6 +1301,7 @@ mod tests {
 
     #[test]
     fn resolve_inside_vault_rejects_absolute_outside_vault() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         let tmp = TempDir::new().unwrap();
         let result = resolve_inside_vault(tmp.path().to_str().unwrap(), "/etc/passwd");
         assert!(result.is_err());
@@ -1179,6 +1316,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn resolve_inside_vault_allows_symlink_inside_vault() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         use std::os::unix::fs::symlink;
         let tmp = TempDir::new().unwrap();
         let outside = TempDir::new().unwrap();
@@ -1199,6 +1337,7 @@ mod tests {
 
     #[test]
     fn lexical_normalize_resolves_dot_dot() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         let p = lexical_normalize(Path::new("/a/b/c/../d"));
         assert_eq!(p, PathBuf::from("/a/b/d"));
         let q = lexical_normalize(Path::new("/a/./b"));
@@ -1207,6 +1346,7 @@ mod tests {
 
     #[test]
     fn scan_vault_skips_hidden_and_node_modules() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         let tmp = TempDir::new().unwrap();
         let root = tmp.path();
         write_file(root, "kept.md", "# Kept\n");
@@ -1221,6 +1361,7 @@ mod tests {
 
     #[test]
     fn scan_vault_skips_scratchpad_root() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         let tmp = TempDir::new().unwrap();
         let root = tmp.path();
         write_file(root, "kept.md", "# Kept\n");
@@ -1235,6 +1376,7 @@ mod tests {
 
     #[test]
     fn read_vault_cache_drops_stale_scratchpad_entries() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         let tmp = TempDir::new().unwrap();
         let root = tmp.path();
         write_file(root, "kept.md", "# Kept\n");
@@ -1256,7 +1398,71 @@ mod tests {
     }
 
     #[test]
+    fn scan_vault_skips_inbox_root() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        write_file(root, "kept.md", "# Kept\n");
+        write_file(root, "inbox/downloads/dropped.md", "# Dropped\n");
+        write_file(root, "inbox-backup/kept2.md", "# Kept2\n");
+        let entries = scan_vault(root.to_string_lossy().to_string(), None).unwrap();
+        let titles: Vec<&str> = entries.iter().map(|e| e.title.as_str()).collect();
+        assert!(titles.contains(&"Kept"));
+        assert!(
+            !titles.contains(&"Dropped"),
+            "the settings-driven inbox root must be excluded from the document index"
+        );
+        assert!(
+            titles.contains(&"Kept2"),
+            "a prefix sibling (inbox-backup/) is authored content and must stay indexed"
+        );
+    }
+
+    #[test]
+    fn read_vault_cache_drops_stale_inbox_entries() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        write_file(root, "kept.md", "# Kept\n");
+        // Simulate a cache written before inbox exclusion existed.
+        let mut stale = scan_vault(root.to_string_lossy().to_string(), None).unwrap();
+        stale.push(VaultEntry {
+            rel_path: "inbox/downloads/dropped.md".to_string(),
+            title: "Dropped".to_string(),
+            ..stale[0].clone()
+        });
+        write_vault_cache(root, &stale).unwrap();
+
+        let cached = read_vault_cache(root.to_string_lossy().to_string())
+            .unwrap()
+            .unwrap();
+        let titles: Vec<&str> = cached.iter().map(|e| e.title.as_str()).collect();
+        assert!(titles.contains(&"Kept"));
+        assert!(
+            !titles.contains(&"Dropped"),
+            "stale cache rows under the inbox root must self-heal at read time"
+        );
+    }
+
+    #[test]
+    fn scan_vault_fails_open_when_inbox_root_unresolvable() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        write_file(root, "kept.md", "# Kept\n");
+        write_file(root, "notes/inner.md", "# Inner\n");
+        // An inbox root that escapes the vault fails resolution; scanning must
+        // keep listing everything instead of erroring.
+        write_file(root, ".maru/inbox.json", "{\"inboxRoot\": \"../outside\"}");
+        let entries = scan_vault(root.to_string_lossy().to_string(), None).unwrap();
+        let titles: Vec<&str> = entries.iter().map(|e| e.title.as_str()).collect();
+        assert!(titles.contains(&"Kept"));
+        assert!(titles.contains(&"Inner"));
+    }
+
+    #[test]
     fn scan_vault_includes_dot_folder_only_when_allowlisted() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         let tmp = TempDir::new().unwrap();
         let root = tmp.path();
         write_file(root, "kept.md", "# Kept\n");
@@ -1288,6 +1494,7 @@ mod tests {
 
     #[test]
     fn scan_vault_skips_generated_directories() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         let tmp = TempDir::new().unwrap();
         let root = tmp.path();
         write_file(root, "kept.md", "# Kept\n");
@@ -1311,6 +1518,7 @@ mod tests {
     /// switched to the shared 14-entry `crate::paths::GENERATED_DIRS`.
     #[test]
     fn scan_excludes_generated_dirs_union_including_pycache() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         let tmp = TempDir::new().unwrap();
         let root = tmp.path();
         write_file(root, "keep.md", "# Keep\n");
@@ -1328,6 +1536,7 @@ mod tests {
 
     #[test]
     fn scan_vault_precomputes_version_names() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         let tmp = TempDir::new().unwrap();
         let root = tmp.path();
         write_file(root, "report.md", "# Report\n");
@@ -1343,6 +1552,7 @@ mod tests {
 
     #[test]
     fn scan_vault_writes_cache_and_read_vault_cache_loads_it() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         let tmp = TempDir::new().unwrap();
         let root = tmp.path();
         write_file(root, "note.md", "# Note\n");
@@ -1356,6 +1566,7 @@ mod tests {
 
     #[test]
     fn vault_cache_rejects_version_three_and_rebuilds_semantic_titles() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         let tmp = TempDir::new().unwrap();
         let root = tmp.path();
         write_file(
@@ -1399,6 +1610,7 @@ mod tests {
 
     #[test]
     fn semantic_title_prefers_markdown_and_html_h1_over_frontmatter() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         assert_eq!(
             title_from_content(
                 "---\ntitle: Frontmatter title\n---\n# Markdown title\n",
@@ -1417,6 +1629,7 @@ mod tests {
 
     #[test]
     fn semantic_title_uses_frontmatter_after_empty_cleaned_h1() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         assert_eq!(
             title_from_content(
                 "---\ntitle: Frontmatter title\n---\n# <img alt=\"\">\n",
@@ -1435,6 +1648,7 @@ mod tests {
 
     #[test]
     fn semantic_title_uses_only_trimmed_nonempty_frontmatter_strings() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         assert_eq!(
             title_from_content(
                 "---\ntitle: '  Frontmatter title  '\n---\nBody\n",
@@ -1460,6 +1674,7 @@ mod tests {
 
     #[test]
     fn read_vault_cache_returns_none_for_missing_or_malformed_cache() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         let tmp = TempDir::new().unwrap();
         let root = tmp.path();
         assert!(read_vault_cache(root.to_string_lossy().to_string())
@@ -1475,6 +1690,7 @@ mod tests {
 
     #[test]
     fn scan_vault_paths_reads_existing_files() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         let tmp = TempDir::new().unwrap();
         let root = tmp.path();
         write_file(root, "top.md", "# Top\n");
@@ -1496,7 +1712,37 @@ mod tests {
     }
 
     #[test]
+    fn scan_vault_paths_skips_inbox_root() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        write_file(root, "kept.md", "# Kept\n");
+        write_file(root, "inbox/downloads/dropped.md", "# Dropped\n");
+        write_file(root, "inbox-backup/kept2.md", "# Kept2\n");
+        let entries = scan_vault_paths(
+            root.to_string_lossy().to_string(),
+            vec![
+                "kept.md".to_string(),
+                "inbox/downloads/dropped.md".to_string(),
+                "inbox-backup/kept2.md".to_string(),
+            ],
+            None,
+        )
+        .unwrap();
+        let rels: Vec<&str> = entries
+            .iter()
+            .map(|entry| entry.rel_path.as_str())
+            .collect();
+        assert_eq!(
+            rels,
+            vec!["kept.md", "inbox-backup/kept2.md"],
+            "paths under the settings-driven inbox root must resolve absent; prefix siblings must resolve"
+        );
+    }
+
+    #[test]
     fn scan_vault_paths_treats_missing_and_traversal_as_absent() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         let tmp = TempDir::new().unwrap();
         let root = tmp.path();
         write_file(root, "kept.md", "# Kept\n");
@@ -1523,6 +1769,7 @@ mod tests {
 
     #[test]
     fn scan_vault_paths_respects_maruignore() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         let tmp = TempDir::new().unwrap();
         let root = tmp.path();
         write_file(root, ".maruignore", "skipme\n");
@@ -1600,6 +1847,7 @@ mod tests {
 
     #[test]
     fn scan_vault_paths_reports_fresh_version_count() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         let tmp = TempDir::new().unwrap();
         let root = tmp.path();
         write_file(root, "report.md", "# Report\n");
@@ -1643,6 +1891,7 @@ mod tests {
 
     #[test]
     fn seeds_embedded_sample_workspace_into_empty_dir() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         let tmp = TempDir::new().unwrap();
         let root = tmp.path();
         seed_dir_if_missing(&SAMPLE_WORKSPACE_DIR, root).unwrap();
@@ -1660,6 +1909,7 @@ mod tests {
 
     #[test]
     fn seeding_is_idempotent_and_preserves_user_edits() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
         let tmp = TempDir::new().unwrap();
         let root = tmp.path();
         seed_dir_if_missing(&SAMPLE_WORKSPACE_DIR, root).unwrap();
@@ -1670,5 +1920,183 @@ mod tests {
         // Re-seeding must not error and must leave the user's edit untouched.
         seed_dir_if_missing(&SAMPLE_WORKSPACE_DIR, root).unwrap();
         assert_eq!(fs::read_to_string(&edited).unwrap(), "# my own notes\n");
+    }
+}
+
+/// Owned IPC scheduling; synchronous domain APIs remain available to Rust callers.
+pub mod ipc {
+    use super::*;
+    #[tauri::command]
+    pub async fn sample_workspace_path() -> Result<String, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            crate::atomic_file::PathTransactionLease::test_stage(
+                &[host_fs::maru_home()?.join("sample-workspace")],
+                "worker:sample_workspace_path",
+            );
+            super::sample_workspace_path()
+        })
+        .await
+        .map_err(|err| format!("sample_workspace_path_task_failed: {err}"))?
+    }
+    #[tauri::command]
+    pub async fn scan_vault(
+        vault_path: String,
+        scan_options: Option<ScanOptions>,
+    ) -> Result<Vec<VaultEntry>, String> {
+        #[cfg(feature = "native-e2e")]
+        if crate::native_e2e::is_blocking_async("scan_vault") {
+            crate::native_e2e::blocking_async_interval();
+            return super::scan_vault(vault_path, scan_options);
+        }
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(feature = "native-e2e")]
+            {
+                let path = vault_path.clone();
+                crate::native_e2e::with_load_control("scan_vault", None, Some(&path), || {
+                    #[cfg(test)]
+                    crate::atomic_file::PathTransactionLease::test_stage(
+                        &[PathBuf::from(&vault_path)],
+                        "worker:scan_vault",
+                    );
+                    super::scan_vault(vault_path, scan_options)
+                })
+            }
+            #[cfg(not(feature = "native-e2e"))]
+            {
+                #[cfg(test)]
+                crate::atomic_file::PathTransactionLease::test_stage(
+                    &[PathBuf::from(&vault_path)],
+                    "worker:scan_vault",
+                );
+                super::scan_vault(vault_path, scan_options)
+            }
+        })
+        .await
+        .map_err(|err| format!("scan_vault_task_failed: {err}"))?
+    }
+    #[tauri::command]
+    pub async fn scan_vault_paths(
+        vault_path: String,
+        rel_paths: Vec<String>,
+        scan_options: Option<ScanOptions>,
+    ) -> Result<Vec<VaultEntry>, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            crate::atomic_file::PathTransactionLease::test_stage(
+                &[PathBuf::from(&vault_path)],
+                "worker:scan_vault_paths",
+            );
+            super::scan_vault_paths(vault_path, rel_paths, scan_options)
+        })
+        .await
+        .map_err(|err| format!("scan_vault_paths_task_failed: {err}"))?
+    }
+    #[tauri::command]
+    pub async fn read_vault_cache(vault_path: String) -> Result<Option<Vec<VaultEntry>>, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            crate::atomic_file::PathTransactionLease::test_stage(
+                &[PathBuf::from(&vault_path)],
+                "worker:read_vault_cache",
+            );
+            super::read_vault_cache(vault_path)
+        })
+        .await
+        .map_err(|err| format!("read_vault_cache_task_failed: {err}"))?
+    }
+}
+
+#[cfg(test)]
+mod phase08_06 {
+    use super::*;
+    use crate::atomic_file::phase08_06::{boundary, run, Home};
+
+    #[test]
+    fn phase08_06_scan_wrappers_use_workers_and_preserve_pruning() {
+        let home = Home::new();
+        let root = home.root.path().join("work");
+        fs::create_dir(&root).unwrap();
+        let s = root.to_string_lossy().into_owned();
+        boundary(root.clone(), "scan_vault", ipc::scan_vault(s.clone(), None));
+        boundary(
+            root.clone(),
+            "scan_vault_paths",
+            ipc::scan_vault_paths(s.clone(), vec!["note.md".into()], None),
+        );
+        boundary(
+            root.clone(),
+            "read_vault_cache",
+            ipc::read_vault_cache(s.clone()),
+        );
+        fs::write(root.join("note.md"), "# Kept fixture").unwrap();
+        for folder in ["node_modules", "inbox/downloads", "scratchpad"] {
+            fs::create_dir_all(root.join(folder)).unwrap();
+            fs::write(root.join(folder).join("hidden.md"), "# excluded").unwrap();
+        }
+        let entries = run(ipc::scan_vault(s.clone(), None)).unwrap();
+        assert_eq!(entries.len(), 1);
+        let mut stale = entries.clone();
+        for rel in [
+            "node_modules/hidden.md",
+            "scratchpad/hidden.md",
+            "inbox/downloads/hidden.md",
+        ] {
+            let mut entry = entries[0].clone();
+            entry.rel_path = rel.to_string();
+            entry.path = root.join(rel).to_string_lossy().into_owned();
+            stale.push(entry);
+        }
+        write_vault_cache(&root, &stale).unwrap();
+        assert_eq!(
+            run(ipc::scan_vault_paths(
+                s.clone(),
+                vec![
+                    "note.md".into(),
+                    "inbox/downloads/hidden.md".into(),
+                    "scratchpad/hidden.md".into(),
+                    "node_modules/hidden.md".into()
+                ],
+                None
+            ))
+            .unwrap()
+            .len(),
+            1
+        );
+        assert_eq!(run(ipc::read_vault_cache(s)).unwrap().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn phase08_06_sample_worker_is_idempotent_and_cache_failure_stays_nonfatal() {
+        let home = Home::new();
+        let sample = home.root.path().join(".maru/sample-workspace");
+        boundary(
+            sample,
+            "sample_workspace_path",
+            ipc::sample_workspace_path(),
+        );
+        let path = run(ipc::sample_workspace_path()).unwrap();
+        let path2 = run(ipc::sample_workspace_path()).unwrap();
+        assert_eq!(path, path2);
+        assert!(!run(ipc::scan_vault(path, None)).unwrap().is_empty());
+        let root = home.root.path().join("readable");
+        fs::create_dir(&root).unwrap();
+        fs::write(root.join("note.md"), "# Cache failure").unwrap();
+        fs::write(root.join(".maru"), "blocks cache directory").unwrap();
+        assert_eq!(
+            run(ipc::scan_vault(root.to_string_lossy().into_owned(), None))
+                .unwrap()
+                .len(),
+            1
+        );
+        let missing = home.root.path().join("vanished");
+        assert!(run(ipc::scan_vault(
+            missing.to_string_lossy().into_owned(),
+            None
+        ))
+        .is_err());
+        assert!(!missing.exists());
+        assert!(normalize_existing_dir(&missing.to_string_lossy()).is_err());
+        assert!(!missing.exists());
     }
 }

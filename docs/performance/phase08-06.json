@@ -1,0 +1,1003 @@
+{
+  "plan": "08-06",
+  "moduleIntegrationOwner": "08-06",
+  "commands": [
+    {
+      "name": "sample_workspace_path",
+      "module": "src-tauri/src/vault.rs",
+      "registrationPath": "src-tauri/src/lib.rs::vault::ipc::sample_workspace_path",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/vault.rs::ipc::sample_workspace_path awaits spawn_blocking before validation, filesystem/process work or lock waits",
+        "src-tauri/src/vault.rs::sample_workspace_path preserves the public synchronous API",
+        "src-tauri/src/vault.rs::seed_dir_if_missing performs the decisive filesystem walk/read/write/process or native Trash operation"
+      ],
+      "workerBoundary": "src-tauri/src/vault.rs::ipc::sample_workspace_path awaits tauri::async_runtime::spawn_blocking; owned String/Vec/Option/enum inputs only; contextual JoinError maps to String and inner String result remains unchanged",
+      "syncCallers": [
+        "src-tauri/src/vault.rs::sample_workspace_path remains callable synchronously by existing inline regression and Rust callers; maru-cli compilation verifies stable exports",
+        "src-tauri/src/kg_refs.rs retains synchronous scan/cache consumers; src-tauri/src/inbox.rs retains copy_source/move_source byte/tree primitives whose whole-transaction admission belongs to Plan10"
+      ],
+      "mutationKey": {
+        "lexicalPaths": [
+          "Complete embedded sample-workspace subtree including missing ancestor creation, lexical root derived from skill_host/fs.rs maru_home; required nearest existing directory pinned"
+        ],
+        "aliasPaths": [
+          "src-tauri/src/atomic_file.rs::PathTransactionRequest derives physical existing-target or nearest-existing-ancestor plus missing-suffix identities beside lexical paths; macOS/Windows exclusion keys conservatively fold case"
+        ],
+        "postAdmissionPreconditions": [
+          "Original directory handle identity is pinned (Unix dev/inode; Windows volume serial/file index) and alias resolution is rechecked; disappeared or replaced parents fail before effects",
+          "Mutation adapters recheck full lease coverage, conditional registry migration coverage, lexical containment, current permissions, destination absence and original domain validations; no new revision parameter is introduced"
+        ],
+        "domainLockOrder": "Shared atomic path-set admission before BINDER_WRITE_LOCK and any existing domain guard; lease spans complete work, rekey, error and rollback; work never holds bookkeeping mutex",
+        "sharedAdmissionEntry": "src-tauri/src/atomic_file.rs::with_path_transactions",
+        "crossDomainProof": "src-tauri/src/workspace_files.rs phase08_06_parent_rename_trash_create_both_orders_keep_complete_tree and phase08_06_queue_parent_race_and_multi_item_move use actual wrappers; earlier writer pairs are produced by Plan29, document pairs by Plan07"
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_06",
+          "passed": 20,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/App.tsx",
+          "src/lib/workspaceStore.ts"
+        ],
+        "payload": "Existing String errors and data payload pass through untouched. Query responses are view-owned; reads do not create user-processing jobs.",
+        "terminalNoticeOwner": "Current src/lib/api.ts caller and initiating view own response/error publication; completion-lifetime finalization is assigned to Plans25/26."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=sample_workspace_path"
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_06_scan_wrappers_use_workers_and_preserve_pruning",
+          "phase08_06_sample_worker_is_idempotent_and_cache_failure_stays_nonfatal"
+        ],
+        "workerProof": "Actual wrapper future and yielding probe run on one Tauri task; a held worker reports a distinct thread ID before release; injected panic verifies contextual JoinError",
+        "scope": "Disposable explicit fixture roots only. No native saturation or Windows runtime claim. Phase27 owns native performance and Phase28 owns final artifact closure.",
+        "platformScope": "macOS fixture volume accepted CaseFolder/casefolder aliases and canonicalize returned identical physical paths; conservative lowercase keys are extra exclusion only, not a proof of all Unicode equivalences. Windows handle identity implementation is present but no Windows compile/runtime test ran on this host."
+      }
+    },
+    {
+      "name": "scan_vault",
+      "module": "src-tauri/src/vault.rs",
+      "registrationPath": "src-tauri/src/lib.rs::vault::ipc::scan_vault",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/vault.rs::ipc::scan_vault awaits spawn_blocking before validation, filesystem/process work or lock waits",
+        "src-tauri/src/vault.rs::scan_vault preserves the public synchronous API",
+        "src-tauri/src/vault.rs::scan_vault_in_transaction performs the decisive filesystem walk/read/write/process or native Trash operation"
+      ],
+      "workerBoundary": "src-tauri/src/vault.rs::ipc::scan_vault awaits tauri::async_runtime::spawn_blocking; owned String/Vec/Option/enum inputs only; contextual JoinError maps to String and inner String result remains unchanged",
+      "syncCallers": [
+        "src-tauri/src/vault.rs::scan_vault remains callable synchronously by existing inline regression and Rust callers; maru-cli compilation verifies stable exports",
+        "src-tauri/src/kg_refs.rs retains synchronous scan/cache consumers; src-tauri/src/inbox.rs retains copy_source/move_source byte/tree primitives whose whole-transaction admission belongs to Plan10"
+      ],
+      "mutationKey": {
+        "lexicalPaths": [
+          "Workspace cache workspace-index-v4.json plus registry workspaces.json and legacy vaults.json migration; cache failures stay best-effort"
+        ],
+        "aliasPaths": [
+          "src-tauri/src/atomic_file.rs::PathTransactionRequest derives physical existing-target or nearest-existing-ancestor plus missing-suffix identities beside lexical paths; macOS/Windows exclusion keys conservatively fold case"
+        ],
+        "postAdmissionPreconditions": [
+          "Original directory handle identity is pinned (Unix dev/inode; Windows volume serial/file index) and alias resolution is rechecked; disappeared or replaced parents fail before effects",
+          "Mutation adapters recheck full lease coverage, conditional registry migration coverage, lexical containment, current permissions, destination absence and original domain validations; no new revision parameter is introduced"
+        ],
+        "domainLockOrder": "Shared atomic path-set admission before BINDER_WRITE_LOCK and any existing domain guard; lease spans complete work, rekey, error and rollback; work never holds bookkeeping mutex",
+        "sharedAdmissionEntry": "src-tauri/src/atomic_file.rs::with_path_transactions",
+        "crossDomainProof": "src-tauri/src/workspace_files.rs phase08_06_parent_rename_trash_create_both_orders_keep_complete_tree and phase08_06_queue_parent_race_and_multi_item_move use actual wrappers; earlier writer pairs are produced by Plan29, document pairs by Plan07"
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_06",
+          "passed": 20,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/App.tsx",
+          "src/lib/workspaceStore.ts"
+        ],
+        "payload": "Existing String errors and data payload pass through untouched. Query responses are view-owned; reads do not create user-processing jobs.",
+        "terminalNoticeOwner": "Current src/lib/api.ts caller and initiating view own response/error publication; completion-lifetime finalization is assigned to Plans25/26."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=scan_vault"
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_06_scan_wrappers_use_workers_and_preserve_pruning",
+          "phase08_06_sample_worker_is_idempotent_and_cache_failure_stays_nonfatal"
+        ],
+        "workerProof": "Actual wrapper future and yielding probe run on one Tauri task; a held worker reports a distinct thread ID before release; injected panic verifies contextual JoinError",
+        "scope": "Disposable explicit fixture roots only. No native saturation or Windows runtime claim. Phase27 owns native performance and Phase28 owns final artifact closure.",
+        "platformScope": "macOS fixture volume accepted CaseFolder/casefolder aliases and canonicalize returned identical physical paths; conservative lowercase keys are extra exclusion only, not a proof of all Unicode equivalences. Windows handle identity implementation is present but no Windows compile/runtime test ran on this host."
+      }
+    },
+    {
+      "name": "scan_vault_paths",
+      "module": "src-tauri/src/vault.rs",
+      "registrationPath": "src-tauri/src/lib.rs::vault::ipc::scan_vault_paths",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/vault.rs::ipc::scan_vault_paths awaits spawn_blocking before validation, filesystem/process work or lock waits",
+        "src-tauri/src/vault.rs::scan_vault_paths preserves the public synchronous API",
+        "src-tauri/src/vault.rs::scan_vault_paths_in_transaction performs the decisive filesystem walk/read/write/process or native Trash operation"
+      ],
+      "workerBoundary": "src-tauri/src/vault.rs::ipc::scan_vault_paths awaits tauri::async_runtime::spawn_blocking; owned String/Vec/Option/enum inputs only; contextual JoinError maps to String and inner String result remains unchanged",
+      "syncCallers": [
+        "src-tauri/src/vault.rs::scan_vault_paths remains callable synchronously by existing inline regression and Rust callers; maru-cli compilation verifies stable exports",
+        "src-tauri/src/kg_refs.rs retains synchronous scan/cache consumers; src-tauri/src/inbox.rs retains copy_source/move_source byte/tree primitives whose whole-transaction admission belongs to Plan10"
+      ],
+      "mutationKey": {
+        "lexicalPaths": [
+          "Registry workspaces.json plus legacy vaults.json, the transitive lookup may migrate; document/version reads remain unchanged"
+        ],
+        "aliasPaths": [
+          "src-tauri/src/atomic_file.rs::PathTransactionRequest derives physical existing-target or nearest-existing-ancestor plus missing-suffix identities beside lexical paths; macOS/Windows exclusion keys conservatively fold case"
+        ],
+        "postAdmissionPreconditions": [
+          "Original directory handle identity is pinned (Unix dev/inode; Windows volume serial/file index) and alias resolution is rechecked; disappeared or replaced parents fail before effects",
+          "Mutation adapters recheck full lease coverage, conditional registry migration coverage, lexical containment, current permissions, destination absence and original domain validations; no new revision parameter is introduced"
+        ],
+        "domainLockOrder": "Shared atomic path-set admission before BINDER_WRITE_LOCK and any existing domain guard; lease spans complete work, rekey, error and rollback; work never holds bookkeeping mutex",
+        "sharedAdmissionEntry": "src-tauri/src/atomic_file.rs::with_path_transactions",
+        "crossDomainProof": "src-tauri/src/workspace_files.rs phase08_06_parent_rename_trash_create_both_orders_keep_complete_tree and phase08_06_queue_parent_race_and_multi_item_move use actual wrappers; earlier writer pairs are produced by Plan29, document pairs by Plan07"
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_06",
+          "passed": 20,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/App.tsx",
+          "src/lib/workspaceStore.ts"
+        ],
+        "payload": "Existing String errors and data payload pass through untouched. Query responses are view-owned; reads do not create user-processing jobs.",
+        "terminalNoticeOwner": "Current src/lib/api.ts caller and initiating view own response/error publication; completion-lifetime finalization is assigned to Plans25/26."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=scan_vault_paths"
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_06_scan_wrappers_use_workers_and_preserve_pruning",
+          "phase08_06_sample_worker_is_idempotent_and_cache_failure_stays_nonfatal"
+        ],
+        "workerProof": "Actual wrapper future and yielding probe run on one Tauri task; a held worker reports a distinct thread ID before release; injected panic verifies contextual JoinError",
+        "scope": "Disposable explicit fixture roots only. No native saturation or Windows runtime claim. Phase27 owns native performance and Phase28 owns final artifact closure.",
+        "platformScope": "macOS fixture volume accepted CaseFolder/casefolder aliases and canonicalize returned identical physical paths; conservative lowercase keys are extra exclusion only, not a proof of all Unicode equivalences. Windows handle identity implementation is present but no Windows compile/runtime test ran on this host."
+      }
+    },
+    {
+      "name": "read_vault_cache",
+      "module": "src-tauri/src/vault.rs",
+      "registrationPath": "src-tauri/src/lib.rs::vault::ipc::read_vault_cache",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/vault.rs::ipc::read_vault_cache awaits spawn_blocking before validation, filesystem/process work or lock waits",
+        "src-tauri/src/vault.rs::read_vault_cache preserves the public synchronous API",
+        "src-tauri/src/vault.rs::read_vault_cache_envelope performs the decisive filesystem walk/read/write/process or native Trash operation"
+      ],
+      "workerBoundary": "src-tauri/src/vault.rs::ipc::read_vault_cache awaits tauri::async_runtime::spawn_blocking; owned String/Vec/Option/enum inputs only; contextual JoinError maps to String and inner String result remains unchanged",
+      "syncCallers": [
+        "src-tauri/src/vault.rs::read_vault_cache remains callable synchronously by existing inline regression and Rust callers; maru-cli compilation verifies stable exports",
+        "src-tauri/src/kg_refs.rs retains synchronous scan/cache consumers; src-tauri/src/inbox.rs retains copy_source/move_source byte/tree primitives whose whole-transaction admission belongs to Plan10"
+      ],
+      "mutationKey": {
+        "lexicalPaths": [
+          "Registry workspaces.json plus legacy vaults.json for scratchpad ownership migration; cache itself is read only"
+        ],
+        "aliasPaths": [
+          "src-tauri/src/atomic_file.rs::PathTransactionRequest derives physical existing-target or nearest-existing-ancestor plus missing-suffix identities beside lexical paths; macOS/Windows exclusion keys conservatively fold case"
+        ],
+        "postAdmissionPreconditions": [
+          "Original directory handle identity is pinned (Unix dev/inode; Windows volume serial/file index) and alias resolution is rechecked; disappeared or replaced parents fail before effects",
+          "Mutation adapters recheck full lease coverage, conditional registry migration coverage, lexical containment, current permissions, destination absence and original domain validations; no new revision parameter is introduced"
+        ],
+        "domainLockOrder": "Shared atomic path-set admission before BINDER_WRITE_LOCK and any existing domain guard; lease spans complete work, rekey, error and rollback; work never holds bookkeeping mutex",
+        "sharedAdmissionEntry": "src-tauri/src/atomic_file.rs::with_path_transactions",
+        "crossDomainProof": "src-tauri/src/workspace_files.rs phase08_06_parent_rename_trash_create_both_orders_keep_complete_tree and phase08_06_queue_parent_race_and_multi_item_move use actual wrappers; earlier writer pairs are produced by Plan29, document pairs by Plan07"
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_06",
+          "passed": 20,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/App.tsx",
+          "src/lib/workspaceStore.ts"
+        ],
+        "payload": "Existing String errors and data payload pass through untouched. Query responses are view-owned; reads do not create user-processing jobs.",
+        "terminalNoticeOwner": "Current src/lib/api.ts caller and initiating view own response/error publication; completion-lifetime finalization is assigned to Plans25/26."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=read_vault_cache"
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_06_scan_wrappers_use_workers_and_preserve_pruning",
+          "phase08_06_sample_worker_is_idempotent_and_cache_failure_stays_nonfatal"
+        ],
+        "workerProof": "Actual wrapper future and yielding probe run on one Tauri task; a held worker reports a distinct thread ID before release; injected panic verifies contextual JoinError",
+        "scope": "Disposable explicit fixture roots only. No native saturation or Windows runtime claim. Phase27 owns native performance and Phase28 owns final artifact closure.",
+        "platformScope": "macOS fixture volume accepted CaseFolder/casefolder aliases and canonicalize returned identical physical paths; conservative lowercase keys are extra exclusion only, not a proof of all Unicode equivalences. Windows handle identity implementation is present but no Windows compile/runtime test ran on this host."
+      }
+    },
+    {
+      "name": "scan_workspace_files",
+      "module": "src-tauri/src/workspace_files.rs",
+      "registrationPath": "src-tauri/src/lib.rs::workspace_files::ipc::scan_workspace_files",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/workspace_files.rs::ipc::scan_workspace_files awaits spawn_blocking before validation, filesystem/process work or lock waits",
+        "src-tauri/src/workspace_files.rs::scan_workspace_files preserves the public synchronous API",
+        "src-tauri/src/workspace_files.rs::scan_workspace_files_at performs the decisive filesystem walk/read/write/process or native Trash operation"
+      ],
+      "workerBoundary": "src-tauri/src/workspace_files.rs::ipc::scan_workspace_files awaits tauri::async_runtime::spawn_blocking; owned String/Vec/Option/enum inputs only; contextual JoinError maps to String and inner String result remains unchanged",
+      "syncCallers": [
+        "src-tauri/src/workspace_files.rs::scan_workspace_files remains callable synchronously by existing inline regression and Rust callers; maru-cli compilation verifies stable exports",
+        "src-tauri/src/kg_refs.rs retains synchronous scan/cache consumers; src-tauri/src/inbox.rs retains copy_source/move_source byte/tree primitives whose whole-transaction admission belongs to Plan10"
+      ],
+      "mutationKey": {
+        "readOnly": true,
+        "reason": "No filesystem mutation: metadata/content reads and read-only subprocess/walk are entirely inside the awaited blocking worker"
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_06",
+          "passed": 20,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/components/FilesWorkbench.tsx",
+          "src/lib/documentOpsModeLifecycle.ts"
+        ],
+        "payload": "Existing String errors and data payload pass through untouched. Query responses are view-owned; reads do not create user-processing jobs.",
+        "terminalNoticeOwner": "Current src/lib/api.ts caller and initiating view own response/error publication; completion-lifetime finalization is assigned to Plans25/26."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=scan_workspace_files"
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_06_every_files_wrapper_leaves_the_polling_task",
+          "phase08_06_actual_wrappers_return_files_and_preserve_legacy_errors",
+          "phase08_06_parent_rename_trash_create_both_orders_keep_complete_tree",
+          "phase08_06_queue_parent_race_and_multi_item_move",
+          "phase08_06_create_contention_and_unrelated_directory_progress",
+          "phase08_06_waiting_command_rechecks_parent_permission_and_migration",
+          "phase08_06_symlink_alias_create_and_rename_rekey_rollback",
+          "phase08_06_duplicate_paste_queue_same_destination_preserve_both_results",
+          "phase08_06_case_aliases_of_actual_directory_serialize",
+          "phase08_06_nested_real_mutations_reuse_complete_lease_after_rename"
+        ],
+        "workerProof": "Actual wrapper future and yielding probe run on one Tauri task; a held worker reports a distinct thread ID before release; injected panic verifies contextual JoinError",
+        "scope": "Disposable explicit fixture roots only. No native saturation or Windows runtime claim. Phase27 owns native performance and Phase28 owns final artifact closure.",
+        "platformScope": "macOS fixture volume accepted CaseFolder/casefolder aliases and canonicalize returned identical physical paths; conservative lowercase keys are extra exclusion only, not a proof of all Unicode equivalences. Windows handle identity implementation is present but no Windows compile/runtime test ran on this host."
+      }
+    },
+    {
+      "name": "scan_workspace_entries",
+      "module": "src-tauri/src/workspace_files.rs",
+      "registrationPath": "src-tauri/src/lib.rs::workspace_files::ipc::scan_workspace_entries",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/workspace_files.rs::ipc::scan_workspace_entries awaits spawn_blocking before validation, filesystem/process work or lock waits",
+        "src-tauri/src/workspace_files.rs::scan_workspace_entries preserves the public synchronous API",
+        "src-tauri/src/workspace_files.rs::recover_rename_transactions performs the decisive filesystem walk/read/write/process or native Trash operation"
+      ],
+      "workerBoundary": "src-tauri/src/workspace_files.rs::ipc::scan_workspace_entries awaits tauri::async_runtime::spawn_blocking; owned String/Vec/Option/enum inputs only; contextual JoinError maps to String and inner String result remains unchanged",
+      "syncCallers": [
+        "src-tauri/src/workspace_files.rs::scan_workspace_entries remains callable synchronously by existing inline regression and Rust callers; maru-cli compilation verifies stable exports",
+        "src-tauri/src/kg_refs.rs retains synchronous scan/cache consumers; src-tauri/src/inbox.rs retains copy_source/move_source byte/tree primitives whose whole-transaction admission belongs to Plan10"
+      ],
+      "mutationKey": {
+        "lexicalPaths": [
+          "Whole workspace subtree plus normalized source/destination of every valid captured rename journal; physical aliases are captured for those paths, coverage is checked again after admission, and binder rekey/rollback completes before journal removal. Conditional registry migration paths are included."
+        ],
+        "aliasPaths": [
+          "src-tauri/src/atomic_file.rs::PathTransactionRequest derives physical existing-target or nearest-existing-ancestor plus missing-suffix identities beside lexical paths; macOS/Windows exclusion keys conservatively fold case"
+        ],
+        "postAdmissionPreconditions": [
+          "Original directory handle identity is pinned (Unix dev/inode; Windows volume serial/file index) and alias resolution is rechecked; disappeared or replaced parents fail before effects",
+          "Mutation adapters recheck full lease coverage, conditional registry migration coverage, lexical containment, current permissions, destination absence and original domain validations; no new revision parameter is introduced"
+        ],
+        "domainLockOrder": "Shared atomic path-set admission before BINDER_WRITE_LOCK and any existing domain guard; lease spans complete work, rekey, error and rollback; work never holds bookkeeping mutex",
+        "sharedAdmissionEntry": "src-tauri/src/atomic_file.rs::with_path_transactions",
+        "crossDomainProof": "src-tauri/src/workspace_files.rs phase08_06_parent_rename_trash_create_both_orders_keep_complete_tree and phase08_06_queue_parent_race_and_multi_item_move use actual wrappers; earlier writer pairs are produced by Plan29, document pairs by Plan07"
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_06",
+          "passed": 20,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/components/FilesWorkbench.tsx",
+          "src/lib/documentOpsModeLifecycle.ts"
+        ],
+        "payload": "Existing String errors and data payload pass through untouched. Query responses are view-owned; reads do not create user-processing jobs.",
+        "terminalNoticeOwner": "Current src/lib/api.ts caller and initiating view own response/error publication; completion-lifetime finalization is assigned to Plans25/26."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=scan_workspace_entries"
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_06_every_files_wrapper_leaves_the_polling_task",
+          "phase08_06_actual_wrappers_return_files_and_preserve_legacy_errors",
+          "phase08_06_parent_rename_trash_create_both_orders_keep_complete_tree",
+          "phase08_06_queue_parent_race_and_multi_item_move",
+          "phase08_06_create_contention_and_unrelated_directory_progress",
+          "phase08_06_waiting_command_rechecks_parent_permission_and_migration",
+          "phase08_06_symlink_alias_create_and_rename_rekey_rollback",
+          "phase08_06_duplicate_paste_queue_same_destination_preserve_both_results",
+          "phase08_06_case_aliases_of_actual_directory_serialize",
+          "phase08_06_nested_real_mutations_reuse_complete_lease_after_rename",
+          "phase08_06_recovery_normalizes_paths_preserves_aliases_and_rekeys"
+        ],
+        "workerProof": "Actual wrapper future and yielding probe run on one Tauri task; a held worker reports a distinct thread ID before release; injected panic verifies contextual JoinError",
+        "scope": "Disposable explicit fixture roots only. No native saturation or Windows runtime claim. Phase27 owns native performance and Phase28 owns final artifact closure.",
+        "platformScope": "macOS fixture volume accepted CaseFolder/casefolder aliases and canonicalize returned identical physical paths; conservative lowercase keys are extra exclusion only, not a proof of all Unicode equivalences. Windows handle identity implementation is present but no Windows compile/runtime test ran on this host."
+      }
+    },
+    {
+      "name": "create_workspace_directory",
+      "module": "src-tauri/src/workspace_files.rs",
+      "registrationPath": "src-tauri/src/lib.rs::workspace_files::ipc::create_workspace_directory",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/workspace_files.rs::ipc::create_workspace_directory awaits spawn_blocking before validation, filesystem/process work or lock waits",
+        "src-tauri/src/workspace_files.rs::create_workspace_directory preserves the public synchronous API",
+        "src-tauri/src/workspace_files.rs::create_workspace_directory_in_transaction performs the decisive filesystem walk/read/write/process or native Trash operation"
+      ],
+      "workerBoundary": "src-tauri/src/workspace_files.rs::ipc::create_workspace_directory awaits tauri::async_runtime::spawn_blocking; owned String/Vec/Option/enum inputs only; contextual JoinError maps to String and inner String result remains unchanged",
+      "syncCallers": [
+        "src-tauri/src/workspace_files.rs::create_workspace_directory remains callable synchronously by existing inline regression and Rust callers; maru-cli compilation verifies stable exports",
+        "src-tauri/src/kg_refs.rs retains synchronous scan/cache consumers; src-tauri/src/inbox.rs retains copy_source/move_source byte/tree primitives whose whole-transaction admission belongs to Plan10"
+      ],
+      "mutationKey": {
+        "lexicalPaths": [
+          "Exact parent/name target plus conditional registry migration output/input; required original parent and workspace identity"
+        ],
+        "aliasPaths": [
+          "src-tauri/src/atomic_file.rs::PathTransactionRequest derives physical existing-target or nearest-existing-ancestor plus missing-suffix identities beside lexical paths; macOS/Windows exclusion keys conservatively fold case"
+        ],
+        "postAdmissionPreconditions": [
+          "Original directory handle identity is pinned (Unix dev/inode; Windows volume serial/file index) and alias resolution is rechecked; disappeared or replaced parents fail before effects",
+          "Mutation adapters recheck full lease coverage, conditional registry migration coverage, lexical containment, current permissions, destination absence and original domain validations; no new revision parameter is introduced"
+        ],
+        "domainLockOrder": "Shared atomic path-set admission before BINDER_WRITE_LOCK and any existing domain guard; lease spans complete work, rekey, error and rollback; work never holds bookkeeping mutex",
+        "sharedAdmissionEntry": "src-tauri/src/atomic_file.rs::with_path_transactions",
+        "crossDomainProof": "src-tauri/src/workspace_files.rs phase08_06_parent_rename_trash_create_both_orders_keep_complete_tree and phase08_06_queue_parent_race_and_multi_item_move use actual wrappers; earlier writer pairs are produced by Plan29, document pairs by Plan07"
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_06",
+          "passed": 20,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/components/FilesWorkbench.tsx",
+          "src/lib/documentOpsModeLifecycle.ts"
+        ],
+        "payload": "Existing String errors and data payload pass through untouched. Query responses are view-owned; reads do not create user-processing jobs.",
+        "terminalNoticeOwner": "Current src/lib/api.ts caller and initiating view own response/error publication; completion-lifetime finalization is assigned to Plans25/26."
+      ,
+        "classifier": "classifyWorkspaceMutationCompletion (src/lib/api.ts:1452)",
+        "successRetention": "payload returned unchanged to the caller; ProcessingOperationRecord.completion.succeeded retains successful item/output references after navigation",
+        "failureReasons": "per-item error strings trimmed into completion.failed[].reason; IPC rejection mapped by rejectionReason() (message + code); component no longer publishes a second error toast",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=create_workspace_directory"
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_06_every_files_wrapper_leaves_the_polling_task",
+          "phase08_06_actual_wrappers_return_files_and_preserve_legacy_errors",
+          "phase08_06_parent_rename_trash_create_both_orders_keep_complete_tree",
+          "phase08_06_queue_parent_race_and_multi_item_move",
+          "phase08_06_create_contention_and_unrelated_directory_progress",
+          "phase08_06_waiting_command_rechecks_parent_permission_and_migration",
+          "phase08_06_symlink_alias_create_and_rename_rekey_rollback",
+          "phase08_06_duplicate_paste_queue_same_destination_preserve_both_results",
+          "phase08_06_case_aliases_of_actual_directory_serialize",
+          "phase08_06_nested_real_mutations_reuse_complete_lease_after_rename"
+        ],
+        "workerProof": "Actual wrapper future and yielding probe run on one Tauri task; a held worker reports a distinct thread ID before release; injected panic verifies contextual JoinError",
+        "scope": "Disposable explicit fixture roots only. No native saturation or Windows runtime claim. Phase27 owns native performance and Phase28 owns final artifact closure.",
+        "platformScope": "macOS fixture volume accepted CaseFolder/casefolder aliases and canonicalize returned identical physical paths; conservative lowercase keys are extra exclusion only, not a proof of all Unicode equivalences. Windows handle identity implementation is present but no Windows compile/runtime test ran on this host."
+      }
+    },
+    {
+      "name": "rename_workspace_entry",
+      "module": "src-tauri/src/workspace_files.rs",
+      "registrationPath": "src-tauri/src/lib.rs::workspace_files::ipc::rename_workspace_entry",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/workspace_files.rs::ipc::rename_workspace_entry awaits spawn_blocking before validation, filesystem/process work or lock waits",
+        "src-tauri/src/workspace_files.rs::rename_workspace_entry preserves the public synchronous API",
+        "src-tauri/src/workspace_files.rs::journaled_rename performs the decisive filesystem walk/read/write/process or native Trash operation"
+      ],
+      "workerBoundary": "src-tauri/src/workspace_files.rs::ipc::rename_workspace_entry awaits tauri::async_runtime::spawn_blocking; owned String/Vec/Option/enum inputs only; contextual JoinError maps to String and inner String result remains unchanged",
+      "syncCallers": [
+        "src-tauri/src/workspace_files.rs::rename_workspace_entry remains callable synchronously by existing inline regression and Rust callers; maru-cli compilation verifies stable exports",
+        "src-tauri/src/kg_refs.rs retains synchronous scan/cache consumers; src-tauri/src/inbox.rs retains copy_source/move_source byte/tree primitives whose whole-transaction admission belongs to Plan10"
+      ],
+      "mutationKey": {
+        "lexicalPaths": [
+          "Source subtree, destination subtree, entire .maru/rename-txn and .maru/binder sidecar sets including rollback, plus conditional registry migration"
+        ],
+        "aliasPaths": [
+          "src-tauri/src/atomic_file.rs::PathTransactionRequest derives physical existing-target or nearest-existing-ancestor plus missing-suffix identities beside lexical paths; macOS/Windows exclusion keys conservatively fold case"
+        ],
+        "postAdmissionPreconditions": [
+          "Original directory handle identity is pinned (Unix dev/inode; Windows volume serial/file index) and alias resolution is rechecked; disappeared or replaced parents fail before effects",
+          "Mutation adapters recheck full lease coverage, conditional registry migration coverage, lexical containment, current permissions, destination absence and original domain validations; no new revision parameter is introduced"
+        ],
+        "domainLockOrder": "Shared atomic path-set admission before BINDER_WRITE_LOCK and any existing domain guard; lease spans complete work, rekey, error and rollback; work never holds bookkeeping mutex",
+        "sharedAdmissionEntry": "src-tauri/src/atomic_file.rs::with_path_transactions",
+        "crossDomainProof": "src-tauri/src/workspace_files.rs phase08_06_parent_rename_trash_create_both_orders_keep_complete_tree and phase08_06_queue_parent_race_and_multi_item_move use actual wrappers; earlier writer pairs are produced by Plan29, document pairs by Plan07"
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_06",
+          "passed": 20,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/components/FilesWorkbench.tsx",
+          "src/lib/documentOpsModeLifecycle.ts"
+        ],
+        "payload": "Existing String errors and data payload pass through untouched. Query responses are view-owned; reads do not create user-processing jobs.",
+        "terminalNoticeOwner": "Current src/lib/api.ts caller and initiating view own response/error publication; completion-lifetime finalization is assigned to Plans25/26."
+      ,
+        "classifier": "classifyWorkspaceMutationCompletion (src/lib/api.ts:1452)",
+        "successRetention": "payload returned unchanged to the caller; ProcessingOperationRecord.completion.succeeded retains successful item/output references after navigation",
+        "failureReasons": "per-item error strings trimmed into completion.failed[].reason; IPC rejection mapped by rejectionReason() (message + code); component no longer publishes a second error toast",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=rename_workspace_entry"
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_06_every_files_wrapper_leaves_the_polling_task",
+          "phase08_06_actual_wrappers_return_files_and_preserve_legacy_errors",
+          "phase08_06_parent_rename_trash_create_both_orders_keep_complete_tree",
+          "phase08_06_queue_parent_race_and_multi_item_move",
+          "phase08_06_create_contention_and_unrelated_directory_progress",
+          "phase08_06_waiting_command_rechecks_parent_permission_and_migration",
+          "phase08_06_symlink_alias_create_and_rename_rekey_rollback",
+          "phase08_06_duplicate_paste_queue_same_destination_preserve_both_results",
+          "phase08_06_case_aliases_of_actual_directory_serialize",
+          "phase08_06_nested_real_mutations_reuse_complete_lease_after_rename"
+        ],
+        "workerProof": "Actual wrapper future and yielding probe run on one Tauri task; a held worker reports a distinct thread ID before release; injected panic verifies contextual JoinError",
+        "scope": "Disposable explicit fixture roots only. No native saturation or Windows runtime claim. Phase27 owns native performance and Phase28 owns final artifact closure.",
+        "platformScope": "macOS fixture volume accepted CaseFolder/casefolder aliases and canonicalize returned identical physical paths; conservative lowercase keys are extra exclusion only, not a proof of all Unicode equivalences. Windows handle identity implementation is present but no Windows compile/runtime test ran on this host."
+      }
+    },
+    {
+      "name": "duplicate_workspace_entries",
+      "module": "src-tauri/src/workspace_files.rs",
+      "registrationPath": "src-tauri/src/lib.rs::workspace_files::ipc::duplicate_workspace_entries",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/workspace_files.rs::ipc::duplicate_workspace_entries awaits spawn_blocking before validation, filesystem/process work or lock waits",
+        "src-tauri/src/workspace_files.rs::duplicate_workspace_entries preserves the public synchronous API",
+        "src-tauri/src/workspace_files.rs::copy_dir_recursive_with_symlinks performs the decisive filesystem walk/read/write/process or native Trash operation"
+      ],
+      "workerBoundary": "src-tauri/src/workspace_files.rs::ipc::duplicate_workspace_entries awaits tauri::async_runtime::spawn_blocking; owned String/Vec/Option/enum inputs only; contextual JoinError maps to String and inner String result remains unchanged",
+      "syncCallers": [
+        "src-tauri/src/workspace_files.rs::duplicate_workspace_entries remains callable synchronously by existing inline regression and Rust callers; maru-cli compilation verifies stable exports",
+        "src-tauri/src/kg_refs.rs retains synchronous scan/cache consumers; src-tauri/src/inbox.rs retains copy_source/move_source byte/tree primitives whose whole-transaction admission belongs to Plan10"
+      ],
+      "mutationKey": {
+        "lexicalPaths": [
+          "Every valid source parent subtree covers original and all collision-derived sibling destination names; conditional registry migration"
+        ],
+        "aliasPaths": [
+          "src-tauri/src/atomic_file.rs::PathTransactionRequest derives physical existing-target or nearest-existing-ancestor plus missing-suffix identities beside lexical paths; macOS/Windows exclusion keys conservatively fold case"
+        ],
+        "postAdmissionPreconditions": [
+          "Original directory handle identity is pinned (Unix dev/inode; Windows volume serial/file index) and alias resolution is rechecked; disappeared or replaced parents fail before effects",
+          "Mutation adapters recheck full lease coverage, conditional registry migration coverage, lexical containment, current permissions, destination absence and original domain validations; no new revision parameter is introduced"
+        ],
+        "domainLockOrder": "Shared atomic path-set admission before BINDER_WRITE_LOCK and any existing domain guard; lease spans complete work, rekey, error and rollback; work never holds bookkeeping mutex",
+        "sharedAdmissionEntry": "src-tauri/src/atomic_file.rs::with_path_transactions",
+        "crossDomainProof": "src-tauri/src/workspace_files.rs phase08_06_parent_rename_trash_create_both_orders_keep_complete_tree and phase08_06_queue_parent_race_and_multi_item_move use actual wrappers; earlier writer pairs are produced by Plan29, document pairs by Plan07"
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_06",
+          "passed": 20,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/components/FilesWorkbench.tsx",
+          "src/lib/documentOpsModeLifecycle.ts"
+        ],
+        "payload": "Fulfilled Vec<WorkspaceMutationOutcome> can mix done/error; FilesWorkbench.runMutation filters errors and retains successful target selection before onFilesystemMutated.",
+        "terminalNoticeOwner": "Current FilesWorkbench.runMutation sets errors/busy and refresh callbacks; Plans25/26 must retain one terminal notice across unmount."
+      ,
+        "classifier": "classifyWorkspaceMutationCompletion (src/lib/api.ts:1452)",
+        "successRetention": "payload returned unchanged to the caller; ProcessingOperationRecord.completion.succeeded retains successful item/output references after navigation",
+        "failureReasons": "per-item error strings trimmed into completion.failed[].reason; IPC rejection mapped by rejectionReason() (message + code); component no longer publishes a second error toast",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=duplicate_workspace_entries"
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_06_every_files_wrapper_leaves_the_polling_task",
+          "phase08_06_actual_wrappers_return_files_and_preserve_legacy_errors",
+          "phase08_06_parent_rename_trash_create_both_orders_keep_complete_tree",
+          "phase08_06_queue_parent_race_and_multi_item_move",
+          "phase08_06_create_contention_and_unrelated_directory_progress",
+          "phase08_06_waiting_command_rechecks_parent_permission_and_migration",
+          "phase08_06_symlink_alias_create_and_rename_rekey_rollback",
+          "phase08_06_duplicate_paste_queue_same_destination_preserve_both_results",
+          "phase08_06_case_aliases_of_actual_directory_serialize",
+          "phase08_06_nested_real_mutations_reuse_complete_lease_after_rename"
+        ],
+        "workerProof": "Actual wrapper future and yielding probe run on one Tauri task; a held worker reports a distinct thread ID before release; injected panic verifies contextual JoinError",
+        "scope": "Disposable explicit fixture roots only. No native saturation or Windows runtime claim. Phase27 owns native performance and Phase28 owns final artifact closure.",
+        "platformScope": "macOS fixture volume accepted CaseFolder/casefolder aliases and canonicalize returned identical physical paths; conservative lowercase keys are extra exclusion only, not a proof of all Unicode equivalences. Windows handle identity implementation is present but no Windows compile/runtime test ran on this host."
+      }
+    },
+    {
+      "name": "paste_workspace_entries",
+      "module": "src-tauri/src/workspace_files.rs",
+      "registrationPath": "src-tauri/src/lib.rs::workspace_files::ipc::paste_workspace_entries",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/workspace_files.rs::ipc::paste_workspace_entries awaits spawn_blocking before validation, filesystem/process work or lock waits",
+        "src-tauri/src/workspace_files.rs::paste_workspace_entries preserves the public synchronous API",
+        "src-tauri/src/workspace_files.rs::move_entry performs the decisive filesystem walk/read/write/process or native Trash operation"
+      ],
+      "workerBoundary": "src-tauri/src/workspace_files.rs::ipc::paste_workspace_entries awaits tauri::async_runtime::spawn_blocking; owned String/Vec/Option/enum inputs only; contextual JoinError maps to String and inner String result remains unchanged",
+      "syncCallers": [
+        "src-tauri/src/workspace_files.rs::paste_workspace_entries remains callable synchronously by existing inline regression and Rust callers; maru-cli compilation verifies stable exports",
+        "src-tauri/src/kg_refs.rs retains synchronous scan/cache consumers; src-tauri/src/inbox.rs retains copy_source/move_source byte/tree primitives whose whole-transaction admission belongs to Plan10"
+      ],
+      "mutationKey": {
+        "lexicalPaths": [
+          "All source subtrees and complete destination directory subtree; move additionally reserves .maru/rename-txn and .maru/binder through rekey/rollback; conditional registry migration"
+        ],
+        "aliasPaths": [
+          "src-tauri/src/atomic_file.rs::PathTransactionRequest derives physical existing-target or nearest-existing-ancestor plus missing-suffix identities beside lexical paths; macOS/Windows exclusion keys conservatively fold case"
+        ],
+        "postAdmissionPreconditions": [
+          "Original directory handle identity is pinned (Unix dev/inode; Windows volume serial/file index) and alias resolution is rechecked; disappeared or replaced parents fail before effects",
+          "Mutation adapters recheck full lease coverage, conditional registry migration coverage, lexical containment, current permissions, destination absence and original domain validations; no new revision parameter is introduced"
+        ],
+        "domainLockOrder": "Shared atomic path-set admission before BINDER_WRITE_LOCK and any existing domain guard; lease spans complete work, rekey, error and rollback; work never holds bookkeeping mutex",
+        "sharedAdmissionEntry": "src-tauri/src/atomic_file.rs::with_path_transactions",
+        "crossDomainProof": "src-tauri/src/workspace_files.rs phase08_06_parent_rename_trash_create_both_orders_keep_complete_tree and phase08_06_queue_parent_race_and_multi_item_move use actual wrappers; earlier writer pairs are produced by Plan29, document pairs by Plan07"
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_06",
+          "passed": 20,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/components/FilesWorkbench.tsx",
+          "src/lib/documentOpsModeLifecycle.ts"
+        ],
+        "payload": "Fulfilled Vec<WorkspaceMutationOutcome> can mix done/error; FilesWorkbench.runMutation filters errors and retains successful target selection before onFilesystemMutated.",
+        "terminalNoticeOwner": "Current FilesWorkbench.runMutation sets errors/busy and refresh callbacks; Plans25/26 must retain one terminal notice across unmount."
+      ,
+        "classifier": "classifyWorkspaceMutationCompletion (src/lib/api.ts:1452)",
+        "successRetention": "payload returned unchanged to the caller; ProcessingOperationRecord.completion.succeeded retains successful item/output references after navigation",
+        "failureReasons": "per-item error strings trimmed into completion.failed[].reason; IPC rejection mapped by rejectionReason() (message + code); component no longer publishes a second error toast",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=paste_workspace_entries"
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_06_every_files_wrapper_leaves_the_polling_task",
+          "phase08_06_actual_wrappers_return_files_and_preserve_legacy_errors",
+          "phase08_06_parent_rename_trash_create_both_orders_keep_complete_tree",
+          "phase08_06_queue_parent_race_and_multi_item_move",
+          "phase08_06_create_contention_and_unrelated_directory_progress",
+          "phase08_06_waiting_command_rechecks_parent_permission_and_migration",
+          "phase08_06_symlink_alias_create_and_rename_rekey_rollback",
+          "phase08_06_duplicate_paste_queue_same_destination_preserve_both_results",
+          "phase08_06_case_aliases_of_actual_directory_serialize",
+          "phase08_06_nested_real_mutations_reuse_complete_lease_after_rename"
+        ],
+        "workerProof": "Actual wrapper future and yielding probe run on one Tauri task; a held worker reports a distinct thread ID before release; injected panic verifies contextual JoinError",
+        "scope": "Disposable explicit fixture roots only. No native saturation or Windows runtime claim. Phase27 owns native performance and Phase28 owns final artifact closure.",
+        "platformScope": "macOS fixture volume accepted CaseFolder/casefolder aliases and canonicalize returned identical physical paths; conservative lowercase keys are extra exclusion only, not a proof of all Unicode equivalences. Windows handle identity implementation is present but no Windows compile/runtime test ran on this host."
+      }
+    },
+    {
+      "name": "trash_workspace_entries",
+      "module": "src-tauri/src/workspace_files.rs",
+      "registrationPath": "src-tauri/src/lib.rs::workspace_files::ipc::trash_workspace_entries",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/workspace_files.rs::ipc::trash_workspace_entries awaits spawn_blocking before validation, filesystem/process work or lock waits",
+        "src-tauri/src/workspace_files.rs::trash_workspace_entries preserves the public synchronous API",
+        "src-tauri/src/workspace_files.rs::move_path_to_system_trash performs the decisive filesystem walk/read/write/process or native Trash operation"
+      ],
+      "workerBoundary": "src-tauri/src/workspace_files.rs::ipc::trash_workspace_entries awaits tauri::async_runtime::spawn_blocking; owned String/Vec/Option/enum inputs only; contextual JoinError maps to String and inner String result remains unchanged",
+      "syncCallers": [
+        "src-tauri/src/workspace_files.rs::trash_workspace_entries remains callable synchronously by existing inline regression and Rust callers; maru-cli compilation verifies stable exports",
+        "src-tauri/src/kg_refs.rs retains synchronous scan/cache consumers; src-tauri/src/inbox.rs retains copy_source/move_source byte/tree primitives whose whole-transaction admission belongs to Plan10"
+      ],
+      "mutationKey": {
+        "lexicalPaths": [
+          "All selected target subtrees plus conditional registry migration; promoted target validation remains inside admission; OS Trash destination is delegated to the existing native API"
+        ],
+        "aliasPaths": [
+          "src-tauri/src/atomic_file.rs::PathTransactionRequest derives physical existing-target or nearest-existing-ancestor plus missing-suffix identities beside lexical paths; macOS/Windows exclusion keys conservatively fold case"
+        ],
+        "postAdmissionPreconditions": [
+          "Original directory handle identity is pinned (Unix dev/inode; Windows volume serial/file index) and alias resolution is rechecked; disappeared or replaced parents fail before effects",
+          "Mutation adapters recheck full lease coverage, conditional registry migration coverage, lexical containment, current permissions, destination absence and original domain validations; no new revision parameter is introduced"
+        ],
+        "domainLockOrder": "Shared atomic path-set admission before BINDER_WRITE_LOCK and any existing domain guard; lease spans complete work, rekey, error and rollback; work never holds bookkeeping mutex",
+        "sharedAdmissionEntry": "src-tauri/src/atomic_file.rs::with_path_transactions",
+        "crossDomainProof": "src-tauri/src/workspace_files.rs phase08_06_parent_rename_trash_create_both_orders_keep_complete_tree and phase08_06_queue_parent_race_and_multi_item_move use actual wrappers; earlier writer pairs are produced by Plan29, document pairs by Plan07"
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_06",
+          "passed": 20,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/components/FilesWorkbench.tsx",
+          "src/lib/documentOpsModeLifecycle.ts"
+        ],
+        "payload": "Fulfilled Vec<WorkspaceMutationOutcome> can mix done/error; FilesWorkbench.runMutation filters errors and retains successful target selection before onFilesystemMutated.",
+        "terminalNoticeOwner": "Current FilesWorkbench.runMutation sets errors/busy and refresh callbacks; Plans25/26 must retain one terminal notice across unmount."
+      ,
+        "classifier": "classifyWorkspaceMutationCompletion (src/lib/api.ts:1452)",
+        "successRetention": "payload returned unchanged to the caller; ProcessingOperationRecord.completion.succeeded retains successful item/output references after navigation",
+        "failureReasons": "per-item error strings trimmed into completion.failed[].reason; IPC rejection mapped by rejectionReason() (message + code); component no longer publishes a second error toast",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=trash_workspace_entries"
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_06_every_files_wrapper_leaves_the_polling_task",
+          "phase08_06_actual_wrappers_return_files_and_preserve_legacy_errors",
+          "phase08_06_parent_rename_trash_create_both_orders_keep_complete_tree",
+          "phase08_06_queue_parent_race_and_multi_item_move",
+          "phase08_06_create_contention_and_unrelated_directory_progress",
+          "phase08_06_waiting_command_rechecks_parent_permission_and_migration",
+          "phase08_06_symlink_alias_create_and_rename_rekey_rollback",
+          "phase08_06_duplicate_paste_queue_same_destination_preserve_both_results",
+          "phase08_06_case_aliases_of_actual_directory_serialize",
+          "phase08_06_nested_real_mutations_reuse_complete_lease_after_rename"
+        ],
+        "workerProof": "Actual wrapper future and yielding probe run on one Tauri task; a held worker reports a distinct thread ID before release; injected panic verifies contextual JoinError",
+        "scope": "Disposable explicit fixture roots only. No native saturation or Windows runtime claim. Phase27 owns native performance and Phase28 owns final artifact closure.",
+        "platformScope": "macOS fixture volume accepted CaseFolder/casefolder aliases and canonicalize returned identical physical paths; conservative lowercase keys are extra exclusion only, not a proof of all Unicode equivalences. Windows handle identity implementation is present but no Windows compile/runtime test ran on this host."
+      }
+    },
+    {
+      "name": "describe_file_queue_sources",
+      "module": "src-tauri/src/workspace_files.rs",
+      "registrationPath": "src-tauri/src/lib.rs::workspace_files::ipc::describe_file_queue_sources",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/workspace_files.rs::ipc::describe_file_queue_sources awaits spawn_blocking before validation, filesystem/process work or lock waits",
+        "src-tauri/src/workspace_files.rs::describe_file_queue_sources preserves the public synchronous API",
+        "src-tauri/src/workspace_files.rs::describe_file_queue_sources performs the decisive filesystem walk/read/write/process or native Trash operation"
+      ],
+      "workerBoundary": "src-tauri/src/workspace_files.rs::ipc::describe_file_queue_sources awaits tauri::async_runtime::spawn_blocking; owned String/Vec/Option/enum inputs only; contextual JoinError maps to String and inner String result remains unchanged",
+      "syncCallers": [
+        "src-tauri/src/workspace_files.rs::describe_file_queue_sources remains callable synchronously by existing inline regression and Rust callers; maru-cli compilation verifies stable exports",
+        "src-tauri/src/kg_refs.rs retains synchronous scan/cache consumers; src-tauri/src/inbox.rs retains copy_source/move_source byte/tree primitives whose whole-transaction admission belongs to Plan10"
+      ],
+      "mutationKey": {
+        "readOnly": true,
+        "reason": "No filesystem mutation: metadata/content reads and read-only subprocess/walk are entirely inside the awaited blocking worker"
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_06",
+          "passed": 20,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/App.tsx"
+        ],
+        "payload": "Existing String errors and data payload pass through untouched. Query responses are view-owned; reads do not create user-processing jobs.",
+        "terminalNoticeOwner": "Current src/lib/api.ts caller and initiating view own response/error publication; completion-lifetime finalization is assigned to Plans25/26."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=describe_file_queue_sources"
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_06_every_files_wrapper_leaves_the_polling_task",
+          "phase08_06_actual_wrappers_return_files_and_preserve_legacy_errors",
+          "phase08_06_parent_rename_trash_create_both_orders_keep_complete_tree",
+          "phase08_06_queue_parent_race_and_multi_item_move",
+          "phase08_06_create_contention_and_unrelated_directory_progress",
+          "phase08_06_waiting_command_rechecks_parent_permission_and_migration",
+          "phase08_06_symlink_alias_create_and_rename_rekey_rollback",
+          "phase08_06_duplicate_paste_queue_same_destination_preserve_both_results",
+          "phase08_06_case_aliases_of_actual_directory_serialize",
+          "phase08_06_nested_real_mutations_reuse_complete_lease_after_rename"
+        ],
+        "workerProof": "Actual wrapper future and yielding probe run on one Tauri task; a held worker reports a distinct thread ID before release; injected panic verifies contextual JoinError",
+        "scope": "Disposable explicit fixture roots only. No native saturation or Windows runtime claim. Phase27 owns native performance and Phase28 owns final artifact closure.",
+        "platformScope": "macOS fixture volume accepted CaseFolder/casefolder aliases and canonicalize returned identical physical paths; conservative lowercase keys are extra exclusion only, not a proof of all Unicode equivalences. Windows handle identity implementation is present but no Windows compile/runtime test ran on this host."
+      }
+    },
+    {
+      "name": "apply_file_queue",
+      "module": "src-tauri/src/workspace_files.rs",
+      "registrationPath": "src-tauri/src/lib.rs::workspace_files::ipc::apply_file_queue",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/workspace_files.rs::ipc::apply_file_queue awaits spawn_blocking before validation, filesystem/process work or lock waits",
+        "src-tauri/src/workspace_files.rs::apply_file_queue preserves the public synchronous API",
+        "src-tauri/src/workspace_files.rs::apply_file_queue_in_transaction performs the decisive filesystem walk/read/write/process or native Trash operation"
+      ],
+      "workerBoundary": "src-tauri/src/workspace_files.rs::ipc::apply_file_queue awaits tauri::async_runtime::spawn_blocking; owned String/Vec/Option/enum inputs only; contextual JoinError maps to String and inner String result remains unchanged",
+      "syncCallers": [
+        "src-tauri/src/workspace_files.rs::apply_file_queue remains callable synchronously by existing inline regression and Rust callers; maru-cli compilation verifies stable exports",
+        "src-tauri/src/kg_refs.rs retains synchronous scan/cache consumers; src-tauri/src/inbox.rs retains copy_source/move_source byte/tree primitives whose whole-transaction admission belongs to Plan10"
+      ],
+      "mutationKey": {
+        "lexicalPaths": [
+          "All source paths/subtrees and target directory subtrees atomically; moves include .maru/binder rekey/rollback; conditional registry migration; no per-item admission reacquisition"
+        ],
+        "aliasPaths": [
+          "src-tauri/src/atomic_file.rs::PathTransactionRequest derives physical existing-target or nearest-existing-ancestor plus missing-suffix identities beside lexical paths; macOS/Windows exclusion keys conservatively fold case"
+        ],
+        "postAdmissionPreconditions": [
+          "Original directory handle identity is pinned (Unix dev/inode; Windows volume serial/file index) and alias resolution is rechecked; disappeared or replaced parents fail before effects",
+          "Mutation adapters recheck full lease coverage, conditional registry migration coverage, lexical containment, current permissions, destination absence and original domain validations; no new revision parameter is introduced"
+        ],
+        "domainLockOrder": "Shared atomic path-set admission before BINDER_WRITE_LOCK and any existing domain guard; lease spans complete work, rekey, error and rollback; work never holds bookkeeping mutex",
+        "sharedAdmissionEntry": "src-tauri/src/atomic_file.rs::with_path_transactions",
+        "crossDomainProof": "src-tauri/src/workspace_files.rs phase08_06_parent_rename_trash_create_both_orders_keep_complete_tree and phase08_06_queue_parent_race_and_multi_item_move use actual wrappers; earlier writer pairs are produced by Plan29, document pairs by Plan07"
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_06",
+          "passed": 20,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/App.tsx"
+        ],
+        "payload": "Vec<FileQueueApplyOutcome> reports successful items; existing early error can follow persisted earlier work. App.applyQueuedFiles Promise.all across workspaces can reject after another group succeeds; retain those successes in Plans25/26.",
+        "terminalNoticeOwner": "Current App.applyQueuedFiles and outlinePaneStore own queue completion, error and refresh; Plans25/26 consolidate lifetime and one terminal notice."
+      ,
+        "classifier": "null classifier: rejection-only contract (src/lib/api.ts:1560)",
+        "successRetention": "payload returned unchanged to the caller; ProcessingOperationRecord.completion.succeeded retains successful item/output references after navigation",
+        "failureReasons": "per-item error strings trimmed into completion.failed[].reason; IPC rejection mapped by rejectionReason() (message + code); component no longer publishes a second error toast",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=apply_file_queue"
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_06_every_files_wrapper_leaves_the_polling_task",
+          "phase08_06_actual_wrappers_return_files_and_preserve_legacy_errors",
+          "phase08_06_parent_rename_trash_create_both_orders_keep_complete_tree",
+          "phase08_06_queue_parent_race_and_multi_item_move",
+          "phase08_06_create_contention_and_unrelated_directory_progress",
+          "phase08_06_waiting_command_rechecks_parent_permission_and_migration",
+          "phase08_06_symlink_alias_create_and_rename_rekey_rollback",
+          "phase08_06_duplicate_paste_queue_same_destination_preserve_both_results",
+          "phase08_06_case_aliases_of_actual_directory_serialize",
+          "phase08_06_nested_real_mutations_reuse_complete_lease_after_rename"
+        ],
+        "workerProof": "Actual wrapper future and yielding probe run on one Tauri task; a held worker reports a distinct thread ID before release; injected panic verifies contextual JoinError",
+        "scope": "Disposable explicit fixture roots only. No native saturation or Windows runtime claim. Phase27 owns native performance and Phase28 owns final artifact closure.",
+        "platformScope": "macOS fixture volume accepted CaseFolder/casefolder aliases and canonicalize returned identical physical paths; conservative lowercase keys are extra exclusion only, not a proof of all Unicode equivalences. Windows handle identity implementation is present but no Windows compile/runtime test ran on this host."
+      }
+    },
+    {
+      "name": "search_workspace_contents",
+      "module": "src-tauri/src/content_search.rs",
+      "registrationPath": "src-tauri/src/lib.rs::content_search::ipc::search_workspace_contents",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/content_search.rs::ipc::search_workspace_contents awaits spawn_blocking before validation, filesystem/process work or lock waits",
+        "src-tauri/src/content_search.rs::search_workspace_contents preserves the public synchronous API",
+        "src-tauri/src/content_search.rs::collect_with_rg performs the decisive filesystem walk/read/write/process or native Trash operation"
+      ],
+      "workerBoundary": "src-tauri/src/content_search.rs::ipc::search_workspace_contents awaits tauri::async_runtime::spawn_blocking; owned String/Vec/Option/enum inputs only; contextual JoinError maps to String and inner String result remains unchanged",
+      "syncCallers": [
+        "src-tauri/src/content_search.rs::search_workspace_contents remains callable synchronously by existing inline regression and Rust callers; maru-cli compilation verifies stable exports",
+        "src-tauri/src/kg_refs.rs retains synchronous scan/cache consumers; src-tauri/src/inbox.rs retains copy_source/move_source byte/tree primitives whose whole-transaction admission belongs to Plan10"
+      ],
+      "mutationKey": {
+        "readOnly": true,
+        "reason": "No filesystem mutation: metadata/content reads and read-only subprocess/walk are entirely inside the awaited blocking worker"
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_06",
+          "passed": 20,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/components/FilesWorkbench.tsx"
+        ],
+        "payload": "Existing String errors and data payload pass through untouched. Query responses are view-owned; reads do not create user-processing jobs.",
+        "terminalNoticeOwner": "Current src/lib/api.ts caller and initiating view own response/error publication; completion-lifetime finalization is assigned to Plans25/26."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=search_workspace_contents"
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_06_search_worker_returns_real_hits_and_legacy_regex_error"
+        ],
+        "workerProof": "Actual wrapper future and yielding probe run on one Tauri task; a held worker reports a distinct thread ID before release; injected panic verifies contextual JoinError",
+        "scope": "Disposable explicit fixture roots only. No native saturation or Windows runtime claim. Phase27 owns native performance and Phase28 owns final artifact closure.",
+        "platformScope": "macOS fixture volume accepted CaseFolder/casefolder aliases and canonicalize returned identical physical paths; conservative lowercase keys are extra exclusion only, not a proof of all Unicode equivalences. Windows handle identity implementation is present but no Windows compile/runtime test ran on this host."
+      }
+    },
+    {
+      "name": "search_calendar_notes",
+      "module": "src-tauri/src/calendar_search.rs",
+      "registrationPath": "src-tauri/src/lib.rs::calendar_search::ipc::search_calendar_notes",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/calendar_search.rs::ipc::search_calendar_notes awaits spawn_blocking before validation, filesystem/process work or lock waits",
+        "src-tauri/src/calendar_search.rs::search_calendar_notes preserves the public synchronous API",
+        "src-tauri/src/calendar_search.rs::search_calendar_notes performs the decisive filesystem walk/read/write/process or native Trash operation"
+      ],
+      "workerBoundary": "src-tauri/src/calendar_search.rs::ipc::search_calendar_notes awaits tauri::async_runtime::spawn_blocking; owned String/Vec/Option/enum inputs only; contextual JoinError maps to String and inner String result remains unchanged",
+      "syncCallers": [
+        "src-tauri/src/calendar_search.rs::search_calendar_notes remains callable synchronously by existing inline regression and Rust callers; maru-cli compilation verifies stable exports",
+        "src-tauri/src/kg_refs.rs retains synchronous scan/cache consumers; src-tauri/src/inbox.rs retains copy_source/move_source byte/tree primitives whose whole-transaction admission belongs to Plan10"
+      ],
+      "mutationKey": {
+        "readOnly": true,
+        "reason": "No filesystem mutation: metadata/content reads and read-only subprocess/walk are entirely inside the awaited blocking worker"
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_06",
+          "passed": 20,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts"
+        ],
+        "payload": "Existing String errors and data payload pass through untouched. Query responses are view-owned; reads do not create user-processing jobs.",
+        "terminalNoticeOwner": "Current src/lib/api.ts caller and initiating view own response/error publication; completion-lifetime finalization is assigned to Plans25/26."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=search_calendar_notes"
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_06_calendar_worker_returns_real_hits_and_legacy_errors"
+        ],
+        "workerProof": "Actual wrapper future and yielding probe run on one Tauri task; a held worker reports a distinct thread ID before release; injected panic verifies contextual JoinError",
+        "scope": "Disposable explicit fixture roots only. No native saturation or Windows runtime claim. Phase27 owns native performance and Phase28 owns final artifact closure.",
+        "platformScope": "macOS fixture volume accepted CaseFolder/casefolder aliases and canonicalize returned identical physical paths; conservative lowercase keys are extra exclusion only, not a proof of all Unicode equivalences. Windows handle identity implementation is present but no Windows compile/runtime test ran on this host."
+      }
+    }
+  ]
+}

@@ -4,7 +4,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { describe, expect, it } from "vitest";
 
-import { clearError, resolveErrorValue, setError, useError, type ErrorValue } from "./errorStore";
+import { clearError, resolveErrorValue, setError, useError, dismissOperationNotice, getOperationNotice, publishOperationNotice, useOperationNotice, type ErrorValue } from "./errorStore";
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT =
   true;
@@ -58,6 +58,37 @@ describe("errorStore", () => {
     await act(async () => setError((current) => (current === "kept" ? null : current)));
 
     expect(seen).toEqual([null, "kept", null]);
+    await act(async () => root.unmount());
+  });
+});
+
+
+describe("operation notice channel", () => {
+  it("deduplicates terminal notices even after dismissal", () => {
+    const notice = { operationId: "dedup", kind: "success" as const, message: "Workspace / source complete" };
+    expect(publishOperationNotice(notice)).toBe(true);
+    expect(publishOperationNotice(notice)).toBe(false);
+    dismissOperationNotice(notice.operationId);
+    expect(publishOperationNotice(notice)).toBe(false);
+    expect(getOperationNotice()).toBeNull();
+  });
+  it("concurrent notices remain available in order without replacing errors", () => {
+    setError("existing error");
+    publishOperationNotice({ operationId: "first", kind: "info", message: "Skipped; retry manually" });
+    publishOperationNotice({ operationId: "second", kind: "error", message: "Failed; retry manually" });
+    expect(getOperationNotice()?.operationId).toBe("first");
+    dismissOperationNotice("first"); expect(getOperationNotice()?.operationId).toBe("second");
+    dismissOperationNotice("second"); expect(getOperationNotice()).toBeNull();
+    let previous: ErrorValue = null;
+    setError((current) => { previous = current; return null; });
+    expect(previous).toBe("existing error");
+  });
+  it("useOperationNotice reattaches after unmount", async () => {
+    const container = document.createElement("div"); const root = createRoot(container);
+    function Notice() { return <span>{useOperationNotice()?.message ?? "empty"}</span>; }
+    publishOperationNotice({ operationId: "hook", kind: "success", message: "Done" });
+    await act(async () => root.render(<Notice />)); expect(container.textContent).toBe("Done");
+    await act(async () => dismissOperationNotice("hook")); expect(container.textContent).toBe("empty");
     await act(async () => root.unmount());
   });
 });

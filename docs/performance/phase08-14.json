@@ -1,0 +1,1534 @@
+{
+  "plan": "08-14",
+  "moduleIntegrationOwner": "08-14",
+  "commands": [
+    {
+      "name": "fetch_telegram_recent",
+      "module": "src-tauri/src/telegram_io.rs",
+      "registrationPath": "src-tauri/src/lib.rs::telegram_io::ipc::fetch_telegram_recent",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/telegram_io.rs::fetch_telegram_recent_inner preserves existing provider arguments, parsing, approvals and outcomes; all reached filesystem/process work remains inside the owned blocking worker."
+      ],
+      "workerBoundary": "src-tauri/src/telegram_io.rs::ipc::fetch_telegram_recent owns command values and awaits tauri::async_runtime::spawn_blocking before any process, filesystem traversal, admission or domain-lock wait. Existing String results and success payloads remain unchanged; contextual JoinError stays a display-only String. AppHandle resolves real ApprovalState inside the worker where needed; no borrowed guard crosses await.",
+      "syncCallers": [
+        "src-tauri/src/telegram_io.rs::fetch_telegram_recent preserves the original synchronous API where originally synchronous; existing async entries keep their registration. Telegram polling retains dedicated threads, and stop releases the poller handle lock before join."
+      ],
+      "mutationKey": {
+        "lexicalPaths": [
+          "Configured selected SQLite session, Telethon .session alternative, both filenames journal/WAL/SHM sidecars and allocation parent",
+          "Workspace and monitor configuration snapshots; owned environment/bootstrap preparation remains its existing independently admitted producer",
+          "legacy_auto_drop with selected work additionally reserves configured workspace/inbox/drop trees and existing descendant aliases; no-work custom outputs retain the original delegated boundary"
+        ],
+        "aliasPaths": [
+          "Session filename/parent physical aliases and original existing parent handles",
+          "Workspace start snapshot retained for fetch return and polling callback settlement"
+        ],
+        "sharedAdmissionEntry": "src-tauri/src/telegram_io.rs::fetch_telegram_recent_inner admits complete session paths around the finite subprocess and releases them before fresh result/callback settlement.",
+        "postAdmissionPreconditions": [
+          "Session parents/aliases and selected configuration are revalidated before subprocess",
+          "Fresh post-provider and polling callback admission retains the original workspace parent and current config/policy"
+        ],
+        "domainLockOrder": "Session admission before local-writing subprocess; no domain/bookkeeping mutex is held across provider work. Existing Telegram session reservation releases its mutex while active; registry/environment preparation finishes before session admission."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_14",
+          "passed": 32,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/App.tsx"
+        ],
+        "payload": "App processCommsChannelNow / decideInboxKeys keep existing busy/finally, successful siblings and errors. Readiness uses current request ownership. KakaoRelayPanel owns viewer state and explicit queue/send-result polling; Telegram polling uses existing events/status.",
+        "terminalNoticeOwner": "Existing initiating component owns current completion. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "accept/reject/stage outcome per item",
+        "successRetention": "pane state refresh after mutation",
+        "failureReasons": "pane-local catch error message",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=fetch_telegram_recent"
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_14_telegram_every_wrapper_yields_and_preserves_join_errors",
+          "phase08_14_telegram_retained_auth_yields_and_preserves_probe_error",
+          "phase08_14_telegram_actual_entries_nonempty_results_approvals_auth_and_polling",
+          "phase08_14_telegram_raw_writers_policy_alias_and_error_release",
+          "phase08_14_telegram_fetch_discards_replaced_parent_and_releases_reservation",
+          "phase08_14_telegram_writers_contend_with_files_both_orders",
+          "phase08_14_telegram_same_target_contention_and_actual_unwind_release",
+          "phase08_14_telegram_polling_callback_rejects_replaced_parent_without_locking_status",
+          "phase08_14_telegram_fetch_auth_session_writers_files_both_orders_aliases",
+          "phase08_14_telegram_concurrent_actual_starts_status_and_stop_reap",
+          "phase08_14_telegram_session_policy_rechecked_after_admission_and_released",
+          "phase08_14_telegram_legacy_configured_drop_preserves_argv_files_races_and_aliases"
+        ],
+        "workerProof": "Actual command futures are held at worker entry on a distinct blocking thread, manually polled on the same async task and yield before release; synthetic fixtures verify output and contextual worker-unwind errors.",
+        "platformScope": "macOS synthetic fixtures only, with shared Home lock and disposable outer MARU_TEST_HOME/MARU_TEST_CONFIG_DIR. Provider executable selection is asserted before invocation; no real messages, account/auth calls, relay daemon or native Trash.",
+        "limits": "In-process admission does not exclude independent external processes. Configured custom scripts and external provider internals retain their existing delegated effects; no remote exactly-once or live connected-provider proof. PERF-01/PERF-02 remain globally pending.",
+        "lifetime": "Setup and stop run in awaited workers; existing polling thread owns fetch and fresh start-parent callback validation. Session/local legacy lease spans only actual child lifetime; status/poller guards do not span network or join."
+      }
+    },
+    {
+      "name": "accept_telegram_item",
+      "module": "src-tauri/src/telegram_io.rs",
+      "registrationPath": "src-tauri/src/lib.rs::telegram_io::ipc::accept_telegram_item",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/telegram_io.rs::accept_telegram_item_blocking preserves existing provider arguments, parsing, approvals and outcomes; all reached filesystem/process work remains inside the owned blocking worker.",
+        "src-tauri/src/inbox_drop.rs::stage_message_json_with_parent independently admits each envelope with the original batch parent; successful siblings remain on disk after later failure."
+      ],
+      "workerBoundary": "src-tauri/src/telegram_io.rs::ipc::accept_telegram_item owns command values and awaits tauri::async_runtime::spawn_blocking before any process, filesystem traversal, admission or domain-lock wait. Existing String results and success payloads remain unchanged; contextual JoinError stays a display-only String. AppHandle resolves real ApprovalState inside the worker where needed; no borrowed guard crosses await.",
+      "syncCallers": [
+        "src-tauri/src/telegram_io.rs::accept_telegram_item preserves the original synchronous API where originally synchronous; existing async entries keep their registration. Telegram polling retains dedicated threads, and stop releases the poller handle lock before join."
+      ],
+      "mutationKey": {
+        "lexicalPaths": [
+          "Configured inbox root, channel target directory and exact timestamp-provider-id JSON",
+          "workspace.config.yaml, .maru/inbox.json and missing .maru allocation",
+          "Conditional legacy/global registry migration paths"
+        ],
+        "aliasPaths": [
+          "Original selected workspace parent and every lexical/physical target and existing final-file alias; supported external symlinks remain valid"
+        ],
+        "sharedAdmissionEntry": "src-tauri/src/inbox_drop.rs::stage_message_json_with_parent constructs PathTransactionRequest and calls with_path_transactions for each original-parent settlement.",
+        "postAdmissionPreconditions": [
+          "Original parent identity and alias snapshots remain current",
+          "Reloaded inbox configuration matches the selected configuration",
+          "Current registry write policy allows Create before target-directory creation or fs::write"
+        ],
+        "domainLockOrder": "Shared admission before filesystem effects; approval store mutex is consumed/released inside worker before admission waits. No provider call or nested admission inside the envelope lease."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_14",
+          "passed": 32,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/App.tsx"
+        ],
+        "payload": "App processCommsChannelNow / decideInboxKeys keep existing busy/finally, successful siblings and errors. Readiness uses current request ownership. KakaoRelayPanel owns viewer state and explicit queue/send-result polling; Telegram polling uses existing events/status.",
+        "terminalNoticeOwner": "Existing initiating component owns current completion. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "accept/reject/stage outcome per item",
+        "successRetention": "pane state refresh after mutation",
+        "failureReasons": "pane-local catch error message",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=accept_telegram_item"
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_14_telegram_every_wrapper_yields_and_preserves_join_errors",
+          "phase08_14_telegram_retained_auth_yields_and_preserves_probe_error",
+          "phase08_14_telegram_actual_entries_nonempty_results_approvals_auth_and_polling",
+          "phase08_14_telegram_raw_writers_policy_alias_and_error_release",
+          "phase08_14_telegram_fetch_discards_replaced_parent_and_releases_reservation",
+          "phase08_14_telegram_writers_contend_with_files_both_orders",
+          "phase08_14_telegram_same_target_contention_and_actual_unwind_release",
+          "phase08_14_telegram_polling_callback_rejects_replaced_parent_without_locking_status",
+          "phase08_14_telegram_fetch_auth_session_writers_files_both_orders_aliases",
+          "phase08_14_telegram_concurrent_actual_starts_status_and_stop_reap",
+          "phase08_14_telegram_session_policy_rechecked_after_admission_and_released",
+          "phase08_14_telegram_legacy_configured_drop_preserves_argv_files_races_and_aliases"
+        ],
+        "workerProof": "Actual command futures are held at worker entry on a distinct blocking thread, manually polled on the same async task and yield before release; synthetic fixtures verify output and contextual worker-unwind errors.",
+        "platformScope": "macOS synthetic fixtures only, with shared Home lock and disposable outer MARU_TEST_HOME/MARU_TEST_CONFIG_DIR. Provider executable selection is asserted before invocation; no real messages, account/auth calls, relay daemon or native Trash.",
+        "limits": "In-process admission does not exclude independent external processes. Configured custom scripts and external provider internals retain their existing delegated effects; no remote exactly-once or live connected-provider proof. PERF-01/PERF-02 remain globally pending."
+      }
+    },
+    {
+      "name": "reject_telegram_item",
+      "module": "src-tauri/src/telegram_io.rs",
+      "registrationPath": "src-tauri/src/lib.rs::telegram_io::ipc::reject_telegram_item",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/telegram_io.rs::reject_telegram_item_blocking preserves existing provider arguments, parsing, approvals and outcomes; all reached filesystem/process work remains inside the owned blocking worker."
+      ],
+      "workerBoundary": "src-tauri/src/telegram_io.rs::ipc::reject_telegram_item owns command values and awaits tauri::async_runtime::spawn_blocking before any process, filesystem traversal, admission or domain-lock wait. Existing String results and success payloads remain unchanged; contextual JoinError stays a display-only String. AppHandle resolves real ApprovalState inside the worker where needed; no borrowed guard crosses await.",
+      "syncCallers": [
+        "src-tauri/src/telegram_io.rs::reject_telegram_item preserves the original synchronous API where originally synchronous; existing async entries keep their registration. Telegram polling retains dedicated threads, and stop releases the poller handle lock before join."
+      ],
+      "mutationKey": {
+        "readOnly": true,
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "sharedAdmissionEntry": "No filesystem mutation is owned by this command. Read-only local status/metadata or existing external provider operations and in-memory approval/status state only.",
+        "postAdmissionPreconditions": [
+          "Existing argument validation and explicit approval remain inside the worker."
+        ],
+        "domainLockOrder": "No command-owned filesystem mutation lease; bounded approval/status guards are released before process/network calls or thread joins."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_14",
+          "passed": 32,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/App.tsx"
+        ],
+        "payload": "App processCommsChannelNow / decideInboxKeys keep existing busy/finally, successful siblings and errors. Readiness uses current request ownership. KakaoRelayPanel owns viewer state and explicit queue/send-result polling; Telegram polling uses existing events/status.",
+        "terminalNoticeOwner": "Existing initiating component owns current completion. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "accept/reject/stage outcome per item",
+        "successRetention": "pane state refresh after mutation",
+        "failureReasons": "pane-local catch error message",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=reject_telegram_item"
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_14_telegram_every_wrapper_yields_and_preserves_join_errors",
+          "phase08_14_telegram_retained_auth_yields_and_preserves_probe_error",
+          "phase08_14_telegram_actual_entries_nonempty_results_approvals_auth_and_polling",
+          "phase08_14_telegram_raw_writers_policy_alias_and_error_release",
+          "phase08_14_telegram_fetch_discards_replaced_parent_and_releases_reservation",
+          "phase08_14_telegram_writers_contend_with_files_both_orders",
+          "phase08_14_telegram_same_target_contention_and_actual_unwind_release",
+          "phase08_14_telegram_polling_callback_rejects_replaced_parent_without_locking_status",
+          "phase08_14_telegram_fetch_auth_session_writers_files_both_orders_aliases",
+          "phase08_14_telegram_concurrent_actual_starts_status_and_stop_reap",
+          "phase08_14_telegram_session_policy_rechecked_after_admission_and_released",
+          "phase08_14_telegram_legacy_configured_drop_preserves_argv_files_races_and_aliases"
+        ],
+        "workerProof": "Actual command futures are held at worker entry on a distinct blocking thread, manually polled on the same async task and yield before release; synthetic fixtures verify output and contextual worker-unwind errors.",
+        "platformScope": "macOS synthetic fixtures only, with shared Home lock and disposable outer MARU_TEST_HOME/MARU_TEST_CONFIG_DIR. Provider executable selection is asserted before invocation; no real messages, account/auth calls, relay daemon or native Trash.",
+        "limits": "In-process admission does not exclude independent external processes. Configured custom scripts and external provider internals retain their existing delegated effects; no remote exactly-once or live connected-provider proof. PERF-01/PERF-02 remain globally pending."
+      }
+    },
+    {
+      "name": "stage_telegram_items",
+      "module": "src-tauri/src/telegram_io.rs",
+      "registrationPath": "src-tauri/src/lib.rs::telegram_io::ipc::stage_telegram_items",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/telegram_io.rs::stage_telegram_items_blocking preserves existing provider arguments, parsing, approvals and outcomes; all reached filesystem/process work remains inside the owned blocking worker.",
+        "src-tauri/src/inbox_drop.rs::stage_message_json_with_parent independently admits each envelope with the original batch parent; successful siblings remain on disk after later failure."
+      ],
+      "workerBoundary": "src-tauri/src/telegram_io.rs::ipc::stage_telegram_items owns command values and awaits tauri::async_runtime::spawn_blocking before any process, filesystem traversal, admission or domain-lock wait. Existing String results and success payloads remain unchanged; contextual JoinError stays a display-only String. AppHandle resolves real ApprovalState inside the worker where needed; no borrowed guard crosses await.",
+      "syncCallers": [
+        "src-tauri/src/telegram_io.rs::stage_telegram_items preserves the original synchronous API where originally synchronous; existing async entries keep their registration. Telegram polling retains dedicated threads, and stop releases the poller handle lock before join."
+      ],
+      "mutationKey": {
+        "lexicalPaths": [
+          "Configured inbox root, channel target directory and exact timestamp-provider-id JSON",
+          "workspace.config.yaml, .maru/inbox.json and missing .maru allocation",
+          "Conditional legacy/global registry migration paths"
+        ],
+        "aliasPaths": [
+          "Original selected workspace parent and every lexical/physical target and existing final-file alias; supported external symlinks remain valid"
+        ],
+        "sharedAdmissionEntry": "src-tauri/src/inbox_drop.rs::stage_message_json_with_parent constructs PathTransactionRequest and calls with_path_transactions for each original-parent settlement.",
+        "postAdmissionPreconditions": [
+          "Original parent identity and alias snapshots remain current",
+          "Reloaded inbox configuration matches the selected configuration",
+          "Current registry write policy allows Create before target-directory creation or fs::write"
+        ],
+        "domainLockOrder": "Shared admission before filesystem effects; approval store mutex is consumed/released inside worker before admission waits. No provider call or nested admission inside the envelope lease."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_14",
+          "passed": 32,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/App.tsx"
+        ],
+        "payload": "App processCommsChannelNow / decideInboxKeys keep existing busy/finally, successful siblings and errors. Readiness uses current request ownership. KakaoRelayPanel owns viewer state and explicit queue/send-result polling; Telegram polling uses existing events/status.",
+        "terminalNoticeOwner": "Existing initiating component owns current completion. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "accept/reject/stage outcome per item",
+        "successRetention": "pane state refresh after mutation",
+        "failureReasons": "pane-local catch error message",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=stage_telegram_items"
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_14_telegram_every_wrapper_yields_and_preserves_join_errors",
+          "phase08_14_telegram_retained_auth_yields_and_preserves_probe_error",
+          "phase08_14_telegram_actual_entries_nonempty_results_approvals_auth_and_polling",
+          "phase08_14_telegram_raw_writers_policy_alias_and_error_release",
+          "phase08_14_telegram_fetch_discards_replaced_parent_and_releases_reservation",
+          "phase08_14_telegram_writers_contend_with_files_both_orders",
+          "phase08_14_telegram_same_target_contention_and_actual_unwind_release",
+          "phase08_14_telegram_polling_callback_rejects_replaced_parent_without_locking_status",
+          "phase08_14_telegram_fetch_auth_session_writers_files_both_orders_aliases",
+          "phase08_14_telegram_concurrent_actual_starts_status_and_stop_reap",
+          "phase08_14_telegram_session_policy_rechecked_after_admission_and_released",
+          "phase08_14_telegram_legacy_configured_drop_preserves_argv_files_races_and_aliases"
+        ],
+        "workerProof": "Actual command futures are held at worker entry on a distinct blocking thread, manually polled on the same async task and yield before release; synthetic fixtures verify output and contextual worker-unwind errors.",
+        "platformScope": "macOS synthetic fixtures only, with shared Home lock and disposable outer MARU_TEST_HOME/MARU_TEST_CONFIG_DIR. Provider executable selection is asserted before invocation; no real messages, account/auth calls, relay daemon or native Trash.",
+        "limits": "In-process admission does not exclude independent external processes. Configured custom scripts and external provider internals retain their existing delegated effects; no remote exactly-once or live connected-provider proof. PERF-01/PERF-02 remain globally pending."
+      }
+    },
+    {
+      "name": "check_telegram_auth",
+      "module": "src-tauri/src/telegram_io.rs",
+      "registrationPath": "src-tauri/src/lib.rs::telegram_io::check_telegram_auth",
+      "originalDisposition": "ISOLATED",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/telegram_io.rs::check_telegram_auth_now preserves existing provider arguments, parsing, approvals and outcomes; all reached filesystem/process work remains inside the owned blocking worker."
+      ],
+      "workerBoundary": "src-tauri/src/telegram_io.rs::check_telegram_auth owns command values and awaits tauri::async_runtime::spawn_blocking before any process, filesystem traversal, admission or domain-lock wait. Existing String results and success payloads remain unchanged; contextual JoinError stays a display-only String. AppHandle resolves real ApprovalState inside the worker where needed; no borrowed guard crosses await.",
+      "syncCallers": [
+        "src-tauri/src/telegram_io.rs::check_telegram_auth preserves the original synchronous API where originally synchronous; existing async entries keep their registration. Telegram polling retains dedicated threads, and stop releases the poller handle lock before join."
+      ],
+      "mutationKey": {
+        "lexicalPaths": [
+          "Configured selected SQLite session, Telethon .session alternative, both filenames journal/WAL/SHM sidecars and allocation parent",
+          "Workspace and monitor configuration snapshots; owned environment/bootstrap preparation remains its existing independently admitted producer"
+        ],
+        "aliasPaths": [
+          "Session filename/parent physical aliases and original existing parent handles",
+          "Workspace start snapshot retained for fetch return and polling callback settlement"
+        ],
+        "sharedAdmissionEntry": "src-tauri/src/telegram_io.rs::check_telegram_auth_now admits complete session paths around the finite subprocess and releases them before fresh result/callback settlement.",
+        "postAdmissionPreconditions": [
+          "Session parents/aliases and selected configuration are revalidated before subprocess",
+          "Fresh post-provider and polling callback admission retains the original workspace parent and current config/policy"
+        ],
+        "domainLockOrder": "Session admission before local-writing subprocess; no domain/bookkeeping mutex is held across provider work. Existing Telegram session reservation releases its mutex while active; registry/environment preparation finishes before session admission."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_14",
+          "passed": 32,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/App.tsx"
+        ],
+        "payload": "App processCommsChannelNow / decideInboxKeys keep existing busy/finally, successful siblings and errors. Readiness uses current request ownership. KakaoRelayPanel owns viewer state and explicit queue/send-result polling; Telegram polling uses existing events/status.",
+        "terminalNoticeOwner": "Existing initiating component owns current completion. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "accept/reject/stage outcome per item",
+        "successRetention": "pane state refresh after mutation",
+        "failureReasons": "pane-local catch error message",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=check_telegram_auth"
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_14_telegram_every_wrapper_yields_and_preserves_join_errors",
+          "phase08_14_telegram_retained_auth_yields_and_preserves_probe_error",
+          "phase08_14_telegram_actual_entries_nonempty_results_approvals_auth_and_polling",
+          "phase08_14_telegram_raw_writers_policy_alias_and_error_release",
+          "phase08_14_telegram_fetch_discards_replaced_parent_and_releases_reservation",
+          "phase08_14_telegram_writers_contend_with_files_both_orders",
+          "phase08_14_telegram_same_target_contention_and_actual_unwind_release",
+          "phase08_14_telegram_polling_callback_rejects_replaced_parent_without_locking_status",
+          "phase08_14_telegram_fetch_auth_session_writers_files_both_orders_aliases",
+          "phase08_14_telegram_concurrent_actual_starts_status_and_stop_reap",
+          "phase08_14_telegram_session_policy_rechecked_after_admission_and_released",
+          "phase08_14_telegram_legacy_configured_drop_preserves_argv_files_races_and_aliases"
+        ],
+        "workerProof": "Actual command futures are held at worker entry on a distinct blocking thread, manually polled on the same async task and yield before release; synthetic fixtures verify output and contextual worker-unwind errors.",
+        "platformScope": "macOS synthetic fixtures only, with shared Home lock and disposable outer MARU_TEST_HOME/MARU_TEST_CONFIG_DIR. Provider executable selection is asserted before invocation; no real messages, account/auth calls, relay daemon or native Trash.",
+        "limits": "In-process admission does not exclude independent external processes. Configured custom scripts and external provider internals retain their existing delegated effects; no remote exactly-once or live connected-provider proof. PERF-01/PERF-02 remain globally pending."
+      }
+    },
+    {
+      "name": "start_telegram_polling",
+      "module": "src-tauri/src/telegram_io.rs",
+      "registrationPath": "src-tauri/src/lib.rs::telegram_io::ipc::start_telegram_polling",
+      "originalDisposition": "BACKGROUND",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/telegram_io.rs::start_telegram_polling_blocking preserves existing provider arguments, parsing, approvals and outcomes; all reached filesystem/process work remains inside the owned blocking worker."
+      ],
+      "workerBoundary": "src-tauri/src/telegram_io.rs::ipc::start_telegram_polling owns command values and awaits tauri::async_runtime::spawn_blocking before any process, filesystem traversal, admission or domain-lock wait. Existing String results and success payloads remain unchanged; contextual JoinError stays a display-only String. AppHandle resolves real ApprovalState inside the worker where needed; no borrowed guard crosses await.",
+      "syncCallers": [
+        "src-tauri/src/telegram_io.rs::start_telegram_polling preserves the original synchronous API where originally synchronous; existing async entries keep their registration. Telegram polling retains dedicated threads, and stop releases the poller handle lock before join."
+      ],
+      "mutationKey": {
+        "lexicalPaths": [
+          "Configured selected SQLite session, Telethon .session alternative, both filenames journal/WAL/SHM sidecars and allocation parent",
+          "Workspace and monitor configuration snapshots; owned environment/bootstrap preparation remains its existing independently admitted producer",
+          "legacy_auto_drop with selected work additionally reserves configured workspace/inbox/drop trees and existing descendant aliases; no-work custom outputs retain the original delegated boundary"
+        ],
+        "aliasPaths": [
+          "Session filename/parent physical aliases and original existing parent handles",
+          "Workspace start snapshot retained for fetch return and polling callback settlement"
+        ],
+        "sharedAdmissionEntry": "src-tauri/src/telegram_io.rs::fetch_telegram_recent_inner admits complete session paths around the finite subprocess and releases them before fresh result/callback settlement.",
+        "postAdmissionPreconditions": [
+          "Session parents/aliases and selected configuration are revalidated before subprocess",
+          "Fresh post-provider and polling callback admission retains the original workspace parent and current config/policy"
+        ],
+        "domainLockOrder": "Session admission before local-writing subprocess; no domain/bookkeeping mutex is held across provider work. Existing Telegram session reservation releases its mutex while active; registry/environment preparation finishes before session admission."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_14",
+          "passed": 32,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/App.tsx"
+        ],
+        "payload": "App processCommsChannelNow / decideInboxKeys keep existing busy/finally, successful siblings and errors. Readiness uses current request ownership. KakaoRelayPanel owns viewer state and explicit queue/send-result polling; Telegram polling uses existing events/status.",
+        "terminalNoticeOwner": "Existing initiating component owns current completion. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "accept/reject/stage outcome per item",
+        "successRetention": "pane state refresh after mutation",
+        "failureReasons": "pane-local catch error message",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=start_telegram_polling"
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_14_telegram_every_wrapper_yields_and_preserves_join_errors",
+          "phase08_14_telegram_retained_auth_yields_and_preserves_probe_error",
+          "phase08_14_telegram_actual_entries_nonempty_results_approvals_auth_and_polling",
+          "phase08_14_telegram_raw_writers_policy_alias_and_error_release",
+          "phase08_14_telegram_fetch_discards_replaced_parent_and_releases_reservation",
+          "phase08_14_telegram_writers_contend_with_files_both_orders",
+          "phase08_14_telegram_same_target_contention_and_actual_unwind_release",
+          "phase08_14_telegram_polling_callback_rejects_replaced_parent_without_locking_status",
+          "phase08_14_telegram_fetch_auth_session_writers_files_both_orders_aliases",
+          "phase08_14_telegram_concurrent_actual_starts_status_and_stop_reap",
+          "phase08_14_telegram_session_policy_rechecked_after_admission_and_released",
+          "phase08_14_telegram_legacy_configured_drop_preserves_argv_files_races_and_aliases"
+        ],
+        "workerProof": "Actual command futures are held at worker entry on a distinct blocking thread, manually polled on the same async task and yield before release; synthetic fixtures verify output and contextual worker-unwind errors.",
+        "platformScope": "macOS synthetic fixtures only, with shared Home lock and disposable outer MARU_TEST_HOME/MARU_TEST_CONFIG_DIR. Provider executable selection is asserted before invocation; no real messages, account/auth calls, relay daemon or native Trash.",
+        "limits": "In-process admission does not exclude independent external processes. Configured custom scripts and external provider internals retain their existing delegated effects; no remote exactly-once or live connected-provider proof. PERF-01/PERF-02 remain globally pending.",
+        "lifetime": "Setup and stop run in awaited workers; existing polling thread owns fetch and fresh start-parent callback validation. Session/local legacy lease spans only actual child lifetime; status/poller guards do not span network or join."
+      }
+    },
+    {
+      "name": "stop_telegram_polling",
+      "module": "src-tauri/src/telegram_io.rs",
+      "registrationPath": "src-tauri/src/lib.rs::telegram_io::ipc::stop_telegram_polling",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/telegram_io.rs::stop_telegram_polling_blocking preserves existing provider arguments, parsing, approvals and outcomes; all reached filesystem/process work remains inside the owned blocking worker."
+      ],
+      "workerBoundary": "src-tauri/src/telegram_io.rs::ipc::stop_telegram_polling owns command values and awaits tauri::async_runtime::spawn_blocking before any process, filesystem traversal, admission or domain-lock wait. Existing String results and success payloads remain unchanged; contextual JoinError stays a display-only String. AppHandle resolves real ApprovalState inside the worker where needed; no borrowed guard crosses await.",
+      "syncCallers": [
+        "src-tauri/src/telegram_io.rs::stop_telegram_polling preserves the original synchronous API where originally synchronous; existing async entries keep their registration. Telegram polling retains dedicated threads, and stop releases the poller handle lock before join."
+      ],
+      "mutationKey": {
+        "readOnly": true,
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "sharedAdmissionEntry": "No filesystem mutation is owned by this command. Read-only local status/metadata or existing external provider operations and in-memory approval/status state only.",
+        "postAdmissionPreconditions": [
+          "Existing argument validation and explicit approval remain inside the worker."
+        ],
+        "domainLockOrder": "No command-owned filesystem mutation lease; bounded approval/status guards are released before process/network calls or thread joins."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_14",
+          "passed": 32,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/App.tsx"
+        ],
+        "payload": "App processCommsChannelNow / decideInboxKeys keep existing busy/finally, successful siblings and errors. Readiness uses current request ownership. KakaoRelayPanel owns viewer state and explicit queue/send-result polling; Telegram polling uses existing events/status.",
+        "terminalNoticeOwner": "Existing initiating component owns current completion. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "accept/reject/stage outcome per item",
+        "successRetention": "pane state refresh after mutation",
+        "failureReasons": "pane-local catch error message",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=stop_telegram_polling"
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_14_telegram_every_wrapper_yields_and_preserves_join_errors",
+          "phase08_14_telegram_retained_auth_yields_and_preserves_probe_error",
+          "phase08_14_telegram_actual_entries_nonempty_results_approvals_auth_and_polling",
+          "phase08_14_telegram_raw_writers_policy_alias_and_error_release",
+          "phase08_14_telegram_fetch_discards_replaced_parent_and_releases_reservation",
+          "phase08_14_telegram_writers_contend_with_files_both_orders",
+          "phase08_14_telegram_same_target_contention_and_actual_unwind_release",
+          "phase08_14_telegram_polling_callback_rejects_replaced_parent_without_locking_status",
+          "phase08_14_telegram_fetch_auth_session_writers_files_both_orders_aliases",
+          "phase08_14_telegram_concurrent_actual_starts_status_and_stop_reap",
+          "phase08_14_telegram_session_policy_rechecked_after_admission_and_released",
+          "phase08_14_telegram_legacy_configured_drop_preserves_argv_files_races_and_aliases"
+        ],
+        "workerProof": "Actual command futures are held at worker entry on a distinct blocking thread, manually polled on the same async task and yield before release; synthetic fixtures verify output and contextual worker-unwind errors.",
+        "platformScope": "macOS synthetic fixtures only, with shared Home lock and disposable outer MARU_TEST_HOME/MARU_TEST_CONFIG_DIR. Provider executable selection is asserted before invocation; no real messages, account/auth calls, relay daemon or native Trash.",
+        "limits": "In-process admission does not exclude independent external processes. Configured custom scripts and external provider internals retain their existing delegated effects; no remote exactly-once or live connected-provider proof. PERF-01/PERF-02 remain globally pending."
+      }
+    },
+    {
+      "name": "telegram_polling_status",
+      "module": "src-tauri/src/telegram_io.rs",
+      "registrationPath": "src-tauri/src/lib.rs::telegram_io::ipc::telegram_polling_status",
+      "originalDisposition": "RETAIN",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/telegram_io.rs::telegram_polling_status_blocking preserves existing provider arguments, parsing, approvals and outcomes; all reached filesystem/process work remains inside the owned blocking worker."
+      ],
+      "workerBoundary": "src-tauri/src/telegram_io.rs::ipc::telegram_polling_status owns command values and awaits tauri::async_runtime::spawn_blocking before any process, filesystem traversal, admission or domain-lock wait. Existing String results and success payloads remain unchanged; contextual JoinError stays a display-only String. AppHandle resolves real ApprovalState inside the worker where needed; no borrowed guard crosses await.",
+      "syncCallers": [
+        "src-tauri/src/telegram_io.rs::telegram_polling_status preserves the original synchronous API where originally synchronous; existing async entries keep their registration. Telegram polling retains dedicated threads, and stop releases the poller handle lock before join."
+      ],
+      "mutationKey": {
+        "readOnly": true,
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "sharedAdmissionEntry": "No filesystem mutation is owned by this command. Read-only local status/metadata or existing external provider operations and in-memory approval/status state only.",
+        "postAdmissionPreconditions": [
+          "Existing argument validation and explicit approval remain inside the worker."
+        ],
+        "domainLockOrder": "No command-owned filesystem mutation lease; bounded approval/status guards are released before process/network calls or thread joins."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_14",
+          "passed": 32,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/App.tsx"
+        ],
+        "payload": "App processCommsChannelNow / decideInboxKeys keep existing busy/finally, successful siblings and errors. Readiness uses current request ownership. KakaoRelayPanel owns viewer state and explicit queue/send-result polling; Telegram polling uses existing events/status.",
+        "terminalNoticeOwner": "Existing initiating component owns current completion. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "accept/reject/stage outcome per item",
+        "successRetention": "pane state refresh after mutation",
+        "failureReasons": "pane-local catch error message",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=telegram_polling_status"
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_14_telegram_every_wrapper_yields_and_preserves_join_errors",
+          "phase08_14_telegram_retained_auth_yields_and_preserves_probe_error",
+          "phase08_14_telegram_actual_entries_nonempty_results_approvals_auth_and_polling",
+          "phase08_14_telegram_raw_writers_policy_alias_and_error_release",
+          "phase08_14_telegram_fetch_discards_replaced_parent_and_releases_reservation",
+          "phase08_14_telegram_writers_contend_with_files_both_orders",
+          "phase08_14_telegram_same_target_contention_and_actual_unwind_release",
+          "phase08_14_telegram_polling_callback_rejects_replaced_parent_without_locking_status",
+          "phase08_14_telegram_fetch_auth_session_writers_files_both_orders_aliases",
+          "phase08_14_telegram_concurrent_actual_starts_status_and_stop_reap",
+          "phase08_14_telegram_session_policy_rechecked_after_admission_and_released",
+          "phase08_14_telegram_legacy_configured_drop_preserves_argv_files_races_and_aliases"
+        ],
+        "workerProof": "Actual command futures are held at worker entry on a distinct blocking thread, manually polled on the same async task and yield before release; synthetic fixtures verify output and contextual worker-unwind errors.",
+        "platformScope": "macOS synthetic fixtures only, with shared Home lock and disposable outer MARU_TEST_HOME/MARU_TEST_CONFIG_DIR. Provider executable selection is asserted before invocation; no real messages, account/auth calls, relay daemon or native Trash.",
+        "limits": "In-process admission does not exclude independent external processes. Configured custom scripts and external provider internals retain their existing delegated effects; no remote exactly-once or live connected-provider proof. PERF-01/PERF-02 remain globally pending."
+      }
+    },
+    {
+      "name": "fetch_gmail_unread",
+      "module": "src-tauri/src/gmail_gws.rs",
+      "registrationPath": "src-tauri/src/lib.rs::gmail_gws::ipc::fetch_gmail_unread",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/gmail_gws.rs::fetch_gmail_unread preserves existing provider arguments, parsing, approvals and outcomes; all reached filesystem/process work remains inside the owned blocking worker."
+      ],
+      "workerBoundary": "src-tauri/src/gmail_gws.rs::ipc::fetch_gmail_unread owns command values and awaits tauri::async_runtime::spawn_blocking before any process, filesystem traversal, admission or domain-lock wait. Existing String results and success payloads remain unchanged; contextual JoinError stays a display-only String. AppHandle resolves real ApprovalState inside the worker where needed; no borrowed guard crosses await.",
+      "syncCallers": [
+        "src-tauri/src/gmail_gws.rs::fetch_gmail_unread preserves the original synchronous API where originally synchronous; existing async entries keep their registration. Telegram polling retains dedicated threads, and stop releases the poller handle lock before join."
+      ],
+      "mutationKey": {
+        "readOnly": true,
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "sharedAdmissionEntry": "No filesystem mutation is owned by this command. Read-only local status/metadata or existing external provider operations and in-memory approval/status state only.",
+        "postAdmissionPreconditions": [
+          "Existing argument validation and explicit approval remain inside the worker."
+        ],
+        "domainLockOrder": "No command-owned filesystem mutation lease; bounded approval/status guards are released before process/network calls or thread joins."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_14",
+          "passed": 32,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/App.tsx"
+        ],
+        "payload": "App processCommsChannelNow / decideInboxKeys keep existing busy/finally, successful siblings and errors. Readiness uses current request ownership. KakaoRelayPanel owns viewer state and explicit queue/send-result polling; Telegram polling uses existing events/status.",
+        "terminalNoticeOwner": "Existing initiating component owns current completion. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "decision outcome ok/error per item",
+        "successRetention": "carry updates applied only while the ticket is current",
+        "failureReasons": "outcome.error per item into the gmail error state",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=fetch_gmail_unread"
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_14_gmail_each_wrapper_nonempty_results_and_legacy_rejections",
+          "phase08_14_gmail_each_new_wrapper_yields_same_task_and_maps_worker_unwind",
+          "phase08_14_gmail_auth_existing_worker_yields_and_preserves_probe_error",
+          "phase08_14_gmail_stage_same_target_contention_policy_and_unwind_release",
+          "phase08_14_gmail_stage_real_files_parent_rename_trash_both_orders_aliases",
+          "phase08_14_gmail_stage_policy_aliases_and_config_change_fail_closed",
+          "phase08_14_gmail_stage_batch_retains_success_and_rejects_replaced_parent"
+        ],
+        "workerProof": "Actual command futures are held at worker entry on a distinct blocking thread, manually polled on the same async task and yield before release; synthetic fixtures verify output and contextual worker-unwind errors.",
+        "platformScope": "macOS synthetic fixtures only, with shared Home lock and disposable outer MARU_TEST_HOME/MARU_TEST_CONFIG_DIR. Provider executable selection is asserted before invocation; no real messages, account/auth calls, relay daemon or native Trash.",
+        "limits": "In-process admission does not exclude independent external processes. Configured custom scripts and external provider internals retain their existing delegated effects; no remote exactly-once or live connected-provider proof. PERF-01/PERF-02 remain globally pending.",
+        "providerContract": "Fixed gws argv, existing triage/labels/modify behavior and explicit approvals are unchanged. Readiness has its existing 10-second bound; other existing Command::output calls gain isolation without an invented new duration bound. Bulk outcomes retain successful siblings and success events."
+      }
+    },
+    {
+      "name": "stage_gmail_items",
+      "module": "src-tauri/src/gmail_gws.rs",
+      "registrationPath": "src-tauri/src/lib.rs::gmail_gws::ipc::stage_gmail_items",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/gmail_gws.rs::stage_gmail_items_blocking preserves existing provider arguments, parsing, approvals and outcomes; all reached filesystem/process work remains inside the owned blocking worker.",
+        "src-tauri/src/inbox_drop.rs::stage_message_json_with_parent independently admits each envelope with the original batch parent; successful siblings remain on disk after later failure."
+      ],
+      "workerBoundary": "src-tauri/src/gmail_gws.rs::ipc::stage_gmail_items owns command values and awaits tauri::async_runtime::spawn_blocking before any process, filesystem traversal, admission or domain-lock wait. Existing String results and success payloads remain unchanged; contextual JoinError stays a display-only String. AppHandle resolves real ApprovalState inside the worker where needed; no borrowed guard crosses await.",
+      "syncCallers": [
+        "src-tauri/src/gmail_gws.rs::stage_gmail_items preserves the original synchronous API where originally synchronous; existing async entries keep their registration. Telegram polling retains dedicated threads, and stop releases the poller handle lock before join."
+      ],
+      "mutationKey": {
+        "lexicalPaths": [
+          "Configured inbox root, channel target directory and exact timestamp-provider-id JSON",
+          "workspace.config.yaml, .maru/inbox.json and missing .maru allocation",
+          "Conditional legacy/global registry migration paths"
+        ],
+        "aliasPaths": [
+          "Original selected workspace parent and every lexical/physical target and existing final-file alias; supported external symlinks remain valid"
+        ],
+        "sharedAdmissionEntry": "src-tauri/src/inbox_drop.rs::stage_message_json_with_parent constructs PathTransactionRequest and calls with_path_transactions for each original-parent settlement.",
+        "postAdmissionPreconditions": [
+          "Original parent identity and alias snapshots remain current",
+          "Reloaded inbox configuration matches the selected configuration",
+          "Current registry write policy allows Create before target-directory creation or fs::write"
+        ],
+        "domainLockOrder": "Shared admission before filesystem effects; approval store mutex is consumed/released inside worker before admission waits. No provider call or nested admission inside the envelope lease."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_14",
+          "passed": 32,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/App.tsx"
+        ],
+        "payload": "App processCommsChannelNow / decideInboxKeys keep existing busy/finally, successful siblings and errors. Readiness uses current request ownership. KakaoRelayPanel owns viewer state and explicit queue/send-result polling; Telegram polling uses existing events/status.",
+        "terminalNoticeOwner": "Existing initiating component owns current completion. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "decision outcome ok/error per item",
+        "successRetention": "carry updates applied only while the ticket is current",
+        "failureReasons": "outcome.error per item into the gmail error state",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=stage_gmail_items"
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_14_gmail_each_wrapper_nonempty_results_and_legacy_rejections",
+          "phase08_14_gmail_each_new_wrapper_yields_same_task_and_maps_worker_unwind",
+          "phase08_14_gmail_auth_existing_worker_yields_and_preserves_probe_error",
+          "phase08_14_gmail_stage_same_target_contention_policy_and_unwind_release",
+          "phase08_14_gmail_stage_real_files_parent_rename_trash_both_orders_aliases",
+          "phase08_14_gmail_stage_policy_aliases_and_config_change_fail_closed",
+          "phase08_14_gmail_stage_batch_retains_success_and_rejects_replaced_parent"
+        ],
+        "workerProof": "Actual command futures are held at worker entry on a distinct blocking thread, manually polled on the same async task and yield before release; synthetic fixtures verify output and contextual worker-unwind errors.",
+        "platformScope": "macOS synthetic fixtures only, with shared Home lock and disposable outer MARU_TEST_HOME/MARU_TEST_CONFIG_DIR. Provider executable selection is asserted before invocation; no real messages, account/auth calls, relay daemon or native Trash.",
+        "limits": "In-process admission does not exclude independent external processes. Configured custom scripts and external provider internals retain their existing delegated effects; no remote exactly-once or live connected-provider proof. PERF-01/PERF-02 remain globally pending.",
+        "providerContract": "Fixed gws argv, existing triage/labels/modify behavior and explicit approvals are unchanged. Readiness has its existing 10-second bound; other existing Command::output calls gain isolation without an invented new duration bound. Bulk outcomes retain successful siblings and success events."
+      }
+    },
+    {
+      "name": "check_gws_auth",
+      "module": "src-tauri/src/gmail_gws.rs",
+      "registrationPath": "src-tauri/src/lib.rs::gmail_gws::check_gws_auth",
+      "originalDisposition": "ISOLATED",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/gmail_gws.rs::check_gws_auth_now preserves existing provider arguments, parsing, approvals and outcomes; all reached filesystem/process work remains inside the owned blocking worker."
+      ],
+      "workerBoundary": "src-tauri/src/gmail_gws.rs::check_gws_auth owns command values and awaits tauri::async_runtime::spawn_blocking before any process, filesystem traversal, admission or domain-lock wait. Existing String results and success payloads remain unchanged; contextual JoinError stays a display-only String. AppHandle resolves real ApprovalState inside the worker where needed; no borrowed guard crosses await.",
+      "syncCallers": [
+        "src-tauri/src/gmail_gws.rs::check_gws_auth preserves the original synchronous API where originally synchronous; existing async entries keep their registration. Telegram polling retains dedicated threads, and stop releases the poller handle lock before join."
+      ],
+      "mutationKey": {
+        "readOnly": true,
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "sharedAdmissionEntry": "No filesystem mutation is owned by this command. Read-only local status/metadata or existing external provider operations and in-memory approval/status state only.",
+        "postAdmissionPreconditions": [
+          "Existing argument validation and explicit approval remain inside the worker."
+        ],
+        "domainLockOrder": "No command-owned filesystem mutation lease; bounded approval/status guards are released before process/network calls or thread joins."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_14",
+          "passed": 32,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/App.tsx"
+        ],
+        "payload": "App processCommsChannelNow / decideInboxKeys keep existing busy/finally, successful siblings and errors. Readiness uses current request ownership. KakaoRelayPanel owns viewer state and explicit queue/send-result polling; Telegram polling uses existing events/status.",
+        "terminalNoticeOwner": "Existing initiating component owns current completion. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=check_gws_auth"
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_14_gmail_each_wrapper_nonempty_results_and_legacy_rejections",
+          "phase08_14_gmail_each_new_wrapper_yields_same_task_and_maps_worker_unwind",
+          "phase08_14_gmail_auth_existing_worker_yields_and_preserves_probe_error",
+          "phase08_14_gmail_stage_same_target_contention_policy_and_unwind_release",
+          "phase08_14_gmail_stage_real_files_parent_rename_trash_both_orders_aliases",
+          "phase08_14_gmail_stage_policy_aliases_and_config_change_fail_closed",
+          "phase08_14_gmail_stage_batch_retains_success_and_rejects_replaced_parent"
+        ],
+        "workerProof": "Actual command futures are held at worker entry on a distinct blocking thread, manually polled on the same async task and yield before release; synthetic fixtures verify output and contextual worker-unwind errors.",
+        "platformScope": "macOS synthetic fixtures only, with shared Home lock and disposable outer MARU_TEST_HOME/MARU_TEST_CONFIG_DIR. Provider executable selection is asserted before invocation; no real messages, account/auth calls, relay daemon or native Trash.",
+        "limits": "In-process admission does not exclude independent external processes. Configured custom scripts and external provider internals retain their existing delegated effects; no remote exactly-once or live connected-provider proof. PERF-01/PERF-02 remain globally pending.",
+        "providerContract": "Fixed gws argv, existing triage/labels/modify behavior and explicit approvals are unchanged. Readiness has its existing 10-second bound; other existing Command::output calls gain isolation without an invented new duration bound. Bulk outcomes retain successful siblings and success events."
+      }
+    },
+    {
+      "name": "decide_gmail_item",
+      "module": "src-tauri/src/gmail_gws.rs",
+      "registrationPath": "src-tauri/src/lib.rs::gmail_gws::ipc::decide_gmail_item",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/gmail_gws.rs::decide_gmail_item_blocking preserves existing provider arguments, parsing, approvals and outcomes; all reached filesystem/process work remains inside the owned blocking worker."
+      ],
+      "workerBoundary": "src-tauri/src/gmail_gws.rs::ipc::decide_gmail_item owns command values and awaits tauri::async_runtime::spawn_blocking before any process, filesystem traversal, admission or domain-lock wait. Existing String results and success payloads remain unchanged; contextual JoinError stays a display-only String. AppHandle resolves real ApprovalState inside the worker where needed; no borrowed guard crosses await.",
+      "syncCallers": [
+        "src-tauri/src/gmail_gws.rs::decide_gmail_item preserves the original synchronous API where originally synchronous; existing async entries keep their registration. Telegram polling retains dedicated threads, and stop releases the poller handle lock before join."
+      ],
+      "mutationKey": {
+        "readOnly": true,
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "sharedAdmissionEntry": "No filesystem mutation is owned by this command. Read-only local status/metadata or existing external provider operations and in-memory approval/status state only.",
+        "postAdmissionPreconditions": [
+          "Existing argument validation and explicit approval remain inside the worker."
+        ],
+        "domainLockOrder": "No command-owned filesystem mutation lease; bounded approval/status guards are released before process/network calls or thread joins."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_14",
+          "passed": 32,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/App.tsx"
+        ],
+        "payload": "App processCommsChannelNow / decideInboxKeys keep existing busy/finally, successful siblings and errors. Readiness uses current request ownership. KakaoRelayPanel owns viewer state and explicit queue/send-result polling; Telegram polling uses existing events/status.",
+        "terminalNoticeOwner": "Existing initiating component owns current completion. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "decision outcome ok/error per item",
+        "successRetention": "carry updates applied only while the ticket is current",
+        "failureReasons": "outcome.error per item into the gmail error state",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=decide_gmail_item"
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_14_gmail_each_wrapper_nonempty_results_and_legacy_rejections",
+          "phase08_14_gmail_each_new_wrapper_yields_same_task_and_maps_worker_unwind",
+          "phase08_14_gmail_auth_existing_worker_yields_and_preserves_probe_error",
+          "phase08_14_gmail_stage_same_target_contention_policy_and_unwind_release",
+          "phase08_14_gmail_stage_real_files_parent_rename_trash_both_orders_aliases",
+          "phase08_14_gmail_stage_policy_aliases_and_config_change_fail_closed",
+          "phase08_14_gmail_stage_batch_retains_success_and_rejects_replaced_parent"
+        ],
+        "workerProof": "Actual command futures are held at worker entry on a distinct blocking thread, manually polled on the same async task and yield before release; synthetic fixtures verify output and contextual worker-unwind errors.",
+        "platformScope": "macOS synthetic fixtures only, with shared Home lock and disposable outer MARU_TEST_HOME/MARU_TEST_CONFIG_DIR. Provider executable selection is asserted before invocation; no real messages, account/auth calls, relay daemon or native Trash.",
+        "limits": "In-process admission does not exclude independent external processes. Configured custom scripts and external provider internals retain their existing delegated effects; no remote exactly-once or live connected-provider proof. PERF-01/PERF-02 remain globally pending.",
+        "providerContract": "Fixed gws argv, existing triage/labels/modify behavior and explicit approvals are unchanged. Readiness has its existing 10-second bound; other existing Command::output calls gain isolation without an invented new duration bound. Bulk outcomes retain successful siblings and success events."
+      }
+    },
+    {
+      "name": "decide_gmail_items",
+      "module": "src-tauri/src/gmail_gws.rs",
+      "registrationPath": "src-tauri/src/lib.rs::gmail_gws::ipc::decide_gmail_items",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/gmail_gws.rs::decide_gmail_items_blocking preserves existing provider arguments, parsing, approvals and outcomes; all reached filesystem/process work remains inside the owned blocking worker."
+      ],
+      "workerBoundary": "src-tauri/src/gmail_gws.rs::ipc::decide_gmail_items owns command values and awaits tauri::async_runtime::spawn_blocking before any process, filesystem traversal, admission or domain-lock wait. Existing String results and success payloads remain unchanged; contextual JoinError stays a display-only String. AppHandle resolves real ApprovalState inside the worker where needed; no borrowed guard crosses await.",
+      "syncCallers": [
+        "src-tauri/src/gmail_gws.rs::decide_gmail_items preserves the original synchronous API where originally synchronous; existing async entries keep their registration. Telegram polling retains dedicated threads, and stop releases the poller handle lock before join."
+      ],
+      "mutationKey": {
+        "readOnly": true,
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "sharedAdmissionEntry": "No filesystem mutation is owned by this command. Read-only local status/metadata or existing external provider operations and in-memory approval/status state only.",
+        "postAdmissionPreconditions": [
+          "Existing argument validation and explicit approval remain inside the worker."
+        ],
+        "domainLockOrder": "No command-owned filesystem mutation lease; bounded approval/status guards are released before process/network calls or thread joins."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_14",
+          "passed": 32,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/App.tsx"
+        ],
+        "payload": "App processCommsChannelNow / decideInboxKeys keep existing busy/finally, successful siblings and errors. Readiness uses current request ownership. KakaoRelayPanel owns viewer state and explicit queue/send-result polling; Telegram polling uses existing events/status.",
+        "terminalNoticeOwner": "Existing initiating component owns current completion. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "decision outcome ok/error per item",
+        "successRetention": "carry updates applied only while the ticket is current",
+        "failureReasons": "outcome.error per item into the gmail error state",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=decide_gmail_items"
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_14_gmail_each_wrapper_nonempty_results_and_legacy_rejections",
+          "phase08_14_gmail_each_new_wrapper_yields_same_task_and_maps_worker_unwind",
+          "phase08_14_gmail_auth_existing_worker_yields_and_preserves_probe_error",
+          "phase08_14_gmail_stage_same_target_contention_policy_and_unwind_release",
+          "phase08_14_gmail_stage_real_files_parent_rename_trash_both_orders_aliases",
+          "phase08_14_gmail_stage_policy_aliases_and_config_change_fail_closed",
+          "phase08_14_gmail_stage_batch_retains_success_and_rejects_replaced_parent"
+        ],
+        "workerProof": "Actual command futures are held at worker entry on a distinct blocking thread, manually polled on the same async task and yield before release; synthetic fixtures verify output and contextual worker-unwind errors.",
+        "platformScope": "macOS synthetic fixtures only, with shared Home lock and disposable outer MARU_TEST_HOME/MARU_TEST_CONFIG_DIR. Provider executable selection is asserted before invocation; no real messages, account/auth calls, relay daemon or native Trash.",
+        "limits": "In-process admission does not exclude independent external processes. Configured custom scripts and external provider internals retain their existing delegated effects; no remote exactly-once or live connected-provider proof. PERF-01/PERF-02 remain globally pending.",
+        "providerContract": "Fixed gws argv, existing triage/labels/modify behavior and explicit approvals are unchanged. Readiness has its existing 10-second bound; other existing Command::output calls gain isolation without an invented new duration bound. Bulk outcomes retain successful siblings and success events."
+      }
+    },
+    {
+      "name": "fetch_outlook_unread",
+      "module": "src-tauri/src/outlook_mso.rs",
+      "registrationPath": "src-tauri/src/lib.rs::outlook_mso::fetch_outlook_unread",
+      "originalDisposition": "ISOLATED",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/outlook_mso.rs::fetch_outlook_unread_now preserves existing provider arguments, parsing, approvals and outcomes; all reached filesystem/process work remains inside the owned blocking worker."
+      ],
+      "workerBoundary": "src-tauri/src/outlook_mso.rs::fetch_outlook_unread owns command values and awaits tauri::async_runtime::spawn_blocking before any process, filesystem traversal, admission or domain-lock wait. Existing String results and success payloads remain unchanged; contextual JoinError stays a display-only String. AppHandle resolves real ApprovalState inside the worker where needed; no borrowed guard crosses await.",
+      "syncCallers": [
+        "src-tauri/src/outlook_mso.rs::fetch_outlook_unread preserves the original synchronous API where originally synchronous; existing async entries keep their registration. Telegram polling retains dedicated threads, and stop releases the poller handle lock before join."
+      ],
+      "mutationKey": {
+        "readOnly": true,
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "sharedAdmissionEntry": "No filesystem mutation is owned by this command. Read-only local status/metadata or existing external provider operations and in-memory approval/status state only.",
+        "postAdmissionPreconditions": [
+          "Existing argument validation and explicit approval remain inside the worker."
+        ],
+        "domainLockOrder": "No command-owned filesystem mutation lease; bounded approval/status guards are released before process/network calls or thread joins."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_14",
+          "passed": 32,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/App.tsx"
+        ],
+        "payload": "App processCommsChannelNow / decideInboxKeys keep existing busy/finally, successful siblings and errors. Readiness uses current request ownership. KakaoRelayPanel owns viewer state and explicit queue/send-result polling; Telegram polling uses existing events/status.",
+        "terminalNoticeOwner": "Existing initiating component owns current completion. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=fetch_outlook_unread"
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_14_outlook_fetch_actual_wrapper_result_and_same_task_yield",
+          "phase08_14_outlook_auth_actual_wrapper_result_and_same_task_yield",
+          "phase08_14_outlook_stage_actual_wrapper_result_rejection_and_same_task_yield",
+          "phase08_14_outlook_single_actual_wrapper_result_rejection_and_same_task_yield",
+          "phase08_14_outlook_bulk_actual_wrapper_partial_result_and_same_task_yield",
+          "phase08_14_outlook_stage_same_target_serializes_and_error_unwind_release",
+          "phase08_14_outlook_stage_real_files_parent_rename_trash_both_orders_and_aliases",
+          "phase08_14_outlook_stage_policy_alias_denial_and_config_revalidation"
+        ],
+        "workerProof": "Actual command futures are held at worker entry on a distinct blocking thread, manually polled on the same async task and yield before release; synthetic fixtures verify output and contextual worker-unwind errors.",
+        "platformScope": "macOS synthetic fixtures only, with shared Home lock and disposable outer MARU_TEST_HOME/MARU_TEST_CONFIG_DIR. Provider executable selection is asserted before invocation; no real messages, account/auth calls, relay daemon or native Trash.",
+        "limits": "In-process admission does not exclude independent external processes. Configured custom scripts and external provider internals retain their existing delegated effects; no remote exactly-once or live connected-provider proof. PERF-01/PERF-02 remain globally pending.",
+        "providerContract": "Existing m365 fixed argv and Graph context validation, 10-second readiness and 15-second IO deadlines remain. Category updates preserve existing read/patch outcomes; no owned filesystem settlement follows provider return."
+      }
+    },
+    {
+      "name": "stage_outlook_items",
+      "module": "src-tauri/src/outlook_mso.rs",
+      "registrationPath": "src-tauri/src/lib.rs::outlook_mso::ipc::stage_outlook_items",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/outlook_mso.rs::stage_outlook_items_blocking preserves existing provider arguments, parsing, approvals and outcomes; all reached filesystem/process work remains inside the owned blocking worker.",
+        "src-tauri/src/inbox_drop.rs::stage_message_json_with_parent independently admits each envelope with the original batch parent; successful siblings remain on disk after later failure."
+      ],
+      "workerBoundary": "src-tauri/src/outlook_mso.rs::ipc::stage_outlook_items owns command values and awaits tauri::async_runtime::spawn_blocking before any process, filesystem traversal, admission or domain-lock wait. Existing String results and success payloads remain unchanged; contextual JoinError stays a display-only String. AppHandle resolves real ApprovalState inside the worker where needed; no borrowed guard crosses await.",
+      "syncCallers": [
+        "src-tauri/src/outlook_mso.rs::stage_outlook_items preserves the original synchronous API where originally synchronous; existing async entries keep their registration. Telegram polling retains dedicated threads, and stop releases the poller handle lock before join."
+      ],
+      "mutationKey": {
+        "lexicalPaths": [
+          "Configured inbox root, channel target directory and exact timestamp-provider-id JSON",
+          "workspace.config.yaml, .maru/inbox.json and missing .maru allocation",
+          "Conditional legacy/global registry migration paths"
+        ],
+        "aliasPaths": [
+          "Original selected workspace parent and every lexical/physical target and existing final-file alias; supported external symlinks remain valid"
+        ],
+        "sharedAdmissionEntry": "src-tauri/src/inbox_drop.rs::stage_message_json_with_parent constructs PathTransactionRequest and calls with_path_transactions for each original-parent settlement.",
+        "postAdmissionPreconditions": [
+          "Original parent identity and alias snapshots remain current",
+          "Reloaded inbox configuration matches the selected configuration",
+          "Current registry write policy allows Create before target-directory creation or fs::write"
+        ],
+        "domainLockOrder": "Shared admission before filesystem effects; approval store mutex is consumed/released inside worker before admission waits. No provider call or nested admission inside the envelope lease."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_14",
+          "passed": 32,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/App.tsx"
+        ],
+        "payload": "App processCommsChannelNow / decideInboxKeys keep existing busy/finally, successful siblings and errors. Readiness uses current request ownership. KakaoRelayPanel owns viewer state and explicit queue/send-result polling; Telegram polling uses existing events/status.",
+        "terminalNoticeOwner": "Existing initiating component owns current completion. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=stage_outlook_items"
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_14_outlook_fetch_actual_wrapper_result_and_same_task_yield",
+          "phase08_14_outlook_auth_actual_wrapper_result_and_same_task_yield",
+          "phase08_14_outlook_stage_actual_wrapper_result_rejection_and_same_task_yield",
+          "phase08_14_outlook_single_actual_wrapper_result_rejection_and_same_task_yield",
+          "phase08_14_outlook_bulk_actual_wrapper_partial_result_and_same_task_yield",
+          "phase08_14_outlook_stage_same_target_serializes_and_error_unwind_release",
+          "phase08_14_outlook_stage_real_files_parent_rename_trash_both_orders_and_aliases",
+          "phase08_14_outlook_stage_policy_alias_denial_and_config_revalidation"
+        ],
+        "workerProof": "Actual command futures are held at worker entry on a distinct blocking thread, manually polled on the same async task and yield before release; synthetic fixtures verify output and contextual worker-unwind errors.",
+        "platformScope": "macOS synthetic fixtures only, with shared Home lock and disposable outer MARU_TEST_HOME/MARU_TEST_CONFIG_DIR. Provider executable selection is asserted before invocation; no real messages, account/auth calls, relay daemon or native Trash.",
+        "limits": "In-process admission does not exclude independent external processes. Configured custom scripts and external provider internals retain their existing delegated effects; no remote exactly-once or live connected-provider proof. PERF-01/PERF-02 remain globally pending.",
+        "providerContract": "Existing m365 fixed argv and Graph context validation, 10-second readiness and 15-second IO deadlines remain. Category updates preserve existing read/patch outcomes; no owned filesystem settlement follows provider return."
+      }
+    },
+    {
+      "name": "check_mso_auth",
+      "module": "src-tauri/src/outlook_mso.rs",
+      "registrationPath": "src-tauri/src/lib.rs::outlook_mso::check_mso_auth",
+      "originalDisposition": "ISOLATED",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/outlook_mso.rs::check_mso_auth_now preserves existing provider arguments, parsing, approvals and outcomes; all reached filesystem/process work remains inside the owned blocking worker."
+      ],
+      "workerBoundary": "src-tauri/src/outlook_mso.rs::check_mso_auth owns command values and awaits tauri::async_runtime::spawn_blocking before any process, filesystem traversal, admission or domain-lock wait. Existing String results and success payloads remain unchanged; contextual JoinError stays a display-only String. AppHandle resolves real ApprovalState inside the worker where needed; no borrowed guard crosses await.",
+      "syncCallers": [
+        "src-tauri/src/outlook_mso.rs::check_mso_auth preserves the original synchronous API where originally synchronous; existing async entries keep their registration. Telegram polling retains dedicated threads, and stop releases the poller handle lock before join."
+      ],
+      "mutationKey": {
+        "readOnly": true,
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "sharedAdmissionEntry": "No filesystem mutation is owned by this command. Read-only local status/metadata or existing external provider operations and in-memory approval/status state only.",
+        "postAdmissionPreconditions": [
+          "Existing argument validation and explicit approval remain inside the worker."
+        ],
+        "domainLockOrder": "No command-owned filesystem mutation lease; bounded approval/status guards are released before process/network calls or thread joins."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_14",
+          "passed": 32,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/App.tsx"
+        ],
+        "payload": "App processCommsChannelNow / decideInboxKeys keep existing busy/finally, successful siblings and errors. Readiness uses current request ownership. KakaoRelayPanel owns viewer state and explicit queue/send-result polling; Telegram polling uses existing events/status.",
+        "terminalNoticeOwner": "Existing initiating component owns current completion. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=check_mso_auth"
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_14_outlook_fetch_actual_wrapper_result_and_same_task_yield",
+          "phase08_14_outlook_auth_actual_wrapper_result_and_same_task_yield",
+          "phase08_14_outlook_stage_actual_wrapper_result_rejection_and_same_task_yield",
+          "phase08_14_outlook_single_actual_wrapper_result_rejection_and_same_task_yield",
+          "phase08_14_outlook_bulk_actual_wrapper_partial_result_and_same_task_yield",
+          "phase08_14_outlook_stage_same_target_serializes_and_error_unwind_release",
+          "phase08_14_outlook_stage_real_files_parent_rename_trash_both_orders_and_aliases",
+          "phase08_14_outlook_stage_policy_alias_denial_and_config_revalidation"
+        ],
+        "workerProof": "Actual command futures are held at worker entry on a distinct blocking thread, manually polled on the same async task and yield before release; synthetic fixtures verify output and contextual worker-unwind errors.",
+        "platformScope": "macOS synthetic fixtures only, with shared Home lock and disposable outer MARU_TEST_HOME/MARU_TEST_CONFIG_DIR. Provider executable selection is asserted before invocation; no real messages, account/auth calls, relay daemon or native Trash.",
+        "limits": "In-process admission does not exclude independent external processes. Configured custom scripts and external provider internals retain their existing delegated effects; no remote exactly-once or live connected-provider proof. PERF-01/PERF-02 remain globally pending.",
+        "providerContract": "Existing m365 fixed argv and Graph context validation, 10-second readiness and 15-second IO deadlines remain. Category updates preserve existing read/patch outcomes; no owned filesystem settlement follows provider return."
+      }
+    },
+    {
+      "name": "decide_outlook_item",
+      "module": "src-tauri/src/outlook_mso.rs",
+      "registrationPath": "src-tauri/src/lib.rs::outlook_mso::decide_outlook_item",
+      "originalDisposition": "ISOLATED",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/outlook_mso.rs::decide_outlook_item_now preserves existing provider arguments, parsing, approvals and outcomes; all reached filesystem/process work remains inside the owned blocking worker."
+      ],
+      "workerBoundary": "src-tauri/src/outlook_mso.rs::decide_outlook_item owns command values and awaits tauri::async_runtime::spawn_blocking before any process, filesystem traversal, admission or domain-lock wait. Existing String results and success payloads remain unchanged; contextual JoinError stays a display-only String. AppHandle resolves real ApprovalState inside the worker where needed; no borrowed guard crosses await.",
+      "syncCallers": [
+        "src-tauri/src/outlook_mso.rs::decide_outlook_item preserves the original synchronous API where originally synchronous; existing async entries keep their registration. Telegram polling retains dedicated threads, and stop releases the poller handle lock before join."
+      ],
+      "mutationKey": {
+        "readOnly": true,
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "sharedAdmissionEntry": "No filesystem mutation is owned by this command. Read-only local status/metadata or existing external provider operations and in-memory approval/status state only.",
+        "postAdmissionPreconditions": [
+          "Existing argument validation and explicit approval remain inside the worker."
+        ],
+        "domainLockOrder": "No command-owned filesystem mutation lease; bounded approval/status guards are released before process/network calls or thread joins."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_14",
+          "passed": 32,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/App.tsx"
+        ],
+        "payload": "App processCommsChannelNow / decideInboxKeys keep existing busy/finally, successful siblings and errors. Readiness uses current request ownership. KakaoRelayPanel owns viewer state and explicit queue/send-result polling; Telegram polling uses existing events/status.",
+        "terminalNoticeOwner": "Existing initiating component owns current completion. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=decide_outlook_item"
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_14_outlook_fetch_actual_wrapper_result_and_same_task_yield",
+          "phase08_14_outlook_auth_actual_wrapper_result_and_same_task_yield",
+          "phase08_14_outlook_stage_actual_wrapper_result_rejection_and_same_task_yield",
+          "phase08_14_outlook_single_actual_wrapper_result_rejection_and_same_task_yield",
+          "phase08_14_outlook_bulk_actual_wrapper_partial_result_and_same_task_yield",
+          "phase08_14_outlook_stage_same_target_serializes_and_error_unwind_release",
+          "phase08_14_outlook_stage_real_files_parent_rename_trash_both_orders_and_aliases",
+          "phase08_14_outlook_stage_policy_alias_denial_and_config_revalidation"
+        ],
+        "workerProof": "Actual command futures are held at worker entry on a distinct blocking thread, manually polled on the same async task and yield before release; synthetic fixtures verify output and contextual worker-unwind errors.",
+        "platformScope": "macOS synthetic fixtures only, with shared Home lock and disposable outer MARU_TEST_HOME/MARU_TEST_CONFIG_DIR. Provider executable selection is asserted before invocation; no real messages, account/auth calls, relay daemon or native Trash.",
+        "limits": "In-process admission does not exclude independent external processes. Configured custom scripts and external provider internals retain their existing delegated effects; no remote exactly-once or live connected-provider proof. PERF-01/PERF-02 remain globally pending.",
+        "providerContract": "Existing m365 fixed argv and Graph context validation, 10-second readiness and 15-second IO deadlines remain. Category updates preserve existing read/patch outcomes; no owned filesystem settlement follows provider return."
+      }
+    },
+    {
+      "name": "decide_outlook_items",
+      "module": "src-tauri/src/outlook_mso.rs",
+      "registrationPath": "src-tauri/src/lib.rs::outlook_mso::decide_outlook_items",
+      "originalDisposition": "ISOLATED",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/outlook_mso.rs::decide_outlook_item_now preserves existing provider arguments, parsing, approvals and outcomes; all reached filesystem/process work remains inside the owned blocking worker.",
+        "src-tauri/src/outlook_mso.rs::decide_outlook_item_with_session preserves current category reads and fixed-argv patches per item; decision_error_outcome retains failures without discarding successful siblings."
+      ],
+      "workerBoundary": "src-tauri/src/outlook_mso.rs::decide_outlook_items owns command values and awaits tauri::async_runtime::spawn_blocking before any process, filesystem traversal, admission or domain-lock wait. Existing String results and success payloads remain unchanged; contextual JoinError stays a display-only String. AppHandle resolves real ApprovalState inside the worker where needed; no borrowed guard crosses await.",
+      "syncCallers": [
+        "src-tauri/src/outlook_mso.rs::decide_outlook_items preserves the original synchronous API where originally synchronous; existing async entries keep their registration. Telegram polling retains dedicated threads, and stop releases the poller handle lock before join."
+      ],
+      "mutationKey": {
+        "readOnly": true,
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "sharedAdmissionEntry": "No filesystem mutation is owned by this command. Read-only local status/metadata or existing external provider operations and in-memory approval/status state only.",
+        "postAdmissionPreconditions": [
+          "Existing argument validation and explicit approval remain inside the worker."
+        ],
+        "domainLockOrder": "No command-owned filesystem mutation lease; bounded approval/status guards are released before process/network calls or thread joins."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_14",
+          "passed": 32,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/App.tsx"
+        ],
+        "payload": "App processCommsChannelNow / decideInboxKeys keep existing busy/finally, successful siblings and errors. Readiness uses current request ownership. KakaoRelayPanel owns viewer state and explicit queue/send-result polling; Telegram polling uses existing events/status.",
+        "terminalNoticeOwner": "Existing initiating component owns current completion. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=decide_outlook_items"
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_14_outlook_fetch_actual_wrapper_result_and_same_task_yield",
+          "phase08_14_outlook_auth_actual_wrapper_result_and_same_task_yield",
+          "phase08_14_outlook_stage_actual_wrapper_result_rejection_and_same_task_yield",
+          "phase08_14_outlook_single_actual_wrapper_result_rejection_and_same_task_yield",
+          "phase08_14_outlook_bulk_actual_wrapper_partial_result_and_same_task_yield",
+          "phase08_14_outlook_stage_same_target_serializes_and_error_unwind_release",
+          "phase08_14_outlook_stage_real_files_parent_rename_trash_both_orders_and_aliases",
+          "phase08_14_outlook_stage_policy_alias_denial_and_config_revalidation"
+        ],
+        "workerProof": "Actual command futures are held at worker entry on a distinct blocking thread, manually polled on the same async task and yield before release; synthetic fixtures verify output and contextual worker-unwind errors.",
+        "platformScope": "macOS synthetic fixtures only, with shared Home lock and disposable outer MARU_TEST_HOME/MARU_TEST_CONFIG_DIR. Provider executable selection is asserted before invocation; no real messages, account/auth calls, relay daemon or native Trash.",
+        "limits": "In-process admission does not exclude independent external processes. Configured custom scripts and external provider internals retain their existing delegated effects; no remote exactly-once or live connected-provider proof. PERF-01/PERF-02 remain globally pending.",
+        "providerContract": "Existing m365 fixed argv and Graph context validation, 10-second readiness and 15-second IO deadlines remain. Category updates preserve existing read/patch outcomes; no owned filesystem settlement follows provider return."
+      }
+    },
+    {
+      "name": "read_kakao_relay_status",
+      "module": "src-tauri/src/kakao_relay.rs",
+      "registrationPath": "src-tauri/src/lib.rs::kakao_relay::read_kakao_relay_status",
+      "originalDisposition": "ISOLATED",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/kakao_relay.rs::read_status_inner preserves existing provider arguments, parsing, approvals and outcomes; all reached filesystem/process work remains inside the owned blocking worker."
+      ],
+      "workerBoundary": "src-tauri/src/kakao_relay.rs::read_kakao_relay_status owns command values and awaits tauri::async_runtime::spawn_blocking before any process, filesystem traversal, admission or domain-lock wait. Existing String results and success payloads remain unchanged; contextual JoinError stays a display-only String. AppHandle resolves real ApprovalState inside the worker where needed; no borrowed guard crosses await.",
+      "syncCallers": [
+        "src-tauri/src/kakao_relay.rs::read_kakao_relay_status preserves the original synchronous API where originally synchronous; existing async entries keep their registration. Telegram polling retains dedicated threads, and stop releases the poller handle lock before join."
+      ],
+      "mutationKey": {
+        "readOnly": true,
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "sharedAdmissionEntry": "No filesystem mutation is owned by this command. Read-only local status/metadata or existing external provider operations and in-memory approval/status state only.",
+        "postAdmissionPreconditions": [
+          "Existing argument validation and explicit approval remain inside the worker."
+        ],
+        "domainLockOrder": "No command-owned filesystem mutation lease; bounded approval/status guards are released before process/network calls or thread joins."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_14",
+          "passed": 32,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/App.tsx",
+          "src/components/comms/KakaoRelayPanel.tsx"
+        ],
+        "payload": "App processCommsChannelNow owns staging preview/approval/staged outcome and inbox refresh. KakaoRelayPanel loadMessages owns viewer loading/error; explicit send owns queued result and existing bounded backoff result polling with pollSeqRef invalidated on unmount. Enqueue success means local queued only, not remote delivery.",
+        "terminalNoticeOwner": "Existing initiating component owns current completion. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=read_kakao_relay_status"
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_14_kakao_all_wrappers_preserve_fixture_outputs_and_rejections",
+          "phase08_14_kakao_every_actual_wrapper_yields_same_task_and_join_error",
+          "phase08_14_kakao_writers_serialize_release_error_unwind_and_deny_policy",
+          "phase08_14_kakao_real_files_parent_races_both_orders_and_aliases",
+          "phase08_14_kakao_attachment_document_race_keeps_typed_conflicts_and_current_bytes"
+        ],
+        "workerProof": "Actual command futures are held at worker entry on a distinct blocking thread, manually polled on the same async task and yield before release; synthetic fixtures verify output and contextual worker-unwind errors.",
+        "platformScope": "macOS synthetic fixtures only, with shared Home lock and disposable outer MARU_TEST_HOME/MARU_TEST_CONFIG_DIR. Provider executable selection is asserted before invocation; no real messages, account/auth calls, relay daemon or native Trash.",
+        "limits": "In-process admission does not exclude independent external processes. Configured custom scripts and external provider internals retain their existing delegated effects; no remote exactly-once or live connected-provider proof. PERF-01/PERF-02 remain globally pending.",
+        "providerContract": "Only local relay JSON/message/media reads and explicitly approved local outbox requests occur. Existing cursor/backfill ring, media stable-age checks, queue request schema and partial staging errors remain. External daemon delivery is outside this transaction."
+      }
+    },
+    {
+      "name": "read_kakao_relay_messages",
+      "module": "src-tauri/src/kakao_relay.rs",
+      "registrationPath": "src-tauri/src/lib.rs::kakao_relay::read_kakao_relay_messages",
+      "originalDisposition": "ISOLATED",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/kakao_relay.rs::read_messages_inner preserves existing provider arguments, parsing, approvals and outcomes; all reached filesystem/process work remains inside the owned blocking worker."
+      ],
+      "workerBoundary": "src-tauri/src/kakao_relay.rs::read_kakao_relay_messages owns command values and awaits tauri::async_runtime::spawn_blocking before any process, filesystem traversal, admission or domain-lock wait. Existing String results and success payloads remain unchanged; contextual JoinError stays a display-only String. AppHandle resolves real ApprovalState inside the worker where needed; no borrowed guard crosses await.",
+      "syncCallers": [
+        "src-tauri/src/kakao_relay.rs::read_kakao_relay_messages preserves the original synchronous API where originally synchronous; existing async entries keep their registration. Telegram polling retains dedicated threads, and stop releases the poller handle lock before join."
+      ],
+      "mutationKey": {
+        "readOnly": true,
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "sharedAdmissionEntry": "No filesystem mutation is owned by this command. Read-only local status/metadata or existing external provider operations and in-memory approval/status state only.",
+        "postAdmissionPreconditions": [
+          "Existing argument validation and explicit approval remain inside the worker."
+        ],
+        "domainLockOrder": "No command-owned filesystem mutation lease; bounded approval/status guards are released before process/network calls or thread joins."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_14",
+          "passed": 32,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/App.tsx",
+          "src/components/comms/KakaoRelayPanel.tsx"
+        ],
+        "payload": "App processCommsChannelNow owns staging preview/approval/staged outcome and inbox refresh. KakaoRelayPanel loadMessages owns viewer loading/error; explicit send owns queued result and existing bounded backoff result polling with pollSeqRef invalidated on unmount. Enqueue success means local queued only, not remote delivery.",
+        "terminalNoticeOwner": "Existing initiating component owns current completion. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=read_kakao_relay_messages"
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_14_kakao_all_wrappers_preserve_fixture_outputs_and_rejections",
+          "phase08_14_kakao_every_actual_wrapper_yields_same_task_and_join_error",
+          "phase08_14_kakao_writers_serialize_release_error_unwind_and_deny_policy",
+          "phase08_14_kakao_real_files_parent_races_both_orders_and_aliases",
+          "phase08_14_kakao_attachment_document_race_keeps_typed_conflicts_and_current_bytes"
+        ],
+        "workerProof": "Actual command futures are held at worker entry on a distinct blocking thread, manually polled on the same async task and yield before release; synthetic fixtures verify output and contextual worker-unwind errors.",
+        "platformScope": "macOS synthetic fixtures only, with shared Home lock and disposable outer MARU_TEST_HOME/MARU_TEST_CONFIG_DIR. Provider executable selection is asserted before invocation; no real messages, account/auth calls, relay daemon or native Trash.",
+        "limits": "In-process admission does not exclude independent external processes. Configured custom scripts and external provider internals retain their existing delegated effects; no remote exactly-once or live connected-provider proof. PERF-01/PERF-02 remain globally pending.",
+        "providerContract": "Only local relay JSON/message/media reads and explicitly approved local outbox requests occur. Existing cursor/backfill ring, media stable-age checks, queue request schema and partial staging errors remain. External daemon delivery is outside this transaction."
+      }
+    },
+    {
+      "name": "stage_kakao_relay_new",
+      "module": "src-tauri/src/kakao_relay.rs",
+      "registrationPath": "src-tauri/src/lib.rs::kakao_relay::stage_kakao_relay_new",
+      "originalDisposition": "ISOLATED",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/kakao_relay.rs::stage_inner preserves existing provider arguments, parsing, approvals and outcomes; all reached filesystem/process work remains inside the owned blocking worker."
+      ],
+      "workerBoundary": "src-tauri/src/kakao_relay.rs::stage_kakao_relay_new owns command values and awaits tauri::async_runtime::spawn_blocking before any process, filesystem traversal, admission or domain-lock wait. Existing String results and success payloads remain unchanged; contextual JoinError stays a display-only String. AppHandle resolves real ApprovalState inside the worker where needed; no borrowed guard crosses await.",
+      "syncCallers": [
+        "src-tauri/src/kakao_relay.rs::stage_kakao_relay_new preserves the original synchronous API where originally synchronous; existing async entries keep their registration. Telegram polling retains dedicated threads, and stop releases the poller handle lock before join."
+      ],
+      "mutationKey": {
+        "lexicalPaths": [
+          "Selected workspace YAML and legacy .maru/inbox.json",
+          "Relay root, actual source message/media paths, configured inbox/drop output and exact existing destination aliases, cursor/cache creation directory"
+        ],
+        "aliasPaths": [
+          "Complete lexical and physical aliases, including exact source/destination files and configured queue directories",
+          "Pinned existing selected workspace and relay parents prevent recreation after rename/Trash"
+        ],
+        "sharedAdmissionEntry": "src-tauri/src/kakao_relay.rs::stage_inner enters with_path_transactions; the named in_transaction body verifies coverage and retains admission through all local publication.",
+        "postAdmissionPreconditions": [
+          "Reloaded configuration and physical aliases remain current",
+          "Current workspace write policy permits Create; queue also validates configured relay policy",
+          "Original parents still exist; raw copies, JSON/cursor publication and queue request preserve existing outputs/errors"
+        ],
+        "domainLockOrder": "Shared admission before all filesystem effects; approval mutex is consumed in the blocking worker and released before admission. No new domain mutex, retry queue or daemon was added."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_14",
+          "passed": 32,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/App.tsx",
+          "src/components/comms/KakaoRelayPanel.tsx"
+        ],
+        "payload": "App processCommsChannelNow owns staging preview/approval/staged outcome and inbox refresh. KakaoRelayPanel loadMessages owns viewer loading/error; explicit send owns queued result and existing bounded backoff result polling with pollSeqRef invalidated on unmount. Enqueue success means local queued only, not remote delivery.",
+        "terminalNoticeOwner": "Existing initiating component owns current completion. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=stage_kakao_relay_new"
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_14_kakao_all_wrappers_preserve_fixture_outputs_and_rejections",
+          "phase08_14_kakao_every_actual_wrapper_yields_same_task_and_join_error",
+          "phase08_14_kakao_writers_serialize_release_error_unwind_and_deny_policy",
+          "phase08_14_kakao_real_files_parent_races_both_orders_and_aliases",
+          "phase08_14_kakao_attachment_document_race_keeps_typed_conflicts_and_current_bytes"
+        ],
+        "workerProof": "Actual command futures are held at worker entry on a distinct blocking thread, manually polled on the same async task and yield before release; synthetic fixtures verify output and contextual worker-unwind errors.",
+        "platformScope": "macOS synthetic fixtures only, with shared Home lock and disposable outer MARU_TEST_HOME/MARU_TEST_CONFIG_DIR. Provider executable selection is asserted before invocation; no real messages, account/auth calls, relay daemon or native Trash.",
+        "limits": "In-process admission does not exclude independent external processes. Configured custom scripts and external provider internals retain their existing delegated effects; no remote exactly-once or live connected-provider proof. PERF-01/PERF-02 remain globally pending.",
+        "providerContract": "Only local relay JSON/message/media reads and explicitly approved local outbox requests occur. Existing cursor/backfill ring, media stable-age checks, queue request schema and partial staging errors remain. External daemon delivery is outside this transaction."
+      }
+    },
+    {
+      "name": "enqueue_kakao_send",
+      "module": "src-tauri/src/kakao_relay.rs",
+      "registrationPath": "src-tauri/src/lib.rs::kakao_relay::enqueue_kakao_send",
+      "originalDisposition": "ISOLATED",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/kakao_relay.rs::enqueue_send_inner preserves existing provider arguments, parsing, approvals and outcomes; all reached filesystem/process work remains inside the owned blocking worker."
+      ],
+      "workerBoundary": "src-tauri/src/kakao_relay.rs::enqueue_kakao_send owns command values and awaits tauri::async_runtime::spawn_blocking before any process, filesystem traversal, admission or domain-lock wait. Existing String results and success payloads remain unchanged; contextual JoinError stays a display-only String. AppHandle resolves real ApprovalState inside the worker where needed; no borrowed guard crosses await.",
+      "syncCallers": [
+        "src-tauri/src/kakao_relay.rs::enqueue_kakao_send preserves the original synchronous API where originally synchronous; existing async entries keep their registration. Telegram polling retains dedicated threads, and stop releases the poller handle lock before join."
+      ],
+      "mutationKey": {
+        "lexicalPaths": [
+          "Selected workspace YAML, configured relay root and outbox/pending/attachments allocation directories",
+          "Optional original attachment source and its physical alias",
+          "Conditional global registry migration endpoints"
+        ],
+        "aliasPaths": [
+          "Complete lexical and physical aliases, including exact source/destination files and configured queue directories",
+          "Pinned existing selected workspace and relay parents prevent recreation after rename/Trash"
+        ],
+        "sharedAdmissionEntry": "src-tauri/src/kakao_relay.rs::enqueue_send_inner enters with_path_transactions; the named in_transaction body verifies coverage and retains admission through all local publication.",
+        "postAdmissionPreconditions": [
+          "Reloaded configuration and physical aliases remain current",
+          "Current workspace write policy permits Create; queue also validates configured relay policy",
+          "Original parents still exist; raw copies, JSON/cursor publication and queue request preserve existing outputs/errors"
+        ],
+        "domainLockOrder": "Shared admission before all filesystem effects; approval mutex is consumed in the blocking worker and released before admission. No new domain mutex, retry queue or daemon was added."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_14",
+          "passed": 32,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/App.tsx",
+          "src/components/comms/KakaoRelayPanel.tsx"
+        ],
+        "payload": "App processCommsChannelNow owns staging preview/approval/staged outcome and inbox refresh. KakaoRelayPanel loadMessages owns viewer loading/error; explicit send owns queued result and existing bounded backoff result polling with pollSeqRef invalidated on unmount. Enqueue success means local queued only, not remote delivery.",
+        "terminalNoticeOwner": "Existing initiating component owns current completion. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=enqueue_kakao_send"
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_14_kakao_all_wrappers_preserve_fixture_outputs_and_rejections",
+          "phase08_14_kakao_every_actual_wrapper_yields_same_task_and_join_error",
+          "phase08_14_kakao_writers_serialize_release_error_unwind_and_deny_policy",
+          "phase08_14_kakao_real_files_parent_races_both_orders_and_aliases",
+          "phase08_14_kakao_attachment_document_race_keeps_typed_conflicts_and_current_bytes"
+        ],
+        "workerProof": "Actual command futures are held at worker entry on a distinct blocking thread, manually polled on the same async task and yield before release; synthetic fixtures verify output and contextual worker-unwind errors.",
+        "platformScope": "macOS synthetic fixtures only, with shared Home lock and disposable outer MARU_TEST_HOME/MARU_TEST_CONFIG_DIR. Provider executable selection is asserted before invocation; no real messages, account/auth calls, relay daemon or native Trash.",
+        "limits": "In-process admission does not exclude independent external processes. Configured custom scripts and external provider internals retain their existing delegated effects; no remote exactly-once or live connected-provider proof. PERF-01/PERF-02 remain globally pending.",
+        "providerContract": "Only local relay JSON/message/media reads and explicitly approved local outbox requests occur. Existing cursor/backfill ring, media stable-age checks, queue request schema and partial staging errors remain. External daemon delivery is outside this transaction."
+      }
+    },
+    {
+      "name": "read_kakao_send_results",
+      "module": "src-tauri/src/kakao_relay.rs",
+      "registrationPath": "src-tauri/src/lib.rs::kakao_relay::read_kakao_send_results",
+      "originalDisposition": "ISOLATED",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/kakao_relay.rs::read_send_results_inner preserves existing provider arguments, parsing, approvals and outcomes; all reached filesystem/process work remains inside the owned blocking worker."
+      ],
+      "workerBoundary": "src-tauri/src/kakao_relay.rs::read_kakao_send_results owns command values and awaits tauri::async_runtime::spawn_blocking before any process, filesystem traversal, admission or domain-lock wait. Existing String results and success payloads remain unchanged; contextual JoinError stays a display-only String. AppHandle resolves real ApprovalState inside the worker where needed; no borrowed guard crosses await.",
+      "syncCallers": [
+        "src-tauri/src/kakao_relay.rs::read_kakao_send_results preserves the original synchronous API where originally synchronous; existing async entries keep their registration. Telegram polling retains dedicated threads, and stop releases the poller handle lock before join."
+      ],
+      "mutationKey": {
+        "readOnly": true,
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "sharedAdmissionEntry": "No filesystem mutation is owned by this command. Read-only local status/metadata or existing external provider operations and in-memory approval/status state only.",
+        "postAdmissionPreconditions": [
+          "Existing argument validation and explicit approval remain inside the worker."
+        ],
+        "domainLockOrder": "No command-owned filesystem mutation lease; bounded approval/status guards are released before process/network calls or thread joins."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_14",
+          "passed": 32,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/App.tsx",
+          "src/components/comms/KakaoRelayPanel.tsx"
+        ],
+        "payload": "App processCommsChannelNow owns staging preview/approval/staged outcome and inbox refresh. KakaoRelayPanel loadMessages owns viewer loading/error; explicit send owns queued result and existing bounded backoff result polling with pollSeqRef invalidated on unmount. Enqueue success means local queued only, not remote delivery.",
+        "terminalNoticeOwner": "Existing initiating component owns current completion. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=read_kakao_send_results"
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_14_kakao_all_wrappers_preserve_fixture_outputs_and_rejections",
+          "phase08_14_kakao_every_actual_wrapper_yields_same_task_and_join_error",
+          "phase08_14_kakao_writers_serialize_release_error_unwind_and_deny_policy",
+          "phase08_14_kakao_real_files_parent_races_both_orders_and_aliases",
+          "phase08_14_kakao_attachment_document_race_keeps_typed_conflicts_and_current_bytes"
+        ],
+        "workerProof": "Actual command futures are held at worker entry on a distinct blocking thread, manually polled on the same async task and yield before release; synthetic fixtures verify output and contextual worker-unwind errors.",
+        "platformScope": "macOS synthetic fixtures only, with shared Home lock and disposable outer MARU_TEST_HOME/MARU_TEST_CONFIG_DIR. Provider executable selection is asserted before invocation; no real messages, account/auth calls, relay daemon or native Trash.",
+        "limits": "In-process admission does not exclude independent external processes. Configured custom scripts and external provider internals retain their existing delegated effects; no remote exactly-once or live connected-provider proof. PERF-01/PERF-02 remain globally pending.",
+        "providerContract": "Only local relay JSON/message/media reads and explicitly approved local outbox requests occur. Existing cursor/backfill ring, media stable-age checks, queue request schema and partial staging errors remain. External daemon delivery is outside this transaction."
+      }
+    }
+  ]
+}

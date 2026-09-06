@@ -21,8 +21,8 @@ operative rule is in README's Release Process section.
 ## Phases
 
 - [x] **Phase 6: Native E2E Runner Foundation** - A native runner drives the real app against the real backend, and the CI-vs-local question is settled by a spike rather than assumed. (completed 2026-08-29)
-- [ ] **Phase 7: Guardrails Before Churn** - Lock poisoning recovers, the watcher and the document index stop carrying trees they never serve, and a sanitizer guard lands before the milestone's own later work can trip it.
-- [ ] **Phase 8: Main-Thread Responsiveness** - The skills registry lock narrows and the main-thread-blocking commands move off it, proven by a concurrency load test rather than the absence of a visible freeze.
+- [x] **Phase 7: Guardrails Before Churn** - Lock poisoning recovers, the watcher and the document index stop carrying trees they never serve, and a sanitizer guard lands before the milestone's own later work can trip it. (completed 2026-09-05)
+- [x] **Phase 8: Main-Thread Responsiveness** - The skills registry lock narrows and the main-thread-blocking commands move off it, proven by a concurrency load test rather than the absence of a visible freeze. (completed 2026-09-06)
 - [ ] **Phase 9: Durability and Session Lifecycle** - A SIGHUP-trapping terminal can still be killed, a pending edit is saved (or its failure surfaced) on unmount and app quit, and a scheduled job's own PATH resolves as written.
 - [ ] **Phase 10: Bundle and Build Hardening** - The packaged CSP drops an unused directive and per-mode CSS restores the budget headroom spent since v0.4.46.
 - [ ] **Phase 11: Milestone Verification & Evidence** - Coverage is measured, the narrowed CI trace configuration is proven, and v1.0's closeout evidence debt is retired.
@@ -75,7 +75,17 @@ Plans:
   3. `make verify` fails the moment a new `dangerouslySetInnerHTML` value in `src/` does not trace to a DOMPurify-backed helper, proven by a deliberate red-then-green break of the guard itself.
   4. The document index holds zero `inbox/...` entries through every path that produces one - full scan, targeted rescan, and cache read - while the Inbox pane still lists pending items and drop/auto arrivals, and the Files browser and content search still resolve `inbox/` paths. The Inbox view is gone from the documents view switcher rather than left permanently empty.
 
-**Plans**: TBD
+**Plans**: 5/5 plans executed in 1 wave (all file-disjoint; 07-01 leads as the phase tracer)
+
+Plans:
+**Wave 1**
+
+- [x] 07-01-PLAN.md - SEC-02 sanitizer guard: check-dom-sanitizer.mjs, red-then-green proof, make verify wiring (phase tracer)
+- [x] 07-02-PLAN.md - PERF-03 lock poison recovery: shared recover_guard helper, six named locks, per-lock D-03 justifications
+- [x] 07-03-PLAN.md - PERF-04 watcher prune: paths::is_under_generated_dir predicate at all five recursive-watch sites
+- [x] 07-04-PLAN.md - PERF-06 backend: shared non-document-roots list excluding the settings-driven inbox root at all three vault call sites
+- [x] 07-05-PLAN.md - PERF-06 frontend: Inbox view removal from the documents switcher, persisted-filter reset, i18n cleanup
+
 **Note**: The scratchpad exclusion PERF-06 mirrors lives at three call sites, not the two the issue's design names (`scan_vault`, `scan_vault_paths`, and the `read_vault_cache` rel-prefix filter). Covering only the first and third leaves a targeted rescan able to re-inject inbox rows the full scan just pruned.
 
 ### Phase 8: Main-Thread Responsiveness
@@ -89,7 +99,133 @@ Plans:
   2. Every command that reaches the network, a subprocess, or an unbounded filesystem walk is off the main thread. The 37 commands counted during research are the known set at kickoff, not the definition: that count came from scanning each command's first 80 lines, so a command that blocks further down is equally in scope and the set must be re-measured when the phase starts.
   3. A concurrency load test fires several converted commands at once and shows an unrelated command's latency stays flat (not merely the absence of a visible freeze, which cannot by itself distinguish a real fix from one that relocated the block onto Tauri's shared async worker pool).
 
-**Plans**: TBD
+**Plans**: 29/29 plans executed across 29 waves
+
+Plans:
+**Wave 1**
+
+- [x] 08-01-PLAN.md - Single-source synchronization tracer
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [x] 08-02-PLAN.md - Sync All outcomes and surviving completion
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
+- [x] 08-03-PLAN.md - Remaining registry commands and lock-free network stages
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
+- [x] 08-04-PLAN.md - Environment and dispatch blocking boundaries
+
+**Wave 5** *(blocked on Wave 4 completion)*
+
+- [x] 08-05-PLAN.md - Git and workspace sync command isolation
+
+**Wave 6** *(blocked on Wave 5 completion)*
+
+- [x] 08-06-PLAN.md - Workspace scan and file queue command isolation
+
+**Wave 7** *(blocked on Wave 6 completion)*
+
+- [x] 08-29-PLAN.md - Close cross-domain admission for earlier Skills, Git, environment, dispatch and dot writers before document conversion
+
+**Wave 8** *(blocked on Wave 7 completion)*
+
+- [x] 08-07-PLAN.md - Guarded documents command isolation
+
+**Wave 9** *(blocked on Wave 8 completion)*
+
+- [x] 08-08-PLAN.md - Scratchpad and drafts command isolation
+
+**Wave 10** *(blocked on Wave 9 completion)*
+
+- [x] 08-09-PLAN.md - Tasks and meetings command isolation
+
+**Wave 11** *(blocked on Wave 10 completion)*
+
+- [x] 08-10-PLAN.md - Inbox processing command isolation
+
+**Wave 12** *(blocked on Wave 11 completion)*
+
+- [x] 08-11-PLAN.md - Today transactions command isolation
+
+**Wave 13** *(blocked on Wave 12 completion)*
+
+- [x] 08-12-PLAN.md - Calendar and evidence command isolation
+
+**Wave 14** *(blocked on Wave 13 completion)*
+
+- [x] 08-13-PLAN.md - Graph and catalog command isolation
+
+**Wave 15** *(blocked on Wave 14 completion)*
+
+- [x] 08-14-PLAN.md - Message providers command isolation
+
+**Wave 16** *(blocked on Wave 15 completion)*
+
+- [x] 08-15-PLAN.md - Jobs and setup command isolation
+
+**Wave 17** *(blocked on Wave 16 completion)*
+
+- [x] 08-16-PLAN.md - Agent control command isolation
+
+**Wave 18** *(blocked on Wave 17 completion)*
+
+- [x] 08-17-PLAN.md - Agent data and Hub command isolation
+
+**Wave 19** *(blocked on Wave 18 completion)*
+
+- [x] 08-18-PLAN.md - Terminal boundaries command isolation
+
+**Wave 20** *(blocked on Wave 19 completion)*
+
+- [x] 08-19-PLAN.md - Watcher lifetimes command isolation
+
+**Wave 21** *(blocked on Wave 20 completion)*
+
+- [x] 08-20-PLAN.md - Studio and diagrams command isolation
+
+**Wave 22** *(blocked on Wave 21 completion)*
+
+- [x] 08-21-PLAN.md - Export and templates command isolation
+
+**Wave 23** *(blocked on Wave 22 completion)*
+
+- [x] 08-22-PLAN.md - Workspace configuration command isolation
+
+**Wave 24** *(blocked on Wave 23 completion)*
+
+- [x] 08-23-PLAN.md - Settings and native flows command isolation
+
+**Wave 25** *(blocked on Wave 24 completion)*
+
+- [x] 08-24-PLAN.md - Native UI and bounded parsers command isolation
+
+**Wave 26** *(blocked on Wave 25 completion)*
+
+- [x] 08-25-PLAN.md - File-processing completion ownership
+
+**Wave 27** *(blocked on Wave 26 completion)*
+
+- [x] 08-26-PLAN.md - Scope visible refreshes and close processing callers
+
+**Wave 28** *(blocked on Wave 27 completion)*
+
+- [x] 08-27-PLAN.md - Native saturation and source-race harness
+
+**Wave 29** *(blocked on Wave 28 completion)*
+
+- [x] 08-28-PLAN.md - Exhaustive closure and production isolation
+
+**Cross-cutting constraints:**
+
+- All 11 owned commands preserve wire types, permission checks and synchronous internal callers.
+- Concurrent operations preserve lifecycle ordering and current disk state; each retained/native UI exception has positive evidence.
+- All 15 owned commands preserve wire types, permission checks and synchronous internal callers.
+- All 30 owned commands preserve wire types, permission checks and synchronous internal callers.
+- All 12 owned commands preserve wire types, permission checks and synchronous internal callers.
+- All 19 owned commands preserve wire types, permission checks and synchronous internal callers.
 
 ### Phase 9: Durability and Session Lifecycle
 
@@ -142,8 +278,8 @@ Phases execute in numeric order: 6 → 7 → 8 → 9 → 10 → 11
 | Phase | Plans Complete | Status | Completed |
 |-------|-----------------|--------|-----------|
 | 6. Native E2E Runner Foundation | 5/5 | Complete    | 2026-08-29 |
-| 7. Guardrails Before Churn | 0/TBD | Not started | - |
-| 8. Main-Thread Responsiveness | 0/TBD | Not started | - |
+| 7. Guardrails Before Churn | 5/5 | Complete    | 2026-09-05 |
+| 8. Main-Thread Responsiveness | 29/29 | Complete    | 2026-09-06 |
 | 9. Durability and Session Lifecycle | 0/TBD | Not started | - |
 | 10. Bundle and Build Hardening | 0/TBD | Not started | - |
 | 11. Milestone Verification & Evidence | 0/TBD | Not started | - |

@@ -69,7 +69,6 @@ pub struct ArchivePreview {
     pub truncated: bool,
 }
 
-#[tauri::command]
 pub fn binary_viewer_classify(
     vault_path: String,
     target_path: String,
@@ -98,9 +97,8 @@ pub fn binary_viewer_classify(
     })
 }
 
-#[tauri::command]
-pub fn binary_viewer_prepare_asset(
-    app: tauri::AppHandle,
+pub fn binary_viewer_prepare_asset<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
     vault_path: String,
     target_path: String,
 ) -> Result<String, String> {
@@ -112,7 +110,6 @@ pub fn binary_viewer_prepare_asset(
     Ok(target.to_string_lossy().to_string())
 }
 
-#[tauri::command]
 pub fn binary_viewer_read_text(
     vault_path: String,
     target_path: String,
@@ -141,7 +138,6 @@ pub fn binary_viewer_read_text(
     })
 }
 
-#[tauri::command]
 pub fn binary_viewer_read_archive(
     vault_path: String,
     target_path: String,
@@ -157,6 +153,7 @@ pub fn binary_viewer_read_archive(
         let entry = archive
             .by_index(index)
             .map_err(|err| format!("Cannot read ZIP entry {index}: {err}"))?;
+        validate_archive_entry_name(entry.name())?;
         entries.push(ArchiveEntry {
             name: entry.name().to_string(),
             size: entry.size(),
@@ -171,7 +168,6 @@ pub fn binary_viewer_read_archive(
     })
 }
 
-#[tauri::command]
 pub fn binary_viewer_extract_hwpx(
     vault_path: String,
     target_path: String,
@@ -181,7 +177,6 @@ pub fn binary_viewer_extract_hwpx(
     extract_hwpx_text_html(&target)
 }
 
-#[tauri::command]
 pub fn binary_viewer_open_external(vault_path: String, target_path: String) -> Result<(), String> {
     let target = resolve_inside_vault(&vault_path, &target_path)?;
     require_existing_file(&target)?;
@@ -192,7 +187,6 @@ pub fn binary_viewer_open_external(vault_path: String, target_path: String) -> R
     spawn_external(&target_str)
 }
 
-#[tauri::command]
 pub fn binary_viewer_preview_external(
     vault_path: String,
     target_path: String,
@@ -264,6 +258,46 @@ fn preview_command_spec_for(platform: DesktopPlatform, target: &str) -> CommandS
 }
 
 fn spawn_command(spec: CommandSpec, label: &str) -> Result<(), String> {
+    #[cfg(test)]
+    if let Some(fixture) = phase08_10::capture() {
+        // Tests replace only this scoped launcher. The fixture is the current
+        // test executable, so no installed opener, Finder, Quick Look, or
+        // provider binary is ever invoked by the test suite.
+        let selected = spec.args.last().cloned().unwrap_or_default();
+        let selected_executable = std::env::current_exe()
+            .map_err(|err| format!("{label}: cannot select fixture executable: {err}"))?;
+        assert_eq!(
+            fixture.program, selected_executable,
+            "scoped native fixture must use the current test executable"
+        );
+        fixture.commands.lock().unwrap().push(spec.clone());
+        let mut child = Command::new(&fixture.program)
+            .args(["--exact", "binary_viewer::phase08_10::native_fixture_child"])
+            .env("MARU_PHASE08_10_BINARY_VIEWER_MARKER", &fixture.marker)
+            .env("MARU_PHASE08_10_BINARY_VIEWER_SELECTED", selected)
+            .no_window()
+            .spawn()
+            .map_err(|err| format!("{label}: {err}"))?;
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let status = loop {
+            match child.try_wait() {
+                Ok(Some(status)) => break status,
+                Ok(None) if std::time::Instant::now() < deadline => {
+                    std::thread::sleep(std::time::Duration::from_millis(5));
+                }
+                result => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return Err(format!("{label}: fixture did not exit: {result:?}"));
+                }
+            }
+        };
+        return if status.success() {
+            Ok(())
+        } else {
+            Err(format!("{label}: fixture failed"))
+        };
+    }
     Command::new(&spec.program)
         .args(spec.args)
         .no_window()
@@ -292,6 +326,26 @@ pub(crate) fn require_existing_file(path: &Path) -> Result<(), String> {
     }
     if !path.is_file() {
         return Err(format!("Target is not a regular file: {}", path.display()));
+    }
+    Ok(())
+}
+
+fn validate_archive_entry_name(name: &str) -> Result<(), String> {
+    if name.is_empty() || name.starts_with('/') || name.contains('\\') {
+        return Err(format!("unsafe ZIP entry path: {name}"));
+    }
+    if name.contains(':') || name.split('/').any(|part| part == "..") {
+        return Err(format!("unsafe ZIP entry path: {name}"));
+    }
+    for component in Path::new(name).components() {
+        if matches!(
+            component,
+            std::path::Component::ParentDir
+                | std::path::Component::RootDir
+                | std::path::Component::Prefix(_)
+        ) {
+            return Err(format!("unsafe ZIP entry path: {name}"));
+        }
     }
     Ok(())
 }
@@ -437,6 +491,186 @@ fn decode_text(bytes: &[u8]) -> (String, String) {
         String::from_utf8_lossy(bytes).into_owned(),
         "utf-8-lossy".to_string(),
     )
+}
+
+/// Owned IPC scheduling boundary. The synchronous functions above remain the
+/// Rust/CLI API; every filesystem parse and native launch runs in a finite
+/// blocking worker with an operation-specific join error.
+pub mod ipc {
+    use super::*;
+
+    #[tauri::command]
+    pub async fn binary_viewer_classify(
+        vault_path: String,
+        target_path: String,
+    ) -> Result<ViewerClassification, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            crate::atomic_file::PathTransactionLease::test_stage(
+                &[std::path::PathBuf::from(&vault_path)],
+                "worker:binary_viewer_classify",
+            );
+            super::binary_viewer_classify(vault_path, target_path)
+        })
+        .await
+        .map_err(|err| format!("binary_viewer_classify_task_failed: {err}"))?
+    }
+
+    #[tauri::command]
+    pub async fn binary_viewer_prepare_asset<R: tauri::Runtime>(
+        app: tauri::AppHandle<R>,
+        vault_path: String,
+        target_path: String,
+    ) -> Result<String, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            crate::atomic_file::PathTransactionLease::test_stage(
+                &[std::path::PathBuf::from(&vault_path)],
+                "worker:binary_viewer_prepare_asset",
+            );
+            super::binary_viewer_prepare_asset(app, vault_path, target_path)
+        })
+        .await
+        .map_err(|err| format!("binary_viewer_prepare_asset_task_failed: {err}"))?
+    }
+
+    #[tauri::command]
+    pub async fn binary_viewer_read_text(
+        vault_path: String,
+        target_path: String,
+        max_bytes: Option<u64>,
+    ) -> Result<TextPreview, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            crate::atomic_file::PathTransactionLease::test_stage(
+                &[std::path::PathBuf::from(&vault_path)],
+                "worker:binary_viewer_read_text",
+            );
+            super::binary_viewer_read_text(vault_path, target_path, max_bytes)
+        })
+        .await
+        .map_err(|err| format!("binary_viewer_read_text_task_failed: {err}"))?
+    }
+
+    #[tauri::command]
+    pub async fn binary_viewer_read_archive(
+        vault_path: String,
+        target_path: String,
+    ) -> Result<ArchivePreview, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            crate::atomic_file::PathTransactionLease::test_stage(
+                &[std::path::PathBuf::from(&vault_path)],
+                "worker:binary_viewer_read_archive",
+            );
+            super::binary_viewer_read_archive(vault_path, target_path)
+        })
+        .await
+        .map_err(|err| format!("binary_viewer_read_archive_task_failed: {err}"))?
+    }
+
+    #[tauri::command]
+    pub async fn binary_viewer_extract_hwpx(
+        vault_path: String,
+        target_path: String,
+    ) -> Result<HwpxPreview, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            crate::atomic_file::PathTransactionLease::test_stage(
+                &[std::path::PathBuf::from(&vault_path)],
+                "worker:binary_viewer_extract_hwpx",
+            );
+            super::binary_viewer_extract_hwpx(vault_path, target_path)
+        })
+        .await
+        .map_err(|err| format!("binary_viewer_extract_hwpx_task_failed: {err}"))?
+    }
+
+    #[tauri::command]
+    pub async fn binary_viewer_open_external(
+        vault_path: String,
+        target_path: String,
+    ) -> Result<(), String> {
+        #[cfg(test)]
+        let fixture = super::phase08_10::capture();
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            let _fixture = super::phase08_10::enter(fixture);
+            #[cfg(test)]
+            crate::atomic_file::PathTransactionLease::test_stage(
+                &[std::path::PathBuf::from(&vault_path)],
+                "worker:binary_viewer_open_external",
+            );
+            super::binary_viewer_open_external(vault_path, target_path)
+        })
+        .await
+        .map_err(|err| format!("binary_viewer_open_external_task_failed: {err}"))?
+    }
+
+    #[tauri::command]
+    pub async fn binary_viewer_preview_external(
+        vault_path: String,
+        target_path: String,
+    ) -> Result<(), String> {
+        #[cfg(test)]
+        let fixture = super::phase08_10::capture();
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            let _fixture = super::phase08_10::enter(fixture);
+            #[cfg(test)]
+            crate::atomic_file::PathTransactionLease::test_stage(
+                &[std::path::PathBuf::from(&vault_path)],
+                "worker:binary_viewer_preview_external",
+            );
+            super::binary_viewer_preview_external(vault_path, target_path)
+        })
+        .await
+        .map_err(|err| format!("binary_viewer_preview_external_task_failed: {err}"))?
+    }
+}
+
+#[cfg(test)]
+mod phase08_10 {
+    use super::CommandSpec;
+    use std::cell::RefCell;
+    use std::path::PathBuf;
+    use std::sync::{Arc, Mutex};
+
+    pub(super) struct Fixture {
+        pub(super) program: PathBuf,
+        pub(super) marker: PathBuf,
+        pub(super) commands: Mutex<Vec<CommandSpec>>,
+    }
+
+    thread_local! {
+        static FIXTURE: RefCell<Option<Arc<Fixture>>> = const { RefCell::new(None) };
+    }
+
+    pub(super) fn capture() -> Option<Arc<Fixture>> {
+        FIXTURE.with(|slot| slot.borrow().clone())
+    }
+
+    pub(super) struct Guard(Option<Arc<Fixture>>);
+
+    pub(super) fn enter(fixture: Option<Arc<Fixture>>) -> Guard {
+        Guard(FIXTURE.with(|slot| slot.replace(fixture)))
+    }
+
+    impl Drop for Guard {
+        fn drop(&mut self) {
+            FIXTURE.with(|slot| slot.replace(self.0.take()));
+        }
+    }
+
+    #[test]
+    fn native_fixture_child() {
+        if let Some(marker) = std::env::var_os("MARU_PHASE08_10_BINARY_VIEWER_MARKER") {
+            let selected = std::env::var_os("MARU_PHASE08_10_BINARY_VIEWER_SELECTED")
+                .expect("selected target path");
+            let selected = selected.to_string_lossy();
+            std::fs::write(marker, selected.as_bytes()).unwrap();
+        }
+    }
 }
 
 #[cfg(test)]
@@ -674,5 +908,251 @@ mod tests {
         assert_eq!(preview.total_entries, 2);
         assert_eq!(preview.entries.len(), 2);
         assert!(!preview.truncated);
+    }
+}
+
+#[cfg(test)]
+mod phase08_10_tests {
+    use super::*;
+    use crate::atomic_file::phase08_06::{boundary, run};
+    use std::fs;
+    use std::future::Future;
+    use std::io::Write;
+    use std::path::Path;
+    use std::sync::{Arc, Mutex};
+
+    async fn with_fixture<F: Future>(fixture: Arc<phase08_10::Fixture>, future: F) -> F::Output {
+        let mut future = Box::pin(future);
+        std::future::poll_fn(move |cx| {
+            // The caller scope is restored on every poll; the worker owns its
+            // captured fixture for the duration of the native launch.
+            let _fixture = phase08_10::enter(Some(fixture.clone()));
+            future.as_mut().poll(cx)
+        })
+        .await
+    }
+
+    fn text(path: &Path) -> String {
+        path.to_string_lossy().into_owned()
+    }
+
+    fn write_zip_fixture(path: &Path, entries: &[(&str, &[u8])]) {
+        let file = fs::File::create(path).unwrap();
+        let mut zip = zip::ZipWriter::new(file);
+        let options = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Stored);
+        for (name, bytes) in entries {
+            zip.start_file(name, options).unwrap();
+            zip.write_all(bytes).unwrap();
+        }
+        zip.finish().unwrap();
+    }
+
+    #[test]
+    fn phase08_10_all_wrappers_yield_on_same_polling_task() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::write(temp.path().join("note.txt"), "fixture bytes").unwrap();
+        let root = text(temp.path());
+        let target = text(&temp.path().join("note.txt"));
+
+        boundary(
+            temp.path().to_path_buf(),
+            "binary_viewer_classify",
+            ipc::binary_viewer_classify(root.clone(), target.clone()),
+        );
+        let app = tauri::test::mock_app();
+        boundary(
+            temp.path().to_path_buf(),
+            "binary_viewer_prepare_asset",
+            ipc::binary_viewer_prepare_asset(app.handle().clone(), root.clone(), target.clone()),
+        );
+        boundary(
+            temp.path().to_path_buf(),
+            "binary_viewer_read_text",
+            ipc::binary_viewer_read_text(root.clone(), target.clone(), None),
+        );
+        boundary(
+            temp.path().to_path_buf(),
+            "binary_viewer_read_archive",
+            ipc::binary_viewer_read_archive(root.clone(), target.clone()),
+        );
+        boundary(
+            temp.path().to_path_buf(),
+            "binary_viewer_extract_hwpx",
+            ipc::binary_viewer_extract_hwpx(root.clone(), target.clone()),
+        );
+        boundary(
+            temp.path().to_path_buf(),
+            "binary_viewer_open_external",
+            ipc::binary_viewer_open_external(root.clone(), target.clone()),
+        );
+        boundary(
+            temp.path().to_path_buf(),
+            "binary_viewer_preview_external",
+            ipc::binary_viewer_preview_external(root, target),
+        );
+    }
+
+    #[test]
+    fn phase08_10_actual_wrappers_return_nonempty_results_and_native_argv() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
+        let temp = tempfile::tempdir_in(_home.root.path()).unwrap();
+        let root = text(temp.path());
+        let note = temp.path().join("note.txt");
+        fs::write(&note, "nonempty viewer bytes").unwrap();
+        let archive = temp.path().join("archive.zip");
+        write_zip_fixture(&archive, &[("docs/readme.txt", b"archive bytes")]);
+        let hwpx = temp.path().join("sample.hwpx");
+        write_zip_fixture(
+            &hwpx,
+            &[
+                ("mimetype", b"application/hwp+zip"),
+                ("Contents/content.hpf", b"<package />"),
+                (
+                    "Contents/section0.xml",
+                    b"<hp:sec><hp:p><hp:t>nonempty HWPX</hp:t></hp:p></hp:sec>",
+                ),
+            ],
+        );
+        let target = text(&note);
+        let archive_target = text(&archive);
+        let hwpx_target = text(&hwpx);
+        let fixture = Arc::new(phase08_10::Fixture {
+            program: std::env::current_exe().unwrap(),
+            marker: temp.path().join("native-selected-target.txt"),
+            commands: Mutex::new(Vec::new()),
+        });
+
+        let expected_target = target.clone();
+        let worker_fixture = fixture.clone();
+        run(async move {
+            let classified = ipc::binary_viewer_classify(root.clone(), target.clone())
+                .await
+                .unwrap();
+            assert_eq!(classified.category, ViewerCategory::Text);
+            assert_eq!(classified.size_bytes, "nonempty viewer bytes".len() as u64);
+
+            let preview = ipc::binary_viewer_read_text(root.clone(), target.clone(), None)
+                .await
+                .unwrap();
+            assert_eq!(preview.content, "nonempty viewer bytes");
+
+            let archive_preview = ipc::binary_viewer_read_archive(root.clone(), archive_target)
+                .await
+                .unwrap();
+            assert_eq!(archive_preview.total_entries, 1);
+            assert_eq!(archive_preview.entries[0].name, "docs/readme.txt");
+
+            let hwpx_preview = ipc::binary_viewer_extract_hwpx(root.clone(), hwpx_target)
+                .await
+                .unwrap();
+            assert!(hwpx_preview.sections > 0);
+            assert!(hwpx_preview.html.contains("nonempty HWPX"));
+
+            let app = tauri::test::mock_app();
+            let prepared = ipc::binary_viewer_prepare_asset(
+                app.handle().clone(),
+                root.clone(),
+                target.clone(),
+            )
+            .await
+            .unwrap();
+            assert_eq!(prepared, target);
+
+            with_fixture(
+                worker_fixture.clone(),
+                ipc::binary_viewer_open_external(root.clone(), target.clone()),
+            )
+            .await
+            .unwrap();
+            with_fixture(
+                worker_fixture,
+                ipc::binary_viewer_preview_external(root, target.clone()),
+            )
+            .await
+            .unwrap();
+        });
+
+        let expected_external =
+            external_command_spec_for(current_desktop_platform(), &expected_target);
+        let expected_preview =
+            preview_command_spec_for(current_desktop_platform(), &expected_target);
+        assert_eq!(
+            *fixture.commands.lock().unwrap(),
+            vec![expected_external, expected_preview]
+        );
+        assert_eq!(
+            fs::read_to_string(&fixture.marker).unwrap(),
+            expected_target
+        );
+        assert_eq!(fs::read(&note).unwrap(), b"nonempty viewer bytes");
+    }
+
+    #[test]
+    fn phase08_10_archive_traversal_and_denied_paths_are_rejected() {
+        let temp = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let archive = temp.path().join("unsafe.zip");
+        write_zip_fixture(&archive, &[("../outside.txt", b"must not escape")]);
+        let root = text(temp.path());
+        let archive_target = text(&archive);
+
+        let err = binary_viewer_read_archive(root.clone(), archive_target.clone()).unwrap_err();
+        assert!(
+            err.contains("unsafe ZIP entry path"),
+            "unexpected error: {err}"
+        );
+
+        let outside_file = outside.path().join("outside.txt");
+        fs::write(&outside_file, "outside").unwrap();
+        let denied = text(&outside_file);
+        let sync_error = binary_viewer_read_text(root.clone(), denied.clone(), None).unwrap_err();
+        let async_error = run(ipc::binary_viewer_read_text(root, denied, None)).unwrap_err();
+        assert_eq!(async_error, sync_error);
+    }
+
+    #[test]
+    fn phase08_10_external_wrappers_preserve_denied_and_worker_error_release() {
+        let temp = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let target = temp.path().join("note.pdf");
+        fs::write(&target, b"nonempty pdf bytes").unwrap();
+        let outside_file = outside.path().join("outside.pdf");
+        fs::write(&outside_file, b"outside bytes").unwrap();
+        let root = text(temp.path());
+        let denied = text(&outside_file);
+        let expected_open = binary_viewer_open_external(root.clone(), denied.clone()).unwrap_err();
+        let expected_preview =
+            binary_viewer_preview_external(root.clone(), denied.clone()).unwrap_err();
+        assert!(expected_open.contains("escapes") || expected_open.contains("outside"));
+        assert!(expected_preview.contains("escapes") || expected_preview.contains("outside"));
+        assert_eq!(
+            run(ipc::binary_viewer_open_external(
+                root.clone(),
+                denied.clone()
+            ))
+            .unwrap_err(),
+            expected_open
+        );
+        assert_eq!(
+            run(ipc::binary_viewer_preview_external(root, denied)).unwrap_err(),
+            expected_preview
+        );
+
+        // The shared boundary hook deliberately panics the worker after its
+        // distinct worker thread is observed. Its JoinError is contextual,
+        // and the released worker slot is immediately reusable by this call.
+        boundary(
+            temp.path().to_path_buf(),
+            "binary_viewer_read_text",
+            ipc::binary_viewer_read_text(text(temp.path()), text(&target), None),
+        );
+        let preview = run(ipc::binary_viewer_read_text(
+            text(temp.path()),
+            text(&target),
+            None,
+        ))
+        .unwrap();
+        assert_eq!(preview.content, "nonempty pdf bytes");
     }
 }

@@ -1,0 +1,2182 @@
+{
+  "plan": "08-10",
+  "moduleIntegrationOwner": "08-10",
+  "commands": [
+    {
+      "name": "read_share_outbox_config",
+      "module": "src-tauri/src/share_outbox.rs",
+      "registrationPath": "src-tauri/src/lib.rs::share_outbox::ipc::read_share_outbox_config",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/share_outbox.rs::ipc::read_share_outbox_config awaits spawn_blocking before the entire blocking filesystem/process/parse body and its lock waits.",
+        "src-tauri/src/share_outbox.rs::read_share_outbox_config preserves the existing synchronous domain API."
+      ],
+      "workerBoundary": "src-tauri/src/share_outbox.rs::ipc::read_share_outbox_config owns wire Strings, Options, Vecs and structs and awaits tauri::async_runtime::spawn_blocking. Event/approval commands own AppHandle<R> and retrieve live State inside that worker. Legacy String errors stay unchanged; typed conflicts elsewhere remain structured, JoinError adds command_task_failed context. Prompt sync formatter remains String, with IPC Result<String,String> carrying identical successful wire payload.",
+      "syncCallers": [
+        "src-tauri/src/share_outbox.rs::read_share_outbox_config remains callable by existing Rust/CLI consumers with its existing synchronous domain result."
+      ],
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_10",
+          "passed": 40,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/components/SharedOutboxPane.tsx",
+          "src/lib/shareOutbox.ts"
+        ],
+        "payload": "SharedOutboxPane handleSetRoot/handleCreateRoot/handleApply own local config, recent receipts, results, applying and errors. prepare is local-only and passes --no-telegram; separate send flows are unchanged.",
+        "terminalNoticeOwner": "Existing initiating component/App hook owns completion and current notices. Durable navigation-safe common settlement, single terminal notification and stale-refresh closure remain Plans25/26; this shard records current owners and does not claim that future frontend work complete."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=read_share_outbox_config"
+      },
+      "mutationKey": {
+        "readOnly": true,
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "reason": "Read-only filesystem/config/content inspection with no filesystem mutation or registry migration."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_10_all_five_wrappers_yield_on_the_same_polling_task",
+          "phase08_10_wrappers_return_real_payloads_and_preserve_sync_contract",
+          "phase08_10_prepare_writes_fixture_output_receipt_and_retains_sibling_failure",
+          "phase08_10_share_mutation_same_target_and_error_release",
+          "phase08_10_real_document_rename_and_trash_contend_with_share_root",
+          "phase08_10_every_share_mutator_contention_and_error_release",
+          "phase08_10_share_mutators_vs_real_workspace_parent_rename_trash_orders",
+          "phase08_10_share_parent_replacement_fails_closed"
+        ],
+        "workerProof": "Actual registered wrapper futures are polled on the same async task, yield while a distinct blocking worker is held, and surface contextual worker failures. Meaningful synthetic outcomes separately verify successful behavior.",
+        "platformScope": "Executed on macOS using disposable roots and scoped Home/config. Secrets contain dummy fixture values only. Native launch fixture selects current test executable before invocation; no installed opener, provider, real Trash or external send. No Windows/native saturation proof claimed."
+      }
+    },
+    {
+      "name": "save_share_outbox_root",
+      "module": "src-tauri/src/share_outbox.rs",
+      "registrationPath": "src-tauri/src/lib.rs::share_outbox::ipc::save_share_outbox_root",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/share_outbox.rs::ipc::save_share_outbox_root awaits spawn_blocking before the entire blocking filesystem/process/parse body and its lock waits.",
+        "src-tauri/src/share_outbox.rs::save_share_outbox_root preserves the existing synchronous domain API.",
+        "src-tauri/src/share_outbox.rs::save_share_outbox_root_in_transaction validates current state under the complete admitted set; nested helpers borrow this lease."
+      ],
+      "workerBoundary": "src-tauri/src/share_outbox.rs::ipc::save_share_outbox_root owns wire Strings, Options, Vecs and structs and awaits tauri::async_runtime::spawn_blocking. Event/approval commands own AppHandle<R> and retrieve live State inside that worker. Legacy String errors stay unchanged; typed conflicts elsewhere remain structured, JoinError adds command_task_failed context. Prompt sync formatter remains String, with IPC Result<String,String> carrying identical successful wire payload.",
+      "syncCallers": [
+        "src-tauri/src/share_outbox.rs::save_share_outbox_root remains callable by existing Rust/CLI consumers with its existing synchronous domain result."
+      ],
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_10",
+          "passed": 40,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/components/SharedOutboxPane.tsx",
+          "src/lib/shareOutbox.ts"
+        ],
+        "payload": "SharedOutboxPane handleSetRoot/handleCreateRoot/handleApply own local config, recent receipts, results, applying and errors. prepare is local-only and passes --no-telegram; separate send flows are unchanged.",
+        "terminalNoticeOwner": "Existing initiating component/App hook owns completion and current notices. Durable navigation-safe common settlement, single terminal notification and stale-refresh closure remain Plans25/26; this shard records current owners and does not claim that future frontend work complete."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=save_share_outbox_root"
+      },
+      "mutationKey": {
+        "lexicalPaths": [
+          "Workspace config plus atomic replacement sibling, every source, resolved outgoing allocation subtree and receipt sidecar; canonical and lexical aliases, original workspace identity and conditional registry migration."
+        ],
+        "aliasPaths": [
+          "PathTransactionRequest reserves original lexical spellings and physical alias/ancestor identities; PathTransactionParent preserves selected directory identity."
+        ],
+        "postAdmissionPreconditions": "Validate original existing parents/aliases before first effect; revalidate containment/current policy where applicable and dynamic complete coverage before writes. Nested helpers borrow the lease, never reacquire or extend it.",
+        "domainLockOrder": "Shared PathTransactionRequest admission in the blocking worker before domain lock waits and permission registry loaders; no guard crosses await. Inbox approval consumption completes before per-item admission and holds no approval guard while waiting.",
+        "sharedAdmissionEntry": [
+          "src-tauri/src/share_outbox.rs::save_share_outbox_root_in_transaction",
+          "src-tauri/src/atomic_file.rs::with_path_transactions"
+        ],
+        "lifetime": "Lease remains owned through concrete local writes, copy/move/atomic replacement, sidecars and any owned cleanup. No auto retry or background job service."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_10_all_five_wrappers_yield_on_the_same_polling_task",
+          "phase08_10_wrappers_return_real_payloads_and_preserve_sync_contract",
+          "phase08_10_prepare_writes_fixture_output_receipt_and_retains_sibling_failure",
+          "phase08_10_share_mutation_same_target_and_error_release",
+          "phase08_10_real_document_rename_and_trash_contend_with_share_root",
+          "phase08_10_every_share_mutator_contention_and_error_release",
+          "phase08_10_share_mutators_vs_real_workspace_parent_rename_trash_orders",
+          "phase08_10_share_parent_replacement_fails_closed"
+        ],
+        "workerProof": "Actual registered wrapper futures are polled on the same async task, yield while a distinct blocking worker is held, and surface contextual worker failures. Meaningful synthetic outcomes separately verify successful behavior.",
+        "platformScope": "Executed on macOS using disposable roots and scoped Home/config. Secrets contain dummy fixture values only. Native launch fixture selects current test executable before invocation; no installed opener, provider, real Trash or external send. No Windows/native saturation proof claimed."
+      }
+    },
+    {
+      "name": "ensure_share_outbox_root",
+      "module": "src-tauri/src/share_outbox.rs",
+      "registrationPath": "src-tauri/src/lib.rs::share_outbox::ipc::ensure_share_outbox_root",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/share_outbox.rs::ipc::ensure_share_outbox_root awaits spawn_blocking before the entire blocking filesystem/process/parse body and its lock waits.",
+        "src-tauri/src/share_outbox.rs::ensure_share_outbox_root preserves the existing synchronous domain API.",
+        "src-tauri/src/share_outbox.rs::ensure_share_outbox_root_in_transaction validates current state under the complete admitted set; nested helpers borrow this lease."
+      ],
+      "workerBoundary": "src-tauri/src/share_outbox.rs::ipc::ensure_share_outbox_root owns wire Strings, Options, Vecs and structs and awaits tauri::async_runtime::spawn_blocking. Event/approval commands own AppHandle<R> and retrieve live State inside that worker. Legacy String errors stay unchanged; typed conflicts elsewhere remain structured, JoinError adds command_task_failed context. Prompt sync formatter remains String, with IPC Result<String,String> carrying identical successful wire payload.",
+      "syncCallers": [
+        "src-tauri/src/share_outbox.rs::ensure_share_outbox_root remains callable by existing Rust/CLI consumers with its existing synchronous domain result."
+      ],
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_10",
+          "passed": 40,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/components/SharedOutboxPane.tsx",
+          "src/lib/shareOutbox.ts"
+        ],
+        "payload": "SharedOutboxPane handleSetRoot/handleCreateRoot/handleApply own local config, recent receipts, results, applying and errors. prepare is local-only and passes --no-telegram; separate send flows are unchanged.",
+        "terminalNoticeOwner": "Existing initiating component/App hook owns completion and current notices. Durable navigation-safe common settlement, single terminal notification and stale-refresh closure remain Plans25/26; this shard records current owners and does not claim that future frontend work complete."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=ensure_share_outbox_root"
+      },
+      "mutationKey": {
+        "lexicalPaths": [
+          "Workspace config plus atomic replacement sibling, every source, resolved outgoing allocation subtree and receipt sidecar; canonical and lexical aliases, original workspace identity and conditional registry migration."
+        ],
+        "aliasPaths": [
+          "PathTransactionRequest reserves original lexical spellings and physical alias/ancestor identities; PathTransactionParent preserves selected directory identity."
+        ],
+        "postAdmissionPreconditions": "Validate original existing parents/aliases before first effect; revalidate containment/current policy where applicable and dynamic complete coverage before writes. Nested helpers borrow the lease, never reacquire or extend it.",
+        "domainLockOrder": "Shared PathTransactionRequest admission in the blocking worker before domain lock waits and permission registry loaders; no guard crosses await. Inbox approval consumption completes before per-item admission and holds no approval guard while waiting.",
+        "sharedAdmissionEntry": [
+          "src-tauri/src/share_outbox.rs::ensure_share_outbox_root_in_transaction",
+          "src-tauri/src/atomic_file.rs::with_path_transactions"
+        ],
+        "lifetime": "Lease remains owned through concrete local writes, copy/move/atomic replacement, sidecars and any owned cleanup. No auto retry or background job service."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_10_all_five_wrappers_yield_on_the_same_polling_task",
+          "phase08_10_wrappers_return_real_payloads_and_preserve_sync_contract",
+          "phase08_10_prepare_writes_fixture_output_receipt_and_retains_sibling_failure",
+          "phase08_10_share_mutation_same_target_and_error_release",
+          "phase08_10_real_document_rename_and_trash_contend_with_share_root",
+          "phase08_10_every_share_mutator_contention_and_error_release",
+          "phase08_10_share_mutators_vs_real_workspace_parent_rename_trash_orders",
+          "phase08_10_share_parent_replacement_fails_closed"
+        ],
+        "workerProof": "Actual registered wrapper futures are polled on the same async task, yield while a distinct blocking worker is held, and surface contextual worker failures. Meaningful synthetic outcomes separately verify successful behavior.",
+        "platformScope": "Executed on macOS using disposable roots and scoped Home/config. Secrets contain dummy fixture values only. Native launch fixture selects current test executable before invocation; no installed opener, provider, real Trash or external send. No Windows/native saturation proof claimed."
+      }
+    },
+    {
+      "name": "scan_share_outbox",
+      "module": "src-tauri/src/share_outbox.rs",
+      "registrationPath": "src-tauri/src/lib.rs::share_outbox::ipc::scan_share_outbox",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/share_outbox.rs::ipc::scan_share_outbox awaits spawn_blocking before the entire blocking filesystem/process/parse body and its lock waits.",
+        "src-tauri/src/share_outbox.rs::scan_share_outbox preserves the existing synchronous domain API."
+      ],
+      "workerBoundary": "src-tauri/src/share_outbox.rs::ipc::scan_share_outbox owns wire Strings, Options, Vecs and structs and awaits tauri::async_runtime::spawn_blocking. Event/approval commands own AppHandle<R> and retrieve live State inside that worker. Legacy String errors stay unchanged; typed conflicts elsewhere remain structured, JoinError adds command_task_failed context. Prompt sync formatter remains String, with IPC Result<String,String> carrying identical successful wire payload.",
+      "syncCallers": [
+        "src-tauri/src/share_outbox.rs::scan_share_outbox remains callable by existing Rust/CLI consumers with its existing synchronous domain result."
+      ],
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_10",
+          "passed": 40,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/components/SharedOutboxPane.tsx",
+          "src/lib/shareOutbox.ts"
+        ],
+        "payload": "SharedOutboxPane handleSetRoot/handleCreateRoot/handleApply own local config, recent receipts, results, applying and errors. prepare is local-only and passes --no-telegram; separate send flows are unchanged.",
+        "terminalNoticeOwner": "Existing initiating component/App hook owns completion and current notices. Durable navigation-safe common settlement, single terminal notification and stale-refresh closure remain Plans25/26; this shard records current owners and does not claim that future frontend work complete."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=scan_share_outbox"
+      },
+      "mutationKey": {
+        "readOnly": true,
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "reason": "Read-only filesystem/config/content inspection with no filesystem mutation or registry migration."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_10_all_five_wrappers_yield_on_the_same_polling_task",
+          "phase08_10_wrappers_return_real_payloads_and_preserve_sync_contract",
+          "phase08_10_prepare_writes_fixture_output_receipt_and_retains_sibling_failure",
+          "phase08_10_share_mutation_same_target_and_error_release",
+          "phase08_10_real_document_rename_and_trash_contend_with_share_root",
+          "phase08_10_every_share_mutator_contention_and_error_release",
+          "phase08_10_share_mutators_vs_real_workspace_parent_rename_trash_orders",
+          "phase08_10_share_parent_replacement_fails_closed"
+        ],
+        "workerProof": "Actual registered wrapper futures are polled on the same async task, yield while a distinct blocking worker is held, and surface contextual worker failures. Meaningful synthetic outcomes separately verify successful behavior.",
+        "platformScope": "Executed on macOS using disposable roots and scoped Home/config. Secrets contain dummy fixture values only. Native launch fixture selects current test executable before invocation; no installed opener, provider, real Trash or external send. No Windows/native saturation proof claimed."
+      }
+    },
+    {
+      "name": "prepare_share_outbox_files",
+      "module": "src-tauri/src/share_outbox.rs",
+      "registrationPath": "src-tauri/src/lib.rs::share_outbox::ipc::prepare_share_outbox_files",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/share_outbox.rs::ipc::prepare_share_outbox_files awaits spawn_blocking before the entire blocking filesystem/process/parse body and its lock waits.",
+        "src-tauri/src/share_outbox.rs::prepare_share_outbox_files preserves the existing synchronous domain API.",
+        "src-tauri/src/share_outbox.rs::prepare_share_outbox_files_in_transaction validates current state under the complete admitted set; nested helpers borrow this lease."
+      ],
+      "workerBoundary": "src-tauri/src/share_outbox.rs::ipc::prepare_share_outbox_files owns wire Strings, Options, Vecs and structs and awaits tauri::async_runtime::spawn_blocking. Event/approval commands own AppHandle<R> and retrieve live State inside that worker. Legacy String errors stay unchanged; typed conflicts elsewhere remain structured, JoinError adds command_task_failed context. Prompt sync formatter remains String, with IPC Result<String,String> carrying identical successful wire payload.",
+      "syncCallers": [
+        "src-tauri/src/share_outbox.rs::prepare_share_outbox_files remains callable by existing Rust/CLI consumers with its existing synchronous domain result."
+      ],
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_10",
+          "passed": 40,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        },
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_10_prepare_writes_fixture_output_receipt_and_retains_sibling_failure",
+          "passed": 1,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/components/SharedOutboxPane.tsx",
+          "src/lib/shareOutbox.ts"
+        ],
+        "payload": "SharedOutboxPane handleSetRoot/handleCreateRoot/handleApply own local config, recent receipts, results, applying and errors. prepare is local-only and passes --no-telegram; separate send flows are unchanged.",
+        "terminalNoticeOwner": "Existing initiating component/App hook owns completion and current notices. Durable navigation-safe common settlement, single terminal notification and stale-refresh closure remain Plans25/26; this shard records current owners and does not claim that future frontend work complete."
+      ,
+        "classifier": "classifyShareOutboxCompletion (src/lib/api.ts:1497)",
+        "successRetention": "payload returned unchanged to the caller; ProcessingOperationRecord.completion.succeeded retains successful item/output references after navigation",
+        "failureReasons": "per-item error strings trimmed into completion.failed[].reason; IPC rejection mapped by rejectionReason() (message + code); component no longer publishes a second error toast",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=prepare_share_outbox_files"
+      },
+      "mutationKey": {
+        "lexicalPaths": [
+          "Workspace config plus atomic replacement sibling, every source, resolved outgoing allocation subtree and receipt sidecar; canonical and lexical aliases, original workspace identity and conditional registry migration."
+        ],
+        "aliasPaths": [
+          "PathTransactionRequest reserves original lexical spellings and physical alias/ancestor identities; PathTransactionParent preserves selected directory identity."
+        ],
+        "postAdmissionPreconditions": "Validate original existing parents/aliases before first effect; revalidate containment/current policy where applicable and dynamic complete coverage before writes. Nested helpers borrow the lease, never reacquire or extend it.",
+        "domainLockOrder": "Shared PathTransactionRequest admission in the blocking worker before domain lock waits and permission registry loaders; no guard crosses await. Inbox approval consumption completes before per-item admission and holds no approval guard while waiting.",
+        "sharedAdmissionEntry": [
+          "src-tauri/src/share_outbox.rs::prepare_share_outbox_files_in_transaction",
+          "src-tauri/src/atomic_file.rs::with_path_transactions"
+        ],
+        "lifetime": "Lease remains owned through concrete local writes, copy/move/atomic replacement, sidecars and any owned cleanup. No auto retry or background job service."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_10_all_five_wrappers_yield_on_the_same_polling_task",
+          "phase08_10_wrappers_return_real_payloads_and_preserve_sync_contract",
+          "phase08_10_prepare_writes_fixture_output_receipt_and_retains_sibling_failure",
+          "phase08_10_share_mutation_same_target_and_error_release",
+          "phase08_10_real_document_rename_and_trash_contend_with_share_root",
+          "phase08_10_every_share_mutator_contention_and_error_release",
+          "phase08_10_share_mutators_vs_real_workspace_parent_rename_trash_orders",
+          "phase08_10_share_parent_replacement_fails_closed"
+        ],
+        "workerProof": "Actual registered wrapper futures are polled on the same async task, yield while a distinct blocking worker is held, and surface contextual worker failures. Meaningful synthetic outcomes separately verify successful behavior.",
+        "platformScope": "Executed on macOS using disposable roots and scoped Home/config. Secrets contain dummy fixture values only. Native launch fixture selects current test executable before invocation; no installed opener, provider, real Trash or external send. No Windows/native saturation proof claimed.",
+        "localPreparation": "The source module promises staging copies and SharedOutboxPane exposes no explicit send option. The bundled script supports --no-telegram; every actual prepare argv passes it and current_dir(work), with before-spawn fixture assertions. Existing monthly/receipt fragments and nested output aliases are checked and reserved before local process effects. PYTHONDONTWRITEBYTECODE=1 is set after inherited/run environment values to prevent Python imports from creating caches outside the admitted local outputs; the actual fixture asserts that final setting before launching."
+      }
+    },
+    {
+      "name": "build_inbox_classification_prompt",
+      "module": "src-tauri/src/inbox_classifier.rs",
+      "registrationPath": "src-tauri/src/lib.rs::inbox_classifier::ipc::build_inbox_classification_prompt",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/inbox_classifier.rs::ipc::build_inbox_classification_prompt awaits spawn_blocking before the entire blocking filesystem/process/parse body and its lock waits.",
+        "src-tauri/src/inbox_classifier.rs::build_inbox_classification_prompt preserves the existing synchronous domain API."
+      ],
+      "workerBoundary": "src-tauri/src/inbox_classifier.rs::ipc::build_inbox_classification_prompt owns wire Strings, Options, Vecs and structs and awaits tauri::async_runtime::spawn_blocking. Event/approval commands own AppHandle<R> and retrieve live State inside that worker. Legacy String errors stay unchanged; typed conflicts elsewhere remain structured, JoinError adds command_task_failed context. Prompt sync formatter remains String, with IPC Result<String,String> carrying identical successful wire payload.",
+      "syncCallers": [
+        "src-tauri/src/inbox_classifier.rs::build_inbox_classification_prompt remains callable by existing Rust/CLI consumers with its existing synchronous domain result."
+      ],
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_10",
+          "passed": 40,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/App.tsx",
+          "src/lib/aiInvoke.ts"
+        ],
+        "payload": "App classifyItem owns classifying and updateInboxCarry settlement. aiInvoke.classifyInboxItem owns the existing prompt/CLI event/parser lifecycle; these commands only format/parse in memory.",
+        "terminalNoticeOwner": "Existing initiating component/App hook owns completion and current notices. Durable navigation-safe common settlement, single terminal notification and stale-refresh closure remain Plans25/26; this shard records current owners and does not claim that future frontend work complete."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=build_inbox_classification_prompt"
+      },
+      "mutationKey": {
+        "readOnly": true,
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "reason": "Pure in-memory prompt construction and JSON parsing; no mutation, filesystem lookup, subprocess or provider call. Arbitrary caller strings make the work size input-dependent."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_10_actual_wrappers_return_nonempty_fixture_payloads",
+          "phase08_10_parse_wrapper_preserves_domain_rejection",
+          "phase08_10_build_wrapper_yields_on_same_polling_task",
+          "phase08_10_parse_wrapper_yields_on_same_polling_task",
+          "phase08_10_each_wrapper_adds_context_to_join_failure",
+          "phase08_10_synchronous_helpers_remain_available_to_rust_callers"
+        ],
+        "workerProof": "Actual registered wrapper futures are polled on the same async task, yield while a distinct blocking worker is held, and surface contextual worker failures. Meaningful synthetic outcomes separately verify successful behavior.",
+        "platformScope": "Executed on macOS using disposable roots and scoped Home/config. Secrets contain dummy fixture values only. Native launch fixture selects current test executable before invocation; no installed opener, provider, real Trash or external send. No Windows/native saturation proof claimed."
+      }
+    },
+    {
+      "name": "parse_inbox_classification",
+      "module": "src-tauri/src/inbox_classifier.rs",
+      "registrationPath": "src-tauri/src/lib.rs::inbox_classifier::ipc::parse_inbox_classification",
+      "originalDisposition": "RETAIN",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/inbox_classifier.rs::ipc::parse_inbox_classification awaits spawn_blocking before the entire blocking filesystem/process/parse body and its lock waits.",
+        "src-tauri/src/inbox_classifier.rs::parse_inbox_classification preserves the existing synchronous domain API."
+      ],
+      "workerBoundary": "src-tauri/src/inbox_classifier.rs::ipc::parse_inbox_classification owns wire Strings, Options, Vecs and structs and awaits tauri::async_runtime::spawn_blocking. Event/approval commands own AppHandle<R> and retrieve live State inside that worker. Legacy String errors stay unchanged; typed conflicts elsewhere remain structured, JoinError adds command_task_failed context. Prompt sync formatter remains String, with IPC Result<String,String> carrying identical successful wire payload.",
+      "syncCallers": [
+        "src-tauri/src/inbox_classifier.rs::parse_inbox_classification remains callable by existing Rust/CLI consumers with its existing synchronous domain result."
+      ],
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_10",
+          "passed": 40,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/App.tsx",
+          "src/lib/aiInvoke.ts"
+        ],
+        "payload": "App classifyItem owns classifying and updateInboxCarry settlement. aiInvoke.classifyInboxItem owns the existing prompt/CLI event/parser lifecycle; these commands only format/parse in memory.",
+        "terminalNoticeOwner": "Existing initiating component/App hook owns completion and current notices. Durable navigation-safe common settlement, single terminal notification and stale-refresh closure remain Plans25/26; this shard records current owners and does not claim that future frontend work complete."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=parse_inbox_classification"
+      },
+      "mutationKey": {
+        "readOnly": true,
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "reason": "Pure in-memory prompt construction and JSON parsing; no mutation, filesystem lookup, subprocess or provider call. Arbitrary caller strings make the work size input-dependent."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_10_actual_wrappers_return_nonempty_fixture_payloads",
+          "phase08_10_parse_wrapper_preserves_domain_rejection",
+          "phase08_10_build_wrapper_yields_on_same_polling_task",
+          "phase08_10_parse_wrapper_yields_on_same_polling_task",
+          "phase08_10_each_wrapper_adds_context_to_join_failure",
+          "phase08_10_synchronous_helpers_remain_available_to_rust_callers"
+        ],
+        "workerProof": "Actual registered wrapper futures are polled on the same async task, yield while a distinct blocking worker is held, and surface contextual worker failures. Meaningful synthetic outcomes separately verify successful behavior.",
+        "platformScope": "Executed on macOS using disposable roots and scoped Home/config. Secrets contain dummy fixture values only. Native launch fixture selects current test executable before invocation; no installed opener, provider, real Trash or external send. No Windows/native saturation proof claimed."
+      }
+    },
+    {
+      "name": "scan_inbox_drop",
+      "module": "src-tauri/src/inbox.rs",
+      "registrationPath": "src-tauri/src/lib.rs::inbox::ipc::scan_inbox_drop",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/inbox.rs::ipc::scan_inbox_drop awaits spawn_blocking before the entire blocking filesystem/process/parse body and its lock waits.",
+        "src-tauri/src/inbox.rs::scan_inbox_drop preserves the existing synchronous domain API."
+      ],
+      "workerBoundary": "src-tauri/src/inbox.rs::ipc::scan_inbox_drop owns wire Strings, Options, Vecs and structs and awaits tauri::async_runtime::spawn_blocking. Event/approval commands own AppHandle<R> and retrieve live State inside that worker. Legacy String errors stay unchanged; typed conflicts elsewhere remain structured, JoinError adds command_task_failed context. Prompt sync formatter remains String, with IPC Result<String,String> carrying identical successful wire payload.",
+      "syncCallers": [
+        "src-tauri/src/inbox.rs::scan_inbox_drop remains callable by existing Rust/CLI consumers with its existing synchronous domain result."
+      ],
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_10",
+          "passed": 40,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/App.tsx",
+          "src/components/InboxPane.tsx",
+          "src/lib/useInboxEvents.ts"
+        ],
+        "payload": "Batch completion events and per-item outcome arrays preserve successful siblings and explicit failures. App handlers own inbox carry, drop staging and notices; current load request checks stay with callers.",
+        "terminalNoticeOwner": "Existing initiating component/App hook owns completion and current notices. Durable navigation-safe common settlement, single terminal notification and stale-refresh closure remain Plans25/26; this shard records current owners and does not claim that future frontend work complete."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=scan_inbox_drop"
+      },
+      "mutationKey": {
+        "readOnly": true,
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "reason": "Read-only filesystem/config/content inspection with no filesystem mutation or registry migration."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_10_inbox_all_fourteen_workers_yield_on_same_polling_task_and_join_error",
+          "phase08_10_inbox_real_nonempty_read_processing_approval_and_denied_paths",
+          "phase08_10_inbox_every_writer_same_target_serializes_and_unwind_releases",
+          "phase08_10_inbox_competing_accept_reject_and_batch_keep_settled_siblings",
+          "phase08_10_inbox_all_writers_policy_rechecked_after_admission_and_failure_release",
+          "phase08_10_inbox_policy_alias_spellings_restrictive_duplicates_and_allowed_alias",
+          "phase08_10_inbox_all_writers_parent_rename_trash_both_orders_and_aliases",
+          "phase08_10_inbox_document_save_serializes_and_preserves_typed_conflict",
+          "phase08_10_inbox_failed_item_move_rolls_back_copies_and_keeps_pending_for_retry",
+          "phase08_10_inbox_raw_tree_denial_leaves_no_partial_output"
+        ],
+        "workerProof": "Actual registered wrapper futures are polled on the same async task, yield while a distinct blocking worker is held, and surface contextual worker failures. Meaningful synthetic outcomes separately verify successful behavior.",
+        "platformScope": "Executed on macOS using disposable roots and scoped Home/config. Secrets contain dummy fixture values only. Native launch fixture selects current test executable before invocation; no installed opener, provider, real Trash or external send. No Windows/native saturation proof claimed."
+      }
+    },
+    {
+      "name": "scan_inbox_entries",
+      "module": "src-tauri/src/inbox.rs",
+      "registrationPath": "src-tauri/src/lib.rs::inbox::ipc::scan_inbox_entries",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/inbox.rs::ipc::scan_inbox_entries awaits spawn_blocking before the entire blocking filesystem/process/parse body and its lock waits.",
+        "src-tauri/src/inbox.rs::scan_inbox_entries preserves the existing synchronous domain API."
+      ],
+      "workerBoundary": "src-tauri/src/inbox.rs::ipc::scan_inbox_entries owns wire Strings, Options, Vecs and structs and awaits tauri::async_runtime::spawn_blocking. Event/approval commands own AppHandle<R> and retrieve live State inside that worker. Legacy String errors stay unchanged; typed conflicts elsewhere remain structured, JoinError adds command_task_failed context. Prompt sync formatter remains String, with IPC Result<String,String> carrying identical successful wire payload.",
+      "syncCallers": [
+        "src-tauri/src/inbox.rs::scan_inbox_entries remains callable by existing Rust/CLI consumers with its existing synchronous domain result."
+      ],
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_10",
+          "passed": 40,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/App.tsx",
+          "src/components/InboxPane.tsx",
+          "src/lib/useInboxEvents.ts"
+        ],
+        "payload": "Batch completion events and per-item outcome arrays preserve successful siblings and explicit failures. App handlers own inbox carry, drop staging and notices; current load request checks stay with callers.",
+        "terminalNoticeOwner": "Existing initiating component/App hook owns completion and current notices. Durable navigation-safe common settlement, single terminal notification and stale-refresh closure remain Plans25/26; this shard records current owners and does not claim that future frontend work complete."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=scan_inbox_entries"
+      },
+      "mutationKey": {
+        "readOnly": true,
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "reason": "Read-only filesystem/config/content inspection with no filesystem mutation or registry migration."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_10_inbox_all_fourteen_workers_yield_on_same_polling_task_and_join_error",
+          "phase08_10_inbox_real_nonempty_read_processing_approval_and_denied_paths",
+          "phase08_10_inbox_every_writer_same_target_serializes_and_unwind_releases",
+          "phase08_10_inbox_competing_accept_reject_and_batch_keep_settled_siblings",
+          "phase08_10_inbox_all_writers_policy_rechecked_after_admission_and_failure_release",
+          "phase08_10_inbox_policy_alias_spellings_restrictive_duplicates_and_allowed_alias",
+          "phase08_10_inbox_all_writers_parent_rename_trash_both_orders_and_aliases",
+          "phase08_10_inbox_document_save_serializes_and_preserves_typed_conflict",
+          "phase08_10_inbox_failed_item_move_rolls_back_copies_and_keeps_pending_for_retry",
+          "phase08_10_inbox_raw_tree_denial_leaves_no_partial_output"
+        ],
+        "workerProof": "Actual registered wrapper futures are polled on the same async task, yield while a distinct blocking worker is held, and surface contextual worker failures. Meaningful synthetic outcomes separately verify successful behavior.",
+        "platformScope": "Executed on macOS using disposable roots and scoped Home/config. Secrets contain dummy fixture values only. Native launch fixture selects current test executable before invocation; no installed opener, provider, real Trash or external send. No Windows/native saturation proof claimed."
+      }
+    },
+    {
+      "name": "scan_inbox_processed_items",
+      "module": "src-tauri/src/inbox.rs",
+      "registrationPath": "src-tauri/src/lib.rs::inbox::ipc::scan_inbox_processed_items",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/inbox.rs::ipc::scan_inbox_processed_items awaits spawn_blocking before the entire blocking filesystem/process/parse body and its lock waits.",
+        "src-tauri/src/inbox.rs::scan_inbox_processed_items preserves the existing synchronous domain API."
+      ],
+      "workerBoundary": "src-tauri/src/inbox.rs::ipc::scan_inbox_processed_items owns wire Strings, Options, Vecs and structs and awaits tauri::async_runtime::spawn_blocking. Event/approval commands own AppHandle<R> and retrieve live State inside that worker. Legacy String errors stay unchanged; typed conflicts elsewhere remain structured, JoinError adds command_task_failed context. Prompt sync formatter remains String, with IPC Result<String,String> carrying identical successful wire payload.",
+      "syncCallers": [
+        "src-tauri/src/inbox.rs::scan_inbox_processed_items remains callable by existing Rust/CLI consumers with its existing synchronous domain result."
+      ],
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_10",
+          "passed": 40,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/App.tsx",
+          "src/components/InboxPane.tsx",
+          "src/lib/useInboxEvents.ts"
+        ],
+        "payload": "Batch completion events and per-item outcome arrays preserve successful siblings and explicit failures. App handlers own inbox carry, drop staging and notices; current load request checks stay with callers.",
+        "terminalNoticeOwner": "Existing initiating component/App hook owns completion and current notices. Durable navigation-safe common settlement, single terminal notification and stale-refresh closure remain Plans25/26; this shard records current owners and does not claim that future frontend work complete."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=scan_inbox_processed_items"
+      },
+      "mutationKey": {
+        "readOnly": true,
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "reason": "Read-only filesystem/config/content inspection with no filesystem mutation or registry migration."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_10_inbox_all_fourteen_workers_yield_on_same_polling_task_and_join_error",
+          "phase08_10_inbox_real_nonempty_read_processing_approval_and_denied_paths",
+          "phase08_10_inbox_every_writer_same_target_serializes_and_unwind_releases",
+          "phase08_10_inbox_competing_accept_reject_and_batch_keep_settled_siblings",
+          "phase08_10_inbox_all_writers_policy_rechecked_after_admission_and_failure_release",
+          "phase08_10_inbox_policy_alias_spellings_restrictive_duplicates_and_allowed_alias",
+          "phase08_10_inbox_all_writers_parent_rename_trash_both_orders_and_aliases",
+          "phase08_10_inbox_document_save_serializes_and_preserves_typed_conflict",
+          "phase08_10_inbox_failed_item_move_rolls_back_copies_and_keeps_pending_for_retry",
+          "phase08_10_inbox_raw_tree_denial_leaves_no_partial_output"
+        ],
+        "workerProof": "Actual registered wrapper futures are polled on the same async task, yield while a distinct blocking worker is held, and surface contextual worker failures. Meaningful synthetic outcomes separately verify successful behavior.",
+        "platformScope": "Executed on macOS using disposable roots and scoped Home/config. Secrets contain dummy fixture values only. Native launch fixture selects current test executable before invocation; no installed opener, provider, real Trash or external send. No Windows/native saturation proof claimed."
+      }
+    },
+    {
+      "name": "scan_inbox_processed_snapshot",
+      "module": "src-tauri/src/inbox.rs",
+      "registrationPath": "src-tauri/src/lib.rs::inbox::scan_inbox_processed_snapshot",
+      "originalDisposition": "ISOLATED",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/inbox.rs::scan_inbox_processed_snapshot awaits spawn_blocking before the entire blocking filesystem/process/parse body and its lock waits.",
+        "src-tauri/src/inbox.rs::scan_processed_snapshot_with_config performs candidate read, hydration and count aggregation inside the existing awaited worker."
+      ],
+      "workerBoundary": "src-tauri/src/inbox.rs::scan_inbox_processed_snapshot owns wire Strings, Options, Vecs and structs and awaits tauri::async_runtime::spawn_blocking. Event/approval commands own AppHandle<R> and retrieve live State inside that worker. Legacy String errors stay unchanged; typed conflicts elsewhere remain structured, JoinError adds command_task_failed context. Prompt sync formatter remains String, with IPC Result<String,String> carrying identical successful wire payload.",
+      "syncCallers": [
+        "src-tauri/src/inbox.rs::scan_inbox_processed_snapshot remains the existing async public API and registration."
+      ],
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_10",
+          "passed": 40,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/App.tsx",
+          "src/components/InboxPane.tsx",
+          "src/lib/useInboxEvents.ts"
+        ],
+        "payload": "Batch completion events and per-item outcome arrays preserve successful siblings and explicit failures. App handlers own inbox carry, drop staging and notices; current load request checks stay with callers.",
+        "terminalNoticeOwner": "Existing initiating component/App hook owns completion and current notices. Durable navigation-safe common settlement, single terminal notification and stale-refresh closure remain Plans25/26; this shard records current owners and does not claim that future frontend work complete."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=scan_inbox_processed_snapshot"
+      },
+      "mutationKey": {
+        "readOnly": true,
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "reason": "Read-only filesystem/config/content inspection with no filesystem mutation or registry migration."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_10_inbox_all_fourteen_workers_yield_on_same_polling_task_and_join_error",
+          "phase08_10_inbox_real_nonempty_read_processing_approval_and_denied_paths",
+          "phase08_10_inbox_every_writer_same_target_serializes_and_unwind_releases",
+          "phase08_10_inbox_competing_accept_reject_and_batch_keep_settled_siblings",
+          "phase08_10_inbox_all_writers_policy_rechecked_after_admission_and_failure_release",
+          "phase08_10_inbox_policy_alias_spellings_restrictive_duplicates_and_allowed_alias",
+          "phase08_10_inbox_all_writers_parent_rename_trash_both_orders_and_aliases",
+          "phase08_10_inbox_document_save_serializes_and_preserves_typed_conflict",
+          "phase08_10_inbox_failed_item_move_rolls_back_copies_and_keeps_pending_for_retry",
+          "phase08_10_inbox_raw_tree_denial_leaves_no_partial_output"
+        ],
+        "workerProof": "Actual registered wrapper futures are polled on the same async task, yield while a distinct blocking worker is held, and surface contextual worker failures. Meaningful synthetic outcomes separately verify successful behavior.",
+        "platformScope": "Executed on macOS using disposable roots and scoped Home/config. Secrets contain dummy fixture values only. Native launch fixture selects current test executable before invocation; no installed opener, provider, real Trash or external send. No Windows/native saturation proof claimed."
+      }
+    },
+    {
+      "name": "read_inbox_processed_item",
+      "module": "src-tauri/src/inbox.rs",
+      "registrationPath": "src-tauri/src/lib.rs::inbox::ipc::read_inbox_processed_item",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/inbox.rs::ipc::read_inbox_processed_item awaits spawn_blocking before the entire blocking filesystem/process/parse body and its lock waits.",
+        "src-tauri/src/inbox.rs::read_inbox_processed_item preserves the existing synchronous domain API."
+      ],
+      "workerBoundary": "src-tauri/src/inbox.rs::ipc::read_inbox_processed_item owns wire Strings, Options, Vecs and structs and awaits tauri::async_runtime::spawn_blocking. Event/approval commands own AppHandle<R> and retrieve live State inside that worker. Legacy String errors stay unchanged; typed conflicts elsewhere remain structured, JoinError adds command_task_failed context. Prompt sync formatter remains String, with IPC Result<String,String> carrying identical successful wire payload.",
+      "syncCallers": [
+        "src-tauri/src/inbox.rs::read_inbox_processed_item remains callable by existing Rust/CLI consumers with its existing synchronous domain result."
+      ],
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_10",
+          "passed": 40,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/App.tsx",
+          "src/components/InboxPane.tsx",
+          "src/lib/useInboxEvents.ts"
+        ],
+        "payload": "Batch completion events and per-item outcome arrays preserve successful siblings and explicit failures. App handlers own inbox carry, drop staging and notices; current load request checks stay with callers.",
+        "terminalNoticeOwner": "Existing initiating component/App hook owns completion and current notices. Durable navigation-safe common settlement, single terminal notification and stale-refresh closure remain Plans25/26; this shard records current owners and does not claim that future frontend work complete."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=read_inbox_processed_item"
+      },
+      "mutationKey": {
+        "readOnly": true,
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "reason": "Read-only filesystem/config/content inspection with no filesystem mutation or registry migration."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_10_inbox_all_fourteen_workers_yield_on_same_polling_task_and_join_error",
+          "phase08_10_inbox_real_nonempty_read_processing_approval_and_denied_paths",
+          "phase08_10_inbox_every_writer_same_target_serializes_and_unwind_releases",
+          "phase08_10_inbox_competing_accept_reject_and_batch_keep_settled_siblings",
+          "phase08_10_inbox_all_writers_policy_rechecked_after_admission_and_failure_release",
+          "phase08_10_inbox_policy_alias_spellings_restrictive_duplicates_and_allowed_alias",
+          "phase08_10_inbox_all_writers_parent_rename_trash_both_orders_and_aliases",
+          "phase08_10_inbox_document_save_serializes_and_preserves_typed_conflict",
+          "phase08_10_inbox_failed_item_move_rolls_back_copies_and_keeps_pending_for_retry",
+          "phase08_10_inbox_raw_tree_denial_leaves_no_partial_output"
+        ],
+        "workerProof": "Actual registered wrapper futures are polled on the same async task, yield while a distinct blocking worker is held, and surface contextual worker failures. Meaningful synthetic outcomes separately verify successful behavior.",
+        "platformScope": "Executed on macOS using disposable roots and scoped Home/config. Secrets contain dummy fixture values only. Native launch fixture selects current test executable before invocation; no installed opener, provider, real Trash or external send. No Windows/native saturation proof claimed."
+      }
+    },
+    {
+      "name": "read_inbox_source_runs",
+      "module": "src-tauri/src/inbox.rs",
+      "registrationPath": "src-tauri/src/lib.rs::inbox::ipc::read_inbox_source_runs",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/inbox.rs::ipc::read_inbox_source_runs awaits spawn_blocking before the entire blocking filesystem/process/parse body and its lock waits.",
+        "src-tauri/src/inbox.rs::read_inbox_source_runs preserves the existing synchronous domain API."
+      ],
+      "workerBoundary": "src-tauri/src/inbox.rs::ipc::read_inbox_source_runs owns wire Strings, Options, Vecs and structs and awaits tauri::async_runtime::spawn_blocking. Event/approval commands own AppHandle<R> and retrieve live State inside that worker. Legacy String errors stay unchanged; typed conflicts elsewhere remain structured, JoinError adds command_task_failed context. Prompt sync formatter remains String, with IPC Result<String,String> carrying identical successful wire payload.",
+      "syncCallers": [
+        "src-tauri/src/inbox.rs::read_inbox_source_runs remains callable by existing Rust/CLI consumers with its existing synchronous domain result."
+      ],
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_10",
+          "passed": 40,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/App.tsx",
+          "src/components/InboxPane.tsx",
+          "src/lib/useInboxEvents.ts"
+        ],
+        "payload": "Batch completion events and per-item outcome arrays preserve successful siblings and explicit failures. App handlers own inbox carry, drop staging and notices; current load request checks stay with callers.",
+        "terminalNoticeOwner": "Existing initiating component/App hook owns completion and current notices. Durable navigation-safe common settlement, single terminal notification and stale-refresh closure remain Plans25/26; this shard records current owners and does not claim that future frontend work complete."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=read_inbox_source_runs"
+      },
+      "mutationKey": {
+        "readOnly": true,
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "reason": "Read-only filesystem/config/content inspection with no filesystem mutation or registry migration."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_10_inbox_all_fourteen_workers_yield_on_same_polling_task_and_join_error",
+          "phase08_10_inbox_real_nonempty_read_processing_approval_and_denied_paths",
+          "phase08_10_inbox_every_writer_same_target_serializes_and_unwind_releases",
+          "phase08_10_inbox_competing_accept_reject_and_batch_keep_settled_siblings",
+          "phase08_10_inbox_all_writers_policy_rechecked_after_admission_and_failure_release",
+          "phase08_10_inbox_policy_alias_spellings_restrictive_duplicates_and_allowed_alias",
+          "phase08_10_inbox_all_writers_parent_rename_trash_both_orders_and_aliases",
+          "phase08_10_inbox_document_save_serializes_and_preserves_typed_conflict",
+          "phase08_10_inbox_failed_item_move_rolls_back_copies_and_keeps_pending_for_retry",
+          "phase08_10_inbox_raw_tree_denial_leaves_no_partial_output"
+        ],
+        "workerProof": "Actual registered wrapper futures are polled on the same async task, yield while a distinct blocking worker is held, and surface contextual worker failures. Meaningful synthetic outcomes separately verify successful behavior.",
+        "platformScope": "Executed on macOS using disposable roots and scoped Home/config. Secrets contain dummy fixture values only. Native launch fixture selects current test executable before invocation; no installed opener, provider, real Trash or external send. No Windows/native saturation proof claimed."
+      }
+    },
+    {
+      "name": "count_inbox_processed_by_channel",
+      "module": "src-tauri/src/inbox.rs",
+      "registrationPath": "src-tauri/src/lib.rs::inbox::ipc::count_inbox_processed_by_channel",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/inbox.rs::ipc::count_inbox_processed_by_channel awaits spawn_blocking before the entire blocking filesystem/process/parse body and its lock waits.",
+        "src-tauri/src/inbox.rs::count_inbox_processed_by_channel preserves the existing synchronous domain API."
+      ],
+      "workerBoundary": "src-tauri/src/inbox.rs::ipc::count_inbox_processed_by_channel owns wire Strings, Options, Vecs and structs and awaits tauri::async_runtime::spawn_blocking. Event/approval commands own AppHandle<R> and retrieve live State inside that worker. Legacy String errors stay unchanged; typed conflicts elsewhere remain structured, JoinError adds command_task_failed context. Prompt sync formatter remains String, with IPC Result<String,String> carrying identical successful wire payload.",
+      "syncCallers": [
+        "src-tauri/src/inbox.rs::count_inbox_processed_by_channel remains callable by existing Rust/CLI consumers with its existing synchronous domain result."
+      ],
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_10",
+          "passed": 40,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/App.tsx",
+          "src/components/InboxPane.tsx",
+          "src/lib/useInboxEvents.ts"
+        ],
+        "payload": "Batch completion events and per-item outcome arrays preserve successful siblings and explicit failures. App handlers own inbox carry, drop staging and notices; current load request checks stay with callers.",
+        "terminalNoticeOwner": "Existing initiating component/App hook owns completion and current notices. Durable navigation-safe common settlement, single terminal notification and stale-refresh closure remain Plans25/26; this shard records current owners and does not claim that future frontend work complete."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=count_inbox_processed_by_channel"
+      },
+      "mutationKey": {
+        "readOnly": true,
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "reason": "Read-only filesystem/config/content inspection with no filesystem mutation or registry migration."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_10_inbox_all_fourteen_workers_yield_on_same_polling_task_and_join_error",
+          "phase08_10_inbox_real_nonempty_read_processing_approval_and_denied_paths",
+          "phase08_10_inbox_every_writer_same_target_serializes_and_unwind_releases",
+          "phase08_10_inbox_competing_accept_reject_and_batch_keep_settled_siblings",
+          "phase08_10_inbox_all_writers_policy_rechecked_after_admission_and_failure_release",
+          "phase08_10_inbox_policy_alias_spellings_restrictive_duplicates_and_allowed_alias",
+          "phase08_10_inbox_all_writers_parent_rename_trash_both_orders_and_aliases",
+          "phase08_10_inbox_document_save_serializes_and_preserves_typed_conflict",
+          "phase08_10_inbox_failed_item_move_rolls_back_copies_and_keeps_pending_for_retry",
+          "phase08_10_inbox_raw_tree_denial_leaves_no_partial_output"
+        ],
+        "workerProof": "Actual registered wrapper futures are polled on the same async task, yield while a distinct blocking worker is held, and surface contextual worker failures. Meaningful synthetic outcomes separately verify successful behavior.",
+        "platformScope": "Executed on macOS using disposable roots and scoped Home/config. Secrets contain dummy fixture values only. Native launch fixture selects current test executable before invocation; no installed opener, provider, real Trash or external send. No Windows/native saturation proof claimed."
+      }
+    },
+    {
+      "name": "trash_inbox_items",
+      "module": "src-tauri/src/inbox.rs",
+      "registrationPath": "src-tauri/src/lib.rs::inbox::ipc::trash_inbox_items",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/inbox.rs::ipc::trash_inbox_items awaits spawn_blocking before the entire blocking filesystem/process/parse body and its lock waits.",
+        "src-tauri/src/inbox.rs::trash_inbox_items preserves the existing synchronous domain API.",
+        "src-tauri/src/inbox.rs::trash_inbox_items_blocking validates current state under the complete admitted set; nested helpers borrow this lease."
+      ],
+      "workerBoundary": "src-tauri/src/inbox.rs::ipc::trash_inbox_items owns wire Strings, Options, Vecs and structs and awaits tauri::async_runtime::spawn_blocking. Event/approval commands own AppHandle<R> and retrieve live State inside that worker. Legacy String errors stay unchanged; typed conflicts elsewhere remain structured, JoinError adds command_task_failed context. Prompt sync formatter remains String, with IPC Result<String,String> carrying identical successful wire payload.",
+      "syncCallers": [
+        "src-tauri/src/inbox.rs::trash_inbox_items remains callable by existing Rust/CLI consumers with its existing synchronous domain result."
+      ],
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_10",
+          "passed": 40,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/App.tsx",
+          "src/components/InboxPane.tsx",
+          "src/lib/useInboxEvents.ts"
+        ],
+        "payload": "Batch completion events and per-item outcome arrays preserve successful siblings and explicit failures. App handlers own inbox carry, drop staging and notices; current load request checks stay with callers.",
+        "terminalNoticeOwner": "Existing initiating component/App hook owns completion and current notices. Durable navigation-safe common settlement, single terminal notification and stale-refresh closure remain Plans25/26; this shard records current owners and does not claim that future frontend work complete."
+      ,
+        "classifier": "classifyInboxCompletion (src/lib/api.ts:1471)",
+        "successRetention": "payload returned unchanged to the caller; ProcessingOperationRecord.completion.succeeded retains successful item/output references after navigation",
+        "failureReasons": "per-item error strings trimmed into completion.failed[].reason; IPC rejection mapped by rejectionReason() (message + code); component no longer publishes a second error toast",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=trash_inbox_items"
+      },
+      "mutationKey": {
+        "lexicalPaths": [
+          "Source item/file, destination collision-allocation directory, workspace config and Inbox settings, manifest/raw subtree, done/rejected subtree and receipt path. Each batch keeps its original workspace/alias parent snapshot; individual failures preserve settled siblings."
+        ],
+        "aliasPaths": [
+          "PathTransactionRequest reserves original lexical spellings and physical alias/ancestor identities; PathTransactionParent preserves selected directory identity."
+        ],
+        "postAdmissionPreconditions": "Validate original existing parents/aliases before first effect; revalidate containment/current policy where applicable and dynamic complete coverage before writes. Nested helpers borrow the lease, never reacquire or extend it.",
+        "domainLockOrder": "Shared PathTransactionRequest admission in the blocking worker before domain lock waits and permission registry loaders; no guard crosses await. Inbox approval consumption completes before per-item admission and holds no approval guard while waiting.",
+        "sharedAdmissionEntry": [
+          "src-tauri/src/inbox.rs::trash_inbox_items_blocking",
+          "src-tauri/src/atomic_file.rs::with_path_transactions"
+        ],
+        "lifetime": "Lease remains owned through concrete local writes, copy/move/atomic replacement, sidecars and any owned cleanup. No auto retry or background job service."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_10_inbox_all_fourteen_workers_yield_on_same_polling_task_and_join_error",
+          "phase08_10_inbox_real_nonempty_read_processing_approval_and_denied_paths",
+          "phase08_10_inbox_every_writer_same_target_serializes_and_unwind_releases",
+          "phase08_10_inbox_competing_accept_reject_and_batch_keep_settled_siblings",
+          "phase08_10_inbox_all_writers_policy_rechecked_after_admission_and_failure_release",
+          "phase08_10_inbox_policy_alias_spellings_restrictive_duplicates_and_allowed_alias",
+          "phase08_10_inbox_all_writers_parent_rename_trash_both_orders_and_aliases",
+          "phase08_10_inbox_document_save_serializes_and_preserves_typed_conflict",
+          "phase08_10_inbox_failed_item_move_rolls_back_copies_and_keeps_pending_for_retry",
+          "phase08_10_inbox_raw_tree_denial_leaves_no_partial_output"
+        ],
+        "workerProof": "Actual registered wrapper futures are polled on the same async task, yield while a distinct blocking worker is held, and surface contextual worker failures. Meaningful synthetic outcomes separately verify successful behavior.",
+        "platformScope": "Executed on macOS using disposable roots and scoped Home/config. Secrets contain dummy fixture values only. Native launch fixture selects current test executable before invocation; no installed opener, provider, real Trash or external send. No Windows/native saturation proof claimed."
+      }
+    },
+    {
+      "name": "stage_inbox_drop_files",
+      "module": "src-tauri/src/inbox.rs",
+      "registrationPath": "src-tauri/src/lib.rs::inbox::ipc::stage_inbox_drop_files",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/inbox.rs::ipc::stage_inbox_drop_files awaits spawn_blocking before the entire blocking filesystem/process/parse body and its lock waits.",
+        "src-tauri/src/inbox.rs::stage_inbox_drop_files preserves the existing synchronous domain API.",
+        "src-tauri/src/inbox.rs::stage_inbox_drop_files validates current state under the complete admitted set; nested helpers borrow this lease."
+      ],
+      "workerBoundary": "src-tauri/src/inbox.rs::ipc::stage_inbox_drop_files owns wire Strings, Options, Vecs and structs and awaits tauri::async_runtime::spawn_blocking. Event/approval commands own AppHandle<R> and retrieve live State inside that worker. Legacy String errors stay unchanged; typed conflicts elsewhere remain structured, JoinError adds command_task_failed context. Prompt sync formatter remains String, with IPC Result<String,String> carrying identical successful wire payload.",
+      "syncCallers": [
+        "src-tauri/src/inbox.rs::stage_inbox_drop_files remains callable by existing Rust/CLI consumers with its existing synchronous domain result."
+      ],
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_10",
+          "passed": 40,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/App.tsx",
+          "src/components/InboxPane.tsx",
+          "src/lib/useInboxEvents.ts"
+        ],
+        "payload": "Batch completion events and per-item outcome arrays preserve successful siblings and explicit failures. App handlers own inbox carry, drop staging and notices; current load request checks stay with callers.",
+        "terminalNoticeOwner": "Existing initiating component/App hook owns completion and current notices. Durable navigation-safe common settlement, single terminal notification and stale-refresh closure remain Plans25/26; this shard records current owners and does not claim that future frontend work complete."
+      ,
+        "classifier": "classifyInboxCompletion (src/lib/api.ts:1471)",
+        "successRetention": "payload returned unchanged to the caller; ProcessingOperationRecord.completion.succeeded retains successful item/output references after navigation",
+        "failureReasons": "per-item error strings trimmed into completion.failed[].reason; IPC rejection mapped by rejectionReason() (message + code); component no longer publishes a second error toast",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=stage_inbox_drop_files"
+      },
+      "mutationKey": {
+        "lexicalPaths": [
+          "Source item/file, destination collision-allocation directory, workspace config and Inbox settings, manifest/raw subtree, done/rejected subtree and receipt path. Each batch keeps its original workspace/alias parent snapshot; individual failures preserve settled siblings."
+        ],
+        "aliasPaths": [
+          "PathTransactionRequest reserves original lexical spellings and physical alias/ancestor identities; PathTransactionParent preserves selected directory identity."
+        ],
+        "postAdmissionPreconditions": "Validate original existing parents/aliases before first effect; revalidate containment/current policy where applicable and dynamic complete coverage before writes. Nested helpers borrow the lease, never reacquire or extend it.",
+        "domainLockOrder": "Shared PathTransactionRequest admission in the blocking worker before domain lock waits and permission registry loaders; no guard crosses await. Inbox approval consumption completes before per-item admission and holds no approval guard while waiting.",
+        "sharedAdmissionEntry": [
+          "src-tauri/src/inbox.rs::stage_inbox_drop_files",
+          "src-tauri/src/atomic_file.rs::with_path_transactions"
+        ],
+        "lifetime": "Lease remains owned through concrete local writes, copy/move/atomic replacement, sidecars and any owned cleanup. No auto retry or background job service."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_10_inbox_all_fourteen_workers_yield_on_same_polling_task_and_join_error",
+          "phase08_10_inbox_real_nonempty_read_processing_approval_and_denied_paths",
+          "phase08_10_inbox_every_writer_same_target_serializes_and_unwind_releases",
+          "phase08_10_inbox_competing_accept_reject_and_batch_keep_settled_siblings",
+          "phase08_10_inbox_all_writers_policy_rechecked_after_admission_and_failure_release",
+          "phase08_10_inbox_policy_alias_spellings_restrictive_duplicates_and_allowed_alias",
+          "phase08_10_inbox_all_writers_parent_rename_trash_both_orders_and_aliases",
+          "phase08_10_inbox_document_save_serializes_and_preserves_typed_conflict",
+          "phase08_10_inbox_failed_item_move_rolls_back_copies_and_keeps_pending_for_retry",
+          "phase08_10_inbox_raw_tree_denial_leaves_no_partial_output"
+        ],
+        "workerProof": "Actual registered wrapper futures are polled on the same async task, yield while a distinct blocking worker is held, and surface contextual worker failures. Meaningful synthetic outcomes separately verify successful behavior.",
+        "platformScope": "Executed on macOS using disposable roots and scoped Home/config. Secrets contain dummy fixture values only. Native launch fixture selects current test executable before invocation; no installed opener, provider, real Trash or external send. No Windows/native saturation proof claimed."
+      }
+    },
+    {
+      "name": "accept_inbox_item",
+      "module": "src-tauri/src/inbox.rs",
+      "registrationPath": "src-tauri/src/lib.rs::inbox::ipc::accept_inbox_item",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/inbox.rs::ipc::accept_inbox_item awaits spawn_blocking before the entire blocking filesystem/process/parse body and its lock waits.",
+        "src-tauri/src/inbox.rs::accept_inbox_item preserves the existing synchronous domain API.",
+        "src-tauri/src/inbox.rs::accept_inbox_item_blocking validates current state under the complete admitted set; nested helpers borrow this lease."
+      ],
+      "workerBoundary": "src-tauri/src/inbox.rs::ipc::accept_inbox_item owns wire Strings, Options, Vecs and structs and awaits tauri::async_runtime::spawn_blocking. Event/approval commands own AppHandle<R> and retrieve live State inside that worker. Legacy String errors stay unchanged; typed conflicts elsewhere remain structured, JoinError adds command_task_failed context. Prompt sync formatter remains String, with IPC Result<String,String> carrying identical successful wire payload.",
+      "syncCallers": [
+        "src-tauri/src/inbox.rs::accept_inbox_item remains callable by existing Rust/CLI consumers with its existing synchronous domain result."
+      ],
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_10",
+          "passed": 40,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/App.tsx",
+          "src/components/InboxPane.tsx",
+          "src/lib/useInboxEvents.ts"
+        ],
+        "payload": "Batch completion events and per-item outcome arrays preserve successful siblings and explicit failures. App handlers own inbox carry, drop staging and notices; current load request checks stay with callers.",
+        "terminalNoticeOwner": "Existing initiating component/App hook owns completion and current notices. Durable navigation-safe common settlement, single terminal notification and stale-refresh closure remain Plans25/26; this shard records current owners and does not claim that future frontend work complete."
+      ,
+        "classifier": "classifyInboxCompletion (src/lib/api.ts:1471)",
+        "successRetention": "payload returned unchanged to the caller; ProcessingOperationRecord.completion.succeeded retains successful item/output references after navigation",
+        "failureReasons": "per-item error strings trimmed into completion.failed[].reason; IPC rejection mapped by rejectionReason() (message + code); component no longer publishes a second error toast",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=accept_inbox_item"
+      },
+      "mutationKey": {
+        "lexicalPaths": [
+          "Source item/file, destination collision-allocation directory, workspace config and Inbox settings, manifest/raw subtree, done/rejected subtree and receipt path. Each batch keeps its original workspace/alias parent snapshot; individual failures preserve settled siblings."
+        ],
+        "aliasPaths": [
+          "PathTransactionRequest reserves original lexical spellings and physical alias/ancestor identities; PathTransactionParent preserves selected directory identity."
+        ],
+        "postAdmissionPreconditions": "Validate original existing parents/aliases before first effect; revalidate containment/current policy where applicable and dynamic complete coverage before writes. Nested helpers borrow the lease, never reacquire or extend it.",
+        "domainLockOrder": "Shared PathTransactionRequest admission in the blocking worker before domain lock waits and permission registry loaders; no guard crosses await. Inbox approval consumption completes before per-item admission and holds no approval guard while waiting.",
+        "sharedAdmissionEntry": [
+          "src-tauri/src/inbox.rs::accept_inbox_item_blocking",
+          "src-tauri/src/atomic_file.rs::with_path_transactions"
+        ],
+        "lifetime": "Lease remains owned through concrete local writes, copy/move/atomic replacement, sidecars and any owned cleanup. No auto retry or background job service."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_10_inbox_all_fourteen_workers_yield_on_same_polling_task_and_join_error",
+          "phase08_10_inbox_real_nonempty_read_processing_approval_and_denied_paths",
+          "phase08_10_inbox_every_writer_same_target_serializes_and_unwind_releases",
+          "phase08_10_inbox_competing_accept_reject_and_batch_keep_settled_siblings",
+          "phase08_10_inbox_all_writers_policy_rechecked_after_admission_and_failure_release",
+          "phase08_10_inbox_policy_alias_spellings_restrictive_duplicates_and_allowed_alias",
+          "phase08_10_inbox_all_writers_parent_rename_trash_both_orders_and_aliases",
+          "phase08_10_inbox_document_save_serializes_and_preserves_typed_conflict",
+          "phase08_10_inbox_failed_item_move_rolls_back_copies_and_keeps_pending_for_retry",
+          "phase08_10_inbox_raw_tree_denial_leaves_no_partial_output"
+        ],
+        "workerProof": "Actual registered wrapper futures are polled on the same async task, yield while a distinct blocking worker is held, and surface contextual worker failures. Meaningful synthetic outcomes separately verify successful behavior.",
+        "platformScope": "Executed on macOS using disposable roots and scoped Home/config. Secrets contain dummy fixture values only. Native launch fixture selects current test executable before invocation; no installed opener, provider, real Trash or external send. No Windows/native saturation proof claimed."
+      }
+    },
+    {
+      "name": "accept_inbox_items",
+      "module": "src-tauri/src/inbox.rs",
+      "registrationPath": "src-tauri/src/lib.rs::inbox::ipc::accept_inbox_items",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/inbox.rs::ipc::accept_inbox_items awaits spawn_blocking before the entire blocking filesystem/process/parse body and its lock waits.",
+        "src-tauri/src/inbox.rs::accept_inbox_items preserves the existing synchronous domain API.",
+        "src-tauri/src/inbox.rs::accept_inbox_item_blocking validates current state under the complete admitted set; nested helpers borrow this lease."
+      ],
+      "workerBoundary": "src-tauri/src/inbox.rs::ipc::accept_inbox_items owns wire Strings, Options, Vecs and structs and awaits tauri::async_runtime::spawn_blocking. Event/approval commands own AppHandle<R> and retrieve live State inside that worker. Legacy String errors stay unchanged; typed conflicts elsewhere remain structured, JoinError adds command_task_failed context. Prompt sync formatter remains String, with IPC Result<String,String> carrying identical successful wire payload.",
+      "syncCallers": [
+        "src-tauri/src/inbox.rs::accept_inbox_items remains callable by existing Rust/CLI consumers with its existing synchronous domain result."
+      ],
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_10",
+          "passed": 40,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/App.tsx",
+          "src/components/InboxPane.tsx",
+          "src/lib/useInboxEvents.ts"
+        ],
+        "payload": "Batch completion events and per-item outcome arrays preserve successful siblings and explicit failures. App handlers own inbox carry, drop staging and notices; current load request checks stay with callers.",
+        "terminalNoticeOwner": "Existing initiating component/App hook owns completion and current notices. Durable navigation-safe common settlement, single terminal notification and stale-refresh closure remain Plans25/26; this shard records current owners and does not claim that future frontend work complete."
+      ,
+        "classifier": "classifyInboxCompletion (src/lib/api.ts:1471)",
+        "successRetention": "payload returned unchanged to the caller; ProcessingOperationRecord.completion.succeeded retains successful item/output references after navigation",
+        "failureReasons": "per-item error strings trimmed into completion.failed[].reason; IPC rejection mapped by rejectionReason() (message + code); component no longer publishes a second error toast",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=accept_inbox_items"
+      },
+      "mutationKey": {
+        "lexicalPaths": [
+          "Source item/file, destination collision-allocation directory, workspace config and Inbox settings, manifest/raw subtree, done/rejected subtree and receipt path. Each batch keeps its original workspace/alias parent snapshot; individual failures preserve settled siblings."
+        ],
+        "aliasPaths": [
+          "PathTransactionRequest reserves original lexical spellings and physical alias/ancestor identities; PathTransactionParent preserves selected directory identity."
+        ],
+        "postAdmissionPreconditions": "Validate original existing parents/aliases before first effect; revalidate containment/current policy where applicable and dynamic complete coverage before writes. Nested helpers borrow the lease, never reacquire or extend it.",
+        "domainLockOrder": "Shared PathTransactionRequest admission in the blocking worker before domain lock waits and permission registry loaders; no guard crosses await. Inbox approval consumption completes before per-item admission and holds no approval guard while waiting.",
+        "sharedAdmissionEntry": [
+          "src-tauri/src/inbox.rs::accept_inbox_item_blocking",
+          "src-tauri/src/atomic_file.rs::with_path_transactions"
+        ],
+        "lifetime": "Lease remains owned through concrete local writes, copy/move/atomic replacement, sidecars and any owned cleanup. No auto retry or background job service."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_10_inbox_all_fourteen_workers_yield_on_same_polling_task_and_join_error",
+          "phase08_10_inbox_real_nonempty_read_processing_approval_and_denied_paths",
+          "phase08_10_inbox_every_writer_same_target_serializes_and_unwind_releases",
+          "phase08_10_inbox_competing_accept_reject_and_batch_keep_settled_siblings",
+          "phase08_10_inbox_all_writers_policy_rechecked_after_admission_and_failure_release",
+          "phase08_10_inbox_policy_alias_spellings_restrictive_duplicates_and_allowed_alias",
+          "phase08_10_inbox_all_writers_parent_rename_trash_both_orders_and_aliases",
+          "phase08_10_inbox_document_save_serializes_and_preserves_typed_conflict",
+          "phase08_10_inbox_failed_item_move_rolls_back_copies_and_keeps_pending_for_retry",
+          "phase08_10_inbox_raw_tree_denial_leaves_no_partial_output"
+        ],
+        "workerProof": "Actual registered wrapper futures are polled on the same async task, yield while a distinct blocking worker is held, and surface contextual worker failures. Meaningful synthetic outcomes separately verify successful behavior.",
+        "platformScope": "Executed on macOS using disposable roots and scoped Home/config. Secrets contain dummy fixture values only. Native launch fixture selects current test executable before invocation; no installed opener, provider, real Trash or external send. No Windows/native saturation proof claimed."
+      }
+    },
+    {
+      "name": "reject_inbox_item",
+      "module": "src-tauri/src/inbox.rs",
+      "registrationPath": "src-tauri/src/lib.rs::inbox::ipc::reject_inbox_item",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/inbox.rs::ipc::reject_inbox_item awaits spawn_blocking before the entire blocking filesystem/process/parse body and its lock waits.",
+        "src-tauri/src/inbox.rs::reject_inbox_item preserves the existing synchronous domain API.",
+        "src-tauri/src/inbox.rs::reject_inbox_item_blocking validates current state under the complete admitted set; nested helpers borrow this lease."
+      ],
+      "workerBoundary": "src-tauri/src/inbox.rs::ipc::reject_inbox_item owns wire Strings, Options, Vecs and structs and awaits tauri::async_runtime::spawn_blocking. Event/approval commands own AppHandle<R> and retrieve live State inside that worker. Legacy String errors stay unchanged; typed conflicts elsewhere remain structured, JoinError adds command_task_failed context. Prompt sync formatter remains String, with IPC Result<String,String> carrying identical successful wire payload.",
+      "syncCallers": [
+        "src-tauri/src/inbox.rs::reject_inbox_item remains callable by existing Rust/CLI consumers with its existing synchronous domain result."
+      ],
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_10",
+          "passed": 40,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/App.tsx",
+          "src/components/InboxPane.tsx",
+          "src/lib/useInboxEvents.ts"
+        ],
+        "payload": "Batch completion events and per-item outcome arrays preserve successful siblings and explicit failures. App handlers own inbox carry, drop staging and notices; current load request checks stay with callers.",
+        "terminalNoticeOwner": "Existing initiating component/App hook owns completion and current notices. Durable navigation-safe common settlement, single terminal notification and stale-refresh closure remain Plans25/26; this shard records current owners and does not claim that future frontend work complete."
+      ,
+        "classifier": "classifyInboxCompletion (src/lib/api.ts:1471)",
+        "successRetention": "payload returned unchanged to the caller; ProcessingOperationRecord.completion.succeeded retains successful item/output references after navigation",
+        "failureReasons": "per-item error strings trimmed into completion.failed[].reason; IPC rejection mapped by rejectionReason() (message + code); component no longer publishes a second error toast",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=reject_inbox_item"
+      },
+      "mutationKey": {
+        "lexicalPaths": [
+          "Source item/file, destination collision-allocation directory, workspace config and Inbox settings, manifest/raw subtree, done/rejected subtree and receipt path. Each batch keeps its original workspace/alias parent snapshot; individual failures preserve settled siblings."
+        ],
+        "aliasPaths": [
+          "PathTransactionRequest reserves original lexical spellings and physical alias/ancestor identities; PathTransactionParent preserves selected directory identity."
+        ],
+        "postAdmissionPreconditions": "Validate original existing parents/aliases before first effect; revalidate containment/current policy where applicable and dynamic complete coverage before writes. Nested helpers borrow the lease, never reacquire or extend it.",
+        "domainLockOrder": "Shared PathTransactionRequest admission in the blocking worker before domain lock waits and permission registry loaders; no guard crosses await. Inbox approval consumption completes before per-item admission and holds no approval guard while waiting.",
+        "sharedAdmissionEntry": [
+          "src-tauri/src/inbox.rs::reject_inbox_item_blocking",
+          "src-tauri/src/atomic_file.rs::with_path_transactions"
+        ],
+        "lifetime": "Lease remains owned through concrete local writes, copy/move/atomic replacement, sidecars and any owned cleanup. No auto retry or background job service."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_10_inbox_all_fourteen_workers_yield_on_same_polling_task_and_join_error",
+          "phase08_10_inbox_real_nonempty_read_processing_approval_and_denied_paths",
+          "phase08_10_inbox_every_writer_same_target_serializes_and_unwind_releases",
+          "phase08_10_inbox_competing_accept_reject_and_batch_keep_settled_siblings",
+          "phase08_10_inbox_all_writers_policy_rechecked_after_admission_and_failure_release",
+          "phase08_10_inbox_policy_alias_spellings_restrictive_duplicates_and_allowed_alias",
+          "phase08_10_inbox_all_writers_parent_rename_trash_both_orders_and_aliases",
+          "phase08_10_inbox_document_save_serializes_and_preserves_typed_conflict",
+          "phase08_10_inbox_failed_item_move_rolls_back_copies_and_keeps_pending_for_retry",
+          "phase08_10_inbox_raw_tree_denial_leaves_no_partial_output"
+        ],
+        "workerProof": "Actual registered wrapper futures are polled on the same async task, yield while a distinct blocking worker is held, and surface contextual worker failures. Meaningful synthetic outcomes separately verify successful behavior.",
+        "platformScope": "Executed on macOS using disposable roots and scoped Home/config. Secrets contain dummy fixture values only. Native launch fixture selects current test executable before invocation; no installed opener, provider, real Trash or external send. No Windows/native saturation proof claimed."
+      }
+    },
+    {
+      "name": "reject_inbox_items",
+      "module": "src-tauri/src/inbox.rs",
+      "registrationPath": "src-tauri/src/lib.rs::inbox::ipc::reject_inbox_items",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/inbox.rs::ipc::reject_inbox_items awaits spawn_blocking before the entire blocking filesystem/process/parse body and its lock waits.",
+        "src-tauri/src/inbox.rs::reject_inbox_items preserves the existing synchronous domain API.",
+        "src-tauri/src/inbox.rs::reject_inbox_item_blocking validates current state under the complete admitted set; nested helpers borrow this lease."
+      ],
+      "workerBoundary": "src-tauri/src/inbox.rs::ipc::reject_inbox_items owns wire Strings, Options, Vecs and structs and awaits tauri::async_runtime::spawn_blocking. Event/approval commands own AppHandle<R> and retrieve live State inside that worker. Legacy String errors stay unchanged; typed conflicts elsewhere remain structured, JoinError adds command_task_failed context. Prompt sync formatter remains String, with IPC Result<String,String> carrying identical successful wire payload.",
+      "syncCallers": [
+        "src-tauri/src/inbox.rs::reject_inbox_items remains callable by existing Rust/CLI consumers with its existing synchronous domain result."
+      ],
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_10",
+          "passed": 40,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/App.tsx",
+          "src/components/InboxPane.tsx",
+          "src/lib/useInboxEvents.ts"
+        ],
+        "payload": "Batch completion events and per-item outcome arrays preserve successful siblings and explicit failures. App handlers own inbox carry, drop staging and notices; current load request checks stay with callers.",
+        "terminalNoticeOwner": "Existing initiating component/App hook owns completion and current notices. Durable navigation-safe common settlement, single terminal notification and stale-refresh closure remain Plans25/26; this shard records current owners and does not claim that future frontend work complete."
+      ,
+        "classifier": "classifyInboxCompletion (src/lib/api.ts:1471)",
+        "successRetention": "payload returned unchanged to the caller; ProcessingOperationRecord.completion.succeeded retains successful item/output references after navigation",
+        "failureReasons": "per-item error strings trimmed into completion.failed[].reason; IPC rejection mapped by rejectionReason() (message + code); component no longer publishes a second error toast",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=reject_inbox_items"
+      },
+      "mutationKey": {
+        "lexicalPaths": [
+          "Source item/file, destination collision-allocation directory, workspace config and Inbox settings, manifest/raw subtree, done/rejected subtree and receipt path. Each batch keeps its original workspace/alias parent snapshot; individual failures preserve settled siblings."
+        ],
+        "aliasPaths": [
+          "PathTransactionRequest reserves original lexical spellings and physical alias/ancestor identities; PathTransactionParent preserves selected directory identity."
+        ],
+        "postAdmissionPreconditions": "Validate original existing parents/aliases before first effect; revalidate containment/current policy where applicable and dynamic complete coverage before writes. Nested helpers borrow the lease, never reacquire or extend it.",
+        "domainLockOrder": "Shared PathTransactionRequest admission in the blocking worker before domain lock waits and permission registry loaders; no guard crosses await. Inbox approval consumption completes before per-item admission and holds no approval guard while waiting.",
+        "sharedAdmissionEntry": [
+          "src-tauri/src/inbox.rs::reject_inbox_item_blocking",
+          "src-tauri/src/atomic_file.rs::with_path_transactions"
+        ],
+        "lifetime": "Lease remains owned through concrete local writes, copy/move/atomic replacement, sidecars and any owned cleanup. No auto retry or background job service."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_10_inbox_all_fourteen_workers_yield_on_same_polling_task_and_join_error",
+          "phase08_10_inbox_real_nonempty_read_processing_approval_and_denied_paths",
+          "phase08_10_inbox_every_writer_same_target_serializes_and_unwind_releases",
+          "phase08_10_inbox_competing_accept_reject_and_batch_keep_settled_siblings",
+          "phase08_10_inbox_all_writers_policy_rechecked_after_admission_and_failure_release",
+          "phase08_10_inbox_policy_alias_spellings_restrictive_duplicates_and_allowed_alias",
+          "phase08_10_inbox_all_writers_parent_rename_trash_both_orders_and_aliases",
+          "phase08_10_inbox_document_save_serializes_and_preserves_typed_conflict",
+          "phase08_10_inbox_failed_item_move_rolls_back_copies_and_keeps_pending_for_retry",
+          "phase08_10_inbox_raw_tree_denial_leaves_no_partial_output"
+        ],
+        "workerProof": "Actual registered wrapper futures are polled on the same async task, yield while a distinct blocking worker is held, and surface contextual worker failures. Meaningful synthetic outcomes separately verify successful behavior.",
+        "platformScope": "Executed on macOS using disposable roots and scoped Home/config. Secrets contain dummy fixture values only. Native launch fixture selects current test executable before invocation; no installed opener, provider, real Trash or external send. No Windows/native saturation proof claimed."
+      }
+    },
+    {
+      "name": "apply_inbox_decisions",
+      "module": "src-tauri/src/inbox.rs",
+      "registrationPath": "src-tauri/src/lib.rs::inbox::ipc::apply_inbox_decisions",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/inbox.rs::ipc::apply_inbox_decisions awaits spawn_blocking before the entire blocking filesystem/process/parse body and its lock waits.",
+        "src-tauri/src/inbox.rs::apply_inbox_decisions preserves the existing synchronous domain API.",
+        "src-tauri/src/inbox.rs::apply_inbox_decisions_blocking validates current state under the complete admitted set; nested helpers borrow this lease."
+      ],
+      "workerBoundary": "src-tauri/src/inbox.rs::ipc::apply_inbox_decisions owns wire Strings, Options, Vecs and structs and awaits tauri::async_runtime::spawn_blocking. Event/approval commands own AppHandle<R> and retrieve live State inside that worker. Legacy String errors stay unchanged; typed conflicts elsewhere remain structured, JoinError adds command_task_failed context. Prompt sync formatter remains String, with IPC Result<String,String> carrying identical successful wire payload.",
+      "syncCallers": [
+        "src-tauri/src/inbox.rs::apply_inbox_decisions remains callable by existing Rust/CLI consumers with its existing synchronous domain result."
+      ],
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_10",
+          "passed": 40,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/App.tsx",
+          "src/components/InboxPane.tsx",
+          "src/lib/useInboxEvents.ts"
+        ],
+        "payload": "Batch completion events and per-item outcome arrays preserve successful siblings and explicit failures. App handlers own inbox carry, drop staging and notices; current load request checks stay with callers.",
+        "terminalNoticeOwner": "Existing initiating component/App hook owns completion and current notices. Durable navigation-safe common settlement, single terminal notification and stale-refresh closure remain Plans25/26; this shard records current owners and does not claim that future frontend work complete."
+      ,
+        "classifier": "classifyInboxCompletion (src/lib/api.ts:1471)",
+        "successRetention": "payload returned unchanged to the caller; ProcessingOperationRecord.completion.succeeded retains successful item/output references after navigation",
+        "failureReasons": "per-item error strings trimmed into completion.failed[].reason; IPC rejection mapped by rejectionReason() (message + code); component no longer publishes a second error toast",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=apply_inbox_decisions"
+      },
+      "mutationKey": {
+        "lexicalPaths": [
+          "Source item/file, destination collision-allocation directory, workspace config and Inbox settings, manifest/raw subtree, done/rejected subtree and receipt path. Each batch keeps its original workspace/alias parent snapshot; individual failures preserve settled siblings."
+        ],
+        "aliasPaths": [
+          "PathTransactionRequest reserves original lexical spellings and physical alias/ancestor identities; PathTransactionParent preserves selected directory identity."
+        ],
+        "postAdmissionPreconditions": "Validate original existing parents/aliases before first effect; revalidate containment/current policy where applicable and dynamic complete coverage before writes. Nested helpers borrow the lease, never reacquire or extend it.",
+        "domainLockOrder": "Shared PathTransactionRequest admission in the blocking worker before domain lock waits and permission registry loaders; no guard crosses await. Inbox approval consumption completes before per-item admission and holds no approval guard while waiting.",
+        "sharedAdmissionEntry": [
+          "src-tauri/src/inbox.rs::apply_inbox_decisions_blocking",
+          "src-tauri/src/atomic_file.rs::with_path_transactions"
+        ],
+        "lifetime": "Lease remains owned through concrete local writes, copy/move/atomic replacement, sidecars and any owned cleanup. No auto retry or background job service."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_10_inbox_all_fourteen_workers_yield_on_same_polling_task_and_join_error",
+          "phase08_10_inbox_real_nonempty_read_processing_approval_and_denied_paths",
+          "phase08_10_inbox_every_writer_same_target_serializes_and_unwind_releases",
+          "phase08_10_inbox_competing_accept_reject_and_batch_keep_settled_siblings",
+          "phase08_10_inbox_all_writers_policy_rechecked_after_admission_and_failure_release",
+          "phase08_10_inbox_policy_alias_spellings_restrictive_duplicates_and_allowed_alias",
+          "phase08_10_inbox_all_writers_parent_rename_trash_both_orders_and_aliases",
+          "phase08_10_inbox_document_save_serializes_and_preserves_typed_conflict",
+          "phase08_10_inbox_failed_item_move_rolls_back_copies_and_keeps_pending_for_retry",
+          "phase08_10_inbox_raw_tree_denial_leaves_no_partial_output"
+        ],
+        "workerProof": "Actual registered wrapper futures are polled on the same async task, yield while a distinct blocking worker is held, and surface contextual worker failures. Meaningful synthetic outcomes separately verify successful behavior.",
+        "platformScope": "Executed on macOS using disposable roots and scoped Home/config. Secrets contain dummy fixture values only. Native launch fixture selects current test executable before invocation; no installed opener, provider, real Trash or external send. No Windows/native saturation proof claimed."
+      }
+    },
+    {
+      "name": "binary_viewer_classify",
+      "module": "src-tauri/src/binary_viewer.rs",
+      "registrationPath": "src-tauri/src/lib.rs::binary_viewer::ipc::binary_viewer_classify",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/binary_viewer.rs::ipc::binary_viewer_classify awaits spawn_blocking before the entire blocking filesystem/process/parse body and its lock waits.",
+        "src-tauri/src/binary_viewer.rs::binary_viewer_classify preserves the existing synchronous domain API."
+      ],
+      "workerBoundary": "src-tauri/src/binary_viewer.rs::ipc::binary_viewer_classify owns wire Strings, Options, Vecs and structs and awaits tauri::async_runtime::spawn_blocking. Event/approval commands own AppHandle<R> and retrieve live State inside that worker. Legacy String errors stay unchanged; typed conflicts elsewhere remain structured, JoinError adds command_task_failed context. Prompt sync formatter remains String, with IPC Result<String,String> carrying identical successful wire payload.",
+      "syncCallers": [
+        "src-tauri/src/binary_viewer.rs::binary_viewer_classify remains callable by existing Rust/CLI consumers with its existing synchronous domain result."
+      ],
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_10",
+          "passed": 40,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/components/BinaryViewerPane.tsx",
+          "src/components/FilesWorkbench.tsx",
+          "src/components/binaryViewers/TextViewer.tsx",
+          "src/components/binaryViewers/ArchiveViewer.tsx",
+          "src/components/binaryViewers/HwpxViewer.tsx"
+        ],
+        "payload": "FilesWorkbench and BinaryViewerPane own selected path, asset/classification and request sequence. TextViewer/ArchiveViewer/HwpxViewer own preview cancellation and state. External launch retains existing delegated OS application lifetime.",
+        "terminalNoticeOwner": "Existing initiating component/App hook owns completion and current notices. Durable navigation-safe common settlement, single terminal notification and stale-refresh closure remain Plans25/26; this shard records current owners and does not claim that future frontend work complete."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=binary_viewer_classify"
+      },
+      "mutationKey": {
+        "readOnly": true,
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "reason": "No filesystem mutation. Classify and text/archive/HWPX preview inspect bytes in memory; prepare_asset only extends the existing Tauri asset scope. External open/preview dispatches an OS app and does not promise exclusion after launch; no Maru-owned cache/extraction directory is created."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_10_all_wrappers_yield_on_same_polling_task",
+          "phase08_10_actual_wrappers_return_nonempty_results_and_native_argv",
+          "phase08_10_archive_traversal_and_denied_paths_are_rejected",
+          "phase08_10_external_wrappers_preserve_denied_and_worker_error_release"
+        ],
+        "workerProof": "Actual registered wrapper futures are polled on the same async task, yield while a distinct blocking worker is held, and surface contextual worker failures. Meaningful synthetic outcomes separately verify successful behavior.",
+        "platformScope": "Executed on macOS using disposable roots and scoped Home/config. Secrets contain dummy fixture values only. Native launch fixture selects current test executable before invocation; no installed opener, provider, real Trash or external send. No Windows/native saturation proof claimed."
+      }
+    },
+    {
+      "name": "binary_viewer_prepare_asset",
+      "module": "src-tauri/src/binary_viewer.rs",
+      "registrationPath": "src-tauri/src/lib.rs::binary_viewer::ipc::binary_viewer_prepare_asset",
+      "originalDisposition": "UI",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/binary_viewer.rs::ipc::binary_viewer_prepare_asset awaits spawn_blocking before the entire blocking filesystem/process/parse body and its lock waits.",
+        "src-tauri/src/binary_viewer.rs::binary_viewer_prepare_asset preserves the existing synchronous domain API."
+      ],
+      "workerBoundary": "src-tauri/src/binary_viewer.rs::ipc::binary_viewer_prepare_asset owns wire Strings, Options, Vecs and structs and awaits tauri::async_runtime::spawn_blocking. Event/approval commands own AppHandle<R> and retrieve live State inside that worker. Legacy String errors stay unchanged; typed conflicts elsewhere remain structured, JoinError adds command_task_failed context. Prompt sync formatter remains String, with IPC Result<String,String> carrying identical successful wire payload.",
+      "syncCallers": [
+        "src-tauri/src/binary_viewer.rs::binary_viewer_prepare_asset remains callable by existing Rust/CLI consumers with its existing synchronous domain result."
+      ],
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_10",
+          "passed": 40,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/components/BinaryViewerPane.tsx",
+          "src/components/FilesWorkbench.tsx",
+          "src/components/binaryViewers/TextViewer.tsx",
+          "src/components/binaryViewers/ArchiveViewer.tsx",
+          "src/components/binaryViewers/HwpxViewer.tsx"
+        ],
+        "payload": "FilesWorkbench and BinaryViewerPane own selected path, asset/classification and request sequence. TextViewer/ArchiveViewer/HwpxViewer own preview cancellation and state. External launch retains existing delegated OS application lifetime.",
+        "terminalNoticeOwner": "Existing initiating component/App hook owns completion and current notices. Durable navigation-safe common settlement, single terminal notification and stale-refresh closure remain Plans25/26; this shard records current owners and does not claim that future frontend work complete."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=binary_viewer_prepare_asset"
+      },
+      "mutationKey": {
+        "readOnly": true,
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "reason": "No filesystem mutation. Classify and text/archive/HWPX preview inspect bytes in memory; prepare_asset only extends the existing Tauri asset scope. External open/preview dispatches an OS app and does not promise exclusion after launch; no Maru-owned cache/extraction directory is created."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_10_all_wrappers_yield_on_same_polling_task",
+          "phase08_10_actual_wrappers_return_nonempty_results_and_native_argv",
+          "phase08_10_archive_traversal_and_denied_paths_are_rejected",
+          "phase08_10_external_wrappers_preserve_denied_and_worker_error_release"
+        ],
+        "workerProof": "Actual registered wrapper futures are polled on the same async task, yield while a distinct blocking worker is held, and surface contextual worker failures. Meaningful synthetic outcomes separately verify successful behavior.",
+        "platformScope": "Executed on macOS using disposable roots and scoped Home/config. Secrets contain dummy fixture values only. Native launch fixture selects current test executable before invocation; no installed opener, provider, real Trash or external send. No Windows/native saturation proof claimed."
+      }
+    },
+    {
+      "name": "binary_viewer_read_text",
+      "module": "src-tauri/src/binary_viewer.rs",
+      "registrationPath": "src-tauri/src/lib.rs::binary_viewer::ipc::binary_viewer_read_text",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/binary_viewer.rs::ipc::binary_viewer_read_text awaits spawn_blocking before the entire blocking filesystem/process/parse body and its lock waits.",
+        "src-tauri/src/binary_viewer.rs::binary_viewer_read_text preserves the existing synchronous domain API."
+      ],
+      "workerBoundary": "src-tauri/src/binary_viewer.rs::ipc::binary_viewer_read_text owns wire Strings, Options, Vecs and structs and awaits tauri::async_runtime::spawn_blocking. Event/approval commands own AppHandle<R> and retrieve live State inside that worker. Legacy String errors stay unchanged; typed conflicts elsewhere remain structured, JoinError adds command_task_failed context. Prompt sync formatter remains String, with IPC Result<String,String> carrying identical successful wire payload.",
+      "syncCallers": [
+        "src-tauri/src/binary_viewer.rs::binary_viewer_read_text remains callable by existing Rust/CLI consumers with its existing synchronous domain result."
+      ],
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_10",
+          "passed": 40,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/components/BinaryViewerPane.tsx",
+          "src/components/FilesWorkbench.tsx",
+          "src/components/binaryViewers/TextViewer.tsx",
+          "src/components/binaryViewers/ArchiveViewer.tsx",
+          "src/components/binaryViewers/HwpxViewer.tsx"
+        ],
+        "payload": "FilesWorkbench and BinaryViewerPane own selected path, asset/classification and request sequence. TextViewer/ArchiveViewer/HwpxViewer own preview cancellation and state. External launch retains existing delegated OS application lifetime.",
+        "terminalNoticeOwner": "Existing initiating component/App hook owns completion and current notices. Durable navigation-safe common settlement, single terminal notification and stale-refresh closure remain Plans25/26; this shard records current owners and does not claim that future frontend work complete."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=binary_viewer_read_text"
+      },
+      "mutationKey": {
+        "readOnly": true,
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "reason": "No filesystem mutation. Classify and text/archive/HWPX preview inspect bytes in memory; prepare_asset only extends the existing Tauri asset scope. External open/preview dispatches an OS app and does not promise exclusion after launch; no Maru-owned cache/extraction directory is created."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_10_all_wrappers_yield_on_same_polling_task",
+          "phase08_10_actual_wrappers_return_nonempty_results_and_native_argv",
+          "phase08_10_archive_traversal_and_denied_paths_are_rejected",
+          "phase08_10_external_wrappers_preserve_denied_and_worker_error_release"
+        ],
+        "workerProof": "Actual registered wrapper futures are polled on the same async task, yield while a distinct blocking worker is held, and surface contextual worker failures. Meaningful synthetic outcomes separately verify successful behavior.",
+        "platformScope": "Executed on macOS using disposable roots and scoped Home/config. Secrets contain dummy fixture values only. Native launch fixture selects current test executable before invocation; no installed opener, provider, real Trash or external send. No Windows/native saturation proof claimed."
+      }
+    },
+    {
+      "name": "binary_viewer_read_archive",
+      "module": "src-tauri/src/binary_viewer.rs",
+      "registrationPath": "src-tauri/src/lib.rs::binary_viewer::ipc::binary_viewer_read_archive",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/binary_viewer.rs::ipc::binary_viewer_read_archive awaits spawn_blocking before the entire blocking filesystem/process/parse body and its lock waits.",
+        "src-tauri/src/binary_viewer.rs::binary_viewer_read_archive preserves the existing synchronous domain API."
+      ],
+      "workerBoundary": "src-tauri/src/binary_viewer.rs::ipc::binary_viewer_read_archive owns wire Strings, Options, Vecs and structs and awaits tauri::async_runtime::spawn_blocking. Event/approval commands own AppHandle<R> and retrieve live State inside that worker. Legacy String errors stay unchanged; typed conflicts elsewhere remain structured, JoinError adds command_task_failed context. Prompt sync formatter remains String, with IPC Result<String,String> carrying identical successful wire payload.",
+      "syncCallers": [
+        "src-tauri/src/binary_viewer.rs::binary_viewer_read_archive remains callable by existing Rust/CLI consumers with its existing synchronous domain result."
+      ],
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_10",
+          "passed": 40,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/components/BinaryViewerPane.tsx",
+          "src/components/FilesWorkbench.tsx",
+          "src/components/binaryViewers/TextViewer.tsx",
+          "src/components/binaryViewers/ArchiveViewer.tsx",
+          "src/components/binaryViewers/HwpxViewer.tsx"
+        ],
+        "payload": "FilesWorkbench and BinaryViewerPane own selected path, asset/classification and request sequence. TextViewer/ArchiveViewer/HwpxViewer own preview cancellation and state. External launch retains existing delegated OS application lifetime.",
+        "terminalNoticeOwner": "Existing initiating component/App hook owns completion and current notices. Durable navigation-safe common settlement, single terminal notification and stale-refresh closure remain Plans25/26; this shard records current owners and does not claim that future frontend work complete."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=binary_viewer_read_archive"
+      },
+      "mutationKey": {
+        "readOnly": true,
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "reason": "No filesystem mutation. Classify and text/archive/HWPX preview inspect bytes in memory; prepare_asset only extends the existing Tauri asset scope. External open/preview dispatches an OS app and does not promise exclusion after launch; no Maru-owned cache/extraction directory is created."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_10_all_wrappers_yield_on_same_polling_task",
+          "phase08_10_actual_wrappers_return_nonempty_results_and_native_argv",
+          "phase08_10_archive_traversal_and_denied_paths_are_rejected",
+          "phase08_10_external_wrappers_preserve_denied_and_worker_error_release"
+        ],
+        "workerProof": "Actual registered wrapper futures are polled on the same async task, yield while a distinct blocking worker is held, and surface contextual worker failures. Meaningful synthetic outcomes separately verify successful behavior.",
+        "platformScope": "Executed on macOS using disposable roots and scoped Home/config. Secrets contain dummy fixture values only. Native launch fixture selects current test executable before invocation; no installed opener, provider, real Trash or external send. No Windows/native saturation proof claimed."
+      }
+    },
+    {
+      "name": "binary_viewer_extract_hwpx",
+      "module": "src-tauri/src/binary_viewer.rs",
+      "registrationPath": "src-tauri/src/lib.rs::binary_viewer::ipc::binary_viewer_extract_hwpx",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/binary_viewer.rs::ipc::binary_viewer_extract_hwpx awaits spawn_blocking before the entire blocking filesystem/process/parse body and its lock waits.",
+        "src-tauri/src/binary_viewer.rs::binary_viewer_extract_hwpx preserves the existing synchronous domain API."
+      ],
+      "workerBoundary": "src-tauri/src/binary_viewer.rs::ipc::binary_viewer_extract_hwpx owns wire Strings, Options, Vecs and structs and awaits tauri::async_runtime::spawn_blocking. Event/approval commands own AppHandle<R> and retrieve live State inside that worker. Legacy String errors stay unchanged; typed conflicts elsewhere remain structured, JoinError adds command_task_failed context. Prompt sync formatter remains String, with IPC Result<String,String> carrying identical successful wire payload.",
+      "syncCallers": [
+        "src-tauri/src/binary_viewer.rs::binary_viewer_extract_hwpx remains callable by existing Rust/CLI consumers with its existing synchronous domain result."
+      ],
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_10",
+          "passed": 40,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/components/BinaryViewerPane.tsx",
+          "src/components/FilesWorkbench.tsx",
+          "src/components/binaryViewers/TextViewer.tsx",
+          "src/components/binaryViewers/ArchiveViewer.tsx",
+          "src/components/binaryViewers/HwpxViewer.tsx"
+        ],
+        "payload": "FilesWorkbench and BinaryViewerPane own selected path, asset/classification and request sequence. TextViewer/ArchiveViewer/HwpxViewer own preview cancellation and state. External launch retains existing delegated OS application lifetime.",
+        "terminalNoticeOwner": "Existing initiating component/App hook owns completion and current notices. Durable navigation-safe common settlement, single terminal notification and stale-refresh closure remain Plans25/26; this shard records current owners and does not claim that future frontend work complete."
+      ,
+        "classifier": "classifyBinaryViewerHwpxCompletion (src/lib/api.ts:1512)",
+        "successRetention": "payload returned unchanged to the caller; ProcessingOperationRecord.completion.succeeded retains successful item/output references after navigation",
+        "failureReasons": "per-item error strings trimmed into completion.failed[].reason; IPC rejection mapped by rejectionReason() (message + code); component no longer publishes a second error toast",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=binary_viewer_extract_hwpx"
+      },
+      "mutationKey": {
+        "readOnly": true,
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "reason": "No filesystem mutation. Classify and text/archive/HWPX preview inspect bytes in memory; prepare_asset only extends the existing Tauri asset scope. External open/preview dispatches an OS app and does not promise exclusion after launch; no Maru-owned cache/extraction directory is created."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_10_all_wrappers_yield_on_same_polling_task",
+          "phase08_10_actual_wrappers_return_nonempty_results_and_native_argv",
+          "phase08_10_archive_traversal_and_denied_paths_are_rejected",
+          "phase08_10_external_wrappers_preserve_denied_and_worker_error_release"
+        ],
+        "workerProof": "Actual registered wrapper futures are polled on the same async task, yield while a distinct blocking worker is held, and surface contextual worker failures. Meaningful synthetic outcomes separately verify successful behavior.",
+        "platformScope": "Executed on macOS using disposable roots and scoped Home/config. Secrets contain dummy fixture values only. Native launch fixture selects current test executable before invocation; no installed opener, provider, real Trash or external send. No Windows/native saturation proof claimed."
+      }
+    },
+    {
+      "name": "binary_viewer_open_external",
+      "module": "src-tauri/src/binary_viewer.rs",
+      "registrationPath": "src-tauri/src/lib.rs::binary_viewer::ipc::binary_viewer_open_external",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/binary_viewer.rs::ipc::binary_viewer_open_external awaits spawn_blocking before the entire blocking filesystem/process/parse body and its lock waits.",
+        "src-tauri/src/binary_viewer.rs::binary_viewer_open_external preserves the existing synchronous domain API."
+      ],
+      "workerBoundary": "src-tauri/src/binary_viewer.rs::ipc::binary_viewer_open_external owns wire Strings, Options, Vecs and structs and awaits tauri::async_runtime::spawn_blocking. Event/approval commands own AppHandle<R> and retrieve live State inside that worker. Legacy String errors stay unchanged; typed conflicts elsewhere remain structured, JoinError adds command_task_failed context. Prompt sync formatter remains String, with IPC Result<String,String> carrying identical successful wire payload.",
+      "syncCallers": [
+        "src-tauri/src/binary_viewer.rs::binary_viewer_open_external remains callable by existing Rust/CLI consumers with its existing synchronous domain result."
+      ],
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_10",
+          "passed": 40,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/components/BinaryViewerPane.tsx",
+          "src/components/FilesWorkbench.tsx",
+          "src/components/binaryViewers/TextViewer.tsx",
+          "src/components/binaryViewers/ArchiveViewer.tsx",
+          "src/components/binaryViewers/HwpxViewer.tsx"
+        ],
+        "payload": "FilesWorkbench and BinaryViewerPane own selected path, asset/classification and request sequence. TextViewer/ArchiveViewer/HwpxViewer own preview cancellation and state. External launch retains existing delegated OS application lifetime.",
+        "terminalNoticeOwner": "Existing initiating component/App hook owns completion and current notices. Durable navigation-safe common settlement, single terminal notification and stale-refresh closure remain Plans25/26; this shard records current owners and does not claim that future frontend work complete."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=binary_viewer_open_external"
+      },
+      "mutationKey": {
+        "readOnly": true,
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "reason": "No filesystem mutation. Classify and text/archive/HWPX preview inspect bytes in memory; prepare_asset only extends the existing Tauri asset scope. External open/preview dispatches an OS app and does not promise exclusion after launch; no Maru-owned cache/extraction directory is created."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_10_all_wrappers_yield_on_same_polling_task",
+          "phase08_10_actual_wrappers_return_nonempty_results_and_native_argv",
+          "phase08_10_archive_traversal_and_denied_paths_are_rejected",
+          "phase08_10_external_wrappers_preserve_denied_and_worker_error_release"
+        ],
+        "workerProof": "Actual registered wrapper futures are polled on the same async task, yield while a distinct blocking worker is held, and surface contextual worker failures. Meaningful synthetic outcomes separately verify successful behavior.",
+        "platformScope": "Executed on macOS using disposable roots and scoped Home/config. Secrets contain dummy fixture values only. Native launch fixture selects current test executable before invocation; no installed opener, provider, real Trash or external send. No Windows/native saturation proof claimed."
+      }
+    },
+    {
+      "name": "binary_viewer_preview_external",
+      "module": "src-tauri/src/binary_viewer.rs",
+      "registrationPath": "src-tauri/src/lib.rs::binary_viewer::ipc::binary_viewer_preview_external",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/binary_viewer.rs::ipc::binary_viewer_preview_external awaits spawn_blocking before the entire blocking filesystem/process/parse body and its lock waits.",
+        "src-tauri/src/binary_viewer.rs::binary_viewer_preview_external preserves the existing synchronous domain API."
+      ],
+      "workerBoundary": "src-tauri/src/binary_viewer.rs::ipc::binary_viewer_preview_external owns wire Strings, Options, Vecs and structs and awaits tauri::async_runtime::spawn_blocking. Event/approval commands own AppHandle<R> and retrieve live State inside that worker. Legacy String errors stay unchanged; typed conflicts elsewhere remain structured, JoinError adds command_task_failed context. Prompt sync formatter remains String, with IPC Result<String,String> carrying identical successful wire payload.",
+      "syncCallers": [
+        "src-tauri/src/binary_viewer.rs::binary_viewer_preview_external remains callable by existing Rust/CLI consumers with its existing synchronous domain result."
+      ],
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_10",
+          "passed": 40,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/components/BinaryViewerPane.tsx",
+          "src/components/FilesWorkbench.tsx",
+          "src/components/binaryViewers/TextViewer.tsx",
+          "src/components/binaryViewers/ArchiveViewer.tsx",
+          "src/components/binaryViewers/HwpxViewer.tsx"
+        ],
+        "payload": "FilesWorkbench and BinaryViewerPane own selected path, asset/classification and request sequence. TextViewer/ArchiveViewer/HwpxViewer own preview cancellation and state. External launch retains existing delegated OS application lifetime.",
+        "terminalNoticeOwner": "Existing initiating component/App hook owns completion and current notices. Durable navigation-safe common settlement, single terminal notification and stale-refresh closure remain Plans25/26; this shard records current owners and does not claim that future frontend work complete."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=binary_viewer_preview_external"
+      },
+      "mutationKey": {
+        "readOnly": true,
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "reason": "No filesystem mutation. Classify and text/archive/HWPX preview inspect bytes in memory; prepare_asset only extends the existing Tauri asset scope. External open/preview dispatches an OS app and does not promise exclusion after launch; no Maru-owned cache/extraction directory is created."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_10_all_wrappers_yield_on_same_polling_task",
+          "phase08_10_actual_wrappers_return_nonempty_results_and_native_argv",
+          "phase08_10_archive_traversal_and_denied_paths_are_rejected",
+          "phase08_10_external_wrappers_preserve_denied_and_worker_error_release"
+        ],
+        "workerProof": "Actual registered wrapper futures are polled on the same async task, yield while a distinct blocking worker is held, and surface contextual worker failures. Meaningful synthetic outcomes separately verify successful behavior.",
+        "platformScope": "Executed on macOS using disposable roots and scoped Home/config. Secrets contain dummy fixture values only. Native launch fixture selects current test executable before invocation; no installed opener, provider, real Trash or external send. No Windows/native saturation proof claimed."
+      }
+    },
+    {
+      "name": "secrets_scan",
+      "module": "src-tauri/src/secrets.rs",
+      "registrationPath": "src-tauri/src/lib.rs::secrets::ipc::secrets_scan",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/secrets.rs::ipc::secrets_scan awaits spawn_blocking before the entire blocking filesystem/process/parse body and its lock waits.",
+        "src-tauri/src/secrets.rs::secrets_scan preserves the existing synchronous domain API."
+      ],
+      "workerBoundary": "src-tauri/src/secrets.rs::ipc::secrets_scan owns wire Strings, Options, Vecs and structs and awaits tauri::async_runtime::spawn_blocking. Event/approval commands own AppHandle<R> and retrieve live State inside that worker. Legacy String errors stay unchanged; typed conflicts elsewhere remain structured, JoinError adds command_task_failed context. Prompt sync formatter remains String, with IPC Result<String,String> carrying identical successful wire payload.",
+      "syncCallers": [
+        "src-tauri/src/secrets.rs::secrets_scan remains callable by existing Rust/CLI consumers with its existing synchronous domain result."
+      ],
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_10",
+          "passed": 40,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/maruDir.ts",
+          "src/components/settings/tabs/SecretsTab.tsx"
+        ],
+        "payload": "SecretsTab owns scan/doctor/migration/edit completion, saving/deleting/busy state and errors; maruDir contains the IPC adapters.",
+        "terminalNoticeOwner": "Existing initiating component/App hook owns completion and current notices. Durable navigation-safe common settlement, single terminal notification and stale-refresh closure remain Plans25/26; this shard records current owners and does not claim that future frontend work complete."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=secrets_scan"
+      },
+      "mutationKey": {
+        "readOnly": true,
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "reason": "Read-only filesystem/config/content inspection with no filesystem mutation or registry migration."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_10_secrets_all_six_wrappers_yield_on_same_polling_task",
+          "phase08_10_secrets_real_fixture_payloads_and_legacy_errors",
+          "phase08_10_secrets_writer_contention_and_error_release",
+          "phase08_10_secrets_migration_contention_and_error_release",
+          "phase08_10_secrets_delete_contention_and_error_release",
+          "phase08_10_secrets_writer_serializes_with_files_rename",
+          "phase08_10_secrets_writer_serializes_with_files_trash",
+          "phase08_10_secrets_all_mutators_parent_rename_trash_both_orders_and_aliases",
+          "phase08_10_secrets_migration_rejects_new_physical_alias_before_effect",
+          "phase08_10_secrets_write_rejects_stale_maru_alias_before_effect"
+        ],
+        "workerProof": "Actual registered wrapper futures are polled on the same async task, yield while a distinct blocking worker is held, and surface contextual worker failures. Meaningful synthetic outcomes separately verify successful behavior.",
+        "platformScope": "Executed on macOS using disposable roots and scoped Home/config. Secrets contain dummy fixture values only. Native launch fixture selects current test executable before invocation; no installed opener, provider, real Trash or external send. No Windows/native saturation proof claimed."
+      }
+    },
+    {
+      "name": "secrets_doctor",
+      "module": "src-tauri/src/secrets.rs",
+      "registrationPath": "src-tauri/src/lib.rs::secrets::ipc::secrets_doctor",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/secrets.rs::ipc::secrets_doctor awaits spawn_blocking before the entire blocking filesystem/process/parse body and its lock waits.",
+        "src-tauri/src/secrets.rs::secrets_doctor preserves the existing synchronous domain API."
+      ],
+      "workerBoundary": "src-tauri/src/secrets.rs::ipc::secrets_doctor owns wire Strings, Options, Vecs and structs and awaits tauri::async_runtime::spawn_blocking. Event/approval commands own AppHandle<R> and retrieve live State inside that worker. Legacy String errors stay unchanged; typed conflicts elsewhere remain structured, JoinError adds command_task_failed context. Prompt sync formatter remains String, with IPC Result<String,String> carrying identical successful wire payload.",
+      "syncCallers": [
+        "src-tauri/src/secrets.rs::secrets_doctor remains callable by existing Rust/CLI consumers with its existing synchronous domain result."
+      ],
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_10",
+          "passed": 40,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/maruDir.ts",
+          "src/components/settings/tabs/SecretsTab.tsx"
+        ],
+        "payload": "SecretsTab owns scan/doctor/migration/edit completion, saving/deleting/busy state and errors; maruDir contains the IPC adapters.",
+        "terminalNoticeOwner": "Existing initiating component/App hook owns completion and current notices. Durable navigation-safe common settlement, single terminal notification and stale-refresh closure remain Plans25/26; this shard records current owners and does not claim that future frontend work complete."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=secrets_doctor"
+      },
+      "mutationKey": {
+        "readOnly": true,
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "reason": "Read-only filesystem/config/content inspection with no filesystem mutation or registry migration."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_10_secrets_all_six_wrappers_yield_on_same_polling_task",
+          "phase08_10_secrets_real_fixture_payloads_and_legacy_errors",
+          "phase08_10_secrets_writer_contention_and_error_release",
+          "phase08_10_secrets_migration_contention_and_error_release",
+          "phase08_10_secrets_delete_contention_and_error_release",
+          "phase08_10_secrets_writer_serializes_with_files_rename",
+          "phase08_10_secrets_writer_serializes_with_files_trash",
+          "phase08_10_secrets_all_mutators_parent_rename_trash_both_orders_and_aliases",
+          "phase08_10_secrets_migration_rejects_new_physical_alias_before_effect",
+          "phase08_10_secrets_write_rejects_stale_maru_alias_before_effect"
+        ],
+        "workerProof": "Actual registered wrapper futures are polled on the same async task, yield while a distinct blocking worker is held, and surface contextual worker failures. Meaningful synthetic outcomes separately verify successful behavior.",
+        "platformScope": "Executed on macOS using disposable roots and scoped Home/config. Secrets contain dummy fixture values only. Native launch fixture selects current test executable before invocation; no installed opener, provider, real Trash or external send. No Windows/native saturation proof claimed."
+      }
+    },
+    {
+      "name": "secrets_migrate",
+      "module": "src-tauri/src/secrets.rs",
+      "registrationPath": "src-tauri/src/lib.rs::secrets::ipc::secrets_migrate",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/secrets.rs::ipc::secrets_migrate awaits spawn_blocking before the entire blocking filesystem/process/parse body and its lock waits.",
+        "src-tauri/src/secrets.rs::secrets_migrate preserves the existing synchronous domain API.",
+        "src-tauri/src/secrets.rs::migrate_in_transaction validates current state under the complete admitted set; nested helpers borrow this lease."
+      ],
+      "workerBoundary": "src-tauri/src/secrets.rs::ipc::secrets_migrate owns wire Strings, Options, Vecs and structs and awaits tauri::async_runtime::spawn_blocking. Event/approval commands own AppHandle<R> and retrieve live State inside that worker. Legacy String errors stay unchanged; typed conflicts elsewhere remain structured, JoinError adds command_task_failed context. Prompt sync formatter remains String, with IPC Result<String,String> carrying identical successful wire payload.",
+      "syncCallers": [
+        "src-tauri/src/secrets.rs::secrets_migrate remains callable by existing Rust/CLI consumers with its existing synchronous domain result."
+      ],
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_10",
+          "passed": 40,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/maruDir.ts",
+          "src/components/settings/tabs/SecretsTab.tsx"
+        ],
+        "payload": "SecretsTab owns scan/doctor/migration/edit completion, saving/deleting/busy state and errors; maruDir contains the IPC adapters.",
+        "terminalNoticeOwner": "Existing initiating component/App hook owns completion and current notices. Durable navigation-safe common settlement, single terminal notification and stale-refresh closure remain Plans25/26; this shard records current owners and does not claim that future frontend work complete."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=secrets_migrate"
+      },
+      "mutationKey": {
+        "lexicalPaths": [
+          "Original workspace, .maru and .maru/secrets parents, .secrets compatibility root, selected candidate and destination paths, atomic-private temporary siblings, chmod and replacement/rollback paths. Refreshed migration candidates require complete lease coverage before first effect."
+        ],
+        "aliasPaths": [
+          "PathTransactionRequest reserves original lexical spellings and physical alias/ancestor identities; PathTransactionParent preserves selected directory identity."
+        ],
+        "postAdmissionPreconditions": "Validate original existing parents/aliases before first effect; revalidate containment/current policy where applicable and dynamic complete coverage before writes. Nested helpers borrow the lease, never reacquire or extend it.",
+        "domainLockOrder": "Shared PathTransactionRequest admission in the blocking worker before domain lock waits and permission registry loaders; no guard crosses await. Inbox approval consumption completes before per-item admission and holds no approval guard while waiting.",
+        "sharedAdmissionEntry": [
+          "src-tauri/src/secrets.rs::migrate_in_transaction",
+          "src-tauri/src/atomic_file.rs::with_path_transactions"
+        ],
+        "lifetime": "Lease remains owned through concrete local writes, copy/move/atomic replacement, sidecars and any owned cleanup. No auto retry or background job service."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_10_secrets_all_six_wrappers_yield_on_same_polling_task",
+          "phase08_10_secrets_real_fixture_payloads_and_legacy_errors",
+          "phase08_10_secrets_writer_contention_and_error_release",
+          "phase08_10_secrets_migration_contention_and_error_release",
+          "phase08_10_secrets_delete_contention_and_error_release",
+          "phase08_10_secrets_writer_serializes_with_files_rename",
+          "phase08_10_secrets_writer_serializes_with_files_trash",
+          "phase08_10_secrets_all_mutators_parent_rename_trash_both_orders_and_aliases",
+          "phase08_10_secrets_migration_rejects_new_physical_alias_before_effect",
+          "phase08_10_secrets_write_rejects_stale_maru_alias_before_effect"
+        ],
+        "workerProof": "Actual registered wrapper futures are polled on the same async task, yield while a distinct blocking worker is held, and surface contextual worker failures. Meaningful synthetic outcomes separately verify successful behavior.",
+        "platformScope": "Executed on macOS using disposable roots and scoped Home/config. Secrets contain dummy fixture values only. Native launch fixture selects current test executable before invocation; no installed opener, provider, real Trash or external send. No Windows/native saturation proof claimed."
+      }
+    },
+    {
+      "name": "secrets_read_text",
+      "module": "src-tauri/src/secrets.rs",
+      "registrationPath": "src-tauri/src/lib.rs::secrets::ipc::secrets_read_text",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/secrets.rs::ipc::secrets_read_text awaits spawn_blocking before the entire blocking filesystem/process/parse body and its lock waits.",
+        "src-tauri/src/secrets.rs::secrets_read_text preserves the existing synchronous domain API."
+      ],
+      "workerBoundary": "src-tauri/src/secrets.rs::ipc::secrets_read_text owns wire Strings, Options, Vecs and structs and awaits tauri::async_runtime::spawn_blocking. Event/approval commands own AppHandle<R> and retrieve live State inside that worker. Legacy String errors stay unchanged; typed conflicts elsewhere remain structured, JoinError adds command_task_failed context. Prompt sync formatter remains String, with IPC Result<String,String> carrying identical successful wire payload.",
+      "syncCallers": [
+        "src-tauri/src/secrets.rs::secrets_read_text remains callable by existing Rust/CLI consumers with its existing synchronous domain result."
+      ],
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_10",
+          "passed": 40,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/maruDir.ts",
+          "src/components/settings/tabs/SecretsTab.tsx"
+        ],
+        "payload": "SecretsTab owns scan/doctor/migration/edit completion, saving/deleting/busy state and errors; maruDir contains the IPC adapters.",
+        "terminalNoticeOwner": "Existing initiating component/App hook owns completion and current notices. Durable navigation-safe common settlement, single terminal notification and stale-refresh closure remain Plans25/26; this shard records current owners and does not claim that future frontend work complete."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=secrets_read_text"
+      },
+      "mutationKey": {
+        "readOnly": true,
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "reason": "Read-only filesystem/config/content inspection with no filesystem mutation or registry migration."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_10_secrets_all_six_wrappers_yield_on_same_polling_task",
+          "phase08_10_secrets_real_fixture_payloads_and_legacy_errors",
+          "phase08_10_secrets_writer_contention_and_error_release",
+          "phase08_10_secrets_migration_contention_and_error_release",
+          "phase08_10_secrets_delete_contention_and_error_release",
+          "phase08_10_secrets_writer_serializes_with_files_rename",
+          "phase08_10_secrets_writer_serializes_with_files_trash",
+          "phase08_10_secrets_all_mutators_parent_rename_trash_both_orders_and_aliases",
+          "phase08_10_secrets_migration_rejects_new_physical_alias_before_effect",
+          "phase08_10_secrets_write_rejects_stale_maru_alias_before_effect"
+        ],
+        "workerProof": "Actual registered wrapper futures are polled on the same async task, yield while a distinct blocking worker is held, and surface contextual worker failures. Meaningful synthetic outcomes separately verify successful behavior.",
+        "platformScope": "Executed on macOS using disposable roots and scoped Home/config. Secrets contain dummy fixture values only. Native launch fixture selects current test executable before invocation; no installed opener, provider, real Trash or external send. No Windows/native saturation proof claimed."
+      }
+    },
+    {
+      "name": "secrets_write_text",
+      "module": "src-tauri/src/secrets.rs",
+      "registrationPath": "src-tauri/src/lib.rs::secrets::ipc::secrets_write_text",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/secrets.rs::ipc::secrets_write_text awaits spawn_blocking before the entire blocking filesystem/process/parse body and its lock waits.",
+        "src-tauri/src/secrets.rs::secrets_write_text preserves the existing synchronous domain API.",
+        "src-tauri/src/secrets.rs::write_text_in_transaction validates current state under the complete admitted set; nested helpers borrow this lease."
+      ],
+      "workerBoundary": "src-tauri/src/secrets.rs::ipc::secrets_write_text owns wire Strings, Options, Vecs and structs and awaits tauri::async_runtime::spawn_blocking. Event/approval commands own AppHandle<R> and retrieve live State inside that worker. Legacy String errors stay unchanged; typed conflicts elsewhere remain structured, JoinError adds command_task_failed context. Prompt sync formatter remains String, with IPC Result<String,String> carrying identical successful wire payload.",
+      "syncCallers": [
+        "src-tauri/src/secrets.rs::secrets_write_text remains callable by existing Rust/CLI consumers with its existing synchronous domain result."
+      ],
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_10",
+          "passed": 40,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/maruDir.ts",
+          "src/components/settings/tabs/SecretsTab.tsx"
+        ],
+        "payload": "SecretsTab owns scan/doctor/migration/edit completion, saving/deleting/busy state and errors; maruDir contains the IPC adapters.",
+        "terminalNoticeOwner": "Existing initiating component/App hook owns completion and current notices. Durable navigation-safe common settlement, single terminal notification and stale-refresh closure remain Plans25/26; this shard records current owners and does not claim that future frontend work complete."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=secrets_write_text"
+      },
+      "mutationKey": {
+        "lexicalPaths": [
+          "Original workspace, .maru and .maru/secrets parents, .secrets compatibility root, selected candidate and destination paths, atomic-private temporary siblings, chmod and replacement/rollback paths. Refreshed migration candidates require complete lease coverage before first effect."
+        ],
+        "aliasPaths": [
+          "PathTransactionRequest reserves original lexical spellings and physical alias/ancestor identities; PathTransactionParent preserves selected directory identity."
+        ],
+        "postAdmissionPreconditions": "Validate original existing parents/aliases before first effect; revalidate containment/current policy where applicable and dynamic complete coverage before writes. Nested helpers borrow the lease, never reacquire or extend it.",
+        "domainLockOrder": "Shared PathTransactionRequest admission in the blocking worker before domain lock waits and permission registry loaders; no guard crosses await. Inbox approval consumption completes before per-item admission and holds no approval guard while waiting.",
+        "sharedAdmissionEntry": [
+          "src-tauri/src/secrets.rs::write_text_in_transaction",
+          "src-tauri/src/atomic_file.rs::with_path_transactions"
+        ],
+        "lifetime": "Lease remains owned through concrete local writes, copy/move/atomic replacement, sidecars and any owned cleanup. No auto retry or background job service."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_10_secrets_all_six_wrappers_yield_on_same_polling_task",
+          "phase08_10_secrets_real_fixture_payloads_and_legacy_errors",
+          "phase08_10_secrets_writer_contention_and_error_release",
+          "phase08_10_secrets_migration_contention_and_error_release",
+          "phase08_10_secrets_delete_contention_and_error_release",
+          "phase08_10_secrets_writer_serializes_with_files_rename",
+          "phase08_10_secrets_writer_serializes_with_files_trash",
+          "phase08_10_secrets_all_mutators_parent_rename_trash_both_orders_and_aliases",
+          "phase08_10_secrets_migration_rejects_new_physical_alias_before_effect",
+          "phase08_10_secrets_write_rejects_stale_maru_alias_before_effect"
+        ],
+        "workerProof": "Actual registered wrapper futures are polled on the same async task, yield while a distinct blocking worker is held, and surface contextual worker failures. Meaningful synthetic outcomes separately verify successful behavior.",
+        "platformScope": "Executed on macOS using disposable roots and scoped Home/config. Secrets contain dummy fixture values only. Native launch fixture selects current test executable before invocation; no installed opener, provider, real Trash or external send. No Windows/native saturation proof claimed."
+      }
+    },
+    {
+      "name": "secrets_delete_text",
+      "module": "src-tauri/src/secrets.rs",
+      "registrationPath": "src-tauri/src/lib.rs::secrets::ipc::secrets_delete_text",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/secrets.rs::ipc::secrets_delete_text awaits spawn_blocking before the entire blocking filesystem/process/parse body and its lock waits.",
+        "src-tauri/src/secrets.rs::secrets_delete_text preserves the existing synchronous domain API.",
+        "src-tauri/src/secrets.rs::delete_text_in_transaction validates current state under the complete admitted set; nested helpers borrow this lease."
+      ],
+      "workerBoundary": "src-tauri/src/secrets.rs::ipc::secrets_delete_text owns wire Strings, Options, Vecs and structs and awaits tauri::async_runtime::spawn_blocking. Event/approval commands own AppHandle<R> and retrieve live State inside that worker. Legacy String errors stay unchanged; typed conflicts elsewhere remain structured, JoinError adds command_task_failed context. Prompt sync formatter remains String, with IPC Result<String,String> carrying identical successful wire payload.",
+      "syncCallers": [
+        "src-tauri/src/secrets.rs::secrets_delete_text remains callable by existing Rust/CLI consumers with its existing synchronous domain result."
+      ],
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_10",
+          "passed": 40,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/maruDir.ts",
+          "src/components/settings/tabs/SecretsTab.tsx"
+        ],
+        "payload": "SecretsTab owns scan/doctor/migration/edit completion, saving/deleting/busy state and errors; maruDir contains the IPC adapters.",
+        "terminalNoticeOwner": "Existing initiating component/App hook owns completion and current notices. Durable navigation-safe common settlement, single terminal notification and stale-refresh closure remain Plans25/26; this shard records current owners and does not claim that future frontend work complete."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=secrets_delete_text"
+      },
+      "mutationKey": {
+        "lexicalPaths": [
+          "Original workspace, .maru and .maru/secrets parents, .secrets compatibility root, selected candidate and destination paths, atomic-private temporary siblings, chmod and replacement/rollback paths. Refreshed migration candidates require complete lease coverage before first effect."
+        ],
+        "aliasPaths": [
+          "PathTransactionRequest reserves original lexical spellings and physical alias/ancestor identities; PathTransactionParent preserves selected directory identity."
+        ],
+        "postAdmissionPreconditions": "Validate original existing parents/aliases before first effect; revalidate containment/current policy where applicable and dynamic complete coverage before writes. Nested helpers borrow the lease, never reacquire or extend it.",
+        "domainLockOrder": "Shared PathTransactionRequest admission in the blocking worker before domain lock waits and permission registry loaders; no guard crosses await. Inbox approval consumption completes before per-item admission and holds no approval guard while waiting.",
+        "sharedAdmissionEntry": [
+          "src-tauri/src/secrets.rs::delete_text_in_transaction",
+          "src-tauri/src/atomic_file.rs::with_path_transactions"
+        ],
+        "lifetime": "Lease remains owned through concrete local writes, copy/move/atomic replacement, sidecars and any owned cleanup. No auto retry or background job service."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_10_secrets_all_six_wrappers_yield_on_same_polling_task",
+          "phase08_10_secrets_real_fixture_payloads_and_legacy_errors",
+          "phase08_10_secrets_writer_contention_and_error_release",
+          "phase08_10_secrets_migration_contention_and_error_release",
+          "phase08_10_secrets_delete_contention_and_error_release",
+          "phase08_10_secrets_writer_serializes_with_files_rename",
+          "phase08_10_secrets_writer_serializes_with_files_trash",
+          "phase08_10_secrets_all_mutators_parent_rename_trash_both_orders_and_aliases",
+          "phase08_10_secrets_migration_rejects_new_physical_alias_before_effect",
+          "phase08_10_secrets_write_rejects_stale_maru_alias_before_effect"
+        ],
+        "workerProof": "Actual registered wrapper futures are polled on the same async task, yield while a distinct blocking worker is held, and surface contextual worker failures. Meaningful synthetic outcomes separately verify successful behavior.",
+        "platformScope": "Executed on macOS using disposable roots and scoped Home/config. Secrets contain dummy fixture values only. Native launch fixture selects current test executable before invocation; no installed opener, provider, real Trash or external send. No Windows/native saturation proof claimed."
+      }
+    }
+  ]
+}

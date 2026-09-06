@@ -1,0 +1,2131 @@
+{
+  "plan": "08-08",
+  "moduleIntegrationOwner": "08-08",
+  "commands": [
+    {
+      "name": "scratchpad_list",
+      "module": "src-tauri/src/scratchpad.rs",
+      "registrationPath": "src-tauri/src/lib.rs::scratchpad::ipc::scratchpad_list",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/scratchpad.rs::ipc::scratchpad_list awaits spawn_blocking before filesystem reads, walks, serialization, process work or admission waits.",
+        "src-tauri/src/scratchpad.rs::scratchpad_list preserves the original synchronous Rust API.",
+        "src-tauri/src/scratchpad.rs::scratchpad_list_in_transaction performs the admitted domain work with current disk/policy validation."
+      ],
+      "workerBoundary": "src-tauri/src/scratchpad.rs::ipc::scratchpad_list owns its inputs and awaits tauri::async_runtime::spawn_blocking. All owned results remain Result<T,String>; inner legacy errors pass unchanged and JoinError adds only command_task_failed context. Drafts event wrappers own AppHandle<R>; promotion obtains live ApprovalState inside worker. No borrowed State or guard crosses await.",
+      "syncCallers": [
+        "src-tauri/src/scratchpad.rs::scratchpad_list remains available with its original synchronous signature; existing Rust regression callers compile and CLI check passes.",
+        "src-tauri/src/drafts.rs::update_idea_origin_refs_in_transaction receives the scratchpad transition lease; direct update_idea_origin_refs independently admits its finite write. Task promotion currently calls tasks::create_task_note entirely under its complete outer lease; Plan09 must provide a borrowed task adapter and update this call when tasks adds admission."
+      ],
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_08",
+          "passed": 32,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/components/ScratchpadPane.tsx"
+        ],
+        "payload": "listScratchpad; ScratchpadPane refresh and workspace loading own list state.",
+        "terminalNoticeOwner": "Existing initiating component/dialog callback and current local/global error surface own settlement; Rust workers finish independently of view polling. Plans25/26 remain responsible for shared cross-navigation lifetime and single completion notice. No new job service or final lifecycle claim in this shard."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=scratchpad_list"
+      },
+      "mutationKey": {
+        "lexicalPaths": [
+          "Complete configured scratchpad subtree plus workspace.config.yaml; exact selected source/destination endpoints also pin their closest existing parents.",
+          "Transition additionally reserves .maru/drafts index/lineage; legacy migration reserves .maru/memos, .maru staging/marker and destination memo subtree.",
+          "Conditional workspace registry and legacy migration files are included by with_workspace_registry."
+        ],
+        "aliasPaths": [
+          "src-tauri/src/atomic_file.rs::PathTransactionRequest records absolute lexical and physical nearest-parent-plus-suffix identities. Pinned parent handles reject removed/replaced original directories; supported workspace aliases remain valid."
+        ],
+        "postAdmissionPreconditions": "Lease coverage and registry coverage are checked, original parents/aliases revalidated before first effect, then existing ownership, capability, revision, destination and domain rules are re-read. Nested calls reuse current lease without extension or reacquisition.",
+        "domainLockOrder": "Shared path admission happens before existing domain guards and permission loaders. Gap append lock is nested after shared admission; other owned paths introduce no new domain mutex. Admission remains held through publish, rekey and rollback.",
+        "sharedAdmissionEntry": "src-tauri/src/scratchpad.rs::scratchpad_list reaches src-tauri/src/atomic_file.rs::with_path_transactions inside the worker, before nested domain work."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_08_scratchpad_all_ten_wrappers_yield_on_same_polling_task",
+          "phase08_08_scratchpad_real_payloads_legacy_errors_and_all_mutations",
+          "phase08_08_scratchpad_every_mutation_contends_and_releases",
+          "phase08_08_scratchpad_reads_serialize_rename_delete_both_orders",
+          "phase08_08_scratchpad_all_mutations_files_parent_pairs_both_orders_aliases",
+          "phase08_08_scratchpad_document_save_both_orders_aliases_and_error_release",
+          "phase08_08_scratchpad_actual_permission_denial_and_post_admission_recheck",
+          "phase08_08_scratchpad_nested_parent_missing_or_replaced_is_not_recreated",
+          "phase08_08_scratchpad_read_registry_migration_and_changed_condition_release"
+        ],
+        "workerProof": "Every actual owned wrapper is polled and yields on the same async polling task while a distinct blocking worker is held; injected worker panic asserts contextual JoinError. This is not a spare-worker-only responsiveness test.",
+        "permissions": "Path-scoped PrimaryWorkspaceAccessFixture opts selected temporary roots into the actual production primary-workspace guard. Foreign/readOnly and post-admission policy changes reject actual wrappers; other historical fixture bypasses are not counted as permission evidence. File-store compatibility commands retain their original user-selected arbitrary-file policy.",
+        "platformScope": "macOS execution only; cfg(unix) aliases and parent races executed. Windows native runtime and final native saturation/artifact isolation remain later gates. Scratchpad/drafts Trash uses existing cfg(test) local deletion and Files uses scoped local TrashFixture; no system Trash, installed CLI, provider credentials or native application launched.",
+        "scope": "Complete results, same-target contention/error release, real earlier Files/document overlap, byte/revision preservation and nested rollback are verified by the named module tests. Conservative scratchpad/drafts subtrees and Gap workspace snapshots serialize overlapping work; this is in-process exclusion only."
+      }
+    },
+    {
+      "name": "scratchpad_read",
+      "module": "src-tauri/src/scratchpad.rs",
+      "registrationPath": "src-tauri/src/lib.rs::scratchpad::ipc::scratchpad_read",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/scratchpad.rs::ipc::scratchpad_read awaits spawn_blocking before filesystem reads, walks, serialization, process work or admission waits.",
+        "src-tauri/src/scratchpad.rs::scratchpad_read preserves the original synchronous Rust API.",
+        "src-tauri/src/scratchpad.rs::scratchpad_read_in_transaction performs the admitted domain work with current disk/policy validation."
+      ],
+      "workerBoundary": "src-tauri/src/scratchpad.rs::ipc::scratchpad_read owns its inputs and awaits tauri::async_runtime::spawn_blocking. All owned results remain Result<T,String>; inner legacy errors pass unchanged and JoinError adds only command_task_failed context. Drafts event wrappers own AppHandle<R>; promotion obtains live ApprovalState inside worker. No borrowed State or guard crosses await.",
+      "syncCallers": [
+        "src-tauri/src/scratchpad.rs::scratchpad_read remains available with its original synchronous signature; existing Rust regression callers compile and CLI check passes.",
+        "src-tauri/src/drafts.rs::update_idea_origin_refs_in_transaction receives the scratchpad transition lease; direct update_idea_origin_refs independently admits its finite write. Task promotion currently calls tasks::create_task_note entirely under its complete outer lease; Plan09 must provide a borrowed task adapter and update this call when tasks adds admission."
+      ],
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_08",
+          "passed": 32,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/components/ScratchpadPane.tsx"
+        ],
+        "payload": "readScratchpadDocument; ScratchpadPane open/reload/overwrite own selected document and revision.",
+        "terminalNoticeOwner": "Existing initiating component/dialog callback and current local/global error surface own settlement; Rust workers finish independently of view polling. Plans25/26 remain responsible for shared cross-navigation lifetime and single completion notice. No new job service or final lifecycle claim in this shard."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=scratchpad_read"
+      },
+      "mutationKey": {
+        "lexicalPaths": [
+          "Complete configured scratchpad subtree plus workspace.config.yaml; exact selected source/destination endpoints also pin their closest existing parents.",
+          "Transition additionally reserves .maru/drafts index/lineage; legacy migration reserves .maru/memos, .maru staging/marker and destination memo subtree.",
+          "Conditional workspace registry and legacy migration files are included by with_workspace_registry."
+        ],
+        "aliasPaths": [
+          "src-tauri/src/atomic_file.rs::PathTransactionRequest records absolute lexical and physical nearest-parent-plus-suffix identities. Pinned parent handles reject removed/replaced original directories; supported workspace aliases remain valid."
+        ],
+        "postAdmissionPreconditions": "Lease coverage and registry coverage are checked, original parents/aliases revalidated before first effect, then existing ownership, capability, revision, destination and domain rules are re-read. Nested calls reuse current lease without extension or reacquisition.",
+        "domainLockOrder": "Shared path admission happens before existing domain guards and permission loaders. Gap append lock is nested after shared admission; other owned paths introduce no new domain mutex. Admission remains held through publish, rekey and rollback.",
+        "sharedAdmissionEntry": "src-tauri/src/scratchpad.rs::scratchpad_read reaches src-tauri/src/atomic_file.rs::with_path_transactions inside the worker, before nested domain work."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_08_scratchpad_all_ten_wrappers_yield_on_same_polling_task",
+          "phase08_08_scratchpad_real_payloads_legacy_errors_and_all_mutations",
+          "phase08_08_scratchpad_every_mutation_contends_and_releases",
+          "phase08_08_scratchpad_reads_serialize_rename_delete_both_orders",
+          "phase08_08_scratchpad_all_mutations_files_parent_pairs_both_orders_aliases",
+          "phase08_08_scratchpad_document_save_both_orders_aliases_and_error_release",
+          "phase08_08_scratchpad_actual_permission_denial_and_post_admission_recheck",
+          "phase08_08_scratchpad_nested_parent_missing_or_replaced_is_not_recreated",
+          "phase08_08_scratchpad_read_registry_migration_and_changed_condition_release"
+        ],
+        "workerProof": "Every actual owned wrapper is polled and yields on the same async polling task while a distinct blocking worker is held; injected worker panic asserts contextual JoinError. This is not a spare-worker-only responsiveness test.",
+        "permissions": "Path-scoped PrimaryWorkspaceAccessFixture opts selected temporary roots into the actual production primary-workspace guard. Foreign/readOnly and post-admission policy changes reject actual wrappers; other historical fixture bypasses are not counted as permission evidence. File-store compatibility commands retain their original user-selected arbitrary-file policy.",
+        "platformScope": "macOS execution only; cfg(unix) aliases and parent races executed. Windows native runtime and final native saturation/artifact isolation remain later gates. Scratchpad/drafts Trash uses existing cfg(test) local deletion and Files uses scoped local TrashFixture; no system Trash, installed CLI, provider credentials or native application launched.",
+        "scope": "Complete results, same-target contention/error release, real earlier Files/document overlap, byte/revision preservation and nested rollback are verified by the named module tests. Conservative scratchpad/drafts subtrees and Gap workspace snapshots serialize overlapping work; this is in-process exclusion only."
+      }
+    },
+    {
+      "name": "scratchpad_save",
+      "module": "src-tauri/src/scratchpad.rs",
+      "registrationPath": "src-tauri/src/lib.rs::scratchpad::ipc::scratchpad_save",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/scratchpad.rs::ipc::scratchpad_save awaits spawn_blocking before filesystem reads, walks, serialization, process work or admission waits.",
+        "src-tauri/src/scratchpad.rs::scratchpad_save preserves the original synchronous Rust API.",
+        "src-tauri/src/scratchpad.rs::scratchpad_save_in_transaction performs the admitted domain work with current disk/policy validation."
+      ],
+      "workerBoundary": "src-tauri/src/scratchpad.rs::ipc::scratchpad_save owns its inputs and awaits tauri::async_runtime::spawn_blocking. All owned results remain Result<T,String>; inner legacy errors pass unchanged and JoinError adds only command_task_failed context. Drafts event wrappers own AppHandle<R>; promotion obtains live ApprovalState inside worker. No borrowed State or guard crosses await.",
+      "syncCallers": [
+        "src-tauri/src/scratchpad.rs::scratchpad_save remains available with its original synchronous signature; existing Rust regression callers compile and CLI check passes.",
+        "src-tauri/src/drafts.rs::update_idea_origin_refs_in_transaction receives the scratchpad transition lease; direct update_idea_origin_refs independently admits its finite write. Task promotion currently calls tasks::create_task_note entirely under its complete outer lease; Plan09 must provide a borrowed task adapter and update this call when tasks adds admission."
+      ],
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_08",
+          "passed": 32,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/components/ScratchpadPane.tsx"
+        ],
+        "payload": "saveScratchpadDocument; ScratchpadPane flushCurrent owns autosave/copy promise, revision and local error state.",
+        "terminalNoticeOwner": "Existing initiating component/dialog callback and current local/global error surface own settlement; Rust workers finish independently of view polling. Plans25/26 remain responsible for shared cross-navigation lifetime and single completion notice. No new job service or final lifecycle claim in this shard."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=scratchpad_save"
+      },
+      "mutationKey": {
+        "lexicalPaths": [
+          "Complete configured scratchpad subtree plus workspace.config.yaml; exact selected source/destination endpoints also pin their closest existing parents.",
+          "Transition additionally reserves .maru/drafts index/lineage; legacy migration reserves .maru/memos, .maru staging/marker and destination memo subtree.",
+          "Conditional workspace registry and legacy migration files are included by with_workspace_registry."
+        ],
+        "aliasPaths": [
+          "src-tauri/src/atomic_file.rs::PathTransactionRequest records absolute lexical and physical nearest-parent-plus-suffix identities. Pinned parent handles reject removed/replaced original directories; supported workspace aliases remain valid."
+        ],
+        "postAdmissionPreconditions": "Lease coverage and registry coverage are checked, original parents/aliases revalidated before first effect, then existing ownership, capability, revision, destination and domain rules are re-read. Nested calls reuse current lease without extension or reacquisition.",
+        "domainLockOrder": "Shared path admission happens before existing domain guards and permission loaders. Gap append lock is nested after shared admission; other owned paths introduce no new domain mutex. Admission remains held through publish, rekey and rollback.",
+        "sharedAdmissionEntry": "src-tauri/src/scratchpad.rs::scratchpad_save reaches src-tauri/src/atomic_file.rs::with_path_transactions inside the worker, before nested domain work."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_08_scratchpad_all_ten_wrappers_yield_on_same_polling_task",
+          "phase08_08_scratchpad_real_payloads_legacy_errors_and_all_mutations",
+          "phase08_08_scratchpad_every_mutation_contends_and_releases",
+          "phase08_08_scratchpad_reads_serialize_rename_delete_both_orders",
+          "phase08_08_scratchpad_all_mutations_files_parent_pairs_both_orders_aliases",
+          "phase08_08_scratchpad_document_save_both_orders_aliases_and_error_release",
+          "phase08_08_scratchpad_actual_permission_denial_and_post_admission_recheck",
+          "phase08_08_scratchpad_nested_parent_missing_or_replaced_is_not_recreated",
+          "phase08_08_scratchpad_read_registry_migration_and_changed_condition_release"
+        ],
+        "workerProof": "Every actual owned wrapper is polled and yields on the same async polling task while a distinct blocking worker is held; injected worker panic asserts contextual JoinError. This is not a spare-worker-only responsiveness test.",
+        "permissions": "Path-scoped PrimaryWorkspaceAccessFixture opts selected temporary roots into the actual production primary-workspace guard. Foreign/readOnly and post-admission policy changes reject actual wrappers; other historical fixture bypasses are not counted as permission evidence. File-store compatibility commands retain their original user-selected arbitrary-file policy.",
+        "platformScope": "macOS execution only; cfg(unix) aliases and parent races executed. Windows native runtime and final native saturation/artifact isolation remain later gates. Scratchpad/drafts Trash uses existing cfg(test) local deletion and Files uses scoped local TrashFixture; no system Trash, installed CLI, provider credentials or native application launched.",
+        "scope": "Complete results, same-target contention/error release, real earlier Files/document overlap, byte/revision preservation and nested rollback are verified by the named module tests. Conservative scratchpad/drafts subtrees and Gap workspace snapshots serialize overlapping work; this is in-process exclusion only."
+      }
+    },
+    {
+      "name": "scratchpad_rename",
+      "module": "src-tauri/src/scratchpad.rs",
+      "registrationPath": "src-tauri/src/lib.rs::scratchpad::ipc::scratchpad_rename",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/scratchpad.rs::ipc::scratchpad_rename awaits spawn_blocking before filesystem reads, walks, serialization, process work or admission waits.",
+        "src-tauri/src/scratchpad.rs::scratchpad_rename preserves the original synchronous Rust API.",
+        "src-tauri/src/scratchpad.rs::scratchpad_rename_in_transaction performs the admitted domain work with current disk/policy validation."
+      ],
+      "workerBoundary": "src-tauri/src/scratchpad.rs::ipc::scratchpad_rename owns its inputs and awaits tauri::async_runtime::spawn_blocking. All owned results remain Result<T,String>; inner legacy errors pass unchanged and JoinError adds only command_task_failed context. Drafts event wrappers own AppHandle<R>; promotion obtains live ApprovalState inside worker. No borrowed State or guard crosses await.",
+      "syncCallers": [
+        "src-tauri/src/scratchpad.rs::scratchpad_rename remains available with its original synchronous signature; existing Rust regression callers compile and CLI check passes.",
+        "src-tauri/src/drafts.rs::update_idea_origin_refs_in_transaction receives the scratchpad transition lease; direct update_idea_origin_refs independently admits its finite write. Task promotion currently calls tasks::create_task_note entirely under its complete outer lease; Plan09 must provide a borrowed task adapter and update this call when tasks adds admission."
+      ],
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_08",
+          "passed": 32,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/components/ScratchpadPane.tsx"
+        ],
+        "payload": "renameScratchpadDocument; ScratchpadPane renameCurrent awaits rename then refreshes editor/workspace.",
+        "terminalNoticeOwner": "Existing initiating component/dialog callback and current local/global error surface own settlement; Rust workers finish independently of view polling. Plans25/26 remain responsible for shared cross-navigation lifetime and single completion notice. No new job service or final lifecycle claim in this shard."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=scratchpad_rename"
+      },
+      "mutationKey": {
+        "lexicalPaths": [
+          "Complete configured scratchpad subtree plus workspace.config.yaml; exact selected source/destination endpoints also pin their closest existing parents.",
+          "Transition additionally reserves .maru/drafts index/lineage; legacy migration reserves .maru/memos, .maru staging/marker and destination memo subtree.",
+          "Conditional workspace registry and legacy migration files are included by with_workspace_registry."
+        ],
+        "aliasPaths": [
+          "src-tauri/src/atomic_file.rs::PathTransactionRequest records absolute lexical and physical nearest-parent-plus-suffix identities. Pinned parent handles reject removed/replaced original directories; supported workspace aliases remain valid."
+        ],
+        "postAdmissionPreconditions": "Lease coverage and registry coverage are checked, original parents/aliases revalidated before first effect, then existing ownership, capability, revision, destination and domain rules are re-read. Nested calls reuse current lease without extension or reacquisition.",
+        "domainLockOrder": "Shared path admission happens before existing domain guards and permission loaders. Gap append lock is nested after shared admission; other owned paths introduce no new domain mutex. Admission remains held through publish, rekey and rollback.",
+        "sharedAdmissionEntry": "src-tauri/src/scratchpad.rs::scratchpad_rename reaches src-tauri/src/atomic_file.rs::with_path_transactions inside the worker, before nested domain work."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_08_scratchpad_all_ten_wrappers_yield_on_same_polling_task",
+          "phase08_08_scratchpad_real_payloads_legacy_errors_and_all_mutations",
+          "phase08_08_scratchpad_every_mutation_contends_and_releases",
+          "phase08_08_scratchpad_reads_serialize_rename_delete_both_orders",
+          "phase08_08_scratchpad_all_mutations_files_parent_pairs_both_orders_aliases",
+          "phase08_08_scratchpad_document_save_both_orders_aliases_and_error_release",
+          "phase08_08_scratchpad_actual_permission_denial_and_post_admission_recheck",
+          "phase08_08_scratchpad_nested_parent_missing_or_replaced_is_not_recreated",
+          "phase08_08_scratchpad_read_registry_migration_and_changed_condition_release"
+        ],
+        "workerProof": "Every actual owned wrapper is polled and yields on the same async polling task while a distinct blocking worker is held; injected worker panic asserts contextual JoinError. This is not a spare-worker-only responsiveness test.",
+        "permissions": "Path-scoped PrimaryWorkspaceAccessFixture opts selected temporary roots into the actual production primary-workspace guard. Foreign/readOnly and post-admission policy changes reject actual wrappers; other historical fixture bypasses are not counted as permission evidence. File-store compatibility commands retain their original user-selected arbitrary-file policy.",
+        "platformScope": "macOS execution only; cfg(unix) aliases and parent races executed. Windows native runtime and final native saturation/artifact isolation remain later gates. Scratchpad/drafts Trash uses existing cfg(test) local deletion and Files uses scoped local TrashFixture; no system Trash, installed CLI, provider credentials or native application launched.",
+        "scope": "Complete results, same-target contention/error release, real earlier Files/document overlap, byte/revision preservation and nested rollback are verified by the named module tests. Conservative scratchpad/drafts subtrees and Gap workspace snapshots serialize overlapping work; this is in-process exclusion only."
+      }
+    },
+    {
+      "name": "scratchpad_trash",
+      "module": "src-tauri/src/scratchpad.rs",
+      "registrationPath": "src-tauri/src/lib.rs::scratchpad::ipc::scratchpad_trash",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/scratchpad.rs::ipc::scratchpad_trash awaits spawn_blocking before filesystem reads, walks, serialization, process work or admission waits.",
+        "src-tauri/src/scratchpad.rs::scratchpad_trash preserves the original synchronous Rust API.",
+        "src-tauri/src/scratchpad.rs::scratchpad_trash_in_transaction performs the admitted domain work with current disk/policy validation."
+      ],
+      "workerBoundary": "src-tauri/src/scratchpad.rs::ipc::scratchpad_trash owns its inputs and awaits tauri::async_runtime::spawn_blocking. All owned results remain Result<T,String>; inner legacy errors pass unchanged and JoinError adds only command_task_failed context. Drafts event wrappers own AppHandle<R>; promotion obtains live ApprovalState inside worker. No borrowed State or guard crosses await.",
+      "syncCallers": [
+        "src-tauri/src/scratchpad.rs::scratchpad_trash remains available with its original synchronous signature; existing Rust regression callers compile and CLI check passes.",
+        "src-tauri/src/drafts.rs::update_idea_origin_refs_in_transaction receives the scratchpad transition lease; direct update_idea_origin_refs independently admits its finite write. Task promotion currently calls tasks::create_task_note entirely under its complete outer lease; Plan09 must provide a borrowed task adapter and update this call when tasks adds admission."
+      ],
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_08",
+          "passed": 32,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/components/ScratchpadPane.tsx"
+        ],
+        "payload": "trashScratchpadDocument; ScratchpadPane trashCurrent confirms then awaits deletion and refresh.",
+        "terminalNoticeOwner": "Existing initiating component/dialog callback and current local/global error surface own settlement; Rust workers finish independently of view polling. Plans25/26 remain responsible for shared cross-navigation lifetime and single completion notice. No new job service or final lifecycle claim in this shard."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=scratchpad_trash"
+      },
+      "mutationKey": {
+        "lexicalPaths": [
+          "Complete configured scratchpad subtree plus workspace.config.yaml; exact selected source/destination endpoints also pin their closest existing parents.",
+          "Transition additionally reserves .maru/drafts index/lineage; legacy migration reserves .maru/memos, .maru staging/marker and destination memo subtree.",
+          "Conditional workspace registry and legacy migration files are included by with_workspace_registry."
+        ],
+        "aliasPaths": [
+          "src-tauri/src/atomic_file.rs::PathTransactionRequest records absolute lexical and physical nearest-parent-plus-suffix identities. Pinned parent handles reject removed/replaced original directories; supported workspace aliases remain valid."
+        ],
+        "postAdmissionPreconditions": "Lease coverage and registry coverage are checked, original parents/aliases revalidated before first effect, then existing ownership, capability, revision, destination and domain rules are re-read. Nested calls reuse current lease without extension or reacquisition.",
+        "domainLockOrder": "Shared path admission happens before existing domain guards and permission loaders. Gap append lock is nested after shared admission; other owned paths introduce no new domain mutex. Admission remains held through publish, rekey and rollback.",
+        "sharedAdmissionEntry": "src-tauri/src/scratchpad.rs::scratchpad_trash reaches src-tauri/src/atomic_file.rs::with_path_transactions inside the worker, before nested domain work."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_08_scratchpad_all_ten_wrappers_yield_on_same_polling_task",
+          "phase08_08_scratchpad_real_payloads_legacy_errors_and_all_mutations",
+          "phase08_08_scratchpad_every_mutation_contends_and_releases",
+          "phase08_08_scratchpad_reads_serialize_rename_delete_both_orders",
+          "phase08_08_scratchpad_all_mutations_files_parent_pairs_both_orders_aliases",
+          "phase08_08_scratchpad_document_save_both_orders_aliases_and_error_release",
+          "phase08_08_scratchpad_actual_permission_denial_and_post_admission_recheck",
+          "phase08_08_scratchpad_nested_parent_missing_or_replaced_is_not_recreated",
+          "phase08_08_scratchpad_read_registry_migration_and_changed_condition_release"
+        ],
+        "workerProof": "Every actual owned wrapper is polled and yields on the same async polling task while a distinct blocking worker is held; injected worker panic asserts contextual JoinError. This is not a spare-worker-only responsiveness test.",
+        "permissions": "Path-scoped PrimaryWorkspaceAccessFixture opts selected temporary roots into the actual production primary-workspace guard. Foreign/readOnly and post-admission policy changes reject actual wrappers; other historical fixture bypasses are not counted as permission evidence. File-store compatibility commands retain their original user-selected arbitrary-file policy.",
+        "platformScope": "macOS execution only; cfg(unix) aliases and parent races executed. Windows native runtime and final native saturation/artifact isolation remain later gates. Scratchpad/drafts Trash uses existing cfg(test) local deletion and Files uses scoped local TrashFixture; no system Trash, installed CLI, provider credentials or native application launched.",
+        "scope": "Complete results, same-target contention/error release, real earlier Files/document overlap, byte/revision preservation and nested rollback are verified by the named module tests. Conservative scratchpad/drafts subtrees and Gap workspace snapshots serialize overlapping work; this is in-process exclusion only."
+      }
+    },
+    {
+      "name": "scratchpad_create_idea",
+      "module": "src-tauri/src/scratchpad.rs",
+      "registrationPath": "src-tauri/src/lib.rs::scratchpad::ipc::scratchpad_create_idea",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/scratchpad.rs::ipc::scratchpad_create_idea awaits spawn_blocking before filesystem reads, walks, serialization, process work or admission waits.",
+        "src-tauri/src/scratchpad.rs::scratchpad_create_idea preserves the original synchronous Rust API.",
+        "src-tauri/src/scratchpad.rs::scratchpad_create_idea_in_transaction performs the admitted domain work with current disk/policy validation."
+      ],
+      "workerBoundary": "src-tauri/src/scratchpad.rs::ipc::scratchpad_create_idea owns its inputs and awaits tauri::async_runtime::spawn_blocking. All owned results remain Result<T,String>; inner legacy errors pass unchanged and JoinError adds only command_task_failed context. Drafts event wrappers own AppHandle<R>; promotion obtains live ApprovalState inside worker. No borrowed State or guard crosses await.",
+      "syncCallers": [
+        "src-tauri/src/scratchpad.rs::scratchpad_create_idea remains available with its original synchronous signature; existing Rust regression callers compile and CLI check passes.",
+        "src-tauri/src/drafts.rs::update_idea_origin_refs_in_transaction receives the scratchpad transition lease; direct update_idea_origin_refs independently admits its finite write. Task promotion currently calls tasks::create_task_note entirely under its complete outer lease; Plan09 must provide a borrowed task adapter and update this call when tasks adds admission."
+      ],
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_08",
+          "passed": 32,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/components/ScratchpadPane.tsx"
+        ],
+        "payload": "createScratchpadIdea; ScratchpadPane explicit idea creation owns returned editor and refresh.",
+        "terminalNoticeOwner": "Existing initiating component/dialog callback and current local/global error surface own settlement; Rust workers finish independently of view polling. Plans25/26 remain responsible for shared cross-navigation lifetime and single completion notice. No new job service or final lifecycle claim in this shard."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=scratchpad_create_idea"
+      },
+      "mutationKey": {
+        "lexicalPaths": [
+          "Complete configured scratchpad subtree plus workspace.config.yaml; exact selected source/destination endpoints also pin their closest existing parents.",
+          "Transition additionally reserves .maru/drafts index/lineage; legacy migration reserves .maru/memos, .maru staging/marker and destination memo subtree.",
+          "Conditional workspace registry and legacy migration files are included by with_workspace_registry."
+        ],
+        "aliasPaths": [
+          "src-tauri/src/atomic_file.rs::PathTransactionRequest records absolute lexical and physical nearest-parent-plus-suffix identities. Pinned parent handles reject removed/replaced original directories; supported workspace aliases remain valid."
+        ],
+        "postAdmissionPreconditions": "Lease coverage and registry coverage are checked, original parents/aliases revalidated before first effect, then existing ownership, capability, revision, destination and domain rules are re-read. Nested calls reuse current lease without extension or reacquisition.",
+        "domainLockOrder": "Shared path admission happens before existing domain guards and permission loaders. Gap append lock is nested after shared admission; other owned paths introduce no new domain mutex. Admission remains held through publish, rekey and rollback.",
+        "sharedAdmissionEntry": "src-tauri/src/scratchpad.rs::scratchpad_create_idea reaches src-tauri/src/atomic_file.rs::with_path_transactions inside the worker, before nested domain work."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_08_scratchpad_all_ten_wrappers_yield_on_same_polling_task",
+          "phase08_08_scratchpad_real_payloads_legacy_errors_and_all_mutations",
+          "phase08_08_scratchpad_every_mutation_contends_and_releases",
+          "phase08_08_scratchpad_reads_serialize_rename_delete_both_orders",
+          "phase08_08_scratchpad_all_mutations_files_parent_pairs_both_orders_aliases",
+          "phase08_08_scratchpad_document_save_both_orders_aliases_and_error_release",
+          "phase08_08_scratchpad_actual_permission_denial_and_post_admission_recheck",
+          "phase08_08_scratchpad_nested_parent_missing_or_replaced_is_not_recreated",
+          "phase08_08_scratchpad_read_registry_migration_and_changed_condition_release"
+        ],
+        "workerProof": "Every actual owned wrapper is polled and yields on the same async polling task while a distinct blocking worker is held; injected worker panic asserts contextual JoinError. This is not a spare-worker-only responsiveness test.",
+        "permissions": "Path-scoped PrimaryWorkspaceAccessFixture opts selected temporary roots into the actual production primary-workspace guard. Foreign/readOnly and post-admission policy changes reject actual wrappers; other historical fixture bypasses are not counted as permission evidence. File-store compatibility commands retain their original user-selected arbitrary-file policy.",
+        "platformScope": "macOS execution only; cfg(unix) aliases and parent races executed. Windows native runtime and final native saturation/artifact isolation remain later gates. Scratchpad/drafts Trash uses existing cfg(test) local deletion and Files uses scoped local TrashFixture; no system Trash, installed CLI, provider credentials or native application launched.",
+        "scope": "Complete results, same-target contention/error release, real earlier Files/document overlap, byte/revision preservation and nested rollback are verified by the named module tests. Conservative scratchpad/drafts subtrees and Gap workspace snapshots serialize overlapping work; this is in-process exclusion only."
+      }
+    },
+    {
+      "name": "scratchpad_transition_idea",
+      "module": "src-tauri/src/scratchpad.rs",
+      "registrationPath": "src-tauri/src/lib.rs::scratchpad::ipc::scratchpad_transition_idea",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/scratchpad.rs::ipc::scratchpad_transition_idea awaits spawn_blocking before filesystem reads, walks, serialization, process work or admission waits.",
+        "src-tauri/src/scratchpad.rs::scratchpad_transition_idea preserves the original synchronous Rust API.",
+        "src-tauri/src/scratchpad.rs::scratchpad_transition_idea_in_transaction performs the admitted domain work with current disk/policy validation."
+      ],
+      "workerBoundary": "src-tauri/src/scratchpad.rs::ipc::scratchpad_transition_idea owns its inputs and awaits tauri::async_runtime::spawn_blocking. All owned results remain Result<T,String>; inner legacy errors pass unchanged and JoinError adds only command_task_failed context. Drafts event wrappers own AppHandle<R>; promotion obtains live ApprovalState inside worker. No borrowed State or guard crosses await.",
+      "syncCallers": [
+        "src-tauri/src/scratchpad.rs::scratchpad_transition_idea remains available with its original synchronous signature; existing Rust regression callers compile and CLI check passes.",
+        "src-tauri/src/drafts.rs::update_idea_origin_refs_in_transaction receives the scratchpad transition lease; direct update_idea_origin_refs independently admits its finite write. Task promotion currently calls tasks::create_task_note entirely under its complete outer lease; Plan09 must provide a borrowed task adapter and update this call when tasks adds admission."
+      ],
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_08",
+          "passed": 32,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/components/ScratchpadPane.tsx"
+        ],
+        "payload": "transitionScratchpadIdea; ScratchpadPane transition handler owns lifecycle result and refresh.",
+        "terminalNoticeOwner": "Existing initiating component/dialog callback and current local/global error surface own settlement; Rust workers finish independently of view polling. Plans25/26 remain responsible for shared cross-navigation lifetime and single completion notice. No new job service or final lifecycle claim in this shard."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=scratchpad_transition_idea"
+      },
+      "mutationKey": {
+        "lexicalPaths": [
+          "Complete configured scratchpad subtree plus workspace.config.yaml; exact selected source/destination endpoints also pin their closest existing parents.",
+          "Transition additionally reserves .maru/drafts index/lineage; legacy migration reserves .maru/memos, .maru staging/marker and destination memo subtree.",
+          "Conditional workspace registry and legacy migration files are included by with_workspace_registry."
+        ],
+        "aliasPaths": [
+          "src-tauri/src/atomic_file.rs::PathTransactionRequest records absolute lexical and physical nearest-parent-plus-suffix identities. Pinned parent handles reject removed/replaced original directories; supported workspace aliases remain valid."
+        ],
+        "postAdmissionPreconditions": "Lease coverage and registry coverage are checked, original parents/aliases revalidated before first effect, then existing ownership, capability, revision, destination and domain rules are re-read. Nested calls reuse current lease without extension or reacquisition.",
+        "domainLockOrder": "Shared path admission happens before existing domain guards and permission loaders. Gap append lock is nested after shared admission; other owned paths introduce no new domain mutex. Admission remains held through publish, rekey and rollback.",
+        "sharedAdmissionEntry": "src-tauri/src/scratchpad.rs::scratchpad_transition_idea reaches src-tauri/src/atomic_file.rs::with_path_transactions inside the worker, before nested domain work."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_08_scratchpad_all_ten_wrappers_yield_on_same_polling_task",
+          "phase08_08_scratchpad_real_payloads_legacy_errors_and_all_mutations",
+          "phase08_08_scratchpad_every_mutation_contends_and_releases",
+          "phase08_08_scratchpad_reads_serialize_rename_delete_both_orders",
+          "phase08_08_scratchpad_all_mutations_files_parent_pairs_both_orders_aliases",
+          "phase08_08_scratchpad_document_save_both_orders_aliases_and_error_release",
+          "phase08_08_scratchpad_actual_permission_denial_and_post_admission_recheck",
+          "phase08_08_scratchpad_nested_parent_missing_or_replaced_is_not_recreated",
+          "phase08_08_scratchpad_read_registry_migration_and_changed_condition_release"
+        ],
+        "workerProof": "Every actual owned wrapper is polled and yields on the same async polling task while a distinct blocking worker is held; injected worker panic asserts contextual JoinError. This is not a spare-worker-only responsiveness test.",
+        "permissions": "Path-scoped PrimaryWorkspaceAccessFixture opts selected temporary roots into the actual production primary-workspace guard. Foreign/readOnly and post-admission policy changes reject actual wrappers; other historical fixture bypasses are not counted as permission evidence. File-store compatibility commands retain their original user-selected arbitrary-file policy.",
+        "platformScope": "macOS execution only; cfg(unix) aliases and parent races executed. Windows native runtime and final native saturation/artifact isolation remain later gates. Scratchpad/drafts Trash uses existing cfg(test) local deletion and Files uses scoped local TrashFixture; no system Trash, installed CLI, provider credentials or native application launched.",
+        "scope": "Complete results, same-target contention/error release, real earlier Files/document overlap, byte/revision preservation and nested rollback are verified by the named module tests. Conservative scratchpad/drafts subtrees and Gap workspace snapshots serialize overlapping work; this is in-process exclusion only."
+      }
+    },
+    {
+      "name": "scratchpad_cleanup_plan",
+      "module": "src-tauri/src/scratchpad.rs",
+      "registrationPath": "src-tauri/src/lib.rs::scratchpad::ipc::scratchpad_cleanup_plan",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/scratchpad.rs::ipc::scratchpad_cleanup_plan awaits spawn_blocking before filesystem reads, walks, serialization, process work or admission waits.",
+        "src-tauri/src/scratchpad.rs::scratchpad_cleanup_plan preserves the original synchronous Rust API.",
+        "src-tauri/src/scratchpad.rs::scratchpad_cleanup_plan_in_transaction performs the admitted domain work with current disk/policy validation."
+      ],
+      "workerBoundary": "src-tauri/src/scratchpad.rs::ipc::scratchpad_cleanup_plan owns its inputs and awaits tauri::async_runtime::spawn_blocking. All owned results remain Result<T,String>; inner legacy errors pass unchanged and JoinError adds only command_task_failed context. Drafts event wrappers own AppHandle<R>; promotion obtains live ApprovalState inside worker. No borrowed State or guard crosses await.",
+      "syncCallers": [
+        "src-tauri/src/scratchpad.rs::scratchpad_cleanup_plan remains available with its original synchronous signature; existing Rust regression callers compile and CLI check passes.",
+        "src-tauri/src/drafts.rs::update_idea_origin_refs_in_transaction receives the scratchpad transition lease; direct update_idea_origin_refs independently admits its finite write. Task promotion currently calls tasks::create_task_note entirely under its complete outer lease; Plan09 must provide a borrowed task adapter and update this call when tasks adds admission."
+      ],
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_08",
+          "passed": 32,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/components/ScratchpadPane.tsx"
+        ],
+        "payload": "planScratchpadTempCleanup; ScratchpadPane reviewTempCleanup owns candidate query and selection.",
+        "terminalNoticeOwner": "Existing initiating component/dialog callback and current local/global error surface own settlement; Rust workers finish independently of view polling. Plans25/26 remain responsible for shared cross-navigation lifetime and single completion notice. No new job service or final lifecycle claim in this shard."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=scratchpad_cleanup_plan"
+      },
+      "mutationKey": {
+        "lexicalPaths": [
+          "Complete configured scratchpad subtree plus workspace.config.yaml; exact selected source/destination endpoints also pin their closest existing parents.",
+          "Transition additionally reserves .maru/drafts index/lineage; legacy migration reserves .maru/memos, .maru staging/marker and destination memo subtree.",
+          "Conditional workspace registry and legacy migration files are included by with_workspace_registry."
+        ],
+        "aliasPaths": [
+          "src-tauri/src/atomic_file.rs::PathTransactionRequest records absolute lexical and physical nearest-parent-plus-suffix identities. Pinned parent handles reject removed/replaced original directories; supported workspace aliases remain valid."
+        ],
+        "postAdmissionPreconditions": "Lease coverage and registry coverage are checked, original parents/aliases revalidated before first effect, then existing ownership, capability, revision, destination and domain rules are re-read. Nested calls reuse current lease without extension or reacquisition.",
+        "domainLockOrder": "Shared path admission happens before existing domain guards and permission loaders. Gap append lock is nested after shared admission; other owned paths introduce no new domain mutex. Admission remains held through publish, rekey and rollback.",
+        "sharedAdmissionEntry": "src-tauri/src/scratchpad.rs::scratchpad_cleanup_plan reaches src-tauri/src/atomic_file.rs::with_path_transactions inside the worker, before nested domain work."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_08_scratchpad_all_ten_wrappers_yield_on_same_polling_task",
+          "phase08_08_scratchpad_real_payloads_legacy_errors_and_all_mutations",
+          "phase08_08_scratchpad_every_mutation_contends_and_releases",
+          "phase08_08_scratchpad_reads_serialize_rename_delete_both_orders",
+          "phase08_08_scratchpad_all_mutations_files_parent_pairs_both_orders_aliases",
+          "phase08_08_scratchpad_document_save_both_orders_aliases_and_error_release",
+          "phase08_08_scratchpad_actual_permission_denial_and_post_admission_recheck",
+          "phase08_08_scratchpad_nested_parent_missing_or_replaced_is_not_recreated",
+          "phase08_08_scratchpad_read_registry_migration_and_changed_condition_release"
+        ],
+        "workerProof": "Every actual owned wrapper is polled and yields on the same async polling task while a distinct blocking worker is held; injected worker panic asserts contextual JoinError. This is not a spare-worker-only responsiveness test.",
+        "permissions": "Path-scoped PrimaryWorkspaceAccessFixture opts selected temporary roots into the actual production primary-workspace guard. Foreign/readOnly and post-admission policy changes reject actual wrappers; other historical fixture bypasses are not counted as permission evidence. File-store compatibility commands retain their original user-selected arbitrary-file policy.",
+        "platformScope": "macOS execution only; cfg(unix) aliases and parent races executed. Windows native runtime and final native saturation/artifact isolation remain later gates. Scratchpad/drafts Trash uses existing cfg(test) local deletion and Files uses scoped local TrashFixture; no system Trash, installed CLI, provider credentials or native application launched.",
+        "scope": "Complete results, same-target contention/error release, real earlier Files/document overlap, byte/revision preservation and nested rollback are verified by the named module tests. Conservative scratchpad/drafts subtrees and Gap workspace snapshots serialize overlapping work; this is in-process exclusion only."
+      }
+    },
+    {
+      "name": "scratchpad_cleanup_apply",
+      "module": "src-tauri/src/scratchpad.rs",
+      "registrationPath": "src-tauri/src/lib.rs::scratchpad::ipc::scratchpad_cleanup_apply",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/scratchpad.rs::ipc::scratchpad_cleanup_apply awaits spawn_blocking before filesystem reads, walks, serialization, process work or admission waits.",
+        "src-tauri/src/scratchpad.rs::scratchpad_cleanup_apply preserves the original synchronous Rust API.",
+        "src-tauri/src/scratchpad.rs::scratchpad_cleanup_apply_in_transaction performs the admitted domain work with current disk/policy validation."
+      ],
+      "workerBoundary": "src-tauri/src/scratchpad.rs::ipc::scratchpad_cleanup_apply owns its inputs and awaits tauri::async_runtime::spawn_blocking. All owned results remain Result<T,String>; inner legacy errors pass unchanged and JoinError adds only command_task_failed context. Drafts event wrappers own AppHandle<R>; promotion obtains live ApprovalState inside worker. No borrowed State or guard crosses await.",
+      "syncCallers": [
+        "src-tauri/src/scratchpad.rs::scratchpad_cleanup_apply remains available with its original synchronous signature; existing Rust regression callers compile and CLI check passes.",
+        "src-tauri/src/drafts.rs::update_idea_origin_refs_in_transaction receives the scratchpad transition lease; direct update_idea_origin_refs independently admits its finite write. Task promotion currently calls tasks::create_task_note entirely under its complete outer lease; Plan09 must provide a borrowed task adapter and update this call when tasks adds admission."
+      ],
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_08",
+          "passed": 32,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/components/ScratchpadPane.tsx"
+        ],
+        "payload": "applyScratchpadTempCleanup; ScratchpadPane applyTempCleanup retains trashed/skipped sibling outcomes.",
+        "terminalNoticeOwner": "Existing initiating component/dialog callback and current local/global error surface own settlement; Rust workers finish independently of view polling. Plans25/26 remain responsible for shared cross-navigation lifetime and single completion notice. No new job service or final lifecycle claim in this shard."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=scratchpad_cleanup_apply"
+      },
+      "mutationKey": {
+        "lexicalPaths": [
+          "Complete configured scratchpad subtree plus workspace.config.yaml; exact selected source/destination endpoints also pin their closest existing parents.",
+          "Transition additionally reserves .maru/drafts index/lineage; legacy migration reserves .maru/memos, .maru staging/marker and destination memo subtree.",
+          "Conditional workspace registry and legacy migration files are included by with_workspace_registry."
+        ],
+        "aliasPaths": [
+          "src-tauri/src/atomic_file.rs::PathTransactionRequest records absolute lexical and physical nearest-parent-plus-suffix identities. Pinned parent handles reject removed/replaced original directories; supported workspace aliases remain valid."
+        ],
+        "postAdmissionPreconditions": "Lease coverage and registry coverage are checked, original parents/aliases revalidated before first effect, then existing ownership, capability, revision, destination and domain rules are re-read. Nested calls reuse current lease without extension or reacquisition.",
+        "domainLockOrder": "Shared path admission happens before existing domain guards and permission loaders. Gap append lock is nested after shared admission; other owned paths introduce no new domain mutex. Admission remains held through publish, rekey and rollback.",
+        "sharedAdmissionEntry": "src-tauri/src/scratchpad.rs::scratchpad_cleanup_apply reaches src-tauri/src/atomic_file.rs::with_path_transactions inside the worker, before nested domain work."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_08_scratchpad_all_ten_wrappers_yield_on_same_polling_task",
+          "phase08_08_scratchpad_real_payloads_legacy_errors_and_all_mutations",
+          "phase08_08_scratchpad_every_mutation_contends_and_releases",
+          "phase08_08_scratchpad_reads_serialize_rename_delete_both_orders",
+          "phase08_08_scratchpad_all_mutations_files_parent_pairs_both_orders_aliases",
+          "phase08_08_scratchpad_document_save_both_orders_aliases_and_error_release",
+          "phase08_08_scratchpad_actual_permission_denial_and_post_admission_recheck",
+          "phase08_08_scratchpad_nested_parent_missing_or_replaced_is_not_recreated",
+          "phase08_08_scratchpad_read_registry_migration_and_changed_condition_release"
+        ],
+        "workerProof": "Every actual owned wrapper is polled and yields on the same async polling task while a distinct blocking worker is held; injected worker panic asserts contextual JoinError. This is not a spare-worker-only responsiveness test.",
+        "permissions": "Path-scoped PrimaryWorkspaceAccessFixture opts selected temporary roots into the actual production primary-workspace guard. Foreign/readOnly and post-admission policy changes reject actual wrappers; other historical fixture bypasses are not counted as permission evidence. File-store compatibility commands retain their original user-selected arbitrary-file policy.",
+        "platformScope": "macOS execution only; cfg(unix) aliases and parent races executed. Windows native runtime and final native saturation/artifact isolation remain later gates. Scratchpad/drafts Trash uses existing cfg(test) local deletion and Files uses scoped local TrashFixture; no system Trash, installed CLI, provider credentials or native application launched.",
+        "scope": "Complete results, same-target contention/error release, real earlier Files/document overlap, byte/revision preservation and nested rollback are verified by the named module tests. Conservative scratchpad/drafts subtrees and Gap workspace snapshots serialize overlapping work; this is in-process exclusion only."
+      }
+    },
+    {
+      "name": "scratchpad_migrate_legacy_memos",
+      "module": "src-tauri/src/scratchpad.rs",
+      "registrationPath": "src-tauri/src/lib.rs::scratchpad::ipc::scratchpad_migrate_legacy_memos",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/scratchpad.rs::ipc::scratchpad_migrate_legacy_memos awaits spawn_blocking before filesystem reads, walks, serialization, process work or admission waits.",
+        "src-tauri/src/scratchpad.rs::scratchpad_migrate_legacy_memos preserves the original synchronous Rust API.",
+        "src-tauri/src/scratchpad.rs::scratchpad_migrate_legacy_memos_in_transaction performs the admitted domain work with current disk/policy validation."
+      ],
+      "workerBoundary": "src-tauri/src/scratchpad.rs::ipc::scratchpad_migrate_legacy_memos owns its inputs and awaits tauri::async_runtime::spawn_blocking. All owned results remain Result<T,String>; inner legacy errors pass unchanged and JoinError adds only command_task_failed context. Drafts event wrappers own AppHandle<R>; promotion obtains live ApprovalState inside worker. No borrowed State or guard crosses await.",
+      "syncCallers": [
+        "src-tauri/src/scratchpad.rs::scratchpad_migrate_legacy_memos remains available with its original synchronous signature; existing Rust regression callers compile and CLI check passes.",
+        "src-tauri/src/drafts.rs::update_idea_origin_refs_in_transaction receives the scratchpad transition lease; direct update_idea_origin_refs independently admits its finite write. Task promotion currently calls tasks::create_task_note entirely under its complete outer lease; Plan09 must provide a borrowed task adapter and update this call when tasks adds admission."
+      ],
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_08",
+          "passed": 32,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/components/ScratchpadPane.tsx"
+        ],
+        "payload": "migrateLegacyMemos; ScratchpadPane migrateMemos owns migrated/skipped status and workspace refresh.",
+        "terminalNoticeOwner": "Existing initiating component/dialog callback and current local/global error surface own settlement; Rust workers finish independently of view polling. Plans25/26 remain responsible for shared cross-navigation lifetime and single completion notice. No new job service or final lifecycle claim in this shard."
+      ,
+        "classifier": "n/a",
+        "successRetention": "n/a",
+        "failureReasons": "n/a",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=scratchpad_migrate_legacy_memos"
+      },
+      "mutationKey": {
+        "lexicalPaths": [
+          "Complete configured scratchpad subtree plus workspace.config.yaml; exact selected source/destination endpoints also pin their closest existing parents.",
+          "Transition additionally reserves .maru/drafts index/lineage; legacy migration reserves .maru/memos, .maru staging/marker and destination memo subtree.",
+          "Conditional workspace registry and legacy migration files are included by with_workspace_registry."
+        ],
+        "aliasPaths": [
+          "src-tauri/src/atomic_file.rs::PathTransactionRequest records absolute lexical and physical nearest-parent-plus-suffix identities. Pinned parent handles reject removed/replaced original directories; supported workspace aliases remain valid."
+        ],
+        "postAdmissionPreconditions": "Lease coverage and registry coverage are checked, original parents/aliases revalidated before first effect, then existing ownership, capability, revision, destination and domain rules are re-read. Nested calls reuse current lease without extension or reacquisition.",
+        "domainLockOrder": "Shared path admission happens before existing domain guards and permission loaders. Gap append lock is nested after shared admission; other owned paths introduce no new domain mutex. Admission remains held through publish, rekey and rollback.",
+        "sharedAdmissionEntry": "src-tauri/src/scratchpad.rs::scratchpad_migrate_legacy_memos reaches src-tauri/src/atomic_file.rs::with_path_transactions inside the worker, before nested domain work."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_08_scratchpad_all_ten_wrappers_yield_on_same_polling_task",
+          "phase08_08_scratchpad_real_payloads_legacy_errors_and_all_mutations",
+          "phase08_08_scratchpad_every_mutation_contends_and_releases",
+          "phase08_08_scratchpad_reads_serialize_rename_delete_both_orders",
+          "phase08_08_scratchpad_all_mutations_files_parent_pairs_both_orders_aliases",
+          "phase08_08_scratchpad_document_save_both_orders_aliases_and_error_release",
+          "phase08_08_scratchpad_actual_permission_denial_and_post_admission_recheck",
+          "phase08_08_scratchpad_nested_parent_missing_or_replaced_is_not_recreated",
+          "phase08_08_scratchpad_read_registry_migration_and_changed_condition_release"
+        ],
+        "workerProof": "Every actual owned wrapper is polled and yields on the same async polling task while a distinct blocking worker is held; injected worker panic asserts contextual JoinError. This is not a spare-worker-only responsiveness test.",
+        "permissions": "Path-scoped PrimaryWorkspaceAccessFixture opts selected temporary roots into the actual production primary-workspace guard. Foreign/readOnly and post-admission policy changes reject actual wrappers; other historical fixture bypasses are not counted as permission evidence. File-store compatibility commands retain their original user-selected arbitrary-file policy.",
+        "platformScope": "macOS execution only; cfg(unix) aliases and parent races executed. Windows native runtime and final native saturation/artifact isolation remain later gates. Scratchpad/drafts Trash uses existing cfg(test) local deletion and Files uses scoped local TrashFixture; no system Trash, installed CLI, provider credentials or native application launched.",
+        "scope": "Complete results, same-target contention/error release, real earlier Files/document overlap, byte/revision preservation and nested rollback are verified by the named module tests. Conservative scratchpad/drafts subtrees and Gap workspace snapshots serialize overlapping work; this is in-process exclusion only."
+      }
+    },
+    {
+      "name": "store_shelf_files",
+      "module": "src-tauri/src/shelf.rs",
+      "registrationPath": "src-tauri/src/lib.rs::shelf::ipc::store_shelf_files",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/shelf.rs::ipc::store_shelf_files awaits spawn_blocking before filesystem reads, walks, serialization, process work or admission waits.",
+        "src-tauri/src/shelf.rs::store_shelf_files preserves the original synchronous Rust API.",
+        "src-tauri/src/shelf.rs::store_files_into_dir performs the admitted domain work with current disk/policy validation."
+      ],
+      "workerBoundary": "src-tauri/src/shelf.rs::ipc::store_shelf_files owns its inputs and awaits tauri::async_runtime::spawn_blocking. All owned results remain Result<T,String>; inner legacy errors pass unchanged and JoinError adds only command_task_failed context. Drafts event wrappers own AppHandle<R>; promotion obtains live ApprovalState inside worker. No borrowed State or guard crosses await.",
+      "syncCallers": [
+        "src-tauri/src/shelf.rs::store_shelf_files remains available with its original synchronous signature; existing Rust regression callers compile and CLI check passes.",
+        "No new background owner or dispatcher was introduced; existing direct synchronous helpers remain callable."
+      ],
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_08",
+          "passed": 32,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/components/ScratchpadPane.tsx"
+        ],
+        "payload": "Compatibility export in Rust and API where present; source audit finds no current component caller. storeShelfFiles/storeShelfFilesAs remain exported API definitions; list/read/save/delete memo have no current TypeScript invocation.",
+        "terminalNoticeOwner": "Existing initiating component/dialog callback and current local/global error surface own settlement; Rust workers finish independently of view polling. Plans25/26 remain responsible for shared cross-navigation lifetime and single completion notice. No new job service or final lifecycle claim in this shard."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=store_shelf_files"
+      },
+      "mutationKey": {
+        "lexicalPaths": [
+          "File-store operations reserve all absolute source paths and complete destination allocation subtree, covering collision-selected names, copy/move and fallback.",
+          "Memo CRUD reserves configured scratchpad subtree, workspace.config.yaml, exact memo endpoints, and conditional registry migration. Save As reserves exact export target and original workspace parent."
+        ],
+        "aliasPaths": [
+          "src-tauri/src/atomic_file.rs::PathTransactionRequest records absolute lexical and physical nearest-parent-plus-suffix identities. Pinned parent handles reject removed/replaced original directories; supported workspace aliases remain valid."
+        ],
+        "postAdmissionPreconditions": "Lease coverage and registry coverage are checked, original parents/aliases revalidated before first effect, then existing ownership, capability, revision, destination and domain rules are re-read. Nested calls reuse current lease without extension or reacquisition.",
+        "domainLockOrder": "Shared path admission happens before existing domain guards and permission loaders. Gap append lock is nested after shared admission; other owned paths introduce no new domain mutex. Admission remains held through publish, rekey and rollback.",
+        "sharedAdmissionEntry": "src-tauri/src/shelf.rs::store_shelf_files reaches src-tauri/src/atomic_file.rs::with_path_transactions inside the worker, before nested domain work."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_08_shelf_all_seven_wrappers_yield_and_preserve_join_errors",
+          "phase08_08_shelf_nonempty_results_and_legacy_rejections",
+          "phase08_08_shelf_every_write_same_target_and_error_release",
+          "phase08_08_shelf_export_permission_denial_then_success",
+          "phase08_08_shelf_all_writers_versus_parent_rename_both_orders",
+          "phase08_08_shelf_copy_and_export_aliases_conflict_with_physical_parent",
+          "phase08_08_shelf_actual_primary_workspace_and_read_only_guards"
+        ],
+        "workerProof": "Every actual owned wrapper is polled and yields on the same async polling task while a distinct blocking worker is held; injected worker panic asserts contextual JoinError. This is not a spare-worker-only responsiveness test.",
+        "permissions": "Path-scoped PrimaryWorkspaceAccessFixture opts selected temporary roots into the actual production primary-workspace guard. Foreign/readOnly and post-admission policy changes reject actual wrappers; other historical fixture bypasses are not counted as permission evidence. File-store compatibility commands retain their original user-selected arbitrary-file policy.",
+        "platformScope": "macOS execution only; cfg(unix) aliases and parent races executed. Windows native runtime and final native saturation/artifact isolation remain later gates. Scratchpad/drafts Trash uses existing cfg(test) local deletion and Files uses scoped local TrashFixture; no system Trash, installed CLI, provider credentials or native application launched.",
+        "scope": "Complete results, same-target contention/error release, real earlier Files/document overlap, byte/revision preservation and nested rollback are verified by the named module tests. Conservative scratchpad/drafts subtrees and Gap workspace snapshots serialize overlapping work; this is in-process exclusion only."
+      }
+    },
+    {
+      "name": "store_shelf_files_as",
+      "module": "src-tauri/src/shelf.rs",
+      "registrationPath": "src-tauri/src/lib.rs::shelf::ipc::store_shelf_files_as",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/shelf.rs::ipc::store_shelf_files_as awaits spawn_blocking before filesystem reads, walks, serialization, process work or admission waits.",
+        "src-tauri/src/shelf.rs::store_shelf_files_as preserves the original synchronous Rust API.",
+        "src-tauri/src/shelf.rs::store_files_into_dir performs the admitted domain work with current disk/policy validation."
+      ],
+      "workerBoundary": "src-tauri/src/shelf.rs::ipc::store_shelf_files_as owns its inputs and awaits tauri::async_runtime::spawn_blocking. All owned results remain Result<T,String>; inner legacy errors pass unchanged and JoinError adds only command_task_failed context. Drafts event wrappers own AppHandle<R>; promotion obtains live ApprovalState inside worker. No borrowed State or guard crosses await.",
+      "syncCallers": [
+        "src-tauri/src/shelf.rs::store_shelf_files_as remains available with its original synchronous signature; existing Rust regression callers compile and CLI check passes.",
+        "No new background owner or dispatcher was introduced; existing direct synchronous helpers remain callable."
+      ],
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_08",
+          "passed": 32,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/components/ScratchpadPane.tsx"
+        ],
+        "payload": "Compatibility export in Rust and API where present; source audit finds no current component caller. storeShelfFiles/storeShelfFilesAs remain exported API definitions; list/read/save/delete memo have no current TypeScript invocation.",
+        "terminalNoticeOwner": "Existing initiating component/dialog callback and current local/global error surface own settlement; Rust workers finish independently of view polling. Plans25/26 remain responsible for shared cross-navigation lifetime and single completion notice. No new job service or final lifecycle claim in this shard."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=store_shelf_files_as"
+      },
+      "mutationKey": {
+        "lexicalPaths": [
+          "File-store operations reserve all absolute source paths and complete destination allocation subtree, covering collision-selected names, copy/move and fallback.",
+          "Memo CRUD reserves configured scratchpad subtree, workspace.config.yaml, exact memo endpoints, and conditional registry migration. Save As reserves exact export target and original workspace parent."
+        ],
+        "aliasPaths": [
+          "src-tauri/src/atomic_file.rs::PathTransactionRequest records absolute lexical and physical nearest-parent-plus-suffix identities. Pinned parent handles reject removed/replaced original directories; supported workspace aliases remain valid."
+        ],
+        "postAdmissionPreconditions": "Lease coverage and registry coverage are checked, original parents/aliases revalidated before first effect, then existing ownership, capability, revision, destination and domain rules are re-read. Nested calls reuse current lease without extension or reacquisition.",
+        "domainLockOrder": "Shared path admission happens before existing domain guards and permission loaders. Gap append lock is nested after shared admission; other owned paths introduce no new domain mutex. Admission remains held through publish, rekey and rollback.",
+        "sharedAdmissionEntry": "src-tauri/src/shelf.rs::store_shelf_files_as reaches src-tauri/src/atomic_file.rs::with_path_transactions inside the worker, before nested domain work."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_08_shelf_all_seven_wrappers_yield_and_preserve_join_errors",
+          "phase08_08_shelf_nonempty_results_and_legacy_rejections",
+          "phase08_08_shelf_every_write_same_target_and_error_release",
+          "phase08_08_shelf_export_permission_denial_then_success",
+          "phase08_08_shelf_all_writers_versus_parent_rename_both_orders",
+          "phase08_08_shelf_copy_and_export_aliases_conflict_with_physical_parent",
+          "phase08_08_shelf_actual_primary_workspace_and_read_only_guards"
+        ],
+        "workerProof": "Every actual owned wrapper is polled and yields on the same async polling task while a distinct blocking worker is held; injected worker panic asserts contextual JoinError. This is not a spare-worker-only responsiveness test.",
+        "permissions": "Path-scoped PrimaryWorkspaceAccessFixture opts selected temporary roots into the actual production primary-workspace guard. Foreign/readOnly and post-admission policy changes reject actual wrappers; other historical fixture bypasses are not counted as permission evidence. File-store compatibility commands retain their original user-selected arbitrary-file policy.",
+        "platformScope": "macOS execution only; cfg(unix) aliases and parent races executed. Windows native runtime and final native saturation/artifact isolation remain later gates. Scratchpad/drafts Trash uses existing cfg(test) local deletion and Files uses scoped local TrashFixture; no system Trash, installed CLI, provider credentials or native application launched.",
+        "scope": "Complete results, same-target contention/error release, real earlier Files/document overlap, byte/revision preservation and nested rollback are verified by the named module tests. Conservative scratchpad/drafts subtrees and Gap workspace snapshots serialize overlapping work; this is in-process exclusion only."
+      }
+    },
+    {
+      "name": "list_memos",
+      "module": "src-tauri/src/shelf.rs",
+      "registrationPath": "src-tauri/src/lib.rs::shelf::ipc::list_memos",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/shelf.rs::ipc::list_memos awaits spawn_blocking before filesystem reads, walks, serialization, process work or admission waits.",
+        "src-tauri/src/shelf.rs::list_memos preserves the original synchronous Rust API.",
+        "src-tauri/src/shelf.rs::list_memos_in_transaction performs the admitted domain work with current disk/policy validation."
+      ],
+      "workerBoundary": "src-tauri/src/shelf.rs::ipc::list_memos owns its inputs and awaits tauri::async_runtime::spawn_blocking. All owned results remain Result<T,String>; inner legacy errors pass unchanged and JoinError adds only command_task_failed context. Drafts event wrappers own AppHandle<R>; promotion obtains live ApprovalState inside worker. No borrowed State or guard crosses await.",
+      "syncCallers": [
+        "src-tauri/src/shelf.rs::list_memos remains available with its original synchronous signature; existing Rust regression callers compile and CLI check passes.",
+        "No new background owner or dispatcher was introduced; existing direct synchronous helpers remain callable."
+      ],
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_08",
+          "passed": 32,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/components/ScratchpadPane.tsx"
+        ],
+        "payload": "Compatibility export in Rust and API where present; source audit finds no current component caller. storeShelfFiles/storeShelfFilesAs remain exported API definitions; list/read/save/delete memo have no current TypeScript invocation.",
+        "terminalNoticeOwner": "Existing initiating component/dialog callback and current local/global error surface own settlement; Rust workers finish independently of view polling. Plans25/26 remain responsible for shared cross-navigation lifetime and single completion notice. No new job service or final lifecycle claim in this shard."
+      ,
+        "classifier": "n/a",
+        "successRetention": "n/a",
+        "failureReasons": "n/a",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=list_memos"
+      },
+      "mutationKey": {
+        "lexicalPaths": [
+          "File-store operations reserve all absolute source paths and complete destination allocation subtree, covering collision-selected names, copy/move and fallback.",
+          "Memo CRUD reserves configured scratchpad subtree, workspace.config.yaml, exact memo endpoints, and conditional registry migration. Save As reserves exact export target and original workspace parent."
+        ],
+        "aliasPaths": [
+          "src-tauri/src/atomic_file.rs::PathTransactionRequest records absolute lexical and physical nearest-parent-plus-suffix identities. Pinned parent handles reject removed/replaced original directories; supported workspace aliases remain valid."
+        ],
+        "postAdmissionPreconditions": "Lease coverage and registry coverage are checked, original parents/aliases revalidated before first effect, then existing ownership, capability, revision, destination and domain rules are re-read. Nested calls reuse current lease without extension or reacquisition.",
+        "domainLockOrder": "Shared path admission happens before existing domain guards and permission loaders. Gap append lock is nested after shared admission; other owned paths introduce no new domain mutex. Admission remains held through publish, rekey and rollback.",
+        "sharedAdmissionEntry": "src-tauri/src/shelf.rs::list_memos reaches src-tauri/src/atomic_file.rs::with_path_transactions inside the worker, before nested domain work."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_08_shelf_all_seven_wrappers_yield_and_preserve_join_errors",
+          "phase08_08_shelf_nonempty_results_and_legacy_rejections",
+          "phase08_08_shelf_every_write_same_target_and_error_release",
+          "phase08_08_shelf_export_permission_denial_then_success",
+          "phase08_08_shelf_all_writers_versus_parent_rename_both_orders",
+          "phase08_08_shelf_copy_and_export_aliases_conflict_with_physical_parent",
+          "phase08_08_shelf_actual_primary_workspace_and_read_only_guards"
+        ],
+        "workerProof": "Every actual owned wrapper is polled and yields on the same async polling task while a distinct blocking worker is held; injected worker panic asserts contextual JoinError. This is not a spare-worker-only responsiveness test.",
+        "permissions": "Path-scoped PrimaryWorkspaceAccessFixture opts selected temporary roots into the actual production primary-workspace guard. Foreign/readOnly and post-admission policy changes reject actual wrappers; other historical fixture bypasses are not counted as permission evidence. File-store compatibility commands retain their original user-selected arbitrary-file policy.",
+        "platformScope": "macOS execution only; cfg(unix) aliases and parent races executed. Windows native runtime and final native saturation/artifact isolation remain later gates. Scratchpad/drafts Trash uses existing cfg(test) local deletion and Files uses scoped local TrashFixture; no system Trash, installed CLI, provider credentials or native application launched.",
+        "scope": "Complete results, same-target contention/error release, real earlier Files/document overlap, byte/revision preservation and nested rollback are verified by the named module tests. Conservative scratchpad/drafts subtrees and Gap workspace snapshots serialize overlapping work; this is in-process exclusion only."
+      }
+    },
+    {
+      "name": "read_memo",
+      "module": "src-tauri/src/shelf.rs",
+      "registrationPath": "src-tauri/src/lib.rs::shelf::ipc::read_memo",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/shelf.rs::ipc::read_memo awaits spawn_blocking before filesystem reads, walks, serialization, process work or admission waits.",
+        "src-tauri/src/shelf.rs::read_memo preserves the original synchronous Rust API.",
+        "src-tauri/src/shelf.rs::read_memo_in_transaction performs the admitted domain work with current disk/policy validation."
+      ],
+      "workerBoundary": "src-tauri/src/shelf.rs::ipc::read_memo owns its inputs and awaits tauri::async_runtime::spawn_blocking. All owned results remain Result<T,String>; inner legacy errors pass unchanged and JoinError adds only command_task_failed context. Drafts event wrappers own AppHandle<R>; promotion obtains live ApprovalState inside worker. No borrowed State or guard crosses await.",
+      "syncCallers": [
+        "src-tauri/src/shelf.rs::read_memo remains available with its original synchronous signature; existing Rust regression callers compile and CLI check passes.",
+        "No new background owner or dispatcher was introduced; existing direct synchronous helpers remain callable."
+      ],
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_08",
+          "passed": 32,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/components/ScratchpadPane.tsx"
+        ],
+        "payload": "Compatibility export in Rust and API where present; source audit finds no current component caller. storeShelfFiles/storeShelfFilesAs remain exported API definitions; list/read/save/delete memo have no current TypeScript invocation.",
+        "terminalNoticeOwner": "Existing initiating component/dialog callback and current local/global error surface own settlement; Rust workers finish independently of view polling. Plans25/26 remain responsible for shared cross-navigation lifetime and single completion notice. No new job service or final lifecycle claim in this shard."
+      ,
+        "classifier": "n/a",
+        "successRetention": "n/a",
+        "failureReasons": "n/a",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=read_memo"
+      },
+      "mutationKey": {
+        "lexicalPaths": [
+          "File-store operations reserve all absolute source paths and complete destination allocation subtree, covering collision-selected names, copy/move and fallback.",
+          "Memo CRUD reserves configured scratchpad subtree, workspace.config.yaml, exact memo endpoints, and conditional registry migration. Save As reserves exact export target and original workspace parent."
+        ],
+        "aliasPaths": [
+          "src-tauri/src/atomic_file.rs::PathTransactionRequest records absolute lexical and physical nearest-parent-plus-suffix identities. Pinned parent handles reject removed/replaced original directories; supported workspace aliases remain valid."
+        ],
+        "postAdmissionPreconditions": "Lease coverage and registry coverage are checked, original parents/aliases revalidated before first effect, then existing ownership, capability, revision, destination and domain rules are re-read. Nested calls reuse current lease without extension or reacquisition.",
+        "domainLockOrder": "Shared path admission happens before existing domain guards and permission loaders. Gap append lock is nested after shared admission; other owned paths introduce no new domain mutex. Admission remains held through publish, rekey and rollback.",
+        "sharedAdmissionEntry": "src-tauri/src/shelf.rs::read_memo reaches src-tauri/src/atomic_file.rs::with_path_transactions inside the worker, before nested domain work."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_08_shelf_all_seven_wrappers_yield_and_preserve_join_errors",
+          "phase08_08_shelf_nonempty_results_and_legacy_rejections",
+          "phase08_08_shelf_every_write_same_target_and_error_release",
+          "phase08_08_shelf_export_permission_denial_then_success",
+          "phase08_08_shelf_all_writers_versus_parent_rename_both_orders",
+          "phase08_08_shelf_copy_and_export_aliases_conflict_with_physical_parent",
+          "phase08_08_shelf_actual_primary_workspace_and_read_only_guards"
+        ],
+        "workerProof": "Every actual owned wrapper is polled and yields on the same async polling task while a distinct blocking worker is held; injected worker panic asserts contextual JoinError. This is not a spare-worker-only responsiveness test.",
+        "permissions": "Path-scoped PrimaryWorkspaceAccessFixture opts selected temporary roots into the actual production primary-workspace guard. Foreign/readOnly and post-admission policy changes reject actual wrappers; other historical fixture bypasses are not counted as permission evidence. File-store compatibility commands retain their original user-selected arbitrary-file policy.",
+        "platformScope": "macOS execution only; cfg(unix) aliases and parent races executed. Windows native runtime and final native saturation/artifact isolation remain later gates. Scratchpad/drafts Trash uses existing cfg(test) local deletion and Files uses scoped local TrashFixture; no system Trash, installed CLI, provider credentials or native application launched.",
+        "scope": "Complete results, same-target contention/error release, real earlier Files/document overlap, byte/revision preservation and nested rollback are verified by the named module tests. Conservative scratchpad/drafts subtrees and Gap workspace snapshots serialize overlapping work; this is in-process exclusion only."
+      }
+    },
+    {
+      "name": "save_memo",
+      "module": "src-tauri/src/shelf.rs",
+      "registrationPath": "src-tauri/src/lib.rs::shelf::ipc::save_memo",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/shelf.rs::ipc::save_memo awaits spawn_blocking before filesystem reads, walks, serialization, process work or admission waits.",
+        "src-tauri/src/shelf.rs::save_memo preserves the original synchronous Rust API.",
+        "src-tauri/src/shelf.rs::save_memo_in_transaction performs the admitted domain work with current disk/policy validation."
+      ],
+      "workerBoundary": "src-tauri/src/shelf.rs::ipc::save_memo owns its inputs and awaits tauri::async_runtime::spawn_blocking. All owned results remain Result<T,String>; inner legacy errors pass unchanged and JoinError adds only command_task_failed context. Drafts event wrappers own AppHandle<R>; promotion obtains live ApprovalState inside worker. No borrowed State or guard crosses await.",
+      "syncCallers": [
+        "src-tauri/src/shelf.rs::save_memo remains available with its original synchronous signature; existing Rust regression callers compile and CLI check passes.",
+        "No new background owner or dispatcher was introduced; existing direct synchronous helpers remain callable."
+      ],
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_08",
+          "passed": 32,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/components/ScratchpadPane.tsx"
+        ],
+        "payload": "Compatibility export in Rust and API where present; source audit finds no current component caller. storeShelfFiles/storeShelfFilesAs remain exported API definitions; list/read/save/delete memo have no current TypeScript invocation.",
+        "terminalNoticeOwner": "Existing initiating component/dialog callback and current local/global error surface own settlement; Rust workers finish independently of view polling. Plans25/26 remain responsible for shared cross-navigation lifetime and single completion notice. No new job service or final lifecycle claim in this shard."
+      ,
+        "classifier": "n/a",
+        "successRetention": "n/a",
+        "failureReasons": "n/a",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=save_memo"
+      },
+      "mutationKey": {
+        "lexicalPaths": [
+          "File-store operations reserve all absolute source paths and complete destination allocation subtree, covering collision-selected names, copy/move and fallback.",
+          "Memo CRUD reserves configured scratchpad subtree, workspace.config.yaml, exact memo endpoints, and conditional registry migration. Save As reserves exact export target and original workspace parent."
+        ],
+        "aliasPaths": [
+          "src-tauri/src/atomic_file.rs::PathTransactionRequest records absolute lexical and physical nearest-parent-plus-suffix identities. Pinned parent handles reject removed/replaced original directories; supported workspace aliases remain valid."
+        ],
+        "postAdmissionPreconditions": "Lease coverage and registry coverage are checked, original parents/aliases revalidated before first effect, then existing ownership, capability, revision, destination and domain rules are re-read. Nested calls reuse current lease without extension or reacquisition.",
+        "domainLockOrder": "Shared path admission happens before existing domain guards and permission loaders. Gap append lock is nested after shared admission; other owned paths introduce no new domain mutex. Admission remains held through publish, rekey and rollback.",
+        "sharedAdmissionEntry": "src-tauri/src/shelf.rs::save_memo reaches src-tauri/src/atomic_file.rs::with_path_transactions inside the worker, before nested domain work."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_08_shelf_all_seven_wrappers_yield_and_preserve_join_errors",
+          "phase08_08_shelf_nonempty_results_and_legacy_rejections",
+          "phase08_08_shelf_every_write_same_target_and_error_release",
+          "phase08_08_shelf_export_permission_denial_then_success",
+          "phase08_08_shelf_all_writers_versus_parent_rename_both_orders",
+          "phase08_08_shelf_copy_and_export_aliases_conflict_with_physical_parent",
+          "phase08_08_shelf_actual_primary_workspace_and_read_only_guards"
+        ],
+        "workerProof": "Every actual owned wrapper is polled and yields on the same async polling task while a distinct blocking worker is held; injected worker panic asserts contextual JoinError. This is not a spare-worker-only responsiveness test.",
+        "permissions": "Path-scoped PrimaryWorkspaceAccessFixture opts selected temporary roots into the actual production primary-workspace guard. Foreign/readOnly and post-admission policy changes reject actual wrappers; other historical fixture bypasses are not counted as permission evidence. File-store compatibility commands retain their original user-selected arbitrary-file policy.",
+        "platformScope": "macOS execution only; cfg(unix) aliases and parent races executed. Windows native runtime and final native saturation/artifact isolation remain later gates. Scratchpad/drafts Trash uses existing cfg(test) local deletion and Files uses scoped local TrashFixture; no system Trash, installed CLI, provider credentials or native application launched.",
+        "scope": "Complete results, same-target contention/error release, real earlier Files/document overlap, byte/revision preservation and nested rollback are verified by the named module tests. Conservative scratchpad/drafts subtrees and Gap workspace snapshots serialize overlapping work; this is in-process exclusion only."
+      }
+    },
+    {
+      "name": "delete_memo",
+      "module": "src-tauri/src/shelf.rs",
+      "registrationPath": "src-tauri/src/lib.rs::shelf::ipc::delete_memo",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/shelf.rs::ipc::delete_memo awaits spawn_blocking before filesystem reads, walks, serialization, process work or admission waits.",
+        "src-tauri/src/shelf.rs::delete_memo preserves the original synchronous Rust API.",
+        "src-tauri/src/shelf.rs::delete_memo_in_transaction performs the admitted domain work with current disk/policy validation."
+      ],
+      "workerBoundary": "src-tauri/src/shelf.rs::ipc::delete_memo owns its inputs and awaits tauri::async_runtime::spawn_blocking. All owned results remain Result<T,String>; inner legacy errors pass unchanged and JoinError adds only command_task_failed context. Drafts event wrappers own AppHandle<R>; promotion obtains live ApprovalState inside worker. No borrowed State or guard crosses await.",
+      "syncCallers": [
+        "src-tauri/src/shelf.rs::delete_memo remains available with its original synchronous signature; existing Rust regression callers compile and CLI check passes.",
+        "No new background owner or dispatcher was introduced; existing direct synchronous helpers remain callable."
+      ],
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_08",
+          "passed": 32,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/components/ScratchpadPane.tsx"
+        ],
+        "payload": "Compatibility export in Rust and API where present; source audit finds no current component caller. storeShelfFiles/storeShelfFilesAs remain exported API definitions; list/read/save/delete memo have no current TypeScript invocation.",
+        "terminalNoticeOwner": "Existing initiating component/dialog callback and current local/global error surface own settlement; Rust workers finish independently of view polling. Plans25/26 remain responsible for shared cross-navigation lifetime and single completion notice. No new job service or final lifecycle claim in this shard."
+      ,
+        "classifier": "n/a",
+        "successRetention": "n/a",
+        "failureReasons": "n/a",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=delete_memo"
+      },
+      "mutationKey": {
+        "lexicalPaths": [
+          "File-store operations reserve all absolute source paths and complete destination allocation subtree, covering collision-selected names, copy/move and fallback.",
+          "Memo CRUD reserves configured scratchpad subtree, workspace.config.yaml, exact memo endpoints, and conditional registry migration. Save As reserves exact export target and original workspace parent."
+        ],
+        "aliasPaths": [
+          "src-tauri/src/atomic_file.rs::PathTransactionRequest records absolute lexical and physical nearest-parent-plus-suffix identities. Pinned parent handles reject removed/replaced original directories; supported workspace aliases remain valid."
+        ],
+        "postAdmissionPreconditions": "Lease coverage and registry coverage are checked, original parents/aliases revalidated before first effect, then existing ownership, capability, revision, destination and domain rules are re-read. Nested calls reuse current lease without extension or reacquisition.",
+        "domainLockOrder": "Shared path admission happens before existing domain guards and permission loaders. Gap append lock is nested after shared admission; other owned paths introduce no new domain mutex. Admission remains held through publish, rekey and rollback.",
+        "sharedAdmissionEntry": "src-tauri/src/shelf.rs::delete_memo reaches src-tauri/src/atomic_file.rs::with_path_transactions inside the worker, before nested domain work."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_08_shelf_all_seven_wrappers_yield_and_preserve_join_errors",
+          "phase08_08_shelf_nonempty_results_and_legacy_rejections",
+          "phase08_08_shelf_every_write_same_target_and_error_release",
+          "phase08_08_shelf_export_permission_denial_then_success",
+          "phase08_08_shelf_all_writers_versus_parent_rename_both_orders",
+          "phase08_08_shelf_copy_and_export_aliases_conflict_with_physical_parent",
+          "phase08_08_shelf_actual_primary_workspace_and_read_only_guards"
+        ],
+        "workerProof": "Every actual owned wrapper is polled and yields on the same async polling task while a distinct blocking worker is held; injected worker panic asserts contextual JoinError. This is not a spare-worker-only responsiveness test.",
+        "permissions": "Path-scoped PrimaryWorkspaceAccessFixture opts selected temporary roots into the actual production primary-workspace guard. Foreign/readOnly and post-admission policy changes reject actual wrappers; other historical fixture bypasses are not counted as permission evidence. File-store compatibility commands retain their original user-selected arbitrary-file policy.",
+        "platformScope": "macOS execution only; cfg(unix) aliases and parent races executed. Windows native runtime and final native saturation/artifact isolation remain later gates. Scratchpad/drafts Trash uses existing cfg(test) local deletion and Files uses scoped local TrashFixture; no system Trash, installed CLI, provider credentials or native application launched.",
+        "scope": "Complete results, same-target contention/error release, real earlier Files/document overlap, byte/revision preservation and nested rollback are verified by the named module tests. Conservative scratchpad/drafts subtrees and Gap workspace snapshots serialize overlapping work; this is in-process exclusion only."
+      }
+    },
+    {
+      "name": "save_memo_as",
+      "module": "src-tauri/src/shelf.rs",
+      "registrationPath": "src-tauri/src/lib.rs::shelf::ipc::save_memo_as",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/shelf.rs::ipc::save_memo_as awaits spawn_blocking before filesystem reads, walks, serialization, process work or admission waits.",
+        "src-tauri/src/shelf.rs::save_memo_as preserves the original synchronous Rust API.",
+        "src-tauri/src/shelf.rs::write_new_memo_document performs the admitted domain work with current disk/policy validation."
+      ],
+      "workerBoundary": "src-tauri/src/shelf.rs::ipc::save_memo_as owns its inputs and awaits tauri::async_runtime::spawn_blocking. All owned results remain Result<T,String>; inner legacy errors pass unchanged and JoinError adds only command_task_failed context. Drafts event wrappers own AppHandle<R>; promotion obtains live ApprovalState inside worker. No borrowed State or guard crosses await.",
+      "syncCallers": [
+        "src-tauri/src/shelf.rs::save_memo_as remains available with its original synchronous signature; existing Rust regression callers compile and CLI check passes.",
+        "No new background owner or dispatcher was introduced; existing direct synchronous helpers remain callable."
+      ],
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_08",
+          "passed": 32,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/components/ScratchpadPane.tsx"
+        ],
+        "payload": "saveMemoAs; ScratchpadPane saveAs awaits export and routes errors to local/global error state.",
+        "terminalNoticeOwner": "Existing initiating component/dialog callback and current local/global error surface own settlement; Rust workers finish independently of view polling. Plans25/26 remain responsible for shared cross-navigation lifetime and single completion notice. No new job service or final lifecycle claim in this shard."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=save_memo_as"
+      },
+      "mutationKey": {
+        "lexicalPaths": [
+          "File-store operations reserve all absolute source paths and complete destination allocation subtree, covering collision-selected names, copy/move and fallback.",
+          "Memo CRUD reserves configured scratchpad subtree, workspace.config.yaml, exact memo endpoints, and conditional registry migration. Save As reserves exact export target and original workspace parent."
+        ],
+        "aliasPaths": [
+          "src-tauri/src/atomic_file.rs::PathTransactionRequest records absolute lexical and physical nearest-parent-plus-suffix identities. Pinned parent handles reject removed/replaced original directories; supported workspace aliases remain valid."
+        ],
+        "postAdmissionPreconditions": "Lease coverage and registry coverage are checked, original parents/aliases revalidated before first effect, then existing ownership, capability, revision, destination and domain rules are re-read. Nested calls reuse current lease without extension or reacquisition.",
+        "domainLockOrder": "Shared path admission happens before existing domain guards and permission loaders. Gap append lock is nested after shared admission; other owned paths introduce no new domain mutex. Admission remains held through publish, rekey and rollback.",
+        "sharedAdmissionEntry": "src-tauri/src/shelf.rs::save_memo_as reaches src-tauri/src/atomic_file.rs::with_path_transactions inside the worker, before nested domain work."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_08_shelf_all_seven_wrappers_yield_and_preserve_join_errors",
+          "phase08_08_shelf_nonempty_results_and_legacy_rejections",
+          "phase08_08_shelf_every_write_same_target_and_error_release",
+          "phase08_08_shelf_export_permission_denial_then_success",
+          "phase08_08_shelf_all_writers_versus_parent_rename_both_orders",
+          "phase08_08_shelf_copy_and_export_aliases_conflict_with_physical_parent",
+          "phase08_08_shelf_actual_primary_workspace_and_read_only_guards"
+        ],
+        "workerProof": "Every actual owned wrapper is polled and yields on the same async polling task while a distinct blocking worker is held; injected worker panic asserts contextual JoinError. This is not a spare-worker-only responsiveness test.",
+        "permissions": "Path-scoped PrimaryWorkspaceAccessFixture opts selected temporary roots into the actual production primary-workspace guard. Foreign/readOnly and post-admission policy changes reject actual wrappers; other historical fixture bypasses are not counted as permission evidence. File-store compatibility commands retain their original user-selected arbitrary-file policy.",
+        "platformScope": "macOS execution only; cfg(unix) aliases and parent races executed. Windows native runtime and final native saturation/artifact isolation remain later gates. Scratchpad/drafts Trash uses existing cfg(test) local deletion and Files uses scoped local TrashFixture; no system Trash, installed CLI, provider credentials or native application launched.",
+        "scope": "Complete results, same-target contention/error release, real earlier Files/document overlap, byte/revision preservation and nested rollback are verified by the named module tests. Conservative scratchpad/drafts subtrees and Gap workspace snapshots serialize overlapping work; this is in-process exclusion only."
+      }
+    },
+    {
+      "name": "drafts_list",
+      "module": "src-tauri/src/drafts.rs",
+      "registrationPath": "src-tauri/src/lib.rs::drafts::ipc::drafts_list",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/drafts.rs::ipc::drafts_list awaits spawn_blocking before filesystem reads, walks, serialization, process work or admission waits.",
+        "src-tauri/src/drafts.rs::drafts_list preserves the original synchronous Rust API.",
+        "src-tauri/src/drafts.rs::drafts_list_in_transaction performs the admitted domain work with current disk/policy validation."
+      ],
+      "workerBoundary": "src-tauri/src/drafts.rs::ipc::drafts_list owns its inputs and awaits tauri::async_runtime::spawn_blocking. All owned results remain Result<T,String>; inner legacy errors pass unchanged and JoinError adds only command_task_failed context. Drafts event wrappers own AppHandle<R>; promotion obtains live ApprovalState inside worker. No borrowed State or guard crosses await.",
+      "syncCallers": [
+        "src-tauri/src/drafts.rs::drafts_list remains available with its original synchronous signature; existing Rust regression callers compile and CLI check passes.",
+        "src-tauri/src/drafts.rs::update_idea_origin_refs_in_transaction receives the scratchpad transition lease; direct update_idea_origin_refs independently admits its finite write. Task promotion currently calls tasks::create_task_note entirely under its complete outer lease; Plan09 must provide a borrowed task adapter and update this call when tasks adds admission."
+      ],
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_08",
+          "passed": 32,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/components/drafts/DraftsPane.tsx",
+          "src/components/drafts/NewDraftDialog.tsx",
+          "src/components/drafts/PromoteDraftDialog.tsx",
+          "src/lib/taskIngestion.ts",
+          "src/components/gap/GapPane.tsx"
+        ],
+        "payload": "listDrafts; DraftsPane refresh and dashboard load own list results; listing may adopt orphan bodies.",
+        "terminalNoticeOwner": "Existing initiating component/dialog callback and current local/global error surface own settlement; Rust workers finish independently of view polling. Plans25/26 remain responsible for shared cross-navigation lifetime and single completion notice. No new job service or final lifecycle claim in this shard."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=drafts_list"
+      },
+      "mutationKey": {
+        "lexicalPaths": [
+          "Original lexical and physical configured drafts root, workspace.config.yaml and complete .maru/drafts subtree cover body allocation, index and baseline files.",
+          "Promotion additionally reserves exact document target or resolved tasks/active allocation subtree; relink reserves selected promoted target.",
+          "Conditional registry migration files join complete admission. Body/index/baseline/target rollback stays inside the same lease."
+        ],
+        "aliasPaths": [
+          "src-tauri/src/atomic_file.rs::PathTransactionRequest records absolute lexical and physical nearest-parent-plus-suffix identities. Pinned parent handles reject removed/replaced original directories; supported workspace aliases remain valid."
+        ],
+        "postAdmissionPreconditions": "Lease coverage and registry coverage are checked, original parents/aliases revalidated before first effect, then existing ownership, capability, revision, destination and domain rules are re-read. Nested calls reuse current lease without extension or reacquisition.",
+        "domainLockOrder": "Shared path admission happens before existing domain guards and permission loaders. Gap append lock is nested after shared admission; other owned paths introduce no new domain mutex. Admission remains held through publish, rekey and rollback.",
+        "sharedAdmissionEntry": "src-tauri/src/drafts.rs::drafts_list reaches src-tauri/src/atomic_file.rs::with_path_transactions inside the worker, before nested domain work."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_08_drafts_all_nine_wrappers_yield_on_same_task",
+          "phase08_08_drafts_payload_approval_and_legacy_conflict_survive",
+          "phase08_08_drafts_two_same_revision_saves_keep_one_winner",
+          "phase08_08_drafts_every_writer_contends_and_releases_on_index_error",
+          "phase08_08_drafts_promotion_files_parent_both_orders_and_aliases",
+          "phase08_08_drafts_promotion_document_create_both_orders_and_aliases",
+          "phase08_08_drafts_index_commit_failures_restore_body_baseline_and_target",
+          "phase08_08_drafts_actual_wrappers_enforce_primary_and_fresh_write_policy",
+          "phase08_08_drafts_workspace_alias_preserves_lexical_admission",
+          "phase08_08_drafts_reads_serialize_with_real_rename_and_local_trash"
+        ],
+        "workerProof": "Every actual owned wrapper is polled and yields on the same async polling task while a distinct blocking worker is held; injected worker panic asserts contextual JoinError. This is not a spare-worker-only responsiveness test.",
+        "permissions": "Path-scoped PrimaryWorkspaceAccessFixture opts selected temporary roots into the actual production primary-workspace guard. Foreign/readOnly and post-admission policy changes reject actual wrappers; other historical fixture bypasses are not counted as permission evidence. File-store compatibility commands retain their original user-selected arbitrary-file policy.",
+        "platformScope": "macOS execution only; cfg(unix) aliases and parent races executed. Windows native runtime and final native saturation/artifact isolation remain later gates. Scratchpad/drafts Trash uses existing cfg(test) local deletion and Files uses scoped local TrashFixture; no system Trash, installed CLI, provider credentials or native application launched.",
+        "scope": "Complete results, same-target contention/error release, real earlier Files/document overlap, byte/revision preservation and nested rollback are verified by the named module tests. Conservative scratchpad/drafts subtrees and Gap workspace snapshots serialize overlapping work; this is in-process exclusion only."
+      }
+    },
+    {
+      "name": "drafts_promote_default_dir",
+      "module": "src-tauri/src/drafts.rs",
+      "registrationPath": "src-tauri/src/lib.rs::drafts::ipc::drafts_promote_default_dir",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/drafts.rs::ipc::drafts_promote_default_dir awaits spawn_blocking before filesystem reads, walks, serialization, process work or admission waits.",
+        "src-tauri/src/drafts.rs::drafts_promote_default_dir preserves the original synchronous Rust API.",
+        "src-tauri/src/drafts.rs::drafts_promote_default_dir_in_transaction performs the admitted domain work with current disk/policy validation."
+      ],
+      "workerBoundary": "src-tauri/src/drafts.rs::ipc::drafts_promote_default_dir owns its inputs and awaits tauri::async_runtime::spawn_blocking. All owned results remain Result<T,String>; inner legacy errors pass unchanged and JoinError adds only command_task_failed context. Drafts event wrappers own AppHandle<R>; promotion obtains live ApprovalState inside worker. No borrowed State or guard crosses await.",
+      "syncCallers": [
+        "src-tauri/src/drafts.rs::drafts_promote_default_dir remains available with its original synchronous signature; existing Rust regression callers compile and CLI check passes.",
+        "src-tauri/src/drafts.rs::update_idea_origin_refs_in_transaction receives the scratchpad transition lease; direct update_idea_origin_refs independently admits its finite write. Task promotion currently calls tasks::create_task_note entirely under its complete outer lease; Plan09 must provide a borrowed task adapter and update this call when tasks adds admission."
+      ],
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_08",
+          "passed": 32,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/components/drafts/DraftsPane.tsx",
+          "src/components/drafts/NewDraftDialog.tsx",
+          "src/components/drafts/PromoteDraftDialog.tsx",
+          "src/lib/taskIngestion.ts",
+          "src/components/gap/GapPane.tsx"
+        ],
+        "payload": "draftsPromoteDefaultDir; PromoteDraftDialog default-directory query owns dialog field.",
+        "terminalNoticeOwner": "Existing initiating component/dialog callback and current local/global error surface own settlement; Rust workers finish independently of view polling. Plans25/26 remain responsible for shared cross-navigation lifetime and single completion notice. No new job service or final lifecycle claim in this shard."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=drafts_promote_default_dir"
+      },
+      "mutationKey": {
+        "lexicalPaths": [
+          "Original lexical and physical configured drafts root, workspace.config.yaml and complete .maru/drafts subtree cover body allocation, index and baseline files.",
+          "Promotion additionally reserves exact document target or resolved tasks/active allocation subtree; relink reserves selected promoted target.",
+          "Conditional registry migration files join complete admission. Body/index/baseline/target rollback stays inside the same lease."
+        ],
+        "aliasPaths": [
+          "src-tauri/src/atomic_file.rs::PathTransactionRequest records absolute lexical and physical nearest-parent-plus-suffix identities. Pinned parent handles reject removed/replaced original directories; supported workspace aliases remain valid."
+        ],
+        "postAdmissionPreconditions": "Lease coverage and registry coverage are checked, original parents/aliases revalidated before first effect, then existing ownership, capability, revision, destination and domain rules are re-read. Nested calls reuse current lease without extension or reacquisition.",
+        "domainLockOrder": "Shared path admission happens before existing domain guards and permission loaders. Gap append lock is nested after shared admission; other owned paths introduce no new domain mutex. Admission remains held through publish, rekey and rollback.",
+        "sharedAdmissionEntry": "src-tauri/src/drafts.rs::drafts_promote_default_dir reaches src-tauri/src/atomic_file.rs::with_path_transactions inside the worker, before nested domain work."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_08_drafts_all_nine_wrappers_yield_on_same_task",
+          "phase08_08_drafts_payload_approval_and_legacy_conflict_survive",
+          "phase08_08_drafts_two_same_revision_saves_keep_one_winner",
+          "phase08_08_drafts_every_writer_contends_and_releases_on_index_error",
+          "phase08_08_drafts_promotion_files_parent_both_orders_and_aliases",
+          "phase08_08_drafts_promotion_document_create_both_orders_and_aliases",
+          "phase08_08_drafts_index_commit_failures_restore_body_baseline_and_target",
+          "phase08_08_drafts_actual_wrappers_enforce_primary_and_fresh_write_policy",
+          "phase08_08_drafts_workspace_alias_preserves_lexical_admission",
+          "phase08_08_drafts_reads_serialize_with_real_rename_and_local_trash"
+        ],
+        "workerProof": "Every actual owned wrapper is polled and yields on the same async polling task while a distinct blocking worker is held; injected worker panic asserts contextual JoinError. This is not a spare-worker-only responsiveness test.",
+        "permissions": "Path-scoped PrimaryWorkspaceAccessFixture opts selected temporary roots into the actual production primary-workspace guard. Foreign/readOnly and post-admission policy changes reject actual wrappers; other historical fixture bypasses are not counted as permission evidence. File-store compatibility commands retain their original user-selected arbitrary-file policy.",
+        "platformScope": "macOS execution only; cfg(unix) aliases and parent races executed. Windows native runtime and final native saturation/artifact isolation remain later gates. Scratchpad/drafts Trash uses existing cfg(test) local deletion and Files uses scoped local TrashFixture; no system Trash, installed CLI, provider credentials or native application launched.",
+        "scope": "Complete results, same-target contention/error release, real earlier Files/document overlap, byte/revision preservation and nested rollback are verified by the named module tests. Conservative scratchpad/drafts subtrees and Gap workspace snapshots serialize overlapping work; this is in-process exclusion only."
+      }
+    },
+    {
+      "name": "drafts_read",
+      "module": "src-tauri/src/drafts.rs",
+      "registrationPath": "src-tauri/src/lib.rs::drafts::ipc::drafts_read",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/drafts.rs::ipc::drafts_read awaits spawn_blocking before filesystem reads, walks, serialization, process work or admission waits.",
+        "src-tauri/src/drafts.rs::drafts_read preserves the original synchronous Rust API.",
+        "src-tauri/src/drafts.rs::drafts_read_in_transaction performs the admitted domain work with current disk/policy validation."
+      ],
+      "workerBoundary": "src-tauri/src/drafts.rs::ipc::drafts_read owns its inputs and awaits tauri::async_runtime::spawn_blocking. All owned results remain Result<T,String>; inner legacy errors pass unchanged and JoinError adds only command_task_failed context. Drafts event wrappers own AppHandle<R>; promotion obtains live ApprovalState inside worker. No borrowed State or guard crosses await.",
+      "syncCallers": [
+        "src-tauri/src/drafts.rs::drafts_read remains available with its original synchronous signature; existing Rust regression callers compile and CLI check passes.",
+        "src-tauri/src/drafts.rs::update_idea_origin_refs_in_transaction receives the scratchpad transition lease; direct update_idea_origin_refs independently admits its finite write. Task promotion currently calls tasks::create_task_note entirely under its complete outer lease; Plan09 must provide a borrowed task adapter and update this call when tasks adds admission."
+      ],
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_08",
+          "passed": 32,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/components/drafts/DraftsPane.tsx",
+          "src/components/drafts/NewDraftDialog.tsx",
+          "src/components/drafts/PromoteDraftDialog.tsx",
+          "src/lib/taskIngestion.ts",
+          "src/components/gap/GapPane.tsx"
+        ],
+        "payload": "readDraft; DraftsPane selection and GapPane draft read own selected content.",
+        "terminalNoticeOwner": "Existing initiating component/dialog callback and current local/global error surface own settlement; Rust workers finish independently of view polling. Plans25/26 remain responsible for shared cross-navigation lifetime and single completion notice. No new job service or final lifecycle claim in this shard."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=drafts_read"
+      },
+      "mutationKey": {
+        "lexicalPaths": [
+          "Original lexical and physical configured drafts root, workspace.config.yaml and complete .maru/drafts subtree cover body allocation, index and baseline files.",
+          "Promotion additionally reserves exact document target or resolved tasks/active allocation subtree; relink reserves selected promoted target.",
+          "Conditional registry migration files join complete admission. Body/index/baseline/target rollback stays inside the same lease."
+        ],
+        "aliasPaths": [
+          "src-tauri/src/atomic_file.rs::PathTransactionRequest records absolute lexical and physical nearest-parent-plus-suffix identities. Pinned parent handles reject removed/replaced original directories; supported workspace aliases remain valid."
+        ],
+        "postAdmissionPreconditions": "Lease coverage and registry coverage are checked, original parents/aliases revalidated before first effect, then existing ownership, capability, revision, destination and domain rules are re-read. Nested calls reuse current lease without extension or reacquisition.",
+        "domainLockOrder": "Shared path admission happens before existing domain guards and permission loaders. Gap append lock is nested after shared admission; other owned paths introduce no new domain mutex. Admission remains held through publish, rekey and rollback.",
+        "sharedAdmissionEntry": "src-tauri/src/drafts.rs::drafts_read reaches src-tauri/src/atomic_file.rs::with_path_transactions inside the worker, before nested domain work."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_08_drafts_all_nine_wrappers_yield_on_same_task",
+          "phase08_08_drafts_payload_approval_and_legacy_conflict_survive",
+          "phase08_08_drafts_two_same_revision_saves_keep_one_winner",
+          "phase08_08_drafts_every_writer_contends_and_releases_on_index_error",
+          "phase08_08_drafts_promotion_files_parent_both_orders_and_aliases",
+          "phase08_08_drafts_promotion_document_create_both_orders_and_aliases",
+          "phase08_08_drafts_index_commit_failures_restore_body_baseline_and_target",
+          "phase08_08_drafts_actual_wrappers_enforce_primary_and_fresh_write_policy",
+          "phase08_08_drafts_workspace_alias_preserves_lexical_admission",
+          "phase08_08_drafts_reads_serialize_with_real_rename_and_local_trash"
+        ],
+        "workerProof": "Every actual owned wrapper is polled and yields on the same async polling task while a distinct blocking worker is held; injected worker panic asserts contextual JoinError. This is not a spare-worker-only responsiveness test.",
+        "permissions": "Path-scoped PrimaryWorkspaceAccessFixture opts selected temporary roots into the actual production primary-workspace guard. Foreign/readOnly and post-admission policy changes reject actual wrappers; other historical fixture bypasses are not counted as permission evidence. File-store compatibility commands retain their original user-selected arbitrary-file policy.",
+        "platformScope": "macOS execution only; cfg(unix) aliases and parent races executed. Windows native runtime and final native saturation/artifact isolation remain later gates. Scratchpad/drafts Trash uses existing cfg(test) local deletion and Files uses scoped local TrashFixture; no system Trash, installed CLI, provider credentials or native application launched.",
+        "scope": "Complete results, same-target contention/error release, real earlier Files/document overlap, byte/revision preservation and nested rollback are verified by the named module tests. Conservative scratchpad/drafts subtrees and Gap workspace snapshots serialize overlapping work; this is in-process exclusion only."
+      }
+    },
+    {
+      "name": "drafts_save",
+      "module": "src-tauri/src/drafts.rs",
+      "registrationPath": "src-tauri/src/lib.rs::drafts::ipc::drafts_save",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/drafts.rs::ipc::drafts_save awaits spawn_blocking before filesystem reads, walks, serialization, process work or admission waits.",
+        "src-tauri/src/drafts.rs::drafts_save preserves the original synchronous Rust API.",
+        "src-tauri/src/drafts.rs::drafts_save_in_transaction performs the admitted domain work with current disk/policy validation.",
+        "src-tauri/src/drafts.rs::drafts_save_blocking owns AppHandle<R> and command values, preserving drafts-changed event emission."
+      ],
+      "workerBoundary": "src-tauri/src/drafts.rs::ipc::drafts_save owns its inputs and awaits tauri::async_runtime::spawn_blocking. All owned results remain Result<T,String>; inner legacy errors pass unchanged and JoinError adds only command_task_failed context. Drafts event wrappers own AppHandle<R>; promotion obtains live ApprovalState inside worker. No borrowed State or guard crosses await.",
+      "syncCallers": [
+        "src-tauri/src/drafts.rs::drafts_save remains available with its original synchronous signature; existing Rust regression callers compile and CLI check passes.",
+        "src-tauri/src/drafts.rs::update_idea_origin_refs_in_transaction receives the scratchpad transition lease; direct update_idea_origin_refs independently admits its finite write. Task promotion currently calls tasks::create_task_note entirely under its complete outer lease; Plan09 must provide a borrowed task adapter and update this call when tasks adds admission."
+      ],
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_08",
+          "passed": 32,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/components/drafts/DraftsPane.tsx",
+          "src/components/drafts/NewDraftDialog.tsx",
+          "src/components/drafts/PromoteDraftDialog.tsx",
+          "src/lib/taskIngestion.ts",
+          "src/components/gap/GapPane.tsx"
+        ],
+        "payload": "saveDraft; DraftsPane save handler owns expectedUpdatedAt, returned body and error feedback.",
+        "terminalNoticeOwner": "Existing initiating component/dialog callback and current local/global error surface own settlement; Rust workers finish independently of view polling. Plans25/26 remain responsible for shared cross-navigation lifetime and single completion notice. No new job service or final lifecycle claim in this shard."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=drafts_save"
+      },
+      "mutationKey": {
+        "lexicalPaths": [
+          "Original lexical and physical configured drafts root, workspace.config.yaml and complete .maru/drafts subtree cover body allocation, index and baseline files.",
+          "Promotion additionally reserves exact document target or resolved tasks/active allocation subtree; relink reserves selected promoted target.",
+          "Conditional registry migration files join complete admission. Body/index/baseline/target rollback stays inside the same lease."
+        ],
+        "aliasPaths": [
+          "src-tauri/src/atomic_file.rs::PathTransactionRequest records absolute lexical and physical nearest-parent-plus-suffix identities. Pinned parent handles reject removed/replaced original directories; supported workspace aliases remain valid."
+        ],
+        "postAdmissionPreconditions": "Lease coverage and registry coverage are checked, original parents/aliases revalidated before first effect, then existing ownership, capability, revision, destination and domain rules are re-read. Nested calls reuse current lease without extension or reacquisition.",
+        "domainLockOrder": "Shared path admission happens before existing domain guards and permission loaders. Gap append lock is nested after shared admission; other owned paths introduce no new domain mutex. Admission remains held through publish, rekey and rollback.",
+        "sharedAdmissionEntry": "src-tauri/src/drafts.rs::drafts_save reaches src-tauri/src/atomic_file.rs::with_path_transactions inside the worker, before nested domain work."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_08_drafts_all_nine_wrappers_yield_on_same_task",
+          "phase08_08_drafts_payload_approval_and_legacy_conflict_survive",
+          "phase08_08_drafts_two_same_revision_saves_keep_one_winner",
+          "phase08_08_drafts_every_writer_contends_and_releases_on_index_error",
+          "phase08_08_drafts_promotion_files_parent_both_orders_and_aliases",
+          "phase08_08_drafts_promotion_document_create_both_orders_and_aliases",
+          "phase08_08_drafts_index_commit_failures_restore_body_baseline_and_target",
+          "phase08_08_drafts_actual_wrappers_enforce_primary_and_fresh_write_policy",
+          "phase08_08_drafts_workspace_alias_preserves_lexical_admission",
+          "phase08_08_drafts_reads_serialize_with_real_rename_and_local_trash"
+        ],
+        "workerProof": "Every actual owned wrapper is polled and yields on the same async polling task while a distinct blocking worker is held; injected worker panic asserts contextual JoinError. This is not a spare-worker-only responsiveness test.",
+        "permissions": "Path-scoped PrimaryWorkspaceAccessFixture opts selected temporary roots into the actual production primary-workspace guard. Foreign/readOnly and post-admission policy changes reject actual wrappers; other historical fixture bypasses are not counted as permission evidence. File-store compatibility commands retain their original user-selected arbitrary-file policy.",
+        "platformScope": "macOS execution only; cfg(unix) aliases and parent races executed. Windows native runtime and final native saturation/artifact isolation remain later gates. Scratchpad/drafts Trash uses existing cfg(test) local deletion and Files uses scoped local TrashFixture; no system Trash, installed CLI, provider credentials or native application launched.",
+        "scope": "Complete results, same-target contention/error release, real earlier Files/document overlap, byte/revision preservation and nested rollback are verified by the named module tests. Conservative scratchpad/drafts subtrees and Gap workspace snapshots serialize overlapping work; this is in-process exclusion only."
+      }
+    },
+    {
+      "name": "drafts_create",
+      "module": "src-tauri/src/drafts.rs",
+      "registrationPath": "src-tauri/src/lib.rs::drafts::ipc::drafts_create",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/drafts.rs::ipc::drafts_create awaits spawn_blocking before filesystem reads, walks, serialization, process work or admission waits.",
+        "src-tauri/src/drafts.rs::drafts_create preserves the original synchronous Rust API.",
+        "src-tauri/src/drafts.rs::drafts_create_in_transaction performs the admitted domain work with current disk/policy validation.",
+        "src-tauri/src/drafts.rs::drafts_create_blocking owns AppHandle<R> and command values, preserving drafts-changed event emission."
+      ],
+      "workerBoundary": "src-tauri/src/drafts.rs::ipc::drafts_create owns its inputs and awaits tauri::async_runtime::spawn_blocking. All owned results remain Result<T,String>; inner legacy errors pass unchanged and JoinError adds only command_task_failed context. Drafts event wrappers own AppHandle<R>; promotion obtains live ApprovalState inside worker. No borrowed State or guard crosses await.",
+      "syncCallers": [
+        "src-tauri/src/drafts.rs::drafts_create remains available with its original synchronous signature; existing Rust regression callers compile and CLI check passes.",
+        "src-tauri/src/drafts.rs::update_idea_origin_refs_in_transaction receives the scratchpad transition lease; direct update_idea_origin_refs independently admits its finite write. Task promotion currently calls tasks::create_task_note entirely under its complete outer lease; Plan09 must provide a borrowed task adapter and update this call when tasks adds admission."
+      ],
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_08",
+          "passed": 32,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/components/drafts/DraftsPane.tsx",
+          "src/components/drafts/NewDraftDialog.tsx",
+          "src/components/drafts/PromoteDraftDialog.tsx",
+          "src/lib/taskIngestion.ts",
+          "src/components/gap/GapPane.tsx"
+        ],
+        "payload": "createDraft; NewDraftDialog and taskIngestion own explicit creation, return payload and refresh.",
+        "terminalNoticeOwner": "Existing initiating component/dialog callback and current local/global error surface own settlement; Rust workers finish independently of view polling. Plans25/26 remain responsible for shared cross-navigation lifetime and single completion notice. No new job service or final lifecycle claim in this shard."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=drafts_create"
+      },
+      "mutationKey": {
+        "lexicalPaths": [
+          "Original lexical and physical configured drafts root, workspace.config.yaml and complete .maru/drafts subtree cover body allocation, index and baseline files.",
+          "Promotion additionally reserves exact document target or resolved tasks/active allocation subtree; relink reserves selected promoted target.",
+          "Conditional registry migration files join complete admission. Body/index/baseline/target rollback stays inside the same lease."
+        ],
+        "aliasPaths": [
+          "src-tauri/src/atomic_file.rs::PathTransactionRequest records absolute lexical and physical nearest-parent-plus-suffix identities. Pinned parent handles reject removed/replaced original directories; supported workspace aliases remain valid."
+        ],
+        "postAdmissionPreconditions": "Lease coverage and registry coverage are checked, original parents/aliases revalidated before first effect, then existing ownership, capability, revision, destination and domain rules are re-read. Nested calls reuse current lease without extension or reacquisition.",
+        "domainLockOrder": "Shared path admission happens before existing domain guards and permission loaders. Gap append lock is nested after shared admission; other owned paths introduce no new domain mutex. Admission remains held through publish, rekey and rollback.",
+        "sharedAdmissionEntry": "src-tauri/src/drafts.rs::drafts_create reaches src-tauri/src/atomic_file.rs::with_path_transactions inside the worker, before nested domain work."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_08_drafts_all_nine_wrappers_yield_on_same_task",
+          "phase08_08_drafts_payload_approval_and_legacy_conflict_survive",
+          "phase08_08_drafts_two_same_revision_saves_keep_one_winner",
+          "phase08_08_drafts_every_writer_contends_and_releases_on_index_error",
+          "phase08_08_drafts_promotion_files_parent_both_orders_and_aliases",
+          "phase08_08_drafts_promotion_document_create_both_orders_and_aliases",
+          "phase08_08_drafts_index_commit_failures_restore_body_baseline_and_target",
+          "phase08_08_drafts_actual_wrappers_enforce_primary_and_fresh_write_policy",
+          "phase08_08_drafts_workspace_alias_preserves_lexical_admission",
+          "phase08_08_drafts_reads_serialize_with_real_rename_and_local_trash"
+        ],
+        "workerProof": "Every actual owned wrapper is polled and yields on the same async polling task while a distinct blocking worker is held; injected worker panic asserts contextual JoinError. This is not a spare-worker-only responsiveness test.",
+        "permissions": "Path-scoped PrimaryWorkspaceAccessFixture opts selected temporary roots into the actual production primary-workspace guard. Foreign/readOnly and post-admission policy changes reject actual wrappers; other historical fixture bypasses are not counted as permission evidence. File-store compatibility commands retain their original user-selected arbitrary-file policy.",
+        "platformScope": "macOS execution only; cfg(unix) aliases and parent races executed. Windows native runtime and final native saturation/artifact isolation remain later gates. Scratchpad/drafts Trash uses existing cfg(test) local deletion and Files uses scoped local TrashFixture; no system Trash, installed CLI, provider credentials or native application launched.",
+        "scope": "Complete results, same-target contention/error release, real earlier Files/document overlap, byte/revision preservation and nested rollback are verified by the named module tests. Conservative scratchpad/drafts subtrees and Gap workspace snapshots serialize overlapping work; this is in-process exclusion only."
+      }
+    },
+    {
+      "name": "drafts_set_status",
+      "module": "src-tauri/src/drafts.rs",
+      "registrationPath": "src-tauri/src/lib.rs::drafts::ipc::drafts_set_status",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/drafts.rs::ipc::drafts_set_status awaits spawn_blocking before filesystem reads, walks, serialization, process work or admission waits.",
+        "src-tauri/src/drafts.rs::drafts_set_status preserves the original synchronous Rust API.",
+        "src-tauri/src/drafts.rs::drafts_set_status_in_transaction performs the admitted domain work with current disk/policy validation.",
+        "src-tauri/src/drafts.rs::drafts_set_status_blocking owns AppHandle<R> and command values, preserving drafts-changed event emission."
+      ],
+      "workerBoundary": "src-tauri/src/drafts.rs::ipc::drafts_set_status owns its inputs and awaits tauri::async_runtime::spawn_blocking. All owned results remain Result<T,String>; inner legacy errors pass unchanged and JoinError adds only command_task_failed context. Drafts event wrappers own AppHandle<R>; promotion obtains live ApprovalState inside worker. No borrowed State or guard crosses await.",
+      "syncCallers": [
+        "src-tauri/src/drafts.rs::drafts_set_status remains available with its original synchronous signature; existing Rust regression callers compile and CLI check passes.",
+        "src-tauri/src/drafts.rs::update_idea_origin_refs_in_transaction receives the scratchpad transition lease; direct update_idea_origin_refs independently admits its finite write. Task promotion currently calls tasks::create_task_note entirely under its complete outer lease; Plan09 must provide a borrowed task adapter and update this call when tasks adds admission."
+      ],
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_08",
+          "passed": 32,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/components/drafts/DraftsPane.tsx",
+          "src/components/drafts/NewDraftDialog.tsx",
+          "src/components/drafts/PromoteDraftDialog.tsx",
+          "src/lib/taskIngestion.ts",
+          "src/components/gap/GapPane.tsx"
+        ],
+        "payload": "setDraftStatus; DraftsPane status handler awaits index update and refresh.",
+        "terminalNoticeOwner": "Existing initiating component/dialog callback and current local/global error surface own settlement; Rust workers finish independently of view polling. Plans25/26 remain responsible for shared cross-navigation lifetime and single completion notice. No new job service or final lifecycle claim in this shard."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=drafts_set_status"
+      },
+      "mutationKey": {
+        "lexicalPaths": [
+          "Original lexical and physical configured drafts root, workspace.config.yaml and complete .maru/drafts subtree cover body allocation, index and baseline files.",
+          "Promotion additionally reserves exact document target or resolved tasks/active allocation subtree; relink reserves selected promoted target.",
+          "Conditional registry migration files join complete admission. Body/index/baseline/target rollback stays inside the same lease."
+        ],
+        "aliasPaths": [
+          "src-tauri/src/atomic_file.rs::PathTransactionRequest records absolute lexical and physical nearest-parent-plus-suffix identities. Pinned parent handles reject removed/replaced original directories; supported workspace aliases remain valid."
+        ],
+        "postAdmissionPreconditions": "Lease coverage and registry coverage are checked, original parents/aliases revalidated before first effect, then existing ownership, capability, revision, destination and domain rules are re-read. Nested calls reuse current lease without extension or reacquisition.",
+        "domainLockOrder": "Shared path admission happens before existing domain guards and permission loaders. Gap append lock is nested after shared admission; other owned paths introduce no new domain mutex. Admission remains held through publish, rekey and rollback.",
+        "sharedAdmissionEntry": "src-tauri/src/drafts.rs::drafts_set_status reaches src-tauri/src/atomic_file.rs::with_path_transactions inside the worker, before nested domain work."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_08_drafts_all_nine_wrappers_yield_on_same_task",
+          "phase08_08_drafts_payload_approval_and_legacy_conflict_survive",
+          "phase08_08_drafts_two_same_revision_saves_keep_one_winner",
+          "phase08_08_drafts_every_writer_contends_and_releases_on_index_error",
+          "phase08_08_drafts_promotion_files_parent_both_orders_and_aliases",
+          "phase08_08_drafts_promotion_document_create_both_orders_and_aliases",
+          "phase08_08_drafts_index_commit_failures_restore_body_baseline_and_target",
+          "phase08_08_drafts_actual_wrappers_enforce_primary_and_fresh_write_policy",
+          "phase08_08_drafts_workspace_alias_preserves_lexical_admission",
+          "phase08_08_drafts_reads_serialize_with_real_rename_and_local_trash"
+        ],
+        "workerProof": "Every actual owned wrapper is polled and yields on the same async polling task while a distinct blocking worker is held; injected worker panic asserts contextual JoinError. This is not a spare-worker-only responsiveness test.",
+        "permissions": "Path-scoped PrimaryWorkspaceAccessFixture opts selected temporary roots into the actual production primary-workspace guard. Foreign/readOnly and post-admission policy changes reject actual wrappers; other historical fixture bypasses are not counted as permission evidence. File-store compatibility commands retain their original user-selected arbitrary-file policy.",
+        "platformScope": "macOS execution only; cfg(unix) aliases and parent races executed. Windows native runtime and final native saturation/artifact isolation remain later gates. Scratchpad/drafts Trash uses existing cfg(test) local deletion and Files uses scoped local TrashFixture; no system Trash, installed CLI, provider credentials or native application launched.",
+        "scope": "Complete results, same-target contention/error release, real earlier Files/document overlap, byte/revision preservation and nested rollback are verified by the named module tests. Conservative scratchpad/drafts subtrees and Gap workspace snapshots serialize overlapping work; this is in-process exclusion only."
+      }
+    },
+    {
+      "name": "drafts_discard",
+      "module": "src-tauri/src/drafts.rs",
+      "registrationPath": "src-tauri/src/lib.rs::drafts::ipc::drafts_discard",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/drafts.rs::ipc::drafts_discard awaits spawn_blocking before filesystem reads, walks, serialization, process work or admission waits.",
+        "src-tauri/src/drafts.rs::drafts_discard preserves the original synchronous Rust API.",
+        "src-tauri/src/drafts.rs::drafts_discard_in_transaction performs the admitted domain work with current disk/policy validation.",
+        "src-tauri/src/drafts.rs::drafts_discard_blocking owns AppHandle<R> and command values, preserving drafts-changed event emission."
+      ],
+      "workerBoundary": "src-tauri/src/drafts.rs::ipc::drafts_discard owns its inputs and awaits tauri::async_runtime::spawn_blocking. All owned results remain Result<T,String>; inner legacy errors pass unchanged and JoinError adds only command_task_failed context. Drafts event wrappers own AppHandle<R>; promotion obtains live ApprovalState inside worker. No borrowed State or guard crosses await.",
+      "syncCallers": [
+        "src-tauri/src/drafts.rs::drafts_discard remains available with its original synchronous signature; existing Rust regression callers compile and CLI check passes.",
+        "src-tauri/src/drafts.rs::update_idea_origin_refs_in_transaction receives the scratchpad transition lease; direct update_idea_origin_refs independently admits its finite write. Task promotion currently calls tasks::create_task_note entirely under its complete outer lease; Plan09 must provide a borrowed task adapter and update this call when tasks adds admission."
+      ],
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_08",
+          "passed": 32,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/components/drafts/DraftsPane.tsx",
+          "src/components/drafts/NewDraftDialog.tsx",
+          "src/components/drafts/PromoteDraftDialog.tsx",
+          "src/lib/taskIngestion.ts",
+          "src/components/gap/GapPane.tsx"
+        ],
+        "payload": "discardDraft; DraftsPane discard handler owns confirmation, result and refresh.",
+        "terminalNoticeOwner": "Existing initiating component/dialog callback and current local/global error surface own settlement; Rust workers finish independently of view polling. Plans25/26 remain responsible for shared cross-navigation lifetime and single completion notice. No new job service or final lifecycle claim in this shard."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=drafts_discard"
+      },
+      "mutationKey": {
+        "lexicalPaths": [
+          "Original lexical and physical configured drafts root, workspace.config.yaml and complete .maru/drafts subtree cover body allocation, index and baseline files.",
+          "Promotion additionally reserves exact document target or resolved tasks/active allocation subtree; relink reserves selected promoted target.",
+          "Conditional registry migration files join complete admission. Body/index/baseline/target rollback stays inside the same lease."
+        ],
+        "aliasPaths": [
+          "src-tauri/src/atomic_file.rs::PathTransactionRequest records absolute lexical and physical nearest-parent-plus-suffix identities. Pinned parent handles reject removed/replaced original directories; supported workspace aliases remain valid."
+        ],
+        "postAdmissionPreconditions": "Lease coverage and registry coverage are checked, original parents/aliases revalidated before first effect, then existing ownership, capability, revision, destination and domain rules are re-read. Nested calls reuse current lease without extension or reacquisition.",
+        "domainLockOrder": "Shared path admission happens before existing domain guards and permission loaders. Gap append lock is nested after shared admission; other owned paths introduce no new domain mutex. Admission remains held through publish, rekey and rollback.",
+        "sharedAdmissionEntry": "src-tauri/src/drafts.rs::drafts_discard reaches src-tauri/src/atomic_file.rs::with_path_transactions inside the worker, before nested domain work."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_08_drafts_all_nine_wrappers_yield_on_same_task",
+          "phase08_08_drafts_payload_approval_and_legacy_conflict_survive",
+          "phase08_08_drafts_two_same_revision_saves_keep_one_winner",
+          "phase08_08_drafts_every_writer_contends_and_releases_on_index_error",
+          "phase08_08_drafts_promotion_files_parent_both_orders_and_aliases",
+          "phase08_08_drafts_promotion_document_create_both_orders_and_aliases",
+          "phase08_08_drafts_index_commit_failures_restore_body_baseline_and_target",
+          "phase08_08_drafts_actual_wrappers_enforce_primary_and_fresh_write_policy",
+          "phase08_08_drafts_workspace_alias_preserves_lexical_admission",
+          "phase08_08_drafts_reads_serialize_with_real_rename_and_local_trash"
+        ],
+        "workerProof": "Every actual owned wrapper is polled and yields on the same async polling task while a distinct blocking worker is held; injected worker panic asserts contextual JoinError. This is not a spare-worker-only responsiveness test.",
+        "permissions": "Path-scoped PrimaryWorkspaceAccessFixture opts selected temporary roots into the actual production primary-workspace guard. Foreign/readOnly and post-admission policy changes reject actual wrappers; other historical fixture bypasses are not counted as permission evidence. File-store compatibility commands retain their original user-selected arbitrary-file policy.",
+        "platformScope": "macOS execution only; cfg(unix) aliases and parent races executed. Windows native runtime and final native saturation/artifact isolation remain later gates. Scratchpad/drafts Trash uses existing cfg(test) local deletion and Files uses scoped local TrashFixture; no system Trash, installed CLI, provider credentials or native application launched.",
+        "scope": "Complete results, same-target contention/error release, real earlier Files/document overlap, byte/revision preservation and nested rollback are verified by the named module tests. Conservative scratchpad/drafts subtrees and Gap workspace snapshots serialize overlapping work; this is in-process exclusion only."
+      }
+    },
+    {
+      "name": "drafts_promote",
+      "module": "src-tauri/src/drafts.rs",
+      "registrationPath": "src-tauri/src/lib.rs::drafts::ipc::drafts_promote",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/drafts.rs::ipc::drafts_promote awaits spawn_blocking before filesystem reads, walks, serialization, process work or admission waits.",
+        "src-tauri/src/drafts.rs::drafts_promote preserves the original synchronous Rust API.",
+        "src-tauri/src/drafts.rs::drafts_promote_in_transaction performs the admitted domain work with current disk/policy validation.",
+        "src-tauri/src/drafts.rs::drafts_promote_blocking owns AppHandle<R> and command values, preserving drafts-changed event emission."
+      ],
+      "workerBoundary": "src-tauri/src/drafts.rs::ipc::drafts_promote owns its inputs and awaits tauri::async_runtime::spawn_blocking. All owned results remain Result<T,String>; inner legacy errors pass unchanged and JoinError adds only command_task_failed context. Drafts event wrappers own AppHandle<R>; promotion obtains live ApprovalState inside worker. No borrowed State or guard crosses await.",
+      "syncCallers": [
+        "src-tauri/src/drafts.rs::drafts_promote remains available with its original synchronous signature; existing Rust regression callers compile and CLI check passes.",
+        "src-tauri/src/drafts.rs::update_idea_origin_refs_in_transaction receives the scratchpad transition lease; direct update_idea_origin_refs independently admits its finite write. Task promotion currently calls tasks::create_task_note entirely under its complete outer lease; Plan09 must provide a borrowed task adapter and update this call when tasks adds admission."
+      ],
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_08",
+          "passed": 32,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/components/drafts/DraftsPane.tsx",
+          "src/components/drafts/NewDraftDialog.tsx",
+          "src/components/drafts/PromoteDraftDialog.tsx",
+          "src/lib/taskIngestion.ts",
+          "src/components/gap/GapPane.tsx"
+        ],
+        "payload": "promoteDraft; PromoteDraftDialog binds approval, target and result; existing drafts-changed event informs refresh.",
+        "terminalNoticeOwner": "Existing initiating component/dialog callback and current local/global error surface own settlement; Rust workers finish independently of view polling. Plans25/26 remain responsible for shared cross-navigation lifetime and single completion notice. No new job service or final lifecycle claim in this shard."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=drafts_promote"
+      },
+      "mutationKey": {
+        "lexicalPaths": [
+          "Original lexical and physical configured drafts root, workspace.config.yaml and complete .maru/drafts subtree cover body allocation, index and baseline files.",
+          "Promotion additionally reserves exact document target or resolved tasks/active allocation subtree; relink reserves selected promoted target.",
+          "Conditional registry migration files join complete admission. Body/index/baseline/target rollback stays inside the same lease."
+        ],
+        "aliasPaths": [
+          "src-tauri/src/atomic_file.rs::PathTransactionRequest records absolute lexical and physical nearest-parent-plus-suffix identities. Pinned parent handles reject removed/replaced original directories; supported workspace aliases remain valid."
+        ],
+        "postAdmissionPreconditions": "Lease coverage and registry coverage are checked, original parents/aliases revalidated before first effect, then existing ownership, capability, revision, destination and domain rules are re-read. Nested calls reuse current lease without extension or reacquisition.",
+        "domainLockOrder": "Shared path admission happens before existing domain guards and permission loaders. Gap append lock is nested after shared admission; other owned paths introduce no new domain mutex. Admission remains held through publish, rekey and rollback.",
+        "sharedAdmissionEntry": "src-tauri/src/drafts.rs::drafts_promote reaches src-tauri/src/atomic_file.rs::with_path_transactions inside the worker, before nested domain work."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_08_drafts_all_nine_wrappers_yield_on_same_task",
+          "phase08_08_drafts_payload_approval_and_legacy_conflict_survive",
+          "phase08_08_drafts_two_same_revision_saves_keep_one_winner",
+          "phase08_08_drafts_every_writer_contends_and_releases_on_index_error",
+          "phase08_08_drafts_promotion_files_parent_both_orders_and_aliases",
+          "phase08_08_drafts_promotion_document_create_both_orders_and_aliases",
+          "phase08_08_drafts_index_commit_failures_restore_body_baseline_and_target",
+          "phase08_08_drafts_actual_wrappers_enforce_primary_and_fresh_write_policy",
+          "phase08_08_drafts_workspace_alias_preserves_lexical_admission",
+          "phase08_08_drafts_reads_serialize_with_real_rename_and_local_trash"
+        ],
+        "workerProof": "Every actual owned wrapper is polled and yields on the same async polling task while a distinct blocking worker is held; injected worker panic asserts contextual JoinError. This is not a spare-worker-only responsiveness test.",
+        "permissions": "Path-scoped PrimaryWorkspaceAccessFixture opts selected temporary roots into the actual production primary-workspace guard. Foreign/readOnly and post-admission policy changes reject actual wrappers; other historical fixture bypasses are not counted as permission evidence. File-store compatibility commands retain their original user-selected arbitrary-file policy.",
+        "platformScope": "macOS execution only; cfg(unix) aliases and parent races executed. Windows native runtime and final native saturation/artifact isolation remain later gates. Scratchpad/drafts Trash uses existing cfg(test) local deletion and Files uses scoped local TrashFixture; no system Trash, installed CLI, provider credentials or native application launched.",
+        "scope": "Complete results, same-target contention/error release, real earlier Files/document overlap, byte/revision preservation and nested rollback are verified by the named module tests. Conservative scratchpad/drafts subtrees and Gap workspace snapshots serialize overlapping work; this is in-process exclusion only."
+      }
+    },
+    {
+      "name": "drafts_relink_promoted",
+      "module": "src-tauri/src/drafts.rs",
+      "registrationPath": "src-tauri/src/lib.rs::drafts::ipc::drafts_relink_promoted",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/drafts.rs::ipc::drafts_relink_promoted awaits spawn_blocking before filesystem reads, walks, serialization, process work or admission waits.",
+        "src-tauri/src/drafts.rs::drafts_relink_promoted preserves the original synchronous Rust API.",
+        "src-tauri/src/drafts.rs::drafts_relink_promoted_in_transaction performs the admitted domain work with current disk/policy validation.",
+        "src-tauri/src/drafts.rs::drafts_relink_promoted_blocking owns AppHandle<R> and command values, preserving drafts-changed event emission."
+      ],
+      "workerBoundary": "src-tauri/src/drafts.rs::ipc::drafts_relink_promoted owns its inputs and awaits tauri::async_runtime::spawn_blocking. All owned results remain Result<T,String>; inner legacy errors pass unchanged and JoinError adds only command_task_failed context. Drafts event wrappers own AppHandle<R>; promotion obtains live ApprovalState inside worker. No borrowed State or guard crosses await.",
+      "syncCallers": [
+        "src-tauri/src/drafts.rs::drafts_relink_promoted remains available with its original synchronous signature; existing Rust regression callers compile and CLI check passes.",
+        "src-tauri/src/drafts.rs::update_idea_origin_refs_in_transaction receives the scratchpad transition lease; direct update_idea_origin_refs independently admits its finite write. Task promotion currently calls tasks::create_task_note entirely under its complete outer lease; Plan09 must provide a borrowed task adapter and update this call when tasks adds admission."
+      ],
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_08",
+          "passed": 32,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/components/drafts/DraftsPane.tsx",
+          "src/components/drafts/NewDraftDialog.tsx",
+          "src/components/drafts/PromoteDraftDialog.tsx",
+          "src/lib/taskIngestion.ts",
+          "src/components/gap/GapPane.tsx"
+        ],
+        "payload": "draftsRelinkPromoted; GapPane relinkSelected owns baseline-preserving relink result and refresh.",
+        "terminalNoticeOwner": "Existing initiating component/dialog callback and current local/global error surface own settlement; Rust workers finish independently of view polling. Plans25/26 remain responsible for shared cross-navigation lifetime and single completion notice. No new job service or final lifecycle claim in this shard."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=drafts_relink_promoted"
+      },
+      "mutationKey": {
+        "lexicalPaths": [
+          "Original lexical and physical configured drafts root, workspace.config.yaml and complete .maru/drafts subtree cover body allocation, index and baseline files.",
+          "Promotion additionally reserves exact document target or resolved tasks/active allocation subtree; relink reserves selected promoted target.",
+          "Conditional registry migration files join complete admission. Body/index/baseline/target rollback stays inside the same lease."
+        ],
+        "aliasPaths": [
+          "src-tauri/src/atomic_file.rs::PathTransactionRequest records absolute lexical and physical nearest-parent-plus-suffix identities. Pinned parent handles reject removed/replaced original directories; supported workspace aliases remain valid."
+        ],
+        "postAdmissionPreconditions": "Lease coverage and registry coverage are checked, original parents/aliases revalidated before first effect, then existing ownership, capability, revision, destination and domain rules are re-read. Nested calls reuse current lease without extension or reacquisition.",
+        "domainLockOrder": "Shared path admission happens before existing domain guards and permission loaders. Gap append lock is nested after shared admission; other owned paths introduce no new domain mutex. Admission remains held through publish, rekey and rollback.",
+        "sharedAdmissionEntry": "src-tauri/src/drafts.rs::drafts_relink_promoted reaches src-tauri/src/atomic_file.rs::with_path_transactions inside the worker, before nested domain work."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_08_drafts_all_nine_wrappers_yield_on_same_task",
+          "phase08_08_drafts_payload_approval_and_legacy_conflict_survive",
+          "phase08_08_drafts_two_same_revision_saves_keep_one_winner",
+          "phase08_08_drafts_every_writer_contends_and_releases_on_index_error",
+          "phase08_08_drafts_promotion_files_parent_both_orders_and_aliases",
+          "phase08_08_drafts_promotion_document_create_both_orders_and_aliases",
+          "phase08_08_drafts_index_commit_failures_restore_body_baseline_and_target",
+          "phase08_08_drafts_actual_wrappers_enforce_primary_and_fresh_write_policy",
+          "phase08_08_drafts_workspace_alias_preserves_lexical_admission",
+          "phase08_08_drafts_reads_serialize_with_real_rename_and_local_trash"
+        ],
+        "workerProof": "Every actual owned wrapper is polled and yields on the same async polling task while a distinct blocking worker is held; injected worker panic asserts contextual JoinError. This is not a spare-worker-only responsiveness test.",
+        "permissions": "Path-scoped PrimaryWorkspaceAccessFixture opts selected temporary roots into the actual production primary-workspace guard. Foreign/readOnly and post-admission policy changes reject actual wrappers; other historical fixture bypasses are not counted as permission evidence. File-store compatibility commands retain their original user-selected arbitrary-file policy.",
+        "platformScope": "macOS execution only; cfg(unix) aliases and parent races executed. Windows native runtime and final native saturation/artifact isolation remain later gates. Scratchpad/drafts Trash uses existing cfg(test) local deletion and Files uses scoped local TrashFixture; no system Trash, installed CLI, provider credentials or native application launched.",
+        "scope": "Complete results, same-target contention/error release, real earlier Files/document overlap, byte/revision preservation and nested rollback are verified by the named module tests. Conservative scratchpad/drafts subtrees and Gap workspace snapshots serialize overlapping work; this is in-process exclusion only."
+      }
+    },
+    {
+      "name": "gap_analyze",
+      "module": "src-tauri/src/gap.rs",
+      "registrationPath": "src-tauri/src/lib.rs::gap::ipc::gap_analyze",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/gap.rs::ipc::gap_analyze awaits spawn_blocking before filesystem reads, walks, serialization, process work or admission waits.",
+        "src-tauri/src/gap.rs::gap_analyze preserves the original synchronous Rust API.",
+        "src-tauri/src/gap.rs::gap_analyze_in_transaction performs the admitted domain work with current disk/policy validation."
+      ],
+      "workerBoundary": "src-tauri/src/gap.rs::ipc::gap_analyze owns its inputs and awaits tauri::async_runtime::spawn_blocking. All owned results remain Result<T,String>; inner legacy errors pass unchanged and JoinError adds only command_task_failed context. Drafts event wrappers own AppHandle<R>; promotion obtains live ApprovalState inside worker. No borrowed State or guard crosses await.",
+      "syncCallers": [
+        "src-tauri/src/gap.rs::gap_analyze remains available with its original synchronous signature; existing Rust regression callers compile and CLI check passes.",
+        "No new background owner or dispatcher was introduced; existing direct synchronous helpers remain callable."
+      ],
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_08",
+          "passed": 32,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/components/gap/GapPane.tsx"
+        ],
+        "payload": "gapAnalyze; GapPane analysis request tracks selected draft and rejects stale response identity.",
+        "terminalNoticeOwner": "Existing initiating component/dialog callback and current local/global error surface own settlement; Rust workers finish independently of view polling. Plans25/26 remain responsible for shared cross-navigation lifetime and single completion notice. No new job service or final lifecycle claim in this shard."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=gap_analyze"
+      },
+      "mutationKey": {
+        "lexicalPaths": [
+          "Lexical and physical workspace subtree includes the dynamic index-selected baseline and promoted document, and .maru/gap-log.jsonl.",
+          "Workspace snapshot admission serializes lookup/diff/dedup/append against document and parent writers; the unused rewrite helper separately admits its exact log target.",
+          "Conditional registry migration files are included before permission loaders, even for read commands."
+        ],
+        "aliasPaths": [
+          "src-tauri/src/atomic_file.rs::PathTransactionRequest records absolute lexical and physical nearest-parent-plus-suffix identities. Pinned parent handles reject removed/replaced original directories; supported workspace aliases remain valid."
+        ],
+        "postAdmissionPreconditions": "Lease coverage and registry coverage are checked, original parents/aliases revalidated before first effect, then existing ownership, capability, revision, destination and domain rules are re-read. Nested calls reuse current lease without extension or reacquisition.",
+        "domainLockOrder": "Shared path admission happens before existing domain guards and permission loaders. Gap append lock is nested after shared admission; other owned paths introduce no new domain mutex. Admission remains held through publish, rekey and rollback.",
+        "sharedAdmissionEntry": "src-tauri/src/gap.rs::gap_analyze reaches src-tauri/src/atomic_file.rs::with_path_transactions inside the worker, before nested domain work."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_08_gap_all_wrappers_yield_same_polling_task_and_contextual_join_error",
+          "phase08_08_gap_nonempty_wrappers_and_exact_legacy_errors",
+          "phase08_08_gap_append_same_target_deduplicates_and_failure_releases",
+          "phase08_08_gap_real_document_save_and_append_both_orders_and_aliases",
+          "phase08_08_gap_parent_rename_during_read_and_append_never_recreates",
+          "phase08_08_gap_actual_foreign_readonly_and_post_admission_permissions"
+        ],
+        "workerProof": "Every actual owned wrapper is polled and yields on the same async polling task while a distinct blocking worker is held; injected worker panic asserts contextual JoinError. This is not a spare-worker-only responsiveness test.",
+        "permissions": "Path-scoped PrimaryWorkspaceAccessFixture opts selected temporary roots into the actual production primary-workspace guard. Foreign/readOnly and post-admission policy changes reject actual wrappers; other historical fixture bypasses are not counted as permission evidence. File-store compatibility commands retain their original user-selected arbitrary-file policy.",
+        "platformScope": "macOS execution only; cfg(unix) aliases and parent races executed. Windows native runtime and final native saturation/artifact isolation remain later gates. Scratchpad/drafts Trash uses existing cfg(test) local deletion and Files uses scoped local TrashFixture; no system Trash, installed CLI, provider credentials or native application launched.",
+        "scope": "Complete results, same-target contention/error release, real earlier Files/document overlap, byte/revision preservation and nested rollback are verified by the named module tests. Conservative scratchpad/drafts subtrees and Gap workspace snapshots serialize overlapping work; this is in-process exclusion only."
+      }
+    },
+    {
+      "name": "gap_append_log",
+      "module": "src-tauri/src/gap.rs",
+      "registrationPath": "src-tauri/src/lib.rs::gap::ipc::gap_append_log",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/gap.rs::ipc::gap_append_log awaits spawn_blocking before filesystem reads, walks, serialization, process work or admission waits.",
+        "src-tauri/src/gap.rs::gap_append_log preserves the original synchronous Rust API.",
+        "src-tauri/src/gap.rs::gap_append_log_in_transaction performs the admitted domain work with current disk/policy validation."
+      ],
+      "workerBoundary": "src-tauri/src/gap.rs::ipc::gap_append_log owns its inputs and awaits tauri::async_runtime::spawn_blocking. All owned results remain Result<T,String>; inner legacy errors pass unchanged and JoinError adds only command_task_failed context. Drafts event wrappers own AppHandle<R>; promotion obtains live ApprovalState inside worker. No borrowed State or guard crosses await.",
+      "syncCallers": [
+        "src-tauri/src/gap.rs::gap_append_log remains available with its original synchronous signature; existing Rust regression callers compile and CLI check passes.",
+        "No new background owner or dispatcher was introduced; existing direct synchronous helpers remain callable."
+      ],
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_08",
+          "passed": 32,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/components/gap/GapPane.tsx"
+        ],
+        "payload": "gapAppendLog; GapPane saveToLog owns savingLog/logSaved and refreshLog, errors to setLocalError/setError.",
+        "terminalNoticeOwner": "Existing initiating component/dialog callback and current local/global error surface own settlement; Rust workers finish independently of view polling. Plans25/26 remain responsible for shared cross-navigation lifetime and single completion notice. No new job service or final lifecycle claim in this shard."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=gap_append_log"
+      },
+      "mutationKey": {
+        "lexicalPaths": [
+          "Lexical and physical workspace subtree includes the dynamic index-selected baseline and promoted document, and .maru/gap-log.jsonl.",
+          "Workspace snapshot admission serializes lookup/diff/dedup/append against document and parent writers; the unused rewrite helper separately admits its exact log target.",
+          "Conditional registry migration files are included before permission loaders, even for read commands."
+        ],
+        "aliasPaths": [
+          "src-tauri/src/atomic_file.rs::PathTransactionRequest records absolute lexical and physical nearest-parent-plus-suffix identities. Pinned parent handles reject removed/replaced original directories; supported workspace aliases remain valid."
+        ],
+        "postAdmissionPreconditions": "Lease coverage and registry coverage are checked, original parents/aliases revalidated before first effect, then existing ownership, capability, revision, destination and domain rules are re-read. Nested calls reuse current lease without extension or reacquisition.",
+        "domainLockOrder": "Shared path admission happens before existing domain guards and permission loaders. Gap append lock is nested after shared admission; other owned paths introduce no new domain mutex. Admission remains held through publish, rekey and rollback.",
+        "sharedAdmissionEntry": "src-tauri/src/gap.rs::gap_append_log reaches src-tauri/src/atomic_file.rs::with_path_transactions inside the worker, before nested domain work."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_08_gap_all_wrappers_yield_same_polling_task_and_contextual_join_error",
+          "phase08_08_gap_nonempty_wrappers_and_exact_legacy_errors",
+          "phase08_08_gap_append_same_target_deduplicates_and_failure_releases",
+          "phase08_08_gap_real_document_save_and_append_both_orders_and_aliases",
+          "phase08_08_gap_parent_rename_during_read_and_append_never_recreates",
+          "phase08_08_gap_actual_foreign_readonly_and_post_admission_permissions"
+        ],
+        "workerProof": "Every actual owned wrapper is polled and yields on the same async polling task while a distinct blocking worker is held; injected worker panic asserts contextual JoinError. This is not a spare-worker-only responsiveness test.",
+        "permissions": "Path-scoped PrimaryWorkspaceAccessFixture opts selected temporary roots into the actual production primary-workspace guard. Foreign/readOnly and post-admission policy changes reject actual wrappers; other historical fixture bypasses are not counted as permission evidence. File-store compatibility commands retain their original user-selected arbitrary-file policy.",
+        "platformScope": "macOS execution only; cfg(unix) aliases and parent races executed. Windows native runtime and final native saturation/artifact isolation remain later gates. Scratchpad/drafts Trash uses existing cfg(test) local deletion and Files uses scoped local TrashFixture; no system Trash, installed CLI, provider credentials or native application launched.",
+        "scope": "Complete results, same-target contention/error release, real earlier Files/document overlap, byte/revision preservation and nested rollback are verified by the named module tests. Conservative scratchpad/drafts subtrees and Gap workspace snapshots serialize overlapping work; this is in-process exclusion only."
+      }
+    },
+    {
+      "name": "gap_log_list",
+      "module": "src-tauri/src/gap.rs",
+      "registrationPath": "src-tauri/src/lib.rs::gap::ipc::gap_log_list",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/gap.rs::ipc::gap_log_list awaits spawn_blocking before filesystem reads, walks, serialization, process work or admission waits.",
+        "src-tauri/src/gap.rs::gap_log_list preserves the original synchronous Rust API.",
+        "src-tauri/src/gap.rs::gap_log_list_in_transaction performs the admitted domain work with current disk/policy validation."
+      ],
+      "workerBoundary": "src-tauri/src/gap.rs::ipc::gap_log_list owns its inputs and awaits tauri::async_runtime::spawn_blocking. All owned results remain Result<T,String>; inner legacy errors pass unchanged and JoinError adds only command_task_failed context. Drafts event wrappers own AppHandle<R>; promotion obtains live ApprovalState inside worker. No borrowed State or guard crosses await.",
+      "syncCallers": [
+        "src-tauri/src/gap.rs::gap_log_list remains available with its original synchronous signature; existing Rust regression callers compile and CLI check passes.",
+        "No new background owner or dispatcher was introduced; existing direct synchronous helpers remain callable."
+      ],
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_08",
+          "passed": 32,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/components/gap/GapPane.tsx"
+        ],
+        "payload": "gapLogList; GapPane refreshLog owns log entries; scheduler retains separate synchronous read_gap_log_entries.",
+        "terminalNoticeOwner": "Existing initiating component/dialog callback and current local/global error surface own settlement; Rust workers finish independently of view polling. Plans25/26 remain responsible for shared cross-navigation lifetime and single completion notice. No new job service or final lifecycle claim in this shard."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=gap_log_list"
+      },
+      "mutationKey": {
+        "lexicalPaths": [
+          "Lexical and physical workspace subtree includes the dynamic index-selected baseline and promoted document, and .maru/gap-log.jsonl.",
+          "Workspace snapshot admission serializes lookup/diff/dedup/append against document and parent writers; the unused rewrite helper separately admits its exact log target.",
+          "Conditional registry migration files are included before permission loaders, even for read commands."
+        ],
+        "aliasPaths": [
+          "src-tauri/src/atomic_file.rs::PathTransactionRequest records absolute lexical and physical nearest-parent-plus-suffix identities. Pinned parent handles reject removed/replaced original directories; supported workspace aliases remain valid."
+        ],
+        "postAdmissionPreconditions": "Lease coverage and registry coverage are checked, original parents/aliases revalidated before first effect, then existing ownership, capability, revision, destination and domain rules are re-read. Nested calls reuse current lease without extension or reacquisition.",
+        "domainLockOrder": "Shared path admission happens before existing domain guards and permission loaders. Gap append lock is nested after shared admission; other owned paths introduce no new domain mutex. Admission remains held through publish, rekey and rollback.",
+        "sharedAdmissionEntry": "src-tauri/src/gap.rs::gap_log_list reaches src-tauri/src/atomic_file.rs::with_path_transactions inside the worker, before nested domain work."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_08_gap_all_wrappers_yield_same_polling_task_and_contextual_join_error",
+          "phase08_08_gap_nonempty_wrappers_and_exact_legacy_errors",
+          "phase08_08_gap_append_same_target_deduplicates_and_failure_releases",
+          "phase08_08_gap_real_document_save_and_append_both_orders_and_aliases",
+          "phase08_08_gap_parent_rename_during_read_and_append_never_recreates",
+          "phase08_08_gap_actual_foreign_readonly_and_post_admission_permissions"
+        ],
+        "workerProof": "Every actual owned wrapper is polled and yields on the same async polling task while a distinct blocking worker is held; injected worker panic asserts contextual JoinError. This is not a spare-worker-only responsiveness test.",
+        "permissions": "Path-scoped PrimaryWorkspaceAccessFixture opts selected temporary roots into the actual production primary-workspace guard. Foreign/readOnly and post-admission policy changes reject actual wrappers; other historical fixture bypasses are not counted as permission evidence. File-store compatibility commands retain their original user-selected arbitrary-file policy.",
+        "platformScope": "macOS execution only; cfg(unix) aliases and parent races executed. Windows native runtime and final native saturation/artifact isolation remain later gates. Scratchpad/drafts Trash uses existing cfg(test) local deletion and Files uses scoped local TrashFixture; no system Trash, installed CLI, provider credentials or native application launched.",
+        "scope": "Complete results, same-target contention/error release, real earlier Files/document overlap, byte/revision preservation and nested rollback are verified by the named module tests. Conservative scratchpad/drafts subtrees and Gap workspace snapshots serialize overlapping work; this is in-process exclusion only."
+      }
+    },
+    {
+      "name": "gap_reports_list",
+      "module": "src-tauri/src/gap.rs",
+      "registrationPath": "src-tauri/src/lib.rs::gap::ipc::gap_reports_list",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/gap.rs::ipc::gap_reports_list awaits spawn_blocking before filesystem reads, walks, serialization, process work or admission waits.",
+        "src-tauri/src/gap.rs::gap_reports_list preserves the original synchronous Rust API.",
+        "src-tauri/src/gap.rs::gap_reports_list_in_transaction performs the admitted domain work with current disk/policy validation."
+      ],
+      "workerBoundary": "src-tauri/src/gap.rs::ipc::gap_reports_list owns its inputs and awaits tauri::async_runtime::spawn_blocking. All owned results remain Result<T,String>; inner legacy errors pass unchanged and JoinError adds only command_task_failed context. Drafts event wrappers own AppHandle<R>; promotion obtains live ApprovalState inside worker. No borrowed State or guard crosses await.",
+      "syncCallers": [
+        "src-tauri/src/gap.rs::gap_reports_list remains available with its original synchronous signature; existing Rust regression callers compile and CLI check passes.",
+        "No new background owner or dispatcher was introduced; existing direct synchronous helpers remain callable."
+      ],
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_08",
+          "passed": 32,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/components/gap/GapPane.tsx"
+        ],
+        "payload": "gapReportsList; GapPane refreshReports owns analyzable list and selected report.",
+        "terminalNoticeOwner": "Existing initiating component/dialog callback and current local/global error surface own settlement; Rust workers finish independently of view polling. Plans25/26 remain responsible for shared cross-navigation lifetime and single completion notice. No new job service or final lifecycle claim in this shard."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=gap_reports_list"
+      },
+      "mutationKey": {
+        "lexicalPaths": [
+          "Lexical and physical workspace subtree includes the dynamic index-selected baseline and promoted document, and .maru/gap-log.jsonl.",
+          "Workspace snapshot admission serializes lookup/diff/dedup/append against document and parent writers; the unused rewrite helper separately admits its exact log target.",
+          "Conditional registry migration files are included before permission loaders, even for read commands."
+        ],
+        "aliasPaths": [
+          "src-tauri/src/atomic_file.rs::PathTransactionRequest records absolute lexical and physical nearest-parent-plus-suffix identities. Pinned parent handles reject removed/replaced original directories; supported workspace aliases remain valid."
+        ],
+        "postAdmissionPreconditions": "Lease coverage and registry coverage are checked, original parents/aliases revalidated before first effect, then existing ownership, capability, revision, destination and domain rules are re-read. Nested calls reuse current lease without extension or reacquisition.",
+        "domainLockOrder": "Shared path admission happens before existing domain guards and permission loaders. Gap append lock is nested after shared admission; other owned paths introduce no new domain mutex. Admission remains held through publish, rekey and rollback.",
+        "sharedAdmissionEntry": "src-tauri/src/gap.rs::gap_reports_list reaches src-tauri/src/atomic_file.rs::with_path_transactions inside the worker, before nested domain work."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_08_gap_all_wrappers_yield_same_polling_task_and_contextual_join_error",
+          "phase08_08_gap_nonempty_wrappers_and_exact_legacy_errors",
+          "phase08_08_gap_append_same_target_deduplicates_and_failure_releases",
+          "phase08_08_gap_real_document_save_and_append_both_orders_and_aliases",
+          "phase08_08_gap_parent_rename_during_read_and_append_never_recreates",
+          "phase08_08_gap_actual_foreign_readonly_and_post_admission_permissions"
+        ],
+        "workerProof": "Every actual owned wrapper is polled and yields on the same async polling task while a distinct blocking worker is held; injected worker panic asserts contextual JoinError. This is not a spare-worker-only responsiveness test.",
+        "permissions": "Path-scoped PrimaryWorkspaceAccessFixture opts selected temporary roots into the actual production primary-workspace guard. Foreign/readOnly and post-admission policy changes reject actual wrappers; other historical fixture bypasses are not counted as permission evidence. File-store compatibility commands retain their original user-selected arbitrary-file policy.",
+        "platformScope": "macOS execution only; cfg(unix) aliases and parent races executed. Windows native runtime and final native saturation/artifact isolation remain later gates. Scratchpad/drafts Trash uses existing cfg(test) local deletion and Files uses scoped local TrashFixture; no system Trash, installed CLI, provider credentials or native application launched.",
+        "scope": "Complete results, same-target contention/error release, real earlier Files/document overlap, byte/revision preservation and nested rollback are verified by the named module tests. Conservative scratchpad/drafts subtrees and Gap workspace snapshots serialize overlapping work; this is in-process exclusion only."
+      }
+    }
+  ],
+  "consumerHandoff": {
+    "plan": "08-09",
+    "caller": "src-tauri/src/drafts.rs::drafts_promote_in_transaction",
+    "currentCallee": "src-tauri/src/tasks.rs::create_task_note",
+    "currentCoverage": "Resolved tasks root active allocation subtree is reserved with drafts body/index/baseline/config and registry before calling the synchronous task writer.",
+    "requiredChange": "When Plan09 adds admission to task creation, provide create_task_note_in_transaction and switch this exact dependent consumer to the borrowed lease; never reacquire the parent lease."
+  }
+}

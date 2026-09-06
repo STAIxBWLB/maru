@@ -599,18 +599,14 @@ export const FilesWorkbench = memo(function FilesWorkbench(props: FilesWorkbench
       setBusy(true);
       try {
         const outcomes = await task();
-        const failed = outcomes.filter((outcome) => outcome.status === "error");
-        if (failed.length > 0) {
-          setError(failed.map((outcome) => outcome.error || outcome.name).join("\n"));
-        }
         onFilesystemMutated(outcomes, effect);
         selectPaths(
           outcomes
             .filter((outcome) => outcome.status === "done" && outcome.targetPath)
             .map((outcome) => outcome.targetPath as string),
         );
-      } catch (error) {
-        setError(error instanceof Error ? error.message : String(error));
+      } catch {
+        // The wrapped mutation publishes the terminal notice itself.
       } finally {
         setBusy(false);
       }
@@ -629,8 +625,8 @@ export const FilesWorkbench = memo(function FilesWorkbench(props: FilesWorkbench
       setCreatingFolder(false);
       setNewFolderName("");
       if (outcome.targetPath) selectPaths([outcome.targetPath]);
-    } catch (error) {
-      setError(error instanceof Error ? error.message : String(error));
+    } catch {
+      // The wrapped mutation publishes the terminal notice itself.
     } finally {
       setBusy(false);
     }
@@ -652,8 +648,8 @@ export const FilesWorkbench = memo(function FilesWorkbench(props: FilesWorkbench
       onFilesystemMutated([outcome], "move");
       setRenamingPath(null);
       if (outcome.targetPath) selectPaths([outcome.targetPath]);
-    } catch (error) {
-      setError(error instanceof Error ? error.message : String(error));
+    } catch {
+      // The wrapped mutation publishes the terminal notice itself.
     } finally {
       setBusy(false);
     }

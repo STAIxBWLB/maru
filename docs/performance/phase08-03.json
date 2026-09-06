@@ -1,0 +1,1643 @@
+{
+  "plan": "08-03",
+  "moduleIntegrationOwner": "08-29",
+  "integrationRequired": "08-29",
+  "moduleIntegrations": [
+    {
+      "module": "src-tauri/src/skill_host/store.rs",
+      "commandShards": [
+        "docs/performance/phase08-01.json",
+        "docs/performance/phase08-02.json"
+      ],
+      "obligation": "Preserve single-source and batch wrappers; Plan 08-29 integrates shared lexical/alias/hierarchical admission into these synchronous entry points, default materialization, environment effects and background bundle callbacks without duplicating command ownership."
+    }
+  ],
+  "commands": [
+    {
+      "name": "skills_list_sources",
+      "module": "src-tauri/src/skill_host/store.rs",
+      "registrationPath": "src-tauri/src/lib.rs::skill_host::store::ipc::skills_list_sources",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/skill_host/store.rs::ipc::skills_list_sources -> crate::skill_host::skills_list_sources synchronous reexport in src-tauri/src/skill_host/mod.rs",
+        "src-tauri/src/skill_host/store.rs::skills_list_sources -> ensure_default_sources -> ensure_builtin_source -> ensure_active_bundle -> bundle_update::recover_interrupted_swap; local materialization/recursive copies and default catalog/inventory discovery; save_registry_unlocked",
+        "src-tauri/src/skill_host/fs.rs::write_json_pretty uses atomic file replacement and Unix sync behavior; create_symlink_no_clobber uses Unix symlink or Windows symlink_dir. src-tauri/src/win_process.rs::NoWindow only adjusts process flags. All reachable blocking platform branches remain inside the same worker."
+      ],
+      "workerBoundary": "src-tauri/src/skill_host/store.rs::ipc::skills_list_sources -> tauri::async_runtime::spawn_blocking(move || domain(...)).await; owns inputs, constructs any AppHandle progress reporter in worker; only JoinError maps to skills_list_sources_task_failed String",
+      "syncCallers": [
+        "Synchronous skills_list_sources export preserved in src-tauri/src/skill_host/mod.rs",
+        "Existing domain unit tests call the synchronous function directly"
+      ],
+      "mutationKey": {
+        "lexicalPaths": [
+          "skills_root/registry.json",
+          "skills_root/{_sources,_managed,_imported,_cache,_builtin}",
+          "skills_root/_cache bundle state, pristine and swap-orphan paths"
+        ],
+        "aliasPaths": [
+          "SourceOperationLease canonicalizes existing paths or existing ancestors of new destinations",
+          "Git rev-parse --show-toplevel maps registered/nested/symlink aliases to one worktree; imported origin checked for copy/write paths"
+        ],
+        "sourceReservation": "Defaults and their generations are refreshed under registry_guard. Local recovery is guarded; no network descendant exists.",
+        "postAdmissionPreconditions": [
+          "fresh registry load under registry_guard",
+          "existing ownership/tier/name/path/manifest/install-marker gates remain in the synchronous domain implementation",
+          "network transactions additionally validate source generations, current path, dirty hashes and bundle state at their commit seam"
+        ],
+        "domainLockOrder": "Network operations acquire nonqueued source/worktree reservation, briefly acquire registry_guard, release it for network/env repair, then reacquire for fresh commit. Local operations hold registry_guard through lookup/nonwaiting reservation and write/scan/save; lease bookkeeping mutex is never retained while waiting for registry_guard.",
+        "sharedAdmissionEntry": "integrationRequired: 08-29; Plan 08-06 produces hierarchical path admission, Plan 08-29 integrates all lexical/alias paths and background call sites"
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_03_boundary",
+          "passed": 6,
+          "failed": 0,
+          "ignored": 0
+        }
+      ],
+      "processingCaller": {
+        "path": "src/lib/skills.ts::skillsListSources existing native invoke wrapper",
+        "payload": "Original domain payload and legacy String errors are returned untouched; existing source/batch typed errors retain their prior wrappers and independent shard ownership.",
+        "terminalNoticeOwner": "Existing SkillsTab runOperation/runBackendProgressOperation or the invoking API consumer; no new duplicate notifier added",
+        "lifetime": "Owned blocking closure continues after view unmount; frontend processing lifetime/refresh closure belongs to 08-25/08-26 where applicable. Source sync lifetime and toast proof remain in 08-02.",
+        "retry": "Manual only. Wrapper awaits one blocking task and does not replay failed operations."
+      ,
+        "classifier": "n/a: read; promise resolution returns data to the caller",
+        "successRetention": "result stored in component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=skills_list_sources"
+      },
+      "evidence": {
+        "bounds": "Finite request-response domain work; scan cardinality, recursive file bytes or subprocess duration are not claimed constant. All work is isolated from the async executor.",
+        "platform": "macOS executed. Unix/Windows conditional symlink, mode and subprocess flags audited; no Windows runtime execution claimed.",
+        "boundaryCase": "phase08_03_boundary::every_actual_owned_wrapper_uses_blocking_worker_and_maps_join_error invokes this exact wrapper, proves a distinct blocking thread and same-runtime async probe progress, and checks contextual JoinError.",
+        "safety": "Defaults and their generations are refreshed under registry_guard. Local recovery is guarded; no network descendant exists."
+      }
+    },
+    {
+      "name": "skills_add_source",
+      "module": "src-tauri/src/skill_host/store.rs",
+      "registrationPath": "src-tauri/src/lib.rs::skill_host::store::ipc::skills_add_source",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/skill_host/store.rs::ipc::skills_add_source -> crate::skill_host::skills_add_source synchronous reexport in src-tauri/src/skill_host/mod.rs",
+        "src-tauri/src/skill_host/store.rs::skills_add_source -> normalize_source_id/kind/subdir -> skills_add_source_blocking for clone -> fixed argv Git clone into unique staging -> validate_cloned_source_manifest -> fresh pending generation -> rename -> rescan_source_in_registry -> save_registry_unlocked",
+        "src-tauri/src/skill_host/fs.rs::write_json_pretty uses atomic file replacement and Unix sync behavior; create_symlink_no_clobber uses Unix symlink or Windows symlink_dir. src-tauri/src/win_process.rs::NoWindow only adjusts process flags. All reachable blocking platform branches remain inside the same worker."
+      ],
+      "workerBoundary": "src-tauri/src/skill_host/store.rs::ipc::skills_add_source -> tauri::async_runtime::spawn_blocking(move || domain(...)).await; owns inputs, constructs any AppHandle progress reporter in worker; only JoinError maps to skills_add_source_task_failed String",
+      "syncCallers": [
+        "Synchronous skills_add_source export preserved in src-tauri/src/skill_host/mod.rs",
+        "Existing domain unit tests call the synchronous function directly"
+      ],
+      "mutationKey": {
+        "lexicalPaths": [
+          "skills_root/registry.json",
+          "skills_root/_sources/<id>",
+          "skills_root/_sources/.<id>.clone-<uuid>"
+        ],
+        "aliasPaths": [
+          "SourceOperationLease canonicalizes existing paths or existing ancestors of new destinations",
+          "Git rev-parse --show-toplevel maps registered/nested/symlink aliases to one worktree; imported origin checked for copy/write paths"
+        ],
+        "sourceReservation": "Clone source ID plus canonical destination/ancestor Git worktree lease spans staging and fresh commit. Linked/inventory additions only register metadata; removal/reset invalidates pending clone generations.",
+        "postAdmissionPreconditions": [
+          "fresh registry load under registry_guard",
+          "existing ownership/tier/name/path/manifest/install-marker gates remain in the synchronous domain implementation",
+          "network transactions additionally validate source generations, current path, dirty hashes and bundle state at their commit seam"
+        ],
+        "domainLockOrder": "Network operations acquire nonqueued source/worktree reservation, briefly acquire registry_guard, release it for network/env repair, then reacquire for fresh commit. Local operations hold registry_guard through lookup/nonwaiting reservation and write/scan/save; lease bookkeeping mutex is never retained while waiting for registry_guard.",
+        "sharedAdmissionEntry": "integrationRequired: 08-29; Plan 08-06 produces hierarchical path admission, Plan 08-29 integrates all lexical/alias paths and background call sites"
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_03_boundary",
+          "passed": 6,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_03_network_lock",
+          "passed": 7,
+          "failed": 0,
+          "ignored": 0
+        }
+      ],
+      "processingCaller": {
+        "path": "src/lib/skills.ts::skillsAddSource existing native invoke wrapper",
+        "payload": "Original domain payload and legacy String errors are returned untouched; existing source/batch typed errors retain their prior wrappers and independent shard ownership.",
+        "terminalNoticeOwner": "Existing SkillsTab runOperation/runBackendProgressOperation or the invoking API consumer; no new duplicate notifier added",
+        "lifetime": "Owned blocking closure continues after view unmount; frontend processing lifetime/refresh closure belongs to 08-25/08-26 where applicable. Source sync lifetime and toast proof remain in 08-02.",
+        "retry": "Manual only. Wrapper awaits one blocking task and does not replay failed operations."
+      ,
+        "classifier": "explicit classify: success / skills.operation.complete",
+        "successRetention": "SkillOperation.result retains the payload; component refresh is viewScope.request-guarded; optimistic removal guarded by captured isCurrent() closure",
+        "failureReasons": "explicit classify reason strings (per-item failure messages joined); built-in path merges syncAllComplete summary with per-source errors and detects skills_source_stale",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=skills_add_source"
+      },
+      "evidence": {
+        "bounds": "Finite request-response domain work; scan cardinality, recursive file bytes or subprocess duration are not claimed constant. All work is isolated from the async executor.",
+        "platform": "macOS executed. Unix/Windows conditional symlink, mode and subprocess flags audited; no Windows runtime execution claimed.",
+        "boundaryCase": "phase08_03_boundary::every_actual_owned_wrapper_uses_blocking_worker_and_maps_join_error invokes this exact wrapper, proves a distinct blocking thread and same-runtime async probe progress, and checks contextual JoinError.",
+        "safety": "Clone source ID plus canonical destination/ancestor Git worktree lease spans staging and fresh commit. Linked/inventory additions only register metadata; removal/reset invalidates pending clone generations."
+      }
+    },
+    {
+      "name": "skills_remove_source",
+      "module": "src-tauri/src/skill_host/store.rs",
+      "registrationPath": "src-tauri/src/lib.rs::skill_host::store::ipc::skills_remove_source",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/skill_host/store.rs::ipc::skills_remove_source -> crate::skill_host::skills_remove_source synchronous reexport in src-tauri/src/skill_host/mod.rs",
+        "src-tauri/src/skill_host/store.rs::skills_remove_source -> normalize_source_id -> load_registry_unlocked -> remove_source_from_registry reserved-ID/installed-skill checks -> generation invalidation/tombstone -> save_registry_unlocked",
+        "src-tauri/src/skill_host/fs.rs::write_json_pretty uses atomic file replacement and Unix sync behavior; create_symlink_no_clobber uses Unix symlink or Windows symlink_dir. src-tauri/src/win_process.rs::NoWindow only adjusts process flags. All reachable blocking platform branches remain inside the same worker."
+      ],
+      "workerBoundary": "src-tauri/src/skill_host/store.rs::ipc::skills_remove_source -> tauri::async_runtime::spawn_blocking(move || domain(...)).await; owns inputs, constructs any AppHandle progress reporter in worker; only JoinError maps to skills_remove_source_task_failed String",
+      "syncCallers": [
+        "Synchronous skills_remove_source export preserved in src-tauri/src/skill_host/mod.rs",
+        "Existing domain unit tests call the synchronous function directly"
+      ],
+      "mutationKey": {
+        "lexicalPaths": [
+          "skills_root/registry.json",
+          "skills_root/{_sources,_managed,_imported,_cache} initialization"
+        ],
+        "aliasPaths": [
+          "SourceOperationLease canonicalizes existing paths or existing ancestors of new destinations",
+          "Git rev-parse --show-toplevel maps registered/nested/symlink aliases to one worktree; imported origin checked for copy/write paths"
+        ],
+        "sourceReservation": "Metadata-only removal intentionally does not acquire a source lease; source checkout bytes remain untouched and deletion invalidates in-flight work.",
+        "postAdmissionPreconditions": [
+          "fresh registry load under registry_guard",
+          "existing ownership/tier/name/path/manifest/install-marker gates remain in the synchronous domain implementation",
+          "network transactions additionally validate source generations, current path, dirty hashes and bundle state at their commit seam"
+        ],
+        "domainLockOrder": "Network operations acquire nonqueued source/worktree reservation, briefly acquire registry_guard, release it for network/env repair, then reacquire for fresh commit. Local operations hold registry_guard through lookup/nonwaiting reservation and write/scan/save; lease bookkeeping mutex is never retained while waiting for registry_guard.",
+        "sharedAdmissionEntry": "integrationRequired: 08-29; Plan 08-06 produces hierarchical path admission, Plan 08-29 integrates all lexical/alias paths and background call sites"
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_03_boundary",
+          "passed": 6,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_03_network_lock",
+          "passed": 7,
+          "failed": 0,
+          "ignored": 0
+        }
+      ],
+      "processingCaller": {
+        "path": "src/lib/skills.ts::skillsRemoveSource existing native invoke wrapper",
+        "payload": "Original domain payload and legacy String errors are returned untouched; existing source/batch typed errors retain their prior wrappers and independent shard ownership.",
+        "terminalNoticeOwner": "Existing SkillsTab runOperation/runBackendProgressOperation or the invoking API consumer; no new duplicate notifier added",
+        "lifetime": "Owned blocking closure continues after view unmount; frontend processing lifetime/refresh closure belongs to 08-25/08-26 where applicable. Source sync lifetime and toast proof remain in 08-02.",
+        "retry": "Manual only. Wrapper awaits one blocking task and does not replay failed operations."
+      ,
+        "classifier": "explicit classify: success / skills.operation.complete",
+        "successRetention": "SkillOperation.result retains the payload; component refresh is viewScope.request-guarded; optimistic removal guarded by captured isCurrent() closure",
+        "failureReasons": "explicit classify reason strings (per-item failure messages joined); built-in path merges syncAllComplete summary with per-source errors and detects skills_source_stale",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=skills_remove_source"
+      },
+      "evidence": {
+        "bounds": "AUDIT closure: single registry/request file access is finite in count but disk latency/file bytes are not bounded by the API, and registry validation scales with persisted entries. Positive blocking disposition is ISOLATED rather than retained based on absence of a regex match.",
+        "platform": "macOS executed. Unix/Windows conditional symlink, mode and subprocess flags audited; no Windows runtime execution claimed.",
+        "boundaryCase": "phase08_03_boundary::every_actual_owned_wrapper_uses_blocking_worker_and_maps_join_error invokes this exact wrapper, proves a distinct blocking thread and same-runtime async probe progress, and checks contextual JoinError.",
+        "safety": "Metadata-only removal intentionally does not acquire a source lease; source checkout bytes remain untouched and deletion invalidates in-flight work."
+      }
+    },
+    {
+      "name": "skills_rescan_source",
+      "module": "src-tauri/src/skill_host/store.rs",
+      "registrationPath": "src-tauri/src/lib.rs::skill_host::store::ipc::skills_rescan_source",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/skill_host/store.rs::ipc::skills_rescan_source -> crate::skill_host::skills_rescan_source synchronous reexport in src-tauri/src/skill_host/mod.rs",
+        "src-tauri/src/skill_host/store.rs::skills_rescan_source -> skills_rescan_source_impl -> capture_source_snapshot -> SourceOperationLease::reserve -> rescan_source_in_registry_with_progress -> scan_source_with_progress -> manifest validation or discover_skill_roots -> git_dirty/hash_directory -> save_registry_unlocked",
+        "src-tauri/src/skill_host/fs.rs::write_json_pretty uses atomic file replacement and Unix sync behavior; create_symlink_no_clobber uses Unix symlink or Windows symlink_dir. src-tauri/src/win_process.rs::NoWindow only adjusts process flags. All reachable blocking platform branches remain inside the same worker."
+      ],
+      "workerBoundary": "src-tauri/src/skill_host/store.rs::ipc::skills_rescan_source -> tauri::async_runtime::spawn_blocking(move || domain(...)).await; owns inputs, constructs any AppHandle progress reporter in worker; only JoinError maps to skills_rescan_source_task_failed String",
+      "syncCallers": [
+        "Synchronous skills_rescan_source export preserved in src-tauri/src/skill_host/mod.rs",
+        "Existing domain unit tests call the synchronous function directly"
+      ],
+      "mutationKey": {
+        "lexicalPaths": [
+          "skills_root/registry.json",
+          "skills_root/{_sources,_managed,_imported,_cache} initialization"
+        ],
+        "aliasPaths": [
+          "SourceOperationLease canonicalizes existing paths or existing ancestors of new destinations",
+          "Git rev-parse --show-toplevel maps registered/nested/symlink aliases to one worktree; imported origin checked for copy/write paths"
+        ],
+        "sourceReservation": "Source and canonical worktree reservation prevents scanning an active same-source sync; fresh registry scan/save remains guarded.",
+        "postAdmissionPreconditions": [
+          "fresh registry load under registry_guard",
+          "existing ownership/tier/name/path/manifest/install-marker gates remain in the synchronous domain implementation",
+          "network transactions additionally validate source generations, current path, dirty hashes and bundle state at their commit seam"
+        ],
+        "domainLockOrder": "Network operations acquire nonqueued source/worktree reservation, briefly acquire registry_guard, release it for network/env repair, then reacquire for fresh commit. Local operations hold registry_guard through lookup/nonwaiting reservation and write/scan/save; lease bookkeeping mutex is never retained while waiting for registry_guard.",
+        "sharedAdmissionEntry": "integrationRequired: 08-29; Plan 08-06 produces hierarchical path admission, Plan 08-29 integrates all lexical/alias paths and background call sites"
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_03_boundary",
+          "passed": 6,
+          "failed": 0,
+          "ignored": 0
+        }
+      ],
+      "processingCaller": {
+        "path": "src/lib/skills.ts::skillsRescanSource existing native invoke wrapper",
+        "payload": "Original domain payload and legacy String errors are returned untouched; existing source/batch typed errors retain their prior wrappers and independent shard ownership.",
+        "terminalNoticeOwner": "Existing SkillsTab runOperation/runBackendProgressOperation or the invoking API consumer; no new duplicate notifier added",
+        "lifetime": "Owned blocking closure continues after view unmount; frontend processing lifetime/refresh closure belongs to 08-25/08-26 where applicable. Source sync lifetime and toast proof remain in 08-02.",
+        "retry": "Manual only. Wrapper awaits one blocking task and does not replay failed operations."
+      ,
+        "classifier": "explicit classify: skills.operation.complete with rescanComplete reason",
+        "successRetention": "SkillOperation.result retains the payload; component refresh is viewScope.request-guarded; optimistic removal guarded by captured isCurrent() closure",
+        "failureReasons": "explicit classify reason strings (per-item failure messages joined); built-in path merges syncAllComplete summary with per-source errors and detects skills_source_stale",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=skills_rescan_source"
+      },
+      "evidence": {
+        "bounds": "Finite request-response domain work; scan cardinality, recursive file bytes or subprocess duration are not claimed constant. All work is isolated from the async executor.",
+        "platform": "macOS executed. Unix/Windows conditional symlink, mode and subprocess flags audited; no Windows runtime execution claimed.",
+        "boundaryCase": "phase08_03_boundary::every_actual_owned_wrapper_uses_blocking_worker_and_maps_join_error invokes this exact wrapper, proves a distinct blocking thread and same-runtime async probe progress, and checks contextual JoinError.",
+        "safety": "Source and canonical worktree reservation prevents scanning an active same-source sync; fresh registry scan/save remains guarded."
+      }
+    },
+    {
+      "name": "skills_list_skills",
+      "module": "src-tauri/src/skill_host/store.rs",
+      "registrationPath": "src-tauri/src/lib.rs::skill_host::store::ipc::skills_list_skills",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/skill_host/store.rs::ipc::skills_list_skills -> crate::skill_host::skills_list_skills synchronous reexport in src-tauri/src/skill_host/mod.rs",
+        "src-tauri/src/skill_host/store.rs::skills_list_skills -> load_registry_unlocked; refresh=true reaches ensure_default_sources, every source rescan, manifest validation, WalkDir, file hashes and git_dirty; refresh=false returns persisted records",
+        "src-tauri/src/skill_host/fs.rs::write_json_pretty uses atomic file replacement and Unix sync behavior; create_symlink_no_clobber uses Unix symlink or Windows symlink_dir. src-tauri/src/win_process.rs::NoWindow only adjusts process flags. All reachable blocking platform branches remain inside the same worker."
+      ],
+      "workerBoundary": "src-tauri/src/skill_host/store.rs::ipc::skills_list_skills -> tauri::async_runtime::spawn_blocking(move || domain(...)).await; owns inputs, constructs any AppHandle progress reporter in worker; only JoinError maps to skills_list_skills_task_failed String",
+      "syncCallers": [
+        "Synchronous skills_list_skills export preserved in src-tauri/src/skill_host/mod.rs",
+        "src-tauri/src/e2e_flow.rs consumes the synchronous domain function"
+      ],
+      "mutationKey": {
+        "lexicalPaths": [
+          "skills_root/registry.json when refresh=true",
+          "skills_root/{_sources,_managed,_imported,_cache,_builtin} default initialization"
+        ],
+        "aliasPaths": [
+          "SourceOperationLease canonicalizes existing paths or existing ancestors of new destinations",
+          "Git rev-parse --show-toplevel maps registered/nested/symlink aliases to one worktree; imported origin checked for copy/write paths"
+        ],
+        "sourceReservation": "Both conditional branches are isolated. Refresh mutates only registry records plus default local materialization; the registry guard spans fresh scan/save.",
+        "postAdmissionPreconditions": [
+          "fresh registry load under registry_guard",
+          "existing ownership/tier/name/path/manifest/install-marker gates remain in the synchronous domain implementation",
+          "network transactions additionally validate source generations, current path, dirty hashes and bundle state at their commit seam"
+        ],
+        "domainLockOrder": "Network operations acquire nonqueued source/worktree reservation, briefly acquire registry_guard, release it for network/env repair, then reacquire for fresh commit. Local operations hold registry_guard through lookup/nonwaiting reservation and write/scan/save; lease bookkeeping mutex is never retained while waiting for registry_guard.",
+        "sharedAdmissionEntry": "integrationRequired: 08-29; Plan 08-06 produces hierarchical path admission, Plan 08-29 integrates all lexical/alias paths and background call sites"
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_03_boundary",
+          "passed": 6,
+          "failed": 0,
+          "ignored": 0
+        }
+      ],
+      "processingCaller": {
+        "path": "src/lib/skills.ts::skillsListSkills existing native invoke wrapper",
+        "payload": "Original domain payload and legacy String errors are returned untouched; existing source/batch typed errors retain their prior wrappers and independent shard ownership.",
+        "terminalNoticeOwner": "Existing SkillsTab runOperation/runBackendProgressOperation or the invoking API consumer; no new duplicate notifier added",
+        "lifetime": "Owned blocking closure continues after view unmount; frontend processing lifetime/refresh closure belongs to 08-25/08-26 where applicable. Source sync lifetime and toast proof remain in 08-02.",
+        "retry": "Manual only. Wrapper awaits one blocking task and does not replay failed operations."
+      ,
+        "classifier": "n/a: read; promise resolution returns data to the caller",
+        "successRetention": "result stored in component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=skills_list_skills"
+      },
+      "evidence": {
+        "bounds": "Finite request-response domain work; scan cardinality, recursive file bytes or subprocess duration are not claimed constant. All work is isolated from the async executor.",
+        "platform": "macOS executed. Unix/Windows conditional symlink, mode and subprocess flags audited; no Windows runtime execution claimed.",
+        "boundaryCase": "phase08_03_boundary::every_actual_owned_wrapper_uses_blocking_worker_and_maps_join_error invokes this exact wrapper, proves a distinct blocking thread and same-runtime async probe progress, and checks contextual JoinError.",
+        "safety": "Both conditional branches are isolated. Refresh mutates only registry records plus default local materialization; the registry guard spans fresh scan/save."
+      }
+    },
+    {
+      "name": "skills_read_skill",
+      "module": "src-tauri/src/skill_host/store.rs",
+      "registrationPath": "src-tauri/src/lib.rs::skill_host::store::ipc::skills_read_skill",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/skill_host/store.rs::ipc::skills_read_skill -> crate::skill_host::skills_read_skill synchronous reexport in src-tauri/src/skill_host/mod.rs",
+        "src-tauri/src/skill_host/store.rs::skills_read_skill -> registry_guard -> load_registry_unlocked -> current record lookup -> fs::read_to_string(SKILL.md); load also initializes four skill-root directories and migrates/validates the registry in memory",
+        "src-tauri/src/skill_host/fs.rs::write_json_pretty uses atomic file replacement and Unix sync behavior; create_symlink_no_clobber uses Unix symlink or Windows symlink_dir. src-tauri/src/win_process.rs::NoWindow only adjusts process flags. All reachable blocking platform branches remain inside the same worker."
+      ],
+      "workerBoundary": "src-tauri/src/skill_host/store.rs::ipc::skills_read_skill -> tauri::async_runtime::spawn_blocking(move || domain(...)).await; owns inputs, constructs any AppHandle progress reporter in worker; only JoinError maps to skills_read_skill_task_failed String",
+      "syncCallers": [
+        "Synchronous skills_read_skill export preserved in src-tauri/src/skill_host/mod.rs",
+        "Existing domain unit tests call the synchronous function directly"
+      ],
+      "mutationKey": {
+        "lexicalPaths": [
+          "skills_root/{_sources,_managed,_imported,_cache} initialization"
+        ],
+        "aliasPaths": [
+          "SourceOperationLease canonicalizes existing paths or existing ancestors of new destinations",
+          "Git rev-parse --show-toplevel maps registered/nested/symlink aliases to one worktree; imported origin checked for copy/write paths"
+        ],
+        "sourceReservation": "Registry guard now spans record selection and file read, avoiding torn reads against local guarded saves. No skill or registry-file write.",
+        "postAdmissionPreconditions": [
+          "fresh registry load under registry_guard",
+          "existing ownership/tier/name/path/manifest/install-marker gates remain in the synchronous domain implementation",
+          "network transactions additionally validate source generations, current path, dirty hashes and bundle state at their commit seam"
+        ],
+        "domainLockOrder": "Network operations acquire nonqueued source/worktree reservation, briefly acquire registry_guard, release it for network/env repair, then reacquire for fresh commit. Local operations hold registry_guard through lookup/nonwaiting reservation and write/scan/save; lease bookkeeping mutex is never retained while waiting for registry_guard.",
+        "sharedAdmissionEntry": "integrationRequired: 08-29; Plan 08-06 produces hierarchical path admission, Plan 08-29 integrates all lexical/alias paths and background call sites"
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_03_boundary",
+          "passed": 6,
+          "failed": 0,
+          "ignored": 0
+        }
+      ],
+      "processingCaller": {
+        "path": "src/lib/skills.ts::skillsReadSkill existing native invoke wrapper",
+        "payload": "Original domain payload and legacy String errors are returned untouched; existing source/batch typed errors retain their prior wrappers and independent shard ownership.",
+        "terminalNoticeOwner": "Existing SkillsTab runOperation/runBackendProgressOperation or the invoking API consumer; no new duplicate notifier added",
+        "lifetime": "Owned blocking closure continues after view unmount; frontend processing lifetime/refresh closure belongs to 08-25/08-26 where applicable. Source sync lifetime and toast proof remain in 08-02.",
+        "retry": "Manual only. Wrapper awaits one blocking task and does not replay failed operations."
+      ,
+        "classifier": "n/a: bounded editor save/read, not a file-processing batch",
+        "successRetention": "saved payload retained in the editor; SkillsTab refreshes on SKILLS_UPDATED_EVENT",
+        "failureReasons": "window-local catch surfaces the IPC error message",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=skills_read_skill"
+      },
+      "evidence": {
+        "bounds": "AUDIT closure: single registry/request file access is finite in count but disk latency/file bytes are not bounded by the API, and registry validation scales with persisted entries. Positive blocking disposition is ISOLATED rather than retained based on absence of a regex match.",
+        "platform": "macOS executed. Unix/Windows conditional symlink, mode and subprocess flags audited; no Windows runtime execution claimed.",
+        "boundaryCase": "phase08_03_boundary::every_actual_owned_wrapper_uses_blocking_worker_and_maps_join_error invokes this exact wrapper, proves a distinct blocking thread and same-runtime async probe progress, and checks contextual JoinError.",
+        "safety": "Registry guard now spans record selection and file read, avoiding torn reads against local guarded saves. No skill or registry-file write."
+      }
+    },
+    {
+      "name": "skills_read_skill_file",
+      "module": "src-tauri/src/skill_host/store.rs",
+      "registrationPath": "src-tauri/src/lib.rs::skill_host::store::ipc::skills_read_skill_file",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/skill_host/store.rs::ipc::skills_read_skill_file -> crate::skill_host::skills_read_skill_file synchronous reexport in src-tauri/src/skill_host/mod.rs",
+        "src-tauri/src/skill_host/store.rs::skills_read_skill_file -> registry_guard -> load_registry_unlocked -> resolve_skill_file(registry) -> resolve_skill_file_from_record -> safe_relative_path + lexical_normalize -> fs::read_to_string",
+        "src-tauri/src/skill_host/fs.rs::write_json_pretty uses atomic file replacement and Unix sync behavior; create_symlink_no_clobber uses Unix symlink or Windows symlink_dir. src-tauri/src/win_process.rs::NoWindow only adjusts process flags. All reachable blocking platform branches remain inside the same worker."
+      ],
+      "workerBoundary": "src-tauri/src/skill_host/store.rs::ipc::skills_read_skill_file -> tauri::async_runtime::spawn_blocking(move || domain(...)).await; owns inputs, constructs any AppHandle progress reporter in worker; only JoinError maps to skills_read_skill_file_task_failed String",
+      "syncCallers": [
+        "Synchronous skills_read_skill_file export preserved in src-tauri/src/skill_host/mod.rs",
+        "Existing domain unit tests call the synchronous function directly"
+      ],
+      "mutationKey": {
+        "lexicalPaths": [
+          "skills_root/{_sources,_managed,_imported,_cache} initialization"
+        ],
+        "aliasPaths": [
+          "SourceOperationLease canonicalizes existing paths or existing ancestors of new destinations",
+          "Git rev-parse --show-toplevel maps registered/nested/symlink aliases to one worktree; imported origin checked for copy/write paths"
+        ],
+        "sourceReservation": "Guard spans lookup and file read; absolute/parent traversal rejection and lexical containment are unchanged. No skill or registry-file write.",
+        "postAdmissionPreconditions": [
+          "fresh registry load under registry_guard",
+          "existing ownership/tier/name/path/manifest/install-marker gates remain in the synchronous domain implementation",
+          "network transactions additionally validate source generations, current path, dirty hashes and bundle state at their commit seam"
+        ],
+        "domainLockOrder": "Network operations acquire nonqueued source/worktree reservation, briefly acquire registry_guard, release it for network/env repair, then reacquire for fresh commit. Local operations hold registry_guard through lookup/nonwaiting reservation and write/scan/save; lease bookkeeping mutex is never retained while waiting for registry_guard.",
+        "sharedAdmissionEntry": "integrationRequired: 08-29; Plan 08-06 produces hierarchical path admission, Plan 08-29 integrates all lexical/alias paths and background call sites"
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_03_boundary",
+          "passed": 6,
+          "failed": 0,
+          "ignored": 0
+        }
+      ],
+      "processingCaller": {
+        "path": "src/lib/skills.ts::skillsReadSkillFile existing native invoke wrapper",
+        "payload": "Original domain payload and legacy String errors are returned untouched; existing source/batch typed errors retain their prior wrappers and independent shard ownership.",
+        "terminalNoticeOwner": "Existing SkillsTab runOperation/runBackendProgressOperation or the invoking API consumer; no new duplicate notifier added",
+        "lifetime": "Owned blocking closure continues after view unmount; frontend processing lifetime/refresh closure belongs to 08-25/08-26 where applicable. Source sync lifetime and toast proof remain in 08-02.",
+        "retry": "Manual only. Wrapper awaits one blocking task and does not replay failed operations."
+      ,
+        "classifier": "n/a: bounded editor save/read, not a file-processing batch",
+        "successRetention": "saved payload retained in the editor; SkillsTab refreshes on SKILLS_UPDATED_EVENT",
+        "failureReasons": "window-local catch surfaces the IPC error message",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=skills_read_skill_file"
+      },
+      "evidence": {
+        "bounds": "AUDIT closure: single registry/request file access is finite in count but disk latency/file bytes are not bounded by the API, and registry validation scales with persisted entries. Positive blocking disposition is ISOLATED rather than retained based on absence of a regex match.",
+        "platform": "macOS executed. Unix/Windows conditional symlink, mode and subprocess flags audited; no Windows runtime execution claimed.",
+        "boundaryCase": "phase08_03_boundary::every_actual_owned_wrapper_uses_blocking_worker_and_maps_join_error invokes this exact wrapper, proves a distinct blocking thread and same-runtime async probe progress, and checks contextual JoinError.",
+        "safety": "Guard spans lookup and file read; absolute/parent traversal rejection and lexical containment are unchanged. No skill or registry-file write."
+      }
+    },
+    {
+      "name": "skills_save_skill_file",
+      "module": "src-tauri/src/skill_host/store.rs",
+      "registrationPath": "src-tauri/src/lib.rs::skill_host::store::ipc::skills_save_skill_file",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/skill_host/store.rs::ipc::skills_save_skill_file -> crate::skill_host::skills_save_skill_file synchronous reexport in src-tauri/src/skill_host/mod.rs",
+        "src-tauri/src/skill_host/store.rs::skills_save_skill_file -> load_registry_unlocked -> source owner check -> SourceOperationLease::for_skill -> resolve_skill_file_from_record -> fs::write -> fresh source rescan/hash -> mark_record_saved_after_user_write -> save_registry_unlocked",
+        "src-tauri/src/skill_host/fs.rs::write_json_pretty uses atomic file replacement and Unix sync behavior; create_symlink_no_clobber uses Unix symlink or Windows symlink_dir. src-tauri/src/win_process.rs::NoWindow only adjusts process flags. All reachable blocking platform branches remain inside the same worker."
+      ],
+      "workerBoundary": "src-tauri/src/skill_host/store.rs::ipc::skills_save_skill_file -> tauri::async_runtime::spawn_blocking(move || domain(...)).await; owns inputs, constructs any AppHandle progress reporter in worker; only JoinError maps to skills_save_skill_file_task_failed String",
+      "syncCallers": [
+        "Synchronous skills_save_skill_file export preserved in src-tauri/src/skill_host/mod.rs",
+        "src-tauri/src/e2e_flow.rs consumes the synchronous domain function"
+      ],
+      "mutationKey": {
+        "lexicalPaths": [
+          "skills_root/registry.json",
+          "SkillRecord.abs_path/<validated file_path>"
+        ],
+        "aliasPaths": [
+          "SourceOperationLease canonicalizes existing paths or existing ancestors of new destinations",
+          "Git rev-parse --show-toplevel maps registered/nested/symlink aliases to one worktree; imported origin checked for copy/write paths"
+        ],
+        "sourceReservation": "Source/worktree plus imported-origin worktree reservations last through guarded write/rescan/save. Inventory-only source writes fail before effects.",
+        "postAdmissionPreconditions": [
+          "fresh registry load under registry_guard",
+          "existing ownership/tier/name/path/manifest/install-marker gates remain in the synchronous domain implementation",
+          "network transactions additionally validate source generations, current path, dirty hashes and bundle state at their commit seam"
+        ],
+        "domainLockOrder": "Network operations acquire nonqueued source/worktree reservation, briefly acquire registry_guard, release it for network/env repair, then reacquire for fresh commit. Local operations hold registry_guard through lookup/nonwaiting reservation and write/scan/save; lease bookkeeping mutex is never retained while waiting for registry_guard.",
+        "sharedAdmissionEntry": "integrationRequired: 08-29; Plan 08-06 produces hierarchical path admission, Plan 08-29 integrates all lexical/alias paths and background call sites"
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_03_boundary",
+          "passed": 6,
+          "failed": 0,
+          "ignored": 0
+        }
+      ],
+      "processingCaller": {
+        "path": "src/lib/skills.ts::skillsSaveSkillFile existing native invoke wrapper",
+        "payload": "Original domain payload and legacy String errors are returned untouched; existing source/batch typed errors retain their prior wrappers and independent shard ownership.",
+        "terminalNoticeOwner": "Existing SkillsTab runOperation/runBackendProgressOperation or the invoking API consumer; no new duplicate notifier added",
+        "lifetime": "Owned blocking closure continues after view unmount; frontend processing lifetime/refresh closure belongs to 08-25/08-26 where applicable. Source sync lifetime and toast proof remain in 08-02.",
+        "retry": "Manual only. Wrapper awaits one blocking task and does not replay failed operations."
+      ,
+        "classifier": "n/a: bounded editor save/read, not a file-processing batch",
+        "successRetention": "saved payload retained in the editor; SkillsTab refreshes on SKILLS_UPDATED_EVENT",
+        "failureReasons": "window-local catch surfaces the IPC error message",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=skills_save_skill_file"
+      },
+      "evidence": {
+        "bounds": "Finite request-response domain work; scan cardinality, recursive file bytes or subprocess duration are not claimed constant. All work is isolated from the async executor.",
+        "platform": "macOS executed. Unix/Windows conditional symlink, mode and subprocess flags audited; no Windows runtime execution claimed.",
+        "boundaryCase": "phase08_03_boundary::every_actual_owned_wrapper_uses_blocking_worker_and_maps_join_error invokes this exact wrapper, proves a distinct blocking thread and same-runtime async probe progress, and checks contextual JoinError.",
+        "safety": "Source/worktree plus imported-origin worktree reservations last through guarded write/rescan/save. Inventory-only source writes fail before effects."
+      }
+    },
+    {
+      "name": "skills_save_skill_as",
+      "module": "src-tauri/src/skill_host/store.rs",
+      "registrationPath": "src-tauri/src/lib.rs::skill_host::store::ipc::skills_save_skill_as",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/skill_host/store.rs::ipc::skills_save_skill_as -> crate::skill_host::skills_save_skill_as synchronous reexport in src-tauri/src/skill_host/mod.rs",
+        "src-tauri/src/skill_host/store.rs::skills_save_skill_as -> safe_entry_name -> ensure_managed_source -> SourceOperationLease::for_skill plus managed destination reservation -> copy_dir_all -> fs::write(SKILL.md) -> managed rescan -> save_registry_unlocked",
+        "src-tauri/src/skill_host/fs.rs::write_json_pretty uses atomic file replacement and Unix sync behavior; create_symlink_no_clobber uses Unix symlink or Windows symlink_dir. src-tauri/src/win_process.rs::NoWindow only adjusts process flags. All reachable blocking platform branches remain inside the same worker."
+      ],
+      "workerBoundary": "src-tauri/src/skill_host/store.rs::ipc::skills_save_skill_as -> tauri::async_runtime::spawn_blocking(move || domain(...)).await; owns inputs, constructs any AppHandle progress reporter in worker; only JoinError maps to skills_save_skill_as_task_failed String",
+      "syncCallers": [
+        "Synchronous skills_save_skill_as export preserved in src-tauri/src/skill_host/mod.rs",
+        "Existing domain unit tests call the synchronous function directly"
+      ],
+      "mutationKey": {
+        "lexicalPaths": [
+          "skills_root/registry.json",
+          "skills_root/_managed/<name> and copied descendants"
+        ],
+        "aliasPaths": [
+          "SourceOperationLease canonicalizes existing paths or existing ancestors of new destinations",
+          "Git rev-parse --show-toplevel maps registered/nested/symlink aliases to one worktree; imported origin checked for copy/write paths"
+        ],
+        "sourceReservation": "Source/read origin and managed destination reservations prevent source checkout mutation during the copy. Existing destination collision and tier validation are retained.",
+        "postAdmissionPreconditions": [
+          "fresh registry load under registry_guard",
+          "existing ownership/tier/name/path/manifest/install-marker gates remain in the synchronous domain implementation",
+          "network transactions additionally validate source generations, current path, dirty hashes and bundle state at their commit seam"
+        ],
+        "domainLockOrder": "Network operations acquire nonqueued source/worktree reservation, briefly acquire registry_guard, release it for network/env repair, then reacquire for fresh commit. Local operations hold registry_guard through lookup/nonwaiting reservation and write/scan/save; lease bookkeeping mutex is never retained while waiting for registry_guard.",
+        "sharedAdmissionEntry": "integrationRequired: 08-29; Plan 08-06 produces hierarchical path admission, Plan 08-29 integrates all lexical/alias paths and background call sites"
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_03_boundary",
+          "passed": 6,
+          "failed": 0,
+          "ignored": 0
+        }
+      ],
+      "processingCaller": {
+        "path": "src/lib/skills.ts::skillsSaveSkillAs existing native invoke wrapper",
+        "payload": "Original domain payload and legacy String errors are returned untouched; existing source/batch typed errors retain their prior wrappers and independent shard ownership.",
+        "terminalNoticeOwner": "Existing SkillsTab runOperation/runBackendProgressOperation or the invoking API consumer; no new duplicate notifier added",
+        "lifetime": "Owned blocking closure continues after view unmount; frontend processing lifetime/refresh closure belongs to 08-25/08-26 where applicable. Source sync lifetime and toast proof remain in 08-02.",
+        "retry": "Manual only. Wrapper awaits one blocking task and does not replay failed operations."
+      ,
+        "classifier": "n/a: bounded editor save/read, not a file-processing batch",
+        "successRetention": "saved payload retained in the editor; SkillsTab refreshes on SKILLS_UPDATED_EVENT",
+        "failureReasons": "window-local catch surfaces the IPC error message",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=skills_save_skill_as"
+      },
+      "evidence": {
+        "bounds": "Finite request-response domain work; scan cardinality, recursive file bytes or subprocess duration are not claimed constant. All work is isolated from the async executor.",
+        "platform": "macOS executed. Unix/Windows conditional symlink, mode and subprocess flags audited; no Windows runtime execution claimed.",
+        "boundaryCase": "phase08_03_boundary::every_actual_owned_wrapper_uses_blocking_worker_and_maps_join_error invokes this exact wrapper, proves a distinct blocking thread and same-runtime async probe progress, and checks contextual JoinError.",
+        "safety": "Source/read origin and managed destination reservations prevent source checkout mutation during the copy. Existing destination collision and tier validation are retained."
+      }
+    },
+    {
+      "name": "skills_create_skill",
+      "module": "src-tauri/src/skill_host/store.rs",
+      "registrationPath": "src-tauri/src/lib.rs::skill_host::store::ipc::skills_create_skill",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/skill_host/store.rs::ipc::skills_create_skill -> crate::skill_host::skills_create_skill synchronous reexport in src-tauri/src/skill_host/mod.rs",
+        "src-tauri/src/skill_host/store.rs::skills_create_skill -> safe_entry_name -> ensure_managed_source -> managed source reservation -> mkdir + fs::write(SKILL.md) -> rescan_source_in_registry -> save_registry_unlocked",
+        "src-tauri/src/skill_host/fs.rs::write_json_pretty uses atomic file replacement and Unix sync behavior; create_symlink_no_clobber uses Unix symlink or Windows symlink_dir. src-tauri/src/win_process.rs::NoWindow only adjusts process flags. All reachable blocking platform branches remain inside the same worker."
+      ],
+      "workerBoundary": "src-tauri/src/skill_host/store.rs::ipc::skills_create_skill -> tauri::async_runtime::spawn_blocking(move || domain(...)).await; owns inputs, constructs any AppHandle progress reporter in worker; only JoinError maps to skills_create_skill_task_failed String",
+      "syncCallers": [
+        "Synchronous skills_create_skill export preserved in src-tauri/src/skill_host/mod.rs",
+        "src-tauri/src/e2e_flow.rs consumes the synchronous domain function"
+      ],
+      "mutationKey": {
+        "lexicalPaths": [
+          "skills_root/registry.json",
+          "skills_root/_managed/<name>/SKILL.md"
+        ],
+        "aliasPaths": [
+          "SourceOperationLease canonicalizes existing paths or existing ancestors of new destinations",
+          "Git rev-parse --show-toplevel maps registered/nested/symlink aliases to one worktree; imported origin checked for copy/write paths"
+        ],
+        "sourceReservation": "Managed source lease and fresh guarded destination check/write/scan prevent duplicate creates and lost sibling records.",
+        "postAdmissionPreconditions": [
+          "fresh registry load under registry_guard",
+          "existing ownership/tier/name/path/manifest/install-marker gates remain in the synchronous domain implementation",
+          "network transactions additionally validate source generations, current path, dirty hashes and bundle state at their commit seam"
+        ],
+        "domainLockOrder": "Network operations acquire nonqueued source/worktree reservation, briefly acquire registry_guard, release it for network/env repair, then reacquire for fresh commit. Local operations hold registry_guard through lookup/nonwaiting reservation and write/scan/save; lease bookkeeping mutex is never retained while waiting for registry_guard.",
+        "sharedAdmissionEntry": "integrationRequired: 08-29; Plan 08-06 produces hierarchical path admission, Plan 08-29 integrates all lexical/alias paths and background call sites"
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_03_boundary",
+          "passed": 6,
+          "failed": 0,
+          "ignored": 0
+        }
+      ],
+      "processingCaller": {
+        "path": "src/lib/skills.ts::skillsCreateSkill existing native invoke wrapper",
+        "payload": "Original domain payload and legacy String errors are returned untouched; existing source/batch typed errors retain their prior wrappers and independent shard ownership.",
+        "terminalNoticeOwner": "Existing SkillsTab runOperation/runBackendProgressOperation or the invoking API consumer; no new duplicate notifier added",
+        "lifetime": "Owned blocking closure continues after view unmount; frontend processing lifetime/refresh closure belongs to 08-25/08-26 where applicable. Source sync lifetime and toast proof remain in 08-02.",
+        "retry": "Manual only. Wrapper awaits one blocking task and does not replay failed operations."
+      ,
+        "classifier": "explicit classify: success / skills.operation.complete",
+        "successRetention": "SkillOperation.result retains the payload; component refresh is viewScope.request-guarded; optimistic removal guarded by captured isCurrent() closure",
+        "failureReasons": "explicit classify reason strings (per-item failure messages joined); built-in path merges syncAllComplete summary with per-source errors and detects skills_source_stale",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=skills_create_skill"
+      },
+      "evidence": {
+        "bounds": "Finite request-response domain work; scan cardinality, recursive file bytes or subprocess duration are not claimed constant. All work is isolated from the async executor.",
+        "platform": "macOS executed. Unix/Windows conditional symlink, mode and subprocess flags audited; no Windows runtime execution claimed.",
+        "boundaryCase": "phase08_03_boundary::every_actual_owned_wrapper_uses_blocking_worker_and_maps_join_error invokes this exact wrapper, proves a distinct blocking thread and same-runtime async probe progress, and checks contextual JoinError.",
+        "safety": "Managed source lease and fresh guarded destination check/write/scan prevent duplicate creates and lost sibling records."
+      }
+    },
+    {
+      "name": "skills_delete_skill",
+      "module": "src-tauri/src/skill_host/store.rs",
+      "registrationPath": "src-tauri/src/lib.rs::skill_host::store::ipc::skills_delete_skill",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/skill_host/store.rs::ipc::skills_delete_skill -> crate::skill_host::skills_delete_skill synchronous reexport in src-tauri/src/skill_host/mod.rs",
+        "src-tauri/src/skill_host/store.rs::skills_delete_skill -> load_registry_unlocked -> managed-only and installed-skill checks -> SourceOperationLease::for_skill -> fs::remove_dir_all -> source rescan -> save_registry_unlocked",
+        "src-tauri/src/skill_host/fs.rs::write_json_pretty uses atomic file replacement and Unix sync behavior; create_symlink_no_clobber uses Unix symlink or Windows symlink_dir. src-tauri/src/win_process.rs::NoWindow only adjusts process flags. All reachable blocking platform branches remain inside the same worker."
+      ],
+      "workerBoundary": "src-tauri/src/skill_host/store.rs::ipc::skills_delete_skill -> tauri::async_runtime::spawn_blocking(move || domain(...)).await; owns inputs, constructs any AppHandle progress reporter in worker; only JoinError maps to skills_delete_skill_task_failed String",
+      "syncCallers": [
+        "Synchronous skills_delete_skill export preserved in src-tauri/src/skill_host/mod.rs",
+        "Existing domain unit tests call the synchronous function directly"
+      ],
+      "mutationKey": {
+        "lexicalPaths": [
+          "skills_root/registry.json",
+          "SkillRecord.abs_path managed directory and descendants"
+        ],
+        "aliasPaths": [
+          "SourceOperationLease canonicalizes existing paths or existing ancestors of new destinations",
+          "Git rev-parse --show-toplevel maps registered/nested/symlink aliases to one worktree; imported origin checked for copy/write paths"
+        ],
+        "sourceReservation": "Only uninstalled managed skills are deleted; source/worktree reservation spans the guarded deletion and fresh registry save.",
+        "postAdmissionPreconditions": [
+          "fresh registry load under registry_guard",
+          "existing ownership/tier/name/path/manifest/install-marker gates remain in the synchronous domain implementation",
+          "network transactions additionally validate source generations, current path, dirty hashes and bundle state at their commit seam"
+        ],
+        "domainLockOrder": "Network operations acquire nonqueued source/worktree reservation, briefly acquire registry_guard, release it for network/env repair, then reacquire for fresh commit. Local operations hold registry_guard through lookup/nonwaiting reservation and write/scan/save; lease bookkeeping mutex is never retained while waiting for registry_guard.",
+        "sharedAdmissionEntry": "integrationRequired: 08-29; Plan 08-06 produces hierarchical path admission, Plan 08-29 integrates all lexical/alias paths and background call sites"
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_03_boundary",
+          "passed": 6,
+          "failed": 0,
+          "ignored": 0
+        }
+      ],
+      "processingCaller": {
+        "path": "src/lib/skills.ts::skillsDeleteSkill existing native invoke wrapper",
+        "payload": "Original domain payload and legacy String errors are returned untouched; existing source/batch typed errors retain their prior wrappers and independent shard ownership.",
+        "terminalNoticeOwner": "Existing SkillsTab runOperation/runBackendProgressOperation or the invoking API consumer; no new duplicate notifier added",
+        "lifetime": "Owned blocking closure continues after view unmount; frontend processing lifetime/refresh closure belongs to 08-25/08-26 where applicable. Source sync lifetime and toast proof remain in 08-02.",
+        "retry": "Manual only. Wrapper awaits one blocking task and does not replay failed operations."
+      ,
+        "classifier": "n/a",
+        "successRetention": "n/a",
+        "failureReasons": "n/a",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=skills_delete_skill"
+      },
+      "evidence": {
+        "bounds": "Finite request-response domain work; scan cardinality, recursive file bytes or subprocess duration are not claimed constant. All work is isolated from the async executor.",
+        "platform": "macOS executed. Unix/Windows conditional symlink, mode and subprocess flags audited; no Windows runtime execution claimed.",
+        "boundaryCase": "phase08_03_boundary::every_actual_owned_wrapper_uses_blocking_worker_and_maps_join_error invokes this exact wrapper, proves a distinct blocking thread and same-runtime async probe progress, and checks contextual JoinError.",
+        "safety": "Only uninstalled managed skills are deleted; source/worktree reservation spans the guarded deletion and fresh registry save."
+      }
+    },
+    {
+      "name": "skills_list_installs",
+      "module": "src-tauri/src/skill_host/store.rs",
+      "registrationPath": "src-tauri/src/lib.rs::skill_host::store::ipc::skills_list_installs",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/skill_host/store.rs::ipc::skills_list_installs -> crate::skill_host::skills_list_installs synchronous reexport in src-tauri/src/skill_host/mod.rs",
+        "src-tauri/src/skill_host/store.rs::skills_list_installs -> load_registry_unlocked -> ensure_default_sources -> local builtin recovery/materialization -> save_registry_unlocked -> persisted installs",
+        "src-tauri/src/skill_host/fs.rs::write_json_pretty uses atomic file replacement and Unix sync behavior; create_symlink_no_clobber uses Unix symlink or Windows symlink_dir. src-tauri/src/win_process.rs::NoWindow only adjusts process flags. All reachable blocking platform branches remain inside the same worker."
+      ],
+      "workerBoundary": "src-tauri/src/skill_host/store.rs::ipc::skills_list_installs -> tauri::async_runtime::spawn_blocking(move || domain(...)).await; owns inputs, constructs any AppHandle progress reporter in worker; only JoinError maps to skills_list_installs_task_failed String",
+      "syncCallers": [
+        "Synchronous skills_list_installs export preserved in src-tauri/src/skill_host/mod.rs",
+        "Existing domain unit tests call the synchronous function directly"
+      ],
+      "mutationKey": {
+        "lexicalPaths": [
+          "skills_root/registry.json",
+          "skills_root/{_sources,_managed,_imported,_cache,_builtin} default initialization"
+        ],
+        "aliasPaths": [
+          "SourceOperationLease canonicalizes existing paths or existing ancestors of new destinations",
+          "Git rev-parse --show-toplevel maps registered/nested/symlink aliases to one worktree; imported origin checked for copy/write paths"
+        ],
+        "sourceReservation": "Default refresh and registry save are guarded. This listing can initialize local catalogs, so it is not classified as mutation-free.",
+        "postAdmissionPreconditions": [
+          "fresh registry load under registry_guard",
+          "existing ownership/tier/name/path/manifest/install-marker gates remain in the synchronous domain implementation",
+          "network transactions additionally validate source generations, current path, dirty hashes and bundle state at their commit seam"
+        ],
+        "domainLockOrder": "Network operations acquire nonqueued source/worktree reservation, briefly acquire registry_guard, release it for network/env repair, then reacquire for fresh commit. Local operations hold registry_guard through lookup/nonwaiting reservation and write/scan/save; lease bookkeeping mutex is never retained while waiting for registry_guard.",
+        "sharedAdmissionEntry": "integrationRequired: 08-29; Plan 08-06 produces hierarchical path admission, Plan 08-29 integrates all lexical/alias paths and background call sites"
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_03_boundary",
+          "passed": 6,
+          "failed": 0,
+          "ignored": 0
+        }
+      ],
+      "processingCaller": {
+        "path": "src/lib/skills.ts::skillsListInstalls existing native invoke wrapper",
+        "payload": "Original domain payload and legacy String errors are returned untouched; existing source/batch typed errors retain their prior wrappers and independent shard ownership.",
+        "terminalNoticeOwner": "Existing SkillsTab runOperation/runBackendProgressOperation or the invoking API consumer; no new duplicate notifier added",
+        "lifetime": "Owned blocking closure continues after view unmount; frontend processing lifetime/refresh closure belongs to 08-25/08-26 where applicable. Source sync lifetime and toast proof remain in 08-02.",
+        "retry": "Manual only. Wrapper awaits one blocking task and does not replay failed operations."
+      ,
+        "classifier": "n/a: read; promise resolution returns data to the caller",
+        "successRetention": "result stored in component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=skills_list_installs"
+      },
+      "evidence": {
+        "bounds": "Finite request-response domain work; scan cardinality, recursive file bytes or subprocess duration are not claimed constant. All work is isolated from the async executor.",
+        "platform": "macOS executed. Unix/Windows conditional symlink, mode and subprocess flags audited; no Windows runtime execution claimed.",
+        "boundaryCase": "phase08_03_boundary::every_actual_owned_wrapper_uses_blocking_worker_and_maps_join_error invokes this exact wrapper, proves a distinct blocking thread and same-runtime async probe progress, and checks contextual JoinError.",
+        "safety": "Default refresh and registry save are guarded. This listing can initialize local catalogs, so it is not classified as mutation-free."
+      }
+    },
+    {
+      "name": "skills_install_skill",
+      "module": "src-tauri/src/skill_host/store.rs",
+      "registrationPath": "src-tauri/src/lib.rs::skill_host::store::ipc::skills_install_skill",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/skill_host/store.rs::ipc::skills_install_skill -> crate::skill_host::skills_install_skill synchronous reexport in src-tauri/src/skill_host/mod.rs",
+        "src-tauri/src/skill_host/store.rs::skills_install_skill -> load_registry_unlocked -> owner/validity checks -> SourceOperationLease::for_skill -> normalize target/name/mode -> install_copy or create_maru_entry_symlink + create_install_target_symlink -> save_registry_unlocked",
+        "src-tauri/src/skill_host/fs.rs::write_json_pretty uses atomic file replacement and Unix sync behavior; create_symlink_no_clobber uses Unix symlink or Windows symlink_dir. src-tauri/src/win_process.rs::NoWindow only adjusts process flags. All reachable blocking platform branches remain inside the same worker."
+      ],
+      "workerBoundary": "src-tauri/src/skill_host/store.rs::ipc::skills_install_skill -> tauri::async_runtime::spawn_blocking(move || domain(...)).await; owns inputs, constructs any AppHandle progress reporter in worker; only JoinError maps to skills_install_skill_task_failed String",
+      "syncCallers": [
+        "Synchronous skills_install_skill export preserved in src-tauri/src/skill_host/mod.rs",
+        "Existing domain unit tests call the synchronous function directly"
+      ],
+      "mutationKey": {
+        "lexicalPaths": [
+          "skills_root/registry.json",
+          "skills_root/<installed_as> symlink",
+          "resolved Claude or CODEX_HOME/skills/<installed_as> target and copy descendants/.maru-install.json"
+        ],
+        "aliasPaths": [
+          "SourceOperationLease canonicalizes existing paths or existing ancestors of new destinations",
+          "Git rev-parse --show-toplevel maps registered/nested/symlink aliases to one worktree; imported origin checked for copy/write paths"
+        ],
+        "sourceReservation": "Copy and symlink branches preserve ownership markers and no-clobber checks. Source/worktree reservation protects the copy input; registry guard orders installs. Full lexical target sets remain 08-29.",
+        "postAdmissionPreconditions": [
+          "fresh registry load under registry_guard",
+          "existing ownership/tier/name/path/manifest/install-marker gates remain in the synchronous domain implementation",
+          "network transactions additionally validate source generations, current path, dirty hashes and bundle state at their commit seam"
+        ],
+        "domainLockOrder": "Network operations acquire nonqueued source/worktree reservation, briefly acquire registry_guard, release it for network/env repair, then reacquire for fresh commit. Local operations hold registry_guard through lookup/nonwaiting reservation and write/scan/save; lease bookkeeping mutex is never retained while waiting for registry_guard.",
+        "sharedAdmissionEntry": "integrationRequired: 08-29; Plan 08-06 produces hierarchical path admission, Plan 08-29 integrates all lexical/alias paths and background call sites"
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_03_boundary",
+          "passed": 6,
+          "failed": 0,
+          "ignored": 0
+        }
+      ],
+      "processingCaller": {
+        "path": "src/lib/skills.ts::skillsInstallSkill existing native invoke wrapper",
+        "payload": "Original domain payload and legacy String errors are returned untouched; existing source/batch typed errors retain their prior wrappers and independent shard ownership.",
+        "terminalNoticeOwner": "Existing SkillsTab runOperation/runBackendProgressOperation or the invoking API consumer; no new duplicate notifier added",
+        "lifetime": "Owned blocking closure continues after view unmount; frontend processing lifetime/refresh closure belongs to 08-25/08-26 where applicable. Source sync lifetime and toast proof remain in 08-02.",
+        "retry": "Manual only. Wrapper awaits one blocking task and does not replay failed operations."
+      ,
+        "classifier": "explicit classify per counts: success (0 failures) / info skills.operation.partial (some) / error (all failed)",
+        "successRetention": "SkillOperation.result retains the payload; component refresh is viewScope.request-guarded; optimistic removal guarded by captured isCurrent() closure",
+        "failureReasons": "explicit classify reason strings (per-item failure messages joined); built-in path merges syncAllComplete summary with per-source errors and detects skills_source_stale",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=skills_install_skill"
+      },
+      "evidence": {
+        "bounds": "Finite request-response domain work; scan cardinality, recursive file bytes or subprocess duration are not claimed constant. All work is isolated from the async executor.",
+        "platform": "macOS executed. Unix/Windows conditional symlink, mode and subprocess flags audited; no Windows runtime execution claimed.",
+        "boundaryCase": "phase08_03_boundary::every_actual_owned_wrapper_uses_blocking_worker_and_maps_join_error invokes this exact wrapper, proves a distinct blocking thread and same-runtime async probe progress, and checks contextual JoinError.",
+        "safety": "Copy and symlink branches preserve ownership markers and no-clobber checks. Source/worktree reservation protects the copy input; registry guard orders installs. Full lexical target sets remain 08-29."
+      }
+    },
+    {
+      "name": "skills_uninstall_skill",
+      "module": "src-tauri/src/skill_host/store.rs",
+      "registrationPath": "src-tauri/src/lib.rs::skill_host::store::ipc::skills_uninstall_skill",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/skill_host/store.rs::ipc::skills_uninstall_skill -> crate::skill_host::skills_uninstall_skill synchronous reexport in src-tauri/src/skill_host/mod.rs",
+        "src-tauri/src/skill_host/store.rs::skills_uninstall_skill -> normalize target/name -> load_registry_unlocked -> managed_by check -> target worktree reservation -> marker-checked copy removal or matching symlink removal -> save_registry_unlocked",
+        "src-tauri/src/skill_host/fs.rs::write_json_pretty uses atomic file replacement and Unix sync behavior; create_symlink_no_clobber uses Unix symlink or Windows symlink_dir. src-tauri/src/win_process.rs::NoWindow only adjusts process flags. All reachable blocking platform branches remain inside the same worker."
+      ],
+      "workerBoundary": "src-tauri/src/skill_host/store.rs::ipc::skills_uninstall_skill -> tauri::async_runtime::spawn_blocking(move || domain(...)).await; owns inputs, constructs any AppHandle progress reporter in worker; only JoinError maps to skills_uninstall_skill_task_failed String",
+      "syncCallers": [
+        "Synchronous skills_uninstall_skill export preserved in src-tauri/src/skill_host/mod.rs",
+        "Existing domain unit tests call the synchronous function directly"
+      ],
+      "mutationKey": {
+        "lexicalPaths": [
+          "skills_root/registry.json",
+          "SkillInstall.target_path and copy descendants",
+          "SkillInstall.entrypoint_path when no other install uses it"
+        ],
+        "aliasPaths": [
+          "SourceOperationLease canonicalizes existing paths or existing ancestors of new destinations",
+          "Git rev-parse --show-toplevel maps registered/nested/symlink aliases to one worktree; imported origin checked for copy/write paths"
+        ],
+        "sourceReservation": "Recorded target and ownership proofs remain authoritative; external installs and unmarked directories are rejected before deletion.",
+        "postAdmissionPreconditions": [
+          "fresh registry load under registry_guard",
+          "existing ownership/tier/name/path/manifest/install-marker gates remain in the synchronous domain implementation",
+          "network transactions additionally validate source generations, current path, dirty hashes and bundle state at their commit seam"
+        ],
+        "domainLockOrder": "Network operations acquire nonqueued source/worktree reservation, briefly acquire registry_guard, release it for network/env repair, then reacquire for fresh commit. Local operations hold registry_guard through lookup/nonwaiting reservation and write/scan/save; lease bookkeeping mutex is never retained while waiting for registry_guard.",
+        "sharedAdmissionEntry": "integrationRequired: 08-29; Plan 08-06 produces hierarchical path admission, Plan 08-29 integrates all lexical/alias paths and background call sites"
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_03_boundary",
+          "passed": 6,
+          "failed": 0,
+          "ignored": 0
+        }
+      ],
+      "processingCaller": {
+        "path": "src/lib/skills.ts::skillsUninstallSkill existing native invoke wrapper",
+        "payload": "Original domain payload and legacy String errors are returned untouched; existing source/batch typed errors retain their prior wrappers and independent shard ownership.",
+        "terminalNoticeOwner": "Existing SkillsTab runOperation/runBackendProgressOperation or the invoking API consumer; no new duplicate notifier added",
+        "lifetime": "Owned blocking closure continues after view unmount; frontend processing lifetime/refresh closure belongs to 08-25/08-26 where applicable. Source sync lifetime and toast proof remain in 08-02.",
+        "retry": "Manual only. Wrapper awaits one blocking task and does not replay failed operations."
+      ,
+        "classifier": "explicit classify per counts: success / info partial / error",
+        "successRetention": "SkillOperation.result retains the payload; component refresh is viewScope.request-guarded; optimistic removal guarded by captured isCurrent() closure",
+        "failureReasons": "explicit classify reason strings (per-item failure messages joined); built-in path merges syncAllComplete summary with per-source errors and detects skills_source_stale",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=skills_uninstall_skill"
+      },
+      "evidence": {
+        "bounds": "Finite request-response domain work; scan cardinality, recursive file bytes or subprocess duration are not claimed constant. All work is isolated from the async executor.",
+        "platform": "macOS executed. Unix/Windows conditional symlink, mode and subprocess flags audited; no Windows runtime execution claimed.",
+        "boundaryCase": "phase08_03_boundary::every_actual_owned_wrapper_uses_blocking_worker_and_maps_join_error invokes this exact wrapper, proves a distinct blocking thread and same-runtime async probe progress, and checks contextual JoinError.",
+        "safety": "Recorded target and ownership proofs remain authoritative; external installs and unmarked directories are rejected before deletion."
+      }
+    },
+    {
+      "name": "skills_adopt_external_links",
+      "module": "src-tauri/src/skill_host/store.rs",
+      "registrationPath": "src-tauri/src/lib.rs::skill_host::store::ipc::skills_adopt_external_links",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/skill_host/store.rs::ipc::skills_adopt_external_links -> crate::skill_host::skills_adopt_external_links synchronous reexport in src-tauri/src/skill_host/mod.rs",
+        "src-tauri/src/skill_host/store.rs::skills_adopt_external_links -> skills_adopt_external_links_impl -> read_dir for two tool roots -> read_link_target or copy marker -> adopted source creation/rescan -> external or managed install record -> save_registry_unlocked",
+        "src-tauri/src/skill_host/fs.rs::write_json_pretty uses atomic file replacement and Unix sync behavior; create_symlink_no_clobber uses Unix symlink or Windows symlink_dir. src-tauri/src/win_process.rs::NoWindow only adjusts process flags. All reachable blocking platform branches remain inside the same worker."
+      ],
+      "workerBoundary": "src-tauri/src/skill_host/store.rs::ipc::skills_adopt_external_links -> tauri::async_runtime::spawn_blocking(move || domain(...)).await; owns inputs, constructs any AppHandle progress reporter in worker; only JoinError maps to skills_adopt_external_links_task_failed String",
+      "syncCallers": [
+        "Synchronous skills_adopt_external_links export preserved in src-tauri/src/skill_host/mod.rs",
+        "Existing domain unit tests call the synchronous function directly"
+      ],
+      "mutationKey": {
+        "lexicalPaths": [
+          "skills_root/registry.json",
+          "skills_root/{_sources,_managed,_imported,_cache} initialization"
+        ],
+        "aliasPaths": [
+          "SourceOperationLease canonicalizes existing paths or existing ancestors of new destinations",
+          "Git rev-parse --show-toplevel maps registered/nested/symlink aliases to one worktree; imported origin checked for copy/write paths"
+        ],
+        "sourceReservation": "Adoption reads existing links/copy markers and registers metadata without rewriting their contents. New source incarnations are observed by the common save seam.",
+        "postAdmissionPreconditions": [
+          "fresh registry load under registry_guard",
+          "existing ownership/tier/name/path/manifest/install-marker gates remain in the synchronous domain implementation",
+          "network transactions additionally validate source generations, current path, dirty hashes and bundle state at their commit seam"
+        ],
+        "domainLockOrder": "Network operations acquire nonqueued source/worktree reservation, briefly acquire registry_guard, release it for network/env repair, then reacquire for fresh commit. Local operations hold registry_guard through lookup/nonwaiting reservation and write/scan/save; lease bookkeeping mutex is never retained while waiting for registry_guard.",
+        "sharedAdmissionEntry": "integrationRequired: 08-29; Plan 08-06 produces hierarchical path admission, Plan 08-29 integrates all lexical/alias paths and background call sites"
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_03_boundary",
+          "passed": 6,
+          "failed": 0,
+          "ignored": 0
+        }
+      ],
+      "processingCaller": {
+        "path": "src/lib/skills.ts::skillsAdoptExternalLinks existing native invoke wrapper",
+        "payload": "Original domain payload and legacy String errors are returned untouched; existing source/batch typed errors retain their prior wrappers and independent shard ownership.",
+        "terminalNoticeOwner": "Existing SkillsTab runOperation/runBackendProgressOperation or the invoking API consumer; no new duplicate notifier added",
+        "lifetime": "Owned blocking closure continues after view unmount; frontend processing lifetime/refresh closure belongs to 08-25/08-26 where applicable. Source sync lifetime and toast proof remain in 08-02.",
+        "retry": "Manual only. Wrapper awaits one blocking task and does not replay failed operations."
+      ,
+        "classifier": "explicit classify: success when adopted>0 else info, adoptComplete reason",
+        "successRetention": "SkillOperation.result retains the payload; component refresh is viewScope.request-guarded; optimistic removal guarded by captured isCurrent() closure",
+        "failureReasons": "explicit classify reason strings (per-item failure messages joined); built-in path merges syncAllComplete summary with per-source errors and detects skills_source_stale",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=skills_adopt_external_links"
+      },
+      "evidence": {
+        "bounds": "Finite request-response domain work; scan cardinality, recursive file bytes or subprocess duration are not claimed constant. All work is isolated from the async executor.",
+        "platform": "macOS executed. Unix/Windows conditional symlink, mode and subprocess flags audited; no Windows runtime execution claimed.",
+        "boundaryCase": "phase08_03_boundary::every_actual_owned_wrapper_uses_blocking_worker_and_maps_join_error invokes this exact wrapper, proves a distinct blocking thread and same-runtime async probe progress, and checks contextual JoinError.",
+        "safety": "Adoption reads existing links/copy markers and registers metadata without rewriting their contents. New source incarnations are observed by the common save seam."
+      }
+    },
+    {
+      "name": "skills_reset_registry",
+      "module": "src-tauri/src/skill_host/store.rs",
+      "registrationPath": "src-tauri/src/lib.rs::skill_host::store::ipc::skills_reset_registry",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/skill_host/store.rs::ipc::skills_reset_registry -> crate::skill_host::skills_reset_registry synchronous reexport in src-tauri/src/skill_host/mod.rs",
+        "src-tauri/src/skill_host/store.rs::skills_reset_registry -> skills_reset_registry_impl -> bootstrap directories -> registry backup copy -> preserve intact install records -> invalidate all registry generations including pending clones -> ensure_default_sources -> source scans -> save_registry_unlocked",
+        "src-tauri/src/skill_host/fs.rs::write_json_pretty uses atomic file replacement and Unix sync behavior; create_symlink_no_clobber uses Unix symlink or Windows symlink_dir. src-tauri/src/win_process.rs::NoWindow only adjusts process flags. All reachable blocking platform branches remain inside the same worker."
+      ],
+      "workerBoundary": "src-tauri/src/skill_host/store.rs::ipc::skills_reset_registry -> tauri::async_runtime::spawn_blocking(move || domain(...)).await; owns inputs, constructs any AppHandle progress reporter in worker; only JoinError maps to skills_reset_registry_task_failed String",
+      "syncCallers": [
+        "Synchronous skills_reset_registry export preserved in src-tauri/src/skill_host/mod.rs",
+        "Existing domain unit tests call the synchronous function directly"
+      ],
+      "mutationKey": {
+        "lexicalPaths": [
+          "skills_root/registry.json",
+          "skills_root/registry-<timestamp>.json.bak",
+          "skills_root/{_sources,_managed,_imported,_cache,_builtin} default initialization"
+        ],
+        "aliasPaths": [
+          "SourceOperationLease canonicalizes existing paths or existing ancestors of new destinations",
+          "Git rev-parse --show-toplevel maps registered/nested/symlink aliases to one worktree; imported origin checked for copy/write paths"
+        ],
+        "sourceReservation": "Reset remains available to invalidate in-flight work. Registry guard spans backup/rebuild; existing install ownership and local materialization are preserved.",
+        "postAdmissionPreconditions": [
+          "fresh registry load under registry_guard",
+          "existing ownership/tier/name/path/manifest/install-marker gates remain in the synchronous domain implementation",
+          "network transactions additionally validate source generations, current path, dirty hashes and bundle state at their commit seam"
+        ],
+        "domainLockOrder": "Network operations acquire nonqueued source/worktree reservation, briefly acquire registry_guard, release it for network/env repair, then reacquire for fresh commit. Local operations hold registry_guard through lookup/nonwaiting reservation and write/scan/save; lease bookkeeping mutex is never retained while waiting for registry_guard.",
+        "sharedAdmissionEntry": "integrationRequired: 08-29; Plan 08-06 produces hierarchical path admission, Plan 08-29 integrates all lexical/alias paths and background call sites"
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_03_boundary",
+          "passed": 6,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_03_network_lock",
+          "passed": 7,
+          "failed": 0,
+          "ignored": 0
+        }
+      ],
+      "processingCaller": {
+        "path": "src/lib/skills.ts::skillsResetRegistry existing native invoke wrapper",
+        "payload": "Original domain payload and legacy String errors are returned untouched; existing source/batch typed errors retain their prior wrappers and independent shard ownership.",
+        "terminalNoticeOwner": "Existing SkillsTab runOperation/runBackendProgressOperation or the invoking API consumer; no new duplicate notifier added",
+        "lifetime": "Owned blocking closure continues after view unmount; frontend processing lifetime/refresh closure belongs to 08-25/08-26 where applicable. Source sync lifetime and toast proof remain in 08-02.",
+        "retry": "Manual only. Wrapper awaits one blocking task and does not replay failed operations."
+      ,
+        "classifier": "explicit classify: success / skills.operation.complete",
+        "successRetention": "SkillOperation.result retains the payload; component refresh is viewScope.request-guarded; optimistic removal guarded by captured isCurrent() closure",
+        "failureReasons": "explicit classify reason strings (per-item failure messages joined); built-in path merges syncAllComplete summary with per-source errors and detects skills_source_stale",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=skills_reset_registry"
+      },
+      "evidence": {
+        "bounds": "Finite request-response domain work; scan cardinality, recursive file bytes or subprocess duration are not claimed constant. All work is isolated from the async executor.",
+        "platform": "macOS executed. Unix/Windows conditional symlink, mode and subprocess flags audited; no Windows runtime execution claimed.",
+        "boundaryCase": "phase08_03_boundary::every_actual_owned_wrapper_uses_blocking_worker_and_maps_join_error invokes this exact wrapper, proves a distinct blocking thread and same-runtime async probe progress, and checks contextual JoinError.",
+        "safety": "Reset remains available to invalidate in-flight work. Registry guard spans backup/rebuild; existing install ownership and local materialization are preserved."
+      }
+    },
+    {
+      "name": "skills_doctor",
+      "module": "src-tauri/src/skill_host/store.rs",
+      "registrationPath": "src-tauri/src/lib.rs::skill_host::store::ipc::skills_doctor",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/skill_host/store.rs::ipc::skills_doctor -> crate::skill_host::skills_doctor synchronous reexport in src-tauri/src/skill_host/mod.rs",
+        "src-tauri/src/skill_host/store.rs::skills_doctor -> load_registry_readonly_unlocked -> add_default_sources_readonly -> rescan_source_in_registry_with_progress -> WalkDir/hash/git_dirty -> build_doctor_report + doctor_foreign_root_issues read_dir/link inspection",
+        "src-tauri/src/skill_host/fs.rs::write_json_pretty uses atomic file replacement and Unix sync behavior; create_symlink_no_clobber uses Unix symlink or Windows symlink_dir. src-tauri/src/win_process.rs::NoWindow only adjusts process flags. All reachable blocking platform branches remain inside the same worker."
+      ],
+      "workerBoundary": "src-tauri/src/skill_host/store.rs::ipc::skills_doctor -> tauri::async_runtime::spawn_blocking(move || domain(...)).await; owns inputs, constructs any AppHandle progress reporter in worker; only JoinError maps to skills_doctor_task_failed String",
+      "syncCallers": [
+        "Synchronous skills_doctor export preserved in src-tauri/src/skill_host/mod.rs",
+        "src-tauri/src/cli.rs consumes synchronous skills_doctor"
+      ],
+      "mutationKey": {
+        "readOnly": true,
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "domainLockOrder": "registry_guard covers the read-only diagnostic snapshot; all blocking scans occur in the worker",
+        "sharedAdmissionEntry": "No filesystem mutation in skills_doctor; source module integration remains 08-29"
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_03_boundary",
+          "passed": 6,
+          "failed": 0,
+          "ignored": 0
+        }
+      ],
+      "processingCaller": {
+        "path": "src/lib/skills.ts::skillsDoctor existing native invoke wrapper",
+        "payload": "Original domain payload and legacy String errors are returned untouched; existing source/batch typed errors retain their prior wrappers and independent shard ownership.",
+        "terminalNoticeOwner": "Existing SkillsTab runOperation/runBackendProgressOperation or the invoking API consumer; no new duplicate notifier added",
+        "lifetime": "Owned blocking closure continues after view unmount; frontend processing lifetime/refresh closure belongs to 08-25/08-26 where applicable. Source sync lifetime and toast proof remain in 08-02.",
+        "retry": "Manual only. Wrapper awaits one blocking task and does not replay failed operations."
+      ,
+        "classifier": "n/a",
+        "successRetention": "n/a",
+        "failureReasons": "n/a",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=skills_doctor"
+      },
+      "evidence": {
+        "bounds": "Finite request-response domain work; scan cardinality, recursive file bytes or subprocess duration are not claimed constant. All work is isolated from the async executor.",
+        "platform": "macOS executed. Unix/Windows conditional symlink, mode and subprocess flags audited; no Windows runtime execution claimed.",
+        "boundaryCase": "phase08_03_boundary::every_actual_owned_wrapper_uses_blocking_worker_and_maps_join_error invokes this exact wrapper, proves a distinct blocking thread and same-runtime async probe progress, and checks contextual JoinError.",
+        "safety": "Strict read-only domain path does not create directories, materialize bundles or save migrations; all disk/process work is inside the worker."
+      }
+    },
+    {
+      "name": "skills_list_dirty",
+      "module": "src-tauri/src/skill_host/store.rs",
+      "registrationPath": "src-tauri/src/lib.rs::skill_host::store::ipc::skills_list_dirty",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/skill_host/store.rs::ipc::skills_list_dirty -> crate::skill_host::skills_list_dirty synchronous reexport in src-tauri/src/skill_host/mod.rs",
+        "src-tauri/src/skill_host/store.rs::skills_list_dirty -> rescan_registry_sources -> ensure_default_sources -> source scans -> dirty_records_from_registry -> source_git_repo_root local Git rev-parse -> save_registry_unlocked",
+        "src-tauri/src/skill_host/fs.rs::write_json_pretty uses atomic file replacement and Unix sync behavior; create_symlink_no_clobber uses Unix symlink or Windows symlink_dir. src-tauri/src/win_process.rs::NoWindow only adjusts process flags. All reachable blocking platform branches remain inside the same worker."
+      ],
+      "workerBoundary": "src-tauri/src/skill_host/store.rs::ipc::skills_list_dirty -> tauri::async_runtime::spawn_blocking(move || domain(...)).await; owns inputs, constructs any AppHandle progress reporter in worker; only JoinError maps to skills_list_dirty_task_failed String",
+      "syncCallers": [
+        "Synchronous skills_list_dirty export preserved in src-tauri/src/skill_host/mod.rs",
+        "src-tauri/src/cli.rs consumes synchronous skills_list_dirty"
+      ],
+      "mutationKey": {
+        "lexicalPaths": [
+          "skills_root/registry.json",
+          "skills_root/{_sources,_managed,_imported,_cache,_builtin} default initialization"
+        ],
+        "aliasPaths": [
+          "SourceOperationLease canonicalizes existing paths or existing ancestors of new destinations",
+          "Git rev-parse --show-toplevel maps registered/nested/symlink aliases to one worktree; imported origin checked for copy/write paths"
+        ],
+        "sourceReservation": "Local scan/default refresh/save remain guarded. Local Git identity discovery is blocking but has no network edge.",
+        "postAdmissionPreconditions": [
+          "fresh registry load under registry_guard",
+          "existing ownership/tier/name/path/manifest/install-marker gates remain in the synchronous domain implementation",
+          "network transactions additionally validate source generations, current path, dirty hashes and bundle state at their commit seam"
+        ],
+        "domainLockOrder": "Network operations acquire nonqueued source/worktree reservation, briefly acquire registry_guard, release it for network/env repair, then reacquire for fresh commit. Local operations hold registry_guard through lookup/nonwaiting reservation and write/scan/save; lease bookkeeping mutex is never retained while waiting for registry_guard.",
+        "sharedAdmissionEntry": "integrationRequired: 08-29; Plan 08-06 produces hierarchical path admission, Plan 08-29 integrates all lexical/alias paths and background call sites"
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_03_boundary",
+          "passed": 6,
+          "failed": 0,
+          "ignored": 0
+        }
+      ],
+      "processingCaller": {
+        "path": "src/lib/skills.ts::skillsListDirty existing native invoke wrapper",
+        "payload": "Original domain payload and legacy String errors are returned untouched; existing source/batch typed errors retain their prior wrappers and independent shard ownership.",
+        "terminalNoticeOwner": "Existing SkillsTab runOperation/runBackendProgressOperation or the invoking API consumer; no new duplicate notifier added",
+        "lifetime": "Owned blocking closure continues after view unmount; frontend processing lifetime/refresh closure belongs to 08-25/08-26 where applicable. Source sync lifetime and toast proof remain in 08-02.",
+        "retry": "Manual only. Wrapper awaits one blocking task and does not replay failed operations."
+      ,
+        "classifier": "n/a",
+        "successRetention": "n/a",
+        "failureReasons": "n/a",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=skills_list_dirty"
+      },
+      "evidence": {
+        "bounds": "Finite request-response domain work; scan cardinality, recursive file bytes or subprocess duration are not claimed constant. All work is isolated from the async executor.",
+        "platform": "macOS executed. Unix/Windows conditional symlink, mode and subprocess flags audited; no Windows runtime execution claimed.",
+        "boundaryCase": "phase08_03_boundary::every_actual_owned_wrapper_uses_blocking_worker_and_maps_join_error invokes this exact wrapper, proves a distinct blocking thread and same-runtime async probe progress, and checks contextual JoinError.",
+        "safety": "Local scan/default refresh/save remain guarded. Local Git identity discovery is blocking but has no network edge."
+      }
+    },
+    {
+      "name": "skills_reconcile_skill",
+      "module": "src-tauri/src/skill_host/store.rs",
+      "registrationPath": "src-tauri/src/lib.rs::skill_host::store::ipc::skills_reconcile_skill",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/skill_host/store.rs::ipc::skills_reconcile_skill -> crate::skill_host::skills_reconcile_skill synchronous reexport in src-tauri/src/skill_host/mod.rs",
+        "src-tauri/src/skill_host/store.rs::skills_reconcile_skill -> normalize action -> guarded rescan/owner/hash/snapshot -> source reservation -> fixed Git add/commit/push or checkout outside REGISTRY_LOCK -> fresh snapshot/hash validation -> mark_skill_saved -> save_registry_unlocked; nonGit builtin restore and managed/imported accept remain guarded",
+        "src-tauri/src/skill_host/fs.rs::write_json_pretty uses atomic file replacement and Unix sync behavior; create_symlink_no_clobber uses Unix symlink or Windows symlink_dir. src-tauri/src/win_process.rs::NoWindow only adjusts process flags. All reachable blocking platform branches remain inside the same worker."
+      ],
+      "workerBoundary": "src-tauri/src/skill_host/store.rs::ipc::skills_reconcile_skill -> tauri::async_runtime::spawn_blocking(move || domain(...)).await; owns inputs, constructs any AppHandle progress reporter in worker; only JoinError maps to skills_reconcile_skill_task_failed String",
+      "syncCallers": [
+        "Synchronous skills_reconcile_skill export preserved in src-tauri/src/skill_host/mod.rs",
+        "src-tauri/src/cli.rs consumes synchronous skills_reconcile_skill"
+      ],
+      "mutationKey": {
+        "lexicalPaths": [
+          "skills_root/registry.json",
+          "configured source Git worktree/index and selected skill path",
+          "builtin_materialized_root/skills/<name> for discard",
+          "remote Git push for accept (existing authorized behavior)"
+        ],
+        "aliasPaths": [
+          "SourceOperationLease canonicalizes existing paths or existing ancestors of new destinations",
+          "Git rev-parse --show-toplevel maps registered/nested/symlink aliases to one worktree; imported origin checked for copy/write paths"
+        ],
+        "sourceReservation": "Source generation/path/hash are checked after admission and before saved-state commit. Foreign ownership denies before Git. Completed Git side effects are not rolled back against a replacement source; push failure keeps the existing committed/pushed/message outcome.",
+        "postAdmissionPreconditions": [
+          "fresh registry load under registry_guard",
+          "existing ownership/tier/name/path/manifest/install-marker gates remain in the synchronous domain implementation",
+          "network transactions additionally validate source generations, current path, dirty hashes and bundle state at their commit seam"
+        ],
+        "domainLockOrder": "Network operations acquire nonqueued source/worktree reservation, briefly acquire registry_guard, release it for network/env repair, then reacquire for fresh commit. Local operations hold registry_guard through lookup/nonwaiting reservation and write/scan/save; lease bookkeeping mutex is never retained while waiting for registry_guard.",
+        "sharedAdmissionEntry": "integrationRequired: 08-29; Plan 08-06 produces hierarchical path admission, Plan 08-29 integrates all lexical/alias paths and background call sites"
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_03_boundary",
+          "passed": 6,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_03_network_lock",
+          "passed": 7,
+          "failed": 0,
+          "ignored": 0
+        }
+      ],
+      "processingCaller": {
+        "path": "src/lib/skills.ts::skillsReconcileSkill existing native invoke wrapper",
+        "payload": "Original domain payload and legacy String errors are returned untouched; existing source/batch typed errors retain their prior wrappers and independent shard ownership.",
+        "terminalNoticeOwner": "Existing SkillsTab runOperation/runBackendProgressOperation or the invoking API consumer; no new duplicate notifier added",
+        "lifetime": "Owned blocking closure continues after view unmount; frontend processing lifetime/refresh closure belongs to 08-25/08-26 where applicable. Source sync lifetime and toast proof remain in 08-02.",
+        "retry": "Manual only. Wrapper awaits one blocking task and does not replay failed operations."
+      ,
+        "classifier": "n/a",
+        "successRetention": "n/a",
+        "failureReasons": "n/a",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=skills_reconcile_skill"
+      },
+      "evidence": {
+        "bounds": "Finite request-response domain work; scan cardinality, recursive file bytes or subprocess duration are not claimed constant. All work is isolated from the async executor.",
+        "platform": "macOS executed. Unix/Windows conditional symlink, mode and subprocess flags audited; no Windows runtime execution claimed.",
+        "boundaryCase": "phase08_03_boundary::every_actual_owned_wrapper_uses_blocking_worker_and_maps_join_error invokes this exact wrapper, proves a distinct blocking thread and same-runtime async probe progress, and checks contextual JoinError.",
+        "safety": "Source generation/path/hash are checked after admission and before saved-state commit. Foreign ownership denies before Git. Completed Git side effects are not rolled back against a replacement source; push failure keeps the existing committed/pushed/message outcome."
+      }
+    },
+    {
+      "name": "skills_import_external",
+      "module": "src-tauri/src/skill_host/store.rs",
+      "registrationPath": "src-tauri/src/lib.rs::skill_host::store::ipc::skills_import_external",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/skill_host/store.rs::ipc::skills_import_external -> crate::skill_host::skills_import_external synchronous reexport in src-tauri/src/skill_host/mod.rs",
+        "src-tauri/src/skill_host/store.rs::skills_import_external -> normalize mode and source SKILL.md/name -> fresh registry/default scans/name collision -> imported source plus origin checkout reservation -> copy_dir_all or create_symlink_no_clobber -> imported manifest -> scan -> Maru entry symlink -> save_registry_unlocked",
+        "src-tauri/src/skill_host/fs.rs::write_json_pretty uses atomic file replacement and Unix sync behavior; create_symlink_no_clobber uses Unix symlink or Windows symlink_dir. src-tauri/src/win_process.rs::NoWindow only adjusts process flags. All reachable blocking platform branches remain inside the same worker."
+      ],
+      "workerBoundary": "src-tauri/src/skill_host/store.rs::ipc::skills_import_external -> tauri::async_runtime::spawn_blocking(move || domain(...)).await; owns inputs, constructs any AppHandle progress reporter in worker; only JoinError maps to skills_import_external_task_failed String",
+      "syncCallers": [
+        "Synchronous skills_import_external export preserved in src-tauri/src/skill_host/mod.rs",
+        "src-tauri/src/cli.rs consumes synchronous skills_import_external"
+      ],
+      "mutationKey": {
+        "lexicalPaths": [
+          "skills_root/registry.json",
+          "skills_root/_imported/manifest.json",
+          "skills_root/_imported/skills/<name> descendants or link",
+          "skills_root/<name> entry symlink"
+        ],
+        "aliasPaths": [
+          "SourceOperationLease canonicalizes existing paths or existing ancestors of new destinations",
+          "Git rev-parse --show-toplevel maps registered/nested/symlink aliases to one worktree; imported origin checked for copy/write paths"
+        ],
+        "sourceReservation": "Import reserves imported source and actual source-origin Git worktree. Existing explicit copy/link behavior, manifest-origin validation and collision checks remain.",
+        "postAdmissionPreconditions": [
+          "fresh registry load under registry_guard",
+          "existing ownership/tier/name/path/manifest/install-marker gates remain in the synchronous domain implementation",
+          "network transactions additionally validate source generations, current path, dirty hashes and bundle state at their commit seam"
+        ],
+        "domainLockOrder": "Network operations acquire nonqueued source/worktree reservation, briefly acquire registry_guard, release it for network/env repair, then reacquire for fresh commit. Local operations hold registry_guard through lookup/nonwaiting reservation and write/scan/save; lease bookkeeping mutex is never retained while waiting for registry_guard.",
+        "sharedAdmissionEntry": "integrationRequired: 08-29; Plan 08-06 produces hierarchical path admission, Plan 08-29 integrates all lexical/alias paths and background call sites"
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_03_boundary",
+          "passed": 6,
+          "failed": 0,
+          "ignored": 0
+        }
+      ],
+      "processingCaller": {
+        "path": "src/lib/skills.ts::skillsImportExternal existing native invoke wrapper",
+        "payload": "Original domain payload and legacy String errors are returned untouched; existing source/batch typed errors retain their prior wrappers and independent shard ownership.",
+        "terminalNoticeOwner": "Existing SkillsTab runOperation/runBackendProgressOperation or the invoking API consumer; no new duplicate notifier added",
+        "lifetime": "Owned blocking closure continues after view unmount; frontend processing lifetime/refresh closure belongs to 08-25/08-26 where applicable. Source sync lifetime and toast proof remain in 08-02.",
+        "retry": "Manual only. Wrapper awaits one blocking task and does not replay failed operations."
+      ,
+        "classifier": "n/a",
+        "successRetention": "n/a",
+        "failureReasons": "n/a",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=skills_import_external"
+      },
+      "evidence": {
+        "bounds": "Finite request-response domain work; scan cardinality, recursive file bytes or subprocess duration are not claimed constant. All work is isolated from the async executor.",
+        "platform": "macOS executed. Unix/Windows conditional symlink, mode and subprocess flags audited; no Windows runtime execution claimed.",
+        "boundaryCase": "phase08_03_boundary::every_actual_owned_wrapper_uses_blocking_worker_and_maps_join_error invokes this exact wrapper, proves a distinct blocking thread and same-runtime async probe progress, and checks contextual JoinError.",
+        "safety": "Import reserves imported source and actual source-origin Git worktree. Existing explicit copy/link behavior, manifest-origin validation and collision checks remain."
+      }
+    },
+    {
+      "name": "skills_import_unmanage",
+      "module": "src-tauri/src/skill_host/store.rs",
+      "registrationPath": "src-tauri/src/lib.rs::skill_host::store::ipc::skills_import_unmanage",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/skill_host/store.rs::ipc::skills_import_unmanage -> crate::skill_host::skills_import_unmanage synchronous reexport in src-tauri/src/skill_host/mod.rs",
+        "src-tauri/src/skill_host/store.rs::skills_import_unmanage -> fresh registry/default scans -> imported skill lookup -> source/origin reservation -> matching Maru entry removal -> marker/matching owned install cleanup -> manifest removal -> optional file/link deletion -> rescan/save",
+        "src-tauri/src/skill_host/fs.rs::write_json_pretty uses atomic file replacement and Unix sync behavior; create_symlink_no_clobber uses Unix symlink or Windows symlink_dir. src-tauri/src/win_process.rs::NoWindow only adjusts process flags. All reachable blocking platform branches remain inside the same worker."
+      ],
+      "workerBoundary": "src-tauri/src/skill_host/store.rs::ipc::skills_import_unmanage -> tauri::async_runtime::spawn_blocking(move || domain(...)).await; owns inputs, constructs any AppHandle progress reporter in worker; only JoinError maps to skills_import_unmanage_task_failed String",
+      "syncCallers": [
+        "Synchronous skills_import_unmanage export preserved in src-tauri/src/skill_host/mod.rs",
+        "src-tauri/src/cli.rs consumes synchronous skills_import_unmanage"
+      ],
+      "mutationKey": {
+        "lexicalPaths": [
+          "skills_root/registry.json",
+          "skills_root/_imported/manifest.json",
+          "skills_root/_imported/skills/<name> optional deletion",
+          "skills_root/<name> entry symlink",
+          "recorded SkillInstall.target_path for matching owned installs"
+        ],
+        "aliasPaths": [
+          "SourceOperationLease canonicalizes existing paths or existing ancestors of new destinations",
+          "Git rev-parse --show-toplevel maps registered/nested/symlink aliases to one worktree; imported origin checked for copy/write paths"
+        ],
+        "sourceReservation": "Source/origin reservations and guarded registry mutation preserve delete_files=false behavior, foreign targets and copy ownership markers.",
+        "postAdmissionPreconditions": [
+          "fresh registry load under registry_guard",
+          "existing ownership/tier/name/path/manifest/install-marker gates remain in the synchronous domain implementation",
+          "network transactions additionally validate source generations, current path, dirty hashes and bundle state at their commit seam"
+        ],
+        "domainLockOrder": "Network operations acquire nonqueued source/worktree reservation, briefly acquire registry_guard, release it for network/env repair, then reacquire for fresh commit. Local operations hold registry_guard through lookup/nonwaiting reservation and write/scan/save; lease bookkeeping mutex is never retained while waiting for registry_guard.",
+        "sharedAdmissionEntry": "integrationRequired: 08-29; Plan 08-06 produces hierarchical path admission, Plan 08-29 integrates all lexical/alias paths and background call sites"
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_03_boundary",
+          "passed": 6,
+          "failed": 0,
+          "ignored": 0
+        }
+      ],
+      "processingCaller": {
+        "path": "src/lib/skills.ts::skillsImportUnmanage existing native invoke wrapper",
+        "payload": "Original domain payload and legacy String errors are returned untouched; existing source/batch typed errors retain their prior wrappers and independent shard ownership.",
+        "terminalNoticeOwner": "Existing SkillsTab runOperation/runBackendProgressOperation or the invoking API consumer; no new duplicate notifier added",
+        "lifetime": "Owned blocking closure continues after view unmount; frontend processing lifetime/refresh closure belongs to 08-25/08-26 where applicable. Source sync lifetime and toast proof remain in 08-02.",
+        "retry": "Manual only. Wrapper awaits one blocking task and does not replay failed operations."
+      ,
+        "classifier": "n/a",
+        "successRetention": "n/a",
+        "failureReasons": "n/a",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=skills_import_unmanage"
+      },
+      "evidence": {
+        "bounds": "Finite request-response domain work; scan cardinality, recursive file bytes or subprocess duration are not claimed constant. All work is isolated from the async executor.",
+        "platform": "macOS executed. Unix/Windows conditional symlink, mode and subprocess flags audited; no Windows runtime execution claimed.",
+        "boundaryCase": "phase08_03_boundary::every_actual_owned_wrapper_uses_blocking_worker_and_maps_join_error invokes this exact wrapper, proves a distinct blocking thread and same-runtime async probe progress, and checks contextual JoinError.",
+        "safety": "Source/origin reservations and guarded registry mutation preserve delete_files=false behavior, foreign targets and copy ownership markers."
+      }
+    },
+    {
+      "name": "skills_bundle_status",
+      "module": "src-tauri/src/skill_host/store.rs",
+      "registrationPath": "src-tauri/src/lib.rs::skill_host::store::ipc::skills_bundle_status",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/skill_host/store.rs::ipc::skills_bundle_status -> crate::skill_host::skills_bundle_status synchronous reexport in src-tauri/src/skill_host/mod.rs",
+        "src-tauri/src/skill_host/store.rs::skills_bundle_status -> skills_bundle_status_impl -> guarded bundle state read -> bundle_dirty_areas -> collect_bundle_hashes WalkDir/file reads -> load_registry_unlocked -> stale_copy_installs_report marker/hash reads",
+        "src-tauri/src/skill_host/fs.rs::write_json_pretty uses atomic file replacement and Unix sync behavior; create_symlink_no_clobber uses Unix symlink or Windows symlink_dir. src-tauri/src/win_process.rs::NoWindow only adjusts process flags. All reachable blocking platform branches remain inside the same worker."
+      ],
+      "workerBoundary": "src-tauri/src/skill_host/store.rs::ipc::skills_bundle_status -> tauri::async_runtime::spawn_blocking(move || domain(...)).await; owns inputs, constructs any AppHandle progress reporter in worker; only JoinError maps to skills_bundle_status_task_failed String",
+      "syncCallers": [
+        "Synchronous skills_bundle_status export preserved in src-tauri/src/skill_host/mod.rs",
+        "Existing domain unit tests call the synchronous function directly"
+      ],
+      "mutationKey": {
+        "lexicalPaths": [
+          "skills_root/{_sources,_managed,_imported,_cache} initialization"
+        ],
+        "aliasPaths": [
+          "SourceOperationLease canonicalizes existing paths or existing ancestors of new destinations",
+          "Git rev-parse --show-toplevel maps registered/nested/symlink aliases to one worktree; imported origin checked for copy/write paths"
+        ],
+        "sourceReservation": "Guard spans state/hash/registry inspection so local swap cannot yield a mixed snapshot. Status performs no bundle swap/recovery or registry-file save.",
+        "postAdmissionPreconditions": [
+          "fresh registry load under registry_guard",
+          "existing ownership/tier/name/path/manifest/install-marker gates remain in the synchronous domain implementation",
+          "network transactions additionally validate source generations, current path, dirty hashes and bundle state at their commit seam"
+        ],
+        "domainLockOrder": "Network operations acquire nonqueued source/worktree reservation, briefly acquire registry_guard, release it for network/env repair, then reacquire for fresh commit. Local operations hold registry_guard through lookup/nonwaiting reservation and write/scan/save; lease bookkeeping mutex is never retained while waiting for registry_guard.",
+        "sharedAdmissionEntry": "integrationRequired: 08-29; Plan 08-06 produces hierarchical path admission, Plan 08-29 integrates all lexical/alias paths and background call sites"
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_03_boundary",
+          "passed": 6,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_03_network_lock",
+          "passed": 7,
+          "failed": 0,
+          "ignored": 0
+        }
+      ],
+      "processingCaller": {
+        "path": "src/lib/skills.ts::skillsBundleStatus existing native invoke wrapper",
+        "payload": "Original domain payload and legacy String errors are returned untouched; existing source/batch typed errors retain their prior wrappers and independent shard ownership.",
+        "terminalNoticeOwner": "Existing SkillsTab runOperation/runBackendProgressOperation or the invoking API consumer; no new duplicate notifier added",
+        "lifetime": "Owned blocking closure continues after view unmount; frontend processing lifetime/refresh closure belongs to 08-25/08-26 where applicable. Source sync lifetime and toast proof remain in 08-02.",
+        "retry": "Manual only. Wrapper awaits one blocking task and does not replay failed operations."
+      ,
+        "classifier": "n/a: read; promise resolution returns data to the caller",
+        "successRetention": "result stored in component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=skills_bundle_status"
+      },
+      "evidence": {
+        "bounds": "Finite request-response domain work; scan cardinality, recursive file bytes or subprocess duration are not claimed constant. All work is isolated from the async executor.",
+        "platform": "macOS executed. Unix/Windows conditional symlink, mode and subprocess flags audited; no Windows runtime execution claimed.",
+        "boundaryCase": "phase08_03_boundary::every_actual_owned_wrapper_uses_blocking_worker_and_maps_join_error invokes this exact wrapper, proves a distinct blocking thread and same-runtime async probe progress, and checks contextual JoinError.",
+        "safety": "Guard spans state/hash/registry inspection so local swap cannot yield a mixed snapshot. Status performs no bundle swap/recovery or registry-file save."
+      }
+    },
+    {
+      "name": "skills_check_bundle_update",
+      "module": "src-tauri/src/skill_host/store.rs",
+      "registrationPath": "src-tauri/src/lib.rs::skill_host::store::ipc::skills_check_bundle_update",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/skill_host/store.rs::ipc::skills_check_bundle_update -> crate::skill_host::skills_check_bundle_update synchronous reexport in src-tauri/src/skill_host/mod.rs",
+        "src-tauri/src/skill_host/store.rs::skills_check_bundle_update -> skills_check_bundle_update_blocking -> builtin source/destination reservation -> guarded ensure_active_bundle local recovery -> discover_remote_bundle -> bounded HTTP/signature verification outside REGISTRY_LOCK -> guarded status scan",
+        "src-tauri/src/skill_host/fs.rs::write_json_pretty uses atomic file replacement and Unix sync behavior; create_symlink_no_clobber uses Unix symlink or Windows symlink_dir. src-tauri/src/win_process.rs::NoWindow only adjusts process flags. All reachable blocking platform branches remain inside the same worker."
+      ],
+      "workerBoundary": "src-tauri/src/skill_host/store.rs::ipc::skills_check_bundle_update -> tauri::async_runtime::spawn_blocking(move || domain(...)).await; owns inputs, constructs any AppHandle progress reporter in worker; only JoinError maps to skills_check_bundle_update_task_failed String",
+      "syncCallers": [
+        "Synchronous skills_check_bundle_update export preserved in src-tauri/src/skill_host/mod.rs",
+        "src-tauri/src/cli.rs consumes synchronous skills_check_bundle_update"
+      ],
+      "mutationKey": {
+        "lexicalPaths": [
+          "skills_root/_builtin local recovery",
+          "skills_root/_cache bundle state/pristine/swap paths",
+          "skills_root/{_sources,_managed,_imported,_cache} initialization"
+        ],
+        "aliasPaths": [
+          "SourceOperationLease canonicalizes existing paths or existing ancestors of new destinations",
+          "Git rev-parse --show-toplevel maps registered/nested/symlink aliases to one worktree; imported origin checked for copy/write paths"
+        ],
+        "sourceReservation": "Builtin stable source lease spans check. No registry guard across HTTP; force remains an API-compatible uncached flag.",
+        "postAdmissionPreconditions": [
+          "fresh registry load under registry_guard",
+          "existing ownership/tier/name/path/manifest/install-marker gates remain in the synchronous domain implementation",
+          "network transactions additionally validate source generations, current path, dirty hashes and bundle state at their commit seam"
+        ],
+        "domainLockOrder": "Network operations acquire nonqueued source/worktree reservation, briefly acquire registry_guard, release it for network/env repair, then reacquire for fresh commit. Local operations hold registry_guard through lookup/nonwaiting reservation and write/scan/save; lease bookkeeping mutex is never retained while waiting for registry_guard.",
+        "sharedAdmissionEntry": "integrationRequired: 08-29; Plan 08-06 produces hierarchical path admission, Plan 08-29 integrates all lexical/alias paths and background call sites"
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_03_boundary",
+          "passed": 6,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_03_network_lock",
+          "passed": 7,
+          "failed": 0,
+          "ignored": 0
+        }
+      ],
+      "processingCaller": {
+        "path": "src/lib/skills.ts::skillsCheckBundleUpdate existing native invoke wrapper",
+        "payload": "Original domain payload and legacy String errors are returned untouched; existing source/batch typed errors retain their prior wrappers and independent shard ownership.",
+        "terminalNoticeOwner": "Existing SkillsTab runOperation/runBackendProgressOperation or the invoking API consumer; no new duplicate notifier added",
+        "lifetime": "Owned blocking closure continues after view unmount; frontend processing lifetime/refresh closure belongs to 08-25/08-26 where applicable. Source sync lifetime and toast proof remain in 08-02.",
+        "retry": "Manual only. Wrapper awaits one blocking task and does not replay failed operations."
+      ,
+        "classifier": "n/a: read; promise resolution returns data to the caller",
+        "successRetention": "result stored in component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=skills_check_bundle_update"
+      },
+      "evidence": {
+        "bounds": "Finite request-response domain work; scan cardinality, recursive file bytes or subprocess duration are not claimed constant. All work is isolated from the async executor.",
+        "platform": "macOS executed. Unix/Windows conditional symlink, mode and subprocess flags audited; no Windows runtime execution claimed.",
+        "boundaryCase": "phase08_03_boundary::every_actual_owned_wrapper_uses_blocking_worker_and_maps_join_error invokes this exact wrapper, proves a distinct blocking thread and same-runtime async probe progress, and checks contextual JoinError.",
+        "safety": "Builtin stable source lease spans check. No registry guard across HTTP; force remains an API-compatible uncached flag."
+      }
+    },
+    {
+      "name": "skills_apply_bundle_update",
+      "module": "src-tauri/src/skill_host/store.rs",
+      "registrationPath": "src-tauri/src/lib.rs::skill_host::store::ipc::skills_apply_bundle_update",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/skill_host/store.rs::ipc::skills_apply_bundle_update -> crate::skill_host::skills_apply_bundle_update synchronous reexport in src-tauri/src/skill_host/mod.rs",
+        "src-tauri/src/skill_host/store.rs::skills_apply_bundle_update -> skills_apply_bundle_update_impl -> skills_apply_bundle_update_blocking -> builtin lease + guarded dirty/source snapshot -> signed discovery/download + verified extraction outside guard -> guarded generation/dirty/state gates -> unlocked next-tree/env repair -> fresh guarded revalidation -> signed swap journal/state/scans/install cleanup",
+        "src-tauri/src/skill_host/fs.rs::write_json_pretty uses atomic file replacement and Unix sync behavior; create_symlink_no_clobber uses Unix symlink or Windows symlink_dir. src-tauri/src/win_process.rs::NoWindow only adjusts process flags. All reachable blocking platform branches remain inside the same worker."
+      ],
+      "workerBoundary": "src-tauri/src/skill_host/store.rs::ipc::skills_apply_bundle_update -> tauri::async_runtime::spawn_blocking(move || domain(...)).await; owns inputs, constructs any AppHandle progress reporter in worker; only JoinError maps to skills_apply_bundle_update_task_failed String",
+      "syncCallers": [
+        "Synchronous skills_apply_bundle_update export preserved in src-tauri/src/skill_host/mod.rs",
+        "src-tauri/src/cli.rs consumes synchronous skills_apply_bundle_update_headless -> skills_apply_bundle_update_impl"
+      ],
+      "mutationKey": {
+        "lexicalPaths": [
+          "skills_root/registry.json",
+          "skills_root/_builtin and .next-<uuid> trees",
+          "skills_root/_cache staging/pristine/backup/journal/state paths",
+          "maru_home/env descendants when repair_env=true",
+          "recorded matching builtin install target/entrypoint paths"
+        ],
+        "aliasPaths": [
+          "SourceOperationLease canonicalizes existing paths or existing ancestors of new destinations",
+          "Git rev-parse --show-toplevel maps registered/nested/symlink aliases to one worktree; imported origin checked for copy/write paths"
+        ],
+        "sourceReservation": "Builtin source/worktree lease spans the full transaction. Dirty edits deny before discovery and before swap; orphan sweeping respects active preparation; stale/reset rejects before publication. Existing env script effects are not rollback-journaled and shared env admission remains 08-29.",
+        "postAdmissionPreconditions": [
+          "fresh registry load under registry_guard",
+          "existing ownership/tier/name/path/manifest/install-marker gates remain in the synchronous domain implementation",
+          "network transactions additionally validate source generations, current path, dirty hashes and bundle state at their commit seam"
+        ],
+        "domainLockOrder": "Network operations acquire nonqueued source/worktree reservation, briefly acquire registry_guard, release it for network/env repair, then reacquire for fresh commit. Local operations hold registry_guard through lookup/nonwaiting reservation and write/scan/save; lease bookkeeping mutex is never retained while waiting for registry_guard.",
+        "sharedAdmissionEntry": "integrationRequired: 08-29; Plan 08-06 produces hierarchical path admission, Plan 08-29 integrates all lexical/alias paths and background call sites"
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_03_boundary",
+          "passed": 6,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_03_network_lock",
+          "passed": 7,
+          "failed": 0,
+          "ignored": 0
+        }
+      ],
+      "processingCaller": {
+        "path": "src/lib/skills.ts::skillsApplyBundleUpdate existing native invoke wrapper",
+        "payload": "Original domain payload and legacy String errors are returned untouched; existing source/batch typed errors retain their prior wrappers and independent shard ownership.",
+        "terminalNoticeOwner": "Existing SkillsTab runOperation/runBackendProgressOperation or the invoking API consumer; no new duplicate notifier added",
+        "lifetime": "Owned blocking closure continues after view unmount; frontend processing lifetime/refresh closure belongs to 08-25/08-26 where applicable. Source sync lifetime and toast proof remain in 08-02.",
+        "retry": "Manual only. Wrapper awaits one blocking task and does not replay failed operations."
+      ,
+        "classifier": "explicit classify: null outcome -> error / skills.operation.error",
+        "successRetention": "SkillOperation.result retains the payload; component refresh is viewScope.request-guarded; optimistic removal guarded by captured isCurrent() closure",
+        "failureReasons": "explicit classify reason strings (per-item failure messages joined); built-in path merges syncAllComplete summary with per-source errors and detects skills_source_stale",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=skills_apply_bundle_update"
+      },
+      "evidence": {
+        "bounds": "Finite request-response domain work; scan cardinality, recursive file bytes or subprocess duration are not claimed constant. All work is isolated from the async executor.",
+        "platform": "macOS executed. Unix/Windows conditional symlink, mode and subprocess flags audited; no Windows runtime execution claimed.",
+        "boundaryCase": "phase08_03_boundary::every_actual_owned_wrapper_uses_blocking_worker_and_maps_join_error invokes this exact wrapper, proves a distinct blocking thread and same-runtime async probe progress, and checks contextual JoinError.",
+        "safety": "Builtin source/worktree lease spans the full transaction. Dirty edits deny before discovery and before swap; orphan sweeping respects active preparation; stale/reset rejects before publication. Existing env script effects are not rollback-journaled and shared env admission remains 08-29."
+      }
+    }
+  ],
+  "verification": {
+    "ownedCommands": 24,
+    "convertedAuditRows": 3,
+    "sourceInventory": "Immutable .planning/phases/08-main-thread-responsiveness/08-COMMAND-INVENTORY.md",
+    "networkSeams": "Signed discovery/download and run_env_repair_blocking are production function arguments. Local fixture closures exercise transaction races and real archive extraction/swap; existing bundle_update tests separately verify signatures, capped HTTP, traversal/hash rejection and swap recovery.",
+    "crossProcessScope": "Process-local source generations and reservations plus fresh disk comparison. Cross-process locking/identical offline ABA and phase-wide native saturation are not claimed.",
+    "nativeHandoff": "Existing native tracer remains in 08-01/02. Phase-wide saturation/latency and production artifact closure remain 08-27/28.",
+    "checks": [
+      {
+        "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_03_network_lock",
+        "passed": 7,
+        "failed": 0,
+        "ignored": 0
+      },
+      {
+        "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_03_boundary",
+        "passed": 6,
+        "failed": 0,
+        "ignored": 0,
+        "actualWrappersCovered": 24
+      },
+      {
+        "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib skill_host::store::tests",
+        "passed": 111,
+        "failed": 0,
+        "ignored": 0
+      },
+      {
+        "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib skill_host::bundle_update::tests",
+        "passed": 13,
+        "failed": 0,
+        "ignored": 0
+      },
+      {
+        "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib ipc_error::tests",
+        "passed": 4,
+        "failed": 0,
+        "ignored": 0
+      },
+      {
+        "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib cli::tests",
+        "passed": 12,
+        "failed": 0,
+        "ignored": 0
+      },
+      {
+        "command": "cargo check --manifest-path src-tauri/Cargo.toml -p maru-cli",
+        "exitCode": 0
+      },
+      {
+        "command": "cargo clippy --manifest-path src-tauri/Cargo.toml --lib -- -D warnings",
+        "exitCode": 0
+      },
+      {
+        "command": "cargo fmt --manifest-path src-tauri/Cargo.toml -- --check",
+        "exitCode": 0
+      },
+      {
+        "command": "gsd-tools verify artifacts 08-03-PLAN.md",
+        "passed": 4,
+        "total": 4
+      },
+      {
+        "command": "inline Python exact plan ownership, registration and evidence-field check",
+        "passed": 24,
+        "total": 24
+      }
+    ],
+    "generationMutationRoutes": {
+      "commonObserver": "save_registry_unlocked -> ensure_source_generation covers every persisted source configuration, excludes last_synced_at, and deletes absent established identities even while their old lease exists",
+      "sourceConfigurationWriters": [
+        "skills_add_source and skills_add_source_blocking",
+        "skills_remove_source -> remove_source_from_registry",
+        "ensure_default_sources through skills_list_sources, skills_list_skills(refresh), skills_list_installs, skills_sync_all_sources_impl, skills_reset_registry_impl, skills_sync_tools(apply), rescan_registry_sources and default_public_env_setup",
+        "ensure_catalog_sources / ensure_inventory_sources replace or prune configuration",
+        "skills_adopt_external_links_impl inserts adopted configuration",
+        "skills_save_skill_as / skills_create_skill -> ensure_managed_source",
+        "skills_import_external / skills_import_unmanage -> rescan_registry_sources / ensure_imported_source",
+        "skills_apply_bundle_update_blocking invalidates builtin content replacement generation"
+      ],
+      "explicitInvalidators": [
+        "remove_source_from_registry also invalidates pending clone ID",
+        "skills_reset_registry_impl clears all identities for the current registry before recreating defaults",
+        "skills_apply_bundle_update_blocking removes builtin generation after a verified content swap"
+      ],
+      "pendingCloneRule": "Only pending_clone=true entries may survive unrelated saves while their reservation is active; a pending entry is never serialized into registry JSON",
+      "namedTests": [
+        "phase08_03_network_lock::clone_preserves_unrelated_commit_and_reset_rejects_pending_generation",
+        "phase08_03_network_lock::clone_keeps_registry_available_and_removal_wins",
+        "phase08_03_boundary::generations_cover_default_refresh_inventory_prune_import_adopt_and_reset",
+        "phase08_source_transactions regressions in the 111-test store run"
+      ]
+    }
+  }
+}

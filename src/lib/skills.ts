@@ -1,3 +1,4 @@
+import { normalizeIpcError } from "./ipcError";
 import { invoke } from "@tauri-apps/api/core";
 import { invokeE2EOverride } from "./e2eInvoke";
 import type { MissionMetadata } from "./types";
@@ -219,6 +220,8 @@ export interface SyncSourceResult {
   sourceId: string;
   kind: string;
   ok: boolean;
+  skipped: boolean;
+  errorCode?: string | null;
   skills: number;
   lastSyncedAt?: string | null;
   error?: string | null;
@@ -228,6 +231,7 @@ export interface SyncAllOutcome {
   total: number;
   succeeded: number;
   failed: number;
+  skipped: number;
   results: SyncSourceResult[];
 }
 
@@ -334,7 +338,9 @@ export async function skillsSyncSource(
   progressId: string | null = null,
 ): Promise<SkillRecord[]> {
   if (!isTauri()) return [];
-  return invoke<SkillRecord[]>("skills_sync_source", { sourceId, progressId });
+  // The Rust worker owns operation lifetime. Preserve its result/error and
+  // progress ID; a failure is retried only by another explicit user action.
+  return invoke<SkillRecord[]>("skills_sync_source", { sourceId, progressId }).catch((reason: unknown) => { throw normalizeIpcError(reason); });
 }
 
 export async function skillsRescanSource(
@@ -349,8 +355,8 @@ export async function skillsSyncAllSources(
   workPath: string | null = null,
   progressId: string | null = null,
 ): Promise<SyncAllOutcome> {
-  if (!isTauri()) return { total: 0, succeeded: 0, failed: 0, results: [] };
-  return invoke<SyncAllOutcome>("skills_sync_all_sources", { workPath, progressId });
+  if (!isTauri()) return { total: 0, succeeded: 0, failed: 0, skipped: 0, results: [] };
+  return invoke<SyncAllOutcome>("skills_sync_all_sources", { workPath, progressId }).catch((reason: unknown) => { throw normalizeIpcError(reason); });
 }
 
 export async function skillsListSkills(

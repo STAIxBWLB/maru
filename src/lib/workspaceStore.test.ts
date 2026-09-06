@@ -205,6 +205,20 @@ describe("query/filter/collapsed/selection helpers", () => {
     expect(pruneCustomDocumentFiltersInState(next, new Set(["kept"]))).toBe(next);
   });
 
+  it("pruneCustomDocumentFiltersInState resets persisted filters holding a removed built-in view", () => {
+    // A workspace persisted before the PERF-06 Inbox removal can hold
+    // { kind: "view", view: "inbox" }; the prune resets it to "all" silently.
+    const removed = { kind: "view", view: "inbox" } as unknown as DocumentFilter;
+    const surviving: DocumentFilter = { kind: "view", view: "drafts" };
+    const state = stateOf({
+      documentFilterByVisibility: { private: removed, public: surviving },
+    });
+    const next = pruneCustomDocumentFiltersInState(state, new Set());
+    expect(next.documentFilterByVisibility.private).toEqual({ kind: "all" });
+    expect(next.documentFilterByVisibility.public).toBe(surviving);
+    expect(pruneCustomDocumentFiltersInState(next, new Set())).toBe(next);
+  });
+
   it("collapsed folder helpers set one visibility and no-op on identity", () => {
     const state = stateOf();
     const tree = setCollapsedTreeFoldersInState(state, "private", ["a", "b"]);

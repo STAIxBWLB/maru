@@ -2,6 +2,11 @@
 // Spec: plan §M4, src-tauri/src/export/.
 
 import { invoke } from "@tauri-apps/api/core";
+import {
+  runProcessingOperation,
+  type ProcessingCompletion,
+  type ProcessingWrapperOptions,
+} from "./processingOperations";
 
 export type ExportFormat = "docx" | "hwpx" | "pdf";
 export type ExportOutputStatus = "planned" | "pending" | "ready" | "failed";
@@ -88,18 +93,49 @@ export interface ExportDispatchResponse {
   results: ExportDispatchResult[];
 }
 
-export async function exportDispatch(params: {
-  workspaceRoot: string;
-  manifestPath: string;
-  formats?: ExportFormat[];
-}): Promise<ExportDispatchResponse> {
-  return invoke<ExportDispatchResponse>("export_dispatch", {
-    req: {
-      workspace_root: params.workspaceRoot,
-      manifest_path: params.manifestPath,
-      formats: params.formats ?? [],
+export function classifyExportDispatchCompletion(
+  response: ExportDispatchResponse,
+): ProcessingCompletion {
+  if (response.results.length === 0) return { status: "empty", succeeded: [], failed: [] };
+  const succeeded = response.results
+    .filter((result) => result.success)
+    .map((result) => `${result.format}: ${result.output_path}`);
+  const failed = response.results
+    .filter((result) => !result.success)
+    .map((result) => ({
+      label: result.format,
+      reason: result.reason?.trim() || summarizeValidation(response.validation),
+    }));
+  if (failed.length === 0) return { status: "all-success", succeeded, failed };
+  if (succeeded.length === 0) return { status: "all-failed", succeeded, failed };
+  return { status: "partial-success", succeeded, failed };
+}
+
+export async function exportDispatch(
+  params: {
+    workspaceRoot: string;
+    manifestPath: string;
+    formats?: ExportFormat[];
+  },
+  options?: ProcessingWrapperOptions,
+): Promise<ExportDispatchResponse> {
+  return runProcessingOperation(
+    {
+      operationId: options?.operationId ?? crypto.randomUUID(),
+      workspace: params.workspaceRoot,
+      labelKey: "processing.label.exportDispatch",
+      outerOperationId: options?.outerOperationId ?? null,
     },
-  });
+    () =>
+      invoke<ExportDispatchResponse>("export_dispatch", {
+        req: {
+          workspace_root: params.workspaceRoot,
+          manifest_path: params.manifestPath,
+          formats: params.formats ?? [],
+        },
+      }),
+    classifyExportDispatchCompletion,
+  );
 }
 
 /**

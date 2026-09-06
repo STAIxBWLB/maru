@@ -1,0 +1,1909 @@
+{
+  "plan": "08-22",
+  "moduleIntegrationOwner": "08-22",
+  "commands": [
+    {
+      "name": "read_maru_workspace",
+      "module": "src-tauri/src/maru_dir.rs",
+      "registrationPath": "src-tauri/src/lib.rs::maru_dir::ipc::read_maru_workspace",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/maru_dir.rs::ipc::read_maru_workspace owns its inputs and awaits tauri::async_runtime::spawn_blocking calling src-tauri/src/maru_dir.rs::read_maru_workspace inside the worker; a JoinError becomes the display-only read_maru_workspace_task_failed String.",
+        "src-tauri/src/maru_dir.rs::read_maru_workspace only reads: src-tauri/src/maru_dir.rs::normalize_work_path bounds the workspace root, ensure_maru_dir performs bounded idempotent skeleton creation, and src-tauri/src/maru_dir.rs::read_workspace_internal parses the finite workspace.json with a schema-version ceiling, so the converted chain reaches no network call, process wait or unbounded walk."
+      ],
+      "workerBoundary": "src-tauri/src/maru_dir.rs::ipc::read_maru_workspace awaits tauri::async_runtime::spawn_blocking before any filesystem access or admission wait runs; only a JoinError maps to the display-only read_maru_workspace_task_failed String while the typed payload and every domain error string pass through unchanged; owned Strings, structs and JSON values cross the await, never a borrowed State or guard.",
+      "syncCallers": [
+        "No Rust or CLI caller invokes read_maru_workspace synchronously today; src-tauri/src/lib.rs registers only maru_dir::ipc::read_maru_workspace, and the original synchronous src-tauri/src/maru_dir.rs::read_maru_workspace keeps its name and signature for Rust callers (the phase08_22 tests exercise it directly)."
+      ],
+      "mutationKey": {
+        "readOnly": true,
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "sharedAdmissionEntry": "read_maru_workspace performs no filesystem mutation: src-tauri/src/maru_dir.rs::read_workspace_internal only parses the finite <work>/.maru/workspace.json with a schema-version ceiling, so beyond the bounded idempotent ensure_maru_dir skeleton creation this command is read-only and needs no mutation admission.",
+        "postAdmissionPreconditions": [
+          "No mutation admission is required: the command performs no filesystem mutation beyond the bounded idempotent skeleton creation noted above, so there is no transaction key to admit and nothing to release"
+        ],
+        "domainLockOrder": "No path admission exists; the command takes no domain lock, so there is no admission-before-domain-lock order to record."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_22",
+          "passed": 15,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/maruDir.ts"
+        ],
+        "payload": "readMaruWorkspace (src/lib/maruDir.ts:412) invokes read_maru_workspace with the workspace path; that surface keeps owning the load/save flow regardless of screen changes.",
+        "terminalNoticeOwner": "The settings/workspace surfaces that call readMaruWorkspace own busy state, current value display and error toasts for this call. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=read_maru_workspace"
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_22_each_wrapper_yields_same_poll_and_maps_join_failure",
+          "phase08_22_real_fixture_results_and_legacy_rejections"
+        ],
+        "workerProof": "maru_dir::phase08_22::phase08_22_each_wrapper_yields_same_poll_and_maps_join_failure holds the read_maru_workspace future at spawn_blocking worker entry via a #[cfg(test)] worker-stage hook keyed to the fixture workspace root, manually polls it on the same async task and proves progress while a distinct worker thread stays blocked; the panicked worker maps to the display-only read_maru_workspace_task_failed String.",
+        "platformScope": "macOS unit fixtures only: atomic_file::phase08_06::Home isolation (MARU_TEST_HOME/MARU_TEST_CONFIG_DIR), disposable tempdir workspaces and the test-only worker-stage hooks; no live workspace, credential, network endpoint or native test hook is touched.",
+        "limits": "Shared admission serializes cooperating in-process writers on the same admitted .maru set only; external editor processes are outside the in-process guarantee. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
+        "contract": "The MaruWorkspaceMeta payload, the workspace.json parse and newer-schema error strings are unchanged; the only new failure path is the JoinError-to-String mapping at the worker boundary."
+      }
+    },
+    {
+      "name": "read_maru_ignore",
+      "module": "src-tauri/src/maru_dir.rs",
+      "registrationPath": "src-tauri/src/lib.rs::maru_dir::ipc::read_maru_ignore",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/maru_dir.rs::ipc::read_maru_ignore owns its inputs and awaits tauri::async_runtime::spawn_blocking calling src-tauri/src/maru_dir.rs::read_maru_ignore inside the worker; a JoinError becomes the display-only read_maru_ignore_task_failed String.",
+        "src-tauri/src/maru_dir.rs::read_maru_ignore only reads: src-tauri/src/maru_dir.rs::normalize_work_path bounds the workspace root and src-tauri/src/maru_dir.rs::ignore_document resolves the managed ignore source through crate::vault::maruignore_source, returning built-in defaults when no file exists, so the converted chain reaches no network call, process wait or unbounded walk."
+      ],
+      "workerBoundary": "src-tauri/src/maru_dir.rs::ipc::read_maru_ignore awaits tauri::async_runtime::spawn_blocking before any filesystem access or admission wait runs; only a JoinError maps to the display-only read_maru_ignore_task_failed String while the typed payload and every domain error string pass through unchanged; owned Strings, structs and JSON values cross the await, never a borrowed State or guard.",
+      "syncCallers": [
+        "No Rust or CLI caller invokes read_maru_ignore synchronously today; src-tauri/src/lib.rs registers only maru_dir::ipc::read_maru_ignore, and the original synchronous src-tauri/src/maru_dir.rs::read_maru_ignore keeps its name and signature for Rust callers (the phase08_22 tests exercise it directly)."
+      ],
+      "mutationKey": {
+        "readOnly": true,
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "sharedAdmissionEntry": "read_maru_ignore performs no filesystem mutation: src-tauri/src/maru_dir.rs::ignore_document only reads the resolved ignore source or reports the built-in defaults, so this command is read-only and needs no mutation admission.",
+        "postAdmissionPreconditions": [
+          "No mutation admission is required: the command performs no filesystem mutation beyond the bounded idempotent skeleton creation noted above, so there is no transaction key to admit and nothing to release"
+        ],
+        "domainLockOrder": "No path admission exists; the command takes no domain lock, so there is no admission-before-domain-lock order to record."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_22",
+          "passed": 15,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/maruDir.ts"
+        ],
+        "payload": "readMaruIgnore (src/lib/maruDir.ts:476) invokes read_maru_ignore with the workspace path; that surface keeps owning the load/save flow regardless of screen changes.",
+        "terminalNoticeOwner": "The settings/workspace surfaces that call readMaruIgnore own busy state, current value display and error toasts for this call. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=read_maru_ignore"
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_22_each_wrapper_yields_same_poll_and_maps_join_failure",
+          "phase08_22_real_fixture_results_and_legacy_rejections"
+        ],
+        "workerProof": "maru_dir::phase08_22::phase08_22_each_wrapper_yields_same_poll_and_maps_join_failure holds the read_maru_ignore future at spawn_blocking worker entry via a #[cfg(test)] worker-stage hook keyed to the fixture workspace root, manually polls it on the same async task and proves progress while a distinct worker thread stays blocked; the panicked worker maps to the display-only read_maru_ignore_task_failed String.",
+        "platformScope": "macOS unit fixtures only: atomic_file::phase08_06::Home isolation (MARU_TEST_HOME/MARU_TEST_CONFIG_DIR), disposable tempdir workspaces and the test-only worker-stage hooks; no live workspace, credential, network endpoint or native test hook is touched.",
+        "limits": "Shared admission serializes cooperating in-process writers on the same admitted .maru set only; external editor processes are outside the in-process guarantee. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
+        "contract": "The MaruIgnoreDocument payload and the legacy .anchorignore source reporting are unchanged; the only new failure path is the JoinError-to-String mapping at the worker boundary."
+      }
+    },
+    {
+      "name": "list_maru_rules",
+      "module": "src-tauri/src/maru_dir.rs",
+      "registrationPath": "src-tauri/src/lib.rs::maru_dir::ipc::list_maru_rules",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/maru_dir.rs::ipc::list_maru_rules owns its inputs and awaits tauri::async_runtime::spawn_blocking calling src-tauri/src/maru_dir.rs::list_maru_rules inside the worker; a JoinError becomes the display-only list_maru_rules_task_failed String.",
+        "src-tauri/src/maru_dir.rs::list_maru_rules performs one bounded fs::read_dir over the managed <work>/.maru/rules directory (a finite maru-owned directory, never a recursive walk) after ensure_maru_dir bounded skeleton creation, and src-tauri/src/maru_dir.rs::rule_entry_from_path parses each finite frontmatter document, so the converted chain reaches no network call, process wait or unbounded walk."
+      ],
+      "workerBoundary": "src-tauri/src/maru_dir.rs::ipc::list_maru_rules awaits tauri::async_runtime::spawn_blocking before any filesystem access or admission wait runs; only a JoinError maps to the display-only list_maru_rules_task_failed String while the typed payload and every domain error string pass through unchanged; owned Strings, structs and JSON values cross the await, never a borrowed State or guard.",
+      "syncCallers": [
+        "No Rust or CLI caller invokes list_maru_rules synchronously today; src-tauri/src/lib.rs registers only maru_dir::ipc::list_maru_rules, and the original synchronous src-tauri/src/maru_dir.rs::list_maru_rules keeps its name and signature for Rust callers (the phase08_22 tests exercise it directly)."
+      ],
+      "mutationKey": {
+        "readOnly": true,
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "sharedAdmissionEntry": "list_maru_rules performs no filesystem mutation: one bounded fs::read_dir over the managed <work>/.maru/rules directory (never a recursive walk) plus per-file frontmatter parsing, so beyond the bounded idempotent ensure_maru_dir skeleton creation this command is read-only and needs no mutation admission.",
+        "postAdmissionPreconditions": [
+          "No mutation admission is required: the command performs no filesystem mutation beyond the bounded idempotent skeleton creation noted above, so there is no transaction key to admit and nothing to release"
+        ],
+        "domainLockOrder": "No path admission exists; the command takes no domain lock, so there is no admission-before-domain-lock order to record."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_22",
+          "passed": 15,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/maruDir.ts"
+        ],
+        "payload": "listMaruRules (src/lib/maruDir.ts:442) invokes list_maru_rules with the workspace path; that surface keeps owning the load/save flow regardless of screen changes.",
+        "terminalNoticeOwner": "The settings/workspace surfaces that call listMaruRules own busy state, current value display and error toasts for this call. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=list_maru_rules"
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_22_each_wrapper_yields_same_poll_and_maps_join_failure",
+          "phase08_22_real_fixture_results_and_legacy_rejections"
+        ],
+        "workerProof": "maru_dir::phase08_22::phase08_22_each_wrapper_yields_same_poll_and_maps_join_failure holds the list_maru_rules future at spawn_blocking worker entry via a #[cfg(test)] worker-stage hook keyed to the fixture workspace root, manually polls it on the same async task and proves progress while a distinct worker thread stays blocked; the panicked worker maps to the display-only list_maru_rules_task_failed String.",
+        "platformScope": "macOS unit fixtures only: atomic_file::phase08_06::Home isolation (MARU_TEST_HOME/MARU_TEST_CONFIG_DIR), disposable tempdir workspaces and the test-only worker-stage hooks; no live workspace, credential, network endpoint or native test hook is touched.",
+        "limits": "Shared admission serializes cooperating in-process writers on the same admitted .maru set only; external editor processes are outside the in-process guarantee. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
+        "contract": "The Vec<RuleEntry> payload, the sorted-by-name ordering and the rules-directory error strings are unchanged; the only new failure path is the JoinError-to-String mapping at the worker boundary."
+      }
+    },
+    {
+      "name": "read_maru_rule",
+      "module": "src-tauri/src/maru_dir.rs",
+      "registrationPath": "src-tauri/src/lib.rs::maru_dir::ipc::read_maru_rule",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/maru_dir.rs::ipc::read_maru_rule owns its inputs and awaits tauri::async_runtime::spawn_blocking calling src-tauri/src/maru_dir.rs::read_maru_rule inside the worker; a JoinError becomes the display-only read_maru_rule_task_failed String.",
+        "src-tauri/src/maru_dir.rs::read_maru_rule only reads: src-tauri/src/maru_dir.rs::rule_path validates the leaf name (validate_leaf_name) and containment (ensure_within) before the single finite read of the rule document, so an escaping name fails closed and the converted chain reaches no network call, process wait or unbounded walk."
+      ],
+      "workerBoundary": "src-tauri/src/maru_dir.rs::ipc::read_maru_rule awaits tauri::async_runtime::spawn_blocking before any filesystem access or admission wait runs; only a JoinError maps to the display-only read_maru_rule_task_failed String while the typed payload and every domain error string pass through unchanged; owned Strings, structs and JSON values cross the await, never a borrowed State or guard.",
+      "syncCallers": [
+        "No Rust or CLI caller invokes read_maru_rule synchronously today; src-tauri/src/lib.rs registers only maru_dir::ipc::read_maru_rule, and the original synchronous src-tauri/src/maru_dir.rs::read_maru_rule keeps its name and signature for Rust callers (the phase08_22 tests exercise it directly)."
+      ],
+      "mutationKey": {
+        "readOnly": true,
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "sharedAdmissionEntry": "read_maru_rule performs no filesystem mutation: validate_leaf_name plus ensure_within bound the target to a single leaf under <work>/.maru/rules and the body is one finite read, so beyond the bounded idempotent ensure_maru_dir skeleton creation this command is read-only and needs no mutation admission.",
+        "postAdmissionPreconditions": [
+          "No mutation admission is required: the command performs no filesystem mutation beyond the bounded idempotent skeleton creation noted above, so there is no transaction key to admit and nothing to release"
+        ],
+        "domainLockOrder": "No path admission exists; the command takes no domain lock, so there is no admission-before-domain-lock order to record."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_22",
+          "passed": 15,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/maruDir.ts"
+        ],
+        "payload": "readMaruRule (src/lib/maruDir.ts:449) invokes read_maru_rule with the workspace path; that surface keeps owning the load/save flow regardless of screen changes.",
+        "terminalNoticeOwner": "The settings/workspace surfaces that call readMaruRule own busy state, current value display and error toasts for this call. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=read_maru_rule"
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_22_each_wrapper_yields_same_poll_and_maps_join_failure",
+          "phase08_22_real_fixture_results_and_legacy_rejections"
+        ],
+        "workerProof": "maru_dir::phase08_22::phase08_22_each_wrapper_yields_same_poll_and_maps_join_failure holds the read_maru_rule future at spawn_blocking worker entry via a #[cfg(test)] worker-stage hook keyed to the fixture workspace root, manually polls it on the same async task and proves progress while a distinct worker thread stays blocked; the panicked worker maps to the display-only read_maru_rule_task_failed String.",
+        "platformScope": "macOS unit fixtures only: atomic_file::phase08_06::Home isolation (MARU_TEST_HOME/MARU_TEST_CONFIG_DIR), disposable tempdir workspaces and the test-only worker-stage hooks; no live workspace, credential, network endpoint or native test hook is touched.",
+        "limits": "Shared admission serializes cooperating in-process writers on the same admitted .maru set only; external editor processes are outside the in-process guarantee. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
+        "contract": "The RuleDocument payload, the invalid-name rejection and the missing-rule error strings are unchanged; the only new failure path is the JoinError-to-String mapping at the worker boundary."
+      }
+    },
+    {
+      "name": "list_maru_templates",
+      "module": "src-tauri/src/maru_dir.rs",
+      "registrationPath": "src-tauri/src/lib.rs::maru_dir::ipc::list_maru_templates",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/maru_dir.rs::ipc::list_maru_templates owns its inputs and awaits tauri::async_runtime::spawn_blocking calling src-tauri/src/maru_dir.rs::list_maru_templates inside the worker; a JoinError becomes the display-only list_maru_templates_task_failed String.",
+        "src-tauri/src/maru_dir.rs::list_maru_templates performs one bounded fs::read_dir over the managed <work>/.maru/templates directory (a finite maru-owned directory, never a recursive walk) after ensure_maru_dir bounded skeleton creation, and src-tauri/src/maru_dir.rs::template_entry_from_path parses each finite frontmatter document, so the converted chain reaches no network call, process wait or unbounded walk."
+      ],
+      "workerBoundary": "src-tauri/src/maru_dir.rs::ipc::list_maru_templates awaits tauri::async_runtime::spawn_blocking before any filesystem access or admission wait runs; only a JoinError maps to the display-only list_maru_templates_task_failed String while the typed payload and every domain error string pass through unchanged; owned Strings, structs and JSON values cross the await, never a borrowed State or guard.",
+      "syncCallers": [
+        "No Rust or CLI caller invokes list_maru_templates synchronously today; src-tauri/src/lib.rs registers only maru_dir::ipc::list_maru_templates, and the original synchronous src-tauri/src/maru_dir.rs::list_maru_templates keeps its name and signature for Rust callers (the phase08_22 tests exercise it directly)."
+      ],
+      "mutationKey": {
+        "readOnly": true,
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "sharedAdmissionEntry": "list_maru_templates performs no filesystem mutation: one bounded fs::read_dir over the managed <work>/.maru/templates directory (never a recursive walk) plus per-file frontmatter parsing, so beyond the bounded idempotent ensure_maru_dir skeleton creation this command is read-only and needs no mutation admission.",
+        "postAdmissionPreconditions": [
+          "No mutation admission is required: the command performs no filesystem mutation beyond the bounded idempotent skeleton creation noted above, so there is no transaction key to admit and nothing to release"
+        ],
+        "domainLockOrder": "No path admission exists; the command takes no domain lock, so there is no admission-before-domain-lock order to record."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_22",
+          "passed": 15,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/maruDir.ts"
+        ],
+        "payload": "listMaruTemplates (src/lib/maruDir.ts:547) invokes list_maru_templates with the workspace path; that surface keeps owning the load/save flow regardless of screen changes.",
+        "terminalNoticeOwner": "The settings/workspace surfaces that call listMaruTemplates own busy state, current value display and error toasts for this call. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=list_maru_templates"
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_22_each_wrapper_yields_same_poll_and_maps_join_failure",
+          "phase08_22_real_fixture_results_and_legacy_rejections"
+        ],
+        "workerProof": "maru_dir::phase08_22::phase08_22_each_wrapper_yields_same_poll_and_maps_join_failure holds the list_maru_templates future at spawn_blocking worker entry via a #[cfg(test)] worker-stage hook keyed to the fixture workspace root, manually polls it on the same async task and proves progress while a distinct worker thread stays blocked; the panicked worker maps to the display-only list_maru_templates_task_failed String.",
+        "platformScope": "macOS unit fixtures only: atomic_file::phase08_06::Home isolation (MARU_TEST_HOME/MARU_TEST_CONFIG_DIR), disposable tempdir workspaces and the test-only worker-stage hooks; no live workspace, credential, network endpoint or native test hook is touched.",
+        "limits": "Shared admission serializes cooperating in-process writers on the same admitted .maru set only; external editor processes are outside the in-process guarantee. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
+        "contract": "The Vec<TemplateEntry> payload, the sorted-by-name ordering and the templates-directory error strings are unchanged; the only new failure path is the JoinError-to-String mapping at the worker boundary."
+      }
+    },
+    {
+      "name": "read_maru_template",
+      "module": "src-tauri/src/maru_dir.rs",
+      "registrationPath": "src-tauri/src/lib.rs::maru_dir::ipc::read_maru_template",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/maru_dir.rs::ipc::read_maru_template owns its inputs and awaits tauri::async_runtime::spawn_blocking calling src-tauri/src/maru_dir.rs::read_maru_template inside the worker; a JoinError becomes the display-only read_maru_template_task_failed String.",
+        "src-tauri/src/maru_dir.rs::read_maru_template only reads: src-tauri/src/maru_dir.rs::template_path resolves the managed template path before the single finite read_to_string, so the converted chain reaches no network call, process wait or unbounded walk."
+      ],
+      "workerBoundary": "src-tauri/src/maru_dir.rs::ipc::read_maru_template awaits tauri::async_runtime::spawn_blocking before any filesystem access or admission wait runs; only a JoinError maps to the display-only read_maru_template_task_failed String while the typed payload and every domain error string pass through unchanged; owned Strings, structs and JSON values cross the await, never a borrowed State or guard.",
+      "syncCallers": [
+        "No Rust or CLI caller invokes read_maru_template synchronously today; src-tauri/src/lib.rs registers only maru_dir::ipc::read_maru_template, and the original synchronous src-tauri/src/maru_dir.rs::read_maru_template keeps its name and signature for Rust callers (the phase08_22 tests exercise it directly)."
+      ],
+      "mutationKey": {
+        "readOnly": true,
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "sharedAdmissionEntry": "read_maru_template performs no filesystem mutation: template_path bounds the target to a single leaf under <work>/.maru/templates and the body is one finite read, so beyond the bounded idempotent ensure_maru_dir skeleton creation this command is read-only and needs no mutation admission.",
+        "postAdmissionPreconditions": [
+          "No mutation admission is required: the command performs no filesystem mutation beyond the bounded idempotent skeleton creation noted above, so there is no transaction key to admit and nothing to release"
+        ],
+        "domainLockOrder": "No path admission exists; the command takes no domain lock, so there is no admission-before-domain-lock order to record."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_22",
+          "passed": 15,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/maruDir.ts"
+        ],
+        "payload": "readMaruTemplate (src/lib/maruDir.ts:554) invokes read_maru_template with the workspace path; that surface keeps owning the load/save flow regardless of screen changes.",
+        "terminalNoticeOwner": "The settings/workspace surfaces that call readMaruTemplate own busy state, current value display and error toasts for this call. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=read_maru_template"
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_22_each_wrapper_yields_same_poll_and_maps_join_failure",
+          "phase08_22_real_fixture_results_and_legacy_rejections"
+        ],
+        "workerProof": "maru_dir::phase08_22::phase08_22_each_wrapper_yields_same_poll_and_maps_join_failure holds the read_maru_template future at spawn_blocking worker entry via a #[cfg(test)] worker-stage hook keyed to the fixture workspace root, manually polls it on the same async task and proves progress while a distinct worker thread stays blocked; the panicked worker maps to the display-only read_maru_template_task_failed String.",
+        "platformScope": "macOS unit fixtures only: atomic_file::phase08_06::Home isolation (MARU_TEST_HOME/MARU_TEST_CONFIG_DIR), disposable tempdir workspaces and the test-only worker-stage hooks; no live workspace, credential, network endpoint or native test hook is touched.",
+        "limits": "Shared admission serializes cooperating in-process writers on the same admitted .maru set only; external editor processes are outside the in-process guarantee. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
+        "contract": "The template content String payload and the cannot-read-template error string are unchanged; the only new failure path is the JoinError-to-String mapping at the worker boundary."
+      }
+    },
+    {
+      "name": "read_maru_mcp",
+      "module": "src-tauri/src/maru_dir.rs",
+      "registrationPath": "src-tauri/src/lib.rs::maru_dir::ipc::read_maru_mcp",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/maru_dir.rs::ipc::read_maru_mcp owns its inputs and awaits tauri::async_runtime::spawn_blocking calling src-tauri/src/maru_dir.rs::read_maru_mcp inside the worker; a JoinError becomes the display-only read_maru_mcp_task_failed String.",
+        "src-tauri/src/maru_dir.rs::read_maru_mcp only reads the finite mcp.json document through the shared read_json helper after ensure_maru_dir bounded skeleton creation, so the converted chain reaches no network call, process wait or unbounded walk."
+      ],
+      "workerBoundary": "src-tauri/src/maru_dir.rs::ipc::read_maru_mcp awaits tauri::async_runtime::spawn_blocking before any filesystem access or admission wait runs; only a JoinError maps to the display-only read_maru_mcp_task_failed String while the typed payload and every domain error string pass through unchanged; owned Strings, structs and JSON values cross the await, never a borrowed State or guard.",
+      "syncCallers": [
+        "No Rust or CLI caller invokes read_maru_mcp synchronously today; src-tauri/src/lib.rs registers only maru_dir::ipc::read_maru_mcp, and the original synchronous src-tauri/src/maru_dir.rs::read_maru_mcp keeps its name and signature for Rust callers (the phase08_22 tests exercise it directly)."
+      ],
+      "mutationKey": {
+        "readOnly": true,
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "sharedAdmissionEntry": "read_maru_mcp performs no filesystem mutation: it parses only the finite <work>/.maru/mcp.json document (or defaults) via the shared read_json helper, so beyond the bounded idempotent ensure_maru_dir skeleton creation this command is read-only and needs no mutation admission.",
+        "postAdmissionPreconditions": [
+          "No mutation admission is required: the command performs no filesystem mutation beyond the bounded idempotent skeleton creation noted above, so there is no transaction key to admit and nothing to release"
+        ],
+        "domainLockOrder": "No path admission exists; the command takes no domain lock, so there is no admission-before-domain-lock order to record."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_22",
+          "passed": 15,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/maruDir.ts"
+        ],
+        "payload": "readMaruMcp (src/lib/maruDir.ts:577) invokes read_maru_mcp with the workspace path; that surface keeps owning the load/save flow regardless of screen changes.",
+        "terminalNoticeOwner": "The settings/workspace surfaces that call readMaruMcp own busy state, current value display and error toasts for this call. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=read_maru_mcp"
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_22_each_wrapper_yields_same_poll_and_maps_join_failure",
+          "phase08_22_real_fixture_results_and_legacy_rejections"
+        ],
+        "workerProof": "maru_dir::phase08_22::phase08_22_each_wrapper_yields_same_poll_and_maps_join_failure holds the read_maru_mcp future at spawn_blocking worker entry via a #[cfg(test)] worker-stage hook keyed to the fixture workspace root, manually polls it on the same async task and proves progress while a distinct worker thread stays blocked; the panicked worker maps to the display-only read_maru_mcp_task_failed String.",
+        "platformScope": "macOS unit fixtures only: atomic_file::phase08_06::Home isolation (MARU_TEST_HOME/MARU_TEST_CONFIG_DIR), disposable tempdir workspaces and the test-only worker-stage hooks; no live workspace, credential, network endpoint or native test hook is touched.",
+        "limits": "Shared admission serializes cooperating in-process writers on the same admitted .maru set only; external editor processes are outside the in-process guarantee. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
+        "contract": "The raw JSON payload and the mcp.json parse error strings are unchanged; the only new failure path is the JoinError-to-String mapping at the worker boundary."
+      }
+    },
+    {
+      "name": "read_maru_projects",
+      "module": "src-tauri/src/maru_dir.rs",
+      "registrationPath": "src-tauri/src/lib.rs::maru_dir::ipc::read_maru_projects",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/maru_dir.rs::ipc::read_maru_projects owns its inputs and awaits tauri::async_runtime::spawn_blocking calling src-tauri/src/maru_dir.rs::read_maru_projects inside the worker; a JoinError becomes the display-only read_maru_projects_task_failed String.",
+        "src-tauri/src/maru_dir.rs::read_maru_projects only reads the finite projects.json document through the shared read_json helper after ensure_maru_dir bounded skeleton creation, so the converted chain reaches no network call, process wait or unbounded walk."
+      ],
+      "workerBoundary": "src-tauri/src/maru_dir.rs::ipc::read_maru_projects awaits tauri::async_runtime::spawn_blocking before any filesystem access or admission wait runs; only a JoinError maps to the display-only read_maru_projects_task_failed String while the typed payload and every domain error string pass through unchanged; owned Strings, structs and JSON values cross the await, never a borrowed State or guard.",
+      "syncCallers": [
+        "No Rust or CLI caller invokes read_maru_projects synchronously today; src-tauri/src/lib.rs registers only maru_dir::ipc::read_maru_projects, and the original synchronous src-tauri/src/maru_dir.rs::read_maru_projects keeps its name and signature for Rust callers (the phase08_22 tests exercise it directly)."
+      ],
+      "mutationKey": {
+        "readOnly": true,
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "sharedAdmissionEntry": "read_maru_projects performs no filesystem mutation: it parses only the finite <work>/.maru/projects.json document (or defaults) via the shared read_json helper, so beyond the bounded idempotent ensure_maru_dir skeleton creation this command is read-only and needs no mutation admission.",
+        "postAdmissionPreconditions": [
+          "No mutation admission is required: the command performs no filesystem mutation beyond the bounded idempotent skeleton creation noted above, so there is no transaction key to admit and nothing to release"
+        ],
+        "domainLockOrder": "No path admission exists; the command takes no domain lock, so there is no admission-before-domain-lock order to record."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_22",
+          "passed": 15,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/maruDir.ts"
+        ],
+        "payload": "readMaruProjects (src/lib/maruDir.ts:587) invokes read_maru_projects with the workspace path; that surface keeps owning the load/save flow regardless of screen changes.",
+        "terminalNoticeOwner": "The settings/workspace surfaces that call readMaruProjects own busy state, current value display and error toasts for this call. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=read_maru_projects"
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_22_each_wrapper_yields_same_poll_and_maps_join_failure",
+          "phase08_22_real_fixture_results_and_legacy_rejections"
+        ],
+        "workerProof": "maru_dir::phase08_22::phase08_22_each_wrapper_yields_same_poll_and_maps_join_failure holds the read_maru_projects future at spawn_blocking worker entry via a #[cfg(test)] worker-stage hook keyed to the fixture workspace root, manually polls it on the same async task and proves progress while a distinct worker thread stays blocked; the panicked worker maps to the display-only read_maru_projects_task_failed String.",
+        "platformScope": "macOS unit fixtures only: atomic_file::phase08_06::Home isolation (MARU_TEST_HOME/MARU_TEST_CONFIG_DIR), disposable tempdir workspaces and the test-only worker-stage hooks; no live workspace, credential, network endpoint or native test hook is touched.",
+        "limits": "Shared admission serializes cooperating in-process writers on the same admitted .maru set only; external editor processes are outside the in-process guarantee. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
+        "contract": "The raw JSON payload and the projects.json parse error strings are unchanged; the only new failure path is the JoinError-to-String mapping at the worker boundary."
+      }
+    },
+    {
+      "name": "list_workspace_projects",
+      "module": "src-tauri/src/maru_dir.rs",
+      "registrationPath": "src-tauri/src/lib.rs::maru_dir::ipc::list_workspace_projects",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/maru_dir.rs::ipc::list_workspace_projects owns its inputs and awaits tauri::async_runtime::spawn_blocking calling src-tauri/src/maru_dir.rs::list_workspace_projects inside the worker; a JoinError becomes the display-only list_workspace_projects_task_failed String.",
+        "src-tauri/src/maru_dir.rs::list_workspace_projects only reads the finite projects.json document after ensure_maru_dir bounded skeleton creation and flattens it through src-tauri/src/maru_dir.rs::collect_project_picker_entries_json with a de-duplicating seen set, so the converted chain reaches no network call, process wait or unbounded walk."
+      ],
+      "workerBoundary": "src-tauri/src/maru_dir.rs::ipc::list_workspace_projects awaits tauri::async_runtime::spawn_blocking before any filesystem access or admission wait runs; only a JoinError maps to the display-only list_workspace_projects_task_failed String while the typed payload and every domain error string pass through unchanged; owned Strings, structs and JSON values cross the await, never a borrowed State or guard.",
+      "syncCallers": [
+        "No Rust or CLI caller invokes list_workspace_projects synchronously today; src-tauri/src/lib.rs registers only maru_dir::ipc::list_workspace_projects, and the original synchronous src-tauri/src/maru_dir.rs::list_workspace_projects keeps its name and signature for Rust callers (the phase08_22 tests exercise it directly)."
+      ],
+      "mutationKey": {
+        "readOnly": true,
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "sharedAdmissionEntry": "list_workspace_projects performs no filesystem mutation: it reads the finite projects.json document and flattens it through src-tauri/src/maru_dir.rs::collect_project_picker_entries_json into picker entries, so beyond the bounded idempotent ensure_maru_dir skeleton creation this command is read-only and needs no mutation admission.",
+        "postAdmissionPreconditions": [
+          "No mutation admission is required: the command performs no filesystem mutation beyond the bounded idempotent skeleton creation noted above, so there is no transaction key to admit and nothing to release"
+        ],
+        "domainLockOrder": "No path admission exists; the command takes no domain lock, so there is no admission-before-domain-lock order to record."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_22",
+          "passed": 15,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/maruDir.ts"
+        ],
+        "payload": "listWorkspaceProjects (src/lib/maruDir.ts:604) invokes list_workspace_projects with the workspace path; that surface keeps owning the load/save flow regardless of screen changes.",
+        "terminalNoticeOwner": "The settings/workspace surfaces that call listWorkspaceProjects own busy state, current value display and error toasts for this call. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=list_workspace_projects"
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_22_each_wrapper_yields_same_poll_and_maps_join_failure",
+          "phase08_22_real_fixture_results_and_legacy_rejections"
+        ],
+        "workerProof": "maru_dir::phase08_22::phase08_22_each_wrapper_yields_same_poll_and_maps_join_failure holds the list_workspace_projects future at spawn_blocking worker entry via a #[cfg(test)] worker-stage hook keyed to the fixture workspace root, manually polls it on the same async task and proves progress while a distinct worker thread stays blocked; the panicked worker maps to the display-only list_workspace_projects_task_failed String.",
+        "platformScope": "macOS unit fixtures only: atomic_file::phase08_06::Home isolation (MARU_TEST_HOME/MARU_TEST_CONFIG_DIR), disposable tempdir workspaces and the test-only worker-stage hooks; no live workspace, credential, network endpoint or native test hook is touched.",
+        "limits": "Shared admission serializes cooperating in-process writers on the same admitted .maru set only; external editor processes are outside the in-process guarantee. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
+        "contract": "The Vec<ProjectPickerEntry> payload, the inactive-filter semantics and the projects.json parse error strings are unchanged; the only new failure path is the JoinError-to-String mapping at the worker boundary."
+      }
+    },
+    {
+      "name": "read_maru_skills",
+      "module": "src-tauri/src/maru_dir.rs",
+      "registrationPath": "src-tauri/src/lib.rs::maru_dir::ipc::read_maru_skills",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/maru_dir.rs::ipc::read_maru_skills owns its inputs and awaits tauri::async_runtime::spawn_blocking calling src-tauri/src/maru_dir.rs::read_maru_skills inside the worker; a JoinError becomes the display-only read_maru_skills_task_failed String.",
+        "src-tauri/src/maru_dir.rs::read_maru_skills only reads the finite skills.json document through the shared read_json helper after ensure_maru_dir bounded skeleton creation, so the converted chain reaches no network call, process wait or unbounded walk."
+      ],
+      "workerBoundary": "src-tauri/src/maru_dir.rs::ipc::read_maru_skills awaits tauri::async_runtime::spawn_blocking before any filesystem access or admission wait runs; only a JoinError maps to the display-only read_maru_skills_task_failed String while the typed payload and every domain error string pass through unchanged; owned Strings, structs and JSON values cross the await, never a borrowed State or guard.",
+      "syncCallers": [
+        "No Rust or CLI caller invokes read_maru_skills synchronously today; src-tauri/src/lib.rs registers only maru_dir::ipc::read_maru_skills, and the original synchronous src-tauri/src/maru_dir.rs::read_maru_skills keeps its name and signature for Rust callers (the phase08_22 tests exercise it directly)."
+      ],
+      "mutationKey": {
+        "readOnly": true,
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "sharedAdmissionEntry": "read_maru_skills performs no filesystem mutation: it parses only the finite <work>/.maru/skills.json document (or defaults) via the shared read_json helper, so beyond the bounded idempotent ensure_maru_dir skeleton creation this command is read-only and needs no mutation admission.",
+        "postAdmissionPreconditions": [
+          "No mutation admission is required: the command performs no filesystem mutation beyond the bounded idempotent skeleton creation noted above, so there is no transaction key to admit and nothing to release"
+        ],
+        "domainLockOrder": "No path admission exists; the command takes no domain lock, so there is no admission-before-domain-lock order to record."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_22",
+          "passed": 15,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/maruDir.ts"
+        ],
+        "payload": "readMaruSkills (src/lib/maruDir.ts:617) invokes read_maru_skills with the workspace path; that surface keeps owning the load/save flow regardless of screen changes.",
+        "terminalNoticeOwner": "The settings/workspace surfaces that call readMaruSkills own busy state, current value display and error toasts for this call. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a",
+        "successRetention": "n/a",
+        "failureReasons": "n/a",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=read_maru_skills"
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_22_each_wrapper_yields_same_poll_and_maps_join_failure",
+          "phase08_22_real_fixture_results_and_legacy_rejections"
+        ],
+        "workerProof": "maru_dir::phase08_22::phase08_22_each_wrapper_yields_same_poll_and_maps_join_failure holds the read_maru_skills future at spawn_blocking worker entry via a #[cfg(test)] worker-stage hook keyed to the fixture workspace root, manually polls it on the same async task and proves progress while a distinct worker thread stays blocked; the panicked worker maps to the display-only read_maru_skills_task_failed String.",
+        "platformScope": "macOS unit fixtures only: atomic_file::phase08_06::Home isolation (MARU_TEST_HOME/MARU_TEST_CONFIG_DIR), disposable tempdir workspaces and the test-only worker-stage hooks; no live workspace, credential, network endpoint or native test hook is touched.",
+        "limits": "Shared admission serializes cooperating in-process writers on the same admitted .maru set only; external editor processes are outside the in-process guarantee. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
+        "contract": "The raw JSON payload and the skills.json parse error strings are unchanged; the only new failure path is the JoinError-to-String mapping at the worker boundary."
+      }
+    },
+    {
+      "name": "update_maru_workspace",
+      "module": "src-tauri/src/maru_dir.rs",
+      "registrationPath": "src-tauri/src/lib.rs::maru_dir::ipc::update_maru_workspace",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/maru_dir.rs::ipc::update_maru_workspace owns its inputs and awaits tauri::async_runtime::spawn_blocking calling src-tauri/src/maru_dir.rs::update_maru_workspace inside the worker; a JoinError becomes the display-only update_maru_workspace_task_failed String.",
+        "src-tauri/src/maru_dir.rs::update_maru_workspace enters src-tauri/src/atomic_file.rs::with_path_transactions via src-tauri/src/maru_dir.rs::maru_mutation_admission (admitted <work>/.maru + <work>/.maruignore, pinned workspace-root parent, workspace-registry precondition), then src-tauri/src/maru_dir.rs::update_maru_workspace_in_transaction re-covers workspace.json, runs ensure_maru_dir and the read-modify-write through src-tauri/src/maru_dir.rs::read_workspace_internal and write_workspace entirely inside the lease."
+      ],
+      "workerBoundary": "src-tauri/src/maru_dir.rs::ipc::update_maru_workspace awaits tauri::async_runtime::spawn_blocking before any filesystem access or admission wait runs; only a JoinError maps to the display-only update_maru_workspace_task_failed String while the typed payload and every domain error string pass through unchanged; owned Strings, structs and JSON values cross the await, never a borrowed State or guard.",
+      "syncCallers": [
+        "No Rust or CLI caller invokes update_maru_workspace synchronously today; src-tauri/src/lib.rs registers only maru_dir::ipc::update_maru_workspace, and the original synchronous src-tauri/src/maru_dir.rs::update_maru_workspace keeps its name and signature for Rust callers (the phase08_22 tests exercise it directly)."
+      ],
+      "mutationKey": {
+        "readOnly": false,
+        "lexicalPaths": [
+          "<work>/.maru/workspace.json (read-modify-write target)",
+          "<work>/.maru/ (admitted cover for ensure_maru_dir bounded skeleton creation)",
+          "<work>/.maruignore (admitted cover)",
+          "pinned workspace-root parent (require_parent)"
+        ],
+        "aliasPaths": [
+          "workspace-relative work_path resolves through src-tauri/src/maru_dir.rs::normalize_work_path to the same absolute lexical set admitted up front"
+        ],
+        "sharedAdmissionEntry": "src-tauri/src/maru_dir.rs::update_maru_workspace admits the complete write set before any effect: src-tauri/src/atomic_file.rs::with_path_transactions opens the lease after src-tauri/src/maru_dir.rs::maru_mutation_admission builds the src-tauri/src/atomic_file.rs::PathTransactionRequest over <work>/.maru and <work>/.maruignore with the pinned workspace-root parent (require_parent) and the workspace-registry precondition, so no workspace.json write escapes the admitted set.",
+        "postAdmissionPreconditions": [
+          "lease.ensure_workspace_registry runs before any effect",
+          "lease.ensure_covered over <work>/.maru/workspace.json runs before lease.before_effect",
+          "ensure_maru_dir bounded skeleton creation stays inside the admitted <work>/.maru cover and never overwrites existing user content"
+        ],
+        "domainLockOrder": "Filesystem path admission (with_path_transactions acquire) happens in src-tauri/src/maru_dir.rs::update_maru_workspace before ensure_maru_dir, target resolution and the read-modify-write; admission precedes every domain effect and no domain lock is taken before admission."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_22",
+          "passed": 15,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/maruDir.ts"
+        ],
+        "payload": "updateMaruWorkspace (src/lib/maruDir.ts:432) invokes update_maru_workspace with the workspace path; that surface keeps owning the load/save flow regardless of screen changes.",
+        "terminalNoticeOwner": "The settings/workspace surfaces that call updateMaruWorkspace own busy state, current value display and error toasts for this call. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=update_maru_workspace"
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_22_each_wrapper_yields_same_poll_and_maps_join_failure",
+          "phase08_22_real_fixture_results_and_legacy_rejections",
+          "phase08_22_workspace_meta_and_settings_serialize_both_orders",
+          "phase08_22_error_releases_admission_and_retry_recovers",
+          "phase08_22_maru_dir_and_registry_writers_do_not_block_each_other"
+        ],
+        "workerProof": "maru_dir::phase08_22::phase08_22_each_wrapper_yields_same_poll_and_maps_join_failure holds the update_maru_workspace future at spawn_blocking worker entry via a #[cfg(test)] worker-stage hook keyed to the fixture workspace root, manually polls it on the same async task and proves progress while a distinct worker thread stays blocked; the panicked worker maps to the display-only update_maru_workspace_task_failed String. phase08_22_save_maru_rule_serializes_same_target_both_orders and phase08_22_workspace_meta_and_settings_serialize_both_orders park a worker on the admitted <work>/.maru lease and prove the second admitted writer cannot complete within 30 ms; phase08_22_settings_read_serializes_with_save_both_orders proves the settings read, which can run the one-shot legacy migration, serializes with the settings save in either order; phase08_22_error_releases_admission_and_retry_recovers proves a filesystem error releases admission with no partial effect and a retry succeeds; phase08_22_maru_dir_and_registry_writers_do_not_block_each_other proves a disjoint registry writer still progresses while a .maru writer stays blocked.",
+        "platformScope": "macOS unit fixtures only: atomic_file::phase08_06::Home isolation (MARU_TEST_HOME/MARU_TEST_CONFIG_DIR), disposable tempdir workspaces and the test-only worker-stage hooks; no live workspace, credential, network endpoint or native test hook is touched.",
+        "limits": "Shared admission serializes cooperating in-process writers on the same admitted .maru set only; external editor processes are outside the in-process guarantee. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
+        "contract": "The MaruWorkspaceMeta payload, the patch field semantics and the workspace.json parse/serialize error strings are unchanged; the only new failure paths are the JoinError-to-String mapping at the worker boundary plus fail-closed admission rejections for out-of-set writes."
+      }
+    },
+    {
+      "name": "bootstrap_maru_dir",
+      "module": "src-tauri/src/maru_dir.rs",
+      "registrationPath": "src-tauri/src/lib.rs::maru_dir::ipc::bootstrap_maru_dir",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/maru_dir.rs::ipc::bootstrap_maru_dir owns its inputs and awaits tauri::async_runtime::spawn_blocking calling src-tauri/src/maru_dir.rs::bootstrap_maru_dir inside the worker; a JoinError becomes the display-only bootstrap_maru_dir_task_failed String.",
+        "src-tauri/src/maru_dir.rs::bootstrap_maru_dir enters src-tauri/src/atomic_file.rs::with_path_transactions via src-tauri/src/maru_dir.rs::maru_mutation_admission (admitted <work>/.maru + <work>/.maruignore, pinned workspace-root parent, workspace-registry precondition), then ensure_maru_dir skeleton creation and the meta read through src-tauri/src/maru_dir.rs::read_workspace_internal run inside the lease, so skeleton defaults and the meta read are atomic with respect to other admitted writers."
+      ],
+      "workerBoundary": "src-tauri/src/maru_dir.rs::ipc::bootstrap_maru_dir awaits tauri::async_runtime::spawn_blocking before any filesystem access or admission wait runs; only a JoinError maps to the display-only bootstrap_maru_dir_task_failed String while the typed payload and every domain error string pass through unchanged; owned Strings, structs and JSON values cross the await, never a borrowed State or guard.",
+      "syncCallers": [
+        "No Rust or CLI caller invokes bootstrap_maru_dir synchronously today; src-tauri/src/lib.rs registers only maru_dir::ipc::bootstrap_maru_dir, and the original synchronous src-tauri/src/maru_dir.rs::bootstrap_maru_dir keeps its name and signature for Rust callers (the phase08_22 tests exercise it directly)."
+      ],
+      "mutationKey": {
+        "readOnly": false,
+        "lexicalPaths": [
+          "<work>/.maru/ skeleton (workspace.json + managed defaults)",
+          "<work>/.maruignore",
+          "<work>/.maruignore (admitted cover)",
+          "pinned workspace-root parent (require_parent)"
+        ],
+        "aliasPaths": [
+          "workspace-relative work_path resolves through src-tauri/src/maru_dir.rs::normalize_work_path to the same absolute lexical set admitted up front"
+        ],
+        "sharedAdmissionEntry": "src-tauri/src/maru_dir.rs::bootstrap_maru_dir admits the complete write set before any effect: src-tauri/src/atomic_file.rs::with_path_transactions opens the lease after src-tauri/src/maru_dir.rs::maru_mutation_admission builds the src-tauri/src/atomic_file.rs::PathTransactionRequest over <work>/.maru and <work>/.maruignore with the pinned workspace-root parent (require_parent) and the workspace-registry precondition, so no bootstrap skeleton write escapes the admitted set.",
+        "postAdmissionPreconditions": [
+          "lease.ensure_workspace_registry runs before any effect",
+          "lease.ensure_covered over <work>/.maru/workspace.json and <work>/.maruignore runs before lease.before_effect",
+          "ensure_maru_dir bounded skeleton creation stays inside the admitted <work>/.maru cover and never overwrites existing user content"
+        ],
+        "domainLockOrder": "Filesystem path admission (with_path_transactions acquire) happens in src-tauri/src/maru_dir.rs::bootstrap_maru_dir before ensure_maru_dir, target resolution and the read-modify-write; admission precedes every domain effect and no domain lock is taken before admission."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_22",
+          "passed": 15,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/maruDir.ts"
+        ],
+        "payload": "bootstrapMaruDir (src/lib/maruDir.ts:405) invokes bootstrap_maru_dir with the workspace path; that surface keeps owning the load/save flow regardless of screen changes.",
+        "terminalNoticeOwner": "The settings/workspace surfaces that call bootstrapMaruDir own busy state, current value display and error toasts for this call. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=bootstrap_maru_dir"
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_22_each_wrapper_yields_same_poll_and_maps_join_failure",
+          "phase08_22_real_fixture_results_and_legacy_rejections",
+          "phase08_22_workspace_meta_and_settings_serialize_both_orders",
+          "phase08_22_error_releases_admission_and_retry_recovers"
+        ],
+        "workerProof": "maru_dir::phase08_22::phase08_22_each_wrapper_yields_same_poll_and_maps_join_failure holds the bootstrap_maru_dir future at spawn_blocking worker entry via a #[cfg(test)] worker-stage hook keyed to the fixture workspace root, manually polls it on the same async task and proves progress while a distinct worker thread stays blocked; the panicked worker maps to the display-only bootstrap_maru_dir_task_failed String. phase08_22_save_maru_rule_serializes_same_target_both_orders and phase08_22_workspace_meta_and_settings_serialize_both_orders park a worker on the admitted <work>/.maru lease and prove the second admitted writer cannot complete within 30 ms; phase08_22_settings_read_serializes_with_save_both_orders proves the settings read, which can run the one-shot legacy migration, serializes with the settings save in either order; phase08_22_error_releases_admission_and_retry_recovers proves a filesystem error releases admission with no partial effect and a retry succeeds; phase08_22_maru_dir_and_registry_writers_do_not_block_each_other proves a disjoint registry writer still progresses while a .maru writer stays blocked.",
+        "platformScope": "macOS unit fixtures only: atomic_file::phase08_06::Home isolation (MARU_TEST_HOME/MARU_TEST_CONFIG_DIR), disposable tempdir workspaces and the test-only worker-stage hooks; no live workspace, credential, network endpoint or native test hook is touched.",
+        "limits": "Shared admission serializes cooperating in-process writers on the same admitted .maru set only; external editor processes are outside the in-process guarantee. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
+        "contract": "The MaruWorkspaceMeta payload, the idempotent never-overwrite bootstrap semantics (including the .anchor rename adoption) and the cannot-create error strings are unchanged; the only new failure paths are the JoinError-to-String mapping at the worker boundary plus fail-closed admission rejections for out-of-set writes."
+      }
+    },
+    {
+      "name": "save_maru_rule",
+      "module": "src-tauri/src/maru_dir.rs",
+      "registrationPath": "src-tauri/src/lib.rs::maru_dir::ipc::save_maru_rule",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/maru_dir.rs::ipc::save_maru_rule owns its inputs and awaits tauri::async_runtime::spawn_blocking calling src-tauri/src/maru_dir.rs::save_maru_rule inside the worker; a JoinError becomes the display-only save_maru_rule_task_failed String.",
+        "src-tauri/src/maru_dir.rs::save_maru_rule enters src-tauri/src/atomic_file.rs::with_path_transactions via src-tauri/src/maru_dir.rs::maru_mutation_admission, then lease.before_effect runs before ensure_maru_dir and src-tauri/src/maru_dir.rs::rule_path validation (validate_leaf_name plus ensure_within), and lease.ensure_covered over the resolved rules target re-checks the write before fs::write, so an escaping name fails closed instead of touching a foreign path."
+      ],
+      "workerBoundary": "src-tauri/src/maru_dir.rs::ipc::save_maru_rule awaits tauri::async_runtime::spawn_blocking before any filesystem access or admission wait runs; only a JoinError maps to the display-only save_maru_rule_task_failed String while the typed payload and every domain error string pass through unchanged; owned Strings, structs and JSON values cross the await, never a borrowed State or guard.",
+      "syncCallers": [
+        "No Rust or CLI caller invokes save_maru_rule synchronously today; src-tauri/src/lib.rs registers only maru_dir::ipc::save_maru_rule, and the original synchronous src-tauri/src/maru_dir.rs::save_maru_rule keeps its name and signature for Rust callers (the phase08_22 tests exercise it directly)."
+      ],
+      "mutationKey": {
+        "readOnly": false,
+        "lexicalPaths": [
+          "<work>/.maru/rules/<name>.md (validated leaf target)",
+          "<work>/.maru/ (admitted cover for ensure_maru_dir bounded skeleton creation)",
+          "<work>/.maruignore (admitted cover)",
+          "pinned workspace-root parent (require_parent)"
+        ],
+        "aliasPaths": [
+          "workspace-relative work_path resolves through src-tauri/src/maru_dir.rs::normalize_work_path to the same absolute lexical set admitted up front"
+        ],
+        "sharedAdmissionEntry": "src-tauri/src/maru_dir.rs::save_maru_rule admits the complete write set before any effect: src-tauri/src/atomic_file.rs::with_path_transactions opens the lease after src-tauri/src/maru_dir.rs::maru_mutation_admission builds the src-tauri/src/atomic_file.rs::PathTransactionRequest over <work>/.maru and <work>/.maruignore with the pinned workspace-root parent (require_parent) and the workspace-registry precondition, so no rule write escapes the admitted set.",
+        "postAdmissionPreconditions": [
+          "lease.ensure_workspace_registry runs before any effect",
+          "lease.ensure_covered over the resolved <work>/.maru/rules/<name>.md target runs before lease.before_effect",
+          "ensure_maru_dir bounded skeleton creation stays inside the admitted <work>/.maru cover and never overwrites existing user content"
+        ],
+        "domainLockOrder": "Filesystem path admission (with_path_transactions acquire) happens in src-tauri/src/maru_dir.rs::save_maru_rule before ensure_maru_dir, target resolution and the read-modify-write; admission precedes every domain effect and no domain lock is taken before admission."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_22",
+          "passed": 15,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/maruDir.ts"
+        ],
+        "payload": "saveMaruRule (src/lib/maruDir.ts:460) invokes save_maru_rule with the workspace path; that surface keeps owning the load/save flow regardless of screen changes.",
+        "terminalNoticeOwner": "The settings/workspace surfaces that call saveMaruRule own busy state, current value display and error toasts for this call. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=save_maru_rule"
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_22_each_wrapper_yields_same_poll_and_maps_join_failure",
+          "phase08_22_real_fixture_results_and_legacy_rejections",
+          "phase08_22_save_maru_rule_serializes_same_target_both_orders",
+          "phase08_22_error_releases_admission_and_retry_recovers",
+          "phase08_22_maru_dir_and_registry_writers_do_not_block_each_other"
+        ],
+        "workerProof": "maru_dir::phase08_22::phase08_22_each_wrapper_yields_same_poll_and_maps_join_failure holds the save_maru_rule future at spawn_blocking worker entry via a #[cfg(test)] worker-stage hook keyed to the fixture workspace root, manually polls it on the same async task and proves progress while a distinct worker thread stays blocked; the panicked worker maps to the display-only save_maru_rule_task_failed String. phase08_22_save_maru_rule_serializes_same_target_both_orders and phase08_22_workspace_meta_and_settings_serialize_both_orders park a worker on the admitted <work>/.maru lease and prove the second admitted writer cannot complete within 30 ms; phase08_22_settings_read_serializes_with_save_both_orders proves the settings read, which can run the one-shot legacy migration, serializes with the settings save in either order; phase08_22_error_releases_admission_and_retry_recovers proves a filesystem error releases admission with no partial effect and a retry succeeds; phase08_22_maru_dir_and_registry_writers_do_not_block_each_other proves a disjoint registry writer still progresses while a .maru writer stays blocked.",
+        "platformScope": "macOS unit fixtures only: atomic_file::phase08_06::Home isolation (MARU_TEST_HOME/MARU_TEST_CONFIG_DIR), disposable tempdir workspaces and the test-only worker-stage hooks; no live workspace, credential, network endpoint or native test hook is touched.",
+        "limits": "Shared admission serializes cooperating in-process writers on the same admitted .maru set only; external editor processes are outside the in-process guarantee. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
+        "contract": "The RuleEntry payload, the frontmatter parse semantics and the cannot-save-rule error strings are unchanged; the only new failure paths are the JoinError-to-String mapping at the worker boundary plus fail-closed admission rejections for out-of-set writes."
+      }
+    },
+    {
+      "name": "delete_maru_rule",
+      "module": "src-tauri/src/maru_dir.rs",
+      "registrationPath": "src-tauri/src/lib.rs::maru_dir::ipc::delete_maru_rule",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/maru_dir.rs::ipc::delete_maru_rule owns its inputs and awaits tauri::async_runtime::spawn_blocking calling src-tauri/src/maru_dir.rs::delete_maru_rule inside the worker; a JoinError becomes the display-only delete_maru_rule_task_failed String.",
+        "src-tauri/src/maru_dir.rs::delete_maru_rule enters src-tauri/src/atomic_file.rs::with_path_transactions via src-tauri/src/maru_dir.rs::maru_mutation_admission, then lease.before_effect runs before ensure_maru_dir and src-tauri/src/maru_dir.rs::rule_path validation (validate_leaf_name plus ensure_within), and lease.ensure_covered over the resolved rules target re-checks the delete before fs::remove_file, so an escaping name fails closed."
+      ],
+      "workerBoundary": "src-tauri/src/maru_dir.rs::ipc::delete_maru_rule awaits tauri::async_runtime::spawn_blocking before any filesystem access or admission wait runs; only a JoinError maps to the display-only delete_maru_rule_task_failed String while the typed payload and every domain error string pass through unchanged; owned Strings, structs and JSON values cross the await, never a borrowed State or guard.",
+      "syncCallers": [
+        "No Rust or CLI caller invokes delete_maru_rule synchronously today; src-tauri/src/lib.rs registers only maru_dir::ipc::delete_maru_rule, and the original synchronous src-tauri/src/maru_dir.rs::delete_maru_rule keeps its name and signature for Rust callers (the phase08_22 tests exercise it directly)."
+      ],
+      "mutationKey": {
+        "readOnly": false,
+        "lexicalPaths": [
+          "<work>/.maru/rules/<name>.md (validated leaf target)",
+          "<work>/.maru/ (admitted cover for ensure_maru_dir bounded skeleton creation)",
+          "<work>/.maruignore (admitted cover)",
+          "pinned workspace-root parent (require_parent)"
+        ],
+        "aliasPaths": [
+          "workspace-relative work_path resolves through src-tauri/src/maru_dir.rs::normalize_work_path to the same absolute lexical set admitted up front"
+        ],
+        "sharedAdmissionEntry": "src-tauri/src/maru_dir.rs::delete_maru_rule admits the complete write set before any effect: src-tauri/src/atomic_file.rs::with_path_transactions opens the lease after src-tauri/src/maru_dir.rs::maru_mutation_admission builds the src-tauri/src/atomic_file.rs::PathTransactionRequest over <work>/.maru and <work>/.maruignore with the pinned workspace-root parent (require_parent) and the workspace-registry precondition, so no rule delete write escapes the admitted set.",
+        "postAdmissionPreconditions": [
+          "lease.ensure_workspace_registry runs before any effect",
+          "lease.ensure_covered over the resolved <work>/.maru/rules/<name>.md target runs before lease.before_effect",
+          "ensure_maru_dir bounded skeleton creation stays inside the admitted <work>/.maru cover and never overwrites existing user content"
+        ],
+        "domainLockOrder": "Filesystem path admission (with_path_transactions acquire) happens in src-tauri/src/maru_dir.rs::delete_maru_rule before ensure_maru_dir, target resolution and the read-modify-write; admission precedes every domain effect and no domain lock is taken before admission."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_22",
+          "passed": 15,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/maruDir.ts"
+        ],
+        "payload": "deleteMaruRule (src/lib/maruDir.ts:540) invokes delete_maru_rule with the workspace path; that surface keeps owning the load/save flow regardless of screen changes.",
+        "terminalNoticeOwner": "The settings/workspace surfaces that call deleteMaruRule own busy state, current value display and error toasts for this call. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=delete_maru_rule"
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_22_each_wrapper_yields_same_poll_and_maps_join_failure",
+          "phase08_22_real_fixture_results_and_legacy_rejections",
+          "phase08_22_save_maru_rule_serializes_same_target_both_orders",
+          "phase08_22_error_releases_admission_and_retry_recovers"
+        ],
+        "workerProof": "maru_dir::phase08_22::phase08_22_each_wrapper_yields_same_poll_and_maps_join_failure holds the delete_maru_rule future at spawn_blocking worker entry via a #[cfg(test)] worker-stage hook keyed to the fixture workspace root, manually polls it on the same async task and proves progress while a distinct worker thread stays blocked; the panicked worker maps to the display-only delete_maru_rule_task_failed String. phase08_22_save_maru_rule_serializes_same_target_both_orders and phase08_22_workspace_meta_and_settings_serialize_both_orders park a worker on the admitted <work>/.maru lease and prove the second admitted writer cannot complete within 30 ms; phase08_22_settings_read_serializes_with_save_both_orders proves the settings read, which can run the one-shot legacy migration, serializes with the settings save in either order; phase08_22_error_releases_admission_and_retry_recovers proves a filesystem error releases admission with no partial effect and a retry succeeds; phase08_22_maru_dir_and_registry_writers_do_not_block_each_other proves a disjoint registry writer still progresses while a .maru writer stays blocked.",
+        "platformScope": "macOS unit fixtures only: atomic_file::phase08_06::Home isolation (MARU_TEST_HOME/MARU_TEST_CONFIG_DIR), disposable tempdir workspaces and the test-only worker-stage hooks; no live workspace, credential, network endpoint or native test hook is touched.",
+        "limits": "Shared admission serializes cooperating in-process writers on the same admitted .maru set only; external editor processes are outside the in-process guarantee. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
+        "contract": "The unit payload, the missing-rule no-op semantics and the cannot-delete-rule error strings are unchanged; the only new failure paths are the JoinError-to-String mapping at the worker boundary plus fail-closed admission rejections for out-of-set writes."
+      }
+    },
+    {
+      "name": "save_maru_template",
+      "module": "src-tauri/src/maru_dir.rs",
+      "registrationPath": "src-tauri/src/lib.rs::maru_dir::ipc::save_maru_template",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/maru_dir.rs::ipc::save_maru_template owns its inputs and awaits tauri::async_runtime::spawn_blocking calling src-tauri/src/maru_dir.rs::save_maru_template inside the worker; a JoinError becomes the display-only save_maru_template_task_failed String.",
+        "src-tauri/src/maru_dir.rs::save_maru_template enters src-tauri/src/atomic_file.rs::with_path_transactions via src-tauri/src/maru_dir.rs::maru_mutation_admission, then lease.before_effect runs before ensure_maru_dir and src-tauri/src/maru_dir.rs::template_path resolution, and lease.ensure_covered over the resolved templates target re-checks the write before fs::write returns src-tauri/src/maru_dir.rs::template_entry_from_path, so an escaping name fails closed."
+      ],
+      "workerBoundary": "src-tauri/src/maru_dir.rs::ipc::save_maru_template awaits tauri::async_runtime::spawn_blocking before any filesystem access or admission wait runs; only a JoinError maps to the display-only save_maru_template_task_failed String while the typed payload and every domain error string pass through unchanged; owned Strings, structs and JSON values cross the await, never a borrowed State or guard.",
+      "syncCallers": [
+        "No Rust or CLI caller invokes save_maru_template synchronously today; src-tauri/src/lib.rs registers only maru_dir::ipc::save_maru_template, and the original synchronous src-tauri/src/maru_dir.rs::save_maru_template keeps its name and signature for Rust callers (the phase08_22 tests exercise it directly)."
+      ],
+      "mutationKey": {
+        "readOnly": false,
+        "lexicalPaths": [
+          "<work>/.maru/templates/<name>.md (managed leaf target)",
+          "<work>/.maru/ (admitted cover for ensure_maru_dir bounded skeleton creation)",
+          "<work>/.maruignore (admitted cover)",
+          "pinned workspace-root parent (require_parent)"
+        ],
+        "aliasPaths": [
+          "workspace-relative work_path resolves through src-tauri/src/maru_dir.rs::normalize_work_path to the same absolute lexical set admitted up front"
+        ],
+        "sharedAdmissionEntry": "src-tauri/src/maru_dir.rs::save_maru_template admits the complete write set before any effect: src-tauri/src/atomic_file.rs::with_path_transactions opens the lease after src-tauri/src/maru_dir.rs::maru_mutation_admission builds the src-tauri/src/atomic_file.rs::PathTransactionRequest over <work>/.maru and <work>/.maruignore with the pinned workspace-root parent (require_parent) and the workspace-registry precondition, so no template write escapes the admitted set.",
+        "postAdmissionPreconditions": [
+          "lease.ensure_workspace_registry runs before any effect",
+          "lease.ensure_covered over the resolved <work>/.maru/templates/<name>.md target runs before lease.before_effect",
+          "ensure_maru_dir bounded skeleton creation stays inside the admitted <work>/.maru cover and never overwrites existing user content"
+        ],
+        "domainLockOrder": "Filesystem path admission (with_path_transactions acquire) happens in src-tauri/src/maru_dir.rs::save_maru_template before ensure_maru_dir, target resolution and the read-modify-write; admission precedes every domain effect and no domain lock is taken before admission."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_22",
+          "passed": 15,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/maruDir.ts"
+        ],
+        "payload": "saveMaruTemplate (src/lib/maruDir.ts:565) invokes save_maru_template with the workspace path; that surface keeps owning the load/save flow regardless of screen changes.",
+        "terminalNoticeOwner": "The settings/workspace surfaces that call saveMaruTemplate own busy state, current value display and error toasts for this call. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=save_maru_template"
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_22_each_wrapper_yields_same_poll_and_maps_join_failure",
+          "phase08_22_real_fixture_results_and_legacy_rejections",
+          "phase08_22_save_maru_rule_serializes_same_target_both_orders",
+          "phase08_22_error_releases_admission_and_retry_recovers"
+        ],
+        "workerProof": "maru_dir::phase08_22::phase08_22_each_wrapper_yields_same_poll_and_maps_join_failure holds the save_maru_template future at spawn_blocking worker entry via a #[cfg(test)] worker-stage hook keyed to the fixture workspace root, manually polls it on the same async task and proves progress while a distinct worker thread stays blocked; the panicked worker maps to the display-only save_maru_template_task_failed String. phase08_22_save_maru_rule_serializes_same_target_both_orders and phase08_22_workspace_meta_and_settings_serialize_both_orders park a worker on the admitted <work>/.maru lease and prove the second admitted writer cannot complete within 30 ms; phase08_22_settings_read_serializes_with_save_both_orders proves the settings read, which can run the one-shot legacy migration, serializes with the settings save in either order; phase08_22_error_releases_admission_and_retry_recovers proves a filesystem error releases admission with no partial effect and a retry succeeds; phase08_22_maru_dir_and_registry_writers_do_not_block_each_other proves a disjoint registry writer still progresses while a .maru writer stays blocked.",
+        "platformScope": "macOS unit fixtures only: atomic_file::phase08_06::Home isolation (MARU_TEST_HOME/MARU_TEST_CONFIG_DIR), disposable tempdir workspaces and the test-only worker-stage hooks; no live workspace, credential, network endpoint or native test hook is touched.",
+        "limits": "Shared admission serializes cooperating in-process writers on the same admitted .maru set only; external editor processes are outside the in-process guarantee. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
+        "contract": "The TemplateEntry payload and the cannot-save-template error strings are unchanged; the only new failure paths are the JoinError-to-String mapping at the worker boundary plus fail-closed admission rejections for out-of-set writes."
+      }
+    },
+    {
+      "name": "delete_maru_template",
+      "module": "src-tauri/src/maru_dir.rs",
+      "registrationPath": "src-tauri/src/lib.rs::maru_dir::ipc::delete_maru_template",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/maru_dir.rs::ipc::delete_maru_template owns its inputs and awaits tauri::async_runtime::spawn_blocking calling src-tauri/src/maru_dir.rs::delete_maru_template inside the worker; a JoinError becomes the display-only delete_maru_template_task_failed String.",
+        "src-tauri/src/maru_dir.rs::delete_maru_template enters src-tauri/src/atomic_file.rs::with_path_transactions via src-tauri/src/maru_dir.rs::maru_mutation_admission, then lease.before_effect runs before ensure_maru_dir and src-tauri/src/maru_dir.rs::template_path resolution, and lease.ensure_covered over the resolved templates target re-checks the delete before fs::remove_file, so an escaping name fails closed."
+      ],
+      "workerBoundary": "src-tauri/src/maru_dir.rs::ipc::delete_maru_template awaits tauri::async_runtime::spawn_blocking before any filesystem access or admission wait runs; only a JoinError maps to the display-only delete_maru_template_task_failed String while the typed payload and every domain error string pass through unchanged; owned Strings, structs and JSON values cross the await, never a borrowed State or guard.",
+      "syncCallers": [
+        "No Rust or CLI caller invokes delete_maru_template synchronously today; src-tauri/src/lib.rs registers only maru_dir::ipc::delete_maru_template, and the original synchronous src-tauri/src/maru_dir.rs::delete_maru_template keeps its name and signature for Rust callers (the phase08_22 tests exercise it directly)."
+      ],
+      "mutationKey": {
+        "readOnly": false,
+        "lexicalPaths": [
+          "<work>/.maru/templates/<name>.md (managed leaf target)",
+          "<work>/.maru/ (admitted cover for ensure_maru_dir bounded skeleton creation)",
+          "<work>/.maruignore (admitted cover)",
+          "pinned workspace-root parent (require_parent)"
+        ],
+        "aliasPaths": [
+          "workspace-relative work_path resolves through src-tauri/src/maru_dir.rs::normalize_work_path to the same absolute lexical set admitted up front"
+        ],
+        "sharedAdmissionEntry": "src-tauri/src/maru_dir.rs::delete_maru_template admits the complete write set before any effect: src-tauri/src/atomic_file.rs::with_path_transactions opens the lease after src-tauri/src/maru_dir.rs::maru_mutation_admission builds the src-tauri/src/atomic_file.rs::PathTransactionRequest over <work>/.maru and <work>/.maruignore with the pinned workspace-root parent (require_parent) and the workspace-registry precondition, so no template delete write escapes the admitted set.",
+        "postAdmissionPreconditions": [
+          "lease.ensure_workspace_registry runs before any effect",
+          "lease.ensure_covered over the resolved <work>/.maru/templates/<name>.md target runs before lease.before_effect",
+          "ensure_maru_dir bounded skeleton creation stays inside the admitted <work>/.maru cover and never overwrites existing user content"
+        ],
+        "domainLockOrder": "Filesystem path admission (with_path_transactions acquire) happens in src-tauri/src/maru_dir.rs::delete_maru_template before ensure_maru_dir, target resolution and the read-modify-write; admission precedes every domain effect and no domain lock is taken before admission."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_22",
+          "passed": 15,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/maruDir.ts"
+        ],
+        "payload": "deleteMaruTemplate (src/lib/maruDir.ts:570) invokes delete_maru_template with the workspace path; that surface keeps owning the load/save flow regardless of screen changes.",
+        "terminalNoticeOwner": "The settings/workspace surfaces that call deleteMaruTemplate own busy state, current value display and error toasts for this call. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=delete_maru_template"
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_22_each_wrapper_yields_same_poll_and_maps_join_failure",
+          "phase08_22_real_fixture_results_and_legacy_rejections",
+          "phase08_22_save_maru_rule_serializes_same_target_both_orders",
+          "phase08_22_error_releases_admission_and_retry_recovers"
+        ],
+        "workerProof": "maru_dir::phase08_22::phase08_22_each_wrapper_yields_same_poll_and_maps_join_failure holds the delete_maru_template future at spawn_blocking worker entry via a #[cfg(test)] worker-stage hook keyed to the fixture workspace root, manually polls it on the same async task and proves progress while a distinct worker thread stays blocked; the panicked worker maps to the display-only delete_maru_template_task_failed String. phase08_22_save_maru_rule_serializes_same_target_both_orders and phase08_22_workspace_meta_and_settings_serialize_both_orders park a worker on the admitted <work>/.maru lease and prove the second admitted writer cannot complete within 30 ms; phase08_22_settings_read_serializes_with_save_both_orders proves the settings read, which can run the one-shot legacy migration, serializes with the settings save in either order; phase08_22_error_releases_admission_and_retry_recovers proves a filesystem error releases admission with no partial effect and a retry succeeds; phase08_22_maru_dir_and_registry_writers_do_not_block_each_other proves a disjoint registry writer still progresses while a .maru writer stays blocked.",
+        "platformScope": "macOS unit fixtures only: atomic_file::phase08_06::Home isolation (MARU_TEST_HOME/MARU_TEST_CONFIG_DIR), disposable tempdir workspaces and the test-only worker-stage hooks; no live workspace, credential, network endpoint or native test hook is touched.",
+        "limits": "Shared admission serializes cooperating in-process writers on the same admitted .maru set only; external editor processes are outside the in-process guarantee. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
+        "contract": "The unit payload, the missing-template no-op semantics and the cannot-delete-template error strings are unchanged; the only new failure paths are the JoinError-to-String mapping at the worker boundary plus fail-closed admission rejections for out-of-set writes."
+      }
+    },
+    {
+      "name": "save_maru_mcp",
+      "module": "src-tauri/src/maru_dir.rs",
+      "registrationPath": "src-tauri/src/lib.rs::maru_dir::ipc::save_maru_mcp",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/maru_dir.rs::ipc::save_maru_mcp owns its inputs and awaits tauri::async_runtime::spawn_blocking calling src-tauri/src/maru_dir.rs::save_maru_mcp inside the worker; a JoinError becomes the display-only save_maru_mcp_task_failed String.",
+        "src-tauri/src/maru_dir.rs::save_maru_mcp enters src-tauri/src/atomic_file.rs::with_path_transactions via src-tauri/src/maru_dir.rs::maru_mutation_admission, with lease.ensure_covered over mcp.json running before lease.before_effect, then ensure_maru_dir and the write_json_pretty publish run inside the lease, so the raw JSON document is written atomically with respect to other admitted writers."
+      ],
+      "workerBoundary": "src-tauri/src/maru_dir.rs::ipc::save_maru_mcp awaits tauri::async_runtime::spawn_blocking before any filesystem access or admission wait runs; only a JoinError maps to the display-only save_maru_mcp_task_failed String while the typed payload and every domain error string pass through unchanged; owned Strings, structs and JSON values cross the await, never a borrowed State or guard.",
+      "syncCallers": [
+        "No Rust or CLI caller invokes save_maru_mcp synchronously today; src-tauri/src/lib.rs registers only maru_dir::ipc::save_maru_mcp, and the original synchronous src-tauri/src/maru_dir.rs::save_maru_mcp keeps its name and signature for Rust callers (the phase08_22 tests exercise it directly)."
+      ],
+      "mutationKey": {
+        "readOnly": false,
+        "lexicalPaths": [
+          "<work>/.maru/mcp.json (raw JSON document)",
+          "<work>/.maru/ (admitted cover for ensure_maru_dir bounded skeleton creation)",
+          "<work>/.maruignore (admitted cover)",
+          "pinned workspace-root parent (require_parent)"
+        ],
+        "aliasPaths": [
+          "workspace-relative work_path resolves through src-tauri/src/maru_dir.rs::normalize_work_path to the same absolute lexical set admitted up front"
+        ],
+        "sharedAdmissionEntry": "src-tauri/src/maru_dir.rs::save_maru_mcp admits the complete write set before any effect: src-tauri/src/atomic_file.rs::with_path_transactions opens the lease after src-tauri/src/maru_dir.rs::maru_mutation_admission builds the src-tauri/src/atomic_file.rs::PathTransactionRequest over <work>/.maru and <work>/.maruignore with the pinned workspace-root parent (require_parent) and the workspace-registry precondition, so no mcp.json write escapes the admitted set.",
+        "postAdmissionPreconditions": [
+          "lease.ensure_workspace_registry runs before any effect",
+          "lease.ensure_covered over <work>/.maru/mcp.json runs before lease.before_effect",
+          "ensure_maru_dir bounded skeleton creation stays inside the admitted <work>/.maru cover and never overwrites existing user content"
+        ],
+        "domainLockOrder": "Filesystem path admission (with_path_transactions acquire) happens in src-tauri/src/maru_dir.rs::save_maru_mcp before ensure_maru_dir, target resolution and the read-modify-write; admission precedes every domain effect and no domain lock is taken before admission."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_22",
+          "passed": 15,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/maruDir.ts"
+        ],
+        "payload": "saveMaruMcp (src/lib/maruDir.ts:582) invokes save_maru_mcp with the workspace path; that surface keeps owning the load/save flow regardless of screen changes.",
+        "terminalNoticeOwner": "The settings/workspace surfaces that call saveMaruMcp own busy state, current value display and error toasts for this call. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=save_maru_mcp"
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_22_each_wrapper_yields_same_poll_and_maps_join_failure",
+          "phase08_22_real_fixture_results_and_legacy_rejections",
+          "phase08_22_save_maru_rule_serializes_same_target_both_orders",
+          "phase08_22_error_releases_admission_and_retry_recovers"
+        ],
+        "workerProof": "maru_dir::phase08_22::phase08_22_each_wrapper_yields_same_poll_and_maps_join_failure holds the save_maru_mcp future at spawn_blocking worker entry via a #[cfg(test)] worker-stage hook keyed to the fixture workspace root, manually polls it on the same async task and proves progress while a distinct worker thread stays blocked; the panicked worker maps to the display-only save_maru_mcp_task_failed String. phase08_22_save_maru_rule_serializes_same_target_both_orders and phase08_22_workspace_meta_and_settings_serialize_both_orders park a worker on the admitted <work>/.maru lease and prove the second admitted writer cannot complete within 30 ms; phase08_22_settings_read_serializes_with_save_both_orders proves the settings read, which can run the one-shot legacy migration, serializes with the settings save in either order; phase08_22_error_releases_admission_and_retry_recovers proves a filesystem error releases admission with no partial effect and a retry succeeds; phase08_22_maru_dir_and_registry_writers_do_not_block_each_other proves a disjoint registry writer still progresses while a .maru writer stays blocked.",
+        "platformScope": "macOS unit fixtures only: atomic_file::phase08_06::Home isolation (MARU_TEST_HOME/MARU_TEST_CONFIG_DIR), disposable tempdir workspaces and the test-only worker-stage hooks; no live workspace, credential, network endpoint or native test hook is touched.",
+        "limits": "Shared admission serializes cooperating in-process writers on the same admitted .maru set only; external editor processes are outside the in-process guarantee. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
+        "contract": "The unit payload and the mcp.json write error strings are unchanged; the only new failure paths are the JoinError-to-String mapping at the worker boundary plus fail-closed admission rejections for out-of-set writes."
+      }
+    },
+    {
+      "name": "save_maru_projects",
+      "module": "src-tauri/src/maru_dir.rs",
+      "registrationPath": "src-tauri/src/lib.rs::maru_dir::ipc::save_maru_projects",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/maru_dir.rs::ipc::save_maru_projects owns its inputs and awaits tauri::async_runtime::spawn_blocking calling src-tauri/src/maru_dir.rs::save_maru_projects inside the worker; a JoinError becomes the display-only save_maru_projects_task_failed String.",
+        "src-tauri/src/maru_dir.rs::save_maru_projects enters src-tauri/src/atomic_file.rs::with_path_transactions via src-tauri/src/maru_dir.rs::maru_mutation_admission, with lease.ensure_covered over projects.json running before lease.before_effect, then ensure_maru_dir and the write_json_pretty publish run inside the lease, so the raw JSON document is written atomically with respect to other admitted writers."
+      ],
+      "workerBoundary": "src-tauri/src/maru_dir.rs::ipc::save_maru_projects awaits tauri::async_runtime::spawn_blocking before any filesystem access or admission wait runs; only a JoinError maps to the display-only save_maru_projects_task_failed String while the typed payload and every domain error string pass through unchanged; owned Strings, structs and JSON values cross the await, never a borrowed State or guard.",
+      "syncCallers": [
+        "No Rust or CLI caller invokes save_maru_projects synchronously today; src-tauri/src/lib.rs registers only maru_dir::ipc::save_maru_projects, and the original synchronous src-tauri/src/maru_dir.rs::save_maru_projects keeps its name and signature for Rust callers (the phase08_22 tests exercise it directly)."
+      ],
+      "mutationKey": {
+        "readOnly": false,
+        "lexicalPaths": [
+          "<work>/.maru/projects.json (raw JSON document)",
+          "<work>/.maru/ (admitted cover for ensure_maru_dir bounded skeleton creation)",
+          "<work>/.maruignore (admitted cover)",
+          "pinned workspace-root parent (require_parent)"
+        ],
+        "aliasPaths": [
+          "workspace-relative work_path resolves through src-tauri/src/maru_dir.rs::normalize_work_path to the same absolute lexical set admitted up front"
+        ],
+        "sharedAdmissionEntry": "src-tauri/src/maru_dir.rs::save_maru_projects admits the complete write set before any effect: src-tauri/src/atomic_file.rs::with_path_transactions opens the lease after src-tauri/src/maru_dir.rs::maru_mutation_admission builds the src-tauri/src/atomic_file.rs::PathTransactionRequest over <work>/.maru and <work>/.maruignore with the pinned workspace-root parent (require_parent) and the workspace-registry precondition, so no projects.json write escapes the admitted set.",
+        "postAdmissionPreconditions": [
+          "lease.ensure_workspace_registry runs before any effect",
+          "lease.ensure_covered over <work>/.maru/projects.json runs before lease.before_effect",
+          "ensure_maru_dir bounded skeleton creation stays inside the admitted <work>/.maru cover and never overwrites existing user content"
+        ],
+        "domainLockOrder": "Filesystem path admission (with_path_transactions acquire) happens in src-tauri/src/maru_dir.rs::save_maru_projects before ensure_maru_dir, target resolution and the read-modify-write; admission precedes every domain effect and no domain lock is taken before admission."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_22",
+          "passed": 15,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/maruDir.ts"
+        ],
+        "payload": "saveMaruProjects (src/lib/maruDir.ts:612) invokes save_maru_projects with the workspace path; that surface keeps owning the load/save flow regardless of screen changes.",
+        "terminalNoticeOwner": "The settings/workspace surfaces that call saveMaruProjects own busy state, current value display and error toasts for this call. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=save_maru_projects"
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_22_each_wrapper_yields_same_poll_and_maps_join_failure",
+          "phase08_22_real_fixture_results_and_legacy_rejections",
+          "phase08_22_save_maru_rule_serializes_same_target_both_orders",
+          "phase08_22_error_releases_admission_and_retry_recovers"
+        ],
+        "workerProof": "maru_dir::phase08_22::phase08_22_each_wrapper_yields_same_poll_and_maps_join_failure holds the save_maru_projects future at spawn_blocking worker entry via a #[cfg(test)] worker-stage hook keyed to the fixture workspace root, manually polls it on the same async task and proves progress while a distinct worker thread stays blocked; the panicked worker maps to the display-only save_maru_projects_task_failed String. phase08_22_save_maru_rule_serializes_same_target_both_orders and phase08_22_workspace_meta_and_settings_serialize_both_orders park a worker on the admitted <work>/.maru lease and prove the second admitted writer cannot complete within 30 ms; phase08_22_settings_read_serializes_with_save_both_orders proves the settings read, which can run the one-shot legacy migration, serializes with the settings save in either order; phase08_22_error_releases_admission_and_retry_recovers proves a filesystem error releases admission with no partial effect and a retry succeeds; phase08_22_maru_dir_and_registry_writers_do_not_block_each_other proves a disjoint registry writer still progresses while a .maru writer stays blocked.",
+        "platformScope": "macOS unit fixtures only: atomic_file::phase08_06::Home isolation (MARU_TEST_HOME/MARU_TEST_CONFIG_DIR), disposable tempdir workspaces and the test-only worker-stage hooks; no live workspace, credential, network endpoint or native test hook is touched.",
+        "limits": "Shared admission serializes cooperating in-process writers on the same admitted .maru set only; external editor processes are outside the in-process guarantee. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
+        "contract": "The unit payload and the projects.json write error strings are unchanged; the only new failure paths are the JoinError-to-String mapping at the worker boundary plus fail-closed admission rejections for out-of-set writes."
+      }
+    },
+    {
+      "name": "save_maru_ignore",
+      "module": "src-tauri/src/maru_dir.rs",
+      "registrationPath": "src-tauri/src/lib.rs::maru_dir::ipc::save_maru_ignore",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/maru_dir.rs::ipc::save_maru_ignore owns its inputs and awaits tauri::async_runtime::spawn_blocking calling src-tauri/src/maru_dir.rs::save_maru_ignore inside the worker; a JoinError becomes the display-only save_maru_ignore_task_failed String.",
+        "src-tauri/src/maru_dir.rs::save_maru_ignore admits <work>/.maruignore alone before any effect: the inline src-tauri/src/atomic_file.rs::PathTransactionRequest over the ignore path with require_parent(work) and the workspace-registry precondition enters src-tauri/src/atomic_file.rs::with_path_transactions, and ensure_workspace_registry plus lease.ensure_covered over the ignore file run before lease.before_effect, then src-tauri/src/maru_dir.rs::save_maru_ignore_in_transaction writes through write_atomic and restores the managed defaults with ensure_maruignore."
+      ],
+      "workerBoundary": "src-tauri/src/maru_dir.rs::ipc::save_maru_ignore awaits tauri::async_runtime::spawn_blocking before any filesystem access or admission wait runs; only a JoinError maps to the display-only save_maru_ignore_task_failed String while the MaruIgnoreDocument payload and every domain error string pass through unchanged; owned Strings, structs and JSON values cross the await, never a borrowed State or guard.",
+      "syncCallers": [
+        "No Rust or CLI caller invokes save_maru_ignore synchronously today; src-tauri/src/lib.rs registers only maru_dir::ipc::save_maru_ignore, and the original synchronous src-tauri/src/maru_dir.rs::save_maru_ignore keeps its name and signature for Rust callers (the phase08_22 tests exercise it directly)."
+      ],
+      "mutationKey": {
+        "readOnly": false,
+        "lexicalPaths": [
+          "<work>/.maruignore (rewritten managed list)",
+          "pinned workspace-root parent (require_parent)"
+        ],
+        "aliasPaths": [
+          "workspace-relative work_path resolves through src-tauri/src/maru_dir.rs::normalize_work_path to the same absolute ignore path admitted up front"
+        ],
+        "sharedAdmissionEntry": "src-tauri/src/maru_dir.rs::save_maru_ignore admits the ignore write before any effect: the inline src-tauri/src/atomic_file.rs::PathTransactionRequest pins the workspace-root parent (require_parent) and attaches the workspace-registry precondition before src-tauri/src/atomic_file.rs::with_path_transactions opens the lease, so no ignore write escapes the admitted path.",
+        "postAdmissionPreconditions": [
+          "lease.ensure_workspace_registry runs before any effect",
+          "lease.ensure_covered over <work>/.maruignore runs before lease.before_effect",
+          "ensure_maruignore managed-default restoration stays inside the admitted ignore file"
+        ],
+        "domainLockOrder": "Filesystem path admission (with_path_transactions acquire) happens in src-tauri/src/maru_dir.rs::save_maru_ignore before the rewrite and default restoration; admission precedes every domain effect and no domain lock is taken before admission."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_22",
+          "passed": 15,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/maruDir.ts"
+        ],
+        "payload": "saveMaruIgnore (src/lib/maruDir.ts:486) invokes save_maru_ignore with the workspace path and pattern list; the settings surface keeps owning that save flow regardless of screen changes.",
+        "terminalNoticeOwner": "The settings/workspace surfaces that call saveMaruIgnore own busy state, current value display and error toasts for this call. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=save_maru_ignore"
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_22_each_wrapper_yields_same_poll_and_maps_join_failure",
+          "phase08_22_real_fixture_results_and_legacy_rejections",
+          "phase08_22_save_maru_rule_serializes_same_target_both_orders",
+          "phase08_22_error_releases_admission_and_retry_recovers"
+        ],
+        "workerProof": "maru_dir::phase08_22::phase08_22_each_wrapper_yields_same_poll_and_maps_join_failure holds the save_maru_ignore future at spawn_blocking worker entry via a #[cfg(test)] worker-stage hook keyed to the fixture workspace root, manually polls it on the same async task and proves progress while a distinct worker thread stays blocked; the panicked worker maps to the display-only save_maru_ignore_task_failed String. phase08_22_save_maru_rule_serializes_same_target_both_orders and phase08_22_workspace_meta_and_settings_serialize_both_orders park a worker on the admitted <work>/.maru lease and prove the second admitted writer cannot complete within 30 ms; phase08_22_settings_read_serializes_with_save_both_orders proves the settings read, which can run the one-shot legacy migration, serializes with the settings save in either order; phase08_22_error_releases_admission_and_retry_recovers proves a filesystem error releases admission with no partial effect and a retry succeeds; phase08_22_maru_dir_and_registry_writers_do_not_block_each_other proves a disjoint registry writer still progresses while a .maru writer stays blocked.",
+        "platformScope": "macOS unit fixtures only: atomic_file::phase08_06::Home isolation (MARU_TEST_HOME/MARU_TEST_CONFIG_DIR), disposable tempdir workspaces and the test-only worker-stage hooks; no live workspace, credential, network endpoint or native test hook is touched.",
+        "limits": "Shared admission serializes cooperating in-process writers on the same admitted .maru set only; external editor processes are outside the in-process guarantee. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
+        "contract": "The MaruIgnoreDocument payload, the comment-replacement rewrite semantics and the cannot-write .maruignore error string are unchanged; the only new failure paths are the JoinError-to-String mapping at the worker boundary plus fail-closed admission rejections for out-of-set writes."
+      }
+    },
+    {
+      "name": "save_maru_settings",
+      "module": "src-tauri/src/maru_dir.rs",
+      "registrationPath": "src-tauri/src/lib.rs::maru_dir::ipc::save_maru_settings",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/maru_dir.rs::ipc::save_maru_settings owns its inputs and awaits tauri::async_runtime::spawn_blocking calling src-tauri/src/maru_dir.rs::save_maru_settings inside the worker; a JoinError becomes the display-only save_maru_settings_task_failed String.",
+        "src-tauri/src/maru_dir.rs::save_maru_settings resolves the global settings path through src-tauri/src/maru_dir.rs::global_settings_json_path and admits [<work>/.maru, <work>/.maruignore, ~/.maru/settings.json] via src-tauri/src/maru_dir.rs::maru_mutation_admission before any effect; src-tauri/src/atomic_file.rs::with_path_transactions runs ensure_workspace_registry, lease.ensure_covered over the global and workspace-state settings files and lease.before_effect, then src-tauri/src/maru_dir.rs::save_maru_settings_in_transaction re-covers both files and applies the base-revision merge inside the lease."
+      ],
+      "workerBoundary": "src-tauri/src/maru_dir.rs::ipc::save_maru_settings awaits tauri::async_runtime::spawn_blocking before any filesystem access or admission wait runs; only a JoinError maps to the display-only save_maru_settings_task_failed String while the settings JSON payload and every domain error string pass through unchanged; owned Strings, structs and JSON values cross the await, never a borrowed State or guard.",
+      "syncCallers": [
+        "No Rust or CLI caller invokes save_maru_settings synchronously today; src-tauri/src/lib.rs registers only maru_dir::ipc::save_maru_settings, and the original synchronous src-tauri/src/maru_dir.rs::save_maru_settings keeps its name and signature for Rust callers (the phase08_22 tests exercise it directly)."
+      ],
+      "mutationKey": {
+        "readOnly": false,
+        "lexicalPaths": [
+          "~/.maru/settings.json (global settings store)",
+          "<work>/.maru/workspace-state.json (per-workspace settings override)",
+          "<work>/.maru/ (admitted cover, including the legacy settings source)",
+          "<work>/.maruignore (admitted cover)",
+          "pinned workspace-root parent (require_parent)"
+        ],
+        "aliasPaths": [
+          "workspace-relative work_path resolves through src-tauri/src/maru_dir.rs::normalize_work_path to the same absolute set, and the global store resolves through src-tauri/src/maru_dir.rs::global_settings_json_path (MARU_TEST_HOME-redirectable) before admission"
+        ],
+        "sharedAdmissionEntry": "src-tauri/src/maru_dir.rs::save_maru_settings admits the complete settings write set before any effect: src-tauri/src/atomic_file.rs::with_path_transactions opens the lease after src-tauri/src/maru_dir.rs::maru_mutation_admission builds the src-tauri/src/atomic_file.rs::PathTransactionRequest over <work>/.maru, <work>/.maruignore and the global settings path with the pinned workspace-root parent (require_parent) and the workspace-registry precondition, so no settings write escapes the admitted set.",
+        "postAdmissionPreconditions": [
+          "lease.ensure_workspace_registry runs before any effect",
+          "lease.ensure_covered over the global settings path and workspace-state path runs before lease.before_effect",
+          "the one-shot legacy migration creates at most the two settings files and never overwrites an existing target"
+        ],
+        "domainLockOrder": "Filesystem path admission (with_path_transactions acquire) happens in src-tauri/src/maru_dir.rs::save_maru_settings before the settings read/merge or base-revision write; admission precedes every domain effect and no domain lock is taken before admission."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_22",
+          "passed": 15,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/maruDir.ts"
+        ],
+        "payload": "saveMaruSettings (src/lib/maruDir.ts:704) invokes save_maru_settings with the workspace path, merged value and optional base value for revision checking; the settings surface keeps owning that flow regardless of screen changes.",
+        "terminalNoticeOwner": "The settings/workspace surfaces that call saveMaruSettings own busy state, current value display and error toasts for this call. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=save_maru_settings"
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_22_each_wrapper_yields_same_poll_and_maps_join_failure",
+          "phase08_22_real_fixture_results_and_legacy_rejections",
+          "phase08_22_workspace_meta_and_settings_serialize_both_orders",
+          "phase08_22_settings_read_serializes_with_save_both_orders",
+          "phase08_22_error_releases_admission_and_retry_recovers",
+          "phase08_22_maru_dir_and_registry_writers_do_not_block_each_other"
+        ],
+        "workerProof": "maru_dir::phase08_22::phase08_22_each_wrapper_yields_same_poll_and_maps_join_failure holds the save_maru_settings future at spawn_blocking worker entry via a #[cfg(test)] worker-stage hook keyed to the fixture workspace root, manually polls it on the same async task and proves progress while a distinct worker thread stays blocked; the panicked worker maps to the display-only save_maru_settings_task_failed String. phase08_22_save_maru_rule_serializes_same_target_both_orders and phase08_22_workspace_meta_and_settings_serialize_both_orders park a worker on the admitted <work>/.maru lease and prove the second admitted writer cannot complete within 30 ms; phase08_22_settings_read_serializes_with_save_both_orders proves the settings read, which can run the one-shot legacy migration, serializes with the settings save in either order; phase08_22_error_releases_admission_and_retry_recovers proves a filesystem error releases admission with no partial effect and a retry succeeds; phase08_22_maru_dir_and_registry_writers_do_not_block_each_other proves a disjoint registry writer still progresses while a .maru writer stays blocked.",
+        "platformScope": "macOS unit fixtures only: atomic_file::phase08_06::Home isolation (MARU_TEST_HOME/MARU_TEST_CONFIG_DIR), disposable tempdir workspaces and the test-only worker-stage hooks; no live workspace, credential, network endpoint or native test hook is touched.",
+        "limits": "Shared admission serializes cooperating in-process writers on the same admitted .maru set and the global settings store only; external editor processes are outside the in-process guarantee. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
+        "contract": "The MaruSettingsSaveOutcome payload, the global/workspace-state split, the base-revision conflict semantics and the cannot-write settings error strings are unchanged; the only new failure paths are the JoinError-to-String mapping at the worker boundary plus fail-closed admission rejections for out-of-set writes."
+      }
+    },
+    {
+      "name": "read_maru_settings",
+      "module": "src-tauri/src/maru_dir.rs",
+      "registrationPath": "src-tauri/src/lib.rs::maru_dir::ipc::read_maru_settings",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/maru_dir.rs::ipc::read_maru_settings owns its inputs and awaits tauri::async_runtime::spawn_blocking calling src-tauri/src/maru_dir.rs::read_maru_settings inside the worker; a JoinError becomes the display-only read_maru_settings_task_failed String.",
+        "src-tauri/src/maru_dir.rs::read_maru_settings resolves the global settings path through src-tauri/src/maru_dir.rs::global_settings_json_path and admits the same set as the save because the one-shot legacy migration can create the global and workspace-state settings files; src-tauri/src/atomic_file.rs::with_path_transactions runs ensure_workspace_registry, lease.ensure_covered over both settings files and lease.before_effect before the bounded read/merge, so a concurrent save cannot interleave with the migration."
+      ],
+      "workerBoundary": "src-tauri/src/maru_dir.rs::ipc::read_maru_settings awaits tauri::async_runtime::spawn_blocking before any filesystem access or admission wait runs; only a JoinError maps to the display-only read_maru_settings_task_failed String while the settings JSON payload and every domain error string pass through unchanged; owned Strings, structs and JSON values cross the await, never a borrowed State or guard.",
+      "syncCallers": [
+        "No Rust or CLI caller invokes read_maru_settings synchronously today; src-tauri/src/lib.rs registers only maru_dir::ipc::read_maru_settings, and the original synchronous src-tauri/src/maru_dir.rs::read_maru_settings keeps its name and signature for Rust callers (the phase08_22 tests exercise it directly)."
+      ],
+      "mutationKey": {
+        "readOnly": false,
+        "lexicalPaths": [
+          "~/.maru/settings.json (global settings store)",
+          "<work>/.maru/workspace-state.json (per-workspace settings override)",
+          "<work>/.maru/ (admitted cover, including the legacy settings source)",
+          "<work>/.maruignore (admitted cover)",
+          "pinned workspace-root parent (require_parent)"
+        ],
+        "aliasPaths": [
+          "workspace-relative work_path resolves through src-tauri/src/maru_dir.rs::normalize_work_path to the same absolute set, and the global store resolves through src-tauri/src/maru_dir.rs::global_settings_json_path (MARU_TEST_HOME-redirectable) before admission"
+        ],
+        "sharedAdmissionEntry": "src-tauri/src/maru_dir.rs::read_maru_settings admits the complete settings write set before any effect: src-tauri/src/atomic_file.rs::with_path_transactions opens the lease after src-tauri/src/maru_dir.rs::maru_mutation_admission builds the src-tauri/src/atomic_file.rs::PathTransactionRequest over <work>/.maru, <work>/.maruignore and the global settings path with the pinned workspace-root parent (require_parent) and the workspace-registry precondition, so no settings write escapes the admitted set.",
+        "postAdmissionPreconditions": [
+          "lease.ensure_workspace_registry runs before any effect",
+          "lease.ensure_covered over the global settings path and workspace-state path runs before lease.before_effect",
+          "the one-shot legacy migration creates at most the two settings files and never overwrites an existing target"
+        ],
+        "domainLockOrder": "Filesystem path admission (with_path_transactions acquire) happens in src-tauri/src/maru_dir.rs::read_maru_settings before the settings read/merge or base-revision write; admission precedes every domain effect and no domain lock is taken before admission."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_22",
+          "passed": 15,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/maruDir.ts"
+        ],
+        "payload": "readMaruSettings (src/lib/maruDir.ts:676) invokes read_maru_settings with the workspace path; the settings surface keeps owning that flow regardless of screen changes.",
+        "terminalNoticeOwner": "The settings/workspace surfaces that call readMaruSettings own busy state, current value display and error toasts for this call. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=read_maru_settings"
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_22_each_wrapper_yields_same_poll_and_maps_join_failure",
+          "phase08_22_real_fixture_results_and_legacy_rejections",
+          "phase08_22_workspace_meta_and_settings_serialize_both_orders",
+          "phase08_22_settings_read_serializes_with_save_both_orders",
+          "phase08_22_error_releases_admission_and_retry_recovers",
+          "phase08_22_maru_dir_and_registry_writers_do_not_block_each_other"
+        ],
+        "workerProof": "maru_dir::phase08_22::phase08_22_each_wrapper_yields_same_poll_and_maps_join_failure holds the read_maru_settings future at spawn_blocking worker entry via a #[cfg(test)] worker-stage hook keyed to the fixture workspace root, manually polls it on the same async task and proves progress while a distinct worker thread stays blocked; the panicked worker maps to the display-only read_maru_settings_task_failed String. phase08_22_save_maru_rule_serializes_same_target_both_orders and phase08_22_workspace_meta_and_settings_serialize_both_orders park a worker on the admitted <work>/.maru lease and prove the second admitted writer cannot complete within 30 ms; phase08_22_settings_read_serializes_with_save_both_orders proves the settings read, which can run the one-shot legacy migration, serializes with the settings save in either order; phase08_22_error_releases_admission_and_retry_recovers proves a filesystem error releases admission with no partial effect and a retry succeeds; phase08_22_maru_dir_and_registry_writers_do_not_block_each_other proves a disjoint registry writer still progresses while a .maru writer stays blocked.",
+        "platformScope": "macOS unit fixtures only: atomic_file::phase08_06::Home isolation (MARU_TEST_HOME/MARU_TEST_CONFIG_DIR), disposable tempdir workspaces and the test-only worker-stage hooks; no live workspace, credential, network endpoint or native test hook is touched.",
+        "limits": "Shared admission serializes cooperating in-process writers on the same admitted .maru set and the global settings store only; external editor processes are outside the in-process guarantee. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
+        "contract": "The merged settings JSON payload, the global-over-workspace precedence and the parse error strings are unchanged; the only new failure paths are the JoinError-to-String mapping at the worker boundary plus fail-closed admission rejections for out-of-set writes."
+      }
+    },
+    {
+      "name": "list_workspace_roots",
+      "module": "src-tauri/src/vault_list.rs",
+      "registrationPath": "src-tauri/src/lib.rs::vault_list::ipc::list_workspace_roots",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/vault_list.rs::ipc::list_workspace_roots owns its inputs and awaits tauri::async_runtime::spawn_blocking calling src-tauri/src/vault_list.rs::list_workspace_roots inside the worker; a JoinError becomes the display-only list_workspace_roots_task_failed String.",
+        "src-tauri/src/vault_list.rs::list_workspace_roots admits the registry before the read because src-tauri/src/vault_list.rs::load_registry may run the legacy vault-list migration: src-tauri/src/vault_list.rs::registry_mutation_admission builds the request over the registry and legacy paths, src-tauri/src/atomic_file.rs::with_path_transactions opens the lease, and ensure_workspace_registry plus lease.before_effect run before the bounded load (and possible one-time legacy rewrite) so a concurrent upsert cannot interleave with the migration."
+      ],
+      "workerBoundary": "src-tauri/src/vault_list.rs::ipc::list_workspace_roots awaits tauri::async_runtime::spawn_blocking before any filesystem access or admission wait runs; only a JoinError maps to the display-only list_workspace_roots_task_failed String while the WorkspaceRegistry payload and every domain error string pass through unchanged; owned Strings, structs and JSON values cross the await, never a borrowed State or guard.",
+      "syncCallers": [
+        "src-tauri/src/workspace.rs::list_workspaces is the one synchronous Rust caller, invoking src-tauri/src/vault_list.rs::list_workspace_roots in-process for the settings/diagnostics surface; src-tauri/src/lib.rs registers only vault_list::ipc::list_workspace_roots for IPC."
+      ],
+      "mutationKey": {
+        "readOnly": false,
+        "lexicalPaths": [
+          "workspace registry JSON (src-tauri/src/vault_list.rs::workspace_registry_path)",
+          "legacy vault-list JSON (src-tauri/src/vault_list.rs::legacy_vault_list_path, admitted cover for the load-time migration)"
+        ],
+        "aliasPaths": [
+          "the registry and legacy paths resolve through the same home/config-dir resolution the load and save helpers use, so the admitted lexical pair is exactly what load-modify-save rewrites"
+        ],
+        "sharedAdmissionEntry": "src-tauri/src/vault_list.rs::list_workspace_roots admits the registry rewrite before any effect: src-tauri/src/vault_list.rs::registry_mutation_admission builds the src-tauri/src/atomic_file.rs::PathTransactionRequest over the current registry and legacy paths with the workspace-registry precondition, src-tauri/src/atomic_file.rs::with_path_transactions opens the lease, and ensure_workspace_registry, lease.ensure_covered over the registry output and lease.before_effect run before the load-modify-save.",
+        "postAdmissionPreconditions": [
+          "lease.ensure_workspace_registry runs before any effect",
+          "lease.ensure_covered over the registry output runs before lease.before_effect",
+          "the load-modify-save through src-tauri/src/vault_list.rs::load_registry and src-tauri/src/vault_list.rs::save_registry runs wholly inside the lease so a concurrently added root is never overwritten"
+        ],
+        "domainLockOrder": "Filesystem path admission (with_path_transactions acquire) happens in src-tauri/src/vault_list.rs::list_workspace_roots before the registry load-modify-save; admission precedes every domain effect and no registry write escapes the admitted pair."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_22",
+          "passed": 15,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts"
+        ],
+        "payload": "listWorkspaceRoots (src/lib/api.ts:1233) invokes list_workspace_roots; the workspace-registry surface keeps owning that flow regardless of screen changes.",
+        "terminalNoticeOwner": "The workspace-registry settings surface that calls listWorkspaceRoots owns busy state, current registry display and error toasts for this call. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=list_workspace_roots"
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_22_vault_list_wrappers_yield_same_poll_and_map_join_failure",
+          "phase08_22_vault_list_real_fixture_and_rejections",
+          "phase08_22_vault_list_serializes_registry_both_orders",
+          "phase08_22_vault_list_error_releases_admission_and_retry_recovers",
+          "phase08_22_vault_list_serializes_registry_both_orders"
+        ],
+        "workerProof": "vault_list::phase08_22::phase08_22_vault_list_wrappers_yield_same_poll_and_map_join_failure holds each future at spawn_blocking worker entry via a #[cfg(test)] worker-stage hook keyed to the fixture workspace registry path, manually polls it on the same async task and proves progress while a distinct worker thread stays blocked; the panicked worker maps to the display-only list_workspace_roots_task_failed String. phase08_22_vault_list_serializes_registry_both_orders parks a worker on the admitted registry lease and proves the second admitted registry writer cannot complete within 30 ms in either launch order; phase08_22_vault_list_error_releases_admission_and_retry_recovers proves a rejection releases admission with no partial registry write and a retry succeeds.",
+        "platformScope": "macOS unit fixtures only: atomic_file::phase08_06::Home isolation (MARU_TEST_CONFIG_DIR), disposable tempdir workspace roots and the test-only worker-stage hooks; no live workspace, credential, network endpoint or native test hook is touched.",
+        "limits": "Shared admission serializes cooperating in-process registry writers only; external processes editing the registry files are outside the in-process guarantee. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
+        "contract": "The WorkspaceRegistry payload, the legacy migration semantics and the registry parse error strings are unchanged; the only new failure paths are the JoinError-to-String mapping at the worker boundary plus fail-closed admission rejections."
+      }
+    },
+    {
+      "name": "add_workspace_root",
+      "module": "src-tauri/src/vault_list.rs",
+      "registrationPath": "src-tauri/src/lib.rs::vault_list::ipc::add_workspace_root",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/vault_list.rs::ipc::add_workspace_root owns its inputs and awaits tauri::async_runtime::spawn_blocking calling src-tauri/src/vault_list.rs::add_workspace_root inside the worker; a JoinError becomes the display-only add_workspace_root_task_failed String.",
+        "src-tauri/src/vault_list.rs::add_workspace_root delegates to src-tauri/src/vault_list.rs::upsert_workspace_root so both names share one admission; src-tauri/src/vault_list.rs::upsert_workspace_root_in_transaction normalizes visibility, provider and write_policy, refreshes the permission summary and saves through src-tauri/src/vault_list.rs::save_registry inside the lease, so a concurrently added root is never overwritten."
+      ],
+      "workerBoundary": "src-tauri/src/vault_list.rs::ipc::add_workspace_root awaits tauri::async_runtime::spawn_blocking before any filesystem access or admission wait runs; only a JoinError maps to the display-only add_workspace_root_task_failed String while the WorkspaceRegistry payload and every domain error string pass through unchanged; owned Strings, structs and JSON values cross the await, never a borrowed State or guard.",
+      "syncCallers": [
+        "No production Rust or CLI caller invokes add_workspace_root synchronously today; src-tauri/src/vault.rs exercises the synchronous src-tauri/src/vault_list.rs::add_workspace_root in its nested-workspace watcher test under a throwaway MARU_TEST_CONFIG_DIR, and src-tauri/src/lib.rs registers only vault_list::ipc::add_workspace_root for IPC."
+      ],
+      "mutationKey": {
+        "readOnly": false,
+        "lexicalPaths": [
+          "workspace registry JSON (src-tauri/src/vault_list.rs::workspace_registry_path)",
+          "legacy vault-list JSON (src-tauri/src/vault_list.rs::legacy_vault_list_path, admitted cover for the load-time migration)"
+        ],
+        "aliasPaths": [
+          "the registry and legacy paths resolve through the same home/config-dir resolution the load and save helpers use, so the admitted lexical pair is exactly what load-modify-save rewrites"
+        ],
+        "sharedAdmissionEntry": "src-tauri/src/vault_list.rs::add_workspace_root admits the registry rewrite before any effect: src-tauri/src/vault_list.rs::registry_mutation_admission builds the src-tauri/src/atomic_file.rs::PathTransactionRequest over the current registry and legacy paths with the workspace-registry precondition, src-tauri/src/atomic_file.rs::with_path_transactions opens the lease, and ensure_workspace_registry, lease.ensure_covered over the registry output and lease.before_effect run before the load-modify-save.",
+        "postAdmissionPreconditions": [
+          "lease.ensure_workspace_registry runs before any effect",
+          "lease.ensure_covered over the registry output runs before lease.before_effect",
+          "the load-modify-save through src-tauri/src/vault_list.rs::load_registry and src-tauri/src/vault_list.rs::save_registry runs wholly inside the lease so a concurrently added root is never overwritten"
+        ],
+        "domainLockOrder": "Filesystem path admission (with_path_transactions acquire) happens in src-tauri/src/vault_list.rs::add_workspace_root before the registry load-modify-save; admission precedes every domain effect and no registry write escapes the admitted pair."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_22",
+          "passed": 15,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts"
+        ],
+        "payload": "addWorkspaceRoot (src/lib/api.ts:1240) invokes add_workspace_root with the root entry; the workspace-registry surface keeps owning that flow regardless of screen changes.",
+        "terminalNoticeOwner": "The workspace-registry settings surface that calls addWorkspaceRoot owns busy state, current registry display and error toasts for this call. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=add_workspace_root"
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_22_vault_list_wrappers_yield_same_poll_and_map_join_failure",
+          "phase08_22_vault_list_real_fixture_and_rejections",
+          "phase08_22_vault_list_serializes_registry_both_orders",
+          "phase08_22_vault_list_error_releases_admission_and_retry_recovers"
+        ],
+        "workerProof": "vault_list::phase08_22::phase08_22_vault_list_wrappers_yield_same_poll_and_map_join_failure holds each future at spawn_blocking worker entry via a #[cfg(test)] worker-stage hook keyed to the fixture workspace registry path, manually polls it on the same async task and proves progress while a distinct worker thread stays blocked; the panicked worker maps to the display-only add_workspace_root_task_failed String. phase08_22_vault_list_serializes_registry_both_orders parks a worker on the admitted registry lease and proves the second admitted registry writer cannot complete within 30 ms in either launch order; phase08_22_vault_list_error_releases_admission_and_retry_recovers proves a rejection releases admission with no partial registry write and a retry succeeds.",
+        "platformScope": "macOS unit fixtures only: atomic_file::phase08_06::Home isolation (MARU_TEST_CONFIG_DIR), disposable tempdir workspace roots and the test-only worker-stage hooks; no live workspace, credential, network endpoint or native test hook is touched.",
+        "limits": "Shared admission serializes cooperating in-process registry writers only; external processes editing the registry files are outside the in-process guarantee. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
+        "contract": "The WorkspaceRegistry payload, the upsert/active-slot normalization semantics and the registry save error strings are unchanged; the only new failure paths are the JoinError-to-String mapping at the worker boundary plus fail-closed admission rejections."
+      }
+    },
+    {
+      "name": "refresh_workspace_capabilities",
+      "module": "src-tauri/src/vault_list.rs",
+      "registrationPath": "src-tauri/src/lib.rs::vault_list::ipc::refresh_workspace_capabilities",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/vault_list.rs::ipc::refresh_workspace_capabilities owns its inputs and awaits tauri::async_runtime::spawn_blocking calling src-tauri/src/vault_list.rs::refresh_workspace_capabilities inside the worker; a JoinError becomes the display-only refresh_workspace_capabilities_task_failed String.",
+        "src-tauri/src/vault_list.rs::refresh_workspace_capabilities re-resolves the permission summary for one registered root inside the admitted lease: the not-registered rejection fires before any write, and src-tauri/src/vault_list.rs::save_registry persists the normalized registry only inside the transaction."
+      ],
+      "workerBoundary": "src-tauri/src/vault_list.rs::ipc::refresh_workspace_capabilities awaits tauri::async_runtime::spawn_blocking before any filesystem access or admission wait runs; only a JoinError maps to the display-only refresh_workspace_capabilities_task_failed String while the WorkspaceRegistry payload and every domain error string pass through unchanged; owned Strings, structs and JSON values cross the await, never a borrowed State or guard.",
+      "syncCallers": [
+        "No Rust or CLI caller invokes refresh_workspace_capabilities synchronously today; src-tauri/src/lib.rs registers only vault_list::ipc::refresh_workspace_capabilities, and the original synchronous src-tauri/src/vault_list.rs::refresh_workspace_capabilities keeps its name and signature for Rust callers (the phase08_22 tests exercise it directly)."
+      ],
+      "mutationKey": {
+        "readOnly": false,
+        "lexicalPaths": [
+          "workspace registry JSON (src-tauri/src/vault_list.rs::workspace_registry_path)",
+          "legacy vault-list JSON (src-tauri/src/vault_list.rs::legacy_vault_list_path, admitted cover for the load-time migration)"
+        ],
+        "aliasPaths": [
+          "the registry and legacy paths resolve through the same home/config-dir resolution the load and save helpers use, so the admitted lexical pair is exactly what load-modify-save rewrites"
+        ],
+        "sharedAdmissionEntry": "src-tauri/src/vault_list.rs::refresh_workspace_capabilities admits the registry rewrite before any effect: src-tauri/src/vault_list.rs::registry_mutation_admission builds the src-tauri/src/atomic_file.rs::PathTransactionRequest over the current registry and legacy paths with the workspace-registry precondition, src-tauri/src/atomic_file.rs::with_path_transactions opens the lease, and ensure_workspace_registry, lease.ensure_covered over the registry output and lease.before_effect run before the load-modify-save.",
+        "postAdmissionPreconditions": [
+          "lease.ensure_workspace_registry runs before any effect",
+          "lease.ensure_covered over the registry output runs before lease.before_effect",
+          "the load-modify-save through src-tauri/src/vault_list.rs::load_registry and src-tauri/src/vault_list.rs::save_registry runs wholly inside the lease so a concurrently added root is never overwritten"
+        ],
+        "domainLockOrder": "Filesystem path admission (with_path_transactions acquire) happens in src-tauri/src/vault_list.rs::refresh_workspace_capabilities before the registry load-modify-save; admission precedes every domain effect and no registry write escapes the admitted pair."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_22",
+          "passed": 15,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts"
+        ],
+        "payload": "refreshWorkspaceCapabilities (src/lib/api.ts:1258) invokes refresh_workspace_capabilities with the root path; the workspace-registry surface keeps owning that flow regardless of screen changes.",
+        "terminalNoticeOwner": "The workspace-registry settings surface that calls refreshWorkspaceCapabilities owns busy state, current registry display and error toasts for this call. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=refresh_workspace_capabilities"
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_22_vault_list_wrappers_yield_same_poll_and_map_join_failure",
+          "phase08_22_vault_list_real_fixture_and_rejections",
+          "phase08_22_vault_list_serializes_registry_both_orders",
+          "phase08_22_vault_list_error_releases_admission_and_retry_recovers"
+        ],
+        "workerProof": "vault_list::phase08_22::phase08_22_vault_list_wrappers_yield_same_poll_and_map_join_failure holds each future at spawn_blocking worker entry via a #[cfg(test)] worker-stage hook keyed to the fixture workspace registry path, manually polls it on the same async task and proves progress while a distinct worker thread stays blocked; the panicked worker maps to the display-only refresh_workspace_capabilities_task_failed String. phase08_22_vault_list_serializes_registry_both_orders parks a worker on the admitted registry lease and proves the second admitted registry writer cannot complete within 30 ms in either launch order; phase08_22_vault_list_error_releases_admission_and_retry_recovers proves a rejection releases admission with no partial registry write and a retry succeeds.",
+        "platformScope": "macOS unit fixtures only: atomic_file::phase08_06::Home isolation (MARU_TEST_CONFIG_DIR), disposable tempdir workspace roots and the test-only worker-stage hooks; no live workspace, credential, network endpoint or native test hook is touched.",
+        "limits": "Shared admission serializes cooperating in-process registry writers only; external processes editing the registry files are outside the in-process guarantee. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
+        "contract": "The WorkspaceRegistry payload, the Workspace is not registered rejection and the capability-summary computation are unchanged; the only new failure paths are the JoinError-to-String mapping at the worker boundary plus fail-closed admission rejections."
+      }
+    },
+    {
+      "name": "remove_workspace_root",
+      "module": "src-tauri/src/vault_list.rs",
+      "registrationPath": "src-tauri/src/lib.rs::vault_list::ipc::remove_workspace_root",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/vault_list.rs::ipc::remove_workspace_root owns its inputs and awaits tauri::async_runtime::spawn_blocking calling src-tauri/src/vault_list.rs::remove_workspace_root inside the worker; a JoinError becomes the display-only remove_workspace_root_task_failed String.",
+        "src-tauri/src/vault_list.rs::remove_workspace_root retains every other root and clears the matching active slot inside the admitted lease: the load-modify-save through src-tauri/src/vault_list.rs::load_registry and src-tauri/src/vault_list.rs::save_registry runs wholly inside the transaction, so a concurrent add cannot be lost."
+      ],
+      "workerBoundary": "src-tauri/src/vault_list.rs::ipc::remove_workspace_root awaits tauri::async_runtime::spawn_blocking before any filesystem access or admission wait runs; only a JoinError maps to the display-only remove_workspace_root_task_failed String while the WorkspaceRegistry payload and every domain error string pass through unchanged; owned Strings, structs and JSON values cross the await, never a borrowed State or guard.",
+      "syncCallers": [
+        "No Rust or CLI caller invokes remove_workspace_root synchronously today; src-tauri/src/lib.rs registers only vault_list::ipc::remove_workspace_root, and the original synchronous src-tauri/src/vault_list.rs::remove_workspace_root keeps its name and signature for Rust callers (the phase08_22 tests exercise it directly)."
+      ],
+      "mutationKey": {
+        "readOnly": false,
+        "lexicalPaths": [
+          "workspace registry JSON (src-tauri/src/vault_list.rs::workspace_registry_path)",
+          "legacy vault-list JSON (src-tauri/src/vault_list.rs::legacy_vault_list_path, admitted cover for the load-time migration)"
+        ],
+        "aliasPaths": [
+          "the registry and legacy paths resolve through the same home/config-dir resolution the load and save helpers use, so the admitted lexical pair is exactly what load-modify-save rewrites"
+        ],
+        "sharedAdmissionEntry": "src-tauri/src/vault_list.rs::remove_workspace_root admits the registry rewrite before any effect: src-tauri/src/vault_list.rs::registry_mutation_admission builds the src-tauri/src/atomic_file.rs::PathTransactionRequest over the current registry and legacy paths with the workspace-registry precondition, src-tauri/src/atomic_file.rs::with_path_transactions opens the lease, and ensure_workspace_registry, lease.ensure_covered over the registry output and lease.before_effect run before the load-modify-save.",
+        "postAdmissionPreconditions": [
+          "lease.ensure_workspace_registry runs before any effect",
+          "lease.ensure_covered over the registry output runs before lease.before_effect",
+          "the load-modify-save through src-tauri/src/vault_list.rs::load_registry and src-tauri/src/vault_list.rs::save_registry runs wholly inside the lease so a concurrently added root is never overwritten"
+        ],
+        "domainLockOrder": "Filesystem path admission (with_path_transactions acquire) happens in src-tauri/src/vault_list.rs::remove_workspace_root before the registry load-modify-save; admission precedes every domain effect and no registry write escapes the admitted pair."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_22",
+          "passed": 15,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts"
+        ],
+        "payload": "removeWorkspaceRoot (src/lib/api.ts:1245) invokes remove_workspace_root with the root path; the workspace-registry surface keeps owning that flow regardless of screen changes.",
+        "terminalNoticeOwner": "The workspace-registry settings surface that calls removeWorkspaceRoot owns busy state, current registry display and error toasts for this call. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=remove_workspace_root"
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_22_vault_list_wrappers_yield_same_poll_and_map_join_failure",
+          "phase08_22_vault_list_real_fixture_and_rejections",
+          "phase08_22_vault_list_serializes_registry_both_orders",
+          "phase08_22_vault_list_error_releases_admission_and_retry_recovers"
+        ],
+        "workerProof": "vault_list::phase08_22::phase08_22_vault_list_wrappers_yield_same_poll_and_map_join_failure holds each future at spawn_blocking worker entry via a #[cfg(test)] worker-stage hook keyed to the fixture workspace registry path, manually polls it on the same async task and proves progress while a distinct worker thread stays blocked; the panicked worker maps to the display-only remove_workspace_root_task_failed String. phase08_22_vault_list_serializes_registry_both_orders parks a worker on the admitted registry lease and proves the second admitted registry writer cannot complete within 30 ms in either launch order; phase08_22_vault_list_error_releases_admission_and_retry_recovers proves a rejection releases admission with no partial registry write and a retry succeeds.",
+        "platformScope": "macOS unit fixtures only: atomic_file::phase08_06::Home isolation (MARU_TEST_CONFIG_DIR), disposable tempdir workspace roots and the test-only worker-stage hooks; no live workspace, credential, network endpoint or native test hook is touched.",
+        "limits": "Shared admission serializes cooperating in-process registry writers only; external processes editing the registry files are outside the in-process guarantee. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
+        "contract": "The WorkspaceRegistry payload, the active-slot clearing semantics and the registry save error strings are unchanged; the only new failure paths are the JoinError-to-String mapping at the worker boundary plus fail-closed admission rejections."
+      }
+    },
+    {
+      "name": "set_active_workspace_root",
+      "module": "src-tauri/src/vault_list.rs",
+      "registrationPath": "src-tauri/src/lib.rs::vault_list::ipc::set_active_workspace_root",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/vault_list.rs::ipc::set_active_workspace_root owns its inputs and awaits tauri::async_runtime::spawn_blocking calling src-tauri/src/vault_list.rs::set_active_workspace_root inside the worker; a JoinError becomes the display-only set_active_workspace_root_task_failed String.",
+        "src-tauri/src/vault_list.rs::set_active_workspace_root validates that the path is registered for the requested visibility (the Workspace is not registered for this visibility rejection fires before any write) and flips the active slot through src-tauri/src/vault_list.rs::set_active_workspace_root_in_transaction, persisting via src-tauri/src/vault_list.rs::save_registry inside the lease."
+      ],
+      "workerBoundary": "src-tauri/src/vault_list.rs::ipc::set_active_workspace_root awaits tauri::async_runtime::spawn_blocking before any filesystem access or admission wait runs; only a JoinError maps to the display-only set_active_workspace_root_task_failed String while the WorkspaceRegistry payload and every domain error string pass through unchanged; owned Strings, structs and JSON values cross the await, never a borrowed State or guard.",
+      "syncCallers": [
+        "No Rust or CLI caller invokes set_active_workspace_root synchronously today; src-tauri/src/lib.rs registers only vault_list::ipc::set_active_workspace_root, and the original synchronous src-tauri/src/vault_list.rs::set_active_workspace_root keeps its name and signature for Rust callers (the phase08_22 tests exercise it directly)."
+      ],
+      "mutationKey": {
+        "readOnly": false,
+        "lexicalPaths": [
+          "workspace registry JSON (src-tauri/src/vault_list.rs::workspace_registry_path)",
+          "legacy vault-list JSON (src-tauri/src/vault_list.rs::legacy_vault_list_path, admitted cover for the load-time migration)"
+        ],
+        "aliasPaths": [
+          "the registry and legacy paths resolve through the same home/config-dir resolution the load and save helpers use, so the admitted lexical pair is exactly what load-modify-save rewrites"
+        ],
+        "sharedAdmissionEntry": "src-tauri/src/vault_list.rs::set_active_workspace_root admits the registry rewrite before any effect: src-tauri/src/vault_list.rs::registry_mutation_admission builds the src-tauri/src/atomic_file.rs::PathTransactionRequest over the current registry and legacy paths with the workspace-registry precondition, src-tauri/src/atomic_file.rs::with_path_transactions opens the lease, and ensure_workspace_registry, lease.ensure_covered over the registry output and lease.before_effect run before the load-modify-save.",
+        "postAdmissionPreconditions": [
+          "lease.ensure_workspace_registry runs before any effect",
+          "lease.ensure_covered over the registry output runs before lease.before_effect",
+          "the load-modify-save through src-tauri/src/vault_list.rs::load_registry and src-tauri/src/vault_list.rs::save_registry runs wholly inside the lease so a concurrently added root is never overwritten"
+        ],
+        "domainLockOrder": "Filesystem path admission (with_path_transactions acquire) happens in src-tauri/src/vault_list.rs::set_active_workspace_root before the registry load-modify-save; admission precedes every domain effect and no registry write escapes the admitted pair."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_22",
+          "passed": 15,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts"
+        ],
+        "payload": "setActiveWorkspaceRoot (src/lib/api.ts:1253) invokes set_active_workspace_root with the root path and visibility; the workspace-registry surface keeps owning that flow regardless of screen changes.",
+        "terminalNoticeOwner": "The workspace-registry settings surface that calls setActiveWorkspaceRoot owns busy state, current registry display and error toasts for this call. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=set_active_workspace_root"
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_22_vault_list_wrappers_yield_same_poll_and_map_join_failure",
+          "phase08_22_vault_list_real_fixture_and_rejections",
+          "phase08_22_vault_list_serializes_registry_both_orders",
+          "phase08_22_vault_list_error_releases_admission_and_retry_recovers"
+        ],
+        "workerProof": "vault_list::phase08_22::phase08_22_vault_list_wrappers_yield_same_poll_and_map_join_failure holds each future at spawn_blocking worker entry via a #[cfg(test)] worker-stage hook keyed to the fixture workspace registry path, manually polls it on the same async task and proves progress while a distinct worker thread stays blocked; the panicked worker maps to the display-only set_active_workspace_root_task_failed String. phase08_22_vault_list_serializes_registry_both_orders parks a worker on the admitted registry lease and proves the second admitted registry writer cannot complete within 30 ms in either launch order; phase08_22_vault_list_error_releases_admission_and_retry_recovers proves a rejection releases admission with no partial registry write and a retry succeeds.",
+        "platformScope": "macOS unit fixtures only: atomic_file::phase08_06::Home isolation (MARU_TEST_CONFIG_DIR), disposable tempdir workspace roots and the test-only worker-stage hooks; no live workspace, credential, network endpoint or native test hook is touched.",
+        "limits": "Shared admission serializes cooperating in-process registry writers only; external processes editing the registry files are outside the in-process guarantee. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
+        "contract": "The WorkspaceRegistry payload, the visibility-scoped active-slot semantics and the not-registered rejection are unchanged; the only new failure paths are the JoinError-to-String mapping at the worker boundary plus fail-closed admission rejections."
+      }
+    },
+    {
+      "name": "detect_workspace",
+      "module": "src-tauri/src/workspace.rs",
+      "registrationPath": "src-tauri/src/lib.rs::workspace::ipc::detect_workspace",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/workspace.rs::ipc::detect_workspace owns the path String and awaits tauri::async_runtime::spawn_blocking calling src-tauri/src/workspace.rs::detect_workspace inside the worker; a JoinError becomes the display-only detect_workspace_task_failed String.",
+        "src-tauri/src/workspace.rs::detect_workspace only reads: an existence check plus src-tauri/src/workspace.rs::canonicalize_or_self and src-tauri/src/workspace.rs::detect_at parse the finite workspace.config.yaml and stat the declared public workspace paths, so the converted chain reaches no network call, process wait or unbounded walk."
+      ],
+      "workerBoundary": "src-tauri/src/workspace.rs::ipc::detect_workspace awaits tauri::async_runtime::spawn_blocking before any filesystem access or admission wait runs; only a JoinError maps to the display-only detect_workspace_task_failed String while the WorkspaceDetect payload and every domain error string pass through unchanged; owned Strings, structs and JSON values cross the await, never a borrowed State or guard.",
+      "syncCallers": [
+        "No Rust or CLI caller invokes detect_workspace synchronously outside tests today; src-tauri/src/lib.rs registers only workspace::ipc::detect_workspace, and the original synchronous src-tauri/src/workspace.rs::detect_workspace keeps its name and signature for Rust callers (the phase08_22 tests exercise it directly)."
+      ],
+      "mutationKey": {
+        "readOnly": true,
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "sharedAdmissionEntry": "detect_workspace performs no filesystem mutation: it only stats the candidate path and parses the finite workspace.config.yaml, so this command is read-only and needs no mutation admission.",
+        "postAdmissionPreconditions": [
+          "No mutation admission is required: the command performs no filesystem mutation, so there is no transaction key to admit and nothing to release"
+        ],
+        "domainLockOrder": "No path admission exists; the command takes no domain lock, so there is no admission-before-domain-lock order to record."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_22",
+          "passed": 15,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/maruDir.ts"
+        ],
+        "payload": "detectWorkspace (src/lib/maruDir.ts:184) invokes detect_workspace with the picked directory path during workspace onboarding; the onboarding flow keeps owning that probe regardless of screen changes.",
+        "terminalNoticeOwner": "The workspace onboarding flow that calls detectWorkspace owns busy state and error toasts for this probe. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=detect_workspace"
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_22_workspace_wrappers_yield_same_poll_and_map_join_failure",
+          "phase08_22_workspace_real_fixture_results_and_rejections"
+        ],
+        "workerProof": "workspace::phase08_22::phase08_22_workspace_wrappers_yield_same_poll_and_map_join_failure holds each future at spawn_blocking worker entry via a #[cfg(test)] worker-stage hook keyed to the fixture work path (workspace registry path for list_workspaces), manually polls it on the same async task and proves progress while a distinct worker thread stays blocked; the panicked worker maps to the display-only detect_workspace_task_failed String.",
+        "platformScope": "macOS unit fixtures only: atomic_file::phase08_06::Home isolation (MARU_TEST_CONFIG_DIR), disposable tempdir workspaces with workspace.config.yaml fixtures and the test-only worker-stage hooks; no live workspace, credential, network endpoint or native test hook is touched.",
+        "limits": "Shared admission serializes cooperating in-process writers on the admitted private .maru set and workspace registry only; external processes are outside the in-process guarantee. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
+        "contract": "The WorkspaceDetect payload, the Path does not exist rejection and the detected/private/public resolution semantics are unchanged; the only new failure path is the JoinError-to-String mapping at the worker boundary."
+      }
+    },
+    {
+      "name": "read_workspace_config",
+      "module": "src-tauri/src/workspace.rs",
+      "registrationPath": "src-tauri/src/lib.rs::workspace::ipc::read_workspace_config",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/workspace.rs::ipc::read_workspace_config owns the work path String and awaits tauri::async_runtime::spawn_blocking calling src-tauri/src/workspace.rs::read_workspace_config inside the worker; a JoinError becomes the display-only read_workspace_config_task_failed String.",
+        "src-tauri/src/workspace.rs::read_workspace_config only reads the finite workspace.config.yaml through src-tauri/src/workspace.rs::read_workspace_config_at after a canonicalize_or_self and an existence check, so the converted chain reaches no network call, process wait or unbounded walk."
+      ],
+      "workerBoundary": "src-tauri/src/workspace.rs::ipc::read_workspace_config awaits tauri::async_runtime::spawn_blocking before any filesystem access or admission wait runs; only a JoinError maps to the display-only read_workspace_config_task_failed String while the WorkspaceConfig payload and every domain error string pass through unchanged; owned Strings, structs and JSON values cross the await, never a borrowed State or guard.",
+      "syncCallers": [
+        "No Rust or CLI caller invokes read_workspace_config synchronously outside tests today; src-tauri/src/lib.rs registers only workspace::ipc::read_workspace_config, and the original synchronous src-tauri/src/workspace.rs::read_workspace_config keeps its name and signature for Rust callers (the phase08_22 tests exercise it directly)."
+      ],
+      "mutationKey": {
+        "readOnly": true,
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "sharedAdmissionEntry": "read_workspace_config performs no filesystem mutation: it only parses the finite workspace.config.yaml after an existence check, so this command is read-only and needs no mutation admission.",
+        "postAdmissionPreconditions": [
+          "No mutation admission is required: the command performs no filesystem mutation, so there is no transaction key to admit and nothing to release"
+        ],
+        "domainLockOrder": "No path admission exists; the command takes no domain lock, so there is no admission-before-domain-lock order to record."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_22",
+          "passed": 15,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/maruDir.ts"
+        ],
+        "payload": "readWorkspaceConfig (src/lib/maruDir.ts:191) invokes read_workspace_config with the detected work path during workspace onboarding; the onboarding flow keeps owning that load regardless of screen changes.",
+        "terminalNoticeOwner": "The workspace onboarding flow that calls readWorkspaceConfig owns busy state and error toasts for this load. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=read_workspace_config"
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_22_workspace_wrappers_yield_same_poll_and_map_join_failure",
+          "phase08_22_workspace_real_fixture_results_and_rejections"
+        ],
+        "workerProof": "workspace::phase08_22::phase08_22_workspace_wrappers_yield_same_poll_and_map_join_failure holds each future at spawn_blocking worker entry via a #[cfg(test)] worker-stage hook keyed to the fixture work path (workspace registry path for list_workspaces), manually polls it on the same async task and proves progress while a distinct worker thread stays blocked; the panicked worker maps to the display-only read_workspace_config_task_failed String.",
+        "platformScope": "macOS unit fixtures only: atomic_file::phase08_06::Home isolation (MARU_TEST_CONFIG_DIR), disposable tempdir workspaces with workspace.config.yaml fixtures and the test-only worker-stage hooks; no live workspace, credential, network endpoint or native test hook is touched.",
+        "limits": "Shared admission serializes cooperating in-process writers on the admitted private .maru set and workspace registry only; external processes are outside the in-process guarantee. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
+        "contract": "The WorkspaceConfig payload, the workspace.config.yaml not found race rejection and the YAML parse error strings are unchanged; the only new failure path is the JoinError-to-String mapping at the worker boundary."
+      }
+    },
+    {
+      "name": "register_workspace_roots",
+      "module": "src-tauri/src/workspace.rs",
+      "registrationPath": "src-tauri/src/lib.rs::workspace::ipc::register_workspace_roots",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/workspace.rs::ipc::register_workspace_roots owns the work path String and awaits tauri::async_runtime::spawn_blocking calling src-tauri/src/workspace.rs::register_workspace_roots inside the worker; a JoinError becomes the display-only register_workspace_roots_task_failed String.",
+        "src-tauri/src/workspace.rs::register_workspace_roots canonicalizes the config directory, runs src-tauri/src/workspace.rs::detect_at for owner labels and public roots, then admits [<private>/.maru, <private>/.maruignore, registry output, legacy vault list] with require_parent(private) and the workspace-registry precondition before any effect.",
+        "src-tauri/src/workspace.rs::register_workspace_roots_in_transaction re-covers the registry and private paths, bootstraps through src-tauri/src/maru_dir.rs::ensure_maru_dir, and reuses the admitted lease via src-tauri/src/vault_list.rs::upsert_workspace_root_in_transaction and src-tauri/src/vault_list.rs::set_active_workspace_root_in_transaction without re-acquiring, then stamps the meta through src-tauri/src/maru_dir.rs::set_paired_vault_path and src-tauri/src/maru_dir.rs::set_owner_name; a failure before the registry upserts leaves the registry untouched."
+      ],
+      "workerBoundary": "src-tauri/src/workspace.rs::ipc::register_workspace_roots awaits tauri::async_runtime::spawn_blocking before any filesystem access or admission wait runs; only a JoinError maps to the display-only register_workspace_roots_task_failed String while the RegisterOutcome payload and every domain error string pass through unchanged; owned Strings, structs and JSON values cross the await, never a borrowed State or guard.",
+      "syncCallers": [
+        "No Rust or CLI caller invokes register_workspace_roots synchronously outside tests today; src-tauri/src/lib.rs registers only workspace::ipc::register_workspace_roots, and the original synchronous src-tauri/src/workspace.rs::register_workspace_roots keeps its name and signature for Rust callers (the phase08_22 tests exercise it directly)."
+      ],
+      "mutationKey": {
+        "readOnly": false,
+        "lexicalPaths": [
+          "<private>/.maru/ skeleton (workspace.json + managed defaults)",
+          "<private>/.maruignore",
+          "workspace registry JSON (src-tauri/src/vault_list.rs::workspace_registry_path)",
+          "legacy vault-list JSON (src-tauri/src/vault_list.rs::legacy_vault_list_path)",
+          "pinned private-root parent (require_parent)"
+        ],
+        "aliasPaths": [
+          "the config directory is canonicalized via src-tauri/src/workspace.rs::canonicalize_or_self and the resolved private root is what gets admitted, so aliased spellings of the same directory cannot escape the set"
+        ],
+        "sharedAdmissionEntry": "src-tauri/src/workspace.rs::register_workspace_roots admits the whole flow before any effect: src-tauri/src/atomic_file.rs::with_path_transactions opens the lease after src-tauri/src/atomic_file.rs::PathTransactionRequest pins the private parent (require_parent) and attaches the registry paths and the workspace-registry precondition, so no nested upsert or meta stamp escapes the admitted set.",
+        "postAdmissionPreconditions": [
+          "lease.ensure_workspace_registry runs before any effect",
+          "lease.ensure_covered over the registry output, private .maru and .maruignore runs before lease.before_effect",
+          "src-tauri/src/vault_list.rs::upsert_workspace_root_in_transaction and src-tauri/src/vault_list.rs::set_active_workspace_root_in_transaction consume the admitted lease without re-acquiring, so nested registry writes cannot self-deadlock"
+        ],
+        "domainLockOrder": "Filesystem path admission (with_path_transactions acquire) happens in src-tauri/src/workspace.rs::register_workspace_roots before ensure_maru_dir, the registry upserts and the workspace.json stamp; admission precedes every domain effect."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_22",
+          "passed": 15,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/maruDir.ts"
+        ],
+        "payload": "registerWorkspaceRoots (src/lib/maruDir.ts:285) invokes register_workspace_roots with the picked config directory during workspace onboarding; the onboarding flow keeps owning that registration regardless of screen changes.",
+        "terminalNoticeOwner": "The workspace onboarding flow that calls registerWorkspaceRoots owns busy state and error toasts for this registration. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=register_workspace_roots"
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_22_workspace_wrappers_yield_same_poll_and_map_join_failure",
+          "phase08_22_workspace_real_fixture_results_and_rejections",
+          "phase08_22_register_serializes_with_concurrent_add_both_orders",
+          "phase08_22_register_error_releases_admission_and_retry_recovers"
+        ],
+        "workerProof": "workspace::phase08_22::phase08_22_workspace_wrappers_yield_same_poll_and_map_join_failure holds each future at spawn_blocking worker entry via a #[cfg(test)] worker-stage hook keyed to the fixture work path (workspace registry path for list_workspaces), manually polls it on the same async task and proves progress while a distinct worker thread stays blocked; the panicked worker maps to the display-only register_workspace_roots_task_failed String. phase08_22_register_serializes_with_concurrent_add_both_orders parks a register worker on the admitted lease while a concurrent add_workspace_root on a disjoint root progresses, then proves a same-key second register waits in either launch order; phase08_22_register_error_releases_admission_and_retry_recovers proves an error releases admission with the registry untouched and a retry succeeds.",
+        "platformScope": "macOS unit fixtures only: atomic_file::phase08_06::Home isolation (MARU_TEST_CONFIG_DIR), disposable tempdir workspaces with workspace.config.yaml fixtures and the test-only worker-stage hooks; no live workspace, credential, network endpoint or native test hook is touched.",
+        "limits": "Shared admission serializes cooperating in-process writers on the admitted private .maru set and workspace registry only; external processes are outside the in-process guarantee. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
+        "contract": "The RegisterOutcome payload, the idempotent registration semantics, the public-root pairing and the Work path does not exist rejection are unchanged; the only new failure paths are the JoinError-to-String mapping at the worker boundary plus fail-closed admission rejections for out-of-set writes."
+      }
+    },
+    {
+      "name": "list_workspaces",
+      "module": "src-tauri/src/workspace.rs",
+      "registrationPath": "src-tauri/src/lib.rs::workspace::ipc::list_workspaces",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/workspace.rs::ipc::list_workspaces owns no inputs and awaits tauri::async_runtime::spawn_blocking calling src-tauri/src/workspace.rs::list_workspaces inside the worker; a JoinError becomes the display-only list_workspaces_task_failed String.",
+        "src-tauri/src/workspace.rs::list_workspaces only reads: it delegates to src-tauri/src/vault_list.rs::list_workspace_roots (which admits the registry because its load may run the legacy migration) and folds the finite registry into per-root WorkspaceSummary values, so the converted chain reaches no network call, process wait or unbounded walk."
+      ],
+      "workerBoundary": "src-tauri/src/workspace.rs::ipc::list_workspaces awaits tauri::async_runtime::spawn_blocking before any filesystem access or admission wait runs; only a JoinError maps to the display-only list_workspaces_task_failed String while the Vec<WorkspaceSummary> payload and every domain error string pass through unchanged; owned Strings, structs and JSON values cross the await, never a borrowed State or guard.",
+      "syncCallers": [
+        "No Rust or CLI caller invokes list_workspaces synchronously today; src-tauri/src/lib.rs registers only workspace::ipc::list_workspaces, and the original synchronous src-tauri/src/workspace.rs::list_workspaces keeps its name and signature for Rust callers (the phase08_22 tests exercise it directly)."
+      ],
+      "mutationKey": {
+        "readOnly": false,
+        "lexicalPaths": [
+          "workspace registry JSON (src-tauri/src/vault_list.rs::workspace_registry_path)",
+          "legacy vault-list JSON (src-tauri/src/vault_list.rs::legacy_vault_list_path, admitted cover for the delegated load-time migration)"
+        ],
+        "aliasPaths": [
+          "the registry and legacy paths resolve through the same home/config-dir resolution the delegated load and save helpers use, so the admitted lexical pair is exactly what the delegated load may rewrite"
+        ],
+        "sharedAdmissionEntry": "src-tauri/src/workspace.rs::list_workspaces admits through its callee: src-tauri/src/vault_list.rs::list_workspace_roots enters src-tauri/src/atomic_file.rs::with_path_transactions via src-tauri/src/vault_list.rs::registry_mutation_admission over the registry and legacy paths with the workspace-registry precondition before the delegated load, so the possible one-time legacy migration never interleaves with a registry writer.",
+        "postAdmissionPreconditions": [
+          "the delegated lease runs ensure_workspace_registry before any effect",
+          "the delegated lease runs ensure_covered over the registry output before its before_effect",
+          "the per-root summary fold is a pure in-memory projection of the loaded registry"
+        ],
+        "domainLockOrder": "Filesystem path admission (the delegated with_path_transactions acquire) happens inside src-tauri/src/vault_list.rs::list_workspace_roots before the registry load; admission precedes every domain effect of this command."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_22",
+          "passed": 15,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/maruDir.ts"
+        ],
+        "payload": "listWorkspaces (src/lib/maruDir.ts:290) invokes list_workspaces for the workspace settings/diagnostics surfaces; those surfaces keep owning that load regardless of screen changes.",
+        "terminalNoticeOwner": "The workspace settings surface that calls listWorkspaces owns busy state and error toasts for this load. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=list_workspaces"
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_22_workspace_wrappers_yield_same_poll_and_map_join_failure",
+          "phase08_22_workspace_real_fixture_results_and_rejections"
+        ],
+        "workerProof": "workspace::phase08_22::phase08_22_workspace_wrappers_yield_same_poll_and_map_join_failure holds each future at spawn_blocking worker entry via a #[cfg(test)] worker-stage hook keyed to the fixture work path (workspace registry path for list_workspaces), manually polls it on the same async task and proves progress while a distinct worker thread stays blocked; the panicked worker maps to the display-only list_workspaces_task_failed String.",
+        "platformScope": "macOS unit fixtures only: atomic_file::phase08_06::Home isolation (MARU_TEST_CONFIG_DIR), disposable tempdir workspaces with workspace.config.yaml fixtures and the test-only worker-stage hooks; no live workspace, credential, network endpoint or native test hook is touched.",
+        "limits": "Shared admission serializes cooperating in-process writers on the admitted private .maru set and workspace registry only; external processes are outside the in-process guarantee. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
+        "contract": "The Vec<WorkspaceSummary> payload and the per-root fold semantics are unchanged; the only new failure paths are the JoinError-to-String mapping at the worker boundary plus fail-closed admission rejections from the delegated registry admission."
+      }
+    }
+  ]
+}

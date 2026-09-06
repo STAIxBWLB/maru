@@ -310,6 +310,9 @@ make clippy
 # Complete hermetic verification
 make verify
 
+# Phase 08 evidence closure gate alone (365 production commands, PERF-01/PERF-02)
+node scripts/check-command-isolation.mjs --all --expected-count 365
+
 # Full verify plus release-only CLI and debug Tauri checks
 make release-checks
 
@@ -342,7 +345,12 @@ cargo run --manifest-path src-tauri/Cargo.toml -p maru-cli --bin maru-cli -- ski
 - release-version synchronization and static architecture guards
 - frontend tests and Rust library tests
 - rustfmt and clippy with warnings denied
-- production frontend build and gzip bundle budgets
+- production frontend build and gzip bundle budgets, including the native-e2e
+  ship-isolation scan of the produced bundle (D-10)
+- the Phase 08 evidence closure gate (`check-command-isolation`): every
+  registered production command carries final justified worker-boundary,
+  mutation-admission and processing-caller evidence against the 365-command
+  inventory (`node scripts/check-command-isolation.mjs --all --expected-count 365`)
 
 Pull requests run a lightweight decision job first. Source changes fan out to
 `make verify` and Playwright E2E. Version-changing PRs run `make release-checks`

@@ -39,6 +39,25 @@ import { useToday } from "./todayContext";
 
 const PROBLEM_STATUSES: ReadonlySet<OutboxStatus> = new Set(["retryNeeded", "authBlocked"]);
 
+// Plan 12 reconciliation markers (today_outbox.rs): an unknown external
+// outcome or a provider-succeeded/local-commit-failed record needs external
+// verification, not blind requeueing. Ordinary retry is disabled while the
+// provider task id is unverified; a known id keeps retry available.
+const PROVIDER_OUTCOME_UNKNOWN_PREFIX = "provider_outcome_unknown:";
+const PROVIDER_LOCAL_COMMIT_FAILED_PREFIX = "provider_succeeded_local_commit_failed:";
+
+function isExternalReconciliation(record: OutboxRecord): boolean {
+  const error = record.lastError ?? "";
+  return (
+    error.startsWith(PROVIDER_OUTCOME_UNKNOWN_PREFIX) ||
+    error.startsWith(PROVIDER_LOCAL_COMMIT_FAILED_PREFIX)
+  );
+}
+
+function ordinaryRetryBlocked(record: OutboxRecord): boolean {
+  return isExternalReconciliation(record) && !record.googleTaskId.trim();
+}
+
 /** File stem of the task note path (no directory, no extension). */
 function taskStem(taskPath: string): string {
   const fileName = taskPath.split("/").pop() ?? taskPath;
@@ -59,20 +78,20 @@ function badgeStatus(status: OutboxStatus): "syncing" | "synced" | "retryNeeded"
   }
 }
 
-function StatusBadge({ status }: { status: OutboxStatus }) {
+function StatusBadge({ status, labelOverride }: { status: OutboxStatus; labelOverride?: string }) {
   const { t } = useTranslation();
   const badge = badgeStatus(status);
-  const warn = badge === "retryNeeded" || badge === "authBlocked";
+  const warn = badge === "retryNeeded" || badge === "authBlocked" || Boolean(labelOverride);
   return (
     <span className={warn ? "today-sync-badge warn" : "today-sync-badge"} role="status">
       {badge === "syncing" ? (
         <Loader2 size={12} strokeWidth={1.9} className="today-spin" aria-hidden="true" />
-      ) : badge === "synced" ? (
+      ) : badge === "synced" && !labelOverride ? (
         <Check size={12} strokeWidth={2.2} aria-hidden="true" />
       ) : (
         <TriangleAlert size={12} strokeWidth={1.9} aria-hidden="true" />
       )}
-      {t(`today.sync.status.${badge}`)}
+      {labelOverride ?? t(`today.sync.status.${badge}`)}
     </span>
   );
 }
@@ -344,6 +363,8 @@ export function TodaySyncStatus() {
             {records.map((record) => {
               const problem = PROBLEM_STATUSES.has(record.status);
               const repairable = canRepairTaskListLinkage(record, defaultTaskList);
+              const externalReconciliation = isExternalReconciliation(record);
+              const retryBlocked = ordinaryRetryBlocked(record);
               return (
                 <li
                   key={record.id}
@@ -352,11 +373,16 @@ export function TodaySyncStatus() {
                 >
                   <span className="today-sync-status-task">{taskStem(record.taskPath)}</span>
                   <span className="today-sync-status-op">{t(`today.sync.op.${record.op}`)}</span>
-                  <StatusBadge status={record.status} />
+                  <StatusBadge
+                    status={record.status}
+                    labelOverride={
+                      externalReconciliation ? t("today.sync.status.verifyExternal") : undefined
+                    }
+                  />
                   <span className="today-sync-status-attempts">
                     {t("today.sync.attempts", { count: record.attempts })}
                   </span>
-                  {problem ? (
+                  {problem && !retryBlocked ? (
                     <button
                       type="button"
                       className="today-panel-link"
@@ -376,8 +402,11 @@ export function TodaySyncStatus() {
                       {t("today.sync.repairTaskList")}
                     </button>
                   ) : null}
-                  {record.status === "authBlocked" ? (
+                  {record.status === "authBlocked" && !externalReconciliation ? (
                     <p className="today-sync-status-hint">{t("today.sync.authHint")}</p>
+                  ) : null}
+                  {retryBlocked ? (
+                    <p className="today-sync-status-hint">{t("today.sync.verifyExternalHint")}</p>
                   ) : null}
                   {repairable ? (
                     <p className="today-sync-status-hint">{t("today.sync.repairTaskListHint")}</p>

@@ -229,7 +229,6 @@ pub struct TodayPlanRequest {
 /// Assemble the plan-request context from the stored snapshot. Candidate
 /// refs are carryovers, yesterday items, and any existing plan items,
 /// deduplicated in first-seen order.
-#[tauri::command]
 pub fn today_build_plan_request(
     work_path: String,
     logical_day: String,
@@ -267,7 +266,6 @@ pub fn today_build_plan_request(
 /// Validate a raw `maru_today_plan_v1` output and apply it through the same
 /// path as `TodayMutation::SetPlan`. Revision drift between validation and
 /// the stored snapshot propagates as `today_conflict`.
-#[tauri::command]
 pub fn today_apply_plan_result(
     work_path: String,
     logical_day: String,
@@ -297,6 +295,58 @@ pub fn today_apply_plan_result(
         expected_revision,
         TodayMutation::SetPlan { plan },
     )
+}
+
+/// IPC owns all inputs before scheduling filesystem work. The synchronous
+/// APIs remain available to Rust callers; apply delegates write admission and
+/// current-state validation to `today_mutate` before that entry's Today lock.
+pub mod ipc {
+    use super::*;
+
+    #[tauri::command]
+    pub async fn today_build_plan_request(
+        work_path: String,
+        logical_day: String,
+    ) -> Result<TodayPlanRequest, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            crate::atomic_file::PathTransactionLease::test_stage(
+                &[std::path::PathBuf::from(&work_path)],
+                "worker:today_build_plan_request",
+            );
+            super::today_build_plan_request(work_path, logical_day)
+        })
+        .await
+        .map_err(|err| format!("today_build_plan_request_task_failed: {err}"))?
+    }
+
+    #[tauri::command]
+    pub async fn today_apply_plan_result(
+        work_path: String,
+        logical_day: String,
+        expected_revision: String,
+        output_json: String,
+        valid_refs: Vec<PlanItemRef>,
+        sleep_start: String,
+    ) -> Result<TodaySnapshot, IpcError> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            crate::atomic_file::PathTransactionLease::test_stage(
+                &[std::path::PathBuf::from(&work_path)],
+                "worker:today_apply_plan_result",
+            );
+            super::today_apply_plan_result(
+                work_path,
+                logical_day,
+                expected_revision,
+                output_json,
+                valid_refs,
+                sleep_start,
+            )
+        })
+        .await
+        .map_err(|err| IpcError::from(format!("today_apply_plan_result_task_failed: {err}")))?
+    }
 }
 
 #[cfg(test)]
@@ -815,5 +865,201 @@ mod tests {
         let err =
             validate_plan_output(&raw, DAY, &snapshot.revision, &valid, SLEEP, tz()).unwrap_err();
         assert!(err.starts_with("today_ai_invalid_payload"));
+    }
+    #[test]
+    fn phase08_11_ai_request_apply_nonempty_roundtrip_and_errors() {
+        use crate::atomic_file::phase08_06::{run, Home};
+        let home = Home::new();
+        let work = home.root.path().to_string_lossy().into_owned();
+        let snapshot = open_day(&work);
+        let initial = today_apply_plan_result(
+            work.clone(),
+            DAY.into(),
+            snapshot.revision.clone(),
+            plan_output_json(&snapshot.revision, vec![top_item("fixture-task")], vec![]),
+            valid_refs(&["fixture-task"]),
+            SLEEP.into(),
+        )
+        .unwrap();
+        let work_request = work.clone();
+        let request = run(ipc::today_build_plan_request(work_request, DAY.into())).unwrap();
+        assert_eq!(request.candidate_refs, valid_refs(&["fixture-task"]));
+        assert_eq!(request.input_revision, initial.revision);
+        let output = plan_output_json(
+            &request.input_revision,
+            vec![top_item("fixture-task")],
+            vec![],
+        );
+        let apply_work = work.clone();
+        let apply_revision = request.input_revision.clone();
+        let applied = run(ipc::today_apply_plan_result(
+            apply_work,
+            DAY.into(),
+            apply_revision,
+            output.clone(),
+            request.candidate_refs.clone(),
+            SLEEP.into(),
+        ))
+        .unwrap();
+        assert_eq!(
+            applied.plan.as_ref().unwrap().top[0].item_ref,
+            task_ref("fixture-task")
+        );
+        // Ensure a different persisted revision before replaying the old output.
+        let changed = today_mutate(
+            work.clone(),
+            DAY.into(),
+            applied.revision,
+            TodayMutation::SetBrainDump {
+                brain_dump: "new planning context".into(),
+            },
+        )
+        .unwrap();
+        let stale = run(ipc::today_apply_plan_result(
+            work.clone(),
+            DAY.into(),
+            request.input_revision,
+            output,
+            request.candidate_refs,
+            SLEEP.into(),
+        ))
+        .unwrap_err();
+        assert_eq!(stale.code, crate::ipc_error::TODAY_CONFLICT);
+        let malformed = run(ipc::today_apply_plan_result(
+            work.clone(),
+            DAY.into(),
+            changed.revision.clone(),
+            "{ malformed".into(),
+            valid_refs(&["fixture-task"]),
+            SLEEP.into(),
+        ))
+        .unwrap_err();
+        assert!(malformed.code.is_empty());
+        assert!(malformed.message.starts_with("today_ai_invalid_payload:"));
+        let stored = load_snapshot(home.root.path(), DAY).unwrap();
+        assert_eq!(stored.revision, changed.revision);
+        assert_eq!(stored.plan.unwrap().top.len(), 1);
+        let missing = run(ipc::today_build_plan_request(work, "2026-07-22".into())).unwrap_err();
+        assert_eq!(missing, "today_state_missing");
+    }
+
+    #[test]
+    fn phase08_11_ai_wrappers_yield_on_same_polling_task_and_map_join_failure() {
+        use crate::atomic_file::phase08_06::{boundary, Home};
+        let home = Home::new();
+        let work = home.root.path().to_string_lossy().into_owned();
+        boundary(
+            home.root.path().into(),
+            "today_build_plan_request",
+            ipc::today_build_plan_request(work.clone(), DAY.into()),
+        );
+        boundary(
+            home.root.path().into(),
+            "today_apply_plan_result",
+            async move {
+                ipc::today_apply_plan_result(
+                    work,
+                    DAY.into(),
+                    "revision".into(),
+                    "{}".into(),
+                    valid_refs(&["fixture-task"]),
+                    SLEEP.into(),
+                )
+                .await
+                .map_err(|error| {
+                    assert!(error.code.is_empty(), "JoinError must remain display-only");
+                    error.message
+                })
+            },
+        );
+    }
+
+    #[test]
+    fn phase08_11_ai_apply_same_target_contention_conflict_releases_admission() {
+        use crate::atomic_file::phase08_06::{run, Held, Home};
+        use crate::atomic_file::PathTransactionTestHook;
+        use std::sync::mpsc;
+        use std::time::Duration;
+        let home = Home::new();
+        let work = home.root.path().to_string_lossy().into_owned();
+        let snapshot = open_day(&work);
+        let output = plan_output_json(&snapshot.revision, vec![top_item("fixture-task")], vec![]);
+        let held = Held::new(home.root.path().join(".maru/today"), "admitted");
+        let (first_tx, first_rx) = mpsc::channel();
+        let first_work = work.clone();
+        let first_revision = snapshot.revision.clone();
+        let first_output = output.clone();
+        tauri::async_runtime::spawn(async move {
+            first_tx
+                .send(
+                    ipc::today_apply_plan_result(
+                        first_work,
+                        DAY.into(),
+                        first_revision,
+                        first_output,
+                        valid_refs(&["fixture-task"]),
+                        SLEEP.into(),
+                    )
+                    .await,
+                )
+                .unwrap();
+        });
+        held.wait();
+        let (attempt_tx, attempt_rx) = mpsc::channel();
+        let _attempt = PathTransactionTestHook::new(
+            home.root.path().join(".maru/today"),
+            "before-admission",
+            move || {
+                attempt_tx.send(()).unwrap();
+            },
+        );
+        let (second_tx, second_rx) = mpsc::channel();
+        let second_work = work.clone();
+        tauri::async_runtime::spawn(async move {
+            second_tx
+                .send(
+                    ipc::today_apply_plan_result(
+                        second_work,
+                        DAY.into(),
+                        snapshot.revision,
+                        output,
+                        valid_refs(&["fixture-task"]),
+                        SLEEP.into(),
+                    )
+                    .await,
+                )
+                .unwrap();
+        });
+        attempt_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        assert!(matches!(
+            second_rx.try_recv(),
+            Err(mpsc::TryRecvError::Empty)
+        ));
+        held.release();
+        let first = first_rx
+            .recv_timeout(Duration::from_secs(5))
+            .unwrap()
+            .unwrap();
+        let stale = second_rx
+            .recv_timeout(Duration::from_secs(5))
+            .unwrap()
+            .unwrap_err();
+        assert_eq!(stale.code, crate::ipc_error::TODAY_CONFLICT);
+        // The conflict releases admission: the next real apply completes.
+        let output = plan_output_json(&first.revision, vec![top_item("fixture-task")], vec![]);
+        let final_snapshot = run(ipc::today_apply_plan_result(
+            work,
+            DAY.into(),
+            first.revision,
+            output,
+            valid_refs(&["fixture-task"]),
+            SLEEP.into(),
+        ))
+        .unwrap();
+        assert_eq!(
+            load_snapshot(home.root.path(), DAY).unwrap().revision,
+            final_snapshot.revision
+        );
+        assert_eq!(final_snapshot.plan.unwrap().top.len(), 1);
     }
 }

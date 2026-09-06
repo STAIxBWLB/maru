@@ -11,7 +11,7 @@
 
 use std::path::PathBuf;
 use std::sync::mpsc;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use notify::{recommended_watcher, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
@@ -20,8 +20,8 @@ use tauri::{AppHandle, Emitter, State};
 
 use crate::inbox_settings;
 
-#[derive(Default)]
-pub struct InboxWatcherState(pub Mutex<Option<RecommendedWatcher>>);
+#[derive(Default, Clone)]
+pub struct InboxWatcherState(pub Arc<Mutex<Option<RecommendedWatcher>>>);
 
 /// Coalesce window for filesystem event bursts. A bulk drop of N files
 /// produces one `inbox://file_events` emit per window instead of N emits
@@ -69,7 +69,11 @@ fn dedup_events(events: Vec<InboxFileEvent>) -> Vec<InboxFileEvent> {
     out
 }
 
-fn emit_batch(app: &AppHandle, vault_path: &str, events: Vec<InboxFileEvent>) {
+fn emit_batch<R: tauri::Runtime>(
+    app: &AppHandle<R>,
+    vault_path: &str,
+    events: Vec<InboxFileEvent>,
+) {
     let events = dedup_events(events);
     if events.is_empty() {
         return;
@@ -83,10 +87,9 @@ fn emit_batch(app: &AppHandle, vault_path: &str, events: Vec<InboxFileEvent>) {
     );
 }
 
-#[tauri::command]
-pub fn start_inbox_watcher(
-    app: AppHandle,
-    state: State<'_, InboxWatcherState>,
+pub fn start_inbox_watcher<R: tauri::Runtime>(
+    app: AppHandle<R>,
+    state: &InboxWatcherState,
     vault_path: String,
 ) -> Result<(), String> {
     let vault = PathBuf::from(&vault_path);
@@ -139,6 +142,12 @@ pub fn start_inbox_watcher(
                 Ok(rel) => rel,
                 Err(_) => continue,
             };
+            // PERF-04 prune runs on the root-relative path (WR-01): an inbox
+            // drop dir itself named like a generated dir (dist, build, ...)
+            // must not prune 100% of its own events.
+            if crate::paths::is_under_generated_dir(rel_to_downloads) {
+                continue;
+            }
             let source = rel_to_downloads
                 .components()
                 .next()
@@ -204,8 +213,7 @@ pub fn start_inbox_watcher(
     Ok(())
 }
 
-#[tauri::command]
-pub fn stop_inbox_watcher(state: State<'_, InboxWatcherState>) -> Result<(), String> {
+pub fn stop_inbox_watcher(state: &InboxWatcherState) -> Result<(), String> {
     let mut guard = state
         .0
         .lock()
@@ -214,6 +222,287 @@ pub fn stop_inbox_watcher(state: State<'_, InboxWatcherState>) -> Result<(), Str
     // the drain thread via the disconnected channel.
     *guard = None;
     Ok(())
+}
+
+#[cfg(test)]
+mod phase08_19_stage {
+    use super::InboxWatcherState;
+    use std::sync::{Arc, Mutex};
+
+    pub(super) static STAGES: Mutex<Vec<(u64, usize, String, Arc<dyn Fn() + Send + Sync>)>> =
+        Mutex::new(Vec::new());
+
+    fn state_key(state: &InboxWatcherState) -> usize {
+        Arc::as_ptr(&state.0) as usize
+    }
+
+    pub(super) fn register(
+        id: u64,
+        command: &str,
+        state: &InboxWatcherState,
+        callback: Arc<dyn Fn() + Send + Sync>,
+    ) {
+        STAGES
+            .lock()
+            .unwrap()
+            .push((id, state_key(state), command.to_string(), callback));
+    }
+
+    pub(super) fn hit(command: &str, state: &InboxWatcherState) {
+        let key = state_key(state);
+        let callbacks: Vec<_> = STAGES
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(_, hook_key, name, _)| *hook_key == key && name == command)
+            .map(|(_, _, _, callback)| callback.clone())
+            .collect();
+        for callback in callbacks {
+            callback();
+        }
+    }
+}
+
+pub mod ipc {
+    use super::*;
+
+    #[tauri::command]
+    pub async fn start_inbox_watcher<R: tauri::Runtime>(
+        app: AppHandle<R>,
+        state: State<'_, InboxWatcherState>,
+        vault_path: String,
+    ) -> Result<(), String> {
+        let state = state.inner().clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            super::phase08_19_stage::hit("start_inbox_watcher", &state);
+            super::start_inbox_watcher(app, &state, vault_path)
+        })
+        .await
+        .map_err(|err| format!("start_inbox_watcher_task_failed: {err}"))?
+    }
+
+    #[tauri::command]
+    pub async fn stop_inbox_watcher(state: State<'_, InboxWatcherState>) -> Result<(), String> {
+        let state = state.inner().clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            super::phase08_19_stage::hit("stop_inbox_watcher", &state);
+            super::stop_inbox_watcher(&state)
+        })
+        .await
+        .map_err(|err| format!("stop_inbox_watcher_task_failed: {err}"))?
+    }
+}
+
+#[cfg(test)]
+mod phase08_19 {
+    use super::phase08_19_stage::STAGES;
+    use super::*;
+    use crate::atomic_file::phase08_06::run;
+    use std::future::Future;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::{mpsc, Arc, Mutex};
+    use std::time::Duration;
+    use tauri::Manager;
+
+    type TestApp = tauri::AppHandle<tauri::test::MockRuntime>;
+
+    fn mock_app() -> tauri::App<tauri::test::MockRuntime> {
+        let app = tauri::test::mock_app();
+        app.manage(InboxWatcherState::default());
+        app
+    }
+
+    fn vault_with_drop() -> tempfile::TempDir {
+        let vault = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(vault.path().join(".maru")).unwrap();
+        std::fs::write(
+            vault.path().join(".maru/inbox.json"),
+            r#"{"inboxRoot": "inbox/downloads", "sources": ["gmail"]}"#,
+        )
+        .unwrap();
+        std::fs::create_dir_all(vault.path().join("inbox/downloads/gmail")).unwrap();
+        vault
+    }
+
+    static NEXT_HOOK: AtomicU64 = AtomicU64::new(0);
+
+    struct StageGuard(u64);
+    impl Drop for StageGuard {
+        fn drop(&mut self) {
+            STAGES.lock().unwrap().retain(|(id, _, _, _)| *id != self.0);
+        }
+    }
+
+    fn boundary<F, T>(command: &'static str, app: &TestApp, future: F)
+    where
+        F: Future<Output = Result<T, String>> + Send + 'static,
+        T: Send + 'static,
+    {
+        let (entered_tx, mut entered_rx) = tauri::async_runtime::channel(1);
+        let (release_tx, release_rx) = mpsc::channel::<()>();
+        let release_rx = Mutex::new(release_rx);
+        let id = NEXT_HOOK.fetch_add(1, Ordering::SeqCst);
+        let callback: Arc<dyn Fn() + Send + Sync> = Arc::new(move || {
+            entered_tx
+                .blocking_send(std::thread::current().id())
+                .unwrap();
+            release_rx
+                .lock()
+                .unwrap()
+                .recv_timeout(Duration::from_secs(5))
+                .unwrap();
+            panic!("fixture worker failure");
+        });
+        super::phase08_19_stage::register(
+            id,
+            command,
+            app.state::<InboxWatcherState>().inner(),
+            callback,
+        );
+        let _guard = StageGuard(id);
+        run(async move {
+            let caller = std::thread::current().id();
+            let mut future = Box::pin(future);
+            assert!(
+                std::future::poll_fn(|cx| std::task::Poll::Ready(future.as_mut().poll(cx)))
+                    .await
+                    .is_pending(),
+                "{command} must yield until its blocking worker completes"
+            );
+            let worker = entered_rx.recv().await.expect("worker entry");
+            let mut yielded = false;
+            std::future::poll_fn(|cx| {
+                if yielded {
+                    std::task::Poll::Ready(())
+                } else {
+                    yielded = true;
+                    cx.waker().wake_by_ref();
+                    std::task::Poll::Pending
+                }
+            })
+            .await;
+            assert_ne!(
+                worker, caller,
+                "{command} must run on a distinct blocking worker"
+            );
+            release_tx.send(()).unwrap();
+            assert!(
+                matches!(future.await, Err(error) if error.starts_with(&format!("{command}_task_failed:"))),
+                "{command} must map a panicked worker to the display-only task-failed error"
+            );
+        });
+    }
+
+    async fn start_watcher(app: TestApp, vault_path: String) -> Result<(), String> {
+        ipc::start_inbox_watcher(app.clone(), app.state(), vault_path).await
+    }
+
+    async fn stop_watcher(app: TestApp) -> Result<(), String> {
+        ipc::stop_inbox_watcher(app.state()).await
+    }
+
+    #[test]
+    fn phase08_19_inbox_each_wrapper_yields_same_poll_and_maps_join_failure() {
+        for command in ["start_inbox_watcher", "stop_inbox_watcher"] {
+            let app = mock_app();
+            let app = app.handle().clone();
+            let app_for_call = app.clone();
+            let future = async move {
+                if command == "start_inbox_watcher" {
+                    start_watcher(app_for_call, "/phase08-19-missing-vault".to_string())
+                        .await
+                        .map(|_| String::new())
+                } else {
+                    stop_watcher(app_for_call).await.map(|_| String::new())
+                }
+            };
+            boundary(command, &app, future);
+        }
+    }
+
+    #[test]
+    fn phase08_19_inbox_real_fixture_results_and_legacy_rejections() {
+        let app = mock_app();
+        let app = app.handle().clone();
+        let vault = vault_with_drop();
+        let vault_path = vault.path().to_path_buf().to_string_lossy().into_owned();
+
+        run(stop_watcher(app.clone())).unwrap();
+        run(start_watcher(app.clone(), vault_path.clone())).unwrap();
+        run(start_watcher(app.clone(), vault_path.clone())).unwrap();
+        run(stop_watcher(app.clone())).unwrap();
+
+        let empty = tempfile::tempdir().unwrap();
+        let err = run(start_watcher(
+            app.clone(),
+            empty.path().to_path_buf().to_string_lossy().into_owned(),
+        ))
+        .unwrap_err();
+        assert!(
+            err.contains("No configured inbox drop or pending directories exist yet."),
+            "legacy rejection string unchanged, got: {err}"
+        );
+        let file = tempfile::NamedTempFile::new().unwrap();
+        let err = run(start_watcher(
+            app.clone(),
+            file.path().to_path_buf().to_string_lossy().into_owned(),
+        ))
+        .unwrap_err();
+        assert!(
+            err.contains("Vault path is not a directory"),
+            "file vault keeps the typed rejection, got: {err}"
+        );
+        let err = run(start_watcher(app, "/phase08-19-missing-vault".to_string())).unwrap_err();
+        assert!(
+            err.contains("Vault path is not a directory"),
+            "missing vault keeps the typed rejection, got: {err}"
+        );
+    }
+
+    #[test]
+    fn phase08_19_inbox_blocked_start_still_allows_stop_and_replace() {
+        let app = mock_app();
+        let app = app.handle().clone();
+        let vault = vault_with_drop();
+        let vault_path = vault.path().to_path_buf().to_string_lossy().into_owned();
+
+        let (entered_tx, entered_rx) = mpsc::channel::<std::thread::ThreadId>();
+        let (release_tx, release_rx) = mpsc::channel::<()>();
+        let release_rx = Mutex::new(release_rx);
+        let id = NEXT_HOOK.fetch_add(1, Ordering::SeqCst);
+        let callback: Arc<dyn Fn() + Send + Sync> = Arc::new(move || {
+            let _ = entered_tx.send(std::thread::current().id());
+            release_rx
+                .lock()
+                .unwrap()
+                .recv_timeout(Duration::from_secs(5))
+                .unwrap();
+        });
+        super::phase08_19_stage::register(
+            id,
+            "start_inbox_watcher",
+            app.state::<InboxWatcherState>().inner(),
+            callback,
+        );
+        let _guard = StageGuard(id);
+
+        let start_app = app.clone();
+        let (start_tx, start_rx) = mpsc::channel();
+        let starter = std::thread::spawn(move || {
+            let _ = start_tx.send(run(start_watcher(start_app, vault_path)));
+        });
+        entered_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        run(stop_watcher(app.clone())).unwrap();
+        release_tx.send(()).unwrap();
+        start_rx
+            .recv_timeout(Duration::from_secs(5))
+            .unwrap()
+            .unwrap();
+        starter.join().unwrap();
+        run(stop_watcher(app)).unwrap();
+    }
 }
 
 #[cfg(test)]
@@ -288,5 +577,20 @@ mod tests {
     fn dedup_events_keeps_distinct_kinds_of_the_same_path() {
         let deduped = dedup_events(vec![event("a.pdf", "added"), event("a.pdf", "removed")]);
         assert_eq!(deduped.len(), 2);
+    }
+
+    #[test]
+    fn callback_prunes_generated_dir_paths_via_shared_predicate() {
+        // The per-path prune lives inside the notify callback closure, which
+        // is not unit-testable without a refactor (out of scope); pin the
+        // wiring with a source assertion instead. Split needles keep the
+        // test's own text from matching the count.
+        let source = include_str!("inbox_watcher.rs");
+        let needle = concat!("is_under_generated_", "dir");
+        assert_eq!(
+            source.matches(needle).count(),
+            1,
+            "callback must reference the SSOT predicate exactly once"
+        );
     }
 }

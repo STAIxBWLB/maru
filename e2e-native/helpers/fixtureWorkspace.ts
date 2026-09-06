@@ -6,11 +6,194 @@
 // path.join, never from a caller-supplied absolute path (T-06-02).
 //
 // No credentials are seeded here, and the updater / provider IO paths are
-// left unconfigured (D-11) - the fixture registers exactly one local
-// workspace with one markdown document, nothing else.
+// left unconfigured (D-11). The fixture registers one local workspace and
+// a skill source backed by a disposable local Git remote.
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
+
+export const FIXTURE_SKILL_SOURCE = "native-local-git";
+export const FIXTURE_SKILL_TITLE = "Native synced skill";
+
+// Plan 08-27 saturation fixtures: two disposable Git repos with modified
+// tracked files, a 2000-file Markdown tree for the real scan workload, and
+// three additional cloned skill sources with local bare remotes and pending
+// commits. Every path lives under the one mkdtemp root; nothing here touches
+// a live workspace, credential, or public remote.
+export const FIXTURE_GIT_REPO_A = "git-repo-a";
+export const FIXTURE_GIT_REPO_B = "git-repo-b";
+export const FIXTURE_VAULT_TREE = "vault-tree";
+export const FIXTURE_VAULT_TREE_FILES = 2000;
+export const FIXTURE_SYNC_SOURCE_A = "native-sync-a";
+export const FIXTURE_SYNC_SOURCE_B = "native-sync-b";
+export const FIXTURE_FAIL_SOURCE = "native-fail-git";
+export const FIXTURE_SKILL_TITLE_A = "Native Saturation Skill A";
+export const FIXTURE_SKILL_TITLE_B = "Native Saturation Skill B";
+/** Marker the pending commit adds to the updated SKILL.md: the discarded-sync
+ *  assertions check for this exact description so a startup catalog refresh
+ *  (the app's production behavior of rescanning an empty catalog) persisting
+ *  the OLD checkout content cannot be mistaken for the discarded sync's
+ *  write-back. */
+export const FIXTURE_PENDING_DESCRIPTION = "Native local Git fixture updated";
+
+function gitEnv() {
+  return { ...process.env, GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: os.devNull, GIT_TERMINAL_PROMPT: "0" };
+}
+
+function runGit(args: string[]): string {
+  return execFileSync("git", args, {
+    encoding: "utf8",
+    env: gitEnv(),
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+}
+
+export interface SeededSkillSource {
+  id: string;
+  checkout: string;
+  remote: string;
+  /** Checkout HEAD at seed time: a pull moves this forward, and the restore
+   *  helper resets back to it so later specs keep their pending commits. */
+  head: string;
+}
+
+/** Seeds one disposable cloned skill source (bare remote + author clone with
+ *  a pending commit + app checkout one commit behind) and returns its paths.
+ *  The checkout lives under the fixture skills root in the same nested shape
+ *  seedSkillSource established, so the public-tier placement rule holds. */
+async function seedClonedSkillSource(root: string, id: string, title: string): Promise<SeededSkillSource> {
+  const { homeDir } = fixturePaths(root);
+  const skillsRoot = path.join(homeDir, ".maru", "skills");
+  const remote = path.join(root, `skills-remote-${id}.git`);
+  const author = path.join(root, `skills-author-${id}`);
+  const checkout = path.join(skillsRoot, "_sources", id, "_sources", "skills-public");
+  await fs.mkdir(skillsRoot, { recursive: true });
+  runGit(["init", "--bare", remote]);
+  runGit(["clone", remote, author]);
+  await fs.mkdir(path.join(author, "skills", id), { recursive: true });
+  const skillFile = path.join(author, "skills", id, "SKILL.md");
+  await fs.writeFile(skillFile, `---\nname: ${title}\ndescription: Native local Git fixture\n---\n# Initial\n`);
+  runGit(["-C", author, "add", "."]);
+  runGit(["-C", author, "-c", "user.name=Native Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-m", "Seed local source"]);
+  runGit(["-C", author, "push", "origin", "HEAD"]);
+  await fs.mkdir(path.dirname(checkout), { recursive: true });
+  runGit(["clone", remote, checkout]);
+  await fs.writeFile(skillFile, `---\nname: ${title}\ndescription: ${FIXTURE_PENDING_DESCRIPTION}\n---\n# Synced\n`);
+  runGit(["-C", author, "add", "."]);
+  runGit(["-C", author, "-c", "user.name=Native Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-m", "Update local source"]);
+  runGit(["-C", author, "push", "origin", "HEAD"]);
+  const head = runGit(["-C", checkout, "rev-parse", "HEAD"]).trim();
+  return { id, checkout, remote, head };
+}
+
+async function seedSkillSource(root: string): Promise<SeededSkillSource> {
+  return seedClonedSkillSource(root, FIXTURE_SKILL_SOURCE, FIXTURE_SKILL_TITLE);
+}
+
+/** Two disposable Git repos whose single tracked file is modified after the
+ *  seed commit, so git_status must report a nonempty dirty state. */
+async function seedGitRepos(root: string): Promise<void> {
+  for (const name of [FIXTURE_GIT_REPO_A, FIXTURE_GIT_REPO_B]) {
+    const dir = path.join(root, name);
+    await fs.mkdir(dir, { recursive: true });
+    runGit(["-C", dir, "init", "-b", "main"]);
+    await fs.writeFile(path.join(dir, "note.md"), `# ${name}\n\nseeded\n`);
+    runGit(["-C", dir, "add", "."]);
+    runGit(["-C", dir, "-c", "user.name=Native Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-m", "Seed repo"]);
+    await fs.writeFile(path.join(dir, "note.md"), `# ${name}\n\nseeded, then modified for the saturation window\n`);
+  }
+}
+
+/** A real 2000-file Markdown tree: the scan_vault workload must return at
+ *  least this many entries for a no-op wrapper to be unable to pass. */
+async function seedVaultTree(root: string): Promise<void> {
+  const tree = path.join(root, FIXTURE_VAULT_TREE);
+  const batchCount = 20;
+  const perBatch = FIXTURE_VAULT_TREE_FILES / batchCount;
+  for (let batch = 0; batch < batchCount; batch += 1) {
+    const dir = path.join(tree, `batch-${String(batch).padStart(2, "0")}`);
+    await fs.mkdir(dir, { recursive: true });
+    await Promise.all(
+      Array.from({ length: perBatch }, (_, index) => {
+        const number = batch * perBatch + index;
+        return fs.writeFile(
+          path.join(dir, `note-${String(number).padStart(5, "0")}.md`),
+          `---\ntitle: Saturation note ${number}\n---\n\n# Note ${number}\n\nSeeded by the native saturation harness.\n`,
+        );
+      }),
+    );
+  }
+}
+
+export async function readFixtureSkillRegistry(): Promise<{ sources: { id: string; path?: string; skillsSubdir?: string; lastSyncedAt?: string }[]; skills: { sourceId: string; title: string; description?: string; valid: boolean; absPath: string }[]; removedSourceIds?: string[] }> {
+  return JSON.parse(await fs.readFile(path.join(fixturePaths(requireFixtureRoot()).homeDir, ".maru", "skills", "registry.json"), "utf8"));
+}
+
+const SEEDED_REGISTRY_BACKUP = "seeded-registry.json";
+const FIXTURE_METADATA_FILE = "fixture-metadata.json";
+
+export interface FixtureMetadata {
+  sources: SeededSkillSource[];
+  gitRepos: string[];
+  vaultTree: string;
+  vaultTreeFiles: number;
+}
+
+/** Absolute path of the disposable fixture root in this (worker) process. */
+export function fixtureRootDir(): string {
+  return requireFixtureRoot();
+}
+
+/** Paths the saturation spec passes to the app through the debug bridge. */
+export function saturationFixturePaths(): { repoA: string; repoB: string; tree: string } {
+  const root = requireFixtureRoot();
+  return {
+    repoA: path.join(root, FIXTURE_GIT_REPO_A),
+    repoB: path.join(root, FIXTURE_GIT_REPO_B),
+    tree: path.join(root, FIXTURE_VAULT_TREE),
+  };
+}
+
+export async function readFixtureMetadata(): Promise<FixtureMetadata> {
+  return JSON.parse(await fs.readFile(path.join(requireFixtureRoot(), FIXTURE_METADATA_FILE), "utf8"));
+}
+
+const BROKEN_REMOTE_SUFFIX = ".broken";
+
+/** D-05 fault injection: rename the disposable bare remote away so the real
+ *  git pull fails with an actionable reason. */
+export async function breakFailSourceRemote(): Promise<void> {
+  const meta = await readFixtureMetadata();
+  const remote = meta.sources.find((source) => source.id === FIXTURE_FAIL_SOURCE)?.remote;
+  if (!remote) throw new Error("native-fail-git remote missing from fixture metadata");
+  await fs.rename(remote, remote + BROKEN_REMOTE_SUFFIX);
+}
+
+export async function restoreFailSourceRemote(): Promise<void> {
+  const meta = await readFixtureMetadata();
+  const remote = meta.sources.find((source) => source.id === FIXTURE_FAIL_SOURCE)?.remote;
+  if (!remote) throw new Error("native-fail-git remote missing from fixture metadata");
+  await fs.rename(remote + BROKEN_REMOTE_SUFFIX, remote).catch(() => {});
+}
+
+/** Restores the skill fixtures to their seeded state after the destructive
+ *  D-case tests: registry.json from the seeded backup, and every checkout
+ *  reset in place to its seed HEAD (never deleting directories, so an app
+ *  filesystem watcher on the skills root survives) so each source keeps a
+ *  pending commit for the specs that run after this file. */
+export async function restoreSkillFixtures(): Promise<void> {
+  const root = requireFixtureRoot();
+  const meta = await readFixtureMetadata();
+  for (const source of meta.sources) {
+    runGit(["-C", source.checkout, "reset", "--hard", source.head]);
+  }
+  const skillsRoot = path.join(fixturePaths(root).homeDir, ".maru", "skills");
+  const backup = path.join(root, SEEDED_REGISTRY_BACKUP);
+  const tmp = path.join(skillsRoot, `.registry-restore-${process.pid}.tmp`);
+  await fs.copyFile(backup, tmp);
+  await fs.rename(tmp, path.join(skillsRoot, "registry.json"));
+}
 
 /** Stem of the one seeded markdown document, exported so specs assert
  * against the same literal rather than duplicating it. */
@@ -31,6 +214,7 @@ let fixtureRoot: string | null = null;
 /** Per-worker latch: the first beforeTest sees the just-seeded state (the
  *  app launched after onPrepare), so only later tests need a real reset. */
 let fixtureDirty = false;
+const previousGitEnv = new Map<string, string | undefined>();
 
 function fixturePaths(root: string) {
   return {
@@ -110,9 +294,47 @@ export async function seedFixtureWorkspace(): Promise<{
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "maru-native-e2e-"));
   fixtureRoot = root;
   await writeFixtureContent(root);
+  const sources = [
+    await seedSkillSource(root),
+    await seedClonedSkillSource(root, FIXTURE_SYNC_SOURCE_A, FIXTURE_SKILL_TITLE_A),
+    await seedClonedSkillSource(root, FIXTURE_SYNC_SOURCE_B, FIXTURE_SKILL_TITLE_B),
+    await seedClonedSkillSource(root, FIXTURE_FAIL_SOURCE, "Native Failing Skill"),
+  ];
+  await seedGitRepos(root);
+  await seedVaultTree(root);
+  const { homeDir } = fixturePaths(root);
+  const skillsRoot = path.join(homeDir, ".maru", "skills");
+  const registry = {
+    version: 3,
+    sources: sources.map((source) => ({
+      id: source.id,
+      kind: "cloned",
+      ownershipClass: "owned-catalog",
+      path: source.checkout,
+      repoUrl: source.remote,
+      skillsSubdir: "skills",
+    })),
+    skills: [],
+    installs: [],
+    removedSourceIds: [],
+  };
+  const seededRegistry = JSON.stringify(registry, null, 2);
+  await fs.writeFile(path.join(skillsRoot, "registry.json"), seededRegistry, "utf8");
+  await fs.writeFile(path.join(root, SEEDED_REGISTRY_BACKUP), seededRegistry, "utf8");
+  const metadata: FixtureMetadata = {
+    sources,
+    gitRepos: [path.join(root, FIXTURE_GIT_REPO_A), path.join(root, FIXTURE_GIT_REPO_B)],
+    vaultTree: path.join(root, FIXTURE_VAULT_TREE),
+    vaultTreeFiles: FIXTURE_VAULT_TREE_FILES,
+  };
+  await fs.writeFile(path.join(root, FIXTURE_METADATA_FILE), JSON.stringify(metadata, null, 2), "utf8");
   const resolved = fixturePaths(root);
   process.env.MARU_NATIVE_E2E_HOME = resolved.homeDir;
   process.env.MARU_NATIVE_E2E_CONFIG_DIR = resolved.configDir;
+  for (const [key, value] of Object.entries({ GIT_CONFIG_GLOBAL: os.devNull, GIT_CONFIG_NOSYSTEM: "1", GIT_TERMINAL_PROMPT: "0" })) {
+    previousGitEnv.set(key, process.env[key]);
+    process.env[key] = value;
+  }
   return resolved;
 }
 
@@ -171,5 +393,10 @@ export async function cleanupFixtureWorkspace(): Promise<void> {
   fixtureRoot = null;
   delete process.env.MARU_NATIVE_E2E_HOME;
   delete process.env.MARU_NATIVE_E2E_CONFIG_DIR;
+  for (const [key, value] of previousGitEnv) {
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
+  previousGitEnv.clear();
   await fs.rm(root, { recursive: true, force: true });
 }

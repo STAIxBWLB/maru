@@ -14,6 +14,7 @@ use serde::{Deserialize, Serialize};
 use serde_yaml::Value as YamlValue;
 use tauri::{AppHandle, Emitter};
 
+use crate::atomic_file::{with_path_transactions, PathTransactionRequest};
 use crate::vault::resolve_inside_vault;
 
 pub const DEFAULT_INBOX_ROOT: &str = "inbox/downloads";
@@ -577,20 +578,22 @@ fn merge_runtime_defaults(config: &mut InboxRuntimeConfig) {
     }
 }
 
-#[tauri::command]
 pub fn read_inbox_runtime_config(work_path: String) -> Result<InboxRuntimeConfig, String> {
     let work = resolve_inside_vault(&work_path, ".")?;
     load_runtime_config_or_legacy(&work)
 }
 
-#[tauri::command]
-pub fn save_inbox_runtime_config(
-    app: AppHandle,
+pub fn save_inbox_runtime_config<R: tauri::Runtime>(
+    app: AppHandle<R>,
     work_path: String,
     config: InboxRuntimeConfig,
 ) -> Result<InboxRuntimeConfig, String> {
     let work = resolve_inside_vault(&work_path, ".")?;
-    let saved = save_runtime_config(&work, config)?;
+    let admission = inbox_runtime_config_admission(&work)?;
+    let saved = with_path_transactions(admission, |lease| {
+        lease.before_effect()?;
+        save_runtime_config(&work, config)
+    })?;
     let _ = app.emit(
         "inbox://runtime_config_updated",
         InboxRuntimeConfigUpdated {
@@ -599,6 +602,10 @@ pub fn save_inbox_runtime_config(
         },
     );
     Ok(saved)
+}
+
+fn inbox_runtime_config_admission(work: &Path) -> Result<PathTransactionRequest, String> {
+    PathTransactionRequest::new(vec![workspace_config_path(work)])?.require_parent(work)
 }
 
 fn save_runtime_config(
@@ -667,24 +674,114 @@ fn replace_top_level_yaml_block(raw: &str, key: &str, block: &str) -> String {
     out
 }
 
-#[tauri::command]
 pub fn read_inbox_settings(vault_path: String) -> Result<InboxSettings, String> {
     let vault = resolve_inside_vault(&vault_path, ".")?;
     Ok(load(&vault))
 }
 
-#[tauri::command]
 pub fn save_inbox_settings(
     vault_path: String,
     settings: InboxSettings,
 ) -> Result<InboxSettings, String> {
     let vault = resolve_inside_vault(&vault_path, ".")?;
-    ensure_maru_dir(&vault)?;
-    let serialized = serde_json::to_string_pretty(&settings)
-        .map_err(|err| format!("Cannot serialize inbox settings: {err}"))?;
-    fs::write(settings_path(&vault), format!("{serialized}\n"))
-        .map_err(|err| format!("Cannot write inbox settings: {err}"))?;
-    Ok(settings)
+    let admission = inbox_settings_admission(&vault)?;
+    with_path_transactions(admission, |lease| {
+        lease.before_effect()?;
+        ensure_maru_dir(&vault)?;
+        let serialized = serde_json::to_string_pretty(&settings)
+            .map_err(|err| format!("Cannot serialize inbox settings: {err}"))?;
+        fs::write(settings_path(&vault), format!("{serialized}\n"))
+            .map_err(|err| format!("Cannot write inbox settings: {err}"))?;
+        Ok(settings)
+    })
+}
+
+fn inbox_settings_admission(vault: &Path) -> Result<PathTransactionRequest, String> {
+    PathTransactionRequest::new(vec![vault.join(".maru")])?.require_parent(vault)
+}
+
+/// Owned IPC boundaries; the synchronous entry points remain available to
+/// Rust callers.
+pub mod ipc {
+    use super::*;
+
+    #[cfg(test)]
+    use crate::atomic_file::PathTransactionLease;
+
+    #[cfg(test)]
+    fn vault_stage_key(vault_path: &str) -> Option<PathBuf> {
+        let vault = crate::vault::normalize_existing_dir(vault_path).ok()?;
+        Some(crate::vault::lexical_normalize(&vault.join(".maru")))
+    }
+
+    #[cfg(test)]
+    fn runtime_config_stage_key(work_path: &str) -> Option<PathBuf> {
+        let work = crate::vault::normalize_existing_dir(work_path).ok()?;
+        Some(crate::vault::lexical_normalize(
+            &super::workspace_config_path(&work),
+        ))
+    }
+
+    #[tauri::command]
+    pub async fn read_inbox_runtime_config(
+        work_path: String,
+    ) -> Result<InboxRuntimeConfig, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            if let Some(key) = runtime_config_stage_key(&work_path) {
+                PathTransactionLease::test_stage(&[key], "worker:read_inbox_runtime_config");
+            }
+            super::read_inbox_runtime_config(work_path)
+        })
+        .await
+        .map_err(|err| format!("read_inbox_runtime_config_task_failed: {err}"))?
+    }
+
+    #[tauri::command]
+    pub async fn save_inbox_runtime_config<R: tauri::Runtime>(
+        app: AppHandle<R>,
+        work_path: String,
+        config: InboxRuntimeConfig,
+    ) -> Result<InboxRuntimeConfig, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            if let Some(key) = runtime_config_stage_key(&work_path) {
+                PathTransactionLease::test_stage(&[key], "worker:save_inbox_runtime_config");
+            }
+            super::save_inbox_runtime_config(app, work_path, config)
+        })
+        .await
+        .map_err(|err| format!("save_inbox_runtime_config_task_failed: {err}"))?
+    }
+
+    #[tauri::command]
+    pub async fn read_inbox_settings(vault_path: String) -> Result<InboxSettings, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            if let Some(key) = vault_stage_key(&vault_path) {
+                PathTransactionLease::test_stage(&[key], "worker:read_inbox_settings");
+            }
+            super::read_inbox_settings(vault_path)
+        })
+        .await
+        .map_err(|err| format!("read_inbox_settings_task_failed: {err}"))?
+    }
+
+    #[tauri::command]
+    pub async fn save_inbox_settings(
+        vault_path: String,
+        settings: InboxSettings,
+    ) -> Result<InboxSettings, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            if let Some(key) = vault_stage_key(&vault_path) {
+                PathTransactionLease::test_stage(&[key], "worker:save_inbox_settings");
+            }
+            super::save_inbox_settings(vault_path, settings)
+        })
+        .await
+        .map_err(|err| format!("save_inbox_settings_task_failed: {err}"))?
+    }
 }
 
 #[cfg(test)]
@@ -902,5 +999,265 @@ projects:
             config.channels.get("alpha").unwrap().drop_paths,
             vec!["incoming/spool/alpha".to_string()]
         );
+    }
+
+    mod phase08_23 {
+        use super::*;
+        use crate::atomic_file::phase08_06::{boundary, run, Held};
+        use std::sync::mpsc;
+        use std::time::Duration;
+
+        fn text(path: &Path) -> String {
+            path.to_string_lossy().to_string()
+        }
+
+        fn vault_key(vault_path: &str) -> PathBuf {
+            let vault = crate::vault::normalize_existing_dir(vault_path).unwrap();
+            crate::vault::lexical_normalize(&vault.join(".maru"))
+        }
+
+        fn runtime_key(work_path: &str) -> PathBuf {
+            let work = crate::vault::normalize_existing_dir(work_path).unwrap();
+            crate::vault::lexical_normalize(&work.join(WORKSPACE_CONFIG_FILE))
+        }
+
+        fn fixture_work_config(tmp: &TempDir) {
+            fs::write(
+                tmp.path().join(WORKSPACE_CONFIG_FILE),
+                r#"# workspace comment
+profile: local
+inbox:
+  root: inbox
+  channels: {}
+projects:
+  root: ~/workspace/work
+"#,
+            )
+            .unwrap();
+        }
+
+        fn start<F>(future: F) -> mpsc::Receiver<F::Output>
+        where
+            F: std::future::Future + Send + 'static,
+            F::Output: Send + 'static,
+        {
+            let (tx, rx) = mpsc::channel();
+            tauri::async_runtime::spawn(async move {
+                let _ = tx.send(future.await);
+            });
+            rx
+        }
+
+        fn done<T>(rx: mpsc::Receiver<T>) -> T {
+            rx.recv_timeout(Duration::from_secs(10))
+                .expect("fixture completion")
+        }
+
+        fn settings_with_root(root: &str) -> InboxSettings {
+            InboxSettings {
+                inbox_root: root.to_string(),
+                ..InboxSettings::default()
+            }
+        }
+
+        #[test]
+        fn phase08_23_inbox_wrappers_yield_same_poll_and_map_join_failure() {
+            let tmp = TempDir::new().unwrap();
+            let path = text(tmp.path());
+            boundary(
+                runtime_key(&path),
+                "read_inbox_runtime_config",
+                ipc::read_inbox_runtime_config(path.clone()),
+            );
+            boundary(
+                runtime_key(&path),
+                "save_inbox_runtime_config",
+                ipc::save_inbox_runtime_config(
+                    tauri::test::mock_app().handle().clone(),
+                    path.clone(),
+                    InboxRuntimeConfig::default(),
+                ),
+            );
+            boundary(
+                vault_key(&path),
+                "read_inbox_settings",
+                ipc::read_inbox_settings(path.clone()),
+            );
+            boundary(
+                vault_key(&path),
+                "save_inbox_settings",
+                ipc::save_inbox_settings(path.clone(), InboxSettings::default()),
+            );
+        }
+
+        #[test]
+        fn phase08_23_inbox_real_fixture_results_and_rejections() {
+            let tmp = TempDir::new().unwrap();
+            let path = text(tmp.path());
+            fixture_work_config(&tmp);
+
+            let config = run(ipc::read_inbox_runtime_config(path.clone())).unwrap();
+            assert_eq!(config.root, "inbox");
+            assert!(!config.channels.is_empty());
+
+            let mut next = config.clone();
+            next.naming.summary_file = "digest.md".to_string();
+            let saved = run(ipc::save_inbox_runtime_config(
+                tauri::test::mock_app().handle().clone(),
+                path.clone(),
+                next.clone(),
+            ))
+            .unwrap();
+            assert_eq!(saved.naming.summary_file, "digest.md");
+            let on_disk = fs::read_to_string(tmp.path().join(WORKSPACE_CONFIG_FILE)).unwrap();
+            assert!(on_disk.contains("# workspace comment"));
+            assert!(on_disk.contains("profile: local"));
+            assert!(on_disk.contains("projects:\n  root: ~/workspace/work"));
+            assert!(on_disk.contains("summary_file: digest.md"));
+
+            let mut invalid = next.clone();
+            invalid.gmail.max_results = 0;
+            let err = run(ipc::save_inbox_runtime_config(
+                tauri::test::mock_app().handle().clone(),
+                path.clone(),
+                invalid,
+            ))
+            .unwrap_err();
+            assert_eq!(err, "gmail_max_results_out_of_range");
+
+            let missing = TempDir::new().unwrap();
+            let err = run(ipc::save_inbox_runtime_config(
+                tauri::test::mock_app().handle().clone(),
+                text(missing.path()),
+                next,
+            ))
+            .unwrap_err();
+            assert_eq!(err, "workspace_config_missing");
+
+            let legacy = settings_with_root("incoming/spool");
+            let saved = run(ipc::save_inbox_settings(path.clone(), legacy.clone())).unwrap();
+            assert_eq!(saved, legacy);
+            let reloaded = run(ipc::read_inbox_settings(path.clone())).unwrap();
+            assert_eq!(reloaded, legacy);
+            assert!(tmp.path().join(".maru/inbox.json").exists());
+
+            let err = run(ipc::read_inbox_settings(
+                "/definitely/not/a/vault-xyz".into(),
+            ))
+            .unwrap_err();
+            assert!(err.contains("Cannot open workspace directory"));
+        }
+
+        #[test]
+        fn phase08_23_save_inbox_settings_serializes_same_target_both_orders() {
+            for swap in [false, true] {
+                let tmp = TempDir::new().unwrap();
+                let path = text(tmp.path());
+                let key = vault_key(&path);
+                let first_root = if swap { "second/root" } else { "first/root" };
+                let second_root = if swap { "first/root" } else { "second/root" };
+                let admitted = Held::new(key.clone(), "admitted");
+                let first = start(ipc::save_inbox_settings(
+                    path.clone(),
+                    settings_with_root(first_root),
+                ));
+                admitted.wait();
+                let waiting = Held::new(key.clone(), "before-admission");
+                let second = start(ipc::save_inbox_settings(
+                    path.clone(),
+                    settings_with_root(second_root),
+                ));
+                waiting.wait();
+                waiting.release();
+                assert!(
+                    second.recv_timeout(Duration::from_millis(30)).is_err(),
+                    "second settings writer must wait while the first holds admission"
+                );
+                admitted.release();
+                done(first).unwrap();
+                done(second).unwrap();
+                let on_disk = fs::read_to_string(tmp.path().join(".maru/inbox.json")).unwrap();
+                assert!(
+                    on_disk.contains(second_root),
+                    "serialized second writer must own the final file"
+                );
+            }
+        }
+
+        #[test]
+        fn phase08_23_runtime_config_and_settings_writes_do_not_block_each_other() {
+            let tmp = TempDir::new().unwrap();
+            let path = text(tmp.path());
+            fixture_work_config(&tmp);
+            let admitted = Held::new(vault_key(&path), "admitted");
+            let settings = start(ipc::save_inbox_settings(
+                path.clone(),
+                settings_with_root("blocked/settings"),
+            ));
+            admitted.wait();
+            let mut next = InboxRuntimeConfig::default();
+            next.naming.summary_file = "cross-domain.md".to_string();
+            let runtime = start(ipc::save_inbox_runtime_config(
+                tauri::test::mock_app().handle().clone(),
+                path.clone(),
+                next,
+            ));
+            let runtime_result = runtime.recv_timeout(Duration::from_secs(5)).expect(
+                "disjoint runtime-config writer must progress while settings writer is blocked",
+            );
+            runtime_result.unwrap();
+            assert!(
+                settings.recv_timeout(Duration::from_millis(30)).is_err(),
+                "settings writer must stay blocked while its admission is held"
+            );
+            admitted.release();
+            done(settings).unwrap();
+            let on_disk = fs::read_to_string(tmp.path().join(WORKSPACE_CONFIG_FILE)).unwrap();
+            assert!(on_disk.contains("summary_file: cross-domain.md"));
+        }
+
+        #[test]
+        fn phase08_23_inbox_error_releases_admission_and_retry_recovers() {
+            let tmp = TempDir::new().unwrap();
+            let path = text(tmp.path());
+            fixture_work_config(&tmp);
+
+            let mut invalid = InboxRuntimeConfig::default();
+            invalid.gmail.max_results = 0;
+            let err = run(ipc::save_inbox_runtime_config(
+                tauri::test::mock_app().handle().clone(),
+                path.clone(),
+                invalid,
+            ))
+            .unwrap_err();
+            assert_eq!(err, "gmail_max_results_out_of_range");
+            let on_disk = fs::read_to_string(tmp.path().join(WORKSPACE_CONFIG_FILE)).unwrap();
+            assert!(
+                !on_disk.contains("max_results: 0"),
+                "rejected runtime-config save must leave the file untouched"
+            );
+            let recovered = run(ipc::save_inbox_runtime_config(
+                tauri::test::mock_app().handle().clone(),
+                path.clone(),
+                InboxRuntimeConfig::default(),
+            ))
+            .unwrap();
+            assert_eq!(recovered.root, "inbox");
+
+            fs::write(tmp.path().join(".maru"), "not a directory").unwrap();
+            let err = run(ipc::save_inbox_settings(
+                path.clone(),
+                settings_with_root("retry/root"),
+            ))
+            .unwrap_err();
+            assert!(err.contains("Cannot create .maru directory"), "{err}");
+            fs::remove_file(tmp.path().join(".maru")).unwrap();
+            let recovered = run(ipc::save_inbox_settings(
+                path.clone(),
+                settings_with_root("retry/root"),
+            ))
+            .unwrap();
+            assert_eq!(recovered.inbox_root, "retry/root");
+        }
     }
 }

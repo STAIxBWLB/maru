@@ -25,7 +25,9 @@
 // `require_approval(.., "scheduler.add")` and shipping a JSON file must not
 // bypass that gate. `recommended_schedule` only pre-fills the add dialog.
 
-use crate::atomic_file::write_atomic;
+use crate::atomic_file::{
+    with_path_transactions, write_atomic, PathTransactionLease, PathTransactionRequest,
+};
 use crate::skill_host::fs::maru_home;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map as JsonMap, Value as JsonValue};
@@ -300,6 +302,16 @@ fn agents_path() -> Result<PathBuf, String> {
     Ok(maru_home()?.join("agents.json"))
 }
 
+fn agents_mutation_paths() -> Result<Vec<PathBuf>, String> {
+    Ok(vec![agents_path()?])
+}
+
+fn agents_transaction<T>(
+    work: impl FnOnce(&PathTransactionLease) -> Result<T, String>,
+) -> Result<T, String> {
+    with_path_transactions(PathTransactionRequest::new(agents_mutation_paths()?)?, work)
+}
+
 fn load_file() -> Result<AgentsFile, String> {
     let path = agents_path()?;
     if !path.is_file() {
@@ -315,7 +327,16 @@ fn load_file() -> Result<AgentsFile, String> {
     serde_json::from_str(&raw).map_err(|err| format!("Cannot parse {}: {err}", path.display()))
 }
 
+#[cfg(test)]
 fn save_file(file: &AgentsFile) -> Result<(), String> {
+    let bytes =
+        serde_json::to_vec_pretty(file).map_err(|err| format!("Cannot serialize agents: {err}"))?;
+    write_atomic(&agents_path()?, &bytes)
+}
+
+fn save_file_in_transaction(file: &AgentsFile, lease: &PathTransactionLease) -> Result<(), String> {
+    lease.ensure_covered(agents_mutation_paths()?)?;
+    lease.before_effect()?;
     let bytes =
         serde_json::to_vec_pretty(file).map_err(|err| format!("Cannot serialize agents: {err}"))?;
     write_atomic(&agents_path()?, &bytes)
@@ -466,15 +487,22 @@ pub fn agent_can_run_standalone(agent: &AgentRecord) -> bool {
 // Commands
 // ---------------------------------------------------------------------------
 
-#[tauri::command]
 pub fn agents_list() -> Result<Vec<AgentRecord>, String> {
     merged(&load_file()?)
 }
 
 /// Creates or updates one agent. For a builtin this stores the sparse diff
 /// against the seed; for a user agent it stores the whole record.
-#[tauri::command]
 pub fn agents_upsert(agent: AgentRecord) -> Result<AgentRecord, String> {
+    agents_transaction(|lease| agents_upsert_in_transaction(agent, lease))
+}
+
+fn agents_upsert_in_transaction(
+    agent: AgentRecord,
+    lease: &PathTransactionLease,
+) -> Result<AgentRecord, String> {
+    lease.ensure_covered(agents_mutation_paths()?)?;
+    lease.before_effect()?;
     let mut file = load_file()?;
     if let Some(seed) = find_seed(&agent.id) {
         // A builtin's identity fields are the seed's, whatever the client sent.
@@ -491,7 +519,7 @@ pub fn agents_upsert(agent: AgentRecord) -> Result<AgentRecord, String> {
             file.overrides
                 .insert(base.id.clone(), JsonValue::Object(patch));
         }
-        save_file(&file)?;
+        save_file_in_transaction(&file, lease)?;
         return merged(&file)?
             .into_iter()
             .find(|record| record.id == base.id)
@@ -515,12 +543,20 @@ pub fn agents_upsert(agent: AgentRecord) -> Result<AgentRecord, String> {
         Some(existing) => *existing = next.clone(),
         None => file.agents.push(next.clone()),
     }
-    save_file(&file)?;
+    save_file_in_transaction(&file, lease)?;
     Ok(next)
 }
 
-#[tauri::command]
 pub fn agents_delete(id: String) -> Result<Vec<AgentRecord>, String> {
+    agents_transaction(|lease| agents_delete_in_transaction(id, lease))
+}
+
+fn agents_delete_in_transaction(
+    id: String,
+    lease: &PathTransactionLease,
+) -> Result<Vec<AgentRecord>, String> {
+    lease.ensure_covered(agents_mutation_paths()?)?;
+    lease.before_effect()?;
     if find_seed(&id).is_some() {
         // ~10 builtin rows: `enabled: false` is the delete. Revisit with
         // tombstones only when the builtin list becomes clutter.
@@ -532,18 +568,83 @@ pub fn agents_delete(id: String) -> Result<Vec<AgentRecord>, String> {
     if file.agents.len() == before {
         return Err(format!("agent_not_found: {id}"));
     }
-    save_file(&file)?;
+    save_file_in_transaction(&file, lease)?;
     merged(&file)
 }
 
 /// Drops a builtin's override patch, restoring every seed default.
-#[tauri::command]
 pub fn agents_reset(id: String) -> Result<AgentRecord, String> {
+    agents_transaction(|lease| agents_reset_in_transaction(id, lease))
+}
+
+fn agents_reset_in_transaction(
+    id: String,
+    lease: &PathTransactionLease,
+) -> Result<AgentRecord, String> {
+    lease.ensure_covered(agents_mutation_paths()?)?;
+    lease.before_effect()?;
     let seed = find_seed(&id).ok_or_else(|| format!("agent_not_builtin: {id}"))?;
     let mut file = load_file()?;
     file.overrides.remove(&id);
-    save_file(&file)?;
+    save_file_in_transaction(&file, lease)?;
     Ok(seed_record(seed))
+}
+
+/// IPC owns values before offloading; synchronous Rust callers keep their API.
+pub mod ipc {
+    use super::*;
+
+    #[tauri::command]
+    pub async fn agents_list() -> Result<Vec<AgentRecord>, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            if let Ok(path) = super::agents_path() {
+                PathTransactionLease::test_stage(&[path], "worker:agents_list");
+            }
+            super::agents_list()
+        })
+        .await
+        .map_err(|err| format!("agents_list_task_failed: {err}"))?
+    }
+
+    #[tauri::command]
+    pub async fn agents_upsert(agent: AgentRecord) -> Result<AgentRecord, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            if let Ok(path) = super::agents_path() {
+                PathTransactionLease::test_stage(&[path], "worker:agents_upsert");
+            }
+            super::agents_upsert(agent)
+        })
+        .await
+        .map_err(|err| format!("agents_upsert_task_failed: {err}"))?
+    }
+
+    #[tauri::command]
+    pub async fn agents_delete(id: String) -> Result<Vec<AgentRecord>, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            if let Ok(path) = super::agents_path() {
+                PathTransactionLease::test_stage(&[path], "worker:agents_delete");
+            }
+            super::agents_delete(id)
+        })
+        .await
+        .map_err(|err| format!("agents_delete_task_failed: {err}"))?
+    }
+
+    #[tauri::command]
+    pub async fn agents_reset(id: String) -> Result<AgentRecord, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            if let Ok(path) = super::agents_path() {
+                PathTransactionLease::test_stage(&[path], "worker:agents_reset");
+            }
+            super::agents_reset(id)
+        })
+        .await
+        .map_err(|err| format!("agents_reset_task_failed: {err}"))?
+    }
 }
 
 /// Effective record for `id`, or `None`. Used by the scheduler to resolve a
@@ -846,5 +947,262 @@ mod tests {
         let listed = agents_list().unwrap();
         assert_eq!(listed.iter().filter(|a| a.id == "git-sync").count(), 1);
         assert!(listed.iter().find(|a| a.id == "git-sync").unwrap().builtin);
+    }
+}
+
+#[cfg(test)]
+mod phase08_16 {
+    use super::*;
+    use crate::atomic_file::phase08_06::{boundary, run, Held, Home};
+    use crate::atomic_file::PathTransactionTestHook;
+    use crate::workspace_files::{ipc as files_ipc, phase08_06::TrashFixture};
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    fn text(path: &std::path::Path) -> String {
+        path.to_string_lossy().into_owned()
+    }
+
+    fn agents_file(home: &std::path::Path) -> std::path::PathBuf {
+        home.join(".maru/agents.json")
+    }
+
+    fn start<F>(future: F) -> mpsc::Receiver<F::Output>
+    where
+        F: std::future::Future + Send + 'static,
+        F::Output: Send + 'static,
+    {
+        let (tx, rx) = mpsc::channel();
+        tauri::async_runtime::spawn(async move {
+            let _ = tx.send(future.await);
+        });
+        rx
+    }
+
+    fn done<T>(rx: mpsc::Receiver<T>) -> T {
+        rx.recv_timeout(Duration::from_secs(10))
+            .expect("agents fixture completion")
+    }
+
+    fn user_agent(id: &str) -> AgentRecord {
+        AgentRecord {
+            id: id.to_string(),
+            label_key: None,
+            label: Some("문서 변환".to_string()),
+            description: None,
+            skill_name: "md2docx".to_string(),
+            runtime: "kimi".to_string(),
+            permission_mode: "inherit".to_string(),
+            prompt: "최근 보고서를 docx 로 변환".to_string(),
+            kind: "background".to_string(),
+            enabled: true,
+            builtin: false,
+            customized: false,
+            recommended_schedule: None,
+        }
+    }
+
+    #[test]
+    fn phase08_16_agents_all_wrappers_round_trip_and_legacy_rejections() {
+        let home = Home::new();
+        let listed = run(ipc::agents_list()).unwrap();
+        assert_eq!(listed.len(), SEEDS.len());
+        assert!(listed.iter().any(|a| a.id == "inbox-triage"));
+
+        let saved = run(ipc::agents_upsert(user_agent("doc-convert"))).unwrap();
+        assert_eq!(saved.id, "doc-convert");
+        assert!(!saved.builtin);
+        assert_eq!(run(ipc::agents_list()).unwrap().len(), SEEDS.len() + 1);
+
+        let mut edited = seed_record(find_seed("git-sync").unwrap());
+        edited.runtime = "codex".to_string();
+        let patched = run(ipc::agents_upsert(edited)).unwrap();
+        assert!(patched.builtin);
+        assert_eq!(patched.runtime, "codex");
+        assert!(load_file().unwrap().overrides.contains_key("git-sync"));
+
+        let mut bad_id = user_agent("Bad Id");
+        bad_id.runtime = "claude".to_string();
+        assert_eq!(
+            run(ipc::agents_upsert(bad_id)).unwrap_err(),
+            "agent_id_invalid: Bad Id"
+        );
+        let mut no_label = user_agent("no-label");
+        no_label.label = Some("   ".to_string());
+        assert_eq!(
+            run(ipc::agents_upsert(no_label)).unwrap_err(),
+            "agent_label_required"
+        );
+        assert_eq!(
+            run(ipc::agents_delete("git-sync".into())).unwrap_err(),
+            "agent_builtin_not_deletable"
+        );
+        assert_eq!(
+            run(ipc::agents_delete("missing".into())).unwrap_err(),
+            "agent_not_found: missing"
+        );
+        assert_eq!(
+            run(ipc::agents_reset("not-a-builtin".into())).unwrap_err(),
+            "agent_not_builtin: not-a-builtin"
+        );
+
+        let restored = run(ipc::agents_reset("git-sync".into())).unwrap();
+        assert!(!restored.enabled);
+        assert_eq!(restored.runtime, "inherit");
+        assert!(load_file().unwrap().overrides.is_empty());
+
+        let remaining = run(ipc::agents_delete("doc-convert".into())).unwrap();
+        assert_eq!(remaining.len(), SEEDS.len());
+        assert!(agents_file(home.root.path()).is_file());
+    }
+
+    #[test]
+    fn phase08_16_agents_each_wrapper_yields_same_poll_and_maps_join_failure() {
+        let home = Home::new();
+        let file = agents_file(home.root.path());
+        boundary(file.clone(), "agents_list", ipc::agents_list());
+        boundary(
+            file.clone(),
+            "agents_upsert",
+            ipc::agents_upsert(user_agent("doc-convert")),
+        );
+        run(ipc::agents_upsert(user_agent("doc-convert"))).unwrap();
+        boundary(
+            file.clone(),
+            "agents_delete",
+            ipc::agents_delete("doc-convert".into()),
+        );
+        boundary(file, "agents_reset", ipc::agents_reset("git-sync".into()));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn phase08_16_agents_files_parent_both_orders_and_aliases_no_recreation() {
+        let home = Home::new();
+        let root = home.root.path();
+        for parent in ["rename", "trash"] {
+            for parent_first in [false, true] {
+                for alias in [false, true] {
+                    if alias && parent == "trash" {
+                        continue;
+                    }
+                    let fixture = tempfile::tempdir_in(root).unwrap();
+                    let fixture_root = fixture.path();
+                    std::env::set_var("MARU_TEST_HOME", fixture_root);
+                    let maru_dir = fixture_root.join(".maru");
+                    fs::create_dir_all(&maru_dir).unwrap();
+                    let external = fixture_root.join("external");
+                    fs::create_dir(&external).unwrap();
+                    let (selected, key) = if alias {
+                        fs::remove_dir(&maru_dir).unwrap();
+                        std::os::unix::fs::symlink(&external, &maru_dir).unwrap();
+                        (external.clone(), maru_dir.join("agents.json"))
+                    } else {
+                        (maru_dir.clone(), maru_dir.join("agents.json"))
+                    };
+                    let vault = text(fixture_root);
+                    let trash_target = fixture_root.join("trash-target");
+                    let agent = user_agent("doc-convert");
+                    let selected_for_parent = selected.clone();
+                    let trash_target_for_parent = trash_target.clone();
+                    let parent_future = async move {
+                        if parent == "rename" {
+                            files_ipc::rename_workspace_entry(
+                                vault,
+                                text(&selected_for_parent),
+                                "moved".into(),
+                            )
+                            .await
+                            .map(|outcome| assert!(outcome.error.is_none()))
+                        } else {
+                            let _trash = TrashFixture::new(
+                                selected_for_parent.clone(),
+                                trash_target_for_parent.clone(),
+                            );
+                            files_ipc::trash_workspace_entries(
+                                vault,
+                                vec![text(&selected_for_parent)],
+                            )
+                            .await
+                            .map(|outcomes| assert!(outcomes[0].error.is_none()))
+                        }
+                    };
+                    let child_future = ipc::agents_upsert(agent);
+                    if parent_first {
+                        let held = Held::new(selected.clone(), "pre-effect");
+                        let p = start(parent_future);
+                        held.wait();
+                        let waiting = Held::new(key.clone(), "before-admission");
+                        let c = start(child_future);
+                        waiting.wait();
+                        waiting.release();
+                        assert!(c.recv_timeout(Duration::from_millis(20)).is_err());
+                        held.release();
+                        done(p).unwrap();
+                        assert!(
+                            done(c).is_err(),
+                            "{parent}/{alias}: renamed original parent must fail revalidation"
+                        );
+                    } else {
+                        let held = Held::new(key.clone(), "pre-effect");
+                        let c = start(child_future);
+                        held.wait();
+                        let waiting = Held::new(selected.clone(), "before-admission");
+                        let p = start(parent_future);
+                        waiting.wait();
+                        waiting.release();
+                        assert!(p.recv_timeout(Duration::from_millis(20)).is_err());
+                        held.release();
+                        done(c).unwrap();
+                        done(p).unwrap();
+                        let moved = if parent == "rename" {
+                            fixture_root.join("moved")
+                        } else {
+                            trash_target.clone()
+                        };
+                        assert!(moved.join("agents.json").is_file(), "{parent}/{alias}");
+                    }
+                    assert!(
+                        !selected.exists(),
+                        "{parent}/{alias}: original agent parent recreated"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn phase08_16_agents_error_and_unwind_release_admission() {
+        let home = Home::new();
+        let root = home.root.path();
+        let file = agents_file(root);
+        fs::create_dir_all(root.join(".maru")).unwrap();
+
+        // A domain error after admission (missing id) releases the lease: a
+        // competing real Files rename of the same parent proceeds afterwards.
+        assert_eq!(
+            run(ipc::agents_delete("missing".into())).unwrap_err(),
+            "agent_not_found: missing"
+        );
+        run(files_ipc::rename_workspace_entry(
+            text(root),
+            ".maru".into(),
+            "maru-moved".into(),
+        ))
+        .unwrap();
+        assert!(root.join("maru-moved").is_dir());
+        fs::rename(root.join("maru-moved"), root.join(".maru")).unwrap();
+
+        // An unwinding worker releases the whole admitted set.
+        {
+            let _panic = PathTransactionTestHook::new(file, "pre-effect", || {
+                panic!("fixture agents transaction unwind")
+            });
+            assert!(run(ipc::agents_upsert(user_agent("doc-convert")))
+                .unwrap_err()
+                .starts_with("agents_upsert_task_failed:"));
+        }
+        let saved = run(ipc::agents_upsert(user_agent("doc-convert"))).unwrap();
+        assert_eq!(saved.id, "doc-convert");
     }
 }

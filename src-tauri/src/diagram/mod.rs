@@ -4,7 +4,9 @@
 //! rejects path traversal (`..`, `/`, `\\`, NUL) and leading-dot entries, mirroring
 //! the safety rules in `studio/mod.rs` and the workspace write-allow guard.
 //!
-use crate::atomic_file::write_atomic;
+use crate::atomic_file::{
+    with_path_transactions, write_atomic, PathTransactionLease, PathTransactionRequest,
+};
 use crate::vault::{lexical_normalize, resolve_inside_vault};
 use crate::vault_list::{assert_maru_can_write, WorkspaceWriteAction};
 use serde::{Deserialize, Serialize};
@@ -115,19 +117,33 @@ fn extract_doc_title(file_path: &Path) -> String {
     rest[..end].to_string()
 }
 
-#[tauri::command]
 pub fn diagram_save_document(workspace: String, name: String, body: String) -> Result<(), String> {
     let path = diagram_file_path(&workspace, &name)?;
+    let root = resolve_inside_vault(&workspace, ".")?;
+    let request = PathTransactionRequest::new(vec![path])?
+        .require_parent(&root)?
+        .with_workspace_registry()?;
+    with_path_transactions(request, |lease| {
+        diagram_save_document_in_transaction(workspace, name, body, lease)
+    })
+}
+
+fn diagram_save_document_in_transaction(
+    workspace: String,
+    name: String,
+    body: String,
+    lease: &PathTransactionLease,
+) -> Result<(), String> {
+    lease.ensure_workspace_registry()?;
+    let path = diagram_file_path(&workspace, &name)?;
+    lease.ensure_covered(vec![path.clone()])?;
     let action = if path.is_file() {
         WorkspaceWriteAction::Modify
     } else {
         WorkspaceWriteAction::Create
     };
     assert_maru_can_write(&workspace, action)?;
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .map_err(|err| format!("Cannot create diagrams folder: {err}"))?;
-    }
+    lease.before_effect()?;
     let payload = if body.ends_with('\n') {
         body
     } else {
@@ -137,7 +153,6 @@ pub fn diagram_save_document(workspace: String, name: String, body: String) -> R
     Ok(())
 }
 
-#[tauri::command]
 pub fn diagram_load_document(workspace: String, name: String) -> Result<String, String> {
     let path = diagram_file_path(&workspace, &name)?;
     if !path.is_file() {
@@ -146,7 +161,6 @@ pub fn diagram_load_document(workspace: String, name: String) -> Result<String, 
     fs::read_to_string(&path).map_err(|err| format!("Cannot read diagram: {err}"))
 }
 
-#[tauri::command]
 pub fn diagram_list_documents(workspace: String) -> Result<Vec<DiagramFile>, String> {
     let root = diagrams_root(&workspace)?;
     if !root.exists() {
@@ -183,13 +197,30 @@ pub fn diagram_list_documents(workspace: String) -> Result<Vec<DiagramFile>, Str
     Ok(out)
 }
 
-#[tauri::command]
 pub fn diagram_delete_document(workspace: String, name: String) -> Result<bool, String> {
     let path = diagram_file_path(&workspace, &name)?;
+    let root = resolve_inside_vault(&workspace, ".")?;
+    let request = PathTransactionRequest::new(vec![path])?
+        .require_parent(&root)?
+        .with_workspace_registry()?;
+    with_path_transactions(request, |lease| {
+        diagram_delete_document_in_transaction(workspace, name, lease)
+    })
+}
+
+fn diagram_delete_document_in_transaction(
+    workspace: String,
+    name: String,
+    lease: &PathTransactionLease,
+) -> Result<bool, String> {
+    lease.ensure_workspace_registry()?;
+    let path = diagram_file_path(&workspace, &name)?;
+    lease.ensure_covered(vec![path.clone()])?;
     if !path.is_file() {
         return Ok(false);
     }
     assert_maru_can_write(&workspace, WorkspaceWriteAction::Delete)?;
+    lease.before_effect()?;
     fs::remove_file(&path).map_err(|err| format!("Cannot delete diagram: {err}"))?;
     Ok(true)
 }
@@ -246,7 +277,6 @@ fn validate_export_target_path(target_path: &str, kind: &str) -> Result<PathBuf,
     Ok(path)
 }
 
-#[tauri::command]
 pub fn diagram_export_blob(
     workspace: String,
     name: String,
@@ -258,12 +288,36 @@ pub fn diagram_export_blob(
     let root = diagrams_root(&workspace)?;
     let candidate = root.join(format!("{trimmed}.{ext}"));
     ensure_within(&root, &candidate)?;
+    let workspace_root = resolve_inside_vault(&workspace, ".")?;
+    let request = PathTransactionRequest::new(vec![candidate])?
+        .require_parent(&workspace_root)?
+        .with_workspace_registry()?;
+    with_path_transactions(request, |lease| {
+        diagram_export_blob_in_transaction(workspace, name, kind, bytes, lease)
+    })
+}
+
+fn diagram_export_blob_in_transaction(
+    workspace: String,
+    name: String,
+    kind: String,
+    bytes: Vec<u8>,
+    lease: &PathTransactionLease,
+) -> Result<String, String> {
+    lease.ensure_workspace_registry()?;
+    let trimmed = validate_name(&name)?;
+    let ext = validate_export_kind(&kind)?;
+    let root = diagrams_root(&workspace)?;
+    let candidate = root.join(format!("{trimmed}.{ext}"));
+    ensure_within(&root, &candidate)?;
+    lease.ensure_covered(vec![candidate.clone()])?;
     let action = if candidate.is_file() {
         WorkspaceWriteAction::Modify
     } else {
         WorkspaceWriteAction::Create
     };
     assert_maru_can_write(&workspace, action)?;
+    lease.before_effect()?;
     if let Some(parent) = candidate.parent() {
         fs::create_dir_all(parent)
             .map_err(|err| format!("Cannot create diagrams folder: {err}"))?;
@@ -272,13 +326,27 @@ pub fn diagram_export_blob(
     Ok(candidate.to_string_lossy().to_string())
 }
 
-#[tauri::command]
 pub fn diagram_export_blob_to_path(
     target_path: String,
     kind: String,
     bytes: Vec<u8>,
 ) -> Result<String, String> {
     let path = validate_export_target_path(&target_path, &kind)?;
+    let request = PathTransactionRequest::new(vec![path])?;
+    with_path_transactions(request, |lease| {
+        diagram_export_blob_to_path_in_transaction(target_path, kind, bytes, lease)
+    })
+}
+
+fn diagram_export_blob_to_path_in_transaction(
+    target_path: String,
+    kind: String,
+    bytes: Vec<u8>,
+    lease: &PathTransactionLease,
+) -> Result<String, String> {
+    let path = validate_export_target_path(&target_path, &kind)?;
+    lease.ensure_covered(vec![path.clone()])?;
+    lease.before_effect()?;
     if let Some(parent) = path.parent() {
         if !parent.as_os_str().is_empty() {
             fs::create_dir_all(parent)
@@ -299,14 +367,12 @@ const BACKUP_DIR: &str = ".maru/diagrams/backups";
 /// `<workspace>/.maru/diagrams/backups/<name>-v7-<unix-ts>.cmd.json` before the
 /// first v8 save overwrites a v7 document. The copy goes through a temp file +
 /// rename so a crash mid-copy cannot leave a truncated backup.
-#[tauri::command]
 pub fn diagram_backup_document(workspace: String, name: String) -> Result<String, String> {
     let trimmed = validate_name(&name)?;
     let src = diagram_file_path(&workspace, trimmed)?;
     if !src.is_file() {
         return Err(format!("Diagram not found: {trimmed}"));
     }
-    assert_maru_can_write(&workspace, WorkspaceWriteAction::Create)?;
     let root = resolve_inside_vault(&workspace, BACKUP_DIR)?;
     let ts = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -314,9 +380,39 @@ pub fn diagram_backup_document(workspace: String, name: String) -> Result<String
         .as_millis();
     let dest = root.join(format!("{trimmed}-v7-{ts}{DIAGRAM_EXT}"));
     ensure_within(&root, &dest)?;
-    fs::create_dir_all(&root).map_err(|err| format!("Cannot create backup folder: {err}"))?;
     let tmp = root.join(format!(".{trimmed}-v7-{ts}.tmp"));
     ensure_within(&root, &tmp)?;
+    let workspace_root = resolve_inside_vault(&workspace, ".")?;
+    let request = PathTransactionRequest::new(vec![src.clone(), dest.clone(), tmp.clone()])?
+        .require_parent(&workspace_root)?
+        .with_workspace_registry()?;
+    with_path_transactions(request, |lease| {
+        diagram_backup_document_in_transaction(workspace, name, ts, lease)
+    })
+}
+
+fn diagram_backup_document_in_transaction(
+    workspace: String,
+    name: String,
+    ts: u128,
+    lease: &PathTransactionLease,
+) -> Result<String, String> {
+    lease.ensure_workspace_registry()?;
+    let trimmed = validate_name(&name)?;
+    let src = diagram_file_path(&workspace, trimmed)?;
+    if !src.is_file() {
+        return Err(format!("Diagram not found: {trimmed}"));
+    }
+    lease.ensure_covered(vec![src.clone()])?;
+    assert_maru_can_write(&workspace, WorkspaceWriteAction::Create)?;
+    let root = resolve_inside_vault(&workspace, BACKUP_DIR)?;
+    let dest = root.join(format!("{trimmed}-v7-{ts}{DIAGRAM_EXT}"));
+    ensure_within(&root, &dest)?;
+    let tmp = root.join(format!(".{trimmed}-v7-{ts}.tmp"));
+    ensure_within(&root, &tmp)?;
+    lease.ensure_covered(vec![dest.clone(), tmp.clone()])?;
+    lease.before_effect()?;
+    fs::create_dir_all(&root).map_err(|err| format!("Cannot create backup folder: {err}"))?;
     fs::copy(&src, &tmp).map_err(|err| format!("Cannot copy diagram for backup: {err}"))?;
     fs::rename(&tmp, &dest).map_err(|err| format!("Cannot finalize backup: {err}"))?;
     Ok(dest.to_string_lossy().to_string())
@@ -359,7 +455,6 @@ fn snapshot_file(workspace: &str, doc_id: &str, ts: &str) -> Result<PathBuf, Str
     Ok(candidate)
 }
 
-#[tauri::command]
 pub fn diagram_save_snapshot(
     workspace: String,
     doc_id: String,
@@ -368,6 +463,27 @@ pub fn diagram_save_snapshot(
 ) -> Result<SnapshotMeta, String> {
     let dir = snapshot_dir(&workspace, &doc_id)?;
     let path = snapshot_file(&workspace, &doc_id, &snapshot_ts)?;
+    let root = resolve_inside_vault(&workspace, ".")?;
+    let request = PathTransactionRequest::new(vec![dir, path])?
+        .require_parent(&root)?
+        .with_workspace_registry()?;
+    with_path_transactions(request, |lease| {
+        diagram_save_snapshot_in_transaction(workspace, doc_id, snapshot_ts, content, lease)
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn diagram_save_snapshot_in_transaction(
+    workspace: String,
+    doc_id: String,
+    snapshot_ts: String,
+    content: String,
+    lease: &PathTransactionLease,
+) -> Result<SnapshotMeta, String> {
+    lease.ensure_workspace_registry()?;
+    let dir = snapshot_dir(&workspace, &doc_id)?;
+    let path = snapshot_file(&workspace, &doc_id, &snapshot_ts)?;
+    lease.ensure_covered(vec![dir.clone(), path.clone()])?;
     assert_maru_can_write(
         &workspace,
         if path.is_file() {
@@ -376,6 +492,7 @@ pub fn diagram_save_snapshot(
             WorkspaceWriteAction::Create
         },
     )?;
+    lease.before_effect()?;
     fs::create_dir_all(&dir).map_err(|err| format!("Cannot create snapshot dir: {err}"))?;
     let body = if content.ends_with('\n') {
         content
@@ -425,7 +542,6 @@ fn prune_snapshots(dir: &Path, cap: usize) -> Result<(), String> {
     Ok(())
 }
 
-#[tauri::command]
 pub fn diagram_list_snapshots(
     workspace: String,
     doc_id: String,
@@ -462,7 +578,6 @@ pub fn diagram_list_snapshots(
     Ok(out)
 }
 
-#[tauri::command]
 pub fn diagram_restore_snapshot(
     workspace: String,
     doc_id: String,
@@ -509,7 +624,6 @@ fn validate_report_file_name(file_name: &str) -> Result<&str, String> {
 
 /// Write a rendered report asset (SVG/PNG/JSON) for a managed Markdown block.
 /// Returns the workspace-relative path (`attachments/diagrams/<doc_id>/<file_name>`).
-#[tauri::command]
 pub fn diagram_write_report_asset(
     workspace: String,
     doc_id: String,
@@ -526,12 +640,41 @@ pub fn diagram_write_report_asset(
     ensure_within(&root, &dir)?;
     let candidate = dir.join(name);
     ensure_within(&dir, &candidate)?;
+    let workspace_root = resolve_inside_vault(&workspace, ".")?;
+    let request = PathTransactionRequest::new(vec![candidate])?
+        .require_parent(&workspace_root)?
+        .with_workspace_registry()?;
+    with_path_transactions(request, |lease| {
+        diagram_write_report_asset_in_transaction(workspace, doc_id, file_name, bytes, lease)
+    })
+}
+
+fn diagram_write_report_asset_in_transaction(
+    workspace: String,
+    doc_id: String,
+    file_name: String,
+    bytes: Vec<u8>,
+    lease: &PathTransactionLease,
+) -> Result<String, String> {
+    lease.ensure_workspace_registry()?;
+    let id = validate_doc_id(&doc_id)?;
+    if !is_ascii_component(id) {
+        return Err(format!("Invalid report asset doc id: {doc_id}"));
+    }
+    let name = validate_report_file_name(&file_name)?;
+    let root = resolve_inside_vault(&workspace, REPORT_ASSET_ROOT)?;
+    let dir = root.join(id);
+    ensure_within(&root, &dir)?;
+    let candidate = dir.join(name);
+    ensure_within(&dir, &candidate)?;
+    lease.ensure_covered(vec![candidate.clone()])?;
     let action = if candidate.is_file() {
         WorkspaceWriteAction::Modify
     } else {
         WorkspaceWriteAction::Create
     };
     assert_maru_can_write(&workspace, action)?;
+    lease.before_effect()?;
     write_atomic(&candidate, &bytes)?;
     Ok(format!("{REPORT_ASSET_ROOT}/{id}/{name}"))
 }
@@ -551,15 +694,33 @@ fn pattern_file_path(work_path: &str, name: &str) -> Result<PathBuf, String> {
     Ok(candidate)
 }
 
-#[tauri::command]
 pub fn diagram_pattern_save(workspace: String, name: String, body: String) -> Result<(), String> {
     let path = pattern_file_path(&workspace, &name)?;
+    let root = resolve_inside_vault(&workspace, ".")?;
+    let request = PathTransactionRequest::new(vec![path])?
+        .require_parent(&root)?
+        .with_workspace_registry()?;
+    with_path_transactions(request, |lease| {
+        diagram_pattern_save_in_transaction(workspace, name, body, lease)
+    })
+}
+
+fn diagram_pattern_save_in_transaction(
+    workspace: String,
+    name: String,
+    body: String,
+    lease: &PathTransactionLease,
+) -> Result<(), String> {
+    lease.ensure_workspace_registry()?;
+    let path = pattern_file_path(&workspace, &name)?;
+    lease.ensure_covered(vec![path.clone()])?;
     let action = if path.is_file() {
         WorkspaceWriteAction::Modify
     } else {
         WorkspaceWriteAction::Create
     };
     assert_maru_can_write(&workspace, action)?;
+    lease.before_effect()?;
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|err| format!("Cannot create pattern folder: {err}"))?;
     }
@@ -572,7 +733,6 @@ pub fn diagram_pattern_save(workspace: String, name: String, body: String) -> Re
     Ok(())
 }
 
-#[tauri::command]
 pub fn diagram_pattern_list(workspace: String) -> Result<Vec<DiagramFile>, String> {
     let root = resolve_inside_vault(&workspace, PATTERN_DIR)?;
     if !root.exists() {
@@ -609,15 +769,256 @@ pub fn diagram_pattern_list(workspace: String) -> Result<Vec<DiagramFile>, Strin
     Ok(out)
 }
 
-#[tauri::command]
 pub fn diagram_pattern_delete(workspace: String, name: String) -> Result<bool, String> {
     let path = pattern_file_path(&workspace, &name)?;
+    let root = resolve_inside_vault(&workspace, ".")?;
+    let request = PathTransactionRequest::new(vec![path])?
+        .require_parent(&root)?
+        .with_workspace_registry()?;
+    with_path_transactions(request, |lease| {
+        diagram_pattern_delete_in_transaction(workspace, name, lease)
+    })
+}
+
+fn diagram_pattern_delete_in_transaction(
+    workspace: String,
+    name: String,
+    lease: &PathTransactionLease,
+) -> Result<bool, String> {
+    lease.ensure_workspace_registry()?;
+    let path = pattern_file_path(&workspace, &name)?;
+    lease.ensure_covered(vec![path.clone()])?;
     if !path.is_file() {
         return Ok(false);
     }
     assert_maru_can_write(&workspace, WorkspaceWriteAction::Delete)?;
+    lease.before_effect()?;
     fs::remove_file(&path).map_err(|err| format!("Cannot delete pattern preset: {err}"))?;
     Ok(true)
+}
+
+/// Owned IPC boundaries; synchronous entry points remain available to Rust callers.
+pub mod ipc {
+    use super::*;
+    #[tauri::command]
+    pub async fn diagram_save_document(
+        workspace: String,
+        name: String,
+        body: String,
+    ) -> Result<(), String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(
+                &[PathBuf::from(&workspace)],
+                "worker:diagram_save_document",
+            );
+            super::diagram_save_document(workspace, name, body)
+        })
+        .await
+        .map_err(|err| format!("diagram_save_document_task_failed: {err}"))?
+    }
+    #[tauri::command]
+    pub async fn diagram_load_document(workspace: String, name: String) -> Result<String, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(
+                &[PathBuf::from(&workspace)],
+                "worker:diagram_load_document",
+            );
+            super::diagram_load_document(workspace, name)
+        })
+        .await
+        .map_err(|err| format!("diagram_load_document_task_failed: {err}"))?
+    }
+    #[tauri::command]
+    pub async fn diagram_list_documents(workspace: String) -> Result<Vec<DiagramFile>, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(
+                &[PathBuf::from(&workspace)],
+                "worker:diagram_list_documents",
+            );
+            super::diagram_list_documents(workspace)
+        })
+        .await
+        .map_err(|err| format!("diagram_list_documents_task_failed: {err}"))?
+    }
+    #[tauri::command]
+    pub async fn diagram_delete_document(workspace: String, name: String) -> Result<bool, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(
+                &[PathBuf::from(&workspace)],
+                "worker:diagram_delete_document",
+            );
+            super::diagram_delete_document(workspace, name)
+        })
+        .await
+        .map_err(|err| format!("diagram_delete_document_task_failed: {err}"))?
+    }
+    #[tauri::command]
+    pub async fn diagram_export_blob(
+        workspace: String,
+        name: String,
+        kind: String,
+        bytes: Vec<u8>,
+    ) -> Result<String, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(
+                &[PathBuf::from(&workspace)],
+                "worker:diagram_export_blob",
+            );
+            super::diagram_export_blob(workspace, name, kind, bytes)
+        })
+        .await
+        .map_err(|err| format!("diagram_export_blob_task_failed: {err}"))?
+    }
+    #[tauri::command]
+    pub async fn diagram_export_blob_to_path(
+        target_path: String,
+        kind: String,
+        bytes: Vec<u8>,
+    ) -> Result<String, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(
+                &[PathBuf::from(&target_path)],
+                "worker:diagram_export_blob_to_path",
+            );
+            super::diagram_export_blob_to_path(target_path, kind, bytes)
+        })
+        .await
+        .map_err(|err| format!("diagram_export_blob_to_path_task_failed: {err}"))?
+    }
+    #[tauri::command]
+    pub async fn diagram_backup_document(
+        workspace: String,
+        name: String,
+    ) -> Result<String, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(
+                &[PathBuf::from(&workspace)],
+                "worker:diagram_backup_document",
+            );
+            super::diagram_backup_document(workspace, name)
+        })
+        .await
+        .map_err(|err| format!("diagram_backup_document_task_failed: {err}"))?
+    }
+    #[tauri::command]
+    pub async fn diagram_save_snapshot(
+        workspace: String,
+        doc_id: String,
+        snapshot_ts: String,
+        content: String,
+    ) -> Result<SnapshotMeta, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(
+                &[PathBuf::from(&workspace)],
+                "worker:diagram_save_snapshot",
+            );
+            super::diagram_save_snapshot(workspace, doc_id, snapshot_ts, content)
+        })
+        .await
+        .map_err(|err| format!("diagram_save_snapshot_task_failed: {err}"))?
+    }
+    #[tauri::command]
+    pub async fn diagram_list_snapshots(
+        workspace: String,
+        doc_id: String,
+    ) -> Result<Vec<SnapshotMeta>, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(
+                &[PathBuf::from(&workspace)],
+                "worker:diagram_list_snapshots",
+            );
+            super::diagram_list_snapshots(workspace, doc_id)
+        })
+        .await
+        .map_err(|err| format!("diagram_list_snapshots_task_failed: {err}"))?
+    }
+    #[tauri::command]
+    pub async fn diagram_restore_snapshot(
+        workspace: String,
+        doc_id: String,
+        snapshot_ts: String,
+    ) -> Result<String, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(
+                &[PathBuf::from(&workspace)],
+                "worker:diagram_restore_snapshot",
+            );
+            super::diagram_restore_snapshot(workspace, doc_id, snapshot_ts)
+        })
+        .await
+        .map_err(|err| format!("diagram_restore_snapshot_task_failed: {err}"))?
+    }
+    #[tauri::command]
+    pub async fn diagram_write_report_asset(
+        workspace: String,
+        doc_id: String,
+        file_name: String,
+        bytes: Vec<u8>,
+    ) -> Result<String, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(
+                &[PathBuf::from(&workspace)],
+                "worker:diagram_write_report_asset",
+            );
+            super::diagram_write_report_asset(workspace, doc_id, file_name, bytes)
+        })
+        .await
+        .map_err(|err| format!("diagram_write_report_asset_task_failed: {err}"))?
+    }
+    #[tauri::command]
+    pub async fn diagram_pattern_save(
+        workspace: String,
+        name: String,
+        body: String,
+    ) -> Result<(), String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(
+                &[PathBuf::from(&workspace)],
+                "worker:diagram_pattern_save",
+            );
+            super::diagram_pattern_save(workspace, name, body)
+        })
+        .await
+        .map_err(|err| format!("diagram_pattern_save_task_failed: {err}"))?
+    }
+    #[tauri::command]
+    pub async fn diagram_pattern_list(workspace: String) -> Result<Vec<DiagramFile>, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(
+                &[PathBuf::from(&workspace)],
+                "worker:diagram_pattern_list",
+            );
+            super::diagram_pattern_list(workspace)
+        })
+        .await
+        .map_err(|err| format!("diagram_pattern_list_task_failed: {err}"))?
+    }
+    #[tauri::command]
+    pub async fn diagram_pattern_delete(workspace: String, name: String) -> Result<bool, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(
+                &[PathBuf::from(&workspace)],
+                "worker:diagram_pattern_delete",
+            );
+            super::diagram_pattern_delete(workspace, name)
+        })
+        .await
+        .map_err(|err| format!("diagram_pattern_delete_task_failed: {err}"))?
+    }
 }
 
 #[cfg(test)]
@@ -1039,5 +1440,360 @@ mod tests {
             .filter_map(|entry| entry.file_name().to_str().map(str::to_string))
             .collect();
         assert_eq!(names, vec!["doc-deadbeef.png".to_string()]);
+    }
+}
+
+#[cfg(test)]
+mod phase08_20 {
+    use super::*;
+    use crate::atomic_file::phase08_06::{boundary, run, Held, Home};
+    use std::future::Future;
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    fn text(path: &Path) -> String {
+        path.to_string_lossy().into_owned()
+    }
+
+    fn workspace(home: &Home, name: &str) -> (PathBuf, String) {
+        let root = home.root.path().join(name);
+        fs::create_dir_all(root.join(".maru")).unwrap();
+        (root.clone(), text(&root))
+    }
+
+    fn start<F, T>(future: F) -> mpsc::Receiver<T>
+    where
+        F: Future<Output = T> + Send + 'static,
+        T: Send + 'static,
+    {
+        let (tx, rx) = mpsc::channel();
+        tauri::async_runtime::spawn(async move {
+            let _ = tx.send(future.await);
+        });
+        rx
+    }
+
+    fn done<T>(rx: mpsc::Receiver<T>) -> T {
+        rx.recv_timeout(Duration::from_secs(10))
+            .expect("diagram fixture completion")
+    }
+
+    #[test]
+    fn phase08_20_diagram_each_wrapper_yields_same_poll_and_maps_join_failure() {
+        let home = Home::new();
+        let (_root, work) = workspace(&home, "boundary");
+        boundary(work.clone().into(), "diagram_save_document", {
+            let work = work.clone();
+            ipc::diagram_save_document(work, "demo".into(), "{}".into())
+        });
+        boundary(work.clone().into(), "diagram_load_document", {
+            let work = work.clone();
+            ipc::diagram_load_document(work, "demo".into())
+        });
+        boundary(
+            work.clone().into(),
+            "diagram_list_documents",
+            ipc::diagram_list_documents(work.clone()),
+        );
+        boundary(work.clone().into(), "diagram_delete_document", {
+            let work = work.clone();
+            ipc::diagram_delete_document(work, "demo".into())
+        });
+        boundary(work.clone().into(), "diagram_export_blob", {
+            let work = work.clone();
+            ipc::diagram_export_blob(work, "demo".into(), "png".into(), vec![1, 2, 3])
+        });
+        let target = home.root.path().join("chosen/demo.svg");
+        boundary(
+            target.to_string_lossy().into_owned().into(),
+            "diagram_export_blob_to_path",
+            ipc::diagram_export_blob_to_path(
+                target.to_string_lossy().into_owned(),
+                "svg".into(),
+                b"<svg/>".to_vec(),
+            ),
+        );
+        boundary(work.clone().into(), "diagram_backup_document", {
+            let work = work.clone();
+            ipc::diagram_backup_document(work, "demo".into())
+        });
+        boundary(work.clone().into(), "diagram_save_snapshot", {
+            let work = work.clone();
+            ipc::diagram_save_snapshot(work, "doc-1".into(), "20260101T000000Z".into(), "{}".into())
+        });
+        boundary(
+            work.clone().into(),
+            "diagram_list_snapshots",
+            ipc::diagram_list_snapshots(work.clone(), "doc-1".into()),
+        );
+        boundary(work.clone().into(), "diagram_restore_snapshot", {
+            let work = work.clone();
+            ipc::diagram_restore_snapshot(work, "doc-1".into(), "20260101T000000Z".into())
+        });
+        boundary(work.clone().into(), "diagram_write_report_asset", {
+            let work = work.clone();
+            ipc::diagram_write_report_asset(
+                work,
+                "doc-1".into(),
+                "view-ab12cd34.svg".into(),
+                b"<svg/>".to_vec(),
+            )
+        });
+        boundary(work.clone().into(), "diagram_pattern_save", {
+            let work = work.clone();
+            ipc::diagram_pattern_save(work, "preset".into(), "{}".into())
+        });
+        boundary(
+            work.clone().into(),
+            "diagram_pattern_list",
+            ipc::diagram_pattern_list(work.clone()),
+        );
+        boundary(work.clone().into(), "diagram_pattern_delete", {
+            ipc::diagram_pattern_delete(work, "preset".into())
+        });
+    }
+
+    #[test]
+    fn phase08_20_diagram_real_fixture_results_and_legacy_rejections() {
+        let home = Home::new();
+        let (root, work) = workspace(&home, "fixture");
+        let body = r#"{"v":8,"docTitle":"demo","nodes":[],"edges":[],"layers":[]}"#;
+
+        run(ipc::diagram_save_document(
+            work.clone(),
+            "demo".into(),
+            body.into(),
+        ))
+        .unwrap();
+        let loaded = run(ipc::diagram_load_document(work.clone(), "demo".into())).unwrap();
+        assert!(loaded.contains("\"v\":8"));
+        let listed = run(ipc::diagram_list_documents(work.clone())).unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].name, "demo");
+        assert_eq!(listed[0].doc_title, "demo");
+
+        let export_path = run(ipc::diagram_export_blob(
+            work.clone(),
+            "demo".into(),
+            "png".into(),
+            vec![0x89, 0x50, 0x4e, 0x47],
+        ))
+        .unwrap();
+        assert_eq!(
+            fs::read(&export_path).unwrap(),
+            vec![0x89, 0x50, 0x4e, 0x47]
+        );
+
+        let meta = run(ipc::diagram_save_snapshot(
+            work.clone(),
+            "demo".into(),
+            "20260101T000000Z".into(),
+            "{\"v\":8}".into(),
+        ))
+        .unwrap();
+        assert_eq!(meta.doc_id, "demo");
+        assert_eq!(meta.snapshot_ts, "20260101T000000Z");
+        assert_eq!(meta.size, 8);
+        let snapshots = run(ipc::diagram_list_snapshots(work.clone(), "demo".into())).unwrap();
+        assert_eq!(snapshots.len(), 1);
+        assert_eq!(snapshots[0].doc_id, meta.doc_id);
+        assert_eq!(snapshots[0].snapshot_ts, meta.snapshot_ts);
+        assert_eq!(snapshots[0].size, meta.size);
+        let restored = run(ipc::diagram_restore_snapshot(
+            work.clone(),
+            "demo".into(),
+            "20260101T000000Z".into(),
+        ))
+        .unwrap();
+        assert_eq!(restored, "{\"v\":8}\n");
+
+        let backup = run(ipc::diagram_backup_document(work.clone(), "demo".into())).unwrap();
+        assert!(backup.contains("demo-v7-"));
+        assert!(backup.ends_with(DIAGRAM_EXT));
+        assert!(fs::read_to_string(&backup).unwrap().contains("\"v\":8"));
+
+        let pattern = r#"{"v":1,"id":"p1","name":"Preset"}"#;
+        run(ipc::diagram_pattern_save(
+            work.clone(),
+            "preset".into(),
+            pattern.into(),
+        ))
+        .unwrap();
+        let patterns = run(ipc::diagram_pattern_list(work.clone())).unwrap();
+        assert_eq!(patterns.len(), 1);
+        assert_eq!(patterns[0].name, "preset");
+
+        let rel = run(ipc::diagram_write_report_asset(
+            work.clone(),
+            "demo".into(),
+            "view-ab12cd34.svg".into(),
+            b"<svg/>".to_vec(),
+        ))
+        .unwrap();
+        assert_eq!(rel, "attachments/diagrams/demo/view-ab12cd34.svg");
+        assert_eq!(fs::read(root.join(&rel)).unwrap(), b"<svg/>");
+
+        assert!(run(ipc::diagram_pattern_delete(work.clone(), "preset".into())).unwrap());
+        assert_eq!(
+            run(ipc::diagram_delete_document(work.clone(), "demo".into())).unwrap(),
+            true
+        );
+        assert!(run(ipc::diagram_list_documents(work.clone()))
+            .unwrap()
+            .is_empty());
+
+        assert_eq!(
+            run(ipc::diagram_load_document(work.clone(), "ghost".into())).unwrap_err(),
+            "Diagram not found: ghost"
+        );
+        assert!(run(ipc::diagram_save_document(
+            work.clone(),
+            "../escape".into(),
+            "{}".into()
+        ))
+        .unwrap_err()
+        .starts_with("Invalid diagram name:"));
+        assert!(run(ipc::diagram_export_blob(
+            work.clone(),
+            "demo".into(),
+            "exe".into(),
+            vec![]
+        ))
+        .unwrap_err()
+        .starts_with("Unsupported export kind:"));
+        assert_eq!(
+            run(ipc::diagram_restore_snapshot(
+                work.clone(),
+                "demo".into(),
+                "19990101T000000Z".into()
+            ))
+            .unwrap_err(),
+            "snapshot not found: 19990101T000000Z"
+        );
+        assert!(run(ipc::diagram_write_report_asset(
+            work.clone(),
+            "demo".into(),
+            "a.exe".into(),
+            vec![]
+        ))
+        .unwrap_err()
+        .starts_with("Unsupported report asset extension:"));
+        assert_eq!(
+            run(ipc::diagram_pattern_delete(work.clone(), "ghost".into())).unwrap(),
+            false
+        );
+    }
+
+    #[test]
+    fn phase08_20_diagram_save_contends_with_document_save_both_orders() {
+        let home = Home::new();
+        for document_first in [false, true] {
+            let (root, work) = workspace(&home, &format!("contend-{document_first}"));
+            let target = root.join("diagrams/demo.cmd.json");
+            fs::create_dir_all(target.parent().unwrap()).unwrap();
+            fs::write(&target, "original").unwrap();
+            let revision = crate::document::revision_for("original");
+            let diagram_body = r#"{"v":8,"docTitle":"from diagram"}"#;
+            if document_first {
+                let held = Held::new(target.clone(), "admitted");
+                let first = start(crate::document::ipc::save_document(
+                    work.clone(),
+                    "diagrams/demo.cmd.json".into(),
+                    "from document".into(),
+                    Some(revision),
+                ));
+                held.wait();
+                let waiting = Held::new(target.clone(), "before-admission");
+                let second = start(ipc::diagram_save_document(
+                    work.clone(),
+                    "demo".into(),
+                    diagram_body.into(),
+                ));
+                waiting.wait();
+                waiting.release();
+                assert!(second.recv_timeout(Duration::from_millis(30)).is_err());
+                held.release();
+                done(first).unwrap();
+                done(second).unwrap();
+            } else {
+                let held = Held::new(target.clone(), "admitted");
+                let first = start(ipc::diagram_save_document(
+                    work.clone(),
+                    "demo".into(),
+                    diagram_body.into(),
+                ));
+                held.wait();
+                let waiting = Held::new(target.clone(), "before-admission");
+                let second = start(crate::document::ipc::save_document(
+                    work.clone(),
+                    "diagrams/demo.cmd.json".into(),
+                    "from document".into(),
+                    Some(revision),
+                ));
+                waiting.wait();
+                waiting.release();
+                assert!(second.recv_timeout(Duration::from_millis(30)).is_err());
+                held.release();
+                done(first).unwrap();
+                let err = done(second).unwrap_err();
+                assert_eq!(err.code, crate::ipc_error::DOCUMENT_CONFLICT);
+            }
+            assert_eq!(
+                run(ipc::diagram_load_document(work, "demo".into())).unwrap(),
+                format!("{diagram_body}\n")
+            );
+        }
+    }
+
+    #[test]
+    fn phase08_20_diagram_delete_then_save_serializes_and_error_releases() {
+        let home = Home::new();
+        let (root, work) = workspace(&home, "serialize");
+        let target = root.join("diagrams/demo.cmd.json");
+        let body = r#"{"v":8}"#;
+        run(ipc::diagram_save_document(
+            work.clone(),
+            "demo".into(),
+            body.into(),
+        ))
+        .unwrap();
+
+        let held = Held::new(target.clone(), "admitted");
+        let delete = start(ipc::diagram_delete_document(work.clone(), "demo".into()));
+        held.wait();
+        let waiting = Held::new(target.clone(), "before-admission");
+        let save = start(ipc::diagram_save_document(
+            work.clone(),
+            "demo".into(),
+            body.into(),
+        ));
+        waiting.wait();
+        waiting.release();
+        assert!(save.recv_timeout(Duration::from_millis(30)).is_err());
+        held.release();
+        assert!(done(delete).unwrap());
+        done(save).unwrap();
+        assert_eq!(
+            run(ipc::diagram_load_document(work.clone(), "demo".into())).unwrap(),
+            format!("{body}\n")
+        );
+
+        fs::remove_file(&target).unwrap();
+        fs::create_dir(&target).unwrap();
+        assert!(run(ipc::diagram_save_document(
+            work.clone(),
+            "demo".into(),
+            body.into(),
+        ))
+        .unwrap_err()
+        .starts_with("Cannot atomically replace"));
+        fs::remove_dir(&target).unwrap();
+        run(ipc::diagram_save_document(
+            work.clone(),
+            "demo".into(),
+            body.into(),
+        ))
+        .unwrap();
+        assert!(target.is_file());
     }
 }

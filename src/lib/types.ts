@@ -67,6 +67,8 @@ export type WorkspaceProvider =
  *  sides agree - neither side's own pin test alone catches a one-sided
  *  rename. */
 export const IPC_ERROR_CODES = [
+  "skills_source_busy",
+  "skills_source_stale",
   "today_conflict",
   "task_conflict",
   "document_conflict",

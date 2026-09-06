@@ -2,44 +2,46 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Felt Quality and Native Proof
-current_phase: 10
-current_phase_name: Bundle and Build Hardening
-status: planning
-stopped_at: Completed 06-05-PLAN.md
-last_updated: "2026-09-04T00:00:00.000Z"
-last_activity: 2026-09-04
-last_activity_desc: "PERF-06 (issue #309, inbox out of the document index) and REL-04 (issue #295, per-segment tilde expansion in job env) added mid-milestone to Phases 7 and 9: 17/17 requirements mapped"
+current_phase: 08
+current_phase_name: Main-Thread Responsiveness
+status: phase-complete
+stopped_at: Phase 08 complete (29/29 plans); make verify and make release-checks green; next is Phase 09 planning (gsd-plan-phase)
+last_updated: "2026-09-06T01:14:19.000Z"
+last_activity: 2026-09-05
+last_activity_desc: Phase 08 completed
+state_head: da6fe9eb664fca99b12fc881bda1781a507af00f
 progress:
   total_phases: 6
-  completed_phases: 1
-  total_plans: 5
-  completed_plans: 5
-  percent: 17
+  completed_phases: 2
+  total_plans: 39
+  completed_plans: 39
+  percent: 50
 ---
 
 # Project State
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-08-28)
+See: .planning/PROJECT.md (updated 2026-09-05)
 
 **Core value:** The filesystem stays the source of truth, everything Maru shows is derived from real files the user owns, and nothing is lost if Maru is uninstalled.
-**Current focus:** Phase 06 — native-e2e-runner-foundation
+**Current focus:** Phase 08 — Main-Thread Responsiveness
 
 ## Current Position
 
-Phase: 10 — Bundle and Build Hardening
-Plan: Not started
-Status: Ready to plan
-Last activity: 2026-08-29 — Phase 06 complete, transitioned to Phase 10
+Phase: 08 (Main-Thread Responsiveness) — EXECUTING
+Plan: 29 of 29
+Status: Complete
+Last Activity Description: Phase 08 execution started
+Last activity: 2026-09-05 — Phase 08 execution started
 
-Progress: [██████████] 100%
+Progress: [█████░░░░░] 50%
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 37
+- Total plans completed: 42
 - Average duration: -
 - Total execution time: -
 
@@ -53,6 +55,7 @@ Progress: [██████████] 100%
 | 04 | 7 | - | - |
 | 05 | 11 | - | - |
 | 06 | 5 | - | - |
+| 7 | 5 | - | - |
 
 **Recent Trend:**
 
@@ -99,6 +102,40 @@ Progress: [██████████] 100%
 | Phase 06 P03 | 50min | 2 tasks | 4 files |
 | Phase 06 P04 | 32min | 2 tasks | 6 files |
 | Phase 06 P05 | cross-session (checkpoint-gated) | 3 tasks | 6 files |
+| Phase 07 P01 | 10min | 3 tasks | 5 files |
+| Phase 07 P02 | 11min | 3 tasks | 7 files |
+| Phase 07 P03 | 5min | 3 tasks | 6 files |
+| Phase 07-guardrails-before-churn P04 | 15min | 2 tasks | 1 files |
+| Phase 07-guardrails-before-churn P05 | 6min | 2 tasks | 10 files |
+| Phase 08 P01 | 15min | 2 tasks | 8 files |
+| Phase 08 P02 | 16min | 3 tasks | 17 files |
+| Phase 08 P03 | 17min | 2 tasks | 6 files |
+| Phase 08 P04 | 14min | 2 tasks | 7 files |
+| Phase 08 P05 | 13min | 2 tasks | 5 files |
+| Phase 08 P06 | 23min | 2 tasks | 9 files |
+| Phase 08 P29 | 25min | 3 tasks | 10 files |
+| Phase 08 P07 | 15min | 2 tasks | 5 files |
+| Phase 08 P08 | 18min | 2 tasks | 7 files |
+| Phase 08 P09 | 10min | 2 tasks | 7 files |
+| Phase 08 P10 | 20 min | 2 tasks | 7 files |
+| Phase 08 P11 | 15min | 2 tasks | 7 files |
+| Phase 08 P12 | 23min | 2 tasks | 9 files |
+| Phase 08 P13 | 11min | 2 tasks | 9 files |
+| Phase 08 P14 | 15min | 2 tasks | 7 files |
+| Phase 08 P15 | cross-session | 2 tasks | 7 files |
+| Phase 08 P16 | 45min | 2 tasks | 8 files |
+| Phase 08 P17 | 55min | 2 tasks | 7 files |
+| Phase 08 P18 | 35min | 2 tasks | 4 files |
+| Phase 08 P19 | 30min | 2 tasks | 7 files |
+| Phase 08 P20 | 40min | 2 tasks | 5 files |
+| Phase 08 P21 | 50min | 2 tasks | 8 files |
+| Phase 08 P22 | 45min | 2 tasks | 6 files |
+| Phase 08 P23 | 40min | 2 tasks | 8 files |
+| Phase 08 P24 | 50min | 2 tasks | 10 files |
+| Phase 08 P25 | 55min | 2 tasks | 12 files |
+| Phase 08 P26 | 50min | 2 tasks | 10 files |
+| Phase 08 P27 | cross-session (timeout+resume) | 2 tasks | 14 files |
+| Phase 08 P28 | 2h | 2 tasks | 32 files |
 
 ## Accumulated Context
 
@@ -200,6 +237,34 @@ Recent decisions affecting current work:
 - [Phase ?]: [Phase 6]: 06-04 ship-isolation guard reads produced artifacts only - dist/assets/*.js for the bridge namespace inside make verify, the unstripped debug no-bundle binary for the plugin crate name inside release-checks; cargo metadata manifest assertions kept as cheap early warning only (--no-deps cannot see dependency-propagated features)
 - [Phase ?]: [Phase 6]: 06-04 both red cases proven with real builds (VITE_NATIVE_E2E=1 bundle, --features native-e2e binary) and the binary scan's two crate-name strings confirmed present in the feature-on binary before the default-build green was accepted
 - [Phase ?]: [Phase 6]: 06-05 verdict ratified ci-viable - all three D-01 conditions evidenced on hosted macos-14 runs 33243419439/33250704926 (no TCC prompt, pty.spec green through canvas, 4/4 unattended); release-preflight exit 0 recorded; known IME first-syllable decomposition on input-source switch classified app-side, not a runner defect
+- [Phase 7]: [Phase 7]: 07-01 authored a permanent behavioral test (scripts/check-dom-sanitizer.behavior.test.ts) for the tdd=true tracer beyond the plan files list; the TDD gate requires a committed RED test and the live red/green proof complements Task 3 hermetic policy pin
+- [Phase 7]: [Phase 7]: 07-01 EditorPane dynamic-import provenance regex matches previewBaseHtml case-insensitively (setter setPreviewBaseHtml is capital P); pattern stays narrow and file-scoped
+- [Phase 7]: [Phase 7]: SEC-02 unclassified edge row resolves fail-closed, drill-proven via the Task 1 probe and Task 2 red fixture, both exercising the no-match path
+- [Phase 7]: [Phase 7]: 07-02 terminal warn-line lock names are TERMINAL_SESSIONS/TERMINAL_RESERVATIONS/TERMINAL_KILLER so five sites sharing two retired strings stay distinguishable in stderr
+- [Phase 7]: [Phase 7]: 07-02 into_inner recovery does not clear the mutex poison flag; every later acquisition still returns Err and recovers again (repeated recoveries each emit one warn) - the recovered-guard contract callers must assume
+- [Phase 7]: 07-03: ops_catalog dispatch gate composed as pure fn should_dispatch_catalog_event(predicate && is_catalog_relevant) so the dispatch-relevance test is behavioral; the next()-only extraction shape is untouched
+- [Phase 7]: 07-03: inbox_watcher and terminal_hooks callback closures pinned with split-needle include_str! exactly-once assertions instead of refactoring for testability; scratchpad_watcher's predicate reference count is 2 (production drain filter + chain-mirroring test), the other four modules exactly 1
+- [Phase 7]: 07-04: excluded_scratchpad_rel_prefix deleted, subsumed into excluded_non_document_rel_prefixes — zero callers after read_vault_cache switched to the shared list and clippy -D warnings rejects dead code
+- [Phase 7]: 07-04: the fail-open behavior test (scan_vault_fails_open_when_inbox_root_unresolvable) passes in RED by design — fail-open is the status quo before the resolver exists; documented per the TDD fail-fast protocol
+- [Phase 7]: 07-04: Task 2 (scan_vault_paths containment) carries no separate RED commit — its test depends on the Task 1 tracer-proven shared-list resolver; the tracer gate (#3299 row 3) verified end-to-end green before expansion
+- [Phase 7]: 07-04: PERF-06 NOT marked complete in REQUIREMENTS.md — the shared-ID gate (#2388) blocks it because sibling plan 07-05 also declares PERF-06 and has no SUMMARY yet; an initial mark-complete was reverted after ready-ids returned 0/1
+- [Phase 07-guardrails-before-churn]: 07-05: outlinePaneStore empty-slice inbox key and test fixtures retired in Task 1, not Task 2 — the narrowed union made them typecheck errors, so the tracer gate could not pass otherwise; same prescribed edits, earlier commit slot
+- [Phase 07-guardrails-before-churn]: 07-05: persisted built-in view filters reset to All silently inside the existing pruneCustomDocumentFiltersInState pass via BUILT_IN_DOCUMENT_VIEWS/isBuiltInDocumentView — no signature change to the MainApp call site
+- [Phase 08]: 08-01 uses process-local UUID generations at registry saves and source/worktree reservations; cross-command path exclusion is explicitly staged to 08-29.
+- [Phase 08]: 08-02 keeps the complete batch in an awaited worker, pins source generations and canonical paths, and owns Skills operation settlement and deduplicated notices outside views; shared path integration remains 08-29.
+- [Phase 08]: Store IPC owns scheduling for 24 remaining rows; synchronous exports and source/batch wrappers remain authoritative.
+- [Phase 08]: Only pending clone generations survive unrelated saves while absent; remove/reset and inventory pruning invalidate old identities.
+- [Phase 08]: Bundle recovery is local and guarded; env repair is outside REGISTRY_LOCK with builtin reservation and fresh source/state/dirty validation. Shared admission remains 08-29.
+- [Phase 08]: Git IPC owns AppHandle and resolves ApprovalState only inside a blocking worker; Git domain transactions serialize aliases until Plan29 shared admission.
+- [Phase 08]: Shared path admission pins parent handles; Plan29 wave7 consumes fresh requests, reusable original-parent snapshots and explicit nested leases before Plan07.
+- [Phase 08]: Earlier Skills/Git/env/dispatch/dot writers share complete path admission; initializing lists retain short conditional metadata transactions, while plain getters are read-only. Plan07 document races and Plans16/17 final adapter handoffs remain pending. — Keep source reservation before path waits, release registry admission for network stages, and retain original parent snapshots. Final 37 integration cases pass; the initial dispatch fixture escape has unknown external effects and remains disclosed in SUMMARY/overlay.
+- [Phase 08]: Document commands use complete path admission and borrowed managed-snapshot leases; actual Files and earlier Skills/Git document consumers pass in both orders and aliases. Production Git automatic maintenance lifetime is a separate root-coordinated Plan29 follow-up.
+- [Phase 08]: Thirty scratchpad/shelf/drafts/Gap commands await blocking workers with complete admission and actual production-policy proof. Plan09 must switch drafts task promotion to its borrowed task-creation adapter when adding task admission.
+- [Phase 08]: Plan10 isolates 34 Inbox/outbox/viewer/secret commands; batches retain original parents and settled siblings, local preparation suppresses sends and bytecode caches, and frontend lifetime closure remains Plans25/26.
+- [Phase 08]: Plan11 isolates all ten Today commands; complete alias-aware admission precedes Today locks and capture materialization borrows the outer lease. Plan12 must consume raw calendar/outbox/web-actions helper handoffs without nested admission.
+- [Phase 08]: Plan12 provider uncertainty is durable and manual-only: Plan26 must classify provider_outcome_unknown: and provider_succeeded_local_commit_failed: as external-result reconciliation, disable ordinary UI retry, and retain verified known-ID retry; unknown Upsert without ID is rejected by Rust.
+- [Phase 08]: Plan13 graph and cache commands share complete admission with borrowed snapshots and scanner consumers; catalog public scan owns its write lease. String error contracts remain unchanged; Plan25/26 owns final completion and stale-view UI.
+- [Phase 08]: Plan14 isolates 23 provider commands; original-parent envelope/relay/session admission preserves batches and polling. Session and declared legacy local effects remain leased through subprocess exit without domain mutex guards; arbitrary custom outputs remain delegated. Plan25/26 owns final completion and Plan12 reconciliation markers remain mandatory.
 
 ### Pending Todos
 
@@ -236,10 +301,10 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-08-29T13:12:56.691Z
-Stopped at: Completed 06-05-PLAN.md
+Last session: 2026-09-06T01:14:19.000Z
+Stopped at: Phase 08 complete (29/29 plans); make verify and make release-checks green; next is Phase 09 planning (gsd-plan-phase)
 Resume file: None
 
 ## Operator Next Steps
 
-- Plan Phase 6 with `/gsd-plan-phase 6`
+- Plan Phase 9 (Durability and Session Lifecycle) with `/gsd-plan-phase 9`

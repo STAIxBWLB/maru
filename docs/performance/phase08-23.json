@@ -1,0 +1,683 @@
+{
+  "plan": "08-23",
+  "moduleIntegrationOwner": "08-23",
+  "commands": [
+    {
+      "name": "read_inbox_runtime_config",
+      "module": "src-tauri/src/inbox_settings.rs",
+      "registrationPath": "src-tauri/src/lib.rs::inbox_settings::ipc::read_inbox_runtime_config",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/inbox_settings.rs::ipc::read_inbox_runtime_config owns its inputs and awaits tauri::async_runtime::spawn_blocking calling src-tauri/src/inbox_settings.rs::read_inbox_runtime_config inside the worker; a JoinError becomes the display-only read_inbox_runtime_config_task_failed String.",
+        "src-tauri/src/inbox_settings.rs::read_inbox_runtime_config only reads: src-tauri/src/vault.rs::resolve_inside_vault bounds the workspace root lexically and src-tauri/src/inbox_settings.rs::load_runtime_config_or_legacy parses the finite <work>/workspace.config.yaml inbox block (with legacy fallback), so the converted chain reaches no network call, process wait or unbounded walk."
+      ],
+      "workerBoundary": "src-tauri/src/inbox_settings.rs::ipc::read_inbox_runtime_config awaits tauri::async_runtime::spawn_blocking before any filesystem access runs; only a JoinError maps to the display-only read_inbox_runtime_config_task_failed String while the typed InboxRuntimeConfig payload and every domain error string pass through unchanged; owned Strings and structs cross the await, never a borrowed State or guard.",
+      "syncCallers": [
+        "No Rust or CLI caller invokes read_inbox_runtime_config synchronously today; src-tauri/src/lib.rs registers only inbox_settings::ipc::read_inbox_runtime_config, and the original synchronous src-tauri/src/inbox_settings.rs::read_inbox_runtime_config keeps its name and signature for Rust callers (the phase08_23 tests exercise it directly)."
+      ],
+      "mutationKey": {
+        "readOnly": true,
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "sharedAdmissionEntry": "read_inbox_runtime_config performs no filesystem mutation: src-tauri/src/inbox_settings.rs::load_runtime_config_or_legacy only parses the finite <work>/workspace.config.yaml inbox block, so the command is read-only and needs no mutation admission.",
+        "postAdmissionPreconditions": [
+          "No mutation admission is required: the command performs no filesystem mutation beyond parsing the workspace config, so there is no transaction key to admit and nothing to release"
+        ],
+        "domainLockOrder": "No path admission exists; the command takes no domain lock, so there is no admission-before-domain-lock order to record."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_23",
+          "passed": 17,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts"
+        ],
+        "payload": "readInboxRuntimeConfig (src/lib/api.ts:911) invokes read_inbox_runtime_config with the workspace path; that surface keeps owning the load/save flow regardless of screen changes.",
+        "terminalNoticeOwner": "The Inbox and Telegram settings surfaces that call these api.ts helpers own busy state, current value display and error toasts for these calls. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=read_inbox_runtime_config"
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_23_inbox_wrappers_yield_same_poll_and_map_join_failure",
+          "phase08_23_inbox_real_fixture_results_and_rejections"
+        ],
+        "workerProof": "inbox_settings::tests::phase08_23::phase08_23_inbox_wrappers_yield_same_poll_and_map_join_failure holds the read_inbox_runtime_config future at spawn_blocking worker entry via a #[cfg(test)] worker-stage hook keyed to the fixture workspace config path, manually polls it on the same async task and proves progress while a distinct worker thread stays blocked; the panicked worker maps to the display-only read_inbox_runtime_config_task_failed String.",
+        "platformScope": "macOS unit fixtures only: atomic_file::phase08_06::Home isolation (MARU_TEST_HOME), disposable tempdir workspaces/vaults and the test-only worker-stage and transaction-stage hooks; no live workspace, credential, network endpoint or native test hook is touched.",
+        "limits": "Shared admission serializes cooperating in-process writers on the same admitted path set only; external editor processes are outside the in-process guarantee. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
+        "contract": "The InboxRuntimeConfig payload, the workspace.config.yaml parse and the workspace_config_missing/validation error strings are unchanged; the only new failure path is the JoinError-to-String mapping at the worker boundary."
+      }
+    },
+    {
+      "name": "save_inbox_runtime_config",
+      "module": "src-tauri/src/inbox_settings.rs",
+      "registrationPath": "src-tauri/src/lib.rs::inbox_settings::ipc::save_inbox_runtime_config",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/inbox_settings.rs::ipc::save_inbox_runtime_config owns its AppHandle and inputs, awaits tauri::async_runtime::spawn_blocking calling src-tauri/src/inbox_settings.rs::save_inbox_runtime_config inside the worker; a JoinError becomes the display-only save_inbox_runtime_config_task_failed String.",
+        "src-tauri/src/inbox_settings.rs::save_inbox_runtime_config resolves the workspace through src-tauri/src/vault.rs::resolve_inside_vault, admits <work>/workspace.config.yaml via src-tauri/src/inbox_settings.rs::inbox_runtime_config_admission, then src-tauri/src/atomic_file.rs::with_path_transactions runs lease.before_effect and src-tauri/src/inbox_settings.rs::save_runtime_config validates and rewrites the top-level inbox YAML block."
+      ],
+      "workerBoundary": "src-tauri/src/inbox_settings.rs::ipc::save_inbox_runtime_config awaits tauri::async_runtime::spawn_blocking before any filesystem access or admission wait runs; only a JoinError maps to the display-only save_inbox_runtime_config_task_failed String while the typed InboxRuntimeConfig payload, the post-save inbox://runtime_config_updated emit and every domain error string pass through unchanged; owned Strings, structs and the AppHandle cross the await, never a borrowed State or guard.",
+      "syncCallers": [
+        "No Rust or CLI caller invokes save_inbox_runtime_config synchronously today; src-tauri/src/lib.rs registers only inbox_settings::ipc::save_inbox_runtime_config, and the original synchronous src-tauri/src/inbox_settings.rs::save_inbox_runtime_config keeps its name and signature for Rust callers (the phase08_23 tests exercise it directly)."
+      ],
+      "mutationKey": {
+        "readOnly": false,
+        "lexicalPaths": [
+          "<work>/workspace.config.yaml (read-modify-write target)",
+          "pinned workspace-root parent (require_parent)"
+        ],
+        "aliasPaths": [
+          "workspace-relative work_path resolves through src-tauri/src/vault.rs::resolve_inside_vault to the same absolute lexical config path admitted up front"
+        ],
+        "sharedAdmissionEntry": "src-tauri/src/inbox_settings.rs::save_inbox_runtime_config admits the complete write set before any effect: src-tauri/src/atomic_file.rs::with_path_transactions opens the lease after src-tauri/src/inbox_settings.rs::inbox_runtime_config_admission builds the src-tauri/src/atomic_file.rs::PathTransactionRequest over <work>/workspace.config.yaml with the pinned workspace-root parent (require_parent), so no workspace.config.yaml rewrite escapes the admitted set.",
+        "postAdmissionPreconditions": [
+          "lease.before_effect revalidates the original workspace.config.yaml before the first write",
+          "save_runtime_config validates the InboxRuntimeConfig and refuses a missing workspace.config.yaml with workspace_config_missing inside the lease",
+          "the inbox://runtime_config_updated emit runs only after the lease drops, so listeners never observe a half-committed file"
+        ],
+        "domainLockOrder": "Filesystem path admission (with_path_transactions acquire) happens in src-tauri/src/inbox_settings.rs::save_inbox_runtime_config before save_runtime_config validation and the YAML block rewrite; admission precedes every domain effect and no domain lock is taken before admission."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_23",
+          "passed": 17,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts"
+        ],
+        "payload": "saveInboxRuntimeConfig (src/lib/api.ts:917) invokes save_inbox_runtime_config with the workspace path and config; that surface keeps owning the load/save flow regardless of screen changes.",
+        "terminalNoticeOwner": "The Inbox and Telegram settings surfaces that call these api.ts helpers own busy state, current value display and error toasts for these calls. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=save_inbox_runtime_config"
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_23_inbox_wrappers_yield_same_poll_and_map_join_failure",
+          "phase08_23_inbox_real_fixture_results_and_rejections",
+          "phase08_23_runtime_config_and_settings_writes_do_not_block_each_other",
+          "phase08_23_inbox_error_releases_admission_and_retry_recovers"
+        ],
+        "workerProof": "inbox_settings::tests::phase08_23::phase08_23_each_wrapper (via phase08_23_inbox_wrappers_yield_same_poll_and_map_join_failure) holds the save_inbox_runtime_config future at spawn_blocking worker entry via a #[cfg(test)] worker-stage hook keyed to the fixture workspace config path, manually polls it on the same async task and proves progress while a distinct worker thread stays blocked; the panicked worker maps to the display-only save_inbox_runtime_config_task_failed String.",
+        "platformScope": "macOS unit fixtures only: atomic_file::phase08_06::Home isolation (MARU_TEST_HOME), disposable tempdir workspaces/vaults and the test-only worker-stage and transaction-stage hooks; no live workspace, credential, network endpoint or native test hook is touched.",
+        "limits": "Shared admission serializes cooperating in-process writers on the same admitted path set only; external editor processes are outside the in-process guarantee. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
+        "contract": "The InboxRuntimeConfig payload, the workspace.config.yaml rewrite and every validation error string are unchanged; serialization with a same-target second save and disjoint-progress coexistence with the <vault>/.maru settings write are proven by phase08_23_save_inbox_settings_serializes_same_target_both_orders and phase08_23_runtime_config_and_settings_writes_do_not_block_each_other; the only new failure path is the JoinError-to-String mapping at the worker boundary."
+      }
+    },
+    {
+      "name": "read_inbox_settings",
+      "module": "src-tauri/src/inbox_settings.rs",
+      "registrationPath": "src-tauri/src/lib.rs::inbox_settings::ipc::read_inbox_settings",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/inbox_settings.rs::ipc::read_inbox_settings owns its inputs and awaits tauri::async_runtime::spawn_blocking calling src-tauri/src/inbox_settings.rs::read_inbox_settings inside the worker; a JoinError becomes the display-only read_inbox_settings_task_failed String.",
+        "src-tauri/src/inbox_settings.rs::read_inbox_settings only reads: src-tauri/src/vault.rs::resolve_inside_vault bounds the vault root lexically and src-tauri/src/inbox_settings.rs::load parses the finite <vault>/.maru/settings.json with defaults on absence, so the converted chain reaches no network call, process wait or unbounded walk."
+      ],
+      "workerBoundary": "src-tauri/src/inbox_settings.rs::ipc::read_inbox_settings awaits tauri::async_runtime::spawn_blocking before any filesystem access runs; only a JoinError maps to the display-only read_inbox_settings_task_failed String while the typed InboxSettings payload and every domain error string pass through unchanged; owned Strings and structs cross the await, never a borrowed State or guard.",
+      "syncCallers": [
+        "No Rust or CLI caller invokes read_inbox_settings synchronously today; src-tauri/src/lib.rs registers only inbox_settings::ipc::read_inbox_settings, and the original synchronous src-tauri/src/inbox_settings.rs::read_inbox_settings keeps its name and signature for Rust callers (the phase08_23 tests exercise it directly)."
+      ],
+      "mutationKey": {
+        "readOnly": true,
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "sharedAdmissionEntry": "read_inbox_settings performs no filesystem mutation: src-tauri/src/inbox_settings.rs::load only parses the finite <vault>/.maru/settings.json with defaults on absence, so the command is read-only and needs no mutation admission.",
+        "postAdmissionPreconditions": [
+          "No mutation admission is required: the command performs no filesystem mutation beyond parsing the settings document, so there is no transaction key to admit and nothing to release"
+        ],
+        "domainLockOrder": "No path admission exists; the command takes no domain lock, so there is no admission-before-domain-lock order to record."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_23",
+          "passed": 17,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts"
+        ],
+        "payload": "readInboxSettings (src/lib/api.ts:2835) invokes read_inbox_settings with the vault path; that surface keeps owning the load/save flow regardless of screen changes.",
+        "terminalNoticeOwner": "The Inbox and Telegram settings surfaces that call these api.ts helpers own busy state, current value display and error toasts for these calls. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=read_inbox_settings"
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_23_inbox_wrappers_yield_same_poll_and_map_join_failure",
+          "phase08_23_inbox_real_fixture_results_and_rejections"
+        ],
+        "workerProof": "inbox_settings::tests::phase08_23::phase08_23_inbox_wrappers_yield_same_poll_and_map_join_failure holds the read_inbox_settings future at spawn_blocking worker entry via a #[cfg(test)] worker-stage hook keyed to the fixture vault .maru path, manually polls it on the same async task and proves progress while a distinct worker thread stays blocked; the panicked worker maps to the display-only read_inbox_settings_task_failed String.",
+        "platformScope": "macOS unit fixtures only: atomic_file::phase08_06::Home isolation (MARU_TEST_HOME), disposable tempdir workspaces/vaults and the test-only worker-stage and transaction-stage hooks; no live workspace, credential, network endpoint or native test hook is touched.",
+        "limits": "Shared admission serializes cooperating in-process writers on the same admitted path set only; external editor processes are outside the in-process guarantee. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
+        "contract": "The InboxSettings payload, the settings.json parse and the fallback-default behavior are unchanged; the only new failure path is the JoinError-to-String mapping at the worker boundary."
+      }
+    },
+    {
+      "name": "save_inbox_settings",
+      "module": "src-tauri/src/inbox_settings.rs",
+      "registrationPath": "src-tauri/src/lib.rs::inbox_settings::ipc::save_inbox_settings",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/inbox_settings.rs::ipc::save_inbox_settings owns its inputs and awaits tauri::async_runtime::spawn_blocking calling src-tauri/src/inbox_settings.rs::save_inbox_settings inside the worker; a JoinError becomes the display-only save_inbox_settings_task_failed String.",
+        "src-tauri/src/inbox_settings.rs::save_inbox_settings resolves the vault through src-tauri/src/vault.rs::resolve_inside_vault, admits <vault>/.maru via src-tauri/src/inbox_settings.rs::inbox_settings_admission, then src-tauri/src/atomic_file.rs::with_path_transactions runs lease.before_effect, src-tauri/src/maru_dir.rs::ensure_maru_dir performs bounded idempotent skeleton creation and the pretty-printed settings.json is written inside the lease."
+      ],
+      "workerBoundary": "src-tauri/src/inbox_settings.rs::ipc::save_inbox_settings awaits tauri::async_runtime::spawn_blocking before any filesystem access or admission wait runs; only a JoinError maps to the display-only save_inbox_settings_task_failed String while the typed InboxSettings payload and every domain error string pass through unchanged; owned Strings and structs cross the await, never a borrowed State or guard.",
+      "syncCallers": [
+        "No Rust or CLI caller invokes save_inbox_settings synchronously today; src-tauri/src/lib.rs registers only inbox_settings::ipc::save_inbox_settings, and the original synchronous src-tauri/src/inbox_settings.rs::save_inbox_settings keeps its name and signature for Rust callers (the phase08_23 tests exercise it directly)."
+      ],
+      "mutationKey": {
+        "readOnly": false,
+        "lexicalPaths": [
+          "<vault>/.maru/ (admitted cover for settings.json plus bounded skeleton creation)",
+          "pinned vault-root parent (require_parent)"
+        ],
+        "aliasPaths": [
+          "vault-relative vault_path resolves through src-tauri/src/vault.rs::resolve_inside_vault to the same absolute lexical .maru set admitted up front"
+        ],
+        "sharedAdmissionEntry": "src-tauri/src/inbox_settings.rs::save_inbox_settings admits the complete write set before any effect: src-tauri/src/atomic_file.rs::with_path_transactions opens the lease after src-tauri/src/inbox_settings.rs::inbox_settings_admission builds the src-tauri/src/atomic_file.rs::PathTransactionRequest over <vault>/.maru with the pinned vault-root parent (require_parent), so no settings.json write escapes the admitted set.",
+        "postAdmissionPreconditions": [
+          "lease.before_effect revalidates the original .maru tree before the first write",
+          "ensure_maru_dir bounded skeleton creation stays inside the admitted <vault>/.maru cover and never overwrites existing user content",
+          "the pretty-printed settings.json write lands only after admission and before the lease drops"
+        ],
+        "domainLockOrder": "Filesystem path admission (with_path_transactions acquire) happens in src-tauri/src/inbox_settings.rs::save_inbox_settings before ensure_maru_dir and the settings.json write; admission precedes every domain effect and no domain lock is taken before admission."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_23",
+          "passed": 17,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts"
+        ],
+        "payload": "saveInboxSettings (src/lib/api.ts:2841) invokes save_inbox_settings with the vault path and settings; that surface keeps owning the load/save flow regardless of screen changes.",
+        "terminalNoticeOwner": "The Inbox and Telegram settings surfaces that call these api.ts helpers own busy state, current value display and error toasts for these calls. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=save_inbox_settings"
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_23_inbox_wrappers_yield_same_poll_and_map_join_failure",
+          "phase08_23_inbox_real_fixture_results_and_rejections",
+          "phase08_23_save_inbox_settings_serializes_same_target_both_orders",
+          "phase08_23_inbox_error_releases_admission_and_retry_recovers"
+        ],
+        "workerProof": "inbox_settings::tests::phase08_23::phase08_23_inbox_wrappers_yield_same_poll_and_map_join_failure holds the save_inbox_settings future at spawn_blocking worker entry via a #[cfg(test)] worker-stage hook keyed to the fixture vault .maru path, manually polls it on the same async task and proves progress while a distinct worker thread stays blocked; the panicked worker maps to the display-only save_inbox_settings_task_failed String.",
+        "platformScope": "macOS unit fixtures only: atomic_file::phase08_06::Home isolation (MARU_TEST_HOME), disposable tempdir workspaces/vaults and the test-only worker-stage and transaction-stage hooks; no live workspace, credential, network endpoint or native test hook is touched.",
+        "limits": "Shared admission serializes cooperating in-process writers on the same admitted path set only; external editor processes are outside the in-process guarantee. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
+        "contract": "The InboxSettings payload, the settings.json write and every validation error string are unchanged; serialization with a same-target second save in both launch orders is proven by phase08_23_save_inbox_settings_serializes_same_target_both_orders and disjoint-progress coexistence with the workspace.config.yaml write by phase08_23_runtime_config_and_settings_writes_do_not_block_each_other; the only new failure path is the JoinError-to-String mapping at the worker boundary."
+      }
+    },
+    {
+      "name": "read_telegram_monitor_config",
+      "module": "src-tauri/src/telegram_config.rs",
+      "registrationPath": "src-tauri/src/lib.rs::telegram_config::ipc::read_telegram_monitor_config",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/telegram_config.rs::ipc::read_telegram_monitor_config owns its inputs and awaits tauri::async_runtime::spawn_blocking calling src-tauri/src/telegram_config.rs::read_telegram_monitor_config inside the worker; a JoinError becomes the display-only read_telegram_monitor_config_task_failed String.",
+        "src-tauri/src/telegram_config.rs::read_telegram_monitor_config only reads: src-tauri/src/telegram_config.rs::resolve_monitor_config_path lexically bounds the effective monitor config path (explicit monitor_config_path wins over the work default) and src-tauri/src/telegram_config.rs::read_config_or_default parses the finite YAML with defaults on absence, then src-tauri/src/telegram_config.rs::redacted_view strips secrets, so the converted chain reaches no network call, process wait or unbounded walk."
+      ],
+      "workerBoundary": "src-tauri/src/telegram_config.rs::ipc::read_telegram_monitor_config awaits tauri::async_runtime::spawn_blocking before any filesystem access runs; only a JoinError maps to the display-only read_telegram_monitor_config_task_failed String while the typed TelegramMonitorConfigView payload and every domain error string pass through unchanged; owned Strings, Options and structs cross the await, never a borrowed State or guard.",
+      "syncCallers": [
+        "src-tauri/src/telegram_config.rs::ipc::save_telegram_monitor_config re-reads the saved config through the shared read_config_or_default helper inside its own lease rather than calling the synchronous read entry point; no Rust or CLI caller invokes read_telegram_monitor_config synchronously today, and the original synchronous src-tauri/src/telegram_config.rs::read_telegram_monitor_config keeps its name and signature for Rust callers (the phase08_23 tests exercise it directly)."
+      ],
+      "mutationKey": {
+        "readOnly": true,
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "sharedAdmissionEntry": "read_telegram_monitor_config performs no filesystem mutation: src-tauri/src/telegram_config.rs::read_config_or_default only parses the finite monitor YAML with defaults on absence and src-tauri/src/telegram_config.rs::redacted_view strips secrets for display, so the command is read-only and needs no mutation admission.",
+        "postAdmissionPreconditions": [
+          "No mutation admission is required: the command performs no filesystem mutation beyond parsing the monitor config document, so there is no transaction key to admit and nothing to release"
+        ],
+        "domainLockOrder": "No path admission exists; the command takes no domain lock, so there is no admission-before-domain-lock order to record."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_23",
+          "passed": 17,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts"
+        ],
+        "payload": "readTelegramMonitorConfig (src/lib/api.ts:2443) invokes read_telegram_monitor_config with the optional work path and monitor config path; that surface keeps owning the load/save flow regardless of screen changes.",
+        "terminalNoticeOwner": "The Inbox and Telegram settings surfaces that call these api.ts helpers own busy state, current value display and error toasts for these calls. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "accept/reject/stage outcome per item",
+        "successRetention": "pane state refresh after mutation",
+        "failureReasons": "pane-local catch error message",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=read_telegram_monitor_config"
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_23_telegram_wrappers_yield_same_poll_and_map_join_failure",
+          "phase08_23_telegram_real_fixture_results_and_rejections"
+        ],
+        "workerProof": "telegram_config::tests::phase08_23::phase08_23_telegram_wrappers_yield_same_poll_and_map_join_failure holds the read_telegram_monitor_config future at spawn_blocking worker entry via a #[cfg(test)] worker-stage hook keyed to the fixture monitor config path, manually polls it on the same async task and proves progress while a distinct worker thread stays blocked; the panicked worker maps to the display-only read_telegram_monitor_config_task_failed String.",
+        "platformScope": "macOS unit fixtures only: atomic_file::phase08_06::Home isolation (MARU_TEST_HOME), disposable tempdir workspaces/vaults and the test-only worker-stage and transaction-stage hooks; no live workspace, credential, network endpoint or native test hook is touched.",
+        "limits": "Shared admission serializes cooperating in-process writers on the same admitted path set only; external editor processes are outside the in-process guarantee. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
+        "contract": "The TelegramMonitorConfigView payload, the redaction behavior and the not-found/default error strings are unchanged; the only new failure path is the JoinError-to-String mapping at the worker boundary."
+      }
+    },
+    {
+      "name": "save_telegram_monitor_config",
+      "module": "src-tauri/src/telegram_config.rs",
+      "registrationPath": "src-tauri/src/lib.rs::telegram_config::ipc::save_telegram_monitor_config",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/telegram_config.rs::ipc::save_telegram_monitor_config owns its AppHandle and inputs, awaits tauri::async_runtime::spawn_blocking calling src-tauri/src/telegram_config.rs::save_telegram_monitor_config inside the worker; a JoinError becomes the display-only save_telegram_monitor_config_task_failed String.",
+        "src-tauri/src/telegram_config.rs::save_telegram_monitor_config resolves the effective path through src-tauri/src/telegram_config.rs::resolve_monitor_config_path, admits it via src-tauri/src/telegram_config.rs::telegram_monitor_admission, then src-tauri/src/atomic_file.rs::with_path_transactions runs lease.before_effect, src-tauri/src/telegram_config.rs::ensure_secret_config_path authorizes the target, apply_save/validate_config merge the patch and write_config_blocks rewrites only the telegram/polling/chats/notification YAML blocks before set_secret_file_mode re-applies permissions."
+      ],
+      "workerBoundary": "src-tauri/src/telegram_config.rs::ipc::save_telegram_monitor_config awaits tauri::async_runtime::spawn_blocking before any filesystem access or admission wait runs; only a JoinError maps to the display-only save_telegram_monitor_config_task_failed String while the typed TelegramMonitorConfigView payload, the post-save telegram://monitor_config_updated emit and every domain error string pass through unchanged; owned Strings, Options, structs and the AppHandle cross the await, never a borrowed State or guard.",
+      "syncCallers": [
+        "No Rust or CLI caller invokes save_telegram_monitor_config synchronously today; src-tauri/src/lib.rs registers only telegram_config::ipc::save_telegram_monitor_config, and the original synchronous src-tauri/src/telegram_config.rs::save_telegram_monitor_config keeps its name and signature for Rust callers (the phase08_23 tests exercise it directly)."
+      ],
+      "mutationKey": {
+        "readOnly": false,
+        "lexicalPaths": [
+          "<resolved monitor config path> (read-modify-write target admitted by telegram_monitor_admission)"
+        ],
+        "aliasPaths": [
+          "an explicit monitor_config_path expands through expand_tilde and lexical_normalize_path, while a work-only call resolves to the work-scoped default config path; both resolve before admission to the same absolute lexical target"
+        ],
+        "sharedAdmissionEntry": "src-tauri/src/telegram_config.rs::save_telegram_monitor_config admits the complete write set before any effect: src-tauri/src/atomic_file.rs::with_path_transactions opens the lease after src-tauri/src/telegram_config.rs::telegram_monitor_admission builds the src-tauri/src/atomic_file.rs::PathTransactionRequest over the resolved monitor config path, so no config rewrite escapes the admitted set.",
+        "postAdmissionPreconditions": [
+          "lease.before_effect revalidates the original config file before the first write",
+          "ensure_secret_config_path runs inside the lease, so a save can never create or widen a secret config path outside the admitted target",
+          "write_config_blocks rewrites only the telegram/polling/chats/notification YAML blocks and set_secret_file_mode re-applies permissions before the lease drops",
+          "the telegram://monitor_config_updated emit runs only after the lease drops, so listeners never observe a half-committed file"
+        ],
+        "domainLockOrder": "Filesystem path admission (with_path_transactions acquire) happens in src-tauri/src/telegram_config.rs::save_telegram_monitor_config before ensure_secret_config_path, block rewrite and permission fixup; admission precedes every domain effect and no domain lock is taken before admission."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_23",
+          "passed": 17,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts"
+        ],
+        "payload": "saveTelegramMonitorConfig (src/lib/api.ts:2452) invokes save_telegram_monitor_config with the optional work path, monitor config path and save payload; that surface keeps owning the load/save flow regardless of screen changes.",
+        "terminalNoticeOwner": "The Inbox and Telegram settings surfaces that call these api.ts helpers own busy state, current value display and error toasts for these calls. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "accept/reject/stage outcome per item",
+        "successRetention": "pane state refresh after mutation",
+        "failureReasons": "pane-local catch error message",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=save_telegram_monitor_config"
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_23_telegram_wrappers_yield_same_poll_and_map_join_failure",
+          "phase08_23_telegram_real_fixture_results_and_rejections",
+          "phase08_23_telegram_save_serializes_same_target_both_orders",
+          "phase08_23_telegram_error_releases_admission_and_retry_recovers"
+        ],
+        "workerProof": "telegram_config::tests::phase08_23::phase08_23_telegram_wrappers_yield_same_poll_and_map_join_failure holds the save_telegram_monitor_config future at spawn_blocking worker entry via a #[cfg(test)] worker-stage hook keyed to the fixture monitor config path, manually polls it on the same async task and proves progress while a distinct worker thread stays blocked; the panicked worker maps to the display-only save_telegram_monitor_config_task_failed String.",
+        "platformScope": "macOS unit fixtures only: atomic_file::phase08_06::Home isolation (MARU_TEST_HOME), disposable tempdir workspaces/vaults and the test-only worker-stage and transaction-stage hooks; no live workspace, credential, network endpoint or native test hook is touched.",
+        "limits": "Shared admission serializes cooperating in-process writers on the same admitted path set only; external editor processes are outside the in-process guarantee. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
+        "contract": "The TelegramMonitorConfigView payload, the block-scoped YAML rewrite, the redaction behavior and every validation error string are unchanged; serialization with a same-target second save in both launch orders is proven by phase08_23_telegram_save_serializes_same_target_both_orders; the only new failure path is the JoinError-to-String mapping at the worker boundary."
+      }
+    },
+    {
+      "name": "read_sites",
+      "module": "src-tauri/src/sites.rs",
+      "registrationPath": "src-tauri/src/lib.rs::sites::ipc::read_sites",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/sites.rs::ipc::read_sites owns its inputs and awaits tauri::async_runtime::spawn_blocking calling src-tauri/src/sites.rs::read_sites inside the worker; a JoinError becomes the display-only read_sites_task_failed String.",
+        "src-tauri/src/sites.rs::read_sites resolves the registry through src-tauri/src/sites.rs::sites_json_path (host_fs::maru_home()/sites.json), admits it via src-tauri/src/sites.rs::sites_registry_admission, then src-tauri/src/atomic_file.rs::with_path_transactions runs lease.before_effect and src-tauri/src/sites.rs::read_sites_internal seeds the versioned default envelope on first use before parsing the finite document, so read_sites is a mutation row (seeder) and shares the save_sites admission."
+      ],
+      "workerBoundary": "src-tauri/src/sites.rs::ipc::read_sites awaits tauri::async_runtime::spawn_blocking before any filesystem access or admission wait runs; only a JoinError maps to the display-only read_sites_task_failed String while the JSON payload and every domain error string pass through unchanged; owned JSON values cross the await, never a borrowed State or guard.",
+      "syncCallers": [
+        "No Rust or CLI caller invokes read_sites synchronously today; src-tauri/src/lib.rs registers only sites::ipc::read_sites, and the original synchronous src-tauri/src/sites.rs::read_sites keeps its name and signature for Rust callers (the phase08_23 tests exercise it directly)."
+      ],
+      "mutationKey": {
+        "readOnly": false,
+        "lexicalPaths": [
+          "<maru-home>/sites.json (seed-on-absence target)"
+        ],
+        "aliasPaths": [
+          "sites_json_path resolves through host_fs::maru_home to the same absolute lexical registry file admitted up front"
+        ],
+        "sharedAdmissionEntry": "src-tauri/src/sites.rs::read_sites admits the complete write set before any effect: src-tauri/src/atomic_file.rs::with_path_transactions opens the lease after src-tauri/src/sites.rs::sites_registry_admission builds the src-tauri/src/atomic_file.rs::PathTransactionRequest over <maru-home>/sites.json, so the first-use default envelope seed never escapes the admitted set.",
+        "postAdmissionPreconditions": [
+          "lease.before_effect revalidates the original sites.json before the first effect",
+          "read_sites_internal seeds the versioned default envelope only when the registry file is absent and otherwise parses the finite document without rewriting it",
+          "the read lease serializes against save_sites on the same registry file, which is what phase08_23_sites_serializes_registry_both_orders proves in both launch orders"
+        ],
+        "domainLockOrder": "Filesystem path admission (with_path_transactions acquire) happens in src-tauri/src/sites.rs::read_sites before the seed-on-absence effect; admission precedes every domain effect and no domain lock is taken before admission."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_23",
+          "passed": 17,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/maruDir.ts"
+        ],
+        "payload": "readSites (src/lib/maruDir.ts:631) invokes read_sites; that surface keeps owning the load/save flow regardless of screen changes.",
+        "terminalNoticeOwner": "The sites import/settings surface that calls these maruDir.ts helpers owns busy state, current value display and error toasts for these calls. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=read_sites"
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_23_sites_wrappers_yield_same_poll_and_map_join_failure",
+          "phase08_23_sites_real_fixture_results_and_rejections",
+          "phase08_23_sites_serializes_registry_both_orders"
+        ],
+        "workerProof": "sites::tests::phase08_23::phase08_23_sites_wrappers_yield_same_poll_and_map_join_failure holds the read_sites future at spawn_blocking worker entry via a #[cfg(test)] worker-stage hook keyed to the fixture sites.json path, manually polls it on the same async task and proves progress while a distinct worker thread stays blocked; the panicked worker maps to the display-only read_sites_task_failed String.",
+        "platformScope": "macOS unit fixtures only: atomic_file::phase08_06::Home isolation (MARU_TEST_HOME), disposable tempdir workspaces/vaults and the test-only worker-stage and transaction-stage hooks; no live workspace, credential, network endpoint or native test hook is touched.",
+        "limits": "Shared admission serializes cooperating in-process writers on the same admitted path set only; external editor processes are outside the in-process guarantee. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
+        "contract": "The sites JSON envelope, the seed-on-absence behavior and the schema error strings are unchanged; read_sites is honestly classified as a mutation row because first use seeds the registry, and it serializes against save_sites on the same admitted file; the only new failure path is the JoinError-to-String mapping at the worker boundary."
+      }
+    },
+    {
+      "name": "save_sites",
+      "module": "src-tauri/src/sites.rs",
+      "registrationPath": "src-tauri/src/lib.rs::sites::ipc::save_sites",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/sites.rs::ipc::save_sites owns its inputs and awaits tauri::async_runtime::spawn_blocking calling src-tauri/src/sites.rs::save_sites inside the worker; a JoinError becomes the display-only save_sites_task_failed String.",
+        "src-tauri/src/sites.rs::save_sites resolves the registry through src-tauri/src/sites.rs::sites_json_path, admits it via src-tauri/src/sites.rs::sites_registry_admission, then src-tauri/src/atomic_file.rs::with_path_transactions runs lease.before_effect and src-tauri/src/sites.rs::save_sites_internal validates the payload (the sites array and schema version) before rewriting the finite document."
+      ],
+      "workerBoundary": "src-tauri/src/sites.rs::ipc::save_sites awaits tauri::async_runtime::spawn_blocking before any filesystem access or admission wait runs; only a JoinError maps to the display-only save_sites_task_failed String while every domain error string passes through unchanged; owned JSON values cross the await, never a borrowed State or guard.",
+      "syncCallers": [
+        "No Rust or CLI caller invokes save_sites synchronously today; src-tauri/src/lib.rs registers only sites::ipc::save_sites, and the original synchronous src-tauri/src/sites.rs::save_sites keeps its name and signature for Rust callers (the phase08_23 tests exercise it directly)."
+      ],
+      "mutationKey": {
+        "readOnly": false,
+        "lexicalPaths": [
+          "<maru-home>/sites.json (read-modify-write target)"
+        ],
+        "aliasPaths": [
+          "sites_json_path resolves through host_fs::maru_home to the same absolute lexical registry file admitted up front"
+        ],
+        "sharedAdmissionEntry": "src-tauri/src/sites.rs::save_sites admits the complete write set before any effect: src-tauri/src/atomic_file.rs::with_path_transactions opens the lease after src-tauri/src/sites.rs::sites_registry_admission builds the src-tauri/src/atomic_file.rs::PathTransactionRequest over <maru-home>/sites.json, so no registry rewrite escapes the admitted set.",
+        "postAdmissionPreconditions": [
+          "lease.before_effect revalidates the original sites.json before the first write",
+          "save_sites_internal validates the payload (sites array and schema version) and refuses malformed input with the unchanged sites.json payload must contain a \"sites\" array error",
+          "the save lease serializes against read_sites on the same registry file, which is what phase08_23_sites_serializes_registry_both_orders proves in both launch orders"
+        ],
+        "domainLockOrder": "Filesystem path admission (with_path_transactions acquire) happens in src-tauri/src/sites.rs::save_sites before payload validation and the registry rewrite; admission precedes every domain effect and no domain lock is taken before admission."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_23",
+          "passed": 17,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/maruDir.ts"
+        ],
+        "payload": "saveSites (src/lib/maruDir.ts:638) invokes save_sites with the registry value; that surface keeps owning the load/save flow regardless of screen changes.",
+        "terminalNoticeOwner": "The sites import/settings surface that calls these maruDir.ts helpers owns busy state, current value display and error toasts for these calls. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=save_sites"
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_23_sites_wrappers_yield_same_poll_and_map_join_failure",
+          "phase08_23_sites_real_fixture_results_and_rejections",
+          "phase08_23_sites_serializes_registry_both_orders",
+          "phase08_23_sites_error_releases_admission_and_retry_recovers"
+        ],
+        "workerProof": "sites::tests::phase08_23::phase08_23_sites_wrappers_yield_same_poll_and_map_join_failure holds the save_sites future at spawn_blocking worker entry via a #[cfg(test)] worker-stage hook keyed to the fixture sites.json path, manually polls it on the same async task and proves progress while a distinct worker thread stays blocked; the panicked worker maps to the display-only save_sites_task_failed String.",
+        "platformScope": "macOS unit fixtures only: atomic_file::phase08_06::Home isolation (MARU_TEST_HOME), disposable tempdir workspaces/vaults and the test-only worker-stage and transaction-stage hooks; no live workspace, credential, network endpoint or native test hook is touched.",
+        "limits": "Shared admission serializes cooperating in-process writers on the same admitted path set only; external editor processes are outside the in-process guarantee. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
+        "contract": "The sites JSON envelope, the validation error strings and the seed-on-absence read behavior are unchanged; serialization with read_sites in both launch orders is proven by phase08_23_sites_serializes_registry_both_orders; the only new failure path is the JoinError-to-String mapping at the worker boundary."
+      }
+    },
+    {
+      "name": "scan_work_sites",
+      "module": "src-tauri/src/sites.rs",
+      "registrationPath": "src-tauri/src/lib.rs::sites::ipc::scan_work_sites",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/sites.rs::ipc::scan_work_sites owns its inputs and awaits tauri::async_runtime::spawn_blocking calling src-tauri/src/sites.rs::scan_work_sites inside the worker; a JoinError becomes the display-only scan_work_sites_task_failed String.",
+        "src-tauri/src/sites.rs::scan_work_sites only reads: host_fs::expand_tilde bounds the scan root, fs::read_dir enumerates immediate children, and src-tauri/src/sites.rs::scan_site_dir probes each candidate through bounded readers (src-tauri/src/sites.rs::read_text_capped with the 256 KiB TEXT_CAP over package.json, astro config, CNAME and README), so the converted chain reaches no network call, process wait or unbounded walk."
+      ],
+      "workerBoundary": "src-tauri/src/sites.rs::ipc::scan_work_sites awaits tauri::async_runtime::spawn_blocking before any filesystem access runs; only a JoinError maps to the display-only scan_work_sites_task_failed String while the typed Vec<SiteCandidate> payload and every domain error string pass through unchanged; owned Strings cross the await, never a borrowed State or guard.",
+      "syncCallers": [
+        "No Rust or CLI caller invokes scan_work_sites synchronously today; src-tauri/src/lib.rs registers only sites::ipc::scan_work_sites, and the original synchronous src-tauri/src/sites.rs::scan_work_sites keeps its name and signature for Rust callers (the phase08_23 tests exercise it directly)."
+      ],
+      "mutationKey": {
+        "readOnly": true,
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "sharedAdmissionEntry": "scan_work_sites performs no filesystem mutation: src-tauri/src/sites.rs::scan_work_sites enumerates only the immediate children of the scan root and src-tauri/src/sites.rs::scan_site_dir reads candidate metadata through read_text_capped with the 256 KiB TEXT_CAP, so the command is read-only and needs no mutation admission.",
+        "postAdmissionPreconditions": [
+          "No mutation admission is required: the command performs no filesystem mutation beyond bounded immediate-child metadata probes, so there is no transaction key to admit and nothing to release"
+        ],
+        "domainLockOrder": "No path admission exists; the command takes no domain lock, so there is no admission-before-domain-lock order to record."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_23",
+          "passed": 17,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/maruDir.ts"
+        ],
+        "payload": "scanWorkSites (src/lib/maruDir.ts:658) invokes scan_work_sites with the directory to scan; that surface keeps owning the import-dialog flow regardless of screen changes.",
+        "terminalNoticeOwner": "The sites import/settings surface that calls these maruDir.ts helpers owns busy state, current value display and error toasts for these calls. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a: read; data returned to the caller",
+        "successRetention": "result stored in caller component state",
+        "failureReasons": "call-site catch retains the error (component-owned read failure)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=scan_work_sites"
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_23_sites_wrappers_yield_same_poll_and_map_join_failure",
+          "phase08_23_sites_real_fixture_results_and_rejections"
+        ],
+        "workerProof": "sites::tests::phase08_23::phase08_23_sites_wrappers_yield_same_poll_and_map_join_failure holds the scan_work_sites future at spawn_blocking worker entry via a #[cfg(test)] worker-stage hook keyed to the fixture scan root, manually polls it on the same async task and proves progress while a distinct worker thread stays blocked; the panicked worker maps to the display-only scan_work_sites_task_failed String.",
+        "platformScope": "macOS unit fixtures only: atomic_file::phase08_06::Home isolation (MARU_TEST_HOME), disposable tempdir workspaces/vaults and the test-only worker-stage and transaction-stage hooks; no live workspace, credential, network endpoint or native test hook is touched.",
+        "limits": "Shared admission serializes cooperating in-process writers on the same admitted path set only; external editor processes are outside the in-process guarantee. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
+        "contract": "The Vec<SiteCandidate> payload, the bounded scan behavior (immediate children plus TEXT_CAP 256 KiB reads) and the Not a directory error string are unchanged; the only new failure path is the JoinError-to-String mapping at the worker boundary."
+      }
+    },
+    {
+      "name": "maru_e2e_run",
+      "module": "src-tauri/src/e2e_flow.rs",
+      "registrationPath": "src-tauri/src/lib.rs::e2e_flow::ipc::maru_e2e_run",
+      "originalDisposition": "CONVERT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/e2e_flow.rs::ipc::maru_e2e_run owns its inputs and awaits tauri::async_runtime::spawn_blocking calling src-tauri/src/e2e_flow.rs::maru_e2e_run inside the worker; a JoinError becomes the display-only maru_e2e_run_task_failed String.",
+        "src-tauri/src/e2e_flow.rs::maru_e2e_run resolves the workspace through src-tauri/src/vault.rs::normalize_existing_dir, seeds the deterministic fixture (ensure_sample_skill, append_run_event_payload, ensure_report_template), then admits <work>/.maru/e2e-runs via src-tauri/src/e2e_flow.rs::e2e_run_admission and runs every artifact effect (storage_dir creation, report/slide/event/template writes and the final metadata write_json) inside the src-tauri/src/atomic_file.rs::with_path_transactions lease; nested writers keep their own admission and stay outside this lease."
+      ],
+      "workerBoundary": "src-tauri/src/e2e_flow.rs::ipc::maru_e2e_run awaits tauri::async_runtime::spawn_blocking before any filesystem access or admission wait runs; only a JoinError maps to the display-only maru_e2e_run_task_failed String while the typed E2EFlowRun payload and every domain error string pass through unchanged; owned Strings, Options and structs cross the await, never a borrowed State or guard.",
+      "syncCallers": [
+        "No Rust or CLI caller invokes maru_e2e_run synchronously today; src-tauri/src/lib.rs registers only e2e_flow::ipc::maru_e2e_run, and the original synchronous src-tauri/src/e2e_flow.rs::maru_e2e_run keeps its name and signature for Rust callers (the phase08_23 tests exercise it directly)."
+      ],
+      "mutationKey": {
+        "readOnly": false,
+        "lexicalPaths": [
+          "<work>/.maru/e2e-runs/ (artifact tree admitted for the run)"
+        ],
+        "aliasPaths": [
+          "workspace-relative work_path resolves through src-tauri/src/vault.rs::normalize_existing_dir to the same absolute lexical e2e-runs tree admitted up front"
+        ],
+        "sharedAdmissionEntry": "src-tauri/src/e2e_flow.rs::maru_e2e_run admits the complete artifact set before any effect: src-tauri/src/atomic_file.rs::with_path_transactions opens the lease after src-tauri/src/e2e_flow.rs::e2e_run_admission builds the src-tauri/src/atomic_file.rs::PathTransactionRequest over <work>/.maru/e2e-runs, so no artifact write escapes the admitted set; nested writers (skills lifecycle, report-template seeding, run-event appends) keep their own admission and intentionally stay outside this lease.",
+        "postAdmissionPreconditions": [
+          "lease.before_effect revalidates the original e2e-runs tree before the first artifact effect",
+          "storage_dir creation, report/slide/event/template artifact writes and the final metadata write_json all run inside the admitted e2e-runs lease",
+          "nested writers re-admit their own complete sets instead of extending this lease, and the store-layer source_busy guard keeps concurrent runs from double-seeding the managed skill"
+        ],
+        "domainLockOrder": "Filesystem path admission (with_path_transactions acquire) happens in src-tauri/src/e2e_flow.rs::maru_e2e_run before any artifact effect; admission precedes every domain effect and no domain lock is taken before admission."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_23",
+          "passed": 17,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/e2eFlow.ts"
+        ],
+        "payload": "runE2EFlow (src/lib/e2eFlow.ts:310) invokes maru_e2e_run with the workspace path and optional baseline average; that surface keeps owning the run flow regardless of screen changes.",
+        "terminalNoticeOwner": "The E2E flow surface that calls these e2eFlow.ts helpers owns run state, progress display and error toasts for these calls. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a",
+        "successRetention": "n/a",
+        "failureReasons": "n/a",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=maru_e2e_run"
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_23_e2e_wrappers_yield_same_poll_and_map_join_failure",
+          "phase08_23_e2e_run_and_read_real_fixture_and_rejections",
+          "phase08_23_e2e_run_serializes_with_template_writer_both_orders",
+          "phase08_23_e2e_run_error_releases_admission_and_retry_recovers"
+        ],
+        "workerProof": "e2e_flow::tests::phase08_23::phase08_23_e2e_wrappers_yield_same_poll_and_map_join_failure holds the maru_e2e_run future at spawn_blocking worker entry via a #[cfg(test)] worker-stage hook keyed to the fixture e2e-runs path, manually polls it on the same async task and proves progress while a distinct worker thread stays blocked; the panicked worker maps to the display-only maru_e2e_run_task_failed String.",
+        "platformScope": "macOS unit fixtures only: atomic_file::phase08_06::Home isolation (MARU_TEST_HOME), disposable tempdir workspaces/vaults and the test-only worker-stage and transaction-stage hooks; no live workspace, credential, network endpoint or native test hook is touched.",
+        "limits": "Shared admission serializes cooperating in-process writers on the same admitted path set only; external editor processes are outside the in-process guarantee. PERF-01/PERF-02 remain globally outstanding for the whole phase. The e2e run's store-layer seeding still fails concurrent same-work runs with the pre-existing source_busy error, so true concurrent runs remain unsupported by design; the path lease only serializes the artifact writers.",
+        "contract": "The E2EFlowRun payload, the deterministic report/slide artifacts, the run_id validation and the Cannot-read error strings are unchanged; serialization with the save_maru_template writer is proven in both launch orders by phase08_23_e2e_run_serializes_with_template_writer_both_orders (template-first observes the run blocked at its first .maru-area acquisition, the run-event store, because the run's run-id-based event path is generated inside the command); the only new failure path is the JoinError-to-String mapping at the worker boundary."
+      }
+    },
+    {
+      "name": "maru_e2e_read",
+      "module": "src-tauri/src/e2e_flow.rs",
+      "registrationPath": "src-tauri/src/lib.rs::e2e_flow::ipc::maru_e2e_read",
+      "originalDisposition": "AUDIT",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/e2e_flow.rs::ipc::maru_e2e_read owns its inputs and awaits tauri::async_runtime::spawn_blocking calling src-tauri/src/e2e_flow.rs::maru_e2e_read inside the worker; a JoinError becomes the display-only maru_e2e_read_task_failed String.",
+        "src-tauri/src/e2e_flow.rs::maru_e2e_read only reads: src-tauri/src/vault.rs::normalize_existing_dir bounds the workspace root, the run_id is validated against the allowed pattern, and the run metadata/report/slides are read back from the finite <work>/.maru/e2e-runs/<run_id> artifact set, so the converted chain reaches no network call, process wait or unbounded walk."
+      ],
+      "workerBoundary": "src-tauri/src/e2e_flow.rs::ipc::maru_e2e_read awaits tauri::async_runtime::spawn_blocking before any filesystem access runs; only a JoinError maps to the display-only maru_e2e_read_task_failed String while the typed E2EFlowRun payload and every domain error string pass through unchanged; owned Strings and structs cross the await, never a borrowed State or guard.",
+      "syncCallers": [
+        "No Rust or CLI caller invokes maru_e2e_read synchronously today; src-tauri/src/lib.rs registers only e2e_flow::ipc::maru_e2e_read, and the original synchronous src-tauri/src/e2e_flow.rs::maru_e2e_read keeps its name and signature for Rust callers (the phase08_23 tests exercise it directly)."
+      ],
+      "mutationKey": {
+        "readOnly": true,
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "sharedAdmissionEntry": "maru_e2e_read performs no filesystem mutation: it validates the run_id pattern and reads the finite <work>/.maru/e2e-runs/<run_id> metadata, report and slides produced by maru_e2e_run, so the command is read-only and needs no mutation admission.",
+        "postAdmissionPreconditions": [
+          "No mutation admission is required: the command performs no filesystem mutation beyond reading the persisted run artifacts, so there is no transaction key to admit and nothing to release"
+        ],
+        "domainLockOrder": "No path admission exists; the command takes no domain lock, so there is no admission-before-domain-lock order to record."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_23",
+          "passed": 17,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/e2eFlow.ts"
+        ],
+        "payload": "readE2EFlow (src/lib/e2eFlow.ts:326) invokes maru_e2e_read with the workspace path and run id; that surface keeps owning the run flow regardless of screen changes.",
+        "terminalNoticeOwner": "The E2E flow surface that calls these e2eFlow.ts helpers owns run state, progress display and error toasts for these calls. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
+      ,
+        "classifier": "n/a",
+        "successRetention": "n/a",
+        "failureReasons": "n/a",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=maru_e2e_read"
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_23_e2e_wrappers_yield_same_poll_and_map_join_failure",
+          "phase08_23_e2e_run_and_read_real_fixture_and_rejections"
+        ],
+        "workerProof": "e2e_flow::tests::phase08_23::phase08_23_e2e_wrappers_yield_same_poll_and_map_join_failure holds the maru_e2e_read future at spawn_blocking worker entry via a #[cfg(test)] worker-stage hook keyed to the fixture e2e-runs run path, manually polls it on the same async task and proves progress while a distinct worker thread stays blocked; the panicked worker maps to the display-only maru_e2e_read_task_failed String.",
+        "platformScope": "macOS unit fixtures only: atomic_file::phase08_06::Home isolation (MARU_TEST_HOME), disposable tempdir workspaces/vaults and the test-only worker-stage and transaction-stage hooks; no live workspace, credential, network endpoint or native test hook is touched.",
+        "limits": "Shared admission serializes cooperating in-process writers on the same admitted path set only; external editor processes are outside the in-process guarantee. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
+        "contract": "The E2EFlowRun payload, the maru_e2e_run_id_invalid validation and the Cannot-read error strings are unchanged; the only new failure path is the JoinError-to-String mapping at the worker boundary."
+      }
+    }
+  ]
+}
