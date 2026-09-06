@@ -283,6 +283,7 @@ import { LocaleContext, useLocaleState, useTranslation } from "./lib/i18n";
 import { listenForMenuCommand } from "./lib/menu";
 import {
   nativeE2eEnabled,
+  installNativeE2eHarness,
   registerMenuCommandDispatcher,
 } from "./lib/nativeE2eBridge";
 import { currentPlatform, isMacPlatform } from "./lib/platform";
@@ -7000,12 +7001,14 @@ export function MainApp() {
   // e2e runner through the build-gated debug bridge. The dispatcher delegates
   // to the same runMenuCommand the Tauri listener above calls — deliberately
   // not a parallel copy of the switch, which would let the native spec pass
-  // against logic the real menu never reaches. registerMenuCommandDispatcher
-  // is itself build-gated (the VITE_NATIVE_E2E literal inside it tree-shakes
+  // against logic the real menu never reaches. Plan 08-27 installs the native
+  // responsiveness harness in the same effect: both are one-time,
+  // build-gated installs (the VITE_NATIVE_E2E literal inside them tree-shakes
   // the bridge from production bundles); the outer guard keeps this effect
-  // inert without registering anything.
+  // inert without installing anything.
   useEffect(() => {
     if (!nativeE2eEnabled()) return;
+    installNativeE2eHarness();
     return registerMenuCommandDispatcher((id) => {
       runMenuCommand(id);
     });

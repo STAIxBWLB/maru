@@ -1500,12 +1500,29 @@ pub mod ipc {
 
     #[tauri::command]
     pub async fn git_status(vault_path: String) -> Result<GitStatus, String> {
+        #[cfg(feature = "native-e2e")]
+        if crate::native_e2e::is_blocking_async("git_status") {
+            crate::native_e2e::blocking_async_interval();
+            return super::git_status(vault_path);
+        }
         #[cfg(test)]
         let fixture = phase08_05::capture();
         tauri::async_runtime::spawn_blocking(move || {
-            #[cfg(test)]
-            let _fixture = phase08_05::enter(fixture, "git_status");
-            super::git_status(vault_path)
+            #[cfg(feature = "native-e2e")]
+            {
+                let path = vault_path.clone();
+                crate::native_e2e::with_load_control("git_status", None, Some(&path), || {
+                    #[cfg(test)]
+                    let _fixture = phase08_05::enter(fixture, "git_status");
+                    super::git_status(vault_path)
+                })
+            }
+            #[cfg(not(feature = "native-e2e"))]
+            {
+                #[cfg(test)]
+                let _fixture = phase08_05::enter(fixture, "git_status");
+                super::git_status(vault_path)
+            }
         })
         .await
         .map_err(|err| format!("git_status_task_failed: {err}"))?

@@ -1944,13 +1944,33 @@ pub mod ipc {
         vault_path: String,
         scan_options: Option<ScanOptions>,
     ) -> Result<Vec<VaultEntry>, String> {
+        #[cfg(feature = "native-e2e")]
+        if crate::native_e2e::is_blocking_async("scan_vault") {
+            crate::native_e2e::blocking_async_interval();
+            return super::scan_vault(vault_path, scan_options);
+        }
         tauri::async_runtime::spawn_blocking(move || {
-            #[cfg(test)]
-            crate::atomic_file::PathTransactionLease::test_stage(
-                &[PathBuf::from(&vault_path)],
-                "worker:scan_vault",
-            );
-            super::scan_vault(vault_path, scan_options)
+            #[cfg(feature = "native-e2e")]
+            {
+                let path = vault_path.clone();
+                crate::native_e2e::with_load_control("scan_vault", None, Some(&path), || {
+                    #[cfg(test)]
+                    crate::atomic_file::PathTransactionLease::test_stage(
+                        &[PathBuf::from(&vault_path)],
+                        "worker:scan_vault",
+                    );
+                    super::scan_vault(vault_path, scan_options)
+                })
+            }
+            #[cfg(not(feature = "native-e2e"))]
+            {
+                #[cfg(test)]
+                crate::atomic_file::PathTransactionLease::test_stage(
+                    &[PathBuf::from(&vault_path)],
+                    "worker:scan_vault",
+                );
+                super::scan_vault(vault_path, scan_options)
+            }
         })
         .await
         .map_err(|err| format!("scan_vault_task_failed: {err}"))?

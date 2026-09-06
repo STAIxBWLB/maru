@@ -1,0 +1,16 @@
+{
+  "commands": [
+    {
+      "name": "native_e2e_async_probe",
+      "feature": "native-e2e",
+      "registrationPath": "src-tauri/src/lib.rs::native_e2e::native_e2e_async_probe",
+      "reason": "Plan 08-27 same-runtime one-yield async probe for the native saturation harness (PERF-01); never spawn_blocking, feature-gated, reported by the installed two-worker runtime."
+    },
+    {
+      "name": "native_e2e_load_control",
+      "feature": "native-e2e",
+      "registrationPath": "src-tauri/src/lib.rs::native_e2e::native_e2e_load_control",
+      "reason": "Plan 08-27 feature-only saturation/source-race control with allowlisted operation IDs, fixture-root validation, overlap counters, isolated/blocking_async modes, and fixture-owned source change/revert through existing registry transaction seams."
+    }
+  ]
+}

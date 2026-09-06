@@ -50,6 +50,12 @@ const BRIDGE_NAMESPACE = "__MARU_NATIVE_E2E__";
 // update both strings in the same change.
 const PLUGIN_CRATE_HYPHENATED = "tauri-plugin-wdio-webdriver";
 const PLUGIN_CRATE_UNDERSCORED = "tauri_plugin_wdio_webdriver";
+// Plan 08-27's native responsiveness harness (src-tauri/src/native_e2e.rs)
+// embeds this distinctive marker in the feature-on binary (the async probe
+// and load-control status both carry it). A default-feature build must not
+// contain it: the whole module is behind cfg(feature = "native-e2e"), so a
+// hit means the gate leaked exactly the way this scan exists to catch.
+const RESPONSIVENESS_HOOK_MARKER = "MARU_NATIVE_RESPONSIVENESS_HOOK";
 
 const violations = [];
 
@@ -188,7 +194,11 @@ function checkBinary(binaryPath) {
     process.exit(1);
   }
   const bytes = readFileSync(binaryPath);
-  for (const needle of [PLUGIN_CRATE_HYPHENATED, PLUGIN_CRATE_UNDERSCORED]) {
+  for (const needle of [
+    PLUGIN_CRATE_HYPHENATED,
+    PLUGIN_CRATE_UNDERSCORED,
+    RESPONSIVENESS_HOOK_MARKER,
+  ]) {
     if (bytes.indexOf(needle) !== -1) {
       violations.push(
         `${binaryPath} contains "${needle}" — the embedded WebDriver plugin ` +

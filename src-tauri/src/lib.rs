@@ -48,6 +48,8 @@ mod maru_dir;
 mod maru_migration;
 mod meetings;
 mod mission_state;
+#[cfg(feature = "native-e2e")]
+mod native_e2e;
 mod ops_catalog;
 mod outlook_mso;
 mod paths;
@@ -174,6 +176,11 @@ use workspace::ipc::{
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Phase 08-27 saturation harness: install the two-worker test runtime
+    // before any Tauri runtime initialization (default builds never call
+    // this and keep Tauri's lazily initialized runtime).
+    #[cfg(feature = "native-e2e")]
+    native_e2e::install_test_runtime();
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_dialog::init())
@@ -599,6 +606,12 @@ pub fn run() {
             read_sites,
             save_sites,
             scan_work_sites,
+            // Phase 08-27 native saturation/source-race harness (feature-only;
+            // the registration itself repeats the feature gate).
+            #[cfg(feature = "native-e2e")]
+            native_e2e::native_e2e_async_probe,
+            #[cfg(feature = "native-e2e")]
+            native_e2e::native_e2e_load_control,
         ])
         .build(tauri::generate_context!())
         .expect("error while building Maru")

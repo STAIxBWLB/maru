@@ -132,6 +132,14 @@ export const config = {
   // the app. Seeding in beforeSession left the app pointed at the real
   // ~/.maru (the 06-01 fixture-isolation bug).
   onPrepare: async () => {
+    // Plan 08-27 saturation harness: the debug binary installs its own Tokio
+    // runtime from TOKIO_WORKER_THREADS before Tauri initializes (see
+    // native_e2e::install_test_runtime), then asserts the observed worker
+    // count. Setting it here — before the tauri-service spawns the app, which
+    // inherits this process's env — is what makes the two-worker saturation
+    // proof meaningful: unrelated async commands have exactly 2 workers to
+    // schedule on while four real operations overlap.
+    process.env.TOKIO_WORKER_THREADS = "2";
     await seedFixtureWorkspace();
   },
   beforeSession: async () => {

@@ -1167,12 +1167,52 @@ pub fn skills_remove_source(source_id: String) -> Result<(), String> {
     save_registry_unlocked(&registry)
 }
 
+// Feature-gated native-e2e seams (plan 08-27): the responsiveness harness
+// reads and mutates ONE fixture-owned source record through the same guarded
+// fresh-load/save transaction every production mutator uses. No new source
+// edit command is registered; these helpers refuse nothing the guard seams
+// do not already refuse.
+#[cfg(feature = "native-e2e")]
+pub(crate) fn native_e2e_find_source(source_id: &str) -> Result<Option<SkillSource>, String> {
+    let _guard = registry_guard()?;
+    let registry = load_registry_unlocked()?;
+    Ok(registry
+        .sources
+        .into_iter()
+        .find(|source| source.id == source_id))
+}
+
+#[cfg(feature = "native-e2e")]
+pub(crate) fn native_e2e_set_source_subdir(
+    source_id: &str,
+    skills_subdir: &str,
+) -> Result<String, String> {
+    let _guard = registry_guard()?;
+    let mut registry = load_registry_unlocked()?;
+    let source = registry
+        .sources
+        .iter_mut()
+        .find(|source| source.id == source_id)
+        .ok_or_else(|| format!("unknown_source: {source_id}"))?;
+    let previous = std::mem::replace(&mut source.skills_subdir, skills_subdir.to_string());
+    save_registry_unlocked(&registry)?;
+    Ok(previous)
+}
+
 #[tauri::command]
 pub async fn skills_sync_source<R: tauri::Runtime>(
     app: AppHandle<R>,
     source_id: String,
     progress_id: Option<String>,
 ) -> Result<Vec<SkillRecord>, IpcError> {
+    #[cfg(feature = "native-e2e")]
+    if crate::native_e2e::is_blocking_async("skills_sync_source") {
+        crate::native_e2e::blocking_async_interval();
+        return skills_sync_source_impl(
+            source_id,
+            ProgressReporter::new(&app, progress_id.as_deref()),
+        );
+    }
     tauri::async_runtime::spawn_blocking(move || {
         #[cfg(test)]
         PathTransactionLease::test_stage(&[host_fs::skills_root()?], "worker:skills_sync_source");
@@ -1239,10 +1279,60 @@ fn sync_source_transaction(
         .require_parent_snapshot(&original_parent)?
         .acquire()?;
     revalidate_source_mutation_paths(&snapshot.source, &network_paths)?;
-    // Revalidate after checkout discovery/admission, before the network edge.
-    {
+    // The lease is held before this point so duplicate requests fail fast as
+    // busy; the native-e2e saturation window then runs the remaining real
+    // work (revalidation, pull, import, commit) so a settings change or a
+    // removal landing inside the window is caught by the revalidations
+    // below instead of being written back over the newer state.
+    let tail = || -> Result<(Vec<SkillRecord>, Option<String>), IpcError> {
+        // Revalidate after checkout discovery/admission, before the network edge.
+        {
+            let _guard = registry_guard()?;
+            let registry = load_registry_unlocked()?;
+            if !registry.sources.iter().any(|source| source.id == source_id) {
+                return Err(IpcError {
+                    code: SKILLS_SOURCE_STALE.into(),
+                    message: format!("unknown_source: {source_id}"),
+                });
+            }
+            let current = capture_source_snapshot(&registry, &source_id)?;
+            if current.generation != snapshot.generation
+                || lease.source_path != original_path
+                || source_path(&current.source)? != original_path
+            {
+                return Err(IpcError {
+                    code: SKILLS_SOURCE_STALE.into(),
+                    message: format!("source_changed: {source_id}; sync again manually"),
+                });
+            }
+        }
+        #[cfg(test)]
+        tests::phase08_batch_transactions::at_edge("work");
+        network_lease.before_effect()?;
+        network(&snapshot.source, progress)?;
+        let network_hash = hash_directory(&original_path)?;
+        drop(network_lease);
+        #[cfg(test)]
+        tests::phase08_source_transactions::at_edge("before_commit");
+        if !original_path.is_dir() {
+            return Err(IpcError::from(
+                "source_path_invalid: checkout disappeared before commit".to_string(),
+            ));
+        }
+        let mut commit_paths = network_paths.clone();
+        commit_paths.extend(registry_mutation_paths()?);
+        let commit_lease = PathTransactionRequest::new(commit_paths)?
+            .require_parent_snapshot(&original_parent)?
+            .acquire()?;
         let _guard = registry_guard()?;
-        let registry = load_registry_unlocked()?;
+        let mut registry = load_registry_unlocked()?;
+        revalidate_source_mutation_paths(&snapshot.source, &network_paths)?;
+        if hash_directory(&original_path)? != network_hash {
+            return Err(IpcError::from(
+                "source_changed: content changed before commit; retry manually".to_string(),
+            ));
+        }
+        commit_lease.before_effect()?;
         if !registry.sources.iter().any(|source| source.id == source_id) {
             return Err(IpcError {
                 code: SKILLS_SOURCE_STALE.into(),
@@ -1250,8 +1340,8 @@ fn sync_source_transaction(
             });
         }
         let current = capture_source_snapshot(&registry, &source_id)?;
-        if current.generation != snapshot.generation
-            || lease.source_path != original_path
+        if current.registry_path != snapshot.registry_path
+            || current.generation != snapshot.generation
             || source_path(&current.source)? != original_path
         {
             return Err(IpcError {
@@ -1259,63 +1349,30 @@ fn sync_source_transaction(
                 message: format!("source_changed: {source_id}; sync again manually"),
             });
         }
-    }
-    #[cfg(test)]
-    tests::phase08_batch_transactions::at_edge("work");
-    network_lease.before_effect()?;
-    network(&snapshot.source, progress)?;
-    let network_hash = hash_directory(&original_path)?;
-    drop(network_lease);
-    #[cfg(test)]
-    tests::phase08_source_transactions::at_edge("before_commit");
-    if !original_path.is_dir() {
-        return Err(IpcError::from(
-            "source_path_invalid: checkout disappeared before commit".to_string(),
+        // Scan and merge into the freshly loaded registry under its existing guard.
+        let skills = rescan_source_in_registry_with_progress(&mut registry, &source_id, progress)?;
+        save_registry_unlocked(&registry)?;
+        progress.success(format!(
+            "Sync complete for {source_id}: {} skill(s)",
+            skills.len()
         ));
-    }
-    let mut commit_paths = network_paths.clone();
-    commit_paths.extend(registry_mutation_paths()?);
-    let commit_lease = PathTransactionRequest::new(commit_paths)?
-        .require_parent_snapshot(&original_parent)?
-        .acquire()?;
-    let _guard = registry_guard()?;
-    let mut registry = load_registry_unlocked()?;
-    revalidate_source_mutation_paths(&snapshot.source, &network_paths)?;
-    if hash_directory(&original_path)? != network_hash {
-        return Err(IpcError::from(
-            "source_changed: content changed before commit; retry manually".to_string(),
-        ));
-    }
-    commit_lease.before_effect()?;
-    if !registry.sources.iter().any(|source| source.id == source_id) {
-        return Err(IpcError {
-            code: SKILLS_SOURCE_STALE.into(),
-            message: format!("unknown_source: {source_id}"),
-        });
-    }
-    let current = capture_source_snapshot(&registry, &source_id)?;
-    if current.registry_path != snapshot.registry_path
-        || current.generation != snapshot.generation
-        || source_path(&current.source)? != original_path
-    {
-        return Err(IpcError {
-            code: SKILLS_SOURCE_STALE.into(),
-            message: format!("source_changed: {source_id}; sync again manually"),
-        });
-    }
-    // Scan and merge into the freshly loaded registry under its existing guard.
-    let skills = rescan_source_in_registry_with_progress(&mut registry, &source_id, progress)?;
-    save_registry_unlocked(&registry)?;
-    progress.success(format!(
-        "Sync complete for {source_id}: {} skill(s)",
-        skills.len()
-    ));
-    let last_synced_at = registry
-        .sources
-        .iter()
-        .find(|source| source.id == source_id)
-        .and_then(|source| source.last_synced_at.clone());
-    Ok((skills, last_synced_at))
+        let last_synced_at = registry
+            .sources
+            .iter()
+            .find(|source| source.id == source_id)
+            .and_then(|source| source.last_synced_at.clone());
+        Ok((skills, last_synced_at))
+    };
+    #[cfg(feature = "native-e2e")]
+    let result = crate::native_e2e::with_load_control(
+        "skills_sync_source",
+        Some(source_id.as_str()),
+        None,
+        tail,
+    );
+    #[cfg(not(feature = "native-e2e"))]
+    let result = tail();
+    result
 }
 
 #[tauri::command]
