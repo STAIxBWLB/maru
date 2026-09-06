@@ -8,6 +8,28 @@ because releases cut frequently during active development. Versions before
 Dates are the release-tag dates. Only `feat`/`fix`-level changes are listed;
 `chore(release)` version bumps and merge commits are omitted.
 
+## v1.1.4 - 2026-09-06 - Off the Main Thread
+
+- **All 365 production commands now run off the UI/shared async worker thread
+  (#311).** 356 commands are ISOLATED behind awaited `spawn_blocking` workers
+  and 9 stay UI-bound as native-window commands, with zero unowned rows. Wire
+  names, permission checks, and synchronous Rust callers are preserved, and a
+  `make verify` gate rejects regressions.
+- **Every filesystem mutation now passes shared hierarchical path-transaction
+  admission before taking domain locks.** `PathTransactionRequest/Lease`
+  ordering, alias-ancestor parent pinning, and error/unwind paths that release
+  admission before retry are enforced across all domains.
+- **The skills registry lock no longer spans the network round-trip.** A skill
+  source removed mid-sync is never resurrected, with regression tests at all
+  three sync edges.
+- **Native responsiveness is proven by a load test, not by absence of
+  freezes.** The harness saturates the real WKWebView bridge: the negative
+  control violates the bound (p95 4789ms) while isolated runs keep the loaded
+  p95 at 2ms with max stall under 9ms.
+- **Frontend processing flows publish exactly one classified terminal
+  notice**, and provider reconciliation markers disable ordinary retry without
+  verified IDs.
+
 ## v1.1.3 - 2026-08-31 - Semantic Titles
 
 - **Documents now use YAML frontmatter titles when no usable H1 exists
