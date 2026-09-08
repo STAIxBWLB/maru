@@ -7974,6 +7974,49 @@ export function MainApp() {
     [applyExplorerDragSourcesToDestination],
   );
 
+  const handleTrashExplorerEntry = useCallback(
+    async (entry: VaultEntry) => {
+      if (!explorerWorkspacePath) return;
+      if (!workspaceCan(explorerWorkspace ?? null, "delete")) {
+        setError(
+          t("workspace.writeBlocked", {
+            reason:
+              workspaceWriteReason(explorerWorkspace ?? null, "delete") ??
+              "workspace capabilities",
+          }),
+        );
+        return;
+      }
+      if (
+        !window.confirm(
+          t("context.moveToTrash.confirm", { path: entry.relPath }),
+        )
+      ) {
+        return;
+      }
+      try {
+        const deleted = await trashDocument(explorerWorkspacePath, entry.path);
+        await refreshAfterDocumentMutation(explorerWorkspacePath);
+        const openTab = getEditorTabsState().tabs.find(
+          (tab) =>
+            tab.workspacePath === explorerWorkspacePath &&
+            tab.document.path === entry.path,
+        );
+        if (openTab) closeTab(openTab.id);
+        setError(t("editor.tabs.delete.success", { path: deleted.trashRelPath }));
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+      }
+    },
+    [
+      closeTab,
+      explorerWorkspace,
+      explorerWorkspacePath,
+      refreshAfterDocumentMutation,
+      t,
+    ],
+  );
+
   const documentBrowserCommands = useMemo<DocumentListCommands>(
     () => ({
       setWorkspaceVisibility: handleExplorerWorkspaceVisibilityChange,
@@ -7983,6 +8026,7 @@ export function MainApp() {
       setSortKey: setDocumentSortKey,
       setCollapsedTreeFolders,
       selectEntry,
+      trashEntry: handleTrashExplorerEntry,
       revealInFinder: revealTargetInFinder,
       revealInFiles: handleRevealInFiles,
       ignore: handleIgnoreExplorerEntry,
@@ -8005,6 +8049,7 @@ export function MainApp() {
       handleIgnoreExplorerEntry,
       handleRefreshExplorer,
       handleRevealInFiles,
+      handleTrashExplorerEntry,
       isFavorite,
       isFavoriteMissing,
       openFavorite,

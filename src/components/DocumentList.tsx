@@ -131,6 +131,7 @@ export const DocumentList = memo(function DocumentList({
     setSortKey: onSortKeyChange,
     setCollapsedTreeFolders: onCollapsedTreeFoldersChange,
     selectEntry: onSelect,
+    trashEntry: onTrashEntry,
     revealInFinder: onRevealInFinder,
     revealInFiles: onRevealInFiles,
     ignore: onIgnore,
@@ -826,6 +827,22 @@ export const DocumentList = memo(function DocumentList({
                     }}
                   >
                     {t("context.addToIgnore")}
+                  </button>
+                </>
+              ) : null}
+              {contextMenu.targetKind === "file" && contextMenu.entry ? (
+                <>
+                  <div className="context-menu-separator" role="separator" />
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      const entry = contextMenu.entry;
+                      setContextMenu(null);
+                      if (entry) void onTrashEntry(entry);
+                    }}
+                  >
+                    {t("context.moveToTrash")}
                   </button>
                 </>
               ) : null}
