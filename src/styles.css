@@ -6221,6 +6221,24 @@ button.git-badge:hover {
   word-break: break-all;
 }
 
+.system-crontab {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.system-crontab-title {
+  margin: 0;
+  font-size: var(--type-label-size);
+  color: var(--ink-2);
+}
+
+.system-crontab .jobs-list-title code {
+  font-size: var(--type-meta-size);
+  word-break: break-all;
+}
+
 .dot-sync-setup,
 .dot-sync-card,
 .dot-sync-editor,

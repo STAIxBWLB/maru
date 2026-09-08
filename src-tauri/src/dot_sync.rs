@@ -11,6 +11,7 @@ use crate::win_process::NoWindow;
 
 const MIN_DOT_VERSION: &str = "2.63.0";
 const MAX_OUTPUT_BYTES: usize = 512 * 1024;
+const SUPPORTED_STATUS_SCHEMAS: [u64; 2] = [1, 2];
 // D-03: DOT_ACTION_LOCK serializes external dot CLI invocations; the guarded
 // state is the external dotfiles repository on disk, not an in-memory
 // invariant, so recovering the guard cannot serve tainted state.
@@ -263,11 +264,23 @@ fn version_compatible(value: &str) -> bool {
     }
 }
 
+fn schema_supported(version: Option<u64>) -> bool {
+    version.is_some_and(|v| SUPPORTED_STATUS_SCHEMAS.contains(&v))
+}
+
 fn parse_status_json(output: &str, expected_kind: &str) -> Result<Value, String> {
     let value: Value =
         serde_json::from_str(output).map_err(|err| format!("dot_status_json_invalid: {err}"))?;
-    if value.get("schemaVersion").and_then(Value::as_u64) != Some(1) {
-        return Err("dot_status_schema_unsupported".to_string());
+    let schema = value.get("schemaVersion").and_then(Value::as_u64);
+    if !schema_supported(schema) {
+        let observed = value
+            .get("schemaVersion")
+            .map_or("missing".to_string(), Value::to_string);
+        return Err(format!(
+            "dot_status_schema_unsupported: got {observed} (supported: {}-{})",
+            SUPPORTED_STATUS_SCHEMAS[0],
+            SUPPORTED_STATUS_SCHEMAS[SUPPORTED_STATUS_SCHEMAS.len() - 1]
+        ));
     }
     if value.get("kind").and_then(Value::as_str) != Some(expected_kind) {
         return Err(format!("dot_status_kind_invalid: expected {expected_kind}"));
@@ -435,7 +448,7 @@ fn dot_mutation_paths(
         let profile = status
             .get("profile")
             .ok_or("dot_action_paths_unresolved: peer.profile")?;
-        if profile.get("schemaVersion").and_then(Value::as_u64) != Some(1)
+        if !schema_supported(profile.get("schemaVersion").and_then(Value::as_u64))
             || profile.get("kind").and_then(Value::as_str) != Some("peer-profile")
         {
             return Err("dot_action_paths_unresolved: unsupported peer.profile schema".into());
@@ -1811,6 +1824,11 @@ mod tests {
         let good = r#"{"schemaVersion":1,"kind":"mirror"}"#;
         assert!(parse_status_json(good, "mirror").is_ok());
         assert!(parse_status_json(good, "peer").is_err());
-        assert!(parse_status_json(r#"{"schemaVersion":2,"kind":"mirror"}"#, "mirror").is_err());
+        assert!(parse_status_json(r#"{"schemaVersion":2,"kind":"mirror"}"#, "mirror").is_ok());
+        let err =
+            parse_status_json(r#"{"schemaVersion":3,"kind":"mirror"}"#, "mirror").unwrap_err();
+        assert!(err.contains("dot_status_schema_unsupported: got 3 (supported: 1-2)"));
+        let err = parse_status_json(r#"{"kind":"mirror"}"#, "mirror").unwrap_err();
+        assert!(err.contains("dot_status_schema_unsupported: got missing (supported: 1-2)"));
     }
 }

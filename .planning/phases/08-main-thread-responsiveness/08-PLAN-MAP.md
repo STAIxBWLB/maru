@@ -129,6 +129,7 @@ Early shards 01/02/03/04/05 record `integrationRequired: "08-29"` and final modu
 | 08-14 | `src-tauri/src/outlook_mso.rs` | `fetch_outlook_unread`, `stage_outlook_items`, `check_mso_auth`, `decide_outlook_item`, `decide_outlook_items` |
 | 08-14 | `src-tauri/src/kakao_relay.rs` | `read_kakao_relay_status`, `read_kakao_relay_messages`, `stage_kakao_relay_new`, `enqueue_kakao_send`, `read_kakao_send_results` |
 | 08-15 | `src-tauri/src/jobs.rs` | `jobs_list`, `jobs_install`, `jobs_uninstall`, `jobs_start`, `jobs_stop`, `jobs_run_now`, `jobs_read_log` |
+| 08-15 | `src-tauri/src/system_jobs.rs` | `system_jobs_list`, `system_job_set_enabled`, `system_job_run_now`, `system_crontab_remove` |
 | 08-15 | `src-tauri/src/scheduler.rs` | `scheduler_list`, `scheduler_add`, `scheduler_remove`, `scheduler_set_enabled`, `scheduler_run_now` |
 | 08-15 | `src-tauri/src/launchd_migration.rs` | `detect_legacy_telegram_launchd`, `unload_legacy_telegram_launchd` |
 | 08-15 | `src-tauri/src/terminal_hooks.rs` | `terminal_hooks_status`, `terminal_hooks_install`, `terminal_hooks_uninstall`, `write_agent_context_hint`, `remove_agent_context_hint` |

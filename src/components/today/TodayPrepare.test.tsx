@@ -353,6 +353,90 @@ describe("TodayPrepare", () => {
     });
   });
 
+  it("resolves empty yesterday titles from the live task scan", async () => {
+    vi.mocked(scanTaskNotes).mockResolvedValue([
+      {
+        path: "/tmp/work/tasks/weekly-report.md",
+        relPath: "tasks/weekly-report.md",
+        fileName: "weekly-report.md",
+        displayTitle: "주간 보고서 작성",
+        bucket: "active",
+        sizeBytes: 0,
+        updatedAt: null,
+        frontmatter: { taskId: "y9" },
+      },
+    ]);
+    const snapshot: TodaySnapshot = {
+      ...SNAPSHOT,
+      yesterday: [{ taskId: "y9", title: "", status: "todo", resolution: null }],
+    };
+    const { container, mutate } = await renderPrepare(snapshot);
+    await act(async () => {});
+    const row = Array.from(
+      container.querySelectorAll<HTMLElement>(".today-yesterday-row"),
+    ).find((element) => element.textContent?.includes("주간 보고서 작성"))!;
+    expect(row).toBeTruthy();
+    const checkbox = row.querySelector<HTMLInputElement>('input[type="checkbox"]')!;
+    expect(checkbox.getAttribute("aria-label")).toContain("주간 보고서 작성");
+
+    const menuButton = row.querySelector<HTMLButtonElement>(
+      `button[aria-label="${translate("ko", "today.yesterday.actions")}"]`,
+    )!;
+    await act(async () => {
+      menuButton.click();
+    });
+    const flexibleButton = Array.from(
+      row.querySelectorAll<HTMLButtonElement>("button"),
+    ).find((button) =>
+      button.textContent?.includes(translate("ko", "today.yesterday.decision.flexible")),
+    )!;
+    await act(async () => {
+      flexibleButton.click();
+    });
+    const setPlan = mutate.mock.calls
+      .map(([mutation]) => mutation)
+      .find((mutation) => mutation.type === "setPlan");
+    const flexible = (setPlan as { plan: DailyPlanV1 }).plan.flexible;
+    const routed = flexible.find(
+      (item) => item.itemRef.kind === "task" && item.itemRef.taskId === "y9",
+    );
+    expect(routed?.outcome).toBe("주간 보고서 작성");
+  });
+
+  it("persists a null outcome when an empty yesterday title only resolves to the untitled fallback", async () => {
+    const snapshot: TodaySnapshot = {
+      ...SNAPSHOT,
+      yesterday: [{ taskId: "tasks/---.md", title: "", status: "todo", resolution: null }],
+    };
+    const { container, mutate } = await renderPrepare(snapshot);
+    await act(async () => {});
+    const row = container.querySelector<HTMLElement>(".today-yesterday-row")!;
+    expect(row.textContent).toContain(translate("ko", "today.task.untitled"));
+
+    const menuButton = row.querySelector<HTMLButtonElement>(
+      `button[aria-label="${translate("ko", "today.yesterday.actions")}"]`,
+    )!;
+    await act(async () => {
+      menuButton.click();
+    });
+    const flexibleButton = Array.from(
+      row.querySelectorAll<HTMLButtonElement>("button"),
+    ).find((button) =>
+      button.textContent?.includes(translate("ko", "today.yesterday.decision.flexible")),
+    )!;
+    await act(async () => {
+      flexibleButton.click();
+    });
+    const setPlan = mutate.mock.calls
+      .map(([mutation]) => mutation)
+      .find((mutation) => mutation.type === "setPlan");
+    const flexible = (setPlan as { plan: DailyPlanV1 }).plan.flexible;
+    const routed = flexible.find(
+      (item) => item.itemRef.kind === "task" && item.itemRef.taskId === "tasks/---.md",
+    );
+    expect(routed?.outcome).toBeNull();
+  });
+
   it("preflights unresolved carryovers and finalizes setup with one atomic request", async () => {
     const { container, finalizeSetup, mutate, onNavigate } = await renderPrepare();
     const finish = container.querySelector<HTMLButtonElement>(".today-finish-setup")!;

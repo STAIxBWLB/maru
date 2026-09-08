@@ -18,7 +18,7 @@ import {
   Waves,
   X,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { readDocument } from "../../lib/api";
 import { useTranslation } from "../../lib/i18n";
 import type { TaskEntry } from "../../lib/tasks";
@@ -29,7 +29,7 @@ import type {
 } from "../../lib/today";
 import { sha256Hex, taskTransition } from "../../lib/today";
 import { useToday } from "./todayContext";
-import { addDaysIso, taskKeyOf } from "./todayPrepareUtils";
+import { addDaysIso, humanizeTaskIdentifier, taskKeyOf } from "./todayPrepareUtils";
 
 const COLLAPSED_ROW_COUNT = 2;
 const PAGE_SIZE = 25;
@@ -107,20 +107,31 @@ export function TodayYesterday({ onChanged, tasks }: TodayYesterdayProps) {
     };
   }, [menuTaskId]);
 
+  const resolveItemTitle = useCallback(
+    (item: YesterdayItem): string => {
+      if (item.title.trim()) return item.title;
+      const entry = tasks.find(
+        (task) => taskKeyOf(task) === item.taskId || task.relPath === item.taskId,
+      );
+      return entry?.title ?? humanizeTaskIdentifier(item.taskId, t("today.task.untitled"));
+    },
+    [tasks, t],
+  );
+
   const filteredItems = useMemo(() => {
     const needle = query.trim().toLowerCase();
     return [...(snapshot?.yesterday ?? [])]
       .filter((item) => {
         if (resolutionFilter === "unresolved" && item.resolution != null) return false;
         if (resolutionFilter === "resolved" && item.resolution == null) return false;
-        return !needle || item.title.toLowerCase().includes(needle);
+        return !needle || resolveItemTitle(item).toLowerCase().includes(needle);
       })
       .sort(
         (a, b) =>
           Number(a.resolution != null) - Number(b.resolution != null) ||
-          a.title.localeCompare(b.title),
+          resolveItemTitle(a).localeCompare(resolveItemTitle(b)),
       );
-  }, [query, resolutionFilter, snapshot]);
+  }, [query, resolutionFilter, snapshot, resolveItemTitle]);
 
   const pagedIds = useMemo(
     () => new Set(filteredItems.slice(0, page * PAGE_SIZE).map((item) => item.taskId)),
@@ -166,12 +177,13 @@ export function TodayYesterday({ onChanged, tasks }: TodayYesterdayProps) {
     const top = current.top.filter((entry) => !isTarget(entry));
     const flexible = current.flexible.filter((entry) => !isTarget(entry));
     const overflow = current.overflow.filter((entry) => !isTarget(entry));
+    const routedTitle = resolveItemTitle(item);
     const routed: DailyPlanItem =
       existing ?? {
         itemRef: { kind: "task", taskId: item.taskId },
         lane: resolution === "today" ? "top" : "flexible",
         order: 0,
-        outcome: item.title,
+        outcome: routedTitle === t("today.task.untitled") ? null : routedTitle,
         estimateMinutes: 30,
         estimateProvisional: true,
         pinned: false,
@@ -331,6 +343,7 @@ export function TodayYesterday({ onChanged, tasks }: TodayYesterdayProps) {
 
   const renderRow = (group: YesterdayGroup, item: YesterdayItem) => {
     const needsDecision = item.resolution == null;
+    const title = resolveItemTitle(item);
     return (
       <li key={item.taskId} className="today-yesterday-row">
         <div className="today-yesterday-row-main">
@@ -338,7 +351,7 @@ export function TodayYesterday({ onChanged, tasks }: TodayYesterdayProps) {
             <input
               type="checkbox"
               checked={selected.has(item.taskId)}
-              aria-label={t("today.yesterday.select", { title: item.title })}
+              aria-label={t("today.yesterday.select", { title })}
               onChange={(event) =>
                 setSelected((current) => {
                   const next = new Set(current);
@@ -357,7 +370,7 @@ export function TodayYesterday({ onChanged, tasks }: TodayYesterdayProps) {
             <span className="today-yesterday-warn-dot" aria-hidden="true" />
           ) : null}
           <span className="today-yesterday-title">
-            {item.title || t("today.task.untitled")}
+            {title}
           </span>
           {group === "carryover" && needsDecision ? (
             <span className="today-yesterday-flag">{t("today.yesterday.needsDecision")}</span>

@@ -82,6 +82,7 @@ export interface DocumentListCommands {
   setSortKey(key: SortKey): void;
   setCollapsedTreeFolders(paths: string[]): void;
   selectEntry(entry: VaultEntry): void | Promise<unknown>;
+  trashEntry(entry: VaultEntry): Promise<void>;
   revealInFinder(targetPath: string): void;
   revealInFiles(targetPath: string): void;
   ignore?(relPath: string, kind: "file" | "directory"): void;
