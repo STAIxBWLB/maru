@@ -337,8 +337,10 @@ fn agent_status(label: &str, plist: &Path, uid: &str) -> Result<SystemAgent, Str
 
 /// Rewrite the crontab without the entry at `index`, where indexes count the
 /// same non-empty/non-comment lines `parse_crontab_entries` returns. Comments
-/// and blank lines are preserved verbatim.
-fn remove_crontab_entry(raw: &str, index: u32) -> Result<String, String> {
+/// and blank lines are preserved verbatim. `expected` must match the listed
+/// entry text so a crontab changed since the last list cannot shift a
+/// different entry into the confirmed slot.
+fn remove_crontab_entry(raw: &str, index: u32, expected: &str) -> Result<String, String> {
     let mut seen = 0u32;
     let mut kept = Vec::new();
     let mut removed = false;
@@ -347,6 +349,10 @@ fn remove_crontab_entry(raw: &str, index: u32) -> Result<String, String> {
         let is_entry = !trimmed.is_empty() && !trimmed.starts_with('#');
         if is_entry {
             if seen == index {
+                let listed: String = trimmed.chars().take(MAX_CRONTAB_LINE).collect();
+                if listed != expected {
+                    return Err("crontab_entry_mismatch: refresh and retry".to_string());
+                }
                 removed = true;
                 seen += 1;
                 continue;
@@ -365,9 +371,9 @@ fn remove_crontab_entry(raw: &str, index: u32) -> Result<String, String> {
     Ok(rewritten)
 }
 
-fn system_crontab_remove_in(index: u32) -> Result<Vec<String>, String> {
+fn system_crontab_remove_in(index: u32, expected: &str) -> Result<Vec<String>, String> {
     let raw = read_crontab_raw()?.ok_or("crontab_missing: no crontab for user")?;
-    let rewritten = remove_crontab_entry(&raw, index)?;
+    let rewritten = remove_crontab_entry(&raw, index, expected)?;
     let mut child = system_command("crontab")
         .arg("-")
         .no_window()
@@ -409,8 +415,8 @@ pub fn system_job_run_now(label: String) -> Result<SystemAgent, String> {
     system_job_run_now_in(&label)
 }
 
-pub fn system_crontab_remove(index: u32) -> Result<Vec<String>, String> {
-    system_crontab_remove_in(index)
+pub fn system_crontab_remove(index: u32, expected: String) -> Result<Vec<String>, String> {
+    system_crontab_remove_in(index, &expected)
 }
 
 pub mod ipc {
@@ -441,8 +447,11 @@ pub mod ipc {
     }
 
     #[tauri::command]
-    pub async fn system_crontab_remove(index: u32) -> Result<Vec<String>, String> {
-        tauri::async_runtime::spawn_blocking(move || super::system_crontab_remove(index))
+    pub async fn system_crontab_remove(
+        index: u32,
+        expected: String,
+    ) -> Result<Vec<String>, String> {
+        tauri::async_runtime::spawn_blocking(move || super::system_crontab_remove(index, expected))
             .await
             .map_err(|err| format!("system_crontab_remove_task_failed: {err}"))?
     }
@@ -526,13 +535,13 @@ mod tests {
     #[test]
     fn remove_crontab_entry_drops_only_the_indexed_entry() {
         let raw = "# header\n0 3 * * * /usr/bin/true\n\n*/15 * * * * echo hi\n# tail\n";
-        let rewritten = remove_crontab_entry(raw, 1).unwrap();
+        let rewritten = remove_crontab_entry(raw, 1, "*/15 * * * * echo hi").unwrap();
         assert_eq!(rewritten, "# header\n0 3 * * * /usr/bin/true\n\n# tail\n");
         assert_eq!(
             parse_crontab_entries(&rewritten),
             vec!["0 3 * * * /usr/bin/true".to_string()]
         );
-        let first = remove_crontab_entry(raw, 0).unwrap();
+        let first = remove_crontab_entry(raw, 0, "0 3 * * * /usr/bin/true").unwrap();
         assert!(!first.contains("/usr/bin/true"));
         assert!(
             first.ends_with('\n'),
@@ -541,12 +550,21 @@ mod tests {
     }
 
     #[test]
+    fn remove_crontab_entry_rejects_stale_expected_text() {
+        let raw = "0 3 * * * /usr/bin/true\n*/15 * * * * echo hi\n";
+        assert_eq!(
+            remove_crontab_entry(raw, 1, "0 4 * * * /usr/bin/false").unwrap_err(),
+            "crontab_entry_mismatch: refresh and retry"
+        );
+    }
+
+    #[test]
     fn remove_crontab_entry_rejects_out_of_range_index() {
         let raw = "0 3 * * * /usr/bin/true\n";
         assert_eq!(
-            remove_crontab_entry(raw, 1).unwrap_err(),
+            remove_crontab_entry(raw, 1, "0 3 * * * /usr/bin/true").unwrap_err(),
             "crontab_index_out_of_range: 1"
         );
-        assert!(remove_crontab_entry("", 0).is_err());
+        assert!(remove_crontab_entry("", 0, "").is_err());
     }
 }

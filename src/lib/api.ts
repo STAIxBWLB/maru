@@ -2991,11 +2991,11 @@ export async function systemJobRunNow(label: string): Promise<SystemAgent> {
   return invoke<SystemAgent>("system_job_run_now", { label });
 }
 
-export async function systemCrontabRemove(index: number): Promise<string[]> {
+export async function systemCrontabRemove(index: number, expected: string): Promise<string[]> {
   if (!isTauri()) {
     return mockSystemJobsOverview().crontab.filter((_, entryIndex) => entryIndex !== index);
   }
-  return invoke<string[]>("system_crontab_remove", { index });
+  return invoke<string[]>("system_crontab_remove", { index, expected });
 }
 
 // === dot workspace sync (global dot configuration) ===

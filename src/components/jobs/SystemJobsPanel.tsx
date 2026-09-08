@@ -54,7 +54,7 @@ export function SystemJobsPanel() {
     if (!window.confirm(t("system.systemJobs.crontab.confirmRemove", { entry }))) return;
     setBusyCron(index);
     try {
-      await systemCrontabRemove(index);
+      await systemCrontabRemove(index, entry);
       await refresh();
       setError(null);
     } catch (err) {
