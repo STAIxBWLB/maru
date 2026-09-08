@@ -1825,8 +1825,8 @@ mod tests {
         assert!(parse_status_json(good, "mirror").is_ok());
         assert!(parse_status_json(good, "peer").is_err());
         assert!(parse_status_json(r#"{"schemaVersion":2,"kind":"mirror"}"#, "mirror").is_ok());
-        let err = parse_status_json(r#"{"schemaVersion":3,"kind":"mirror"}"#, "mirror")
-            .unwrap_err();
+        let err =
+            parse_status_json(r#"{"schemaVersion":3,"kind":"mirror"}"#, "mirror").unwrap_err();
         assert!(err.contains("dot_status_schema_unsupported: got 3 (supported: 1-2)"));
         let err = parse_status_json(r#"{"kind":"mirror"}"#, "mirror").unwrap_err();
         assert!(err.contains("dot_status_schema_unsupported: got missing (supported: 1-2)"));
