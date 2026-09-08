@@ -1271,5 +1271,242 @@
         "contract": "Existing marked-block removal semantics (including blank-line trimming), removed-path list payload and absent-file no-op behavior are unchanged."
       }
     }
+,
+    {
+      "name": "system_jobs_list",
+      "module": "src-tauri/src/system_jobs.rs",
+      "registrationPath": "src-tauri/src/lib.rs::system_jobs::ipc::system_jobs_list",
+      "originalDisposition": "ISOLATED",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/system_jobs.rs::system_jobs_list delegates to src-tauri/src/system_jobs.rs::list_agents and src-tauri/src/system_jobs.rs::crontab_entries inside the owned blocking worker.",
+        "list_agents enumerates ~/Library/LaunchAgents via launch_agents_dir, resolves each Label and program summary through plist_string and program_summary (PlistBuddy), and merges print_launchd_state plus launchd_disabled_labels state parsed by the pure parse_launchd_print and parse_disabled_labels helpers; crontab_entries filters read_crontab_raw output with the pure parse_crontab_entries helper; every subprocess goes through run_tool and system_command with capped_output bounds."
+      ],
+      "workerBoundary": "src-tauri/src/system_jobs.rs::ipc::system_jobs_list takes no arguments and awaits tauri::async_runtime::spawn_blocking before any LaunchAgents read, launchctl print or crontab -l call; the SystemJobsOverview payload and snake_case error strings pass through unchanged and a JoinError maps to the display-only system_jobs_list_task_failed String; no guard or child handle crosses await.",
+      "syncCallers": [
+        "src-tauri/src/system_jobs.rs::system_jobs_list stays a stable synchronous Rust API composing list_agents and crontab_entries; the pure parsers parse_launchd_print, parse_disabled_labels and parse_crontab_entries are covered directly by in-module unit tests without launchd."
+      ],
+      "mutationKey": {
+        "readOnly": true,
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "domainLockOrder": "Read-only inspection; no domain locks are taken",
+        "sharedAdmissionEntry": "No filesystem mutation: launchctl print/print-disabled, PlistBuddy reads and crontab -l only observe existing state"
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib system_jobs",
+          "passed": 7,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/components/jobs/SystemJobsPanel.tsx"
+        ],
+        "payload": "SystemJobsPanel refresh owns overview state and awaits systemJobsList; agents and crontab render from the returned SystemJobsOverview and a failure keeps the previous state and shows the error string.",
+        "terminalNoticeOwner": "SystemJobsPanel owns completion and error display for the panel; no global notice is emitted.",
+        "classifier": "n/a: bounded launchd/crontab subprocess call, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true
+      },
+      "evidence": {
+        "behaviorCases": [
+          "tests::parse_launchd_print_extracts_pid_and_exit_code",
+          "tests::parse_disabled_labels_collects_only_disabled_entries",
+          "tests::parse_crontab_entries_skips_comments_and_blank_lines"
+        ],
+        "workerProof": "The command body is a single awaited spawn_blocking around super::system_jobs_list; every launchctl, PlistBuddy and crontab spawn happens inside that worker.",
+        "platformScope": "macOS only: launchctl gui domains, PlistBuddy and crontab are Darwin tools; unit tests exercise the pure parsers with recorded tool output, not a live launchd.",
+        "limits": "Output is capped at 64 KiB per tool call and agent/crontab lists at 512 entries; in-process observation cannot exclude external processes mutating launchd state between calls.",
+        "contract": "Maru-managed com.maru.job.* labels are filtered out of the listing and other users' agents are never written; an absent crontab (no crontab for user) maps to an empty list, not an error."
+      }
+    },
+    {
+      "name": "system_job_set_enabled",
+      "module": "src-tauri/src/system_jobs.rs",
+      "registrationPath": "src-tauri/src/lib.rs::system_jobs::ipc::system_job_set_enabled",
+      "originalDisposition": "ISOLATED",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/system_jobs.rs::system_job_set_enabled delegates to src-tauri/src/system_jobs.rs::system_job_set_enabled_in, which gates the label through guarded_system_plist and validate_system_label before any launchctl call.",
+        "system_job_set_enabled_in resolves the uid with current_uid, runs launchctl enable or disable via run_tool, then reads back agent state with agent_status, print_launchd_state, launchd_disabled_labels and program_summary; all subprocess work stays inside the owned blocking worker."
+      ],
+      "workerBoundary": "src-tauri/src/system_jobs.rs::ipc::system_job_set_enabled owns the label String and awaits tauri::async_runtime::spawn_blocking before the label guard, uid resolution or launchctl enable/disable call; the SystemAgent payload and snake_case error strings pass through unchanged and a JoinError maps to the display-only system_job_set_enabled_task_failed String; no borrowed guard crosses await.",
+      "syncCallers": [
+        "src-tauri/src/system_jobs.rs::system_job_set_enabled stays a stable synchronous Rust API delegating to system_job_set_enabled_in; the guard logic validate_system_label and guarded_system_plist is covered directly by in-module unit tests without launchd."
+      ],
+      "mutationKey": {
+        "lexicalPaths": [
+          "~/Library/LaunchAgents/<label>.plist existence-checked by guarded_system_plist (never written)",
+          "launchd disabled-registry entry for gui/<uid>/<label> toggled by launchctl enable or disable"
+        ],
+        "aliasPaths": [
+          "No alias resolution: the plist path is lexical under launch_agents_dir, the label charset forbids separators and dot segments, and the command writes no files"
+        ],
+        "postAdmissionPreconditions": [
+          "Label charset and com.maru.job.* exclusion validated by validate_system_label before any launchctl call",
+          "Plist for the label is present in LaunchAgents at guard time"
+        ],
+        "domainLockOrder": "Label guard and plist existence check run before the launchctl enable/disable effect; no domain mutex is held across the subprocess join.",
+        "sharedAdmissionEntry": "src-tauri/src/system_jobs.rs::guarded_system_plist gates src-tauri/src/system_jobs.rs::system_job_set_enabled_in before launchctl; the command mutates only launchd disabled-registry state, so no workspace path transaction applies."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib system_jobs",
+          "passed": 7,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/components/jobs/SystemJobsPanel.tsx"
+        ],
+        "payload": "SystemJobsPanel runAgentAction owns per-label busy state and awaits systemJobSetEnabled, then refreshes the overview; a failure keeps the previous row state and error surface.",
+        "terminalNoticeOwner": "SystemJobsPanel owns completion and error display for the panel; no global notice is emitted.",
+        "classifier": "n/a: bounded launchd/crontab subprocess call, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true
+      },
+      "evidence": {
+        "behaviorCases": [
+          "tests::validate_system_label_accepts_plain_labels_and_refuses_unsafe_ones",
+          "tests::guarded_system_plist_requires_existing_plist"
+        ],
+        "workerProof": "The command body is a single awaited spawn_blocking around super::system_job_set_enabled; the guard and the launchctl spawn happen inside that worker.",
+        "platformScope": "macOS only: launchctl enable/disable target the gui/<uid> domain; unit tests exercise the pure guard with recorded inputs, not a live launchd.",
+        "limits": "In-process guard cannot exclude external processes enabling the same label concurrently; launchctl remains the arbiter of the disabled registry.",
+        "contract": "The guard refuses Maru-managed com.maru.job.* labels, unsafe charsets and labels without a plist in ~/Library/LaunchAgents, so the command can only toggle a real non-Maru user agent."
+      }
+    },
+    {
+      "name": "system_job_run_now",
+      "module": "src-tauri/src/system_jobs.rs",
+      "registrationPath": "src-tauri/src/lib.rs::system_jobs::ipc::system_job_run_now",
+      "originalDisposition": "ISOLATED",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/system_jobs.rs::system_job_run_now delegates to src-tauri/src/system_jobs.rs::system_job_run_now_in, which gates the label through guarded_system_plist and validate_system_label before the launchctl kickstart call.",
+        "system_job_run_now_in resolves the uid with current_uid, runs launchctl kickstart -k via run_tool, then reads back agent state with agent_status, print_launchd_state, launchd_disabled_labels and program_summary; all subprocess work stays inside the owned blocking worker."
+      ],
+      "workerBoundary": "src-tauri/src/system_jobs.rs::ipc::system_job_run_now owns the label String and awaits tauri::async_runtime::spawn_blocking before the label guard, uid resolution or launchctl kickstart call; the SystemAgent payload and snake_case error strings pass through unchanged and a JoinError maps to the display-only system_job_run_now_task_failed String; no borrowed guard crosses await.",
+      "syncCallers": [
+        "src-tauri/src/system_jobs.rs::system_job_run_now stays a stable synchronous Rust API delegating to system_job_run_now_in; the guard logic validate_system_label and guarded_system_plist is covered directly by in-module unit tests without launchd."
+      ],
+      "mutationKey": {
+        "lexicalPaths": [
+          "~/Library/LaunchAgents/<label>.plist existence-checked by guarded_system_plist (never written)",
+          "Running process state of gui/<uid>/<label> affected by launchctl kickstart -k, including whatever the kicked agent itself writes"
+        ],
+        "aliasPaths": [
+          "No alias resolution: the plist path is lexical under launch_agents_dir, the label charset forbids separators and dot segments, and the command writes no files"
+        ],
+        "postAdmissionPreconditions": [
+          "Label charset and com.maru.job.* exclusion validated by validate_system_label before any launchctl call",
+          "Plist for the label is present in LaunchAgents at guard time"
+        ],
+        "domainLockOrder": "Label guard and plist existence check run before the launchctl kickstart effect; no domain mutex is held across the subprocess join.",
+        "sharedAdmissionEntry": "src-tauri/src/system_jobs.rs::guarded_system_plist gates src-tauri/src/system_jobs.rs::system_job_run_now_in before launchctl; the command only asks launchd to run an already-installed agent, so no workspace path transaction applies."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib system_jobs",
+          "passed": 7,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/components/jobs/SystemJobsPanel.tsx"
+        ],
+        "payload": "SystemJobsPanel runAgentAction owns per-label busy state and awaits systemJobRunNow (disabled unless the agent is loaded), then refreshes the overview; a failure keeps the previous row state and error surface.",
+        "terminalNoticeOwner": "SystemJobsPanel owns completion and error display for the panel; no global notice is emitted.",
+        "classifier": "n/a: bounded launchd/crontab subprocess call, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true
+      },
+      "evidence": {
+        "behaviorCases": [
+          "tests::validate_system_label_accepts_plain_labels_and_refuses_unsafe_ones",
+          "tests::guarded_system_plist_requires_existing_plist"
+        ],
+        "workerProof": "The command body is a single awaited spawn_blocking around super::system_job_run_now; the guard and the launchctl spawn happen inside that worker.",
+        "platformScope": "macOS only: launchctl kickstart targets the gui/<uid> domain; unit tests exercise the pure guard with recorded inputs, not a live launchd.",
+        "limits": "In-process guard cannot exclude external processes kicking the same label concurrently; the kicked agent's own side effects are outside Maru's visibility.",
+        "contract": "The guard refuses Maru-managed com.maru.job.* labels, unsafe charsets and labels without a plist in ~/Library/LaunchAgents, so the command can only kickstart a real non-Maru user agent."
+      }
+    },
+    {
+      "name": "system_crontab_remove",
+      "module": "src-tauri/src/system_jobs.rs",
+      "registrationPath": "src-tauri/src/lib.rs::system_jobs::ipc::system_crontab_remove",
+      "originalDisposition": "ISOLATED",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/system_jobs.rs::system_crontab_remove delegates to src-tauri/src/system_crontab_remove_in, which re-reads the raw crontab with read_crontab_raw, validates and rewrites it with the pure remove_crontab_entry helper, then pipes the result to crontab - via system_command.",
+        "remove_crontab_entry counts the same non-empty and non-comment lines parse_crontab_entries returns, so the list response and the removal index can never drift; comments, blank lines and the trailing newline are preserved verbatim."
+      ],
+      "workerBoundary": "src-tauri/src/system_jobs.rs::ipc::system_crontab_remove awaits tauri::async_runtime::spawn_blocking before the crontab -l read, index validation or crontab - rewrite; the remaining-entries payload and snake_case error strings pass through unchanged and a JoinError maps to the display-only system_crontab_remove_task_failed String; no child stdin handle crosses await.",
+      "syncCallers": [
+        "src-tauri/src/system_jobs.rs::system_crontab_remove stays a stable synchronous Rust API delegating to system_crontab_remove_in; remove_crontab_entry and parse_crontab_entries are pure functions covered directly by in-module unit tests without a crontab."
+      ],
+      "mutationKey": {
+        "lexicalPaths": [
+          "User crontab spool replaced through the crontab tool (crontab - stdin) with the entry at the validated index removed"
+        ],
+        "aliasPaths": [
+          "No file aliases: the crontab spool is only written through the crontab tool, never through a direct file path"
+        ],
+        "postAdmissionPreconditions": [
+          "crontab -l re-read immediately before the rewrite",
+          "index validated against the same non-empty and non-comment entry list the list command returns"
+        ],
+        "domainLockOrder": "The entry index is validated against the freshly read crontab before the single crontab - rewrite; no domain mutex is held across the subprocess join.",
+        "sharedAdmissionEntry": "src-tauri/src/system_jobs.rs::system_crontab_remove_in validates the index via src-tauri/src/system_jobs.rs::remove_crontab_entry before the crontab stdin rewrite; the only mutation is the user's own crontab contents."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib system_jobs",
+          "passed": 7,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/components/jobs/SystemJobsPanel.tsx"
+        ],
+        "payload": "SystemJobsPanel removeCronEntry confirms with window.confirm, owns per-index busy state and awaits systemCrontabRemove, then refreshes the overview; a failure keeps the previous list and error surface.",
+        "terminalNoticeOwner": "SystemJobsPanel owns completion and error display for the panel; no global notice is emitted.",
+        "classifier": "n/a: bounded launchd/crontab subprocess call, not a file-processing batch",
+        "successRetention": "updated record retained in component state",
+        "failureReasons": "call-site catch error message (single publisher)",
+        "singleTerminalNoticeOwner": true
+      },
+      "evidence": {
+        "behaviorCases": [
+          "tests::remove_crontab_entry_drops_only_the_indexed_entry",
+          "tests::remove_crontab_entry_rejects_out_of_range_index"
+        ],
+        "workerProof": "The command body is a single awaited spawn_blocking around super::system_crontab_remove; the crontab -l read and crontab - rewrite happen inside that worker.",
+        "platformScope": "macOS only: crontab is a per-user launchd spool; unit tests exercise the pure rewrite logic with recorded input, not a live crontab.",
+        "limits": "The re-read and rewrite are not atomic against an external crontab edit in between; the tool itself serializes spool replacement.",
+        "contract": "A missing crontab is a crontab_missing error and an out-of-range index is crontab_index_out_of_range; removal never touches comment or environment lines."
+      }
+    }
   ]
 }

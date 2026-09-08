@@ -64,6 +64,7 @@ mod site_view;
 mod sites;
 mod skill_host;
 mod studio;
+mod system_jobs;
 mod tasks;
 mod telegram_config;
 mod telegram_io;
@@ -434,6 +435,10 @@ pub fn run() {
             jobs::ipc::jobs_stop,
             jobs::ipc::jobs_run_now,
             jobs::ipc::jobs_read_log,
+            system_jobs::ipc::system_jobs_list,
+            system_jobs::ipc::system_job_set_enabled,
+            system_jobs::ipc::system_job_run_now,
+            system_jobs::ipc::system_crontab_remove,
             dot_sync_overview,
             dot_sync_run,
             prepare_approval,

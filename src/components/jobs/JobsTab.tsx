@@ -16,6 +16,7 @@ import { useTranslation } from "../../lib/i18n";
 import { ModeHeader } from "../ui/ModeChrome";
 import { SettingsSection } from "../settings/SettingsSection";
 import { DotSyncPanel } from "./DotSyncPanel";
+import { SystemJobsPanel } from "./SystemJobsPanel";
 import {
   jobsInstall,
   jobsList,
@@ -227,6 +228,7 @@ export function JobsTab({ workPath }: JobsTabProps) {
           </ul>
         )}
       </SettingsSection>
+      <SystemJobsPanel />
     </div>
   );
 }

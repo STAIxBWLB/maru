@@ -2924,6 +2924,80 @@ export async function jobsReadLog(workPath: string, jobId: string): Promise<JobL
   return invoke<JobLogsTail>("jobs_read_log", { workPath, jobId });
 }
 
+// === System agents (launchd) + crontab ===
+
+export interface SystemAgent {
+  label: string;
+  program: string;
+  plistPath: string;
+  loaded: boolean;
+  enabled: boolean;
+  pid: number | null;
+  lastExitCode: number | null;
+}
+
+export interface SystemJobsOverview {
+  agents: SystemAgent[];
+  crontab: string[];
+}
+
+function mockSystemJobsOverview(): SystemJobsOverview {
+  return {
+    agents: [
+      {
+        label: "com.vendor.sync",
+        program: "/usr/local/bin/sync-agent",
+        plistPath: "~/Library/LaunchAgents/com.vendor.sync.plist",
+        loaded: true,
+        enabled: true,
+        pid: 4812,
+        lastExitCode: 0,
+      },
+      {
+        label: "com.vendor.backup",
+        program: "/usr/local/bin/backup-agent --daily",
+        plistPath: "~/Library/LaunchAgents/com.vendor.backup.plist",
+        loaded: false,
+        enabled: false,
+        pid: null,
+        lastExitCode: null,
+      },
+    ],
+    crontab: ["0 3 * * * /usr/local/bin/nightly-cleanup"],
+  };
+}
+
+export async function systemJobsList(): Promise<SystemJobsOverview> {
+  if (!isTauri()) return mockSystemJobsOverview();
+  return invoke<SystemJobsOverview>("system_jobs_list");
+}
+
+export async function systemJobSetEnabled(
+  label: string,
+  enabled: boolean,
+): Promise<SystemAgent> {
+  if (!isTauri()) {
+    const agent = mockSystemJobsOverview().agents.find((entry) => entry.label === label);
+    return { ...mockSystemJobsOverview().agents[0], ...agent, label, enabled };
+  }
+  return invoke<SystemAgent>("system_job_set_enabled", { label, enabled });
+}
+
+export async function systemJobRunNow(label: string): Promise<SystemAgent> {
+  if (!isTauri()) {
+    const agent = mockSystemJobsOverview().agents.find((entry) => entry.label === label);
+    return { ...mockSystemJobsOverview().agents[0], ...agent, label, lastExitCode: 0 };
+  }
+  return invoke<SystemAgent>("system_job_run_now", { label });
+}
+
+export async function systemCrontabRemove(index: number): Promise<string[]> {
+  if (!isTauri()) {
+    return mockSystemJobsOverview().crontab.filter((_, entryIndex) => entryIndex !== index);
+  }
+  return invoke<string[]>("system_crontab_remove", { index });
+}
+
 // === dot workspace sync (global dot configuration) ===
 
 export interface DotCliStatus {

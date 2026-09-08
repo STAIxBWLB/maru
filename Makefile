@@ -186,11 +186,12 @@ check-native-e2e-isolation: ## Static guard: no native-e2e runner affordances in
 # Phase 08 closure gate (PERF-01/PERF-02): every registered production
 # command must carry final justified evidence (worker boundary, mutation
 # admission, processing-caller closure) and the live generate_handler
-# registration set must still match the 365-command research inventory.
+# registration set must still match the 365-command research inventory plus
+# the reconciled additions in docs/performance/phase08-registration-changes.json.
 # Hermetic - source and recorded evidence only, no binary or browser needed.
 .PHONY: check-command-isolation
-check-command-isolation: ## Phase 08 closure gate: 365 production commands carry final justified evidence
-	$(NODE) scripts/check-command-isolation.mjs --all --expected-count 365
+check-command-isolation: ## Phase 08 closure gate: 365+4 production commands carry final justified evidence
+	$(NODE) scripts/check-command-isolation.mjs --all --expected-count 369
 
 # The type scale is the single source of truth (PR #137). A raw px font-size in
 # styles.css silently opts that rule out of any future --type-* retune, so the

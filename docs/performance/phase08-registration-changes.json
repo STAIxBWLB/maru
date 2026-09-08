@@ -1,0 +1,33 @@
+{
+  "baselineCount": 365,
+  "additions": [
+    {
+      "name": "system_jobs_list",
+      "owner": "08-15",
+      "module": "src-tauri/src/system_jobs.rs",
+      "originalDisposition": "ISOLATED",
+      "reason": "New Settings > Jobs feature: read-only overview of non-Maru user LaunchAgents and crontab entries; spawns launchctl/PlistBuddy/crontab inside an awaited spawn_blocking worker."
+    },
+    {
+      "name": "system_job_set_enabled",
+      "owner": "08-15",
+      "module": "src-tauri/src/system_jobs.rs",
+      "originalDisposition": "ISOLATED",
+      "reason": "New Settings > Jobs feature: launchctl enable/disable for a guarded non-Maru agent label; finite launchctl call isolated in an awaited spawn_blocking worker."
+    },
+    {
+      "name": "system_job_run_now",
+      "owner": "08-15",
+      "module": "src-tauri/src/system_jobs.rs",
+      "originalDisposition": "ISOLATED",
+      "reason": "New Settings > Jobs feature: launchctl kickstart -k for a guarded non-Maru agent label; finite launchctl call isolated in an awaited spawn_blocking worker."
+    },
+    {
+      "name": "system_crontab_remove",
+      "owner": "08-15",
+      "module": "src-tauri/src/system_jobs.rs",
+      "originalDisposition": "ISOLATED",
+      "reason": "New Settings > Jobs feature: removes one crontab entry by index via a crontab - stdin rewrite; finite subprocess work isolated in an awaited spawn_blocking worker."
+    }
+  ]
+}
