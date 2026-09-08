@@ -8,6 +8,27 @@ because releases cut frequently during active development. Versions before
 Dates are the release-tag dates. Only `feat`/`fix`-level changes are listed;
 `chore(release)` version bumps and merge commits are omitted.
 
+## v1.1.5 - 2026-09-08 - Scheduled Control
+
+- **Settings > Jobs now manages the machine's own scheduled work (#315).** A
+  new System agents section lists user LaunchAgents with loaded/enabled/
+  last-exit state, enable/disable and run-now controls behind a dedicated
+  label guard, plus crontab listing with per-entry removal verified against
+  the confirmed entry text. Maru-managed `com.maru.job.*` jobs stay in the
+  existing section.
+- **Workspace sync works with dot CLI v2.70.** The status parser accepted
+  only schema 1 and failed closed with `dot_status_schema_unsupported`;
+  schemas 1-2 are now accepted for both mirror status and the nested peer
+  profile, and newer schemas report the observed version.
+- **Documents list entries can be trashed individually.** The context menu
+  gains Move to Trash, wired to the recoverable `.maru/trash/documents`
+  flow with delete-permission gating and open-tab cleanup.
+- **Carried-over tasks show their real titles again.** Prepare > Review
+  yesterday rendered every row as "Untitled task" because rollover
+  snapshots seed titles from the plan outcome, which is null for
+  deterministic plans; the screen now resolves titles from the live task
+  scan and no longer stamps empty outcomes into the plan.
+
 ## v1.1.4 - 2026-09-06 - Off the Main Thread
 
 - **All 365 production commands now run off the UI/shared async worker thread
