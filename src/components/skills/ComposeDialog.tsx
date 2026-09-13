@@ -11,7 +11,7 @@ import {
   Workflow,
   X,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type {
   DispatchComposition,
   SkillContextItem,
@@ -29,9 +29,10 @@ import {
   skillsDispatchTerminal,
   skillsRuntimeStatus,
 } from "../../lib/skills";
-import { chooseFiles } from "../../lib/api";
+import { readDocument } from "../../lib/api";
 import { appendSourceBlock } from "../../lib/meetingNotesPrompt";
-import { createMeetingSourceSession, importMeetingSource, type SourceSession } from "../../lib/meetingSources";
+import { createMeetingSourceSession } from "../../lib/meetingSources";
+import { prepareMeetingSourceIntake } from "../../lib/meetingSourceIntake";
 import { requestMeetingSourceSession } from "../../lib/meetingSourceNavigation";
 import { Button } from "../ui/Button";
 import {
@@ -110,7 +111,8 @@ export function ComposeDialog({
   const [skillId, setSkillId] = useState("");
   const [prompt, setPrompt] = useState("");
   const [sourceText, setSourceText] = useState("");
-  const [sourceFiles, setSourceFiles] = useState<string[]>([]);
+  const [sourceFiles, setSourceFiles] = useState<File[]>([]);
+  const sourceFileInput = useRef<HTMLInputElement>(null);
   const [skillQuery, setSkillQuery] = useState("");
   const [runtime, setRuntime] = useState<SkillDispatchRuntime>(defaultRuntime ?? "claude");
   const [mode, setMode] = useState<ComposeMode>("background");
@@ -193,23 +195,14 @@ export function ComposeDialog({
   }, [selectedSkill, skillQuery, skills]);
   const acceptsSource = skillAcceptsSource(selectedSkill);
   const isMeetingNotes = selectedSkill?.name === MEETING_NOTES_SKILL;
-  // Fold the pasted source text into the prompt and the picked files into the
-  // context, so the preview, all dispatch paths, and tracking metadata see the
-  // same composition. The backend wraps the prompt verbatim and renders context
-  // files in <selected_context>, so no backend change is needed.
+  // Selected external files remain browser-granted File objects until intake.
+  // Existing workspace context stays on the guarded document-read path.
   const effectivePrompt = useMemo(() => {
     if (!acceptsSource || !sourceText.trim()) return prompt;
     return appendSourceBlock(prompt, sourceText);
   }, [acceptsSource, prompt, sourceText]);
-  const effectiveContext = useMemo<SkillContextItem[]>(() => {
-    const base = seed?.context ?? [];
-    if (!acceptsSource || sourceFiles.length === 0) return base;
-    const seen = new Set(base.map((item) => item.path));
-    const extra = sourceFiles
-      .filter((path) => !seen.has(path))
-      .map((path) => ({ path, kind: "file" as const }));
-    return extra.length > 0 ? [...base, ...extra] : base;
-  }, [acceptsSource, seed?.context, sourceFiles]);
+  const effectiveContext = useMemo<SkillContextItem[]>(() => seed?.context ?? [], [seed?.context]);
+  const selectedSourceCount = effectiveContext.length + sourceFiles.length;
   const skillValid = selectedSkill?.valid ?? true;
   const selectedRuntimeStatus = runtimeStatuses[runtime] ?? null;
   const runtimeReady = selectedRuntimeStatus?.available === true;
@@ -251,21 +244,15 @@ export function ComposeDialog({
       if (isMeetingNotes) {
         const workspace = meetingsWorkspacePath ?? seed?.cwd;
         if (!workspace || !onOpenMeetingsWorkbench) throw new Error(t("skills.compose.meetingNeedsWorkspace"));
-        let session: SourceSession | null = null;
-        if (sourceText.trim()) {
-          session = await createMeetingSourceSession(workspace, {
-            title: t("meetings.sourceReview.title"), provider: "External", context: prompt,
-            sources: [{ id: crypto.randomUUID(), name: "Imported note", kind: "note", text: sourceText,
-              originalText: sourceText, originalHash: "" }],
-            participants: [], findings: [], suggestions: [], participantsReviewed: false, noteReviewed: false,
-          });
+        const draft = await prepareMeetingSourceIntake({
+          title: t("meetings.sourceReview.title"), prompt, pastedText: sourceText, files: sourceFiles,
+          contextPaths: effectiveContext.map((item) => item.path),
+          readContext: async (path) => (await readDocument(workspace, path)).content,
+        });
+        if (draft) {
+          const session = await createMeetingSourceSession(workspace, draft);
+          requestMeetingSourceSession(workspace, session.id);
         }
-        for (const item of effectiveContext) {
-          session = await importMeetingSource(workspace, session?.id ?? null, {
-            name: item.path.split(/[\\/]/).at(-1) ?? "Imported note", kind: "note", path: item.path,
-          }, session?.revision);
-        }
-        if (session) requestMeetingSourceSession(workspace, session.id);
         onOpenMeetingsWorkbench();
         return;
       }
@@ -374,8 +361,8 @@ export function ComposeDialog({
           <div>
             <DialogSurfaceTitle>{t("skills.compose.title")}</DialogSurfaceTitle>
             <p>
-              {effectiveContext.length > 0
-                ? t("skills.compose.selectedCount", { count: effectiveContext.length })
+              {selectedSourceCount > 0
+                ? t("skills.compose.selectedCount", { count: selectedSourceCount })
                 : t("skills.compose.noSelection")}
             </p>
           </div>
@@ -561,17 +548,24 @@ export function ComposeDialog({
                   <button
                     type="button"
                     className="secondary-button"
-                    onClick={() => void chooseFiles(t("skills.compose.sourcePick")).then(setSourceFiles)}
+                    disabled={busy}
+                    onClick={() => sourceFileInput.current?.click()}
                   >
                     <FolderOpen size={14} />
                     {t("skills.compose.sourcePick")}
                   </button>
+                  <input ref={sourceFileInput} type="file" multiple hidden accept=".txt,.md,.markdown"
+                    aria-label={t("skills.compose.sourcePick")} disabled={busy}
+                    onChange={(event) => {
+                      setSourceFiles(Array.from(event.target.files ?? []));
+                      event.target.value = "";
+                    }} />
                   <div className="compose-context compose-source-files">
                     {sourceFiles.length > 0 ? (
-                      sourceFiles.map((path) => (
-                        <span key={path} title={path}>
+                      sourceFiles.map((file, index) => (
+                        <span key={`${index}-${file.name}`} title={file.name}>
                           <FileText size={12} />
-                          {path.split("/").pop() ?? path}
+                          {file.name}
                         </span>
                       ))
                     ) : (
