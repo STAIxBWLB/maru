@@ -190,6 +190,16 @@ const SEEDS: &[AgentSeed] = &[
         schedule: None,
     },
     AgentSeed {
+        id: "meeting-source-review",
+        label_key: "agents.builtin.meetingSourceReview",
+        skill_name: "meeting-source-review",
+        prompt: "Plaud 등 외부 회의록의 참가자 맥락과 요약을 검토하고, 근거가 있는 수정 제안만 반환. 원문 파일을 수정하거나 회의록 파일을 생성하지 말 것.",
+        kind: "background",
+        permission_mode: "plan",
+        enabled: true,
+        schedule: None,
+    },
+    AgentSeed {
         id: "task-extract",
         label_key: "agents.builtin.taskExtract",
         skill_name: "task-management",

@@ -25,6 +25,7 @@ pub const EVIDENCE_BINDER_REVISION_CONFLICT: &str = "evidence_binder_revision_co
 /// A guarded web-action linkage repair no longer matches the record or note
 /// the Today surface rendered. The frontend can refresh without guessing.
 pub const WEB_ACTION_REPAIR_CONFLICT: &str = "web_action_repair_conflict";
+pub const MEETING_SOURCE_REVISION_CONFLICT: &str = "meeting_source_revision_conflict";
 
 /// Error crossing the Tauri bridge. `code` is empty for legacy errors
 /// converted via `From<String>` (the whole original string lands in

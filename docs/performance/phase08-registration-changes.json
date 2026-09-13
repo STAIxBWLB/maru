@@ -28,6 +28,17 @@
       "module": "src-tauri/src/system_jobs.rs",
       "originalDisposition": "ISOLATED",
       "reason": "New Settings > Jobs feature: removes one crontab entry by index via a crontab - stdin rewrite; finite subprocess work isolated in an awaited spawn_blocking worker."
-    }
+    },
+    { "name": "create_meeting_source_session", "owner": "08-09", "module": "src-tauri/src/meeting_sources.rs", "originalDisposition": "ISOLATED", "reason": "Plaud source-review session creation is isolated in an awaited blocking worker." },
+    { "name": "import_meeting_source", "owner": "08-09", "module": "src-tauri/src/meeting_sources.rs", "originalDisposition": "ISOLATED", "reason": "Plaud TXT/Markdown source import is isolated in an awaited blocking worker." },
+    { "name": "read_meeting_source_session", "owner": "08-09", "module": "src-tauri/src/meeting_sources.rs", "originalDisposition": "ISOLATED", "reason": "Source-review session reads are isolated in an awaited blocking worker." },
+    { "name": "list_meeting_source_sessions", "owner": "08-09", "module": "src-tauri/src/meeting_sources.rs", "originalDisposition": "ISOLATED", "reason": "Source-review session enumeration is isolated in an awaited blocking worker." },
+    { "name": "save_meeting_source_draft", "owner": "08-09", "module": "src-tauri/src/meeting_sources.rs", "originalDisposition": "ISOLATED", "reason": "Revision-checked source-review draft writes are isolated in an awaited blocking worker." },
+    { "name": "checkpoint_meeting_source", "owner": "08-09", "module": "src-tauri/src/meeting_sources.rs", "originalDisposition": "ISOLATED", "reason": "Immutable source-review checkpoints are written in an awaited blocking worker." },
+    { "name": "confirm_meeting_source", "owner": "08-09", "module": "src-tauri/src/meeting_sources.rs", "originalDisposition": "ISOLATED", "reason": "Source-review confirmation and pinned version writes are isolated in an awaited blocking worker." },
+    { "name": "restore_meeting_source_version", "owner": "08-09", "module": "src-tauri/src/meeting_sources.rs", "originalDisposition": "ISOLATED", "reason": "Source-review version restoration is isolated in an awaited blocking worker." },
+    { "name": "read_meeting_source_version", "owner": "08-09", "module": "src-tauri/src/meeting_sources.rs", "originalDisposition": "ISOLATED", "reason": "Immutable source-review version reads are isolated in an awaited blocking worker." },
+    { "name": "list_meeting_correction_examples", "owner": "08-09", "module": "src-tauri/src/meeting_sources.rs", "originalDisposition": "ISOLATED", "reason": "Correction-example reads are isolated in an awaited blocking worker." },
+    { "name": "save_meeting_correction_example", "owner": "08-09", "module": "src-tauri/src/meeting_sources.rs", "originalDisposition": "ISOLATED", "reason": "Explicit correction-example writes are isolated in an awaited blocking worker." }
   ]
 }

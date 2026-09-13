@@ -1,5 +1,6 @@
 import type { MeetingsSettings } from "./settings";
 import type { MeetingGuides } from "./types";
+import type { SourceDraft, ReviewedSourceReference } from "./meetingSources";
 
 export type MeetingSourceKind = "transcript" | "external";
 
@@ -41,6 +42,7 @@ export function buildMeetingNotesPrompt({
   detail,
   note,
   guides,
+  reviewedSource,
 }: {
   sourceKind: MeetingSourceKind;
   settings: MeetingsSettings;
@@ -49,6 +51,7 @@ export function buildMeetingNotesPrompt({
   detail: string;
   note: string;
   guides: MeetingGuides | null;
+  reviewedSource?: { reference: ReviewedSourceReference; draft: SourceDraft };
 }): string {
   const action =
     sourceKind === "transcript"
@@ -72,6 +75,20 @@ export function buildMeetingNotesPrompt({
       ? `Infer only the missing ${missingHints} from the transcript or note body; preserve any provided hint.`
       : null,
     "Use the six-section meeting note structure, normalized tags, and wiki-link conventions.",
+    reviewedSource ? [
+      "REVIEWED_SOURCE_CONTEXT:",
+      "The corrected external note is the primary input. Preserve the user's accepted corrections. References support checking, not silent regeneration from the transcript.",
+      "Use only confirmed attendee identities for attribution. Preserve acknowledged uncertainties in the final note; do not turn mentioned people into attendees or invent decisions and owners.",
+      JSON.stringify({
+        reference: reviewedSource.reference,
+        date: reviewedSource.draft.date,
+        participants: reviewedSource.draft.participants,
+        context: reviewedSource.draft.context,
+        uncertainties: reviewedSource.draft.suggestions.filter((item) => item.status === "uncertain"),
+        references: reviewedSource.draft.sources.filter((source) => source.kind === "transcript")
+          .map(({ id, name, text }) => ({ id, name, text })),
+      }, null, 2),
+    ].join("\n") : null,
     guides ? formatGuide("QUICK_START", guides.quickStart) : null,
     guides ? formatGuide("GLOSSARY", guides.glossary) : null,
     guides ? formatGuide("PEOPLE", guides.people) : null,

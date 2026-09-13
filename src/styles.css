@@ -16926,6 +16926,11 @@ button.git-badge:hover {
   align-items: start;
 }
 
+.meetings-source-workbench-full {
+  grid-column: 1 / -1;
+  min-width: 0;
+}
+
 .meetings-workbench-card {
   min-width: 0;
   display: grid;

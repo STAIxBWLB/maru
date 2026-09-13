@@ -190,8 +190,8 @@ check-native-e2e-isolation: ## Static guard: no native-e2e runner affordances in
 # the reconciled additions in docs/performance/phase08-registration-changes.json.
 # Hermetic - source and recorded evidence only, no binary or browser needed.
 .PHONY: check-command-isolation
-check-command-isolation: ## Phase 08 closure gate: 365+4 production commands carry final justified evidence
-	$(NODE) scripts/check-command-isolation.mjs --all --expected-count 369
+check-command-isolation: ## Phase 08 closure gate: 365+15 production commands carry final justified evidence
+	$(NODE) scripts/check-command-isolation.mjs --all --expected-count 380
 
 # The type scale is the single source of truth (PR #137). A raw px font-size in
 # styles.css silently opts that rule out of any future --type-* retune, so the

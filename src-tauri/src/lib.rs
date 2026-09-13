@@ -46,6 +46,7 @@ mod linter;
 mod lock_recovery;
 mod maru_dir;
 mod maru_migration;
+mod meeting_sources;
 mod meetings;
 mod mission_state;
 #[cfg(feature = "native-e2e")]
@@ -296,6 +297,17 @@ pub fn run() {
             meetings::ipc::read_meeting_guides,
             meetings::ipc::append_meetings_log,
             meetings::ipc::read_meetings_log,
+            meeting_sources::create_meeting_source_session,
+            meeting_sources::import_meeting_source,
+            meeting_sources::read_meeting_source_session,
+            meeting_sources::list_meeting_source_sessions,
+            meeting_sources::save_meeting_source_draft,
+            meeting_sources::checkpoint_meeting_source,
+            meeting_sources::confirm_meeting_source,
+            meeting_sources::restore_meeting_source_version,
+            meeting_sources::read_meeting_source_version,
+            meeting_sources::list_meeting_correction_examples,
+            meeting_sources::save_meeting_correction_example,
             calendar_search::ipc::search_calendar_notes,
             content_search::ipc::search_workspace_contents,
             tasks::ipc::scan_task_notes,
