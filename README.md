@@ -4,7 +4,7 @@ Maru is a local-first desktop workspace for Korean knowledge and document
 operations. It combines a React 19 and TypeScript interface with a Tauri 2 Rust
 core, and treats the filesystem as the source of truth.
 
-The current product release is **v1.1.6, Reviewed Sources**. Releases
+The current product release is **v1.1.7, External Notes**. Releases
 before v0.3.0 shipped under the name Anchor; v0.3.0 completed the application
 identifier and on-disk migration to Maru.
 
@@ -12,12 +12,12 @@ identifier and on-disk migration to Maru.
 
 | Area | State | Evidence |
 |------|-------|----------|
-| Product release | v1.1.6 | Signed desktop bundles and standalone CLI for macOS, Windows, and Linux |
+| Product release | v1.1.7 | Signed desktop bundles and standalone CLI for macOS, Windows, and Linux |
 | Planning milestone | v1.1 Felt Quality and Native Proof | Phases 6-11; phases 6-8 complete (39 plans) |
 | Application shell | Complete | 18 lazy modes; `MainApp` held to 15 `useState` and 24 `useEffect` calls |
 | Verification | Passing | Typecheck, ESLint, unit tests, Rust fmt/clippy, E2E, build, and bundle budgets |
 | Typed IPC | ERR-06 closed | Every conflict-emitting command preserves `{ code, message }`; recursive source guard active |
-| Main-thread isolation | PERF-01/02 closed | All 380 production commands off the UI thread (371 ISOLATED + 9 UI); Phase 08 baseline native load proof keeps loaded p95 at 2ms with the negative control at 4789ms |
+| Main-thread isolation | PERF-01/02 closed | All 381 production commands off the UI thread (372 ISOLATED + 9 UI); Phase 08 baseline native load proof keeps loaded p95 at 2ms with the negative control at 4789ms |
 | Active milestone | v1.1, phase 08 complete | Phase 09 (Durability and Session Lifecycle) is next; releases ship as 1.1.x while v1.1 is open |
 
 The milestone archive, audit, retrospective, and summary live under
@@ -144,7 +144,7 @@ brew upgrade maru-cli
   ISOLATED commands run on awaited `spawn_blocking` workers and 9
   native-window commands stay UI-bound, and every filesystem mutation passes
   shared path-transaction admission before taking domain locks. The
-  380-command inventory, worker-boundary, and admission evidence are gated by
+  381-command inventory, worker-boundary, and admission evidence are gated by
   `check-command-isolation` in `make verify`.
 
 ## Capability Highlights
@@ -330,8 +330,8 @@ make clippy
 # Complete hermetic verification
 make verify
 
-# Phase 08 evidence closure gate alone (380 production commands, PERF-01/PERF-02)
-node scripts/check-command-isolation.mjs --all --expected-count 380
+# Phase 08 evidence closure gate alone (381 production commands, PERF-01/PERF-02)
+node scripts/check-command-isolation.mjs --all --expected-count 381
 
 # Full verify plus release-only CLI and debug Tauri checks
 make release-checks
@@ -369,8 +369,8 @@ cargo run --manifest-path src-tauri/Cargo.toml -p maru-cli --bin maru-cli -- ski
   ship-isolation scan of the produced bundle (D-10)
 - the Phase 08 evidence closure gate (`check-command-isolation`): every
   registered production command carries final justified worker-boundary,
-  mutation-admission and processing-caller evidence against the 380-command
-  inventory (`node scripts/check-command-isolation.mjs --all --expected-count 380`)
+  mutation-admission and processing-caller evidence against the 381-command
+  inventory (`node scripts/check-command-isolation.mjs --all --expected-count 381`)
 
 Pull requests run a lightweight decision job first. Source changes fan out to
 `make verify` and Playwright E2E. Version-changing PRs run `make release-checks`
