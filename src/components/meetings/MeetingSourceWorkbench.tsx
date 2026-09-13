@@ -24,6 +24,7 @@ interface Props {
   requestedSessionId?: string | null;
   onSessionChange?: (sessionId: string | null) => void;
   createRequestNonce?: number;
+  onCreateRequestConsumed?: () => void;
 }
 const emptyDraft = (source: MeetingSource, title: string): SourceDraft => ({
   title, provider: "", sources: [source], participants: [], findings: [], suggestions: [],
@@ -44,7 +45,7 @@ function syncEditorScroll(event: UIEvent<HTMLTextAreaElement>) {
 }
 
 export function MeetingSourceWorkbench(props: Props) {
-  const { workPath, requestedSessionId, externalSessionUpdate, onReviewedSourceChange, onSessionChange } = props;
+  const { workPath, requestedSessionId, externalSessionUpdate, onReviewedSourceChange, onSessionChange, createRequestNonce, onCreateRequestConsumed } = props;
   const { t } = useTranslation();
   const [rows, setRows] = useState<SourceSession[]>([]);
   const [editor, setEditor] = useState<MeetingSourceEditorStore | null>(null);
@@ -133,10 +134,12 @@ export function MeetingSourceWorkbench(props: Props) {
   }, [workPath, busy, select, t]);
   const handledCreateNonce = useRef(0);
   useEffect(() => {
-    if (!props.createRequestNonce || props.createRequestNonce === handledCreateNonce.current) return;
-    handledCreateNonce.current = props.createRequestNonce;
+    if (!createRequestNonce || createRequestNonce === handledCreateNonce.current) return;
+    handledCreateNonce.current = createRequestNonce;
+    // Consume the request so a later remount does not re-create a blank note.
+    onCreateRequestConsumed?.();
     void createBlank();
-  }, [props.createRequestNonce, createBlank]);
+  }, [createRequestNonce, onCreateRequestConsumed, createBlank]);
   const remove = async (session: SourceSession) => {
     if (!workPath || !window.confirm(t("meetings.sourceReview.deleteConfirm"))) return;
     setBusy(true); setError("");

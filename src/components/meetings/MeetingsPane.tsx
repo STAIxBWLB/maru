@@ -436,6 +436,7 @@ export const MeetingsPane = memo(function MeetingsPane({
     setView("external");
     setCreateRequestNonce((nonce) => nonce + 1);
   }, []);
+  const consumeCreateRequest = useCallback(() => setCreateRequestNonce(0), []);
 
   // Honor an external view request (e.g. the Apply-skill dialog nudge routing
   // the user to the meeting-notes workbench).
@@ -493,6 +494,7 @@ export const MeetingsPane = memo(function MeetingsPane({
           <MeetingsExternalFlow
             workPath={workPath}
             createRequestNonce={createRequestNonce}
+            onCreateRequestConsumed={consumeCreateRequest}
             settings={effectiveSettings}
             skills={skills}
             runtimeCommands={runtimeCommands}
@@ -1200,6 +1202,7 @@ function MeetingsTranscriptFlow(props: {
 function MeetingsExternalFlow({
   workPath,
   createRequestNonce,
+  onCreateRequestConsumed,
   settings,
   skills,
   runtimeCommands,
@@ -1220,6 +1223,7 @@ function MeetingsExternalFlow({
 }: {
   workPath: string | null;
   createRequestNonce?: number;
+  onCreateRequestConsumed?: () => void;
   settings: MeetingsSettings;
   skills: SkillRecord[];
   runtimeCommands: Partial<Record<SkillDispatchRuntime, string | null>>;
@@ -1243,6 +1247,7 @@ function MeetingsExternalFlow({
       sourceKind="external"
       workPath={workPath}
       createRequestNonce={createRequestNonce}
+      onCreateRequestConsumed={onCreateRequestConsumed}
       settings={settings}
       skills={skills}
       runtimeCommands={runtimeCommands}
@@ -1287,6 +1292,7 @@ function MeetingsSkillWorkbench({
   sourceKind,
   workPath,
   createRequestNonce,
+  onCreateRequestConsumed,
   settings,
   skills,
   runtimeCommands,
@@ -1308,6 +1314,7 @@ function MeetingsSkillWorkbench({
   sourceKind: MeetingSourceKind;
   workPath: string | null;
   createRequestNonce?: number;
+  onCreateRequestConsumed?: () => void;
   settings: MeetingsSettings;
   skills: SkillRecord[];
   runtimeCommands: Partial<Record<SkillDispatchRuntime, string | null>>;
@@ -1811,6 +1818,7 @@ function MeetingsSkillWorkbench({
             requestedSessionId={requestedSessionId}
             onSessionChange={setActiveSourceSessionId}
             createRequestNonce={createRequestNonce}
+            onCreateRequestConsumed={onCreateRequestConsumed}
           />
         </div>
         <section className="meetings-workbench-card meetings-source-card">

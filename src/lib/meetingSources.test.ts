@@ -54,6 +54,14 @@ describe("meeting source persistence", () => {
     await expect(saveMeetingSourceDraft("/a", session.id, { ...session.draft, context: "수정" }, session.revision)).rejects.toThrow("quota");
     expect(await readMeetingSourceSession("/a", session.id)).toEqual(before);
   });
+  it("keeps blank drafts saveable but refuses to confirm them until text exists", async () => {
+    const blank = await createMeetingSourceSession("/a", draft(""));
+    const reviewed = await saveMeetingSourceDraft("/a", blank.id, { ...blank.draft, participantsReviewed: true, noteReviewed: true }, blank.revision);
+    await expect(confirmMeetingSource("/a", blank.id, reviewed.revision)).rejects.toThrow("empty");
+    const filled = await saveMeetingSourceDraft("/a", blank.id, { ...reviewed.draft, sources: [{ ...reviewed.draft.sources[0], text: "작성된 회의록" }] }, reviewed.revision);
+    const confirmed = await confirmMeetingSource("/a", blank.id, filled.revision);
+    expect(confirmed.confirmedVersionId).toBeDefined();
+  });
   it("requires explicit reviews and preserves no-op confirmation, but invalidates context edits", async () => {
     const session = await createMeetingSourceSession("/a", draft());
     await expect(confirmMeetingSource("/a", session.id, session.revision)).rejects.toThrow("incomplete");

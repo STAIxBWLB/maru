@@ -684,6 +684,16 @@ fn confirm_impl(workspace: &str, id: &str, revision: &str) -> Result<SourceSessi
                 "Confirm participant/context review and note review first.",
             ));
         }
+        // Blank sources are valid while drafting, but a confirmed version must
+        // carry real text so generation never starts from an empty source.
+        if session
+            .draft
+            .sources
+            .iter()
+            .all(|s| s.text.trim().is_empty())
+        {
+            return Err(invalid("The review must contain some source text."));
+        }
         if session
             .draft
             .suggestions
@@ -1462,6 +1472,22 @@ mod tests {
         d.sources[0].text = "나중에 작성한 내용".into();
         let saved = save_draft_impl(&work, &session.id, d, &reopened.revision).unwrap();
         assert_eq!(saved.draft.sources[0].text, "나중에 작성한 내용");
+    }
+    #[test]
+    fn confirmation_requires_nonempty_source_text() {
+        let tmp = TempDir::new().unwrap();
+        let work = workspace(&tmp);
+        let session = create_impl(&work, draft(""), None).unwrap();
+        let mut d = session.draft.clone();
+        d.participants_reviewed = true;
+        d.note_reviewed = true;
+        let reviewed = save_draft_impl(&work, &session.id, d, &session.revision).unwrap();
+        assert!(confirm_impl(&work, &reviewed.id, &reviewed.revision).is_err());
+        let mut filled = reviewed.draft.clone();
+        filled.sources[0].text = "작성된 회의록".into();
+        let filled = save_draft_impl(&work, &reviewed.id, filled, &reviewed.revision).unwrap();
+        let confirmed = confirm_impl(&work, &filled.id, &filled.revision).unwrap();
+        assert!(confirmed.confirmed_version_id.is_some());
     }
     #[test]
     fn all_ipc_wrappers_complete_the_native_source_workflow() {

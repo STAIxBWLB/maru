@@ -25,9 +25,9 @@ function sourceSession(): SourceSession {
     findings: [], suggestions: [], participantsReviewed: false, noteReviewed: false,
   } };
 }
-async function mount() {
+async function mount(extra: Partial<Parameters<typeof MeetingSourceWorkbench>[0]> = {}) {
   await act(async () => { root.render(<LocaleContext.Provider value={{ locale: "ko", setLocale: () => {}, t: (key, vars) => t("ko", key, vars) }}>
-    <MeetingSourceWorkbench workPath="/test" sourceKind="external" onReviewedSourceChange={changed} onRequestAi={vi.fn()} aiBusy={false} />
+    <MeetingSourceWorkbench workPath="/test" sourceKind="external" onReviewedSourceChange={changed} onRequestAi={vi.fn()} aiBusy={false} {...extra} />
   </LocaleContext.Provider>); });
 }
 function button(text: string) {
@@ -94,6 +94,22 @@ describe("MeetingSourceWorkbench", () => {
       sources: expect.arrayContaining([expect.objectContaining({ kind: "note", text: "" })]),
     }), "");
     expect(host.querySelector(".meeting-source-editor-body")).not.toBeNull();
+  });
+  it("handles a header create request once and consumes it across remounts", async () => {
+    vi.mocked(createMeetingSourceSession).mockImplementation(async (_work, draft) => ({
+      id: crypto.randomUUID(), revision: "r1", createdAt: "now", updatedAt: "now", versions: [], outputLinks: [], draft,
+    }));
+    const consumed = vi.fn();
+    await mount({ createRequestNonce: 1, onCreateRequestConsumed: consumed });
+    expect(createMeetingSourceSession).toHaveBeenCalledTimes(1);
+    expect(consumed).toHaveBeenCalledTimes(1);
+    // The parent resets the nonce to 0 on consume; a remount must not create again.
+    await act(async () => root.unmount());
+    host.remove();
+    host = document.createElement("div"); document.body.appendChild(host); root = createRoot(host);
+    await mount({ createRequestNonce: 0, onCreateRequestConsumed: consumed });
+    expect(createMeetingSourceSession).toHaveBeenCalledTimes(1);
+    expect(consumed).toHaveBeenCalledTimes(1);
   });
   it("deletes a session only after confirmation and closes its editor", async () => {
     const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);

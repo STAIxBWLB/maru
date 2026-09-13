@@ -198,6 +198,8 @@ export function checkpointMeetingSource(workspace: string, sessionId: string, re
 export function confirmMeetingSource(workspace: string, sessionId: string, expectedRevision: string): Promise<SourceSession> {
   return call("confirm_meeting_source", { workspace, sessionId, expectedRevision }, () => serialized(workspace, async () => {
     const sessions = readSessions(workspace); const session = find(sessions, sessionId); expected(session, expectedRevision);
+    // Blank sources are valid while drafting, but a confirmed version must carry real text.
+    if (session.draft.sources.every((s) => !s.text.trim())) throw new Error("meeting_source_empty");
     if (!session.draft.participantsReviewed || !session.draft.noteReviewed || session.draft.suggestions.some((s) => s.required && s.status === "pending") || session.draft.participants.some((p) => !p.name.trim())) throw new Error("meeting_source_review_incomplete");
     if (session.confirmedVersionId) return session;
     const saved = await version(session, "Review confirmed"); session.versions.push(saved); session.confirmedVersionId = saved.id; advance(session); commit(workspace, sessions); return session;
