@@ -78,7 +78,8 @@ function contextContent(draft: SourceDraft): string {
     context: draft.context, participants: draft.participants, sources: draft.sources.map((source) => [source.id, source.text]) });
 }
 function validateDraft(draft: SourceDraft) {
-  if (!draft.sources.length || draft.sources.every((s) => !s.text.trim())) throw new Error("meeting_source_empty");
+  // A blank draft is allowed so a new note can be created before any text exists.
+  if (!draft.sources.length) throw new Error("meeting_source_empty");
   const ids = new Set<string>();
   for (const source of draft.sources) {
     if (ids.has(source.id) || !/^[a-zA-Z0-9_-]+$/.test(source.id)) throw new Error("meeting_source_invalid");
@@ -109,6 +110,13 @@ export function listMeetingSourceSessions(workspace: string): Promise<SourceSess
 }
 export function readMeetingSourceSession(workspace: string, sessionId: string): Promise<SourceSession> {
   return call("read_meeting_source_session", { workspace, sessionId }, () => find(readSessions(workspace), sessionId));
+}
+export function deleteMeetingSourceSession(workspace: string, sessionId: string): Promise<void> {
+  return call("delete_meeting_source_session", { workspace, sessionId }, () => serialized(workspace, async () => {
+    const sessions = readSessions(workspace);
+    find(sessions, sessionId);
+    commit(workspace, sessions.filter((session) => session.id !== sessionId));
+  }));
 }
 export function createMeetingSourceSession(workspace: string, draft: SourceDraft, provider?: string): Promise<SourceSession> {
   return call("create_meeting_source_session", { workspace, draft, provider }, () => serialized(workspace, async () => {
@@ -169,7 +177,7 @@ export function importMeetingSource(workspace: string, sessionId: string | null,
   return call("import_meeting_source", { workspace, sessionId, input, expectedRevision }, async () => {
     if (input.path || input.text === undefined) throw new Error("Use the browser file picker to import local file contents.");
     const source: MeetingSource = { id: crypto.randomUUID(), name: input.name, kind: input.kind, text: input.text, originalText: input.text, originalHash: await digest(input.text), importedAt: stamp() };
-    if (!sessionId) return createMeetingSourceSession(workspace, { title: input.name, sources: [source], participants: [], findings: [], suggestions: [], participantsReviewed: false, noteReviewed: false }, "Plaud");
+    if (!sessionId) return createMeetingSourceSession(workspace, { title: input.name, sources: [source], participants: [], findings: [], suggestions: [], participantsReviewed: false, noteReviewed: false });
     return serialized(workspace, async () => {
       const sessions = readSessions(workspace); const session = find(sessions, sessionId); expected(session, expectedRevision ?? "");
       session.draft.sources.push(source); validateDraft(session.draft); session.draft.noteReviewed = false; session.confirmedVersionId = undefined;

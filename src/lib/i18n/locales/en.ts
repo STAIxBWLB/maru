@@ -1625,7 +1625,7 @@ export const en: Record<string, string> = {
   "meetings.sidebar.transcript": "Transcript",
   "meetings.sidebar.transcriptHint": "Transcript / memo → note",
   "meetings.sidebar.external": "Review external notes",
-  "meetings.sidebar.externalHint": "Review and correct Plaud notes",
+  "meetings.sidebar.externalHint": "Review and correct external meeting notes",
   "meetings.sidebar.createGroup": "New note",
   "meetings.sidebar.browseGroup": "Browse",
   "meetings.sidebar.date": "Date lookup",

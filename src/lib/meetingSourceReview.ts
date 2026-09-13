@@ -134,7 +134,7 @@ export function buildSourceReviewPrompt(
     guides: guides ? { people: guides.people, glossary: guides.glossary } : null,
   };
   return [
-    "Review the imported meeting note, primarily a Plaud or similar external summary. Preserve its useful structure and the user's corrections.",
+    "Review the imported meeting note, an external summary or similar outside record. Preserve its useful structure and the user's corrections.",
     "Transcripts are optional reference evidence, not a required input. Do not regenerate a note from scratch or silently replace the reviewed summary with a transcript.",
     "Use confirmed attendees and their meeting-time roles. A mentioned person is not necessarily an attendee. Unknown identities, ownership and decisions must remain uncertain.",
     "Propose corrections to attribution, names, terminology, dates, amounts, decisions, owners, misleading summaries and omissions. Explain evidence; without a transcript never claim transcript verification.",

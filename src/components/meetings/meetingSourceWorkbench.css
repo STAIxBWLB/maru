@@ -8,8 +8,10 @@
 .meeting-source-layout { display: grid; grid-template-columns: 180px minmax(0, 1fr); min-height: 430px; }
 .meeting-source-sessions { padding: 16px 12px; background-color: var(--panel); border-right: 1px solid var(--line-soft); display: flex; flex-direction: column; gap: 10px; }
 .meeting-source-sessions > strong { font-size: 12px; color: var(--text-muted); }
-.meeting-source-sessions > button:not(.button) { border: 0; border-radius: 6px; padding: 10px; background: transparent; color: inherit; text-align: left; cursor: pointer; overflow-wrap: anywhere; }
-.meeting-source-sessions > button.active { background: var(--panel-raised); box-shadow: var(--shadow-sm); }
+.meeting-source-session-row { display: flex; align-items: flex-start; gap: 4px; }
+.meeting-source-session-row > button:not(.button) { flex: 1; min-width: 0; border: 0; border-radius: 6px; padding: 10px; background: transparent; color: inherit; text-align: left; cursor: pointer; overflow-wrap: anywhere; }
+.meeting-source-session-row > button.active { background: var(--panel-raised); box-shadow: var(--shadow-sm); }
+.meeting-source-session-row > .button { flex-shrink: 0; margin-top: 6px; }
 .meeting-source-sessions small { display: block; margin-top: 6px; color: var(--text-muted); }
 .meeting-source-editor-body { margin: 0; padding: 0; border: 0; min-width: 0; }
 .meeting-source-editor-body:disabled { opacity: .8; }
@@ -19,6 +21,7 @@
 .meeting-source-header p { margin: 0; color: var(--text-muted); font-size: 12px; }
 .meeting-source-workbench .save-state { font-size: 12px; white-space: nowrap; color: var(--text-muted); }
 .meeting-source-workbench .save-state.dirty { color: var(--warning, #a36c1f); }
+.meeting-source-workbench .save-flash { font-size: 12px; white-space: nowrap; color: var(--success, #2f7d4f); }
 .meeting-source-context-top { display: grid; grid-template-columns: minmax(180px, 2fr) minmax(140px, 1fr) minmax(120px, 1fr); gap: 12px; padding: 16px 20px 0; }
 .meeting-source-workbench label { display: grid; gap: 6px; font-size: 12px; color: var(--text-muted); }
 .meeting-source-workbench input:not([type="checkbox"]), .meeting-source-workbench textarea, .meeting-source-workbench select { min-width: 0; width: 100%; box-sizing: border-box; border: 1px solid var(--line-soft); border-radius: 6px; padding: 8px 10px; color: var(--text); background-color: var(--panel); font: inherit; }
@@ -88,7 +91,7 @@
   .meeting-source-layout { grid-template-columns: minmax(0, 1fr); }
   .meeting-source-sessions { flex-direction: row; flex-wrap: wrap; border-right: 0; border-bottom: 1px solid var(--line-soft); }
   .meeting-source-sessions > strong { flex-basis: 100%; }
-  .meeting-source-sessions > button:not(.button) { max-width: 190px; }
+  .meeting-source-session-row > button:not(.button) { max-width: 190px; }
 }
 @media (max-width: 650px) {
   .meeting-source-header { flex-wrap: wrap; }

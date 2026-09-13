@@ -197,6 +197,7 @@ export const MeetingsPane = memo(function MeetingsPane({
 }: MeetingsPaneProps) {
   const { t, locale } = useTranslation();
   const [view, setView] = useState<MeetingsView>("all");
+  const [createRequestNonce, setCreateRequestNonce] = useState(0);
   const [displayMode, setDisplayMode] = useState<DisplayMode>("list");
   const [calendarView, setCalendarView] = useState<UnifiedCalendarViewMode>("month");
   const [viewDate, setViewDate] = useState<Date>(() => new Date());
@@ -430,9 +431,10 @@ export const MeetingsPane = memo(function MeetingsPane({
     };
   }, [selectedEntry, workPath]);
 
-  // Most intake is an already summarized Plaud note; transcripts are secondary.
+  // Most intake is an already summarized external note; transcripts are secondary.
   const openNewMeeting = useCallback(() => {
     setView("external");
+    setCreateRequestNonce((nonce) => nonce + 1);
   }, []);
 
   // Honor an external view request (e.g. the Apply-skill dialog nudge routing
@@ -490,6 +492,7 @@ export const MeetingsPane = memo(function MeetingsPane({
         ) : view === "external" ? (
           <MeetingsExternalFlow
             workPath={workPath}
+            createRequestNonce={createRequestNonce}
             settings={effectiveSettings}
             skills={skills}
             runtimeCommands={runtimeCommands}
@@ -1196,6 +1199,7 @@ function MeetingsTranscriptFlow(props: {
 
 function MeetingsExternalFlow({
   workPath,
+  createRequestNonce,
   settings,
   skills,
   runtimeCommands,
@@ -1215,6 +1219,7 @@ function MeetingsExternalFlow({
   onApplied,
 }: {
   workPath: string | null;
+  createRequestNonce?: number;
   settings: MeetingsSettings;
   skills: SkillRecord[];
   runtimeCommands: Partial<Record<SkillDispatchRuntime, string | null>>;
@@ -1237,6 +1242,7 @@ function MeetingsExternalFlow({
     <MeetingsSkillWorkbench
       sourceKind="external"
       workPath={workPath}
+      createRequestNonce={createRequestNonce}
       settings={settings}
       skills={skills}
       runtimeCommands={runtimeCommands}
@@ -1280,6 +1286,7 @@ interface MeetingApplyResult {
 function MeetingsSkillWorkbench({
   sourceKind,
   workPath,
+  createRequestNonce,
   settings,
   skills,
   runtimeCommands,
@@ -1300,6 +1307,7 @@ function MeetingsSkillWorkbench({
 }: {
   sourceKind: MeetingSourceKind;
   workPath: string | null;
+  createRequestNonce?: number;
   settings: MeetingsSettings;
   skills: SkillRecord[];
   runtimeCommands: Partial<Record<SkillDispatchRuntime, string | null>>;
@@ -1802,6 +1810,7 @@ function MeetingsSkillWorkbench({
             externalSessionUpdate={sourceSessionUpdate}
             requestedSessionId={requestedSessionId}
             onSessionChange={setActiveSourceSessionId}
+            createRequestNonce={createRequestNonce}
           />
         </div>
         <section className="meetings-workbench-card meetings-source-card">

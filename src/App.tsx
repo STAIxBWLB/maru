@@ -4180,7 +4180,7 @@ export function MainApp() {
   );
 
   // The Apply-skill dialog nudge routes meeting-notes work into the dedicated
-  // Meetings source review workbench (Plaud note correction before generation).
+  // Meetings source review workbench (external note correction before generation).
   const openMeetingsWorkbench = useCallback(() => {
     closeCompose();
     planningModeController.requestMeetingsView("external");

@@ -77,3 +77,6 @@ export function openMeetingSourceEditor(workPath: string, session: SourceSession
   editors.set(key, editor);
   return editor;
 }
+export function closeMeetingSourceEditor(workPath: string, sessionId: string): void {
+  editors.delete(JSON.stringify([workPath, sessionId]));
+}

@@ -6,7 +6,7 @@ import type {} from "webdriverio";
 
 import { fixtureRootDir } from "../helpers/fixtureWorkspace";
 
-const plaudNote = [
+const pastedNote = [
   "# 제품 전략 회의",
   "참석자: 김민서(제품팀), 박준호(파트너사)",
   "김민서: 9월 출시 범위를 확정한다.",
@@ -80,7 +80,7 @@ async function waitForState(
   assert.fail(`timed out waiting for durable state update in ${file}`);
 }
 
-describe("native Plaud meeting-note source review", () => {
+describe("native external meeting-note source review", () => {
   it("persists the original, corrected version, participant context, and confirmation", async () => {
     await waitFor(".activity-rail");
     await click('.activity-rail button[aria-label="회의록"]');
@@ -94,14 +94,14 @@ describe("native Plaud meeting-note source review", () => {
       button.click();
     });
     await waitFor(".meeting-source-create");
-    await fill(".meeting-source-create textarea", plaudNote);
+    await fill(".meeting-source-create textarea", pastedNote);
     await click(".meeting-source-create button");
     await waitFor(".meeting-source-editors");
 
     const editors = await browser.$$(".meeting-source-editors textarea");
     assert.equal(await editors.length, 2, "source review must show original and corrected editors");
-    assert.equal(await editors[0].getValue(), plaudNote);
-    await editors[1].setValue(`${plaudNote}\n${correction}`);
+    assert.equal(await editors[0].getValue(), pastedNote);
+    await editors[1].setValue(`${pastedNote}\n${correction}`);
 
     await browser.execute(() => {
       const button = [...document.querySelectorAll<HTMLButtonElement>(".meeting-source-context button")]
@@ -128,9 +128,9 @@ describe("native Plaud meeting-note source review", () => {
       confirmedVersionId?: string;
     };
     const source = state.draft.sources[0];
-    assert.equal(source.originalText, plaudNote);
-    assert.equal(source.text, `${plaudNote}\n${correction}`);
-    assert.equal(source.originalHash, createHash("sha256").update(plaudNote).digest("hex"));
+    assert.equal(source.originalText, pastedNote);
+    assert.equal(source.text, `${pastedNote}\n${correction}`);
+    assert.equal(source.originalHash, createHash("sha256").update(pastedNote).digest("hex"));
     assert.equal(state.draft.context, "9월 출시 범위를 결정하는 제품 전략 회의");
     assert.ok(state.versions.length >= 1, "saving a version must create a durable checkpoint");
 
@@ -158,7 +158,7 @@ describe("native Plaud meeting-note source review", () => {
     await click('.meetings-sidebar-item button, .meetings-sidebar-item');
     await waitFor(".meeting-source-editors");
     const reopened = await browser.$$(".meeting-source-editors textarea");
-    assert.equal(await reopened[0].getValue(), plaudNote);
-    assert.equal(await reopened[1].getValue(), `${plaudNote}\n${correction}`);
+    assert.equal(await reopened[0].getValue(), pastedNote);
+    assert.equal(await reopened[1].getValue(), `${pastedNote}\n${correction}`);
   }).timeout(180_000);
 });

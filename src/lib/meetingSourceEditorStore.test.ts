@@ -4,7 +4,7 @@ import { saveMeetingSourceDraft, type SourceSession } from "./meetingSources";
 vi.mock("./meetingSources", () => ({ saveMeetingSourceDraft: vi.fn() }));
 const save = vi.mocked(saveMeetingSourceDraft);
 const session = (): SourceSession => ({ id: "session", revision: "r1", createdAt: "now", updatedAt: "now", versions: [], outputLinks: [],
-  draft: { sources: [{ id: "note", name: "Plaud", kind: "note", text: "원문", originalText: "원문", originalHash: "sha" }],
+  draft: { sources: [{ id: "note", name: "meeting-note", kind: "note", text: "원문", originalText: "원문", originalHash: "sha" }],
     participants: [], findings: [], suggestions: [], participantsReviewed: false, noteReviewed: false } });
 beforeEach(() => save.mockReset());
 describe("source editor working buffer", () => {
