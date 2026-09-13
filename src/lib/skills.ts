@@ -16,6 +16,7 @@ export const SKILL_PROPOSAL_APPLY_APPROVAL_KIND = "agent.proposal.apply";
 
 const MOCK_BUILTIN_SKILLS = [
   "meeting-notes",
+  "meeting-source-review",
   "vault-extract",
   "vault-connect",
   "task-management",

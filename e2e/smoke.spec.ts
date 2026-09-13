@@ -681,14 +681,20 @@ test("opens meetings mode with list, detail, and calendar views", async ({ page 
   // nav item ("녹취록", hint "녹취록·메모를 회의록으로"). Match the label.
   await meetingsPane.getByRole("button", { name: /녹취록/ }).click();
   await expect(page.locator(".meetings-workbench")).toBeVisible();
-  const transcriptTextarea = page.locator(".meetings-source-card textarea");
-  await expect(transcriptTextarea).toBeVisible();
-  await expect(transcriptTextarea).toHaveAttribute("placeholder", /녹취록 전문/);
-  await expect(meetingsPane.getByRole("button", { name: "회의록 생성" })).toBeDisabled();
-  await transcriptTextarea.fill("참석자들이 워크숍 일정과 후속 작업을 논의했다.");
-  await expect(meetingsPane.getByRole("button", { name: "회의록 생성" })).toBeEnabled();
-  await expect(page.getByText("주제 힌트 (선택)")).toBeVisible();
-  await expect(page.getByText("세부 힌트 (선택)")).toBeVisible();
+  const reviewPastedSource = async (text: string) => {
+    if (!(await meetingsPane.locator(".meeting-source-create textarea").isVisible())) {
+      await meetingsPane.getByRole("button", { name: "새 Plaud 회의록", exact: true }).click();
+    }
+    await meetingsPane.locator(".meeting-source-create textarea").fill(text);
+    await meetingsPane.getByRole("button", { name: "회의록 만들기", exact: true }).click();
+    await expect(meetingsPane.getByRole("button", { name: "회의록 생성", exact: true })).toBeDisabled();
+    for (const checkbox of await meetingsPane.locator(".meeting-source-check input").all()) await checkbox.check();
+    await meetingsPane.getByRole("button", { name: "검토 완료", exact: true }).click();
+    await expect(meetingsPane.getByRole("button", { name: "회의록 생성", exact: true })).toBeEnabled();
+  };
+  await reviewPastedSource("참석자들이 워크숍 일정과 후속 작업을 논의했다.");
+  await expect(meetingsPane.getByRole("textbox", { name: "회의 제목", exact: true })).toBeVisible();
+  await expect(meetingsPane.getByRole("textbox", { name: "회의 맥락 메모", exact: true })).toBeVisible();
   await meetingsPane.getByRole("button", { name: "회의록 생성" }).click();
   await expect(page.locator(".meetings-runtime-chooser")).toContainText("실행 엔진 선택");
   await expect(page.getByRole("button", { name: "Claude로 실행" })).toBeVisible();
@@ -762,7 +768,7 @@ test("opens meetings mode with list, detail, and calendar views", async ({ page 
     .getByRole("button", { name: "회의록", exact: true })
     .click();
   await reloadedMeetingsPane.getByRole("button", { name: /녹취록/ }).click();
-  await page.locator(".meetings-source-card textarea").fill("새 회의록 작업으로 저장된 패널 높이를 확인한다.");
+  await reviewPastedSource("새 회의록 작업으로 저장된 패널 높이를 확인한다.");
   await reloadedMeetingsPane.getByRole("button", { name: "회의록 생성" }).click();
   await page.getByRole("button", { name: "Codex로 실행" }).click();
   await reloadedMeetingsPane.getByRole("button", { name: "전체" }).click();
@@ -774,12 +780,10 @@ test("opens meetings mode with list, detail, and calendar views", async ({ page 
     )
     .toBe(storedDockHeight);
 
-  // External/auto-summary intake also moved to a sidebar nav item
-  // ("자동정리 회의록"); "외부 노트 정제" is now the workbench title.
-  await meetingsPane.getByRole("button", { name: /자동정리 회의록/ }).click();
-  await expect(page.locator(".meetings-source-card textarea")).toBeVisible();
-  await page.locator(".meetings-source-card textarea").fill("외부 노트 초안을 회의록 형식으로 정리한다.");
-  await reloadedMeetingsPane.getByRole("button", { name: "정제 실행" }).click();
+  // External summaries use the same mandatory source review and runtime chooser.
+  await meetingsPane.getByRole("button", { name: /외부 회의록 교정/ }).click();
+  await reviewPastedSource("외부 노트 초안을 회의록 형식으로 정리한다.");
+  await reloadedMeetingsPane.getByRole("button", { name: "회의록 생성" }).click();
   await expect(page.locator(".meetings-runtime-chooser")).toContainText("실행 엔진 선택");
   await expect(page.locator(".meetings-run-panel")).toContainText("진행 중인 회의록 작업");
 });

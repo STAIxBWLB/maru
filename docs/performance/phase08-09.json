@@ -34,8 +34,7 @@
           "src/components/dashboard/useDashboardData.ts"
         ],
         "payload": "TasksPane load sets rows/loading/errors; Today hooks and dashboard widget loaders consume task rows.",
-        "terminalNoticeOwner": "Existing initiating component/hook and existing error surface retain completion ownership. Metadata cancellation remains local; durable workspace-scoped lifetime/terminal notices and stale refresh closure remain Plans25/26. Workers complete independently of UI polling; no new service or final D04 claim."
-      ,
+        "terminalNoticeOwner": "Existing initiating component/hook and existing error surface retain completion ownership. Metadata cancellation remains local; durable workspace-scoped lifetime/terminal notices and stale refresh closure remain Plans25/26. Workers complete independently of UI polling; no new service or final D04 claim.",
         "classifier": "n/a: read; data returned to the caller",
         "successRetention": "result stored in caller component state",
         "failureReasons": "call-site catch retains the error (component-owned read failure)",
@@ -98,8 +97,7 @@
           "src/components/today/TaskSheet.tsx"
         ],
         "payload": "Metadata effects use cancellation before publishing local state; TaskSheet load owns detail completion.",
-        "terminalNoticeOwner": "Existing initiating component/hook and existing error surface retain completion ownership. Metadata cancellation remains local; durable workspace-scoped lifetime/terminal notices and stale refresh closure remain Plans25/26. Workers complete independently of UI polling; no new service or final D04 claim."
-      ,
+        "terminalNoticeOwner": "Existing initiating component/hook and existing error surface retain completion ownership. Metadata cancellation remains local; durable workspace-scoped lifetime/terminal notices and stale refresh closure remain Plans25/26. Workers complete independently of UI polling; no new service or final D04 claim.",
         "classifier": "n/a: read; data returned to the caller",
         "successRetention": "result stored in caller component state",
         "failureReasons": "call-site catch retains the error (component-owned read failure)",
@@ -164,8 +162,7 @@
           "src/components/agents/AgentChatTab.tsx"
         ],
         "payload": "TasksPane createTask awaits create then reload; AgentChatTab handoff owns returned row and local state.",
-        "terminalNoticeOwner": "Existing initiating component/hook and existing error surface retain completion ownership. Metadata cancellation remains local; durable workspace-scoped lifetime/terminal notices and stale refresh closure remain Plans25/26. Workers complete independently of UI polling; no new service or final D04 claim."
-      ,
+        "terminalNoticeOwner": "Existing initiating component/hook and existing error surface retain completion ownership. Metadata cancellation remains local; durable workspace-scoped lifetime/terminal notices and stale refresh closure remain Plans25/26. Workers complete independently of UI polling; no new service or final D04 claim.",
         "classifier": "n/a: bounded synchronous write, not a file-processing batch",
         "successRetention": "updated record retained in component state",
         "failureReasons": "call-site catch error message (single publisher)",
@@ -234,8 +231,7 @@
           "src/components/tasks/TasksPane.tsx"
         ],
         "payload": "setStatus replaces current row and selection or reports local error.",
-        "terminalNoticeOwner": "Existing initiating component/hook and existing error surface retain completion ownership. Metadata cancellation remains local; durable workspace-scoped lifetime/terminal notices and stale refresh closure remain Plans25/26. Workers complete independently of UI polling; no new service or final D04 claim."
-      ,
+        "terminalNoticeOwner": "Existing initiating component/hook and existing error surface retain completion ownership. Metadata cancellation remains local; durable workspace-scoped lifetime/terminal notices and stale refresh closure remain Plans25/26. Workers complete independently of UI polling; no new service or final D04 claim.",
         "classifier": "n/a: read; data returned to the caller",
         "successRetention": "result stored in caller component state",
         "failureReasons": "call-site catch retains the error (component-owned read failure)",
@@ -303,8 +299,7 @@
           "src/lib/api.ts"
         ],
         "payload": "Exported API wrapper currently has no live component caller; synchronous API remains available.",
-        "terminalNoticeOwner": "Existing initiating component/hook and existing error surface retain completion ownership. Metadata cancellation remains local; durable workspace-scoped lifetime/terminal notices and stale refresh closure remain Plans25/26. Workers complete independently of UI polling; no new service or final D04 claim."
-      ,
+        "terminalNoticeOwner": "Existing initiating component/hook and existing error surface retain completion ownership. Metadata cancellation remains local; durable workspace-scoped lifetime/terminal notices and stale refresh closure remain Plans25/26. Workers complete independently of UI polling; no new service or final D04 claim.",
         "classifier": "n/a: read; data returned to the caller",
         "successRetention": "result stored in caller component state",
         "failureReasons": "call-site catch retains the error (component-owned read failure)",
@@ -374,8 +369,7 @@
           "src/components/today/TaskSheet.tsx"
         ],
         "payload": "TasksPane updateDetails replaces row and clears editor dirtiness; TaskSheet awaits save callback.",
-        "terminalNoticeOwner": "Existing initiating component/hook and existing error surface retain completion ownership. Metadata cancellation remains local; durable workspace-scoped lifetime/terminal notices and stale refresh closure remain Plans25/26. Workers complete independently of UI polling; no new service or final D04 claim."
-      ,
+        "terminalNoticeOwner": "Existing initiating component/hook and existing error surface retain completion ownership. Metadata cancellation remains local; durable workspace-scoped lifetime/terminal notices and stale refresh closure remain Plans25/26. Workers complete independently of UI polling; no new service or final D04 claim.",
         "classifier": "n/a: bounded synchronous write, not a file-processing batch",
         "successRetention": "updated record retained in component state",
         "failureReasons": "call-site catch error message (single publisher)",
@@ -443,8 +437,7 @@
           "src/lib/api.ts"
         ],
         "payload": "Exported API wrapper currently has no live component caller; synchronous API remains available.",
-        "terminalNoticeOwner": "Existing initiating component/hook and existing error surface retain completion ownership. Metadata cancellation remains local; durable workspace-scoped lifetime/terminal notices and stale refresh closure remain Plans25/26. Workers complete independently of UI polling; no new service or final D04 claim."
-      ,
+        "terminalNoticeOwner": "Existing initiating component/hook and existing error surface retain completion ownership. Metadata cancellation remains local; durable workspace-scoped lifetime/terminal notices and stale refresh closure remain Plans25/26. Workers complete independently of UI polling; no new service or final D04 claim.",
         "classifier": "n/a: bounded synchronous write, not a file-processing batch",
         "successRetention": "updated record retained in component state",
         "failureReasons": "call-site catch error message (single publisher)",
@@ -514,8 +507,7 @@
           "src/components/tasks/TasksRunsPanel.tsx"
         ],
         "payload": "Task AI run completion and TasksRunsPanel audit handling await append before their existing completion handling.",
-        "terminalNoticeOwner": "Existing initiating component/hook and existing error surface retain completion ownership. Metadata cancellation remains local; durable workspace-scoped lifetime/terminal notices and stale refresh closure remain Plans25/26. Workers complete independently of UI polling; no new service or final D04 claim."
-      ,
+        "terminalNoticeOwner": "Existing initiating component/hook and existing error surface retain completion ownership. Metadata cancellation remains local; durable workspace-scoped lifetime/terminal notices and stale refresh closure remain Plans25/26. Workers complete independently of UI polling; no new service or final D04 claim.",
         "classifier": "n/a: read; data returned to the caller",
         "successRetention": "result stored in caller component state",
         "failureReasons": "call-site catch retains the error (component-owned read failure)",
@@ -582,8 +574,7 @@
           "src/lib/api.ts"
         ],
         "payload": "Exported API wrapper currently has no live component caller; log read returns newest capped rows.",
-        "terminalNoticeOwner": "Existing initiating component/hook and existing error surface retain completion ownership. Metadata cancellation remains local; durable workspace-scoped lifetime/terminal notices and stale refresh closure remain Plans25/26. Workers complete independently of UI polling; no new service or final D04 claim."
-      ,
+        "terminalNoticeOwner": "Existing initiating component/hook and existing error surface retain completion ownership. Metadata cancellation remains local; durable workspace-scoped lifetime/terminal notices and stale refresh closure remain Plans25/26. Workers complete independently of UI polling; no new service or final D04 claim.",
         "classifier": "n/a: read; data returned to the caller",
         "successRetention": "result stored in caller component state",
         "failureReasons": "call-site catch retains the error (component-owned read failure)",
@@ -645,8 +636,7 @@
           "src/components/meetings/MeetingsPane.tsx"
         ],
         "payload": "MeetingsPane refresh at scan call owns rows/loading/error/finally.",
-        "terminalNoticeOwner": "Existing initiating component/hook and existing error surface retain completion ownership. Metadata cancellation remains local; durable workspace-scoped lifetime/terminal notices and stale refresh closure remain Plans25/26. Workers complete independently of UI polling; no new service or final D04 claim."
-      ,
+        "terminalNoticeOwner": "Existing initiating component/hook and existing error surface retain completion ownership. Metadata cancellation remains local; durable workspace-scoped lifetime/terminal notices and stale refresh closure remain Plans25/26. Workers complete independently of UI polling; no new service or final D04 claim.",
         "classifier": "n/a: read; data returned to the caller",
         "successRetention": "result stored in caller component state",
         "failureReasons": "call-site catch retains the error (component-owned read failure)",
@@ -704,8 +694,7 @@
           "src/components/meetings/MeetingsPane.tsx"
         ],
         "payload": "MeetingsPane metadata effect owns cancellation and metadataLoading.",
-        "terminalNoticeOwner": "Existing initiating component/hook and existing error surface retain completion ownership. Metadata cancellation remains local; durable workspace-scoped lifetime/terminal notices and stale refresh closure remain Plans25/26. Workers complete independently of UI polling; no new service or final D04 claim."
-      ,
+        "terminalNoticeOwner": "Existing initiating component/hook and existing error surface retain completion ownership. Metadata cancellation remains local; durable workspace-scoped lifetime/terminal notices and stale refresh closure remain Plans25/26. Workers complete independently of UI polling; no new service or final D04 claim.",
         "classifier": "n/a: read; data returned to the caller",
         "successRetention": "result stored in caller component state",
         "failureReasons": "call-site catch retains the error (component-owned read failure)",
@@ -763,8 +752,7 @@
           "src/components/meetings/MeetingsPane.tsx"
         ],
         "payload": "External run preparation awaits guides inside busy try/finally.",
-        "terminalNoticeOwner": "Existing initiating component/hook and existing error surface retain completion ownership. Metadata cancellation remains local; durable workspace-scoped lifetime/terminal notices and stale refresh closure remain Plans25/26. Workers complete independently of UI polling; no new service or final D04 claim."
-      ,
+        "terminalNoticeOwner": "Existing initiating component/hook and existing error surface retain completion ownership. Metadata cancellation remains local; durable workspace-scoped lifetime/terminal notices and stale refresh closure remain Plans25/26. Workers complete independently of UI polling; no new service or final D04 claim.",
         "classifier": "n/a: read; data returned to the caller",
         "successRetention": "result stored in caller component state",
         "failureReasons": "call-site catch retains the error (component-owned read failure)",
@@ -822,8 +810,7 @@
           "src/components/meetings/MeetingsPane.tsx"
         ],
         "payload": "Clear/undo append with catch; followup/retry/writeAuditLine await append inside existing review/run handlers.",
-        "terminalNoticeOwner": "Existing initiating component/hook and existing error surface retain completion ownership. Metadata cancellation remains local; durable workspace-scoped lifetime/terminal notices and stale refresh closure remain Plans25/26. Workers complete independently of UI polling; no new service or final D04 claim."
-      ,
+        "terminalNoticeOwner": "Existing initiating component/hook and existing error surface retain completion ownership. Metadata cancellation remains local; durable workspace-scoped lifetime/terminal notices and stale refresh closure remain Plans25/26. Workers complete independently of UI polling; no new service or final D04 claim.",
         "classifier": "n/a: read; data returned to the caller",
         "successRetention": "result stored in caller component state",
         "failureReasons": "call-site catch retains the error (component-owned read failure)",
@@ -887,8 +874,7 @@
           "src/components/meetings/MeetingsPane.tsx"
         ],
         "payload": "Activity refresh owns loading/error/finally.",
-        "terminalNoticeOwner": "Existing initiating component/hook and existing error surface retain completion ownership. Metadata cancellation remains local; durable workspace-scoped lifetime/terminal notices and stale refresh closure remain Plans25/26. Workers complete independently of UI polling; no new service or final D04 claim."
-      ,
+        "terminalNoticeOwner": "Existing initiating component/hook and existing error surface retain completion ownership. Metadata cancellation remains local; durable workspace-scoped lifetime/terminal notices and stale refresh closure remain Plans25/26. Workers complete independently of UI polling; no new service or final D04 claim.",
         "classifier": "n/a: read; data returned to the caller",
         "successRetention": "result stored in caller component state",
         "failureReasons": "call-site catch retains the error (component-owned read failure)",
@@ -947,8 +933,7 @@
           "src/components/dashboard/useDashboardData.ts"
         ],
         "payload": "Dashboard useWidgetData Promise.all owns project activity completion and current widget generation.",
-        "terminalNoticeOwner": "Existing initiating component/hook and existing error surface retain completion ownership. Metadata cancellation remains local; durable workspace-scoped lifetime/terminal notices and stale refresh closure remain Plans25/26. Workers complete independently of UI polling; no new service or final D04 claim."
-      ,
+        "terminalNoticeOwner": "Existing initiating component/hook and existing error surface retain completion ownership. Metadata cancellation remains local; durable workspace-scoped lifetime/terminal notices and stale refresh closure remain Plans25/26. Workers complete independently of UI polling; no new service or final D04 claim.",
         "classifier": "n/a: read; data returned to the caller",
         "successRetention": "result stored in caller component state",
         "failureReasons": "call-site catch retains the error (component-owned read failure)",
@@ -971,6 +956,600 @@
         "crossDomain": "Actual Tasks/Meetings wrapper writes contend with Files parent rename and document save. Typed document_conflict remains structured through test channels, admission releases after error/unwind, and successful independent field patches retain both results.",
         "platformScope": "Executed on macOS, disposable temporary homes/workspaces only. No subprocess/native provider/Finder/system Trash invocation. Windows/native saturation and artifact isolation remain Plans27/28."
       }
+    },
+    {
+      "name": "create_meeting_source_session",
+      "module": "src-tauri/src/meeting_sources.rs",
+      "registrationPath": "src-tauri/src/lib.rs::meeting_sources::create_meeting_source_session",
+      "originalDisposition": "ISOLATED",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/meeting_sources.rs::create_meeting_source_session",
+        "src-tauri/src/meeting_sources.rs::create_impl"
+      ],
+      "workerBoundary": "src-tauri/src/meeting_sources.rs::create_meeting_source_session owns its input values and awaits spawn_blocking before filesystem access, hashing, serialization, or admission waits; the inner IpcError result remains structured.",
+      "syncCallers": [
+        "src-tauri/src/meeting_sources.rs::create_impl retains synchronous domain behavior inside the worker."
+      ],
+      "mutationKey": {
+        "lexicalPaths": [
+          "<canonical workspace>/.maru, including source originals, state, immutable revisions and correction examples"
+        ],
+        "aliasPaths": [
+          "<selected workspace alias>/.maru and physical alias keys captured by shared path admission"
+        ],
+        "postAdmissionPreconditions": [
+          "workspace identity, workspace registry, managed symlink rejection, write capability and document ownership rechecked; state mutations also reload expected revision under admission"
+        ],
+        "domainLockOrder": "Shared admission before reading mutable session state; no separate domain lock is held across waits.",
+        "sharedAdmissionEntry": "src-tauri/src/meeting_sources.rs::admitted"
+      },
+      "processingCaller": {
+        "path": [
+          "src/lib/meetingSources.ts",
+          "src/lib/meetingSourceEditorStore.ts",
+          "src/components/meetings/MeetingSourceWorkbench.tsx"
+        ],
+        "payload": "Typed source session, version or approved correction-example result returned through the initiating API promise.",
+        "terminalNoticeOwner": "MeetingSourceWorkbench action handler or keyed editor store owns the visible saved/error state.",
+        "classifier": "Source review local query/mutation; no autonomous follow-up dispatch.",
+        "successRetention": "Durable workspace source-review files; returned snapshots retained by the keyed editor store and workbench.",
+        "failureReasons": "Typed revision conflicts and file/policy errors preserve the unsaved editor buffer; no silent success.",
+        "singleTerminalNoticeOwner": true
+      },
+      "evidence": {
+        "behaviorCases": [
+          "originals_are_exact_immutable_and_survive_restart"
+        ],
+        "workerBoundaryInspection": "The actual registered async wrapper awaits its finite blocking closure; behavioral tests exercise durable source results and the relevant mutation constraints. No held-worker timing proof is claimed.",
+        "platformScope": "Executed on macOS with temporary workspaces. Native WKWebView smoke is separate."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib meeting_sources -- --test-threads=1",
+          "passed": 13,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ]
+    },
+    {
+      "name": "import_meeting_source",
+      "module": "src-tauri/src/meeting_sources.rs",
+      "registrationPath": "src-tauri/src/lib.rs::meeting_sources::import_meeting_source",
+      "originalDisposition": "ISOLATED",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/meeting_sources.rs::import_meeting_source",
+        "src-tauri/src/meeting_sources.rs::prepare_import"
+      ],
+      "workerBoundary": "src-tauri/src/meeting_sources.rs::import_meeting_source owns its input values and awaits spawn_blocking before filesystem access, hashing, serialization, or admission waits; the inner IpcError result remains structured.",
+      "syncCallers": [
+        "src-tauri/src/meeting_sources.rs::prepare_import retains synchronous domain behavior inside the worker."
+      ],
+      "mutationKey": {
+        "lexicalPaths": [
+          "<canonical workspace>/.maru, including source originals, state, immutable revisions and correction examples"
+        ],
+        "aliasPaths": [
+          "<selected workspace alias>/.maru and physical alias keys captured by shared path admission"
+        ],
+        "postAdmissionPreconditions": [
+          "workspace identity, workspace registry, managed symlink rejection, write capability and document ownership rechecked; state mutations also reload expected revision under admission"
+        ],
+        "domainLockOrder": "Shared admission before reading mutable session state; no separate domain lock is held across waits.",
+        "sharedAdmissionEntry": "src-tauri/src/meeting_sources.rs::admitted"
+      },
+      "processingCaller": {
+        "path": [
+          "src/lib/meetingSources.ts",
+          "src/lib/meetingSourceEditorStore.ts",
+          "src/components/meetings/MeetingSourceWorkbench.tsx"
+        ],
+        "payload": "Typed source session, version or approved correction-example result returned through the initiating API promise.",
+        "terminalNoticeOwner": "MeetingSourceWorkbench action handler or keyed editor store owns the visible saved/error state.",
+        "classifier": "Source review local query/mutation; no autonomous follow-up dispatch.",
+        "successRetention": "Durable workspace source-review files; returned snapshots retained by the keyed editor store and workbench.",
+        "failureReasons": "Typed revision conflicts and file/policy errors preserve the unsaved editor buffer; no silent success.",
+        "singleTerminalNoticeOwner": true
+      },
+      "evidence": {
+        "behaviorCases": [
+          "import_bounds_utf8_paths_and_optional_transcript"
+        ],
+        "workerBoundaryInspection": "The actual registered async wrapper awaits its finite blocking closure; behavioral tests exercise durable source results and the relevant mutation constraints. No held-worker timing proof is claimed.",
+        "platformScope": "Executed on macOS with temporary workspaces. Native WKWebView smoke is separate."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib meeting_sources -- --test-threads=1",
+          "passed": 13,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ]
+    },
+    {
+      "name": "read_meeting_source_session",
+      "module": "src-tauri/src/meeting_sources.rs",
+      "registrationPath": "src-tauri/src/lib.rs::meeting_sources::read_meeting_source_session",
+      "originalDisposition": "ISOLATED",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/meeting_sources.rs::read_meeting_source_session",
+        "src-tauri/src/meeting_sources.rs::load"
+      ],
+      "workerBoundary": "src-tauri/src/meeting_sources.rs::read_meeting_source_session owns its input values and awaits spawn_blocking before filesystem access, hashing, serialization, or admission waits; the inner IpcError result remains structured.",
+      "syncCallers": [
+        "src-tauri/src/meeting_sources.rs::load retains synchronous domain behavior inside the worker."
+      ],
+      "mutationKey": {
+        "readOnly": true,
+        "reason": "src-tauri/src/meeting_sources.rs::load performs read-only filesystem and hash inspection; no filesystem mutation or registry migration."
+      },
+      "processingCaller": {
+        "path": [
+          "src/lib/meetingSources.ts",
+          "src/lib/meetingSourceEditorStore.ts",
+          "src/components/meetings/MeetingSourceWorkbench.tsx"
+        ],
+        "payload": "Typed source session, version or approved correction-example result returned through the initiating API promise.",
+        "terminalNoticeOwner": "MeetingSourceWorkbench action handler or keyed editor store owns the visible saved/error state.",
+        "classifier": "Source review local query/mutation; no autonomous follow-up dispatch.",
+        "successRetention": "Durable workspace source-review files; returned snapshots retained by the keyed editor store and workbench.",
+        "failureReasons": "Typed revision conflicts and file/policy errors preserve the unsaved editor buffer; no silent success.",
+        "singleTerminalNoticeOwner": true
+      },
+      "evidence": {
+        "behaviorCases": [
+          "originals_are_exact_immutable_and_survive_restart"
+        ],
+        "workerBoundaryInspection": "The actual registered async wrapper awaits its finite blocking closure; behavioral tests exercise durable source results and the relevant mutation constraints. No held-worker timing proof is claimed.",
+        "platformScope": "Executed on macOS with temporary workspaces. Native WKWebView smoke is separate."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib meeting_sources -- --test-threads=1",
+          "passed": 13,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ]
+    },
+    {
+      "name": "list_meeting_source_sessions",
+      "module": "src-tauri/src/meeting_sources.rs",
+      "registrationPath": "src-tauri/src/lib.rs::meeting_sources::list_meeting_source_sessions",
+      "originalDisposition": "ISOLATED",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/meeting_sources.rs::list_meeting_source_sessions",
+        "src-tauri/src/meeting_sources.rs::load"
+      ],
+      "workerBoundary": "src-tauri/src/meeting_sources.rs::list_meeting_source_sessions owns its input values and awaits spawn_blocking before filesystem access, hashing, serialization, or admission waits; the inner IpcError result remains structured.",
+      "syncCallers": [
+        "src-tauri/src/meeting_sources.rs::load retains synchronous domain behavior inside the worker."
+      ],
+      "mutationKey": {
+        "readOnly": true,
+        "reason": "src-tauri/src/meeting_sources.rs::load performs read-only filesystem and hash inspection; no filesystem mutation or registry migration."
+      },
+      "processingCaller": {
+        "path": [
+          "src/lib/meetingSources.ts",
+          "src/lib/meetingSourceEditorStore.ts",
+          "src/components/meetings/MeetingSourceWorkbench.tsx"
+        ],
+        "payload": "Typed source session, version or approved correction-example result returned through the initiating API promise.",
+        "terminalNoticeOwner": "MeetingSourceWorkbench action handler or keyed editor store owns the visible saved/error state.",
+        "classifier": "Source review local query/mutation; no autonomous follow-up dispatch.",
+        "successRetention": "Durable workspace source-review files; returned snapshots retained by the keyed editor store and workbench.",
+        "failureReasons": "Typed revision conflicts and file/policy errors preserve the unsaved editor buffer; no silent success.",
+        "singleTerminalNoticeOwner": true
+      },
+      "evidence": {
+        "behaviorCases": [
+          "all_ipc_wrappers_complete_the_native_source_workflow"
+        ],
+        "workerBoundaryInspection": "The actual registered async wrapper awaits its finite blocking closure; behavioral tests exercise durable source results and the relevant mutation constraints. No held-worker timing proof is claimed.",
+        "platformScope": "Executed on macOS with temporary workspaces. Native WKWebView smoke is separate."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib meeting_sources -- --test-threads=1",
+          "passed": 13,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ]
+    },
+    {
+      "name": "save_meeting_source_draft",
+      "module": "src-tauri/src/meeting_sources.rs",
+      "registrationPath": "src-tauri/src/lib.rs::meeting_sources::save_meeting_source_draft",
+      "originalDisposition": "ISOLATED",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/meeting_sources.rs::save_meeting_source_draft",
+        "src-tauri/src/meeting_sources.rs::save_draft_impl"
+      ],
+      "workerBoundary": "src-tauri/src/meeting_sources.rs::save_meeting_source_draft owns its input values and awaits spawn_blocking before filesystem access, hashing, serialization, or admission waits; the inner IpcError result remains structured.",
+      "syncCallers": [
+        "src-tauri/src/meeting_sources.rs::save_draft_impl retains synchronous domain behavior inside the worker."
+      ],
+      "mutationKey": {
+        "lexicalPaths": [
+          "<canonical workspace>/.maru, including source originals, state, immutable revisions and correction examples"
+        ],
+        "aliasPaths": [
+          "<selected workspace alias>/.maru and physical alias keys captured by shared path admission"
+        ],
+        "postAdmissionPreconditions": [
+          "workspace identity, workspace registry, managed symlink rejection, write capability and document ownership rechecked; state mutations also reload expected revision under admission"
+        ],
+        "domainLockOrder": "Shared admission before reading mutable session state; no separate domain lock is held across waits.",
+        "sharedAdmissionEntry": "src-tauri/src/meeting_sources.rs::admitted"
+      },
+      "processingCaller": {
+        "path": [
+          "src/lib/meetingSources.ts",
+          "src/lib/meetingSourceEditorStore.ts",
+          "src/components/meetings/MeetingSourceWorkbench.tsx"
+        ],
+        "payload": "Typed source session, version or approved correction-example result returned through the initiating API promise.",
+        "terminalNoticeOwner": "MeetingSourceWorkbench action handler or keyed editor store owns the visible saved/error state.",
+        "classifier": "Source review local query/mutation; no autonomous follow-up dispatch.",
+        "successRetention": "Durable workspace source-review files; returned snapshots retained by the keyed editor store and workbench.",
+        "failureReasons": "Typed revision conflicts and file/policy errors preserve the unsaved editor buffer; no silent success.",
+        "singleTerminalNoticeOwner": true
+      },
+      "evidence": {
+        "behaviorCases": [
+          "concurrent_drafts_serialize_and_reject_stale_revision",
+          "native_correction_decisions_reject_stale_context_and_forged_audit_updates"
+        ],
+        "workerBoundaryInspection": "The actual registered async wrapper awaits its finite blocking closure; behavioral tests exercise durable source results and the relevant mutation constraints. No held-worker timing proof is claimed.",
+        "platformScope": "Executed on macOS with temporary workspaces. Native WKWebView smoke is separate."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib meeting_sources -- --test-threads=1",
+          "passed": 13,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ]
+    },
+    {
+      "name": "checkpoint_meeting_source",
+      "module": "src-tauri/src/meeting_sources.rs",
+      "registrationPath": "src-tauri/src/lib.rs::meeting_sources::checkpoint_meeting_source",
+      "originalDisposition": "ISOLATED",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/meeting_sources.rs::checkpoint_meeting_source",
+        "src-tauri/src/meeting_sources.rs::checkpoint_impl"
+      ],
+      "workerBoundary": "src-tauri/src/meeting_sources.rs::checkpoint_meeting_source owns its input values and awaits spawn_blocking before filesystem access, hashing, serialization, or admission waits; the inner IpcError result remains structured.",
+      "syncCallers": [
+        "src-tauri/src/meeting_sources.rs::checkpoint_impl retains synchronous domain behavior inside the worker."
+      ],
+      "mutationKey": {
+        "lexicalPaths": [
+          "<canonical workspace>/.maru, including source originals, state, immutable revisions and correction examples"
+        ],
+        "aliasPaths": [
+          "<selected workspace alias>/.maru and physical alias keys captured by shared path admission"
+        ],
+        "postAdmissionPreconditions": [
+          "workspace identity, workspace registry, managed symlink rejection, write capability and document ownership rechecked; state mutations also reload expected revision under admission"
+        ],
+        "domainLockOrder": "Shared admission before reading mutable session state; no separate domain lock is held across waits.",
+        "sharedAdmissionEntry": "src-tauri/src/meeting_sources.rs::admitted"
+      },
+      "processingCaller": {
+        "path": [
+          "src/lib/meetingSources.ts",
+          "src/lib/meetingSourceEditorStore.ts",
+          "src/components/meetings/MeetingSourceWorkbench.tsx"
+        ],
+        "payload": "Typed source session, version or approved correction-example result returned through the initiating API promise.",
+        "terminalNoticeOwner": "MeetingSourceWorkbench action handler or keyed editor store owns the visible saved/error state.",
+        "classifier": "Source review local query/mutation; no autonomous follow-up dispatch.",
+        "successRetention": "Durable workspace source-review files; returned snapshots retained by the keyed editor store and workbench.",
+        "failureReasons": "Typed revision conflicts and file/policy errors preserve the unsaved editor buffer; no silent success.",
+        "singleTerminalNoticeOwner": true
+      },
+      "evidence": {
+        "behaviorCases": [
+          "checkpoints_retry_without_duplicates_and_restore_full_context",
+          "interrupted_checkpoint_keeps_current_state_and_reuses_the_immutable_record"
+        ],
+        "workerBoundaryInspection": "The actual registered async wrapper awaits its finite blocking closure; behavioral tests exercise durable source results and the relevant mutation constraints. No held-worker timing proof is claimed.",
+        "platformScope": "Executed on macOS with temporary workspaces. Native WKWebView smoke is separate."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib meeting_sources -- --test-threads=1",
+          "passed": 13,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ]
+    },
+    {
+      "name": "confirm_meeting_source",
+      "module": "src-tauri/src/meeting_sources.rs",
+      "registrationPath": "src-tauri/src/lib.rs::meeting_sources::confirm_meeting_source",
+      "originalDisposition": "ISOLATED",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/meeting_sources.rs::confirm_meeting_source",
+        "src-tauri/src/meeting_sources.rs::confirm_impl"
+      ],
+      "workerBoundary": "src-tauri/src/meeting_sources.rs::confirm_meeting_source owns its input values and awaits spawn_blocking before filesystem access, hashing, serialization, or admission waits; the inner IpcError result remains structured.",
+      "syncCallers": [
+        "src-tauri/src/meeting_sources.rs::confirm_impl retains synchronous domain behavior inside the worker."
+      ],
+      "mutationKey": {
+        "lexicalPaths": [
+          "<canonical workspace>/.maru, including source originals, state, immutable revisions and correction examples"
+        ],
+        "aliasPaths": [
+          "<selected workspace alias>/.maru and physical alias keys captured by shared path admission"
+        ],
+        "postAdmissionPreconditions": [
+          "workspace identity, workspace registry, managed symlink rejection, write capability and document ownership rechecked; state mutations also reload expected revision under admission"
+        ],
+        "domainLockOrder": "Shared admission before reading mutable session state; no separate domain lock is held across waits.",
+        "sharedAdmissionEntry": "src-tauri/src/meeting_sources.rs::admitted"
+      },
+      "processingCaller": {
+        "path": [
+          "src/lib/meetingSources.ts",
+          "src/lib/meetingSourceEditorStore.ts",
+          "src/components/meetings/MeetingSourceWorkbench.tsx"
+        ],
+        "payload": "Typed source session, version or approved correction-example result returned through the initiating API promise.",
+        "terminalNoticeOwner": "MeetingSourceWorkbench action handler or keyed editor store owns the visible saved/error state.",
+        "classifier": "Source review local query/mutation; no autonomous follow-up dispatch.",
+        "successRetention": "Durable workspace source-review files; returned snapshots retained by the keyed editor store and workbench.",
+        "failureReasons": "Typed revision conflicts and file/policy errors preserve the unsaved editor buffer; no silent success.",
+        "singleTerminalNoticeOwner": true
+      },
+      "evidence": {
+        "behaviorCases": [
+          "confirmation_requires_review_and_pins_full_context",
+          "required_findings_allow_explicit_uncertainty"
+        ],
+        "workerBoundaryInspection": "The actual registered async wrapper awaits its finite blocking closure; behavioral tests exercise durable source results and the relevant mutation constraints. No held-worker timing proof is claimed.",
+        "platformScope": "Executed on macOS with temporary workspaces. Native WKWebView smoke is separate."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib meeting_sources -- --test-threads=1",
+          "passed": 13,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ]
+    },
+    {
+      "name": "restore_meeting_source_version",
+      "module": "src-tauri/src/meeting_sources.rs",
+      "registrationPath": "src-tauri/src/lib.rs::meeting_sources::restore_meeting_source_version",
+      "originalDisposition": "ISOLATED",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/meeting_sources.rs::restore_meeting_source_version",
+        "src-tauri/src/meeting_sources.rs::restore_impl"
+      ],
+      "workerBoundary": "src-tauri/src/meeting_sources.rs::restore_meeting_source_version owns its input values and awaits spawn_blocking before filesystem access, hashing, serialization, or admission waits; the inner IpcError result remains structured.",
+      "syncCallers": [
+        "src-tauri/src/meeting_sources.rs::restore_impl retains synchronous domain behavior inside the worker."
+      ],
+      "mutationKey": {
+        "lexicalPaths": [
+          "<canonical workspace>/.maru, including source originals, state, immutable revisions and correction examples"
+        ],
+        "aliasPaths": [
+          "<selected workspace alias>/.maru and physical alias keys captured by shared path admission"
+        ],
+        "postAdmissionPreconditions": [
+          "workspace identity, workspace registry, managed symlink rejection, write capability and document ownership rechecked; state mutations also reload expected revision under admission"
+        ],
+        "domainLockOrder": "Shared admission before reading mutable session state; no separate domain lock is held across waits.",
+        "sharedAdmissionEntry": "src-tauri/src/meeting_sources.rs::admitted"
+      },
+      "processingCaller": {
+        "path": [
+          "src/lib/meetingSources.ts",
+          "src/lib/meetingSourceEditorStore.ts",
+          "src/components/meetings/MeetingSourceWorkbench.tsx"
+        ],
+        "payload": "Typed source session, version or approved correction-example result returned through the initiating API promise.",
+        "terminalNoticeOwner": "MeetingSourceWorkbench action handler or keyed editor store owns the visible saved/error state.",
+        "classifier": "Source review local query/mutation; no autonomous follow-up dispatch.",
+        "successRetention": "Durable workspace source-review files; returned snapshots retained by the keyed editor store and workbench.",
+        "failureReasons": "Typed revision conflicts and file/policy errors preserve the unsaved editor buffer; no silent success.",
+        "singleTerminalNoticeOwner": true
+      },
+      "evidence": {
+        "behaviorCases": [
+          "checkpoints_retry_without_duplicates_and_restore_full_context"
+        ],
+        "workerBoundaryInspection": "The actual registered async wrapper awaits its finite blocking closure; behavioral tests exercise durable source results and the relevant mutation constraints. No held-worker timing proof is claimed.",
+        "platformScope": "Executed on macOS with temporary workspaces. Native WKWebView smoke is separate."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib meeting_sources -- --test-threads=1",
+          "passed": 13,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ]
+    },
+    {
+      "name": "read_meeting_source_version",
+      "module": "src-tauri/src/meeting_sources.rs",
+      "registrationPath": "src-tauri/src/lib.rs::meeting_sources::read_meeting_source_version",
+      "originalDisposition": "ISOLATED",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/meeting_sources.rs::read_meeting_source_version",
+        "src-tauri/src/meeting_sources.rs::version_impl"
+      ],
+      "workerBoundary": "src-tauri/src/meeting_sources.rs::read_meeting_source_version owns its input values and awaits spawn_blocking before filesystem access, hashing, serialization, or admission waits; the inner IpcError result remains structured.",
+      "syncCallers": [
+        "src-tauri/src/meeting_sources.rs::version_impl retains synchronous domain behavior inside the worker."
+      ],
+      "mutationKey": {
+        "readOnly": true,
+        "reason": "src-tauri/src/meeting_sources.rs::version_impl performs read-only filesystem and hash inspection; no filesystem mutation or registry migration."
+      },
+      "processingCaller": {
+        "path": [
+          "src/lib/meetingSources.ts",
+          "src/lib/meetingSourceEditorStore.ts",
+          "src/components/meetings/MeetingSourceWorkbench.tsx"
+        ],
+        "payload": "Typed source session, version or approved correction-example result returned through the initiating API promise.",
+        "terminalNoticeOwner": "MeetingSourceWorkbench action handler or keyed editor store owns the visible saved/error state.",
+        "classifier": "Source review local query/mutation; no autonomous follow-up dispatch.",
+        "successRetention": "Durable workspace source-review files; returned snapshots retained by the keyed editor store and workbench.",
+        "failureReasons": "Typed revision conflicts and file/policy errors preserve the unsaved editor buffer; no silent success.",
+        "singleTerminalNoticeOwner": true
+      },
+      "evidence": {
+        "behaviorCases": [
+          "checkpoints_retry_without_duplicates_and_restore_full_context"
+        ],
+        "workerBoundaryInspection": "The actual registered async wrapper awaits its finite blocking closure; behavioral tests exercise durable source results and the relevant mutation constraints. No held-worker timing proof is claimed.",
+        "platformScope": "Executed on macOS with temporary workspaces. Native WKWebView smoke is separate."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib meeting_sources -- --test-threads=1",
+          "passed": 13,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ]
+    },
+    {
+      "name": "list_meeting_correction_examples",
+      "module": "src-tauri/src/meeting_sources.rs",
+      "registrationPath": "src-tauri/src/lib.rs::meeting_sources::list_meeting_correction_examples",
+      "originalDisposition": "ISOLATED",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/meeting_sources.rs::list_meeting_correction_examples",
+        "src-tauri/src/meeting_sources.rs::examples_impl"
+      ],
+      "workerBoundary": "src-tauri/src/meeting_sources.rs::list_meeting_correction_examples owns its input values and awaits spawn_blocking before filesystem access, hashing, serialization, or admission waits; the inner IpcError result remains structured.",
+      "syncCallers": [
+        "src-tauri/src/meeting_sources.rs::examples_impl retains synchronous domain behavior inside the worker."
+      ],
+      "mutationKey": {
+        "readOnly": true,
+        "reason": "src-tauri/src/meeting_sources.rs::examples_impl performs read-only filesystem and hash inspection; no filesystem mutation or registry migration."
+      },
+      "processingCaller": {
+        "path": [
+          "src/lib/meetingSources.ts",
+          "src/lib/meetingSourceEditorStore.ts",
+          "src/components/meetings/MeetingSourceWorkbench.tsx"
+        ],
+        "payload": "Typed source session, version or approved correction-example result returned through the initiating API promise.",
+        "terminalNoticeOwner": "MeetingSourceWorkbench action handler or keyed editor store owns the visible saved/error state.",
+        "classifier": "Source review local query/mutation; no autonomous follow-up dispatch.",
+        "successRetention": "Durable workspace source-review files; returned snapshots retained by the keyed editor store and workbench.",
+        "failureReasons": "Typed revision conflicts and file/policy errors preserve the unsaved editor buffer; no silent success.",
+        "singleTerminalNoticeOwner": true
+      },
+      "evidence": {
+        "behaviorCases": [
+          "examples_are_explicit_scoped_revision_checked_and_durable"
+        ],
+        "workerBoundaryInspection": "The actual registered async wrapper awaits its finite blocking closure; behavioral tests exercise durable source results and the relevant mutation constraints. No held-worker timing proof is claimed.",
+        "platformScope": "Executed on macOS with temporary workspaces. Native WKWebView smoke is separate."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib meeting_sources -- --test-threads=1",
+          "passed": 13,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ]
+    },
+    {
+      "name": "save_meeting_correction_example",
+      "module": "src-tauri/src/meeting_sources.rs",
+      "registrationPath": "src-tauri/src/lib.rs::meeting_sources::save_meeting_correction_example",
+      "originalDisposition": "ISOLATED",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/meeting_sources.rs::save_meeting_correction_example",
+        "src-tauri/src/meeting_sources.rs::save_example_impl"
+      ],
+      "workerBoundary": "src-tauri/src/meeting_sources.rs::save_meeting_correction_example owns its input values and awaits spawn_blocking before filesystem access, hashing, serialization, or admission waits; the inner IpcError result remains structured.",
+      "syncCallers": [
+        "src-tauri/src/meeting_sources.rs::save_example_impl retains synchronous domain behavior inside the worker."
+      ],
+      "mutationKey": {
+        "lexicalPaths": [
+          "<canonical workspace>/.maru, including source originals, state, immutable revisions and correction examples"
+        ],
+        "aliasPaths": [
+          "<selected workspace alias>/.maru and physical alias keys captured by shared path admission"
+        ],
+        "postAdmissionPreconditions": [
+          "workspace identity, workspace registry, managed symlink rejection, write capability and document ownership rechecked; state mutations also reload expected revision under admission"
+        ],
+        "domainLockOrder": "Shared admission before reading mutable session state; no separate domain lock is held across waits.",
+        "sharedAdmissionEntry": "src-tauri/src/meeting_sources.rs::admitted"
+      },
+      "processingCaller": {
+        "path": [
+          "src/lib/meetingSources.ts",
+          "src/lib/meetingSourceEditorStore.ts",
+          "src/components/meetings/MeetingSourceWorkbench.tsx"
+        ],
+        "payload": "Typed source session, version or approved correction-example result returned through the initiating API promise.",
+        "terminalNoticeOwner": "MeetingSourceWorkbench action handler or keyed editor store owns the visible saved/error state.",
+        "classifier": "Source review local query/mutation; no autonomous follow-up dispatch.",
+        "successRetention": "Durable workspace source-review files; returned snapshots retained by the keyed editor store and workbench.",
+        "failureReasons": "Typed revision conflicts and file/policy errors preserve the unsaved editor buffer; no silent success.",
+        "singleTerminalNoticeOwner": true
+      },
+      "evidence": {
+        "behaviorCases": [
+          "examples_are_explicit_scoped_revision_checked_and_durable"
+        ],
+        "workerBoundaryInspection": "The actual registered async wrapper awaits its finite blocking closure; behavioral tests exercise durable source results and the relevant mutation constraints. No held-worker timing proof is claimed.",
+        "platformScope": "Executed on macOS with temporary workspaces. Native WKWebView smoke is separate."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib meeting_sources -- --test-threads=1",
+          "passed": 13,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ]
     }
   ],
   "consumedHandoffs": {

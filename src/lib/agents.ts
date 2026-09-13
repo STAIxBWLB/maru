@@ -108,6 +108,7 @@ export const MOCK_BUILTIN_AGENTS: AgentRecord[] = [
   mockBuiltinAgent({ id: "inbox-triage", labelKey: "agents.builtin.inboxTriage", skillName: "inbox-process", kind: "background" }),
   mockBuiltinAgent({ id: "inbox-classify", labelKey: "agents.builtin.inboxClassify", skillName: "", kind: "inline" }),
   mockBuiltinAgent({ id: "meeting-notes", labelKey: "agents.builtin.meetingNotes", skillName: "meeting-notes", kind: "background" }),
+  mockBuiltinAgent({ id: "meeting-source-review", labelKey: "agents.builtin.meetingSourceReview", skillName: "meeting-source-review", kind: "background", permissionMode: "plan", prompt: "Plaud 등 외부 회의록의 참가자 맥락과 요약을 검토하고, 근거가 있는 수정 제안만 반환. 원문 파일을 수정하거나 회의록 파일을 생성하지 말 것." }),
   mockBuiltinAgent({ id: "task-extract", labelKey: "agents.builtin.taskExtract", skillName: "task-management", kind: "background" }),
   mockBuiltinAgent({ id: "ideation-draft", labelKey: "agents.builtin.ideationDraft", skillName: "ideation-drafts", kind: "background" }),
   mockBuiltinAgent({ id: "commit-message", labelKey: "agents.builtin.commitMessage", skillName: "", kind: "inline" }),

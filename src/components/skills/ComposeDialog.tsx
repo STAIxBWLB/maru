@@ -31,6 +31,8 @@ import {
 } from "../../lib/skills";
 import { chooseFiles } from "../../lib/api";
 import { appendSourceBlock } from "../../lib/meetingNotesPrompt";
+import { createMeetingSourceSession, importMeetingSource, type SourceSession } from "../../lib/meetingSources";
+import { requestMeetingSourceSession } from "../../lib/meetingSourceNavigation";
 import { Button } from "../ui/Button";
 import {
   DialogSurface,
@@ -211,7 +213,9 @@ export function ComposeDialog({
   const skillValid = selectedSkill?.valid ?? true;
   const selectedRuntimeStatus = runtimeStatuses[runtime] ?? null;
   const runtimeReady = selectedRuntimeStatus?.available === true;
-  const canRun = Boolean(selectedSkill && skillValid && effectivePrompt.trim() && runtimeReady);
+  const canRun = Boolean(selectedSkill && skillValid && (isMeetingNotes
+    ? onOpenMeetingsWorkbench && (meetingsWorkspacePath ?? seed?.cwd)
+    : effectivePrompt.trim() && runtimeReady));
 
   useEffect(() => {
     if (!open || !selectedSkill || !skillValid || !effectivePrompt.trim()) {
@@ -240,10 +244,31 @@ export function ComposeDialog({
   }, [effectiveContext, open, effectivePrompt, seed?.cwd, selectedSkill, skillValid]);
 
   async function run() {
-    if (!selectedSkill || !effectivePrompt.trim() || !runtimeReady) return;
+    if (!selectedSkill || (!isMeetingNotes && (!effectivePrompt.trim() || !runtimeReady))) return;
     setBusy(true);
     setError(null);
     try {
+      if (isMeetingNotes) {
+        const workspace = meetingsWorkspacePath ?? seed?.cwd;
+        if (!workspace || !onOpenMeetingsWorkbench) throw new Error(t("skills.compose.meetingNeedsWorkspace"));
+        let session: SourceSession | null = null;
+        if (sourceText.trim()) {
+          session = await createMeetingSourceSession(workspace, {
+            title: t("meetings.sourceReview.title"), provider: "External", context: prompt,
+            sources: [{ id: crypto.randomUUID(), name: "Imported note", kind: "note", text: sourceText,
+              originalText: sourceText, originalHash: "" }],
+            participants: [], findings: [], suggestions: [], participantsReviewed: false, noteReviewed: false,
+          });
+        }
+        for (const item of effectiveContext) {
+          session = await importMeetingSource(workspace, session?.id ?? null, {
+            name: item.path.split(/[\\/]/).at(-1) ?? "Imported note", kind: "note", path: item.path,
+          }, session?.revision);
+        }
+        if (session) requestMeetingSourceSession(workspace, session.id);
+        onOpenMeetingsWorkbench();
+        return;
+      }
       let dispatchEvent: ComposeDialogDispatchEvent;
       if (mode === "structured") {
         if (!seed?.cwd) {
@@ -559,7 +584,7 @@ export function ComposeDialog({
                     <Info size={14} />
                     <span>{t("skills.compose.meetingTrackedNudge")}</span>
                     {onOpenMeetingsWorkbench ? (
-                      <button type="button" onClick={onOpenMeetingsWorkbench}>
+                      <button type="button" onClick={() => void run()} disabled={busy}>
                         {t("skills.compose.openMeetingsWorkbench")}
                         <ArrowRight size={13} />
                       </button>
@@ -597,7 +622,7 @@ export function ComposeDialog({
             disabled={!canRun || busy}
             icon={mode === "terminal" ? <SquareTerminal size={14} /> : <Play size={14} />}
           >
-            {busy ? t("skills.compose.running") : t("skills.compose.run")}
+            {busy ? t("skills.compose.running") : isMeetingNotes ? t("meetings.sourceReview.intake") : t("skills.compose.run")}
           </Button>
         </footer>
     </DialogSurface>

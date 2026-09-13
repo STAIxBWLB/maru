@@ -1,9 +1,21 @@
+import { meetingSourceEn } from "./meetingSourceEn";
 // en dictionary — lazy-loaded by src/lib/i18n.ts via import().
 // Keep key parity with the sibling locale file: `pnpm lint:i18n`
 // (scripts/lint-i18n.mjs, wired into `make verify` / CI) fails on drift.
 // Add/change a key in BOTH locales in the same commit.
 
 export const en: Record<string, string> = {
+  ...meetingSourceEn,
+  "agents.builtin.meetingSourceReview": "Meeting source review",
+  "meetings.sourceReview.generateTitle": "Generate from reviewed content",
+  "meetings.sourceReview.generateDescription": "Create a standard meeting note from the confirmed source version.",
+  "meetings.sourceReview.confirmRequired": "Save and confirm the source review first.",
+  "meetings.sourceReview.aiStale": "The source changed after the AI review started. Review the current content again.",
+  "meetings.sourceReview.aiFailed": "AI review could not finish. Continue editing manually or try again.",
+  "meetings.sourceReview.aiPending": "AI review is still running. Open its result in the run list.",
+  "meetings.sourceReview.openHistory": "View source and correction history",
+  "meetings.sourceReview.intake": "Continue to source review",
+  "meetings.fields.type": "Meeting type",
   "app.subtitle.note": "Files-as-truth · resilient frontmatter · multi-workspace",
   "app.locale.ko": "KO",
   "app.locale.en": "EN",
@@ -1612,8 +1624,8 @@ export const en: Record<string, string> = {
   "meetings.sidebar.month": "This month",
   "meetings.sidebar.transcript": "Transcript",
   "meetings.sidebar.transcriptHint": "Transcript / memo → note",
-  "meetings.sidebar.external": "Auto-summary",
-  "meetings.sidebar.externalHint": "External note → standard note",
+  "meetings.sidebar.external": "Review external notes",
+  "meetings.sidebar.externalHint": "Review and correct Plaud notes",
   "meetings.sidebar.createGroup": "New note",
   "meetings.sidebar.browseGroup": "Browse",
   "meetings.sidebar.date": "Date lookup",
@@ -1643,7 +1655,7 @@ export const en: Record<string, string> = {
   "meetings.external.description": "Restructure external notes against the workspace guide context.",
   "meetings.external.placeholder": "Paste the external note here.",
   "meetings.external.pick": "Pick external note files",
-  "meetings.external.run": "Refine note",
+  "meetings.external.run": "Generate meeting note",
   "meetings.field.type": "Meeting type",
   "meetings.field.topic": "Topic hint (optional)",
   "meetings.field.topicPlaceholder": "Ex: steering meeting, workshop schedule, project kickoff",

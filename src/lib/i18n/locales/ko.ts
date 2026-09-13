@@ -1,9 +1,21 @@
+import { meetingSourceKo } from "./meetingSourceKo";
 // ko dictionary — lazy-loaded by src/lib/i18n.ts via import().
 // Keep key parity with the sibling locale file: `pnpm lint:i18n`
 // (scripts/lint-i18n.mjs, wired into `make verify` / CI) fails on drift.
 // Add/change a key in BOTH locales in the same commit.
 
 export const ko: Record<string, string> = {
+  ...meetingSourceKo,
+  "agents.builtin.meetingSourceReview": "회의록 원문 교정",
+  "meetings.sourceReview.generateTitle": "검토한 내용으로 회의록 생성",
+  "meetings.sourceReview.generateDescription": "원문 교정을 확정한 버전으로 표준 회의록을 생성합니다.",
+  "meetings.sourceReview.confirmRequired": "원문 교정을 저장하고 검토를 확정해 주세요.",
+  "meetings.sourceReview.aiStale": "AI가 검토한 뒤 원문이 바뀌었습니다. 현재 내용으로 다시 검토해 주세요.",
+  "meetings.sourceReview.aiFailed": "AI 교정 작업을 완료하지 못했습니다. 직접 수정을 계속하거나 다시 실행할 수 있습니다.",
+  "meetings.sourceReview.aiPending": "AI 작업이 진행 중입니다. 작업 목록에서 결과를 확인할 수 있습니다.",
+  "meetings.sourceReview.openHistory": "원문과 교정 이력 보기",
+  "meetings.sourceReview.intake": "원문 교정으로 이동",
+  "meetings.fields.type": "회의 유형",
   "app.subtitle.note": "파일 원천 · 깨지지 않는 frontmatter · 다중 workspace",
   "app.locale.ko": "KO",
   "app.locale.en": "EN",
@@ -1612,8 +1624,8 @@ export const ko: Record<string, string> = {
   "meetings.sidebar.month": "이번 달",
   "meetings.sidebar.transcript": "녹취록",
   "meetings.sidebar.transcriptHint": "녹취록·메모를 회의록으로",
-  "meetings.sidebar.external": "자동정리 회의록",
-  "meetings.sidebar.externalHint": "외부 정리본을 표준 회의록으로",
+  "meetings.sidebar.external": "외부 회의록 교정",
+  "meetings.sidebar.externalHint": "Plaud 회의록 검토·수정",
   "meetings.sidebar.createGroup": "새 회의록",
   "meetings.sidebar.browseGroup": "탐색",
   "meetings.sidebar.date": "일자 조회",
@@ -1643,7 +1655,7 @@ export const ko: Record<string, string> = {
   "meetings.external.description": "외부에서 정리된 노트를 workspace 가이드 기준으로 재구성합니다.",
   "meetings.external.placeholder": "외부 노트를 붙여넣으세요.",
   "meetings.external.pick": "외부 노트 파일 선택",
-  "meetings.external.run": "정제 실행",
+  "meetings.external.run": "회의록 생성",
   "meetings.field.type": "회의 유형",
   "meetings.field.topic": "주제 힌트 (선택)",
   "meetings.field.topicPlaceholder": "예: 운영위원회, 워크숍 일정, 과제 킥오프",

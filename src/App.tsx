@@ -1,3 +1,4 @@
+import { hasDirtyMeetingSourceDrafts } from "./lib/meetingSourceEditorStore";
 import {
   lazy,
   memo,
@@ -1950,7 +1951,7 @@ export function MainApp() {
     // store synchronously, so the dirty check below sees fresh iframe edits.
     leftHtmlFlushRef.current?.flushNow();
     rightHtmlFlushRef.current?.flushNow();
-    return getEditorTabsState().tabs.some((tab) => tab.draftContent !== tab.document.content);
+    return hasDirtyMeetingSourceDrafts() || getEditorTabsState().tabs.some((tab) => tab.draftContent !== tab.document.content);
   }, []);
 
   // Dirty-draft guard behind window close and update relaunch: pending action
@@ -4179,10 +4180,10 @@ export function MainApp() {
   );
 
   // The Apply-skill dialog nudge routes meeting-notes work into the dedicated
-  // Meetings transcript workbench (step tracking + diff review + followups).
+  // Meetings source review workbench (Plaud note correction before generation).
   const openMeetingsWorkbench = useCallback(() => {
     closeCompose();
-    planningModeController.requestMeetingsView("transcript");
+    planningModeController.requestMeetingsView("external");
     setPersistedAppMode("meetings");
   }, [setPersistedAppMode]);
 

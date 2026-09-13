@@ -106,6 +106,7 @@ Early shards 01/02/03/04/05 record `integrationRequired: "08-29"` and final modu
 | 08-08 | `src-tauri/src/gap.rs` | `gap_analyze`, `gap_append_log`, `gap_log_list`, `gap_reports_list` |
 | 08-09 | `src-tauri/src/tasks.rs` | `scan_task_notes`, `read_task_metadata`, `create_task_note`, `update_task_status`, `update_task_schedule_fields`, `update_task_details`, `move_task_note`, `append_tasks_log`, `read_tasks_log` |
 | 08-09 | `src-tauri/src/meetings.rs` | `scan_meeting_notes`, `read_meeting_metadata`, `read_meeting_guides`, `append_meetings_log`, `read_meetings_log` |
+| 08-09 | `src-tauri/src/meeting_sources.rs` | `create_meeting_source_session`, `import_meeting_source`, `read_meeting_source_session`, `list_meeting_source_sessions`, `save_meeting_source_draft`, `checkpoint_meeting_source`, `confirm_meeting_source`, `restore_meeting_source_version`, `read_meeting_source_version`, `list_meeting_correction_examples`, `save_meeting_correction_example` |
 | 08-09 | `src-tauri/src/project_activity.rs` | `scan_project_activity` |
 | 08-10 | `src-tauri/src/inbox.rs` | `scan_inbox_drop`, `scan_inbox_entries`, `scan_inbox_processed_items`, `scan_inbox_processed_snapshot`, `read_inbox_processed_item`, `read_inbox_source_runs`, `count_inbox_processed_by_channel`, `trash_inbox_items`, `stage_inbox_drop_files`, `accept_inbox_item`, `accept_inbox_items`, `reject_inbox_item`, `reject_inbox_items`, `apply_inbox_decisions` |
 | 08-10 | `src-tauri/src/inbox_classifier.rs` | `build_inbox_classification_prompt`, `parse_inbox_classification` |

@@ -32,6 +32,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
@@ -39,7 +40,6 @@ import {
 } from "react";
 import {
   appendMeetingsLog,
-  chooseFiles,
   readDocument,
   readMeetingGuides,
   readMeetingMetadata,
@@ -95,6 +95,14 @@ import {
   buildMeetingNotesPrompt,
   type MeetingSourceKind,
 } from "../../lib/meetingNotesPrompt";
+import { MeetingSourceWorkbench } from "./MeetingSourceWorkbench";
+import {
+  listMeetingCorrectionExamples, listMeetingSourceSessions, readMeetingSourceSession, saveMeetingSourceDraft,
+  validateMeetingSourceReference,
+  type SourceSession, type ReviewedSourceReference,
+} from "../../lib/meetingSources";
+import { buildSourceReviewPrompt, parseSourceReviewSuggestions } from "../../lib/meetingSourceReview";
+import { requestMeetingSourceSession, useRequestedMeetingSourceSession } from "../../lib/meetingSourceNavigation";
 import { UnifiedCalendarView } from "../calendar/UnifiedCalendarView";
 import { toUnifiedMeetingEvents } from "../../lib/calendar/fromEntries";
 import type { CalendarView as UnifiedCalendarViewMode } from "../../lib/calendar/types";
@@ -422,12 +430,9 @@ export const MeetingsPane = memo(function MeetingsPane({
     };
   }, [selectedEntry, workPath]);
 
-  // "New meeting note" leads into the dedicated Transcript workbench (paste /
-  // file input → tracked run → review → followups) instead of a generic
-  // terminal free-run. The External tab is one click away for auto-organized
-  // notes.
+  // Most intake is an already summarized Plaud note; transcripts are secondary.
   const openNewMeeting = useCallback(() => {
-    setView("transcript");
+    setView("external");
   }, []);
 
   // Honor an external view request (e.g. the Apply-skill dialog nudge routing
@@ -580,6 +585,10 @@ export const MeetingsPane = memo(function MeetingsPane({
                 workPath={workPath}
                 onOpenSkillCompose={onOpenSkillCompose}
                 onRevealPath={onRevealPath}
+                onOpenSourceReview={(sessionId) => {
+                  if (workPath) requestMeetingSourceSession(workPath, sessionId);
+                  setView("external");
+                }}
               />
             </div>
           </>
@@ -627,16 +636,16 @@ function MeetingsSidebar({
   // becomes a tracked, reviewable meeting note.
   const createItems: SidebarItem[] = [
     {
-      id: "transcript",
-      label: t("meetings.sidebar.transcript"),
-      hint: t("meetings.sidebar.transcriptHint"),
-      icon: <FileText size={15} />,
-    },
-    {
       id: "external",
       label: t("meetings.sidebar.external"),
       hint: t("meetings.sidebar.externalHint"),
       icon: <WandSparkles size={15} />,
+    },
+    {
+      id: "transcript",
+      label: t("meetings.sidebar.transcript"),
+      hint: t("meetings.sidebar.transcriptHint"),
+      icon: <FileText size={15} />,
     },
   ];
   const browseItems: SidebarItem[] = [
@@ -814,6 +823,7 @@ function MeetingsDetailPane({
   workPath,
   onOpenSkillCompose,
   onRevealPath,
+  onOpenSourceReview,
 }: {
   entry: MeetingNoteEntry | null;
   metadata: MeetingMetadata | null;
@@ -827,8 +837,21 @@ function MeetingsDetailPane({
     prompt?: string,
   ) => void;
   onRevealPath?: (path: string) => void;
+  onOpenSourceReview: (sessionId: string) => void;
 }) {
   const { t } = useTranslation();
+  const [sourceReviewId, setSourceReviewId] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    setSourceReviewId(null);
+    if (workPath && entry) void listMeetingSourceSessions(workPath).then((sessions) => {
+      if (cancelled) return;
+      const linked = sessions.find((session) => session.outputLinks.some((path) =>
+        path === entry.relPath || path === entry.absPath));
+      setSourceReviewId(linked?.id ?? null);
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [workPath, entry]);
   if (!entry) return <aside className="meetings-detail-pane empty">{t("meetings.detail.empty")}</aside>;
   const context = [{ path: entry.absPath, kind: "document" }];
   const runFollowup = async (skillName: string, prompt: string) => {
@@ -871,6 +894,9 @@ function MeetingsDetailPane({
         {loading ? t("meetings.detail.loading") : metadata?.preview ?? t("meetings.detail.noPreview")}
       </pre>
       <div className="meetings-detail-actions">
+        {sourceReviewId ? <button type="button" onClick={() => onOpenSourceReview(sourceReviewId)}>
+          <GitCompare size={14} />{t("meetings.sourceReview.openHistory")}
+        </button> : null}
         {settings.hooks.autoVaultExtract ? (
           <button
             type="button"
@@ -1293,11 +1319,16 @@ function MeetingsSkillWorkbench({
   onApplied: () => void;
 }) {
   const { t } = useTranslation();
-  const [paths, setPaths] = useState<string[]>([]);
-  const [note, setNote] = useState("");
+  const [reviewedInput, setReviewedInput] = useState<{ reference: ReviewedSourceReference; session: SourceSession } | null>(null);
+  const [sourceSessionUpdate, setSourceSessionUpdate] = useState<SourceSession | null>(null);
+  const [sourceAiBusy, setSourceAiBusy] = useState(false);
+  const [activeSourceSessionId, setActiveSourceSessionId] = useState<string | null>(null);
+  const sourceResultLoads = useRef(new Map<string, Promise<void>>());
+  const automaticSourceAttempts = useRef(new Set<string>());
+  const requestedSessionId = useRequestedMeetingSourceSession(workPath);
+  const sourceScope = useRef(workPath);
+  sourceScope.current = workPath;
   const [type, setType] = useState(settings.defaultTypes[0] ?? "회의");
-  const [topic, setTopic] = useState("");
-  const [detail, setDetail] = useState("");
   const [busy, setBusy] = useState(false);
   const [runtimeChooserOpen, setRuntimeChooserOpen] = useState(false);
   const [runtimeStatuses, setRuntimeStatuses] = useState<
@@ -1311,21 +1342,112 @@ function MeetingsSkillWorkbench({
   const [appliedRunIds, setAppliedRunIds] = useState<Set<string>>(() => new Set());
   const [localRuns, setLocalRuns] = useState<MissionRecord[]>([]);
   const isExternal = sourceKind === "external";
-  const hasSource = paths.length > 0 || note.trim().length > 0;
+  const hasSource = Boolean(reviewedInput);
   const canRun = Boolean(workPath && hasSource);
   const visibleMissions = useMemo(
     () => mergeMeetingsMissions(missions, localRuns),
     [localRuns, missions],
   );
-  const sourceTitle = isExternal ? t("meetings.external.title") : t("meetings.transcript.title");
-  const sourceDescription = isExternal
-    ? t("meetings.external.description")
-    : t("meetings.transcript.description");
   const runLabel = isExternal ? t("meetings.external.run") : t("meetings.transcript.run");
-  const pickLabel = isExternal ? t("meetings.external.pick") : t("meetings.transcript.pick");
-  const pastePlaceholder = isExternal
-    ? t("meetings.external.placeholder")
-    : t("meetings.transcript.placeholder");
+
+  useEffect(() => () => { sourceScope.current = null; }, []);
+
+  const loadSourceAiResult = useCallback((runId: string, sessionId: string, baseRevision: string): Promise<void> => {
+    const key = `${workPath}:${runId}`;
+    const existing = sourceResultLoads.current.get(key);
+    if (existing) return existing;
+    const loading = (async () => {
+    if (!workPath) return;
+    const current = await readMeetingSourceSession(workPath, sessionId);
+    if (!current) throw new Error(t("meetings.sourceReview.confirmRequired"));
+    if (current.draft.suggestions.some((suggestion) => suggestion.runId === runId)) {
+      setSourceSessionUpdate(current);
+      requestMeetingSourceSession(workPath, current.id);
+      return;
+    }
+    if (current.revision !== baseRevision) throw new Error(t("meetings.sourceReview.aiStale"));
+    const events = await agentReadRunEvents(workPath, runId);
+    const suggestions = parseSourceReviewSuggestions(extractProviderOutput(events, logLines[runId] ?? []), current, runId);
+    const saved = await saveMeetingSourceDraft(workPath, current.id, {
+      ...current.draft,
+      suggestions: [...current.draft.suggestions, ...suggestions],
+      noteReviewed: false,
+    }, current.revision);
+    if (sourceScope.current === workPath) {
+      setSourceSessionUpdate(saved);
+      requestMeetingSourceSession(workPath, saved.id);
+    }
+    })();
+    const tracked = loading.catch((error: unknown) => { sourceResultLoads.current.delete(key); throw error; });
+    sourceResultLoads.current.set(key, tracked);
+    return tracked;
+  }, [workPath, logLines, t]);
+
+  useEffect(() => { automaticSourceAttempts.current.clear(); }, [workPath, activeSourceSessionId]);
+  useEffect(() => {
+    if (!activeSourceSessionId) return;
+    const completed = visibleMissions.find((mission) => {
+      const metadata = meetingMissionMetadata(mission);
+      return mission.status === "done" && metadata?.origin === "meetingSourceReview" && metadata.sourceSessionId === activeSourceSessionId;
+    });
+    if (!completed) return;
+    const key = `${workPath}:${completed.id}`;
+    if (sourceResultLoads.current.has(key) || automaticSourceAttempts.current.has(key)) return;
+    automaticSourceAttempts.current.add(key);
+    const metadata = meetingMissionMetadata(completed);
+    if (typeof metadata?.sourceRevision === "string") {
+      void loadSourceAiResult(completed.id, activeSourceSessionId, metadata.sourceRevision)
+        .catch((error: unknown) => setError(error instanceof Error ? error.message : String(error)));
+    }
+  }, [activeSourceSessionId, visibleMissions, loadSourceAiResult, workPath]);
+
+  const requestSourceAi = async (session: SourceSession, runtimeOverride?: SkillDispatchRuntime) => {
+    if (!workPath || sourceAiBusy) return;
+    setSourceAiBusy(true);
+    setError(null);
+    try {
+      const [guides, examples] = await Promise.all([
+        readMeetingGuides(workPath), listMeetingCorrectionExamples(workPath),
+      ]);
+      const configuredAgent = requireAgent(agents, "meeting-source-review");
+      const agent = { ...configuredAgent, runtime: runtimeOverride ?? configuredAgent.runtime, permissionMode: "plan" as const };
+      const { invocationId, runtime } = await runAgentDetailed(agent, {
+        skills, ai, workPath,
+        prompt: buildSourceReviewPrompt(session, guides, examples),
+        context: [],
+        metadata: { origin: "meetingSourceReview", reviewFlow: true,
+          sourceSessionId: session.id, sourceRevision: session.revision, sourceKind: "external" },
+      });
+      const mission = createOptimisticMeetingMission({ id: invocationId, runtime, sourceKind: "external", inputPaths: [], workPath });
+      mission.metadata = { ...mission.metadata, origin: "meetingSourceReview", skillName: "meeting-source-review",
+        sourceSessionId: session.id, sourceRevision: session.revision };
+      setLocalRuns((current) => [mission, ...current]);
+      onLocalMissionStarted(mission);
+      onMissionStarted(invocationId);
+      onRefreshMissions();
+      const deadline = Date.now() + 15 * 60_000;
+      while (Date.now() < deadline && sourceScope.current === workPath) {
+        await new Promise<void>((resolve) => window.setTimeout(resolve, 2000));
+        const events = await agentReadRunEvents(workPath, invocationId);
+        if (events.some((event) => event.type === "run.failed" || event.type === "run.stopped")) {
+          throw new Error(t("meetings.sourceReview.aiFailed"));
+        }
+        if (events.some((event) => event.type === "run.completed")) {
+          const finished: MissionRecord = { ...mission, status: "done", exitCode: 0, lastOutputAt: new Date().toISOString() };
+          setLocalRuns((current) => current.map((item) => item.id === invocationId ? finished : item));
+          onLocalMissionStarted(finished);
+          await loadSourceAiResult(invocationId, session.id, session.revision);
+          return;
+        }
+      }
+      if (sourceScope.current === workPath) setError(t("meetings.sourceReview.aiPending"));
+    } catch (err) {
+      if (sourceScope.current === workPath) setError(agentErrorMessage(err, t));
+    } finally {
+      setSourceAiBusy(false);
+      onRefreshMissions();
+    }
+  };
 
   useEffect(() => {
     if (missions.length === 0) return;
@@ -1374,19 +1496,25 @@ function MeetingsSkillWorkbench({
   }, [runtimeChooserOpen, runtimeCommands]);
 
   const run = async (runtime: SkillDispatchRuntime) => {
-    if (!workPath || !canRun) return;
+    if (!workPath || !canRun || !reviewedInput) return;
     setBusy(true);
     setError(null);
     try {
-      const guides = isExternal ? await readMeetingGuides(workPath) : null;
+      const currentSource = await readMeetingSourceSession(workPath, reviewedInput.reference.sessionId);
+      if (!currentSource) throw new Error(t("meetings.sourceReview.confirmRequired"));
+      const version = validateMeetingSourceReference(currentSource, reviewedInput.reference);
+      const guides = await readMeetingGuides(workPath);
+      const primaryKind = version.draft.sources.some((source) => source.kind === "note") ? "external" : "transcript";
       const prompt = buildMeetingNotesPrompt({
-        sourceKind,
+        sourceKind: primaryKind,
         settings,
         type,
-        topic,
-        detail,
-        note,
+        topic: version.draft.title ?? "",
+        detail: version.draft.context ?? "",
+        note: version.draft.sources.filter((source) => source.kind === (primaryKind === "external" ? "note" : "transcript"))
+          .map((source) => source.text).join("\n\n"),
         guides,
+        reviewedSource: { reference: reviewedInput.reference, draft: version.draft },
       });
       // The chooser is a per-run override of the agent's stored backend, so
       // the agent is cloned rather than mutated.
@@ -1400,13 +1528,14 @@ function MeetingsSkillWorkbench({
           ai,
           workPath,
           prompt,
-          context: paths.map((path) => ({ path, kind: "file" })),
+          context: [],
           metadata: {
             origin: sourceKind === "transcript"
               ? "meetingNotesFromTranscript"
               : "meetingNotesExternalRefine",
             reviewFlow: true,
             sourceKind,
+            reviewedSource: reviewedInput.reference,
           },
         },
       );
@@ -1415,9 +1544,10 @@ function MeetingsSkillWorkbench({
         id: invocationId,
         runtime: dispatched,
         sourceKind,
-        inputPaths: paths,
+        inputPaths: [],
         workPath,
       });
+      optimisticMission.metadata = { ...optimisticMission.metadata, reviewedSource: reviewedInput.reference };
       setLocalRuns((current) => [
         optimisticMission,
         ...current.filter((mission) => mission.id !== invocationId),
@@ -1437,6 +1567,14 @@ function MeetingsSkillWorkbench({
     if (!workPath) return;
     const originalRuntime =
       normalizeSkillDispatchRuntime(meetingMissionRuntimeValue(mission)) ?? "claude";
+    const sourceMetadata = meetingMissionMetadata(mission);
+    if (sourceMetadata?.origin === "meetingSourceReview" && typeof sourceMetadata.sourceSessionId === "string") {
+      try {
+        const source = await readMeetingSourceSession(workPath, sourceMetadata.sourceSessionId);
+        await requestSourceAi(source, originalRuntime);
+      } catch (err) { setError(agentErrorMessage(err, t)); }
+      return;
+    }
     if (!hasSource) {
       setError(t("meetings.progress.retryNeedsSource"));
       return;
@@ -1466,6 +1604,14 @@ function MeetingsSkillWorkbench({
     setReviewLoading(true);
     setError(null);
     try {
+      const metadata = meetingMissionMetadata(mission);
+      if (metadata?.origin === "meetingSourceReview") {
+        if (typeof metadata.sourceSessionId !== "string" || typeof metadata.sourceRevision !== "string") {
+          throw new Error(t("meetings.sourceReview.aiStale"));
+        }
+        await loadSourceAiResult(mission.id, metadata.sourceSessionId, metadata.sourceRevision);
+        return;
+      }
       const events = await agentReadRunEvents(workPath, mission.id);
       const raw = extractProviderOutput(events, logLines[mission.id] ?? []);
       const proposal = extractSkillProposal(events) ?? await parseProposalFallback(raw);
@@ -1511,8 +1657,13 @@ function MeetingsSkillWorkbench({
   const appliedCurrentRun = Boolean(bundle && appliedRunIds.has(bundle.runId));
   const continuationAvailable = bundle ? meetingApprovalContinuationAvailable(bundle) : false;
   const continuationActive = continuationAvailable && Boolean(bundle?.continuationSelected);
+  const proposalSource = bundle ? meetingMissionMetadata(bundle.mission)?.reviewedSource as ReviewedSourceReference | undefined : undefined;
+  const sourceStillReviewed = !proposalSource || Boolean(reviewedInput &&
+    reviewedInput.reference.sessionId === proposalSource.sessionId &&
+    reviewedInput.reference.versionId === proposalSource.versionId &&
+    reviewedInput.reference.contentHash === proposalSource.contentHash);
   const canApply = bundle
-    ? !appliedCurrentRun && meetingReviewCanApply({
+    ? sourceStillReviewed && !appliedCurrentRun && meetingReviewCanApply({
       proposal: bundle.proposal,
       files: bundle.files,
       followups: bundle.followups,
@@ -1562,6 +1713,13 @@ function MeetingsSkillWorkbench({
     setApplyBusy(true);
     setError(null);
     try {
+      const sourceReference = meetingMissionMetadata(bundle.mission)?.reviewedSource;
+      if (sourceReference && typeof sourceReference === "object") {
+        const reference = sourceReference as ReviewedSourceReference;
+        const session = await readMeetingSourceSession(workPath, reference.sessionId);
+        if (!session) throw new Error(t("meetings.sourceReview.confirmRequired"));
+        validateMeetingSourceReference(session, reference);
+      }
       if (proposal) {
         await agentApplySkillProposal({
           cwd: workPath,
@@ -1634,44 +1792,27 @@ function MeetingsSkillWorkbench({
   return (
     <section className="meetings-workbench">
       <div className="meetings-workbench-grid">
-        <section className="meetings-workbench-card meetings-source-card">
-          <header>
-            <div>
-              <span>{t("meetings.workbench.source")}</span>
-              <h2>{sourceTitle}</h2>
-              <p>{sourceDescription}</p>
-            </div>
-          </header>
-          <div className="meetings-source-input">
-            <textarea
-              className="meetings-textarea compact"
-              aria-label={sourceTitle}
-              value={note}
-              onChange={(event) => setNote(event.target.value)}
-              placeholder={pastePlaceholder}
-            />
-            <button
-              type="button"
-              className="secondary-button"
-              onClick={() => void chooseFiles(pickLabel).then(setPaths)}
-            >
-              <FolderOpen size={14} />
-              {pickLabel}
-            </button>
-            <div className="meetings-selected-files compact">
-              {paths.length === 0 ? <span>{t("meetings.workbench.noFiles")}</span> : null}
-              {paths.map((path) => <span key={path}>{path}</span>)}
-            </div>
-          </div>
-          <FlowFields
-            types={settings.defaultTypes}
-            type={type}
-            topic={topic}
-            detail={detail}
-            onType={setType}
-            onTopic={setTopic}
-            onDetail={setDetail}
+        <div className="meetings-source-workbench-full">
+          <MeetingSourceWorkbench
+            workPath={workPath}
+            sourceKind={sourceKind}
+            onReviewedSourceChange={setReviewedInput}
+            onRequestAi={requestSourceAi}
+            aiBusy={sourceAiBusy}
+            externalSessionUpdate={sourceSessionUpdate}
+            requestedSessionId={requestedSessionId}
+            onSessionChange={setActiveSourceSessionId}
           />
+        </div>
+        <section className="meetings-workbench-card meetings-source-card">
+          <header><div><h2>{t("meetings.sourceReview.generateTitle")}</h2>
+            <p>{t("meetings.sourceReview.generateDescription")}</p></div></header>
+          <label className="field">
+            <span>{t("meetings.fields.type")}</span>
+            <select value={type} onChange={(event) => setType(event.target.value)}>
+              {settings.defaultTypes.map((item) => <option value={item} key={item}>{item}</option>)}
+            </select>
+          </label>
           <button
             type="button"
             className="primary-button"
@@ -1705,9 +1846,16 @@ function MeetingsSkillWorkbench({
               </div>
             </div>
           ) : null}
-          {!hasSource ? <p className="meetings-field-help">{t("meetings.source.noSource")}</p> : null}
+          {!hasSource ? <p className="meetings-field-help">{t("meetings.sourceReview.confirmRequired")}</p> : null}
         </section>
 
+        {!sourceStillReviewed ? <p className="meetings-field-help" role="status">
+          {t("meetings.sourceReview.confirmRequired")}
+          {proposalSource && workPath ? <button type="button" className="secondary-button"
+            onClick={() => requestMeetingSourceSession(workPath, proposalSource.sessionId)}>
+            {t("meetings.sourceReview.openHistory")}
+          </button> : null}
+        </p> : null}
         <MeetingReviewPanel
           bundle={bundle}
           loading={reviewLoading}
@@ -1774,55 +1922,6 @@ function MeetingsSkillWorkbench({
         />
       </div>
     </section>
-  );
-}
-
-function FlowFields({
-  types,
-  type,
-  topic,
-  detail,
-  onType,
-  onTopic,
-  onDetail,
-}: {
-  types: string[];
-  type: string;
-  topic: string;
-  detail: string;
-  onType: (value: string) => void;
-  onTopic: (value: string) => void;
-  onDetail: (value: string) => void;
-}) {
-  const { t } = useTranslation();
-  return (
-    <div className="meetings-metadata-panel">
-      <div className="meetings-metadata-grid">
-        <label className="field">
-          <span>{t("meetings.field.type")}</span>
-          <select value={type} onChange={(event) => onType(event.target.value)}>
-            {types.map((item) => <option key={item}>{item}</option>)}
-          </select>
-        </label>
-        <label className="field">
-          <span>{t("meetings.field.topic")}</span>
-          <input
-            value={topic}
-            onChange={(event) => onTopic(event.target.value)}
-            placeholder={t("meetings.field.topicPlaceholder")}
-          />
-        </label>
-        <label className="field">
-          <span>{t("meetings.field.detail")}</span>
-          <input
-            value={detail}
-            onChange={(event) => onDetail(event.target.value)}
-            placeholder={t("meetings.field.detailPlaceholder")}
-          />
-        </label>
-      </div>
-      <p className="meetings-field-help">{t("meetings.field.help")}</p>
-    </div>
   );
 }
 
@@ -2297,6 +2396,7 @@ function MeetingsRunPanel({
           </div>
         ) : null}
         {missions.map((mission) => {
+          const isSourceReview = meetingMissionMetadata(mission)?.origin === "meetingSourceReview";
           const lines = logLines[mission.id] ?? [];
           const canStop = mission.status === "running" || mission.status === "idle";
           const isFailed =
@@ -2366,7 +2466,7 @@ function MeetingsRunPanel({
                 <span>{meetingMissionSource(mission)}</span>
               </div>
               <ol className="meetings-run-steps" aria-label={t("meetings.progress.steps")}>
-                {steps.map((step) => (
+                {steps.filter((step) => !isSourceReview || step.id === "input" || step.id === "run" || step.id === "review").map((step) => (
                   <li className={`meetings-run-step ${step.status}`} key={step.id}>
                     <span className="meetings-run-step-dot" aria-hidden="true" />
                     <span>{t(`meetings.step.${step.id}`)}</span>

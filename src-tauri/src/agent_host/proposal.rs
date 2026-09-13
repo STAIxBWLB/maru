@@ -12,6 +12,82 @@ use crate::agent_host::protected_write::{
 use crate::approval::{require_approval, ApprovalState};
 use crate::atomic_file::{with_path_transactions, PathTransactionLease, PathTransactionRequest};
 
+pub const MEETING_SOURCE_REVIEW_SCHEMA_VERSION: &str = "maru_meeting_source_review_v1";
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct MeetingSourceReview {
+    pub schema_version: String,
+    pub session_id: String,
+    pub base_revision: String,
+    #[serde(default)]
+    pub suggestions: Vec<MeetingSourceSuggestion>,
+    #[serde(default)]
+    pub uncertainties: Vec<String>,
+    #[serde(default)]
+    pub summary: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct MeetingSourceSuggestion {
+    pub id: String,
+    pub source_id: String,
+    pub before: String,
+    pub after: String,
+    pub category: String,
+    pub reason: String,
+    #[serde(default)]
+    pub evidence: String,
+    #[serde(default = "default_meeting_suggestion_required")]
+    pub required: bool,
+}
+
+fn default_meeting_suggestion_required() -> bool {
+    true
+}
+
+impl MeetingSourceReview {
+    pub fn validate(&self) -> Result<(), String> {
+        if self.schema_version != MEETING_SOURCE_REVIEW_SCHEMA_VERSION {
+            return Err(format!(
+                "meeting_source_review_schema_unsupported: {}",
+                self.schema_version
+            ));
+        }
+        if self.session_id.trim().is_empty() {
+            return Err("meeting_source_review_session_required".to_string());
+        }
+        for suggestion in &self.suggestions {
+            if suggestion.id.trim().is_empty() || suggestion.source_id.trim().is_empty() {
+                return Err("meeting_source_review_suggestion_identity_required".to_string());
+            }
+            if suggestion.before.is_empty() {
+                return Err(format!(
+                    "meeting_source_review_before_required: {}",
+                    suggestion.id
+                ));
+            }
+            if suggestion.category.trim().is_empty() || suggestion.reason.trim().is_empty() {
+                return Err(format!(
+                    "meeting_source_review_reason_required: {}",
+                    suggestion.id
+                ));
+            }
+        }
+        Ok(())
+    }
+}
+
+pub fn parse_meeting_source_review(raw: &str) -> Result<MeetingSourceReview, String> {
+    let json =
+        extract_json_object(raw).ok_or_else(|| "meeting_source_review_json_missing".to_string())?;
+    let review: MeetingSourceReview = serde_json::from_str(json)
+        .map_err(|err| format!("meeting_source_review_json_invalid: {err}"))?;
+    review.validate()?;
+    Ok(review)
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct SkillProposal {
@@ -115,7 +191,71 @@ pub fn agent_apply_skill_proposal<R: tauri::Runtime>(
 ) -> Result<ProposalApplyReport, String> {
     let approvals = app.state::<ApprovalState>();
     require_approval(&approvals, approval_id, "agent.proposal.apply")?;
+    if let Some(run_id) = run_id.as_deref() {
+        validate_reviewed_source_provenance(&cwd, run_id)?;
+    }
     apply_skill_proposal(&cwd, &proposal, run_id.as_deref())
+}
+
+/// A meeting generation proposal may only be applied while its source-review
+/// pin is still present in the durable run metadata. The meeting_sources
+/// domain additionally verifies confirmation, version identity, and content
+/// hash; this guard keeps legacy runs (which have no provenance) compatible.
+fn validate_reviewed_source_provenance(cwd: &str, run_id: &str) -> Result<(), String> {
+    let events = crate::agent_host::event_store::read_run_events(cwd, run_id)?;
+    let Some(started) = events
+        .iter()
+        .find(|event| event.event_type == "run.started")
+    else {
+        return Ok(());
+    };
+    let metadata = started
+        .payload
+        .get("request")
+        .and_then(|request| request.get("metadata"))
+        .or_else(|| started.payload.get("metadata"));
+    let Some(metadata) = metadata else {
+        return Ok(());
+    };
+    let Some(origin) = metadata.get("origin").and_then(serde_json::Value::as_str) else {
+        return Ok(());
+    };
+    if !matches!(
+        origin,
+        "meetingNotesFromTranscript" | "meetingNotesExternalRefine"
+    ) {
+        return Ok(());
+    }
+    if !metadata
+        .get("provenanceRequired")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false)
+    {
+        // Runs created before source review was introduced remain readable and
+        // applicable, as required by the migration contract.
+        return Ok(());
+    }
+    let reviewed = metadata
+        .get("reviewedSource")
+        .and_then(serde_json::Value::as_object)
+        .ok_or_else(|| "meeting_reviewed_source_provenance_missing".to_string())?;
+    for key in ["sessionId", "versionId", "contentHash"] {
+        if reviewed
+            .get(key)
+            .and_then(serde_json::Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .is_none()
+        {
+            return Err(format!("meeting_reviewed_source_{key}_missing_at_apply"));
+        }
+    }
+    let reference: crate::meeting_sources::ReviewedSourceReference =
+        serde_json::from_value(serde_json::Value::Object(reviewed.clone()))
+            .map_err(|_| "meeting_reviewed_source_provenance_invalid".to_string())?;
+    crate::meeting_sources::validate_reviewed_source(cwd, &reference)
+        .map_err(|error| format!("meeting_reviewed_source_stale_at_apply: {error}"))?;
+    Ok(())
 }
 
 /// IPC owns values before offloading; synchronous Rust callers keep their API.
@@ -225,8 +365,65 @@ fn apply_write_set(
     }
     if let Some(run_id) = run_id {
         paths.push(run_events_path(cwd, run_id)?);
+        if let Some(session_path) = reviewed_source_state_path(cwd, run_id)? {
+            paths.push(session_path);
+        }
     }
     Ok(paths)
+}
+
+fn reviewed_source_state_path(cwd: &str, run_id: &str) -> Result<Option<PathBuf>, String> {
+    let Some(reference) = reviewed_source_reference(cwd, run_id)? else {
+        return Ok(None);
+    };
+    let workspace = crate::vault::normalize_existing_dir(cwd)?;
+    Ok(Some(
+        workspace
+            .join(".maru")
+            .join("meetings")
+            .join("source-reviews")
+            .join(reference.session_id)
+            .join("state.json"),
+    ))
+}
+
+fn reviewed_source_reference(
+    cwd: &str,
+    run_id: &str,
+) -> Result<Option<crate::meeting_sources::ReviewedSourceReference>, String> {
+    let events = crate::agent_host::event_store::read_run_events(cwd, run_id)?;
+    let Some(started) = events
+        .iter()
+        .find(|event| event.event_type == "run.started")
+    else {
+        return Ok(None);
+    };
+    let metadata = started
+        .payload
+        .get("request")
+        .and_then(|request| request.get("metadata"));
+    let Some(metadata) = metadata else {
+        return Ok(None);
+    };
+    let Some(origin) = metadata.get("origin").and_then(serde_json::Value::as_str) else {
+        return Ok(None);
+    };
+    if !matches!(
+        origin,
+        "meetingNotesFromTranscript" | "meetingNotesExternalRefine"
+    ) || !metadata
+        .get("provenanceRequired")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false)
+    {
+        return Ok(None);
+    }
+    let Some(reviewed) = metadata.get("reviewedSource") else {
+        return Ok(None);
+    };
+    serde_json::from_value(reviewed.clone())
+        .map(Some)
+        .map_err(|_| "meeting_reviewed_source_provenance_invalid".to_string())
 }
 
 pub fn apply_skill_proposal(
@@ -249,8 +446,24 @@ fn apply_skill_proposal_in_transaction(
 ) -> Result<ProposalApplyReport, String> {
     lease.ensure_covered(apply_write_set(cwd, proposal, run_id)?)?;
     lease.before_effect()?;
+    if let Some(run_id) = run_id {
+        validate_reviewed_source_provenance(cwd, run_id)?;
+    }
+    let reviewed = run_id
+        .map(|id| reviewed_source_reference(cwd, id))
+        .transpose()?
+        .flatten();
     let mut writes = Vec::new();
     for file in &proposal.files {
+        let target = crate::vault::resolve_inside_vault(cwd, &file.path)?;
+        let previous_content = if reviewed.is_some() && target.exists() {
+            Some(
+                std::fs::read_to_string(&target)
+                    .map_err(|error| format!("Cannot preserve output for rollback: {error}"))?,
+            )
+        } else {
+            None
+        };
         let claim = ProtectedWriteClaim {
             path: file.path.clone(),
             expected_hash: file.expected_hash.clone(),
@@ -272,6 +485,30 @@ fn apply_skill_proposal_in_transaction(
         }
         match apply_protected_write_claim(cwd, &claim, file.content.as_deref()) {
             Ok(outcome) => {
+                if outcome.committed_hash.is_some() {
+                    if let Some(reference) = reviewed.as_ref() {
+                        if let Err(error) =
+                            crate::meeting_sources::record_source_output_provenance_in_transaction(
+                                cwd,
+                                reference,
+                                &outcome.path,
+                                lease,
+                            )
+                        {
+                            let rollback = ProtectedWriteClaim {
+                                path: file.path.clone(), expected_hash: outcome.committed_hash.clone(),
+                                operation: if previous_content.is_some() { "replace" } else { "delete" }.into(),
+                                actor: "meeting.source.provenance.rollback".into(), reason: error.to_string(),
+                                schema_version: crate::agent_host::contracts::PROTECTED_WRITE_CLAIM_SCHEMA_VERSION.into(),
+                            };
+                            apply_protected_write_claim(cwd, &rollback, previous_content.as_deref())
+                                .map_err(|rollback_error| format!("meeting_output_provenance_failed: {error}; rollback_failed: {rollback_error}"))?;
+                            return Err(format!(
+                                "meeting_output_provenance_failed: {error}; output rolled back"
+                            ));
+                        }
+                    }
+                }
                 if let Some(run_id) = run_id {
                     let _ = append_run_event_payload_in_transaction(
                         cwd,
@@ -364,6 +601,15 @@ mod tests {
         );
         let err = parse_skill_proposal(&raw).unwrap_err();
         assert!(err.starts_with("skill_proposal_file_content_required"));
+    }
+
+    #[test]
+    fn parses_source_review_contract_without_file_proposals() {
+        let raw = r#"{"schemaVersion":"maru_meeting_source_review_v1","sessionId":"s1","baseRevision":"r1","suggestions":[{"id":"x","sourceId":"plaud","before":"old","after":"new","category":"fact","reason":"확인","evidence":"회의 발언"}],"uncertainties":[]}"#;
+        let review = parse_meeting_source_review(raw).unwrap();
+        assert_eq!(review.base_revision, "r1");
+        assert_eq!(review.suggestions[0].evidence, "회의 발언");
+        assert!(review.suggestions[0].required);
     }
 }
 

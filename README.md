@@ -17,7 +17,7 @@ identifier and on-disk migration to Maru.
 | Application shell | Complete | 18 lazy modes; `MainApp` held to 15 `useState` and 24 `useEffect` calls |
 | Verification | Passing | Typecheck, ESLint, unit tests, Rust fmt/clippy, E2E, build, and bundle budgets |
 | Typed IPC | ERR-06 closed | Every conflict-emitting command preserves `{ code, message }`; recursive source guard active |
-| Main-thread isolation | PERF-01/02 closed | All 365 production commands off the UI thread (356 ISOLATED + 9 UI); native load proof keeps loaded p95 at 2ms with the negative control at 4789ms |
+| Main-thread isolation | PERF-01/02 closed | All 380 production commands off the UI thread (371 ISOLATED + 9 UI); Phase 08 baseline native load proof keeps loaded p95 at 2ms with the negative control at 4789ms |
 | Active milestone | v1.1, phase 08 complete | Phase 09 (Durability and Session Lifecycle) is next; releases ship as 1.1.x while v1.1 is open |
 
 The milestone archive, audit, retrospective, and summary live under
@@ -62,7 +62,7 @@ Graph are enabled by default; E2E Flow is flag-gated.
 | `files` | 파일 | Finder-style folders, direct children, previews, editing, and safe file operations |
 | `inbox` | 인박스 | Drop, pending, processed, provider, classification, approval, and processing flows |
 | `comms` | 메시지 | Telegram, Outlook/Microsoft 365, and provider readiness configuration |
-| `meetings` | 회의록 | Transcript intake, summaries, meeting review, and follow-through |
+| `meetings` | 회의록 | Plaud and external meeting-note review, transcript references, meeting review, and follow-through |
 | `today` | 오늘 | Prepare, execute, review, capacity, calendar selection, and explicit sync |
 | `tasks` | 태스크 | File-backed task list, calendar, detail editing, status changes, and AI runs |
 | `drafts` | 아이디어 | Idea lifecycle, implementation drafts, promotion, and recurring automation |
@@ -140,11 +140,11 @@ brew upgrade maru-cli
   boundaries. Nothing imports `src/App.tsx`.
 - Shared UI state follows keyed module-store plus `useSyncExternalStore`
   patterns. No additional global state library or provider tree is used.
-- Production commands never block the UI/shared async worker thread: 356
+- Production commands never block the UI/shared async worker thread: 371
   ISOLATED commands run on awaited `spawn_blocking` workers and 9
   native-window commands stay UI-bound, and every filesystem mutation passes
   shared path-transaction admission before taking domain locks. The
-  365-command inventory, worker-boundary, and admission evidence are gated by
+  380-command inventory, worker-boundary, and admission evidence are gated by
   `check-command-isolation` in `make verify`.
 
 ## Capability Highlights
@@ -177,6 +177,13 @@ brew upgrade maru-cli
 - The gaejosik linter supports Korean public-document style during authoring.
 
 ### Evidence, Drafts, and Knowledge
+
+- Plaud and other externally generated meeting notes enter a mandatory source
+  review before meeting-note generation. The review preserves the imported
+  original, supports participant and meeting-context correction, shows a
+  side-by-side original-versus-corrected diff with aligned rows and shared scrolling, and records explicit version reasons and
+  acknowledged uncertainties. A transcript is optional evidence, read-only by default;
+  Maru does not connect to the Plaud API in this workflow.
 
 - Evidence Binder stores schema-v2 state under
   `<workspace>/.maru/binder/<doc-id>.json`, uses full binary SHA-256 identity,
@@ -238,6 +245,7 @@ Workspace-local state:
     studio/                 # per-document Studio state
     binder/                 # per-document Evidence Binder state
     diagrams/               # diagram history and backups
+    meetings/source-reviews/ # immutable Plaud originals, state, versions, and review records
     drafts/                 # draft index and frozen promotion baselines
     queue/                   # recoverable provider/Hub work queues
 ```
@@ -262,6 +270,10 @@ Public workspace configuration is registry-only in v1.1.0. Provider metadata
 is non-secret, manually entered roles map to coarse capabilities, and filesystem
 writability is probed again before granting direct writes. OAuth and live cloud
 role checks are not implied by this metadata.
+
+Meeting source review accepts pasted UTF-8 text and TXT/Markdown imports up to
+2 MiB per source. Imported bytes are retained as immutable originals before any
+editing; unsupported or undecodable files are rejected without lossy conversion.
 
 ## Safety Contracts
 
@@ -318,8 +330,8 @@ make clippy
 # Complete hermetic verification
 make verify
 
-# Phase 08 evidence closure gate alone (365 production commands, PERF-01/PERF-02)
-node scripts/check-command-isolation.mjs --all --expected-count 365
+# Phase 08 evidence closure gate alone (380 production commands, PERF-01/PERF-02)
+node scripts/check-command-isolation.mjs --all --expected-count 380
 
 # Full verify plus release-only CLI and debug Tauri checks
 make release-checks
@@ -357,8 +369,8 @@ cargo run --manifest-path src-tauri/Cargo.toml -p maru-cli --bin maru-cli -- ski
   ship-isolation scan of the produced bundle (D-10)
 - the Phase 08 evidence closure gate (`check-command-isolation`): every
   registered production command carries final justified worker-boundary,
-  mutation-admission and processing-caller evidence against the 365-command
-  inventory (`node scripts/check-command-isolation.mjs --all --expected-count 365`)
+  mutation-admission and processing-caller evidence against the 380-command
+  inventory (`node scripts/check-command-isolation.mjs --all --expected-count 380`)
 
 Pull requests run a lightweight decision job first. Source changes fan out to
 `make verify` and Playwright E2E. Version-changing PRs run `make release-checks`
