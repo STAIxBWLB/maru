@@ -8,6 +8,21 @@ because releases cut frequently during active development. Versions before
 Dates are the release-tag dates. Only `feat`/`fix`-level changes are listed;
 `chore(release)` version bumps and merge commits are omitted.
 
+## v1.1.7 - 2026-09-13 - External Notes
+
+- **External meeting note intake is generic and instant (#321).** Plaud-specific
+  branding is gone from the review workbench, and both New note buttons create
+  a blank note immediately instead of stalling on the current view or a failed
+  draft flush. Paste and file import remain for the zero-session state.
+- **Review sessions can be deleted.** Each in-review row carries a confirmed
+  delete affordance backed by a new `delete_meeting_source_session` command
+  that removes the session directory behind the shared workspace write gate.
+- **Confirmation requires real content.** Blank drafts stay saveable, but
+  confirming a review with no source text now fails in both the Rust and
+  browser-fallback paths, so meeting generation never runs on an empty note.
+- **Draft saving is explicit.** Save draft stays clickable on a clean draft
+  and confirms with a visible Saved state; the 700 ms autosave is unchanged.
+
 ## v1.1.6 - 2026-09-13 - Reviewed Sources
 
 - **Plaud and external meeting notes are reviewed before generation (#319).**

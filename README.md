@@ -4,7 +4,7 @@ Maru is a local-first desktop workspace for Korean knowledge and document
 operations. It combines a React 19 and TypeScript interface with a Tauri 2 Rust
 core, and treats the filesystem as the source of truth.
 
-The current product release is **v1.1.6, Reviewed Sources**. Releases
+The current product release is **v1.1.7, External Notes**. Releases
 before v0.3.0 shipped under the name Anchor; v0.3.0 completed the application
 identifier and on-disk migration to Maru.
 
@@ -12,12 +12,12 @@ identifier and on-disk migration to Maru.
 
 | Area | State | Evidence |
 |------|-------|----------|
-| Product release | v1.1.6 | Signed desktop bundles and standalone CLI for macOS, Windows, and Linux |
+| Product release | v1.1.7 | Signed desktop bundles and standalone CLI for macOS, Windows, and Linux |
 | Planning milestone | v1.1 Felt Quality and Native Proof | Phases 6-11; phases 6-8 complete (39 plans) |
 | Application shell | Complete | 18 lazy modes; `MainApp` held to 15 `useState` and 24 `useEffect` calls |
 | Verification | Passing | Typecheck, ESLint, unit tests, Rust fmt/clippy, E2E, build, and bundle budgets |
 | Typed IPC | ERR-06 closed | Every conflict-emitting command preserves `{ code, message }`; recursive source guard active |
-| Main-thread isolation | PERF-01/02 closed | All 380 production commands off the UI thread (371 ISOLATED + 9 UI); Phase 08 baseline native load proof keeps loaded p95 at 2ms with the negative control at 4789ms |
+| Main-thread isolation | PERF-01/02 closed | All 381 production commands off the UI thread (372 ISOLATED + 9 UI); Phase 08 baseline native load proof keeps loaded p95 at 2ms with the negative control at 4789ms |
 | Active milestone | v1.1, phase 08 complete | Phase 09 (Durability and Session Lifecycle) is next; releases ship as 1.1.x while v1.1 is open |
 
 The milestone archive, audit, retrospective, and summary live under
