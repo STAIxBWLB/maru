@@ -11,7 +11,7 @@ function session(): SourceSession {
     versions: [], outputLinks: [],
     draft: {
       title: "협력 회의", context: "사업 검토", participants: [], findings: [],
-      sources: [{ id: "note", name: "Plaud.md", kind: "note", originalText: "이영중이 검토한다.",
+      sources: [{ id: "note", name: "meeting-note.md", kind: "note", originalText: "이영중이 검토한다.",
         text: "이영중이 검토한다.", originalHash: "hash" }],
       suggestions: [], participantsReviewed: false, noteReviewed: false,
     },

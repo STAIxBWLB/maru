@@ -1,13 +1,14 @@
 import { expect, test } from "@playwright/test";
 import type {} from "../src/lib/e2eInvoke";
 
-const plaudNote = [
+const pastedNote = [
   "# 제품 전략 회의",
   "참석자: 김민서(제품팀), 박준호(파트너사)",
   "김민서: 9월 출시 범위를 확정한다.",
   "박준호: 베타 일정은 9월 18일로 제안했다.",
   "결정: 다음 회의 전까지 비용안을 검토한다.",
 ].join("\n");
+const placeholderPattern = /외부 서비스에서 복사한 회의록|Paste a meeting note copied from an external service/;
 
 async function openSourceReview(page: import("@playwright/test").Page) {
   await page.goto("/?maru-e2e=1");
@@ -15,7 +16,7 @@ async function openSourceReview(page: import("@playwright/test").Page) {
   const pane = page.locator(".meetings-pane");
   await expect(pane).toBeVisible();
   await pane.getByRole("button", { name: /외부 회의록 교정|Review external meeting note/ }).click();
-  await expect(page.getByText(/Plaud 회의록 교정|Review Plaud meeting note/)).toBeVisible();
+  await expect(pane.locator(".meeting-source-empty")).toContainText(/외부 회의록 교정|Review external meeting note/);
   return pane;
 }
 
@@ -26,12 +27,12 @@ test.beforeEach(async ({ page }) => {
   });
 });
 
-test("reviews a pasted Plaud note, records a version, and confirms it for generation", async ({
+test("reviews a pasted external note, records a version, and confirms it for generation", async ({
   page,
 }) => {
   const pane = await openSourceReview(page);
-  const note = pane.getByRole("textbox", { name: /Plaud에서 복사한 회의록|Paste the meeting note copied from Plaud/ });
-  await note.fill(plaudNote);
+  const note = pane.getByRole("textbox", { name: placeholderPattern });
+  await note.fill(pastedNote);
   await pane.getByRole("button", { name: /회의록 만들기|Create note/ }).click();
 
   await expect(page.getByText(/참석자와 맥락|Participants and context/)).toBeVisible();
@@ -45,9 +46,9 @@ test("reviews a pasted Plaud note, records a version, and confirms it for genera
   await pane.getByRole("textbox", { name: /참고 자료 내용|Reference text/ }).fill("참고 녹취록: 비용안은 다음 회의에서 확정");
   await pane.getByRole("button", { name: /자료 추가|Add reference/ }).click();
 
-  await expect(pane.locator(".meeting-source-editors textarea").first()).toHaveValue(plaudNote);
+  await expect(pane.locator(".meeting-source-editors textarea").first()).toHaveValue(pastedNote);
   const corrected = pane.locator(".meeting-source-editors textarea").last();
-  await corrected.fill(`${plaudNote}\n추가 확인: 비용안 담당자는 다음 회의에서 확정한다.`);
+  await corrected.fill(`${pastedNote}\n추가 확인: 비용안 담당자는 다음 회의에서 확정한다.`);
   await pane.getByRole("button", { name: /비교|Compare/ }).click();
   await expect(pane.locator(".meeting-source-diff")).toBeVisible();
   const columns = pane.locator(".meeting-source-diff [role=columnheader]");
@@ -71,19 +72,19 @@ test("reviews a pasted Plaud note, records a version, and confirms it for genera
   await expect(pane.getByRole("button", { name: "확인됨", exact: true })).toBeVisible();
 });
 
-test("resumes a Plaud review and keeps the original alongside the corrected note", async ({ page }) => {
+test("resumes an external note review and keeps the original alongside the corrected note", async ({ page }) => {
   const pane = await openSourceReview(page);
-  const note = pane.getByRole("textbox", { name: /Plaud에서 복사한 회의록|Paste the meeting note copied from Plaud/ });
-  await note.fill(plaudNote);
+  const note = pane.getByRole("textbox", { name: placeholderPattern });
+  await note.fill(pastedNote);
   await pane.getByRole("button", { name: /회의록 만들기|Create note/ }).click();
-  await pane.locator(".meeting-source-editors textarea").last().fill(`${plaudNote}\n불확실: 참석자 역할은 확인 필요`);
+  await pane.locator(".meeting-source-editors textarea").last().fill(`${pastedNote}\n불확실: 참석자 역할은 확인 필요`);
   await expect(pane.getByText(/저장되지 않은 수정|Unsaved changes/)).toBeVisible();
   await pane.getByRole("button", { name: /임시저장|Save draft/ }).click();
   await page.reload();
   await page.getByRole("button", { name: "회의록", exact: true }).click();
   await page.locator(".meetings-pane").getByRole("button", { name: /외부 회의록 교정|Review external meeting note/ }).click();
-  await expect(page.locator(".meeting-source-editors textarea").last()).toHaveValue(`${plaudNote}\n불확실: 참석자 역할은 확인 필요`);
-  await expect(page.locator(".meeting-source-editors textarea").first()).toHaveValue(plaudNote);
+  await expect(page.locator(".meeting-source-editors textarea").last()).toHaveValue(`${pastedNote}\n불확실: 참석자 역할은 확인 필요`);
+  await expect(page.locator(".meeting-source-editors textarea").first()).toHaveValue(pastedNote);
   await expect(page.getByText(/원문을 보존|Preserve the original/)).toBeVisible();
 });
 
@@ -123,13 +124,13 @@ test("accepts selected AI corrections and promotes an explicitly scoped reusable
     };
   });
   const pane = await openSourceReview(page);
-  await pane.getByRole("textbox", { name: "Plaud에서 복사한 회의록을 붙여넣으세요." }).fill(plaudNote);
+  await pane.getByRole("textbox", { name: "외부 서비스에서 복사한 회의록을 붙여넣으세요." }).fill(pastedNote);
   await pane.getByRole("button", { name: "회의록 만들기" }).click();
   await pane.getByRole("button", { name: "AI 교정 제안", exact: true }).click();
   const suggestions = pane.locator(".meeting-source-suggestion");
   await expect(suggestions).toHaveCount(2, { timeout: 15000 });
   await suggestions.first().getByRole("button", { name: "수락", exact: true }).click();
-  await expect(pane.locator(".meeting-source-editors textarea").last()).toHaveValue(plaudNote.replace("김민서: 9월 출시 범위를 확정한다.", "김민서: 9월 출시 범위를 검토한다."));
+  await expect(pane.locator(".meeting-source-editors textarea").last()).toHaveValue(pastedNote.replace("김민서: 9월 출시 범위를 확정한다.", "김민서: 9월 출시 범위를 검토한다."));
   await suggestions.last().getByRole("button", { name: "거절", exact: true }).click();
   await pane.getByRole("textbox", { name: "수정 이유를 입력하세요" }).fill("AI 제안 중 확인한 표현만 반영");
   await pane.getByRole("button", { name: "버전 저장", exact: true }).click();

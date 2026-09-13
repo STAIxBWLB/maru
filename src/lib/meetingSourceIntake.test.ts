@@ -10,11 +10,11 @@ const base = () => ({ title: "회의록 교정", prompt: "참가자는 협력기
 
 describe("meeting source intake preparation", () => {
   it("reads browser-granted external files and preserves file-only prompt context", async () => {
-    const input = base(); input.files = [Object.assign(file("Plaud.md", "# 회의\r\n원문\r\n"), { path: "/Users/test/Downloads/Plaud.md" })];
+    const input = base(); input.files = [Object.assign(file("meeting-note.md", "# 회의\r\n원문\r\n"), { path: "/Users/test/Downloads/meeting-note.md" })];
     const draft = await prepareMeetingSourceIntake(input);
-    expect(draft?.title).toBe("Plaud.md");
+    expect(draft?.title).toBe("meeting-note.md");
     expect(draft?.context).toBe(input.prompt);
-    expect(draft?.sources[0]).toMatchObject({ name: "Plaud.md", text: "# 회의\r\n원문\r\n", originalText: "# 회의\r\n원문\r\n" });
+    expect(draft?.sources[0]).toMatchObject({ name: "meeting-note.md", text: "# 회의\r\n원문\r\n", originalText: "# 회의\r\n원문\r\n" });
     expect(input.readContext).not.toHaveBeenCalled();
   });
   it("combines pasted text, files and unique workspace references in one draft", async () => {

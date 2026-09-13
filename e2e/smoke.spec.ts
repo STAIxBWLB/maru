@@ -682,11 +682,14 @@ test("opens meetings mode with list, detail, and calendar views", async ({ page 
   await meetingsPane.getByRole("button", { name: /녹취록/ }).click();
   await expect(page.locator(".meetings-workbench")).toBeVisible();
   const reviewPastedSource = async (text: string) => {
-    if (!(await meetingsPane.locator(".meeting-source-create textarea").isVisible())) {
-      await meetingsPane.getByRole("button", { name: "새 Plaud 회의록", exact: true }).click();
+    if (await meetingsPane.locator(".meeting-source-create textarea").isVisible()) {
+      await meetingsPane.locator(".meeting-source-create textarea").fill(text);
+      await meetingsPane.getByRole("button", { name: "회의록 만들기", exact: true }).click();
+    } else {
+      // The new-note button creates a blank note immediately; type into it.
+      await meetingsPane.locator(".meeting-source-sessions").getByRole("button", { name: "새 회의록", exact: true }).click();
+      await meetingsPane.locator(".meeting-source-editors textarea").last().fill(text);
     }
-    await meetingsPane.locator(".meeting-source-create textarea").fill(text);
-    await meetingsPane.getByRole("button", { name: "회의록 만들기", exact: true }).click();
     await expect(meetingsPane.getByRole("button", { name: "회의록 생성", exact: true })).toBeDisabled();
     for (const checkbox of await meetingsPane.locator(".meeting-source-check input").all()) await checkbox.check();
     await meetingsPane.getByRole("button", { name: "검토 완료", exact: true }).click();

@@ -308,9 +308,7 @@ fn validate_draft(draft: &SourceDraft) -> Result<(), IpcError> {
         ensure_text(&source.text)?;
         ensure_text(&source.original_text)?;
     }
-    if draft.sources.iter().all(|s| s.text.trim().is_empty()) {
-        return Err(invalid("The review must contain some source text."));
-    }
+    // Blank sources are allowed so a new note can be created before any text exists.
     let mut people = HashSet::new();
     for person in &draft.participants {
         if !people.insert(&person.id)
@@ -435,6 +433,16 @@ fn create_impl(
             lease,
         )?;
         Ok(session)
+    })
+}
+fn delete_impl(workspace: &str, id: &str) -> Result<(), IpcError> {
+    let dir = session_dir(workspace, id)?;
+    check_managed_path(workspace, &dir)?;
+    if !dir.join("state.json").exists() {
+        return Err(invalid("Review session not found."));
+    }
+    admitted(workspace, WorkspaceWriteAction::Delete, |_lease| {
+        fs::remove_dir_all(&dir).map_err(io_error)
     })
 }
 fn save_draft_impl(
@@ -675,6 +683,16 @@ fn confirm_impl(workspace: &str, id: &str, revision: &str) -> Result<SourceSessi
             return Err(invalid(
                 "Confirm participant/context review and note review first.",
             ));
+        }
+        // Blank sources are valid while drafting, but a confirmed version must
+        // carry real text so generation never starts from an empty source.
+        if session
+            .draft
+            .sources
+            .iter()
+            .all(|s| s.text.trim().is_empty())
+        {
+            return Err(invalid("The review must contain some source text."));
         }
         if session
             .draft
@@ -1009,7 +1027,7 @@ pub async fn import_meeting_source(
                 sources: vec![source],
                 ..SourceDraft::default()
             };
-            create_impl(&workspace, draft, Some("Plaud".into()))
+            create_impl(&workspace, draft, None)
         }
     })
     .await
@@ -1048,6 +1066,15 @@ pub async fn list_meeting_source_sessions(
     })
     .await
     .map_err(io_error)?
+}
+#[tauri::command]
+pub async fn delete_meeting_source_session(
+    workspace: String,
+    session_id: String,
+) -> Result<(), IpcError> {
+    tauri::async_runtime::spawn_blocking(move || delete_impl(&workspace, &session_id))
+        .await
+        .map_err(io_error)?
 }
 #[tauri::command]
 pub async fn save_meeting_source_draft(
@@ -1150,7 +1177,7 @@ mod tests {
             title: Some("협력 회의".into()),
             sources: vec![MeetingSource {
                 id: "source-one".into(),
-                name: "Plaud.md".into(),
+                name: "meeting-note.md".into(),
                 kind: "note".into(),
                 original_text: text.into(),
                 text: text.into(),
@@ -1182,7 +1209,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let work = workspace(&tmp);
         let original = "# 회의\r\n이영중 검토\r\n\n";
-        let session = create_impl(&work, draft(original), Some("Plaud".into())).unwrap();
+        let session = create_impl(&work, draft(original), Some("external".into())).unwrap();
         assert_eq!(
             session.draft.sources[0].original_hash,
             hash(original.as_bytes())
@@ -1332,7 +1359,7 @@ mod tests {
     fn import_bounds_utf8_paths_and_optional_transcript() {
         let tmp = TempDir::new().unwrap();
         let work = workspace(&tmp);
-        let session = create_impl(&work, draft("Plaud 요약"), None).unwrap();
+        let session = create_impl(&work, draft("외부 요약"), None).unwrap();
         let file = tmp.path().join("reference.txt");
         fs::write(&file, "화자 1: 검토\r\n").unwrap();
         let with_transcript = import_impl(
@@ -1420,6 +1447,49 @@ mod tests {
         );
     }
     #[test]
+    fn delete_removes_the_session_directory_and_rejects_unknown_ids() {
+        let tmp = TempDir::new().unwrap();
+        let work = workspace(&tmp);
+        let session = create_impl(&work, draft("원문"), None).unwrap();
+        assert!(session_dir(&work, &session.id).unwrap().exists());
+        delete_impl(&work, &session.id).unwrap();
+        assert!(!session_dir(&work, &session.id).unwrap().exists());
+        assert!(load(&work, &session.id).is_err());
+        assert!(delete_impl(&work, &session.id).is_err());
+        assert!(delete_impl(&work, "../escape").is_err());
+        let other = create_impl(&work, draft("다른 회의"), None).unwrap();
+        delete_impl(&work, &other.id).unwrap();
+        assert!(!session_dir(&work, &other.id).unwrap().exists());
+    }
+    #[test]
+    fn blank_note_sessions_are_allowed_and_editable() {
+        let tmp = TempDir::new().unwrap();
+        let work = workspace(&tmp);
+        let session = create_impl(&work, draft(""), None).unwrap();
+        let reopened = load(&work, &session.id).unwrap();
+        assert_eq!(reopened.draft.sources[0].text, "");
+        let mut d = reopened.draft.clone();
+        d.sources[0].text = "나중에 작성한 내용".into();
+        let saved = save_draft_impl(&work, &session.id, d, &reopened.revision).unwrap();
+        assert_eq!(saved.draft.sources[0].text, "나중에 작성한 내용");
+    }
+    #[test]
+    fn confirmation_requires_nonempty_source_text() {
+        let tmp = TempDir::new().unwrap();
+        let work = workspace(&tmp);
+        let session = create_impl(&work, draft(""), None).unwrap();
+        let mut d = session.draft.clone();
+        d.participants_reviewed = true;
+        d.note_reviewed = true;
+        let reviewed = save_draft_impl(&work, &session.id, d, &session.revision).unwrap();
+        assert!(confirm_impl(&work, &reviewed.id, &reviewed.revision).is_err());
+        let mut filled = reviewed.draft.clone();
+        filled.sources[0].text = "작성된 회의록".into();
+        let filled = save_draft_impl(&work, &reviewed.id, filled, &reviewed.revision).unwrap();
+        let confirmed = confirm_impl(&work, &filled.id, &filled.revision).unwrap();
+        assert!(confirmed.confirmed_version_id.is_some());
+    }
+    #[test]
     fn all_ipc_wrappers_complete_the_native_source_workflow() {
         let tmp = TempDir::new().unwrap();
         let work = workspace(&tmp);
@@ -1500,7 +1570,7 @@ mod tests {
     fn final_application_pins_review_and_records_links_without_invalidating_the_editor() {
         let tmp = TempDir::new().unwrap();
         let work = workspace(&tmp);
-        let initial = create_impl(&work, draft("Plaud 원문"), None).unwrap();
+        let initial = create_impl(&work, draft("외부 원문"), None).unwrap();
         let session = ready(&work, &initial);
         reviewed_run(&work, &session, "source-apply");
         crate::agent_host::proposal::apply_skill_proposal(
@@ -1532,7 +1602,7 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
         let tmp = TempDir::new().unwrap();
         let work = workspace(&tmp);
-        let initial = create_impl(&work, draft("Plaud 원문"), None).unwrap();
+        let initial = create_impl(&work, draft("외부 원문"), None).unwrap();
         let session = ready(&work, &initial);
         reviewed_run(&work, &session, "source-rollback");
         let dir = session_dir(&work, &session.id).unwrap();

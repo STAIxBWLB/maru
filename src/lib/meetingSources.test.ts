@@ -8,8 +8,8 @@ import {
 
 const stores = new Map<string, string>();
 let quota = false;
-function draft(text = "Plaud 회의록"): SourceDraft {
-  return { sources: [{ id: "note", name: "Plaud.md", kind: "note", originalText: text, text, originalHash: "" }],
+function draft(text = "외부 회의록"): SourceDraft {
+  return { sources: [{ id: "note", name: "meeting-note.md", kind: "note", originalText: text, text, originalHash: "" }],
     participants: [], findings: [], suggestions: [], participantsReviewed: false, noteReviewed: false };
 }
 beforeEach(() => {
@@ -37,7 +37,7 @@ describe("meeting source persistence", () => {
     await expect(decideMeetingSourceSuggestion("/a", fresh.id, { id: "name", status: "accepted" }, edited.revision)).rejects.toThrow("context_changed");
   });
   it("preserves exact originals, isolates workspaces and does not expose mutable stored objects", async () => {
-    const session = await createMeetingSourceSession("/a", draft("원문\r\n"), "Plaud");
+    const session = await createMeetingSourceSession("/a", draft("원문\r\n"));
     expect(session.draft.sources[0].originalHash).toMatch(/^[a-f0-9]{64}$/);
     const changed = { ...session.draft, sources: [{ ...session.draft.sources[0], text: "수정본" }] };
     await saveMeetingSourceDraft("/a", session.id, changed, session.revision);
@@ -48,11 +48,19 @@ describe("meeting source persistence", () => {
     await expect(saveMeetingSourceDraft("/a", saved.id, { ...saved.draft, sources: [{ ...saved.draft.sources[0], originalText: "위조" }] }, saved.revision)).rejects.toThrow("immutable");
   });
   it("rejects stale writes and leaves persisted state intact when storage fails", async () => {
-    const session = await createMeetingSourceSession("/a", draft(), "Plaud");
+    const session = await createMeetingSourceSession("/a", draft());
     await expect(saveMeetingSourceDraft("/a", session.id, session.draft, "stale")).rejects.toMatchObject({ code: "meeting_source_revision_conflict" });
     const before = await readMeetingSourceSession("/a", session.id); quota = true;
     await expect(saveMeetingSourceDraft("/a", session.id, { ...session.draft, context: "수정" }, session.revision)).rejects.toThrow("quota");
     expect(await readMeetingSourceSession("/a", session.id)).toEqual(before);
+  });
+  it("keeps blank drafts saveable but refuses to confirm them until text exists", async () => {
+    const blank = await createMeetingSourceSession("/a", draft(""));
+    const reviewed = await saveMeetingSourceDraft("/a", blank.id, { ...blank.draft, participantsReviewed: true, noteReviewed: true }, blank.revision);
+    await expect(confirmMeetingSource("/a", blank.id, reviewed.revision)).rejects.toThrow("empty");
+    const filled = await saveMeetingSourceDraft("/a", blank.id, { ...reviewed.draft, sources: [{ ...reviewed.draft.sources[0], text: "작성된 회의록" }] }, reviewed.revision);
+    const confirmed = await confirmMeetingSource("/a", blank.id, filled.revision);
+    expect(confirmed.confirmedVersionId).toBeDefined();
   });
   it("requires explicit reviews and preserves no-op confirmation, but invalidates context edits", async () => {
     const session = await createMeetingSourceSession("/a", draft());
@@ -60,7 +68,7 @@ describe("meeting source persistence", () => {
     const reviewed = await saveMeetingSourceDraft("/a", session.id, { ...session.draft, participantsReviewed: true, noteReviewed: true }, session.revision);
     const confirmed = await confirmMeetingSource("/a", session.id, reviewed.revision);
     const pin = { sessionId: confirmed.id, versionId: confirmed.confirmedVersionId!, contentHash: confirmed.versions.at(-1)!.contentHash };
-    expect(validateMeetingSourceReference(confirmed, pin).draft.sources[0].text).toBe("Plaud 회의록");
+    expect(validateMeetingSourceReference(confirmed, pin).draft.sources[0].text).toBe("외부 회의록");
     const noop = await saveMeetingSourceDraft("/a", confirmed.id, confirmed.draft, confirmed.revision);
     expect(noop.revision).toBe(confirmed.revision);
     const changed = await saveMeetingSourceDraft("/a", noop.id, { ...noop.draft, context: "참석자의 역할 변경" }, noop.revision);

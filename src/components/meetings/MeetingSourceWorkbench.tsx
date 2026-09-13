@@ -1,16 +1,16 @@
-import { Check, FilePlus2, GitCompare, History, Plus, RotateCcw, Save, Sparkles, Users } from "lucide-react";
+import { Check, FilePlus2, GitCompare, History, Plus, RotateCcw, Save, Sparkles, Trash2, Users } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type UIEvent } from "react";
 import { useTranslation } from "../../lib/i18n";
 import { buildSourceTextDiff, buildSourceSideBySideRows, matchingCorrectionExamples } from "../../lib/meetingSourceReview";
 import {
-  createMeetingSourceSession, checkpointMeetingSource, confirmMeetingSource, importMeetingSource,
+  createMeetingSourceSession, checkpointMeetingSource, confirmMeetingSource, deleteMeetingSourceSession, importMeetingSource,
   listMeetingSourceSessions, readMeetingSourceSession, restoreMeetingSourceVersion,
   listMeetingCorrectionExamples, saveMeetingCorrectionExample,
   decideMeetingSourceSuggestion,
   type MeetingCorrectionExample, type MeetingSource, type Participant,
   type ReviewedSourceReference, type SourceDraft, type SourceSession,
 } from "../../lib/meetingSources";
-import { MeetingSourceEditorStore, openMeetingSourceEditor } from "../../lib/meetingSourceEditorStore";
+import { MeetingSourceEditorStore, closeMeetingSourceEditor, openMeetingSourceEditor } from "../../lib/meetingSourceEditorStore";
 import { Button } from "../ui/Button";
 import "./meetingSourceWorkbench.css";
 
@@ -23,9 +23,11 @@ interface Props {
   externalSessionUpdate?: SourceSession | null;
   requestedSessionId?: string | null;
   onSessionChange?: (sessionId: string | null) => void;
+  createRequestNonce?: number;
+  onCreateRequestConsumed?: () => void;
 }
 const emptyDraft = (source: MeetingSource, title: string): SourceDraft => ({
-  title, provider: "Plaud", sources: [source], participants: [], findings: [], suggestions: [],
+  title, provider: "", sources: [source], participants: [], findings: [], suggestions: [],
   participantsReviewed: false, noteReviewed: false,
 });
 const makeSource = (text: string, name: string, kind: "note" | "transcript"): MeetingSource => ({
@@ -43,7 +45,7 @@ function syncEditorScroll(event: UIEvent<HTMLTextAreaElement>) {
 }
 
 export function MeetingSourceWorkbench(props: Props) {
-  const { workPath, requestedSessionId, externalSessionUpdate, onReviewedSourceChange, onSessionChange } = props;
+  const { workPath, requestedSessionId, externalSessionUpdate, onReviewedSourceChange, onSessionChange, createRequestNonce, onCreateRequestConsumed } = props;
   const { t } = useTranslation();
   const [rows, setRows] = useState<SourceSession[]>([]);
   const [editor, setEditor] = useState<MeetingSourceEditorStore | null>(null);
@@ -98,21 +100,58 @@ export function MeetingSourceWorkbench(props: Props) {
   }, []);
 
   const navigate = async (session: SourceSession | null) => {
+    // A failed flush (e.g. revision conflict) must never block navigation.
+    try { await editorRef.current?.flush(); } catch (cause) { setError(message(cause)); }
     try {
-      await editorRef.current?.flush();
       onReviewedSourceChange(null);
       if (session && workPath) select(await readMeetingSourceSession(workPath, session.id));
       else { editorRef.current = null; setEditor(null); setPaste(""); onSessionChange?.(null); }
     } catch (cause) { setError(message(cause)); }
   };
-  const create = async (text: string, name = "Plaud.md") => {
+  const create = async (text: string, name = "meeting-note.md") => {
     if (!workPath || !text.trim()) return;
     setBusy(true); setError("");
     try {
       const source = makeSource(text, name, props.sourceKind === "transcript" ? "transcript" : "note");
       const title = text.split("\n").find((line) => line.trim())?.replace(/^#+\s*/, "").slice(0, 100) || t("meetings.sourceReview.title");
-      select(await createMeetingSourceSession(workPath, emptyDraft(source, title), "Plaud"));
+      select(await createMeetingSourceSession(workPath, emptyDraft(source, title), ""));
       setPaste("");
+    } catch (cause) { setError(message(cause)); }
+    finally { setBusy(false); }
+  };
+  const createBlank = useCallback(async () => {
+    if (!workPath || busy) return;
+    setBusy(true); setError("");
+    // A failed flush of the current editor must not block creating a note.
+    try { await editorRef.current?.flush(); } catch (cause) { setError(message(cause)); }
+    try {
+      const title = t("meetings.sourceReview.untitled");
+      const source = makeSource("", title, "note");
+      select(await createMeetingSourceSession(workPath, emptyDraft(source, title), ""));
+      setPaste("");
+    } catch (cause) { setError(message(cause)); }
+    finally { setBusy(false); }
+  }, [workPath, busy, select, t]);
+  const handledCreateNonce = useRef(0);
+  useEffect(() => {
+    if (!createRequestNonce || createRequestNonce === handledCreateNonce.current) return;
+    handledCreateNonce.current = createRequestNonce;
+    // Consume the request so a later remount does not re-create a blank note.
+    onCreateRequestConsumed?.();
+    void createBlank();
+  }, [createRequestNonce, onCreateRequestConsumed, createBlank]);
+  const remove = async (session: SourceSession) => {
+    if (!workPath || !window.confirm(t("meetings.sourceReview.deleteConfirm"))) return;
+    setBusy(true); setError("");
+    try {
+      await deleteMeetingSourceSession(workPath, session.id);
+      closeMeetingSourceEditor(workPath, session.id);
+      const remaining = rows.filter((item) => item.id !== session.id);
+      setRows(remaining);
+      if (editorRef.current?.getSnapshot().session.id === session.id) {
+        editorRef.current = null; setEditor(null); onSessionChange?.(null);
+        if (remaining.length) select(remaining[0]);
+      }
     } catch (cause) { setError(message(cause)); }
     finally { setBusy(false); }
   };
@@ -129,13 +168,17 @@ export function MeetingSourceWorkbench(props: Props) {
     <div className="meeting-source-layout">
       <aside className="meeting-source-sessions">
         <strong>{t("meetings.sourceReview.resume")}</strong>
-        <Button size="sm" onClick={() => void navigate(null)} icon={<Plus size={14} />}>{t("meetings.sourceReview.new")}</Button>
-        {rows.map((session) => <button type="button" key={session.id}
-          className={editor?.getSnapshot().session.id === session.id ? "active" : ""}
-          onClick={() => void navigate(session)}>
-          {session.draft.title || t("meetings.sourceReview.note")}
-          <small>{session.confirmedVersionId ? t("meetings.sourceReview.confirmed") : t("meetings.sourceReview.inReview")}</small>
-        </button>)}
+        <Button size="sm" disabled={!workPath || busy} onClick={() => void createBlank()} icon={<Plus size={14} />}>{t("meetings.sourceReview.new")}</Button>
+        {rows.map((session) => <div className="meeting-source-session-row" key={session.id}>
+          <button type="button"
+            className={editor?.getSnapshot().session.id === session.id ? "active" : ""}
+            onClick={() => void navigate(session)}>
+            {session.draft.title || t("meetings.sourceReview.note")}
+            <small>{session.confirmedVersionId ? t("meetings.sourceReview.confirmed") : t("meetings.sourceReview.inReview")}</small>
+          </button>
+          <Button size="sm" variant="ghost" aria-label={t("meetings.sourceReview.delete")}
+            disabled={busy} onClick={() => void remove(session)} icon={<Trash2 size={13} />} />
+        </div>)}
       </aside>
       {editor && editor.workPath === workPath ? <SourceEditor key={`${workPath}:${editor.getSnapshot().session.id}`}
         editor={editor} {...props} onSaved={recordSaved} />
@@ -179,6 +222,7 @@ function SourceEditor({ editor, onRequestAi, aiBusy, onReviewedSourceChange, onS
   const [exampleForm, setExampleForm] = useState<MeetingCorrectionExample | null>(null);
   const [replacementEdits, setReplacementEdits] = useState<Record<string, string>>({});
   const [conflictCopy, setConflictCopy] = useState<SourceSession | null>(null);
+  const [savedFlash, setSavedFlash] = useState(false);
   const [changeIndex, setChangeIndex] = useState(0);
   const [diffPage, setDiffPage] = useState(0);
   const sourceFileInput = useRef<HTMLInputElement>(null);
@@ -194,6 +238,11 @@ function SourceEditor({ editor, onRequestAi, aiBusy, onReviewedSourceChange, onS
       ? { reference: { sessionId: session.id, versionId: version.id, contentHash: version.contentHash }, session }
       : null);
   }, [session, dirty, saving, onReviewedSourceChange]);
+  useEffect(() => {
+    if (!savedFlash) return;
+    const timer = window.setTimeout(() => setSavedFlash(false), 1500);
+    return () => window.clearTimeout(timer);
+  }, [savedFlash]);
   useEffect(() => {
     if (!dirty || composing || busy || saveError) return;
     const timer = window.setTimeout(() => { void editor.flush().catch(() => {}); }, 700);
@@ -282,7 +331,8 @@ function SourceEditor({ editor, onRequestAi, aiBusy, onReviewedSourceChange, onS
       <span className={`save-state ${dirty ? "dirty" : "saved"}`} role="status">
         {saving ? t("meetings.sourceReview.saving") : dirty ? t("meetings.sourceReview.unsaved") : t("meetings.sourceReview.saved")}
       </span>
-      <Button size="sm" disabled={!dirty || saving} onClick={() => void act(async () => {})} icon={<Save size={14} />}>{t("meetings.sourceReview.saveDraft")}</Button>
+      <Button size="sm" disabled={saving} onClick={() => void act(async () => { setSavedFlash(true); })} icon={<Save size={14} />}>{t("meetings.sourceReview.saveDraft")}</Button>
+      {savedFlash ? <span className="save-flash" role="status">{t("meetings.sourceReview.saved")}</span> : null}
     </header>
     <div className="meeting-source-context-top">
       <label>{t("meetings.sourceReview.meetingTitle")}<input value={draft.title ?? ""} onChange={(e) => change((d) => ({ ...d, title: e.target.value }), true)} /></label>

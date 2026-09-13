@@ -1625,7 +1625,7 @@ export const ko: Record<string, string> = {
   "meetings.sidebar.transcript": "녹취록",
   "meetings.sidebar.transcriptHint": "녹취록·메모를 회의록으로",
   "meetings.sidebar.external": "외부 회의록 교정",
-  "meetings.sidebar.externalHint": "Plaud 회의록 검토·수정",
+  "meetings.sidebar.externalHint": "외부 회의록 검토·수정",
   "meetings.sidebar.createGroup": "새 회의록",
   "meetings.sidebar.browseGroup": "탐색",
   "meetings.sidebar.date": "일자 조회",

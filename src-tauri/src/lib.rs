@@ -301,6 +301,7 @@ pub fn run() {
             meeting_sources::import_meeting_source,
             meeting_sources::read_meeting_source_session,
             meeting_sources::list_meeting_source_sessions,
+            meeting_sources::delete_meeting_source_session,
             meeting_sources::save_meeting_source_draft,
             meeting_sources::checkpoint_meeting_source,
             meeting_sources::confirm_meeting_source,

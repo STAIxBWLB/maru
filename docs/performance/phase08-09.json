@@ -1007,7 +1007,7 @@
       "tests": [
         {
           "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib meeting_sources -- --test-threads=1",
-          "passed": 13,
+          "passed": 16,
           "failed": 0,
           "ignored": 0,
           "exitCode": 0
@@ -1064,7 +1064,7 @@
       "tests": [
         {
           "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib meeting_sources -- --test-threads=1",
-          "passed": 13,
+          "passed": 16,
           "failed": 0,
           "ignored": 0,
           "exitCode": 0
@@ -1112,7 +1112,7 @@
       "tests": [
         {
           "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib meeting_sources -- --test-threads=1",
-          "passed": 13,
+          "passed": 16,
           "failed": 0,
           "ignored": 0,
           "exitCode": 0
@@ -1160,7 +1160,63 @@
       "tests": [
         {
           "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib meeting_sources -- --test-threads=1",
-          "passed": 13,
+          "passed": 16,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ]
+    },
+    {
+      "name": "delete_meeting_source_session",
+      "module": "src-tauri/src/meeting_sources.rs",
+      "registrationPath": "src-tauri/src/lib.rs::meeting_sources::delete_meeting_source_session",
+      "originalDisposition": "ISOLATED",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/meeting_sources.rs::delete_meeting_source_session",
+        "src-tauri/src/meeting_sources.rs::delete_impl"
+      ],
+      "workerBoundary": "src-tauri/src/meeting_sources.rs::delete_meeting_source_session owns its input values and awaits spawn_blocking before filesystem access, path checks, or admission waits; the inner IpcError result remains structured.",
+      "syncCallers": [
+        "src-tauri/src/meeting_sources.rs::delete_impl retains synchronous domain behavior inside the worker."
+      ],
+      "mutationKey": {
+        "lexicalPaths": [
+          "<canonical workspace>/.maru, including source originals, state, immutable revisions and correction examples"
+        ],
+        "aliasPaths": [
+          "<selected workspace alias>/.maru and physical alias keys captured by shared path admission"
+        ],
+        "postAdmissionPreconditions": [
+          "workspace identity, workspace registry, managed symlink rejection, write capability and document ownership rechecked; the session directory is confirmed managed before removal under admission"
+        ],
+        "domainLockOrder": "Shared admission before removing the session directory; no separate domain lock is held across waits.",
+        "sharedAdmissionEntry": "src-tauri/src/meeting_sources.rs::admitted"
+      },
+      "processingCaller": {
+        "path": [
+          "src/lib/meetingSources.ts",
+          "src/components/meetings/MeetingSourceWorkbench.tsx"
+        ],
+        "payload": "Unit success result returned through the initiating API promise.",
+        "terminalNoticeOwner": "MeetingSourceWorkbench session-row delete handler owns the visible removed/error state.",
+        "classifier": "Source review local mutation; no autonomous follow-up dispatch.",
+        "successRetention": "The session directory is durably removed; the workbench drops the row and closes any keyed editor.",
+        "failureReasons": "Unknown-session and policy errors surface in the workbench notice area; no silent success.",
+        "singleTerminalNoticeOwner": true
+      },
+      "evidence": {
+        "behaviorCases": [
+          "delete_removes_the_session_directory_and_rejects_unknown_ids"
+        ],
+        "workerBoundaryInspection": "The actual registered async wrapper awaits its finite blocking closure; the behavioral test exercises durable session-directory removal plus unknown and escaped identifier rejection. No held-worker timing proof is claimed.",
+        "platformScope": "Executed on macOS with temporary workspaces. Native WKWebView smoke is separate."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib meeting_sources -- --test-threads=1",
+          "passed": 16,
           "failed": 0,
           "ignored": 0,
           "exitCode": 0
@@ -1218,7 +1274,7 @@
       "tests": [
         {
           "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib meeting_sources -- --test-threads=1",
-          "passed": 13,
+          "passed": 16,
           "failed": 0,
           "ignored": 0,
           "exitCode": 0
@@ -1276,7 +1332,7 @@
       "tests": [
         {
           "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib meeting_sources -- --test-threads=1",
-          "passed": 13,
+          "passed": 16,
           "failed": 0,
           "ignored": 0,
           "exitCode": 0
@@ -1334,7 +1390,7 @@
       "tests": [
         {
           "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib meeting_sources -- --test-threads=1",
-          "passed": 13,
+          "passed": 16,
           "failed": 0,
           "ignored": 0,
           "exitCode": 0
@@ -1391,7 +1447,7 @@
       "tests": [
         {
           "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib meeting_sources -- --test-threads=1",
-          "passed": 13,
+          "passed": 16,
           "failed": 0,
           "ignored": 0,
           "exitCode": 0
@@ -1439,7 +1495,7 @@
       "tests": [
         {
           "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib meeting_sources -- --test-threads=1",
-          "passed": 13,
+          "passed": 16,
           "failed": 0,
           "ignored": 0,
           "exitCode": 0
@@ -1487,7 +1543,7 @@
       "tests": [
         {
           "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib meeting_sources -- --test-threads=1",
-          "passed": 13,
+          "passed": 16,
           "failed": 0,
           "ignored": 0,
           "exitCode": 0
@@ -1544,7 +1600,7 @@
       "tests": [
         {
           "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib meeting_sources -- --test-threads=1",
-          "passed": 13,
+          "passed": 16,
           "failed": 0,
           "ignored": 0,
           "exitCode": 0
