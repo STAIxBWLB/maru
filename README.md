@@ -144,7 +144,7 @@ brew upgrade maru-cli
   ISOLATED commands run on awaited `spawn_blocking` workers and 9
   native-window commands stay UI-bound, and every filesystem mutation passes
   shared path-transaction admission before taking domain locks. The
-  380-command inventory, worker-boundary, and admission evidence are gated by
+  381-command inventory, worker-boundary, and admission evidence are gated by
   `check-command-isolation` in `make verify`.
 
 ## Capability Highlights
@@ -330,8 +330,8 @@ make clippy
 # Complete hermetic verification
 make verify
 
-# Phase 08 evidence closure gate alone (380 production commands, PERF-01/PERF-02)
-node scripts/check-command-isolation.mjs --all --expected-count 380
+# Phase 08 evidence closure gate alone (381 production commands, PERF-01/PERF-02)
+node scripts/check-command-isolation.mjs --all --expected-count 381
 
 # Full verify plus release-only CLI and debug Tauri checks
 make release-checks
@@ -369,8 +369,8 @@ cargo run --manifest-path src-tauri/Cargo.toml -p maru-cli --bin maru-cli -- ski
   ship-isolation scan of the produced bundle (D-10)
 - the Phase 08 evidence closure gate (`check-command-isolation`): every
   registered production command carries final justified worker-boundary,
-  mutation-admission and processing-caller evidence against the 380-command
-  inventory (`node scripts/check-command-isolation.mjs --all --expected-count 380`)
+  mutation-admission and processing-caller evidence against the 381-command
+  inventory (`node scripts/check-command-isolation.mjs --all --expected-count 381`)
 
 Pull requests run a lightweight decision job first. Source changes fan out to
 `make verify` and Playwright E2E. Version-changing PRs run `make release-checks`
