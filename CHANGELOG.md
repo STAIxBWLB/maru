@@ -8,6 +8,23 @@ because releases cut frequently during active development. Versions before
 Dates are the release-tag dates. Only `feat`/`fix`-level changes are listed;
 `chore(release)` version bumps and merge commits are omitted.
 
+## v1.1.6 - 2026-09-13 - Reviewed Sources
+
+- **Plaud and external meeting notes are reviewed before generation (#319).**
+  Originals and corrections remain side by side, with aligned changes,
+  synchronized editor scrolling, paged comparisons, and immutable versions.
+- **Participant context and corrections are traceable.** Confirm identities
+  and meeting roles, retain explicit uncertainties, record revision reasons,
+  and reuse only explicitly approved correction examples.
+- **AI corrections are suggestions only.** A dedicated source-review agent
+  proposes evidence-backed changes; Rust rejects stale edits and pins final
+  note generation and application to the confirmed source version.
+- **Meeting intake preserves files and instructions.** User-selected UTF-8
+  TXT/Markdown files can come from outside the workspace. All sources are
+  validated before one session is created, including file-only prompt context.
+- **The matching correction skill ships through the signed OTA channel**, with
+  Maru 1.1.6 as the minimum compatible app version.
+
 ## v1.1.5 - 2026-09-08 - Scheduled Control
 
 - **Settings > Jobs now manages the machine's own scheduled work (#315).** A
