@@ -16,15 +16,20 @@ Run these passes and tag every finding with its pass:
 
 ## Repo focus (from README and docs/)
 
-- **Filesystem is the source of truth**: nothing the UI shows may exist only in app state, and
-  uninstalling Maru must not lose user data.
+- **Filesystem is the source of truth**: durable user-authored workspace data (notes, tasks,
+  drafts, evidence, diagrams) is derived from real files, and uninstalling Maru must not lose it.
+  Transient app state such as loading flags, filters, selections, and error banners is component
+  state and is not a finding.
 - **Managed writes**: frontmatter changes go through `src-tauri/src/frontmatter/ops.rs` only, and
   managed writes validate, snapshot, and use revision-checked atomic replacement. Vault note
   deletion stays MCP-only.
 - **IPC errors**: frontend-consumable conflicts cross IPC as a structured `IpcError`; an unknown or
   forged code must degrade to a plain error and must not satisfy a recovery branch.
-- **Module boundaries**: `src/lib/` does not import components, nothing imports `src/App.tsx`, and
-  shared state stays on keyed module stores with `useSyncExternalStore`.
+- **Module boundaries**: `src/lib/` does not import components, **except for documented type-only
+  legacy boundaries** (see `src/lib/knowledgeModeStore.ts`, `src/lib/terminalPanelStore.ts`);
+  a value import from `src/components/` is a finding, a `import type` at a documented boundary is
+  not. Nothing imports `src/App.tsx`, and shared state stays on keyed module stores with
+  `useSyncExternalStore`.
 - **Approval gates**: seeds never create schedules, and `metadata.origin` is never overwritten.
 - **Release surfaces**: version changes touch all five surfaces and never go backwards.
 - **Korean text**: no slicing with backend offsets in JS; IME behavior is not provable in Chromium

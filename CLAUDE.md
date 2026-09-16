@@ -65,8 +65,10 @@ make test-e2e      # Playwright (chromium, own web server on 5307)
   `make skills-bootstrap-refresh`.
 - **Never lower the version** in `package.json`: CI fails the PR, because a lower version overwrites
   `latest.json` and strands updaters. Release tags must start with `v`.
-- **Module boundaries**: `src/lib/` must not import components, nothing imports `src/App.tsx`, and
-  shared state uses keyed module stores with `useSyncExternalStore`, not a new state library.
+- **Module boundaries**: `src/lib/` must not import components, except for the documented type-only
+  legacy boundaries (`import type` only, as in `knowledgeModeStore.ts` and `terminalPanelStore.ts`).
+  Nothing imports `src/App.tsx`, and shared state uses keyed module stores with
+  `useSyncExternalStore`, not a new state library.
 - **Frontmatter writes go through `src-tauri/src/frontmatter/ops.rs` only**; vault note deletion
   stays MCP-only. Do not slice Korean text with backend offsets in JS.
 - **Maru never writes `~/.claude/CLAUDE.md`, `~/.claude/settings*.json`, or `~/.claude/hooks/**`**
