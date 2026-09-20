@@ -22,10 +22,10 @@ progress:
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-09-05)
+See: .planning/PROJECT.md (updated 2026-09-21)
 
 **Core value:** The filesystem stays the source of truth, everything Maru shows is derived from real files the user owns, and nothing is lost if Maru is uninstalled.
-**Current focus:** Phase 08 — Main-Thread Responsiveness
+**Current focus:** Phase 09 — Durability and Session Lifecycle
 
 ## Current Position
 
@@ -276,7 +276,10 @@ None yet.
 ### Blockers/Concerns
 
 - **Phase 3's ERR-04 count band is coupled to `hwped.rs`.** The pinned command reports 1,138, and `hwped.rs` contributes 19 of those matches; without it the tree reads 1,119 and the post-migration count lands at 1,109, below `03-04-PLAN.md`'s `[1118, 1138]` band. The baseline is now anchored to a commit rather than a date - re-confirmed 2026-08-23 on the committed tree at 34f96ee - and `03-02`/`03-04` cite that provenance. Residual risk: the hwp-editor track is still active, so `03-04` now requires a re-measurement at the start of the plan rather than treating drift as exceptional.
-- `make verify` runs on ubuntu-22.04 only and e2e runs Chromium against Vite with mocked IPC. Nothing in CI exercises WKWebView, the real PTY, IME input, or the macOS menu - macOS-affecting changes need a real-app run. Phase 6 (TEST-01) exists to close this gap; until its spike resolves, treat this as open.
+- `make verify` runs on ubuntu-22.04 only and e2e runs Chromium against Vite with mocked IPC. Nothing in CI exercises WKWebView, the real PTY, IME input, or the macOS menu - macOS-affecting changes need a real-app run. Phase 6 (TEST-01) resolved this via the ci-viable spike verdict; hosted macos-14 runners drive the native suite (see 06-05).
+- [Phase 8] WR-01 from 08-REVIEW.md: `skill_host/store.rs` sync commit tail holds REGISTRY_LOCK across a git subprocess and full-checkout SHA-256 hash; PERF-02's network-round-trip contract is verified, this is a residual lock-contention cost (documented, non-blocking).
+- [Phase 8] Native responsiveness raw metric JSONs (`artifacts/native-responsiveness/*.json`) are untracked/local; `docs/performance/*.json` fixed-run and negative-control records are the committed evidence.
+- [Phase 8] Pre-existing `--plan 05` evidence drift reproduces on pristine HEAD; recommend a follow-up shard fix.
 
 ## Deferred Items
 
@@ -302,7 +305,7 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-09-06T01:14:19.000Z
+Last session: 2026-09-21
 Stopped at: Phase 08 complete, ready to plan Phase 9
 Resume file: None
 
