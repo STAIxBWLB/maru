@@ -23,14 +23,14 @@ nothing in the existing suite would notice.
 
 ### Responsiveness
 
-- [ ] **PERF-01**: A command that reaches the network, a subprocess, or an
+- [x] **PERF-01**: A command that reaches the network, a subprocess, or an
   unbounded filesystem walk no longer blocks the main thread. Verification is a
   concurrency load test, not the absence of a visible freeze: several converted
   commands fire at once and an unrelated command's latency stays flat. This
   distinguishes a real fix from a command that merely moved its blocking call
   onto Tauri's shared async worker pool, which has no passive warning sign.
 
-- [ ] **PERF-02**: `skills_sync_source` releases the global registry lock across
+- [x] **PERF-02**: `skills_sync_source` releases the global registry lock across
   its network round-trip, and the write after re-acquiring the lock reloads the
   registry fresh rather than writing back a pre-network copy. A source removed
   concurrently must not be resurrected by the sync that was already in flight.
@@ -184,8 +184,8 @@ Deferred. Acknowledged but not in this roadmap.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| PERF-01 | Phase 8 | Pending |
-| PERF-02 | Phase 8 | Pending |
+| PERF-01 | Phase 8 | Complete |
+| PERF-02 | Phase 8 | Complete |
 | PERF-03 | Phase 7 | Complete |
 | PERF-04 | Phase 7 | Complete |
 | PERF-05 | Phase 10 | Pending |
