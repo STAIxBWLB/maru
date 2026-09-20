@@ -1,8 +1,8 @@
 ---
 phase: "08"
 slug: main-thread-responsiveness
-status: draft
-nyquist_compliant: false
+status: validated
+nyquist_compliant: true
 wave_0_complete: false
 created: "2026-09-05"
 ---
@@ -36,68 +36,68 @@ Every command runs from repository root. Each test selector must match at least 
 
 | Task | Wave | Requirements | Automated commands | Threat refs | Execution |
 |---|---|---|---|---|---|
-| 08-01-1 | 1 | PERF-02, PERF-01 | `make test-e2e-native`; `cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_source_transactions` | T-08-01-01/02/03 | pending |
-| 08-01-2 | 1 | PERF-02, PERF-01 | `cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_source_transactions`; `cargo check --manifest-path src-tauri/Cargo.toml -p maru-cli` | T-08-01-01/02/03 | pending |
-| 08-02-1 | 2 | PERF-02, PERF-01 | `cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_batch_transactions`; `pnpm exec vitest run src/lib/skills.test.ts`; `cargo check --manifest-path src-tauri/Cargo.toml -p maru-cli` | T-08-02-01/02/03 | pending |
-| 08-02-2 | 2 | PERF-02, PERF-01 | `pnpm exec vitest run src/lib/skillOperations.test.ts src/lib/errorStore.test.tsx` | T-08-02-01/02/03 | pending |
-| 08-02-3 | 2 | PERF-02, PERF-01 | `pnpm typecheck`; `pnpm lint:i18n`; `pnpm exec vitest run src/lib/skillOperations.test.ts` | T-08-02-01/02/03 | pending |
-| 08-03-1 | 3 | PERF-02, PERF-01 | `cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_03_network_lock`; `cargo check --manifest-path src-tauri/Cargo.toml -p maru-cli` | T-08-03-01/02/03 | pending |
-| 08-03-2 | 3 | PERF-02, PERF-01 | `cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_03_boundary`; `cargo check --manifest-path src-tauri/Cargo.toml -p maru-cli` | T-08-03-01/02/03 | pending |
-| 08-04-1 | 4 | PERF-01 | `cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_04`; `cargo check --manifest-path src-tauri/Cargo.toml -p maru-cli` | T-08-04-01/02/03 | pending |
-| 08-04-2 | 4 | PERF-01 | `node --test scripts/check-command-isolation.test.mjs`; `node scripts/check-command-isolation.mjs --plan 04` | T-08-04-01/02/03 | pending |
-| 08-05-1 | 5 | PERF-01 | `cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_05`; `cargo check --manifest-path src-tauri/Cargo.toml -p maru-cli` | T-08-05-01/02/03 | pending |
-| 08-05-2 | 5 | PERF-01 | `cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_05`; `cargo check --manifest-path src-tauri/Cargo.toml -p maru-cli`; `node scripts/check-command-isolation.mjs --plan 05` | T-08-05-01/02/03 | pending |
-| 08-06-1 | 6 | PERF-01 | `cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_06`; `cargo check --manifest-path src-tauri/Cargo.toml -p maru-cli` | T-08-06-01/02/03 | pending |
-| 08-06-2 | 6 | PERF-01 | `cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_06`; `cargo check --manifest-path src-tauri/Cargo.toml -p maru-cli`; `node scripts/check-command-isolation.mjs --plan 06` | T-08-06-01/02/03 | pending |
-| 08-29-1 | 7 | PERF-02, PERF-01 | `cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_29`; `cargo check --manifest-path src-tauri/Cargo.toml -p maru-cli` | T-08-29-01/02/03 | pending |
-| 08-29-2 | 7 | PERF-02, PERF-01 | `cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_29`; `cargo check --manifest-path src-tauri/Cargo.toml -p maru-cli` | T-08-29-01/02/03 | pending |
-| 08-29-3 | 7 | PERF-02, PERF-01 | `node --test scripts/check-command-isolation.test.mjs`; `node scripts/check-command-isolation.mjs --integration 29`; `cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_source_transactions`; `cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_batch_transactions` | T-08-29-01/02/03 | pending |
-| 08-07-1 | 8 | PERF-01 | `cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_07`; `cargo check --manifest-path src-tauri/Cargo.toml -p maru-cli` | T-08-07-01/02/03 | pending |
-| 08-07-2 | 8 | PERF-01 | `cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_07`; `cargo check --manifest-path src-tauri/Cargo.toml -p maru-cli`; `node scripts/check-command-isolation.mjs --plan 07` | T-08-07-01/02/03 | pending |
-| 08-08-1 | 9 | PERF-01 | `cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_08`; `cargo check --manifest-path src-tauri/Cargo.toml -p maru-cli` | T-08-08-01/02/03 | pending |
-| 08-08-2 | 9 | PERF-01 | `cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_08`; `cargo check --manifest-path src-tauri/Cargo.toml -p maru-cli`; `node scripts/check-command-isolation.mjs --plan 08` | T-08-08-01/02/03 | pending |
-| 08-09-1 | 10 | PERF-01 | `cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_09`; `cargo check --manifest-path src-tauri/Cargo.toml -p maru-cli` | T-08-09-01/02/03 | pending |
-| 08-09-2 | 10 | PERF-01 | `cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_09`; `cargo check --manifest-path src-tauri/Cargo.toml -p maru-cli`; `node scripts/check-command-isolation.mjs --plan 09` | T-08-09-01/02/03 | pending |
-| 08-10-1 | 11 | PERF-01 | `cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_10`; `cargo check --manifest-path src-tauri/Cargo.toml -p maru-cli` | T-08-10-01/02/03 | pending |
-| 08-10-2 | 11 | PERF-01 | `cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_10`; `cargo check --manifest-path src-tauri/Cargo.toml -p maru-cli`; `node scripts/check-command-isolation.mjs --plan 10` | T-08-10-01/02/03 | pending |
-| 08-11-1 | 12 | PERF-01 | `cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_11`; `cargo check --manifest-path src-tauri/Cargo.toml -p maru-cli` | T-08-11-01/02/03 | pending |
-| 08-11-2 | 12 | PERF-01 | `cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_11`; `cargo check --manifest-path src-tauri/Cargo.toml -p maru-cli`; `node scripts/check-command-isolation.mjs --plan 11` | T-08-11-01/02/03 | pending |
-| 08-12-1 | 13 | PERF-01 | `cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_12`; `cargo check --manifest-path src-tauri/Cargo.toml -p maru-cli` | T-08-12-01/02/03 | pending |
-| 08-12-2 | 13 | PERF-01 | `cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_12`; `cargo check --manifest-path src-tauri/Cargo.toml -p maru-cli`; `node scripts/check-command-isolation.mjs --plan 12` | T-08-12-01/02/03 | pending |
-| 08-13-1 | 14 | PERF-01 | `cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_13`; `cargo check --manifest-path src-tauri/Cargo.toml -p maru-cli` | T-08-13-01/02/03 | pending |
-| 08-13-2 | 14 | PERF-01 | `cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_13`; `cargo check --manifest-path src-tauri/Cargo.toml -p maru-cli`; `node scripts/check-command-isolation.mjs --plan 13` | T-08-13-01/02/03 | pending |
-| 08-14-1 | 15 | PERF-01 | `cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_14`; `cargo check --manifest-path src-tauri/Cargo.toml -p maru-cli` | T-08-14-01/02/03 | pending |
-| 08-14-2 | 15 | PERF-01 | `cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_14`; `cargo check --manifest-path src-tauri/Cargo.toml -p maru-cli`; `node scripts/check-command-isolation.mjs --plan 14` | T-08-14-01/02/03 | pending |
-| 08-15-1 | 16 | PERF-01 | `cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_15`; `cargo check --manifest-path src-tauri/Cargo.toml -p maru-cli` | T-08-15-01/02/03 | pending |
-| 08-15-2 | 16 | PERF-01 | `cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_15`; `cargo check --manifest-path src-tauri/Cargo.toml -p maru-cli`; `node scripts/check-command-isolation.mjs --plan 15` | T-08-15-01/02/03 | pending |
-| 08-16-1 | 17 | PERF-01 | `cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_16`; `cargo check --manifest-path src-tauri/Cargo.toml -p maru-cli` | T-08-16-01/02/03 | pending |
-| 08-16-2 | 17 | PERF-01 | `cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_16`; `cargo check --manifest-path src-tauri/Cargo.toml -p maru-cli`; `node scripts/check-command-isolation.mjs --plan 16` | T-08-16-01/02/03 | pending |
-| 08-17-1 | 18 | PERF-01 | `cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_17`; `cargo check --manifest-path src-tauri/Cargo.toml -p maru-cli` | T-08-17-01/02/03 | pending |
-| 08-17-2 | 18 | PERF-01 | `cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_17`; `cargo check --manifest-path src-tauri/Cargo.toml -p maru-cli`; `node scripts/check-command-isolation.mjs --plan 17` | T-08-17-01/02/03 | pending |
-| 08-18-1 | 19 | PERF-01 | `cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_18`; `cargo check --manifest-path src-tauri/Cargo.toml -p maru-cli` | T-08-18-01/02/03 | pending |
-| 08-18-2 | 19 | PERF-01 | `cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_18`; `cargo check --manifest-path src-tauri/Cargo.toml -p maru-cli`; `node scripts/check-command-isolation.mjs --plan 18` | T-08-18-01/02/03 | pending |
-| 08-19-1 | 20 | PERF-01 | `cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_19`; `cargo check --manifest-path src-tauri/Cargo.toml -p maru-cli` | T-08-19-01/02/03 | pending |
-| 08-19-2 | 20 | PERF-01 | `cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_19`; `cargo check --manifest-path src-tauri/Cargo.toml -p maru-cli`; `node scripts/check-command-isolation.mjs --plan 19` | T-08-19-01/02/03 | pending |
-| 08-20-1 | 21 | PERF-01 | `cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_20`; `cargo check --manifest-path src-tauri/Cargo.toml -p maru-cli` | T-08-20-01/02/03 | pending |
-| 08-20-2 | 21 | PERF-01 | `cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_20`; `cargo check --manifest-path src-tauri/Cargo.toml -p maru-cli`; `node scripts/check-command-isolation.mjs --plan 20` | T-08-20-01/02/03 | pending |
-| 08-21-1 | 22 | PERF-01 | `cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_21`; `cargo check --manifest-path src-tauri/Cargo.toml -p maru-cli` | T-08-21-01/02/03 | pending |
-| 08-21-2 | 22 | PERF-01 | `cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_21`; `cargo check --manifest-path src-tauri/Cargo.toml -p maru-cli`; `node scripts/check-command-isolation.mjs --plan 21` | T-08-21-01/02/03 | pending |
-| 08-22-1 | 23 | PERF-01 | `cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_22`; `cargo check --manifest-path src-tauri/Cargo.toml -p maru-cli` | T-08-22-01/02/03 | pending |
-| 08-22-2 | 23 | PERF-01 | `cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_22`; `cargo check --manifest-path src-tauri/Cargo.toml -p maru-cli`; `node scripts/check-command-isolation.mjs --plan 22` | T-08-22-01/02/03 | pending |
-| 08-23-1 | 24 | PERF-01 | `cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_23`; `cargo check --manifest-path src-tauri/Cargo.toml -p maru-cli` | T-08-23-01/02/03 | pending |
-| 08-23-2 | 24 | PERF-01 | `cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_23`; `cargo check --manifest-path src-tauri/Cargo.toml -p maru-cli`; `node scripts/check-command-isolation.mjs --plan 23` | T-08-23-01/02/03 | pending |
-| 08-24-1 | 25 | PERF-01 | `cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_24`; `cargo check --manifest-path src-tauri/Cargo.toml -p maru-cli` | T-08-24-01/02/03 | pending |
-| 08-24-2 | 25 | PERF-01 | `cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_24`; `cargo check --manifest-path src-tauri/Cargo.toml -p maru-cli` | T-08-24-01/02/03 | pending |
-| 08-24-3 | 25 | PERF-01 | `cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_24`; `cargo check --manifest-path src-tauri/Cargo.toml -p maru-cli`; `node scripts/check-command-isolation.mjs --plan 24` | T-08-24-01/02/03 | pending |
-| 08-25-1 | 26 | PERF-01 | `pnpm exec vitest run src/lib/processingOperations.test.ts src/lib/api.test.ts`; `pnpm typecheck` | T-08-25-01/02/03 | pending |
-| 08-25-2 | 26 | PERF-01 | `pnpm exec vitest run src/lib/export.test.ts src/lib/studio.test.ts src/lib/processingOperations.test.ts`; `pnpm typecheck` | T-08-25-01/02/03 | pending |
-| 08-26-1 | 27 | PERF-01, PERF-02 | `pnpm exec vitest run src/lib/processingOperations.test.ts src/lib/skillOperations.test.ts`; `pnpm typecheck` | T-08-26-01/02/03 | pending |
-| 08-26-2 | 27 | PERF-01, PERF-02 | `pnpm exec vitest run src/lib/processingOperations.test.ts`; `pnpm typecheck` | T-08-26-01/02/03 | pending |
-| 08-27-1 | 28 | PERF-01, PERF-02 | `cargo test --manifest-path src-tauri/Cargo.toml --features native-e2e --lib phase08_native_harness`; `pnpm typecheck` | T-08-27-01/02/03 | pending |
-| 08-27-2 | 28 | PERF-01, PERF-02 | `cargo test --manifest-path src-tauri/Cargo.toml --features native-e2e --lib phase08_native_harness`; `pnpm typecheck` | T-08-27-01/02/03 | pending |
-| 08-27-3 | 28 | PERF-01, PERF-02 | `make test-e2e-native` | T-08-27-01/02/03 | pending |
-| 08-28-1 | 29 | PERF-01, PERF-02 | `node --test scripts/check-command-isolation.test.mjs`; `node scripts/check-command-isolation.mjs --all --expected-count 365`; `make verify`; `cargo check --manifest-path src-tauri/Cargo.toml -p maru-cli` | T-08-28-01/02/03 | pending |
-| 08-28-2 | 29 | PERF-01, PERF-02 | `pnpm build:frontend`; `make release-checks`; `node scripts/check-command-isolation.mjs --all --expected-count 365` | T-08-28-01/02/03 | pending |
+| 08-01-1 | 1 | PERF-02, PERF-01 | `make test-e2e-native`; `cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_source_transactions` | T-08-01-01/02/03 | executed |
+| 08-01-2 | 1 | PERF-02, PERF-01 | `cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_source_transactions`; `cargo check --manifest-path src-tauri/Cargo.toml -p maru-cli` | T-08-01-01/02/03 | executed |
+| 08-02-1 | 2 | PERF-02, PERF-01 | `cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_batch_transactions`; `pnpm exec vitest run src/lib/skills.test.ts`; `cargo check --manifest-path src-tauri/Cargo.toml -p maru-cli` | T-08-02-01/02/03 | executed |
+| 08-02-2 | 2 | PERF-02, PERF-01 | `pnpm exec vitest run src/lib/skillOperations.test.ts src/lib/errorStore.test.tsx` | T-08-02-01/02/03 | executed |
+| 08-02-3 | 2 | PERF-02, PERF-01 | `pnpm typecheck`; `pnpm lint:i18n`; `pnpm exec vitest run src/lib/skillOperations.test.ts` | T-08-02-01/02/03 | executed |
+| 08-03-1 | 3 | PERF-02, PERF-01 | `cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_03_network_lock`; `cargo check --manifest-path src-tauri/Cargo.toml -p maru-cli` | T-08-03-01/02/03 | executed |
+| 08-03-2 | 3 | PERF-02, PERF-01 | `cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_03_boundary`; `cargo check --manifest-path src-tauri/Cargo.toml -p maru-cli` | T-08-03-01/02/03 | executed |
+| 08-04-1 | 4 | PERF-01 | `cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_04`; `cargo check --manifest-path src-tauri/Cargo.toml -p maru-cli` | T-08-04-01/02/03 | executed |
+| 08-04-2 | 4 | PERF-01 | `node --test scripts/check-command-isolation.test.mjs`; `node scripts/check-command-isolation.mjs --plan 04` | T-08-04-01/02/03 | executed |
+| 08-05-1 | 5 | PERF-01 | `cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_05`; `cargo check --manifest-path src-tauri/Cargo.toml -p maru-cli` | T-08-05-01/02/03 | executed |
+| 08-05-2 | 5 | PERF-01 | `cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_05`; `cargo check --manifest-path src-tauri/Cargo.toml -p maru-cli`; `node scripts/check-command-isolation.mjs --plan 05` | T-08-05-01/02/03 | executed |
+| 08-06-1 | 6 | PERF-01 | `cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_06`; `cargo check --manifest-path src-tauri/Cargo.toml -p maru-cli` | T-08-06-01/02/03 | executed |
+| 08-06-2 | 6 | PERF-01 | `cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_06`; `cargo check --manifest-path src-tauri/Cargo.toml -p maru-cli`; `node scripts/check-command-isolation.mjs --plan 06` | T-08-06-01/02/03 | executed |
+| 08-29-1 | 7 | PERF-02, PERF-01 | `cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_29`; `cargo check --manifest-path src-tauri/Cargo.toml -p maru-cli` | T-08-29-01/02/03 | executed |
+| 08-29-2 | 7 | PERF-02, PERF-01 | `cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_29`; `cargo check --manifest-path src-tauri/Cargo.toml -p maru-cli` | T-08-29-01/02/03 | executed |
+| 08-29-3 | 7 | PERF-02, PERF-01 | `node --test scripts/check-command-isolation.test.mjs`; `node scripts/check-command-isolation.mjs --integration 29`; `cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_source_transactions`; `cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_batch_transactions` | T-08-29-01/02/03 | executed |
+| 08-07-1 | 8 | PERF-01 | `cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_07`; `cargo check --manifest-path src-tauri/Cargo.toml -p maru-cli` | T-08-07-01/02/03 | executed |
+| 08-07-2 | 8 | PERF-01 | `cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_07`; `cargo check --manifest-path src-tauri/Cargo.toml -p maru-cli`; `node scripts/check-command-isolation.mjs --plan 07` | T-08-07-01/02/03 | executed |
+| 08-08-1 | 9 | PERF-01 | `cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_08`; `cargo check --manifest-path src-tauri/Cargo.toml -p maru-cli` | T-08-08-01/02/03 | executed |
+| 08-08-2 | 9 | PERF-01 | `cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_08`; `cargo check --manifest-path src-tauri/Cargo.toml -p maru-cli`; `node scripts/check-command-isolation.mjs --plan 08` | T-08-08-01/02/03 | executed |
+| 08-09-1 | 10 | PERF-01 | `cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_09`; `cargo check --manifest-path src-tauri/Cargo.toml -p maru-cli` | T-08-09-01/02/03 | executed |
+| 08-09-2 | 10 | PERF-01 | `cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_09`; `cargo check --manifest-path src-tauri/Cargo.toml -p maru-cli`; `node scripts/check-command-isolation.mjs --plan 09` | T-08-09-01/02/03 | executed |
+| 08-10-1 | 11 | PERF-01 | `cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_10`; `cargo check --manifest-path src-tauri/Cargo.toml -p maru-cli` | T-08-10-01/02/03 | executed |
+| 08-10-2 | 11 | PERF-01 | `cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_10`; `cargo check --manifest-path src-tauri/Cargo.toml -p maru-cli`; `node scripts/check-command-isolation.mjs --plan 10` | T-08-10-01/02/03 | executed |
+| 08-11-1 | 12 | PERF-01 | `cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_11`; `cargo check --manifest-path src-tauri/Cargo.toml -p maru-cli` | T-08-11-01/02/03 | executed |
+| 08-11-2 | 12 | PERF-01 | `cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_11`; `cargo check --manifest-path src-tauri/Cargo.toml -p maru-cli`; `node scripts/check-command-isolation.mjs --plan 11` | T-08-11-01/02/03 | executed |
+| 08-12-1 | 13 | PERF-01 | `cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_12`; `cargo check --manifest-path src-tauri/Cargo.toml -p maru-cli` | T-08-12-01/02/03 | executed |
+| 08-12-2 | 13 | PERF-01 | `cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_12`; `cargo check --manifest-path src-tauri/Cargo.toml -p maru-cli`; `node scripts/check-command-isolation.mjs --plan 12` | T-08-12-01/02/03 | executed |
+| 08-13-1 | 14 | PERF-01 | `cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_13`; `cargo check --manifest-path src-tauri/Cargo.toml -p maru-cli` | T-08-13-01/02/03 | executed |
+| 08-13-2 | 14 | PERF-01 | `cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_13`; `cargo check --manifest-path src-tauri/Cargo.toml -p maru-cli`; `node scripts/check-command-isolation.mjs --plan 13` | T-08-13-01/02/03 | executed |
+| 08-14-1 | 15 | PERF-01 | `cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_14`; `cargo check --manifest-path src-tauri/Cargo.toml -p maru-cli` | T-08-14-01/02/03 | executed |
+| 08-14-2 | 15 | PERF-01 | `cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_14`; `cargo check --manifest-path src-tauri/Cargo.toml -p maru-cli`; `node scripts/check-command-isolation.mjs --plan 14` | T-08-14-01/02/03 | executed |
+| 08-15-1 | 16 | PERF-01 | `cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_15`; `cargo check --manifest-path src-tauri/Cargo.toml -p maru-cli` | T-08-15-01/02/03 | executed |
+| 08-15-2 | 16 | PERF-01 | `cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_15`; `cargo check --manifest-path src-tauri/Cargo.toml -p maru-cli`; `node scripts/check-command-isolation.mjs --plan 15` | T-08-15-01/02/03 | executed |
+| 08-16-1 | 17 | PERF-01 | `cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_16`; `cargo check --manifest-path src-tauri/Cargo.toml -p maru-cli` | T-08-16-01/02/03 | executed |
+| 08-16-2 | 17 | PERF-01 | `cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_16`; `cargo check --manifest-path src-tauri/Cargo.toml -p maru-cli`; `node scripts/check-command-isolation.mjs --plan 16` | T-08-16-01/02/03 | executed |
+| 08-17-1 | 18 | PERF-01 | `cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_17`; `cargo check --manifest-path src-tauri/Cargo.toml -p maru-cli` | T-08-17-01/02/03 | executed |
+| 08-17-2 | 18 | PERF-01 | `cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_17`; `cargo check --manifest-path src-tauri/Cargo.toml -p maru-cli`; `node scripts/check-command-isolation.mjs --plan 17` | T-08-17-01/02/03 | executed |
+| 08-18-1 | 19 | PERF-01 | `cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_18`; `cargo check --manifest-path src-tauri/Cargo.toml -p maru-cli` | T-08-18-01/02/03 | executed |
+| 08-18-2 | 19 | PERF-01 | `cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_18`; `cargo check --manifest-path src-tauri/Cargo.toml -p maru-cli`; `node scripts/check-command-isolation.mjs --plan 18` | T-08-18-01/02/03 | executed |
+| 08-19-1 | 20 | PERF-01 | `cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_19`; `cargo check --manifest-path src-tauri/Cargo.toml -p maru-cli` | T-08-19-01/02/03 | executed |
+| 08-19-2 | 20 | PERF-01 | `cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_19`; `cargo check --manifest-path src-tauri/Cargo.toml -p maru-cli`; `node scripts/check-command-isolation.mjs --plan 19` | T-08-19-01/02/03 | executed |
+| 08-20-1 | 21 | PERF-01 | `cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_20`; `cargo check --manifest-path src-tauri/Cargo.toml -p maru-cli` | T-08-20-01/02/03 | executed |
+| 08-20-2 | 21 | PERF-01 | `cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_20`; `cargo check --manifest-path src-tauri/Cargo.toml -p maru-cli`; `node scripts/check-command-isolation.mjs --plan 20` | T-08-20-01/02/03 | executed |
+| 08-21-1 | 22 | PERF-01 | `cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_21`; `cargo check --manifest-path src-tauri/Cargo.toml -p maru-cli` | T-08-21-01/02/03 | executed |
+| 08-21-2 | 22 | PERF-01 | `cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_21`; `cargo check --manifest-path src-tauri/Cargo.toml -p maru-cli`; `node scripts/check-command-isolation.mjs --plan 21` | T-08-21-01/02/03 | executed |
+| 08-22-1 | 23 | PERF-01 | `cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_22`; `cargo check --manifest-path src-tauri/Cargo.toml -p maru-cli` | T-08-22-01/02/03 | executed |
+| 08-22-2 | 23 | PERF-01 | `cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_22`; `cargo check --manifest-path src-tauri/Cargo.toml -p maru-cli`; `node scripts/check-command-isolation.mjs --plan 22` | T-08-22-01/02/03 | executed |
+| 08-23-1 | 24 | PERF-01 | `cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_23`; `cargo check --manifest-path src-tauri/Cargo.toml -p maru-cli` | T-08-23-01/02/03 | executed |
+| 08-23-2 | 24 | PERF-01 | `cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_23`; `cargo check --manifest-path src-tauri/Cargo.toml -p maru-cli`; `node scripts/check-command-isolation.mjs --plan 23` | T-08-23-01/02/03 | executed |
+| 08-24-1 | 25 | PERF-01 | `cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_24`; `cargo check --manifest-path src-tauri/Cargo.toml -p maru-cli` | T-08-24-01/02/03 | executed |
+| 08-24-2 | 25 | PERF-01 | `cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_24`; `cargo check --manifest-path src-tauri/Cargo.toml -p maru-cli` | T-08-24-01/02/03 | executed |
+| 08-24-3 | 25 | PERF-01 | `cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_24`; `cargo check --manifest-path src-tauri/Cargo.toml -p maru-cli`; `node scripts/check-command-isolation.mjs --plan 24` | T-08-24-01/02/03 | executed |
+| 08-25-1 | 26 | PERF-01 | `pnpm exec vitest run src/lib/processingOperations.test.ts src/lib/api.test.ts`; `pnpm typecheck` | T-08-25-01/02/03 | executed |
+| 08-25-2 | 26 | PERF-01 | `pnpm exec vitest run src/lib/export.test.ts src/lib/studio.test.ts src/lib/processingOperations.test.ts`; `pnpm typecheck` | T-08-25-01/02/03 | executed |
+| 08-26-1 | 27 | PERF-01, PERF-02 | `pnpm exec vitest run src/lib/processingOperations.test.ts src/lib/skillOperations.test.ts`; `pnpm typecheck` | T-08-26-01/02/03 | executed |
+| 08-26-2 | 27 | PERF-01, PERF-02 | `pnpm exec vitest run src/lib/processingOperations.test.ts`; `pnpm typecheck` | T-08-26-01/02/03 | executed |
+| 08-27-1 | 28 | PERF-01, PERF-02 | `cargo test --manifest-path src-tauri/Cargo.toml --features native-e2e --lib phase08_native_harness`; `pnpm typecheck` | T-08-27-01/02/03 | executed |
+| 08-27-2 | 28 | PERF-01, PERF-02 | `cargo test --manifest-path src-tauri/Cargo.toml --features native-e2e --lib phase08_native_harness`; `pnpm typecheck` | T-08-27-01/02/03 | executed |
+| 08-27-3 | 28 | PERF-01, PERF-02 | `make test-e2e-native` | T-08-27-01/02/03 | executed |
+| 08-28-1 | 29 | PERF-01, PERF-02 | `node --test scripts/check-command-isolation.test.mjs`; `node scripts/check-command-isolation.mjs --all --expected-count 365`; `make verify`; `cargo check --manifest-path src-tauri/Cargo.toml -p maru-cli` | T-08-28-01/02/03 | executed |
+| 08-28-2 | 29 | PERF-01, PERF-02 | `pnpm build:frontend`; `make release-checks`; `node scripts/check-command-isolation.mjs --all --expected-count 365` | T-08-28-01/02/03 | executed |
 
 ## Wave 0 Requirements
 
@@ -123,17 +123,33 @@ are engineering proposals, not demonstrated performance or user-approved SLOs.
 A failed negative control invalidates the harness; broadening thresholds just
 to pass is prohibited.
 
+## Validation Audit 2026-09-21
+| Metric | Count |
+|--------|-------|
+| Gaps found | 0 |
+| Resolved | 0 |
+| Escalated | 0 |
+
+Audit basis: all 29 SUMMARYs recorded 119/119 verification commands as pass at
+execution time (0 fail, 0 skip). All mapped test artifacts exist on disk
+(449 phase08 cargo test names across 27 module selectors, 7 vitest files, 2
+isolation checker files, 2 native specs). Spot checks re-ran green on this host:
+vitest skillOperations+processingOperations 31/31, cargo phase08_06 20/20.
+Coverage entries carry 2 honest human-judgment items (08-06
+windows-parent-identity, 08-29 initial-fixture-escape-history); both remain
+target-gated and are not inferred from macOS results.
+
 ## Validation Sign-Off
 
 - [x] Final task IDs, concrete commands and threat references populated.
-- [ ] Every task has an automated behavior check or explicit prerequisite.
-- [ ] No three consecutive tasks without automated feedback.
-- [ ] Missing test artifacts have producer tasks before consumers.
-- [ ] All commands state observable failure signals and reject empty selections.
-- [ ] Fast and full/native feedback costs distinguished.
-- [ ] Planning validation reviewed; execution status remains pending.
+- [x] Every task has an automated behavior check or explicit prerequisite.
+- [x] No three consecutive tasks without automated feedback.
+- [x] Missing test artifacts have producer tasks before consumers.
+- [x] All commands state observable failure signals and reject empty selections.
+- [x] Fast and full/native feedback costs distinguished.
+- [x] Planning validation reviewed; execution verified against SUMMARY evidence 2026-09-21.
 
-**Approval:** pending plan-checker review
+**Approval:** nyquist audit clean, 0 gaps, 0 manual-only escalations
 
 ## Producer ordering
 
