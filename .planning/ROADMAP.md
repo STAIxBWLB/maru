@@ -253,7 +253,19 @@ Plans:
   2. Per-mode CSS ships inside that mode's own lazy chunk instead of the entry stylesheet, and the initial-CSS budget check passes at its original threshold, not a raised one.
   3. No mode shows unstyled content on its first activation after the split.
 
-**Plans**: TBD
+**Plans**: 3 plans
+**Wave 1**
+
+- [ ] 10-01: SEC-01 CSP tightening with a two-half check-csp-blob guard wired into build:frontend and release-checks
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [ ] 10-02: PERF-05 per-mode CSS split with ownership guard and budget-comment correction
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
+- [ ] 10-03: PERF-05 idle preload + first-activation FOUC spec
+
 **UI hint**: yes
 
 ### Phase 11: Milestone Verification & Evidence
