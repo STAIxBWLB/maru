@@ -5,6 +5,7 @@ import {
   byteOffsetToCharIndex,
   mapSpansToPmTextNodes,
   mapSpansToRenderedText,
+  paragraphBlocks,
   refMapToCharSpans,
   refStepsByParagraph,
   resolveReferenceNodeIds,
@@ -183,6 +184,56 @@ describe("refStepsByParagraph", () => {
         { nodePath: "a.md", nodeTitle: "a", matchKind: "entity", spans: [] },
       ]),
     ).toEqual([]);
+  });
+});
+
+describe("paragraphBlocks", () => {
+  const textOf = (content: string, block: { start: number; end: number }) =>
+    content.slice(block.start, block.end);
+
+  it("matches the backend's blank-line segmentation, frontmatter included", () => {
+    // Mirrors kg_refs.rs: frontmatter and the title run together (no blank
+    // line between them), so the frontmatter block is paragraph 0.
+    const content =
+      "---\nproject: \"[[Alpha]]\"\n---\n# 주간 보고\n\n첫 문단에서 [[Alpha]]를 참조한다.\n\n둘째 문단.\n\n셋째 문단 [[Alpha|별칭]] 다시.\n";
+    const blocks = paragraphBlocks(content);
+    expect(blocks).toHaveLength(4);
+    expect(textOf(content, blocks[0]!)).toBe(
+      "---\nproject: \"[[Alpha]]\"\n---\n# 주간 보고",
+    );
+    expect(textOf(content, blocks[1]!)).toBe("첫 문단에서 [[Alpha]]를 참조한다.");
+    expect(textOf(content, blocks[2]!)).toBe("둘째 문단.");
+    expect(textOf(content, blocks[3]!)).toBe("셋째 문단 [[Alpha|별칭]] 다시.");
+    expect(blocks[0]!.start).toBe(0);
+  });
+
+  it("attaches leading blank lines to the first block and trims trailing ones", () => {
+    const content = "\n\n  \nfirst\n\nsecond\n\n\n";
+    const blocks = paragraphBlocks(content);
+    expect(blocks).toHaveLength(2);
+    expect(textOf(content, blocks[0]!)).toBe("first");
+    expect(blocks[0]!.start).toBe(content.indexOf("first"));
+    expect(textOf(content, blocks[1]!)).toBe("second");
+  });
+
+  it("treats whitespace-only lines as blank, CRLF included", () => {
+    const content = "alpha\r\n \t\r\nbeta";
+    const blocks = paragraphBlocks(content);
+    expect(blocks).toHaveLength(2);
+    expect(textOf(content, blocks[0]!)).toBe("alpha");
+    expect(textOf(content, blocks[1]!)).toBe("beta");
+  });
+
+  it("keeps consecutive non-blank lines in one block", () => {
+    const content = "## 메모\n참석자들은 사업 KPI 산식.\n";
+    const blocks = paragraphBlocks(content);
+    expect(blocks).toHaveLength(1);
+    expect(textOf(content, blocks[0]!)).toBe("## 메모\n참석자들은 사업 KPI 산식.");
+  });
+
+  it("returns no blocks for empty or all-blank content", () => {
+    expect(paragraphBlocks("")).toEqual([]);
+    expect(paragraphBlocks("\n\n  \n")).toEqual([]);
   });
 });
 

@@ -39,9 +39,12 @@ function spanFor(text: string, paragraph: number) {
   return { start, end: start + byteLen(text), paragraph };
 }
 
-// [[Maru Project]] sits in the frontmatter (paragraph 0) — the preview
-// strips frontmatter, so only the body entity "KPI" maps there. "KPI" is in
-// the third blank-line-separated block (frontmatter, title, memo).
+// [[Maru Project]] sits in the frontmatter — the preview strips frontmatter,
+// so only the body entity "KPI" maps there. Paragraph indices follow the
+// backend's blank-line-separated blocks: the frontmatter and the title share
+// paragraph 0 (no blank line between them), the memo block is paragraph 1.
+// The doc-side walk highlight resolves full blocks from these indices, so
+// they must match the real segmentation, not just group the spans.
 const SEEDED_REFS = [
   {
     nodePath: "maru-project.md",
@@ -53,7 +56,7 @@ const SEEDED_REFS = [
     nodePath: "references/maru-glossary.md",
     nodeTitle: "Maru 용어집",
     matchKind: "entity",
-    spans: [spanFor("KPI", 2)],
+    spans: [spanFor("KPI", 1)],
   },
 ];
 
@@ -382,13 +385,13 @@ const TWO_REAL_REFS = [
     nodePath: "references/maru-glossary.md",
     nodeTitle: "Maru 용어집",
     matchKind: "entity",
-    spans: [spanFor("KPI", 2)],
+    spans: [spanFor("KPI", 1)],
   },
   {
     nodePath: "maru-weekly-meeting.md",
     nodeTitle: "Maru 사업 주간 점검 회의",
     matchKind: "entity",
-    spans: [spanFor("예산", 2)],
+    spans: [spanFor("예산", 1)],
   },
 ];
 
@@ -476,20 +479,22 @@ test("reference-focus converge animation moves the referenced nodes", async ({ p
 });
 
 /** Same two real nodes, but cited from DIFFERENT paragraphs, so the reference
- *  walk has two legs. TWO_REAL_REFS above puts both in paragraph 2, which is a
- *  single leg and deliberately shows no walk controls. */
+ *  walk has two legs. TWO_REAL_REFS above puts both in paragraph 1, which is a
+ *  single leg and deliberately shows no walk controls. The paragraphs must
+ *  match the doc's real blank-line segmentation (frontmatter + title = 0,
+ *  memo = 1): the doc side derives the highlighted block from the index. */
 const REFS_IN_TWO_PARAGRAPHS = [
+  {
+    nodePath: "maru-weekly-meeting.md",
+    nodeTitle: "Maru 사업 주간 점검 회의",
+    matchKind: "entity",
+    spans: [spanFor("주간 점검", 0)],
+  },
   {
     nodePath: "references/maru-glossary.md",
     nodeTitle: "Maru 용어집",
     matchKind: "entity",
     spans: [spanFor("KPI", 1)],
-  },
-  {
-    nodePath: "maru-weekly-meeting.md",
-    nodeTitle: "Maru 사업 주간 점검 회의",
-    matchKind: "entity",
-    spans: [spanFor("예산", 2)],
   },
 ];
 
@@ -547,29 +552,37 @@ test("reference walk highlights the citing paragraph in source and preview", asy
   await expect(page.getByTestId("graph-ref-focus-bar")).toContainText("2개");
 
   // The doc side mirrors the walk: one paragraph highlighted at a time, in
-  // the same order as the graph legs. Paragraph 1 cites "KPI", paragraph 2
-  // cites "예산", so the mark's text tracks the step.
+  // the same order as the graph legs. The mark covers the paragraph's whole
+  // blank-line-separated block, not just the cited word. Paragraph 0 is the
+  // frontmatter + title block (no blank line between them), paragraph 1 the
+  // memo block.
   const label = page.getByTestId("graph-ref-walk-label");
   await expect(label).toHaveText("문단 1/2", { timeout: 25_000 });
   const sourceMark = page.locator(".kg-source-backdrop .kg-ref-walk-paragraph");
-  await expect(sourceMark).toHaveText("KPI");
+  await expect(sourceMark).toContainText("# Maru 사업 주간 점검 회의");
+  await expect(sourceMark).toContainText('project: "[[Maru Project]]"');
   await expect(label).toHaveText("문단 2/2", { timeout: 20_000 });
-  await expect(sourceMark).toHaveText("예산");
+  await expect(sourceMark).toContainText("## 메모");
+  await expect(sourceMark).toContainText("정리하기로 했다.");
 
   // The walk parks paused at the end; stepping back holds the highlight on
   // the paused leg instead of clearing it.
   await page.getByTestId("graph-ref-walk-prev").click();
   await expect(label).toHaveText("문단 1/2");
-  await expect(sourceMark).toHaveText("KPI");
+  await expect(sourceMark).toContainText("# Maru 사업 주간 점검 회의");
 
-  // Same sync on the preview surface.
+  // Same sync on the preview surface. The rendered counterpart of the source
+  // block is marked: the title heading for leg 1, the memo body for leg 2
+  // (the source block's "## 메모" line renders as a separate heading).
   await page.locator(".tab-trigger", { hasText: "미리보기" }).click();
   await expect(page.locator(".preview-surface")).toContainText("Maru 사업 주간 점검 회의");
   const previewMark = page.locator(".preview-surface .kg-ref-walk-paragraph");
-  await expect(previewMark).toHaveText("KPI");
+  await expect(previewMark).toHaveText("Maru 사업 주간 점검 회의");
   await page.getByTestId("graph-ref-walk-next").click();
   await expect(label).toHaveText("문단 2/2");
-  await expect(previewMark).toHaveText("예산");
+  await expect(previewMark).toHaveText(
+    "참석자들은 사업 KPI 산식과 예산 집행률 보고 기준을 다음 회의 전까지 정리하기로 했다.",
+  );
 
   // Exiting reference focus clears the paragraph highlight with the walk.
   await page.getByTestId("graph-ref-focus-exit").click();

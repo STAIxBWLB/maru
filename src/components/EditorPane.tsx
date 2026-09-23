@@ -60,6 +60,7 @@ import { useDebouncedValue } from "../lib/useDebouncedValue";
 import { buildEntryIndex, resolveTargetIndexed } from "../lib/wikilinkSuggestions";
 import {
   applyKgPreviewHighlights,
+  expandRangeToBlocks,
   KgSourceBackdrop,
   useKgRefWalkTarget,
   type KgRefWalkTarget,
@@ -158,17 +159,19 @@ export function decoratePreviewHtml(baseHtml: string, decoration: PreviewDecorat
     const renderedSpans = decoration.kgSpans?.length
       ? mapSpansToRenderedText(renderedText, decoration.kgSpans, sourceTextFor)
       : [];
-    // The walk paragraph re-locates the same way the reference spans do;
-    // min start / max end over its mapped spans is the paragraph's range in
-    // rendered coordinates.
+    // The walk paragraph re-locates through its citing spans (the rendered
+    // text drops inline markup, so a whole-paragraph source search would
+    // fail), then widens to the enclosing rendered block — the counterpart
+    // of the source's full blank-line-separated block.
     let walkRange: { start: number; end: number } | null = null;
     if (decoration.kgWalk) {
       const mapped = mapSpansToRenderedText(renderedText, decoration.kgWalk.spans, sourceTextFor);
       if (mapped.length > 0) {
-        walkRange = {
+        const spanRange = {
           start: Math.min(...mapped.map((span) => span.start)),
           end: Math.max(...mapped.map((span) => span.end)),
         };
+        walkRange = expandRangeToBlocks(body, spanRange) ?? spanRange;
       }
     }
     applyKgPreviewHighlights(body, renderedSpans, decoration.kgTitleFor, walkRange);
@@ -379,10 +382,13 @@ export const EditorPane = memo(forwardRef<HTMLDivElement, EditorPaneProps>(funct
 
   // KG reference walk (Feature A playback): the graph publishes its active
   // leg's paragraph; this document highlights it when it is the focus
-  // document. Independent of the Feature B toggle.
+  // document — same relative path AND same workspace root, so a same-named
+  // document from another workspace in a split never receives the walk.
+  // Independent of the Feature B toggle.
   const kgWalkTarget = useKgRefWalkTarget(
     document && !isHtml ? document.relPath : null,
     kgSpanSource,
+    vaultPath,
   );
 
 

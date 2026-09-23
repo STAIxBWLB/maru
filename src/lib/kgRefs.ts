@@ -150,6 +150,55 @@ export function refStepsByParagraph(refs: KgNodeRef[]): KgRefStep[] {
     .map(([paragraph, nodePaths]) => ({ paragraph, nodePaths }));
 }
 
+/** A blank-line-separated block's full range, in JS string indices. */
+export interface KgParagraphBlock {
+  /** Index of the block's first character (its first non-blank line). */
+  start: number;
+  /** Index one past the block's last non-whitespace character. */
+  end: number;
+}
+
+/**
+ * Split `content` into the same blank-line-separated blocks the backend's
+ * `kg_document_refs` uses for `KgRefSpan.paragraph` (kg_refs.rs
+ * `paragraph_starts`), so a backend paragraph index resolves to the full
+ * block here. Leading blank lines attach to the first block; a block's range
+ * runs from its first line through its last non-whitespace character
+ * (trailing blank lines belong to no highlight).
+ *
+ * The backend counts in UTF-8 bytes, but block boundaries always fall on
+ * line starts, where byte and char offsets agree — so indexing by paragraph
+ * number lines up exactly.
+ */
+export function paragraphBlocks(content: string): KgParagraphBlock[] {
+  const starts: number[] = [];
+  let seenContent = false;
+  let prevBlank = true;
+  let offset = 0;
+  // split with a lookbehind keeps the "\n" on each piece, like Rust's
+  // split_inclusive; the trailing piece simply has none.
+  for (const line of content.split(/(?<=\n)/)) {
+    if (line.length > 0) {
+      if (line.replace(/[\r\n]+$/, "").trim().length === 0) {
+        if (seenContent) prevBlank = true;
+      } else {
+        if (!seenContent) {
+          starts.push(offset);
+          seenContent = true;
+        } else if (prevBlank) {
+          starts.push(offset);
+        }
+        prevBlank = false;
+      }
+    }
+    offset += line.length;
+  }
+  return starts.map((start, index) => {
+    const rawEnd = index + 1 < starts.length ? starts[index + 1]! : content.length;
+    return { start, end: start + content.slice(start, rawEnd).trimEnd().length };
+  });
+}
+
 function joinRoot(root: string, relative: string): string {
   return `${root.replace(/[\\/]+$/, "")}/${relative.replace(/\\/g, "/").replace(/^\/+/, "")}`;
 }

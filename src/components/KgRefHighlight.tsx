@@ -12,6 +12,7 @@ import { kgDocumentRefs } from "../lib/api";
 import {
   buildByteToCharTable,
   byteOffsetToCharIndex,
+  paragraphBlocks,
   segmentsFromSpans,
   type KgCharSpan,
   type KgRenderedSpan,
@@ -199,16 +200,86 @@ export function applyKgPreviewHighlights(
   return applied;
 }
 
+/** Rendered elements that correspond to a source paragraph. */
+const WALK_BLOCK_TAGS = new Set([
+  "P", "H1", "H2", "H3", "H4", "H5", "H6", "LI", "BLOCKQUOTE", "PRE", "TD", "TH",
+]);
+
+/**
+ * Expand a rendered-text range to the full block element(s) it touches, in
+ * the same container.textContent coordinates applyKgPreviewHighlights uses.
+ *
+ * The reference walk highlights whole paragraphs, but the paragraph is
+ * located in the rendered text through its citing spans (inline formatting
+ * and wikilink syntax make a raw source-text search fail). The spans cover
+ * only the cited words, so the range is widened to the nearest enclosing
+ * block element — the rendered counterpart of the source's
+ * blank-line-separated block. Returns null when no block ancestor exists
+ * (bare text directly in the container), letting the caller fall back to
+ * the span range.
+ */
+export function expandRangeToBlocks(
+  container: HTMLElement,
+  range: { start: number; end: number },
+): { start: number; end: number } | null {
+  const blockOf = (node: Text): HTMLElement | null => {
+    let el = node.parentElement;
+    while (el && el !== container) {
+      if (WALK_BLOCK_TAGS.has(el.tagName) || el.parentElement === container) return el;
+      el = el.parentElement;
+    }
+    return null;
+  };
+  const blocks = new Set<HTMLElement>();
+  const hitWalker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
+  let hitOffset = 0;
+  while (hitWalker.nextNode()) {
+    const node = hitWalker.currentNode as Text;
+    const nodeStart = hitOffset;
+    hitOffset += node.data.length;
+    if (hitOffset <= range.start) continue;
+    if (nodeStart >= range.end) break;
+    const block = blockOf(node);
+    if (block) blocks.add(block);
+  }
+  if (blocks.size === 0) return null;
+  // The nearest-block pick above can never select an element nested inside
+  // another selected element, so each block's text is one contiguous run:
+  // its range is [first text node offset, that + textContent length).
+  const remaining = new Set(blocks);
+  let start = Number.POSITIVE_INFINITY;
+  let end = Number.NEGATIVE_INFINITY;
+  let offset = 0;
+  const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
+  while (walker.nextNode() && remaining.size > 0) {
+    const node = walker.currentNode as Text;
+    let el = node.parentElement;
+    while (el && el !== container) {
+      if (remaining.has(el)) {
+        start = Math.min(start, offset);
+        end = Math.max(end, offset + (el.textContent?.length ?? 0));
+        remaining.delete(el);
+        break;
+      }
+      el = el.parentElement;
+    }
+    offset += node.data.length;
+  }
+  if (end <= start) return null;
+  return { start, end };
+}
+
 /** Remove every KG highlight mark, restoring plain text nodes. */
 
 /** The walk's active paragraph resolved against the open document: a char
- *  range covering that paragraph's citing spans, plus the spans themselves
- *  (preview mode re-locates them in the rendered text). */
+ *  range covering the paragraph's full blank-line-separated block, plus the
+ *  paragraph's citing spans (preview mode re-locates them in the rendered
+ *  text to find the corresponding block there). */
 export interface KgRefWalkTarget {
   paragraph: number;
-  /** JS string index of the first citing span's start. */
+  /** JS string index of the paragraph block's first character. */
   start: number;
-  /** JS string index one past the last citing span's end. */
+  /** JS string index one past the paragraph block's last character. */
   end: number;
   spans: KgCharSpan[];
 }
@@ -216,25 +287,32 @@ export interface KgRefWalkTarget {
 /**
  * Sync the document with the graph reference walk: while the walk runs, the
  * paragraph the active leg belongs to is highlighted, and pause/prev/next
- * hold it. Only the walk's focus document participates; the single-leg
- * fallback (paragraph -1) highlights nothing.
+ * hold it. Only the walk's focus document participates: both the relative
+ * path AND the workspace root must match the focus — a split editor can show
+ * same-named documents from two workspaces, and path alone cannot tell them
+ * apart. The single-leg fallback (paragraph -1) highlights nothing.
  *
- * The paragraph range is derived from the document's own reference map —
- * min start / max end over the spans whose KgRefSpan.paragraph matches the
- * active leg — converted from the backend's UTF-8 byte offsets to JS string
- * indices. The backend caches the map (the Feature B toggle relies on that),
- * so this repeat fetch is cheap.
+ * The paragraph range is the full blank-line-separated block, derived from
+ * the document content with the same segmentation the backend used to number
+ * the paragraphs (paragraphBlocks). The citing spans are still resolved from
+ * the document's own reference map — converted from the backend's UTF-8 byte
+ * offsets to JS string indices — because preview mode needs them to locate
+ * the paragraph in the rendered text. The backend caches the map (the
+ * Feature B toggle relies on that), so this repeat fetch is cheap.
  */
 export function useKgRefWalkTarget(
   docPath: string | null,
   content: string,
+  workspacePath: string | null,
 ): KgRefWalkTarget | null {
   const { referenceWalk, referenceFocus } = useGraphModeSlice();
   const paragraph = referenceWalk?.paragraph ?? -1;
   const focusDocRoot = referenceFocus?.docRoot ?? null;
   const active = Boolean(
-    referenceWalk && focusDocRoot && docPath &&
-    referenceFocus?.docPath === docPath && paragraph >= 0,
+    referenceWalk && focusDocRoot && docPath && workspacePath &&
+    referenceFocus?.docPath === docPath &&
+    focusDocRoot === workspacePath &&
+    paragraph >= 0,
   );
   const [refs, setRefs] = useState<KgNodeRef[] | null>(null);
   useEffect(() => {
@@ -257,10 +335,10 @@ export function useKgRefWalkTarget(
 
   return useMemo(() => {
     if (!active || !refs) return null;
+    const block = paragraphBlocks(content)[paragraph];
+    if (!block) return null;
     const table = buildByteToCharTable(content);
     const spans: KgCharSpan[] = [];
-    let start = Number.POSITIVE_INFINITY;
-    let end = Number.NEGATIVE_INFINITY;
     for (const ref of refs) {
       for (const span of ref.spans) {
         if (span.paragraph !== paragraph) continue;
@@ -275,11 +353,9 @@ export function useKgRefWalkTarget(
           nodeTitle: ref.nodeTitle,
           matchKind: ref.matchKind,
         });
-        start = Math.min(start, spanStart);
-        end = Math.max(end, spanEnd);
       }
     }
     if (spans.length === 0) return null;
-    return { paragraph, start, end, spans };
+    return { paragraph, start: block.start, end: block.end, spans };
   }, [active, refs, content, paragraph]);
 }
