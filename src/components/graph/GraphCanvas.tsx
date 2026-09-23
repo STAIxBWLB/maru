@@ -4,6 +4,7 @@ import { MultiDirectedGraph } from "graphology";
 import { inferSettings } from "graphology-layout-forceatlas2";
 import FA2LayoutSupervisor from "graphology-layout-forceatlas2/worker";
 import {
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -26,6 +27,7 @@ import type { GraphDisplaySettings } from "../../lib/settings";
 import { edgeColor, edgeKey, graphTheme, graphTopologySignature, nodeColor, nodeRadius } from "./graphStyle";
 import { graphBridgeEnabled } from "./graphBridge";
 import { drawMaruNodeLabel, drawMaruNodeHover } from "./graphLabels";
+import { visualModeController } from "../../lib/visualModeStore";
 import { useTranslation } from "../../lib/i18n";
 
 export interface GraphViewport {
@@ -132,9 +134,11 @@ interface GraphCanvasProps {
    *  that re-arms the converge animation on every trigger. null = off. */
   referenceFocus?: {
     ids: Set<string>;
-    /** Per-paragraph node sets, walked in document order. One step (or none)
+    /** Per-paragraph node sets, walked in document order. `paragraph` is the
+     *  0-based block index in the source document; the walk publishes it so
+     *  the document can highlight the citing paragraph. One step (or none)
      *  animates everything at once, which is the old behaviour. */
-    steps?: Set<string>[];
+    steps?: { paragraph: number; ids: Set<string> }[];
     nonce: number;
   } | null;
   overlay?: ReactNode;
@@ -644,6 +648,28 @@ export function GraphCanvas({
   } | null>(null);
   const refWalkPausedRef = useRef(false);
   const refWalkJumpRef = useRef<number | null>(null);
+  // Paragraph index per leg, so every walk publish — including the control-bar
+  // buttons outside the animation effect — can name the citing paragraph.
+  // -1 marks the single-leg fallback: no paragraph to highlight.
+  const refWalkParagraphsRef = useRef<number[]>([]);
+  // Mirror the walk into the visual-mode store so the focus document can
+  // highlight the citing paragraph as the walk plays.
+  const publishRefWalk = useCallback(
+    (walk: { step: number; total: number; paused: boolean } | null) => {
+      setRefWalk(walk);
+      visualModeController.setGraphReferenceWalk(
+        walk
+          ? {
+              paragraph: refWalkParagraphsRef.current[walk.step] ?? -1,
+              step: walk.step,
+              total: walk.total,
+              paused: walk.paused,
+            }
+          : null,
+      );
+    },
+    [],
+  );
   const interactionRef = useRef<InteractionState>({
     selectedId,
     focusNodeId,
@@ -1454,7 +1480,8 @@ export function GraphCanvas({
     refAnimRef.current = null;
     if (!refFocusIds || refFocusIds.size === 0) {
       refFocusAnimatedNonceRef.current = -1;
-      setRefWalk(null);
+      refWalkParagraphsRef.current = [];
+      publishRefWalk(null);
       renderer?.refresh();
       return;
     }
@@ -1520,21 +1547,22 @@ export function GraphCanvas({
     // not move by construction, which is exactly the common case; sharing the
     // document's centroid also reads as each paragraph feeding one document.
     const legs = (refFocusSteps ?? [])
-      .map((ids) => {
+      .map((step) => {
         const nodes: string[] = [];
-        ids.forEach((id) => {
+        step.ids.forEach((id) => {
           if (graph.hasNode(id)) nodes.push(id);
         });
-        return nodes.length > 0 ? { ids, nodes } : null;
+        return nodes.length > 0 ? { paragraph: step.paragraph, ids: step.ids, nodes } : null;
       })
-      .filter((leg): leg is { ids: Set<string>; nodes: string[] } => leg !== null);
+      .filter((leg): leg is { paragraph: number; ids: Set<string>; nodes: string[] } => leg !== null);
     if (legs.length === 0) {
       const nodes: string[] = [];
       refFocusIds.forEach((id) => {
         if (graph.hasNode(id)) nodes.push(id);
       });
-      legs.push({ ids: refFocusIds, nodes });
+      legs.push({ paragraph: -1, ids: refFocusIds, nodes });
     }
+    refWalkParagraphsRef.current = legs.map((leg) => leg.paragraph);
     // Repaint the union for every leg. Scoping the partial graph to the active
     // leg would leave the previous leg's nodes displaying their last animated
     // offset, since nothing repaints them back to rest.
@@ -1548,7 +1576,7 @@ export function GraphCanvas({
     let recoveries = 0;
     let legIndex = 0;
     let start = performance.now();
-    setRefWalk({ step: 0, total: legs.length, paused: false });
+    publishRefWalk({ step: 0, total: legs.length, paused: false });
     refWalkPausedRef.current = false;
     // A partial repaint needs the program slots process() assigns. The
     // interaction-sync effect above also depends on referenceFocus, and its
@@ -1582,7 +1610,7 @@ export function GraphCanvas({
         refWalkJumpRef.current = null;
         legIndex = Math.max(0, Math.min(legs.length - 1, jump));
         start = now;
-        setRefWalk({ step: legIndex, total: legs.length, paused: refWalkPausedRef.current });
+        publishRefWalk({ step: legIndex, total: legs.length, paused: refWalkPausedRef.current });
       }
       // A paused leg holds part-way in, not at rest: at rest its nodes sit on
       // their layout positions and nothing on screen says which paragraph is
@@ -1611,7 +1639,7 @@ export function GraphCanvas({
       if (legIndex < legs.length - 1) {
         legIndex += 1;
         start = now;
-        setRefWalk({ step: legIndex, total: legs.length, paused: false });
+        publishRefWalk({ step: legIndex, total: legs.length, paused: false });
         raf = requestAnimationFrame(tick);
         return;
       }
@@ -1621,7 +1649,7 @@ export function GraphCanvas({
       // restart or a teardown is retried when the graph is ready again.
       refFocusAnimatedNonceRef.current = refFocusNonce;
       // Keep the bar so the walk can be replayed or stepped through by hand.
-      setRefWalk({ step: legs.length - 1, total: legs.length, paused: true });
+      publishRefWalk({ step: legs.length - 1, total: legs.length, paused: true });
       refWalkPausedRef.current = true;
       raf = requestAnimationFrame(tick);
     };
@@ -1632,7 +1660,11 @@ export function GraphCanvas({
       // so a later render cannot resurrect a half-converged frame.
       refAnimRef.current = null;
     };
-  }, [refFocusIds, refFocusSteps, refFocusNonce, rendererState]);
+  }, [refFocusIds, refFocusSteps, refFocusNonce, rendererState, publishRefWalk]);
+
+  // The walk is canvas-owned: unmounting the canvas ends it, so the document
+  // cannot keep a stale paragraph highlight from a dead graph.
+  useEffect(() => () => visualModeController.setGraphReferenceWalk(null), []);
 
   // --- display settings, hot-applied (no graph rebuild) --------------------
 
@@ -1872,7 +1904,7 @@ export function GraphCanvas({
             onClick={() => {
               refWalkPausedRef.current = true;
               refWalkJumpRef.current = refWalk.step - 1;
-              setRefWalk({ ...refWalk, step: Math.max(0, refWalk.step - 1), paused: true });
+              publishRefWalk({ ...refWalk, step: Math.max(0, refWalk.step - 1), paused: true });
             }}
           >
             ‹
@@ -1888,7 +1920,7 @@ export function GraphCanvas({
               if (!paused && refWalk.step === refWalk.total - 1) {
                 refWalkJumpRef.current = 0;
               }
-              setRefWalk({ ...refWalk, paused });
+              publishRefWalk({ ...refWalk, paused });
             }}
           >
             {refWalk.paused ? "▶" : "❚❚"}
@@ -1901,7 +1933,7 @@ export function GraphCanvas({
             onClick={() => {
               refWalkPausedRef.current = true;
               refWalkJumpRef.current = refWalk.step + 1;
-              setRefWalk({
+              publishRefWalk({
                 ...refWalk,
                 step: Math.min(refWalk.total - 1, refWalk.step + 1),
                 paused: true,

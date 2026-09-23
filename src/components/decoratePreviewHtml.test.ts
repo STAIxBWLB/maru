@@ -8,6 +8,7 @@ const NO_DECORATION = {
   kgSpans: null,
   kgSource: "",
   kgTitleFor: () => "",
+  kgWalk: null,
   findQuery: "",
   findCurrent: 0,
   resolveWikilink: () => true,
@@ -92,6 +93,47 @@ describe("decoratePreviewHtml", () => {
       resolveWikilink: () => true,
     });
     expect(out).toBe(html);
+  });
+});
+
+describe("decoratePreviewHtml reference walk", () => {
+  it("marks the walk paragraph without any reference spans", () => {
+    const source = "alpha beta gamma";
+    const out = decoratePreviewHtml("<p>alpha beta gamma</p>", {
+      ...NO_DECORATION,
+      kgSource: source,
+      kgWalk: {
+        paragraph: 0,
+        start: 6,
+        end: 10,
+        spans: [kgSpan(6, 10)],
+      },
+    });
+    document.body.innerHTML = out;
+    const marks = document.querySelectorAll("mark.kg-ref-walk-paragraph");
+    expect(marks).toHaveLength(1);
+    expect(marks[0]!.textContent).toBe("beta");
+    expect(document.body.textContent).toBe("alpha beta gamma");
+  });
+
+  it("wraps the walk paragraph around a reference mark inside it", () => {
+    const source = "see alpha here";
+    const out = decoratePreviewHtml("<p>see alpha here</p>", {
+      ...NO_DECORATION,
+      kgSpans: [kgSpan(4, 9)],
+      kgSource: source,
+      kgTitleFor: (span) => `${span.nodeTitle} · entity`,
+      kgWalk: {
+        paragraph: 0,
+        start: 4,
+        end: 14,
+        spans: [kgSpan(4, 9)],
+      },
+    });
+    document.body.innerHTML = out;
+    // The walk range covers "alpha here": the reference mark nests inside.
+    expect(document.querySelectorAll("mark.kg-ref-walk-paragraph mark.kg-ref-mark")).toHaveLength(1);
+    expect(document.body.textContent).toBe("see alpha here");
   });
 });
 

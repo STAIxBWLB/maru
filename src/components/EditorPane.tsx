@@ -61,6 +61,8 @@ import { buildEntryIndex, resolveTargetIndexed } from "../lib/wikilinkSuggestion
 import {
   applyKgPreviewHighlights,
   KgSourceBackdrop,
+  useKgRefWalkTarget,
+  type KgRefWalkTarget,
 } from "./KgRefHighlight";
 import { Button } from "./ui/Button";
 import { useWikilinkAutocomplete } from "./WikilinkAutocomplete";
@@ -106,6 +108,8 @@ interface PreviewDecoration {
   kgSpans: KgCharSpan[] | null;
   kgSource: string;
   kgTitleFor: (span: { nodeTitle: string; matchKind: "wikilink" | "entity" }) => string;
+  /** The reference walk's active paragraph, re-located in the rendered text. */
+  kgWalk: KgRefWalkTarget | null;
   /** Empty when find is closed or not applicable to the preview. */
   findQuery: string;
   findCurrent: number;
@@ -132,7 +136,7 @@ interface PreviewDecoration {
  */
 export function decoratePreviewHtml(baseHtml: string, decoration: PreviewDecoration): string {
   if (!baseHtml) return "";
-  const needsKg = Boolean(decoration.kgSpans?.length);
+  const needsKg = Boolean(decoration.kgSpans?.length) || Boolean(decoration.kgWalk);
   const needsFind = decoration.findQuery.trim().length > 0;
   const needsWikilink = baseHtml.includes("data-wikilink");
   if (!needsKg && !needsFind && !needsWikilink) return baseHtml;
@@ -148,13 +152,26 @@ export function decoratePreviewHtml(baseHtml: string, decoration: PreviewDecorat
   body.innerHTML = baseHtml;
 
   if (needsKg) {
-    applyKgPreviewHighlights(
-      body,
-      mapSpansToRenderedText(body.textContent ?? "", decoration.kgSpans!, (span) =>
-        decoration.kgSource.slice(span.start, span.end),
-      ),
-      decoration.kgTitleFor,
-    );
+    const renderedText = body.textContent ?? "";
+    const sourceTextFor = (span: KgCharSpan) =>
+      decoration.kgSource.slice(span.start, span.end);
+    const renderedSpans = decoration.kgSpans?.length
+      ? mapSpansToRenderedText(renderedText, decoration.kgSpans, sourceTextFor)
+      : [];
+    // The walk paragraph re-locates the same way the reference spans do;
+    // min start / max end over its mapped spans is the paragraph's range in
+    // rendered coordinates.
+    let walkRange: { start: number; end: number } | null = null;
+    if (decoration.kgWalk) {
+      const mapped = mapSpansToRenderedText(renderedText, decoration.kgWalk.spans, sourceTextFor);
+      if (mapped.length > 0) {
+        walkRange = {
+          start: Math.min(...mapped.map((span) => span.start)),
+          end: Math.max(...mapped.map((span) => span.end)),
+        };
+      }
+    }
+    applyKgPreviewHighlights(body, renderedSpans, decoration.kgTitleFor, walkRange);
   }
   if (needsFind) applyFindHighlights(body, decoration.findQuery, decoration.findCurrent);
   if (needsWikilink) {
@@ -360,6 +377,14 @@ export const EditorPane = memo(forwardRef<HTMLDivElement, EditorPaneProps>(funct
     [t],
   );
 
+  // KG reference walk (Feature A playback): the graph publishes its active
+  // leg's paragraph; this document highlights it when it is the focus
+  // document. Independent of the Feature B toggle.
+  const kgWalkTarget = useKgRefWalkTarget(
+    document && !isHtml ? document.relPath : null,
+    kgSpanSource,
+  );
+
 
   // In-document find (Cmd+F). Source drives the textarea selection; markdown
   // preview injects <mark class="find-mark">. Rich/visual and the HTML preview
@@ -426,6 +451,7 @@ export const EditorPane = memo(forwardRef<HTMLDivElement, EditorPaneProps>(funct
         kgSpans,
         kgSource: kgSpanSource,
         kgTitleFor,
+        kgWalk: activeMode === "preview" ? kgWalkTarget : null,
         findQuery:
           findOpen && findSupported && activeMode === "preview" && !isHtml ? findQuery : "",
         findCurrent,
@@ -436,6 +462,7 @@ export const EditorPane = memo(forwardRef<HTMLDivElement, EditorPaneProps>(funct
       kgSpans,
       kgSpanSource,
       kgTitleFor,
+      kgWalkTarget,
       findOpen,
       findSupported,
       activeMode,
@@ -454,6 +481,59 @@ export const EditorPane = memo(forwardRef<HTMLDivElement, EditorPaneProps>(funct
   // imperatively was discarded. Memoizing on the string means a recompute that
   // yields identical HTML returns the same object and React writes nothing.
   const previewMarkup = useMemo(() => ({ __html: previewHtml }), [previewHtml]);
+
+  // Follow the reference walk in the document: reveal the active paragraph
+  // only when it is off-screen, and only on a step (or mode) change, so a
+  // paused walk never fights the user's scrolling. prefers-reduced-motion
+  // jumps instead of smooth-scrolling, like the converge animation.
+  const walkParagraph = kgWalkTarget?.paragraph ?? null;
+  const walkTargetRef = useRef(kgWalkTarget);
+  walkTargetRef.current = kgWalkTarget;
+  const walkRevealedRef = useRef<string | null>(null);
+  useEffect(() => {
+    const target = walkTargetRef.current;
+    if (!target) {
+      walkRevealedRef.current = null;
+      return;
+    }
+    const key = `${activeMode}:${target.paragraph}`;
+    if (walkRevealedRef.current === key) return;
+    const behavior: ScrollBehavior =
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth";
+    if (activeMode === "source") {
+      const textarea = taRef.current;
+      if (!textarea) return;
+      // The backdrop is scroll-synced and metric-identical to the textarea,
+      // so its walk mark's offset is the paragraph's textarea scroll position.
+      const mark = textarea.parentElement?.querySelector(".kg-ref-walk-paragraph");
+      if (!(mark instanceof HTMLElement)) return;
+      const top = mark.offsetTop;
+      const bottom = top + mark.offsetHeight;
+      if (top >= textarea.scrollTop && bottom <= textarea.scrollTop + textarea.clientHeight) {
+        walkRevealedRef.current = key;
+        return;
+      }
+      walkRevealedRef.current = key;
+      textarea.scrollTo({
+        top: Math.max(0, top - textarea.clientHeight / 2),
+        behavior,
+      });
+      return;
+    }
+    if (activeMode === "preview") {
+      // The mark arrives with the decorated html; if this render predates it,
+      // the previewHtml dependency re-runs the effect when it lands.
+      if (!previewHtml.includes("kg-ref-walk-paragraph")) return;
+      const container = previewRef.current;
+      const mark = container?.querySelector(".kg-ref-walk-paragraph");
+      if (!(mark instanceof HTMLElement) || !container) return;
+      const markRect = mark.getBoundingClientRect();
+      const boxRect = container.getBoundingClientRect();
+      walkRevealedRef.current = key;
+      if (markRect.top >= boxRect.top && markRect.bottom <= boxRect.bottom) return;
+      mark.scrollIntoView({ block: "center", behavior });
+    }
+  }, [walkParagraph, activeMode, previewHtml, taRef]);
 
   // Derived from the undecorated html on purpose: the decoration depends on
   // findCurrent, which depends on this match list, which would depend on the
@@ -997,11 +1077,14 @@ export const EditorPane = memo(forwardRef<HTMLDivElement, EditorPaneProps>(funct
           }
           sourcePanel={
             <>
-              <div className={kgSpans ? "source-editor-wrap kg-active" : "source-editor-wrap"}>
-                {kgSpans ? (
+              <div className={kgSpans || kgWalkTarget ? "source-editor-wrap kg-active" : "source-editor-wrap"}>
+                {kgSpans || kgWalkTarget ? (
                   <KgSourceBackdrop
                     content={draftContent}
-                    spans={kgSpans}
+                    spans={kgSpans ?? []}
+                    walkRange={
+                      kgWalkTarget ? { start: kgWalkTarget.start, end: kgWalkTarget.end } : null
+                    }
                     textareaRef={taRef}
                     titleFor={kgTitleFor}
                   />

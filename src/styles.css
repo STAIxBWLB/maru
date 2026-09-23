@@ -4126,6 +4126,15 @@ mark.find-mark-current {
   text-underline-offset: 2px;
 }
 
+/* Reference-walk paragraph highlight (the doc side of the graph walk): a
+ * band over the citing paragraph, composing with the per-span marks. */
+.kg-ref-walk-paragraph {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent);
+  border-radius: 2px;
+  color: inherit;
+}
+
 /* Rich mode renders marks as BlockNote style spans carrying the same
  * kind classes as the preview, so both clickable surfaces share this. */
 .preview-surface .kg-ref-mark,

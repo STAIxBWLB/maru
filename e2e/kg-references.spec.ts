@@ -538,6 +538,66 @@ test("reference walk steps through the citing paragraphs", async ({ page }) => {
   await expect(page.getByTestId("graph-ref-walk")).toHaveCount(0);
 });
 
+test("reference walk highlights the citing paragraph in source and preview", async ({ page }) => {
+  await seedRefs(page, REFS_IN_TWO_PARAGRAPHS);
+  await page.setViewportSize({ width: 1600, height: 900 });
+  await openMeetingDoc(page);
+  await page.locator(".tab-trigger", { hasText: "원문" }).click();
+  await page.getByTestId("kg-visualize-refs").click();
+  await expect(page.getByTestId("graph-ref-focus-bar")).toContainText("2개");
+
+  // The doc side mirrors the walk: one paragraph highlighted at a time, in
+  // the same order as the graph legs. Paragraph 1 cites "KPI", paragraph 2
+  // cites "예산", so the mark's text tracks the step.
+  const label = page.getByTestId("graph-ref-walk-label");
+  await expect(label).toHaveText("문단 1/2", { timeout: 25_000 });
+  const sourceMark = page.locator(".kg-source-backdrop .kg-ref-walk-paragraph");
+  await expect(sourceMark).toHaveText("KPI");
+  await expect(label).toHaveText("문단 2/2", { timeout: 20_000 });
+  await expect(sourceMark).toHaveText("예산");
+
+  // The walk parks paused at the end; stepping back holds the highlight on
+  // the paused leg instead of clearing it.
+  await page.getByTestId("graph-ref-walk-prev").click();
+  await expect(label).toHaveText("문단 1/2");
+  await expect(sourceMark).toHaveText("KPI");
+
+  // Same sync on the preview surface.
+  await page.locator(".tab-trigger", { hasText: "미리보기" }).click();
+  await expect(page.locator(".preview-surface")).toContainText("Maru 사업 주간 점검 회의");
+  const previewMark = page.locator(".preview-surface .kg-ref-walk-paragraph");
+  await expect(previewMark).toHaveText("KPI");
+  await page.getByTestId("graph-ref-walk-next").click();
+  await expect(label).toHaveText("문단 2/2");
+  await expect(previewMark).toHaveText("예산");
+
+  // Exiting reference focus clears the paragraph highlight with the walk.
+  await page.getByTestId("graph-ref-focus-exit").click();
+  await expect(page.locator(".kg-ref-walk-paragraph")).toHaveCount(0);
+});
+
+test("a walk without usable step data highlights no paragraph", async ({ page }) => {
+  // A referenced node with no spans: refStepsByParagraph yields no steps, so
+  // the graph runs the single-leg fallback over the whole referenced set.
+  await seedRefs(page, [
+    {
+      nodePath: "references/maru-glossary.md",
+      nodeTitle: "Maru 용어집",
+      matchKind: "entity",
+      spans: [],
+    },
+  ]);
+  await page.setViewportSize({ width: 1600, height: 900 });
+  await openMeetingDoc(page);
+  await page.locator(".tab-trigger", { hasText: "원문" }).click();
+  await page.getByTestId("kg-visualize-refs").click();
+  await expect(page.getByTestId("graph-ref-focus-bar")).toContainText("1개");
+  // The fallback leg must not light up the document (and the 1/1 control bar
+  // stays hidden).
+  await expect(page.getByTestId("graph-ref-walk")).toHaveCount(0);
+  await expect(page.locator(".kg-ref-walk-paragraph")).toHaveCount(0);
+});
+
 test("a document citing everything from one paragraph shows no walk controls", async ({ page }) => {
   await seedRefs(page, TWO_REAL_REFS);
   await page.setViewportSize({ width: 1600, height: 900 });

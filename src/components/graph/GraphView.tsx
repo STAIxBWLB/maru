@@ -442,20 +442,23 @@ export function GraphView({
       workspacePath,
     );
   }, [referenceFocus, model.nodes, workspacePath]);
-  // Same resolution per step. A paragraph whose nodes are all outside the
-  // current model would animate nothing, so it is not a step here either.
+  // Same resolution per step, keeping the paragraph across the filter:
+  // GraphCanvas publishes it as the walk's active leg so the document can
+  // highlight the citing paragraph. A paragraph whose nodes are all outside
+  // the current model would animate nothing, so it is not a step here either.
   const refFocusSteps = useMemo(() => {
     if (!referenceFocus) return [];
     return referenceFocus.steps
-      .map((step) =>
-        resolveReferenceNodeIds(
+      .map((step) => ({
+        paragraph: step.paragraph,
+        ids: resolveReferenceNodeIds(
           model.nodes,
           step.nodePaths,
           referenceFocus.docRoot,
           workspacePath,
         ),
-      )
-      .filter((ids) => ids.size > 0);
+      }))
+      .filter((step) => step.ids.size > 0);
   }, [referenceFocus, model.nodes, workspacePath]);
   const localFocusNode = useMemo(
     () =>

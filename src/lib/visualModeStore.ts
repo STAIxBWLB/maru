@@ -27,6 +27,17 @@ export interface GraphModeSlice {
     steps: Array<{ paragraph: number; nodePaths: string[] }>;
     nonce: number;
   } | null;
+  /** The reference walk's active leg, published by GraphCanvas so the focus
+   *  document can highlight the citing paragraph. `paragraph` is the 0-based
+   *  blank-line-separated block index in the raw document; -1 marks the
+   *  single-leg fallback (no paragraph to highlight). null = no walk.
+   *  Source-owned with referenceFocus: clearing the focus clears the walk. */
+  referenceWalk: {
+    paragraph: number;
+    step: number;
+    total: number;
+    paused: boolean;
+  } | null;
 }
 
 export interface SitesModeSlice {
@@ -47,7 +58,7 @@ const EMPTY_DIAGRAM_SLICE: DiagramModeSlice = {
 
 const INITIAL_STATE: VisualModeState = {
   diagram: EMPTY_DIAGRAM_SLICE,
-  graph: { focusTarget: null, referenceFocus: null },
+  graph: { focusTarget: null, referenceFocus: null, referenceWalk: null },
   sites: { openedUrls: [] },
 };
 
@@ -59,6 +70,7 @@ export interface VisualModeController {
   setDiagramActiveDocument(slice: DiagramModeSlice): void;
   setGraphFocusTarget(target: GraphOpenTarget | null): void;
   setGraphReferenceFocus(focus: GraphModeSlice["referenceFocus"]): void;
+  setGraphReferenceWalk(walk: GraphModeSlice["referenceWalk"]): void;
   enqueueSiteUrls(urls: unknown): void;
   acknowledgeSiteUrls(ids: readonly number[]): void;
 }
@@ -113,7 +125,13 @@ export function createVisualModeController(): VisualModeController {
     },
     setGraphReferenceFocus(referenceFocus) {
       if (state.graph.referenceFocus === referenceFocus) return;
-      state = { ...state, graph: { ...state.graph, referenceFocus } };
+      // The walk belongs to the focus: a new (or cleared) focus invalidates it.
+      state = { ...state, graph: { ...state.graph, referenceFocus, referenceWalk: null } };
+      notify("graph");
+    },
+    setGraphReferenceWalk(referenceWalk) {
+      if (state.graph.referenceWalk === referenceWalk) return;
+      state = { ...state, graph: { ...state.graph, referenceWalk } };
       notify("graph");
     },
     enqueueSiteUrls(urls) {
