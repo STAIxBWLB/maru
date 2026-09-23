@@ -57,15 +57,12 @@ test-results/
 *.db-wal
 
 # === Claude Code / OMC state ===
-.claude/settings.local.json
-.claude/scheduled_tasks.lock
-.claude/RESUME.md
 .omc/
 .omx/
 .gstack/
 
 # Python caches generated when skills run in place
-skills/**/__pycache__/
+__pycache__/
 skills/**/.pytest_cache/
 
 # GSD run-scoped runtime state (isolation sentinel)
@@ -73,3 +70,9 @@ skills/**/.pytest_cache/
 
 # GSD research tooling cache (not an artifact)
 .planning/research/.cache/
+
+# === Agent tool state ===
+.claude/
+.qwen/
+.playwright-cli/
+.planning/milestone.lock
