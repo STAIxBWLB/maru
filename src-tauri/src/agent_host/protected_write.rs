@@ -234,15 +234,13 @@ mod tests {
             .join("notes/abs.md")
             .to_string_lossy()
             .to_string();
-        let err = apply_protected_write_claim(&cwd, &claim(abs), Some("no frontmatter"))
-            .unwrap_err();
+        let err =
+            apply_protected_write_claim(&cwd, &claim(abs), Some("no frontmatter")).unwrap_err();
         assert!(err.contains("Managed vault schema check failed"), "{err}");
 
         // Valid notes still write; non-note paths stay ungated.
         let valid = "---\ndescription: 보호된 쓰기 노트\ntype: insight\ndomain: operations\ntopics:\n  - \"[[operations]]\"\n---\n# Body\n";
-        apply_protected_write_claim(&cwd, &claim("notes/ok.md".to_string()), Some(valid))
-            .unwrap();
-        apply_protected_write_claim(&cwd, &claim("inbox/x.md".to_string()), Some("junk"))
-            .unwrap();
+        apply_protected_write_claim(&cwd, &claim("notes/ok.md".to_string()), Some(valid)).unwrap();
+        apply_protected_write_claim(&cwd, &claim("inbox/x.md".to_string()), Some("junk")).unwrap();
     }
 }

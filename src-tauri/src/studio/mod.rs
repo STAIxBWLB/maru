@@ -631,8 +631,12 @@ mod tests {
         // Body replacement preserves frontmatter; schema-invalid frontmatter
         // on a notes/ target must block the write.
         fs::write(&doc, "---\ntype: meeting\n---\n# Old\n").unwrap();
-        let err = studio_apply_body(root.clone(), "notes/report.md".to_string(), "# New".to_string())
-            .unwrap_err();
+        let err = studio_apply_body(
+            root.clone(),
+            "notes/report.md".to_string(),
+            "# New".to_string(),
+        )
+        .unwrap_err();
         assert!(err.contains("Managed vault schema check failed"), "{err}");
         assert!(fs::read_to_string(&doc).unwrap().contains("# Old"));
 
@@ -642,17 +646,24 @@ mod tests {
             "---\ndescription: 스튜디오 본문 적용\ntype: insight\ndomain: operations\ntopics:\n  - \"[[operations]]\"\n---\n# Old\n",
         )
         .unwrap();
-        let payload =
-            studio_apply_body(root.clone(), "notes/report.md".to_string(), "# New".to_string())
-                .unwrap();
+        let payload = studio_apply_body(
+            root.clone(),
+            "notes/report.md".to_string(),
+            "# New".to_string(),
+        )
+        .unwrap();
         assert_eq!(payload.body, "# New\n");
 
         // Case-variant Notes/ prefix is gated too.
         let upper = dir.path().join("Notes").join("upper.md");
         fs::create_dir_all(upper.parent().unwrap()).unwrap();
         fs::write(&upper, "---\ntype: meeting\n---\n# Old\n").unwrap();
-        let err = studio_apply_body(root.clone(), "Notes/upper.md".to_string(), "# New".to_string())
-            .unwrap_err();
+        let err = studio_apply_body(
+            root.clone(),
+            "Notes/upper.md".to_string(),
+            "# New".to_string(),
+        )
+        .unwrap_err();
         assert!(err.contains("Managed vault schema check failed"), "{err}");
 
         // Non-note paths stay ungated in a managed vault.

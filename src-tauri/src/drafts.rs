@@ -2212,15 +2212,15 @@ mod tests {
 
         // A schema-less body is refused at notes/ targets.
         let entry = create_task_draft(&work, "Unschemaed");
-        let err = promote_impl(&work, &entry.id, DraftPromoteTarget::Document, "notes/x.md")
-            .unwrap_err();
+        let err =
+            promote_impl(&work, &entry.id, DraftPromoteTarget::Document, "notes/x.md").unwrap_err();
         assert!(err.contains("Managed vault schema check failed"), "{err}");
         assert!(!temp.path().join("notes/x.md").exists());
 
         // Case-variant Notes/ prefix is gated too.
         let entry = create_task_draft(&work, "Case variant");
-        let err = promote_impl(&work, &entry.id, DraftPromoteTarget::Document, "Notes/y.md")
-            .unwrap_err();
+        let err =
+            promote_impl(&work, &entry.id, DraftPromoteTarget::Document, "Notes/y.md").unwrap_err();
         assert!(err.contains("Managed vault schema check failed"), "{err}");
 
         // Schema-valid bodies still promote.
