@@ -2137,6 +2137,8 @@ mod tests {
 
     #[test]
     fn invalid_receipts_are_reported_and_left_in_place() {
+        use crate::atomic_file::phase08_06::Home;
+        let _home = Home::new();
         let tmp = tempfile::tempdir().unwrap();
         let receipt = write_receipt(tmp.path(), ID, "schemaVersion: nope\nid: x\n");
         let outcome = apply(&tmp);
@@ -2149,6 +2151,8 @@ mod tests {
 
     #[test]
     fn missing_shared_web_directory_is_an_empty_scan() {
+        use crate::atomic_file::phase08_06::Home;
+        let _home = Home::new();
         let tmp = tempfile::tempdir().unwrap();
         assert!(web_actions_scan(work_path(&tmp)).unwrap().is_empty());
         assert_eq!(apply(&tmp), WebActionsOutcome::default());
@@ -2158,6 +2162,8 @@ mod tests {
 
     #[test]
     fn repair_changes_only_the_blocked_linkage_and_preserves_note_bytes() {
+        use crate::atomic_file::phase08_06::Home;
+        let _home = Home::new();
         let note = "---\nstatus: active\ngoogleTaskListId: invalid-list\nowner: Luca # keep\n---\n# Keep this body byte-for-byte\n";
         let (tmp, _) = setup("upsert", "tasks/active/task.md", note);
         let original = blocked_web_upsert(&tmp);
@@ -2194,6 +2200,8 @@ mod tests {
 
     #[test]
     fn repair_is_an_idempotent_local_noop_after_the_linkage_is_fixed() {
+        use crate::atomic_file::phase08_06::Home;
+        let _home = Home::new();
         let (tmp, _) = setup(
             "upsert",
             "tasks/active/task.md",
@@ -2214,6 +2222,8 @@ mod tests {
 
     #[test]
     fn repair_refuses_stale_or_non_matching_guards_without_writing() {
+        use crate::atomic_file::phase08_06::Home;
+        let _home = Home::new();
         let (tmp, _) = setup(
             "upsert",
             "tasks/active/task.md",
@@ -2278,6 +2288,8 @@ mod tests {
 
     #[test]
     fn repair_refuses_missing_or_mismatched_receipt_and_provider_linked_note() {
+        use crate::atomic_file::phase08_06::Home;
+        let _home = Home::new();
         let (tmp, _) = setup(
             "upsert",
             "tasks/active/task.md",
@@ -2320,6 +2332,8 @@ mod tests {
 
     #[test]
     fn stale_blob_sha_marks_retry_needed_and_applies_nothing() {
+        use crate::atomic_file::phase08_06::Home;
+        let _home = Home::new();
         let (tmp, receipt) = setup(
             "complete",
             "tasks/active/task.md",
@@ -2360,6 +2374,8 @@ mod tests {
 
     #[test]
     fn missing_task_note_is_stale_not_fatal() {
+        use crate::atomic_file::phase08_06::Home;
+        let _home = Home::new();
         let (tmp, _) = setup(
             "complete",
             "tasks/active/task.md",
@@ -2378,6 +2394,8 @@ mod tests {
 
     #[test]
     fn complete_archives_the_note_queues_one_op_and_acknowledges_the_receipt() {
+        use crate::atomic_file::phase08_06::Home;
+        let _home = Home::new();
         // Deliberately a different day from NOW: the desktop must mirror the
         // web's recorded completion time, never restamp with its apply time.
         let (tmp, receipt) = setup(
@@ -2425,6 +2443,8 @@ mod tests {
 
     #[test]
     fn complete_falls_back_to_the_receipt_time_not_the_apply_time() {
+        use crate::atomic_file::phase08_06::Home;
+        let _home = Home::new();
         // Defensive: a web complete always writes the triple, but if the note
         // somehow lacks it the receipt's own timestamp is still closer to the
         // truth than the desktop's apply clock.
@@ -2445,6 +2465,8 @@ mod tests {
 
     #[test]
     fn a_completed_receipt_with_no_provider_id_is_still_acknowledged_durably() {
+        use crate::atomic_file::phase08_06::Home;
+        let _home = Home::new();
         // No googleTaskId means no outbox record, so the applied ledger is the
         // only thing that stops a replay from reporting the receipt stale
         // forever once its note has been archived.
@@ -2480,6 +2502,8 @@ mod tests {
 
     #[test]
     fn replaying_an_applied_receipt_is_a_no_op() {
+        use crate::atomic_file::phase08_06::Home;
+        let _home = Home::new();
         let (tmp, _) = setup(
             "complete",
             "tasks/active/task.md",
@@ -2513,6 +2537,8 @@ mod tests {
 
     #[test]
     fn upsert_queues_a_create_with_the_note_title_due_and_default_list() {
+        use crate::atomic_file::phase08_06::Home;
+        let _home = Home::new();
         let (tmp, receipt) = setup(
             "upsert",
             "tasks/active/task.md",
@@ -2541,6 +2567,8 @@ mod tests {
 
     #[test]
     fn upsert_prefers_the_notes_own_list_and_id_over_the_default() {
+        use crate::atomic_file::phase08_06::Home;
+        let _home = Home::new();
         let (tmp, _) = setup(
             "upsert",
             "tasks/active/task.md",
@@ -2558,6 +2586,8 @@ mod tests {
 
     #[test]
     fn upsert_without_a_configured_list_defers_to_the_outbox_fallback() {
+        use crate::atomic_file::phase08_06::Home;
+        let _home = Home::new();
         let (tmp, _) = setup(
             "upsert",
             "tasks/active/task.md",
@@ -2605,6 +2635,8 @@ mod tests {
 
     #[test]
     fn multiple_receipts_are_applied_in_deterministic_order() {
+        use crate::atomic_file::phase08_06::Home;
+        let _home = Home::new();
         let (tmp, _) = setup(
             "complete",
             "tasks/active/a.md",
@@ -2796,6 +2828,8 @@ mod tests {
 
     #[test]
     fn a_dry_run_reports_a_pending_import_without_writing_anything() {
+        use crate::atomic_file::phase08_06::Home;
+        let _home = Home::new();
         let tmp = setup_day(&["tasks/active/a.md"], &["tasks/active/b.md"], &[]);
         assert_eq!(preview(&tmp).changed, false);
 
@@ -2817,6 +2851,8 @@ mod tests {
 
     #[test]
     fn import_promotes_web_selection_and_preserves_the_other_lanes() {
+        use crate::atomic_file::phase08_06::Home;
+        let _home = Home::new();
         let tmp = setup_day(
             &["tasks/active/a.md"],
             &["tasks/active/b.md", "tasks/active/c.md"],
@@ -2871,6 +2907,8 @@ mod tests {
 
     #[test]
     fn journal_entries_that_are_not_paths_resolve_against_the_existing_plan() {
+        use crate::atomic_file::phase08_06::Home;
+        let _home = Home::new();
         // `journal_item_line` writes item_ref.id(), which for a capture-backed
         // item is an opaque id, not a note path. Requiring every entry to be a
         // path would silently drop those items out of Top on any import.
@@ -2909,6 +2947,8 @@ mod tests {
 
     #[test]
     fn import_clamps_to_the_lane_cap_and_drops_unknown_paths() {
+        use crate::atomic_file::phase08_06::Home;
+        let _home = Home::new();
         let tmp = setup_day(&["tasks/active/a.md"], &[], &[]);
         for name in ["b", "c", "d"] {
             fs::write(
@@ -2955,6 +2995,8 @@ mod tests {
     /// takes the entry the default dropped, and reports nothing truncated.
     #[test]
     fn import_fills_the_configured_lane_rather_than_the_default() {
+        use crate::atomic_file::phase08_06::Home;
+        let _home = Home::new();
         let tmp = setup_day(&["tasks/active/a.md"], &[], &[]);
         for name in ["b", "c", "d"] {
             fs::write(
@@ -2982,6 +3024,8 @@ mod tests {
     /// on every poll. Reporting 0 there would hide it permanently.
     #[test]
     fn import_reports_truncation_even_when_the_lane_is_already_current() {
+        use crate::atomic_file::phase08_06::Home;
+        let _home = Home::new();
         let tmp = setup_day(&["tasks/active/a.md"], &[], &[]);
         for name in ["b", "c"] {
             fs::write(
@@ -3012,6 +3056,8 @@ mod tests {
     /// `validate_plan` rejects.
     #[test]
     fn import_clamps_a_caller_supplied_lane_size_into_range() {
+        use crate::atomic_file::phase08_06::Home;
+        let _home = Home::new();
         let tmp = setup_day(&["tasks/active/a.md"], &[], &[]);
         for name in ["b", "c"] {
             fs::write(
@@ -3037,6 +3083,8 @@ mod tests {
 
     #[test]
     fn import_is_a_no_op_when_the_journal_already_matches() {
+        use crate::atomic_file::phase08_06::Home;
+        let _home = Home::new();
         let tmp = setup_day(&["tasks/active/a.md"], &["tasks/active/b.md"], &[]);
         let before =
             fs::read_to_string(tmp.path().join(format!(".maru/today/{DAY}.json"))).unwrap();
@@ -3051,6 +3099,8 @@ mod tests {
 
     #[test]
     fn import_merges_into_current_state_rather_than_restoring_a_stale_snapshot() {
+        use crate::atomic_file::phase08_06::Home;
+        let _home = Home::new();
         let tmp = setup_day(&["tasks/active/a.md"], &["tasks/active/b.md"], &[]);
         // Maru edits the day locally first...
         let snapshot = crate::today_store::load_snapshot(tmp.path(), DAY).unwrap();
@@ -3089,6 +3139,8 @@ mod tests {
 
     #[test]
     fn a_local_mutation_reprojects_the_journal_so_an_unimported_web_edit_loses() {
+        use crate::atomic_file::phase08_06::Home;
+        let _home = Home::new();
         // The journal is Maru's one-way projection: any mutation of a planned
         // day rewrites the whole managed block. A web Top edit that is not
         // imported before the next local mutation is therefore lost — cleanly,
@@ -3150,6 +3202,8 @@ mod tests {
 
     #[test]
     fn import_skips_without_a_journal_snapshot_or_top_section() {
+        use crate::atomic_file::phase08_06::Home;
+        let _home = Home::new();
         // No journal at all.
         let tmp = tempfile::tempdir().unwrap();
         assert_eq!(import(&tmp).reason.as_deref(), Some("journal_missing"));
