@@ -77,7 +77,7 @@ def build_prompt_graph(virtual_vault: Path) -> dict:
     _enrich_prompt_timestamps(Path(virtual_vault), G)
     communities: dict[int, list[str]] = BG.detect_communities(G, exclude_hubs=False)
     god_nodes = BG.find_god_nodes(G, top_n=20)
-    surprising = BG.find_surprising_connections(G, communities, top_n=15)
+    surprising, _surprising_total = BG.find_surprising_connections(G, communities, top_n=15)
     stats = BG.compute_community_stats(G, communities)
     return {
         "graph": G,
