@@ -200,6 +200,20 @@ fn expand_tilde(value: &str) -> String {
     value.to_string()
 }
 
+/// Expand every `:`-separated segment of an env value with `expand_tilde`.
+/// Env values such as PATH are colon-joined path lists; a leading-only
+/// expansion leaves later tildes literal and they land in the plist as-is.
+/// Segment-wise expansion is safe for non-path values: `expand_tilde` only
+/// rewrites a segment that is exactly `~` or starts with `~/`, so URLs
+/// (`https://host/x`) and times (`12:30`) pass through byte-identical.
+fn expand_tilde_segments(value: &str) -> String {
+    value
+        .split(':')
+        .map(expand_tilde)
+        .collect::<Vec<_>>()
+        .join(":")
+}
+
 /// Resolve a job-declared path: expand `~`, then anchor relative paths at the
 /// workspace root.
 fn resolve_job_path(work_path: &Path, value: &str) -> String {
@@ -274,7 +288,7 @@ pub fn plist_for(job: &JobRecord, work_path: &Path) -> Result<String, String> {
         environment.push_str(&format!(
             "      <key>{}</key>\n      <string>{}</string>\n",
             xml_escape(key),
-            xml_escape(&expand_tilde(value))
+            xml_escape(&expand_tilde_segments(value))
         ));
     }
     environment.push_str(&format!(
@@ -1047,6 +1061,65 @@ mod tests {
         assert!(xml.contains("<key>Minute</key>\n    <integer>30</integer>"));
         assert!(xml.contains("<key>StartInterval</key>\n  <integer>900</integer>"));
         assert!(xml.contains("<key>RunAtLoad</key>\n  <false/>"));
+    }
+
+    #[test]
+    fn env_value_expands_every_tilde_segment() {
+        let _home = Home::new();
+        let home = crate::skill_host::fs::install_root_base()
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
+
+        // Regression: a two-tilde PATH must expand both segments.
+        assert_eq!(
+            expand_tilde_segments("~/a:~/b:/usr/bin"),
+            format!("{home}/a:{home}/b:/usr/bin")
+        );
+        // No tilde anywhere → byte-identical.
+        assert_eq!(
+            expand_tilde_segments("/usr/bin:/opt/homebrew/bin"),
+            "/usr/bin:/opt/homebrew/bin"
+        );
+        // Single path without ':' behaves as before.
+        assert_eq!(
+            expand_tilde_segments("~/bin/tools"),
+            format!("{home}/bin/tools")
+        );
+        // URLs and times contain ':' but no tilde segments → byte-identical.
+        assert_eq!(
+            expand_tilde_segments("https://example.com/x"),
+            "https://example.com/x"
+        );
+        assert_eq!(expand_tilde_segments("12:30"), "12:30");
+        // A bare `~` segment expands to the home dir.
+        assert_eq!(
+            expand_tilde_segments("~:/usr/bin"),
+            format!("{home}:/usr/bin")
+        );
+    }
+
+    #[test]
+    fn plist_env_expands_colon_separated_tildes() {
+        let _home = Home::new();
+        let dir = tempfile::tempdir().unwrap();
+        let work = dir.path().join("work");
+        fs::create_dir_all(&work).unwrap();
+        let mut job = sample_job();
+        job.program.env.insert(
+            "PATH".to_string(),
+            "~/.local/bin:~/.local/share/fnm/aliases/default/bin:/opt/homebrew/bin".to_string(),
+        );
+
+        let xml = plist_for(&job, &work).unwrap();
+        let home = crate::skill_host::fs::install_root_base()
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
+        assert!(xml.contains(&format!(
+            "<string>{home}/.local/bin:{home}/.local/share/fnm/aliases/default/bin:/opt/homebrew/bin</string>"
+        )));
+        assert!(!xml.contains("~/"), "no literal ~ in env values: {xml}");
     }
 
     #[test]
