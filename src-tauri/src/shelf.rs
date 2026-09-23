@@ -238,6 +238,7 @@ pub fn save_memo_as(
             .map_err(|err| err.to_string())?
             .join(&path)
     };
+    let gate_target = admission_path.to_string_lossy().to_string();
     let request = PathTransactionRequest::new(vec![admission_path])?
         .require_parent(Path::new(&vault_path))?
         .with_workspace_registry()?;
@@ -247,6 +248,7 @@ pub fn save_memo_as(
         lease.before_effect()?;
         assert_scratchpad_workspace_access(Path::new(&vault_path))?;
         assert_maru_can_write(&vault_path, WorkspaceWriteAction::Create)?;
+        crate::vault_guard::validate_managed_write(&vault_path, &gate_target, &content)?;
         if path.is_dir() {
             return Err("Memo target is a directory".to_string());
         }
@@ -701,6 +703,43 @@ mod tests {
         .unwrap_err();
         assert!(export_error.contains("memo_conflict"));
         assert_eq!(fs::read_to_string(export).unwrap(), "keep");
+    }
+
+    #[test]
+    fn save_memo_as_into_managed_vault_note_requires_valid_schema() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
+        let tmp = TempDir::new().unwrap();
+        crate::scratchpad::phase08_08::registry(tmp.path(), "managed");
+        let work = tmp.path().to_string_lossy().to_string();
+        fs::create_dir_all(tmp.path().join("notes")).unwrap();
+
+        let target = tmp.path().join("notes/memo.md");
+        let err = save_memo_as(
+            Some(work.clone()),
+            target.to_string_lossy().to_string(),
+            "no frontmatter".to_string(),
+        )
+        .unwrap_err();
+        assert!(err.contains("Managed vault schema check failed"), "{err}");
+        assert!(!target.exists());
+
+        let valid = "---\ndescription: 저장된 관리형 메모\ntype: insight\ndomain: operations\ntopics:\n  - \"[[operations]]\"\n---\n# Memo\n";
+        let doc = save_memo_as(
+            Some(work.clone()),
+            target.to_string_lossy().to_string(),
+            valid.to_string(),
+        )
+        .unwrap();
+        assert_eq!(doc.content, valid);
+
+        // Targets outside notes/ stay ungated in a managed vault.
+        let outside = tmp.path().join("exports/memo.md");
+        save_memo_as(
+            Some(work),
+            outside.to_string_lossy().to_string(),
+            "no frontmatter".to_string(),
+        )
+        .unwrap();
     }
 
     #[test]

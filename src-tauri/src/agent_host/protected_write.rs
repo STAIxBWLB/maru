@@ -5,6 +5,7 @@ use std::path::Path;
 
 use crate::agent_host::contracts::PROTECTED_WRITE_CLAIM_SCHEMA_VERSION;
 use crate::vault::resolve_inside_vault;
+use crate::vault_guard::validate_managed_write;
 use crate::vault_list::{assert_maru_can_write, WorkspaceWriteAction};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -83,17 +84,15 @@ pub fn apply_protected_write_claim(
             if exists {
                 return Err("write_conflict: target_exists".to_string());
             }
-            write_content(
-                &target,
-                content.ok_or_else(|| "write_content_required".to_string())?,
-            )?;
+            let next = content.ok_or_else(|| "write_content_required".to_string())?;
+            validate_managed_write(cwd, &target.to_string_lossy(), next)?;
+            write_content(&target, next)?;
         }
         "replace" => {
             assert_maru_can_write(cwd, WorkspaceWriteAction::Modify)?;
-            write_content(
-                &target,
-                content.ok_or_else(|| "write_content_required".to_string())?,
-            )?;
+            let next = content.ok_or_else(|| "write_content_required".to_string())?;
+            validate_managed_write(cwd, &target.to_string_lossy(), next)?;
+            write_content(&target, next)?;
         }
         "append" => {
             assert_maru_can_write(cwd, WorkspaceWriteAction::Modify)?;
@@ -104,6 +103,7 @@ pub fn apply_protected_write_claim(
             };
             let mut next = existing;
             next.push_str(content.ok_or_else(|| "write_content_required".to_string())?);
+            validate_managed_write(cwd, &target.to_string_lossy(), &next)?;
             write_content(&target, &next)?;
         }
         "delete" => {
@@ -199,5 +199,50 @@ mod tests {
                 .unwrap();
         assert!(outcome.committed_hash.is_some());
         assert_eq!(fs::read_to_string(path).unwrap(), "new");
+    }
+
+    #[test]
+    fn protected_write_into_managed_vault_note_requires_valid_schema() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
+        let tmp = TempDir::new().unwrap();
+        crate::scratchpad::phase08_08::registry(tmp.path(), "managed");
+        let cwd = tmp.path().to_string_lossy().to_string();
+        let claim = |path: String| ProtectedWriteClaim {
+            path,
+            expected_hash: None,
+            operation: "create".to_string(),
+            actor: "test".to_string(),
+            reason: "unit".to_string(),
+            schema_version: PROTECTED_WRITE_CLAIM_SCHEMA_VERSION.to_string(),
+        };
+
+        let err = apply_protected_write_claim(
+            &cwd,
+            &claim("notes/x.md".to_string()),
+            Some("no frontmatter"),
+        )
+        .unwrap_err();
+        assert!(err.contains("Managed vault schema check failed"), "{err}");
+        assert!(!tmp.path().join("notes/x.md").exists());
+
+        // Absolute claim paths still hit the gate. resolve_inside_vault works
+        // against the canonical vault root, so build the path from it.
+        let abs = tmp
+            .path()
+            .canonicalize()
+            .unwrap()
+            .join("notes/abs.md")
+            .to_string_lossy()
+            .to_string();
+        let err = apply_protected_write_claim(&cwd, &claim(abs), Some("no frontmatter"))
+            .unwrap_err();
+        assert!(err.contains("Managed vault schema check failed"), "{err}");
+
+        // Valid notes still write; non-note paths stay ungated.
+        let valid = "---\ndescription: 보호된 쓰기 노트\ntype: insight\ndomain: operations\ntopics:\n  - \"[[operations]]\"\n---\n# Body\n";
+        apply_protected_write_claim(&cwd, &claim("notes/ok.md".to_string()), Some(valid))
+            .unwrap();
+        apply_protected_write_claim(&cwd, &claim("inbox/x.md".to_string()), Some("junk"))
+            .unwrap();
     }
 }
