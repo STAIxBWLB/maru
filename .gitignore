@@ -71,9 +71,8 @@ skills/**/.pytest_cache/
 # GSD research tooling cache (not an artifact)
 .planning/research/.cache/
 
-# Session artifacts and one-off verification scripts (not tracked)
+# Session artifacts (not tracked)
 artifacts/
-scripts/check-csp-blob.mjs
 
 # === Agent tool state ===
 .claude/
