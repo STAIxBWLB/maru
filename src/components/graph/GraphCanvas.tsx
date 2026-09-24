@@ -96,6 +96,13 @@ type SigmaEdgeAttributes = {
 
 type GraphInstance = MultiDirectedGraph<SigmaNodeAttributes, SigmaEdgeAttributes>;
 
+type CameraState = ReturnType<ReturnType<Sigma["getCamera"]>["getState"]>;
+
+export interface GraphCameraSnapshot {
+  camera: CameraState;
+  bbox: { x: [number, number]; y: [number, number] } | null;
+}
+
 interface GraphCanvasProps {
   nodes: GraphNode[];
   edges: GraphEdge[];
@@ -142,6 +149,12 @@ interface GraphCanvasProps {
     nonce: number;
   } | null;
   overlay?: ReactNode;
+  /** Surface hidden (#327): stop the layout worker now; positions are kept. */
+  paused?: boolean;
+  /** Owned by GraphView so camera framing survives a suspend/remount cycle. */
+  cameraStateRef?: RefObject<GraphCameraSnapshot | null>;
+  /** Owned by GraphView so a remount with unchanged topology skips the layout rerun. */
+  topologySignatureRef?: RefObject<string | null>;
 }
 
 type InteractionState = {
@@ -565,6 +578,9 @@ export function GraphCanvas({
   exportControllerRef,
   referenceFocus = null,
   overlay,
+  paused = false,
+  cameraStateRef,
+  topologySignatureRef,
 }: GraphCanvasProps) {
   const { t } = useTranslation();
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -610,7 +626,9 @@ export function GraphCanvas({
   // Node/edge-count signature of the last built graph — lets a rebuild whose
   // topology is unchanged (e.g. a metadata-only re-scan or the enrichment swap)
   // reuse the cached positions instead of re-annealing the whole layout.
-  const prevTopoSigRef = useRef<string | null>(null);
+  const localTopoSigRef = useRef<string | null>(null);
+  const prevTopoSigRef = topologySignatureRef ?? localTopoSigRef;
+  const stopLayoutRef = useRef<(() => void) | null>(null);
   // Set when a layout run was triggered by a topology change (new source /
   // vault): fit the camera to the settled result, once.
   const fitOnSettleRef = useRef(false);
@@ -1160,6 +1178,14 @@ export function GraphCanvas({
         }
       };
       startLayoutRef.current = startLayout;
+      // Hidden surface: halt the FA2 worker at once and keep the current
+      // positions; nothing restarts until an explicit trigger.
+      stopLayoutRef.current = () => {
+        if (!layoutRef.current) return;
+        stopLayout();
+        snapshotPositions();
+        applyRendererState("ready");
+      };
       // Dev-only e2e bridge (see graphBridge.ts) — real-Sigma observability
       // instead of the old fake DOM overlay. Nothing here ships in prod builds.
       let bridgeFrameCount = 0;
@@ -1340,11 +1366,13 @@ export function GraphCanvas({
       };
       mouse.on("mousedown", markManualCamera);
       mouse.on("wheel", markManualCamera);
+      let restoredCamera = false;
       renderer.once("afterRender", () => {
         applyRendererState(layoutRef.current ? "layout-running" : "ready");
-        // First render after creation: fit the finite visible bounds once.
+        // First render after creation: fit the finite visible bounds once,
+        // unless a snapshot from before a suspend was restored.
         const centered = centerNode(centerSignalRef.current);
-        if (!manualCameraRef.current && !centered) fitToVisible(false);
+        if (!manualCameraRef.current && !centered && !restoredCamera) fitToVisible(false);
       });
       // Re-run the force layout only when node ids or edge topology changed.
       // Metadata-only rescans and enrichment swaps keep the viewport stable.
@@ -1355,6 +1383,12 @@ export function GraphCanvas({
       if (prevTopoSigRef.current === topoSig && positionsValid) {
         snapshotPositions();
         applyRendererState("ready");
+        const snapshot = cameraStateRef?.current;
+        if (snapshot) {
+          if (snapshot.bbox) renderer.setCustomBBox(snapshot.bbox);
+          renderer.getCamera().setState(snapshot.camera);
+          restoredCamera = true;
+        }
         const signal = centerSignalRef.current;
         if (centerNode(signal) && signal) {
           const guard = { id: signal.id, nonce: signal.nonce, renderer };
@@ -1388,8 +1422,15 @@ export function GraphCanvas({
           canvas.removeEventListener("webglcontextrestored", onContextRestored);
         });
         startLayoutRef.current = null;
+        stopLayoutRef.current = null;
         fitToVisibleRef.current = null;
         stopLayout();
+        if (cameraStateRef) {
+          cameraStateRef.current = {
+            camera: renderer.getCamera().getState(),
+            bbox: renderer.getCustomBBox(),
+          };
+        }
         mouse.off("mousemovebody", onMove);
         mouse.off("mouseup", onUp);
         mouse.off("mousedown", markManualCamera);
@@ -1436,6 +1477,10 @@ export function GraphCanvas({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [nodes, edges, enriched, positionsRef, positionNodeIdsRef, seedPositions, exportControllerRef, themeEpoch, rendererEpoch]);
+
+  useEffect(() => {
+    if (paused) stopLayoutRef.current?.();
+  }, [paused]);
 
   // WebGL failure must not silently disable export. The fallback exporter
   // uses the same visibility masks and effective display settings as the

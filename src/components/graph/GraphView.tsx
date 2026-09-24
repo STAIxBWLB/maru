@@ -28,6 +28,11 @@ import {
   type GraphNode,
 } from "../../lib/graph/model";
 import { applyGraphSearch, deriveGraphView } from "../../lib/graph/derive";
+import {
+  graphSuspendGraceMs,
+  useGraphSurfaceVisible,
+  useSuspendedAfter,
+} from "../../lib/graphSurfaceVisibility";
 import { isFinitePositions, sanitizePositions } from "../../lib/graph/positions";
 import { shortestPath } from "../../lib/graph/insights";
 import { rankGraphSearch } from "../../lib/graph/search";
@@ -66,6 +71,7 @@ import { buildEntryIndex } from "../../lib/wikilinkSuggestions";
 import { DecisionChainLanes } from "./DecisionChainLanes";
 import {
   GraphCanvas,
+  type GraphCameraSnapshot,
   type GraphExportController,
   type GraphHighlight,
   type GraphRendererState,
@@ -394,10 +400,27 @@ export function GraphView({
     return () => cancelAnimationFrame(frame);
   }, [searchOpen]);
 
-  const index = useMemo(() => buildEntryIndex(entries), [entries]);
+  // Surface lifecycle (#327): while the hosting surface is hidden the graph
+  // keeps the last visible entry set, so model derivation and the enrichment
+  // overlay do not rerun for edits made while hidden; the latest entries flow
+  // through once on reveal. After the grace period the WebGL canvas (Sigma,
+  // FA2 worker) is released; GraphView state and cached positions survive so
+  // the remount reconstructs without a layout rerun. Camera state is snapshot
+  // by GraphCanvas into `cameraStateRef` and restored on remount.
+  const visible = useGraphSurfaceVisible();
+  const [graphEntries, setGraphEntries] = useState(entries);
+  useEffect(() => {
+    if (visible) setGraphEntries(entries);
+  }, [visible, entries]);
+  const suspendGraceMs = useMemo(graphSuspendGraceMs, []);
+  const canvasSuspended = useSuspendedAfter(!visible, suspendGraceMs);
+  const cameraStateRef = useRef<GraphCameraSnapshot | null>(null);
+  const topologySignatureRef = useRef<string | null>(null);
+
+  const index = useMemo(() => buildEntryIndex(graphEntries), [graphEntries]);
   const liveModel = useMemo(
-    () => buildVaultGraph(entries, index, knowledgeRootFor(source)),
-    [entries, index, source],
+    () => buildVaultGraph(graphEntries, index, knowledgeRootFor(source)),
+    [graphEntries, index, source],
   );
   const overlayRequestRef = useRef(0);
 
@@ -1247,7 +1270,12 @@ export function GraphView({
       ) : (
         <div className="graph-body" ref={bodyRef}>
           <div className="graph-canvas-column">
-            {layoutCacheReady ? <GraphCanvas
+            {layoutCacheReady && canvasSuspended ? (
+              <div className="graph-canvas-wrap graph-canvas-suspended" data-testid="graph-canvas-suspended" />
+            ) : layoutCacheReady ? <GraphCanvas
+              paused={!visible}
+              cameraStateRef={cameraStateRef}
+              topologySignatureRef={topologySignatureRef}
               nodes={model.nodes}
               edges={model.edges}
               positionsRef={latestPositionsRef}
