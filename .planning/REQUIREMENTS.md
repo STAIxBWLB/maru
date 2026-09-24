@@ -98,7 +98,7 @@ nothing in the existing suite would notice.
 
 ### Security
 
-- [ ] **SEC-01**: `script-src 'self' blob:` is dropped from the CSP if the Vite
+- [x] **SEC-01**: `script-src 'self' blob:` is dropped from the CSP if the Vite
   production build no longer requires it, verified against a packaged build
   rather than a dev server, since this class of removal can pass in development
   and fail only in the shipped bundle.
@@ -194,7 +194,7 @@ Deferred. Acknowledged but not in this roadmap.
 | REL-02 | Phase 9 | Pending |
 | REL-03 | Phase 9 | Pending |
 | REL-04 | Phase 9 | Pending |
-| SEC-01 | Phase 10 | Pending |
+| SEC-01 | Phase 10 | Complete |
 | SEC-02 | Phase 7 | Complete |
 | SEC-03 | Phase 11 | Pending |
 | TEST-01 | Phase 6 | Complete |
