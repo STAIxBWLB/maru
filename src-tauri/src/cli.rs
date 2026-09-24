@@ -26,6 +26,7 @@ pub fn run_cli(args: Vec<String>) -> i32 {
         "secrets" => run_secrets(&args[1..]),
         "skills" => run_skills(&args[1..]),
         "jobs" => run_jobs(&args[1..]),
+        "calendar-sync" => crate::calendar_sync::run_calendar_sync(&args[1..]),
         "terminal-hook" => crate::terminal_hooks::run_terminal_hook(&args[1..]),
         other => {
             eprintln!("unknown command: {other}");
@@ -965,7 +966,7 @@ fn secrets_usage() -> &'static str {
 }
 
 fn usage() -> &'static str {
-    "usage: maru [--version] [--help] <command>\n\ncommands:\n  doctor [--json] [--quiet]\n  secrets scan [--json]\n  secrets doctor [--json] [--quiet]\n  secrets migrate --dry-run|--apply [--select <relpath>] [--json]\n  skills sync --check|--apply --tools claude,codex [--json]\n  skills update --check|--apply [--repair-env] [--json]\n  skills dirty [--json]\n  skills reconcile <name-or-id> (--accept|--discard) [--message <m>] [--dry-run]\n  skills import <source-path> [--name <name>] [--copy|--link]\n  skills import-unmanage <name> [--delete-files]\n  jobs list|status [<id>] [--json]\n  jobs install|uninstall|start|stop|run [<id>] [--json]"
+    "usage: maru [--version] [--help] <command>\n\ncommands:\n  doctor [--json] [--quiet]\n  secrets scan [--json]\n  secrets doctor [--json] [--quiet]\n  secrets migrate --dry-run|--apply [--select <relpath>] [--json]\n  skills sync --check|--apply --tools claude,codex [--json]\n  skills update --check|--apply [--repair-env] [--json]\n  skills dirty [--json]\n  skills reconcile <name-or-id> (--accept|--discard) [--message <m>] [--dry-run]\n  skills import <source-path> [--name <name>] [--copy|--link]\n  skills import-unmanage <name> [--delete-files]\n  jobs list|status [<id>] [--json]\n  jobs install|uninstall|start|stop|run [<id>] [--json]\n  calendar-sync [--work <path>] [--destination <key-or-id>] [--gws <path>] [--dry-run] [--json]"
 }
 
 #[cfg(test)]

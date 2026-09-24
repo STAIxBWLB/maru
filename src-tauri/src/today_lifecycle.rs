@@ -75,6 +75,8 @@ pub(crate) fn prepare_complete_op(
             payload: None,
             status: OutboxStatus::Prepared,
             web_action_id,
+            calendar_id: None,
+            calendar: None,
         },
         now_iso,
     )
@@ -177,6 +179,8 @@ fn run_complete(
                 payload: None,
                 status: OutboxStatus::Prepared,
                 web_action_id: request.web_action_id.clone(),
+                calendar_id: None,
+                calendar: None,
             },
             &ctx.now_iso,
         )?),
@@ -267,6 +271,8 @@ fn run_reopen(
                     payload: None,
                     status: OutboxStatus::Prepared,
                     web_action_id: None,
+                    calendar_id: None,
+                    calendar: None,
                 },
                 &ctx.now_iso,
             )?)
@@ -739,6 +745,8 @@ pub(crate) fn task_trash_in_transaction(
                     payload: None,
                     status: OutboxStatus::Ready,
                     web_action_id: None,
+                    calendar_id: None,
+                    calendar: None,
                 },
                 &ctx.now_iso,
             )?;

@@ -8,6 +8,7 @@ mod atomic_file;
 mod binary_viewer;
 mod browser_passkeys;
 mod calendar_search;
+mod calendar_sync;
 mod cli;
 mod cli_path;
 mod command_output;
@@ -341,6 +342,7 @@ pub fn run() {
             today_calendar::ipc::today_calendar_commitments,
             today_calendar::ipc::task_calendar_set_sync,
             today_calendar::ipc::today_calendar_publish,
+            calendar_sync::ipc::calendar_sync_run,
             // Web action receipts (maru.web-task-action.v1)
             web_actions::ipc::web_actions_scan,
             web_actions::ipc::web_actions_apply,

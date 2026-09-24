@@ -3536,6 +3536,8 @@ mod phase08_11 {
                             payload: None,
                             status: crate::today_outbox::OutboxStatus::Syncing,
                             web_action_id: None,
+                            calendar_id: None,
+                            calendar: None,
                         },
                         "2026-07-21T09:00:00+09:00",
                     )

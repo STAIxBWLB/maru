@@ -327,7 +327,13 @@ export interface TaskTrashOutcome {
   trashedPath: string;
 }
 
-export type OutboxOp = "complete" | "reopen" | "delete" | "upsert";
+export type OutboxOp =
+  | "complete"
+  | "reopen"
+  | "delete"
+  | "upsert"
+  | "calendarUpsert"
+  | "calendarDelete";
 
 export type OutboxStatus =
   | "prepared"
@@ -423,6 +429,40 @@ export interface CalendarPublishOutcome {
    *  items are untouched so the user can re-authenticate and republish. */
   blocked: boolean;
   snapshot: TodaySnapshot;
+}
+
+export type CalendarSyncAction =
+  | "insert"
+  | "patch"
+  | "delete"
+  | "adopt"
+  | "skipForeign"
+  | "pending";
+
+export interface CalendarSyncChange {
+  relPath: string;
+  action: CalendarSyncAction;
+  eventId?: string | null;
+}
+
+/** One `calendar_sync_run` (issue #316): timed notes reconciled one-way to
+ *  the configured calendar. Planned ops are enqueued into the Google outbox
+ *  and drained in the same run; `drained/failed/blocked` are the drain totals. */
+export interface CalendarSyncOutcome {
+  destination: string;
+  dryRun: boolean;
+  scanned: number;
+  inserts: number;
+  patches: number;
+  deletes: number;
+  adopted: number;
+  unchanged: number;
+  skippedForeign: number;
+  pending: number;
+  drained: number;
+  failed: number;
+  blocked: number;
+  changes: CalendarSyncChange[];
 }
 
 // --- Commands --------------------------------------------------------------
@@ -680,6 +720,26 @@ export async function todayCalendarPublish(
     destination: destination ?? null,
     gwsPath: gwsPath ?? null,
     nowIso: nowIso ?? new Date().toISOString(),
+  });
+}
+
+/** Reconcile every timed note under tasks/ and calendar/ with the destination
+ *  calendar (config default unless `destination` names a config key or id),
+ *  then drain the outbox. Same entry point as the daily `maru calendar-sync`
+ *  job. `dryRun` only reports the plan. */
+export async function calendarSyncRun(
+  workPath: string,
+  destination?: string | null,
+  gwsPath?: string | null,
+  dryRun = false,
+  nowIso?: string,
+): Promise<CalendarSyncOutcome> {
+  return todayInvoke<CalendarSyncOutcome>("calendar_sync_run", {
+    workPath,
+    destination: destination ?? null,
+    gwsPath: gwsPath ?? null,
+    nowIso: nowIso ?? new Date().toISOString(),
+    dryRun,
   });
 }
 

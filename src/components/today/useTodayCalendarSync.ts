@@ -1,6 +1,6 @@
 import { useCallback, useState } from "react";
-import type { DailyPlanItem } from "../../lib/today";
-import { isTodayConflict, todayCalendarPublish } from "../../lib/today";
+import type { CalendarSyncOutcome, DailyPlanItem } from "../../lib/today";
+import { calendarSyncRun, isTodayConflict, todayCalendarPublish } from "../../lib/today";
 import { useToday } from "./todayContext";
 
 export type TodayCalendarNotice = "conflict" | "error" | "calendarBlocked" | null;
@@ -10,6 +10,8 @@ export function useTodayCalendarSync() {
     useToday();
   const [publishing, setPublishing] = useState(false);
   const [notice, setNotice] = useState<TodayCalendarNotice>(null);
+  const [syncing, setSyncing] = useState(false);
+  const [lastSync, setLastSync] = useState<CalendarSyncOutcome | null>(null);
 
   const resolvedDestination = useCallback((): string | null => {
     const configured = settings.calendarDestination?.trim() ?? "";
@@ -61,6 +63,24 @@ export function useTodayCalendarSync() {
     [gwsBinary, publishing, reload, resolvedDestination, snapshot, workPath],
   );
 
+  /** Manual trigger of the note → calendar reconcile; the daily job runs the
+   *  same Rust entry point. */
+  const syncNotes = useCallback(async () => {
+    if (!workPath || syncing) return;
+    setSyncing(true);
+    setNotice(null);
+    try {
+      const outcome = await calendarSyncRun(workPath, resolvedDestination(), gwsBinary ?? null);
+      setLastSync(outcome);
+      setNotice(outcome.blocked > 0 ? "calendarBlocked" : null);
+      await reload();
+    } catch {
+      setNotice("error");
+    } finally {
+      setSyncing(false);
+    }
+  }, [gwsBinary, reload, resolvedDestination, syncing, workPath]);
+
   const retryItem = useCallback(
     async (item: DailyPlanItem) => {
       const next = await setSelected(item, true);
@@ -76,5 +96,8 @@ export function useTodayCalendarSync() {
     publishSelected,
     retryItem,
     setSelected,
+    syncing,
+    lastSync,
+    syncNotes,
   };
 }
