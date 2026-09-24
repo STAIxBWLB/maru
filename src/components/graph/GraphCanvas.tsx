@@ -629,6 +629,9 @@ export function GraphCanvas({
   const localTopoSigRef = useRef<string | null>(null);
   const prevTopoSigRef = topologySignatureRef ?? localTopoSigRef;
   const stopLayoutRef = useRef<(() => void) | null>(null);
+  // Teardown reads this instead of the stale closed-over `paused` prop.
+  const pausedRef = useRef(paused);
+  pausedRef.current = paused;
   // Set when a layout run was triggered by a topology change (new source /
   // vault): fit the camera to the settled result, once.
   const fitOnSettleRef = useRef(false);
@@ -1384,6 +1387,7 @@ export function GraphCanvas({
         snapshotPositions();
         applyRendererState("ready");
         const snapshot = cameraStateRef?.current;
+        if (cameraStateRef) cameraStateRef.current = null;
         if (snapshot) {
           if (snapshot.bbox) renderer.setCustomBBox(snapshot.bbox);
           renderer.getCamera().setState(snapshot.camera);
@@ -1425,7 +1429,10 @@ export function GraphCanvas({
         stopLayoutRef.current = null;
         fitToVisibleRef.current = null;
         stopLayout();
-        if (cameraStateRef) {
+        // Only a teardown of a hidden surface is a suspend worth resuming
+        // from: a visible rebuild (theme/enrichment epoch) must reset the
+        // camera so manual framing is not silently replayed.
+        if (cameraStateRef && pausedRef.current) {
           cameraStateRef.current = {
             camera: renderer.getCamera().getState(),
             bbox: renderer.getCustomBBox(),
