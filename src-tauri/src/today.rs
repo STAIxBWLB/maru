@@ -118,8 +118,9 @@ pub struct CalendarSyncState {
     /// Provider event id returned by a successful publish.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub event_id: Option<String>,
-    /// Destination calendar id captured at selection time (publish falls back
-    /// to the command-level destination, then `primary`).
+    /// Destination calendar (config key or id) captured at selection time;
+    /// publish falls back to the command-level destination, then the
+    /// configured default calendar. Never a hardcoded calendar.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub destination: Option<String>,
 }

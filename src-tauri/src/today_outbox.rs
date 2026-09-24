@@ -1,4 +1,4 @@
-// Maru Today — Google Tasks integration outbox.
+// Maru Today — Google Tasks + Google Calendar integration outbox.
 //
 // Every provider mutation is first recorded durably as JSON in
 // `<work>/.maru/today/outbox/<id>.json`, then drained by shelling out to the
@@ -17,6 +17,13 @@
 // - `retryNeeded`: retried once `nextRetryAt <= now` on the backoff schedule
 //   1, 5, 15, 60 minutes, then hourly.
 // - `authBlocked`: skipped by drain until `task_integrations_retry` requeues.
+//
+// Calendar ops (`calendarUpsert` / `calendarDelete`, enqueued by
+// `calendar_sync.rs`) ride the same records: `google_task_id` holds the
+// provider EVENT id, `calendar_id` the destination calendar and `calendar`
+// the event body. Insert → id persisted on the record → `calendarEventId`
+// written back to the note → ledger updated → `synced`, so a crash anywhere
+// in that chain retries as a patch instead of a second insert.
 
 use crate::atomic_file::{
     with_path_transactions, write_atomic, PathTransactionLease, PathTransactionParent,
@@ -68,6 +75,36 @@ pub enum OutboxOp {
     /// Unlike the other ops it carries a `payload` and, on creation, writes
     /// the returned id back into the note's frontmatter.
     Upsert,
+    /// Create-or-update the Google Calendar event mirroring a timed note
+    /// (`calendar_sync.rs`). `google_task_id` is the event id; empty = insert.
+    CalendarUpsert,
+    /// Delete the Google Calendar event of a note whose times were removed,
+    /// or that was deleted/cancelled; clears the note backref on success.
+    CalendarDelete,
+}
+
+impl OutboxOp {
+    /// Ops that create a provider object when the record has no id yet, and
+    /// therefore persist the returned id before anything else.
+    pub(crate) fn creates_remote(self) -> bool {
+        matches!(self, OutboxOp::Upsert | OutboxOp::CalendarUpsert)
+    }
+
+    pub(crate) fn is_calendar(self) -> bool {
+        matches!(self, OutboxOp::CalendarUpsert | OutboxOp::CalendarDelete)
+    }
+}
+
+/// Calendar event body for a `CalendarUpsert`, snapshotted from the note when
+/// the record is enqueued. Also the reconcile fingerprint: a note whose
+/// payload equals the ledger's is unchanged.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct CalendarPayload {
+    pub summary: String,
+    pub start_iso: String,
+    pub end_iso: String,
+    pub time_zone: String,
 }
 
 /// Provider-task fields for an `Upsert`, snapshotted from the note when the
@@ -107,6 +144,12 @@ pub struct OutboxRecord {
     /// `Upsert` only: the fields to send to the provider.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub payload: Option<UpsertPayload>,
+    /// Calendar ops only: destination calendar id.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub calendar_id: Option<String>,
+    /// `CalendarUpsert` only: the event body to send.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub calendar: Option<CalendarPayload>,
     pub status: OutboxStatus,
     /// Id of the `maru.web-task-action.v1` receipt this record was created
     /// from (`web_actions.rs`). Present only for web-originated ops; it is
@@ -288,6 +331,8 @@ pub(crate) struct OutboxRecordDraft {
     pub payload: Option<UpsertPayload>,
     pub status: OutboxStatus,
     pub web_action_id: Option<String>,
+    pub calendar_id: Option<String>,
+    pub calendar: Option<CalendarPayload>,
 }
 
 /// Persist a new outbox record. Written BEFORE the local mutation when
@@ -320,6 +365,8 @@ pub(crate) fn enqueue_record_in_transaction(
         payload,
         status,
         web_action_id,
+        calendar_id,
+        calendar,
     } = draft;
     let stamp = now_iso.replace(|c: char| !c.is_ascii_alphanumeric(), "");
     let unique = &uuid::Uuid::new_v4().simple().to_string()[..8];
@@ -330,6 +377,8 @@ pub(crate) fn enqueue_record_in_transaction(
         google_task_id,
         google_task_list_id,
         payload,
+        calendar_id,
+        calendar,
         status,
         web_action_id,
         attempts: 0,
@@ -498,7 +547,9 @@ fn local_mutation_landed(work: &Path, record: &OutboxRecord) -> bool {
         // Upsert records are enqueued `ready` (the web already committed the
         // note), so they never reach recovery as `prepared`; the note simply
         // has to still be there for the op to mean anything.
-        OutboxOp::Upsert => work.join(&record.task_path).exists(),
+        OutboxOp::Upsert | OutboxOp::CalendarUpsert => work.join(&record.task_path).exists(),
+        // A delete is owed whether or not the note is still there.
+        OutboxOp::CalendarDelete => true,
     }
 }
 
@@ -551,7 +602,58 @@ fn upsert_body(record: &OutboxRecord, clear_missing_due: bool) -> String {
     body.to_string()
 }
 
+/// Calendar event body from the record's `calendar` payload (gws `--json`).
+fn calendar_body(record: &OutboxRecord) -> String {
+    let Some(payload) = &record.calendar else {
+        return json!({}).to_string();
+    };
+    json!({
+        "summary": payload.summary,
+        "start": { "dateTime": payload.start_iso, "timeZone": payload.time_zone },
+        "end": { "dateTime": payload.end_iso, "timeZone": payload.time_zone },
+    })
+    .to_string()
+}
+
 fn gws_args(record: &OutboxRecord) -> Vec<String> {
+    if record.op.is_calendar() {
+        let calendar = record.calendar_id.as_deref().unwrap_or_default();
+        let event_params =
+            json!({ "calendarId": calendar, "eventId": record.google_task_id }).to_string();
+        return match record.op {
+            OutboxOp::CalendarUpsert if record.google_task_id.is_empty() => vec![
+                "calendar".to_string(),
+                "events".to_string(),
+                "insert".to_string(),
+                "--params".to_string(),
+                json!({ "calendarId": calendar }).to_string(),
+                "--json".to_string(),
+                calendar_body(record),
+                "--format".to_string(),
+                "json".to_string(),
+            ],
+            OutboxOp::CalendarUpsert => vec![
+                "calendar".to_string(),
+                "events".to_string(),
+                "patch".to_string(),
+                "--params".to_string(),
+                event_params,
+                "--json".to_string(),
+                calendar_body(record),
+                "--format".to_string(),
+                "json".to_string(),
+            ],
+            _ => vec![
+                "calendar".to_string(),
+                "events".to_string(),
+                "delete".to_string(),
+                "--params".to_string(),
+                event_params,
+                "--format".to_string(),
+                "json".to_string(),
+            ],
+        };
+    }
     let list = record.google_task_list_id.as_deref().unwrap_or("@default");
     let params = json!({ "tasklist": list, "task": record.google_task_id }).to_string();
     match record.op {
@@ -610,6 +712,9 @@ fn gws_args(record: &OutboxRecord) -> Vec<String> {
             "--format".to_string(),
             "json".to_string(),
         ],
+        OutboxOp::CalendarUpsert | OutboxOp::CalendarDelete => {
+            unreachable!("calendar ops are handled above")
+        }
     }
 }
 
@@ -640,6 +745,9 @@ fn task_id_from_stdout(stdout: &[u8]) -> Option<String> {
 /// than picking a winner, and the record stays visible in the sync panel. A
 /// patch that owes nothing leaves the file byte-identical.
 fn write_back_provider_ids(work: &Path, record: &OutboxRecord) -> Result<(), String> {
+    if record.op.is_calendar() {
+        return crate::calendar_sync::write_back_event_id(work, record);
+    }
     let path = work.join(&record.task_path);
     let raw = fs::read_to_string(&path).map_err(|err| format!("Cannot read task note: {err}"))?;
     let frontmatter = crate::tasks::yaml_to_json(&parse_frontmatter(&raw).meta);
@@ -682,7 +790,7 @@ fn write_back_provider_ids(work: &Path, record: &OutboxRecord) -> Result<(), Str
 /// discharge the record: an `Upsert` that was patching a `googleTaskId` the
 /// provider no longer knows.
 fn upsert_needs_recreate(record: &OutboxRecord) -> bool {
-    record.op == OutboxOp::Upsert && !record.google_task_id.is_empty()
+    record.op.creates_remote() && !record.google_task_id.is_empty()
 }
 
 /// Retry backoff in minutes after the n-th failed attempt: 1, 5, 15, 60,
@@ -707,7 +815,13 @@ pub(crate) fn is_auth_error(detail: &str) -> bool {
 /// if gws ever emits them.
 pub(crate) fn is_terminal_error(detail: &str) -> bool {
     let lower = detail.to_lowercase();
-    lower.contains("404") || lower.contains("not found") || lower.contains("notfound")
+    lower.contains("404")
+        || lower.contains("not found")
+        || lower.contains("notfound")
+        // Calendar answers 410 for an event that was deleted remotely.
+        || lower.contains("\"code\": 410")
+        || lower.contains("\"code\":410")
+        || lower.contains("resource has been deleted")
 }
 
 // --- Commands -----------------------------------------------------------------
@@ -937,7 +1051,7 @@ fn drain_record(
                             now_iso,
                         )
                     };
-                    if record.op == OutboxOp::Upsert {
+                    if record.op.creates_remote() {
                         if record.google_task_id.is_empty() {
                             let Some(created) = task_id_from_stdout(&output.stdout) else {
                                 record.last_error = Some(format!(
@@ -965,6 +1079,13 @@ fn drain_record(
                         // its googleTaskId from being upserted again later as a new
                         // task; the retry patches, so it cannot duplicate.
                         if let Err(err) = write_back_provider_ids(work, &record) {
+                            back_off(&mut record, format!("write_back_failed: {err}"))?;
+                            return Ok(OutboxStatus::RetryNeeded);
+                        }
+                    }
+                    if record.op == OutboxOp::CalendarDelete {
+                        if let Err(err) = crate::calendar_sync::settle_deleted_event(work, &record)
+                        {
                             back_off(&mut record, format!("write_back_failed: {err}"))?;
                             return Ok(OutboxStatus::RetryNeeded);
                         }
@@ -1010,6 +1131,26 @@ fn drain_record(
                         // Remote task/list is gone: the op is moot. Discharge the
                         // record (delete + event) instead of retrying forever; count
                         // it as drained.
+                        if record.op == OutboxOp::CalendarDelete {
+                            if let Err(err) =
+                                crate::calendar_sync::settle_deleted_event(work, &record)
+                            {
+                                record.attempts = record.attempts.saturating_add(1);
+                                let retry_at =
+                                    now + Duration::minutes(backoff_minutes(record.attempts));
+                                record.next_retry_at =
+                                    Some(retry_at.to_rfc3339_opts(SecondsFormat::Secs, true));
+                                record.last_error = Some(format!("write_back_failed: {err}"));
+                                set_record_status_in_transaction(
+                                    lease,
+                                    work,
+                                    &mut record,
+                                    OutboxStatus::RetryNeeded,
+                                    now_iso,
+                                )?;
+                                return Ok(OutboxStatus::RetryNeeded);
+                            }
+                        }
                         fs::remove_file(record_path(work, &record.id))
                             .map_err(|err| format!("Cannot drop terminal outbox record: {err}"))?;
                         let _ = crate::today_store::append_task_event_for(
@@ -1072,7 +1213,7 @@ fn drain_record(
                         stored.google_task_id = id.clone();
                     }
                     stored.last_error = Some(
-                        if stored.op == OutboxOp::Upsert && stored.google_task_id.is_empty() {
+                        if stored.op.creates_remote() && stored.google_task_id.is_empty() {
                             format!("{PROVIDER_OUTCOME_UNKNOWN} {detail}")
                         } else {
                             detail.clone()
@@ -1171,7 +1312,7 @@ pub(crate) fn task_integrations_retry_in_transaction(
             record.status,
             OutboxStatus::RetryNeeded | OutboxStatus::AuthBlocked
         ) && ids.as_ref().map_or(true, |ids| ids.contains(&record.id))
-            && record.op == OutboxOp::Upsert
+            && record.op.creates_remote()
             && record.google_task_id.is_empty()
             && record
                 .last_error
@@ -1288,6 +1429,8 @@ mod tests {
                 payload: None,
                 status,
                 web_action_id: None,
+                calendar_id: None,
+                calendar: None,
             },
             NOW,
         )
@@ -1557,6 +1700,8 @@ mod tests {
                 payload: None,
                 status: OutboxStatus::Prepared,
                 web_action_id: None,
+                calendar_id: None,
+                calendar: None,
             },
             NOW,
         )
@@ -1626,6 +1771,8 @@ mod tests {
                 }),
                 status: OutboxStatus::Ready,
                 web_action_id: Some("wa-1".to_string()),
+                calendar_id: None,
+                calendar: None,
             },
             NOW,
         )

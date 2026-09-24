@@ -119,6 +119,7 @@ Early shards 01/02/03/04/05 record `integrationRequired: "08-29"` and final modu
 | 08-11 | `src-tauri/src/today_ai.rs` | `today_build_plan_request`, `today_apply_plan_result` |
 | 08-12 | `src-tauri/src/today_calendar.rs` | `today_calendar_commitments`, `task_calendar_set_sync`, `today_calendar_publish` |
 | 08-12 | `src-tauri/src/today_outbox.rs` | `task_integrations_drain`, `task_integrations_retry`, `read_task_integrations` |
+| 08-12 | `src-tauri/src/calendar_sync.rs` | `calendar_sync_run` |
 | 08-12 | `src-tauri/src/web_actions.rs` | `web_action_repair_task_list_linkage`, `web_actions_import_top`, `web_actions_scan`, `web_actions_apply` |
 | 08-12 | `src-tauri/src/evidence_binder.rs` | `evidence_binder_read`, `evidence_binder_mutate` |
 | 08-13 | `src-tauri/src/vault_graph.rs` | `vault_graph_read`, `vault_graph_root`, `vault_graph_layout_read`, `vault_graph_layout_save` |
