@@ -1,3 +1,5 @@
+import "./meetings-pane.css";
+import "../calendar/calendar.css";
 import {
   AlertTriangle,
   Calendar as CalendarIcon,

@@ -24,8 +24,9 @@ function check(label, asset, maxGzipBytes) {
   );
 }
 
-// Lowered from 500 KiB after the i18n dictionaries moved to lazy chunks
-// (issue #201): the entry measured 284 KiB gzip, leaving ~12% headroom.
+// Entry CSS holds only the shell chrome (foundations, workbench grid, shared
+// surfaces); every mode's pane CSS rides that mode's lazy chunk (D-06: the
+// 70 KiB threshold was never raised — headroom was restored by moving CSS out).
 check("initial JS", largestMatching(/^index-.*\.js$/), 320 * 1024);
 check("initial CSS", largestMatching(/^index-.*\.css$/), 70 * 1024);
 
