@@ -46,7 +46,7 @@ nothing in the existing suite would notice.
   paths under the shared generated-directory prune list, so a watched root that
   gains a heavy subtree does not become an event-volume bottleneck.
 
-- [ ] **PERF-05**: Per-mode CSS ships in the lazy chunk of the mode that uses it
+- [x] **PERF-05**: Per-mode CSS ships in the lazy chunk of the mode that uses it
   rather than in the entry stylesheet, restoring the initial-CSS budget headroom
   spent since v0.4.46. The budget numbers themselves are not raised, and no mode
   shows unstyled content on its first activation.
@@ -188,7 +188,7 @@ Deferred. Acknowledged but not in this roadmap.
 | PERF-02 | Phase 8 | Complete |
 | PERF-03 | Phase 7 | Complete |
 | PERF-04 | Phase 7 | Complete |
-| PERF-05 | Phase 10 | Pending |
+| PERF-05 | Phase 10 | Complete |
 | PERF-06 | Phase 7 | Complete |
 | REL-01 | Phase 9 | Pending |
 | REL-02 | Phase 9 | Pending |
