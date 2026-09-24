@@ -32,7 +32,7 @@
     "security": {
       "csp": {
         "default-src": "'self' ipc: http://ipc.localhost",
-        "script-src": "'self' blob:",
+        "script-src": "'self'",
         "worker-src": "'self' blob:",
         "connect-src": "'self' ipc: http://ipc.localhost asset: http://asset.localhost blob: data:",
         "frame-src": "'self' asset: http://asset.localhost",
