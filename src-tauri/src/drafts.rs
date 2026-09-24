@@ -1257,6 +1257,7 @@ fn drafts_promote_in_transaction(
         DraftPromoteTarget::Document => {
             assert_maru_can_write(work_path, WorkspaceWriteAction::Create)?;
             let (dest, relative) = resolve_document_target(work_path, target_path)?;
+            crate::vault_guard::validate_managed_write(work_path, &relative, &body)?;
             lease.ensure_covered(vec![dest.clone()])?;
             if let Some(parent) = dest.parent() {
                 fs::create_dir_all(parent)
@@ -2201,6 +2202,52 @@ mod tests {
                 "target {bad} must be rejected"
             );
         }
+    }
+
+    #[test]
+    fn promote_document_into_managed_vault_requires_valid_schema() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
+        let (temp, work) = workspace();
+        crate::scratchpad::phase08_08::registry(temp.path(), "managed");
+
+        // A schema-less body is refused at notes/ targets.
+        let entry = create_task_draft(&work, "Unschemaed");
+        let err =
+            promote_impl(&work, &entry.id, DraftPromoteTarget::Document, "notes/x.md").unwrap_err();
+        assert!(err.contains("Managed vault schema check failed"), "{err}");
+        assert!(!temp.path().join("notes/x.md").exists());
+
+        // Case-variant Notes/ prefix is gated too.
+        let entry = create_task_draft(&work, "Case variant");
+        let err =
+            promote_impl(&work, &entry.id, DraftPromoteTarget::Document, "Notes/y.md").unwrap_err();
+        assert!(err.contains("Managed vault schema check failed"), "{err}");
+
+        // Schema-valid bodies still promote.
+        let valid = create_impl(
+            &work,
+            DraftKind::Task,
+            "Valid note",
+            ScratchpadSource::Kimi,
+            vec!["inbox/telegram/260730-note.md".to_string()],
+            Some(DraftImportance::High),
+            Some(0.8),
+            "---\ndescription: 승격된 관리형 노트\ntype: insight\ndomain: operations\ntopics:\n  - \"[[operations]]\"\n---\n# Body\n",
+        )
+        .unwrap();
+        let promoted = promote_impl(
+            &work,
+            &valid.id,
+            DraftPromoteTarget::Document,
+            "notes/valid.md",
+        )
+        .unwrap();
+        assert_eq!(promoted.status, DraftStatus::Accepted);
+        assert!(temp.path().join("notes/valid.md").exists());
+
+        // Targets outside notes/ stay ungated in a managed vault.
+        let entry = create_task_draft(&work, "Outside notes");
+        promote_impl(&work, &entry.id, DraftPromoteTarget::Document, "inbox/x.md").unwrap();
     }
 
     #[cfg(unix)]

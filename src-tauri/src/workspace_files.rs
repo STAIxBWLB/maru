@@ -720,7 +720,7 @@ pub(crate) fn apply_file_queue_in_transaction(
             FileQueueOperation::Copy => WorkspaceWriteAction::Create,
             FileQueueOperation::Move => WorkspaceWriteAction::RenameMove,
         };
-        assert_maru_can_write(&vault.to_string_lossy(), action)?;
+        assert_files_mutation_allowed(&vault, action)?;
         let source_path = PathBuf::from(&item.source_path);
         validate_queue_source(&source_path, item.source_kind)?;
         let target_dir = resolve_target_dir(&vault, &item.target_dir)?;
@@ -1848,6 +1848,54 @@ mod tests {
             fs::read(target_dir.path().join("bundle-copy/nested/b.txt")).unwrap(),
             b"b"
         );
+    }
+
+    #[test]
+    fn queue_refuses_managed_workspace_for_copy_and_move() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
+        let source_dir = TempDir::new().unwrap();
+        let workspace = TempDir::new().unwrap();
+        write_file(source_dir.path(), "note.md", b"body");
+        // The Files commands normalize the vault root before permission checks,
+        // so the registry must be staged with the canonical path.
+        let canonical = workspace.path().canonicalize().unwrap();
+        crate::scratchpad::phase08_08::registry(&canonical, "managed");
+
+        let item = |operation: FileQueueOperation| FileQueueApplyItem {
+            id: "1".to_string(),
+            source_path: source_dir
+                .path()
+                .join("note.md")
+                .to_string_lossy()
+                .to_string(),
+            target_dir: "notes".to_string(),
+            operation,
+            source_kind: FileQueueSourceKind::File,
+        };
+        // Copy maps to Create, which managed policy allows in general — Files
+        // must refuse it via the managed-root read-only gate.
+        let err = apply_file_queue(
+            canonical.to_string_lossy().to_string(),
+            vec![item(FileQueueOperation::Copy)],
+        )
+        .unwrap_err();
+        assert!(
+            err.contains("Managed workspaces are read-only in Files"),
+            "{err}"
+        );
+        // Move maps to RenameMove, which managed policy denies at the
+        // capability layer before the Files gate.
+        let err = apply_file_queue(
+            canonical.to_string_lossy().to_string(),
+            vec![item(FileQueueOperation::Move)],
+        )
+        .unwrap_err();
+        assert!(
+            err.contains("Managed workspaces are read-only in Files")
+                || err.contains("blocked by provider capabilities"),
+            "{err}"
+        );
+        assert!(!canonical.join("notes/note.md").exists());
     }
 
     #[test]

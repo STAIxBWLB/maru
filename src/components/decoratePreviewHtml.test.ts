@@ -8,6 +8,7 @@ const NO_DECORATION = {
   kgSpans: null,
   kgSource: "",
   kgTitleFor: () => "",
+  kgWalk: null,
   findQuery: "",
   findCurrent: 0,
   resolveWikilink: () => true,
@@ -92,6 +93,72 @@ describe("decoratePreviewHtml", () => {
       resolveWikilink: () => true,
     });
     expect(out).toBe(html);
+  });
+});
+
+describe("decoratePreviewHtml reference walk", () => {
+  it("marks the walk paragraph's full block, not just the cited span", () => {
+    const source = "alpha beta gamma";
+    const out = decoratePreviewHtml("<p>alpha beta gamma</p>", {
+      ...NO_DECORATION,
+      kgSource: source,
+      kgWalk: {
+        paragraph: 0,
+        start: 0,
+        end: 16,
+        spans: [kgSpan(6, 10)],
+      },
+    });
+    document.body.innerHTML = out;
+    const marks = document.querySelectorAll("mark.kg-ref-walk-paragraph");
+    expect(marks).toHaveLength(1);
+    // The citation is only "beta", but the paragraph mark covers the block.
+    expect(marks[0]!.textContent).toBe("alpha beta gamma");
+    expect(document.body.textContent).toBe("alpha beta gamma");
+  });
+
+  it("expands the walk mark to the citing block only, leaving sibling blocks alone", () => {
+    // One source paragraph renders as <h2> + <p>; the citation sits in the
+    // <p>, so the heading and the next paragraph stay unmarked.
+    const source = "## 메모\n참석자들은 KPI 산식.\n\n다른 문단.";
+    const html = "<h2>메모</h2><p>참석자들은 KPI 산식.</p><p>다른 문단.</p>";
+    const cited = source.indexOf("KPI");
+    const out = decoratePreviewHtml(html, {
+      ...NO_DECORATION,
+      kgSource: source,
+      kgWalk: {
+        paragraph: 0,
+        start: 0,
+        end: source.indexOf("\n\n"),
+        spans: [kgSpan(cited, cited + 3)],
+      },
+    });
+    document.body.innerHTML = out;
+    const marks = document.querySelectorAll("mark.kg-ref-walk-paragraph");
+    expect(marks).toHaveLength(1);
+    expect(marks[0]!.textContent).toBe("참석자들은 KPI 산식.");
+    expect(document.body.textContent).toBe("메모참석자들은 KPI 산식.다른 문단.");
+  });
+
+  it("wraps the walk paragraph around a reference mark inside it", () => {
+    const source = "see alpha here";
+    const out = decoratePreviewHtml("<p>see alpha here</p>", {
+      ...NO_DECORATION,
+      kgSpans: [kgSpan(4, 9)],
+      kgSource: source,
+      kgTitleFor: (span) => `${span.nodeTitle} · entity`,
+      kgWalk: {
+        paragraph: 0,
+        start: 0,
+        end: 14,
+        spans: [kgSpan(4, 9)],
+      },
+    });
+    document.body.innerHTML = out;
+    // The walk range covers the whole paragraph: the reference mark nests inside.
+    expect(document.querySelectorAll("mark.kg-ref-walk-paragraph mark.kg-ref-mark")).toHaveLength(1);
+    expect(document.querySelector("mark.kg-ref-walk-paragraph")!.textContent).toBe("see alpha here");
+    expect(document.body.textContent).toBe("see alpha here");
   });
 });
 

@@ -15,6 +15,7 @@
 //! appended via fs, the sole exception to MCP-only vault writes).
 
 use serde::Serialize;
+use std::path::Path;
 
 use crate::vault::parse_frontmatter;
 use crate::vault_list::load_registry;
@@ -55,8 +56,36 @@ pub struct VaultSchemaReport {
 }
 
 fn is_vault_note(rel_path: &str) -> bool {
-    let normalized = rel_path.trim_start_matches("./");
-    normalized.starts_with("notes/") && normalized.to_lowercase().ends_with(".md")
+    let normalized = rel_path.trim_start_matches("./").to_lowercase();
+    normalized.starts_with("notes/") && normalized.ends_with(".md")
+}
+
+/// Normalize a caller-supplied document path to a vault-relative form so the
+/// `notes/` gate cannot be bypassed by absolute paths, `Notes/` casing, or
+/// dot segments (`docs/../notes/x.md` resolves to `notes/x.md`). Absolute
+/// paths are relativized against the vault root (canonicalized and lexical
+/// forms, since callers may hold either); paths that do not resolve under
+/// the vault are returned unchanged and will not match `notes/`. A relative
+/// `..` that climbs above the vault root survives lexical normalization as a
+/// leading `..`, so it fails closed and is never treated as a vault note.
+fn note_rel_path(vault_path: &str, document_path: &str) -> String {
+    let trimmed = document_path.trim_start_matches("./");
+    let raw = Path::new(trimmed);
+    let normalized = crate::vault::lexical_normalize(raw);
+    if !raw.is_absolute() {
+        return normalized.to_string_lossy().replace('\\', "/");
+    }
+    let mut roots: Vec<std::path::PathBuf> = Vec::new();
+    if let Ok(vault) = crate::vault::normalize_existing_dir(vault_path) {
+        roots.push(vault);
+    }
+    roots.push(crate::vault::lexical_normalize(Path::new(vault_path)));
+    for root in roots {
+        if let Ok(rel) = normalized.strip_prefix(&root) {
+            return rel.to_string_lossy().replace('\\', "/");
+        }
+    }
+    trimmed.replace('\\', "/")
 }
 
 fn issue(field: &str, code: &str, message: String) -> VaultSchemaIssue {
@@ -206,7 +235,7 @@ pub fn validate_managed_write(
         .workspaces
         .iter()
         .any(|workspace| workspace.path == vault_path && workspace.write_policy == "managed");
-    if !is_managed || !is_vault_note(document_path) {
+    if !is_managed || !is_vault_note(&note_rel_path(vault_path, document_path)) {
         return Ok(());
     }
     let report = validate_note_content(content);
@@ -300,6 +329,54 @@ mod tests {
         // with invalid content — the gate only arms for managed roots.
         let result = validate_managed_write("/tmp/not-registered", "notes/a.md", "junk");
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn managed_gate_covers_absolute_and_case_variant_paths() {
+        let home = crate::atomic_file::phase08_06::Home::new();
+        let root = home.root.path().join("vault");
+        std::fs::create_dir_all(root.join("notes")).unwrap();
+        crate::scratchpad::phase08_08::registry(&root, "managed");
+        let root_str = root.to_string_lossy().to_string();
+
+        let invalid = "no frontmatter";
+        // Relative target (existing behavior).
+        let err = validate_managed_write(&root_str, "notes/x.md", invalid).unwrap_err();
+        assert!(err.contains("Managed vault schema check failed"), "{err}");
+        // Absolute path must relativize against the vault root.
+        let absolute = root.join("notes/x.md").to_string_lossy().to_string();
+        assert!(validate_managed_write(&root_str, &absolute, invalid).is_err());
+        // Case-variant Notes/ prefix must not bypass the gate.
+        assert!(validate_managed_write(&root_str, "Notes/x.md", invalid).is_err());
+        // Valid content passes in both relative and absolute form.
+        assert!(validate_managed_write(&root_str, "notes/x.md", VALID_NOTE).is_ok());
+        assert!(validate_managed_write(&root_str, &absolute, VALID_NOTE).is_ok());
+        // Non-note paths stay ungated even in a managed vault.
+        assert!(validate_managed_write(&root_str, "inbox/x.md", invalid).is_ok());
+        assert!(validate_managed_write(&root_str, "notes/x.txt", invalid).is_ok());
+    }
+
+    #[test]
+    fn managed_gate_normalizes_dot_segments_in_relative_paths() {
+        let home = crate::atomic_file::phase08_06::Home::new();
+        let root = home.root.path().join("vault");
+        std::fs::create_dir_all(root.join("notes")).unwrap();
+        crate::scratchpad::phase08_08::registry(&root, "managed");
+        let root_str = root.to_string_lossy().to_string();
+
+        let invalid = "no frontmatter";
+        // A relative path whose dot segments resolve under notes/ must not
+        // bypass the schema gate (it resolves through resolve_inside_vault
+        // to a real managed note).
+        let err =
+            validate_managed_write(&root_str, "docs/../notes/report.md", invalid).unwrap_err();
+        assert!(err.contains("Managed vault schema check failed"), "{err}");
+        // `./` segments inside notes/ still validate.
+        assert!(validate_managed_write(&root_str, "notes/./a.md", invalid).is_err());
+        assert!(validate_managed_write(&root_str, "notes/./a.md", VALID_NOTE).is_ok());
+        // A path that escapes the vault root via `..` is not a vault note.
+        assert!(validate_managed_write(&root_str, "../outside.md", invalid).is_ok());
+        assert!(validate_managed_write(&root_str, "notes/../../outside.md", invalid).is_ok());
     }
 }
 

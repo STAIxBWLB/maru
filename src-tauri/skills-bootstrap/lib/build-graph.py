@@ -574,6 +574,8 @@ def detect_communities(G: nx.Graph, exclude_hubs: bool = True) -> dict[int, list
     H = G.subgraph([n for n in G.nodes if n not in hubs]).copy()
 
     if H.number_of_nodes() == 0:
+        G.graph["partitioner"] = "none"
+        G.graph["partitioner_fallback"] = None
         return {}
 
     try:
@@ -583,15 +585,39 @@ def detect_communities(G: nx.Graph, exclude_hubs: bool = True) -> dict[int, list
         comms: dict[int, list[str]] = {}
         for idx, cid in enumerate(partition):
             comms.setdefault(int(cid), []).append(node_list[idx])
+        G.graph["partitioner"] = "leiden"
+        G.graph["partitioner_fallback"] = None
         return comms
-    except (ImportError, Exception):
-        pass
+    except ImportError:
+        G.graph["partitioner_fallback"] = "graspologic is not installed"
+    except Exception as exc:
+        G.graph["partitioner_fallback"] = (
+            f"graspologic leiden raised {type(exc).__name__}: {exc}"
+        )
 
     try:
         communities_gen = nx.community.louvain_communities(H, seed=42)
+        G.graph["partitioner"] = "louvain"
         return {i: list(c) for i, c in enumerate(communities_gen)}
-    except Exception:
+    except Exception as exc:
+        prev = G.graph.get("partitioner_fallback")
+        G.graph["partitioner_fallback"] = (
+            f"{prev}; louvain raised {type(exc).__name__}: {exc}" if prev
+            else f"louvain raised {type(exc).__name__}: {exc}"
+        )
+        G.graph["partitioner"] = "connected-components"
         return {i: list(c) for i, c in enumerate(nx.connected_components(H))}
+
+
+def partitioner_label(G: nx.Graph) -> str:
+    """Human-readable partitioner line for stdout and report Overview."""
+    part = G.graph.get("partitioner", "unknown")
+    fallback = G.graph.get("partitioner_fallback")
+    if part == "leiden":
+        return "leiden (graspologic, random_seed=42)"
+    if fallback:
+        return f"{part} (fallback — {fallback})"
+    return part
 
 
 # ── Analysis ───────────────────────────────────────────────────────────
@@ -606,7 +632,16 @@ def find_god_nodes(G: nx.Graph, top_n: int = 10) -> list[dict]:
     return [{"id": n, "degree": d, "label": G.nodes[n].get("label", n)} for n, d in candidates[:top_n]]
 
 
-def find_surprising_connections(G: nx.Graph, communities: dict[int, list[str]], top_n: int = 15) -> list[dict]:
+def find_surprising_connections(
+    G: nx.Graph, communities: dict[int, list[str]],
+    top_n: int = 15, max_per_node: int = 2,
+) -> tuple[list[dict], int]:
+    """Return (top rows, total cross-community edge count).
+
+    Rows are ranked by degree sum; max_per_node greedily caps how many
+    selected rows may share the same endpoint so god nodes cannot dominate
+    (0 = no cap, pre-cap ordering).
+    """
     hubs = get_hub_nodes(G)
     node_to_comm = {}
     for cid, members in communities.items():
@@ -630,7 +665,23 @@ def find_surprising_connections(G: nx.Graph, communities: dict[int, list[str]], 
     for e in cross_edges:
         e["score"] = G.degree(e["source"]) + G.degree(e["target"])
     cross_edges.sort(key=lambda x: x["score"], reverse=True)
-    return cross_edges[:top_n]
+    total = len(cross_edges)
+
+    if max_per_node <= 0:
+        return cross_edges[:top_n], total
+
+    endpoint_count: dict[str, int] = {}
+    selected = []
+    for e in cross_edges:
+        if (endpoint_count.get(e["source"], 0) >= max_per_node
+                or endpoint_count.get(e["target"], 0) >= max_per_node):
+            continue
+        endpoint_count[e["source"]] = endpoint_count.get(e["source"], 0) + 1
+        endpoint_count[e["target"]] = endpoint_count.get(e["target"], 0) + 1
+        selected.append(e)
+        if len(selected) >= top_n:
+            break
+    return selected, total
 
 
 def compute_community_stats(G: nx.Graph, communities: dict[int, list[str]]) -> list[dict]:
@@ -655,6 +706,7 @@ def compute_community_stats(G: nx.Graph, communities: dict[int, list[str]]) -> l
 def generate_report(
     G: nx.Graph, communities: dict, god_nodes: list, surprises: list,
     comm_stats: list, target: Path, mode: str,
+    surprises_total: int | None = None,
 ) -> str:
     today = datetime.now().strftime("%Y-%m-%d")
     project_name = target.name
@@ -666,6 +718,7 @@ def generate_report(
         f"",
         f"- **Target**: `{target}`",
         f"- **Mode**: {mode}",
+        f"- **Partitioner**: {partitioner_label(G)}",
         f"- **Nodes**: {G.number_of_nodes()}" + (f" ({len(hubs)} hubs excluded from clustering)" if hubs else ""),
         f"- **Edges**: {G.number_of_edges()}",
         f"- **Communities**: {len(communities)}",
@@ -701,7 +754,9 @@ def generate_report(
         lines.append(f"*{len(singletons)} singleton communities omitted.*")
         lines.append("")
 
-    lines.append("## Surprising Connections (Cross-Community)")
+    if surprises_total is None:
+        surprises_total = len(surprises)
+    lines.append(f"## Surprising Connections (Cross-Community): {surprises_total} total (top {len(surprises)} shown)")
     lines.append("")
     if surprises:
         lines.append("| Source | Target | Score |")
@@ -734,6 +789,8 @@ def main():
     parser.add_argument("--mode", choices=["auto", "wiki", "code"], default="auto", help="Extraction mode")
     parser.add_argument("--out-dir", type=Path, default=None, help="Output directory (default: target/graphify-out or vault/reports)")
     parser.add_argument("--no-hubs", action="store_true", help="Exclude hub nodes from clustering")
+    parser.add_argument("--surprise-cap", type=int, default=2, metavar="N",
+                        help="Max selected surprising-connection rows per endpoint node (0 = no cap)")
     parser.add_argument("--work-root", type=Path, default=None,
                         help="Add work operational layer → workspace-graph.json (DR-019 §2). "
                              "--target stays the vault; report write is suppressed.")
@@ -795,12 +852,14 @@ def main():
     # Analyze
     print("Analyzing ...")
     gn = find_god_nodes(G)
-    surprises = find_surprising_connections(G, communities)
+    surprises, surprises_total = find_surprising_connections(
+        G, communities, max_per_node=args.surprise_cap)
     comm_stats = compute_community_stats(G, communities)
 
     # Report
     print("Generating report ...")
-    report = generate_report(G, communities, gn, surprises, comm_stats, target, mode)
+    report = generate_report(G, communities, gn, surprises, comm_stats, target, mode,
+                             surprises_total=surprises_total)
 
     # Export
     today = datetime.now().strftime("%y%m%d")
@@ -827,9 +886,10 @@ def main():
     print(f"  Nodes: {G.number_of_nodes()}")
     print(f"  Edges: {G.number_of_edges()}")
     print(f"  Communities: {len(communities)}")
+    print(f"  Partitioner: {partitioner_label(G)}")
     if gn:
         print(f"  God nodes: {', '.join(g['id'] for g in gn[:5])}")
-    print(f"  Cross-community edges: {len(surprises)}")
+    print(f"  Cross-community edges: {surprises_total} (top {len(surprises)} shown)")
     if args.work_root:
         rels = {}
         for _, _, d in G.edges(data=True):
