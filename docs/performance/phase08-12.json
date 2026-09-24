@@ -808,6 +808,77 @@
         "workerProof": "All actual owned wrapper futures yield in their polling task while a distinct blocking worker is held, then preserve JoinError. Separate cases assert nonempty real local outputs, typed or legacy errors, actual competing Files/document operations, and explicit selected captured fake provider outcomes.",
         "platformScope": "macOS disposable Home/config and synthetic workspace only. Actual Files TrashFixture redirects native Trash. Provider proof is captured fake transport only, with exact existing executable selection; no real provider/network/auth/credential calls. Native saturation, Windows and release artifact proof remain later phase gates."
       }
+    },
+    {
+      "name": "calendar_sync_run",
+      "module": "src-tauri/src/calendar_sync.rs",
+      "registrationPath": "src-tauri/src/lib.rs::calendar_sync::ipc::calendar_sync_run",
+      "originalDisposition": "ISOLATED",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/calendar_sync.rs::calendar_sync_run is the synchronous domain API shared by the IPC wrapper and the maru calendar-sync CLI (src-tauri/src/calendar_sync.rs::run_calendar_sync).",
+        "src-tauri/src/calendar_sync.rs::scan_notes walks tasks/ and calendar/ inside the owned blocking boundary.",
+        "src-tauri/src/calendar_sync.rs::load_ledger and src-tauri/src/calendar_sync.rs::save_ledger read/write .maru/today/calendar-sync.json inside the worker.",
+        "src-tauri/src/today_outbox.rs::enqueue_record admits each planned calendarUpsert/calendarDelete record through with_path_transactions.",
+        "src-tauri/src/today_outbox.rs::task_integrations_drain drains the records through the existing outbox (gws subprocess, retry backoff, auth blocking) inside the same worker."
+      ],
+      "workerBoundary": "src-tauri/src/calendar_sync.rs::ipc::calendar_sync_run owns original String/Option/bool values and awaits tauri::async_runtime::spawn_blocking before any filesystem traversal, process execution or lock wait. The inner Result<CalendarSyncOutcome, String> is unchanged; only JoinError gains a contextual display-only error.",
+      "syncCallers": [
+        "src-tauri/src/calendar_sync.rs::calendar_sync_run remains a synchronous public Rust API; the qualified ipc wrapper and src-tauri/src/calendar_sync.rs::run_calendar_sync (CLI, daily .maru/jobs.json job) call it directly with owned inputs."
+      ],
+      "mutationKey": {
+        "lexicalPaths": [
+          "Ledger file under .maru/today, outbox records under .maru/today/outbox, and each planned note path under tasks/ or calendar/ (write-back of calendarEventId/calendarId, or clearing them on delete); reconcile scan itself is read-only."
+        ],
+        "aliasPaths": [
+          "Outbox admission (src-tauri/src/today_outbox.rs::outbox_transaction_request) carries .maru/today, tasks/ and every record note path with their symlink endpoints; the drain re-validates selected aliases before the local commit exactly as Google Tasks records do."
+        ],
+        "sharedAdmissionEntry": "src-tauri/src/calendar_sync.rs::calendar_sync_run enqueues through src-tauri/src/today_outbox.rs::enqueue_record and drains through src-tauri/src/today_outbox.rs::task_integrations_drain, both entering src-tauri/src/atomic_file.rs::with_path_transactions before any domain guard; the per-workspace CalendarPublishReservation is a process-local bookkeeping key held across provider settlement.",
+        "postAdmissionPreconditions": [
+          "ensure_covered and registry coverage inside enqueue/drain; before_effect before the first write; record revision re-read before the provider call and before the local commit; note relink check (note_relinked) before writing a backref."
+        ],
+        "domainLockOrder": "Shared complete path admission before the Today event/outbox domain guards. The gws subprocess holds no path or domain guard; the record owner spans remote and local settlement."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib calendar_sync",
+          "passed": 12,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/components/today/useTodayCalendarSync.ts",
+          "src/components/today/TodayCalendarSyncPanel.tsx",
+          "src/lib/today.ts"
+        ],
+        "payload": "useTodayCalendarSync syncNotes owns the request lifetime (syncing flag, last outcome, notice) and reloads the Today snapshot afterwards; the daily job path has no UI caller and reports through the job log.",
+        "terminalNoticeOwner": "TodayCalendarSyncPanel renders the CalendarSyncOutcome counts and the blocked/error notice once per run; no second owner.",
+        "classifier": "pane-local outcome rendering (CalendarSyncOutcome counts: inserts/patches/deletes/adopted/unchanged/pending, drained/failed/blocked)",
+        "successRetention": "lastSyncOutcome kept in the hook state until the next run; note backrefs live in the files",
+        "failureReasons": "Err(String) surfaces as the generic error notice; blocked > 0 surfaces the calendarBlocked notice that points at the existing outbox retry surface",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "src/components/today/useTodayCalendarSync.ts::syncNotes (issue #316)"
+      },
+      "evidence": {
+        "behaviorCases": [
+          "calendar_sync_destination_comes_from_config_and_never_guesses",
+          "calendar_sync_inserts_once_and_is_idempotent",
+          "calendar_sync_patches_when_times_change_and_keeps_event_id",
+          "calendar_sync_deletes_when_times_removed_or_note_deleted",
+          "calendar_sync_adopts_imported_backrefs_and_skips_foreign_calendars",
+          "calendar_sync_auth_failure_blocks_and_retries_through_outbox",
+          "calendar_sync_crash_between_insert_and_write_back_repairs_without_duplicate",
+          "calendar_sync_dry_run_plans_without_writing",
+          "calendar_sync_cli_and_ipc_share_the_entry_point"
+        ],
+        "workerProof": "calendar_sync_cli_and_ipc_share_the_entry_point drives the actual ipc wrapper through tauri::async_runtime::block_on and the CLI through run_cli against twin fixtures and asserts identical note, ledger and captured provider effects; the wrapper body is spawn_blocking(...).await with no filesystem or process work before it.",
+        "platformScope": "Synthetic temp workspaces and a captured fake gws executable only; no real provider, network, auth or credential calls. The daily launchd job and the real gws serialization wrapper are exercised on the workspace side, not in this crate.",
+        "negativeControl": "Removing the pending-record skip (pending_paths) makes calendar_sync_crash_between_insert_and_write_back_repairs_without_duplicate observe a second events insert; the shipped code keeps the captured insert count at 1 and repairs through the patch path.",
+        "aliasSnapshot": "Outbox admission and drain settlement are unchanged from the Google Tasks path; calendar records only add op variants and a payload. Adoption writes the ledger before enqueue so a crash between the two re-plans only the not-yet-enqueued ops on the next run."
+      }
     }
-  ]
+]
 }

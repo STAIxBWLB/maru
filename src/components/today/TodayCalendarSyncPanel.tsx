@@ -5,6 +5,7 @@ import {
   CalendarCheck,
   CalendarClock,
   CalendarPlus,
+  CalendarSync,
   Check,
   Loader2,
   TriangleAlert,
@@ -35,6 +36,9 @@ export function TodayCalendarSyncPanel() {
     publishSelected,
     retryItem,
     setSelected,
+    syncing,
+    lastSync,
+    syncNotes,
   } = useTodayCalendarSync();
   const [sheetTaskId, setSheetTaskId] = useState<string | null>(null);
 
@@ -154,7 +158,34 @@ export function TodayCalendarSyncPanel() {
           )}
           {t("today.calendar.publishSelected", { count: selectedCount })}
         </button>
+        <button
+          type="button"
+          className="today-button-ghost"
+          disabled={syncing || publishing}
+          onClick={() => void syncNotes()}
+          title={t("today.calendar.syncNotes.hint")}
+          data-testid="today-calendar-sync-notes"
+        >
+          {syncing ? (
+            <Loader2 size={14} className="today-spin" aria-hidden="true" />
+          ) : (
+            <CalendarSync size={14} aria-hidden="true" />
+          )}
+          {t("today.calendar.syncNotes")}
+        </button>
       </header>
+
+      {lastSync ? (
+        <p className="today-panel-meta" data-testid="today-calendar-sync-outcome">
+          {t("today.calendar.syncNotes.outcome", {
+            inserts: lastSync.inserts,
+            patches: lastSync.patches,
+            deletes: lastSync.deletes,
+            unchanged: lastSync.unchanged + lastSync.adopted,
+            failed: lastSync.failed + lastSync.blocked,
+          })}
+        </p>
+      ) : null}
 
       {notice ? (
         <p className="today-notice" role="alert">

@@ -762,6 +762,8 @@ fn queue_upsert(
             // there is no local mutation for recovery to reconcile against.
             status: OutboxStatus::Ready,
             web_action_id: Some(receipt.id.clone()),
+            calendar_id: None,
+            calendar: None,
         },
         now_iso,
     )?;

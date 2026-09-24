@@ -24,6 +24,13 @@
 // opt-in flag per plan item, and `today_calendar_publish` inserts events for
 // items flagged `selected` (policy `calendarBlockSyncPolicy: "explicit"`).
 // Items at `none` are never published.
+//
+// Destination: per-item `calendarSync.destination`, then the run-level
+// `destination` argument, each resolved through `workspace.config.yaml`
+// (`task_management.google.calendar`: a config key maps to its id, read-only
+// calendars are refused). With neither, the configured `default_calendar`.
+// There is no hardcoded fallback: an unresolved destination is an error.
+// The recurring note → calendar reconcile lives in `calendar_sync.rs`.
 
 use crate::atomic_file::{
     with_path_transactions, PathTransactionLease, PathTransactionParent, PathTransactionRequest,
@@ -58,9 +65,11 @@ use walkdir::WalkDir;
 // Only this bookkeeping mutex is held while reserving. The owned token spans
 // provider settlement; neither a domain mutex nor a filesystem lease does.
 static CALENDAR_PUBLISH_ACTIVE: Mutex<Vec<PathBuf>> = Mutex::new(Vec::new());
-struct CalendarPublishReservation(PathBuf);
+/// Shared with `calendar_sync`: a plan publish and a note reconcile never run
+/// concurrently against the same workspace.
+pub(crate) struct CalendarPublishReservation(PathBuf);
 impl CalendarPublishReservation {
-    fn acquire(work: &Path) -> Result<Self, String> {
+    pub(crate) fn acquire(work: &Path) -> Result<Self, String> {
         let mut active = CALENDAR_PUBLISH_ACTIVE
             .lock()
             .map_err(|_| "calendar_publish_bookkeeping_poisoned".to_string())?;
@@ -131,11 +140,9 @@ fn calendar_transaction_request(
 }
 
 /// Conventional roots scanned for timed calendar notes.
-const COMMITMENT_ROOTS: [&str; 2] = ["tasks", "calendar"];
+pub(crate) const COMMITMENT_ROOTS: [&str; 2] = ["tasks", "calendar"];
 /// Calendar name for notes without a `calendarId` frontmatter.
 const LOCAL_CALENDAR: &str = "local";
-/// Fallback Google calendar when no destination is configured.
-const FALLBACK_DESTINATION: &str = "primary";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -160,7 +167,7 @@ struct NoteEvent {
     cancelled: bool,
 }
 
-fn string_field<'a>(frontmatter: &'a JsonValue, keys: &[&str]) -> Option<&'a str> {
+pub(crate) fn string_field<'a>(frontmatter: &'a JsonValue, keys: &[&str]) -> Option<&'a str> {
     keys.iter().find_map(|key| {
         frontmatter
             .get(*key)
@@ -172,7 +179,7 @@ fn string_field<'a>(frontmatter: &'a JsonValue, keys: &[&str]) -> Option<&'a str
 
 /// Parse a frontmatter datetime: RFC3339 with offset, or a naive local
 /// `YYYY-MM-DDTHH:MM[:SS]` interpreted in `tz`.
-fn parse_event_time(raw: &str, tz: Tz) -> Option<DateTime<Tz>> {
+pub(crate) fn parse_event_time(raw: &str, tz: Tz) -> Option<DateTime<Tz>> {
     let trimmed = raw.trim();
     if let Ok(parsed) = DateTime::parse_from_rfc3339(trimmed) {
         return Some(parsed.with_timezone(&tz));
@@ -571,6 +578,7 @@ pub fn today_calendar_publish(
         return Ok(outcome);
     }
     let gws_bin = resolve_gws(gws_path.as_deref())?;
+    let destinations = crate::calendar_sync::CalendarDestinations::load(&work)?;
     let timezone = entry_snapshot.timezone.clone();
 
     for item_ref in &queue {
@@ -591,15 +599,14 @@ pub fn today_calendar_publish(
             // Concurrent edit unselected or removed the item — skip.
             continue;
         };
-        let destination_id = item_destination
-            .as_deref()
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .or(destination
+        let destination_id = destinations.resolve(
+            item_destination
                 .as_deref()
                 .map(str::trim)
-                .filter(|value| !value.is_empty()))
-            .unwrap_or(FALLBACK_DESTINATION);
+                .filter(|value| !value.is_empty())
+                .or(destination.as_deref()),
+        )?;
+        let destination_id = destination_id.as_str();
         let output = Command::new(&gws_bin)
             .env("PATH", augmented_path())
             .args(publish_args(destination_id, &summary, &block, &timezone))
@@ -1110,6 +1117,71 @@ mod tests {
         let events =
             fs::read_to_string(tmp.path().join(".maru/today/events/2026-07.jsonl")).unwrap();
         assert!(events.contains("\"kind\":\"calendar_blocks_published\""));
+    }
+
+    #[test]
+    fn publish_without_any_destination_errors_instead_of_guessing_primary() {
+        let tmp = tempfile::tempdir().unwrap();
+        let log = tmp.path().join("gws-never.log");
+        let fake = write_fake_gws(
+            tmp.path(),
+            "gws-never",
+            &format!("#!/bin/sh\necho \"$@\" >> {}\nexit 0\n", log.display()),
+        );
+        let snapshot = open_with_plan(
+            &tmp,
+            vec![plan_item(
+                "a",
+                Some(block(
+                    "2026-07-21T10:00:00+09:00",
+                    "2026-07-21T11:00:00+09:00",
+                )),
+            )],
+        );
+        // Selected without a per-item destination, published without a
+        // run-level one, and no workspace config: an error, no provider call.
+        let snapshot = task_calendar_set_sync(
+            work(&tmp),
+            snapshot.logical_day.clone(),
+            snapshot.revision.clone(),
+            PlanItemRef::Task {
+                task_id: "a".to_string(),
+            },
+            true,
+            None,
+        )
+        .unwrap();
+        let err = today_calendar_publish(
+            work(&tmp),
+            snapshot.logical_day.clone(),
+            snapshot.revision.clone(),
+            None,
+            Some(fake.to_string_lossy().to_string()),
+            NOW.to_string(),
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string().contains("calendar_destination_unresolved"),
+            "{err}"
+        );
+        assert!(!log.exists());
+
+        // With a configured default the run-level None resolves to its id, and
+        // a config key passed as destination maps to the same id.
+        write(
+            &tmp.path().join("workspace.config.yaml"),
+            "task_management:\n  google:\n    calendar:\n      default_calendar: chu_aio\n      calendars:\n        chu_aio: { id: c_cfg@group.calendar.google.com }\n      read_only:\n        primary: { id: me@example.com }\n",
+        );
+        let outcome = publish(&tmp, &snapshot, &fake);
+        assert_eq!(outcome.published, 1);
+        let logged = fs::read_to_string(&log).unwrap();
+        assert!(logged.contains(r#"{"calendarId":"c_cfg@group.calendar.google.com"}"#));
+        assert!(!logged.contains("primary"));
+        let plan = outcome.snapshot.plan.as_ref().unwrap();
+        assert_eq!(
+            plan.top[0].calendar_sync.destination.as_deref(),
+            Some("c_cfg@group.calendar.google.com")
+        );
     }
 
     #[test]
