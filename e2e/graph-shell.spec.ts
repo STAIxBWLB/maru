@@ -173,3 +173,62 @@ test("terminal maximize hides and restore revives the graph canvas", async ({ pa
   await expect(page.getByTestId("graph-mode")).toBeVisible();
   await expectShellGeometry(page);
 });
+
+// --- #327: panel graph lifecycle ------------------------------------------
+// Closing the panel while Graph is the selected surface must release the
+// graph node (renderer, WebGL contexts, FA2 worker); hiding it behind the
+// terminal surface stops layout at once and releases the canvas after the
+// grace period while GraphView state stays mounted.
+
+async function graphBridgeUp(page: Page): Promise<boolean> {
+  return page.evaluate(() => Boolean((window as unknown as { __maruGraph?: unknown }).__maruGraph));
+}
+
+test("closing the panel while Graph is selected releases the graph node and reopening revives it", async ({ page }) => {
+  await page.setViewportSize({ width: 1600, height: 900 });
+  await page.goto("/");
+  await page.getByLabel("패널에서 그래프 열기").click();
+  const surface = page.getByTestId("panel-graph-surface");
+  await expect(surface).toBeVisible();
+  await expect(page.getByTestId("panel-graph-tab")).toHaveAttribute("aria-selected", "true");
+  await expect(surface.locator(".graph-view")).toHaveCount(1);
+  await expect.poll(() => graphBridgeUp(page)).toBe(true);
+
+  // Close while Graph stays the selected tab (the exact transition that leaked).
+  await page.locator(".terminal-panel").getByRole("button", { name: "패널 접기" }).click();
+  await expect(page.locator(".terminal-panel")).toHaveClass(/collapsed/);
+  await expect(page.locator(".tool-panel-graph .graph-view")).toHaveCount(0);
+  await expect.poll(() => graphBridgeUp(page)).toBe(false);
+
+  // Reopen: the graph reconstructs from authoritative data.
+  await page.locator(".terminal-panel").getByRole("button", { name: "패널 열기" }).click();
+  await expect(surface).toBeVisible();
+  await expect(surface.locator(".graph-view")).toHaveCount(1);
+  await expect.poll(() => graphBridgeUp(page)).toBe(true);
+});
+
+test("hidden graph surface suspends its canvas after the grace period and restores on reveal", async ({ page }) => {
+  await page.addInitScript(() => {
+    window.localStorage.setItem("maru:graph-suspend-grace-ms", "200");
+  });
+  await page.setViewportSize({ width: 1600, height: 900 });
+  await page.goto("/");
+  await page.getByLabel("패널에서 그래프 열기").click();
+  const surface = page.getByTestId("panel-graph-surface");
+  await expect(surface).toBeVisible();
+  await expect.poll(() => graphBridgeUp(page)).toBe(true);
+
+  await page.locator(".terminal-panel").getByRole("tab", { name: "터미널" }).click();
+  await expect(surface).toBeHidden();
+  // GraphView stays mounted (selection/filters/positions survive)...
+  await expect(surface.locator(".graph-view")).toHaveCount(1);
+  // ...while the canvas is released after the (overridden) grace period.
+  await expect(surface.getByTestId("graph-canvas-suspended")).toHaveCount(1);
+  await expect.poll(() => graphBridgeUp(page)).toBe(false);
+
+  await page.getByTestId("panel-graph-tab").click();
+  await expect(surface).toBeVisible();
+  await expect(surface.getByTestId("graph-canvas-suspended")).toHaveCount(0);
+  await expect(surface.getByTestId("graph-canvas")).toBeVisible();
+  await expect.poll(() => graphBridgeUp(page)).toBe(true);
+});

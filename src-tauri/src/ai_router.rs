@@ -244,6 +244,17 @@ fn spawn_streaming_invocation<R: tauri::Runtime>(
         .take()
         .ok_or_else(|| "stderr_capture_failed: subprocess produced no stderr handle".to_string())?;
 
+    // Register before spawning the line pumps: a fast child can emit lines
+    // before the registration lands, and those touch_output calls fail with
+    // `mission_not_found`, permanently dropping the lines from the log.
+    let _ = mission_state::register_mission_with_metadata(
+        &app,
+        &invocation_id,
+        &mission.kind,
+        child_pid,
+        mission.metadata,
+    );
+
     let stdout_pump = spawn_line_pump(
         app.clone(),
         invocation_id.clone(),
@@ -255,13 +266,6 @@ fn spawn_streaming_invocation<R: tauri::Runtime>(
         invocation_id.clone(),
         "stderr".to_string(),
         stderr,
-    );
-    let _ = mission_state::register_mission_with_metadata(
-        &app,
-        &invocation_id,
-        &mission.kind,
-        child_pid,
-        mission.metadata,
     );
 
     // Reaper thread: wait for exit, then drain both output pumps before

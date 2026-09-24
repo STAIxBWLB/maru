@@ -66,6 +66,7 @@ import {
   useTerminalTabsSlice,
   type TerminalPanelScope,
 } from "../lib/terminalPanelStore";
+import { GraphSurfaceVisibilityContext, graphPanelMounted } from "../lib/graphSurfaceVisibility";
 import { getTerminalRuntimeController } from "../lib/terminalRuntimeController";
 import type { TerminalPanelCommands } from "../lib/terminalSurfaceAdapter";
 import type {
@@ -380,12 +381,14 @@ export const TerminalPanel = memo(
       renamingTaskId,
     });
 
+    // Keep-alive spans surface toggles while the panel is open (preserves
+    // graph layout state); a closed panel releases the graph node even while
+    // Graph is still the selected surface (#327). While open but hidden, the
+    // context below lets GraphView stop layout and suspend its renderer.
     useEffect(() => {
-      if (activeSurface === "graph") setGraphMounted(true);
-      // Keep-alive spans surface toggles while the panel is open (preserves
-      // graph layout state); a closed panel releases the hidden Sigma/worker.
-      else if (!open) setGraphMounted(false);
+      setGraphMounted((prev) => graphPanelMounted(prev, open, activeSurface));
     }, [activeSurface, open]);
+    const graphVisible = open && activeSurface === "graph";
 
     // Surface activation moves focus into the graph root so its focus-scoped
     // shortcuts work without requiring a canvas click first (the keep-alive
@@ -2428,7 +2431,9 @@ export const TerminalPanel = memo(
             }
           }}
         >
-          {graphMounted ? graphNode : null}
+          <GraphSurfaceVisibilityContext.Provider value={graphVisible}>
+            {graphMounted ? graphNode : null}
+          </GraphSurfaceVisibilityContext.Provider>
         </div>
         {open && error ? <div className="terminal-error">{error}</div> : null}
       </section>
