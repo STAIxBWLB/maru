@@ -4,6 +4,7 @@
 // and routes internally between the stage screens and the calendar sync
 // panel. The standalone task manager lives in the separate "tasks" mode.
 
+import "./today.css";
 import {
   memo,
   useCallback,

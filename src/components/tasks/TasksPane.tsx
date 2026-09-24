@@ -1,3 +1,5 @@
+import "./tasks.css";
+import "../calendar/calendar.css";
 import {
   CalendarPlus,
   Calendar,
