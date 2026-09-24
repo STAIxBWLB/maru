@@ -501,29 +501,26 @@ mod tests {
                 drop(blocked_guard);
                 done(blocked).unwrap();
 
-                // Two concurrent writers on the same id: whichever record
-                // completes last must own the store with no mixed state.
-                let (order_tx, order_rx) = mpsc::channel();
-                let first_tx = order_tx.clone();
+                // Two concurrent writers on the same id: the store mutex
+                // serializes the mutations, so the final state is exactly one
+                // decision with no mixed state. Async completion order cannot
+                // identify the last writer — each worker's blocking record can
+                // finish (and its mutation be overwritten) before the runtime
+                // reschedules the awaiting task — so read the decision the
+                // store actually settled on.
                 let first_app = app.clone();
                 let first_id = id.clone();
                 let first = start(async move {
-                    let outcome =
-                        ipc::record_approval(first_app.state(), first_id, decision_a, None)
-                            .await
-                            .unwrap();
-                    first_tx.send(decision_a).unwrap();
-                    outcome
+                    ipc::record_approval(first_app.state(), first_id, decision_a, None)
+                        .await
+                        .unwrap()
                 });
                 let second_app = app.clone();
                 let second_id = id.clone();
                 let second = start(async move {
-                    let outcome =
-                        ipc::record_approval(second_app.state(), second_id, decision_b, None)
-                            .await
-                            .unwrap();
-                    order_tx.send(decision_b).unwrap();
-                    outcome
+                    ipc::record_approval(second_app.state(), second_id, decision_b, None)
+                        .await
+                        .unwrap()
                 });
                 let first_outcome = done(first);
                 let second_outcome = done(second);
@@ -531,17 +528,24 @@ mod tests {
                 assert_eq!(second_outcome.kind, "inbox.bulk");
                 assert!(!first_outcome.auto_approved);
                 assert!(!second_outcome.auto_approved);
-                let _first_completed = order_rx.recv().unwrap();
-                let last_decision = order_rx
-                    .recv_timeout(Duration::from_millis(10))
-                    .expect("both record workers must complete");
+                let final_decision = store
+                    .lock()
+                    .unwrap()
+                    .approvals
+                    .get(&id)
+                    .map(|stored| stored.decision)
+                    .expect("approval stays recorded");
+                assert!(
+                    final_decision == decision_a || final_decision == decision_b,
+                    "store holds one of the two recorded decisions"
+                );
 
                 let verdict = require_approval(
                     &app.state::<ApprovalState>(),
                     Some(id.clone()),
                     "inbox.bulk",
                 );
-                if last_decision == ApprovalDecision::Approved {
+                if final_decision == ApprovalDecision::Approved {
                     verdict.unwrap();
                 } else {
                     assert_eq!(verdict.unwrap_err(), "approval_not_granted");
