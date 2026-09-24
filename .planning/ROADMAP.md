@@ -253,11 +253,11 @@ Plans:
   2. Per-mode CSS ships inside that mode's own lazy chunk instead of the entry stylesheet, and the initial-CSS budget check passes at its original threshold, not a raised one.
   3. No mode shows unstyled content on its first activation after the split.
 
-**Plans**: 2/3 plans executed
+**Plans**: 3/3 plans executed
 
 - [x] 10-01-PLAN.md
 - [x] 10-02-PLAN.md
-- [ ] 10-03-PLAN.md
+- [x] 10-03-PLAN.md
 
 **Wave 1**
 
@@ -265,7 +265,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 10-02: PERF-05 per-mode CSS split with ownership guard and budget-comment correction
+- [x] 10-02: PERF-05 per-mode CSS split with ownership guard and budget-comment correction
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
@@ -298,5 +298,5 @@ Phases execute in numeric order: 6 → 7 → 8 → 9 → 10 → 11
 | 7. Guardrails Before Churn | 5/5 | Complete    | 2026-09-05 |
 | 8. Main-Thread Responsiveness | 29/29 | Complete    | 2026-09-06 |
 | 9. Durability and Session Lifecycle | 0/TBD | Not started | - |
-| 10. Bundle and Build Hardening | 2/3 | In Progress|  |
+| 10. Bundle and Build Hardening | 3/3 | In Progress|  |
 | 11. Milestone Verification & Evidence | 0/TBD | Not started | - |
