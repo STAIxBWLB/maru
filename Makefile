@@ -183,6 +183,10 @@ check-dom-sanitizer: ## Static guard: every dangerouslySetInnerHTML sink in src/
 check-native-e2e-isolation: ## Static guard: no native-e2e runner affordances in the production bundle or Cargo manifest (D-10)
 	$(NODE) scripts/check-native-e2e-isolation.mjs
 
+.PHONY: check-csp-blob
+check-csp-blob: ## Static guard: the shipped CSP script-src carries no blob: (SEC-01, D-04)
+	$(NODE) scripts/check-csp-blob.mjs --binary $(TAURI_DIR)/target/debug/maru
+
 # Phase 08 closure gate (PERF-01/PERF-02): every registered production
 # command must carry final justified evidence (worker boundary, mutation
 # admission, processing-caller closure) and the live generate_handler
@@ -300,6 +304,9 @@ release-checks: verify test-cli cli-smoke-debug ## Full verify plus release-only
 	@# arrived through a stray flag or a dependency is caught here. Must run
 	@# BEFORE the debug-artifact prune below, which deletes the binary.
 	$(NODE) scripts/check-native-e2e-isolation.mjs --binary $(TAURI_DIR)/target/debug/maru
+	@# D-04 proof (b): the debug binary's embedded CSP serialization must
+	@# carry no script-src blob: (SEC-01). Runs before the prune below.
+	$(NODE) scripts/check-csp-blob.mjs --binary $(TAURI_DIR)/target/debug/maru
 	$(PNPM) clean:tauri-debug -- --force
 
 .PHONY: release-preflight-core
