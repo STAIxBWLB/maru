@@ -8,6 +8,32 @@ because releases cut frequently during active development. Versions before
 Dates are the release-tag dates. Only `feat`/`fix`-level changes are listed;
 `chore(release)` version bumps and merge commits are omitted.
 
+## v1.1.8 - 2026-09-25 - Reference Walk
+
+- **The KG reference walk highlights the citing paragraph as each leg plays
+  (#314, #328).** The full citing paragraph is highlighted in both the source
+  document and the preview while a walk leg is active, and the highlight holds
+  through prev, next, and pause so the citation never flickers mid-walk.
+  Reduced-motion preferences are respected, so the walk plays without
+  animation for users who ask for it.
+- **Managed vault writes can no longer bypass the schema gate (#323, #328).**
+  The gate now normalizes absolute, case-variant, and dot-segment paths
+  before matching, so disguised writes to managed roots are rejected. The
+  file queue (managed roots are read-only in Files), drafts promote, memo
+  save, protected agent writes, and studio body apply all route through it.
+- **Scheduled job PATHs expand every tilde segment (#295).** Environment
+  values on scheduled jobs now expand `~` in every `:`-separated segment, not
+  just the first, so PATH entries appended after the first resolve to real
+  home-relative directories.
+- **The vault graph builder reports what it actually did (#326).**
+  `build-graph.py` names the partitioner it used along with any fallback
+  reason, prints the true cross-community edge count with the display cap
+  labeled, and caps god-node domination of surprising connections at 2 per
+  node by default (`--surprise-cap 0` restores the old behavior).
+- **Test suites no longer flake under parallel runs (#328, #329).** The
+  web_actions and approval tests were isolated from environment and
+  async-observation races, so CI runs are stable under parallelism.
+
 ## v1.1.7 - 2026-09-13 - External Notes
 
 - **External meeting note intake is generic and instant (#321).** Plaud-specific
