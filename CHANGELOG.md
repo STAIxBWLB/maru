@@ -8,6 +8,14 @@ because releases cut frequently during active development. Versions before
 Dates are the release-tag dates. Only `feat`/`fix`-level changes are listed;
 `chore(release)` version bumps and merge commits are omitted.
 
+## v1.1.10 - 2026-09-25 - Tighter Bundle
+
+- **v1.1.10 ships the v1.1.9 changes (#338).** The v1.1.9 release was tagged
+  but published no installers: its Windows build stopped at the mode CSS
+  ownership guard, which compared Windows-style paths against `/`-separated
+  ones. The guard now compares POSIX paths, so the stricter CSP and the
+  per-mode lazy stylesheets below reach every platform in this release.
+
 ## v1.1.9 - 2026-09-25 - Tighter Bundle
 
 - **The shipped CSP no longer lets scripts load from `blob:` URLs (#334,
