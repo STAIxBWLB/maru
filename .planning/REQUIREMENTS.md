@@ -126,7 +126,7 @@ nothing in the existing suite would notice.
   runner is a single local target wired into `release-preflight`, following the
   `verify-integration` precedent.
 
-- [ ] **TEST-02**: Test coverage is measured and reported for both the
+- [x] **TEST-02**: Test coverage is measured and reported for both the
   TypeScript and Rust sides, as a non-gating report kept outside `make verify`.
 
 - [ ] **GATE-08**: The narrowed Playwright trace configuration shipped in v1.0 is
@@ -198,7 +198,7 @@ Deferred. Acknowledged but not in this roadmap.
 | SEC-02 | Phase 7 | Complete |
 | SEC-03 | Phase 11 | Pending |
 | TEST-01 | Phase 6 | Complete |
-| TEST-02 | Phase 11 | Pending |
+| TEST-02 | Phase 11 | Complete |
 | GATE-08 | Phase 11 | Pending |
 | VALID-01 | Phase 11 | Pending |
 

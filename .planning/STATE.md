@@ -5,16 +5,16 @@ milestone_name: Felt Quality and Native Proof
 current_phase: 11
 current_phase_name: Milestone Verification & Evidence
 status: executing
-stopped_at: Phase 11 planned
-last_updated: "2026-09-25T14:09:50.681Z"
+stopped_at: Completed 11-02-PLAN.md
+last_updated: "2026-09-25T14:52:17.237Z"
 last_activity: 2026-09-25
 last_activity_desc: Phase 11 execution started
-state_head: 6ca52be57dc48224bc16889e462923d6acab4c04
+state_head: 17cca7c6c5e99c412a431895c65a69671bb93eb2
 progress:
   total_phases: 6
   completed_phases: 4
   total_plans: 56
-  completed_plans: 42
+  completed_plans: 47
   percent: 67
 ---
 
@@ -30,8 +30,8 @@ See: .planning/PROJECT.md (updated 2026-09-25)
 ## Current Position
 
 Phase: 11 (Milestone Verification & Evidence) — EXECUTING
-Plan: 1 of 6
-Status: Executing Phase 11
+Plan: 2 of 6
+Status: Ready to execute
 Last Activity Description: Phase 11 execution started
 Last activity: 2026-09-25 — Phase 11 execution started
 
@@ -138,6 +138,7 @@ Progress: [███████░░░] 67%
 | Phase 08 P26 | 50min | 2 tasks | 10 files |
 | Phase 08 P27 | cross-session (timeout+resume) | 2 tasks | 14 files |
 | Phase 08 P28 | 2h | 2 tasks | 32 files |
+| Phase 11 P02 | ~25min | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -270,6 +271,7 @@ Recent decisions affecting current work:
 - [Phase 10]: Shipped CSP `script-src` is `'self'`; `worker-src` keeps `blob:` for the graph FA2 worker (D-05). `check-csp-blob` enforces the tauri configs (overlays merge-patched onto the base), the dist bundles (AST), and the debug binary's codegen CSP.
 - [Phase 10]: Mode CSS lives in per-mode lazy files; mode-owned late overrides sit at the end of the owning file, and the SPLIT HOME guard keeps each selector property in one home.
 - [Phase 10]: D-03 amended (#340): idle preload warms only the six split modes (today, tasks, meetings, drafts, gap, agents), one per idle callback.
+- [Phase 11]: [Phase 11]: 11-02 coverage.yml step order and llvm-tools-inside-checkout approach executed exactly as the plan's flagged_assumptions specified; no deviations
 
 ### Pending Todos
 
@@ -311,9 +313,9 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-09-25T12:42:50.827Z
-Stopped at: Phase 11 planned
-Resume file: .planning/phases/11-milestone-verification-evidence/11-01-PLAN.md
+Last session: 2026-09-25T14:52:17.154Z
+Stopped at: Completed 11-02-PLAN.md
+Resume file: None
 
 ## Operator Next Steps
 
