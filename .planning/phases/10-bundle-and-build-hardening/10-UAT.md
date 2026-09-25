@@ -13,7 +13,7 @@ updated: 2026-09-25T19:55:00+09:00
 ## Tests
 
 ### 1. Packaged CSP runtime proof
-expected: Run `make release-preflight` on macOS after the packaged build. Expected: the check-csp-blob `--binary` line passes against the freshly built debug binary (`src-tauri/target/debug/maru`) — an observed `csp-blob: ... embedded CSP script-src carries no blob:` success line — before `clean:tauri-debug` prunes the binary. Machine evidence already in place: tauri.conf.json:35 `'self'`, the Makefile wiring, the green dist scan, and Release Preflight CI (Linux) runs 36093470159 and 36103227305 printing `csp-blob: src-tauri/target/debug/maru embedded CSP script-src carries no blob: (compiled source list: "'self'")`; v1.1.10 and v1.1.11 shipped from those checks.
+expected: Run `make release-preflight` on macOS after the packaged build. Expected: the check-csp-blob `--binary` line passes against the freshly built debug binary (`src-tauri/target/debug/maru`), an observed `csp-blob: ... embedded CSP script-src carries no blob:` success line, before `clean:tauri-debug` prunes the binary. Machine evidence already in place: tauri.conf.json:35 `'self'`, the Makefile wiring, the green dist scan, and Release Preflight CI (Linux) runs 36093470159 and 36103227305 printing `csp-blob: src-tauri/target/debug/maru embedded CSP script-src carries no blob: (compiled source list: "'self'")`; v1.1.10 and v1.1.11 shipped from those checks.
 result: pass
 
 ### 2. D-03 idle preload warm observation

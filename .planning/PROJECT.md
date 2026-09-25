@@ -39,7 +39,8 @@ is gone from the shipped CSP, per-mode CSS is split into lazy chunks with the
 pre-split cascade restored (a SPLIT HOME guard keeps each selector property in
 one file), and idle preload warms only the six split modes (D-03 as amended in
 #340). An adversarial review after the first verification fixed 24 cascade
-inversions and hardened both build guards before release. Phase 9 is next.
+inversions and hardened both build guards before release. Phases 9 and 11 are
+planned and ready to execute.
 
 ## Requirements
 
@@ -297,4 +298,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-09-25 - Phase 10 complete (3/3 plans, SEC-01/PERF-05 verified, shipped in v1.1.10/v1.1.11); Phase 9 ready to plan*
+*Last updated: 2026-09-25 - Phase 10 complete (3/3 plans, SEC-01/PERF-05 verified, shipped in v1.1.10/v1.1.11); Phases 9 and 11 planned, ready to execute*

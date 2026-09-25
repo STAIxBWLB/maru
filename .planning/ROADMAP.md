@@ -334,6 +334,6 @@ Phases execute in numeric order: 6 → 7 → 8 → 9 → 10 → 11
 | 6. Native E2E Runner Foundation | 5/5 | Complete    | 2026-08-29 |
 | 7. Guardrails Before Churn | 5/5 | Complete    | 2026-09-05 |
 | 8. Main-Thread Responsiveness | 29/29 | Complete    | 2026-09-06 |
-| 9. Durability and Session Lifecycle | 0/TBD | Not started | - |
+| 9. Durability and Session Lifecycle | 0/8 | Planned | - |
 | 10. Bundle and Build Hardening | 3/3 | Complete    | 2026-09-25 |
-| 11. Milestone Verification & Evidence | 0/TBD | Not started | - |
+| 11. Milestone Verification & Evidence | 0/6 | Planned | - |

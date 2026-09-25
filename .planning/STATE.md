@@ -5,7 +5,7 @@ milestone_name: Felt Quality and Native Proof
 current_phase: 11
 current_phase_name: Milestone Verification & Evidence
 status: executing
-stopped_at: Phase 11 context gathered
+stopped_at: Phase 11 planned
 last_updated: "2026-09-25T13:33:14.996Z"
 last_activity: 2026-09-25
 last_activity_desc: Phase 11 planning complete — 6 plans ready
@@ -312,9 +312,9 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-09-25T12:42:50.827Z
-Stopped at: Phase 11 context gathered
-Resume file: .planning/phases/11-milestone-verification-evidence/11-CONTEXT.md
+Stopped at: Phase 11 planned
+Resume file: .planning/phases/11-milestone-verification-evidence/11-01-PLAN.md
 
 ## Operator Next Steps
 
-- Plan Phase 9 (Durability and Session Lifecycle) with `/gsd-plan-phase 9`
+- Execute Phase 9 (Durability and Session Lifecycle, 8 plans) with `/gsd-execute-phase 9`, or Phase 11 (Milestone Verification & Evidence, 6 plans) with `/gsd-execute-phase 11`. Both are planned; neither has started.
