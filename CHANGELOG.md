@@ -8,6 +8,16 @@ because releases cut frequently during active development. Versions before
 Dates are the release-tag dates. Only `feat`/`fix`-level changes are listed;
 `chore(release)` version bumps and merge commits are omitted.
 
+## v1.1.11 - 2026-09-25 - Lighter Start
+
+- **Startup warms only the modes that need it (#340, #341).** The idle-time
+  preload now warms just Today, Tasks, Meetings, Drafts, Gap, and Agents, the
+  modes whose styles moved out of the startup stylesheet in v1.1.10. Studio,
+  Graph, Diagram, and the other modes load when first opened, so a session
+  that never uses them no longer evaluates Studio's rich-text editor (about
+  1.3 MB) or the Graph renderer (about 335 KB) at launch. Every mode still
+  opens fully styled.
+
 ## v1.1.10 - 2026-09-25 - Tighter Bundle
 
 - **v1.1.10 ships the v1.1.9 changes (#338).** The v1.1.9 release was tagged
