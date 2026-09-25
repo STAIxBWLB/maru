@@ -20,7 +20,7 @@ affects: ["09-06 (toast + recovery copy consumes useTeardownFlush's onError path
 actuals:
   tokens: 5505
   tasks: 3
-  commits: 3
+  commits: 5
 
 # Tech tracking
 tech-stack:
@@ -133,6 +133,9 @@ status: complete
 2. **Task 2: Studio and the graph layout save on unmount, pinned by a source-level surfaces test** - `b526b404` (feat)
 3. **Task 3: The Today brain dump runs on the shared saver with its flush-on-unmount, Finish/Quick-skip flush, and Undo discard intact** - `f43c3efa` (feat)
 
+**Plan metadata:** `24c2f432` (docs: complete plan)
+**Deviation fix (found during `make verify` after Task 1's commit):** `af9b4e5d` (fix: silence i18n-lint false positive)
+
 ## Files Created/Modified
 
 - `src/lib/teardownSave.surfaces.test.ts` - source-level pin for all five in-scope surfaces plus HtmlVisualEditor
@@ -160,7 +163,7 @@ status: complete
 - **Fix:** Added the script's documented escape hatch, a trailing `// i18n-lint-ignore` comment, to the affected line.
 - **Files modified:** `src/components/meetings/MeetingSourceWorkbench.tsx`
 - **Verification:** `node scripts/lint-i18n.mjs` reports zero violations; `make verify`'s `lint-i18n` step passes.
-- **Committed in:** `b8872375` (Task 1 commit)
+- **Committed in:** `af9b4e5d` (separate fix commit, found during the post-Task-3 `make verify` run, applied after Task 1's own commit)
 
 ---
 
@@ -193,7 +196,7 @@ None - no external service configuration required.
 ## Self-Check: PASSED
 
 - All key files found on disk: `src/lib/teardownSave.surfaces.test.ts`, `src/components/meetings/MeetingSourceWorkbench.tsx`, `src/components/meetings/MeetingSourceWorkbench.test.tsx`, `src/components/studio/StudioMode.tsx`, `src/components/graph/GraphView.tsx`, `src/components/today/TodayBrainDump.tsx`, `src/components/today/TodayPrepare.test.tsx`.
-- All commit hashes found in `git log`: `b8872375`, `b526b404`, `f43c3efa`.
+- All commit hashes found in `git log`: `b8872375`, `b526b404`, `f43c3efa`, `24c2f432`, `af9b4e5d`.
 - Task 1 acceptance criteria re-verified via grep: `useTeardownFlush(` count 1, `createDebouncedSaver` count 2 in `MeetingSourceWorkbench.tsx`.
 - Task 2 acceptance criteria re-verified: `useTeardownFlush(` count 1 in both `StudioMode.tsx` and `GraphView.tsx`; `saveTimerRef` count 0 in both.
 - Task 3 acceptance criteria re-verified: `useTeardownFlush(` count 1, `createDebouncedSaver` count 2 in `TodayBrainDump.tsx`.
