@@ -2874,4 +2874,186 @@ mod phase09_02 {
             "the old generation's handle must be rejected after respawn"
         );
     }
+
+    /// Spawns `/bin/sh -c script` directly (no PTY) with its own process
+    /// group (`process_group(0)`), reaping it on a waiter thread so a
+    /// zombie leader never keeps the group observable. Returns the pgid.
+    fn spawn_direct_trapping(script: &str) -> u32 {
+        use std::os::unix::process::CommandExt;
+        let mut child = std::process::Command::new("/bin/sh")
+            .arg("-c")
+            .arg(script)
+            .process_group(0)
+            .spawn()
+            .expect("spawn direct process");
+        let pgid = child.id();
+        thread::spawn(move || {
+            let _ = child.wait();
+        });
+        pgid
+    }
+
+    #[test]
+    fn phase09_02_direct_spawn_escalates_to_sigkill_when_hup_and_term_trapped() {
+        let tempdir = tempfile::tempdir().unwrap();
+        let marker = tempdir.path().join("ready");
+        let script = format!(
+            "trap '' HUP TERM; : > {marker}; while :; do sleep 1; done",
+            marker = marker.display()
+        );
+        let pgid = spawn_direct_trapping(&script);
+
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !marker.exists() {
+            assert!(
+                Instant::now() < deadline,
+                "direct-spawn child never signaled readiness"
+            );
+            thread::sleep(Duration::from_millis(20));
+        }
+
+        signal_process_group(pgid, SIGHUP).unwrap();
+        let stage = escalate_process_group(pgid, Duration::from_millis(200));
+        assert_eq!(
+            stage,
+            KillStage::Kill,
+            "a child trapping both HUP and TERM must only die at the SIGKILL stage"
+        );
+        assert!(!process_group_alive(pgid));
+    }
+
+    #[test]
+    fn phase09_02_escalation_warn_line_matches_d11_format() {
+        assert_eq!(escalation_warn_line(4242, KillStage::Hangup), None);
+        assert_eq!(
+            escalation_warn_line(4242, KillStage::Terminate),
+            Some("[terminal] pgid 4242 survived SIGHUP; escalated to SIGTERM".to_string())
+        );
+        assert_eq!(
+            escalation_warn_line(4242, KillStage::Kill),
+            Some("[terminal] pgid 4242 survived SIGHUP; escalated to SIGKILL".to_string())
+        );
+    }
+
+    #[test]
+    fn phase09_02_repeated_kill_is_idempotent_and_does_not_block_other_sessions() {
+        let app = app();
+        let app = app.handle().clone();
+        let session_id = "phase09-02-repeat-kill".to_string();
+        let generation = run(spawn_session(
+            app.clone(),
+            sh_args(
+                session_id.clone(),
+                "trap '' HUP; echo TRAP-READY; while :; do sleep 1; done",
+            ),
+        ))
+        .unwrap();
+        let handle = current(session_id.clone(), generation);
+        wait_for_marker(&app, &handle, "TRAP-READY");
+
+        run(kill_session(app.clone(), handle.clone())).unwrap();
+        // Second kill of the same handle: idempotent, sends nothing new.
+        run(kill_session(app.clone(), handle)).unwrap();
+
+        // While the first session's ladder sleeps in the background (up to
+        // KILL_ESCALATION_GRACE per stage), an unrelated session must still
+        // spawn and be killed quickly -- no lock is held across the sleeps.
+        let other_id = "phase09-02-repeat-kill-other".to_string();
+        let start = Instant::now();
+        let other_generation = run(spawn_session(app.clone(), cat_args(other_id.clone()))).unwrap();
+        let other_handle = current(other_id, other_generation);
+        run(kill_session(app.clone(), other_handle)).unwrap();
+        assert!(
+            start.elapsed() < Duration::from_secs(1),
+            "spawn+kill of an unrelated session must not block on another session's escalation ladder"
+        );
+    }
+
+    #[test]
+    fn phase09_02_sweep_sessions_clears_live_and_mid_ladder_groups() {
+        let app = app();
+        let app = app.handle().clone();
+        let state = app.state::<TerminalState>().inner().clone();
+
+        let id_a = "phase09-02-sweep-a".to_string();
+        let gen_a = run(spawn_session(
+            app.clone(),
+            sh_args(
+                id_a.clone(),
+                "trap '' HUP; echo TRAP-READY; while :; do sleep 1; done",
+            ),
+        ))
+        .unwrap();
+        let handle_a = current(id_a.clone(), gen_a);
+        wait_for_marker(&app, &handle_a, "TRAP-READY");
+        let pgid_a = process_group_of(&app, &id_a).expect("pgid a captured");
+
+        let id_b = "phase09-02-sweep-b".to_string();
+        let gen_b = run(spawn_session(
+            app.clone(),
+            sh_args(
+                id_b.clone(),
+                "trap '' HUP TERM; echo TRAP-READY; while :; do sleep 1; done",
+            ),
+        ))
+        .unwrap();
+        let handle_b = current(id_b.clone(), gen_b);
+        wait_for_marker(&app, &handle_b, "TRAP-READY");
+        let pgid_b = process_group_of(&app, &id_b).expect("pgid b captured");
+
+        let id_c = "phase09-02-sweep-c".to_string();
+        let gen_c = run(spawn_session(
+            app.clone(),
+            sh_args(
+                id_c.clone(),
+                "trap '' HUP; echo TRAP-READY; while :; do sleep 1; done",
+            ),
+        ))
+        .unwrap();
+        let handle_c = current(id_c.clone(), gen_c);
+        wait_for_marker(&app, &handle_c, "TRAP-READY");
+        let pgid_c = process_group_of(&app, &id_c).expect("pgid c captured");
+
+        // Put C mid-ladder: its own tab-close escalation thread is now
+        // sleeping in the background against KILL_ESCALATION_GRACE (2s),
+        // independent of the sweep below.
+        run(kill_session(app.clone(), handle_c)).unwrap();
+
+        sweep_sessions(&state, Duration::from_millis(300));
+
+        assert!(
+            !process_group_alive(pgid_a),
+            "session A's live group must be gone after the sweep"
+        );
+        assert!(
+            !process_group_alive(pgid_b),
+            "session B's live group (traps HUP and TERM) must be gone after the sweep"
+        );
+        assert!(
+            !process_group_alive(pgid_c),
+            "session C's mid-ladder group must be gone after the sweep"
+        );
+        assert!(state.sessions.lock().unwrap().is_empty());
+        assert!(state.escalations.lock().unwrap().is_empty());
+
+        // A second sweep right after a full sweep is a fast no-op.
+        let start = Instant::now();
+        sweep_sessions(&state, Duration::from_millis(300));
+        assert!(
+            start.elapsed() < Duration::from_millis(50),
+            "a sweep of an already-empty state must return almost immediately"
+        );
+    }
+
+    #[test]
+    fn phase09_02_sweep_sessions_on_empty_state_returns_immediately() {
+        let state = TerminalState::default();
+        let start = Instant::now();
+        sweep_sessions(&state, Duration::from_millis(300));
+        assert!(start.elapsed() < Duration::from_millis(50));
+
+        let start = Instant::now();
+        sweep_sessions(&state, Duration::from_millis(300));
+        assert!(start.elapsed() < Duration::from_millis(50));
+    }
 }
