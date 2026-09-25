@@ -463,6 +463,13 @@ test("rollover retries after a transient failure before notifying or refreshing"
     ).__MARU_TODAY_MOCK__.setLogicalDay("2026-07-22"),
   );
   await page.clock.runFor(60_000);
+  // A failed rollover retries on the watcher's next 60s tick, not immediately:
+  // let the first (failing) attempt land, then advance one more interval. An
+  // unrelated re-render may already have retried; the extra tick is then a no-op.
+  await expect
+    .poll(async () => callsOf(await readTodayCalls(page), "today_rollover").length)
+    .toBeGreaterThanOrEqual(1);
+  await page.clock.runFor(60_000);
   await expect
     .poll(async () => callsOf(await readTodayCalls(page), "today_rollover").length)
     .toBeGreaterThanOrEqual(2);
