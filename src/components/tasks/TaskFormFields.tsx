@@ -3,6 +3,7 @@
 // and save/reset actions. Extracted from TaskDetailDrawer so the Today task
 // sheet can render the exact same controls without forking the form.
 
+import "./taskFormFields.css";
 import { RotateCcw, Save } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "../../lib/i18n";

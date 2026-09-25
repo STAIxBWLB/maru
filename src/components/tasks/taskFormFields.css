@@ -1,0 +1,65 @@
+/* TaskFormFields renders in both the Tasks drawer and Today's task sheet, so
+   its rules ship with the shared component, not with either mode's CSS. */
+
+.task-schedule-editor {
+  display: grid;
+  gap: 9px;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--panel) 80%, var(--bg));
+  padding: 10px;
+}
+
+.task-schedule-editor header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.task-schedule-editor h3 {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--type-label-size);
+  text-transform: uppercase;
+}
+
+.task-detail-save-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.task-detail-section h3 {
+  margin: 0 0 8px;
+  font-size: var(--type-label-size);
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.task-body-section {
+  display: grid;
+  gap: 8px;
+}
+
+.task-body-editor {
+  min-width: 0;
+}
+
+.task-body-editor .studio-codemirror-editor {
+  min-height: 260px;
+  max-height: 420px;
+  border-color: var(--line-soft);
+  background: color-mix(in srgb, var(--panel-2) 82%, var(--bg));
+}
+
+.task-body-editor .studio-codemirror-editor .cm-editor,
+.task-body-editor .studio-codemirror-editor .cm-scroller {
+  min-height: 260px;
+}
+
+.task-body-editor .studio-codemirror-editor .cm-scroller {
+  max-height: 420px;
+}

@@ -3,9 +3,9 @@ phase: "10"
 slug: "bundle-and-build-hardening"
 # status lifecycle: draft (seeded by plan-phase) → validated (set by validate-phase §6)
 # audit-milestone §5.5 distinguishes NOT-VALIDATED (draft) from PARTIAL (validated + nyquist_compliant: false) (#2117)
-status: draft
-nyquist_compliant: false
-wave_0_complete: false
+status: validated
+nyquist_compliant: true
+wave_0_complete: true
 created: "2026-09-21"
 ---
 
@@ -42,14 +42,14 @@ created: "2026-09-21"
 
 | Task ID | Plan | Wave | Requirement | Threat Ref | Secure Behavior | Test Type | Automated Command | File Exists | Status |
 |---------|------|------|-------------|------------|-----------------|-----------|-------------------|-------------|--------|
-| TBD | 01 | 1 | SEC-01 (proof a) | T-10-01 | dist/ requires no blob: script URLs | static artifact scan (check-*.mjs) | `node scripts/check-csp-blob.mjs` (chained into `pnpm build:frontend` → `make verify`) | ❌ W0 | ⬜ pending |
-| TBD | 01 | 1 | SEC-01 (proof b) | T-10-01 | packaged config's script-src has no blob: | packaged-artifact scan (release-checks window) | `node scripts/check-csp-blob.mjs --binary src-tauri/target/debug/maru` (wired into `release-checks`) | ❌ W0 | ⬜ pending |
-| TBD | 01 | 1 | PERF-05 | — | initial CSS ≤ 70 KiB gzip, un-raised | budget gate (existing) | `node scripts/check-bundle-budget.mjs` (already in `pnpm build:frontend`) | ✅ | ⬜ pending |
-| TBD | 01 | 1 | PERF-05 (hardening) | — | per-mode CSS in lazy chunks, never entry | budget gate + optional source assertion | same command chain | Optional — W0 | ⬜ pending |
-| TBD | 02 | 1 | Criterion 3 (FOUC) | — | no unstyled first activation | e2e: Playwright computed-styles spec on first mode activation | `pnpm test:e2e` / `make test-e2e` (in `release-preflight`, NOT in `make verify`) | ❌ W0 | ⬜ pending |
-| TBD | 02 | 1 | D-03 preload | — | idle preload warms chunks | manual/observation (startupProfile-style marks or devtools); no gate — preload failure degrades gracefully | — | — | ⬜ pending |
+| 10-01-1/2 | 01 | 1 | SEC-01 (proof a) | T-10-01 | dist/ requires no blob: script URLs | static artifact scan (check-*.mjs) | `node scripts/check-csp-blob.mjs` (chained into `pnpm build:frontend` → `make verify`) | ✅ | ✅ green |
+| 10-01-3 | 01 | 1 | SEC-01 (proof b) | T-10-01 | packaged config's script-src has no blob: | packaged-artifact scan (release-checks window) | `node scripts/check-csp-blob.mjs --binary src-tauri/target/debug/maru` (wired into `release-checks`) | ✅ | ✅ green |
+| 10-02-1..3 | 02 | 2 | PERF-05 | — | initial CSS ≤ 70 KiB gzip, un-raised | budget gate (existing) | `node scripts/check-bundle-budget.mjs` (already in `pnpm build:frontend`) | ✅ | ✅ green |
+| 10-02-3 | 02 | 2 | PERF-05 (hardening) | — | per-mode CSS in lazy chunks, never entry | ownership guard (new check-mode-css-ownership.mjs) | `node scripts/check-mode-css-ownership.mjs` (chained into `pnpm build:frontend`) | ✅ | ✅ green |
+| 10-03-2 | 03 | 3 | Criterion 3 (FOUC) | — | no unstyled first activation | e2e: Playwright computed-styles spec on first mode activation | `pnpm test:e2e -- first-activation-styles` / `make test-e2e` (in `release-preflight`, NOT in `make verify`) | ✅ | ✅ green |
+| 10-03-1 | 03 | 3 | D-03 preload | — | idle preload warms chunks | unit + wiring (vitest, typecheck, lint, grep≥2 in main.tsx); runtime scheduling stays in Manual-Only | `pnpm exec vitest run src/lib` | ✅ | ✅ green |
 
-*Task IDs are planner-assigned during plan-phase step 8; this map is refined when PLAN.md files land.*
+*Task IDs are planner-assigned from the landed PLAN.md files (10-01: 3 tasks, 10-02: 3 tasks, 10-03: 2 tasks).*
 
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
 
@@ -57,10 +57,10 @@ created: "2026-09-21"
 
 ## Wave 0 Requirements
 
-- [ ] `scripts/check-csp-blob.mjs` (new static + `--binary` modes) — covers SEC-01 both proofs
-- [ ] `e2e/first-activation-styles.spec.ts` (new) — covers criterion 3
-- [ ] Optional: per-mode CSS placement assertion in check-bundle-budget.mjs — PERF-05 hardening
-- [ ] Stale-comment correction in `scripts/check-bundle-budget.mjs:27-28` — 10-CONTEXT.md `<specifics>` requires it in the change that lands the split
+- [x] `scripts/check-csp-blob.mjs` (new static + `--binary` modes) — covers SEC-01 both proofs
+- [x] `e2e/first-activation-styles.spec.ts` (new) — covers criterion 3
+- [x] Optional: per-mode CSS placement assertion — landed as `scripts/check-mode-css-ownership.mjs` chained into `pnpm build:frontend`
+- [x] Stale-comment correction in `scripts/check-bundle-budget.mjs` — landed with the 10-02 policy pin
 
 No framework install needed — existing test infrastructure covers everything else. (None of these are test-runner gaps; all land as ordinary implementation tasks.)
 
@@ -77,11 +77,30 @@ No framework install needed — existing test infrastructure covers everything e
 
 ## Validation Sign-Off
 
-- [ ] All tasks have `<automated>` verify or Wave 0 dependencies
-- [ ] Sampling continuity: no 3 consecutive tasks without automated verify
-- [ ] Wave 0 covers all MISSING references
-- [ ] No watch-mode flags
-- [ ] Feedback latency < 60s
-- [ ] `nyquist_compliant: true` set in frontmatter
+- [x] All tasks have `<automated>` verify or Wave 0 dependencies
+- [x] Sampling continuity: no 3 consecutive tasks without automated verify
+- [x] Wave 0 covers all MISSING references
+- [x] No watch-mode flags
+- [x] Feedback latency < 60s
+- [x] `nyquist_compliant: true` set in frontmatter
 
-**Approval:** pending
+**Approval:** nyquist audit clean 2026-09-25 — 0 gaps, 0 escalations; 2 manual-only items retained per verification culture
+
+## Validation Audit 2026-09-25
+| Metric | Count |
+|--------|-------|
+| Gaps found | 0 |
+| Resolved | 0 |
+| Escalated | 0 |
+
+Audit basis: all three SUMMARYs recorded every verification command as pass at
+execution time (10-01: coverage D1-D5 all pass; 10-02: vitest 2166 + node 96,
+guards green; 10-03: vitest src/lib 1634 + e2e 38 green, typecheck/lint/build
+exit 0). Disk verification on this host agrees with the SUMMARY claims:
+`tauri.conf.json` carries `script-src: 'self'` and `worker-src: 'self' blob:'`,
+7 per-mode CSS files each carry a `maru:mode` marker, dist ships 14 CSS chunks,
+`check-bundle-budget.mjs` reports initial JS 310.3 KiB ≤ 320 and initial CSS
+45.3 KiB ≤ 70, `check-mode-css-ownership.mjs` verifies entry chunk clean, and
+`check-csp-blob.mjs` finds no blob: script sources across 76 JS bundles. The
+two manual-only rows above remain the honest human-gated remainder; no gap was
+replaced with an approval marker.

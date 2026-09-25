@@ -1,3 +1,6 @@
+// calendar.css first: tasks.css's taskmain container rules override .cal-*.
+import "../calendar/calendar.css";
+import "./tasks.css";
 import {
   CalendarPlus,
   Calendar,

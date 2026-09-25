@@ -1,3 +1,5 @@
+import "./drafts.css";
+
 import { listen } from "@tauri-apps/api/event";
 import { Check, FileDiff, Lightbulb, PenLine, RefreshCcw, Sparkles, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";

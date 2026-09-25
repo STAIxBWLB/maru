@@ -6,6 +6,8 @@
 // grouped by `metadata.agentId`; the live log tail, the run history and the
 // stop button are the same components the Inbox and Skills surfaces use.
 
+import "./agents.css";
+
 import { Bot, Plus, RefreshCcw, RotateCcw, Square, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";

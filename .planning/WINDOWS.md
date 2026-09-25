@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 0
+open_count: 1
 waived_count: 0
 fixed_count: 4
-total_count: 4
-last_updated: 2026-09-05T05:40:54.363Z
+total_count: 5
+last_updated: 2026-09-24T22:24:57.774Z
 ---
 
 # Broken Windows Ledger
@@ -19,6 +19,7 @@ last_updated: 2026-09-05T05:40:54.363Z
 | 2 | 04 | deviation | src/App.tsx |  | Kept EditorPane command ports stable across App renders with current-scope dispatch. | fixed |  | 2026-08-25T21:59:50.997Z | 2026-08-25T22:00:10.661Z |
 | 3 | 04 | deviation | src/__tests__/editorSurfaceRenderIsolation.test.tsx |  | Separated render-domain probes so changed-slice counters measure independent subscribers. | fixed |  | 2026-08-25T21:59:51.076Z | 2026-08-25T22:00:10.739Z |
 | 4 | 08 | deviation | src-tauri/src/git.rs |  | Plan05 uses owned AppHandle and real worker-local State lookup to preserve ApprovalState ownership without changing its representation. | fixed |  | 2026-09-05T05:40:43.884Z | 2026-09-05T05:40:54.363Z |
+| 5 | 10-bundle-and-build-hardening | stub |  |  | no stubs introduced by plan 10-02 | open |  | 2026-09-24T22:24:57.774Z |  |
 
 ````json
 [
@@ -69,6 +70,19 @@ last_updated: 2026-09-05T05:40:54.363Z
     "reason": "",
     "recorded_at": "2026-09-05T05:40:43.884Z",
     "resolved_at": "2026-09-05T05:40:54.363Z"
+  },
+  {
+    "id": 5,
+    "kind": "stub",
+    "phase": "10-bundle-and-build-hardening",
+    "file": "",
+    "line": null,
+    "description": "no stubs introduced by plan 10-02",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-09-24T22:24:57.774Z",
+    "resolved_at": null,
+    "milestone": "v1.1"
   }
 ]
 ````
