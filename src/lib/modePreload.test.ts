@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const idle: Array<() => void> = [];
 const timeouts: number[] = [];
@@ -39,6 +39,10 @@ async function runIdle() {
   await new Promise((resolve) => setTimeout(resolve, 0));
 }
 
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
 beforeEach(() => {
   idle.length = 0;
   timeouts.length = 0;
@@ -58,8 +62,17 @@ describe("scheduleModePreload", () => {
     await runIdle();
     expect(loads).toEqual(["a", "b", "c"]);
     expect(idle).toHaveLength(0);
-    // First step waits for real idle; later steps stay short for the timer fallback.
+    // No requestIdleCallback here (the WKWebView case): later steps stay short.
     expect(timeouts).toEqual([2000, 250, 250]);
+  });
+
+  it("keeps the 2000ms idle cap between steps where requestIdleCallback exists", async () => {
+    vi.stubGlobal("window", { requestIdleCallback: () => 0 });
+    scheduleModePreload();
+    await runIdle();
+    await runIdle();
+    await runIdle();
+    expect(timeouts).toEqual([2000, 2000, 2000]);
   });
 
   it("skips unavailable modes and keeps going after a failed load", async () => {

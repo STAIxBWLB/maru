@@ -18,9 +18,9 @@ import { scheduleStartupIdle } from "./startupProfile";
  *
  * The first step waits up to 2000ms, above the helper's 1500ms default:
  * idle preload has no UI deadline, while the default is reserved for
- * startup-critical work. Later steps cap the wait at 250ms because WKWebView
- * has no requestIdleCallback and the helper falls back to a plain timer; a
- * 2s timer per mode would leave the last chunk cold for ~30s. Individual
+ * startup-critical work. Where requestIdleCallback is missing (WKWebView) the
+ * helper falls back to a plain timer, so later steps drop to 250ms there; a 2s
+ * timer per mode would leave the last chunk cold for ~30s. Individual
  * load failures are swallowed so a single broken chunk cannot produce an
  * unhandled rejection or stop the queue.
  *
@@ -28,13 +28,14 @@ import { scheduleStartupIdle } from "./startupProfile";
  */
 export function scheduleModePreload(): () => void {
   const queue = [...getRegisteredModeIds()];
+  const stepTimeout = typeof window !== "undefined" && "requestIdleCallback" in window ? 2000 : 250;
   let cancelled = false;
   let cancelIdle = () => {};
   const step = () => {
     const descriptor = getModeDescriptor(queue.shift() ?? "");
     const warm = descriptor?.isAvailable() ? descriptor.load().catch(() => {}) : Promise.resolve();
     void warm.then(() => {
-      if (!cancelled && queue.length > 0) cancelIdle = scheduleStartupIdle(step, 250);
+      if (!cancelled && queue.length > 0) cancelIdle = scheduleStartupIdle(step, stepTimeout);
     });
   };
   cancelIdle = scheduleStartupIdle(step, 2000);
