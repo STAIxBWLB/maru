@@ -240,7 +240,28 @@ Plans:
   3. A save that fails on a teardown path produces a visible signal to the user (log, toast, or equivalent) instead of disappearing with no trace.
   4. A job whose `program.env.PATH` carries several tilde entries installs a launchd plist in which every one of them is absolute, so the child process resolves the same tools the job's shell guard found. A colon-bearing non-path value and a single-path value are byte-identical to today's output.
 
-**Plans**: TBD
+**Plans**: 8 plans in 4 waves
+
+Plans:
+**Wave 1**
+
+- [ ] 09-01-PLAN.md - REL-04 verify-only: run the shipped tilde-expansion tests and mark traceability (D-13)
+- [ ] 09-02-PLAN.md - REL-01 process-group kill ladder for closed tabs and the terminal sweep at app exit (D-09..D-12)
+- [ ] 09-03-PLAN.md - Cmd+Q routed into the window-close guard through a Maru-owned app.quit menu item (D-03, A1 spike)
+- [ ] 09-05-PLAN.md - Shared saver settle/retry contract, teardown flush hook, Scratchpad flushes on unmount (D-01, D-02)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [ ] 09-04-PLAN.md - write_recovery_copy IPC command under .maru/recovery plus command-isolation evidence at 383 (D-08)
+- [ ] 09-07-PLAN.md - Meeting source, Studio, graph layout, and Today brain dump autosaves on the shared saver (D-01)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
+- [ ] 09-06-PLAN.md - Failed teardown saves: recovery copy, toast naming file and reason, Open recovery copy (D-07, D-08)
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
+- [ ] 09-08-PLAN.md - Quit flush in the one guard: 3 s budget, 300 ms indicator, save-failed dialog, real-app verification (D-03..D-06)
 
 ### Phase 10: Bundle and Build Hardening
 
