@@ -11,9 +11,10 @@
 //
 // - Default mode (every run, chained into `build:frontend`, so `make
 //   verify` and CI carry it against a freshly produced bundle):
-//   1. Config: every src-tauri/tauri*.conf.json CSP must keep blob: out
-//      of script-src / script-src-elem (and out of default-src when no
-//      script-src is set). Re-adding blob: fails the ordinary PR build,
+//   1. Config: tauri.conf.json must carry a CSP, and every
+//      src-tauri/tauri*.conf.json CSP must restrict scripts and keep blob:
+//      out of script-src / script-src-elem (and out of default-src when
+//      no script-src is set). Re-adding blob: fails the ordinary PR build,
 //      not only the release preflight.
 //   2. Dist (D-04 proof (a)): parses dist/assets/*.{js,mjs} (Vite's
 //      bundled Rollup parser, not a regex or char scanner: minified
@@ -89,7 +90,13 @@ function checkConfig() {
   const confFiles = readdirSync(confDir).filter((f) => /^tauri.*\.conf\.json$/.test(f));
   for (const file of confFiles) {
     const csp = JSON.parse(readFileSync(join(confDir, file), "utf8")).app?.security?.csp;
-    if (csp == null) continue;
+    if (csp == null) {
+      // Overlays may leave the CSP alone; the base config must carry one.
+      if (file === "tauri.conf.json") {
+        violations.push("src-tauri/tauri.conf.json carries no CSP — the webview would run with none (SEC-01)");
+      }
+      continue;
+    }
     const directives =
       typeof csp === "string"
         ? Object.fromEntries(
@@ -104,6 +111,9 @@ function checkConfig() {
           );
     const governing = ["script-src", "script-src-elem"].filter((d) => d in directives);
     if (governing.length === 0) governing.push("default-src");
+    if (!(governing[0] in directives)) {
+      violations.push(`src-tauri/${file} CSP has no script-src or default-src — scripts are unrestricted (SEC-01)`);
+    }
     for (const name of governing) {
       if ((directives[name] ?? "").includes("blob:")) {
         violations.push(

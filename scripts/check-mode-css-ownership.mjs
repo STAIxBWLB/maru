@@ -57,6 +57,9 @@ const DIST_ASSETS_DIR = path.join(REPO_ROOT, "dist/assets");
 const SRC_COMPONENTS_DIR = path.join(REPO_ROOT, "src/components");
 const ENTRY_CSS = "src/styles.css";
 
+/** Markerless CSS split out of styles.css that SPLIT HOME must still cover. */
+const SHARED_SPLIT_CSS = ["src/components/tasks/taskFormFields.css"];
+
 /**
  * File pairs whose load order is fixed: TasksPane imports calendar.css before
  * tasks.css and calendar.css is a shared dependency chunk, so tasks.css (its
@@ -357,7 +360,10 @@ async function main() {
   // Marker-bearing per-mode src files (raw-text scan).
   const srcCssFiles = await collectCssFiles(SRC_COMPONENTS_DIR);
   const srcMarkerIds = new Map();
-  const homes = [{ file: ENTRY_CSS, text: await readFile(path.join(REPO_ROOT, ENTRY_CSS), "utf8") }];
+  const homes = [];
+  for (const file of [ENTRY_CSS, ...SHARED_SPLIT_CSS]) {
+    homes.push({ file, text: await readFile(path.join(REPO_ROOT, file), "utf8") });
+  }
   for (const file of srcCssFiles) {
     const text = await readFile(file, "utf8");
     const match = firstMarker(text);

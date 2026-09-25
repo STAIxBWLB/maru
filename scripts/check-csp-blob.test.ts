@@ -36,6 +36,13 @@ describe("check-csp-blob.mjs config half", () => {
     expect(result.status).toBe(1);
     expect(result.stderr).toContain("tauri.__csp_probe__.conf.json script-src carries blob:");
   });
+
+  it("fails when a config CSP leaves scripts unrestricted", () => {
+    writeFileSync(probeConf, JSON.stringify({ app: { security: { csp: { "img-src": "'self'" } } } }));
+    const result = runGuard("--dist", fixture({ "ok.js": 'import("./a.js");' }));
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("has no script-src or default-src");
+  });
 });
 
 describe("check-csp-blob.mjs dist half", () => {
