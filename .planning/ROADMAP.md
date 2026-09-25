@@ -306,15 +306,15 @@ Plans:
   3. Nyquist validation metadata for v1.0 phases 01-03 matches what `$gsd-validate-phase` reports, with no stale drift remaining.
   4. Milestone v1.0 Phase 02 has a security report on file, so security evidence is uniform across every v1.0 phase.
 
-**Plans**: 6 plans in 3 waves
+**Plans**: 4/6 plans executed in 3 waves
 
 Plans:
 **Wave 1**
 
-- [ ] 11-01-PLAN.md - TEST-02 local coverage: legitimacy checkpoint, `make coverage` (Vitest v8 + cargo-llvm-cov, per-crate totals), recorded baseline (D-01..D-04)
-- [ ] 11-03-PLAN.md - GATE-08 trace re-proof: throwaway probe branch, dispatched CI failure, `unzip -l` evidence in 11-EVIDENCE.md, branch deleted (D-05..D-07)
-- [ ] 11-04-PLAN.md - VALID-01: validate-phase reconciliation of v1.0 01/02/03-VALIDATION.md against shipped tests (D-08..D-10)
-- [ ] 11-05-PLAN.md - SEC-03: retroactive secure-phase audit of the T-02 register, 02-SECURITY.md (D-12, D-13)
+- [x] 11-01-PLAN.md - TEST-02 local coverage: legitimacy checkpoint, `make coverage` (Vitest v8 + cargo-llvm-cov, per-crate totals), recorded baseline (D-01..D-04)
+- [x] 11-03-PLAN.md - GATE-08 trace re-proof: throwaway probe branch, dispatched CI failure, `unzip -l` evidence in 11-EVIDENCE.md, branch deleted (D-05..D-07)
+- [x] 11-04-PLAN.md - VALID-01: validate-phase reconciliation of v1.0 01/02/03-VALIDATION.md against shipped tests (D-08..D-10)
+- [x] 11-05-PLAN.md - SEC-03: retroactive secure-phase audit of the T-02 register, 02-SECURITY.md (D-12, D-13)
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
@@ -336,4 +336,4 @@ Phases execute in numeric order: 6 → 7 → 8 → 9 → 10 → 11
 | 8. Main-Thread Responsiveness | 29/29 | Complete    | 2026-09-06 |
 | 9. Durability and Session Lifecycle | 0/8 | Planned | - |
 | 10. Bundle and Build Hardening | 3/3 | Complete    | 2026-09-25 |
-| 11. Milestone Verification & Evidence | 0/6 | Planned | - |
+| 11. Milestone Verification & Evidence | 4/6 | In Progress|  |
