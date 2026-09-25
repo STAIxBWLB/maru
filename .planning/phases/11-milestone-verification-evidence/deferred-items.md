@@ -1,28 +1,24 @@
 # Deferred Items - Phase 11
 
-Out-of-scope discoveries logged during plan execution, per the executor's Scope
-Boundary rule (do not auto-fix issues unrelated to the current task).
+Out-of-scope discoveries logged during execution.
 
-## 11-04 (VALID-01 Nyquist reconciliation)
+## `pnpm typecheck` fails inside fresh agent worktrees (environment, not a code regression)
 
-- **`src/components/graph/GraphCanvas.tsx` implicit-any regression (TS7006)**,
-  discovered 2026-09-25 while running `make verify` / `pnpm typecheck` for
-  Tasks 1-3. `graph.forEachEdge((key, attrs, source, target) => ...)` at line
-  311 and `graph.forEachNode((key, attrs) => ...)` at line 328 no longer infer
-  their callback parameter types from `graphology-types@0.24.8` /
-  `sigma@3.0.3`, so `tsc -b` fails at the very first target of `make verify`.
-  Confirmed pre-existing and unrelated to this plan: zero diff to
-  `GraphCanvas.tsx` in this plan's commits, reproduced on a fresh
-  `pnpm install --frozen-lockfile` worktree at HEAD `9446eb0a` (the plan's
-  starting commit) before any task ran. `pnpm lint`, `cargo fmt --check`,
-  `cargo clippy -- -D warnings`, and the full `cargo test --lib` (1800 passed)
-  all ran clean independently. Not fixed here per D-10 scope (this plan may
-  only touch the three VALIDATION.md files under `.planning/milestones/`) and
-  per the Scope Boundary rule (unrelated file, not caused by this plan's
-  changes). Tracked in `.planning/WINDOWS.md` (entry recording this deviation)
-  and cited in `11-04-SUMMARY.md`.
-  **Suggested fix:** annotate the callback parameters explicitly
-  (`(key: string, attrs: SigmaEdgeAttributes, source: string, target: string)`
-  and `(key: string, attrs: SigmaNodeAttributes)`) or add generic type
-  arguments to `renderer.getGraph()`'s call site so `forEachEdge`/`forEachNode`
-  infer correctly again.
+- **Found during:** 11-01 Task 2 and 11-04 Task 1, both running `pnpm typecheck` / `make verify` inside
+  freshly installed agent worktrees under `.claude/worktrees/`.
+- **Symptom:** `tsc -b` reports six `TS7006: Parameter '...' implicitly has an 'any' type` errors at
+  `src/components/graph/GraphCanvas.tsx:311` (`forEachEdge` callback) and `:328` (`forEachNode` callback).
+- **Not a regression in the code:** the same commit (`9446eb0a`) passes `pnpm typecheck` (exit 0) in the
+  main checkout, and CI `make verify` is green on `main` (run for `12a65187`). The executors' first reading,
+  "pre-existing implicit-any errors", was wrong and is corrected here.
+- **Cause:** the fresh worktree install links `graphology` and `graphology-types` through pnpm's global
+  virtual store (`~/.local/share/pnpm/virtual-store/...`), while the main checkout links them through the
+  local `node_modules/.pnpm` store. The versions are identical (`graphology@0.26.0`,
+  `graphology-types@0.24.8`); only the link layout differs, and under the global-store layout TypeScript
+  loses the callback parameter inference.
+- **Impact on this phase:** none on the delivered artifacts. Every phase-owned check was verified
+  separately (see 11-01-SUMMARY.md and 11-04-SUMMARY.md), and the phase gate `make verify` runs in the
+  main checkout.
+- **Possible hardening (not scheduled):** annotate the two callback signatures in `GraphCanvas.tsx`
+  explicitly so type checking does not depend on the install layout, or pin the pnpm virtual-store mode
+  for agent worktrees.
