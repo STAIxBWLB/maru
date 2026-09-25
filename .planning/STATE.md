@@ -6,10 +6,10 @@ current_phase: 9
 current_phase_name: Durability and Session Lifecycle
 status: executing
 stopped_at: Phase 11 complete, ready to execute Phase 9
-last_updated: "2026-09-25T18:59:17.902Z"
+last_updated: "2026-09-25T22:09:13.149Z"
 last_activity: 2026-09-26
-last_activity_desc: Phase 11 complete, transitioned to Phase 9
-state_head: 59aee58927f165c0757b8fdf6f2758e3bf379952
+last_activity_desc: Phase 9 execution started
+state_head: f44beb2bd76cd9a404622c57cd20af0b6ede1ae0
 progress:
   total_phases: 6
   completed_phases: 5
@@ -25,15 +25,15 @@ progress:
 See: .planning/PROJECT.md (updated 2026-09-26)
 
 **Core value:** The filesystem stays the source of truth, everything Maru shows is derived from real files the user owns, and nothing is lost if Maru is uninstalled.
-**Current focus:** Phase 9 - Durability and Session Lifecycle (planned, 8 plans)
+**Current focus:** Phase 9 — Durability and Session Lifecycle
 
 ## Current Position
 
-Phase: 9 - Durability and Session Lifecycle
-Plan: Not started (8 plans, planned)
-Status: Ready to execute
-Last Activity Description: Phase 11 complete, transitioned to Phase 9
-Last activity: 2026-09-26 - Phase 11 complete, transitioned to Phase 9
+Phase: 9 (Durability and Session Lifecycle) — EXECUTING
+Plan: 1 of 8
+Status: Executing Phase 9
+Last Activity Description: Phase 9 execution started
+Last activity: 2026-09-26 — Phase 9 execution started
 
 Progress: [████████░░] 83% (5/6 phases; 48/56 plans)
 
