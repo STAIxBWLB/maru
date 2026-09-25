@@ -437,6 +437,40 @@ describe("ScratchpadPane safety flows", () => {
     expect(container.textContent).toContain("rightPane.scratchpad.recoveryAvailable");
   });
 
+  it("saves a memo edit made just before the pane closes", async () => {
+    vi.useFakeTimers();
+    const entry = memoEntry();
+    mocks.list.mockResolvedValue([entry]);
+    mocks.read.mockResolvedValue(memoDocument());
+    await render();
+    const item = container.querySelector<HTMLButtonElement>('button[title="memos/memo.md"]');
+    await act(async () => item?.click());
+    await settle();
+    const textarea = container.querySelector<HTMLTextAreaElement>("textarea.scratchpad-editor");
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set;
+      setter?.call(textarea, "flush me on close");
+      textarea?.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+
+    // Unmount well inside the 700ms debounce window — the pending save must
+    // still land, not be dropped (D-01, REL-02).
+    await act(async () => root?.unmount());
+    root = null;
+    await settle();
+
+    expect(mocks.save).toHaveBeenCalledTimes(1);
+    expect(mocks.save).toHaveBeenCalledWith(
+      "/work",
+      "memos",
+      "memo.md",
+      "markdown",
+      "flush me on close",
+      "rev-1",
+      false,
+    );
+  });
+
   it("keeps collection grouping under the name sort", async () => {
     mocks.list.mockResolvedValue([
       memoEntry({ relativePath: "memo.md", name: "memo.md" }),
