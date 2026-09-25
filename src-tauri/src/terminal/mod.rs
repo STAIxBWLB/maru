@@ -2354,8 +2354,8 @@ mod phase08_18 {
             done(second_rx).unwrap();
             // Which write reaches the PTY first is up to the scheduler, so wait for
             // both echoes: returning on payload_b alone raced payload_a's echo when
-            // b landed first. A dropped or interleaved payload never matches whole
-            // and fails the wait.
+            // b landed first. A dropped payload fails the bounded wait; the
+            // per-session writer lock is what keeps payloads from interleaving.
             wait_for_all(&app, &handle, &[payload_a.trim_end(), payload_b.trim_end()]);
             run_with!(app, ipc::terminal_kill(app.state(), handle)).unwrap();
         }
