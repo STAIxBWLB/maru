@@ -322,7 +322,7 @@ Plans:
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
-- [ ] 11-06-PLAN.md - Closure: complete 11-EVIDENCE.md, append v1.0 audit resolution, flip the four requirements on evidence, phase-gate `make verify` (D-11, D-14)
+- [x] 11-06-PLAN.md - Closure: complete 11-EVIDENCE.md, append v1.0 audit resolution, flip the four requirements on evidence, phase-gate `make verify` (D-11, D-14)
 
 ## Progress
 
