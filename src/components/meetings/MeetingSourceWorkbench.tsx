@@ -235,7 +235,7 @@ function SourceEditor({ editor, onRequestAi, aiBusy, onReviewedSourceChange, onS
   // A new saver per `editor` identity so useTeardownFlush settles the
   // outgoing store's pending save before the incoming one starts scheduling.
   const saver = useMemo(
-    () => createDebouncedSaver<MeetingSourceEditorStore>(async (store) => { await store.flush(); }, 700),
+    () => createDebouncedSaver<MeetingSourceEditorStore>(async (store) => { await store.flush(); }, 700), // i18n-lint-ignore
     // eslint-disable-next-line react-hooks/exhaustive-deps -- the factory closes only over its `store` param, but `editor` keys the memo intentionally
     [editor],
   );
