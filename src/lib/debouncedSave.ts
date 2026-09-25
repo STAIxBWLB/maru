@@ -86,6 +86,15 @@ export function createDebouncedSaver<T>(
       .then((): SaveSettlement<T> => ({ status: "saved" }))
       .catch((error): SaveSettlement<T> => {
         reportSaveError(onError, error);
+        // Retry only the value that just failed — unless a newer one was
+        // scheduled while this save was in flight, in which case that
+        // newer value wins. Never re-arm the timer here: retries only
+        // happen via an explicit schedule()/flush(), so a broken disk
+        // cannot spin on its own.
+        if (!hasPending) {
+          pending = value;
+          hasPending = true;
+        }
         return { status: "failed", value, error };
       });
     activeSettlement = settlement;
