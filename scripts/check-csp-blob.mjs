@@ -55,12 +55,13 @@ import { fileURLToPath } from "node:url";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 
-// Binary half: codegen form, directive name immediately followed by its
-// source list (quoted keywords, scheme or scheme://host sources).
+// Binary half, matched at each `script-src` occurrence. Codegen form: the
+// directive name immediately followed by its source list (quoted keywords,
+// scheme or scheme://host sources).
 const CODEGEN_SCRIPT_SRC =
-  /script-src(?:-elem)?((?:\s*(?:'[^'\x00-\x1f]*'|[a-z][a-z0-9+.-]*:(?:\/\/[^\s'"\x00-\x1f]*)?))+)/g;
-// Binary half: JSON form (the include_str! copy of tauri.conf.json).
-const JSON_SCRIPT_SRC = /"script-src(?:-elem)?"\s*:\s*"([^"]*)"/g;
+  /^script-src(?:-elem)?((?:\s*(?:'[^'\x00-\x1f]*'|[a-z][a-z0-9+.-]*:(?:\/\/[^\s'"\x00-\x1f]*)?))+)/;
+// JSON form (the include_str! copy of tauri.conf.json), after its opening quote.
+const JSON_SCRIPT_SRC = /^script-src(?:-elem)?"\s*:\s*"([^"]*)"/;
 
 const violations = [];
 let summary = "";
@@ -239,10 +240,18 @@ function checkBinary(binaryPath) {
     console.error(`csp-blob: --binary path does not exist: ${binaryPath}`);
     process.exit(1);
   }
-  // latin1 maps bytes 1:1 to code points; the binary is only scanned.
-  const text = readFileSync(binaryPath).toString("latin1");
-  const codegen = [...text.matchAll(CODEGEN_SCRIPT_SRC)].map((m) => m[1].trim());
-  const json = [...text.matchAll(JSON_SCRIPT_SRC)].map((m) => m[1]);
+  // A Linux debug binary exceeds V8's ~512 MiB string limit, so search the
+  // raw bytes and decode only a window at each hit (latin1 maps bytes 1:1).
+  const bytes = readFileSync(binaryPath);
+  const codegen = [];
+  const json = [];
+  for (let at = bytes.indexOf("script-src"); at !== -1; at = bytes.indexOf("script-src", at + 1)) {
+    const text = bytes.subarray(at, at + 1024).toString("latin1");
+    const codegenMatch = text.match(CODEGEN_SCRIPT_SRC);
+    const jsonMatch = bytes[at - 1] === 0x22 ? text.match(JSON_SCRIPT_SRC) : null;
+    if (codegenMatch) codegen.push(codegenMatch[1].trim());
+    if (jsonMatch) json.push(jsonMatch[1]);
+  }
   if (codegen.length === 0) {
     violations.push(
       `${binaryPath} carries no codegen CSP script-src serialization — ` +
