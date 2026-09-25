@@ -1,0 +1,106 @@
+# Non-gating coverage report (TEST-02, D-01/D-02).
+#
+# `make coverage` measures TypeScript (Vitest v8) and Rust (cargo-llvm-cov,
+# per-crate) coverage. It has no threshold (D-04) and is not a required check
+# anywhere - it exists to refresh the coverage baseline, not to block merges.
+#
+# Trigger scope is deliberate (D-01): pushes to `main` only, never pull
+# requests, never manual dispatch. Every main push refreshes the baseline,
+# including a push whose tree a PR already validated - that is why this job
+# does not reuse ci.yml's `decision` dedup job.
+#
+# This file is separate from ci.yml so the PR path stays byte-identical; the
+# same precedent as native-e2e.yml being its own workflow for its own trigger
+# scope.
+
+name: coverage
+
+on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - README.md
+      - CHANGELOG.md
+      - docs/**
+      - .planning/**
+      - .github/**/*.md
+
+permissions:
+  contents: read
+
+concurrency:
+  group: coverage-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  coverage:
+    name: coverage report (non-gating)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 9.15.0
+
+      - name: Setup Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22.22.3
+          cache: pnpm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      # rust-toolchain.toml pins the channel (1.98.0) with only clippy and
+      # rustfmt, so a `components: llvm-tools` input on the stable step above
+      # would attach llvm-tools to `stable`, not to the pin. Running inside
+      # the checkout targets the pin instead; rust-toolchain.toml is not
+      # edited.
+      - name: Add llvm-tools to the pinned toolchain
+        run: |
+          cargo --version
+          rustup component add llvm-tools
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+          shared-key: ubuntu-22.04-coverage
+
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
+
+      - name: Install Linux Tauri dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libxdo-dev \
+            libssl-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev
+
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run coverage
+        run: make coverage
+
+      - name: Write coverage totals to the job summary
+        run: node scripts/coverage-summary.mjs >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage/
+          retention-days: 30
