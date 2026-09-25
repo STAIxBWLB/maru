@@ -952,15 +952,14 @@ fn escalate_process_group(pgid: u32, grace: Duration) -> KillStage {
 /// SIGHUP alone was enough (the common case, not worth logging).
 #[cfg(unix)]
 fn escalation_warn_line(pgid: u32, stage: KillStage) -> Option<String> {
-    match stage {
-        KillStage::Hangup => None,
-        KillStage::Terminate => Some(format!(
-            "[terminal] pgid {pgid} survived SIGHUP; escalated to SIGTERM"
-        )),
-        KillStage::Kill => Some(format!(
-            "[terminal] pgid {pgid} survived SIGHUP; escalated to SIGKILL"
-        )),
-    }
+    let signal_name = match stage {
+        KillStage::Hangup => return None,
+        KillStage::Terminate => "SIGTERM",
+        KillStage::Kill => "SIGKILL",
+    };
+    Some(format!(
+        "[terminal] pgid {pgid} survived SIGHUP; escalated to {signal_name}"
+    ))
 }
 
 /// Sends SIGHUP to `pgid`'s process group and, unless the group is already
@@ -1055,6 +1054,119 @@ pub fn terminal_kill(state: &TerminalState, handle: TerminalSessionHandle) -> Re
         }
     }
     Ok(())
+}
+
+// D-12: each stage of the quit-time sweep gets this long before escalating;
+// two stages keep the whole sweep inside the 3s quit budget.
+const QUIT_SWEEP_STEP: Duration = Duration::from_millis(1500);
+
+/// Polls every pgid in `pgids` together (not one at a time) for up to
+/// `step`, returning whichever ones are still alive when the deadline
+/// passes (empty once all are gone). Used to run one shared ladder step
+/// across a whole batch of process groups instead of a per-group grace
+/// period, since the quit sweep must stay inside a fixed total budget
+/// regardless of how many sessions are live.
+#[cfg(unix)]
+fn wait_for_all_groups_gone(pgids: &[u32], step: Duration) -> Vec<u32> {
+    let deadline = std::time::Instant::now() + step;
+    loop {
+        let alive: Vec<u32> = pgids
+            .iter()
+            .copied()
+            .filter(|&pgid| process_group_alive(pgid))
+            .collect();
+        if alive.is_empty() {
+            return Vec::new();
+        }
+        if std::time::Instant::now() >= deadline {
+            return alive;
+        }
+        thread::sleep(ESCALATION_POLL);
+    }
+}
+
+/// D-12: drains every live session and every process group whose tab-close
+/// escalation ladder (from a prior `terminal_kill`) is still in flight, then
+/// runs one shared SIGHUP -> SIGTERM -> SIGKILL ladder against the whole
+/// batch, bounded by two `step` windows total. No lock is held while
+/// polling. Sessions with no captured process group (or on non-unix) fall
+/// back to their stored `ChildKiller` instead of joining the batch ladder.
+pub(crate) fn sweep_sessions(state: &TerminalState, step: Duration) {
+    let drained: Vec<Arc<TerminalSession>> = {
+        let mut guard = crate::lock_recovery::recover_guard(
+            state.sessions.lock(),
+            "terminal",
+            "TERMINAL_SESSIONS",
+        );
+        guard.drain().map(|(_, session)| session).collect()
+    };
+
+    #[cfg(unix)]
+    let mut targets: HashSet<u32> = HashSet::new();
+    for session in &drained {
+        // A racing `terminal_kill` on this same session now finds it
+        // already latched and, once it also fails to find the entry in
+        // `state.sessions`, returns `Ok(())` via the unknown-session path.
+        session.closing.store(true, Ordering::Release);
+        #[cfg(unix)]
+        match session.process_group {
+            Some(pgid) => {
+                targets.insert(pgid);
+            }
+            None => {
+                let _ = kill_via_signaller(session);
+            }
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = kill_via_signaller(session);
+        }
+    }
+
+    #[cfg(unix)]
+    {
+        let escalating: Vec<u32> = {
+            let mut guard = crate::lock_recovery::recover_guard(
+                state.escalations.lock(),
+                "terminal",
+                "TERMINAL_ESCALATIONS",
+            );
+            guard.drain().collect()
+        };
+        targets.extend(escalating);
+
+        if targets.is_empty() {
+            return;
+        }
+
+        for &pgid in &targets {
+            let _ = signal_process_group(pgid, SIGHUP);
+        }
+        let target_vec: Vec<u32> = targets.into_iter().collect();
+        let survivors = wait_for_all_groups_gone(&target_vec, step);
+        if survivors.is_empty() {
+            return;
+        }
+        for &pgid in &survivors {
+            let _ = signal_process_group(pgid, SIGTERM);
+        }
+        let still_alive = wait_for_all_groups_gone(&survivors, step);
+        for &pgid in &still_alive {
+            let _ = signal_process_group(pgid, SIGKILL);
+        }
+        eprintln!(
+            "[terminal] quit sweep escalated {} process group(s) past SIGHUP",
+            survivors.len()
+        );
+    }
+}
+
+/// D-12: called from the app's `RunEvent::ExitRequested`/`Exit` arm, only
+/// after the webview's own close guards already let the quit proceed
+/// (D-06). Two `QUIT_SWEEP_STEP` stages keep the whole sweep inside the 3s
+/// quit budget.
+pub fn shutdown_all_sessions(state: &TerminalState) {
+    sweep_sessions(state, QUIT_SWEEP_STEP);
 }
 
 #[cfg(test)]
@@ -2919,7 +3031,13 @@ mod phase09_02 {
             KillStage::Kill,
             "a child trapping both HUP and TERM must only die at the SIGKILL stage"
         );
-        assert!(!process_group_alive(pgid));
+        // escalate_process_group returns as soon as SIGKILL is sent, without
+        // polling for the kernel to finish tearing the process down (and the
+        // waiter thread to reap it) -- give that a brief window here.
+        assert!(
+            wait_until_group_gone(pgid, Duration::from_secs(2)),
+            "SIGKILL must eventually remove the process group"
+        );
     }
 
     #[test]
@@ -3021,16 +3139,19 @@ mod phase09_02 {
 
         sweep_sessions(&state, Duration::from_millis(300));
 
+        // sweep_sessions returns as soon as its last SIGKILL is sent for any
+        // survivor, without polling for the kernel to finish tearing the
+        // process down -- give that a brief window per group here.
         assert!(
-            !process_group_alive(pgid_a),
+            wait_until_group_gone(pgid_a, Duration::from_secs(2)),
             "session A's live group must be gone after the sweep"
         );
         assert!(
-            !process_group_alive(pgid_b),
+            wait_until_group_gone(pgid_b, Duration::from_secs(2)),
             "session B's live group (traps HUP and TERM) must be gone after the sweep"
         );
         assert!(
-            !process_group_alive(pgid_c),
+            wait_until_group_gone(pgid_c, Duration::from_secs(2)),
             "session C's mid-ladder group must be gone after the sweep"
         );
         assert!(state.sessions.lock().unwrap().is_empty());
