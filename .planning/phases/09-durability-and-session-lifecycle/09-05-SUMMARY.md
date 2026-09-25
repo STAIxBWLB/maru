@@ -160,6 +160,15 @@ None - no external service configuration required.
 - The `onError` callback on Scratchpad's saver is not yet wired to the global toast (`errorStore.setError`); that wiring, plus the recovery-copy write, is explicitly plan 09-06's scope per the plan's `flagged_assumptions` note.
 - No blockers for 09-06/09-07/09-08.
 
+## Self-Check: PASSED
+
+- All key files found on disk: `src/lib/teardownSave.ts`, `src/lib/teardownSave.test.ts`, `src/lib/debouncedSave.ts`, `src/lib/debouncedSave.test.ts`, `src/components/ScratchpadPane.tsx`, `src/components/ScratchpadPane.test.tsx`.
+- All commit hashes found in `git log`: `b05d58d1`, `d81a850d`, `3504efa1`.
+- Task 1 acceptance criteria re-verified via grep: `useTeardownFlush(` count 1, `createDebouncedSaver` count 2, `autoSaveTimerRef` count 0, `from "../components` in `teardownSave.ts` count 0.
+- Task 2 acceptance criteria re-verified: `flushSettled` count 3 in `debouncedSave.ts`; `git diff` shows no change inside `createContextualDebouncedSaver`.
+- Plan-level `<verification>` re-run: `pnpm exec vitest run src/lib/debouncedSave.test.ts src/lib/teardownSave.test.ts src/components/ScratchpadPane.test.tsx` (34 passed), `pnpm typecheck` (clean), `pnpm lint` (clean).
+- `make verify` re-run in full: PASSED (TS 2198 tests, Rust 1800 tests, fmt/clippy/build/command-isolation all clean).
+
 ---
 *Phase: 09-durability-and-session-lifecycle*
 *Completed: 2026-09-25*
