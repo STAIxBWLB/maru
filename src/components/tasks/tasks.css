@@ -560,37 +560,6 @@
   margin: 0;
 }
 
-.task-schedule-editor {
-  display: grid;
-  gap: 9px;
-  border: 1px solid var(--line-soft);
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--panel) 80%, var(--bg));
-  padding: 10px;
-}
-
-.task-schedule-editor header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.task-schedule-editor h3 {
-  margin: 0;
-  color: var(--muted);
-  font-size: var(--type-label-size);
-  text-transform: uppercase;
-}
-
-.task-detail-save-actions {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
-}
-
 .task-detail-meta div,
 .task-frontmatter-list div {
   border: 1px solid var(--line-soft);
@@ -608,38 +577,6 @@
 
 .task-detail-meta dd {
   margin: 3px 0 0;
-}
-
-.task-detail-section h3 {
-  margin: 0 0 8px;
-  font-size: var(--type-label-size);
-  text-transform: uppercase;
-  color: var(--muted);
-}
-
-.task-body-section {
-  display: grid;
-  gap: 8px;
-}
-
-.task-body-editor {
-  min-width: 0;
-}
-
-.task-body-editor .studio-codemirror-editor {
-  min-height: 260px;
-  max-height: 420px;
-  border-color: var(--line-soft);
-  background: color-mix(in srgb, var(--panel-2) 82%, var(--bg));
-}
-
-.task-body-editor .studio-codemirror-editor .cm-editor,
-.task-body-editor .studio-codemirror-editor .cm-scroller {
-  min-height: 260px;
-}
-
-.task-body-editor .studio-codemirror-editor .cm-scroller {
-  max-height: 420px;
 }
 
 .task-frontmatter-list {
@@ -1095,36 +1032,7 @@
 
 .tasks-review-actions > span { color: var(--muted); font-size: var(--type-meta-size); }
 
-/* Task dialogs */
-
-.task-new-dialog {
-  display: grid;
-  gap: 14px;
-  width: min(560px, calc(100vw - 32px));
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  background: var(--panel-raised);
-  box-shadow: var(--shadow-lg);
-  padding: 18px;
-}
-
-.task-new-dialog header,
-.task-new-dialog footer {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.task-new-dialog h2 {
-  margin: 0;
-  font-size: var(--type-title-size);
-}
-
-.task-new-dialog p {
-  margin: 4px 0 0;
-  color: var(--muted);
-}
+/* Task dialogs (.task-new-dialog is shared chrome in styles.css) */
 
 .task-natural-dialog textarea {
   width: 100%;
@@ -1223,6 +1131,23 @@
     border-radius: 7px;
     background: var(--panel-raised);
     color: var(--ink);
+  }
+}
+
+@media (max-width: 980px) {
+  .tasks-calendar-shell {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(420px, 1fr) minmax(180px, auto);
+    height: min(760px, 80dvh);
+  }
+
+  .tasks-unscheduled-tray {
+    min-height: 180px;
+  }
+
+  .tasks-sidebar {
+    border-right: 0;
+    border-bottom: 1px solid var(--line-soft);
   }
 }
 
@@ -1343,3 +1268,13 @@
   }
 }
 
+
+/* Late overrides, formerly at the tail of styles.css: keep them last so they
+   still win over the base rules above (lazy CSS loads after the entry CSS). */
+
+.tasks-header {
+  min-height: 58px;
+  border-bottom: 1px solid var(--line-soft);
+  background: var(--panel);
+  padding: 10px 16px;
+}

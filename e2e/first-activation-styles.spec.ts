@@ -6,8 +6,9 @@ import { expect, test, type Page } from "@playwright/test";
  * One Playwright test = one browser context = one genuine first activation.
  * Each test starts on the default `문서` (pkm) mode, switches to the target
  * mode exactly once, and polls the mode's root surface until its lazy CSS has
- * landed (Vite cssCodeSplit ships mode CSS inside the lazy JS chunk that
- * `scheduleModePreload()` fetched during idle time).
+ * landed (Vite cssCodeSplit ships mode CSS inside the mode's lazy JS chunk).
+ * Idle callbacks are disabled so the D-03 preload cannot warm the chunk first:
+ * every activation takes the cold lazy path, the stricter case.
  *
  * A regression where a mode's stylesheet is missing at first activation
  * fails here: the root surface renders unpainted (body background only) or
@@ -73,6 +74,8 @@ async function expectModeSurfaceStyled(page: Page, root: string) {
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
     window.localStorage.clear();
+    window.requestIdleCallback = () => 0;
+    window.cancelIdleCallback = () => {};
   });
 });
 
@@ -122,6 +125,25 @@ test.describe("colorScheme: light", () => {
       return false;
     });
     expect(hasModeLoadingRule).toBe(true);
+  });
+
+  test("shared .task-new-dialog chrome is styled before Tasks ever loads (Sites dialog)", async ({ page }) => {
+    await page.goto("/");
+    await activateMode(page, "사이트");
+    await page.getByRole("button", { name: "사이트 추가", exact: true }).click();
+    await expect
+      .poll(
+        async () =>
+          page
+            .locator(".task-new-dialog")
+            .first()
+            .evaluate((element) => {
+              const style = getComputedStyle(element);
+              return { display: style.display, padding: style.padding, borderRadius: style.borderRadius };
+            }),
+        { timeout: 8_000 },
+      )
+      .toEqual({ display: "grid", padding: "18px", borderRadius: "10px" });
   });
 
   test("empty-state stays single-homed in styles.css on first activation", async ({ page }) => {

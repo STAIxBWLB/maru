@@ -555,3 +555,19 @@
   gap: 4px;
 }
 
+
+/* Late overrides, formerly at the tail of styles.css: keep them last so they
+   still win over the base rules above (lazy CSS loads after the entry CSS). */
+
+@container secondaryworkbench (max-width: 720px) {
+  .gap-body {
+    flex-direction: column;
+  }
+
+  .gap-list-col {
+    width: 100%;
+    max-height: 40%;
+    border-right: 0;
+    border-bottom: 1px solid var(--line-soft);
+  }
+}

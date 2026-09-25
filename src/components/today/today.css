@@ -1995,3 +1995,42 @@
   }
 }
 
+
+/* Late overrides, formerly at the tail of styles.css: keep them last so they
+   still win over the base rules above (lazy CSS loads after the entry CSS). */
+
+.task-sheet {
+  background: var(--material-sheet);
+  backdrop-filter: blur(22px) saturate(150%);
+}
+
+@container todaypane (max-width: 1099px) {
+  .today-sidebar {
+    width: var(--shell-sidebar-compact);
+    padding: 14px 8px;
+  }
+
+  .today-sidebar .today-sidebar-header,
+  .today-sidebar .today-sidebar-label,
+  .today-sidebar .today-nav-label,
+  .today-sidebar .today-nav-meta,
+  .today-sidebar .today-nav-count {
+    display: none;
+  }
+
+  .today-sidebar .today-nav-item {
+    justify-content: center;
+    padding: 0;
+  }
+
+  .today-sidebar + .pane-resize-handle {
+    visibility: hidden;
+  }
+}
+
+@media (prefers-contrast: more) {
+  .task-sheet {
+    background: var(--panel);
+    border-color: var(--ink);
+  }
+}

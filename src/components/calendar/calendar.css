@@ -833,3 +833,12 @@
 .cat-meeting-type-3 { --cal-cat: var(--cal-cat-meeting-3); }
 .cat-meeting-type-4 { --cal-cat: var(--cal-cat-meeting-4); }
 .cat-meeting-type-5 { --cal-cat: var(--cal-cat-meeting-5); }
+
+/* Late overrides, formerly at the tail of styles.css: keep them last so they
+   still win over the base rules above (lazy CSS loads after the entry CSS). */
+
+@media (forced-colors: active) {
+  .cal-day-number-today {
+    background: Highlight;
+  }
+}

@@ -13424,20 +13424,6 @@ button.git-badge:hover {
     min-height: 660px;
   }
 
-  .meetings-pane,
-  .meetings-content-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .meetings-sidebar {
-    border-right: 0;
-    border-bottom: 1px solid var(--line);
-  }
-
-  .meetings-list-row {
-    grid-template-columns: 80px auto minmax(0, 1fr);
-  }
-
   .meetings-list-row > span:last-child {
     grid-column: 1 / -1;
   }
@@ -14748,6 +14734,17 @@ button.git-badge:hover {
 }
 .inbox-review-actions > span { color: var(--muted); font-size: var(--type-meta-size); }
 
+.task-new-dialog {
+  display: grid;
+  gap: 14px;
+  width: min(560px, calc(100vw - 32px));
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel-raised);
+  box-shadow: var(--shadow-lg);
+  padding: 18px;
+}
+
 .dialog-backdrop {
   position: fixed;
   inset: 0;
@@ -14756,6 +14753,24 @@ button.git-badge:hover {
   place-items: center;
   background: var(--overlay);
   padding: 16px;
+}
+
+.task-new-dialog header,
+.task-new-dialog footer {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.task-new-dialog h2 {
+  margin: 0;
+  font-size: var(--type-title-size);
+}
+
+.task-new-dialog p {
+  margin: 4px 0 0;
+  color: var(--muted);
 }
 
 .inbox-process-dialog {
@@ -14819,14 +14834,6 @@ button.git-badge:hover {
   display: flex;
   align-items: center;
   gap: 8px;
-}
-
-@media (max-width: 980px) {
-  .meetings-sidebar,
-  .tasks-sidebar {
-    border-right: 0;
-    border-bottom: 1px solid var(--line-soft);
-  }
 }
 
 :is(
@@ -17704,9 +17711,7 @@ button.git-badge:hover {
 .mode-header,
 .inbox-header,
 .comms-header,
-.tasks-header,
 .meetings-header,
-.meetings-actions-bar,
 .catalog-pane__topbar,
 .studio-header {
   min-height: 58px;
@@ -17995,11 +18000,6 @@ button.git-badge:hover {
   backdrop-filter: blur(16px) saturate(150%);
 }
 
-.task-sheet {
-  background: var(--material-sheet);
-  backdrop-filter: blur(22px) saturate(150%);
-}
-
 .dialog-overlay[data-state="closed"] {
   animation: overlay-out var(--motion-exit) var(--ease-in) forwards;
 }
@@ -18152,30 +18152,6 @@ select:focus-visible,
   background: var(--button-primary-hover) !important;
 }
 
-@container todaypane (max-width: 1099px) {
-  .today-sidebar {
-    width: var(--shell-sidebar-compact);
-    padding: 14px 8px;
-  }
-
-  .today-sidebar .today-sidebar-header,
-  .today-sidebar .today-sidebar-label,
-  .today-sidebar .today-nav-label,
-  .today-sidebar .today-nav-meta,
-  .today-sidebar .today-nav-count {
-    display: none;
-  }
-
-  .today-sidebar .today-nav-item {
-    justify-content: center;
-    padding: 0;
-  }
-
-  .today-sidebar + .pane-resize-handle {
-    visibility: hidden;
-  }
-}
-
 @media (min-width: 760px) and (max-width: 1099px) {
   .sites-pane {
     grid-template-columns: var(--shell-sidebar-compact) minmax(0, 1fr);
@@ -18325,7 +18301,6 @@ select:focus-visible,
   .dialog-content,
   .cmdk-shell,
   .dialog-surface,
-  .task-sheet,
   .workspace-menu,
   .context-menu {
     background: var(--panel);
@@ -18341,7 +18316,6 @@ select:focus-visible,
   }
 
   .activity-button.active::before,
-  .cal-day-number-today,
   .terminal-status-dot {
     background: Highlight;
   }
@@ -18679,16 +18653,6 @@ select:focus-visible,
     position: static;
   }
 
-  .meetings-pane {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .meetings-sidebar {
-    max-height: 190px;
-    border-right: 0;
-    border-bottom: 1px solid var(--line-soft);
-  }
-
   .sites-pane {
     grid-template-columns: 76px minmax(0, 1fr);
   }
@@ -18701,47 +18665,10 @@ select:focus-visible,
     display: none;
   }
 
-  .drafts-body,
-  .gap-body,
-  .agents-body {
-    flex-direction: column;
-  }
-
-  .drafts-list-col,
-  .gap-list-col,
-  .agents-list-col {
-    width: 100%;
-    max-height: 40%;
-    border-right: 0;
-    border-bottom: 1px solid var(--line-soft);
-  }
-
-  .drafts-body > .pane-resize-handle {
-    display: none;
-  }
-
   .studio-step-rail {
     max-height: 150px;
     border-right: 0;
     border-bottom: 1px solid var(--line-soft);
-  }
-}
-
-@container appworkbench (max-width: 720px) {
-  .drafts-body {
-    flex-direction: column;
-  }
-
-  .drafts-list-col {
-    width: 100%;
-    max-height: 40%;
-    flex-basis: auto;
-    border-right: 0;
-    border-bottom: 1px solid var(--line-soft);
-  }
-
-  .drafts-body > .pane-resize-handle {
-    display: none;
   }
 }
 
