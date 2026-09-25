@@ -4,17 +4,17 @@ milestone: v1.1
 milestone_name: Felt Quality and Native Proof
 current_phase: 11
 current_phase_name: Milestone Verification & Evidence
-status: executing
-stopped_at: Phase 11 planned
-last_updated: "2026-09-25T13:33:14.996Z"
+status: verifying
+stopped_at: Completed 11-06-PLAN.md - Phase 11 all 6 plans done, ready for verification
+last_updated: "2026-09-25T15:03:29.467Z"
 last_activity: 2026-09-25
-last_activity_desc: Phase 11 planning complete — 6 plans ready
-state_head: d89951a02ea8dac32e1e0065099bd53053471b4b
+last_activity_desc: Phase 11 executed (6/6), verification human_needed - post-merge coverage run
+state_head: 070f1229e4d80b3d10387f268cd4637abe92ed36
 progress:
   total_phases: 6
   completed_phases: 4
   total_plans: 56
-  completed_plans: 42
+  completed_plans: 48
   percent: 67
 ---
 
@@ -25,15 +25,15 @@ progress:
 See: .planning/PROJECT.md (updated 2026-09-25)
 
 **Core value:** The filesystem stays the source of truth, everything Maru shows is derived from real files the user owns, and nothing is lost if Maru is uninstalled.
-**Current focus:** Phase 9 — Durability and Session Lifecycle
+**Current focus:** Phase 11 — Milestone Verification & Evidence
 
 ## Current Position
 
-Phase: 11 (Milestone Verification & Evidence) — READY TO EXECUTE
-Plan: Not started
-Status: Ready to execute
-Last Activity Description: Phase 11 planning complete — 6 plans ready
-Last activity: 2026-09-25 — Phase 10 complete, transitioned to Phase 9
+Phase: 11 (Milestone Verification & Evidence) — EXECUTING
+Plan: 6 of 6
+Status: Phase complete — ready for verification
+Last Activity Description: Phase 11 executed (6/6), verification human_needed - post-merge coverage run
+Last activity: 2026-09-26 - Phase 11 executed (6/6), PR #351 open, awaiting post-merge coverage run (11-UAT.md)
 
 Progress: [███████░░░] 67%
 
@@ -138,6 +138,8 @@ Progress: [███████░░░] 67%
 | Phase 08 P26 | 50min | 2 tasks | 10 files |
 | Phase 08 P27 | cross-session (timeout+resume) | 2 tasks | 14 files |
 | Phase 08 P28 | 2h | 2 tasks | 32 files |
+| Phase 11 P02 | ~25min | 2 tasks | 2 files |
+| Phase 11-milestone-verification-evidence P06 | 20min | 3 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -270,6 +272,8 @@ Recent decisions affecting current work:
 - [Phase 10]: Shipped CSP `script-src` is `'self'`; `worker-src` keeps `blob:` for the graph FA2 worker (D-05). `check-csp-blob` enforces the tauri configs (overlays merge-patched onto the base), the dist bundles (AST), and the debug binary's codegen CSP.
 - [Phase 10]: Mode CSS lives in per-mode lazy files; mode-owned late overrides sit at the end of the owning file, and the SPLIT HOME guard keeps each selector property in one home.
 - [Phase 10]: D-03 amended (#340): idle preload warms only the six split modes (today, tasks, meetings, drafts, gap, agents), one per idle callback.
+- [Phase 11]: 11-02 coverage.yml step order and llvm-tools-inside-checkout approach executed exactly as the plan's flagged_assumptions specified; no deviations
+- [Phase 11]: 11-06 flipped SEC-03, GATE-08, VALID-01 to Complete behind passing per-ID evidence gates; v1.0-MILESTONE-AUDIT.md's three accepted debt items resolved via an append-only Resolved in v1.1 Phase 11 section, and make verify passed clean on the final tree
 
 ### Pending Todos
 
@@ -311,9 +315,9 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-09-25T12:42:50.827Z
-Stopped at: Phase 11 planned
-Resume file: .planning/phases/11-milestone-verification-evidence/11-01-PLAN.md
+Last session: 2026-09-25T15:03:29.379Z
+Stopped at: Completed 11-06-PLAN.md - Phase 11 all 6 plans done, ready for verification
+Resume file: None
 
 ## Operator Next Steps
 

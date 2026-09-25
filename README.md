@@ -343,6 +343,10 @@ make release-preflight
 make verify-integration
 MARU_CLI_SMOKE_ROUNDTRIP=1 make verify-integration
 
+# TypeScript + Rust coverage report; non-gating, not part of verify, needs
+# cargo-llvm-cov and llvm-tools installed locally
+make coverage
+
 # Local MCP sidecar smoke
 MARU_MCP_WORKSPACE="$PWD" node sidecars/maru-mcp/index.mjs
 ```
@@ -384,6 +388,13 @@ checks, and API failures run the full suite.
 CI E2E runs Chromium against Vite with mocked IPC. It does not prove WKWebView,
 the native PTY, Korean IME behavior, macOS menus, signing, or notarization.
 macOS-affecting changes require a real-app or release-artifact check.
+
+Coverage is measured by `make coverage` locally and by the `coverage` workflow
+on every push to `main`. It never runs for pull requests and is not a required
+check. Both HTML reports upload as the `coverage-report` artifact with 30-day
+retention, and the per-language and per-crate totals table appears in the
+run's Job Summary. There is no threshold, so a lower number never fails
+anything.
 
 ## Release Process
 
