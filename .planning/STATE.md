@@ -2,46 +2,46 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Felt Quality and Native Proof
-current_phase: 10
-current_phase_name: Bundle and Build Hardening
-status: executing
-stopped_at: Phase 08 complete, ready to plan Phase 9
-last_updated: "2026-09-24T10:50:49.228Z"
-last_activity: 2026-09-24
-last_activity_desc: Phase 10 execution started
-state_head: a954fb76dc8aa81617fb6e3f082bbf90079fb84d
+current_phase: 9
+current_phase_name: Durability and Session Lifecycle
+status: planning
+stopped_at: Phase 10 complete, ready to plan Phase 9
+last_updated: "2026-09-25T10:51:07.447Z"
+last_activity: 2026-09-25
+last_activity_desc: Phase 10 complete, transitioned to Phase 9
+state_head: 838c8e3b7db7962ba76d6bc5d11bf64d99a60025
 progress:
   total_phases: 6
-  completed_phases: 3
+  completed_phases: 4
   total_plans: 42
-  completed_plans: 39
-  percent: 50
+  completed_plans: 42
+  percent: 67
 ---
 
 # Project State
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-09-21)
+See: .planning/PROJECT.md (updated 2026-09-25)
 
 **Core value:** The filesystem stays the source of truth, everything Maru shows is derived from real files the user owns, and nothing is lost if Maru is uninstalled.
-**Current focus:** Phase 10 — Bundle and Build Hardening
+**Current focus:** Phase 9 — Durability and Session Lifecycle
 
 ## Current Position
 
-Phase: 10 (Bundle and Build Hardening) — EXECUTING
-Plan: 1 of 3
-Status: Executing Phase 10
-Last Activity Description: Phase 10 execution started
-Last activity: 2026-09-24 — Phase 10 execution resumed (wave continue)
+Phase: 9 — Durability and Session Lifecycle
+Plan: Not started
+Status: Ready to plan
+Last Activity Description: Phase 10 complete, transitioned to Phase 9
+Last activity: 2026-09-25 — Phase 10 complete, transitioned to Phase 9
 
-Progress: [█████░░░░░] 50%
+Progress: [███████░░░] 67%
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 71
+- Total plans completed: 74
 - Average duration: -
 - Total execution time: -
 
@@ -57,6 +57,7 @@ Progress: [█████░░░░░] 50%
 | 06 | 5 | - | - |
 | 7 | 5 | - | - |
 | 08 | 29 | - | - |
+| 10 | 3 | - | - |
 
 **Recent Trend:**
 
@@ -266,6 +267,9 @@ Recent decisions affecting current work:
 - [Phase 08]: Plan12 provider uncertainty is durable and manual-only: Plan26 must classify provider_outcome_unknown: and provider_succeeded_local_commit_failed: as external-result reconciliation, disable ordinary UI retry, and retain verified known-ID retry; unknown Upsert without ID is rejected by Rust.
 - [Phase 08]: Plan13 graph and cache commands share complete admission with borrowed snapshots and scanner consumers; catalog public scan owns its write lease. String error contracts remain unchanged; Plan25/26 owns final completion and stale-view UI.
 - [Phase 08]: Plan14 isolates 23 provider commands; original-parent envelope/relay/session admission preserves batches and polling. Session and declared legacy local effects remain leased through subprocess exit without domain mutex guards; arbitrary custom outputs remain delegated. Plan25/26 owns final completion and Plan12 reconciliation markers remain mandatory.
+- [Phase 10]: Shipped CSP `script-src` is `'self'`; `worker-src` keeps `blob:` for the graph FA2 worker (D-05). `check-csp-blob` enforces the tauri configs (overlays merge-patched onto the base), the dist bundles (AST), and the debug binary's codegen CSP.
+- [Phase 10]: Mode CSS lives in per-mode lazy files; mode-owned late overrides sit at the end of the owning file, and the SPLIT HOME guard keeps each selector property in one home.
+- [Phase 10]: D-03 amended (#340): idle preload warms only the six split modes (today, tasks, meetings, drafts, gap, agents), one per idle callback.
 
 ### Pending Todos
 
@@ -280,6 +284,8 @@ None yet.
 - [Phase 8] WR-01 from 08-REVIEW.md: `skill_host/store.rs` sync commit tail holds REGISTRY_LOCK across a git subprocess and full-checkout SHA-256 hash; PERF-02's network-round-trip contract is verified, this is a residual lock-contention cost (documented, non-blocking).
 - [Phase 8] Native responsiveness raw metric JSONs (`artifacts/native-responsiveness/*.json`) are untracked/local; `docs/performance/*.json` fixed-run and negative-control records are the committed evidence.
 - [Phase 8] Pre-existing `--plan 05` evidence drift reproduces on pristine HEAD; recommend a follow-up shard fix.
+- [Phase 10] `check-csp-blob --binary` reads the debug no-bundle build only: the release linker splits and deduplicates the directive and value literals, so a shipped binary fails closed ("no codegen CSP serialization"). D-04 proof (b) therefore measures the debug build; the shipped binary's embedded config copy reads `'self'`. Follow-up candidate.
+- [Phase 10] `.empty-state` still has two entry-side homes in `styles.css` (:3608, :17879); the cascade is deterministic and the FOUC spec pins the winner, but no 10-02 disposition records it.
 
 ## Deferred Items
 
@@ -305,8 +311,8 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-09-21
-Stopped at: Phase 08 complete, ready to plan Phase 9
+Last session: 2026-09-25
+Stopped at: Phase 10 complete, ready to plan Phase 9
 Resume file: None
 
 ## Operator Next Steps

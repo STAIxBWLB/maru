@@ -34,6 +34,13 @@ existing Inbox E2E passed 8/8. Phase 8 is ready to plan. The pre-existing
 Inbox/right-panel overlap is recorded in 07-UAT.md as an unresolved layout
 limitation outside this removal regression.
 
+Phase 10 (Bundle and Build Hardening) completed 2026-09-25: `script-src blob:`
+is gone from the shipped CSP, per-mode CSS is split into lazy chunks with the
+pre-split cascade restored (a SPLIT HOME guard keeps each selector property in
+one file), and idle preload warms only the six split modes (D-03 as amended in
+#340). An adversarial review after the first verification fixed 24 cascade
+inversions and hardened both build guards before release. Phase 9 is next.
+
 ## Requirements
 
 ### Validated
@@ -87,6 +94,11 @@ limitation outside this removal regression.
 - ✓ Phase 7 guardrails - scoped poison recovery (PERF-03), watcher pruning
   (PERF-04), sanitizer provenance gate (SEC-02), and independent Inbox/index
   behavior (PERF-06); UAT 5/5, existing security register 15/15 closed.
+- ✓ Phase 10 bundle and build hardening - shipped CSP `script-src` is `'self'`
+  (SEC-01; config, AST dist scan and debug-binary codegen scan enforce it) and
+  every mode's pane CSS rides its lazy chunk with the entry CSS at 45 KiB gzip
+  against the unchanged 70 KiB budget (PERF-05); UAT 2/2, verification 10/10,
+  shipped in v1.1.10/v1.1.11.
 
 ### Active
 
@@ -264,6 +276,8 @@ ones this milestone can actually break are listed here.
 | Milestone v1.1 = felt quality, synthesised from the carried-over backlog | The deferred items are not equal in weight: a 40s main-thread block measured on a 64k-file workspace is a product defect, while Nyquist metadata drift is a bookkeeping one. Grouping them by what a user experiences gives the milestone one goal instead of nine chores | Pending |
 | The native E2E runner lands early, not as closeout | v1.1's success condition is that observable behavior changed for the better; the mocked-IPC Chromium suite cannot see that, and v1.0's retrospective already ruled that a human approval marker is not reusable evidence | Pending |
 | Features stay out for a second consecutive milestone | HWPE-01..03, Semantica S1-S4, and HUB-01 all add surface area to panes whose responsiveness this milestone is trying to fix; shipping them first would move the target | Pending |
+| Mode CSS moves to lazy per-mode files; late overrides live at the end of the owning file | Lazy CSS always loads after the entry stylesheet, so an entry-side override of a mode selector silently loses; the split first shipped 24 such inversions | ✓ Phase 10 - SPLIT HOME guard in `check-mode-css-ownership` makes it build-enforced |
+| Idle preload warms only the modes whose CSS was split (D-03 amended) | Vite resolves a lazy mode only after its CSS lands, so preload never prevented FOUC; warming every mode cost ~2.9 MB of evaluated JS per session | ✓ Phase 10 / #340 - six modes, one per idle callback |
 
 ## Evolution
 
@@ -283,4 +297,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-09-21 - Phase 8 complete (29/29 plans, PERF-01/PERF-02 verified); Phase 9 ready to plan*
+*Last updated: 2026-09-25 - Phase 10 complete (3/3 plans, SEC-01/PERF-05 verified, shipped in v1.1.10/v1.1.11); Phase 9 ready to plan*
