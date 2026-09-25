@@ -269,9 +269,9 @@ async function dblclickNode(page: Page, id: string, options?: { fit?: boolean })
   // pixel coordinate. Only fit when the caller revealed a potentially
   // offscreen node; otherwise preserve the interaction being tested.
   // Freeze a running layout before fitting (as ensureNodeInViewport does):
-  // toggling a filter restarts FA2, and a fit taken mid-layout let the node
-  // drift to the canvas edge afterwards, half under the topbar, where the
-  // pointer never hovers it (#347).
+  // switching back from the chain view remounts GraphCanvas and restarts FA2,
+  // and a fit taken mid-layout let the node drift to the canvas edge
+  // afterwards, half under the topbar, where the pointer never hovers it (#347).
   const cameraStart = await page.evaluate((fit) => {
     const bridge = (window as unknown as { __maruGraph: Bridge }).__maruGraph;
     if (fit && bridge.layoutRunning()) bridge.freezeLayout();
