@@ -119,15 +119,28 @@ minimum-percentage threshold; `make coverage` never fails on a percentage, and n
 
 ### Post-merge check
 
-Pending. GitHub only runs a workflow that already exists on the default branch, and
-`.github/workflows/coverage.yml` triggers only on `push` to `main` with no `pull_request`
-or `workflow_dispatch` trigger (D-01), so the first real run happens on the first push to
-`main` after this phase's PR merges - this plan cannot observe it. Record the following
-here once that push happens; until then this stays pending, never passed:
+Confirmed on 2026-09-26. `.github/workflows/coverage.yml` triggers only on `push` to `main`
+(D-01), so its first run was the push of the phase 11 merge commit `7bbfaf10` (PR #351).
 
-- Run URL: (pending)
-- Job Summary totals table: (pending)
-- `coverage-report` artifact: (pending)
+- Run URL: https://github.com/STAIxBWLB/maru/actions/runs/36174321763 (event `push`, job
+  `coverage report (non-gating)` = success; the `Write coverage totals to the job summary`
+  step succeeded).
+- `coverage-report` artifact: uploaded, 5,975,004 bytes, containing `ts/` (HTML +
+  `coverage-summary.json`) and `rust/` (`html/` + `coverage.json`).
+- Job Summary totals table, reproduced from the artifact's two JSON files with the same
+  `scripts/coverage-summary.mjs` (`validateReports` returned null):
+
+| Scope | Lines | Functions |
+|---|---|---|
+| TypeScript (src + scripts) | 61.03% (16842/27598) | 54.04% (4598/8508) |
+| Rust maru (src-tauri/src) | 90.38% (100899/111642) | 80.47% (9573/11897) |
+| Rust maru-cli (src-tauri/maru-cli) | 0.00% (0/3) | 0.00% (0/1) |
+| Rust workspace total | 90.37% (100899/111645) | 80.46% (9573/11898) |
+
+The CI figures are measured on Linux (ubuntu-22.04, pinned rustc 1.98.0); the local baseline
+above is macOS with Homebrew rustc 1.97.1. The Rust line totals differ by about 0.1 point
+(platform-conditional code); the TypeScript totals match within rounding. Recorded for
+comparison by eye only; TEST-02 sets no threshold (D-04). UAT: 11-UAT.md test 1, pass.
 
 ## VALID-01 and SEC-03: reconciled records
 
