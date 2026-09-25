@@ -243,3 +243,7 @@ None - no external service configuration required. `cargo-llvm-cov` is a local m
 ## Orchestrator correction (2026-09-25)
 
 The `pnpm typecheck` / `make verify` failure recorded above as "pre-existing TS7006 errors in `GraphCanvas.tsx`" is not a code regression. The same commit (`9446eb0a`) passes `pnpm typecheck` (exit 0) in the main checkout, and CI `make verify` is green on `main`. The failure appears only in fresh agent worktrees, whose pnpm install links `graphology` and `graphology-types` through the global virtual store instead of the local `node_modules/.pnpm` store (same versions, different link layout). Details: `deferred-items.md`. The phase-gate `make verify` runs in the main checkout.
+
+## Orchestrator correction: maru-cli row (PR #351 review)
+
+The "no files in report" result for `maru-cli` above is not because cargo-llvm-cov omits a crate without profile data. The `cargo llvm-cov report` call in the `coverage` target had no `--workspace`, so it reported only the default member `maru`; the HTML run used `--workspace` and did include `maru-cli/src/main.rs`. The workspace total also counted one toolchain std file mapped in by the local Homebrew LLVM, so "119 files, all under `src-tauri/src/`" was inaccurate. Fixed in the review commit: `report --workspace`, and the workspace total now counts only the two crates. The re-measured baseline is in `11-EVIDENCE.md` (`maru-cli` 0.00% (0/3) lines).

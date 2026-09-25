@@ -77,7 +77,10 @@ jobs:
           shared-key: ubuntu-22.04-coverage
 
       - name: Install cargo-llvm-cov
-        uses: taiki-e/install-action@cargo-llvm-cov
+        uses: taiki-e/install-action@v2
+        with:
+          # Same version the local baseline was measured with (11-EVIDENCE.md).
+          tool: cargo-llvm-cov@0.9.1
 
       - name: Install Linux Tauri dependencies
         run: |

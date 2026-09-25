@@ -117,7 +117,7 @@ describe("summarizeCoverage", () => {
     expect(table).toContain("| Rust maru-cli (src-tauri/maru-cli) | 100.00% (4/4) | 100.00% (1/1) |");
   });
 
-  it("counts a file outside both crate paths only toward the workspace total", async () => {
+  it("leaves a file outside both crate paths out of every row, including the workspace total", async () => {
     const { summarizeCoverage } = await import("./coverage-summary.mjs");
     const rust = {
       data: [
@@ -134,7 +134,15 @@ describe("summarizeCoverage", () => {
     const table = summarizeCoverage({ rust });
     expect(table).toContain("| Rust maru (src-tauri/src) | no files in report | no files in report |");
     expect(table).toContain("| Rust maru-cli (src-tauri/maru-cli) | no files in report | no files in report |");
-    expect(table).toContain("| Rust workspace total | 50.00% (3/6) | 100.00% (1/1) |");
+    expect(table).toContain("| Rust workspace total | no files in report | no files in report |");
+  });
+
+  it("rejects reports whose shape the script cannot read", async () => {
+    const { validateReports } = await import("./coverage-summary.mjs");
+    const ts = { total: { lines: { total: 1, covered: 1 }, functions: { total: 1, covered: 1 } } };
+    expect(validateReports({ ts, rust: { data: [{ files: [] }] } })).toBeNull();
+    expect(validateReports({ ts: {}, rust: { data: [{ files: [] }] } })).toMatch(/total\.lines/);
+    expect(validateReports({ ts, rust: {} })).toMatch(/data\[0\]\.files/);
   });
 
   it("keeps the TypeScript row first when both ts and rust are present", async () => {

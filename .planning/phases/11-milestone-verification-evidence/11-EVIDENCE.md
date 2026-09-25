@@ -71,17 +71,22 @@ config is unchanged, and it matches.
 
 ## TEST-02: coverage baseline
 
-Transcribed verbatim from 11-01-SUMMARY.md's "Evidence: coverage baseline" section, measured
-at commit `eb0ea3fd`.
+Re-measured after the PR #351 review fix. The first baseline in 11-01-SUMMARY.md (commit
+`eb0ea3fd`) came from a `cargo llvm-cov report` call without `--workspace`, which reports only the
+default member `maru`, so `maru-cli` always showed "no files in report", and its workspace total
+also counted one toolchain std file mapped in by the local Homebrew LLVM. With `report --workspace`
+and the workspace total limited to the two crates, the baseline is:
 
 ### Coverage totals
 
 | Scope | Lines | Functions |
 |---|---|---|
-| TypeScript (src + scripts) | 61.03% (16838/27590) | 54.04% (4594/8501) |
-| Rust maru (src-tauri/src) | 90.47% (101190/111846) | 80.32% (9577/11923) |
-| Rust maru-cli (src-tauri/maru-cli) | no files in report | no files in report |
-| Rust workspace total | 90.47% (101201/111860) | 80.32% (9581/11928) |
+| TypeScript (src + scripts) | 61.03% (16838/27590) | 54.00% (4594/8507) |
+| Rust maru (src-tauri/src) | 90.49% (101215/111846) | 80.33% (9578/11923) |
+| Rust maru-cli (src-tauri/maru-cli) | 0.00% (0/3) | 0.00% (0/1) |
+| Rust workspace total | 90.49% (101215/111849) | 80.33% (9578/11924) |
+
+`maru-cli`'s `main.rs` has 3 instrumented lines and no tests, so 0% is its true figure.
 
 ### Measurement record
 

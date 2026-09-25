@@ -42,9 +42,9 @@ function addMetric(metric, count, covered) {
 
 /**
  * Groups a cargo-llvm-cov JSON export's files by crate (maru, maru-cli) and
- * accumulates a workspace total across every file, regardless of crate. A
- * file whose path matches neither crate still counts toward the workspace
- * total only.
+ * accumulates a workspace total over those two crates. A file whose path
+ * matches neither crate (for example a toolchain std source that the local
+ * LLVM maps into the report) is outside the workspace and is not counted.
  *
  * @param {{ data?: Array<{ files?: Array<{ filename: string, summary?: { lines?: { count: number, covered: number }, functions?: { count: number, covered: number } } }> }> }} rust
  */
@@ -61,13 +61,11 @@ function groupRustFiles(rust) {
     const lines = file.summary?.lines ?? { count: 0, covered: 0 };
     const functions = file.summary?.functions ?? { count: 0, covered: 0 };
 
-    groups.workspace.hasFiles = true;
-    addMetric(groups.workspace.lines, lines.count, lines.covered);
-    addMetric(groups.workspace.functions, functions.count, functions.covered);
-
     const kind = filename.includes("/src-tauri/maru-cli/") ? "maruCli" : filename.includes("/src-tauri/src/") ? "maru" : null;
-    if (kind) {
-      const group = groups[kind];
+    if (!kind) {
+      continue;
+    }
+    for (const group of [groups[kind], groups.workspace]) {
       group.hasFiles = true;
       addMetric(group.lines, lines.count, lines.covered);
       addMetric(group.functions, functions.count, functions.covered);
@@ -132,9 +130,33 @@ async function readRequired(filePath) {
   }
 }
 
+/**
+ * Returns an error message when a report does not have the shape this script
+ * reads, or null when both are usable. A wrong shape must fail loudly rather
+ * than print "no files in report" for a Rust half that never ran.
+ *
+ * @param {{ ts?: unknown, rust?: unknown }} reports
+ * @returns {string | null}
+ */
+export function validateReports({ ts, rust } = {}) {
+  const total = /** @type {any} */ (ts)?.total;
+  if (!Number.isFinite(total?.lines?.total) || !Number.isFinite(total?.functions?.total)) {
+    return "coverage/ts/coverage-summary.json has no total.lines/total.functions";
+  }
+  if (!Array.isArray(/** @type {any} */ (rust)?.data?.[0]?.files)) {
+    return "coverage/rust/coverage.json has no data[0].files";
+  }
+  return null;
+}
+
 async function main() {
   const ts = await readRequired(TS_SUMMARY_PATH);
   const rust = await readRequired(RUST_SUMMARY_PATH);
+  const problem = validateReports({ ts, rust });
+  if (problem) {
+    console.error(`coverage-summary: ${problem} - run \`make coverage\` first`);
+    process.exit(1);
+  }
   console.log(summarizeCoverage({ ts, rust }));
 }
 

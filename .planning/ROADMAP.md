@@ -306,7 +306,7 @@ Plans:
   3. Nyquist validation metadata for v1.0 phases 01-03 matches what `$gsd-validate-phase` reports, with no stale drift remaining.
   4. Milestone v1.0 Phase 02 has a security report on file, so security evidence is uniform across every v1.0 phase.
 
-**Plans**: 5/6 plans executed in 3 waves
+**Plans**: 6/6 plans executed in 3 waves
 
 Plans:
 **Wave 1**
@@ -336,4 +336,4 @@ Phases execute in numeric order: 6 → 7 → 8 → 9 → 10 → 11
 | 8. Main-Thread Responsiveness | 29/29 | Complete    | 2026-09-06 |
 | 9. Durability and Session Lifecycle | 0/8 | Planned | - |
 | 10. Bundle and Build Hardening | 3/3 | Complete    | 2026-09-25 |
-| 11. Milestone Verification & Evidence | 5/6 | In Progress|  |
+| 11. Milestone Verification & Evidence | 6/6 | Verification pending (post-merge UAT) | - |

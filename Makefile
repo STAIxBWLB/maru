@@ -279,7 +279,7 @@ coverage: node_modules $(ICON_PATH) ## TS + Rust coverage reports, non-gating (T
 	}
 	$(PNPM) exec vitest run src scripts --exclude '**/check-command-isolation.test.mjs' --coverage --coverage.reporter=html --coverage.reporter=json-summary --coverage.reportsDirectory=coverage/ts
 	cd $(TAURI_DIR) && $(CARGO) llvm-cov --workspace --html --output-dir ../coverage/rust
-	cd $(TAURI_DIR) && $(CARGO) llvm-cov report --json --summary-only --output-path ../coverage/rust/coverage.json
+	cd $(TAURI_DIR) && $(CARGO) llvm-cov report --workspace --json --summary-only --output-path ../coverage/rust/coverage.json
 	$(NODE) scripts/coverage-summary.mjs
 
 # ---------------------------------------------------------------------------
