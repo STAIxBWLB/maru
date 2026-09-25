@@ -239,3 +239,7 @@ None - no external service configuration required. `cargo-llvm-cov` is a local m
 - Created files verified on disk: `scripts/coverage-summary.mjs`, `scripts/coverage-summary.test.ts`, `.planning/phases/11-milestone-verification-evidence/deferred-items.md`, this SUMMARY.md.
 - Commits verified in `git log`: `52ba2167`, `f3b78288`, `06754b57`, `eb0ea3fd`.
 - All Task 2 and Task 3 acceptance criteria re-verified passing (see Evidence section above); the sole open item (`GraphCanvas.tsx` pre-existing typecheck gap) is documented, not silently dropped.
+
+## Orchestrator correction (2026-09-25)
+
+The `pnpm typecheck` / `make verify` failure recorded above as "pre-existing TS7006 errors in `GraphCanvas.tsx`" is not a code regression. The same commit (`9446eb0a`) passes `pnpm typecheck` (exit 0) in the main checkout, and CI `make verify` is green on `main`. The failure appears only in fresh agent worktrees, whose pnpm install links `graphology` and `graphology-types` through the global virtual store instead of the local `node_modules/.pnpm` store (same versions, different link layout). Details: `deferred-items.md`. The phase-gate `make verify` runs in the main checkout.

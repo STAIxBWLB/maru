@@ -221,3 +221,7 @@ None - no new network endpoints, auth paths, file access patterns, or schema cha
 - Re-ran `status: validated` and `## Validation Audit 2026-09-25` grep checks against all three VALIDATION.md files: all pass.
 - Re-ran D-10 file-scope check (`git diff --name-only` against `origin/main`'s merge-base for `.planning/milestones/`): only the three VALIDATION.md files listed, nothing else.
 - `make verify` remains red at the `typecheck` target due to the documented, out-of-scope `GraphCanvas.tsx` regression - not silently marked as passing, and not fixed here per D-10/Scope Boundary. Flagged explicitly in Deviations and Issues Encountered above.
+
+## Orchestrator correction (2026-09-25)
+
+The `pnpm typecheck` / `make verify` failure recorded above as "pre-existing TS7006 errors in `GraphCanvas.tsx`" is not a code regression. The same commit (`9446eb0a`) passes `pnpm typecheck` (exit 0) in the main checkout, and CI `make verify` is green on `main`. The failure appears only in fresh agent worktrees, whose pnpm install links `graphology` and `graphology-types` through the global virtual store instead of the local `node_modules/.pnpm` store (same versions, different link layout). Details: `deferred-items.md`. The phase-gate `make verify` runs in the main checkout.

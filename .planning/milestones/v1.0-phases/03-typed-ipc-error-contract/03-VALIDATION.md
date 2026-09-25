@@ -67,7 +67,7 @@ created: 2026-08-23
 | ERR-02 two-sided rename drill (Rust value rename, Rust name rename, TS union rename, matched Rust-only rename) | ERR-02 | A rename drill is a deliberate break-and-revert exercise; there is no standing automated test that performs the rename itself (only tests that fail correctly once a rename happens) | See 03-04-SUMMARY.md coverage entries D1-D4 for the four independently recorded drill results (Rust value/pin, Rust name/build-site, TS union/tsc, matched Rust-only/cross-language-guard) |
 | ERR-04 `Result<_, String>` signature count | ERR-04 | This was a Phase-3-scoped invariant ("stays within a few of the measured baseline"), satisfied at Phase 3 close; later phases legitimately add new `Result<_, String>` signatures as the codebase grows, so the count is expected to drift upward over time and is not a regression to chase | 1,138 before migration and 1,128 after, per 03-01-SUMMARY.md and 03-04-SUMMARY.md. Re-measured today (2026-09-25) at HEAD `48b99585`: 1,845 (`grep -roE "Result<.*, String>" src-tauri/src --include="*.rs" \| wc -l`), recorded as context, not a gap. No Rust file was touched to move this number. |
 
-**Note on the composite gate:** `pnpm typecheck` (part of ERR-02's automated half and of `make verify`) currently fails on a pre-existing, unrelated `src/components/graph/GraphCanvas.tsx` TS7006 regression (outside this phase's diff and outside this plan's file list; see 02-VALIDATION.md's Manual-Only section and 11-04-SUMMARY.md for the full account). All of ERR-01/02/03's own targeted vitest and cargo commands, and the residual greps, ran clean at HEAD `48b99585`.
+**Note on the composite gate:** `pnpm typecheck` (part of ERR-02's automated half and of `make verify`) is green; the TS7006 errors in `src/components/graph/GraphCanvas.tsx` seen during this reconciliation came from the agent worktree's install layout (pnpm global virtual store), not from the code: `pnpm typecheck` exits 0 in the main checkout at `9446eb0a` and CI `make verify` is green on `main` (see `.planning/phases/11-milestone-verification-evidence/deferred-items.md`). All of ERR-01/02/03's own targeted vitest and cargo commands, and the residual greps, ran clean at HEAD `48b99585`.
 
 ---
 
@@ -97,5 +97,5 @@ created: 2026-08-23
 - `grep -rnE '\.includes\("(today_conflict|task_conflict|document_conflict|evidence_binder_revision_conflict)"' src/` - empty (exit 1, no matches, as required)
 - `grep -rn "todayErrorCode" src/ e2e/` - empty (exit 1, no matches, as required)
 - `grep -roE "Result<.*, String>" src-tauri/src --include="*.rs" | wc -l` - 1845 (historical measurement, not a gap; see Manual-Only table)
-- `pnpm typecheck` - non-zero exit at `src/components/graph/GraphCanvas.tsx`, unrelated to Phase 3 (see Manual-Only note above); escalated, not resolved in this plan per D-10 scope
+- `pnpm typecheck` - exit 0 in the main checkout at `9446eb0a`; the non-zero exit seen inside the agent worktree was an install-layout artifact (see Manual-Only note above)
 - HEAD at measurement: `48b99585`

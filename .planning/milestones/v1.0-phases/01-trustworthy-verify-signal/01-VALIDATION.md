@@ -77,7 +77,7 @@ new test fixtures and no new framework.
 | An older commit rebuilds with its own toolchain | GATE-05 | Requires checking out a prior commit and observing the resolved toolchain; not expressible as a repo-resident test | `git checkout <old-sha> -- rust-toolchain.toml`, then `cd src-tauri && cargo --version`, confirm it matches that commit's pin. Evidence: 01-01-SUMMARY.md and 01-VERIFICATION.md truth #4. Automated half re-run today: `grep -E '^channel = "[0-9]+\.[0-9]+\.[0-9]+"' rust-toolchain.toml` -> `channel = "1.98.0"` |
 | Each gate fails on a deliberate break | GATE-01, GATE-02, GATE-03 | Whether the gate goes red on a bad dep array, unused symbol, unformatted Rust file, clippy warning, or type error cannot be asserted from inside a green suite - it requires a deliberate break-and-revert | Evidence: 01-01/01-02-SUMMARY.md (GATE-01 fmt+clippy break-revert), 01-07-SUMMARY.md (GATE-02 lint break-revert both ways), 01-04/01-05-SUMMARY.md (GATE-03 e2e/ and scripts/ break-revert). Automated half re-run today, all clean: `make fmt-check clippy`, `pnpm lint` |
 
-**Note on the composite gate:** `pnpm typecheck` (GATE-03's and GATE-06's automated half) currently fails on a pre-existing, unrelated `src/components/graph/GraphCanvas.tsx` TS7006 regression, outside this phase's diff and outside this plan's file list (see 02-VALIDATION.md's Manual-Only section and 11-04-SUMMARY.md for the full account). This does not reopen GATE-03 or GATE-06: GATE-03's own e2e/ and scripts/ typechecking is proven by 01-04/01-05's break-and-revert record, and GATE-06's `@types/dompurify` absence is independently confirmed by the read-only check below, which does not depend on `tsc -b` completing.
+**Note on the composite gate:** `pnpm typecheck` (GATE-03's and GATE-06's automated half) is green; the TS7006 errors in `src/components/graph/GraphCanvas.tsx` seen during this reconciliation came from the agent worktree's install layout (pnpm global virtual store), not from the code: `pnpm typecheck` exits 0 in the main checkout at `9446eb0a` and CI `make verify` is green on `main` (see `.planning/phases/11-milestone-verification-evidence/deferred-items.md`). This does not reopen GATE-03 or GATE-06: GATE-03's own e2e/ and scripts/ typechecking is proven by 01-04/01-05's break-and-revert record, and GATE-06's `@types/dompurify` absence is independently confirmed by the read-only check below, which does not depend on `tsc -b` completing.
 
 ---
 
@@ -115,5 +115,5 @@ new test fixtures and no new framework.
 - `node -e "..."` read-only `@types/dompurify` absence check - exit 0, absent from dependencies and devDependencies
 - `test "$(grep -c skill-name-drift src/lib/e2eFlow.ts)" = 0` - exit 0
 - `grep -q 'Hand-maintained' src/lib/e2eFlow.ts` - exit 0, present
-- `pnpm typecheck` - non-zero exit at `src/components/graph/GraphCanvas.tsx`, unrelated to Phase 1 (see Manual-Only note above); escalated, not resolved in this plan per D-10 scope
+- `pnpm typecheck` - exit 0 in the main checkout at `9446eb0a`; the non-zero exit seen inside the agent worktree was an install-layout artifact (see Manual-Only note above)
 - HEAD at measurement: `e4bc96af`
