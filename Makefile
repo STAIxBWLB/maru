@@ -264,6 +264,14 @@ verify-integration: $(ICON_PATH) ## Smoke the real installed AI CLIs (availabili
 	cd $(TAURI_DIR) && MARU_CLI_SMOKE=1 \
 		$(CARGO) test --lib cli_backends_real_smoke -- --ignored --nocapture --test-threads=1
 
+# Deliberately NOT part of `verify`: coverage is a diagnostic report, not a
+# gate (TEST-02, D-01/D-02/D-04) - it carries no threshold and no fail
+# condition, and its CI job runs only on pushes to `main` (plan 11-02).
+.PHONY: coverage
+coverage: node_modules $(ICON_PATH) ## TS + Rust coverage reports, non-gating (TEST-02)
+	$(PNPM) exec vitest run src scripts --exclude '**/check-command-isolation.test.mjs' --coverage --coverage.reporter=html --coverage.reporter=json-summary --coverage.reportsDirectory=coverage/ts
+	$(NODE) scripts/coverage-summary.mjs
+
 # ---------------------------------------------------------------------------
 # Skills / release management
 # ---------------------------------------------------------------------------

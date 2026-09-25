@@ -49,6 +49,7 @@ describe("summarizeCoverage", () => {
         total: {
           // @ts-expect-error -- deliberately wrong `pct` to prove it is ignored
           lines: { total: 4, covered: 1, pct: 999 },
+          // @ts-expect-error -- deliberately wrong `pct` to prove it is ignored
           functions: { total: 4, covered: 1, pct: 999 },
         },
       },
