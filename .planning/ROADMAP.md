@@ -24,7 +24,7 @@ operative rule is in README's Release Process section.
 - [x] **Phase 7: Guardrails Before Churn** - Lock poisoning recovers, the watcher and the document index stop carrying trees they never serve, and a sanitizer guard lands before the milestone's own later work can trip it. (completed 2026-09-05)
 - [x] **Phase 8: Main-Thread Responsiveness** - The skills registry lock narrows and the main-thread-blocking commands move off it, proven by a concurrency load test rather than the absence of a visible freeze. (completed 2026-09-06)
 - [ ] **Phase 9: Durability and Session Lifecycle** - A SIGHUP-trapping terminal can still be killed, a pending edit is saved (or its failure surfaced) on unmount and app quit, and a scheduled job's own PATH resolves as written.
-- [ ] **Phase 10: Bundle and Build Hardening** - The packaged CSP drops an unused directive and per-mode CSS restores the budget headroom spent since v0.4.46.
+- [x] **Phase 10: Bundle and Build Hardening** - The packaged CSP drops an unused directive and per-mode CSS restores the budget headroom spent since v0.4.46. (completed 2026-09-25)
 - [ ] **Phase 11: Milestone Verification & Evidence** - Coverage is measured, the narrowed CI trace configuration is proven, and v1.0's closeout evidence debt is retired.
 
 ## Phase Details
@@ -240,7 +240,28 @@ Plans:
   3. A save that fails on a teardown path produces a visible signal to the user (log, toast, or equivalent) instead of disappearing with no trace.
   4. A job whose `program.env.PATH` carries several tilde entries installs a launchd plist in which every one of them is absolute, so the child process resolves the same tools the job's shell guard found. A colon-bearing non-path value and a single-path value are byte-identical to today's output.
 
-**Plans**: TBD
+**Plans**: 8 plans in 4 waves
+
+Plans:
+**Wave 1**
+
+- [ ] 09-01-PLAN.md - REL-04 verify-only: run the shipped tilde-expansion tests and mark traceability (D-13)
+- [ ] 09-02-PLAN.md - REL-01 process-group kill ladder for closed tabs and the terminal sweep at app exit (D-09..D-12)
+- [ ] 09-03-PLAN.md - Cmd+Q routed into the window-close guard through a Maru-owned app.quit menu item (D-03, A1 spike)
+- [ ] 09-05-PLAN.md - Shared saver settle/retry contract, teardown flush hook, Scratchpad flushes on unmount (D-01, D-02)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [ ] 09-04-PLAN.md - write_recovery_copy IPC command under .maru/recovery plus command-isolation evidence at 383 (D-08)
+- [ ] 09-07-PLAN.md - Meeting source, Studio, graph layout, and Today brain dump autosaves on the shared saver (D-01)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
+- [ ] 09-06-PLAN.md - Failed teardown saves: recovery copy, toast naming file and reason, Open recovery copy (D-07, D-08)
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
+- [ ] 09-08-PLAN.md - Quit flush in the one guard: 3 s budget, 300 ms indicator, save-failed dialog, real-app verification (D-03..D-06)
 
 ### Phase 10: Bundle and Build Hardening
 
@@ -269,7 +290,7 @@ Plans:
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
-- [ ] 10-03: PERF-05 idle preload + first-activation FOUC spec
+- [x] 10-03: PERF-05 idle preload + first-activation FOUC spec
 
 **UI hint**: yes
 
@@ -285,7 +306,23 @@ Plans:
   3. Nyquist validation metadata for v1.0 phases 01-03 matches what `$gsd-validate-phase` reports, with no stale drift remaining.
   4. Milestone v1.0 Phase 02 has a security report on file, so security evidence is uniform across every v1.0 phase.
 
-**Plans**: TBD
+**Plans**: 6 plans in 3 waves
+
+Plans:
+**Wave 1**
+
+- [ ] 11-01-PLAN.md - TEST-02 local coverage: legitimacy checkpoint, `make coverage` (Vitest v8 + cargo-llvm-cov, per-crate totals), recorded baseline (D-01..D-04)
+- [ ] 11-03-PLAN.md - GATE-08 trace re-proof: throwaway probe branch, dispatched CI failure, `unzip -l` evidence in 11-EVIDENCE.md, branch deleted (D-05..D-07)
+- [ ] 11-04-PLAN.md - VALID-01: validate-phase reconciliation of v1.0 01/02/03-VALIDATION.md against shipped tests (D-08..D-10)
+- [ ] 11-05-PLAN.md - SEC-03: retroactive secure-phase audit of the T-02 register, 02-SECURITY.md (D-12, D-13)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [ ] 11-02-PLAN.md - TEST-02 CI: push-to-main-only non-gating coverage workflow with Job Summary and artifact, README (D-01, D-02)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
+- [ ] 11-06-PLAN.md - Closure: complete 11-EVIDENCE.md, append v1.0 audit resolution, flip the four requirements on evidence, phase-gate `make verify` (D-11, D-14)
 
 ## Progress
 
@@ -297,6 +334,6 @@ Phases execute in numeric order: 6 → 7 → 8 → 9 → 10 → 11
 | 6. Native E2E Runner Foundation | 5/5 | Complete    | 2026-08-29 |
 | 7. Guardrails Before Churn | 5/5 | Complete    | 2026-09-05 |
 | 8. Main-Thread Responsiveness | 29/29 | Complete    | 2026-09-06 |
-| 9. Durability and Session Lifecycle | 0/TBD | Not started | - |
-| 10. Bundle and Build Hardening | 3/3 | In Progress|  |
-| 11. Milestone Verification & Evidence | 0/TBD | Not started | - |
+| 9. Durability and Session Lifecycle | 0/8 | Planned | - |
+| 10. Bundle and Build Hardening | 3/3 | Complete    | 2026-09-25 |
+| 11. Milestone Verification & Evidence | 0/6 | Planned | - |

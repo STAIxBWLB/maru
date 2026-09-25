@@ -1,0 +1,1 @@
+No external API integration: the phase touches terminal signaling, the Tauri quit lifecycle, autosave teardown, and one internal recovery-copy IPC command; "API" matched only Tauri's ExitRequested type.
