@@ -582,7 +582,7 @@ cargo llvm-cov --workspace --summary-only
 
 **If this table is empty:** N/A - see rows above.
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Will the gsd-nyquist-auditor subagent's live run agree with this session's manual VALID-01 mapping?**
    - What we know: every requirement row was traced to a specific, currently-existing test this
@@ -593,6 +593,7 @@ cargo llvm-cov --workspace --summary-only
    - Recommendation: run the actual workflow per D-08 rather than hand-writing VALIDATION.md from
      this research; treat this inventory as the pre-flight expectation, not a substitute for the
      dispatch.
+   - RESOLVED: 11-04 Tasks 1-3 re-run every row's command fresh and reconcile from those results, not from this inventory; ERR-04 is recorded as a historical measurement (11-04 Task 2).
 
 2. **Will `/gsd-secure-phase 02`'s short-circuit rule actually fire, or will `register_authored_at_plan_time` resolve `false`?**
    - What we know: all three `02-0N-PLAN.md` files carry parseable `<threat_model>` blocks with
@@ -603,6 +604,7 @@ cargo llvm-cov --workspace --summary-only
      parser this session).
    - Recommendation: if the short-circuit doesn't fire, expect a `gsd-security-auditor` subagent
      dispatch instead of a direct write - budget a few extra minutes, not a new wave.
+   - RESOLVED: 11-05 Task 1 runs the secure-phase steps inline against the T-02 register and handles both the short-circuit and the full-audit path; 11-05 Task 2 covers any open threat per D-13.
 
 ## Environment Availability
 
