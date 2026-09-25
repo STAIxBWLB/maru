@@ -6,7 +6,7 @@
   "status": "pass",
   "visualReview": "pending",
   "artifact": {
-    "path": "/Users/yj.lee/workspace/work/dev/maru/archify/maru-rendered.html",
+    "path": "docs/architecture/maru-rendered.html",
     "sha256": "9da229bd27dbb4d2a050707cbc9245985805ac88905fbb8e94a74656976c5ef0",
     "bytes": 820513
   },

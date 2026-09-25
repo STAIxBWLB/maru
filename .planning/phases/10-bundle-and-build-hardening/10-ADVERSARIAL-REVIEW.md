@@ -14,7 +14,7 @@ The phase passed verification, but the CSS split changed rendering, and the guar
 
 | # | Severity | Finding | Fix | Proof |
 | --- | --- | --- | --- | --- |
-| 1 | critical | **Cascade inversion.** Lazy mode CSS loads after the entry CSS. So 24 declarations that a *later* styles.css rule used to override now win. The affected overrides are the container-query collapses (today sidebar, meetings, drafts/gap/agents list columns), the material header/sheet pass, prefers-contrast, and forced-colors (`.cal-day-number-today`). | Each mode-owned override moved to the end of its mode file, inside the same wrapper. | A declaration-level equivalence check against the pre-split file shows 0 inversions and 0 unintended deletions. The existing `today.spec.ts` "layout smoke at 1024x720" test **fails on the pre-fix tree**: the sidebar is 240px where 56px is expected. It passes after the fix. |
+| 1 | critical | **Cascade inversion.** Lazy mode CSS loads after the entry CSS. So 24 declarations that a *later* styles.css rule used to override now win. The affected overrides are the container-query collapses (today sidebar, meetings, drafts/gap/agents list columns), the material header/sheet pass, prefers-contrast, and forced-colors (`.cal-day-number-today`). | Each mode-owned override moved to the end of its mode file, inside the same wrapper. | A declaration-level equivalence check against the pre-split file shows 0 exact-selector inversions and 0 unintended deletions. The OCR gate then found one more inversion that uses different selector text with equal specificity (see below). The existing `today.spec.ts` "layout smoke at 1024x720" test **fails on the pre-fix tree**: the sidebar is 240px where 56px is expected. It passes after the fix. |
 | 2 | critical | **Rules dropped.** The split deleted `@media (max-width: 980px)` `.tasks-calendar-shell` and `.tasks-unscheduled-tray`. It also left `.tasks-sidebar` inside `meetings-pane.css`. | Restored in `tasks.css` at their original position. | Equivalence check reports 0 deletions. |
 | 3 | warning | **Cross-chunk class use.** `.task-new-dialog` lived only in `tasks.css`, but the entry shell uses it (unsaved-changes dialog) and so do the Sites dialogs. The TaskFormFields rules were also only in `tasks.css`, but Today's task sheet renders them. All of these were unstyled until the Tasks chunk happened to load. | `.task-new-dialog` is back in styles.css at its original position. The TaskFormFields rules moved to `tasks/taskFormFields.css`, imported by the shared component. | A new cold Sites-dialog case in `first-activation-styles.spec.ts` fails on the pre-fix CSS and passes after the fix. |
 | 4 | warning | **The FOUC spec never ran a cold activation.** The idle preload warmed every chunk within about 0.7s, so each "first activation" was warm. | The spec disables idle callbacks, so every activation takes the lazy path. | 39/39 pass cold. |
@@ -31,3 +31,22 @@ Removed as dead code while satisfying SPLIT HOME: 5 declarations in styles.css `
 
 - **Preload scope vs memory.** D-03 preloads every mode, including Studio (about 1.8 MB), Graph and Diagram. None of those has per-mode CSS, and Vite already waits for a chunk's CSS before the lazy component renders. The FOUC goal needs only the 6 split modes plus calendar. Narrowing the scope would change D-03, and the native-memory idle-startup scenario (#327) has not been re-measured with preload on.
 - **Worker aliasing** (`W=Worker; new W(u)`) and scope-blind createObjectURL bindings are known ceilings of the dist half. They are marked `ponytail:` in the guard.
+
+## OCR delegation review (merge gate, PR #335)
+
+- **Host:** Claude Code, read-only subagent.
+- **Refs:** head `7342198f`, base `4efd1c55`.
+- **Files:** 51 total; the OCR list matches `gh pr diff --name-only`.
+  - Reviewed 47: 30 OCR-reviewable, plus 17 excluded files read directly (tests, e2e spec, `.planning` markdown).
+  - Skipped 4 architecture PNGs (binary).
+- **Result:** no Important findings. Verdicts:
+
+| # | Finding | Verdict |
+| --- | --- | --- |
+| 1 | **Equal-specificity inversion missed by the exact-selector check.** The global `:is(button, textarea, ...):focus-visible` (0,2,0) used to follow Today's own focus rules and win. After the split, Today's rules won: the nav, refresh and skip focus offsets went from 2px to 1px, the brain-dump textarea outline changed, and forced-colors `.today-nav-item.active` lost its -2px offset. | Fixed. Every target is a button or textarea, so those `outline` declarations in `today.css` were dead before the split and were deleted; the textarea keeps `border-color`. A Playwright comparison of old vs rebuilt CSS is now identical, including under forced-colors. |
+| 2 | `check-csp-blob` config half passes when the CSP is null or has no directive that governs scripts. | Fixed. A missing base CSP and a CSP with no `script-src`/`default-src` now fail; behavioral test added. |
+| 3 | SPLIT HOME does not cover the markerless `taskFormFields.css`. | Fixed. Added through `SHARED_SPLIT_CSS`. |
+| 4 | WKWebView has no `requestIdleCallback`, so the per-mode 2s fallback timer would chain for about 34s. | Fixed. Later steps wait at most 250ms; the test pins `[2000, 250, 250]`. Packaged-app timing stays under UAT gate 2. |
+| 5 | `maru-rendered.visual-check.json` commits an absolute local path. | Fixed. It is now repo-relative. |
+| 6 | The binary codegen regex stops at a scheme-less host source (`cdn.x.com`, `*`). | Accepted ceiling. Widening it would run into the next directive name and false-positive on `worker-src blob:`. The config and JSON checks still catch `blob:` there. |
+| 7 | Standalone `make check-csp-blob` scans whatever stale debug binary exists. | Accepted. `release-checks` scans the binary it just built; the standalone target is a manual probe. |
