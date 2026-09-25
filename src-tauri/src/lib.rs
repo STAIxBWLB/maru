@@ -641,6 +641,10 @@ pub fn run() {
             tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit => {
                 let state = app_handle.state::<TelegramIoState>();
                 stop_poller_on_exit(state.inner());
+                // D-12: no orphaned terminal child outlives Maru. This is
+                // the only call site (D-06) -- it fires only after the
+                // webview's own close guards already let the quit proceed.
+                terminal::shutdown_all_sessions(app_handle.state::<TerminalState>().inner());
             }
             _ => {}
         });

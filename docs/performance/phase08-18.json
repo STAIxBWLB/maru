@@ -825,7 +825,7 @@
    "disposition": "ISOLATED",
    "helperChain": [
     "src-tauri/src/terminal/mod.rs::ipc::terminal_kill owns its inputs, clones the managed TerminalState, and awaits tauri::async_runtime::spawn_blocking calling src-tauri/src/terminal/mod.rs::terminal_kill inside the worker; a JoinError becomes the display-only terminal_kill_task_failed String.",
-    "src-tauri/src/terminal/mod.rs::terminal_kill re-validates the handle through src-tauri/src/terminal/mod.rs::get_session_generation, latches the closing flag, kills the child under the killer lock and unregisters the session by Arc identity inside the blocking worker; unknown kills stay idempotent."
+    "src-tauri/src/terminal/mod.rs::terminal_kill re-validates the handle through src-tauri/src/terminal/mod.rs::get_session_generation, latches the closing flag, signals the session's spawn-time process group via src-tauri/src/terminal/mod.rs::signal_process_group and hands escalation to a detached src-tauri/src/terminal/mod.rs::escalate_process_group thread, then unregisters the session by Arc identity inside the blocking worker; unknown kills stay idempotent."
    ],
    "workerBoundary": "src-tauri/src/terminal/mod.rs::ipc::terminal_kill awaits tauri::async_runtime::spawn_blocking before any registry, model, writer or process work runs; only a JoinError maps to the display-only terminal_kill_task_failed String while the typed success payload and every domain error string pass through unchanged.",
    "syncCallers": [
