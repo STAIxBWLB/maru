@@ -369,7 +369,9 @@ async function main() {
     const match = firstMarker(text);
     if (match) {
       srcMarkerIds.set(file, match[1]);
-      const rel = path.relative(REPO_ROOT, file);
+      // POSIX separators: the fingerprint and ORDERED_HOMES paths use "/", and
+      // Windows release builds run this guard too.
+      const rel = path.relative(REPO_ROOT, file).split(path.sep).join("/");
       homes.push({ file: rel, text });
       if (!PER_MODE_FINGERPRINTS.some((fingerprint) => fingerprint.file === rel)) {
         violations.push(
