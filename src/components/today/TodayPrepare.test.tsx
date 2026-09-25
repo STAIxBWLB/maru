@@ -213,6 +213,19 @@ describe("TodayPrepare", () => {
     expect(mutate).toHaveBeenCalledWith({ type: "setBrainDump", brainDump: "할 일 메모" });
   });
 
+  it("saves a pending brain dump edit made just before Prepare unmounts", async () => {
+    const { container, mutate, root } = await renderPrepare();
+    const textarea = container.querySelector<HTMLTextAreaElement>(".today-braindump-textarea")!;
+    await act(async () => {
+      typeText(textarea, "닫기 직전 메모");
+    });
+    await act(async () => {
+      root.unmount();
+      await sleep(0);
+    });
+    expect(mutate).toHaveBeenCalledWith({ type: "setBrainDump", brainDump: "닫기 직전 메모" });
+  });
+
   it("hard-caps the brain dump at 2000 characters", async () => {
     const { container } = await renderPrepare();
     const textarea = container.querySelector<HTMLTextAreaElement>(".today-braindump-textarea")!;
