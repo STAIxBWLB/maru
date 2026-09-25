@@ -1904,6 +1904,79 @@
         "limits": "Shared admission serializes cooperating in-process writers on the admitted private .maru set and workspace registry only; external processes are outside the in-process guarantee. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
         "contract": "The Vec<WorkspaceSummary> payload and the per-root fold semantics are unchanged; the only new failure paths are the JoinError-to-String mapping at the worker boundary plus fail-closed admission rejections from the delegated registry admission."
       }
+    },
+    {
+      "name": "write_recovery_copy",
+      "module": "src-tauri/src/maru_dir.rs",
+      "registrationPath": "src-tauri/src/lib.rs::maru_dir::ipc::write_recovery_copy",
+      "originalDisposition": "ISOLATED",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/maru_dir.rs::ipc::write_recovery_copy owns its inputs and awaits tauri::async_runtime::spawn_blocking calling src-tauri/src/maru_dir.rs::write_recovery_copy inside the worker; a JoinError becomes the display-only write_recovery_copy_task_failed String.",
+        "src-tauri/src/maru_dir.rs::write_recovery_copy rejects content over RECOVERY_MAX_BYTES before any admission, then enters src-tauri/src/atomic_file.rs::with_path_transactions via src-tauri/src/maru_dir.rs::maru_mutation_admission; inside the lease it runs ensure_maru_dir, refuses a symlinked .maru/recovery via symlink_metadata, names the file with src-tauri/src/maru_dir.rs::recovery_file_name, re-checks containment with src-tauri/src/paths.rs::ensure_within, and lease.ensure_covered re-checks the resolved target before the no-clobber write_atomic_create write; src-tauri/src/maru_dir.rs::prune_recovery_dir runs after the write and never blocks it."
+      ],
+      "workerBoundary": "src-tauri/src/maru_dir.rs::ipc::write_recovery_copy awaits tauri::async_runtime::spawn_blocking before any filesystem access, admission wait or size check runs; only a JoinError maps to the display-only write_recovery_copy_task_failed String while the typed payload and every domain error string (recovery_copy_too_large, recovery_dir_is_symlink) pass through unchanged; owned Strings cross the await, never a borrowed State or guard.",
+      "syncCallers": [
+        "No Rust or CLI caller invokes write_recovery_copy synchronously today; src-tauri/src/lib.rs registers only maru_dir::ipc::write_recovery_copy, and the original synchronous src-tauri/src/maru_dir.rs::write_recovery_copy keeps its name and signature for Rust callers (the phase09_04 tests exercise it directly)."
+      ],
+      "mutationKey": {
+        "readOnly": false,
+        "lexicalPaths": [
+          "<work>/.maru/recovery/<name> (sanitized leaf target, name computed only from the file_path's leaf stem and extension)",
+          "<work>/.maru/ (admitted cover for ensure_maru_dir bounded skeleton creation)",
+          "<work>/.maruignore (admitted cover)",
+          "pinned workspace-root parent (require_parent)"
+        ],
+        "aliasPaths": [
+          "workspace-relative work_path resolves through src-tauri/src/maru_dir.rs::normalize_work_path to the same absolute lexical set admitted up front"
+        ],
+        "sharedAdmissionEntry": "src-tauri/src/maru_dir.rs::write_recovery_copy admits the complete write set before any effect: src-tauri/src/atomic_file.rs::with_path_transactions opens the lease after src-tauri/src/maru_dir.rs::maru_mutation_admission builds the src-tauri/src/atomic_file.rs::PathTransactionRequest over <work>/.maru and <work>/.maruignore with the pinned workspace-root parent (require_parent) and the workspace-registry precondition, so no recovery write escapes the admitted set.",
+        "postAdmissionPreconditions": [
+          "lease.ensure_workspace_registry runs before any effect",
+          "a symlinked <work>/.maru/recovery is refused via symlink_metadata before the file name is even computed",
+          "src-tauri/src/paths.rs::ensure_within re-checks the sanitized recovery target stays inside <work>/.maru/recovery before the write",
+          "lease.ensure_covered over the resolved <work>/.maru/recovery/<name> target runs before lease.before_effect and the no-clobber write"
+        ],
+        "domainLockOrder": "Filesystem path admission (with_path_transactions acquire) happens in src-tauri/src/maru_dir.rs::write_recovery_copy before ensure_maru_dir, the symlink check, name resolution and the no-clobber write; admission precedes every domain effect and no domain lock is taken before admission."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase09_04",
+          "passed": 8,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/maruDir.ts"
+        ],
+        "payload": "writeRecoveryCopy (src/lib/maruDir.ts) invokes write_recovery_copy with the workspace path, the failed file's path, its unsaved content and the failure reason; it is called from a teardown-save failure path, not a direct UI action.",
+        "terminalNoticeOwner": "The teardown-save failure reporter (Phase 9 plan 09-06, D-07/D-08) owns the single toast and log notice for a failed save and the offer to open its recovery copy; this shard claims backend isolation only.",
+        "classifier": "n/a: a single bounded write triggered by a save failure, not a file-processing batch",
+        "successRetention": "the returned .maru/recovery/<name> path is handed to the teardown-save reporter to offer opening the recovery copy",
+        "failureReasons": "call-site catch surfaces recovery_copy_too_large, recovery_dir_is_symlink, or the underlying write error to the teardown-save reporter (single publisher)",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=write_recovery_copy"
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase09_04_write_recovery_copy_writes_byte_exact_content_and_returns_relative_path",
+          "phase09_04_recovery_file_name_matches_naming_truth",
+          "phase09_04_traversal_and_absolute_file_path_land_inside_recovery_dir",
+          "phase09_04_two_writes_same_second_produce_distinct_files",
+          "phase09_04_retention_keeps_newest_100_and_leaves_non_pattern_file_alone",
+          "phase09_04_oversized_content_is_refused_and_nothing_is_written",
+          "phase09_04_symlinked_recovery_dir_is_refused",
+          "phase09_04_scan_vault_excludes_recovery_copy",
+          "phase08_22_each_wrapper_yields_same_poll_and_maps_join_failure"
+        ],
+        "workerProof": "maru_dir::phase08_22::phase08_22_each_wrapper_yields_same_poll_and_maps_join_failure holds the write_recovery_copy future at spawn_blocking worker entry via a #[cfg(test)] worker-stage hook keyed to the fixture workspace root, manually polls it on the same async task and proves progress while a distinct worker thread stays blocked; the panicked worker maps to the display-only write_recovery_copy_task_failed String. maru_dir::phase09_04::phase09_04_write_recovery_copy_writes_byte_exact_content_and_returns_relative_path proves the byte-exact write and the returned .maru/recovery/<name> relative path; phase09_04_recovery_file_name_matches_naming_truth proves the timestamp prefix, sanitized/Korean stem, 8-hex suffix, allowlisted-extension and unsaved-stem naming rules directly against recovery_file_name; phase09_04_traversal_and_absolute_file_path_land_inside_recovery_dir proves a ../.. and an absolute file_path both resolve to a leaf inside .maru/recovery; phase09_04_two_writes_same_second_produce_distinct_files proves the random suffix keeps two same-second writes from clobbering each other; phase09_04_retention_keeps_newest_100_and_leaves_non_pattern_file_alone proves prune_recovery_dir keeps exactly the newest 100 pattern files and never touches a non-pattern notes.txt; phase09_04_oversized_content_is_refused_and_nothing_is_written proves the 16 MiB cap rejects before any write; phase09_04_symlinked_recovery_dir_is_refused proves a symlinked .maru/recovery is refused before the write; phase09_04_scan_vault_excludes_recovery_copy proves scan_vault returns no entry under .maru/recovery after a .md recovery copy is written.",
+        "platformScope": "macOS unit fixtures only: atomic_file::phase08_06::Home isolation (MARU_TEST_HOME/MARU_TEST_CONFIG_DIR), disposable tempdir workspaces, the test-only worker-stage hook, and (on the symlink case) a local filesystem symlink inside the disposable tempdir; no live workspace, credential, network endpoint or native test hook is touched.",
+        "limits": "Shared admission serializes cooperating in-process writers on the same admitted .maru set only; external editor processes are outside the in-process guarantee. Retention pruning is best-effort (removal errors ignored) and is not a hard disk-space guarantee. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
+        "contract": "The returned .maru/recovery/<name> relative path and the recovery_copy_too_large / recovery_dir_is_symlink error strings are the new contract surface; every other maru_dir command's payload and error strings are unchanged."
+      }
     }
   ]
 }

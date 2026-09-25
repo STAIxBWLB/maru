@@ -501,6 +501,7 @@ pub fn run() {
             read_maru_skills,
             read_maru_settings,
             save_maru_settings,
+            maru_dir::ipc::write_recovery_copy,
             secrets::ipc::secrets_scan,
             secrets::ipc::secrets_doctor,
             secrets::ipc::secrets_migrate,

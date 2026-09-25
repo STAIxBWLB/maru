@@ -1,10 +1,15 @@
-import { describe, expect, it } from "vitest";
+// @vitest-environment jsdom
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { invoke } from "@tauri-apps/api/core";
 import {
   isMissingWorkspaceConfigError,
   isWorkspaceConfigShellUnavailableError,
   nextIgnorePatterns,
   resolveWorkspaceConfigLoad,
+  writeRecoveryCopy,
 } from "./maruDir";
+
+vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 
 describe("isMissingWorkspaceConfigError", () => {
   it("accepts only the backend's exact missing-config error prefix", () => {
@@ -106,5 +111,39 @@ describe("nextIgnorePatterns", () => {
     expect(nextIgnorePatterns(doc, ".DS_Store")).toBeNull();
     expect(nextIgnorePatterns(doc, "   ")).toBeNull();
     expect(nextIgnorePatterns(doc, "# a comment")).toBeNull();
+  });
+});
+
+describe("writeRecoveryCopy", () => {
+  const originalTauriInternals = window.__TAURI_INTERNALS__;
+
+  beforeEach(() => {
+    vi.mocked(invoke).mockReset();
+  });
+
+  afterEach(() => {
+    window.__TAURI_INTERNALS__ = originalTauriInternals;
+  });
+
+  it("throws outside the Tauri shell without invoking anything", async () => {
+    delete window.__TAURI_INTERNALS__;
+    await expect(
+      writeRecoveryCopy("/workspace", "notes/draft.md", "body", "flush timed out"),
+    ).rejects.toThrow("Recovery copies require the Tauri shell");
+    expect(invoke).not.toHaveBeenCalled();
+  });
+
+  it("invokes write_recovery_copy with the raw arguments inside the Tauri shell", async () => {
+    window.__TAURI_INTERNALS__ = {};
+    vi.mocked(invoke).mockResolvedValue(".maru/recovery/20260102-030405-draft-1a2b3c4d.md");
+    await expect(
+      writeRecoveryCopy("/workspace", "notes/draft.md", "body", "flush timed out"),
+    ).resolves.toBe(".maru/recovery/20260102-030405-draft-1a2b3c4d.md");
+    expect(invoke).toHaveBeenCalledWith("write_recovery_copy", {
+      workPath: "/workspace",
+      filePath: "notes/draft.md",
+      content: "body",
+      reason: "flush timed out",
+    });
   });
 });

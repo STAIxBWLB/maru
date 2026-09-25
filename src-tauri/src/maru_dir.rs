@@ -21,7 +21,8 @@
 // migration via `ensure_maru_dir`.
 
 use crate::atomic_file::{
-    with_path_transactions, write_atomic, PathTransactionLease, PathTransactionRequest,
+    with_path_transactions, write_atomic, write_atomic_create, PathTransactionLease,
+    PathTransactionRequest,
 };
 use crate::paths::{ensure_within, native_e2e_dir_override, require_absolute, NATIVE_E2E_HOME_VAR};
 use crate::vault::{parse_frontmatter, title_from_content};
@@ -1525,6 +1526,145 @@ fn save_maru_settings_in_transaction(
 }
 
 // ---------------------------------------------------------------------------
+// Recovery copies (Phase 9 D-08)
+// ---------------------------------------------------------------------------
+
+/// Recovery copies never accumulate without bound; the oldest are pruned once
+/// this many pattern-matching files exist.
+const RECOVERY_MAX_FILES: usize = 100;
+/// A single recovery write larger than this is refused before anything is
+/// admitted or written.
+const RECOVERY_MAX_BYTES: usize = 16 * 1024 * 1024;
+
+fn recovery_dir(work: &Path) -> PathBuf {
+    maru_path(work).join("recovery")
+}
+
+/// `<YYYYMMDD-HHMMSS>-<sanitized stem>-<8 hex>.<ext>`. Only the leaf
+/// `file_stem`/`extension` of `file_path` are used — its directory
+/// components (including any `..` traversal or an absolute prefix) never
+/// reach the output name.
+fn recovery_file_name(file_path: &str, now: chrono::DateTime<chrono::Local>) -> String {
+    let leaf = Path::new(file_path);
+    let stem = leaf
+        .file_stem()
+        .map(|value| value.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let sanitized: String = stem
+        .chars()
+        .map(|c| if c.is_alphanumeric() { c } else { '-' })
+        .take(64)
+        .collect();
+    let sanitized = if sanitized.is_empty() {
+        "unsaved".to_string()
+    } else {
+        sanitized
+    };
+    let ext = leaf
+        .extension()
+        .map(|value| value.to_string_lossy().to_lowercase())
+        .filter(|value| {
+            matches!(
+                value.as_str(),
+                "md" | "markdown" | "txt" | "json" | "html" | "htm" | "yaml" | "yml"
+            )
+        })
+        .unwrap_or_else(|| "txt".to_string());
+    let suffix = &uuid::Uuid::new_v4().simple().to_string()[..8];
+    format!("{}-{sanitized}-{suffix}.{ext}", now.format("%Y%m%d-%H%M%S"))
+}
+
+/// True when `name` starts with the `recovery_file_name` timestamp prefix
+/// (`^\d{8}-\d{6}-`). Anything else — including a pre-existing `notes.txt` —
+/// is never a pruning candidate.
+fn is_recovery_file_name(name: &str) -> bool {
+    let bytes = name.as_bytes();
+    bytes.len() >= 16
+        && bytes[..8].iter().all(u8::is_ascii_digit)
+        && bytes[8] == b'-'
+        && bytes[9..15].iter().all(u8::is_ascii_digit)
+        && bytes[15] == b'-'
+}
+
+/// Keep only the newest `keep` recovery-pattern regular files in `dir`.
+/// `DirEntry::file_type` does not follow symlinks, so a symlinked entry is
+/// never treated as a regular file here. Read/remove errors are ignored —
+/// retention is best-effort and must never turn a successful recovery write
+/// into a failure.
+fn prune_recovery_dir(dir: &Path, keep: usize) {
+    let Ok(read_dir) = fs::read_dir(dir) else {
+        return;
+    };
+    let mut names: Vec<String> = read_dir
+        .filter_map(Result::ok)
+        .filter(|entry| entry.file_type().map(|ft| ft.is_file()).unwrap_or(false))
+        .filter_map(|entry| entry.file_name().into_string().ok())
+        .filter(|name| is_recovery_file_name(name))
+        .collect();
+    if names.len() <= keep {
+        return;
+    }
+    names.sort_unstable_by(|a, b| b.cmp(a));
+    for stale in names.into_iter().skip(keep) {
+        let _ = fs::remove_file(dir.join(stale));
+    }
+}
+
+/// Control characters replaced with a space before interpolation into the
+/// `[recovery]` log line — the line never carries raw content, only the file
+/// label and reason, and never lets an embedded control character (e.g. a
+/// newline) forge extra log lines.
+fn strip_control_chars(input: &str) -> String {
+    input
+        .chars()
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .collect()
+}
+
+/// Writes `content` byte-for-byte to a new, uniquely named file under
+/// `<work>/.maru/recovery/` and returns its workspace-relative path. Implements
+/// D-08's write half and D-07's log line: the frontend calls this when a
+/// teardown save fails, so the edit survives as a real file even though the
+/// original save did not land.
+pub fn write_recovery_copy(
+    work_path: String,
+    file_path: String,
+    content: String,
+    reason: String,
+) -> Result<String, String> {
+    if content.len() > RECOVERY_MAX_BYTES {
+        return Err("recovery_copy_too_large".to_string());
+    }
+    let work = normalize_work_path(&work_path)?;
+    let admission = maru_mutation_admission(&work, [])?;
+    with_path_transactions(admission, |lease| {
+        lease.ensure_workspace_registry()?;
+        lease.before_effect()?;
+        ensure_maru_dir(&work)?;
+        let dir = recovery_dir(&work);
+        if fs::symlink_metadata(&dir)
+            .map(|meta| meta.file_type().is_symlink())
+            .unwrap_or(false)
+        {
+            return Err("recovery_dir_is_symlink".to_string());
+        }
+        let name = recovery_file_name(&file_path, chrono::Local::now());
+        let path = dir.join(&name);
+        ensure_within(&dir, &path)?;
+        lease.ensure_covered([path.clone()])?;
+        write_atomic_create(&path, content.as_bytes())?;
+        prune_recovery_dir(&dir, RECOVERY_MAX_FILES);
+        let rel = format!(".maru/recovery/{name}");
+        eprintln!(
+            "[recovery] save failed for {}: {}; kept {rel}",
+            strip_control_chars(&file_path),
+            strip_control_chars(&reason),
+        );
+        Ok(rel)
+    })
+}
+
+// ---------------------------------------------------------------------------
 // Owned IPC boundaries
 // ---------------------------------------------------------------------------
 
@@ -1834,6 +1974,25 @@ pub mod ipc {
         })
         .await
         .map_err(|err| format!("save_maru_settings_task_failed: {err}"))?
+    }
+
+    #[tauri::command]
+    pub async fn write_recovery_copy(
+        work_path: String,
+        file_path: String,
+        content: String,
+        reason: String,
+    ) -> Result<String, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(
+                &[PathBuf::from(&work_path)],
+                "worker:write_recovery_copy",
+            );
+            super::write_recovery_copy(work_path, file_path, content, reason)
+        })
+        .await
+        .map_err(|err| format!("write_recovery_copy_task_failed: {err}"))?
     }
 }
 
@@ -2552,17 +2711,17 @@ mod phase08_22 {
     use std::sync::mpsc::Receiver;
     use std::time::Duration;
 
-    fn text(path: &Path) -> String {
-        path.to_string_lossy().into_owned()
-    }
-
-    fn work_fixture(home: &Home, name: &str) -> PathBuf {
+    pub(super) fn work_fixture(home: &Home, name: &str) -> PathBuf {
         let root = home.root.path().join(name);
         fs::create_dir_all(&root).unwrap();
         root
     }
 
-    fn start<F, T>(future: F) -> Receiver<T>
+    pub(super) fn text(path: &Path) -> String {
+        path.to_string_lossy().into_owned()
+    }
+
+    pub(super) fn start<F, T>(future: F) -> Receiver<T>
     where
         F: std::future::Future<Output = T> + Send + 'static,
         T: Send + 'static,
@@ -2574,7 +2733,7 @@ mod phase08_22 {
         rx
     }
 
-    fn done<T>(rx: Receiver<T>) -> T {
+    pub(super) fn done<T>(rx: Receiver<T>) -> T {
         rx.recv_timeout(Duration::from_secs(10))
             .expect("fixture completion")
     }
@@ -2688,6 +2847,16 @@ mod phase08_22 {
             work_path.clone().into(),
             "save_maru_settings",
             ipc::save_maru_settings(work.clone(), json!({ "version": 1 }), None),
+        );
+        boundary(
+            work_path.clone().into(),
+            "write_recovery_copy",
+            ipc::write_recovery_copy(
+                work.clone(),
+                "demo.md".to_string(),
+                "body".to_string(),
+                "flush failed".to_string(),
+            ),
         );
     }
 
@@ -3067,5 +3236,220 @@ mod phase08_22 {
         admitted.release();
         done(rule_write).unwrap();
         assert!(work_path.join(".maru/rules/demo.md").exists());
+    }
+}
+
+#[cfg(test)]
+mod phase09_04 {
+    use super::*;
+    use crate::atomic_file::phase08_06::{run, Home};
+    use phase08_22::{text, work_fixture};
+
+    #[test]
+    fn phase09_04_write_recovery_copy_writes_byte_exact_content_and_returns_relative_path() {
+        let home = Home::new();
+        let work_path = work_fixture(&home, "byte-exact");
+        let work = text(&work_path);
+        let content = "unsaved edit\nwith a final line\n".to_string();
+        let rel = run(ipc::write_recovery_copy(
+            work,
+            "notes/draft.md".to_string(),
+            content.clone(),
+            "flush timed out".to_string(),
+        ))
+        .unwrap();
+        assert!(rel.starts_with(".maru/recovery/"), "{rel}");
+        assert_eq!(fs::read_to_string(work_path.join(&rel)).unwrap(), content);
+    }
+
+    #[test]
+    fn phase09_04_recovery_file_name_matches_naming_truth() {
+        use chrono::TimeZone;
+        let now = chrono::Local
+            .with_ymd_and_hms(2026, 1, 2, 3, 4, 5)
+            .single()
+            .unwrap();
+
+        let name = recovery_file_name("draft.md", now);
+        assert!(name.starts_with("20260102-030405-"), "{name}");
+        assert!(name.ends_with(".md"), "{name}");
+        let stem_and_suffix = name
+            .strip_prefix("20260102-030405-")
+            .and_then(|rest| rest.strip_suffix(".md"))
+            .unwrap();
+        let (stem, suffix) = stem_and_suffix.rsplit_once('-').unwrap();
+        assert_eq!(stem, "draft");
+        assert_eq!(suffix.len(), 8);
+        assert!(suffix.chars().all(|c| c.is_ascii_hexdigit()), "{suffix}");
+
+        // A Korean stem is kept, not replaced with dashes.
+        let korean = recovery_file_name("회의록.md", now);
+        assert!(korean.contains("회의록"), "{korean}");
+
+        // An empty stem becomes "unsaved".
+        let empty = recovery_file_name("", now);
+        assert!(empty.contains("-unsaved-"), "{empty}");
+
+        // A disallowed extension falls back to txt.
+        let rust_source = recovery_file_name("main.rs", now);
+        assert!(rust_source.ends_with(".txt"), "{rust_source}");
+
+        // Non-alphanumeric characters in the stem become dashes.
+        let spaced = recovery_file_name("my notes (draft).md", now);
+        assert!(spaced.contains("my-notes"), "{spaced}");
+    }
+
+    #[test]
+    fn phase09_04_traversal_and_absolute_file_path_land_inside_recovery_dir() {
+        let home = Home::new();
+        let work_path = work_fixture(&home, "traversal");
+        let work = text(&work_path);
+
+        let traversal_rel = run(ipc::write_recovery_copy(
+            work.clone(),
+            "../../etc/passwd.md".to_string(),
+            "a".to_string(),
+            "r".to_string(),
+        ))
+        .unwrap();
+        assert!(
+            traversal_rel.starts_with(".maru/recovery/"),
+            "{traversal_rel}"
+        );
+        assert!(work_path.join(&traversal_rel).exists());
+
+        let absolute_rel = run(ipc::write_recovery_copy(
+            work,
+            "/etc/shadow.md".to_string(),
+            "b".to_string(),
+            "r".to_string(),
+        ))
+        .unwrap();
+        assert!(
+            absolute_rel.starts_with(".maru/recovery/"),
+            "{absolute_rel}"
+        );
+        assert!(work_path.join(&absolute_rel).exists());
+    }
+
+    #[test]
+    fn phase09_04_two_writes_same_second_produce_distinct_files() {
+        let home = Home::new();
+        let work_path = work_fixture(&home, "same-second");
+        let work = text(&work_path);
+        let now = chrono::Local::now();
+        assert_ne!(
+            recovery_file_name("draft.md", now),
+            recovery_file_name("draft.md", now),
+            "the random suffix must differ even for the same second"
+        );
+
+        let first_rel = run(ipc::write_recovery_copy(
+            work.clone(),
+            "draft.md".to_string(),
+            "first".to_string(),
+            "r".to_string(),
+        ))
+        .unwrap();
+        let second_rel = run(ipc::write_recovery_copy(
+            work,
+            "draft.md".to_string(),
+            "second".to_string(),
+            "r".to_string(),
+        ))
+        .unwrap();
+        assert_ne!(first_rel, second_rel);
+        assert_eq!(
+            fs::read_to_string(work_path.join(&first_rel)).unwrap(),
+            "first"
+        );
+        assert_eq!(
+            fs::read_to_string(work_path.join(&second_rel)).unwrap(),
+            "second"
+        );
+    }
+
+    #[test]
+    fn phase09_04_retention_keeps_newest_100_and_leaves_non_pattern_file_alone() {
+        let home = Home::new();
+        let work_path = work_fixture(&home, "retention");
+        ensure_maru_dir(&work_path).unwrap();
+        let dir = recovery_dir(&work_path);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("notes.txt"), "not a recovery file").unwrap();
+        for index in 0..105u32 {
+            fs::write(dir.join(format!("20260101-{index:06}-fixture.txt")), "x").unwrap();
+        }
+        prune_recovery_dir(&dir, RECOVERY_MAX_FILES);
+        let remaining: Vec<String> = fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(Result::ok)
+            .map(|entry| entry.file_name().into_string().unwrap())
+            .collect();
+        assert!(remaining.contains(&"notes.txt".to_string()));
+        let pattern_count = remaining
+            .iter()
+            .filter(|name| is_recovery_file_name(name))
+            .count();
+        assert_eq!(pattern_count, RECOVERY_MAX_FILES);
+    }
+
+    #[test]
+    fn phase09_04_oversized_content_is_refused_and_nothing_is_written() {
+        let home = Home::new();
+        let work_path = work_fixture(&home, "oversized");
+        let work = text(&work_path);
+        let content = "x".repeat(RECOVERY_MAX_BYTES + 1);
+        let err = run(ipc::write_recovery_copy(
+            work,
+            "draft.md".to_string(),
+            content,
+            "r".to_string(),
+        ))
+        .unwrap_err();
+        assert!(err.contains("recovery_copy_too_large"), "{err}");
+        assert!(!recovery_dir(&work_path).exists());
+    }
+
+    #[test]
+    fn phase09_04_symlinked_recovery_dir_is_refused() {
+        let home = Home::new();
+        let work_path = work_fixture(&home, "symlink");
+        let work = text(&work_path);
+        ensure_maru_dir(&work_path).unwrap();
+        let real_target = work_path.join("elsewhere-recovery");
+        fs::create_dir_all(&real_target).unwrap();
+        std::os::unix::fs::symlink(&real_target, recovery_dir(&work_path)).unwrap();
+
+        let err = run(ipc::write_recovery_copy(
+            work,
+            "draft.md".to_string(),
+            "x".to_string(),
+            "r".to_string(),
+        ))
+        .unwrap_err();
+        assert!(err.contains("recovery_dir_is_symlink"), "{err}");
+    }
+
+    #[test]
+    fn phase09_04_scan_vault_excludes_recovery_copy() {
+        let home = Home::new();
+        let work_path = work_fixture(&home, "scan-exclude");
+        let work = text(&work_path);
+        fs::write(work_path.join("visible.md"), "# Visible\n").unwrap();
+
+        run(ipc::write_recovery_copy(
+            work.clone(),
+            "draft.md".to_string(),
+            "unsaved".to_string(),
+            "r".to_string(),
+        ))
+        .unwrap();
+
+        let entries = crate::vault::scan_vault(work, None).unwrap();
+        assert!(entries.iter().any(|entry| entry.rel_path == "visible.md"));
+        assert!(!entries
+            .iter()
+            .any(|entry| entry.rel_path.contains(".maru/recovery")));
     }
 }
