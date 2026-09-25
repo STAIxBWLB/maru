@@ -4,6 +4,19 @@ export interface DebouncedSaver<T> {
   cancel(): void;
 }
 
+/** The outcome of settling a debounced saver's pending/in-flight work. */
+export type SaveSettlement<T> =
+  | { status: "clean" }
+  | { status: "saved" }
+  | { status: "failed"; value: T; error: unknown };
+
+export interface SettlingDebouncedSaver<T> extends DebouncedSaver<T> {
+  /** Like flush(), but reports what actually happened instead of always
+   * resolving silently. Used by teardown paths (unmount, quit) that need to
+   * tell a clean exit apart from a failed one. */
+  flushSettled(): Promise<SaveSettlement<T>>;
+}
+
 export interface SaveQueue {
   enqueue(task: () => Promise<void> | void): Promise<void>;
   whenIdle(): Promise<void>;
@@ -50,21 +63,46 @@ export function createDebouncedSaver<T>(
   save: (value: T) => Promise<void> | void,
   delayMs: number,
   onError?: (error: unknown) => void,
-): DebouncedSaver<T> {
+): SettlingDebouncedSaver<T> {
   let timer: ReturnType<typeof setTimeout> | null = null;
   let pending: T | null = null;
   let hasPending = false;
   const queue = createSaveQueue();
   let inFlight: Promise<void> = Promise.resolve();
+  // Tracks the most recently started drain's settlement so a flushSettled()
+  // call that finds nothing newly pending can still await an already
+  // in-flight save instead of reporting a false "clean".
+  let activeSettlement: Promise<SaveSettlement<T>> | null = null;
 
-  const drain = () => {
-    if (!hasPending) return;
+  const drainSettled = (): Promise<SaveSettlement<T>> => {
+    if (!hasPending) {
+      return activeSettlement ?? Promise.resolve<SaveSettlement<T>>({ status: "clean" });
+    }
     const value = pending as T;
     pending = null;
     hasPending = false;
-    inFlight = queue.enqueue(() => save(value)).catch((error) => {
-      reportSaveError(onError, error);
+    const settlement: Promise<SaveSettlement<T>> = queue
+      .enqueue(() => save(value))
+      .then((): SaveSettlement<T> => ({ status: "saved" }))
+      .catch((error): SaveSettlement<T> => {
+        reportSaveError(onError, error);
+        // Retry only the value that just failed — unless a newer one was
+        // scheduled while this save was in flight, in which case that
+        // newer value wins. Never re-arm the timer here: retries only
+        // happen via an explicit schedule()/flush(), so a broken disk
+        // cannot spin on its own.
+        if (!hasPending) {
+          pending = value;
+          hasPending = true;
+        }
+        return { status: "failed", value, error };
+      });
+    activeSettlement = settlement;
+    inFlight = settlement.then(() => undefined);
+    void settlement.finally(() => {
+      if (activeSettlement === settlement) activeSettlement = null;
     });
+    return settlement;
   };
 
   const run = () => {
@@ -72,7 +110,7 @@ export function createDebouncedSaver<T>(
       clearTimeout(timer);
       timer = null;
     }
-    drain();
+    void drainSettled();
     return inFlight;
   };
 
@@ -85,6 +123,13 @@ export function createDebouncedSaver<T>(
     },
     flush() {
       return run();
+    },
+    flushSettled() {
+      if (timer) {
+        clearTimeout(timer);
+        timer = null;
+      }
+      return drainSettled();
     },
     cancel() {
       if (timer) clearTimeout(timer);
