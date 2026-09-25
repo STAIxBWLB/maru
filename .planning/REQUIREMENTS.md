@@ -66,7 +66,7 @@ nothing in the existing suite would notice.
 
 ### Durability and Session Lifecycle
 
-- [ ] **REL-01**: A terminal child that traps SIGHUP can still be killed. The
+- [x] **REL-01**: A terminal child that traps SIGHUP can still be killed. The
   escalation is timeout-gated rather than a blanket replacement, so the existing
   behavior where a deliberately backgrounded grandchild survives tab close is
   preserved, and the generation-token invariant that stops a stale frontend
@@ -190,7 +190,7 @@ Deferred. Acknowledged but not in this roadmap.
 | PERF-04 | Phase 7 | Complete |
 | PERF-05 | Phase 10 | Complete |
 | PERF-06 | Phase 7 | Complete |
-| REL-01 | Phase 9 | Pending |
+| REL-01 | Phase 9 | Complete |
 | REL-02 | Phase 9 | Pending |
 | REL-03 | Phase 9 | Pending |
 | REL-04 | Phase 9 | Pending |
