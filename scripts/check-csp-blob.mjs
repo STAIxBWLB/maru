@@ -9,88 +9,71 @@
 //
 // What runs where, and why:
 //
-// - Dist half (every run, no arguments): scans dist/assets/*.js for the
-//   two constructs that could still demand script-context script URLs —
-//   a Worker spawned from an unclassifiable URL and a dynamic import()
-//   whose specifier is not a literal. It reads a PRODUCED artifact, not
-//   sources: bundled dependencies can introduce constructs no source
-//   declaration shows. Chained into `build:frontend` after
-//   check-native-e2e-isolation.mjs, so `make verify` carries it against
-//   a freshly produced bundle with no new entry in verify's prerequisite
-//   list. This is D-04 proof (a). The scan is config-independent: it
-//   passes or fails on the bundle alone.
+// - Default mode (every run, chained into `build:frontend`, so `make
+//   verify` and CI carry it against a freshly produced bundle):
+//   1. Config: every src-tauri/tauri*.conf.json CSP must keep blob: out
+//      of script-src / script-src-elem (and out of default-src when no
+//      script-src is set). Re-adding blob: fails the ordinary PR build,
+//      not only the release preflight.
+//   2. Dist (D-04 proof (a)): parses dist/assets/*.{js,mjs} (Vite's
+//      bundled Rollup parser, not a regex or char scanner: minified
+//      regex literals and template expressions desynced the old
+//      comment/string stripper and hid real call sites) and flags the
+//      constructs that could still demand script URLs the CSP cannot
+//      classify: a dynamic import() or importScripts() whose specifier
+//      is not a literal, and a Worker/SharedWorker spawned from anything
+//      other than a literal, a `new URL(...)` or an identifier bound to
+//      a createObjectURL(...) call in the same bundle. It reads the
+//      PRODUCED artifact: bundled dependencies can introduce constructs
+//      no source declaration shows. `--dist <dir>` overrides the
+//      directory (behavioral tests).
 //
-// - Binary half (`--binary <path>` only): reads the compiled Tauri
-//   binary and asserts the codegen-embedded CSP serialization's
-//   script-src source list carries no blob:. tauri-codegen embeds the
-//   config text verbatim, so the binary proves what a packaged build
-//   actually ships — dev serves no CSP at all (no devCsp key), so the
-//   config file alone does not prove the shipped posture. Wired into
-//   the Makefile's `release-checks` recipe between the debug no-bundle
-//   Tauri build and the artifact prune (a binary must exist, and the
-//   check must run before `clean:tauri-debug` deletes it);
-//   `release-preflight` inherits it through `release-preflight-core`.
-//   This is D-04 proof (b). The assertion targets the CONFIGURED source
-//   list carrying no blob:, not the byte-level disappearance of the
-//   directive: Tauri's nonce handling may re-create script-src with
-//   'self' at runtime (research pitfall 3), which is the expected
-//   posture and not what this scan measures.
+// - Binary half (`--binary <path>` only, D-04 proof (b)): reads the
+//   compiled Tauri binary and asserts the CSP tauri-codegen compiled in
+//   carries no script-src blob:. Codegen stores each directive as its
+//   name directly followed by its source list (`script-src'self'`), and
+//   that form reflects the effective config, overlays included. The
+//   pretty-printed tauri.conf.json that bundle_update.rs pulls in with
+//   include_str! is NOT the shipped CSP, so the codegen form must be
+//   present or the scan fails closed. Wired into the Makefile's
+//   `release-checks` recipe between the debug no-bundle Tauri build and
+//   the artifact prune; `release-preflight` inherits it. Tauri's nonce
+//   placeholder (`script-src__TAURI_SCRIPT_NONCE__`) is not a source
+//   list and is ignored.
 //
-// Needle scope, deliberately narrow (D-05): these two needles cover the
-// script-execution sinks app code can drive from a blob: URL — a
-// blob:-URL worker spawn and a non-literal dynamic import. DOM
-// script-tag injection is owned by check-dom-sanitizer.mjs (SEC-02) and
-// the runtime CSP itself, and download anchors (`a.href`) are not
-// script sources and must never match. `new Worker(blobUrl)` fetches
-// the worker script under worker-src (script-src is only the fallback
-// when worker-src is absent) and Maru ships `worker-src: 'self'
-// blob:`, so blob-URL worker spawns stay legal after script-src drops
-// blob: — the Worker needle therefore exempts bare-identifier
-// arguments bound to a createObjectURL(...) call nearby (the graphology
-// FA2 supervisor spawn minted through URL.createObjectURL(new
-// Blob(...)) is exactly that shape) and fails closed on every other
-// bare identifier, which cannot be classified statically. A dynamic
-// import() with a non-literal specifier is flagged; method-shaped calls
-// (i.import(r)) are excluded by lookbehind — the dynamic import
-// operator is a free-standing token, never a property access. Both
-// needles run after comment/string stripping so config text and docs
-// inside the bundles cannot false-positive. Missing dist or binary is
-// a usage error (exit 1), not an environmental skip: each mode runs
-// only where its artifact is guaranteed to exist, and unlike a
-// cargo/registry invocation nothing here can fail for environmental
-// reasons.
+// Needle scope, deliberately narrow (D-05): `new Worker(blobUrl)` fetches
+// the worker script under worker-src, which keeps `'self' blob:`, so a
+// createObjectURL-bound worker spawn (the graphology FA2 supervisor) stays
+// legal. Download anchors and image sources are not script sources and
+// never match. DOM script-tag injection is owned by check-dom-sanitizer.mjs
+// (SEC-02) and the runtime CSP itself. Missing dist or binary is a usage
+// error (exit 1), not an environmental skip.
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 
-// --- Needles (module scope, not exported) ----------------------------------
-// Worker-spawn needle: every `new Worker(` call site is examined; the
-// argument classification happens in workerSpawnOffenses below.
-const WORKER_NEEDLE = /new\s+Worker\s*\(/g;
-// Dynamic-import needle: the lookbehind excludes property access
-// (i.import(r) is a graphology layout method, not the import operator).
-const DYNAMIC_IMPORT_NEEDLE = /(?<![.\w$])import\s*\(/g;
-// Embedded-config needle (binary half): the CSP serialization
-// tauri-codegen embeds verbatim into the binary. If the config key is
-// renamed upstream, update this needle in the same change.
-const SCRIPT_SRC_NEEDLE = /"script-src"\s*:\s*"([^"]*)"/g;
+// Binary half: codegen form, directive name immediately followed by its
+// source list (quoted keywords, scheme or scheme://host sources).
+const CODEGEN_SCRIPT_SRC =
+  /script-src(?:-elem)?((?:\s*(?:'[^'\x00-\x1f]*'|[a-z][a-z0-9+.-]*:(?:\/\/[^\s'"\x00-\x1f]*)?))+)/g;
+// Binary half: JSON form (the include_str! copy of tauri.conf.json).
+const JSON_SCRIPT_SRC = /"script-src(?:-elem)?"\s*:\s*"([^"]*)"/g;
 
 const violations = [];
-let scannedBundles = 0;
-let embeddedScriptSrcValues = [];
+let summary = "";
 
 function parseArgs(argv) {
-  const args = { binary: null };
+  const args = { binary: null, dist: join(repoRoot, "dist", "assets") };
   for (let i = 0; i < argv.length; i += 1) {
-    if (argv[i] === "--binary") {
+    if (argv[i] === "--binary" || argv[i] === "--dist") {
       const path = argv[i + 1];
       if (!path) {
-        console.error("csp-blob: --binary requires a path argument");
+        console.error(`csp-blob: ${argv[i]} requires a path argument`);
         process.exit(1);
       }
-      args.binary = path;
+      args[argv[i].slice(2)] = path;
       i += 1;
     } else {
       console.error(`csp-blob: unknown argument ${argv[i]}`);
@@ -100,184 +83,168 @@ function parseArgs(argv) {
   return args;
 }
 
-// House scanner (check-dom-sanitizer.mjs): blank out comments and
-// string/template literals so needle matching only sees live code —
-// bundle text carries config strings and doc comments that would
-// otherwise match the needles. Small char scanner, not an AST parser.
-function stripCommentsAndStrings(source) {
-  let out = "";
-  let i = 0;
-  const n = source.length;
-  while (i < n) {
-    const ch = source[i];
-    const next = source[i + 1];
-    if (ch === "/" && next === "/") {
-      while (i < n && source[i] !== "\n") i++;
-    } else if (ch === "/" && next === "*") {
-      i += 2;
-      while (i < n && !(source[i] === "*" && source[i + 1] === "/")) i++;
-      i = Math.min(i + 2, n);
-    } else if (ch === '"' || ch === "'" || ch === "`") {
-      const quote = ch;
-      i++;
-      while (i < n) {
-        if (source[i] === "\\") {
-          i += 2;
-          continue;
-        }
-        if (source[i] === quote) break;
-        if (quote !== "`" && source[i] === "\n") break;
-        i++;
+// --- Config: the source of the shipped CSP ----------------------------------
+function checkConfig() {
+  const confDir = join(repoRoot, "src-tauri");
+  const confFiles = readdirSync(confDir).filter((f) => /^tauri.*\.conf\.json$/.test(f));
+  for (const file of confFiles) {
+    const csp = JSON.parse(readFileSync(join(confDir, file), "utf8")).app?.security?.csp;
+    if (csp == null) continue;
+    const directives =
+      typeof csp === "string"
+        ? Object.fromEntries(
+            csp
+              .split(";")
+              .map((d) => d.trim().split(/\s+/))
+              .filter((parts) => parts[0])
+              .map(([name, ...sources]) => [name, sources.join(" ")]),
+          )
+        : Object.fromEntries(
+            Object.entries(csp).map(([name, v]) => [name, Array.isArray(v) ? v.join(" ") : String(v)]),
+          );
+    const governing = ["script-src", "script-src-elem"].filter((d) => d in directives);
+    if (governing.length === 0) governing.push("default-src");
+    for (const name of governing) {
+      if ((directives[name] ?? "").includes("blob:")) {
+        violations.push(
+          `src-tauri/${file} ${name} carries blob: ("${directives[name]}") — ` +
+            "drop it (SEC-01); worker-src keeps blob: for the graph worker (D-05)",
+        );
       }
-      i = Math.min(i + 1, n);
-      out += " ";
-    } else {
-      out += ch;
-      i++;
     }
   }
-  return out;
-}
-
-// A blob-URL binding is `<id> = [<qualifier>.]createObjectURL(` in the
-// code region before the spawn: the identifier provably holds a blob:
-// URL, and a Worker fed one runs under worker-src ('self' blob:', D-05),
-// not script-src.
-function hasBlobUrlBinding(stripped, identifier, beforeIndex) {
-  const region = stripped.slice(Math.max(0, beforeIndex - 1024), beforeIndex);
-  const escaped = identifier.replace(/\$/g, "\\$&");
-  const binding = new RegExp(
-    `(^|[^.\\w$])${escaped}\\s*=\\s*[\\w$.]*createObjectURL\\s*\\(`,
-  );
-  return binding.test(region);
 }
 
 // --- Dist half: the built JS must not demand script-src blob: -------------
-function checkBundle() {
-  const assetsDir = join(repoRoot, "dist", "assets");
-  if (!existsSync(assetsDir)) {
-    console.error(
-      "csp-blob: dist/assets/ does not exist — run `pnpm build:frontend` first",
+function isLiteral(node) {
+  return (
+    node?.type === "Literal" ||
+    (node?.type === "TemplateLiteral" && node.expressions.length === 0)
+  );
+}
+
+function isObjectUrlCall(node) {
+  const callee = node?.type === "CallExpression" ? node.callee : null;
+  return (
+    (callee?.type === "MemberExpression" && callee.property.name === "createObjectURL") ||
+    (callee?.type === "Identifier" && callee.name === "createObjectURL")
+  );
+}
+
+function calleeName(callee) {
+  if (callee.type === "Identifier") return callee.name;
+  if (callee.type === "MemberExpression" && !callee.computed) return callee.property.name;
+  return null;
+}
+
+function walk(root, visit) {
+  const stack = [root];
+  while (stack.length > 0) {
+    const node = stack.pop();
+    visit(node);
+    for (const key in node) {
+      const value = node[key];
+      if (Array.isArray(value)) {
+        for (const child of value) if (child && typeof child.type === "string") stack.push(child);
+      } else if (value && typeof value.type === "string") {
+        stack.push(value);
+      }
+    }
+  }
+}
+
+function bundleOffenses(source, parseAst) {
+  const blobBound = new Set();
+  const spawns = [];
+  const offenses = [];
+  const text = (node) => source.slice(node.start, node.end).slice(0, 80);
+  walk(parseAst(source), (node) => {
+    if (node.type === "VariableDeclarator" && node.id.type === "Identifier" && isObjectUrlCall(node.init)) {
+      blobBound.add(node.id.name);
+    } else if (node.type === "AssignmentExpression" && node.left.type === "Identifier" && isObjectUrlCall(node.right)) {
+      blobBound.add(node.left.name);
+    } else if (node.type === "ImportExpression" && !isLiteral(node.source)) {
+      offenses.push(`import(${text(node.source)}) — dynamic import() with a non-literal specifier cannot be proven same-origin; use a string literal`);
+    } else if (node.type === "CallExpression" && calleeName(node.callee) === "importScripts" && !node.arguments.every(isLiteral)) {
+      offenses.push(`${text(node)} — importScripts() with a non-literal URL`);
+    } else if (node.type === "NewExpression" && /^(Shared)?Worker$/.test(calleeName(node.callee) ?? "")) {
+      spawns.push(node);
+    }
+  });
+  for (const node of spawns) {
+    const arg = node.arguments[0];
+    if (!arg || isLiteral(arg)) continue;
+    if (arg.type === "NewExpression" && calleeName(arg.callee) === "URL") continue;
+    // ponytail: bindings are matched by name per bundle, not by scope; a
+    // shadowed identifier could be exempted. Fine while the only blob
+    // spawn is the FA2 supervisor.
+    if (arg.type === "Identifier" && blobBound.has(arg.name)) continue;
+    offenses.push(
+      `${text(node)} — worker URL must be a literal, new URL(...), or an identifier ` +
+        "bound to createObjectURL(...) (a blob-URL spawn runs under worker-src 'self' blob:, D-05)",
     );
+  }
+  return offenses;
+}
+
+async function checkBundle(assetsDir) {
+  if (!existsSync(assetsDir)) {
+    console.error(`csp-blob: ${assetsDir} does not exist — run \`pnpm build:frontend\` first`);
     process.exit(1);
   }
-  const jsFiles = readdirSync(assetsDir).filter((file) => file.endsWith(".js"));
-  scannedBundles = jsFiles.length;
+  const { parseAst } = await import("vite");
+  const jsFiles = readdirSync(assetsDir).filter((file) => /\.m?js$/.test(file));
   const offenders = jsFiles.flatMap((file) => {
-    const stripped = stripCommentsAndStrings(
-      readFileSync(join(assetsDir, file), "utf8"),
-    );
-    return [
-      ...workerSpawnOffenses(stripped).map(
-        (offense) => `dist/assets/${file}: ${offense}`,
-      ),
-      ...dynamicImportOffenses(stripped).map(
-        (offense) => `dist/assets/${file}: ${offense}`,
-      ),
-    ];
+    try {
+      return bundleOffenses(readFileSync(join(assetsDir, file), "utf8"), parseAst).map(
+        (offense) => `${file}: ${offense}`,
+      );
+    } catch (error) {
+      return [`${file}: unparseable bundle, failing closed (${error instanceof Error ? error.message : error})`];
+    }
   });
   if (offenders.length > 0) {
     violations.push(
-      `production bundle carries constructs that demand script-src blob: ` +
-        `(SEC-01):\n  ${offenders.join("\n  ")}`,
+      `production bundle carries constructs that demand script-src blob: (SEC-01):\n  ${offenders.join("\n  ")}`,
     );
   }
+  summary = `csp-blob: config and dist carry no blob: script sources (${jsFiles.length} JS bundles parsed; no unclassifiable worker spawn, importScripts or non-literal dynamic import)`;
 }
 
-function workerSpawnOffenses(stripped) {
-  const offenses = [];
-  for (const match of stripped.matchAll(WORKER_NEEDLE)) {
-    const trimmed = stripped
-      .slice(match.index + match[0].length)
-      .trimStart();
-    if (trimmed === "" || trimmed.startsWith(")")) continue;
-    // A string-literal argument was blanked by stripping; same-origin
-    // spawns use the new URL(...) form (GraphInsightsPanel.tsx).
-    if (/^new\s+URL\b/.test(trimmed)) continue;
-    const identifier = trimmed.match(/^([A-Za-z_$][\w$]*)/);
-    if (identifier) {
-      if (hasBlobUrlBinding(stripped, identifier[1], match.index)) continue;
-      offenses.push(
-        `new Worker(${identifier[1]}) — a bare-identifier worker argument ` +
-          "is only exempt when bound to a createObjectURL(...) call nearby " +
-          "(a blob-URL spawn runs under worker-src 'self' blob:', D-05); " +
-          'rewrite same-origin spawns as new Worker(new URL("./w.ts", ' +
-          "import.meta.url))",
-      );
-      continue;
-    }
-    offenses.push(
-      "new Worker(<unclassifiable argument>) — only string literals, " +
-        "new URL(...) spawns and createObjectURL-bound identifiers are " +
-        "recognized",
-    );
-  }
-  return offenses;
-}
-
-function dynamicImportOffenses(stripped) {
-  const offenses = [];
-  // Lookbehind excludes method-shaped calls (i.import(r)) and property
-  // access; a plain `import(` keyword call remains.
-  for (const match of stripped.matchAll(DYNAMIC_IMPORT_NEEDLE)) {
-    const trimmed = stripped
-      .slice(match.index + match[0].length)
-      .trimStart();
-    if (trimmed === "" || trimmed.startsWith(")")) continue;
-    if (/^new\s+URL\b/.test(trimmed)) continue;
-    const identifier = trimmed.match(/^([A-Za-z_$][\w$]*)/);
-    if (identifier) {
-      offenses.push(
-        `import(${identifier[1]}) — dynamic import() with a non-literal ` +
-          "specifier cannot be proven same-origin; use a string literal",
-      );
-      continue;
-    }
-    offenses.push(
-      "import(<unclassifiable argument>) — only string-literal specifiers " +
-        "are recognized",
-    );
-  }
-  return offenses;
-}
-
-// --- Binary half: the compiled binary's embedded CSP is the shipped posture
+// --- Binary half: the compiled binary's codegen CSP is the shipped posture
 function checkBinary(binaryPath) {
   if (!existsSync(binaryPath)) {
     console.error(`csp-blob: --binary path does not exist: ${binaryPath}`);
     process.exit(1);
   }
-  // latin1 maps bytes 1:1 to code points, so the ASCII config text the
-  // codegen embedded survives intact; the binary is only scanned, never
-  // executed.
+  // latin1 maps bytes 1:1 to code points; the binary is only scanned.
   const text = readFileSync(binaryPath).toString("latin1");
-  embeddedScriptSrcValues = [...text.matchAll(SCRIPT_SRC_NEEDLE)].map(
-    (match) => match[1],
-  );
-  if (embeddedScriptSrcValues.length === 0) {
+  const codegen = [...text.matchAll(CODEGEN_SCRIPT_SRC)].map((m) => m[1].trim());
+  const json = [...text.matchAll(JSON_SCRIPT_SRC)].map((m) => m[1]);
+  if (codegen.length === 0) {
     violations.push(
-      `${binaryPath} carries no embedded CSP script-src serialization — ` +
-        "wrong artifact or the tauri-codegen config format changed; " +
-        "D-04 proof (b) cannot be asserted, failing closed",
+      `${binaryPath} carries no codegen CSP script-src serialization — ` +
+        "wrong artifact or the tauri-codegen format changed; D-04 proof (b) cannot be asserted, failing closed",
     );
     return;
   }
-  for (const value of embeddedScriptSrcValues) {
+  for (const value of [...codegen, ...json]) {
     if (value.includes("blob:")) {
       violations.push(
         `${binaryPath} embedded CSP script-src carries blob: ("${value}") — ` +
-          "drop script-src blob: from src-tauri/tauri.conf.json " +
-          "(SEC-01, D-04 proof (b))",
+          "drop script-src blob: from src-tauri/tauri.conf.json (SEC-01, D-04 proof (b))",
       );
     }
   }
+  summary = `csp-blob: ${binaryPath} embedded CSP script-src carries no blob: (compiled source list: "${codegen[0]}")`;
 }
 
 const args = parseArgs(process.argv.slice(2));
 if (args.binary) {
   checkBinary(args.binary);
 } else {
-  checkBundle();
+  checkConfig();
+  await checkBundle(args.dist);
 }
 
 if (violations.length > 0) {
@@ -286,8 +253,4 @@ if (violations.length > 0) {
   );
   process.exit(1);
 }
-console.log(
-  args.binary
-    ? `csp-blob: ${args.binary} embedded CSP script-src carries no blob: (configured source list: "${embeddedScriptSrcValues[0]}")`
-    : `csp-blob: dist carries no blob: script sources (${scannedBundles} JS bundles scanned; no blob:-attributable worker spawn or non-literal dynamic import)`,
-);
+console.log(summary);
