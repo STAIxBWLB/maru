@@ -37,9 +37,21 @@ describe("check-csp-blob.mjs config half", () => {
     expect(result.stderr).toContain("tauri.__csp_probe__.conf.json script-src carries blob:");
   });
 
-  it("fails when a config CSP leaves scripts unrestricted", () => {
+  it("checks overlays merged onto the base: a partial overlay passes", () => {
     writeFileSync(probeConf, JSON.stringify({ app: { security: { csp: { "img-src": "'self'" } } } }));
     const result = runGuard("--dist", fixture({ "ok.js": 'import("./a.js");' }));
+    expect(result.stderr).toBe("");
+    expect(result.status).toBe(0);
+  });
+
+  it("fails an overlay that deletes the CSP or every script-governing directive", () => {
+    writeFileSync(probeConf, JSON.stringify({ app: { security: { csp: null } } }));
+    let result = runGuard("--dist", fixture({ "ok.js": 'import("./a.js");' }));
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("tauri.__csp_probe__.conf.json leaves the webview with no CSP");
+
+    writeFileSync(probeConf, JSON.stringify({ app: { security: { csp: { "script-src": null, "default-src": null } } } }));
+    result = runGuard("--dist", fixture({ "ok.js": 'import("./a.js");' }));
     expect(result.status).toBe(1);
     expect(result.stderr).toContain("has no script-src or default-src");
   });

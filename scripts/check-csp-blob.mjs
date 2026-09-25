@@ -11,10 +11,10 @@
 //
 // - Default mode (every run, chained into `build:frontend`, so `make
 //   verify` and CI carry it against a freshly produced bundle):
-//   1. Config: tauri.conf.json must carry a CSP, and every
-//      src-tauri/tauri*.conf.json CSP must restrict scripts and keep blob:
-//      out of script-src / script-src-elem (and out of default-src when
-//      no script-src is set). Re-adding blob: fails the ordinary PR build,
+//   1. Config: tauri.conf.json, and each tauri.*.conf.json overlay merged
+//      onto it the way Tauri merges them, must carry a CSP that restricts
+//      scripts and keeps blob: out of script-src / script-src-elem (and out
+//      of default-src when no script-src is set). Re-adding blob: fails the ordinary PR build,
 //      not only the release preflight.
 //   2. Dist (D-04 proof (a)): parses dist/assets/*.{js,mjs} (Vite's
 //      bundled Rollup parser, not a regex or char scanner: minified
@@ -85,16 +85,28 @@ function parseArgs(argv) {
 }
 
 // --- Config: the source of the shipped CSP ----------------------------------
+// RFC 7396 merge-patch, the way tauri-utils applies a tauri.*.conf.json
+// overlay to the base config: objects merge, null deletes, the rest replaces.
+function mergePatch(target, patch) {
+  if (patch === null || typeof patch !== "object" || Array.isArray(patch)) return patch;
+  const out = target && typeof target === "object" && !Array.isArray(target) ? { ...target } : {};
+  for (const [key, value] of Object.entries(patch)) {
+    if (value === null) delete out[key];
+    else out[key] = mergePatch(out[key], value);
+  }
+  return out;
+}
+
 function checkConfig() {
   const confDir = join(repoRoot, "src-tauri");
+  const read = (file) => JSON.parse(readFileSync(join(confDir, file), "utf8"));
+  const base = read("tauri.conf.json");
   const confFiles = readdirSync(confDir).filter((f) => /^tauri.*\.conf\.json$/.test(f));
   for (const file of confFiles) {
-    const csp = JSON.parse(readFileSync(join(confDir, file), "utf8")).app?.security?.csp;
+    // Each overlay is checked as it ships: merged onto the base config.
+    const csp = (file === "tauri.conf.json" ? base : mergePatch(base, read(file))).app?.security?.csp;
     if (csp == null) {
-      // Overlays may leave the CSP alone; the base config must carry one.
-      if (file === "tauri.conf.json") {
-        violations.push("src-tauri/tauri.conf.json carries no CSP — the webview would run with none (SEC-01)");
-      }
+      violations.push(`src-tauri/${file} leaves the webview with no CSP (SEC-01)`);
       continue;
     }
     const directives =
