@@ -92,7 +92,7 @@ and the workspace total limited to the two crates, the baseline is:
 
 | Item | Value |
 |------|-------|
-| Measured-at commit | `eb0ea3fd` |
+| Measured-at commit | Rust report regenerated at `a2258806` (PR #351 review fix); TS summary from the 11-02 `make coverage` run. `src/`, `src-tauri/src/` and `src-tauri/maru-cli/` are unchanged since the phase base `6ca52be5`, so both halves measure the same code. The superseded first measurement was at `eb0ea3fd`. |
 | rustc | `rustc 1.97.1 (8bab26f4f 2026-07-14) (Homebrew)` |
 | LLVM version | `22.1.8` |
 | cargo-llvm-cov | `0.9.1` |
@@ -110,8 +110,9 @@ minimum-percentage threshold; `make coverage` never fails on a percentage, and n
 - `actionlint .github/workflows/coverage.yml`: exit 0, no output (11-02-SUMMARY.md D1).
 - Local Job Summary replay: `coverage/` regenerated with a real `make coverage` run (228
   Vitest files / 2186 tests pass, 1800 Rust `--lib` tests pass), then
-  `GITHUB_STEP_SUMMARY=<tmpfile> node scripts/coverage-summary.mjs` wrote the full four-row
-  totals table above into the stand-in file (11-02-SUMMARY.md D2).
+  `GITHUB_STEP_SUMMARY=<tmpfile> node scripts/coverage-summary.mjs` wrote a four-row totals
+  table into the stand-in file (11-02-SUMMARY.md D2). That replay predates the `report --workspace`
+  fix, so its maru-cli row read "no files in report"; the table above is the re-measured one.
 - `git diff --quiet $(git merge-base HEAD origin/main) -- .github/workflows/ci.yml
   rust-toolchain.toml`: exit 0, both files unchanged by the coverage workflow's addition
   (11-02-SUMMARY.md D3).
