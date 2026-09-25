@@ -108,7 +108,7 @@ nothing in the existing suite would notice.
   check in the shape of the existing `scripts/check-*.mjs` family, not a new lint
   framework.
 
-- [ ] **SEC-03**: Phase 02 of milestone v1.0 has a security report, so the
+- [x] **SEC-03**: Phase 02 of milestone v1.0 has a security report, so the
   milestone audit measures uniform evidence across phases.
 
 ### Native Verification
@@ -129,11 +129,11 @@ nothing in the existing suite would notice.
 - [x] **TEST-02**: Test coverage is measured and reported for both the
   TypeScript and Rust sides, as a non-gating report kept outside `make verify`.
 
-- [ ] **GATE-08**: The narrowed Playwright trace configuration shipped in v1.0 is
+- [x] **GATE-08**: The narrowed Playwright trace configuration shipped in v1.0 is
   proven by a deliberate CI failure that actually produces a trace, closing the
   evidence gap accepted at v1.0 closeout.
 
-- [ ] **VALID-01**: Nyquist validation metadata for phases 01-03 of milestone
+- [x] **VALID-01**: Nyquist validation metadata for phases 01-03 of milestone
   v1.0 is reconciled, so the milestone audit measures evidence rather than stale
   metadata.
 
@@ -196,11 +196,11 @@ Deferred. Acknowledged but not in this roadmap.
 | REL-04 | Phase 9 | Pending |
 | SEC-01 | Phase 10 | Complete |
 | SEC-02 | Phase 7 | Complete |
-| SEC-03 | Phase 11 | Pending |
+| SEC-03 | Phase 11 | Complete |
 | TEST-01 | Phase 6 | Complete |
 | TEST-02 | Phase 11 | Complete |
-| GATE-08 | Phase 11 | Pending |
-| VALID-01 | Phase 11 | Pending |
+| GATE-08 | Phase 11 | Complete |
+| VALID-01 | Phase 11 | Complete |
 
 **Coverage:**
 
