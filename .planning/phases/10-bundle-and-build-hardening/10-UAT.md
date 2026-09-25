@@ -21,7 +21,7 @@ expected: Run `make release-preflight` on macOS after the packaged build. Expect
 result: [pending]
 
 ### 2. D-03 idle preload warm observation
-expected: Open the packaged app with devtools performance/startupProfile. Expected (D-03 as amended in #340): the six split modes' chunks (today, tasks, meetings, drafts, gap, agents; JS and CSS) are fetched one per idle callback after load, and Studio/Graph/Diagram chunks are not fetched until opened; a failed chunk load must not throw unhandled and must not block activation (the normal lazy path still works). Machine evidence already in place: modePreload.ts + main.tsx wiring and the 38-test FOUC spec.
+expected: Open the packaged app with devtools performance/startupProfile. Expected (D-03 as amended in #340): the six split modes' chunks (today, tasks, meetings, drafts, gap, agents; JS and CSS) are fetched one per idle callback after load, and Studio/Graph/Diagram chunks are not fetched until opened; a failed chunk load must not throw unhandled and must not block activation (the normal lazy path still works). Machine evidence already in place: modePreload.ts + main.tsx wiring and the 39-test FOUC spec.
 result: [pending]
 
 ## Summary

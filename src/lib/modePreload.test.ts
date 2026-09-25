@@ -60,7 +60,7 @@ describe("scheduleModePreload", () => {
     expect(idle).toHaveLength(0);
   });
 
-  it("warms one mode per idle callback, in registry order", async () => {
+  it("warms one mode per idle callback, in list order", async () => {
     scheduleModePreload(ids);
     expect(loads).toEqual([]);
     await runIdle();
