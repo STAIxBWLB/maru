@@ -8,8 +8,10 @@
  * rides that mode's lazy chunk: the component imports its CSS, and Vite
  * 7.3.2 (default cssCodeSplit) hoists the import into that mode's lazy CSS
  * chunk. styles.css keeps only entry-side shared chrome (shell grid-area
- * placements, container-query overrides, the shared pane-resize-handle
- * rules, tokens, FOUC block).
+ * placements, the shared pane-resize-handle rules, tokens, FOUC block).
+ * Late overrides of a mode's own selectors (container queries, material and
+ * contrast passes) sit at the END of that mode's file: lazy CSS always loads
+ * after the entry CSS, so an entry-side override would silently lose.
  *
  * Vite's esbuild pipeline forces legalComments: "none", so the marker text
  * `/*! maru:mode:<id> *` exists in SRC only and never survives into dist.
@@ -34,16 +36,33 @@
  *                      chunk (an unimported per-mode file is a silent
  *                      split defeat).
  *   5. ORPHANED MARKER — a marker id outside the known inventory is a
- *                      violation (keep the inventory in sync).
+ *                      violation (keep the inventory in sync); so is a
+ *                      marker-bearing file with no registered fingerprint.
+ *   6. SPLIT HOME    — (src) a selector's property is declared in only one
+ *                      of styles.css and the marker-bearing files. Cascade
+ *                      order between them is load order, not source order:
+ *                      entry CSS first, then mode CSS in activation order.
+ *                      ORDERED_HOMES lists the pairs that load in a fixed
+ *                      order.
  *
- * Hermetic — node builtins only, reads dist/assets and src/components.
+ * Hermetic — node builtins only, reads dist/assets and src/.
  */
 
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
-const DIST_ASSETS_DIR = path.resolve("dist/assets");
-const SRC_COMPONENTS_DIR = path.resolve("src/components");
+const REPO_ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
+const DIST_ASSETS_DIR = path.join(REPO_ROOT, "dist/assets");
+const SRC_COMPONENTS_DIR = path.join(REPO_ROOT, "src/components");
+const ENTRY_CSS = "src/styles.css";
+
+/**
+ * File pairs whose load order is fixed: TasksPane imports calendar.css before
+ * tasks.css and calendar.css is a shared dependency chunk, so tasks.css (its
+ * taskmain container rules override .cal-*) always loads after it.
+ */
+const ORDERED_HOMES = [["src/components/calendar/calendar.css", "src/components/tasks/tasks.css"]];
 
 /** Raw-text marker scan (markers live in comments; a raw scan cannot false-positive). */
 const MARKER_SCAN = /\/\*!\s*maru:mode:([a-z0-9-]+)\s*\*\//g;
@@ -162,6 +181,107 @@ async function collectCssFiles(dir) {
   return files.sort();
 }
 
+/** Splits on `sep` outside parentheses, brackets and quotes. */
+function splitTop(text, sep) {
+  const parts = [];
+  let depth = 0;
+  let quote = null;
+  let start = 0;
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i];
+    if (quote) {
+      if (ch === "\\") i += 1;
+      else if (ch === quote) quote = null;
+    } else if (ch === '"' || ch === "'") quote = ch;
+    else if (ch === "(" || ch === "[") depth += 1;
+    else if (ch === ")" || ch === "]") depth -= 1;
+    else if (ch === sep && depth === 0) {
+      parts.push(text.slice(start, i));
+      start = i + 1;
+    }
+  }
+  parts.push(text.slice(start));
+  return parts.map((part) => part.trim()).filter(Boolean);
+}
+
+/** Every (selector, property) declaration of a stylesheet without CSS nesting. */
+function declarations(css) {
+  const text = css.replace(/\/\*[\s\S]*?\*\//g, "");
+  const out = [];
+  const atRules = [];
+  let start = 0;
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i];
+    if (ch === ";") {
+      start = i + 1;
+    } else if (ch === "}") {
+      atRules.pop();
+      start = i + 1;
+    } else if (ch === "{") {
+      const prelude = text.slice(start, i).trim();
+      start = i + 1;
+      if (prelude.startsWith("@")) {
+        atRules.push(prelude);
+        continue;
+      }
+      const end = text.indexOf("}", i);
+      if (!atRules.some((rule) => /^@(-webkit-)?keyframes\b/.test(rule))) {
+        for (const decl of splitTop(text.slice(i + 1, end), ";")) {
+          const colon = decl.indexOf(":");
+          if (colon < 0) continue;
+          const important = /!important$/.test(decl);
+          const value = decl.slice(colon + 1).replace(/!important$/, "").replace(/\s+/g, " ").trim();
+          for (const selector of splitTop(prelude, ",")) {
+            out.push({ selector: selector.replace(/\s+/g, " "), prop: decl.slice(0, colon).trim(), value, important });
+          }
+        }
+      }
+      i = end;
+      start = end + 1;
+    }
+  }
+  return out;
+}
+
+// A shorthand resets its longhands (border -> border-color), except these.
+const NOT_RESET_BY_SHORTHAND = /^(flex-(direction|wrap|flow)|border(-[a-z]+)*-radius|border-(collapse|spacing))$/;
+const resets = (shorthand, longhand) =>
+  longhand.startsWith(`${shorthand}-`) && !NOT_RESET_BY_SHORTHAND.test(longhand);
+
+/**
+ * Assertion 6: SPLIT HOME. `files` is [{ file, text }]; returns one message
+ * per selector/property that two files declare with different effect.
+ */
+export function splitHomeConflicts(files, orderedHomes = ORDERED_HOMES) {
+  const bySelector = new Map();
+  for (const { file, text } of files) {
+    for (const decl of declarations(text)) {
+      if (!bySelector.has(decl.selector)) bySelector.set(decl.selector, []);
+      bySelector.get(decl.selector).push({ ...decl, file });
+    }
+  }
+  const ordered = (a, b) => orderedHomes.some(([x, y]) => (a === x && b === y) || (a === y && b === x));
+  const conflicts = new Set();
+  for (const [selector, list] of bySelector) {
+    for (let i = 0; i < list.length; i += 1) {
+      for (let j = i + 1; j < list.length; j += 1) {
+        const a = list[i];
+        const b = list[j];
+        if (a.file === b.file || a.important !== b.important || ordered(a.file, b.file)) continue;
+        const clash = a.prop === b.prop ? a.value !== b.value : resets(a.prop, b.prop) || resets(b.prop, a.prop);
+        if (!clash) continue;
+        const [first, second] = [a.file, b.file].sort();
+        conflicts.add(
+          `SPLIT HOME: ${selector} { ${a.prop === b.prop ? a.prop : `${a.prop}/${b.prop}`} } is declared in both ${first} and ${second} — ` +
+            "lazy mode CSS loads after the entry CSS and in activation order, so the winner no longer follows source order; " +
+            "keep it in one file (an override of mode rules goes at the end of the mode file)",
+        );
+      }
+    }
+  }
+  return [...conflicts];
+}
+
 function firstMarker(text) {
   MARKER_SCAN.lastIndex = 0;
   return [...text.matchAll(MARKER_SCAN)][0] ?? null;
@@ -237,12 +357,24 @@ async function main() {
   // Marker-bearing per-mode src files (raw-text scan).
   const srcCssFiles = await collectCssFiles(SRC_COMPONENTS_DIR);
   const srcMarkerIds = new Map();
+  const homes = [{ file: ENTRY_CSS, text: await readFile(path.join(REPO_ROOT, ENTRY_CSS), "utf8") }];
   for (const file of srcCssFiles) {
-    const match = firstMarker(await readFile(file, "utf8"));
+    const text = await readFile(file, "utf8");
+    const match = firstMarker(text);
     if (match) {
       srcMarkerIds.set(file, match[1]);
+      const rel = path.relative(REPO_ROOT, file);
+      homes.push({ file: rel, text });
+      if (!PER_MODE_FINGERPRINTS.some((fingerprint) => fingerprint.file === rel)) {
+        violations.push(
+          `ORPHANED MARKER: ${rel} carries maru:mode:${match[1]} but has no PER_MODE_FINGERPRINTS entry — its chunk ownership is unchecked`,
+        );
+      }
     }
   }
+
+  // Assertion 6: SPLIT HOME (src).
+  violations.push(...splitHomeConflicts(homes));
 
   // Assertion 5: ORPHANED MARKER — a marker id outside the known inventory
   // (registered modes plus the calendar marker, which is not a mode id).
@@ -257,7 +389,7 @@ async function main() {
 
   // Assertions 2 + 3 + 4: per-mode file ownership.
   for (const fingerprint of PER_MODE_FINGERPRINTS) {
-    const srcText = await readFile(path.resolve(fingerprint.file), "utf8");
+    const srcText = await readFile(path.join(REPO_ROOT, fingerprint.file), "utf8");
     const markerMatch = firstMarker(srcText);
     if (!markerMatch) {
       violations.push(
@@ -337,7 +469,9 @@ async function main() {
   );
 }
 
-main().catch((error) => {
-  console.error(`mode-css-ownership: ${error instanceof Error ? error.message : String(error)}`);
-  process.exit(1);
-});
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch((error) => {
+    console.error(`mode-css-ownership: ${error instanceof Error ? error.message : String(error)}`);
+    process.exit(1);
+  });
+}

@@ -69,3 +69,35 @@ describe("check-mode-css-ownership guard policy", () => {
     expect(guardSource).toMatch(/from "node:path"/);
   });
 });
+
+describe("check-mode-css-ownership SPLIT HOME behavior", () => {
+  const home = (file: string, text: string) => ({ file, text });
+
+  it("flags an entry-side override of a mode selector (lazy CSS would win)", async () => {
+    const { splitHomeConflicts } = await import("./check-mode-css-ownership.mjs");
+    const conflicts = splitHomeConflicts([
+      home("src/styles.css", "@container wb (max-width: 720px) { .x-list, .y { width: 100%; } }"),
+      home("src/components/x/x.css", ".x-list { width: 300px; }"),
+    ]);
+    expect(conflicts).toHaveLength(1);
+    expect(conflicts[0]).toContain("SPLIT HOME: .x-list { width }");
+  });
+
+  it("treats shorthand/longhand as conflicting, except longhands the shorthand does not reset", async () => {
+    const { splitHomeConflicts } = await import("./check-mode-css-ownership.mjs");
+    expect(
+      splitHomeConflicts([home("a.css", ".a { border: 0; flex: 1; }"), home("b.css", ".a { border-right: 1px solid; flex-direction: column; }")]),
+    ).toEqual([expect.stringContaining(".a { border/border-right }")]);
+  });
+
+  it("ignores equal values, differing !important, keyframes, and ordered pairs", async () => {
+    const { splitHomeConflicts } = await import("./check-mode-css-ownership.mjs");
+    const files = [
+      home("a.css", '.a { color: red; } .b { color: red !important; background: url("data:x;y"); } @keyframes k { to { opacity: 1; } }'),
+      home("b.css", '.a { color: red; } .b { color: blue; background: url("data:x;y"); } @keyframes k { to { opacity: 0; } }'),
+      home("c.css", ".c:is(.d, .e) { gap: 1px; }"),
+      home("d.css", ".c:is(.d, .e) { gap: 2px; }"),
+    ];
+    expect(splitHomeConflicts(files, [["c.css", "d.css"]])).toEqual([]);
+  });
+});
