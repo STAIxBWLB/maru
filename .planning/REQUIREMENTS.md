@@ -82,7 +82,7 @@ nothing in the existing suite would notice.
   failure; the user learns of it only by reopening the document and finding the
   edit gone.
 
-- [ ] **REL-04**: An env value in a job's `program.env` that holds a
+- [x] **REL-04**: An env value in a job's `program.env` that holds a
   `:`-separated path list expands every tilde segment, not only the leading one,
   so the generated launchd plist carries no literal `~`. Expansion is
   segment-wise rather than keyed on the name `PATH`, since `PYTHONPATH`,
@@ -193,7 +193,7 @@ Deferred. Acknowledged but not in this roadmap.
 | REL-01 | Phase 9 | Pending |
 | REL-02 | Phase 9 | Pending |
 | REL-03 | Phase 9 | Pending |
-| REL-04 | Phase 9 | Pending |
+| REL-04 | Phase 9 | Complete |
 | SEC-01 | Phase 10 | Complete |
 | SEC-02 | Phase 7 | Complete |
 | SEC-03 | Phase 11 | Complete |
