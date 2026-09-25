@@ -2,46 +2,46 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Felt Quality and Native Proof
-current_phase: 11
-current_phase_name: Milestone Verification & Evidence
-status: verifying
-stopped_at: Completed 11-06-PLAN.md - Phase 11 all 6 plans done, ready for verification
-last_updated: "2026-09-25T15:03:29.467Z"
-last_activity: 2026-09-25
-last_activity_desc: Phase 11 executed (6/6), verification human_needed - post-merge coverage run
-state_head: 070f1229e4d80b3d10387f268cd4637abe92ed36
+current_phase: 9
+current_phase_name: Durability and Session Lifecycle
+status: executing
+stopped_at: Phase 11 complete, ready to execute Phase 9
+last_updated: "2026-09-25T18:59:17.902Z"
+last_activity: 2026-09-26
+last_activity_desc: Phase 11 complete, transitioned to Phase 9
+state_head: 59aee58927f165c0757b8fdf6f2758e3bf379952
 progress:
   total_phases: 6
-  completed_phases: 4
+  completed_phases: 5
   total_plans: 56
   completed_plans: 48
-  percent: 67
+  percent: 83
 ---
 
 # Project State
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-09-25)
+See: .planning/PROJECT.md (updated 2026-09-26)
 
 **Core value:** The filesystem stays the source of truth, everything Maru shows is derived from real files the user owns, and nothing is lost if Maru is uninstalled.
-**Current focus:** Phase 11 — Milestone Verification & Evidence
+**Current focus:** Phase 9 - Durability and Session Lifecycle (planned, 8 plans)
 
 ## Current Position
 
-Phase: 11 (Milestone Verification & Evidence) — EXECUTING
-Plan: 6 of 6
-Status: Phase complete — ready for verification
-Last Activity Description: Phase 11 executed (6/6), verification human_needed - post-merge coverage run
-Last activity: 2026-09-26 - Phase 11 executed (6/6), PR #351 open, awaiting post-merge coverage run (11-UAT.md)
+Phase: 9 — Durability and Session Lifecycle
+Plan: Not started (8 plans, planned)
+Status: Ready to execute
+Last Activity Description: Phase 11 complete, transitioned to Phase 9
+Last activity: 2026-09-26 — Phase 11 complete, transitioned to Phase 9
 
-Progress: [███████░░░] 67%
+Progress: [█████████████████░░░] 48/56 plans (86%), 5/6 phases
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 74
+- Total plans completed: 80
 - Average duration: -
 - Total execution time: -
 
@@ -58,6 +58,7 @@ Progress: [███████░░░] 67%
 | 7 | 5 | - | - |
 | 08 | 29 | - | - |
 | 10 | 3 | - | - |
+| 11 | 6 | - | - |
 
 **Recent Trend:**
 
@@ -289,6 +290,7 @@ None yet.
 - [Phase 8] Native responsiveness raw metric JSONs (`artifacts/native-responsiveness/*.json`) are untracked/local; `docs/performance/*.json` fixed-run and negative-control records are the committed evidence.
 - [Phase 8] Pre-existing `--plan 05` evidence drift reproduces on pristine HEAD; recommend a follow-up shard fix.
 - [Phase 10] `check-csp-blob --binary` reads the debug no-bundle build only: the release linker splits and deduplicates the directive and value literals, so a shipped binary fails closed ("no codegen CSP serialization"). D-04 proof (b) therefore measures the debug build; the shipped binary's embedded config copy reads `'self'`. Follow-up candidate.
+- [Phase 11] Agent worktrees installed with pnpm's global virtual store fail `pnpm typecheck` (TS7006 in `GraphCanvas.tsx`) although main and CI are green; run typecheck-dependent gates in the main checkout or annotate those callbacks (11 deferred-items.md).
 - [Phase 10] `.empty-state` still has two entry-side homes in `styles.css` (:3608, :17879); the cascade is deterministic and the FOUC spec pins the winner, but no 10-02 disposition records it.
 
 ## Deferred Items
@@ -302,9 +304,9 @@ None yet.
 | Testing | TEST-03, TEST-04 (remaining component tests, app_menu smoke) | v2 | 2026-08-22 |
 | Product | HUB-01 Hub graph-metadata sync - the doc set's only explicit deferral | v2 | 2026-08-22 |
 | Typed IPC | ERR-05 closed-enum contract (emission sites unconstrained; guard checks declarations only) | v2 | 2026-08-23 |
-| Evidence | Re-run a deliberate failing CI E2E against the shipped narrowed Playwright trace configuration | Promoted to v1.1 (GATE-08, Phase 11) | 2026-08-28 |
-| Validation | Reconcile Phase 01-03 Nyquist metadata with `$gsd-validate-phase` | Promoted to v1.1 (VALID-01, Phase 11) | 2026-08-28 |
-| Security | Add a Phase 02 security report if uniform milestone evidence is required | Promoted to v1.1 (SEC-03, Phase 11) | 2026-08-28 |
+| Evidence | Re-run a deliberate failing CI E2E against the shipped narrowed Playwright trace configuration | Resolved in v1.1 Phase 11 (GATE-08, run 36146017939) | 2026-08-28 |
+| Validation | Reconcile Phase 01-03 Nyquist metadata with `$gsd-validate-phase` | Resolved in v1.1 Phase 11 (VALID-01) | 2026-08-28 |
+| Security | Add a Phase 02 security report if uniform milestone evidence is required | Resolved in v1.1 Phase 11 (SEC-03, 02-SECURITY.md) | 2026-08-28 |
 
 ## Post-Close Resolutions
 
@@ -315,10 +317,10 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-09-25T15:03:29.379Z
-Stopped at: Completed 11-06-PLAN.md - Phase 11 all 6 plans done, ready for verification
+Last session: 2026-09-25T19:00:13.000Z
+Stopped at: Phase 11 complete, ready to execute Phase 9
 Resume file: None
 
 ## Operator Next Steps
 
-- Execute Phase 9 (Durability and Session Lifecycle, 8 plans) with `/gsd-execute-phase 9`, or Phase 11 (Milestone Verification & Evidence, 6 plans) with `/gsd-execute-phase 11`. Both are planned; neither has started.
+- Execute Phase 9 (Durability and Session Lifecycle, 8 plans) with `/gsd-execute-phase 9`. It is the last v1.1 phase; register its spec issue first (development lifecycle: the issue is the spec).

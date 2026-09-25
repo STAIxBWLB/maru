@@ -25,7 +25,7 @@ operative rule is in README's Release Process section.
 - [x] **Phase 8: Main-Thread Responsiveness** - The skills registry lock narrows and the main-thread-blocking commands move off it, proven by a concurrency load test rather than the absence of a visible freeze. (completed 2026-09-06)
 - [ ] **Phase 9: Durability and Session Lifecycle** - A SIGHUP-trapping terminal can still be killed, a pending edit is saved (or its failure surfaced) on unmount and app quit, and a scheduled job's own PATH resolves as written.
 - [x] **Phase 10: Bundle and Build Hardening** - The packaged CSP drops an unused directive and per-mode CSS restores the budget headroom spent since v0.4.46. (completed 2026-09-25)
-- [ ] **Phase 11: Milestone Verification & Evidence** - Coverage is measured, the narrowed CI trace configuration is proven, and v1.0's closeout evidence debt is retired.
+- [x] **Phase 11: Milestone Verification & Evidence** - Coverage is measured, the narrowed CI trace configuration is proven, and v1.0's closeout evidence debt is retired. (completed 2026-09-26)
 
 ## Phase Details
 
@@ -336,4 +336,4 @@ Phases execute in numeric order: 6 → 7 → 8 → 9 → 10 → 11
 | 8. Main-Thread Responsiveness | 29/29 | Complete    | 2026-09-06 |
 | 9. Durability and Session Lifecycle | 0/8 | Planned | - |
 | 10. Bundle and Build Hardening | 3/3 | Complete    | 2026-09-25 |
-| 11. Milestone Verification & Evidence | 6/6 | Verification pending (post-merge UAT) | - |
+| 11. Milestone Verification & Evidence | 6/6 | Complete    | 2026-09-26 |
