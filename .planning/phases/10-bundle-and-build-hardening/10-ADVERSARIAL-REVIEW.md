@@ -29,7 +29,7 @@ Removed as dead code while satisfying SPLIT HOME: 5 declarations in styles.css `
 
 ## Open (user decision)
 
-- **Preload scope vs memory.** D-03 preloads every mode, including Studio (about 1.8 MB), Graph and Diagram. None of those has per-mode CSS, and Vite already waits for a chunk's CSS before the lazy component renders. The FOUC goal needs only the 6 split modes plus calendar. Narrowing the scope would change D-03, and the native-memory idle-startup scenario (#327) has not been re-measured with preload on.
+- **Preload scope vs memory.** Resolved 2026-09-25: the owner chose to narrow D-03's preload set to the six split modes (#340).
 - **Worker aliasing** (`W=Worker; new W(u)`) and scope-blind createObjectURL bindings are known ceilings of the dist half. They are marked `ponytail:` in the guard.
 
 ## OCR delegation review (merge gate, PR #335)

@@ -18,7 +18,6 @@ vi.mock("./startupProfile", () => ({
 }));
 
 vi.mock("./modeRegistry", () => ({
-  getRegisteredModeIds: () => ["a", "b", "c"],
   getModeDescriptor: (id: string) =>
     id
       ? {
@@ -31,7 +30,8 @@ vi.mock("./modeRegistry", () => ({
       : null,
 }));
 
-const { scheduleModePreload } = await import("./modePreload");
+const { PRELOAD_MODE_IDS, scheduleModePreload } = await import("./modePreload");
+const ids = ["a", "b", "c"];
 
 /** Fire the pending idle callback and let its load settle. */
 async function runIdle() {
@@ -52,8 +52,16 @@ beforeEach(() => {
 });
 
 describe("scheduleModePreload", () => {
-  it("warms one mode per idle callback, in registry order", async () => {
+  it("defaults to the six split modes only (D-03 as amended in #340)", async () => {
+    expect(PRELOAD_MODE_IDS).toEqual(["today", "tasks", "meetings", "drafts", "gap", "agents"]);
     scheduleModePreload();
+    for (let i = 0; i < PRELOAD_MODE_IDS.length; i += 1) await runIdle();
+    expect(loads).toEqual([...PRELOAD_MODE_IDS]);
+    expect(idle).toHaveLength(0);
+  });
+
+  it("warms one mode per idle callback, in list order", async () => {
+    scheduleModePreload(ids);
     expect(loads).toEqual([]);
     await runIdle();
     expect(loads).toEqual(["a"]);
@@ -68,7 +76,7 @@ describe("scheduleModePreload", () => {
 
   it("keeps the 2000ms idle cap between steps where requestIdleCallback exists", async () => {
     vi.stubGlobal("window", { requestIdleCallback: () => 0 });
-    scheduleModePreload();
+    scheduleModePreload(ids);
     await runIdle();
     await runIdle();
     await runIdle();
@@ -78,7 +86,7 @@ describe("scheduleModePreload", () => {
   it("skips unavailable modes and keeps going after a failed load", async () => {
     unavailable.add("a");
     failing.add("b");
-    scheduleModePreload();
+    scheduleModePreload(ids);
     await runIdle();
     await runIdle();
     await runIdle();
@@ -87,7 +95,7 @@ describe("scheduleModePreload", () => {
   });
 
   it("cancel stops the remaining queue, including after an in-flight load", async () => {
-    const cancel = scheduleModePreload();
+    const cancel = scheduleModePreload(ids);
     idle.shift()?.();
     cancel();
     await new Promise((resolve) => setTimeout(resolve, 0));

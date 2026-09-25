@@ -37,6 +37,11 @@ activation.
   dynamic `import()` of each mode's lazy chunk, which carries its CSS with it
   - JS and CSS are both warm before first activation. No hover/focus trigger
   is needed on top of idle preload.
+  - **Amended 2026-09-25 (#340, owner decision):** preload only the six split
+    modes (today, tasks, meetings, drafts, gap, agents), one per idle callback.
+    Vite resolves a lazy mode only after its CSS lands, so first activation is
+    styled without preload; warming every mode cost ~2.9 MB of evaluated JS
+    (Studio 1.8 MB, Graph 335 KB) and ~8 MB of JS heap for the whole session.
 
 ### CSP tightening
 
