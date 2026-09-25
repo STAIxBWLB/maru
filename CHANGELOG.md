@@ -8,6 +8,20 @@ because releases cut frequently during active development. Versions before
 Dates are the release-tag dates. Only `feat`/`fix`-level changes are listed;
 `chore(release)` version bumps and merge commits are omitted.
 
+## v1.1.9 - 2026-09-25 - Tighter Bundle
+
+- **The shipped CSP no longer lets scripts load from `blob:` URLs (#334,
+  #335).** `script-src` is now `'self'` only, so content injected into the
+  webview cannot mint executable script URLs; `worker-src` keeps `blob:` for
+  the graph layout worker. The build fails if a Tauri config, the bundle, or
+  the compiled binary would bring `script-src blob:` back.
+- **Each mode's styles load with that mode (#334, #335).** Today, Tasks,
+  Calendar, Meetings, Drafts, Gap, and Agents CSS moved out of the startup
+  stylesheet into their lazy chunks, cutting the initial CSS to about 45 KiB
+  gzip against the 70 KiB budget. Mode chunks are warmed one at a time in idle
+  time after launch, and shared chrome such as task dialogs stays in the
+  startup stylesheet so it is styled before any mode loads.
+
 ## v1.1.8 - 2026-09-25 - Reference Walk
 
 - **The KG reference walk highlights the citing paragraph as each leg plays
