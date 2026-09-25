@@ -1,6 +1,8 @@
 import { Check, FilePlus2, GitCompare, History, Plus, RotateCcw, Save, Sparkles, Trash2, Users } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type UIEvent } from "react";
 import { useTranslation } from "../../lib/i18n";
+import { createDebouncedSaver } from "../../lib/debouncedSave";
+import { useTeardownFlush } from "../../lib/teardownSave";
 import { buildSourceTextDiff, buildSourceSideBySideRows, matchingCorrectionExamples } from "../../lib/meetingSourceReview";
 import {
   createMeetingSourceSession, checkpointMeetingSource, confirmMeetingSource, deleteMeetingSourceSession, importMeetingSource,
@@ -230,6 +232,23 @@ function SourceEditor({ editor, onRequestAi, aiBusy, onReviewedSourceChange, onS
   const source = draft.sources.find((s) => s.id === sourceId) ?? draft.sources[0];
   const pending = draft.suggestions.filter((s) => s.required && s.status === "pending").length;
 
+  // A new saver per `editor` identity so useTeardownFlush settles the
+  // outgoing store's pending save before the incoming one starts scheduling.
+  const saver = useMemo(
+    () => createDebouncedSaver<MeetingSourceEditorStore>(async (store) => { await store.flush(); }, 700),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the factory closes only over its `store` param, but `editor` keys the memo intentionally
+    [editor],
+  );
+  useTeardownFlush(
+    saver,
+    (store) => ({
+      workPath: store.workPath,
+      filePath: `.maru/meetings/source-reviews/${store.getSnapshot().session.id}`,
+      content: JSON.stringify(store.getSnapshot().draft, null, 2),
+    }),
+    t,
+  );
+
   useEffect(() => { onSaved(session); }, [session, onSaved]);
 
   useEffect(() => {
@@ -244,10 +263,12 @@ function SourceEditor({ editor, onRequestAi, aiBusy, onReviewedSourceChange, onS
     return () => window.clearTimeout(timer);
   }, [savedFlash]);
   useEffect(() => {
-    if (!dirty || composing || busy || saveError) return;
-    const timer = window.setTimeout(() => { void editor.flush().catch(() => {}); }, 700);
-    return () => window.clearTimeout(timer);
-  }, [dirty, draft, composing, busy, saveError, editor]);
+    if (!dirty || composing || busy || saveError) {
+      saver.cancel();
+      return;
+    }
+    saver.schedule(editor);
+  }, [dirty, draft, composing, busy, saveError, editor, saver]);
   useEffect(() => {
     let cancelled = false;
     void listMeetingCorrectionExamples(editor.workPath).then((items) => { if (!cancelled) setExamples(items); })
