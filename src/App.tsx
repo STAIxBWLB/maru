@@ -6948,6 +6948,12 @@ export function MainApp() {
         case "window.close":
           requestWindowClose();
           break;
+        case "app.quit":
+          // D-03: the macOS App-submenu Quit item (Cmd+Q) reaches the exact
+          // same window-close guard as the red close button — one quit path,
+          // not two implementations kept in sync.
+          requestWindowClose();
+          break;
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps -- requestTerminalLaunch and saveActiveSurfaceDocument are read in this menu-command switch but not listed; not added here to avoid changing this callback's re-creation timing, a behavior change out of scope for this phase

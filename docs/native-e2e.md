@@ -168,7 +168,17 @@ by a human:
    the document, and undo during/after composition plus mark/selection
    interaction behave as the engine specifies.
 
-### Observations — 2026-08-29 (plan 06-05 ratification)
+**Cmd+Q quit route (plan 09-03, A1).** `e2e-native/specs/menu.spec.ts` proves
+`app.quit` reaches the window-close guard through the debug bridge; only the
+OS delivering the physical keypress or menu click to that item is unproven by
+automation (same Accessibility-walled limit as items 1-3 above):
+
+7. With a dirty document open, press Cmd+Q. Expected: the unsaved-changes
+   dialog appears instead of an immediate exit. Choose Cancel. Expected: Maru
+   stays open. Then, with nothing dirty, press Cmd+Q again. Expected: Maru
+   quits normally with no dialog.
+
+### Observations: 2026-08-29 (plan 06-05 ratification)
 
 Worked end to end on the current debug build under fixture isolation.
 Measurement note applying to all items: the debug binary and the installed
@@ -327,8 +337,14 @@ ids and their asserted DOM consequences:
 | `view.documents` | View → Documents | The document list opens and shows the seeded document |
 | `terminal.shell` | Terminal → New Shell | A native terminal view mounts with a live session |
 | `terminal.split` | Terminal → Split Terminal (⌘D) | The terminal body enters split mode with a second, distinct session in the right pane |
+| `app.quit` | App menu → Quit Maru (Cmd+Q) | With a dirty draft, the unsaved-changes dialog appears; Cancel keeps the app open |
 
-**Human-attended half** — that the OS menu bar actually delivers the id.
+`app.quit` (plan 09-03, D-03) replaces tauri's predefined native quit item so
+Cmd+Q reaches the same guard as the red close button, instead of bypassing the
+webview through `NSApplication terminate:`.
+
+**Human-attended half**: that the OS menu bar actually delivers the id.
 Clicking a menu item (or pressing a key equivalent the menu owns) is outside
 the webview and unscriptable here. The fixed checklist lives in
-`## Human-attended checklist` above (items 1-3), folded in by plan 06-05.
+`## Human-attended checklist` above (items 1-3, plus item 7 for `app.quit`),
+folded in by plan 06-05 and extended by plan 09-03.

@@ -3,15 +3,35 @@ use tauri::{
     AppHandle, Emitter, Manager, Runtime,
 };
 
+#[cfg(target_os = "macos")]
+use tauri::menu::AboutMetadata;
 #[cfg(not(target_os = "macos"))]
 use tauri::menu::HELP_SUBMENU_ID;
 
 const CHECK_FOR_UPDATES_MENU_ID: &str = "app.check_for_updates";
 const CHECK_FOR_UPDATES_EVENT: &str = "maru://check-for-updates";
 const MENU_COMMAND_EVENT: &str = "maru://menu-command";
+// D-03: the id the macOS App-submenu Quit item emits, routed through the
+// existing generic MENU_COMMAND_EVENT path (handle_menu_event below is
+// unchanged) into App.tsx's runMenuCommand -> requestWindowClose(), the same
+// guard the red close button reaches. macOS-only: Windows/Linux keep the
+// platform-native Quit affordance untouched.
+#[cfg(target_os = "macos")]
+const QUIT_MENU_ID: &str = "app.quit";
 
 pub fn build_app_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
     let menu = Menu::default(app)?;
+    // D-03/A1: replace tauri's predefined native Quit item (the predefined
+    // menu item that calls NSApplication terminate: and bypasses the webview
+    // entirely — research Pitfall 2) with a Maru-owned command item before
+    // the Maru menus and Check-for-Updates item are inserted, so Check for
+    // Updates still lands at index 1 of the (now Maru-built) App submenu.
+    #[cfg(target_os = "macos")]
+    {
+        let _ = menu.remove_at(0)?;
+        let app_submenu = build_macos_app_submenu(app)?;
+        menu.insert(&app_submenu, 0)?;
+    }
     let check_for_updates = MenuItem::with_id(
         app,
         CHECK_FOR_UPDATES_MENU_ID,
@@ -23,6 +43,39 @@ pub fn build_app_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> 
     install_maru_menus(app, &menu)?;
     insert_check_for_updates_item(app, &menu, &check_for_updates)?;
     Ok(menu)
+}
+
+/// Reproduces tauri 2.10.3's `Menu::default` macOS App submenu item-for-item
+/// (About, Services, Hide, Hide Others — see
+/// tauri-2.10.3/src/menu/menu.rs:186-204) but ends with a Maru `command_item`
+/// instead of the predefined native quit item, so Cmd+Q reaches the webview.
+#[cfg(target_os = "macos")]
+fn build_macos_app_submenu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Submenu<R>> {
+    let pkg_info = app.package_info();
+    let config = app.config();
+    let about_metadata = AboutMetadata {
+        name: Some(pkg_info.name.clone()),
+        version: Some(pkg_info.version.to_string()),
+        copyright: config.bundle.copyright.clone(),
+        authors: config.bundle.publisher.clone().map(|p| vec![p]),
+        ..Default::default()
+    };
+    let quit = command_item(app, QUIT_MENU_ID, "Quit Maru", Some("CmdOrCtrl+Q"))?;
+    Submenu::with_items(
+        app,
+        pkg_info.name.clone(),
+        true,
+        &[
+            &PredefinedMenuItem::about(app, None, Some(about_metadata))?,
+            &PredefinedMenuItem::separator(app)?,
+            &PredefinedMenuItem::services(app, None)?,
+            &PredefinedMenuItem::separator(app)?,
+            &PredefinedMenuItem::hide(app, None)?,
+            &PredefinedMenuItem::hide_others(app, None)?,
+            &PredefinedMenuItem::separator(app)?,
+            &quit,
+        ],
+    )
 }
 
 fn install_maru_menus<R: Runtime>(app: &AppHandle<R>, menu: &Menu<R>) -> tauri::Result<()> {
