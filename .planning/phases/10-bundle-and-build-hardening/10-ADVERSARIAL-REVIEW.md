@@ -50,3 +50,13 @@ Removed as dead code while satisfying SPLIT HOME: 5 declarations in styles.css `
 | 5 | `maru-rendered.visual-check.json` commits an absolute local path. | Fixed. It is now repo-relative. |
 | 6 | The binary codegen regex stops at a scheme-less host source (`cdn.x.com`, `*`). | Accepted ceiling. Widening it would run into the next directive name and false-positive on `worker-src blob:`. The config and JSON checks still catch `blob:` there. |
 | 7 | Standalone `make check-csp-blob` scans whatever stale debug binary exists. | Accepted. `release-checks` scans the binary it just built; the standalone target is a manual probe. |
+
+### Re-review at head `d17004ce`
+
+The 8-file delta was reviewed in full; the other 43 files are byte-identical to the reviewed head. All five fixes above are confirmed resolved. No Important findings.
+
+| # | Finding | Verdict |
+| --- | --- | --- |
+| R1 | The config check read each overlay on its own. Tauri merge-patches overlays onto the base, so a partial CSP overlay was a false positive, and an overlay with `csp: null` went unchecked. | Fixed. Each overlay is merge-patched (RFC 7396) onto `tauri.conf.json` before the check. Tests cover a partial overlay (passes), a null CSP and deleted script directives (both fail). |
+| R2 | The 250ms step cap also applied where `requestIdleCallback` exists, forcing loads during busy frames. | Fixed. 250ms applies only without `requestIdleCallback`; otherwise 2000ms. Both paths are pinned in the test. |
+| R3 | `csp == null` uses `==`. | False positive. It is the deliberate null-or-undefined idiom. |
