@@ -1,20 +1,33 @@
-import {
-  getModeDescriptor,
-  getRegisteredModeIds,
-} from "./modeRegistry";
+import { getModeDescriptor, type RegisteredModeId } from "./modeRegistry";
 import { scheduleStartupIdle } from "./startupProfile";
 
 /**
- * Idle-time preload of every registered mode's lazy chunk.
+ * The modes whose CSS moved out of the entry stylesheet (phase 10); calendar
+ * CSS rides the tasks and meetings chunks. D-03 as amended in #340: Studio,
+ * Graph, Diagram and the rest load on first activation instead, since Vite
+ * resolves a lazy mode only after its CSS lands and warming every mode costs
+ * ~2.9 MB of evaluated JS for the whole session.
+ */
+export const PRELOAD_MODE_IDS = [
+  "today",
+  "tasks",
+  "meetings",
+  "drafts",
+  "gap",
+  "agents",
+] as const satisfies readonly RegisteredModeId[];
+
+/**
+ * Idle-time preload of the PRELOAD_MODE_IDS lazy chunks.
  *
- * D-03 locked decision: preload runs only during browser idle time (never on
- * hover/focus), so first activation only pays the Suspense boundary cost.
+ * D-03: preload runs only during browser idle time (never on hover/focus), so
+ * first activation of these modes only pays the Suspense boundary cost.
  * Vite's cssCodeSplit ships each mode's lazy CSS inside its JS chunk, so the
  * mode stylesheet lands with the module it styles.
  *
  * One mode per idle callback: the next chunk is requested only after the
- * previous one settled and the browser is idle again, so warming ~3 MB of
- * mode JS never competes with bootstrap or user input in one burst.
+ * previous one settled and the browser is idle again, so warming never
+ * competes with bootstrap or user input in one burst.
  *
  * The first step waits up to 2000ms, above the helper's 1500ms default:
  * idle preload has no UI deadline, while the default is reserved for
@@ -26,8 +39,8 @@ import { scheduleStartupIdle } from "./startupProfile";
  *
  * Returns a cancel handle that stops the remaining queue.
  */
-export function scheduleModePreload(): () => void {
-  const queue = [...getRegisteredModeIds()];
+export function scheduleModePreload(ids: readonly string[] = PRELOAD_MODE_IDS): () => void {
+  const queue = [...ids];
   const stepTimeout = typeof window !== "undefined" && "requestIdleCallback" in window ? 2000 : 250;
   let cancelled = false;
   let cancelIdle = () => {};
