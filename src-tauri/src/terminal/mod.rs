@@ -1998,15 +1998,19 @@ mod phase08_18 {
     }
 
     fn wait_for_text(app: &TestApp, handle: &TerminalSessionHandle, needle: &str) -> String {
+        wait_for_all(app, handle, &[needle])
+    }
+
+    fn wait_for_all(app: &TestApp, handle: &TerminalSessionHandle, needles: &[&str]) -> String {
         let deadline = Instant::now() + Duration::from_secs(5);
         loop {
             let text = run(text_of(app.clone(), handle.clone())).unwrap();
-            if text.contains(needle) {
+            if needles.iter().all(|needle| text.contains(needle)) {
                 return text;
             }
             assert!(
                 Instant::now() < deadline,
-                "fixture terminal never echoed {needle:?}"
+                "fixture terminal never echoed all of {needles:?}: {text:?}"
             );
             thread::sleep(Duration::from_millis(20));
         }
@@ -2348,15 +2352,11 @@ mod phase08_18 {
             let second_rx = start(write_cmd(app.clone(), handle.clone(), second_payload));
             done(first_rx).unwrap();
             done(second_rx).unwrap();
-            let text = wait_for_text(&app, &handle, payload_b.trim_end());
-            assert!(
-                text.contains(payload_a.trim_end()),
-                "first-launched payload must survive whole through the shared writer: {text:?}"
-            );
-            assert!(
-                text.contains(payload_b.trim_end()),
-                "second-launched payload must survive whole through the shared writer: {text:?}"
-            );
+            // Which write reaches the PTY first is up to the scheduler, so wait for
+            // both echoes: returning on payload_b alone raced payload_a's echo when
+            // b landed first. A dropped payload fails the bounded wait; the
+            // per-session writer lock is what keeps payloads from interleaving.
+            wait_for_all(&app, &handle, &[payload_a.trim_end(), payload_b.trim_end()]);
             run_with!(app, ipc::terminal_kill(app.state(), handle)).unwrap();
         }
     }
