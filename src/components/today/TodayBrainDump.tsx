@@ -4,6 +4,8 @@
 
 import { Info, RotateCcw, Sparkles } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { createDebouncedSaver } from "../../lib/debouncedSave";
+import { useTeardownFlush } from "../../lib/teardownSave";
 import { useTranslation } from "../../lib/i18n";
 import { useToday } from "./todayContext";
 
@@ -34,15 +36,13 @@ export function TodayBrainDump({
   onRegisterFlush,
 }: TodayBrainDumpProps) {
   const { t } = useTranslation();
-  const { snapshot, mutate } = useToday();
+  const { workPath, snapshot, mutate } = useToday();
 
   const [text, setText] = useState(snapshot?.brainDump ?? "");
   const [status, setStatus] = useState<SaveStatus>("idle");
   // Nothing to undo until a mutation lands in this session.
   const [undoAvailable, setUndoAvailable] = useState(false);
   const lastSavedRef = useRef(snapshot?.brainDump ?? "");
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const pendingTextRef = useRef<string | null>(null);
 
   // External snapshot changes (undo, conflict reload, planner) resync the
   // editor — but not our own in-flight saves, which would clobber typing.
@@ -71,7 +71,6 @@ export function TodayBrainDump({
   const save = useCallback(
     async (value: string) => {
       if (!snapshot) return;
-      pendingTextRef.current = null;
       setStatus("saving");
       const next = await mutate({ type: "setBrainDump", brainDump: value });
       if (next) {
@@ -79,23 +78,33 @@ export function TodayBrainDump({
         setStatus("saved");
         setUndoAvailable(true);
         onSaved();
-      } else {
-        setStatus("idle");
+        return;
       }
+      setStatus("idle");
+      throw new Error("today_brain_dump_save_failed");
     },
     [snapshot, mutate, onSaved],
   );
 
-  // Flush (not drop) a pending debounced save on unmount — stage/route
-  // switches within the debounce window must not lose the typed tail.
+  // ref-indirection so the saver's stable save callback always calls the
+  // latest `save` without recreating the saver every render.
   const saveRef = useRef(save);
-  saveRef.current = save;
-  useEffect(
-    () => () => {
-      if (timerRef.current !== null) clearTimeout(timerRef.current);
-      if (pendingTextRef.current !== null) void saveRef.current(pendingTextRef.current);
-    },
-    [],
+  useEffect(() => {
+    saveRef.current = save;
+  }, [save]);
+  // One saver per mount — schedule/flush/cancel via the shared debounced-save
+  // helper; unmount performs the pending save instead of only cancelling it
+  // (D-01, REL-02).
+  const [saver] = useState(() =>
+    createDebouncedSaver<string>((value) => saveRef.current(value), AUTOSAVE_DEBOUNCE_MS),
+  );
+  useTeardownFlush(
+    saver,
+    (value) =>
+      workPath
+        ? { workPath, filePath: `today-brain-dump-${snapshot?.logicalDay ?? "unknown"}.txt`, content: value }
+        : null,
+    t,
   );
 
   const handleChange = (value: string) => {
@@ -107,31 +116,13 @@ export function TodayBrainDump({
         : value;
     setText(capped);
     setStatus("idle");
-    pendingTextRef.current = capped;
-    if (timerRef.current !== null) clearTimeout(timerRef.current);
-    timerRef.current = setTimeout(() => {
-      timerRef.current = null;
-      void save(capped);
-    }, AUTOSAVE_DEBOUNCE_MS);
+    saver.schedule(capped);
   };
 
-  const flush = useCallback(async () => {
-    if (timerRef.current !== null) {
-      clearTimeout(timerRef.current);
-      timerRef.current = null;
-    }
-    const pending = pendingTextRef.current;
-    if (pending !== null) await save(pending);
-  }, [save]);
-
-  useEffect(() => onRegisterFlush?.(flush), [flush, onRegisterFlush]);
+  useEffect(() => onRegisterFlush?.(() => saver.flush()), [onRegisterFlush, saver]);
 
   const handleUndo = async () => {
-    if (timerRef.current !== null) {
-      clearTimeout(timerRef.current);
-      timerRef.current = null;
-    }
-    pendingTextRef.current = null; // undo supersedes any unsaved typing
+    saver.cancel(); // undo supersedes any unsaved typing
     const next = await mutate({ type: "undo" });
     // The backend returns today_undo_unavailable for a second undo in a row;
     // a null result here means the undo stack was empty.

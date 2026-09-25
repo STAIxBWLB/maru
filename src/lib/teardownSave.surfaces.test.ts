@@ -41,6 +41,13 @@ describe("teardownSave surface pin", () => {
     expect(file).not.toContain("saveTimerRef");
   });
 
+  it("TodayBrainDump calls useTeardownFlush and createDebouncedSaver, and no longer hand-rolls its timer", () => {
+    const file = source("src/components/today/TodayBrainDump.tsx");
+    expect(file).toContain("useTeardownFlush(");
+    expect(file).toContain("createDebouncedSaver");
+    expect(file).not.toContain("timerRef");
+  });
+
   it("HtmlVisualEditor is pinned as already-compliant: its unmount cleanup still runs the serializer", () => {
     const file = source("src/components/HtmlVisualEditor.tsx");
     expect(file).toContain("serializeNowRef.current()");
