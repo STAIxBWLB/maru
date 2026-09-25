@@ -1,11 +1,12 @@
 ---
 phase: 11-milestone-verification-evidence
 verified: 2026-09-26T00:20:00Z
-status: human_needed
+status: passed
 score: 4/4 must-haves verified
 behavior_unverified: 0
 overrides_applied: 0
 human_verification:
+
   - test: "Confirm the first push-to-main run of `.github/workflows/coverage.yml` after this phase's PR merges."
     expected: "The `coverage` job appears on GitHub Actions for `main` (it does not exist yet: `gh run list --workflow=coverage.yml` returns HTTP 404, `workflow coverage.yml not found on the default branch`, confirmed live during this verification), completes, appends a totals table to the run's Job Summary, and uploads a `coverage-report` artifact. Record the run URL, the Job Summary table, and the artifact in 11-EVIDENCE.md's `### Post-merge check` subsection, replacing the `(pending)` placeholders."
     why_human: "D-01 deliberately gives `coverage.yml` a push-to-main-only trigger (no `pull_request`, no `workflow_dispatch`), so GitHub cannot run it until it already exists on the default branch. No command available to this verifier, run before merge, can execute or observe that first run; it is a fact that comes into existence only after a human (or the orchestrator) merges the PR and a push to `main` fires."
@@ -17,7 +18,8 @@ human_verification:
 verifies: coverage is visible, the narrowed CI trace configuration is proven, and v1.0's closeout
 evidence debt is retired.
 **Verified:** 2026-09-26T00:20:00Z
-**Status:** human_needed
+**Status:** passed (post-merge coverage run 36174321763 confirmed 2026-09-26; see 11-UAT.md and 11-EVIDENCE.md `### Post-merge check`)
+**Note:** rows below that say the first coverage run is "pending" record the state at verification time, before PR #351 merged; that item is now resolved.
 **Re-verification:** No; initial verification
 
 ## Goal Achievement

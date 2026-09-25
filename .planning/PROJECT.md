@@ -39,8 +39,14 @@ is gone from the shipped CSP, per-mode CSS is split into lazy chunks with the
 pre-split cascade restored (a SPLIT HOME guard keeps each selector property in
 one file), and idle preload warms only the six split modes (D-03 as amended in
 #340). An adversarial review after the first verification fixed 24 cascade
-inversions and hardened both build guards before release. Phases 9 and 11 are
-planned and ready to execute.
+inversions and hardened both build guards before release.
+
+Phase 11 (Milestone Verification & Evidence) completed 2026-09-26: `make coverage`
+and a push-to-main `coverage.yml` report TS and Rust coverage without gating
+(first run on `main` 36174321763), a fresh deliberate CI failure re-proved the
+narrowed Playwright trace (run 36146017939), v1.0 phases 01-03 VALIDATION.md are
+reconciled to `validated`, and v1.0 Phase 02 has its security report. Phase 9 is
+planned and ready to execute; it is the last v1.1 phase.
 
 ## Requirements
 
@@ -100,6 +106,11 @@ planned and ready to execute.
   every mode's pane CSS rides its lazy chunk with the entry CSS at 45 KiB gzip
   against the unchanged 70 KiB budget (PERF-05); UAT 2/2, verification 10/10,
   shipped in v1.1.10/v1.1.11.
+- ✓ Phase 11 milestone verification and evidence - non-gating TS and Rust
+  coverage report with a recorded baseline (TEST-02), narrowed trace re-proven by
+  a deliberate CI failure (GATE-08), v1.0 01-03 Nyquist metadata reconciled
+  (VALID-01), and a retroactive v1.0 Phase 02 security report (SEC-03); UAT 1/1,
+  verification 4/4, security 20/20 closed.
 
 ### Active
 
@@ -278,6 +289,8 @@ ones this milestone can actually break are listed here.
 | The native E2E runner lands early, not as closeout | v1.1's success condition is that observable behavior changed for the better; the mocked-IPC Chromium suite cannot see that, and v1.0's retrospective already ruled that a human approval marker is not reusable evidence | Pending |
 | Features stay out for a second consecutive milestone | HWPE-01..03, Semantica S1-S4, and HUB-01 all add surface area to panes whose responsiveness this milestone is trying to fix; shipping them first would move the target | Pending |
 | Mode CSS moves to lazy per-mode files; late overrides live at the end of the owning file | Lazy CSS always loads after the entry stylesheet, so an entry-side override of a mode selector silently loses; the split first shipped 24 such inversions | ✓ Phase 10 - SPLIT HOME guard in `check-mode-css-ownership` makes it build-enforced |
+| Coverage is reported, never gated, and runs on `main` pushes only (TEST-02, D-01/D-04) | A threshold turns a diagnostic into a merge blocker before anyone knows what the numbers mean; running it per PR would slow every PR by an instrumented build | ✓ Phase 11 - `make coverage` outside `verify`, `coverage.yml` push-to-main only, baseline recorded in 11-EVIDENCE.md |
+| Evidence is recorded in the repo, not left in CI artifacts (GATE-08, D-07) | The v1.0 trace proof became unverifiable when its 7-day artifact expired | ✓ Phase 11 - `unzip -l` listing and run metadata in 11-EVIDENCE.md |
 | Idle preload warms only the modes whose CSS was split (D-03 amended) | Vite resolves a lazy mode only after its CSS lands, so preload never prevented FOUC; warming every mode cost ~2.9 MB of evaluated JS per session | ✓ Phase 10 / #340 - six modes, one per idle callback |
 
 ## Evolution
@@ -298,4 +311,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-09-25 - Phase 10 complete (3/3 plans, SEC-01/PERF-05 verified, shipped in v1.1.10/v1.1.11); Phases 9 and 11 planned, ready to execute*
+*Last updated: 2026-09-26 after Phase 11 (6/6 plans, TEST-02/GATE-08/VALID-01/SEC-03 verified); Phase 9 planned, ready to execute*
