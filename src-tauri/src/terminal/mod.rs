@@ -30,6 +30,9 @@ const FRAME_COALESCE_MS: u64 = 16;
 pub struct TerminalState {
     sessions: Arc<Mutex<HashMap<String, Arc<TerminalSession>>>>,
     reservations: Arc<Mutex<HashSet<String>>>,
+    // REL-01/D-09: process groups whose tab-close escalation ladder
+    // (SIGHUP -> SIGTERM -> SIGKILL) is still running in a detached thread.
+    escalations: Arc<Mutex<HashSet<u32>>>,
 }
 
 struct TerminalSession {
@@ -43,6 +46,10 @@ struct TerminalSession {
     resize_lock: Mutex<()>,
     stream: Arc<TerminalStream>,
     closing: AtomicBool,
+    // REL-01: the terminal child's spawn-time pid, which is also its pgid
+    // and sid because portable-pty calls `setsid()` before exec. `None` on
+    // non-unix, where the group-targeted kill ladder does not apply.
+    process_group: Option<u32>,
 }
 
 #[derive(Default)]
@@ -456,6 +463,13 @@ pub fn terminal_spawn(
         .spawn_command(cmd)
         .map_err(|err| format!("terminal_spawn_failed: {err}"))?;
     let killer = child.clone_killer();
+    // REL-01: portable-pty's unix spawn path calls `setsid()` in `pre_exec`
+    // before exec, so this child is already its own session and process-
+    // group leader -- its pid equals its pgid for its whole lifetime.
+    #[cfg(unix)]
+    let process_group = child.process_id();
+    #[cfg(not(unix))]
+    let process_group: Option<u32> = None;
 
     let session = Arc::new(TerminalSession {
         kind: kind.clone(),
@@ -468,6 +482,7 @@ pub fn terminal_spawn(
         resize_lock: Mutex::new(()),
         stream: stream.clone(),
         closing: AtomicBool::new(false),
+        process_group,
     });
     // D-03: the sessions registry holds Arc<TerminalSession> handles whose
     // authoritative state lives in the session struct; every reader
@@ -846,6 +861,162 @@ pub fn terminal_resize(
     Ok(())
 }
 
+// REL-01/D-09: timeout-gated escalation ladder, targeted at the terminal
+// child's own process group (never a bare pid, never the session id). The
+// grace period between stages and the poll interval used while waiting for
+// a stage to take effect.
+#[cfg(unix)]
+const KILL_ESCALATION_GRACE: Duration = Duration::from_secs(2);
+#[cfg(unix)]
+const ESCALATION_POLL: Duration = Duration::from_millis(50);
+#[cfg(unix)]
+const SIGHUP: i32 = 1;
+#[cfg(unix)]
+const SIGTERM: i32 = 15;
+#[cfg(unix)]
+const SIGKILL: i32 = 9;
+
+/// How far an escalation ladder got before the process group disappeared.
+#[cfg(unix)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum KillStage {
+    Hangup,
+    Terminate,
+    Kill,
+}
+
+/// Sends `signal` to the process group led by `pgid` (i.e. `kill(-pgid,
+/// signal)`), reusing the raw FFI idiom already in
+/// `command_output.rs::terminate_unix_process_group`. Returns `Ok(true)`
+/// when the signal was delivered, `Ok(false)` when the group is already
+/// gone (ESRCH), and `Err` for any other failure.
+#[cfg(unix)]
+fn signal_process_group(pgid: u32, signal: i32) -> std::io::Result<bool> {
+    extern "C" {
+        fn kill(pid: i32, signal: i32) -> i32;
+    }
+    let group =
+        i32::try_from(pgid).map_err(|_| std::io::Error::other("process group id exceeds i32"))?;
+    let result = unsafe { kill(-group, signal) };
+    if result == 0 {
+        return Ok(true);
+    }
+    let err = std::io::Error::last_os_error();
+    if err.raw_os_error() == Some(3) {
+        // ESRCH: the group is already gone.
+        return Ok(false);
+    }
+    Err(err)
+}
+
+/// Probes liveness with signal 0. Any error other than ESRCH (e.g. EPERM)
+/// is treated as "still alive" -- the group exists but this process cannot
+/// signal it, not that it is gone.
+#[cfg(unix)]
+fn process_group_alive(pgid: u32) -> bool {
+    signal_process_group(pgid, 0).unwrap_or(true)
+}
+
+#[cfg(unix)]
+fn wait_for_group_exit(pgid: u32, grace: Duration) -> bool {
+    let deadline = std::time::Instant::now() + grace;
+    loop {
+        if !process_group_alive(pgid) {
+            return true;
+        }
+        if std::time::Instant::now() >= deadline {
+            return false;
+        }
+        thread::sleep(ESCALATION_POLL);
+    }
+}
+
+/// Runs the escalation ladder assuming SIGHUP was already sent to `pgid`.
+/// Polls for the group's death for up to `grace`, then sends SIGTERM and
+/// polls again for up to `grace`, then sends SIGKILL. Returns the stage the
+/// group was finally observed gone at (or `Kill` if SIGKILL was needed).
+#[cfg(unix)]
+fn escalate_process_group(pgid: u32, grace: Duration) -> KillStage {
+    if wait_for_group_exit(pgid, grace) {
+        return KillStage::Hangup;
+    }
+    let _ = signal_process_group(pgid, SIGTERM);
+    if wait_for_group_exit(pgid, grace) {
+        return KillStage::Terminate;
+    }
+    let _ = signal_process_group(pgid, SIGKILL);
+    KillStage::Kill
+}
+
+/// D-11: one warn-level line when escalation went past SIGHUP, `None` when
+/// SIGHUP alone was enough (the common case, not worth logging).
+#[cfg(unix)]
+fn escalation_warn_line(pgid: u32, stage: KillStage) -> Option<String> {
+    match stage {
+        KillStage::Hangup => None,
+        KillStage::Terminate => Some(format!(
+            "[terminal] pgid {pgid} survived SIGHUP; escalated to SIGTERM"
+        )),
+        KillStage::Kill => Some(format!(
+            "[terminal] pgid {pgid} survived SIGHUP; escalated to SIGKILL"
+        )),
+    }
+}
+
+/// Sends SIGHUP to `pgid`'s process group and, unless the group is already
+/// gone, spawns a detached thread to run the rest of the escalation ladder.
+/// Holds no session/registry/killer lock while that thread sleeps.
+#[cfg(unix)]
+fn begin_group_kill(state: &TerminalState, pgid: u32) -> Result<(), String> {
+    match signal_process_group(pgid, SIGHUP) {
+        Ok(true) => {
+            // D-03: `escalations` is a registry of process-group ids that
+            // `escalate_process_group` re-validates via `process_group_alive`
+            // before every signal it sends, so a poisoned guard cannot serve
+            // a tainted invariant -- worst case a dead pgid gets probed once
+            // more before this thread drops it from the set.
+            crate::lock_recovery::recover_guard(
+                state.escalations.lock(),
+                "terminal",
+                "TERMINAL_ESCALATIONS",
+            )
+            .insert(pgid);
+            let escalations = state.escalations.clone();
+            thread::spawn(move || {
+                let stage = escalate_process_group(pgid, KILL_ESCALATION_GRACE);
+                if let Some(line) = escalation_warn_line(pgid, stage) {
+                    eprintln!("{line}");
+                }
+                crate::lock_recovery::recover_guard(
+                    escalations.lock(),
+                    "terminal",
+                    "TERMINAL_ESCALATIONS",
+                )
+                .remove(&pgid);
+            });
+            Ok(())
+        }
+        Ok(false) => Ok(()),
+        Err(err) => Err(format!("terminal_kill_failed: {err}")),
+    }
+}
+
+/// Falls back to the session's stored `ChildKiller` (a bare, non-escalating
+/// signal on unix) for sessions with no captured process group, and for
+/// every session on non-unix platforms.
+fn kill_via_signaller(session: &TerminalSession) -> Result<(), String> {
+    // D-03: the killer value is an Arc<Mutex<ChildKiller>> wrapping a live
+    // process handle that survives poisoning; only the guard flag is
+    // tainted, so recovering keeps the success-path semantics (D-02):
+    // `closing` stays latched and the kill proceeds against existing PTY
+    // sessions.
+    let mut killer =
+        crate::lock_recovery::recover_guard(session.killer.lock(), "terminal", "TERMINAL_KILLER");
+    killer
+        .kill()
+        .map_err(|err| format!("terminal_kill_failed: {err}"))
+}
+
 pub fn terminal_kill(state: &TerminalState, handle: TerminalSessionHandle) -> Result<(), String> {
     let session = match get_session_generation(state, &handle) {
         Ok(session) => session,
@@ -857,22 +1028,24 @@ pub fn terminal_kill(state: &TerminalState, handle: TerminalSessionHandle) -> Re
     if session.closing.swap(true, Ordering::AcqRel) {
         return Ok(());
     }
-    // D-03: the killer value is an Arc<Mutex<ChildKiller>> wrapping a live
-    // process handle that survives poisoning; only the guard flag is
-    // tainted, so recovering keeps the success-path semantics (D-02):
-    // `closing` stays latched and the kill proceeds against existing PTY
-    // sessions.
-    let mut killer =
-        crate::lock_recovery::recover_guard(session.killer.lock(), "terminal", "TERMINAL_KILLER");
-    if let Err(err) = killer.kill() {
+
+    #[cfg(unix)]
+    let kill_result = match session.process_group {
+        Some(pgid) => begin_group_kill(state, pgid),
+        None => kill_via_signaller(&session),
+    };
+    #[cfg(not(unix))]
+    let kill_result = kill_via_signaller(&session);
+
+    if let Err(err) = kill_result {
         session.closing.store(false, Ordering::Release);
-        return Err(format!("terminal_kill_failed: {err}"));
+        return Err(err);
     }
-    // Unregister on kill. `ChildKiller::kill` only raises SIGHUP on unix, so a
-    // child that traps it survives and its waiter thread never removes the
-    // entry — leaving an immortal session that can never be killed again
-    // because `closing` is latched. The exit thread's `Arc::ptr_eq` guard makes
-    // this removal safe if the child does exit later.
+    // Unregister on kill. The group escalation ladder (unix) or the stored
+    // `ChildKiller` (non-unix / no captured group) now guarantees the child
+    // eventually terminates, so the waiter thread always removes this entry
+    // later if it has not already. The `Arc::ptr_eq` guard still protects a
+    // late exit here against a session id that was recycled in the meantime.
     if let Ok(mut guard) = state.sessions.lock() {
         if guard
             .get(&handle.session_id)
@@ -2439,5 +2612,266 @@ mod phase08_18 {
     fn done<T>(rx: mpsc::Receiver<T>) -> T {
         rx.recv_timeout(Duration::from_secs(10))
             .expect("fixture completion")
+    }
+}
+
+/// REL-01: real-PTY tests for the process-group escalation ladder (D-09,
+/// D-10) and the generation-token invariant that protects a recycled
+/// session id from a dying child's late output.
+#[cfg(all(test, unix))]
+mod phase09_02 {
+    use super::*;
+    use crate::atomic_file::phase08_06::run;
+    use std::time::Instant;
+    use tauri::Manager;
+
+    type TestApp = tauri::AppHandle<tauri::test::MockRuntime>;
+
+    fn app() -> tauri::App<tauri::test::MockRuntime> {
+        let app = tauri::test::mock_app();
+        app.manage(TerminalState::default());
+        app
+    }
+
+    fn sh_args(session_id: String, script: &str) -> TerminalSpawnArgs {
+        TerminalSpawnArgs {
+            session_id,
+            kind: "shell".to_string(),
+            cwd: None,
+            command: Some("/bin/sh".to_string()),
+            extra_args: Some(vec!["-c".to_string(), script.to_string()]),
+            extra_env: None,
+            cols: Some(120),
+            rows: Some(10),
+        }
+    }
+
+    fn cat_args(session_id: String) -> TerminalSpawnArgs {
+        TerminalSpawnArgs {
+            session_id,
+            kind: "shell".to_string(),
+            cwd: None,
+            command: Some("/bin/cat".to_string()),
+            extra_args: None,
+            extra_env: None,
+            cols: Some(120),
+            rows: Some(10),
+        }
+    }
+
+    fn current(session_id: String, generation: String) -> TerminalSessionHandle {
+        TerminalSessionHandle {
+            session_id,
+            generation,
+        }
+    }
+
+    async fn spawn_session(app: TestApp, args: TerminalSpawnArgs) -> Result<String, String> {
+        ipc::terminal_spawn(app.state(), args, Channel::new(|_| Ok(()))).await
+    }
+
+    async fn kill_session(app: TestApp, handle: TerminalSessionHandle) -> Result<(), String> {
+        ipc::terminal_kill(app.state(), handle).await
+    }
+
+    async fn text_of(app: TestApp, handle: TerminalSessionHandle) -> Result<String, String> {
+        ipc::terminal_text(app.state(), handle).await
+    }
+
+    async fn write_cmd(
+        app: TestApp,
+        handle: TerminalSessionHandle,
+        data: String,
+    ) -> Result<(), String> {
+        ipc::terminal_write(app.state(), handle, data).await
+    }
+
+    /// Reads a live session's spawn-time process group straight from the
+    /// registry — must be called before the session is killed and removed.
+    fn process_group_of(app: &TestApp, session_id: &str) -> Option<u32> {
+        let state = app.state::<TerminalState>();
+        let sessions = state.sessions.lock().unwrap();
+        sessions
+            .get(session_id)
+            .and_then(|session| session.process_group)
+    }
+
+    fn wait_until_group_gone(pgid: u32, timeout: Duration) -> bool {
+        let deadline = Instant::now() + timeout;
+        loop {
+            if !process_group_alive(pgid) {
+                return true;
+            }
+            if Instant::now() >= deadline {
+                return false;
+            }
+            thread::sleep(Duration::from_millis(50));
+        }
+    }
+
+    fn read_pgid(pid: u32) -> Option<u32> {
+        let output = std::process::Command::new("ps")
+            .args(["-o", "pgid=", "-p", &pid.to_string()])
+            .output()
+            .ok()?;
+        if !output.status.success() {
+            return None;
+        }
+        String::from_utf8_lossy(&output.stdout)
+            .trim()
+            .parse::<u32>()
+            .ok()
+    }
+
+    /// Blocks until the session's PTY output contains `marker`. Scripts
+    /// below echo a marker right after `trap` installs, so the fixture
+    /// never races the shell's own startup (sending SIGHUP before the trap
+    /// is installed would kill the shell via the default disposition,
+    /// producing a false pass rather than proving escalation ran).
+    fn wait_for_marker(app: &TestApp, handle: &TerminalSessionHandle, marker: &str) {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            let text = run(text_of(app.clone(), handle.clone())).unwrap();
+            if text.contains(marker) {
+                return;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "marker {marker:?} never appeared in terminal output: {text:?}"
+            );
+            thread::sleep(Duration::from_millis(20));
+        }
+    }
+
+    #[test]
+    fn phase09_02_sighup_trapping_child_dies_via_escalation_ladder() {
+        let app = app();
+        let app = app.handle().clone();
+        let session_id = "phase09-02-sighup-trap".to_string();
+        let generation = run(spawn_session(
+            app.clone(),
+            sh_args(
+                session_id.clone(),
+                "trap '' HUP; echo TRAP-READY; while :; do sleep 1; done",
+            ),
+        ))
+        .unwrap();
+        let handle = current(session_id.clone(), generation);
+        wait_for_marker(&app, &handle, "TRAP-READY");
+
+        let pgid = process_group_of(&app, &session_id).expect("process group captured at spawn");
+
+        let start = Instant::now();
+        run(kill_session(app.clone(), handle)).unwrap();
+        assert!(
+            start.elapsed() < Duration::from_millis(500),
+            "terminal_kill must return immediately; escalation runs in the background"
+        );
+
+        thread::sleep(Duration::from_secs(1));
+        assert!(
+            process_group_alive(pgid),
+            "a SIGHUP-trapping group must still be alive ~1s later (the trap made escalation necessary)"
+        );
+
+        assert!(
+            wait_until_group_gone(pgid, Duration::from_secs(8)),
+            "process group {pgid} survived the full escalation ladder past the 8s deadline"
+        );
+    }
+
+    #[test]
+    fn phase09_02_backgrounded_grandchild_survives_tab_close() {
+        let app = app();
+        let app = app.handle().clone();
+        let session_id = "phase09-02-grandchild".to_string();
+        let tempdir = tempfile::tempdir().unwrap();
+        let pid_file = tempdir.path().join("gc.pid");
+        let script = format!(
+            "set -m; sleep 60 & echo $! > {pid}; trap '' HUP; echo TRAP-READY; while :; do sleep 1; done",
+            pid = pid_file.display()
+        );
+        let generation = run(spawn_session(
+            app.clone(),
+            sh_args(session_id.clone(), &script),
+        ))
+        .unwrap();
+        let handle = current(session_id.clone(), generation);
+        wait_for_marker(&app, &handle, "TRAP-READY");
+
+        let session_pgid =
+            process_group_of(&app, &session_id).expect("process group captured at spawn");
+
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let grandchild_pid: u32 = loop {
+            if let Ok(contents) = std::fs::read_to_string(&pid_file) {
+                if let Ok(pid) = contents.trim().parse::<u32>() {
+                    break pid;
+                }
+            }
+            assert!(
+                Instant::now() < deadline,
+                "grandchild pid file never appeared"
+            );
+            thread::sleep(Duration::from_millis(50));
+        };
+
+        let grandchild_pgid = read_pgid(grandchild_pid)
+            .expect("grandchild process group must be discoverable via ps");
+        assert_ne!(
+            grandchild_pgid, session_pgid,
+            "precondition: the backgrounded grandchild must be in its own process group \
+             (set -m job control) — if this fails the test fixture, not the fix, is wrong"
+        );
+
+        run(kill_session(app.clone(), handle)).unwrap();
+        assert!(
+            wait_until_group_gone(session_pgid, Duration::from_secs(8)),
+            "session process group {session_pgid} never died"
+        );
+        assert!(
+            process_group_alive(grandchild_pgid),
+            "the backgrounded grandchild's group must survive the tab's kill ladder"
+        );
+
+        // Cleanup: the grandchild is a real detached `sleep 60` outside any
+        // Maru session; make sure it does not outlive this test.
+        let _ = signal_process_group(grandchild_pgid, SIGKILL);
+    }
+
+    #[test]
+    fn phase09_02_generation_invariant_blocks_late_output_and_stale_handle() {
+        let app = app();
+        let app = app.handle().clone();
+        let session_id = "phase09-02-generation".to_string();
+        let old_generation = run(spawn_session(
+            app.clone(),
+            sh_args(
+                session_id.clone(),
+                "trap 'echo LATE-OLD-GEN' HUP; echo TRAP-READY; while :; do sleep 1; done",
+            ),
+        ))
+        .unwrap();
+        let old_handle = current(session_id.clone(), old_generation);
+        wait_for_marker(&app, &old_handle, "TRAP-READY");
+
+        run(kill_session(app.clone(), old_handle.clone())).unwrap();
+
+        let new_generation = run(spawn_session(app.clone(), cat_args(session_id.clone()))).unwrap();
+        let new_handle = current(session_id.clone(), new_generation);
+
+        thread::sleep(Duration::from_millis(2500));
+
+        let text = run(text_of(app.clone(), new_handle)).unwrap();
+        assert!(
+            !text.contains("LATE-OLD-GEN"),
+            "late output from the killed old-generation child must never reach the new session: {text:?}"
+        );
+
+        let write_result = run(write_cmd(app.clone(), old_handle, "irrelevant\n".into()));
+        assert!(
+            write_result.is_err(),
+            "the old generation's handle must be rejected after respawn"
+        );
     }
 }
