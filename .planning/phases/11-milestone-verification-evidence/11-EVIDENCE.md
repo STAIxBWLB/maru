@@ -68,3 +68,79 @@ config is unchanged, and it matches.
 - `git worktree list` no longer shows the probe worktree.
 - `git merge-base --is-ancestor 90f64713c13af7fae5e2a2786980ac1ee23be424 origin/main` exited 1.
 - `git merge-base --is-ancestor 90f64713c13af7fae5e2a2786980ac1ee23be424 HEAD` exited 1.
+
+## TEST-02: coverage baseline
+
+Transcribed verbatim from 11-01-SUMMARY.md's "Evidence: coverage baseline" section, measured
+at commit `eb0ea3fd`.
+
+### Coverage totals
+
+| Scope | Lines | Functions |
+|---|---|---|
+| TypeScript (src + scripts) | 61.03% (16838/27590) | 54.04% (4594/8501) |
+| Rust maru (src-tauri/src) | 90.47% (101190/111846) | 80.32% (9577/11923) |
+| Rust maru-cli (src-tauri/maru-cli) | no files in report | no files in report |
+| Rust workspace total | 90.47% (101201/111860) | 80.32% (9581/11928) |
+
+### Measurement record
+
+| Item | Value |
+|------|-------|
+| Measured-at commit | `eb0ea3fd` |
+| rustc | `rustc 1.97.1 (8bab26f4f 2026-07-14) (Homebrew)` |
+| LLVM version | `22.1.8` |
+| cargo-llvm-cov | `0.9.1` |
+| vitest | `4.1.5` |
+| @vitest/coverage-v8 | `4.1.5` (exact pin) |
+| TS HTML report | `coverage/ts/index.html` (gitignored, not committed) |
+| Rust HTML report | `coverage/rust/html/index.html` (gitignored, not committed) |
+
+The totals above are recorded once, for future comparison by eye. TEST-02 sets no
+minimum-percentage threshold; `make coverage` never fails on a percentage, and no
+`coverage.thresholds`/`fail-under`/`lcov` gate exists anywhere in the new code (D-04).
+
+### CI readiness
+
+- `actionlint .github/workflows/coverage.yml`: exit 0, no output (11-02-SUMMARY.md D1).
+- Local Job Summary replay: `coverage/` regenerated with a real `make coverage` run (228
+  Vitest files / 2186 tests pass, 1800 Rust `--lib` tests pass), then
+  `GITHUB_STEP_SUMMARY=<tmpfile> node scripts/coverage-summary.mjs` wrote the full four-row
+  totals table above into the stand-in file (11-02-SUMMARY.md D2).
+- `git diff --quiet $(git merge-base HEAD origin/main) -- .github/workflows/ci.yml
+  rust-toolchain.toml`: exit 0, both files unchanged by the coverage workflow's addition
+  (11-02-SUMMARY.md D3).
+
+### Post-merge check
+
+Pending. GitHub only runs a workflow that already exists on the default branch, and
+`.github/workflows/coverage.yml` triggers only on `push` to `main` with no `pull_request`
+or `workflow_dispatch` trigger (D-01), so the first real run happens on the first push to
+`main` after this phase's PR merges - this plan cannot observe it. Record the following
+here once that push happens; until then this stays pending, never passed:
+
+- Run URL: (pending)
+- Job Summary totals table: (pending)
+- `coverage-report` artifact: (pending)
+
+## VALID-01 and SEC-03: reconciled records
+
+Values below are read from each file's current frontmatter, not copied from SUMMARY prose.
+
+| Record | Path | status | nyquist_compliant / threats_open | Audit date |
+|--------|------|--------|-----------------------------------|------------|
+| Phase 01 Validation | `.planning/milestones/v1.0-phases/01-trustworthy-verify-signal/01-VALIDATION.md` | validated | nyquist_compliant: true | 2026-09-25 |
+| Phase 02 Validation | `.planning/milestones/v1.0-phases/02-shared-scanner-and-path-invariants/02-VALIDATION.md` | validated | nyquist_compliant: true | 2026-09-25 |
+| Phase 03 Validation | `.planning/milestones/v1.0-phases/03-typed-ipc-error-contract/03-VALIDATION.md` | validated | nyquist_compliant: true | 2026-09-25 |
+| Phase 02 Security | `.planning/milestones/v1.0-phases/02-shared-scanner-and-path-invariants/02-SECURITY.md` | verified | threats_open: 0 | 2026-09-25 |
+| Phase 03 Security | `.planning/milestones/v1.0-phases/03-typed-ipc-error-contract/03-SECURITY.md` | verified | threats_open: 0 | 2026-08-28, commit `4fd3ea3b` (predates this phase) |
+
+Phase 03's security report already existed before v1.1 Phase 11 started; it is listed here
+only to complete the four-report set the v1.0 audit's "Phases 02-03 have no SECURITY.md" gap
+referenced.
+
+### GATE-04 pointer resolution
+
+`01-VALIDATION.md`'s GATE-04 row cites `.planning/phases/11-milestone-verification-evidence/11-EVIDENCE.md`
+(GATE-08 section). Confirmed: this file exists and contains the `## GATE-08: narrowed
+Playwright trace re-proof` heading above.
