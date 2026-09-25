@@ -93,11 +93,6 @@
   color: var(--accent);
 }
 
-.today-nav-item:focus-visible {
-  outline: 2px solid var(--focus-ring);
-  outline-offset: 1px;
-}
-
 .today-nav-item svg {
   flex: none;
 }
@@ -222,12 +217,6 @@
   white-space: nowrap;
   font-size: var(--type-label-size);
   color: var(--danger);
-}
-
-.today-quick-skip:focus-visible,
-.today-refresh-action:focus-visible {
-  outline: 2px solid var(--focus-ring);
-  outline-offset: 1px;
 }
 
 .today-stepper {
@@ -973,8 +962,6 @@
 }
 
 .today-braindump-textarea:focus {
-  outline: 2px solid var(--accent-soft);
-  outline-offset: 0;
   border-color: var(--accent);
 }
 
