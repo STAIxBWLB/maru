@@ -269,7 +269,17 @@ verify-integration: $(ICON_PATH) ## Smoke the real installed AI CLIs (availabili
 # condition, and its CI job runs only on pushes to `main` (plan 11-02).
 .PHONY: coverage
 coverage: node_modules $(ICON_PATH) ## TS + Rust coverage reports, non-gating (TEST-02)
+	@$(CARGO) llvm-cov --version >/dev/null 2>&1 || { \
+		echo "coverage: cargo-llvm-cov is not installed, so the Rust half cannot run."; \
+		echo "coverage: install it with: cargo install cargo-llvm-cov --locked"; \
+		echo "coverage: then either run: rustup component add llvm-tools"; \
+		echo "coverage: or export LLVM_COV and LLVM_PROFDATA pointing at an LLVM whose"; \
+		echo "coverage: major version matches \`rustc --version --verbose\` (for example Homebrew llvm)."; \
+		exit 1; \
+	}
 	$(PNPM) exec vitest run src scripts --exclude '**/check-command-isolation.test.mjs' --coverage --coverage.reporter=html --coverage.reporter=json-summary --coverage.reportsDirectory=coverage/ts
+	cd $(TAURI_DIR) && $(CARGO) llvm-cov --workspace --html --output-dir ../coverage/rust
+	cd $(TAURI_DIR) && $(CARGO) llvm-cov report --json --summary-only --output-path ../coverage/rust/coverage.json
 	$(NODE) scripts/coverage-summary.mjs
 
 # ---------------------------------------------------------------------------
