@@ -16,10 +16,13 @@ import { scheduleStartupIdle } from "./startupProfile";
  * previous one settled and the browser is idle again, so warming ~3 MB of
  * mode JS never competes with bootstrap or user input in one burst.
  *
- * The 2000ms timeout is intentionally above the helper's 1500ms default:
+ * The first step waits up to 2000ms, above the helper's 1500ms default:
  * idle preload has no UI deadline, while the default is reserved for
- * startup-critical work. Individual load failures are swallowed so a single
- * broken chunk cannot produce an unhandled rejection or stop the queue.
+ * startup-critical work. Later steps cap the wait at 250ms because WKWebView
+ * has no requestIdleCallback and the helper falls back to a plain timer; a
+ * 2s timer per mode would leave the last chunk cold for ~30s. Individual
+ * load failures are swallowed so a single broken chunk cannot produce an
+ * unhandled rejection or stop the queue.
  *
  * Returns a cancel handle that stops the remaining queue.
  */
@@ -31,7 +34,7 @@ export function scheduleModePreload(): () => void {
     const descriptor = getModeDescriptor(queue.shift() ?? "");
     const warm = descriptor?.isAvailable() ? descriptor.load().catch(() => {}) : Promise.resolve();
     void warm.then(() => {
-      if (!cancelled && queue.length > 0) cancelIdle = scheduleStartupIdle(step, 2000);
+      if (!cancelled && queue.length > 0) cancelIdle = scheduleStartupIdle(step, 250);
     });
   };
   cancelIdle = scheduleStartupIdle(step, 2000);

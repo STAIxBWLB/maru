@@ -1,13 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const idle: Array<() => void> = [];
+const timeouts: number[] = [];
 const loads: string[] = [];
 const failing = new Set<string>();
 const unavailable = new Set<string>();
 
 vi.mock("./startupProfile", () => ({
-  scheduleStartupIdle: (work: () => void) => {
+  scheduleStartupIdle: (work: () => void, timeout: number) => {
     idle.push(work);
+    timeouts.push(timeout);
     return () => {
       const index = idle.indexOf(work);
       if (index >= 0) idle.splice(index, 1);
@@ -39,6 +41,7 @@ async function runIdle() {
 
 beforeEach(() => {
   idle.length = 0;
+  timeouts.length = 0;
   loads.length = 0;
   failing.clear();
   unavailable.clear();
@@ -55,6 +58,8 @@ describe("scheduleModePreload", () => {
     await runIdle();
     expect(loads).toEqual(["a", "b", "c"]);
     expect(idle).toHaveLength(0);
+    // First step waits for real idle; later steps stay short for the timer fallback.
+    expect(timeouts).toEqual([2000, 250, 250]);
   });
 
   it("skips unavailable modes and keeps going after a failed load", async () => {
