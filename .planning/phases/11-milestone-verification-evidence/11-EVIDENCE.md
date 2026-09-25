@@ -138,8 +138,11 @@ Confirmed on 2026-09-26. `.github/workflows/coverage.yml` triggers only on `push
 | Rust workspace total | 90.37% (100899/111645) | 80.46% (9573/11898) |
 
 The CI figures are measured on Linux (ubuntu-22.04, pinned rustc 1.98.0); the local baseline
-above is macOS with Homebrew rustc 1.97.1. The Rust line totals differ by about 0.1 point
-(platform-conditional code); the TypeScript totals match within rounding. Recorded for
+above is macOS with Homebrew rustc 1.97.1. Differences from the local baseline: Rust `maru`
+lines 90.38% vs 90.49% and functions 80.47% vs 80.33% (platform-conditional code and a
+different toolchain); TypeScript lines 61.03% in both (16842/27598 vs 16838/27590) and
+functions 54.04% vs 54.00% (4598/8508 vs 4594/8507), because `scripts/coverage-summary.mjs`
+and its test changed in the PR #351 review after the local measurement. Recorded for
 comparison by eye only; TEST-02 sets no threshold (D-04). UAT: 11-UAT.md test 1, pass.
 
 ## VALID-01 and SEC-03: reconciled records

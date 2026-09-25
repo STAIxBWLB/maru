@@ -18,7 +18,8 @@ human_verification:
 verifies: coverage is visible, the narrowed CI trace configuration is proven, and v1.0's closeout
 evidence debt is retired.
 **Verified:** 2026-09-26T00:20:00Z
-**Status:** human_needed
+**Status:** passed (post-merge coverage run 36174321763 confirmed 2026-09-26; see 11-UAT.md and 11-EVIDENCE.md `### Post-merge check`)
+**Note:** rows below that say the first coverage run is "pending" record the state at verification time, before PR #351 merged; that item is now resolved.
 **Re-verification:** No; initial verification
 
 ## Goal Achievement

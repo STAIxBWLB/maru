@@ -29,13 +29,13 @@ See: .planning/PROJECT.md (updated 2026-09-26)
 
 ## Current Position
 
-Phase: 9 — Durability and Session Lifecycle
+Phase: 9 - Durability and Session Lifecycle
 Plan: Not started (8 plans, planned)
 Status: Ready to execute
 Last Activity Description: Phase 11 complete, transitioned to Phase 9
-Last activity: 2026-09-26 — Phase 11 complete, transitioned to Phase 9
+Last activity: 2026-09-26 - Phase 11 complete, transitioned to Phase 9
 
-Progress: [█████████████████░░░] 48/56 plans (86%), 5/6 phases
+Progress: [████████░░] 83% (5/6 phases; 48/56 plans)
 
 ## Performance Metrics
 
