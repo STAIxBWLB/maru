@@ -38,6 +38,7 @@ import {
   subscribeToSystemTheme,
 } from "../../lib/theme";
 import { Button } from "../ui/Button";
+import { TextInput } from "../ui/Field";
 
 // Memoized, not raw dynamic import()s: this component's several effects
 // each reach for the same handful of Tauri modules on every mount (all
@@ -154,13 +155,22 @@ let confirmQueue: Promise<unknown> = Promise.resolve();
  * (`onCloseRequested`'s doc comment in `@tauri-apps/api/window` uses it as
  * the canonical example).
  */
-async function confirmDestructive(message: string): Promise<boolean> {
+async function confirmDestructive(
+  message: string,
+  stillNeeded: () => boolean = () => true,
+): Promise<boolean> {
   const answer = confirmQueue.then(async () => {
+    // Re-checked once this confirm's turn comes: the reason to ask (a dirty
+    // edit) can be gone after waiting behind another sheet (#371).
+    if (!stillNeeded()) return true;
     const { confirm } = await loadDialogModule();
     return confirm(message, { kind: "warning" });
   });
-  confirmQueue = answer.catch(() => undefined);
-  return answer;
+  // A failed dialog is a "no": it keeps the edit, and every caller answers
+  // instead of leaving main waiting on a check that never settles (#371).
+  const settled = answer.catch(() => false);
+  confirmQueue = settled;
+  return settled;
 }
 
 export function SkillEditorWindow({ initialWorkPath, initialSkillId }: SkillEditorWindowProps) {
@@ -176,6 +186,12 @@ export function SkillEditorWindow({ initialWorkPath, initialSkillId }: SkillEdit
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const dirtyRef = useRef(false);
+  // Latest save for the window-scoped Cmd+S listener below (#370).
+  const saveRef = useRef<() => Promise<void>>(async () => {});
+  // The Save As name being typed, or null while the field is closed. Asked
+  // inside the window: wry implements no JavaScript prompt panel, so
+  // window.prompt() returns null in the app and Save As never ran (#370).
+  const [saveAsName, setSaveAsName] = useState<string | null>(null);
   // The quit attempt the user already confirmed for this exact text. main
   // asks again right before it destroys this window (its own dialogs are
   // in-page, so this window stays editable meanwhile); only a newer edit or
@@ -252,7 +268,12 @@ export function SkillEditorWindow({ initialWorkPath, initialSkillId }: SkillEdit
       if (payload.skillId === skillIdRef.current && payload.workPath === workPathRef.current) {
         return;
       }
-      if (dirtyRef.current && !(await confirmDestructive(t("skillEditor.switchConfirm")))) return;
+      if (
+        dirtyRef.current &&
+        !(await confirmDestructive(t("skillEditor.switchConfirm"), () => dirtyRef.current))
+      ) {
+        return;
+      }
       await loadSkill(payload.workPath, payload.skillId);
     },
     [loadSkill, t],
@@ -292,8 +313,12 @@ export function SkillEditorWindow({ initialWorkPath, initialSkillId }: SkillEdit
         getCurrentWindow().onCloseRequested(async (event) => {
           if (disposed) return;
           if (!dirtyRef.current) return;
-          const proceed = await confirmDestructive(t("skillEditor.closeConfirm"));
-          if (disposed) return;
+          const proceed = await confirmDestructive(
+            t("skillEditor.closeConfirm"),
+            () => dirtyRef.current,
+          );
+          // No disposed check here: the close is still waiting on this answer,
+          // so a Cancel must block it even if the effect was re-run (#371).
           if (!proceed) event.preventDefault();
         }),
       )
@@ -331,7 +356,7 @@ export function SkillEditorWindow({ initialWorkPath, initialSkillId }: SkillEdit
             const proceed =
               !dirtyRef.current ||
               (attempt !== null && quitApprovedAttemptRef.current === attempt) ||
-              (await confirmDestructive(t("skillEditor.closeConfirm")));
+              (await confirmDestructive(t("skillEditor.closeConfirm"), () => dirtyRef.current));
             quitApprovedAttemptRef.current = proceed ? attempt : null;
             // Answer even if this effect was torn down meanwhile (a locale
             // change re-registers it): main is waiting on this very answer.
@@ -355,6 +380,12 @@ export function SkillEditorWindow({ initialWorkPath, initialSkillId }: SkillEdit
     let disposed = false;
     let dispose: (() => void) | null = null;
     void listenForMenuCommand((id) => {
+      if (id === "file.save") {
+        // Since #361 menu commands reach only the focused window, so Cmd+S
+        // here is the editor's own Save (#370).
+        if (dirtyRef.current) void saveRef.current();
+        return;
+      }
       if (id === "file.close_active" || id === "window.close") {
         // Routes through onCloseRequested above, so the dirty guard still applies.
         void loadWindowModule()
@@ -369,7 +400,10 @@ export function SkillEditorWindow({ initialWorkPath, initialSkillId }: SkillEdit
         // this window's own guard instead of leaving Cmd+Q dead.
         void (async () => {
           if (disposed) return;
-          if (dirtyRef.current && !(await confirmDestructive(t("skillEditor.closeConfirm")))) {
+          if (
+            dirtyRef.current &&
+            !(await confirmDestructive(t("skillEditor.closeConfirm"), () => dirtyRef.current))
+          ) {
             return;
           }
           if (disposed) return;
@@ -411,12 +445,16 @@ export function SkillEditorWindow({ initialWorkPath, initialSkillId }: SkillEdit
     }
   }, [emitUpdated, skill, t, text, workPath]);
 
-  const saveAs = useCallback(async () => {
+  useEffect(() => {
+    saveRef.current = save;
+  }, [save]);
+
+  const saveAs = useCallback(async (rawName: string) => {
     if (!skill) return;
-    const rawName = window.prompt(t("system.skills.saveAsPrompt"), `${skill.name}-copy`);
-    const name = rawName?.trim();
+    const name = rawName.trim();
     if (!name) return;
     if (!(await confirmDestructive(t("system.skills.saveAsConfirm", { name })))) return;
+    setSaveAsName(null);
     setSaving(true);
     setError(null);
     setMessage(null);
@@ -460,15 +498,49 @@ export function SkillEditorWindow({ initialWorkPath, initialSkillId }: SkillEdit
           <span className={dirty ? "save-state dirty" : "save-state saved"}>
             {dirty ? t("system.rules.dirty") : t("system.rules.saved")}
           </span>
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={() => void saveAs()}
-            disabled={!skill || loading || saving}
-            icon={<Save size={14} />}
-          >
-            {t("system.skills.saveAs")}
-          </Button>
+          {saveAsName === null ? (
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => skill && setSaveAsName(`${skill.name}-copy`)}
+              disabled={!skill || loading || saving}
+              icon={<Save size={14} />}
+            >
+              {t("system.skills.saveAs")}
+            </Button>
+          ) : (
+            <form
+              className="skill-editor-save-as"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void saveAs(saveAsName);
+              }}
+            >
+              <TextInput
+                aria-label={t("system.skills.saveAsPrompt")}
+                placeholder={t("system.skills.saveAsPrompt")}
+                value={saveAsName}
+                autoFocus
+                disabled={saving}
+                onChange={(event) => setSaveAsName(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Escape") setSaveAsName(null);
+                }}
+              />
+              <Button
+                type="submit"
+                variant="secondary"
+                size="sm"
+                disabled={!saveAsName.trim() || saving}
+                icon={<Save size={14} />}
+              >
+                {t("system.skills.saveAs")}
+              </Button>
+              <Button type="button" variant="ghost" size="sm" onClick={() => setSaveAsName(null)}>
+                {t("dialog.cancel")}
+              </Button>
+            </form>
+          )}
           <Button
             variant="primary"
             size="sm"

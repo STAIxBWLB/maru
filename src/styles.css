@@ -1581,6 +1581,16 @@ a {
   gap: 7px;
 }
 
+.skill-editor-save-as {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.skill-editor-save-as .text-input {
+  width: 180px;
+}
+
 .skill-editor-window-notice {
   display: flex;
   align-items: center;
