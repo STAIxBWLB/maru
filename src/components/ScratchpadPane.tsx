@@ -63,6 +63,8 @@ import {
   type ScratchpadDraft,
 } from "../lib/scratchpad";
 import { setError } from "../lib/errorStore";
+import { createDebouncedSaver } from "../lib/debouncedSave";
+import { useTeardownFlush } from "../lib/teardownSave";
 import {
   SCRATCHPAD_LIST_HEIGHT,
   SCRATCHPAD_LIST_WIDTH,
@@ -293,7 +295,6 @@ export function ScratchpadPane({
   const contentRef = useRef("");
   const dirtyRef = useRef(false);
   const editSerialRef = useRef(0);
-  const autoSaveTimerRef = useRef<number | null>(null);
   const saveInFlightRef = useRef<Promise<boolean> | null>(null);
   const refreshSerialRef = useRef(0);
   const watcherRefreshTimerRef = useRef<number | null>(null);
@@ -304,11 +305,22 @@ export function ScratchpadPane({
   const refreshRequestEpochRef = useRef(refreshRequestEpoch);
   activeWorkPathRef.current = workPath;
 
-  const clearAutoSaveTimer = useCallback(() => {
-    if (!autoSaveTimerRef.current) return;
-    window.clearTimeout(autoSaveTimerRef.current);
-    autoSaveTimerRef.current = null;
-  }, []);
+  // The memo autosave lives on the shared debounced-save helper so unmount
+  // performs the pending save instead of only cancelling it (D-01, REL-02).
+  // `flushCurrentRef` gives the saver's stable `save` closure access to the
+  // latest `flushCurrent` without recreating the saver every render.
+  const lastSaveErrorRef = useRef<unknown>(null);
+  const flushCurrentRef = useRef<() => Promise<boolean>>(() => Promise.resolve(true));
+  const [saver] = useState(() =>
+    createDebouncedSaver<string>(async (scheduledWorkPath) => {
+      if (activeWorkPathRef.current !== scheduledWorkPath) return;
+      lastSaveErrorRef.current = null;
+      const saved = await flushCurrentRef.current();
+      if (!saved && lastSaveErrorRef.current) {
+        throw lastSaveErrorRef.current;
+      }
+    }, 700),
+  );
 
   const loadEditor = useCallback((document: ScratchpadDocument | null) => {
     editorRef.current = document;
@@ -397,7 +409,7 @@ export function ScratchpadPane({
 
   const flushCurrent = useCallback(
     async (options?: { force?: boolean; copyPath?: string }): Promise<boolean> => {
-      clearAutoSaveTimer();
+      saver.cancel();
       if (saveInFlightRef.current) {
         const priorSaved = await saveInFlightRef.current;
         if (!priorSaved) return false;
@@ -452,6 +464,7 @@ export function ScratchpadPane({
           return true;
         })
         .catch((error) => {
+          lastSaveErrorRef.current = error;
           const message = errorMessage(error);
           if (isRevisionConflict(error)) setConflict(true);
           setLocalError(message);
@@ -468,15 +481,19 @@ export function ScratchpadPane({
       }
       return saved;
     },
-    [clearAutoSaveTimer, loadEditor, refresh, workPath],
+    [saver, loadEditor, refresh, workPath],
   );
 
   useEffect(() => {
-    clearAutoSaveTimer();
+    flushCurrentRef.current = flushCurrent;
+  }, [flushCurrent]);
+
+  useEffect(() => {
+    saver.cancel();
     loadEditor(null);
     setRecoveryDraft(workPath ? readScratchpadDraft(workPath) : null);
     void refresh(false);
-  }, [clearAutoSaveTimer, loadEditor, refresh, workPath]);
+  }, [saver, loadEditor, refresh, workPath]);
 
   useEffect(() => {
     if (refreshRequestEpochRef.current === refreshRequestEpoch) return;
@@ -538,11 +555,14 @@ export function ScratchpadPane({
     };
   }, [refresh, workPath]);
 
-  useEffect(
-    () => () => {
-      clearAutoSaveTimer();
-    },
-    [clearAutoSaveTimer],
+  useTeardownFlush(
+    saver,
+    (scheduledWorkPath) => ({
+      workPath: scheduledWorkPath,
+      filePath: editorRef.current?.relativePath ?? "scratchpad",
+      content: contentRef.current,
+    }),
+    t,
   );
 
   const persistDraft = useCallback(
@@ -564,14 +584,9 @@ export function ScratchpadPane({
   );
 
   const scheduleAutoSave = useCallback(() => {
-    clearAutoSaveTimer();
-    const scheduledWorkPath = workPath;
-    autoSaveTimerRef.current = window.setTimeout(() => {
-      autoSaveTimerRef.current = null;
-      if (activeWorkPathRef.current !== scheduledWorkPath) return;
-      void flushCurrent();
-    }, 700);
-  }, [clearAutoSaveTimer, flushCurrent, workPath]);
+    if (workPath == null) return;
+    saver.schedule(workPath);
+  }, [saver, workPath]);
 
   const updateContent = (next: string) => {
     contentRef.current = next;

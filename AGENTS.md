@@ -52,7 +52,7 @@ make test-e2e      # Playwright (chromium, own web server on 5307)
   touches `src-tauri/build.rs` first. A webview stuck on `about:blank` is this.
 - **`VITE_NATIVE_E2E=1` output is not shippable**: re-run `pnpm build:frontend` before inspecting a
   production artifact. The `native-e2e` cargo feature must never reach a release; three guards check.
-- **Command isolation count**: `check-command-isolation` expects exactly **382** registered commands
+- **Command isolation count**: `check-command-isolation` expects exactly **383** registered commands
   with recorded evidence. Adding or removing a `#[tauri::command]` means updating the evidence JSON
   under `docs/performance/`, which is input to the gate and must not be hand-forged.
 - **No raw `font-size: Npx` in `src/styles.css`**: use the `--type-*` / `--read-*` scale in

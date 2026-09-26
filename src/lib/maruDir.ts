@@ -460,6 +460,23 @@ export async function saveMaruRule(
   return invoke<RuleEntry>("save_maru_rule", { workPath, name, content });
 }
 
+/**
+ * Preserve a failed teardown save as a real file under `<work>/.maru/recovery/`
+ * (D-08). Returns the workspace-relative path to the new copy, e.g.
+ * `.maru/recovery/20260102-030405-notes-1a2b3c4d.md`.
+ */
+export async function writeRecoveryCopy(
+  workPath: string,
+  filePath: string,
+  content: string,
+  reason: string,
+): Promise<string> {
+  if (!isTauri()) {
+    throw new Error("Recovery copies require the Tauri shell");
+  }
+  return invoke<string>("write_recovery_copy", { workPath, filePath, content, reason });
+}
+
 // === Ignore list (.maruignore) ===
 
 /** Patterns hiding files from the document list, gitignore-style. */

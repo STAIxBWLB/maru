@@ -71,6 +71,28 @@ describe("MeetingSourceWorkbench", () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(750); });
     expect(saveMeetingSourceDraft).toHaveBeenCalledWith("/test", initial.id, expect.objectContaining({ sources: expect.arrayContaining([expect.objectContaining({ text: "회의록 수정", originalText: "원문" })]) }), "r1");
   });
+  it("saves an edit made just before the editor closes", async () => {
+    // A dedicated root/host (not the shared beforeEach one) so this test can
+    // unmount mid-test without a double-unmount against afterEach's cleanup.
+    const localHost = document.createElement("div");
+    document.body.appendChild(localHost);
+    const localRoot = createRoot(localHost);
+    await act(async () => { localRoot.render(<LocaleContext.Provider value={{ locale: "ko", setLocale: () => {}, t: (key, vars) => t("ko", key, vars) }}>
+      <MeetingSourceWorkbench workPath="/test" sourceKind="external" onReviewedSourceChange={changed} onRequestAi={vi.fn()} aiBusy={false} />
+    </LocaleContext.Provider>); });
+    const correctedLocal = () => localHost.querySelectorAll<HTMLTextAreaElement>(".meeting-source-editors textarea")[1];
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(correctedLocal(), "닫기 직전 수정");
+      correctedLocal().dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => { localRoot.unmount(); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    expect(saveMeetingSourceDraft).toHaveBeenCalledTimes(1);
+    expect(saveMeetingSourceDraft).toHaveBeenCalledWith("/test", initial.id, expect.objectContaining({
+      sources: expect.arrayContaining([expect.objectContaining({ text: "닫기 직전 수정", originalText: "원문" })]),
+    }), "r1");
+    localHost.remove();
+  });
   it("allows acknowledged uncertain participants and uses the server's confirmed version", async () => {
     initial.draft.participantsReviewed = true; initial.draft.noteReviewed = true;
     const version = { id: "confirmed", revision: "r1", createdAt: "now", reason: "Confirmed", draft: initial.draft, contentHash: "server-full-context-hash" };
