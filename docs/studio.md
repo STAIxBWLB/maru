@@ -29,13 +29,14 @@ and M4 export subsystems. Shipped in Phase 4 W11–W12.
    alone, with a warning, when `hwp` is missing). The fill is built in a
    staging directory next to the output: `hwp fill --data … --json
    --allow-partial` gets only the requested keys that are real `{{slot}}`s
-   (with no slot keys the template is copied instead), then every value goes
+   (with no slot keys, or when `hwp fill` publishes nothing because it matched
+   no slot at all, the template is copied instead), then every value goes
    through the kordoc_lite fill, which replaces `{{…}}` placeholders
    (including padded `{{ name }}` ones that `hwp fill` does not match) and
    form labels. A final `hwp slots --json` re-scan fails the fill closed if
    any requested slot is still unfilled; otherwise `hwp validate --json`
    checks it and the output is published atomically. The output may not be
-   the template itself. Without a released `hwp` the fill fails closed with
+   the template itself, through a symlink or another spelling either. Without a released `hwp` the fill fails closed with
    its `cli_missing:` / `hwp_version:` reason and writes nothing.
 6. **Export** — wraps `export_plan` + the M4 dispatch pipeline (docx / hwpx / pdf
    with a sha256 manifest; see below).
