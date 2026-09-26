@@ -26,12 +26,17 @@ and M4 export subsystems. Shipped in Phase 4 W11–W12.
    typed in the step overrides an `hwpx_skill` key and goes through
    `template_get_fields` / `template_fill_hwpx`, also on the released `hwp`:
    fields merge `hwp slots --json` with the kordoc_lite scan (kordoc_lite
-   alone, with a warning, when `hwp` is missing). The fill sends `hwp fill
-   --data … --json` only the requested keys that are real `{{slot}}`s, so an
-   unreplaced slot fails closed; with no slot keys it copies the template
-   instead. Every value then goes through the kordoc_lite form-label fill, and
-   `hwp validate --json` checks the output. Without a released `hwp` the fill
-   fails closed with its `cli_missing:` / `hwp_version:` reason.
+   alone, with a warning, when `hwp` is missing). The fill is built in a
+   staging directory next to the output: `hwp fill --data … --json
+   --allow-partial` gets only the requested keys that are real `{{slot}}`s
+   (with no slot keys the template is copied instead), then every value goes
+   through the kordoc_lite fill, which replaces `{{…}}` placeholders
+   (including padded `{{ name }}` ones that `hwp fill` does not match) and
+   form labels. A final `hwp slots --json` re-scan fails the fill closed if
+   any requested slot is still unfilled; otherwise `hwp validate --json`
+   checks it and the output is published atomically. The output may not be
+   the template itself. Without a released `hwp` the fill fails closed with
+   its `cli_missing:` / `hwp_version:` reason and writes nothing.
 6. **Export** — wraps `export_plan` + the M4 dispatch pipeline (docx / hwpx / pdf
    with a sha256 manifest; see below).
 7. **Package** — applies the local body and freezes a version snapshot.
@@ -62,8 +67,9 @@ and the command palette (`src-tauri/src/export/`):
 - `export/dispatch.rs` — a single "Export bundle" command drives
   `pending → ready/failed` using deterministic local converters: `pandoc`
   (DOCX), the released `hwp` (`hwp new --from <md> --preset report` for HWPX,
-  and `hwp convert <hwpx> --to pdf` for a PDF when the bundle also exports
-  HWPX), and `pandoc` as the PDF fallback. Missing converters, missing outputs,
+  and `hwp convert <hwpx> --to pdf` for a PDF when the bundle's HWPX output is
+  Ready), and `pandoc` as the PDF fallback; a pandoc PDF after an `hwp`
+  failure keeps the `hwp` reason on its dispatch result. Missing converters, missing outputs,
   and source-hash drift surface as partial failures rather than silent success.
 
 ## Related invariants
