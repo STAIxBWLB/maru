@@ -728,14 +728,22 @@ mod quit_acl_tests {
         }
     }
 
+    /// generate_context!() with no path argument reads THIS crate's own
+    /// tauri.conf.json + capabilities/*.json — the same files `run()` above
+    /// builds from — not an empty/default test fixture. Factored into one
+    /// call site: the macro embeds a `#[no_mangle]` static once per compiled
+    /// binary, so a second literal invocation anywhere else in this crate's
+    /// test build is a link error ("symbol _EMBED_INFO_PLIST is already
+    /// defined"), not just a run-time conflict.
+    fn build_test_app() -> tauri::App<tauri::test::MockRuntime> {
+        mock_builder()
+            .build(tauri::generate_context!())
+            .expect("failed to build the app with this crate's real context/capabilities")
+    }
+
     #[test]
     fn main_window_can_destroy_itself_through_the_real_capabilities() {
-        // generate_context!() with no path argument reads THIS crate's own
-        // tauri.conf.json + capabilities/*.json — the same files `run()`
-        // above builds from — not an empty/default test fixture.
-        let app = mock_builder()
-            .build(tauri::generate_context!())
-            .expect("failed to build the app with this crate's real context/capabilities");
+        let app = build_test_app();
         let webview = WebviewWindowBuilder::new(&app, "main", Default::default())
             .build()
             .expect("failed to build the \"main\" webview window");
@@ -749,6 +757,33 @@ mod quit_acl_tests {
              not preventDefault() — without \"core:window:allow-destroy\" granted in \
              src-tauri/capabilities/default.json, a confirmed clean quit (D-03) never actually \
              closes the window (checkpoint items 2/5/6/8).",
+            response,
+        );
+    }
+
+    // Review finding #2 / T-09-08-05 evidence gap: the "default" capability's
+    // `windows` list already names both "main" and "skill-editor" (same
+    // capability object, both windows), so this should already pass without
+    // a capabilities change — this test only closes the gap the security
+    // audit trail flagged: no direct test exercised the skill-editor label's
+    // own destroy grant. requestAppQuit (useDestructiveActionGuard.ts) calls
+    // this exact IPC command on the skill-editor window once its own guard
+    // has cleared, as the last step before main itself closes.
+    #[test]
+    fn skill_editor_window_can_destroy_itself_through_the_real_capabilities() {
+        let app = build_test_app();
+        let webview = WebviewWindowBuilder::new(&app, "skill-editor", Default::default())
+            .build()
+            .expect("failed to build the \"skill-editor\" webview window");
+
+        let response = get_ipc_response(&webview, invoke_request("plugin:window|destroy"));
+
+        assert!(
+            response.is_ok(),
+            "plugin:window|destroy was denied for the \"skill-editor\" window: {:?}. \
+             requestAppQuit's closeSkillEditorForQuit (windowLayout.ts) calls exactly this IPC \
+             command; without it granted for this window label, a whole-app quit would flush \
+             and confirm successfully but leave the skill editor window behind.",
             response,
         );
     }

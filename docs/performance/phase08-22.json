@@ -1935,7 +1935,7 @@
           "lease.ensure_workspace_registry runs before any effect",
           "a symlinked <work>/.maru/recovery is refused via symlink_metadata before the file name is even computed",
           "src-tauri/src/paths.rs::ensure_within re-checks the sanitized recovery target stays inside <work>/.maru/recovery before the write",
-          "lease.ensure_covered over the resolved <work>/.maru/recovery/<name> target runs before lease.before_effect and the no-clobber write"
+          "lease.ensure_covered over the resolved <work>/.maru/recovery/<name> target runs after lease.before_effect (same order as the rules/templates saves) and before the no-clobber write"
         ],
         "domainLockOrder": "Filesystem path admission (with_path_transactions acquire) happens in src-tauri/src/maru_dir.rs::write_recovery_copy before ensure_maru_dir, the symlink check, name resolution and the no-clobber write; admission precedes every domain effect and no domain lock is taken before admission."
       },

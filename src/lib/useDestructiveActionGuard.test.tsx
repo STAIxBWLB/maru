@@ -25,6 +25,8 @@ const mocks = vi.hoisted(() => ({
   tauriAvailable: vi.fn(() => true),
   relaunchApp: vi.fn(),
   flushPendingSavesForQuit: vi.fn(),
+  requestSkillEditorQuitCheck: vi.fn<() => Promise<boolean>>(),
+  closeSkillEditorForQuit: vi.fn<() => Promise<void>>(),
 }));
 
 vi.mock("@tauri-apps/api/window", () => ({
@@ -37,6 +39,8 @@ vi.mock("@tauri-apps/api/window", () => ({
 
 vi.mock("./windowLayout", () => ({
   tauriAvailable: mocks.tauriAvailable,
+  requestSkillEditorQuitCheck: mocks.requestSkillEditorQuitCheck,
+  closeSkillEditorForQuit: mocks.closeSkillEditorForQuit,
 }));
 
 vi.mock("./updater", () => ({
@@ -94,6 +98,11 @@ describe("useDestructiveActionGuard onCloseRequested", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.close.mockResolvedValue(undefined);
+    // Not exercised by this describe block's tests (none call
+    // requestAppQuit), but kept resolved so an accidental call fails loudly
+    // in its own assertion rather than hanging on an unresolved mock.
+    mocks.requestSkillEditorQuitCheck.mockResolvedValue(true);
+    mocks.closeSkillEditorForQuit.mockResolvedValue(undefined);
     settingsFlush = vi.fn<() => Promise<void>>();
     settingsFlush.mockResolvedValue(undefined);
     settingsSaverRef = {
@@ -234,6 +243,8 @@ describe("useDestructiveActionGuard quitSaving indicator and the save-failed dia
     vi.clearAllMocks();
     mocks.close.mockResolvedValue(undefined);
     mocks.relaunchApp.mockResolvedValue(undefined);
+    mocks.requestSkillEditorQuitCheck.mockResolvedValue(true);
+    mocks.closeSkillEditorForQuit.mockResolvedValue(undefined);
     settingsFlush = vi.fn<() => Promise<void>>();
     settingsFlush.mockResolvedValue(undefined);
     settingsSaverRef = {
@@ -470,5 +481,141 @@ describe("useDestructiveActionGuard quitSaving indicator and the save-failed dia
     expect(guard.quitFailureKind).toBeNull();
     expect(guard.failedQuitAction).toBeNull();
     expect(mocks.close).not.toHaveBeenCalled();
+  });
+});
+
+// Review finding #2: Cmd+Q / app-menu Quit must quit the whole app from any
+// window — asking the skill editor window's own guard first, honoring
+// main's own guard second, and only destroying the skill editor once both
+// have passed — while a plain per-window close (red button, Cmd+W) is left
+// alone (requestWindowClose/onCloseRequested's existing behavior, unchanged).
+describe("useDestructiveActionGuard requestAppQuit (review finding #2)", () => {
+  let container: HTMLDivElement;
+  let root: Root | null;
+  let guard: DestructiveActionGuard;
+  let settingsSaverRef: MutableRefObject<DebouncedSaver<MaruSettings> | null>;
+  let settingsFlush: ReturnType<typeof vi.fn<() => Promise<void>>>;
+  let dirty: boolean;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.close.mockResolvedValue(undefined);
+    mocks.flushPendingSavesForQuit.mockResolvedValue({ kind: "clean" });
+    mocks.requestSkillEditorQuitCheck.mockResolvedValue(true);
+    mocks.closeSkillEditorForQuit.mockResolvedValue(undefined);
+    settingsFlush = vi.fn<() => Promise<void>>();
+    settingsFlush.mockResolvedValue(undefined);
+    settingsSaverRef = {
+      current: { schedule: vi.fn(), flush: settingsFlush, cancel: vi.fn() },
+    };
+    dirty = false;
+  });
+
+  afterEach(async () => {
+    if (root) await act(async () => root?.unmount());
+    container?.remove();
+    root = null;
+  });
+
+  async function mount(): Promise<void> {
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => {
+      root?.render(
+        createElement(Probe, {
+          onGuard: (g) => {
+            guard = g;
+          },
+          hasDirtyDrafts: () => dirty,
+          settingsSaverRef,
+        }),
+      );
+    });
+    await settleEffect();
+  }
+
+  it("the skill editor cancelling its own guard aborts the whole quit before main's guard or flush ever run", async () => {
+    mocks.requestSkillEditorQuitCheck.mockResolvedValue(false);
+    await mount();
+
+    await act(async () => {
+      await guard.requestAppQuit();
+    });
+
+    expect(mocks.requestSkillEditorQuitCheck).toHaveBeenCalledTimes(1);
+    expect(mocks.close).not.toHaveBeenCalled();
+    expect(mocks.flushPendingSavesForQuit).not.toHaveBeenCalled();
+    expect(mocks.closeSkillEditorForQuit).not.toHaveBeenCalled();
+  });
+
+  it("a clean quit destroys the skill editor before main closes, in order", async () => {
+    await mount();
+
+    await act(async () => {
+      await guard.requestAppQuit();
+    });
+    // Simulates the OS replaying CloseRequested after requestWindowClose()'s
+    // ask, same pattern every other test in this file uses.
+    await act(async () => {
+      await capturedHandler()(makeEvent());
+    });
+
+    expect(mocks.closeSkillEditorForQuit).toHaveBeenCalledTimes(1);
+    expect(mocks.close).toHaveBeenCalledTimes(2); // the initial ask, then the confirmed close
+    const skillEditorOrder = mocks.closeSkillEditorForQuit.mock.invocationCallOrder[0];
+    const finalCloseOrder = mocks.close.mock.invocationCallOrder[1];
+    expect(skillEditorOrder).toBeLessThan(finalCloseOrder);
+  });
+
+  it("main's own dirty guard shows its dialog; cancelling aborts the whole quit and leaves a later plain close untouched", async () => {
+    dirty = true;
+    await mount();
+
+    await act(async () => {
+      await guard.requestAppQuit();
+    });
+    await act(async () => {
+      await capturedHandler()(makeEvent());
+    });
+
+    expect(guard.pendingDestructiveAction).toBe("close");
+    expect(mocks.closeSkillEditorForQuit).not.toHaveBeenCalled();
+    expect(mocks.close).toHaveBeenCalledTimes(1); // only the initial ask so far
+
+    act(() => {
+      guard.cancelDestructiveAction();
+    });
+    expect(guard.pendingDestructiveAction).toBeNull();
+
+    // A later PLAIN window close (red button / Cmd+W) — not routed through
+    // requestAppQuit — must behave per-window: it must not destroy the
+    // skill editor even though it now succeeds cleanly.
+    dirty = false;
+    await act(async () => {
+      await capturedHandler()(makeEvent());
+    });
+    expect(mocks.close).toHaveBeenCalledTimes(2);
+    expect(mocks.closeSkillEditorForQuit).not.toHaveBeenCalled();
+  });
+
+  it("confirming main's dialog after the skill editor cleared still destroys it before main closes", async () => {
+    dirty = true;
+    await mount();
+
+    await act(async () => {
+      await guard.requestAppQuit();
+    });
+    await act(async () => {
+      await capturedHandler()(makeEvent());
+    });
+    expect(guard.pendingDestructiveAction).toBe("close");
+
+    await act(async () => {
+      await guard.confirmDestructiveAction();
+    });
+
+    expect(mocks.closeSkillEditorForQuit).toHaveBeenCalledTimes(1);
+    expect(mocks.close).toHaveBeenCalledTimes(2);
   });
 });

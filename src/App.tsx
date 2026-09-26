@@ -1969,6 +1969,7 @@ export function MainApp() {
     cancelDestructiveAction,
     retryQuit,
     quitAnyway,
+    requestAppQuit,
   } = useDestructiveActionGuard({ hasDirtyDrafts, settingsSaverRef });
 
   const updateSettings = useCallback(
@@ -6956,10 +6957,12 @@ export function MainApp() {
           requestWindowClose();
           break;
         case "app.quit":
-          // D-03: the macOS App-submenu Quit item (Cmd+Q) reaches the exact
-          // same window-close guard as the red close button — one quit path,
-          // not two implementations kept in sync.
-          requestWindowClose();
+          // D-03 + review finding #2: the macOS App-submenu Quit item
+          // (Cmd+Q) always reaches "main" regardless of which window was
+          // focused (see app_menu.rs's menu_command_target), and quits the
+          // whole app — asking the skill editor window's own guard first —
+          // rather than only closing whichever window received the event.
+          void requestAppQuit();
           break;
       }
     },
@@ -6976,6 +6979,7 @@ export function MainApp() {
       openPreferences,
       outlineOpen,
       refreshActiveSurface,
+      requestAppQuit,
       requestWindowClose,
       revealTargetInFinder,
       saveCurrent,

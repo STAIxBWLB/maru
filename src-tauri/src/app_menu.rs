@@ -339,26 +339,152 @@ fn insert_check_for_updates_item<R: Runtime>(
     Ok(())
 }
 
+/// Where `handle_menu_event` routes a menu command id. Split out as its own
+/// pure function (review finding #2) so the routing decision — the part a
+/// prior review found broken — is unit-testable without a real window
+/// manager, webview, or MenuEvent construction.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MenuCommandTarget<'a> {
+    Label(&'a str),
+    Broadcast,
+}
+
+fn menu_command_target<'a>(
+    id: &str,
+    focused_label: Option<&'a str>,
+    main_exists: bool,
+    any_window_label: Option<&'a str>,
+) -> MenuCommandTarget<'a> {
+    // D-03 follow-up: Cmd+Q/app-menu Quit must always reach "main", never a
+    // secondary window like skill-editor, which has no whole-app-quit
+    // orchestration of its own and would otherwise leave Cmd+Q dead whenever
+    // it happens to have focus. "main" asks every other open window's own
+    // guard before it lets the app actually exit — see requestAppQuit in
+    // useDestructiveActionGuard.ts.
+    #[cfg(target_os = "macos")]
+    {
+        if id == QUIT_MENU_ID {
+            if main_exists {
+                return MenuCommandTarget::Label("main");
+            }
+            // Round 2 (owner-observed regression): "main" no longer exists
+            // (e.g. it was closed directly while a secondary window stayed
+            // open, orphaning it) — emit_to a label with no window behind
+            // it reaches nobody, and every later Cmd+Q would go dead
+            // forever. Route to any live window instead; its own JS quits
+            // the whole app through its own guard (SkillEditorWindow.tsx's
+            // app.quit fallback, exit() via @tauri-apps/plugin-process).
+            return match any_window_label {
+                Some(label) => MenuCommandTarget::Label(label),
+                None => MenuCommandTarget::Broadcast,
+            };
+        }
+    }
+    // Every other menu command goes to the focused window only: a broadcast
+    // made one Cmd+W act in every window at once (e.g. closing a background
+    // PTY tab while the Settings window closed itself). Fall back to
+    // broadcast if no window reports focus so menus never go dead.
+    match focused_label {
+        Some(label) => MenuCommandTarget::Label(label),
+        None => MenuCommandTarget::Broadcast,
+    }
+}
+
 pub fn handle_menu_event<R: Runtime>(app: &AppHandle<R>, event: tauri::menu::MenuEvent) {
     if event.id() == CHECK_FOR_UPDATES_MENU_ID {
         let _ = app.emit(CHECK_FOR_UPDATES_EVENT, ());
         return;
     }
-    // Menu commands go to the focused window only: a broadcast made one Cmd+W
-    // act in every window at once (e.g. closing a background PTY tab while the
-    // Settings window closed itself). Fall back to broadcast if no window
-    // reports focus so menus never go dead.
     let id = event.id().0.clone();
-    let focused = app
-        .webview_windows()
-        .into_iter()
-        .find(|(_, window)| window.is_focused().unwrap_or(false));
-    match focused {
-        Some((label, _)) => {
-            let _ = app.emit_to(&label, MENU_COMMAND_EVENT, id);
+    let windows = app.webview_windows();
+    let focused = windows
+        .iter()
+        .find(|(_, window)| window.is_focused().unwrap_or(false))
+        .map(|(label, _)| label.clone());
+    let main_exists = windows.contains_key("main");
+    let any_window_label = windows.keys().next().cloned();
+    match menu_command_target(
+        &id,
+        focused.as_deref(),
+        main_exists,
+        any_window_label.as_deref(),
+    ) {
+        MenuCommandTarget::Label(label) => {
+            let _ = app.emit_to(label, MENU_COMMAND_EVENT, id);
         }
-        None => {
+        MenuCommandTarget::Broadcast => {
             let _ = app.emit(MENU_COMMAND_EVENT, id);
         }
+    }
+}
+
+#[cfg(test)]
+mod menu_routing_tests {
+    use super::*;
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn quit_always_routes_to_main_regardless_of_focus() {
+        assert_eq!(
+            menu_command_target(QUIT_MENU_ID, Some("skill-editor"), true, Some("main")),
+            MenuCommandTarget::Label("main"),
+        );
+        assert_eq!(
+            menu_command_target(QUIT_MENU_ID, Some("main"), true, Some("main")),
+            MenuCommandTarget::Label("main"),
+        );
+        assert_eq!(
+            menu_command_target(QUIT_MENU_ID, None, true, Some("main")),
+            MenuCommandTarget::Label("main"),
+        );
+    }
+
+    // Round 2 (owner-observed regression): "main" closed directly (or was
+    // orphaned by the round-1 initializing-window race) while a secondary
+    // window stayed open. Every later Cmd+Q must still reach a live window
+    // instead of going nowhere.
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn quit_falls_back_to_a_live_window_when_main_no_longer_exists() {
+        assert_eq!(
+            menu_command_target(
+                QUIT_MENU_ID,
+                Some("skill-editor"),
+                false,
+                Some("skill-editor")
+            ),
+            MenuCommandTarget::Label("skill-editor"),
+        );
+        // Even if the (now-gone) "main" still happened to report focus in a
+        // stale snapshot, main_exists=false must win the fallback decision.
+        assert_eq!(
+            menu_command_target(QUIT_MENU_ID, Some("main"), false, Some("skill-editor")),
+            MenuCommandTarget::Label("skill-editor"),
+        );
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn quit_broadcasts_when_main_is_gone_and_no_window_remains() {
+        assert_eq!(
+            menu_command_target(QUIT_MENU_ID, None, false, None),
+            MenuCommandTarget::Broadcast,
+        );
+    }
+
+    #[test]
+    fn every_other_command_follows_focus_or_broadcasts() {
+        assert_eq!(
+            menu_command_target("window.close", Some("skill-editor"), true, Some("main")),
+            MenuCommandTarget::Label("skill-editor"),
+        );
+        assert_eq!(
+            menu_command_target("window.close", Some("main"), true, Some("main")),
+            MenuCommandTarget::Label("main"),
+        );
+        assert_eq!(
+            menu_command_target("window.close", None, true, Some("main")),
+            MenuCommandTarget::Broadcast,
+        );
     }
 }

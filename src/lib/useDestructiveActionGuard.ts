@@ -6,7 +6,11 @@ import { setError } from "./errorStore";
 import type { MaruSettings } from "./settings";
 import { flushPendingSavesForQuit } from "./teardownSave";
 import { relaunchApp } from "./updater";
-import { tauriAvailable } from "./windowLayout";
+import {
+  closeSkillEditorForQuit,
+  requestSkillEditorQuitCheck,
+  tauriAvailable,
+} from "./windowLayout";
 
 // ---------------------------------------------------------------------------
 // Destructive-action guard (extracted from MainApp in step 9): the dirty-draft
@@ -48,6 +52,11 @@ export interface DestructiveActionGuard {
    * existing dirty-draft confirm if drafts are still dirty, otherwise the
    * settings-flush-then-close/relaunch today's confirm path already runs. */
   quitAnyway: () => Promise<void>;
+  /** Cmd+Q / the app-menu Quit item: quits the whole app from any window,
+   * not just the main window that received the menu event. Asks the skill
+   * editor window's own guard first (review finding #2); a cancelled guard
+   * there aborts the entire quit before main's own guard is ever reached. */
+  requestAppQuit: () => Promise<void>;
 }
 
 export function useDestructiveActionGuard({
@@ -63,6 +72,14 @@ export function useDestructiveActionGuard({
   const [quitFailureKind, setQuitFailureKind] = useState<"failed" | "timeout" | null>(null);
   const [failedQuitAction, setFailedQuitAction] = useState<"close" | "relaunch" | null>(null);
   const closeConfirmedRef = useRef(false);
+  // Review finding #2: set only by requestAppQuit, once the skill editor's
+  // own guard has already cleared. closeAfterSettingsFlush destroys the
+  // skill editor window right before it closes main, so the two disappear
+  // together only when a whole-app quit actually goes through — a plain
+  // window close (red button, Cmd+W) never touches this ref and leaves the
+  // skill editor alone. Cleared on any cancel so an aborted quit kills
+  // nothing and a later plain close doesn't inherit the flag.
+  const quitWholeAppRef = useRef(false);
 
   const relaunchAfterSettingsFlush = useCallback(async () => {
     try {
@@ -81,11 +98,21 @@ export function useDestructiveActionGuard({
     }
     closeConfirmedRef.current = true;
     try {
+      // Review finding #2: only once every guard on the way here has
+      // passed (this function is the single choke point every close/quit
+      // path funnels through) do we actually destroy the skill editor, and
+      // only when this close is part of a whole-app quit, not a plain
+      // per-window close.
+      if (quitWholeAppRef.current) {
+        await closeSkillEditorForQuit();
+      }
       const { getCurrentWindow } = await import("@tauri-apps/api/window");
       await getCurrentWindow().close();
     } catch (err) {
       closeConfirmedRef.current = false;
       setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      quitWholeAppRef.current = false;
     }
   }, [settingsSaverRef]);
 
@@ -132,6 +159,10 @@ export function useDestructiveActionGuard({
     setPendingDestructiveAction(null);
     setQuitFailureKind(null);
     setFailedQuitAction(null);
+    // Cancelling any guard cancels the whole quit and kills nothing (D-05):
+    // a whole-app quit in flight must not leave the skill editor destroyed
+    // on a later plain close.
+    quitWholeAppRef.current = false;
   }, []);
 
   const requestWindowClose = useCallback(() => {
@@ -139,6 +170,15 @@ export function useDestructiveActionGuard({
       .then(({ getCurrentWindow }) => getCurrentWindow().close())
       .catch((err) => setError(err instanceof Error ? err.message : String(err)));
   }, []);
+
+  const requestAppQuit = useCallback(async () => {
+    if (!quitWholeAppRef.current) {
+      const proceed = await requestSkillEditorQuitCheck();
+      if (!proceed) return;
+      quitWholeAppRef.current = true;
+    }
+    requestWindowClose();
+  }, [requestWindowClose]);
 
   const retryQuit = useCallback(() => {
     const action = failedQuitAction;
@@ -244,5 +284,6 @@ export function useDestructiveActionGuard({
     cancelDestructiveAction,
     retryQuit,
     quitAnyway,
+    requestAppQuit,
   };
 }

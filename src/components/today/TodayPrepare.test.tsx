@@ -226,6 +226,105 @@ describe("TodayPrepare", () => {
     expect(mutate).toHaveBeenCalledWith({ type: "setBrainDump", brainDump: "닫기 직전 메모" });
   });
 
+  it("skips a scheduled autosave whose workspace changed before it drains, instead of reporting a false failure (review finding #5)", async () => {
+    const mutate = vi.fn<(mutation: TodayMutation) => Promise<TodaySnapshot | null>>(
+      async () => ({ ...SNAPSHOT, revision: "rev-2" }),
+    );
+    const contextValueFor = (workPath: string): TodayContextValue => ({
+      workPath,
+      settings: { ...DEFAULT_MARU_SETTINGS.tasks.today, autoPlan: false },
+      timezone: "Asia/Seoul",
+      snapshot: SNAPSHOT,
+      loading: false,
+      mutate,
+      reload: async () => SNAPSHOT,
+      finalizeSetup: vi.fn(async () => ({ snapshot: SNAPSHOT, materialized: [], replayed: false })),
+    });
+    const onNavigate = vi.fn();
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    const renderWithWorkPath = (workPath: string) =>
+      act(async () => {
+        root.render(
+          <LocaleContext.Provider
+            value={{ locale: "ko", setLocale: () => {}, t: (key, vars) => translate("ko", key, vars) }}
+          >
+            <TodayContext.Provider value={contextValueFor(workPath)}>
+              <TodayPrepare onNavigate={onNavigate} />
+            </TodayContext.Provider>
+          </LocaleContext.Provider>,
+        );
+      });
+
+    await renderWithWorkPath("/tmp/workspace-a");
+    const textarea = container.querySelector<HTMLTextAreaElement>(".today-braindump-textarea")!;
+    await act(async () => {
+      typeText(textarea, "workspace a 메모");
+    });
+
+    // The workspace switches before the 800ms debounce drains — same
+    // TodayPrepare instance, matching TodayPane.tsx's real non-remount
+    // behavior (only its context value's workPath changes, not a remount).
+    await renderWithWorkPath("/tmp/workspace-b");
+
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      await act(async () => {
+        await sleep(900);
+      });
+
+      // The stale edit must never be applied against the new workspace.
+      expect(mutate).not.toHaveBeenCalled();
+
+      await act(async () => {
+        root.unmount();
+        await sleep(0);
+      });
+
+      // No false failure toast/log: a workspace-switch skip must never
+      // reach the teardown failure reporter.
+      const teardownFailureLogs = errorSpy.mock.calls.filter(
+        (call) => typeof call[0] === "string" && call[0].includes("teardown save failed"),
+      );
+      expect(teardownFailureLogs).toHaveLength(0);
+    } finally {
+      errorSpy.mockRestore();
+    }
+  });
+
+  it("still reports a genuine same-workspace save failure through the teardown reporter", async () => {
+    const { container, mutate, root } = await renderPrepare();
+    // Persistently null (not once): useTeardownFlush's unmount settle is
+    // itself an explicit retry (D-05), so a one-shot null would let that
+    // retry quietly succeed and mask the failure this test targets.
+    mutate.mockResolvedValue(null);
+    const textarea = container.querySelector<HTMLTextAreaElement>(".today-braindump-textarea")!;
+    await act(async () => {
+      typeText(textarea, "저장 실패 메모");
+    });
+
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      await act(async () => {
+        await sleep(900);
+      });
+      expect(mutate).toHaveBeenCalledWith({ type: "setBrainDump", brainDump: "저장 실패 메모" });
+
+      await act(async () => {
+        root.unmount();
+        await sleep(0);
+      });
+
+      const teardownFailureLogs = errorSpy.mock.calls.filter(
+        (call) => typeof call[0] === "string" && call[0].includes("teardown save failed"),
+      );
+      expect(teardownFailureLogs.length).toBeGreaterThan(0);
+    } finally {
+      errorSpy.mockRestore();
+    }
+  });
+
   it("hard-caps the brain dump at 2000 characters", async () => {
     const { container } = await renderPrepare();
     const textarea = container.querySelector<HTMLTextAreaElement>(".today-braindump-textarea")!;

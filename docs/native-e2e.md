@@ -178,6 +178,28 @@ automation (same Accessibility-walled limit as items 1-3 above):
    stays open. Then, with nothing dirty, press Cmd+Q again. Expected: Maru
    quits normally with no dialog.
 
+**Cmd+Q with the skill editor window open (review finding #2).** Cmd+Q and
+the app menu's Quit Maru always route to `main` (see
+`menu_command_target` in `src-tauri/src/app_menu.rs`), regardless of which
+window has focus, and `requestAppQuit` (`useDestructiveActionGuard.ts`) asks
+the skill editor window's own guard before deciding whether to quit at all:
+
+13. Open a skill editor window, focus it, and press Cmd+Q. Expected: with
+    nothing unsaved anywhere, the app quits and both windows close.
+14. With an unsaved edit in the skill editor, press Cmd+Q from either the
+    skill editor or the main window. Expected: the skill editor's own
+    unsaved-changes confirm appears; Cancel keeps both windows open and kills
+    nothing.
+15. With an unsaved edit only in the main window, press Cmd+Q from the skill
+    editor window. Expected: main's own unsaved-changes confirm appears
+    (not the skill editor's); Cancel keeps both windows open.
+16. With a terminal running `trap '' HUP; sleep 600` and a skill editor
+    window open, press Cmd+Q. Expected: the app quits and
+    `pgrep -f "sleep 600"` prints nothing.
+17. Regression: with no skill editor window open, edit the Scratchpad and
+    press Cmd+Q. Expected: the app still quits within about 1 s and the
+    edit is saved (unchanged from the single-window behavior above).
+
 **Quit flush of pending autosaves (plan 09-08, D-03/D-04/D-05/D-06).** Every
 mounted autosave surface is flushed before quit, bounded to 3 s, with a
 failure keeping Maru open rather than dropping the edit:
@@ -362,10 +384,20 @@ ids and their asserted DOM consequences:
 
 `app.quit` (plan 09-03, D-03) replaces tauri's predefined native quit item so
 Cmd+Q reaches the same guard as the red close button, instead of bypassing the
-webview through `NSApplication terminate:`.
+webview through `NSApplication terminate:`. Review finding #2 (post-09-08)
+changed the routing: `handle_menu_event` always sends `app.quit` to `main`
+(`menu_command_target` in `app_menu.rs`), never the focused window, because a
+secondary window like skill-editor has no whole-app-quit orchestration of its
+own. `main`'s `requestAppQuit` then asks the skill editor window's own guard
+(if open) before running its own, and only destroys the skill editor once
+both guards have passed; see `src/lib/useDestructiveActionGuard.ts` and
+`src/lib/windowLayout.ts`'s `requestSkillEditorQuitCheck`/
+`closeSkillEditorForQuit`.
 
-**Human-attended half**: that the OS menu bar actually delivers the id.
-Clicking a menu item (or pressing a key equivalent the menu owns) is outside
-the webview and unscriptable here. The fixed checklist lives in
-`## Human-attended checklist` above (items 1-3, plus item 7 for `app.quit`),
-folded in by plan 06-05 and extended by plan 09-03.
+**Human-attended half**: that the OS menu bar actually delivers the id, and
+that the multi-window routing above behaves per window. Clicking a menu item
+(or pressing a key equivalent the menu owns) is outside the webview and
+unscriptable here. The fixed checklist lives in `## Human-attended checklist`
+above (items 1-3, plus item 7 for single-window `app.quit` and items 13-17
+for the skill-editor multi-window cases), folded in by plan 06-05, extended
+by plan 09-03, and extended again by the review finding #2 fix.

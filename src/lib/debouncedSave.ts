@@ -73,12 +73,26 @@ export function createDebouncedSaver<T>(
   // call that finds nothing newly pending can still await an already
   // in-flight save instead of reporting a false "clean".
   let activeSettlement: Promise<SaveSettlement<T>> | null = null;
+  // A monotonically increasing stamp assigned to every drained value. A
+  // failed save's catch handler must only resurrect its own value as
+  // pending when this is still the most recently drained attempt. A value
+  // that was merely *scheduled* (never drained) is already caught by
+  // `!hasPending`, but a value that was scheduled AND drained behind this
+  // one — queued in the shared save queue while this save was still in
+  // flight — clears `hasPending` back to false without becoming "the
+  // failed value" itself. Without this stamp, that already-drained newer
+  // value would be silently clobbered by the older failure being retried
+  // on the next flush (e.g. at unmount/quit teardown).
+  let nextDrainSeq = 0;
+  let latestDrainSeq = 0;
 
   const drainSettled = (): Promise<SaveSettlement<T>> => {
     if (!hasPending) {
       return activeSettlement ?? Promise.resolve<SaveSettlement<T>>({ status: "clean" });
     }
     const value = pending as T;
+    const seq = ++nextDrainSeq;
+    latestDrainSeq = seq;
     pending = null;
     hasPending = false;
     const settlement: Promise<SaveSettlement<T>> = queue
@@ -86,12 +100,12 @@ export function createDebouncedSaver<T>(
       .then((): SaveSettlement<T> => ({ status: "saved" }))
       .catch((error): SaveSettlement<T> => {
         reportSaveError(onError, error);
-        // Retry only the value that just failed — unless a newer one was
-        // scheduled while this save was in flight, in which case that
-        // newer value wins. Never re-arm the timer here: retries only
-        // happen via an explicit schedule()/flush(), so a broken disk
-        // cannot spin on its own.
-        if (!hasPending) {
+        // Retry only the value that just failed — unless a newer drain has
+        // started since (this drain is no longer the latest) or a newer
+        // value is already waiting in the schedule slot. Never re-arm the
+        // timer here: retries only happen via an explicit schedule()/
+        // flush(), so a broken disk cannot spin on its own.
+        if (!hasPending && seq === latestDrainSeq) {
           pending = value;
           hasPending = true;
         }

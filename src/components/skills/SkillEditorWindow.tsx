@@ -12,11 +12,16 @@ import {
 } from "../../lib/settings";
 import {
   SKILL_EDITOR_OPEN_EVENT,
+  SKILL_EDITOR_QUIT_CHECK_ACK_EVENT,
+  SKILL_EDITOR_QUIT_CHECK_EVENT,
+  SKILL_EDITOR_QUIT_CHECK_RESPONSE_EVENT,
   SKILLS_UPDATED_EVENT,
   type SkillEditorOpenPayload,
+  type SkillEditorQuitCheckResponse,
   type SkillsUpdatedPayload,
 } from "../../lib/skillEditorEvents";
 import { listenForMenuCommand } from "../../lib/menu";
+import { lazyImport } from "../../lib/lazyModule";
 import {
   skillsListSources,
   skillsReadSkill,
@@ -32,6 +37,17 @@ import {
   subscribeToSystemTheme,
 } from "../../lib/theme";
 import { Button } from "../ui/Button";
+
+// Memoized, not raw dynamic import()s: this component's several effects
+// each reach for the same handful of Tauri modules on every mount (all
+// firing in the same React commit), which can race in some Vite/Vitest
+// dev/test module loaders when nothing has resolved that specifier yet —
+// see lazyModule.ts's doc comment. Sharing one in-flight promise per
+// module sidesteps that and is also strictly cheaper at runtime.
+const loadWindowModule = lazyImport(() => import("@tauri-apps/api/window"));
+const loadEventModule = lazyImport(() => import("@tauri-apps/api/event"));
+const loadDialogModule = lazyImport(() => import("@tauri-apps/plugin-dialog"));
+const loadProcessModule = lazyImport(() => import("@tauri-apps/plugin-process"));
 
 interface SkillEditorWindowRootProps {
   workPath: string | null;
@@ -117,12 +133,26 @@ export function SkillEditorWindowRoot({ workPath, skillId }: SkillEditorWindowRo
   );
 }
 
-interface SkillEditorWindowProps {
+export interface SkillEditorWindowProps {
   initialWorkPath: string | null;
   initialSkillId: string | null;
 }
 
-function SkillEditorWindow({ initialWorkPath, initialSkillId }: SkillEditorWindowProps) {
+/**
+ * Asks the native confirm dialog plugin, not `window.confirm` (review
+ * finding #2, round 2, owner-observed regression): in this app's WKWebView,
+ * `window.confirm` is not a reliable blocking gate — a dirty edit was lost
+ * with no dialog ever appearing. `@tauri-apps/plugin-dialog`'s `confirm()`
+ * is the SDK's own documented pattern for exactly this
+ * (`onCloseRequested`'s doc comment in `@tauri-apps/api/window` uses it as
+ * the canonical example).
+ */
+async function confirmDestructive(message: string): Promise<boolean> {
+  const { confirm } = await loadDialogModule();
+  return confirm(message, { kind: "warning" });
+}
+
+export function SkillEditorWindow({ initialWorkPath, initialSkillId }: SkillEditorWindowProps) {
   const { t } = useTranslation();
   const [workPath, setWorkPath] = useState<string | null>(initialWorkPath);
   const [skillId, setSkillId] = useState<string | null>(initialSkillId);
@@ -192,7 +222,7 @@ function SkillEditorWindow({ initialWorkPath, initialSkillId }: SkillEditorWindo
   useEffect(() => {
     const title = skill ? t("skillEditor.windowTitleWithName", { name: skill.name }) : t("skillEditor.windowTitle");
     document.title = title;
-    void import("@tauri-apps/api/window")
+    void loadWindowModule()
       .then(({ getCurrentWindow }) => getCurrentWindow().setTitle(title))
       .catch(() => {});
   }, [skill, t]);
@@ -202,7 +232,7 @@ function SkillEditorWindow({ initialWorkPath, initialSkillId }: SkillEditorWindo
       if (payload.skillId === skillIdRef.current && payload.workPath === workPathRef.current) {
         return;
       }
-      if (dirtyRef.current && !window.confirm(t("skillEditor.switchConfirm"))) return;
+      if (dirtyRef.current && !(await confirmDestructive(t("skillEditor.switchConfirm")))) return;
       await loadSkill(payload.workPath, payload.skillId);
     },
     [loadSkill, t],
@@ -211,7 +241,7 @@ function SkillEditorWindow({ initialWorkPath, initialSkillId }: SkillEditorWindo
   useEffect(() => {
     let disposed = false;
     let unlisten: (() => void) | null = null;
-    void import("@tauri-apps/api/event")
+    void loadEventModule()
       .then(({ listen }) =>
         listen<SkillEditorOpenPayload>(SKILL_EDITOR_OPEN_EVENT, (event) => {
           if (disposed) return;
@@ -232,12 +262,56 @@ function SkillEditorWindow({ initialWorkPath, initialSkillId }: SkillEditorWindo
   useEffect(() => {
     let disposed = false;
     let unlisten: (() => void) | null = null;
-    void import("@tauri-apps/api/window")
+    void loadWindowModule()
       .then(({ getCurrentWindow }) =>
-        getCurrentWindow().onCloseRequested((event) => {
+        // async is required here, not incidental: onCloseRequested's own
+        // wrapper (@tauri-apps/api/window.js) awaits this handler before
+        // deciding whether to destroy the window, which is what makes an
+        // awaited confirmDestructive() a reliable gate — a synchronous
+        // window.confirm() was not (review finding #2, round 2).
+        getCurrentWindow().onCloseRequested(async (event) => {
           if (disposed) return;
           if (!dirtyRef.current) return;
-          if (!window.confirm(t("skillEditor.closeConfirm"))) event.preventDefault();
+          const proceed = await confirmDestructive(t("skillEditor.closeConfirm"));
+          if (disposed) return;
+          if (!proceed) event.preventDefault();
+        }),
+      )
+      .then((off) => {
+        if (disposed) off();
+        else unlisten = off;
+      })
+      .catch(() => {});
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, [t]);
+
+  useEffect(() => {
+    let disposed = false;
+    let unlisten: (() => void) | null = null;
+    void loadEventModule()
+      .then(({ listen, emit }) =>
+        listen(SKILL_EDITOR_QUIT_CHECK_EVENT, () => {
+          if (disposed) return;
+          // Ack immediately, before any dirty check or dialog: lets
+          // requestSkillEditorQuitCheck (windowLayout.ts) tell "this
+          // listener wasn't registered yet" (window still initializing —
+          // the owner-observed round-2 regression) apart from "listening
+          // and now awaiting a real user decision" (only the former is
+          // safe to time out).
+          void emit(SKILL_EDITOR_QUIT_CHECK_ACK_EVENT, undefined);
+          void (async () => {
+            // Same guard as onCloseRequested above (same confirm copy),
+            // but this only answers whether we're clear to quit — it never
+            // closes/destroys the window itself. main only does that once
+            // every open window's own guard has passed.
+            const proceed = !dirtyRef.current || (await confirmDestructive(t("skillEditor.closeConfirm")));
+            if (disposed) return;
+            const response: SkillEditorQuitCheckResponse = { proceed };
+            void emit(SKILL_EDITOR_QUIT_CHECK_RESPONSE_EVENT, response);
+          })();
         }),
       )
       .then((off) => {
@@ -255,11 +329,28 @@ function SkillEditorWindow({ initialWorkPath, initialSkillId }: SkillEditorWindo
     let disposed = false;
     let dispose: (() => void) | null = null;
     void listenForMenuCommand((id) => {
-      if (id !== "file.close_active" && id !== "window.close") return;
-      // Routes through onCloseRequested above, so the dirty guard still applies.
-      void import("@tauri-apps/api/window")
-        .then(({ getCurrentWindow }) => getCurrentWindow().close())
-        .catch(() => {});
+      if (id === "file.close_active" || id === "window.close") {
+        // Routes through onCloseRequested above, so the dirty guard still applies.
+        void loadWindowModule()
+          .then(({ getCurrentWindow }) => getCurrentWindow().close())
+          .catch(() => {});
+        return;
+      }
+      if (id === "app.quit") {
+        // Fallback path (review finding #2, round 2): Rust routes app.quit
+        // here only when "main" no longer exists (e.g. it was closed
+        // directly, orphaning this window) — quit the whole app through
+        // this window's own guard instead of leaving Cmd+Q dead.
+        void (async () => {
+          if (disposed) return;
+          if (dirtyRef.current && !(await confirmDestructive(t("skillEditor.closeConfirm")))) {
+            return;
+          }
+          if (disposed) return;
+          const { exit } = await loadProcessModule();
+          await exit(0);
+        })();
+      }
     }).then((off) => {
       if (disposed) off();
       else dispose = off;
@@ -268,10 +359,10 @@ function SkillEditorWindow({ initialWorkPath, initialSkillId }: SkillEditorWindo
       disposed = true;
       dispose?.();
     };
-  }, []);
+  }, [t]);
 
   const emitUpdated = useCallback(async (payload: SkillsUpdatedPayload) => {
-    await import("@tauri-apps/api/event")
+    await loadEventModule()
       .then(({ emit }) => emit(SKILLS_UPDATED_EVENT, payload))
       .catch(() => {});
   }, []);
@@ -299,7 +390,7 @@ function SkillEditorWindow({ initialWorkPath, initialSkillId }: SkillEditorWindo
     const rawName = window.prompt(t("system.skills.saveAsPrompt"), `${skill.name}-copy`);
     const name = rawName?.trim();
     if (!name) return;
-    if (!window.confirm(t("system.skills.saveAsConfirm", { name }))) return;
+    if (!(await confirmDestructive(t("system.skills.saveAsConfirm", { name })))) return;
     setSaving(true);
     setError(null);
     setMessage(null);
@@ -318,7 +409,7 @@ function SkillEditorWindow({ initialWorkPath, initialSkillId }: SkillEditorWindo
   }, [emitUpdated, skill, t, text, workPath]);
 
   const closeWindow = useCallback(async () => {
-    await import("@tauri-apps/api/window")
+    await loadWindowModule()
       .then(({ getCurrentWindow }) => getCurrentWindow().close())
       .catch(() => {});
   }, []);

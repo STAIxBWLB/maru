@@ -243,7 +243,12 @@ export function StudioMode({
       workspaceRoot
         ? {
             workPath: workspaceRoot,
-            filePath: activeDocument?.path ?? `studio/${savedState.docId}`,
+            // Review finding #3: label from the saved state's own document
+            // path, not the currently active one — after a document switch,
+            // a failed save of the OLD document must not be named after the
+            // NEW one. source.documentPath is a schedule-time snapshot
+            // (createInitialStudioState), unlike the live activeDocument prop.
+            filePath: savedState.source.documentPath ?? `studio/${savedState.docId}`,
             content: JSON.stringify(savedState, null, 2),
           }
         : null,

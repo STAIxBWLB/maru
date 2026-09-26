@@ -14,6 +14,15 @@ const AUTOSAVE_DEBOUNCE_MS = 800;
 
 type SaveStatus = "idle" | "saving" | "saved" | "planning" | "planned";
 
+/** A scheduled brain-dump edit paired with the workPath active when it was
+ *  scheduled (review finding #5) — a schedule-time snapshot, not the live
+ *  render's workPath, so a workspace switch mid-debounce can be told apart
+ *  from a genuine save failure at drain time. */
+interface BrainDumpSaveValue {
+  text: string;
+  workPath: string;
+}
+
 interface TodayBrainDumpProps {
   /** True while a plan run (manual or auto) is in flight. */
   planning: boolean;
@@ -69,8 +78,21 @@ export function TodayBrainDump({
   }, [planning]);
 
   const save = useCallback(
-    async (value: string) => {
+    async ({ text: value, workPath: scheduledWorkPath }: BrainDumpSaveValue) => {
       if (!snapshot) return;
+      // Review finding #5: TodayContext's mutate() resolves null for two
+      // different reasons — a genuine failure, or a deliberate skip when
+      // TodayPane's pane identity no longer matches (the workspace changed
+      // between scheduling this edit and draining it), in which case mutate
+      // never even attempts anything. A workspace switch under an in-flight
+      // autosave is not a failure: skip quietly (no throw, so no false
+      // failure toast, and no recovery copy written into the new
+      // workspace) instead of calling mutate against the new workspace at
+      // all.
+      if (scheduledWorkPath !== workPath) {
+        setStatus("idle");
+        return;
+      }
       setStatus("saving");
       const next = await mutate({ type: "setBrainDump", brainDump: value });
       if (next) {
@@ -83,7 +105,7 @@ export function TodayBrainDump({
       setStatus("idle");
       throw new Error("today_brain_dump_save_failed");
     },
-    [snapshot, mutate, onSaved],
+    [snapshot, mutate, onSaved, workPath],
   );
 
   // ref-indirection so the saver's stable save callback always calls the
@@ -94,16 +116,20 @@ export function TodayBrainDump({
   }, [save]);
   // One saver per mount — schedule/flush/cancel via the shared debounced-save
   // helper; unmount performs the pending save instead of only cancelling it
-  // (D-01, REL-02).
+  // (D-01, REL-02). Each scheduled value carries its own workPath (review
+  // finding #5): a schedule-time snapshot, not the live render's workPath,
+  // so both the save-vs-skip check above and the teardown describe() below
+  // stay bound to the workspace this edit actually belongs to.
   const [saver] = useState(() =>
-    createDebouncedSaver<string>((value) => saveRef.current(value), AUTOSAVE_DEBOUNCE_MS),
+    createDebouncedSaver<BrainDumpSaveValue>((value) => saveRef.current(value), AUTOSAVE_DEBOUNCE_MS),
   );
   useTeardownFlush(
     saver,
-    (value) =>
-      workPath
-        ? { workPath, filePath: `today-brain-dump-${snapshot?.logicalDay ?? "unknown"}.txt`, content: value }
-        : null,
+    (value) => ({
+      workPath: value.workPath,
+      filePath: `today-brain-dump-${snapshot?.logicalDay ?? "unknown"}.txt`,
+      content: value.text,
+    }),
     t,
   );
 
@@ -116,7 +142,7 @@ export function TodayBrainDump({
         : value;
     setText(capped);
     setStatus("idle");
-    saver.schedule(capped);
+    if (workPath) saver.schedule({ text: capped, workPath });
   };
 
   useEffect(() => onRegisterFlush?.(() => saver.flush()), [onRegisterFlush, saver]);

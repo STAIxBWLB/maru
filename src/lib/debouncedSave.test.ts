@@ -341,6 +341,53 @@ describe("createDebouncedSaver settlement", () => {
     expect(second).toEqual({ status: "saved" });
   });
 
+  it("does not resurrect a failed save's stale value over an already-drained newer save on teardown flush (review finding #1)", async () => {
+    vi.useFakeTimers();
+    const first = deferred<void>();
+    let diskContent: string | null = null;
+    let attemptsForA = 0;
+    const saver = createDebouncedSaver<string>((value) => {
+      if (value === "A") {
+        attemptsForA += 1;
+        // The first attempt is the one this test fails; a retry (driven by
+        // the buggy resurrection this test targets) would succeed and must
+        // never be allowed to land, since a newer save (B) already did.
+        if (attemptsForA === 1) return first.promise;
+        diskContent = value;
+        return undefined;
+      }
+      diskContent = value;
+      return undefined;
+    }, 250);
+
+    // A is scheduled and its debounce timer drains it while its save is
+    // in flight (first.promise not yet settled).
+    saver.schedule("A");
+    await vi.advanceTimersByTimeAsync(250);
+    expect(attemptsForA).toBe(1);
+
+    // B is scheduled after A started saving; B's own debounce timer fires
+    // and drains it too, queuing it behind A in the shared save queue —
+    // B is no longer "pending" once this happens.
+    saver.schedule("B");
+    await vi.advanceTimersByTimeAsync(250);
+
+    // A's in-flight save now fails.
+    first.reject(new Error("disk full"));
+    await vi.advanceTimersByTimeAsync(0);
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // B's queued save landed once A settled.
+    expect(diskContent).toBe("B");
+
+    // A teardown/quit flush must not resurrect A's stale, already-failed
+    // value and overwrite B's already-saved content.
+    await saver.flushSettled();
+    expect(diskContent).toBe("B");
+  });
+
   it("settles an in-flight save then a newly-pending one in order on unmount-driven settle", async () => {
     vi.useFakeTimers();
     const first = deferred<void>();
