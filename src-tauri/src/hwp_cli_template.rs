@@ -3,8 +3,9 @@
 //! Hub records keep `hwpx_template_key` for schema compatibility, but when
 //! their source is `hwp_cli_skill` that key is the released Korean alias for
 //! an embedded hwp template, never a path to the retired binary-template tree.
-//! Legacy `hwpx_skill` records name a template file of that retired tree; the
-//! six known keys map onto the same aliases, so they fill natively too.
+//! Legacy `hwpx_skill` records name a template of that retired tree, by file
+//! stem or by Hub seed key; the known keys map onto the same aliases, so they
+//! fill natively too.
 //! The generated document remains HWPX so the existing export contract is
 //! unchanged. Outputs are built and validated in a sibling staging directory
 //! and only then atomically published into the workspace.
@@ -44,7 +45,8 @@ const TEMPLATE_ALIASES: &[(&str, &str)] = &[
     ("회의록", "minutes"),
 ];
 
-/// Template keys of the retired `hwpx` skill, mapped to their released alias.
+/// Template keys of the retired `hwpx` skill, mapped to their released alias:
+/// its template file stems, then the ASCII keys the Hub catalog seeds.
 const LEGACY_HWPX_TEMPLATE_KEYS: &[(&str, &str)] = &[
     ("공문서_기본", "공문서-기본"),
     ("기안문_내부결재", "기안문-내부결재"),
@@ -52,6 +54,12 @@ const LEGACY_HWPX_TEMPLATE_KEYS: &[(&str, &str)] = &[
     ("보고서_일반", "보고서"),
     ("사업계획서_기본", "사업계획서"),
     ("회의록", "회의록"),
+    ("gongmun_default", "공문서-기본"),
+    ("gibun_internal_approval", "기안문-내부결재"),
+    ("gibun_external_dispatch", "기안문-대외시행"),
+    ("bogoseo_general", "보고서"),
+    ("business_plan_default", "사업계획서"),
+    ("meeting_minutes_default", "회의록"),
 ];
 
 #[derive(Debug, Clone, Deserialize)]
@@ -146,7 +154,7 @@ fn canonical_template(source: &str, key: &str) -> Result<(&'static str, &'static
         HWP_CLI_SKILL_SOURCE => key,
         LEGACY_HWPX_SKILL_SOURCE => LEGACY_HWPX_TEMPLATE_KEYS
             .iter()
-            .find(|(legacy, _)| *legacy == key)
+            .find(|(legacy, _)| *legacy == key.strip_suffix(".hwpx").unwrap_or(key))
             .map(|(_, alias)| *alias)
             .ok_or_else(|| {
                 let known = LEGACY_HWPX_TEMPLATE_KEYS
@@ -691,7 +699,7 @@ esac
     }
 
     #[test]
-    fn maps_the_six_legacy_hwpx_skill_keys_onto_released_aliases() {
+    fn maps_the_legacy_hwpx_skill_keys_onto_released_aliases() {
         let expected = [
             ("공문서_기본", "공문서-기본", "gongmun-basic"),
             ("기안문_내부결재", "기안문-내부결재", "gian-internal"),
@@ -699,6 +707,21 @@ esac
             ("보고서_일반", "보고서", "report"),
             ("사업계획서_기본", "사업계획서", "plan"),
             ("회의록", "회의록", "minutes"),
+            // maru-hub scripts/seed_catalog.py hwpx_skill seeds
+            ("gongmun_default", "공문서-기본", "gongmun-basic"),
+            (
+                "gibun_internal_approval",
+                "기안문-내부결재",
+                "gian-internal",
+            ),
+            (
+                "gibun_external_dispatch",
+                "기안문-대외시행",
+                "gian-external",
+            ),
+            ("bogoseo_general", "보고서", "report"),
+            ("business_plan_default", "사업계획서", "plan"),
+            ("meeting_minutes_default", "회의록", "minutes"),
         ];
         assert_eq!(LEGACY_HWPX_TEMPLATE_KEYS.len(), expected.len());
         for (legacy, alias, slug) in expected {
@@ -707,6 +730,11 @@ esac
                 (alias, slug)
             );
         }
+        // A key saved with its template file name resolves to the same alias.
+        assert_eq!(
+            canonical_template("hwpx_skill", "사업계획서_기본.hwpx").unwrap(),
+            ("사업계획서", "plan")
+        );
         // A released alias is not a legacy key, and an unknown key names the supported ones.
         let error = canonical_template("hwpx_skill", "보고서").unwrap_err();
         assert!(error.contains("template_alias_invalid"), "{error}");

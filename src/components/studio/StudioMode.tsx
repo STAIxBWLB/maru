@@ -53,6 +53,7 @@ import {
   studioStateSave,
   hwpCliTemplateFields,
   hwpCliTemplateFill,
+  nativeHwpTemplateSource,
   templateFillHwpx,
   templateGetFields,
   templatePrepareHwpxTemplate,
@@ -518,9 +519,8 @@ export function StudioMode({
     const isCurrent = beginAdmittedFlow(workspace);
     setBusyAction("hwp-scan");
     try {
-      const templateSource = state.template?.source;
-      // Legacy hwpx_skill templates fill natively too; their bundled tree is retired.
-      if (templateSource === "hwp_cli_skill" || templateSource === "hwpx_skill") {
+      const templateSource = nativeHwpTemplateSource(state.template?.source, configuredPath);
+      if (templateSource) {
         if (!templateKey) {
           throw new Error("hwp_cli_template_alias_missing");
         }
@@ -652,8 +652,8 @@ export function StudioMode({
         state.hwpFields.fields.map((field) => [field.key, state.hwpFields.values[field.key] ?? ""]),
       );
       let response: TemplateFillResponse;
-      const templateSource = state.template?.source;
-      if (templateSource === "hwp_cli_skill" || templateSource === "hwpx_skill") {
+      const templateSource = nativeHwpTemplateSource(state.template?.source, templatePath);
+      if (templateSource) {
         response = await hwpCliTemplateFill(workspace, {
           source: templateSource,
           templateKey: templateKey ?? "",

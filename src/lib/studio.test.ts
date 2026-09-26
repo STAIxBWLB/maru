@@ -13,6 +13,7 @@ import {
   classifyTemplateFillCompletion,
   classifyTemplatePrepareCompletion,
   createInitialStudioState,
+  nativeHwpTemplateSource,
   normalizeStudioState,
   nextStudioStep,
   previousStudioStep,
@@ -97,6 +98,15 @@ describe("studio helpers", () => {
     });
     expect(state.template?.source).toBe("hwp_cli_skill");
     expect(state.template?.hwpxTemplateKey).toBe("보고서");
+  });
+
+  it("routes hwpx_skill natively only while no workspace template path is typed", () => {
+    expect(nativeHwpTemplateSource("hwpx_skill", null)).toBe("hwpx_skill");
+    expect(nativeHwpTemplateSource("hwpx_skill", "hwp-cli:plan")).toBe("hwpx_skill");
+    expect(nativeHwpTemplateSource("hwpx_skill", "templates/우리기관_사업계획서.hwpx")).toBeNull();
+    expect(nativeHwpTemplateSource("hwp_cli_skill", "templates/any.hwpx")).toBe("hwp_cli_skill");
+    expect(nativeHwpTemplateSource("work_repo", null)).toBeNull();
+    expect(nativeHwpTemplateSource(undefined, null)).toBeNull();
   });
 
   it("steps forward and backward within the fixed wizard bounds", () => {

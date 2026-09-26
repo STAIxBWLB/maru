@@ -457,6 +457,22 @@ export async function templateFillHwpx(
   );
 }
 
+/**
+ * The native hwp source that serves a Studio template's HWP scan/fill, or null
+ * for the workspace-template path. hwp_cli_skill always uses its alias; a
+ * legacy hwpx_skill record keeps a typed workspace path ahead of its key.
+ */
+export function nativeHwpTemplateSource(
+  source: StudioTemplateState["source"] | undefined,
+  templatePath: string | null,
+): HwpCliTemplateFieldsRequest["source"] | null {
+  if (source === "hwp_cli_skill") return source;
+  if (source === "hwpx_skill" && (!templatePath || templatePath.startsWith("hwp-cli:"))) {
+    return source;
+  }
+  return null;
+}
+
 export async function hwpCliTemplateFields(
   request: HwpCliTemplateFieldsRequest,
 ): Promise<HwpCliTemplateFieldsResponse> {
