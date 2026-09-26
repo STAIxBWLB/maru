@@ -20,13 +20,14 @@ Dates are the release-tag dates. Only `feat`/`fix`-level changes are listed;
   sweeps every terminal within the 3 s quit window.
 - **Edits are saved, not dropped, on unmount and quit (#353, #361).**
   Scratchpad, meeting sources, Studio, graph layout, and the Today brain dump
-  save a pending edit when their view closes, the workspace switches, or the
-  app quits. Quit waits up to 3 s for those saves and shows "saving" after
-  300 ms.
-- **A save that fails leaves a recovery copy and says so (#353, #361).** The
-  unsaved content is written under `.maru/recovery/`, a notification names the
-  file and the reason with "Open recovery copy", and a failed or timed-out
-  quit keeps Maru open with Retry, Quit anyway, and Cancel.
+  save a pending edit when their view closes or the app quits, and all but the
+  brain dump also when the workspace switches (#369 tracks the brain dump).
+  Quit waits up to 3 s for those saves and shows "saving" after 300 ms.
+- **A save that fails on close or quit leaves a recovery copy and says so
+  (#353, #361).** The unsaved content is written under `.maru/recovery/`, a
+  notification names the file and the reason with "Open recovery copy", and a
+  failed or timed-out quit keeps Maru open with Retry, Quit anyway, and
+  Cancel.
 - **Cmd+Q and the close button share one guard, including the skill editor
   (#353, #361).** Cmd+Q is now Maru's own menu item: it asks an open skill
   editor about unsaved changes with one native dialog at a time, then applies
@@ -39,10 +40,17 @@ Dates are the release-tag dates. Only `feat`/`fix`-level changes are listed;
 - **HWPX export, fields, fill, and PDF run on the released `hwp` (#359, #360,
   #362, #363).** HWPX export and legacy `hwpx_skill` templates route to native
   `hwp`, and workspace `.hwpx` field scans, fills, and PDF conversion use the
-  same released binary, failing closed with a named reason when it is missing.
+  same released binary. Without it, export and fill fail closed with a named
+  reason, field scans fall back to the built-in scanner with a warning, and PDF
+  conversion falls back to pandoc.
 - **The context hint writes `AGENTS.md` only (#355, #356).** Writing the hint
   no longer creates `CLAUDE.md`, and removing it deletes a `CLAUDE.md` it left
-  empty.
+  empty. The bundled skills environment's instruction file is `AGENTS.md` too
+  (#354).
+- **The bundled skills snapshot is refreshed (#357, #358).** Fresh and offline
+  installs get the current skills bundle: `yunmun`, `linkedin-manager`, and
+  `ship` are added, and the retired `hwpx` skill is removed in favor of the
+  released `hwp` (see the HWPX entry above). The bundle now carries 39 skills.
 
 ## v1.1.11 - 2026-09-25 - Lighter Start
 
