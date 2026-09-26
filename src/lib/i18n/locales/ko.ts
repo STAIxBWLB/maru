@@ -2381,7 +2381,7 @@ export const ko: Record<string, string> = {
   "cmdk.action.splitRight": "오른쪽으로 분할",
   "cmdk.action.attachActiveItem": "활성 항목을 터미널에 첨부",
   "cmdk.action.toggleAgentHooks": "에이전트 상태 훅 켜기/끄기 (Claude/Kimi)",
-  "cmdk.action.writeContextHint": "컨텍스트 안내를 CLAUDE.md/AGENTS.md에 작성",
+  "cmdk.action.writeContextHint": "컨텍스트 안내를 AGENTS.md에 작성",
   "cmdk.action.removeContextHint": "CLAUDE.md/AGENTS.md 컨텍스트 안내 제거",
   "cmdk.action.dockTerminalRight": "패널을 오른쪽에 배치",
   "cmdk.action.dockTerminalBottom": "패널을 하단에 배치",
