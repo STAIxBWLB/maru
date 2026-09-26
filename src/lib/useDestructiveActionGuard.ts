@@ -4,6 +4,7 @@ import type { MutableRefObject } from "react";
 import type { DebouncedSaver } from "./debouncedSave";
 import { setError } from "./errorStore";
 import type { MaruSettings } from "./settings";
+import { flushPendingSavesForQuit } from "./teardownSave";
 import { relaunchApp } from "./updater";
 import { tauriAvailable } from "./windowLayout";
 
@@ -121,11 +122,20 @@ export function useDestructiveActionGuard({
             return;
           }
           event.preventDefault();
+          closing = true;
+          // D-03/D-04: flush every mounted autosave surface first, bounded to
+          // 3 s. A failed or timed-out flush never closes — the 09-06
+          // notices are the visible signal until Task 2 adds the dialog.
+          const outcome = await flushPendingSavesForQuit();
+          if (outcome.kind !== "clean") {
+            closing = false;
+            return;
+          }
           if (hasDirtyDrafts()) {
+            closing = false;
             setPendingDestructiveAction("close");
             return;
           }
-          closing = true;
           try {
             await settingsSaverRef.current?.flush();
           } catch (err) {
