@@ -3770,6 +3770,76 @@ mod phase09_02 {
         );
     }
 
+    // TEMPORARY Linux diagnostic (diag/nohup-linux branch only, never merged).
+    #[test]
+    fn diag_nohup_linux_timeline() {
+        let app = app();
+        let app = app.handle().clone();
+        let tempdir = tempfile::tempdir().unwrap();
+        let sig_log = tempdir.path().join("sig.log");
+        let script_path = tempdir.path().join("child.py");
+        std::fs::write(
+            &script_path,
+            format!(
+                "import signal, time, os\n\
+                 log = {log:?}\n\
+                 def h(n, f):\n    open(log, 'a').write('%.3f caught %d\\n' % (time.time(), n))\n\
+                 for s in (signal.SIGTERM, signal.SIGINT, signal.SIGQUIT, signal.SIGCONT, signal.SIGTTIN, signal.SIGTTOU, signal.SIGPIPE, signal.SIGUSR1, signal.SIGUSR2, signal.SIGALRM):\n    signal.signal(s, h)\n\
+                 open(log, 'a').write('%.3f start hup=%s\\n' % (time.time(), signal.getsignal(signal.SIGHUP)))\n\
+                 time.sleep(600)\n",
+                log = sig_log.display().to_string()
+            ),
+        )
+        .unwrap();
+        let pid_file = tempdir.path().join("child.pid");
+        let script = format!(
+            "nohup python3 {py} </dev/null >/dev/null 2>&1 & echo $! > {pid}; trap '' HUP; echo TRAP-READY; while :; do sleep 1; done",
+            py = script_path.display(),
+            pid = pid_file.display()
+        );
+        let generation = run(spawn_session(
+            app.clone(),
+            sh_args("diag-nohup".to_string(), &script),
+        ))
+        .unwrap();
+        let handle = current("diag-nohup".to_string(), generation);
+        wait_for_marker(&app, &handle, "TRAP-READY");
+        thread::sleep(Duration::from_millis(500));
+        let leader = process_group_of(&app, "diag-nohup").unwrap();
+        let child: u32 = std::fs::read_to_string(&pid_file).unwrap().trim().parse().unwrap();
+        let ps = |label: &str| {
+            let out = std::process::Command::new("ps")
+                .args(["-e", "-o", "pid,ppid,pgid,sid,tpgid,stat,comm"])
+                .output()
+                .unwrap();
+            let text = String::from_utf8_lossy(&out.stdout);
+            eprintln!("DIAG [{label}] leader={leader} child={child}");
+            for line in text.lines() {
+                if line.contains(&leader.to_string()) || line.contains(&child.to_string()) || line.contains("PID") {
+                    eprintln!("DIAG   {line}");
+                }
+            }
+        };
+        ps("before kill");
+        let start = Instant::now();
+        run(kill_session(app.clone(), handle)).unwrap();
+        for _ in 0..40 {
+            eprintln!(
+                "DIAG t={:.2}s leader_alive={} child_alive={}",
+                start.elapsed().as_secs_f64(),
+                pid_alive(leader),
+                pid_alive(child)
+            );
+            if start.elapsed() > Duration::from_millis(2400) && start.elapsed() < Duration::from_millis(2700) {
+                ps("after SIGTERM step");
+            }
+            thread::sleep(Duration::from_millis(250));
+        }
+        ps("end");
+        eprintln!("DIAG sig.log:\n{}", std::fs::read_to_string(&sig_log).unwrap_or_default());
+        kill_pid(child);
+    }
+
     #[test]
     fn phase09_02_hup_trapping_non_job_control_leader_is_escalated_but_nohup_child_survives() {
         let app = app();
