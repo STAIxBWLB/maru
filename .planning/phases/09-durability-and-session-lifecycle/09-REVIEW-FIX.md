@@ -524,6 +524,27 @@ matches the pre-PR behavior.
 
 ---
 
+## Round 3 owner checkpoint (head `1b70ed15`)
+
+Approved: (a), (b), (b2), (c), (e), (f), a `trap '' HUP; sleep 600` foreground job dies on tab
+close, and a disowned job survives it. The owner confirmed on disk that a cancelled and then
+confirmed skill-editor quit left `SKILL.md` untouched, and that the Scratchpad edit survived the
+quit and a relaunch.
+
+Two observations, both handled:
+
+- **(c) the unsaved-changes dialog was hidden under Settings.** The editor is opened from
+  Settings, so after its Cmd+Q main still shows the Settings overlay (`z-index: 82`), which covered
+  main's quit dialogs (`.dialog-backdrop`, `60`) until the user went back to the app. The quit and
+  relaunch dialogs now use `z-index: 83`: above Settings, still below the toast stack (`84`) whose
+  recovery-copy notices the save-failed dialog points at. Checked with Playwright against the real
+  stylesheets: the dialog wins the center hit test and the toast stays clickable.
+- **The foreground job took 3-5 s to die.** That is the D-09 ladder (SIGHUP, 2 s, SIGTERM, 2 s,
+  SIGKILL): `trap '' HUP` defeats the SIGHUP, so SIGTERM ends the job about 2 s after the tab
+  closes. Unchanged by `1b70ed15`, which is test-only.
+
+---
+
 ## Checkpoint
 
 After round 1's fixes, the orchestrator/owner should run the real-app checkpoint described in the

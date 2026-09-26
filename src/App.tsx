@@ -8842,7 +8842,7 @@ export function MainApp() {
         />
 
         {pendingDestructiveAction === "save-failed" ? (
-          <div className="dialog-backdrop">
+          <div className="dialog-backdrop app-exit-dialog-backdrop">
             <section className="task-new-dialog" role="alertdialog" aria-modal="true">
               <header>
                 <div>
@@ -8882,7 +8882,7 @@ export function MainApp() {
             </section>
           </div>
         ) : pendingDestructiveAction ? (
-          <div className="dialog-backdrop">
+          <div className="dialog-backdrop app-exit-dialog-backdrop">
             <section className="task-new-dialog" role="alertdialog" aria-modal="true">
               <header>
                 <div>

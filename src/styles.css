@@ -14755,6 +14755,14 @@ button.git-badge:hover {
   padding: 16px;
 }
 
+/* The quit/relaunch dialogs sit above the Settings overlay (82): the skill
+   editor is opened from Settings, so a Cmd+Q from it lands here while main
+   still shows Settings. They stay below the toast stack (84), whose
+   recovery-copy notices the save-failed dialog points at. */
+.dialog-backdrop.app-exit-dialog-backdrop {
+  z-index: 83;
+}
+
 .task-new-dialog header,
 .task-new-dialog footer {
   display: flex;
