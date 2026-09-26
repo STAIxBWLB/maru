@@ -23,7 +23,7 @@ operative rule is in README's Release Process section.
 - [x] **Phase 6: Native E2E Runner Foundation** - A native runner drives the real app against the real backend, and the CI-vs-local question is settled by a spike rather than assumed. (completed 2026-08-29)
 - [x] **Phase 7: Guardrails Before Churn** - Lock poisoning recovers, the watcher and the document index stop carrying trees they never serve, and a sanitizer guard lands before the milestone's own later work can trip it. (completed 2026-09-05)
 - [x] **Phase 8: Main-Thread Responsiveness** - The skills registry lock narrows and the main-thread-blocking commands move off it, proven by a concurrency load test rather than the absence of a visible freeze. (completed 2026-09-06)
-- [ ] **Phase 9: Durability and Session Lifecycle** - A SIGHUP-trapping terminal can still be killed, a pending edit is saved (or its failure surfaced) on unmount and app quit, and a scheduled job's own PATH resolves as written.
+- [x] **Phase 9: Durability and Session Lifecycle** - A SIGHUP-trapping terminal can still be killed, a pending edit is saved (or its failure surfaced) on unmount and app quit, and a scheduled job's own PATH resolves as written. (completed 2026-09-26)
 - [x] **Phase 10: Bundle and Build Hardening** - The packaged CSP drops an unused directive and per-mode CSS restores the budget headroom spent since v0.4.46. (completed 2026-09-25)
 - [x] **Phase 11: Milestone Verification & Evidence** - Coverage is measured, the narrowed CI trace configuration is proven, and v1.0's closeout evidence debt is retired. (completed 2026-09-26)
 
@@ -240,28 +240,28 @@ Plans:
   3. A save that fails on a teardown path produces a visible signal to the user (log, toast, or equivalent) instead of disappearing with no trace.
   4. A job whose `program.env.PATH` carries several tilde entries installs a launchd plist in which every one of them is absolute, so the child process resolves the same tools the job's shell guard found. A colon-bearing non-path value and a single-path value are byte-identical to today's output.
 
-**Plans**: 8 plans in 4 waves
+**Plans**: 8/8 plans executed in 4 waves
 
 Plans:
 **Wave 1**
 
-- [ ] 09-01-PLAN.md - REL-04 verify-only: run the shipped tilde-expansion tests and mark traceability (D-13)
-- [ ] 09-02-PLAN.md - REL-01 process-group kill ladder for closed tabs and the terminal sweep at app exit (D-09..D-12)
-- [ ] 09-03-PLAN.md - Cmd+Q routed into the window-close guard through a Maru-owned app.quit menu item (D-03, A1 spike)
-- [ ] 09-05-PLAN.md - Shared saver settle/retry contract, teardown flush hook, Scratchpad flushes on unmount (D-01, D-02)
+- [x] 09-01-PLAN.md - REL-04 verify-only: run the shipped tilde-expansion tests and mark traceability (D-13)
+- [x] 09-02-PLAN.md - REL-01 process-group kill ladder for closed tabs and the terminal sweep at app exit (D-09..D-12)
+- [x] 09-03-PLAN.md - Cmd+Q routed into the window-close guard through a Maru-owned app.quit menu item (D-03, A1 spike)
+- [x] 09-05-PLAN.md - Shared saver settle/retry contract, teardown flush hook, Scratchpad flushes on unmount (D-01, D-02)
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 09-04-PLAN.md - write_recovery_copy IPC command under .maru/recovery plus command-isolation evidence at 383 (D-08)
-- [ ] 09-07-PLAN.md - Meeting source, Studio, graph layout, and Today brain dump autosaves on the shared saver (D-01)
+- [x] 09-04-PLAN.md - write_recovery_copy IPC command under .maru/recovery plus command-isolation evidence at 383 (D-08)
+- [x] 09-07-PLAN.md - Meeting source, Studio, graph layout, and Today brain dump autosaves on the shared saver (D-01)
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
-- [ ] 09-06-PLAN.md - Failed teardown saves: recovery copy, toast naming file and reason, Open recovery copy (D-07, D-08)
+- [x] 09-06-PLAN.md - Failed teardown saves: recovery copy, toast naming file and reason, Open recovery copy (D-07, D-08)
 
 **Wave 4** *(blocked on Wave 3 completion)*
 
-- [ ] 09-08-PLAN.md - Quit flush in the one guard: 3 s budget, 300 ms indicator, save-failed dialog, real-app verification (D-03..D-06)
+- [x] 09-08-PLAN.md - Quit flush in the one guard: 3 s budget, 300 ms indicator, save-failed dialog, real-app verification (D-03..D-06)
 
 ### Phase 10: Bundle and Build Hardening
 
@@ -334,6 +334,6 @@ Phases execute in numeric order: 6 → 7 → 8 → 9 → 10 → 11
 | 6. Native E2E Runner Foundation | 5/5 | Complete    | 2026-08-29 |
 | 7. Guardrails Before Churn | 5/5 | Complete    | 2026-09-05 |
 | 8. Main-Thread Responsiveness | 29/29 | Complete    | 2026-09-06 |
-| 9. Durability and Session Lifecycle | 0/8 | Planned | - |
+| 9. Durability and Session Lifecycle | 8/8 | Complete    | 2026-09-26 |
 | 10. Bundle and Build Hardening | 3/3 | Complete    | 2026-09-25 |
 | 11. Milestone Verification & Evidence | 6/6 | Complete    | 2026-09-26 |

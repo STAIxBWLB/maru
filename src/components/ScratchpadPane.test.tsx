@@ -19,6 +19,7 @@ const mocks = vi.hoisted(() => ({
   startWatcher: vi.fn(),
   stopWatcher: vi.fn(),
   trash: vi.fn(),
+  writeRecoveryCopy: vi.fn(),
 }));
 
 const watcherListeners = new Map<string, (event: { payload: never }) => void>();
@@ -47,14 +48,28 @@ vi.mock("../lib/api", () => ({
   trashScratchpadDocument: mocks.trash,
 }));
 
+vi.mock("../lib/maruDir", () => ({
+  writeRecoveryCopy: mocks.writeRecoveryCopy,
+}));
+
 import { ScratchpadPane } from "./ScratchpadPane";
+import { getOperationNotice } from "../lib/errorStore";
 import type { SortKey } from "../lib/settings";
 import type { ScratchpadDocument, ScratchpadEntry } from "../lib/types";
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
+// Most keys resolve as their own literal (identity) so assertions elsewhere
+// in this file can match on the dotted key. The teardown-failure messages
+// need real interpolation to assert file/reason content, so they get a
+// template here matching en.ts.
+const templates: Record<string, string> = {
+  "save.teardown.failed": "Could not save {file}: {reason}. A recovery copy was kept.",
+  "save.teardown.failedNoCopy": "Could not save {file}: {reason}.",
+};
+
 const t = (key: string, vars?: Record<string, string | number>) => {
-  let result = key;
+  let result = templates[key] ?? key;
   for (const [name, value] of Object.entries(vars ?? {})) {
     result = result.replace(`{${name}}`, String(value));
   }
@@ -435,6 +450,75 @@ describe("ScratchpadPane safety flows", () => {
     });
     await settle();
     expect(container.textContent).toContain("rightPane.scratchpad.recoveryAvailable");
+  });
+
+  it("saves a memo edit made just before the pane closes", async () => {
+    vi.useFakeTimers();
+    const entry = memoEntry();
+    mocks.list.mockResolvedValue([entry]);
+    mocks.read.mockResolvedValue(memoDocument());
+    await render();
+    const item = container.querySelector<HTMLButtonElement>('button[title="memos/memo.md"]');
+    await act(async () => item?.click());
+    await settle();
+    const textarea = container.querySelector<HTMLTextAreaElement>("textarea.scratchpad-editor");
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set;
+      setter?.call(textarea, "flush me on close");
+      textarea?.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+
+    // Unmount well inside the 700ms debounce window — the pending save must
+    // still land, not be dropped (D-01, REL-02).
+    await act(async () => root?.unmount());
+    root = null;
+    await settle();
+
+    expect(mocks.save).toHaveBeenCalledTimes(1);
+    expect(mocks.save).toHaveBeenCalledWith(
+      "/work",
+      "memos",
+      "memo.md",
+      "markdown",
+      "flush me on close",
+      "rev-1",
+      false,
+    );
+  });
+
+  it("keeps a recovery copy and raises a toast when a close-time save fails", async () => {
+    vi.useFakeTimers();
+    const entry = memoEntry();
+    mocks.list.mockResolvedValue([entry]);
+    mocks.read.mockResolvedValue(memoDocument());
+    mocks.save.mockRejectedValue(new Error("disk full"));
+    mocks.writeRecoveryCopy.mockResolvedValue(".maru/recovery/20260925-120000-memo-abcd1234.md");
+    await render();
+    const item = container.querySelector<HTMLButtonElement>('button[title="memos/memo.md"]');
+    await act(async () => item?.click());
+    await settle();
+    const textarea = container.querySelector<HTMLTextAreaElement>("textarea.scratchpad-editor");
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set;
+      setter?.call(textarea, "keep me");
+      textarea?.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+
+    // Unmount well inside the 700ms debounce window — the failed save must
+    // keep the edit as a real recovery file and raise a visible toast
+    // (D-07, D-08, REL-03), not merely log or drop it.
+    await act(async () => root?.unmount());
+    root = null;
+    await settle();
+
+    expect(mocks.writeRecoveryCopy).toHaveBeenCalledTimes(1);
+    expect(mocks.writeRecoveryCopy).toHaveBeenCalledWith("/work", "memo.md", "keep me", "disk full");
+
+    const notice = getOperationNotice();
+    expect(notice?.kind).toBe("error");
+    expect(notice?.message).toContain("memo.md");
+    expect(notice?.message).toContain("disk full");
+    expect(notice?.recovery?.path).toBe(".maru/recovery/20260925-120000-memo-abcd1234.md");
   });
 
   it("keeps collection grouping under the name sort", async () => {

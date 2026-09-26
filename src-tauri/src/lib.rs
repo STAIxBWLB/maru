@@ -177,6 +177,20 @@ use workspace::ipc::{
     detect_workspace, list_workspaces, read_workspace_config, register_workspace_roots,
 };
 
+// `tauri::generate_context!()` embeds a `#[no_mangle] static _EMBED_INFO_PLIST`
+// (embed_plist crate) — a linker-global symbol allowed exactly once per final
+// binary, at whichever single source location invokes the macro, regardless of
+// how many times the containing function runs. `cargo test --lib` compiles
+// this whole file (run() included, since it carries no test gate normally) INTO
+// the same test binary as any #[cfg(test)] module, so a second invocation
+// anywhere else in a unit test collides with this one ("symbol `_EMBED_INFO_PLIST`
+// is already defined"). Splitting run() itself behind #[cfg(not(test))], with a
+// stub standing in under #[cfg(test)], keeps the real body's invocation and
+// quit_acl_tests's own (its only other call site in the crate) mutually
+// exclusive: never both compiled into the same binary. main.rs's dependency
+// edge on this lib is unaffected — cargo compiles a library dependency without
+// --cfg test for its dependents, so real builds always get the body below.
+#[cfg(not(test))]
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Phase 08-27 saturation harness: install the two-worker test runtime
@@ -501,6 +515,7 @@ pub fn run() {
             read_maru_skills,
             read_maru_settings,
             save_maru_settings,
+            maru_dir::ipc::write_recovery_copy,
             secrets::ipc::secrets_scan,
             secrets::ipc::secrets_doctor,
             secrets::ipc::secrets_migrate,
@@ -641,11 +656,135 @@ pub fn run() {
             tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit => {
                 let state = app_handle.state::<TelegramIoState>();
                 stop_poller_on_exit(state.inner());
+                // D-12: no orphaned terminal child outlives Maru. This is
+                // the only call site (D-06) -- it fires only after the
+                // webview's own close guards already let the quit proceed.
+                terminal::shutdown_all_sessions(app_handle.state::<TerminalState>().inner());
             }
             _ => {}
         });
 }
 
+/// Never invoked (main.rs is compiled without --cfg test, so it always links
+/// the real body above): exists only so a `cargo test --lib` build has
+/// exactly one `tauri::generate_context!()` call site, which is
+/// quit_acl_tests's own build_context() below — see the comment on the real
+/// run().
+#[cfg(test)]
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
+pub fn run() {
+    unreachable!("run() is not exercised under cfg(test) builds");
+}
+
 pub fn run_cli(args: Vec<String>) -> i32 {
     cli::run_cli(args)
+}
+
+#[cfg(test)]
+mod quit_acl_tests {
+    // Plan 09-08, D-03 ("one quit path"): a reviewer build regressed to
+    // never actually exiting on a clean quit (no dirty draft, no pending
+    // save) — no crash, no dialog, the window/app just stayed open. The
+    // native-e2e WebDriver harness (e2e-native/specs/quit.spec.ts's sibling
+    // approach) cannot observe this in the sandboxed environment this test
+    // was authored in (its embedded WebDriver server's loopback bind never
+    // completes there — confirmed pre-existing: an untouched, unrelated
+    // spec fails identically). This test instead drives the REAL IPC/ACL
+    // path Tauri itself uses, with tauri::test's MockRuntime standing in
+    // for the window server (no real window, no socket, no webview) but
+    // this crate's REAL `tauri.conf.json` + `capabilities/*.json`, loaded by
+    // this module's own `tauri::generate_context!()` call below — the only
+    // one active in a `cfg(test)` build (see the comment above the real
+    // run(), which carries the equivalent call for normal builds).
+    //
+    // Root cause: @tauri-apps/api's `onCloseRequested` wrapper
+    // (node_modules/@tauri-apps/api/window.js) calls `this.destroy()` —
+    // i.e. invokes `plugin:window|destroy` — whenever the JS handler does
+    // not call `event.preventDefault()`. Tauri's own default
+    // `on_window_event` (tauri-2.10.3/src/manager/window.rs) ALWAYS calls
+    // `api.prevent_close()` at the native level once any JS
+    // close-requested listener is registered (this app registers exactly
+    // one, in useDestructiveActionGuard.ts), so the only path to an actual
+    // close is that JS-side `destroy()` call succeeding. `destroy` was
+    // never granted in src-tauri/capabilities/default.json (only
+    // `core:window:allow-close` was), so the IPC call was silently denied
+    // and the window never closed.
+    use tauri::ipc::{CallbackFn, InvokeBody};
+    use tauri::test::{get_ipc_response, mock_builder, INVOKE_KEY};
+    use tauri::webview::InvokeRequest;
+    use tauri::WebviewWindowBuilder;
+
+    fn invoke_request(cmd: &str) -> InvokeRequest {
+        InvokeRequest {
+            cmd: cmd.into(),
+            callback: CallbackFn(0),
+            error: CallbackFn(1),
+            // macOS/Linux desktop's local-origin scheme (manager::tauri_protocol_url):
+            // "http://tauri.localhost" is only correct on Windows/Android.
+            url: "tauri://localhost".parse().unwrap(),
+            body: InvokeBody::default(),
+            headers: Default::default(),
+            invoke_key: INVOKE_KEY.to_string(),
+        }
+    }
+
+    /// generate_context!() with no path argument reads THIS crate's own
+    /// tauri.conf.json + capabilities/*.json — the same files `run()` above
+    /// builds from — not an empty/default test fixture. Factored into one
+    /// call site: the macro embeds a `#[no_mangle]` static once per compiled
+    /// binary, so a second literal invocation anywhere else in this crate's
+    /// test build is a link error ("symbol _EMBED_INFO_PLIST is already
+    /// defined"), not just a run-time conflict.
+    fn build_test_app() -> tauri::App<tauri::test::MockRuntime> {
+        mock_builder()
+            .build(tauri::generate_context!())
+            .expect("failed to build the app with this crate's real context/capabilities")
+    }
+
+    #[test]
+    fn main_window_can_destroy_itself_through_the_real_capabilities() {
+        let app = build_test_app();
+        let webview = WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .expect("failed to build the \"main\" webview window");
+
+        let response = get_ipc_response(&webview, invoke_request("plugin:window|destroy"));
+
+        assert!(
+            response.is_ok(),
+            "plugin:window|destroy was denied for the \"main\" window: {:?}. This is exactly \
+             the call @tauri-apps/api's onCloseRequested wrapper makes when the JS handler does \
+             not preventDefault() — without \"core:window:allow-destroy\" granted in \
+             src-tauri/capabilities/default.json, a confirmed clean quit (D-03) never actually \
+             closes the window (checkpoint items 2/5/6/8).",
+            response,
+        );
+    }
+
+    // Review finding #2 / T-09-08-05 evidence gap: the "default" capability's
+    // `windows` list already names both "main" and "skill-editor" (same
+    // capability object, both windows), so this should already pass without
+    // a capabilities change — this test only closes the gap the security
+    // audit trail flagged: no direct test exercised the skill-editor label's
+    // own destroy grant. requestAppQuit (useDestructiveActionGuard.ts) calls
+    // this exact IPC command on the skill-editor window once its own guard
+    // has cleared, as the last step before main itself closes.
+    #[test]
+    fn skill_editor_window_can_destroy_itself_through_the_real_capabilities() {
+        let app = build_test_app();
+        let webview = WebviewWindowBuilder::new(&app, "skill-editor", Default::default())
+            .build()
+            .expect("failed to build the \"skill-editor\" webview window");
+
+        let response = get_ipc_response(&webview, invoke_request("plugin:window|destroy"));
+
+        assert!(
+            response.is_ok(),
+            "plugin:window|destroy was denied for the \"skill-editor\" window: {:?}. \
+             requestAppQuit's closeSkillEditorForQuit (windowLayout.ts) calls exactly this IPC \
+             command; without it granted for this window label, a whole-app quit would flush \
+             and confirm successfully but leave the skill editor window behind.",
+            response,
+        );
+    }
 }

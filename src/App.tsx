@@ -57,6 +57,7 @@ import { WritingGuidelineSidebar } from "./components/catalog/WritingGuidelineSi
 import { EvidenceBinderPane } from "./components/evidence/EvidenceBinderPane";
 import { MissionBadge } from "./components/MissionBadge";
 import { NewDocumentDialog } from "./components/NewDocumentDialog";
+import { OperationNoticeToast } from "./components/OperationNoticeToast";
 import { OutlinePane } from "./components/OutlinePane";
 import {
   createEditorPaneCommands,
@@ -360,7 +361,7 @@ import {
   useAgentMissionSlice,
   useAgentRegistrySlice,
 } from "./lib/agentRuntimeModeStore";
-import { dismissOperationNotice, setError, useError, useOperationNotice } from "./lib/errorStore";
+import { setError, useError, useOperationNotice } from "./lib/errorStore";
 import { setTelegramMessages, setTelegramPolling, useTelegramPolling } from "./lib/telegramEventsStore";
 import {
   communicationsModeController,
@@ -1959,10 +1960,16 @@ export function MainApp() {
   // live in the guard hook now (settings flush semantics unchanged).
   const {
     pendingDestructiveAction,
+    quitSaving,
+    quitFailureKind,
+    failedQuitAction,
     requestRelaunch,
     requestWindowClose,
     confirmDestructiveAction,
     cancelDestructiveAction,
+    retryQuit,
+    quitAnyway,
+    requestAppQuit,
   } = useDestructiveActionGuard({ hasDirtyDrafts, settingsSaverRef });
 
   const updateSettings = useCallback(
@@ -6949,6 +6956,14 @@ export function MainApp() {
         case "window.close":
           requestWindowClose();
           break;
+        case "app.quit":
+          // D-03 + review finding #2: the macOS App-submenu Quit item
+          // (Cmd+Q) always reaches "main" regardless of which window was
+          // focused (see app_menu.rs's menu_command_target), and quits the
+          // whole app — asking the skill editor window's own guard first —
+          // rather than only closing whichever window received the event.
+          void requestAppQuit();
+          break;
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps -- requestTerminalLaunch and saveActiveSurfaceDocument are read in this menu-command switch but not listed; not added here to avoid changing this callback's re-creation timing, a behavior change out of scope for this phase
@@ -6964,6 +6979,7 @@ export function MainApp() {
       openPreferences,
       outlineOpen,
       refreshActiveSurface,
+      requestAppQuit,
       requestWindowClose,
       revealTargetInFinder,
       saveCurrent,
@@ -8650,14 +8666,19 @@ export function MainApp() {
         />
 
         <div className="toast-stack">
+          {quitSaving
+            ? (() => {
+                const quitSavingLabel = t("app.quit.saving");
+                return (
+                  <div className="toast notice" role="status" title={quitSavingLabel}>
+                    <RefreshCcw size={15} className="spin" />
+                    <span>{quitSavingLabel}</span>
+                  </div>
+                );
+              })()
+            : null}
           {operationNotice ? (
-            <div className={operationNotice.kind === "error" ? "toast" : "toast notice"} title={operationNotice.message} role="status" data-skill-operation={operationNotice.operationId}>
-              <AlertTriangle size={15} />
-              <span>{operationNotice.message}</span>
-              <button type="button" className="icon-button" onClick={() => dismissOperationNotice(operationNotice.operationId)} aria-label={t("app.errorClose")} title={t("app.errorClose")}>
-                <X size={14} />
-              </button>
-            </div>
+            <OperationNoticeToast notice={operationNotice} t={t} />
           ) : null}
           {error ? (
             <div
@@ -8820,7 +8841,47 @@ export function MainApp() {
           workspaceDocumentCount={entries.length}
         />
 
-        {pendingDestructiveAction ? (
+        {pendingDestructiveAction === "save-failed" ? (
+          <div className="dialog-backdrop">
+            <section className="task-new-dialog" role="alertdialog" aria-modal="true">
+              <header>
+                <div>
+                  <h2>{t("app.quit.failedTitle")}</h2>
+                  <p>
+                    {quitFailureKind === "timeout"
+                      ? t("app.quit.timeoutBody")
+                      : t("app.quit.failedBody")}
+                  </p>
+                </div>
+              </header>
+              <footer>
+                <button
+                  type="button"
+                  className="button button-ghost button-sm"
+                  onClick={cancelDestructiveAction}
+                >
+                  {t("dialog.cancel")}
+                </button>
+                <button
+                  type="button"
+                  className="button button-ghost button-sm"
+                  onClick={() => void quitAnyway()}
+                >
+                  {failedQuitAction === "relaunch"
+                    ? t("app.quit.relaunchAnyway")
+                    : t("app.quit.quitAnyway")}
+                </button>
+                <button
+                  type="button"
+                  className="button button-primary button-sm"
+                  onClick={retryQuit}
+                >
+                  {t("app.quit.retry")}
+                </button>
+              </footer>
+            </section>
+          </div>
+        ) : pendingDestructiveAction ? (
           <div className="dialog-backdrop">
             <section className="task-new-dialog" role="alertdialog" aria-modal="true">
               <header>

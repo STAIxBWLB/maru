@@ -3,15 +3,35 @@ use tauri::{
     AppHandle, Emitter, Manager, Runtime,
 };
 
+#[cfg(target_os = "macos")]
+use tauri::menu::AboutMetadata;
 #[cfg(not(target_os = "macos"))]
 use tauri::menu::HELP_SUBMENU_ID;
 
 const CHECK_FOR_UPDATES_MENU_ID: &str = "app.check_for_updates";
 const CHECK_FOR_UPDATES_EVENT: &str = "maru://check-for-updates";
 const MENU_COMMAND_EVENT: &str = "maru://menu-command";
+// D-03: the id the macOS App-submenu Quit item emits, routed through the
+// existing generic MENU_COMMAND_EVENT path (handle_menu_event below is
+// unchanged) into App.tsx's runMenuCommand -> requestWindowClose(), the same
+// guard the red close button reaches. macOS-only: Windows/Linux keep the
+// platform-native Quit affordance untouched.
+#[cfg(target_os = "macos")]
+const QUIT_MENU_ID: &str = "app.quit";
 
 pub fn build_app_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
     let menu = Menu::default(app)?;
+    // D-03/A1: replace tauri's predefined native Quit item (the predefined
+    // menu item that calls NSApplication terminate: and bypasses the webview
+    // entirely — research Pitfall 2) with a Maru-owned command item before
+    // the Maru menus and Check-for-Updates item are inserted, so Check for
+    // Updates still lands at index 1 of the (now Maru-built) App submenu.
+    #[cfg(target_os = "macos")]
+    {
+        let _ = menu.remove_at(0)?;
+        let app_submenu = build_macos_app_submenu(app)?;
+        menu.insert(&app_submenu, 0)?;
+    }
     let check_for_updates = MenuItem::with_id(
         app,
         CHECK_FOR_UPDATES_MENU_ID,
@@ -23,6 +43,39 @@ pub fn build_app_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> 
     install_maru_menus(app, &menu)?;
     insert_check_for_updates_item(app, &menu, &check_for_updates)?;
     Ok(menu)
+}
+
+/// Reproduces tauri 2.10.3's `Menu::default` macOS App submenu item-for-item
+/// (About, Services, Hide, Hide Others — see
+/// tauri-2.10.3/src/menu/menu.rs:186-204) but ends with a Maru `command_item`
+/// instead of the predefined native quit item, so Cmd+Q reaches the webview.
+#[cfg(target_os = "macos")]
+fn build_macos_app_submenu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Submenu<R>> {
+    let pkg_info = app.package_info();
+    let config = app.config();
+    let about_metadata = AboutMetadata {
+        name: Some(pkg_info.name.clone()),
+        version: Some(pkg_info.version.to_string()),
+        copyright: config.bundle.copyright.clone(),
+        authors: config.bundle.publisher.clone().map(|p| vec![p]),
+        ..Default::default()
+    };
+    let quit = command_item(app, QUIT_MENU_ID, "Quit Maru", Some("CmdOrCtrl+Q"))?;
+    Submenu::with_items(
+        app,
+        pkg_info.name.clone(),
+        true,
+        &[
+            &PredefinedMenuItem::about(app, None, Some(about_metadata))?,
+            &PredefinedMenuItem::separator(app)?,
+            &PredefinedMenuItem::services(app, None)?,
+            &PredefinedMenuItem::separator(app)?,
+            &PredefinedMenuItem::hide(app, None)?,
+            &PredefinedMenuItem::hide_others(app, None)?,
+            &PredefinedMenuItem::separator(app)?,
+            &quit,
+        ],
+    )
 }
 
 fn install_maru_menus<R: Runtime>(app: &AppHandle<R>, menu: &Menu<R>) -> tauri::Result<()> {
@@ -286,26 +339,155 @@ fn insert_check_for_updates_item<R: Runtime>(
     Ok(())
 }
 
+/// Where `handle_menu_event` routes a menu command id. Split out as its own
+/// pure function (review finding #2) so the routing decision — the part a
+/// prior review found broken — is unit-testable without a real window
+/// manager, webview, or MenuEvent construction.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MenuCommandTarget<'a> {
+    Label(&'a str),
+    Broadcast,
+}
+
+fn menu_command_target<'a>(
+    id: &str,
+    focused_label: Option<&'a str>,
+    main_exists: bool,
+    any_window_label: Option<&'a str>,
+) -> MenuCommandTarget<'a> {
+    // D-03 follow-up: Cmd+Q/app-menu Quit must always reach "main", never a
+    // secondary window like skill-editor, which has no whole-app-quit
+    // orchestration of its own and would otherwise leave Cmd+Q dead whenever
+    // it happens to have focus. "main" asks every other open window's own
+    // guard before it lets the app actually exit — see requestAppQuit in
+    // useDestructiveActionGuard.ts.
+    #[cfg(target_os = "macos")]
+    {
+        if id == QUIT_MENU_ID {
+            if main_exists {
+                return MenuCommandTarget::Label("main");
+            }
+            // Round 2 (owner-observed regression): "main" no longer exists
+            // (e.g. it was closed directly while a secondary window stayed
+            // open, orphaning it) — emit_to a label with no window behind
+            // it reaches nobody, and every later Cmd+Q would go dead
+            // forever. Route to any live window instead; its own JS quits
+            // the whole app through its own guard (SkillEditorWindow.tsx's
+            // app.quit fallback, exit() via @tauri-apps/plugin-process).
+            return match any_window_label {
+                Some(label) => MenuCommandTarget::Label(label),
+                None => MenuCommandTarget::Broadcast,
+            };
+        }
+    }
+    // Only the macOS Quit route above reads these.
+    #[cfg(not(target_os = "macos"))]
+    let _ = (id, main_exists, any_window_label);
+    // Every other menu command goes to the focused window only: a broadcast
+    // made one Cmd+W act in every window at once (e.g. closing a background
+    // PTY tab while the Settings window closed itself). Fall back to
+    // broadcast if no window reports focus so menus never go dead.
+    match focused_label {
+        Some(label) => MenuCommandTarget::Label(label),
+        None => MenuCommandTarget::Broadcast,
+    }
+}
+
 pub fn handle_menu_event<R: Runtime>(app: &AppHandle<R>, event: tauri::menu::MenuEvent) {
     if event.id() == CHECK_FOR_UPDATES_MENU_ID {
         let _ = app.emit(CHECK_FOR_UPDATES_EVENT, ());
         return;
     }
-    // Menu commands go to the focused window only: a broadcast made one Cmd+W
-    // act in every window at once (e.g. closing a background PTY tab while the
-    // Settings window closed itself). Fall back to broadcast if no window
-    // reports focus so menus never go dead.
     let id = event.id().0.clone();
-    let focused = app
-        .webview_windows()
-        .into_iter()
-        .find(|(_, window)| window.is_focused().unwrap_or(false));
-    match focused {
-        Some((label, _)) => {
-            let _ = app.emit_to(&label, MENU_COMMAND_EVENT, id);
+    let windows = app.webview_windows();
+    let focused = windows
+        .iter()
+        .find(|(_, window)| window.is_focused().unwrap_or(false))
+        .map(|(label, _)| label.clone());
+    let main_exists = windows.contains_key("main");
+    let any_window_label = windows.keys().next().cloned();
+    match menu_command_target(
+        &id,
+        focused.as_deref(),
+        main_exists,
+        any_window_label.as_deref(),
+    ) {
+        MenuCommandTarget::Label(label) => {
+            let _ = app.emit_to(label, MENU_COMMAND_EVENT, id);
         }
-        None => {
+        MenuCommandTarget::Broadcast => {
             let _ = app.emit(MENU_COMMAND_EVENT, id);
         }
+    }
+}
+
+#[cfg(test)]
+mod menu_routing_tests {
+    use super::*;
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn quit_always_routes_to_main_regardless_of_focus() {
+        assert_eq!(
+            menu_command_target(QUIT_MENU_ID, Some("skill-editor"), true, Some("main")),
+            MenuCommandTarget::Label("main"),
+        );
+        assert_eq!(
+            menu_command_target(QUIT_MENU_ID, Some("main"), true, Some("main")),
+            MenuCommandTarget::Label("main"),
+        );
+        assert_eq!(
+            menu_command_target(QUIT_MENU_ID, None, true, Some("main")),
+            MenuCommandTarget::Label("main"),
+        );
+    }
+
+    // Round 2 (owner-observed regression): "main" closed directly (or was
+    // orphaned by the round-1 initializing-window race) while a secondary
+    // window stayed open. Every later Cmd+Q must still reach a live window
+    // instead of going nowhere.
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn quit_falls_back_to_a_live_window_when_main_no_longer_exists() {
+        assert_eq!(
+            menu_command_target(
+                QUIT_MENU_ID,
+                Some("skill-editor"),
+                false,
+                Some("skill-editor")
+            ),
+            MenuCommandTarget::Label("skill-editor"),
+        );
+        // Even if the (now-gone) "main" still happened to report focus in a
+        // stale snapshot, main_exists=false must win the fallback decision.
+        assert_eq!(
+            menu_command_target(QUIT_MENU_ID, Some("main"), false, Some("skill-editor")),
+            MenuCommandTarget::Label("skill-editor"),
+        );
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn quit_broadcasts_when_main_is_gone_and_no_window_remains() {
+        assert_eq!(
+            menu_command_target(QUIT_MENU_ID, None, false, None),
+            MenuCommandTarget::Broadcast,
+        );
+    }
+
+    #[test]
+    fn every_other_command_follows_focus_or_broadcasts() {
+        assert_eq!(
+            menu_command_target("window.close", Some("skill-editor"), true, Some("main")),
+            MenuCommandTarget::Label("skill-editor"),
+        );
+        assert_eq!(
+            menu_command_target("window.close", Some("main"), true, Some("main")),
+            MenuCommandTarget::Label("main"),
+        );
+        assert_eq!(
+            menu_command_target("window.close", None, true, Some("main")),
+            MenuCommandTarget::Broadcast,
+        );
     }
 }

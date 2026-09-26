@@ -22,6 +22,8 @@ import { EmptyState, ModeHeader } from "../ui/ModeChrome";
 import { RichMarkdownEditor } from "../RichMarkdownEditor";
 import { MarkdownSourceEditor } from "./MarkdownSourceEditor";
 import { setError } from "../../lib/errorStore";
+import { createDebouncedSaver } from "../../lib/debouncedSave";
+import { settleTeardownSave, useTeardownFlush } from "../../lib/teardownSave";
 import { useTranslation } from "../../lib/i18n";
 import {
   defaultMaruDocType,
@@ -125,7 +127,6 @@ export function StudioMode({
   const [editorMode, setEditorMode] = useState<EditorMode>("rich");
   const [lintIssues, setLintIssues] = useState<GaejosikLintIssue[]>([]);
   const [lintLoading, setLintLoading] = useState(false);
-  const saveTimerRef = useRef<number | null>(null);
   const loadingRef = useRef(false);
   const saveQueueRef = useRef<Promise<void>>(Promise.resolve());
   const saveRevisionRef = useRef(0);
@@ -208,17 +209,49 @@ export function StudioMode({
           if (revision === saveRevisionRef.current) {
             setError(err instanceof Error ? err.message : String(err));
           }
+          // Rethrow after bookkeeping so the debounced saver (D-01) can see
+          // the failure and report it as a failed settlement.
+          throw err;
         })
         .finally(() => {
           if (revision === saveRevisionRef.current) {
             setSaving(false);
           }
         });
-      saveQueueRef.current = run;
+      // The shared queue tail must never reject, or the next enqueue's
+      // `.catch(() => undefined).then(...)` chain would be poisoned.
+      saveQueueRef.current = run.catch(() => undefined);
       return run;
     },
     [loadSummaries, workspaceRoot],
   );
+
+  // A new saver per workspaceRoot so a workspace switch settles the outgoing
+  // workspace's pending save via useTeardownFlush (T-09-07-01) instead of
+  // losing it. enqueueStudioSave's own identity already changes in lockstep
+  // with workspaceRoot (it depends only on workspaceRoot/loadSummaries).
+  const saver = useMemo(
+    () =>
+      workspaceRoot
+        ? createDebouncedSaver<StudioState>((nextState) => enqueueStudioSave(nextState), 600)
+        : null,
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on workspaceRoot only; enqueueStudioSave changes only when workspaceRoot does
+    [workspaceRoot],
+  );
+  const describeStudioSave = (savedState: StudioState) =>
+    workspaceRoot
+      ? {
+          workPath: workspaceRoot,
+          // Review finding #3: label from the saved state's own document
+          // path, not the currently active one — after a document switch,
+          // a failed save of the OLD document must not be named after the
+          // NEW one. source.documentPath is a schedule-time snapshot
+          // (createInitialStudioState), unlike the live activeDocument prop.
+          filePath: savedState.source.documentPath ?? `studio/${savedState.docId}`,
+          content: JSON.stringify(savedState, null, 2),
+        }
+      : null;
+  useTeardownFlush(saver, describeStudioSave, t);
 
   useEffect(() => {
     flowAdmissionRef.current = {
@@ -230,6 +263,11 @@ export function StudioMode({
       setSummaries([]);
       return;
     }
+    // A document/root switch must not silently overwrite the previous
+    // document's pending debounced save (T-09-07-02) — flush it first, and
+    // keep a recovery copy if that fails: the next schedule() replaces the
+    // retained value, so a bare flush() would drop it behind a banner.
+    if (saver) void settleTeardownSave(saver, describeStudioSave, t);
     let cancelled = false;
     loadingRef.current = true;
     setLoading(true);
@@ -260,15 +298,9 @@ export function StudioMode({
   }, [activeDocId, activeDocument?.path, workspaceRoot]);
 
   useEffect(() => {
-    if (!workspaceRoot || !state || loadingRef.current) return;
-    if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current);
-    saveTimerRef.current = window.setTimeout(() => {
-      void enqueueStudioSave(state);
-    }, 600);
-    return () => {
-      if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current);
-    };
-  }, [enqueueStudioSave, state, workspaceRoot]);
+    if (!workspaceRoot || !state || loadingRef.current || !saver) return;
+    saver.schedule(state);
+  }, [saver, state, workspaceRoot]);
 
   useEffect(() => {
     if (!workspaceRoot || !state) return;
@@ -335,8 +367,12 @@ export function StudioMode({
 
   async function saveNow(): Promise<void> {
     if (!workspaceRoot || !state) return;
-    if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current);
-    await enqueueStudioSave(state);
+    saver?.cancel();
+    try {
+      await enqueueStudioSave(state);
+    } catch {
+      // enqueueStudioSave already surfaced the error via setError.
+    }
   }
 
   async function loadState(docId: string): Promise<void> {

@@ -26,6 +26,13 @@ export const ko: Record<string, string> = {
   "app.unsaved.closeBody": "저장하지 않은 변경이 있습니다. 저장하지 않고 앱을 닫을까요?",
   "app.unsaved.relaunchBody": "저장하지 않은 변경이 있습니다. 저장하지 않고 재시작할까요?",
   "app.unsaved.confirm": "저장하지 않고 계속",
+  "app.quit.saving": "종료하기 전에 변경 사항을 저장하는 중...",
+  "app.quit.failedTitle": "변경 사항을 저장하지 못했습니다",
+  "app.quit.failedBody": "일부 변경 사항을 저장하지 못해 Maru를 종료하지 않았습니다. 각 항목의 알림을 확인하세요. 복구 사본을 보관한 경우 알림에서 열 수 있습니다.",
+  "app.quit.timeoutBody": "저장이 3초 넘게 걸려 Maru를 종료하지 않았습니다.",
+  "app.quit.retry": "다시 시도",
+  "app.quit.quitAnyway": "그래도 종료",
+  "app.quit.relaunchAnyway": "그래도 재시작",
   "system.tab.secrets": "Secrets",
   "system.secrets.title": "Workspace 시크릿",
   "system.secrets.subtitle": ".maru/secrets 아래에서 관리되며 .secrets 는 호환용 심볼릭 링크로 유지됩니다. 시크릿 값은 명시적으로 공개할 때까지 숨겨집니다.",
@@ -2589,6 +2596,11 @@ export const ko: Record<string, string> = {
 
   "toast.discardedEdit": "{title} 의 저장하지 않은 변경 사항이 임시 보관되었습니다.",
   "toast.restore": "되돌리기",
+
+  "save.teardown.failed": "{file} 저장 실패: {reason}. 복구 사본을 보관했습니다.",
+  "save.teardown.failedNoCopy": "{file} 저장 실패: {reason}.",
+  "save.teardown.openCopy": "복구 사본 열기",
+
   "updates.checking": "업데이트 확인 중...",
   "updates.available": "새 버전 {version}이 있습니다.",
   "updates.none": "사용 가능한 업데이트가 없습니다.",
