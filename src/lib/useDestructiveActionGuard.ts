@@ -16,7 +16,11 @@ import { tauriAvailable } from "./windowLayout";
 // settingsSaverRef/closeConfirmedRef exactly as the inline version did.
 // ---------------------------------------------------------------------------
 
-export type DestructiveAction = "close" | "relaunch";
+export type DestructiveAction = "close" | "relaunch" | "save-failed";
+
+/** 300 ms — the flush is only announced with an indicator when it takes
+ * longer than this to settle (D-04). */
+export const QUIT_SAVING_INDICATOR_MS = 300;
 
 export interface DestructiveActionGuardParams {
   hasDirtyDrafts: () => boolean;
@@ -25,10 +29,25 @@ export interface DestructiveActionGuardParams {
 
 export interface DestructiveActionGuard {
   pendingDestructiveAction: DestructiveAction | null;
+  /** True once the quit flush has been running longer than
+   * QUIT_SAVING_INDICATOR_MS; false again once it settles. */
+  quitSaving: boolean;
+  /** Set alongside pendingDestructiveAction === "save-failed"; tells the
+   * dialog which body copy to show. */
+  quitFailureKind: "failed" | "timeout" | null;
+  /** Which action the failed/timed-out flush interrupted, so retryQuit and
+   * quitAnyway know what to re-run or continue. */
+  failedQuitAction: "close" | "relaunch" | null;
   requestRelaunch: () => Promise<void>;
   requestWindowClose: () => void;
   confirmDestructiveAction: () => Promise<void>;
   cancelDestructiveAction: () => void;
+  /** Re-runs the interrupted action's entry point from a save-failed dialog. */
+  retryQuit: () => void;
+  /** Continues the interrupted action past a save-failed dialog: the
+   * existing dirty-draft confirm if drafts are still dirty, otherwise the
+   * settings-flush-then-close/relaunch today's confirm path already runs. */
+  quitAnyway: () => Promise<void>;
 }
 
 export function useDestructiveActionGuard({
@@ -36,9 +55,13 @@ export function useDestructiveActionGuard({
   settingsSaverRef,
 }: DestructiveActionGuardParams): DestructiveActionGuard {
   // Dirty-draft guard: "close" = window close requested, "relaunch" = update
-  // ready. Non-null shows the confirm dialog; the action runs on confirm.
+  // ready, "save-failed" = the quit flush failed or timed out. Non-null shows
+  // a dialog; the action runs on confirm/retry/quit-anyway.
   const [pendingDestructiveAction, setPendingDestructiveAction] =
     useState<DestructiveAction | null>(null);
+  const [quitSaving, setQuitSaving] = useState(false);
+  const [quitFailureKind, setQuitFailureKind] = useState<"failed" | "timeout" | null>(null);
+  const [failedQuitAction, setFailedQuitAction] = useState<"close" | "relaunch" | null>(null);
   const closeConfirmedRef = useRef(false);
 
   const relaunchAfterSettingsFlush = useCallback(async () => {
@@ -50,13 +73,48 @@ export function useDestructiveActionGuard({
     }
   }, [settingsSaverRef]);
 
+  const closeAfterSettingsFlush = useCallback(async () => {
+    try {
+      await settingsSaverRef.current?.flush();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+    closeConfirmedRef.current = true;
+    try {
+      const { getCurrentWindow } = await import("@tauri-apps/api/window");
+      await getCurrentWindow().close();
+    } catch (err) {
+      closeConfirmedRef.current = false;
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }, [settingsSaverRef]);
+
+  // D-03/D-04/D-05: the flush step shared by close and relaunch alike. A
+  // clean settle clears the 300 ms indicator and lets the caller continue; a
+  // failed or timed-out settle records which action was interrupted and
+  // raises the save-failed dialog instead.
+  const runQuitFlush = useCallback(async (action: "close" | "relaunch") => {
+    const indicatorTimer = setTimeout(() => setQuitSaving(true), QUIT_SAVING_INDICATOR_MS);
+    const outcome = await flushPendingSavesForQuit();
+    clearTimeout(indicatorTimer);
+    setQuitSaving(false);
+    if (outcome.kind !== "clean") {
+      setFailedQuitAction(action);
+      setQuitFailureKind(outcome.kind);
+      setPendingDestructiveAction("save-failed");
+    }
+    return outcome;
+  }, []);
+
   const requestRelaunch = useCallback(async () => {
+    const outcome = await runQuitFlush("relaunch");
+    if (outcome.kind !== "clean") return;
     if (hasDirtyDrafts()) {
       setPendingDestructiveAction("relaunch");
       return;
     }
     await relaunchAfterSettingsFlush();
-  }, [hasDirtyDrafts, relaunchAfterSettingsFlush]);
+  }, [hasDirtyDrafts, relaunchAfterSettingsFlush, runQuitFlush]);
 
   const confirmDestructiveAction = useCallback(async () => {
     const action = pendingDestructiveAction;
@@ -66,24 +124,14 @@ export function useDestructiveActionGuard({
       return;
     }
     if (action === "close") {
-      try {
-        await settingsSaverRef.current?.flush();
-      } catch (err) {
-        setError(err instanceof Error ? err.message : String(err));
-      }
-      closeConfirmedRef.current = true;
-      try {
-        const { getCurrentWindow } = await import("@tauri-apps/api/window");
-        await getCurrentWindow().close();
-      } catch (err) {
-        closeConfirmedRef.current = false;
-        setError(err instanceof Error ? err.message : String(err));
-      }
+      await closeAfterSettingsFlush();
     }
-  }, [pendingDestructiveAction, relaunchAfterSettingsFlush, settingsSaverRef]);
+  }, [pendingDestructiveAction, relaunchAfterSettingsFlush, closeAfterSettingsFlush]);
 
   const cancelDestructiveAction = useCallback(() => {
     setPendingDestructiveAction(null);
+    setQuitFailureKind(null);
+    setFailedQuitAction(null);
   }, []);
 
   const requestWindowClose = useCallback(() => {
@@ -91,6 +139,38 @@ export function useDestructiveActionGuard({
       .then(({ getCurrentWindow }) => getCurrentWindow().close())
       .catch((err) => setError(err instanceof Error ? err.message : String(err)));
   }, []);
+
+  const retryQuit = useCallback(() => {
+    const action = failedQuitAction;
+    setPendingDestructiveAction(null);
+    setQuitFailureKind(null);
+    setFailedQuitAction(null);
+    if (action === "close") {
+      requestWindowClose();
+    } else if (action === "relaunch") {
+      void requestRelaunch();
+    }
+  }, [failedQuitAction, requestWindowClose, requestRelaunch]);
+
+  const quitAnyway = useCallback(async () => {
+    const action = failedQuitAction;
+    setPendingDestructiveAction(null);
+    setQuitFailureKind(null);
+    setFailedQuitAction(null);
+    if (action === "close") {
+      if (hasDirtyDrafts()) {
+        setPendingDestructiveAction("close");
+        return;
+      }
+      await closeAfterSettingsFlush();
+    } else if (action === "relaunch") {
+      if (hasDirtyDrafts()) {
+        setPendingDestructiveAction("relaunch");
+        return;
+      }
+      await relaunchAfterSettingsFlush();
+    }
+  }, [failedQuitAction, hasDirtyDrafts, closeAfterSettingsFlush, relaunchAfterSettingsFlush]);
 
   // Main-window close: flush pending settings writes before the window goes
   // away, and gate on unsaved drafts instead of losing them silently. The
@@ -123,10 +203,10 @@ export function useDestructiveActionGuard({
           }
           event.preventDefault();
           closing = true;
-          // D-03/D-04: flush every mounted autosave surface first, bounded to
-          // 3 s. A failed or timed-out flush never closes — the 09-06
-          // notices are the visible signal until Task 2 adds the dialog.
-          const outcome = await flushPendingSavesForQuit();
+          // D-03/D-04/D-05: flush every mounted autosave surface first,
+          // bounded to 3 s. A failed or timed-out flush never closes — it
+          // raises the save-failed dialog instead (runQuitFlush).
+          const outcome = await runQuitFlush("close");
           if (outcome.kind !== "clean") {
             closing = false;
             return;
@@ -136,19 +216,8 @@ export function useDestructiveActionGuard({
             setPendingDestructiveAction("close");
             return;
           }
-          try {
-            await settingsSaverRef.current?.flush();
-          } catch (err) {
-            setError(err instanceof Error ? err.message : String(err));
-          }
-          closeConfirmedRef.current = true;
-          try {
-            await appWindow.close();
-          } catch (err) {
-            closeConfirmedRef.current = false;
-            closing = false;
-            setError(err instanceof Error ? err.message : String(err));
-          }
+          await closeAfterSettingsFlush();
+          closing = false;
         });
       })
       .then((off) => {
@@ -162,13 +231,18 @@ export function useDestructiveActionGuard({
       disposed = true;
       unlisten?.();
     };
-  }, [hasDirtyDrafts, settingsSaverRef]);
+  }, [closeAfterSettingsFlush, hasDirtyDrafts, runQuitFlush]);
 
   return {
     pendingDestructiveAction,
+    quitSaving,
+    quitFailureKind,
+    failedQuitAction,
     requestRelaunch,
     requestWindowClose,
     confirmDestructiveAction,
     cancelDestructiveAction,
+    retryQuit,
+    quitAnyway,
   };
 }

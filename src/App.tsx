@@ -1960,10 +1960,15 @@ export function MainApp() {
   // live in the guard hook now (settings flush semantics unchanged).
   const {
     pendingDestructiveAction,
+    quitSaving,
+    quitFailureKind,
+    failedQuitAction,
     requestRelaunch,
     requestWindowClose,
     confirmDestructiveAction,
     cancelDestructiveAction,
+    retryQuit,
+    quitAnyway,
   } = useDestructiveActionGuard({ hasDirtyDrafts, settingsSaverRef });
 
   const updateSettings = useCallback(
@@ -8656,6 +8661,17 @@ export function MainApp() {
         />
 
         <div className="toast-stack">
+          {quitSaving
+            ? (() => {
+                const quitSavingLabel = t("app.quit.saving");
+                return (
+                  <div className="toast notice" role="status" title={quitSavingLabel}>
+                    <RefreshCcw size={15} className="spin" />
+                    <span>{quitSavingLabel}</span>
+                  </div>
+                );
+              })()
+            : null}
           {operationNotice ? (
             <OperationNoticeToast notice={operationNotice} t={t} />
           ) : null}
@@ -8820,7 +8836,47 @@ export function MainApp() {
           workspaceDocumentCount={entries.length}
         />
 
-        {pendingDestructiveAction ? (
+        {pendingDestructiveAction === "save-failed" ? (
+          <div className="dialog-backdrop">
+            <section className="task-new-dialog" role="alertdialog" aria-modal="true">
+              <header>
+                <div>
+                  <h2>{t("app.quit.failedTitle")}</h2>
+                  <p>
+                    {quitFailureKind === "timeout"
+                      ? t("app.quit.timeoutBody")
+                      : t("app.quit.failedBody")}
+                  </p>
+                </div>
+              </header>
+              <footer>
+                <button
+                  type="button"
+                  className="button button-ghost button-sm"
+                  onClick={cancelDestructiveAction}
+                >
+                  {t("dialog.cancel")}
+                </button>
+                <button
+                  type="button"
+                  className="button button-ghost button-sm"
+                  onClick={() => void quitAnyway()}
+                >
+                  {failedQuitAction === "relaunch"
+                    ? t("app.quit.relaunchAnyway")
+                    : t("app.quit.quitAnyway")}
+                </button>
+                <button
+                  type="button"
+                  className="button button-primary button-sm"
+                  onClick={retryQuit}
+                >
+                  {t("app.quit.retry")}
+                </button>
+              </footer>
+            </section>
+          </div>
+        ) : pendingDestructiveAction ? (
           <div className="dialog-backdrop">
             <section className="task-new-dialog" role="alertdialog" aria-modal="true">
               <header>
