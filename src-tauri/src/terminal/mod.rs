@@ -3725,6 +3725,19 @@ mod phase09_02 {
             .ok()
             .and_then(|contents| contents.trim().parse::<u32>().ok())
             .expect("the pid file is written before the marker is echoed");
+        // `echo $!` and the marker run right after the fork, before the
+        // background child has exec'd nohup and set SIGHUP to ignored. Under
+        // parallel test load a kill in that window killed the child (seen on
+        // Linux CI), which tests the fixture, not the ladder. nohup ignores
+        // SIGHUP before it execs `sleep`, so wait for `sleep`.
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while !read_comm(child).is_some_and(|comm| comm.ends_with("sleep")) {
+            assert!(
+                Instant::now() < deadline,
+                "the nohup'd child {child} never exec'd sleep"
+            );
+            thread::sleep(Duration::from_millis(20));
+        }
         assert_eq!(
             read_pgid(child),
             Some(leader),
@@ -3732,6 +3745,15 @@ mod phase09_02 {
              process group -- if this fails the test fixture, not the fix, is wrong"
         );
         (handle, leader, child)
+    }
+
+    fn read_comm(pid: u32) -> Option<String> {
+        let output = std::process::Command::new("ps")
+            .args(["-o", "comm=", "-p", &pid.to_string()])
+            .output()
+            .ok()?;
+        let comm = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        (!comm.is_empty()).then_some(comm)
     }
 
     fn kill_pid(pid: u32) {
