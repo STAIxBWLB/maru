@@ -1242,7 +1242,7 @@ mod tests {
     fn bundle_rel_path_validation() {
         assert!(validate_bundle_rel_path("skills/gaejosik/SKILL.md").is_ok());
         assert!(validate_bundle_rel_path("manifest.json").is_ok());
-        assert!(validate_bundle_rel_path("skills/hwpx/templates/회의록.hwpx").is_ok());
+        assert!(validate_bundle_rel_path("skills/hwp/templates/회의록.hwpx").is_ok());
         assert!(validate_bundle_rel_path("../evil").is_err());
         assert!(validate_bundle_rel_path("skills/../../evil").is_err());
         assert!(validate_bundle_rel_path("/abs/path").is_err());

@@ -173,7 +173,8 @@ export interface TemplateFillResponse {
 }
 
 export interface HwpCliTemplateFieldsRequest {
-  source: "hwp_cli_skill";
+  /** `hwpx_skill` records carry a legacy template key the backend maps onto a released alias. */
+  source: "hwp_cli_skill" | "hwpx_skill";
   templateKey: string;
 }
 

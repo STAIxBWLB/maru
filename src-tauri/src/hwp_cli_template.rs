@@ -3,6 +3,8 @@
 //! Hub records keep `hwpx_template_key` for schema compatibility, but when
 //! their source is `hwp_cli_skill` that key is the released Korean alias for
 //! an embedded hwp template, never a path to the retired binary-template tree.
+//! Legacy `hwpx_skill` records name a template file of that retired tree; the
+//! six known keys map onto the same aliases, so they fill natively too.
 //! The generated document remains HWPX so the existing export contract is
 //! unchanged. Outputs are built and validated in a sibling staging directory
 //! and only then atomically published into the workspace.
@@ -27,6 +29,7 @@ use std::process::Command;
 use std::time::Duration;
 
 const HWP_CLI_SKILL_SOURCE: &str = "hwp_cli_skill";
+const LEGACY_HWPX_SKILL_SOURCE: &str = "hwpx_skill";
 const MIN_HWP_VERSION: (u64, u64, u64) = (0, 12, 1);
 const HWP_TIMEOUT: Duration = Duration::from_secs(60);
 const STDOUT_LIMIT: usize = 32 * 1024 * 1024;
@@ -39,6 +42,16 @@ const TEMPLATE_ALIASES: &[(&str, &str)] = &[
     ("보고서", "report"),
     ("사업계획서", "plan"),
     ("회의록", "minutes"),
+];
+
+/// Template keys of the retired `hwpx` skill, mapped to their released alias.
+const LEGACY_HWPX_TEMPLATE_KEYS: &[(&str, &str)] = &[
+    ("공문서_기본", "공문서-기본"),
+    ("기안문_내부결재", "기안문-내부결재"),
+    ("기안문_대외시행", "기안문-대외시행"),
+    ("보고서_일반", "보고서"),
+    ("사업계획서_기본", "사업계획서"),
+    ("회의록", "회의록"),
 ];
 
 #[derive(Debug, Clone, Deserialize)]
@@ -128,12 +141,29 @@ fn hwp_cli_skill_aliases() -> &'static [(&'static str, &'static str)] {
     TEMPLATE_ALIASES
 }
 
-fn canonical_template(source: &str, alias: &str) -> Result<(&'static str, &'static str), String> {
-    if source != HWP_CLI_SKILL_SOURCE {
-        return Err(format!(
-            "template_source_invalid: expected {HWP_CLI_SKILL_SOURCE}, got {source}"
-        ));
-    }
+fn canonical_template(source: &str, key: &str) -> Result<(&'static str, &'static str), String> {
+    let alias = match source {
+        HWP_CLI_SKILL_SOURCE => key,
+        LEGACY_HWPX_SKILL_SOURCE => LEGACY_HWPX_TEMPLATE_KEYS
+            .iter()
+            .find(|(legacy, _)| *legacy == key)
+            .map(|(_, alias)| *alias)
+            .ok_or_else(|| {
+                let known = LEGACY_HWPX_TEMPLATE_KEYS
+                    .iter()
+                    .map(|(legacy, _)| *legacy)
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!(
+                    "template_alias_invalid: unsupported legacy hwpx_skill template key: {key} (supported: {known}); re-pick the template as hwp_cli_skill"
+                )
+            })?,
+        _ => {
+            return Err(format!(
+                "template_source_invalid: expected {HWP_CLI_SKILL_SOURCE} or {LEGACY_HWPX_SKILL_SOURCE}, got {source}"
+            ))
+        }
+    };
     TEMPLATE_ALIASES
         .iter()
         .copied()
@@ -182,7 +212,7 @@ fn select_hwp_bin(
     select_compatible_hwp(candidates)
 }
 
-fn hwp_bin() -> Result<PathBuf, String> {
+pub(crate) fn hwp_bin() -> Result<PathBuf, String> {
     select_hwp_bin(
         std::env::var_os("MARU_HWP_BIN").map(PathBuf::from),
         hwp_candidates(),
@@ -256,7 +286,7 @@ fn ensure_released_version(bin: &Path) -> Result<(), String> {
     })?;
     if version < MIN_HWP_VERSION {
         return Err(format!(
-            "hwp_version: hwp {}.{}.{} is too old; hwp_cli_skill requires >= {}.{}.{}",
+            "hwp_version: hwp {}.{}.{} is too old; Maru requires >= {}.{}.{}",
             version.0,
             version.1,
             version.2,
@@ -652,12 +682,35 @@ esac
                 (*alias, *slug)
             );
         }
-        assert!(canonical_template("hwpx_skill", "보고서")
+        assert!(canonical_template("manual", "보고서")
             .unwrap_err()
             .contains("template_source_invalid"));
         assert!(canonical_template("hwp_cli_skill", "공고문")
             .unwrap_err()
             .contains("template_alias_invalid"));
+    }
+
+    #[test]
+    fn maps_the_six_legacy_hwpx_skill_keys_onto_released_aliases() {
+        let expected = [
+            ("공문서_기본", "공문서-기본", "gongmun-basic"),
+            ("기안문_내부결재", "기안문-내부결재", "gian-internal"),
+            ("기안문_대외시행", "기안문-대외시행", "gian-external"),
+            ("보고서_일반", "보고서", "report"),
+            ("사업계획서_기본", "사업계획서", "plan"),
+            ("회의록", "회의록", "minutes"),
+        ];
+        assert_eq!(LEGACY_HWPX_TEMPLATE_KEYS.len(), expected.len());
+        for (legacy, alias, slug) in expected {
+            assert_eq!(
+                canonical_template("hwpx_skill", legacy).unwrap(),
+                (alias, slug)
+            );
+        }
+        // A released alias is not a legacy key, and an unknown key names the supported ones.
+        let error = canonical_template("hwpx_skill", "보고서").unwrap_err();
+        assert!(error.contains("template_alias_invalid"), "{error}");
+        assert!(error.contains("사업계획서_기본"), "{error}");
     }
 
     #[test]
@@ -1056,8 +1109,31 @@ esac
             serde_json::to_string(&values("제주한라대학교")).unwrap()
         );
 
-        let fields_err = run(ipc::hwp_cli_template_fields(HwpCliTemplateFieldsRequest {
+        let legacy = run(ipc::hwp_cli_template_fields(HwpCliTemplateFieldsRequest {
             source: "hwpx_skill".to_string(),
+            template_key: "사업계획서_기본".to_string(),
+        }))
+        .unwrap();
+        assert_eq!(legacy.template_alias, "사업계획서");
+        assert_eq!(legacy.template_slug, "plan");
+        let legacy_filled = run(ipc::hwp_cli_template_fill(
+            work.clone(),
+            HwpCliTemplateFillRequest {
+                source: "hwpx_skill".to_string(),
+                template_key: "사업계획서_기본".to_string(),
+                values: values("레거시"),
+                output_path: Some("legacy.hwpx".to_string()),
+            },
+        ))
+        .unwrap();
+        assert!(legacy_filled.validation_ok);
+        assert_eq!(
+            std::fs::read_to_string(root.join("legacy.hwpx")).unwrap(),
+            serde_json::to_string(&values("레거시")).unwrap()
+        );
+
+        let fields_err = run(ipc::hwp_cli_template_fields(HwpCliTemplateFieldsRequest {
+            source: "manual".to_string(),
             template_key: "보고서".to_string(),
         }))
         .unwrap_err();

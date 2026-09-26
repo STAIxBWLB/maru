@@ -1328,22 +1328,15 @@ mod tests {
     }
 
     #[test]
-    fn extracts_hwpx_text_html_on_bundled_template() {
-        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .unwrap()
-            .join("skills/skills/hwpx/templates/사업계획서_기본.hwpx");
-        if !path.exists() {
-            eprintln!("skip: bundled HWPX template missing at {}", path.display());
-            return;
-        }
+    fn extracts_hwpx_text_html_on_hwp_cli_template() {
+        // `hwp new --template 사업계획서` (hwp-cli 1.1.0), committed so the
+        // test never depends on a sibling skills checkout.
+        let path =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata/hwp-cli-plan-template.hwpx");
         let preview = extract_hwpx_text_html(&path).unwrap();
         assert!(preview.sections >= 1, "expected at least one section");
-        assert!(
-            preview.html.contains("<p>") || preview.html.contains("<td>"),
-            "expected paragraphs or table cells in output (got {} bytes)",
-            preview.html.len()
-        );
+        assert!(preview.html.contains("<p>"), "{}", preview.html);
+        assert!(preview.html.contains("{{사업명}}"), "{}", preview.html);
     }
 
     #[test]
