@@ -26,7 +26,8 @@ and M4 export subsystems. Shipped in Phase 4 W11–W12.
    typed in the step overrides an `hwpx_skill` key and goes through
    `template_get_fields` / `template_fill_hwpx`, which still shells out to the
    retired `hwpx` tool (`MARU_HWPX_BIN` or `hwpx` on PATH); without it the
-   field scan falls back to kordoc_lite and the fill fails.
+   field scan falls back to kordoc_lite and the fill fails. #362 tracks moving
+   that workspace fill, field scan, and the HWPX-to-PDF step onto `hwp`.
 6. **Export** — wraps `export_plan` + the M4 dispatch pipeline (docx / hwpx / pdf
    with a sha256 manifest; see below).
 7. **Package** — applies the local body and freezes a version snapshot.
