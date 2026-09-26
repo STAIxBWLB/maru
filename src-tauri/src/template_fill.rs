@@ -407,17 +407,11 @@ fn resolve_template_path(
         .map(str::trim)
         .filter(|key| !key.is_empty())
         .ok_or_else(|| "Template key or template path is required".to_string())?;
-    validate_template_key(key)?;
-    let root = bundled_templates_root();
-    let mut candidates = vec![root.join(key)];
-    if Path::new(key).extension().is_none() {
-        candidates.push(root.join(format!("{key}.hwpx")));
-    }
-    let template = candidates
-        .into_iter()
-        .find(|candidate| candidate.is_file())
-        .ok_or_else(|| format!("Bundled HWPX template not found: {key}"))?;
-    Ok((template, "bundled".to_string()))
+    // The bundled template tree went away with the retired hwpx skill;
+    // hwpx_skill and hwp_cli_skill keys fill through hwp_cli_template.
+    Err(format!(
+        "Bundled HWPX templates were retired with the hwpx skill; set a workspace .hwpx template path for {key}, or use an hwp_cli_skill template"
+    ))
 }
 
 fn resolve_output_path(
@@ -449,34 +443,11 @@ fn resolve_output_path(
     )
 }
 
-fn validate_template_key(key: &str) -> Result<(), String> {
-    if key.contains('/') || key.contains('\\') || key.contains("..") || key.starts_with('.') {
-        return Err("Invalid HWPX template key".to_string());
-    }
-    Ok(())
-}
-
 fn has_extension(path: &Path, expected: &str) -> bool {
     path.extension()
         .and_then(|ext| ext.to_str())
         .map(|ext| ext.eq_ignore_ascii_case(expected))
         .unwrap_or(false)
-}
-
-fn bundled_templates_root() -> PathBuf {
-    // Active OTA bundle first; the compile-time repo path only exists on dev
-    // machines and goes stale the moment a skills bundle updates.
-    if let Ok(root) = crate::skill_host::fs::skills_root() {
-        let bundled = root
-            .join("_builtin")
-            .join("skills")
-            .join("hwpx")
-            .join("templates");
-        if bundled.is_dir() {
-            return bundled;
-        }
-    }
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../skills/skills/hwpx/templates")
 }
 
 fn sanitize_filename(value: &str) -> String {
@@ -555,16 +526,7 @@ fn find_hwpx_tool() -> Option<PathBuf> {
             return Some(path);
         }
     }
-    find_program("hwpx").or_else(|| {
-        let mut candidates = Vec::new();
-        if let Some(home) = dirs::home_dir() {
-            candidates.push(home.join(".maru/skills/hwpx/hwpx"));
-            candidates.push(home.join(".maru/skills/_builtin/skills/hwpx/hwpx"));
-        }
-        candidates
-            .push(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../skills/skills/hwpx/hwpx"));
-        candidates.into_iter().find(|path| is_executable(path))
-    })
+    find_program("hwpx")
 }
 
 fn find_program(name: &str) -> Option<PathBuf> {
@@ -653,10 +615,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn rejects_path_like_template_key() {
-        assert!(validate_template_key("../bad").is_err());
-        assert!(validate_template_key("nested/name").is_err());
-        assert!(validate_template_key("보고서_일반").is_ok());
+    fn template_key_without_path_never_reads_the_retired_bundle() {
+        let tmp = tempfile::tempdir().unwrap();
+        let error = resolve_template_path(
+            tmp.path().to_str().unwrap(),
+            Some("사업계획서_기본".to_string()),
+            None,
+        )
+        .unwrap_err();
+        assert!(
+            error.contains("Bundled HWPX templates were retired"),
+            "{error}"
+        );
+        assert!(error.contains("사업계획서_기본"), "{error}");
     }
 
     #[test]

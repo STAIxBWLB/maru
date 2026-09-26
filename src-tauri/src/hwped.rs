@@ -120,24 +120,14 @@ pub struct HwpedCapabilities {
     pub formats: Vec<String>,
 }
 
-/// Binary resolution, following find_hwpx_tool (export/dispatch.rs):
-/// MARU_HWP_BIN override -> PATH (augmented) -> bundled skill fallbacks.
+/// Binary resolution: MARU_HWP_BIN override -> `hwp` on the (augmented) PATH.
 fn find_hwp_tool() -> Option<PathBuf> {
     if let Some(path) = std::env::var_os("MARU_HWP_BIN").map(PathBuf::from) {
         if is_executable(&path) {
             return Some(path);
         }
     }
-    resolve_program("hwp").or_else(|| {
-        let mut candidates = Vec::new();
-        if let Some(home) = dirs::home_dir() {
-            candidates.push(home.join(".maru/skills/hwpx/hwp"));
-            candidates.push(home.join(".maru/skills/_builtin/skills/hwpx/hwp"));
-        }
-        candidates
-            .push(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../skills/skills/hwpx/hwp"));
-        candidates.into_iter().find(|path| is_executable(path))
-    })
+    resolve_program("hwp")
 }
 
 fn hwp_bin() -> Result<PathBuf, String> {

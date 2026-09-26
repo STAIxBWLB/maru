@@ -173,7 +173,8 @@ export interface TemplateFillResponse {
 }
 
 export interface HwpCliTemplateFieldsRequest {
-  source: "hwp_cli_skill";
+  /** `hwpx_skill` records carry a legacy template key the backend maps onto a released alias. */
+  source: "hwp_cli_skill" | "hwpx_skill";
   templateKey: string;
 }
 
@@ -454,6 +455,31 @@ export async function templateFillHwpx(
     () => invoke<TemplateFillResponse>("template_fill_hwpx", { workPath, request }),
     classifyTemplateFillCompletion,
   );
+}
+
+// Studio state saved before the hwpx retirement holds the resolved path of the
+// retired bundled template tree; it is not a user-typed workspace path.
+const RETIRED_HWPX_TEMPLATE_PATH = /[\\/]skills[\\/]hwpx[\\/]templates[\\/]/;
+
+/**
+ * The native hwp source that serves a Studio template's HWP scan/fill, or null
+ * for the workspace-template path. hwp_cli_skill always uses its alias; a
+ * legacy hwpx_skill record keeps a typed workspace path ahead of its key.
+ */
+export function nativeHwpTemplateSource(
+  source: StudioTemplateState["source"] | undefined,
+  templatePath: string | null,
+): HwpCliTemplateFieldsRequest["source"] | null {
+  if (source === "hwp_cli_skill") return source;
+  if (
+    source === "hwpx_skill" &&
+    (!templatePath ||
+      templatePath.startsWith("hwp-cli:") ||
+      RETIRED_HWPX_TEMPLATE_PATH.test(templatePath))
+  ) {
+    return source;
+  }
+  return null;
 }
 
 export async function hwpCliTemplateFields(

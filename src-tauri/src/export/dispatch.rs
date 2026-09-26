@@ -306,37 +306,28 @@ fn convert_docx(source: &Path, output: &Path) -> ConverterRun {
     )
 }
 
+/// Markdown -> HWPX through the released `hwp` binary (the retired `hwpx`
+/// skill's `styled --preset bogoseo` maps to hwp's `report` profile).
 fn convert_hwpx(source: &Path, output: &Path) -> ConverterRun {
-    let Some(hwpx) = find_hwpx_tool() else {
-        return ConverterRun {
-            command: "hwpx".to_string(),
-            result: Err(not_found("hwpx")),
-        };
+    let hwp = match crate::hwp_cli_template::hwp_bin() {
+        Ok(hwp) => hwp,
+        Err(reason) => {
+            return ConverterRun {
+                command: "hwp".to_string(),
+                result: Err(io::Error::new(io::ErrorKind::NotFound, reason)),
+            }
+        }
     };
-
-    let styled = run(
-        &hwpx,
+    run(
+        &hwp,
         &[
-            OsString::from("styled"),
-            OsString::from("--preset"),
-            OsString::from("bogoseo"),
-            OsString::from("--markdown"),
+            OsString::from("new"),
+            OsString::from("--from"),
             source.as_os_str().to_os_string(),
+            OsString::from("--preset"),
+            OsString::from("report"),
             OsString::from("-o"),
             output.as_os_str().to_os_string(),
-        ],
-    );
-    if styled.result.is_ok() {
-        return styled;
-    }
-
-    run(
-        &hwpx,
-        &[
-            OsString::from("write-java"),
-            output.as_os_str().to_os_string(),
-            OsString::from("--markdown"),
-            source.as_os_str().to_os_string(),
         ],
     )
 }
@@ -429,16 +420,7 @@ fn find_hwpx_tool() -> Option<PathBuf> {
             return Some(path);
         }
     }
-    find_program("hwpx").or_else(|| {
-        let mut candidates = Vec::new();
-        if let Some(home) = dirs::home_dir() {
-            candidates.push(home.join(".maru/skills/hwpx/hwpx"));
-            candidates.push(home.join(".maru/skills/_builtin/skills/hwpx/hwpx"));
-        }
-        candidates
-            .push(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../skills/skills/hwpx/hwpx"));
-        candidates.into_iter().find(|path| is_executable(path))
-    })
+    find_program("hwpx")
 }
 
 fn find_program(name: &str) -> Option<PathBuf> {
@@ -594,6 +576,131 @@ mod phase08_21 {
     fn done<T>(rx: mpsc::Receiver<T>) -> T {
         rx.recv_timeout(Duration::from_secs(10))
             .expect("export fixture completion")
+    }
+
+    /// Points MARU_HWP_BIN at a fixture binary, serialized with the other
+    /// phase08_21 tests that set hwp/hwpx overrides.
+    struct HwpBinGuard {
+        _lock: std::sync::MutexGuard<'static, ()>,
+    }
+    impl HwpBinGuard {
+        fn set(value: &Path) -> Self {
+            let guard = crate::hwped::PHASE08_21_ENV_LOCK
+                .lock()
+                .unwrap_or_else(|poison| poison.into_inner());
+            std::env::set_var("MARU_HWP_BIN", value);
+            Self { _lock: guard }
+        }
+    }
+    impl Drop for HwpBinGuard {
+        fn drop(&mut self) {
+            std::env::remove_var("MARU_HWP_BIN");
+        }
+    }
+
+    /// Fake released hwp: `new --from <md> ... -o <out>` logs its argv and
+    /// copies the markdown to the output, so the test sees the exact call.
+    #[cfg(unix)]
+    fn fake_hwp(dir: &Path) -> PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+
+        let binary = dir.join("hwp");
+        let script = format!(
+            r#"#!/bin/sh
+case "$1" in
+  --version) echo "hwp 1.1.0" ;;
+  new)
+    echo "$@" > "{log}"
+    from=""; out=""
+    while [ "$#" -gt 0 ]; do
+      if [ "$1" = "--from" ]; then shift; from="$1"; fi
+      if [ "$1" = "-o" ]; then shift; out="$1"; fi
+      shift
+    done
+    [ -n "$from" ] && [ -n "$out" ] || exit 2
+    cp "$from" "$out" ;;
+  *) exit 2 ;;
+esac
+"#,
+            log = dir.join("argv.log").display()
+        );
+        std::fs::write(&binary, script).unwrap();
+        let mut permissions = std::fs::metadata(&binary).unwrap().permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(&binary, permissions).unwrap();
+        binary
+    }
+
+    fn plan_hwpx(root: &Path) {
+        run(crate::export::ipc::export_plan(
+            crate::export::ExportPlanRequest {
+                workspace_root: text(root),
+                source_path: "draft.md".to_string(),
+                formats: vec!["hwpx".to_string()],
+                output_dir: None,
+            },
+        ))
+        .unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn phase08_21_export_hwpx_runs_released_hwp_new_with_report_preset() {
+        let home = Home::new();
+        let root = setup_workspace(&home);
+        let bin_dir = home.root.path().join("bin");
+        std::fs::create_dir_all(&bin_dir).unwrap();
+        let _hwp = HwpBinGuard::set(&fake_hwp(&bin_dir));
+        plan_hwpx(&root);
+
+        let response = run(ipc::export_dispatch(plan_request(&root))).unwrap();
+        assert_eq!(response.results.len(), 1);
+        let result = &response.results[0];
+        assert_eq!(result.format, ExportFormat::Hwpx);
+        assert!(result.success, "{:?}", result.reason);
+        let argv = std::fs::read_to_string(bin_dir.join("argv.log")).unwrap();
+        assert!(argv.starts_with("new --from "), "{argv}");
+        assert!(argv.contains(" --preset report -o "), "{argv}");
+        assert_eq!(
+            std::fs::read_to_string(&result.output_path).unwrap(),
+            "# Title\n\nbody\n"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn phase08_21_export_hwpx_fails_closed_without_a_released_hwp() {
+        let home = Home::new();
+        let root = setup_workspace(&home);
+        let not_executable = home.root.path().join("hwp");
+        std::fs::write(&not_executable, "not a binary").unwrap();
+        let _hwp = HwpBinGuard::set(&not_executable);
+        plan_hwpx(&root);
+
+        let response = run(ipc::export_dispatch(plan_request(&root))).unwrap();
+        let result = &response.results[0];
+        assert!(!result.success);
+        assert_eq!(result.command, "hwp");
+        assert!(
+            result
+                .reason
+                .as_deref()
+                .unwrap_or_default()
+                .contains("cli_missing"),
+            "{:?}",
+            result.reason
+        );
+        assert!(!Path::new(&result.output_path).exists());
+        let hwpx = response
+            .manifest
+            .outputs
+            .iter()
+            .find(|entry| entry.format == ExportFormat::Hwpx)
+            .unwrap();
+        assert_eq!(
+            hwpx.status,
+            super::super::manifest::ExportOutputStatus::Failed
+        );
     }
 
     #[test]

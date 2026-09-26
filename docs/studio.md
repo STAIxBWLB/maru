@@ -14,13 +14,20 @@ and M4 export subsystems. Shipped in Phase 4 W11–W12.
    decorations (source) or a BlockNote `gaejosikLint` mark (rich). Dismissals
    persist under workspace-state `composer.lintDismissals` with a per-document
    Studio fallback.
-5. **HWP fields** — HWPX `{{field}}` placeholder map. Legacy `hwpx_skill`
-   templates continue through `template_get_fields` / `template_fill_hwpx`.
-   Hub records with `source: hwp_cli_skill` keep the compatibility
-   `hwpx_template_key` field, but its value is one of the six released Korean
-   aliases. They resolve only through `hwp new --template`, then native slot
-   scan/fill and `hwp validate`; output is staged and validated before it is
-   published to `.maru/studio/filled/`.
+5. **HWP fields** — HWPX `{{field}}` placeholder map. Hub records with
+   `source: hwp_cli_skill` keep the compatibility `hwpx_template_key` field,
+   but its value is one of the six released Korean aliases. They resolve only
+   through `hwp new --template`, then native slot scan/fill and `hwp validate`;
+   output is staged and validated before it is published to
+   `.maru/studio/filled/`. Legacy `hwpx_skill` records take the same native
+   path: `hwp_cli_template` maps their key (the retired skill's template stem,
+   such as `사업계획서_기본`, or a Hub seed key such as `business_plan_default`,
+   with or without `.hwpx`) onto the matching alias. A workspace template path
+   typed in the step overrides an `hwpx_skill` key and goes through
+   `template_get_fields` / `template_fill_hwpx`, which still shells out to the
+   retired `hwpx` tool (`MARU_HWPX_BIN` or `hwpx` on PATH); without it the
+   field scan falls back to kordoc_lite and the fill fails. #362 tracks moving
+   that workspace fill, field scan, and the HWPX-to-PDF step onto `hwp`.
 6. **Export** — wraps `export_plan` + the M4 dispatch pipeline (docx / hwpx / pdf
    with a sha256 manifest; see below).
 7. **Package** — applies the local body and freezes a version snapshot.
@@ -64,6 +71,7 @@ and the command palette (`src-tauri/src/export/`):
 
 ## Tests
 
-Rust: `cargo test --lib` filters `template_fill`, `kordoc_lite`, `validate`
-(and the Studio state module). HWPX slot extraction is exercised against the
-bundled `사업계획서_기본.hwpx`.
+Rust: `cargo test --lib` filters `template_fill`, `hwp_cli_template`,
+`kordoc_lite`, `validate` (and the Studio state module). HWPX text extraction
+is exercised against the committed `src-tauri/testdata/hwp-cli-plan-template.hwpx`
+(`hwp new --template 사업계획서`).
