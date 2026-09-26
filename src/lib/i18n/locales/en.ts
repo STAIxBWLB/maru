@@ -2347,7 +2347,7 @@ export const en: Record<string, string> = {
   "studio.hwp.templateKey": "Hub HWPX template",
   "studio.hwp.noTemplateKey": "No Hub HWPX template linked",
   "studio.hwp.templatePath": "Workspace HWPX/HWP path",
-  "studio.hwp.templatePath.helper": "Leave empty to use the Hub template key. .hwp files fall back to manual HWPX save guidance.",
+  "studio.hwp.templatePath.helper": "Leave empty to use the Hub template key; hwp_cli_skill templates always use their key. .hwp files fall back to manual HWPX save guidance.",
   "studio.hwp.templatePath.placeholder": "e.g. templates/business-plan.hwpx",
   "studio.hwp.scan": "Scan fields",
   "studio.hwp.scanning": "Scanning",

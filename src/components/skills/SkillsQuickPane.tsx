@@ -69,7 +69,7 @@ function kindFromSkill(skill: SkillRecord, t: Translate): SkillKind {
   }
   if (
     name.includes("toolkit") ||
-    ["gaejosik", "hwpx", "meeting-notes"].includes(name)
+    ["gaejosik", "hwp", "meeting-notes"].includes(name)
   ) {
     return { id: "documents", label: t("rightPane.skills.kind.documents") };
   }

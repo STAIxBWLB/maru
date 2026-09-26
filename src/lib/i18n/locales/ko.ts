@@ -2346,7 +2346,7 @@ export const ko: Record<string, string> = {
   "studio.hwp.templateKey": "Hub HWPX 템플릿",
   "studio.hwp.noTemplateKey": "연결된 Hub HWPX 템플릿 없음",
   "studio.hwp.templatePath": "Workspace HWPX/HWP 경로",
-  "studio.hwp.templatePath.helper": "비워두면 Hub 템플릿 키를 사용합니다. .hwp는 수동 HWPX 저장 안내로 전환됩니다.",
+  "studio.hwp.templatePath.helper": "비워두면 Hub 템플릿 키를 사용합니다. hwp_cli_skill 템플릿은 항상 키를 사용합니다. .hwp는 수동 HWPX 저장 안내로 전환됩니다.",
   "studio.hwp.templatePath.placeholder": "예: templates/사업계획서_기본.hwpx",
   "studio.hwp.scan": "필드 스캔",
   "studio.hwp.scanning": "스캔 중",

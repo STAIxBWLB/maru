@@ -3,6 +3,9 @@
 //! Hub records keep `hwpx_template_key` for schema compatibility, but when
 //! their source is `hwp_cli_skill` that key is the released Korean alias for
 //! an embedded hwp template, never a path to the retired binary-template tree.
+//! Legacy `hwpx_skill` records name a template of that retired tree, by file
+//! stem or by Hub seed key; the known keys map onto the same aliases, so they
+//! fill natively too.
 //! The generated document remains HWPX so the existing export contract is
 //! unchanged. Outputs are built and validated in a sibling staging directory
 //! and only then atomically published into the workspace.
@@ -27,6 +30,7 @@ use std::process::Command;
 use std::time::Duration;
 
 const HWP_CLI_SKILL_SOURCE: &str = "hwp_cli_skill";
+const LEGACY_HWPX_SKILL_SOURCE: &str = "hwpx_skill";
 const MIN_HWP_VERSION: (u64, u64, u64) = (0, 12, 1);
 const HWP_TIMEOUT: Duration = Duration::from_secs(60);
 const STDOUT_LIMIT: usize = 32 * 1024 * 1024;
@@ -39,6 +43,23 @@ const TEMPLATE_ALIASES: &[(&str, &str)] = &[
     ("보고서", "report"),
     ("사업계획서", "plan"),
     ("회의록", "minutes"),
+];
+
+/// Template keys of the retired `hwpx` skill, mapped to their released alias:
+/// its template file stems, then the ASCII keys the Hub catalog seeds.
+const LEGACY_HWPX_TEMPLATE_KEYS: &[(&str, &str)] = &[
+    ("공문서_기본", "공문서-기본"),
+    ("기안문_내부결재", "기안문-내부결재"),
+    ("기안문_대외시행", "기안문-대외시행"),
+    ("보고서_일반", "보고서"),
+    ("사업계획서_기본", "사업계획서"),
+    ("회의록", "회의록"),
+    ("gongmun_default", "공문서-기본"),
+    ("gibun_internal_approval", "기안문-내부결재"),
+    ("gibun_external_dispatch", "기안문-대외시행"),
+    ("bogoseo_general", "보고서"),
+    ("business_plan_default", "사업계획서"),
+    ("meeting_minutes_default", "회의록"),
 ];
 
 #[derive(Debug, Clone, Deserialize)]
@@ -109,12 +130,12 @@ struct Slot {
 /// report for every requested value.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct NativeFillReport {
+pub(crate) struct NativeFillReport {
     output: String,
     mode: String,
-    replaced: u32,
+    pub(crate) replaced: u32,
     counts: BTreeMap<String, u32>,
-    warnings: Vec<String>,
+    pub(crate) warnings: Vec<String>,
 }
 
 struct CliRun {
@@ -128,12 +149,38 @@ fn hwp_cli_skill_aliases() -> &'static [(&'static str, &'static str)] {
     TEMPLATE_ALIASES
 }
 
-fn canonical_template(source: &str, alias: &str) -> Result<(&'static str, &'static str), String> {
-    if source != HWP_CLI_SKILL_SOURCE {
-        return Err(format!(
-            "template_source_invalid: expected {HWP_CLI_SKILL_SOURCE}, got {source}"
-        ));
+/// `사업계획서_기본.HWPX` -> `사업계획서_기본`; anything else is returned unchanged.
+fn without_hwpx_extension(key: &str) -> &str {
+    let cut = key.len().saturating_sub(".hwpx".len());
+    match key.get(cut..) {
+        Some(ext) if ext.eq_ignore_ascii_case(".hwpx") => &key[..cut],
+        _ => key,
     }
+}
+
+fn canonical_template(source: &str, key: &str) -> Result<(&'static str, &'static str), String> {
+    let alias = match source {
+        HWP_CLI_SKILL_SOURCE => key,
+        LEGACY_HWPX_SKILL_SOURCE => LEGACY_HWPX_TEMPLATE_KEYS
+            .iter()
+            .find(|(legacy, _)| *legacy == without_hwpx_extension(key))
+            .map(|(_, alias)| *alias)
+            .ok_or_else(|| {
+                let known = LEGACY_HWPX_TEMPLATE_KEYS
+                    .iter()
+                    .map(|(legacy, _)| *legacy)
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!(
+                    "template_alias_invalid: unsupported legacy hwpx_skill template key: {key} (supported: {known}); re-pick the template as hwp_cli_skill"
+                )
+            })?,
+        _ => {
+            return Err(format!(
+                "template_source_invalid: expected {HWP_CLI_SKILL_SOURCE} or {LEGACY_HWPX_SKILL_SOURCE}, got {source}"
+            ))
+        }
+    };
     TEMPLATE_ALIASES
         .iter()
         .copied()
@@ -182,7 +229,7 @@ fn select_hwp_bin(
     select_compatible_hwp(candidates)
 }
 
-fn hwp_bin() -> Result<PathBuf, String> {
+pub(crate) fn hwp_bin() -> Result<PathBuf, String> {
     select_hwp_bin(
         std::env::var_os("MARU_HWP_BIN").map(PathBuf::from),
         hwp_candidates(),
@@ -256,7 +303,7 @@ fn ensure_released_version(bin: &Path) -> Result<(), String> {
     })?;
     if version < MIN_HWP_VERSION {
         return Err(format!(
-            "hwp_version: hwp {}.{}.{} is too old; hwp_cli_skill requires >= {}.{}.{}",
+            "hwp_version: hwp {}.{}.{} is too old; Maru requires >= {}.{}.{}",
             version.0,
             version.1,
             version.2,
@@ -286,7 +333,7 @@ fn create_template(bin: &Path, alias: &str, output: &Path) -> Result<(), String>
     Ok(())
 }
 
-fn validate_template(bin: &Path, output: &Path) -> Result<(), String> {
+pub(crate) fn validate_template(bin: &Path, output: &Path) -> Result<(), String> {
     run_hwp_ok(
         bin,
         &[
@@ -298,7 +345,7 @@ fn validate_template(bin: &Path, output: &Path) -> Result<(), String> {
     Ok(())
 }
 
-fn slots_for(bin: &Path, document: &Path) -> Result<Vec<TemplateField>, String> {
+pub(crate) fn slots_for(bin: &Path, document: &Path) -> Result<Vec<TemplateField>, String> {
     let output = run_hwp_ok(
         bin,
         &[
@@ -360,6 +407,7 @@ fn output_path(work_path: &str, alias: &str, requested: Option<String>) -> Resul
 fn parse_native_fill_report(
     stdout: &[u8],
     values: &BTreeMap<String, String>,
+    allow_partial: bool,
 ) -> Result<NativeFillReport, String> {
     let report: NativeFillReport =
         serde_json::from_slice(stdout).map_err(|err| format!("hwp_fill_invalid_json: {err}"))?;
@@ -403,7 +451,7 @@ fn parse_native_fill_report(
         .filter(|(_, count)| **count == 0)
         .map(|(name, _)| name.clone())
         .collect::<Vec<_>>();
-    if !unmatched.is_empty() {
+    if !allow_partial && !unmatched.is_empty() {
         return Err(format!(
             "hwp_fill_unmatched_required: {}",
             unmatched.join(", ")
@@ -422,6 +470,35 @@ fn parse_native_fill_report(
         ));
     }
     Ok(report)
+}
+
+/// `hwp fill <template> --data <values.json> -o <output> --json` for exactly
+/// `values`, and the report must account for every value. Without
+/// `allow_partial`, hwp fails closed on an unreplaced request; with it
+/// (`--allow-partial`) hwp publishes the matched values and reports the rest
+/// with a zero count, so the caller owns the final completeness check.
+pub(crate) fn fill_slots(
+    bin: &Path,
+    template: &Path,
+    values_path: &Path,
+    output: &Path,
+    values: &BTreeMap<String, String>,
+    allow_partial: bool,
+) -> Result<NativeFillReport, String> {
+    let mut args = vec![
+        OsString::from("fill"),
+        template.as_os_str().to_os_string(),
+        OsString::from("--data"),
+        values_path.as_os_str().to_os_string(),
+        OsString::from("-o"),
+        output.as_os_str().to_os_string(),
+        OsString::from("--json"),
+    ];
+    if allow_partial {
+        args.push(OsString::from("--allow-partial"));
+    }
+    let stdout = run_hwp_ok(bin, &args)?;
+    parse_native_fill_report(&stdout, values, allow_partial)
 }
 
 pub fn hwp_cli_template_fields(
@@ -514,19 +591,7 @@ fn fill_with_bin(
     .map_err(|err| format!("hwp_stage_failed: {err}"))?;
     create_template(bin, alias, &template)?;
     validate_template(bin, &template)?;
-    let native_fill = run_hwp_ok(
-        bin,
-        &[
-            OsString::from("fill"),
-            template.as_os_str().to_os_string(),
-            OsString::from("--data"),
-            values_path.as_os_str().to_os_string(),
-            OsString::from("-o"),
-            staged_output.as_os_str().to_os_string(),
-            OsString::from("--json"),
-        ],
-    )?;
-    let native_report = parse_native_fill_report(&native_fill, values)?;
+    let native_report = fill_slots(bin, &template, &values_path, &staged_output, values, false)?;
     validate_template(bin, &staged_output)?;
     let staged_bytes = fs::read(&staged_output)
         .map_err(|err| format!("hwp_publish_failed: cannot read staged output: {err}"))?;
@@ -652,12 +717,59 @@ esac
                 (*alias, *slug)
             );
         }
-        assert!(canonical_template("hwpx_skill", "보고서")
+        assert!(canonical_template("manual", "보고서")
             .unwrap_err()
             .contains("template_source_invalid"));
         assert!(canonical_template("hwp_cli_skill", "공고문")
             .unwrap_err()
             .contains("template_alias_invalid"));
+    }
+
+    #[test]
+    fn maps_the_legacy_hwpx_skill_keys_onto_released_aliases() {
+        let expected = [
+            ("공문서_기본", "공문서-기본", "gongmun-basic"),
+            ("기안문_내부결재", "기안문-내부결재", "gian-internal"),
+            ("기안문_대외시행", "기안문-대외시행", "gian-external"),
+            ("보고서_일반", "보고서", "report"),
+            ("사업계획서_기본", "사업계획서", "plan"),
+            ("회의록", "회의록", "minutes"),
+            // maru-hub scripts/seed_catalog.py hwpx_skill seeds
+            ("gongmun_default", "공문서-기본", "gongmun-basic"),
+            (
+                "gibun_internal_approval",
+                "기안문-내부결재",
+                "gian-internal",
+            ),
+            (
+                "gibun_external_dispatch",
+                "기안문-대외시행",
+                "gian-external",
+            ),
+            ("bogoseo_general", "보고서", "report"),
+            ("business_plan_default", "사업계획서", "plan"),
+            ("meeting_minutes_default", "회의록", "minutes"),
+        ];
+        assert_eq!(LEGACY_HWPX_TEMPLATE_KEYS.len(), expected.len());
+        for (legacy, alias, slug) in expected {
+            assert_eq!(
+                canonical_template("hwpx_skill", legacy).unwrap(),
+                (alias, slug)
+            );
+        }
+        // A key saved with its template file name resolves to the same alias.
+        assert_eq!(
+            canonical_template("hwpx_skill", "사업계획서_기본.hwpx").unwrap(),
+            ("사업계획서", "plan")
+        );
+        assert_eq!(
+            canonical_template("hwpx_skill", "business_plan_default.HWPX").unwrap(),
+            ("사업계획서", "plan")
+        );
+        // A released alias is not a legacy key, and an unknown key names the supported ones.
+        let error = canonical_template("hwpx_skill", "보고서").unwrap_err();
+        assert!(error.contains("template_alias_invalid"), "{error}");
+        assert!(error.contains("사업계획서_기본"), "{error}");
     }
 
     #[test]
@@ -1056,8 +1168,31 @@ esac
             serde_json::to_string(&values("제주한라대학교")).unwrap()
         );
 
-        let fields_err = run(ipc::hwp_cli_template_fields(HwpCliTemplateFieldsRequest {
+        let legacy = run(ipc::hwp_cli_template_fields(HwpCliTemplateFieldsRequest {
             source: "hwpx_skill".to_string(),
+            template_key: "사업계획서_기본".to_string(),
+        }))
+        .unwrap();
+        assert_eq!(legacy.template_alias, "사업계획서");
+        assert_eq!(legacy.template_slug, "plan");
+        let legacy_filled = run(ipc::hwp_cli_template_fill(
+            work.clone(),
+            HwpCliTemplateFillRequest {
+                source: "hwpx_skill".to_string(),
+                template_key: "사업계획서_기본".to_string(),
+                values: values("레거시"),
+                output_path: Some("legacy.hwpx".to_string()),
+            },
+        ))
+        .unwrap();
+        assert!(legacy_filled.validation_ok);
+        assert_eq!(
+            std::fs::read_to_string(root.join("legacy.hwpx")).unwrap(),
+            serde_json::to_string(&values("레거시")).unwrap()
+        );
+
+        let fields_err = run(ipc::hwp_cli_template_fields(HwpCliTemplateFieldsRequest {
+            source: "manual".to_string(),
             template_key: "보고서".to_string(),
         }))
         .unwrap_err();

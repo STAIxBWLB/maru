@@ -791,7 +791,7 @@
       "helperChain": [
         "src-tauri/src/template_fill.rs::ipc::template_fill_hwpx owns the work_path String and TemplateFillRequest and awaits tauri::async_runtime::spawn_blocking calling src-tauri/src/template_fill.rs::template_fill_hwpx inside the worker; a JoinError becomes the display-only template_fill_hwpx_task_failed String.",
         "src-tauri/src/template_fill.rs::template_fill_hwpx resolves template and output through src-tauri/src/template_fill.rs::resolve_template_path and src-tauri/src/template_fill.rs::resolve_output_path (src-tauri/src/vault.rs::resolve_inside_vault lexical containment), admits [output, parent] plus the vault-root parent through src-tauri/src/atomic_file.rs::PathTransactionRequest, and inside src-tauri/src/atomic_file.rs::with_path_transactions checks src-tauri/src/vault_list.rs::assert_maru_can_write before lease.before_effect.",
-        "src-tauri/src/template_fill.rs::template_fill_hwpx_in_transaction writes the values JSON through src-tauri/src/template_fill.rs::write_temp_values, runs the bounded hwpx fill and validation probes via src-tauri/src/template_fill.rs::run_command, then rewrites form fields in place through kordoc_lite so the last admitted writer owns the final bytes."
+        "src-tauri/src/template_fill.rs::template_fill_hwpx_in_transaction resolves the released hwp through src-tauri/src/hwp_cli_template.rs::hwp_bin, scans the template slots through src-tauri/src/hwp_cli_template.rs::slots_for, writes the slot values JSON through src-tauri/src/template_fill.rs::write_temp_values and runs the bounded hwp fill into a sibling staging file through src-tauri/src/hwp_cli_template.rs::fill_slots (or copies the template there when no requested key is a slot), rewrites placeholders and form fields in that file through kordoc_lite, re-scans it through src-tauri/src/hwp_cli_template.rs::slots_for, validates it through src-tauri/src/hwp_cli_template.rs::validate_template, and publishes it through src-tauri/src/atomic_file.rs::write_atomic, so the last admitted writer owns the final bytes."
       ],
       "workerBoundary": "src-tauri/src/template_fill.rs::ipc::template_fill_hwpx awaits tauri::async_runtime::spawn_blocking before any filesystem access or lock wait runs; only a JoinError maps to the display-only template_fill_hwpx_task_failed String while the TemplateFillResponse payload and every domain error string pass through unchanged; owned inputs cross the await, never a borrowed State or guard.",
       "syncCallers": [
@@ -815,7 +815,7 @@
           "lease.before_effect runs after the write-policy check and before the first process spawn",
           "fs::create_dir_all(output parent) runs inside the transaction after the lease covers the parent"
         ],
-        "domainLockOrder": "Filesystem path admission (with_path_transactions acquire) happens in src-tauri/src/template_fill.rs::template_fill_hwpx before the write-policy check and before any hwpx process spawn; converter and validation processes run only inside the admitted transaction."
+        "domainLockOrder": "Filesystem path admission (with_path_transactions acquire) happens in src-tauri/src/template_fill.rs::template_fill_hwpx before the write-policy check and before any hwp process spawn; converter and validation processes run only inside the admitted transaction."
       },
       "tests": [
         {

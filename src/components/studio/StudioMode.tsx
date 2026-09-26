@@ -55,6 +55,7 @@ import {
   studioStateSave,
   hwpCliTemplateFields,
   hwpCliTemplateFill,
+  nativeHwpTemplateSource,
   templateFillHwpx,
   templateGetFields,
   templatePrepareHwpxTemplate,
@@ -555,12 +556,13 @@ export function StudioMode({
     const isCurrent = beginAdmittedFlow(workspace);
     setBusyAction("hwp-scan");
     try {
-      if (state.template?.source === "hwp_cli_skill") {
+      const templateSource = nativeHwpTemplateSource(state.template?.source, configuredPath);
+      if (templateSource) {
         if (!templateKey) {
           throw new Error("hwp_cli_template_alias_missing");
         }
         const response = await hwpCliTemplateFields({
-          source: "hwp_cli_skill",
+          source: templateSource,
           templateKey,
         });
         if (!isCurrent()) return;
@@ -687,9 +689,10 @@ export function StudioMode({
         state.hwpFields.fields.map((field) => [field.key, state.hwpFields.values[field.key] ?? ""]),
       );
       let response: TemplateFillResponse;
-      if (state.template?.source === "hwp_cli_skill") {
+      const templateSource = nativeHwpTemplateSource(state.template?.source, templatePath);
+      if (templateSource) {
         response = await hwpCliTemplateFill(workspace, {
-          source: "hwp_cli_skill",
+          source: templateSource,
           templateKey: templateKey ?? "",
           values,
         });
