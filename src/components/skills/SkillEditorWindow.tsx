@@ -188,6 +188,10 @@ export function SkillEditorWindow({ initialWorkPath, initialSkillId }: SkillEdit
   const dirtyRef = useRef(false);
   // Latest save for the window-scoped Cmd+S listener below (#370).
   const saveRef = useRef<() => Promise<void>>(async () => {});
+  // Loads and saves in flight, counted synchronously: the loading/saving
+  // state lags a render behind, so a second Cmd+S in the same task would
+  // still see it false and start a save that races the first.
+  const busyRef = useRef(0);
   // The Save As name being typed, or null while the field is closed. Asked
   // inside the window: wry implements no JavaScript prompt panel, so
   // window.prompt() returns null in the app and Save As never ran (#370).
@@ -228,6 +232,7 @@ export function SkillEditorWindow({ initialWorkPath, initialSkillId }: SkillEdit
         setError(t("skillEditor.noSkill"));
         return;
       }
+      busyRef.current += 1;
       setLoading(true);
       setError(null);
       setMessage(null);
@@ -245,6 +250,7 @@ export function SkillEditorWindow({ initialWorkPath, initialSkillId }: SkillEdit
           message: err instanceof Error ? err.message : String(err),
         }));
       } finally {
+        busyRef.current -= 1;
         setLoading(false);
       }
     },
@@ -428,7 +434,8 @@ export function SkillEditorWindow({ initialWorkPath, initialSkillId }: SkillEdit
   }, []);
 
   const save = useCallback(async () => {
-    if (!skill) return;
+    if (!skill || busyRef.current > 0) return;
+    busyRef.current += 1;
     setSaving(true);
     setError(null);
     setMessage(null);
@@ -441,6 +448,7 @@ export function SkillEditorWindow({ initialWorkPath, initialSkillId }: SkillEdit
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
+      busyRef.current -= 1;
       setSaving(false);
     }
   }, [emitUpdated, skill, t, text, workPath]);
@@ -454,12 +462,15 @@ export function SkillEditorWindow({ initialWorkPath, initialSkillId }: SkillEdit
     const name = rawName.trim();
     if (!name) return;
     if (!(await confirmDestructive(t("system.skills.saveAsConfirm", { name })))) return;
-    setSaveAsName(null);
+    if (busyRef.current > 0) return;
+    busyRef.current += 1;
     setSaving(true);
     setError(null);
     setMessage(null);
     try {
       const created = await skillsSaveSkillAs(skill.id, name, text);
+      // Closed only on success, so a refused name stays editable.
+      setSaveAsName(null);
       setSkillId(created.id);
       setSkill(created);
       setBase(text);
@@ -468,6 +479,7 @@ export function SkillEditorWindow({ initialWorkPath, initialSkillId }: SkillEdit
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
+      busyRef.current -= 1;
       setSaving(false);
     }
   }, [emitUpdated, skill, t, text, workPath]);
@@ -524,7 +536,8 @@ export function SkillEditorWindow({ initialWorkPath, initialSkillId }: SkillEdit
                 disabled={saving}
                 onChange={(event) => setSaveAsName(event.target.value)}
                 onKeyDown={(event) => {
-                  if (event.key === "Escape") setSaveAsName(null);
+                  // An Escape that ends an IME composition must not close the field.
+                  if (event.key === "Escape" && !event.nativeEvent.isComposing) setSaveAsName(null);
                 }}
               />
               <Button

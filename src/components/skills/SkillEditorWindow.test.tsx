@@ -462,6 +462,31 @@ describe("SkillEditorWindow save shortcuts (#370)", () => {
     expect(mocks.skillsSaveSkillFile).toHaveBeenCalledWith("skill-1", "SKILL.md", "edited content");
   });
 
+  it("Cmd+S while a save is still running does not start a second save", async () => {
+    let finishSave: (record: ReturnType<typeof skillDocument>["skill"]) => void = () => {};
+    mocks.skillsSaveSkillFile.mockImplementation(
+      () => new Promise((resolve) => { finishSave = resolve; }),
+    );
+    await mount();
+    act(() => {
+      dirtyTextarea();
+    });
+
+    // Two presses in the same task: the second must not wait on the first
+    // one's file lock and then fail with skill_changed.
+    await act(async () => {
+      handlersFor(MENU_COMMAND_EVENT).forEach((handler) => handler({ payload: "file.save" }));
+      handlersFor(MENU_COMMAND_EVENT).forEach((handler) => handler({ payload: "file.save" }));
+    });
+    await settle();
+    expect(mocks.skillsSaveSkillFile).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      finishSave(skillDocument().skill);
+    });
+    await settle();
+  });
+
   // wry implements no JavaScript prompt panel on macOS, so window.prompt()
   // returns null there and Save As never got past its name prompt.
   it("Save As asks for the name inside the window, never through window.prompt", async () => {
