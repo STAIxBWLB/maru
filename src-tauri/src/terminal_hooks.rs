@@ -720,7 +720,8 @@ fn terminal_hooks_uninstall_in_transaction(
 }
 
 // ---------------------------------------------------------------------------
-// Phase E: CLAUDE.md / AGENTS.md context-hint writer (opt-in, reversible)
+// Phase E: AGENTS.md context-hint writer (opt-in, reversible; removal also
+// clears legacy CLAUDE.md blocks)
 // ---------------------------------------------------------------------------
 
 const HINT_START: &str = "<!-- maru:context-hint v1 start -->";
@@ -888,8 +889,15 @@ fn remove_agent_context_hint_in_transaction(
         let existing = std::fs::read_to_string(&path).unwrap_or_default();
         let next = remove_marked_block(&existing, HINT_START, HINT_END);
         if next != existing {
-            std::fs::write(&path, next)
-                .map_err(|err| format!("Cannot write {}: {err}", path.display()))?;
+            // An empty CLAUDE.md would still hide AGENTS.md from Claude Code.
+            // A symlinked one is the user's link, so it is only emptied.
+            if target == "claude" && next.trim().is_empty() && !path.is_symlink() {
+                std::fs::remove_file(&path)
+                    .map_err(|err| format!("Cannot remove {}: {err}", path.display()))?;
+            } else {
+                std::fs::write(&path, next)
+                    .map_err(|err| format!("Cannot write {}: {err}", path.display()))?;
+            }
             removed.push(path.to_string_lossy().to_string());
         }
     }
@@ -1264,6 +1272,66 @@ mod tests {
             remove_marked_block(original, HINT_START, HINT_END),
             original
         );
+    }
+
+    #[test]
+    fn remove_hint_deletes_claude_md_left_empty() {
+        let dir = tempfile::tempdir_in(std::env::temp_dir().canonicalize().unwrap()).unwrap();
+        let work = dir.path();
+        let block = agent_context_hint_block();
+        let original = "# My Project\n";
+        std::fs::write(work.join("CLAUDE.md"), format!("\n{block}\n")).unwrap();
+        std::fs::write(
+            work.join("AGENTS.md"),
+            upsert_marked_block(original, HINT_START, HINT_END, &block),
+        )
+        .unwrap();
+        let removed = remove_agent_context_hint(
+            work.to_string_lossy().into_owned(),
+            vec!["claude".into(), "agents".into()],
+        )
+        .unwrap();
+        assert_eq!(removed.len(), 2);
+        assert!(!work.join("CLAUDE.md").exists());
+        assert_eq!(
+            std::fs::read_to_string(work.join("AGENTS.md")).unwrap(),
+            original
+        );
+    }
+
+    #[test]
+    fn remove_hint_keeps_claude_md_with_user_content() {
+        let dir = tempfile::tempdir_in(std::env::temp_dir().canonicalize().unwrap()).unwrap();
+        let work = dir.path();
+        let block = agent_context_hint_block();
+        std::fs::write(work.join("CLAUDE.md"), format!("# Mine\n\n{block}")).unwrap();
+        let removed =
+            remove_agent_context_hint(work.to_string_lossy().into_owned(), vec!["claude".into()])
+                .unwrap();
+        assert_eq!(removed.len(), 1);
+        assert_eq!(
+            std::fs::read_to_string(work.join("CLAUDE.md")).unwrap(),
+            "# Mine\n"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn remove_hint_keeps_symlinked_claude_md_and_its_target() {
+        let dir = tempfile::tempdir_in(std::env::temp_dir().canonicalize().unwrap()).unwrap();
+        let work = dir.path();
+        let shared = work.join("shared.md");
+        std::fs::write(&shared, agent_context_hint_block()).unwrap();
+        std::os::unix::fs::symlink(&shared, work.join("CLAUDE.md")).unwrap();
+        let removed =
+            remove_agent_context_hint(work.to_string_lossy().into_owned(), vec!["claude".into()])
+                .unwrap();
+        assert_eq!(removed.len(), 1);
+        assert!(std::fs::symlink_metadata(work.join("CLAUDE.md"))
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        assert_eq!(std::fs::read_to_string(&shared).unwrap(), "");
     }
 }
 
@@ -1677,9 +1745,8 @@ mod phase08_15 {
         held.release();
         done(first).unwrap();
         assert_eq!(done(second).unwrap().len(), 2);
-        assert!(!std::fs::read_to_string(root.join("CLAUDE.md"))
-            .unwrap()
-            .contains(HINT_START));
+        // The hint was its only content, so removal deletes CLAUDE.md.
+        assert!(!root.join("CLAUDE.md").exists());
         let config = home.root.path().join(".kimi-code/config.toml");
         std::fs::create_dir(config.parent().unwrap()).unwrap();
         let physical = root.join("config.toml");
