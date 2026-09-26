@@ -811,8 +811,8 @@ mod tests {
     }
 }
 
-/// Serializes the MARU_HWP_BIN / MARU_HWPX_BIN fixture overrides across every
-/// phase08_21 module so parallel tests never observe each other's binaries.
+/// Serializes the MARU_HWP_BIN fixture overrides across every phase08_21
+/// module so parallel tests never observe each other's binaries.
 #[cfg(test)]
 pub(crate) static PHASE08_21_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 

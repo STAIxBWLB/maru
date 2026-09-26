@@ -35,9 +35,11 @@ Errors are prefixed strings (`cli_missing:`, `hwp_timeout:`, `hwp_failed:`,
 
 `MARU_HWP_BIN` env override → `hwp` on (augmented) PATH. The retired `hwpx`
 skill no longer ships a binary, so there are no bundled fallbacks. Studio's
-native template fill (`hwp_cli_skill` and legacy `hwpx_skill` records) and
-Markdown → HWPX export resolve the released `hwp` through
-`hwp_cli_template::hwp_bin()`, which also enforces its minimum version.
+template fields, fill and validate (native `hwp_cli_skill` / legacy `hwpx_skill`
+records and workspace `.hwpx` templates), Markdown → HWPX export, and PDF from
+the exported HWPX resolve the released `hwp` through
+`hwp_cli_template::hwp_bin()`, which also enforces its minimum version. No code
+path runs the retired `hwpx` binary.
 
 ## Frontend
 

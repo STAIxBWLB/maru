@@ -24,10 +24,14 @@ and M4 export subsystems. Shipped in Phase 4 W11–W12.
    such as `사업계획서_기본`, or a Hub seed key such as `business_plan_default`,
    with or without `.hwpx`) onto the matching alias. A workspace template path
    typed in the step overrides an `hwpx_skill` key and goes through
-   `template_get_fields` / `template_fill_hwpx`, which still shells out to the
-   retired `hwpx` tool (`MARU_HWPX_BIN` or `hwpx` on PATH); without it the
-   field scan falls back to kordoc_lite and the fill fails. #362 tracks moving
-   that workspace fill, field scan, and the HWPX-to-PDF step onto `hwp`.
+   `template_get_fields` / `template_fill_hwpx`, also on the released `hwp`:
+   fields merge `hwp slots --json` with the kordoc_lite scan (kordoc_lite
+   alone, with a warning, when `hwp` is missing). The fill sends `hwp fill
+   --data … --json` only the requested keys that are real `{{slot}}`s, so an
+   unreplaced slot fails closed; with no slot keys it copies the template
+   instead. Every value then goes through the kordoc_lite form-label fill, and
+   `hwp validate --json` checks the output. Without a released `hwp` the fill
+   fails closed with its `cli_missing:` / `hwp_version:` reason.
 6. **Export** — wraps `export_plan` + the M4 dispatch pipeline (docx / hwpx / pdf
    with a sha256 manifest; see below).
 7. **Package** — applies the local body and freezes a version snapshot.
@@ -56,8 +60,10 @@ and the command palette (`src-tauri/src/export/`):
 - `export/validate.rs` — format-specific structure checks (docx / hwpx / pdf)
   plus `kordoc_lite` HWPX/form checks.
 - `export/dispatch.rs` — a single "Export bundle" command drives
-  `pending → ready/failed` using deterministic local converters (`pandoc`,
-  `hwpx`, LibreOffice-backed PDF fallback). Missing converters, missing outputs,
+  `pending → ready/failed` using deterministic local converters: `pandoc`
+  (DOCX), the released `hwp` (`hwp new --from <md> --preset report` for HWPX,
+  and `hwp convert <hwpx> --to pdf` for a PDF when the bundle also exports
+  HWPX), and `pandoc` as the PDF fallback. Missing converters, missing outputs,
   and source-hash drift surface as partial failures rather than silent success.
 
 ## Related invariants

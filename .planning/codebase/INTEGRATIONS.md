@@ -66,8 +66,8 @@ Maru is local-first: most integrations are subprocess bridges to CLIs the user a
 
 - **`git`** — status, diff, commit, sync by shell-out (`src-tauri/src/git.rs`). Commit+push is approval-gated (`GIT_SYNC_COMMIT_PUSH_APPROVAL_KIND`)
 - **`dot` CLI** (>= 2.63.0) — workspace cloud-mirror and Mac-peer sync (`src-tauri/src/dot_sync.rs`); mutating actions serialized behind a global lock
-- **`hwp` / HWPX toolchain** — document export and template fill (`src-tauri/src/hwped.rs`, `src-tauri/src/export/dispatch.rs`, `src-tauri/src/template_fill.rs`); binary override `MARU_HWPX_BIN`
-- **Export pipeline** — `pandoc` (Markdown → DOCX/PDF), `lualatex` (PDF engine), `soffice`/`libreoffice` fallback for PDF from HWPX
+- **`hwp` / HWPX toolchain** — released `hwp` for document export, template fields/fill/validate, and PDF from HWPX (`src-tauri/src/hwped.rs`, `src-tauri/src/hwp_cli_template.rs`, `src-tauri/src/export/dispatch.rs`, `src-tauri/src/template_fill.rs`); binary override `MARU_HWP_BIN`
+- **Export pipeline** — `pandoc` (Markdown → DOCX, and PDF when no HWPX render is available), `lualatex` (PDF engine)
 - **macOS `launchctl`** — migration/registration for scheduled work (`src-tauri/src/launchd_migration.rs`, `src-tauri/src/jobs.rs`)
 - **File manager integration** — `open`/`explorer`/`xdg-open` for reveal and open actions (`src-tauri/src/file_manager.rs`)
 

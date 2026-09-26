@@ -338,34 +338,47 @@ fn convert_pdf(
     source: &Path,
     output: &Path,
 ) -> ConverterRun {
+    // A bundle that also exports HWPX renders its PDF from that HWPX through
+    // the released hwp, keeping the HWPX layout; pandoc is the fallback.
+    let mut hwp_reason = None;
     if let Some(hwpx_entry) = manifest
         .outputs
         .iter()
         .find(|entry| entry.format == ExportFormat::Hwpx)
     {
         let hwpx_path = workspace_root.join(&hwpx_entry.path);
-        if hwpx_path.exists() && find_soffice().is_some() {
-            if let Some(hwpx) = find_hwpx_tool() {
-                let via_hwpx = run(
-                    &hwpx,
-                    &[
-                        OsString::from("to-pdf"),
-                        hwpx_path.as_os_str().to_os_string(),
-                        OsString::from("-o"),
-                        output.as_os_str().to_os_string(),
-                    ],
-                );
-                if via_hwpx.result.is_ok() {
-                    return via_hwpx;
+        if hwpx_path.exists() {
+            match crate::hwp_cli_template::hwp_bin() {
+                Ok(hwp) => {
+                    let via_hwp = run(
+                        &hwp,
+                        &[
+                            OsString::from("convert"),
+                            hwpx_path.as_os_str().to_os_string(),
+                            OsString::from("--to"),
+                            OsString::from("pdf"),
+                            OsString::from("-o"),
+                            output.as_os_str().to_os_string(),
+                        ],
+                    );
+                    match via_hwp.result {
+                        Ok(()) => return via_hwp,
+                        Err(err) => hwp_reason = Some(err.to_string()),
+                    }
                 }
+                Err(reason) => hwp_reason = Some(reason),
             }
         }
     }
 
     let Some(pandoc) = find_program("pandoc") else {
+        let mut error = not_found("pandoc");
+        if let Some(reason) = hwp_reason {
+            error = io::Error::new(error.kind(), format!("{error}; hwp: {reason}"));
+        }
         return ConverterRun {
             command: "pandoc".to_string(),
-            result: Err(not_found("pandoc")),
+            result: Err(error),
         };
     };
     run(
@@ -408,19 +421,6 @@ fn command_label(program: &Path, args: &[OsString]) -> String {
     let mut parts = vec![program.to_string_lossy().to_string()];
     parts.extend(args.iter().map(|arg| arg.to_string_lossy().to_string()));
     parts.join(" ")
-}
-
-fn find_soffice() -> Option<PathBuf> {
-    find_program("soffice").or_else(|| find_program("libreoffice"))
-}
-
-fn find_hwpx_tool() -> Option<PathBuf> {
-    if let Some(path) = std::env::var_os("MARU_HWPX_BIN").map(PathBuf::from) {
-        if is_executable(&path) {
-            return Some(path);
-        }
-    }
-    find_program("hwpx")
 }
 
 fn find_program(name: &str) -> Option<PathBuf> {
@@ -598,8 +598,9 @@ mod phase08_21 {
         }
     }
 
-    /// Fake released hwp: `new --from <md> ... -o <out>` logs its argv and
-    /// copies the markdown to the output, so the test sees the exact call.
+    /// Fake released hwp: `new --from <md> ... -o <out>` copies the markdown to
+    /// the output and `convert <in> --to pdf -o <out>` writes a stub PDF; every
+    /// call appends its argv to argv.log, so the tests see the exact calls.
     #[cfg(unix)]
     fn fake_hwp(dir: &Path) -> PathBuf {
         use std::os::unix::fs::PermissionsExt;
@@ -610,7 +611,7 @@ mod phase08_21 {
 case "$1" in
   --version) echo "hwp 1.1.0" ;;
   new)
-    echo "$@" > "{log}"
+    echo "$@" >> "{log}"
     from=""; out=""
     while [ "$#" -gt 0 ]; do
       if [ "$1" = "--from" ]; then shift; from="$1"; fi
@@ -619,6 +620,10 @@ case "$1" in
     done
     [ -n "$from" ] && [ -n "$out" ] || exit 2
     cp "$from" "$out" ;;
+  convert)
+    echo "$@" >> "{log}"
+    [ -f "$2" ] && [ "$3" = "--to" ] && [ "$4" = "pdf" ] && [ "$5" = "-o" ] || exit 2
+    printf '%%PDF-1.4 stub' > "$6" ;;
   *) exit 2 ;;
 esac
 "#,
@@ -631,12 +636,12 @@ esac
         binary
     }
 
-    fn plan_hwpx(root: &Path) {
+    fn plan(root: &Path, formats: &[&str]) {
         run(crate::export::ipc::export_plan(
             crate::export::ExportPlanRequest {
                 workspace_root: text(root),
                 source_path: "draft.md".to_string(),
-                formats: vec!["hwpx".to_string()],
+                formats: formats.iter().map(|format| format.to_string()).collect(),
                 output_dir: None,
             },
         ))
@@ -651,7 +656,7 @@ esac
         let bin_dir = home.root.path().join("bin");
         std::fs::create_dir_all(&bin_dir).unwrap();
         let _hwp = HwpBinGuard::set(&fake_hwp(&bin_dir));
-        plan_hwpx(&root);
+        plan(&root, &["hwpx"]);
 
         let response = run(ipc::export_dispatch(plan_request(&root))).unwrap();
         assert_eq!(response.results.len(), 1);
@@ -669,13 +674,48 @@ esac
 
     #[cfg(unix)]
     #[test]
+    fn phase08_21_export_pdf_renders_the_exported_hwpx_through_hwp_convert() {
+        let home = Home::new();
+        let root = setup_workspace(&home);
+        let bin_dir = home.root.path().join("bin");
+        std::fs::create_dir_all(&bin_dir).unwrap();
+        let _hwp = HwpBinGuard::set(&fake_hwp(&bin_dir));
+        plan(&root, &["hwpx", "pdf"]);
+
+        let response = run(ipc::export_dispatch(plan_request(&root))).unwrap();
+        let pdf = response
+            .results
+            .iter()
+            .find(|result| result.format == ExportFormat::Pdf)
+            .unwrap();
+        assert!(pdf.success, "{:?}", pdf.reason);
+        let hwpx = response
+            .results
+            .iter()
+            .find(|result| result.format == ExportFormat::Hwpx)
+            .unwrap();
+        let argv = std::fs::read_to_string(bin_dir.join("argv.log")).unwrap();
+        assert!(
+            argv.contains(&format!(
+                "convert {} --to pdf -o {}",
+                hwpx.output_path, pdf.output_path
+            )),
+            "{argv}"
+        );
+        assert!(std::fs::read(&pdf.output_path)
+            .unwrap()
+            .starts_with(b"%PDF"));
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn phase08_21_export_hwpx_fails_closed_without_a_released_hwp() {
         let home = Home::new();
         let root = setup_workspace(&home);
         let not_executable = home.root.path().join("hwp");
         std::fs::write(&not_executable, "not a binary").unwrap();
         let _hwp = HwpBinGuard::set(&not_executable);
-        plan_hwpx(&root);
+        plan(&root, &["hwpx"]);
 
         let response = run(ipc::export_dispatch(plan_request(&root))).unwrap();
         let result = &response.results[0];

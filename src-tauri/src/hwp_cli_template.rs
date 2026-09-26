@@ -130,12 +130,12 @@ struct Slot {
 /// report for every requested value.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct NativeFillReport {
+pub(crate) struct NativeFillReport {
     output: String,
     mode: String,
-    replaced: u32,
+    pub(crate) replaced: u32,
     counts: BTreeMap<String, u32>,
-    warnings: Vec<String>,
+    pub(crate) warnings: Vec<String>,
 }
 
 struct CliRun {
@@ -333,7 +333,7 @@ fn create_template(bin: &Path, alias: &str, output: &Path) -> Result<(), String>
     Ok(())
 }
 
-fn validate_template(bin: &Path, output: &Path) -> Result<(), String> {
+pub(crate) fn validate_template(bin: &Path, output: &Path) -> Result<(), String> {
     run_hwp_ok(
         bin,
         &[
@@ -345,7 +345,7 @@ fn validate_template(bin: &Path, output: &Path) -> Result<(), String> {
     Ok(())
 }
 
-fn slots_for(bin: &Path, document: &Path) -> Result<Vec<TemplateField>, String> {
+pub(crate) fn slots_for(bin: &Path, document: &Path) -> Result<Vec<TemplateField>, String> {
     let output = run_hwp_ok(
         bin,
         &[
@@ -471,6 +471,31 @@ fn parse_native_fill_report(
     Ok(report)
 }
 
+/// `hwp fill <template> --data <values.json> -o <output> --json` for exactly
+/// `values`, which must all be `{{slot}}`s: hwp fails closed on an unreplaced
+/// request, and the report must account for every value.
+pub(crate) fn fill_slots(
+    bin: &Path,
+    template: &Path,
+    values_path: &Path,
+    output: &Path,
+    values: &BTreeMap<String, String>,
+) -> Result<NativeFillReport, String> {
+    let stdout = run_hwp_ok(
+        bin,
+        &[
+            OsString::from("fill"),
+            template.as_os_str().to_os_string(),
+            OsString::from("--data"),
+            values_path.as_os_str().to_os_string(),
+            OsString::from("-o"),
+            output.as_os_str().to_os_string(),
+            OsString::from("--json"),
+        ],
+    )?;
+    parse_native_fill_report(&stdout, values)
+}
+
 pub fn hwp_cli_template_fields(
     request: HwpCliTemplateFieldsRequest,
 ) -> Result<HwpCliTemplateFieldsResponse, String> {
@@ -561,19 +586,7 @@ fn fill_with_bin(
     .map_err(|err| format!("hwp_stage_failed: {err}"))?;
     create_template(bin, alias, &template)?;
     validate_template(bin, &template)?;
-    let native_fill = run_hwp_ok(
-        bin,
-        &[
-            OsString::from("fill"),
-            template.as_os_str().to_os_string(),
-            OsString::from("--data"),
-            values_path.as_os_str().to_os_string(),
-            OsString::from("-o"),
-            staged_output.as_os_str().to_os_string(),
-            OsString::from("--json"),
-        ],
-    )?;
-    let native_report = parse_native_fill_report(&native_fill, values)?;
+    let native_report = fill_slots(bin, &template, &values_path, &staged_output, values)?;
     validate_template(bin, &staged_output)?;
     let staged_bytes = fs::read(&staged_output)
         .map_err(|err| format!("hwp_publish_failed: cannot read staged output: {err}"))?;
