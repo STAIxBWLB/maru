@@ -18,10 +18,11 @@ extra packages):
   <src.md> -o <tmp>/<stem>.pdf [--title "문서 제목"]
 ```
 
-- Chrome/Chromium is auto-detected (macOS app path, then PATH); override
-  with `--chrome <bin>` or `CHROME_BIN`. An explicit `--chrome` that does
-  not resolve is an error (no silent fallback). Exits with code 2 and a
-  fallback hint when no browser is found.
+- Google Chrome is preferred by direct installed-app path, before PATH
+  candidates. This keeps the Chrome-first route working when a Homebrew
+  `chromium` shim is stale. Override with `--chrome <bin>` or `CHROME_BIN`.
+  An explicit `--chrome` that does not resolve is an error (no silent
+  fallback). Exits with code 2 and a fallback hint when no browser is found.
 - A leading YAML frontmatter block is stripped before rendering, so
   internal metadata never reaches the outgoing PDF.
 - The intermediate HTML goes to a temp file, removed on success and kept
@@ -54,13 +55,11 @@ the theme by editing the constant, not by post-processing the HTML.
 
 ## Fallbacks
 
-- No Chrome on the machine: convert first, then print with LibreOffice if
-  installed. Either `md2docx <src.md>` then
-  `soffice --headless --convert-to pdf <stem>.docx`, or
-  `hwpx styled --markdown <src.md>` then
-  `hwpx to-pdf --engine soffice <stem>.hwpx` (LibreOffice cannot import
-  raw Markdown as a document).
-- Bare `hwpx to-pdf` (engine auto/hwp) is a last resort for table-free
-  documents only, and the output pages must be visually verified before
-  sending. The table row loss exits 0, so the auto engine's soffice
-  fallback never triggers on it.
+- No Chrome on the machine: convert first, then print the DOCX with
+  LibreOffice if installed: `md2docx <src.md>` then
+  `soffice --headless --convert-to pdf <stem>.docx`. LibreOffice cannot
+  import raw Markdown, and a direct HWPX-to-LibreOffice route is not a
+  verified fallback for this consumer.
+- Bare native HWPX rendering is a last resort for table-free documents only,
+  and the output pages must be visually verified before sending. The table
+  row loss exits 0, so it cannot be used as an automatic fallback.

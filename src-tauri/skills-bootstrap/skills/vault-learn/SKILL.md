@@ -6,7 +6,9 @@ description: Query→Wiki 환원 — research a topic (or promote a conversation
 
 # /vault-learn [topic]
 
-Promote a research finding or conversation answer into the vault graph **only after explicit user approval**. Implements the Query→Wiki 환원 루프 defined in `<workspace-root>/CLAUDE.md` §"Query→Wiki 환원 루프".
+Promote a research finding or conversation answer into the vault graph **only after explicit user approval**. Implements the Query→Wiki 환원 루프 defined in `vault/AGENTS.md` §"Query → Wiki 환원 루프".
+
+**Not for**: observations about how the vault/methodology itself is working (friction, surprises, process notes) — those go to `ops/observations/` via `/vault-remember` (no approval gate, no LEARN line; they feed `/vault-rethink`). `/vault-learn` writes knowledge into `notes/`.
 
 ## When to invoke
 
@@ -35,7 +37,7 @@ LEARN PROPOSAL
 topic: <topic>
 type: insight | observation | decision
 domain: research | projects | teaching | operations | people | ai-practice
-confidence: experimental (new research) | validated (consensus + sources)
+confidence: experimental (new research, default) | likely (consensus) | proven (verified sources) — schema values only (vault/AGENTS.md §Schema)
 
 Option A (NEW note):
   - path: notes/<prose-title>.md
@@ -94,6 +96,6 @@ YYYY-MM-DD HH:MM  LEARN  <project>  <source> → <vault/notes/x.md>  — <note>
 
 ## Related
 
-- `<workspace-root>/CLAUDE.md` §"Query→Wiki 환원 루프" — the policy
+- `vault/AGENTS.md` §"Query → Wiki 환원 루프" — the policy
 - `<workspace-root>/_meta/rules/ingest-chain.md` §"vault/log 포맷" — log line format
 - `/vault-extract`, `/vault-connect` — downstream skills invoked in steps 4-5

@@ -7,7 +7,7 @@ description: >
   런타임 + docx 패키지로 실행하며 어느 프로젝트에서나 호출 가능.
   트리거: docx, .docx, 워드, word 문서, 보고서 docx, md to docx, markdown to docx,
   마크다운 변환, 마크다운 docx, docx-js, docx 생성, 워드로 변환, 문서 산출물, 한글 워드
-  사용하지 않음: .hwpx 공문서(→ hwpx 스킬), .pdf, 스프레드시트(→ xlsx-toolkit), 슬라이드(→ pptx-toolkit)
+  사용하지 않음: .hwpx 공문서(→ hwp 스킬), .pdf, 스프레드시트(→ xlsx-toolkit), 슬라이드(→ pptx-toolkit)
 ---
 
 # md2docx — markdown → refined .docx (docx-js)
@@ -110,4 +110,4 @@ bash ~/.maru/skills/_builtin/envs/default/setup.sh --target ~/.maru/env
 
 - 변환기 구현: `scripts/md2docx.mjs` (self-contained, `docx`만 의존)
 - 런타임 해소 규약: `skills/envs/default/REFERENCE.md` (Python/JRE/Node 해소 순서)
-- 공문서(.hwpx)는 `hwpx` 스킬, 스프레드시트는 `xlsx-toolkit`, 슬라이드는 `pptx-toolkit`.
+- 공문서(.hwpx)는 released `hwp` 스킬의 `references/editing-recipes.md` (minimum `v1.0.0`), 스프레드시트는 `xlsx-toolkit`, 슬라이드는 `pptx-toolkit`.

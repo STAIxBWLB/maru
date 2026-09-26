@@ -17,7 +17,7 @@ Atomic vault note rename with full reference propagation. Implements 2026-04-22 
 - 네이밍 오타·정정 (정오자)
 - Acronym 변경 (JSIF → JIUCC 같은 브랜드 정정)
 - Scope 변경 (예: `rise-program` → `rise-y2-program`)
-- Lint L10b registry hygiene 교체 과정에서 노트명 shift 필요 시
+- registry `vault_note` 교체 과정에서 노트명 shift 필요 시
 
 **Do NOT use for**: 내용 개편·분할·병합 (→ `/vault-refactor` 사용)
 
@@ -95,10 +95,10 @@ Accept: [y]es, [n]o
    - Meeting 원본 파일명 (`work/meetings/.../04-02 회의 - JSIF-AWS...md`) — 물리 파일명 변경은 별도 의사결정
 3. **의도되지 않은 잔여 존재** → 사용자에게 보고 + 추가 패치 여부 확인
 
-### Step 6: log LINT event append
+### Step 6: log EXTRACT event append
 
 ```
-YYYY-MM-DD HH:MM  LINT  -  notes/{{old}}.md → notes/{{new}}.md  — rename, N files updated
+YYYY-MM-DD HH:MM  EXTRACT  -  notes/{{old}}.md → notes/{{new}}.md  — renamed, N files updated
 ```
 
 ## Safety Rules
@@ -113,7 +113,7 @@ YYYY-MM-DD HH:MM  LINT  -  notes/{{old}}.md → notes/{{new}}.md  — rename, N 
 
 - Move_note 성공 확인
 - 참조 patch 성공률 ≥95% (5% 이내 skill·legacy 경로는 Step 5에서 사용자 확인)
-- LINT event 기록
+- EXTRACT event 기록 (`— renamed`; rename은 구조 변경이라 `EXTRACT`로 기록, `ingest-chain.md` §비표준 TYPE 처리의 `RENAME → EXTRACT` 매핑과 정합)
 - Graph 재빌드 권장 (7일 내 `/vault-graph build`)
 
 ## Output
@@ -127,5 +127,5 @@ YYYY-MM-DD HH:MM  LINT  -  notes/{{old}}.md → notes/{{new}}.md  — rename, N 
 
 - **/vault-refactor** — 노트 내용 개편·분할·병합 (rename 이상의 구조적 변경)
 - **/vault-graph build** — rename 후 7일 내 재빌드 권장
-- **/vault-lint** — L11(graph stale) · L10(registry vault_note orphan) 연동
+- **/vault-lint** — L01(dead wiki-link) · L10(`project:` 값 검증) · L11(graph stale) 연동
 - 근거: 2026-04-22 Rethink M7 (ops/methodology/260422-rethink-report.md §T2)

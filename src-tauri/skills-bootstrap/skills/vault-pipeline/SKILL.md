@@ -1,25 +1,23 @@
 ---
 name: vault-pipeline
 trigger: /vault-pipeline
-description: Run seed/register -> extract -> connect -> lint pipeline for vault inbox items or work sources
+description: Run extract -> connect -> lint pipeline over a batch of work/ sources
 ---
 
 # /vault-pipeline [target]
 
-> **When to use**: vault/inbox/에 이미 등록된 항목이나 신규 work/ 파일·디렉토리를 전체 파이프라인으로 처리.
+> **When to use**: work/ 파일·디렉토리 여러 건을 extract → connect → lint 전체 파이프라인으로 일괄 처리. 단건은 `/vault-extract` 직접 호출.
 
-Batch process inbox items or specified work targets through the full pipeline. This skill owns the old seed/batch orchestration surface; there is no separate seed or ralph skill.
+Batch process work targets through the full pipeline. work `inbox/` 항목은 먼저 `inbox-process`로 summary를 만든 뒤 그 산출물을 대상으로 삼는다(vault는 inbox를 갖지 않는다).
 
 > **Registry fallback**: when project registry scoring < 3 → content-based domain analysis → prompt user. SSOT: `<workspace-root>/_meta/rules/project-registry-scoring.md`
 
 ## Input
-- target: `inbox`, a specific vault inbox item, a work file, or a work directory
+- target: a work file, a work directory, or an explicit list of work paths
 
 ## Process
 
-1. Resolve targets:
-   - `inbox` → list vault inbox items via Obsidian MCP
-   - work file/directory → enumerate eligible source files and register source references for this run
+1. Resolve targets: enumerate eligible source files (`.md` with frontmatter or summary output) for this run
 2. Pre-classify all items via project registry:
    - Read workspace `project-registry.yaml` once (status: active only)
    - For each item: score signals (people +3, acronyms +2, keywords +2, orgs +1, tags +1), attach project + `vault_note`
@@ -28,14 +26,13 @@ Batch process inbox items or specified work targets through the full pipeline. T
    a. /vault-extract -- pull insights into notes
    b. /vault-connect -- find relationships for new notes
    c. /vault-lint note=<note> -- check quality of new notes
-4. Move processed vault inbox references to vault/archive/ when applicable
-5. Generate completion report
+4. Generate completion report
 
 ## Output
 - Summary: items processed, notes created, connections made
-- Quality: pass/fail counts from verify
-- Remaining: inbox count after processing
+- Quality: per-note `/vault-lint note=` error/warn counts
+- Remaining: targets skipped (precondition failures, see vault-extract §Preconditions)
 
 ## Guards
-- Respects inbox WIP limit (20)
+- Max 20 targets per run (collector's-fallacy guard; split larger batches)
 - Stops on critical errors, continues on warnings

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for build-graph.py reporting fixes (issue #326)."""
+"""Tests for build-graph.py reporting fixes (STAIxBWLB/maru#326, ported from maru#328)."""
 
 import importlib.util
 import sys
@@ -53,9 +53,11 @@ def test_leiden_exception_falls_back_to_louvain_with_reason(monkeypatch):
 
 
 def test_leiden_success_labels_partitioner(monkeypatch):
-    def leiden(matrix, seed=None):
-        assert seed == 42
-        return [0] * matrix.shape[0]
+    # Mirrors graspologic's adjacency-matrix contract: random_seed kwarg,
+    # {node_index: community_id} return.
+    def leiden(matrix, random_seed=None):
+        assert random_seed == 42
+        return {i: 0 for i in range(matrix.shape[0])}
     install_fake_leiden(monkeypatch, leiden)
 
     G = two_community_graph()
@@ -137,3 +139,23 @@ def test_zero_cap_reproduces_precap_ordering():
     assert [r["score"] for r in rows] == [
         G.degree(e["source"]) + G.degree(e["target"]) for e in expected
     ]
+
+
+# ── graphifyy >= 0.9 cache placement ────────────────────────────────────
+
+def test_extract_code_pins_cache_root_to_target(monkeypatch, tmp_path):
+    calls = []
+    fake_pkg = types.ModuleType("graphify")
+    fake_extract = types.ModuleType("graphify.extract")
+    fake_extract.collect_files = lambda target, follow_symlinks: [target / "a.py"]
+
+    def extract(paths, cache_root=None, **kwargs):
+        calls.append(cache_root)
+        return {"nodes": [], "edges": []}
+    fake_extract.extract = extract
+    fake_pkg.extract = fake_extract
+    monkeypatch.setitem(sys.modules, "graphify", fake_pkg)
+    monkeypatch.setitem(sys.modules, "graphify.extract", fake_extract)
+
+    BG.extract_code(tmp_path)
+    assert calls == [tmp_path]

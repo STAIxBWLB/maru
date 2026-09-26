@@ -6,22 +6,22 @@ description: Recommend the highest-value next action for the vault
 
 # /vault-next
 
-Analyze vault state and recommend the most valuable next action.
+Analyze vault state and recommend the most valuable next action. Recommendation only; the raw numbers are `/vault-stats`.
 
 ## Process
 
-1. Check ops/queue/ for pending items
+1. Read the latest `reports/lint-YYMMDD.md` (errors/warnings) and `reports/graph-report-YYMMDD.md` (staleness)
 2. Evaluate maintenance conditions:
-   - Orphan notes (need /vault-connect)
+   - Orphan notes / island communities (need /vault-connect)
    - Stale notes > 90 days (need /vault-update)
-   - Inbox size (need /vault-extract or /vault-pipeline)
-   - Observation/tension count (need /vault-rethink)
+   - Unprocessed work sources since `ops/sessions/last-sync-timestamp` (need /vault-sync or /vault-pipeline)
+   - Observation/tension count vs `ops/config.yaml` thresholds (need /vault-rethink)
 3. Consider recent activity patterns
 4. Rank actions by impact
 
 ## Priority Order
 1. Critical: schema violations, broken links
-2. High: inbox overflow, orphan drift
+2. High: unsynced work sources, orphan drift
 3. Medium: stale notes, pending observations
 4. Low: optimization, MOC refinement
 

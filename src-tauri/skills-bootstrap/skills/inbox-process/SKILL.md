@@ -45,8 +45,14 @@ skill. The user may scope processing with `inbox-process <channel>`.
 3. Read each `inbox.naming.manifest_file` and verify
    `schema: inbox-item/v1`.
 4. Extract text from `files[]` into `inbox.naming.extracted_file`.
-   - `.pdf`, `.docx`, `.pptx`, `.xlsx`, `.hwpx`, `.hwp`, `.txt`, `.md`, and
-     `.csv` should use the closest installed public toolkit or platform reader.
+   - Prefer the native route when its tool is installed: `.hwp`/`.hwpx` via
+     `hwp cat --format markdown` (keeps tables, merged cells and image
+     positions), `.xlsx` via `xlsx-toolkit`, `.pptx` via `pptx-toolkit`.
+     `.docx`, `.txt`, `.md`, and `.csv` use the closest installed public
+     toolkit or platform reader.
+   - Formats with no native route (`.pdf`, `.epub`, `.msg`, `.html`, images)
+     fall back to `markitdown <file>` when it is installed. It is a read-only
+     text extractor here; never use it to generate or convert documents.
    - Unsupported binaries stay pending with a clear `failed` reason.
 5. Create `inbox.naming.summary_file` with the required frontmatter and
    exactly three body sections: `## 요약`, `## 핵심`, `## 실행`.
@@ -73,14 +79,17 @@ skill. The user may scope processing with `inbox-process <channel>`.
    just the project) per `naming-and-placement.md` §C — map the item kind to the
    project's matching subfolder (`<project>/.maru/bu-config.yaml` `tree_map` →
    existing `NN-`/`N-` subfolder → `_incoming/` fallback; never the bare project
-   root). Write the decision to `inbox.naming.route_file`.
+   root). Write the decision to `inbox.naming.route_file` in the shape defined in
+   *Route File* below; the machine-readable block is what the applying tool reads.
 8. Ask for confirmation before moving originals or summaries outside the inbox.
    In Maru review mode (see *Maru Run Contract*), do not move anything
    yourself — defer the move to Maru's confirmation step.
    When filing a raw original OUT of the exempt inbox zone into a non-exempt
    project folder, rename it to an English slug per `_meta/rules/naming-and-placement.md` §A4
    (`YYMMDD-type-description[-vX].ext`) and preserve the Korean original in the
-   item manifest `source.original_name`.
+   item manifest `source.original_name`. §A4's scope is tracked text only —
+   `.md`, `.txt`, `.svg` with a non-ASCII name. Binaries (`.pdf`, `.hwp`,
+   `.hwpx`, `.xlsx`, `.pptx`, `.docx`) keep their original filename.
 9. Move processed items to `done/`, `failed/`, or `duplicate/` and append a
    receipt to `_state/index.jsonl`. In Maru review mode, skip this step;
    Maru performs the move and writes the receipt after the user confirms.
@@ -142,6 +151,83 @@ sets `reviewFlow: true`), process **every** selected item in one run and:
 Set `requiresConfirmation: true` for weak routes (top score < 3), `noise`, and
 `handoff` items so the user must decide before Apply unlocks. Parsers ignore
 unknown fields, so the artifact stays forward-compatible.
+
+## Proposal-Only Mode
+
+When the request names explicit item IDs and no channel — the headless case an
+unattended scheduler runs — propose and stop. This is the same non-destructive
+contract as *Maru Run Contract* items 2 and 3, and it holds without the caller
+restating it in the prompt.
+
+1. Process only the named items.
+2. Write `inbox.naming.extracted_file`, `inbox.naming.summary_file` and
+   `inbox.naming.route_file` inside each item's directory, and
+   `metadata.processing_context` / `metadata.processing_hints` into its
+   `manifest.yaml`. Nothing else.
+3. Move nothing. The item stays in `pending/`, `_state/index.jsonl` gets no
+   receipt, and no raw original is filed into a project folder. A person or the
+   applying tool performs the move after confirmation.
+4. Do not run follow-up skills.
+
+Items staged with `metadata.processing_hints.intake_mode: auto` are the usual
+input (see `inbox-intake` §Processing Hints), but the mode is selected by the
+request shape, not by the hint.
+
+## Route File
+
+`inbox.naming.route_file` carries the routing decision. Write the reasoning as
+ordinary prose in the workspace language, then one machine-readable block that a
+tool can apply without reading the prose:
+
+```markdown
+## Destination (schema)
+
+- destination: projects/<project>/<subfolder>/
+- project: <project id>
+- classification: action
+- confidence: medium
+- rationale: why this destination, and what is still uncertain
+- filed_as: <원본명>.md -> 260730-mail-drive-share-example.md
+```
+
+Parsing rules the block must satisfy:
+
+- The heading is matched case-insensitively on the `## destination` prefix, and
+  the block ends at the next `##` heading. Emit exactly `## Destination (schema)`.
+- Each line is `- key: value`. Keys are `[A-Za-z_]+`, and one level of
+  surrounding backticks is stripped from the value.
+- Scalar keys are single-valued: repeat one and the **first occurrence wins**.
+- `filed_as` is the exception — it is repeatable, and every line **accumulates**
+  into the rename map. A bundle with three files needing slugs carries three
+  `filed_as` lines, and all three apply.
+- Unknown keys are ignored, so the block stays forward-compatible.
+
+| Key | Rule |
+|---|---|
+| `destination` | Workspace-relative subfolder for raw originals, kind-matched per `naming-and-placement.md` §C. Must contain `/`, must not be absolute, `~`-rooted or contain `..`, and its parent must already exist (at most one new leaf folder). `null` when there is no destination. |
+| `project` | Project ID from `project-registry.yaml`, or `null`. |
+| `classification` | `action`, `schedule`, `info`, `ideation`, or `noise`. Recorded on the receipt. |
+| `confidence` | `high`, `medium`, or `low`. Only `high` and `medium` are applicable without a person deciding. Use `low` whenever the top registry score is weak (`< 3`), the kind is ambiguous, or the item is `noise`/`handoff`. |
+| `rationale` | Free text. Parsed but never acted on — it is where doubt belongs, for the human reading the proposal. |
+| `filed_as` | Rename map, one line per raw file that needs an English slug. Repeatable and accumulated, unlike the scalar keys above. |
+
+Two ways to say "do not file this anywhere":
+
+- `destination: null` — the explicit no-destination value; prefer it over
+  omitting the key, so a reader can tell a decision from a gap. It is not a typed
+  null: it applies as a value that is not a path, which is exactly why nothing is
+  moved.
+- `destination: projects/x/  (정본 이전 후)` — a path plus a caveat, separated by
+  two spaces or ` (`. The caveat marks the route as not machine-applicable, so a
+  person handles it. Use it when the path is right but the timing or precondition
+  is not.
+
+`filed_as` lines take the form `- filed_as: <original> -> <slug>`, with `->` or
+`→`, backticks optional on either side. The target slug must contain no spaces.
+Write one for every raw file that §A4 requires renaming — `.md`, `.txt` or `.svg`
+with a non-ASCII name — because choosing the slug is judgment and belongs here;
+the applying tool only uses what it was given and skips the item when the line is
+missing. Binaries need no `filed_as`.
 
 ## Task Extraction Mode (`extract-tasks`)
 
@@ -228,6 +314,8 @@ Hooks are optional and config-driven:
 ## Routing Rules
 
 - Use `project-registry.yaml` as the first source of truth for the target project.
+- Serialize the decision per *Route File*; a weak route (top score < 3) is
+  `confidence: low`, which keeps it out of any automatic apply.
 - Resolve the destination **subfolder** per `naming-and-placement.md` §C: classify the
   item's kind, then map kind → subfolder (`<project>/.maru/bu-config.yaml`
   `tree_map` → existing `NN-`/`N-` subfolder → default kind→category). Never drop

@@ -12,7 +12,7 @@ Scan work/ for new or changed content and propose vault extractions. Nothing is 
 - scope (optional): "full" (all work/), "meetings" (meetings only), "projects" (projects only), "diff" (git diff only)
 - Default: "full"
 
-Raw recordings and unreviewed transcripts are not scanned by `/vault-sync`. Only refined meeting notes under `work/meetings/2026/2026-MM/` are considered vault-worthy sources. Any transcript provider output must be processed through `meeting-notes` first.
+Raw recordings and unreviewed transcripts are not scanned by `/vault-sync`. Only refined meeting notes under `work/meetings/YYYY/YYYY-MM/` are considered vault-worthy sources. Any transcript provider output must be processed through `meeting-notes` first.
 
 ## Process
 
@@ -22,11 +22,11 @@ Raw recordings and unreviewed transcripts are not scanned by `/vault-sync`. Only
 
 #### 1A: Meeting Notes (highest priority)
 ```bash
-# List all meeting files in current month
-ls <workspace-root>/meetings/2026/2026-MM/
+# List all meeting files in current month (YYYY/YYYY-MM = today)
+ls <workspace-root>/meetings/YYYY/YYYY-MM/
 ```
 - Cross-reference vault notes source fields to find unprocessed meetings
-- Grep vault `notes/` for `source:.*work/meetings/2026/2026-MM` to identify already-extracted
+- Grep vault `notes/` for `source:.*work/meetings/YYYY/YYYY-MM` to identify already-extracted
 
 #### 1B: Git Diff — Work Root + Submodules (NEW)
 ```bash
@@ -38,7 +38,7 @@ SINCE_DATE=$(echo $LAST_SYNC | sed 's/\(....\)\(..\)\(..\)\(..\)\(..\)/\1-\2-\3 
 
 # Root repo changes (exclude system/meetings/tasks — those have dedicated scanners)
 git log --oneline --since="$SINCE_DATE" --name-only -- . \
-  ':!.omc' ':!.claude' ':!.obsidian' ':!meetings' ':!tasks' \
+  ':!.claude' ':!.obsidian' ':!meetings' ':!tasks' \
   | grep -v '^\w\{7\} ' | grep -v '^$' | grep -v '\.json$' \
   | grep -v '_meta/' | grep -v 'uv.lock' | grep -v 'pyproject.toml' \
   | sort -u
@@ -52,23 +52,11 @@ git submodule status --recursive | grep '^+' | awk '{print $2}'
 - For each changed submodule, check its recent commits:
   ```bash
   cd <workspace-root>/$SUBMODULE
-  git log --oneline --since="$SINCE_DATE" --name-only -- . ':!.omc' ':!.claude' \
+  git log --oneline --since="$SINCE_DATE" --name-only -- . ':!.claude' \
     | grep -v '^\w\{7\} ' | grep -v '^$' | sort -u
   ```
 
-**Work repo submodules (root + recursive, `.gitmodules` 기준)**:
-
-| Category | Submodules | Vault-relevant |
-|----------|-----------|----------------|
-| projects/ | kbs-election | HIGH |
-| teaching/ | course-repos (+ai-systems, +djgirls), halla-ai | MEDIUM |
-| research/ | research | MEDIUM |
-| meetings/ | meetings | (별도 스캐너) |
-| personal/ | personal (+STAIxBWLB, +assets, +me) | LOW |
-| dev/ | dev (+hwp-toolkit, +dotfiles, +rootfiles) | LOW |
-| _meta/ | rules, registry, templates, scripts, reports, migrations | SKIP |
-
-Converted regular directories (`projects/rise/`, `projects/rise-research/`, `projects/oda-*`, `projects/ai-disaster/`, `teaching/courses/`) are covered by the root git diff scan, not submodule scan.
+**Work repo submodules**: 목록은 `.gitmodules`가 정본(런타임 뷰 `_meta/config/submodules.yaml`) — 여기에 표 사본을 두지 않는다(드리프트 방지). `vault`는 스캔 대상이 아니라 목적지이고, `dev`·`sites/*`(코드 저장소)는 명시 요청 시에만 스캔한다. 그 외 work 트리는 일반 디렉토리이므로 루트 git diff 스캔이 덮는다.
 
 ### Step 1.5: Filter & Classify
 
@@ -110,7 +98,7 @@ Present candidates grouped by source and priority:
 ```
 EXTRACTION PROPOSALS
 ====================
-Scanned: meetings 9건, git-diff 5건, submodules 2건
+Scanned: meetings 9건, git-diff 5건, submodules 1건
 
 ─── MEETINGS (HIGH) ───
 
@@ -130,27 +118,21 @@ Scanned: meetings 9건, git-diff 5건, submodules 2건
 
 ─── SUBMODULE CHANGES ───
 
-[4] SUBMODULE: projects/kbs-election (+3 commits)
-    -> Changed: pipeline/, reports/
-    -> Proposed: update [[kbs-election-ai-pipeline]]
-    -> Domain: projects
-
-[5] SUBMODULE: teaching/halla-ai (+1 commit)
+[4] SUBMODULE: sites/halla-ai (+1 commit, requested)
     -> Changed: src/pages/
     -> Proposed: update [[halla-ai-department-home]]
     -> Domain: teaching
 
-Accept: [a]ll, [1-5] select, [s]kip, [q]uit
+Accept: [a]ll, [1-4] select, [s]kip, [q]uit
 ```
 
 ### Step 3: Confirm
 - User selects which proposals to execute
 - For each confirmed proposal:
   1. Read the source document fully
-  2. Extract insights per /vault-extract methodology
-  3. Create vault note(s)
-  4. Update relevant MOCs
-  5. Show created note for review
+  2. **create** proposals: extract insights per `/vault-extract` methodology → create vault note(s) → update relevant MOCs
+  3. **update** proposals: hand off to the `/vault-update` procedure (MCP `patch_note`/`write_note` with the original insight preserved, `## Update YYYY-MM-DD` section, `/vault-lint note=` afterwards) — this skill does not carry its own update path
+  4. Show created/updated note for review
 
 ### Step 3.5: R4 Sibling Merge — Method Evidence 자동 갱신 (M10, 2026-04-24 도입)
 
@@ -172,19 +154,18 @@ Accept: [a]ll, [1-5] select, [s]kip, [q]uit
 - User가 /vault-sync --skip-method-update 플래그 사용 시
 
 ### Step 4: Record
-- Update last-sync timestamp in ops/sessions/last-sync-timestamp
-- Log sync results in ops/sessions/YYYYMMDD-sync.md
+- Update last-sync timestamp in `ops/sessions/last-sync-timestamp` (plain file, fs write)
+- Log sync results in `ops/sessions/YYYYMMDD-sync.md` via `mcp__obsidian__write_note` (vault markdown)
 - Promote vault-relevant `TASK` events from the work-local `.maru/tasks-log.md`
   to `vault/log` (ingest-chain TYPE `TASK`; task-management does not write the
   vault directly — context-enrichment §6)
-- **Graph freshness (DR-019 §6)**: run vault-lint L11/L11b (graph staleness). If the
-  vault or workspace graph is > 7 days stale, propose `/vault-graph build` (+ `--workspace`
-  for the work layer). Suggest only — do not auto-build.
+- **Graph freshness (DR-019 §6)**: run vault-lint L11 (graph staleness). If `vault-graph.json`
+  is > 7 days stale, propose `/vault-graph build`. Suggest only — do not auto-build.
 
 ## Scope Details
 
 ### /vault-sync meetings
-- Scan work/meetings/2026/ for notes not yet in vault
+- Scan work/meetings/YYYY/ (current year) for notes not yet in vault
 - Cross-reference vault notes source fields
 - Extract: decisions, insights, relationship updates
 

@@ -22,14 +22,22 @@ At the start of a vault-facing workflow:
    - `ssot.rules`
    - `ssot.glossary`
    - `ssot.people`
-   - `skills.vault_adapter`
+   - `ssot.ingest_chain` (log TYPE set and normalization table)
 3. If a key is missing, ask for the workspace-local value instead of hardcoding a personal path.
 
 ## Access Rules
 
 ### Vault Markdown
 
-All vault `.md` reads, writes, moves, deletes, frontmatter edits, tag edits, and searches must go through Obsidian MCP tools. Do not use filesystem read/write/edit or shell commands for vault markdown.
+All vault `.md` writes, moves, deletes, frontmatter edits, and tag edits must go through Obsidian MCP tools — `notes/`, `ops/` (observations, methodology, sessions logs), and root docs alike. Agent-side reads and searches also go through MCP. Do not use filesystem write/edit or shell commands for vault markdown.
+
+Three declared exceptions (machine I/O, not agent writes):
+
+| Path | Writer / reader | Why |
+|---|---|---|
+| `log`, `ops/sessions/last-sync-timestamp` | fs read/append by any vault skill | plain files, not Obsidian notes |
+| `reports/{vault-graph.json,workspace-graph.json,graph-report-*.md,graph-trend.md}` | written by `lib/build-graph.py` (fs) | machine-generated artifacts; `lint-YYMMDD.md` is still written via MCP |
+| `notes/*.md` **read-only** | `lib/build-graph.py`, `vault-lint/scripts/lint.py` | deterministic scripts scan the tree; they never write notes |
 
 Typical mappings:
 
@@ -52,13 +60,13 @@ Workspace-local operational files are not vault markdown. They may be read or ed
 
 ## Log Append
 
-Vault-changing workflows append one line to the configured vault log through Obsidian MCP:
+Vault-changing workflows append one line to the configured vault log (`vault.log_file`) by **direct fs append** (`>>`) — the log is a plain logfile, not a note:
 
 ```text
-YYYY-MM-DD HH:MM  TYPE  project  source -> dest  - note
+YYYY-MM-DD HH:MM  TYPE  project  source → dest  — note
 ```
 
-Allowed `TYPE` values are workspace-defined; common values are `INGEST`, `ROUTE`, `EXTRACT`, `CONNECT`, `DIGEST`, `LEARN`, `LINT`, `TASK`, and `GRAPH`.
+`TYPE` is workspace-defined (`ssot.ingest_chain`): the canonical set is `INGEST ROUTE EXTRACT CONNECT DIGEST LEARN LINT TASK GRAPH SYNC RETHINK SOURCE`; historical non-standard TYPEs are interpreted via that rule's normalization table and must not be written anew (structure changes such as rename/refactor log as `EXTRACT`).
 
 ## Summary To Vault Fields
 
