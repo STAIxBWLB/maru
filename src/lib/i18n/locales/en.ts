@@ -28,7 +28,7 @@ export const en: Record<string, string> = {
   "app.unsaved.confirm": "Continue without saving",
   "app.quit.saving": "Saving changes before quitting...",
   "app.quit.failedTitle": "Changes were not saved",
-  "app.quit.failedBody": "Some changes could not be saved, so Maru stayed open. Each one has a notification with its recovery copy.",
+  "app.quit.failedBody": "Some changes could not be saved, so Maru stayed open. Check each notification; it links a recovery copy when one could be kept.",
   "app.quit.timeoutBody": "Saving took longer than 3 seconds, so Maru stayed open.",
   "app.quit.retry": "Retry",
   "app.quit.quitAnyway": "Quit anyway",

@@ -139,10 +139,10 @@ async function mount(): Promise<void> {
   });
 }
 
-function dirtyTextarea(): void {
+function dirtyTextarea(value = "edited content"): void {
   const textarea = host.querySelector<HTMLTextAreaElement>("textarea")!;
   const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!;
-  setter.call(textarea, "edited content");
+  setter.call(textarea, value);
   textarea.dispatchEvent(new Event("input", { bubbles: true }));
 }
 
@@ -287,6 +287,42 @@ describe("SkillEditorWindow quit-check listener", () => {
     expect(mocks.emit).toHaveBeenCalledWith(SKILL_EDITOR_QUIT_CHECK_RESPONSE_EVENT, {
       proceed: true,
     });
+  });
+  // PR #361 review: main asks again right before it destroys the editor (its
+  // own dialogs are in-page, so the editor stays editable meanwhile). An
+  // unchanged, already-approved edit must not get a second dialog; a newer
+  // edit must.
+  it("answers a repeat quit-check without a second dialog until the text changes", async () => {
+    await mount();
+    act(() => {
+      dirtyTextarea();
+    });
+    mocks.dialogConfirm.mockResolvedValue(true);
+    const fireQuitCheck = () =>
+      act(async () => {
+        handlersFor(SKILL_EDITOR_QUIT_CHECK_EVENT).forEach((handler) =>
+          handler({ payload: undefined }),
+        );
+        await Promise.resolve();
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+    const responses = () =>
+      mocks.emit.mock.calls.filter(([name]) => name === SKILL_EDITOR_QUIT_CHECK_RESPONSE_EVENT);
+
+    await fireQuitCheck();
+    await fireQuitCheck();
+    expect(mocks.dialogConfirm).toHaveBeenCalledTimes(1);
+    expect(responses()).toEqual([
+      [SKILL_EDITOR_QUIT_CHECK_RESPONSE_EVENT, { proceed: true }],
+      [SKILL_EDITOR_QUIT_CHECK_RESPONSE_EVENT, { proceed: true }],
+    ]);
+
+    act(() => {
+      dirtyTextarea("edited again");
+    });
+    await fireQuitCheck();
+    expect(mocks.dialogConfirm).toHaveBeenCalledTimes(2);
   });
 });
 

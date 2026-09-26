@@ -618,4 +618,65 @@ describe("useDestructiveActionGuard requestAppQuit (review finding #2)", () => {
     expect(mocks.closeSkillEditorForQuit).toHaveBeenCalledTimes(1);
     expect(mocks.close).toHaveBeenCalledTimes(2);
   });
+
+  // PR #361 review: main's dialogs are in-page, so the skill editor stays
+  // editable while one is open; its earlier approval can be stale by the
+  // time main actually closes.
+  it("re-asks the skill editor before destroying it, and aborts the quit if it now declines", async () => {
+    dirty = true;
+    await mount();
+    await act(async () => {
+      await guard.requestAppQuit();
+    });
+    await act(async () => {
+      await capturedHandler()(makeEvent());
+    });
+    expect(guard.pendingDestructiveAction).toBe("close");
+
+    mocks.requestSkillEditorQuitCheck.mockResolvedValueOnce(false);
+    await act(async () => {
+      await guard.confirmDestructiveAction();
+    });
+
+    expect(mocks.requestSkillEditorQuitCheck).toHaveBeenCalledTimes(2);
+    expect(mocks.closeSkillEditorForQuit).not.toHaveBeenCalled();
+    expect(mocks.close).toHaveBeenCalledTimes(1); // only the initial ask
+  });
+
+  // PR #361 review: a confirm sheet does not block the app menu, so a second
+  // Cmd+Q while the editor is still asking must not stack another sheet.
+  it("a second Cmd+Q while the skill editor is still asking does not ask it again", async () => {
+    let answer!: (proceed: boolean) => void;
+    mocks.requestSkillEditorQuitCheck.mockImplementationOnce(
+      () => new Promise<boolean>((resolve) => (answer = resolve)),
+    );
+    await mount();
+
+    let first!: Promise<void>;
+    await act(async () => {
+      first = guard.requestAppQuit();
+      await guard.requestAppQuit();
+    });
+    expect(mocks.requestSkillEditorQuitCheck).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      answer(false);
+      await first;
+    });
+    expect(mocks.close).not.toHaveBeenCalled();
+  });
+
+  // PR #361 review: relaunch is the other whole-app exit, and it kills the
+  // skill editor with the process.
+  it("a relaunch asks the skill editor first and does nothing if it declines", async () => {
+    mocks.requestSkillEditorQuitCheck.mockResolvedValue(false);
+    await mount();
+
+    await act(async () => {
+      await guard.requestRelaunch();
+    });
+
+    expect(mocks.requestSkillEditorQuitCheck).toHaveBeenCalledTimes(1);
+    expect(mocks.relaunchApp).not.toHaveBeenCalled();
+  });
 });

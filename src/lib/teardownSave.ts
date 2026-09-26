@@ -70,7 +70,7 @@ export async function reportTeardownSaveFailure(
   setError((current) => (current === reason ? null : current));
 }
 
-function settleTeardownSave<T>(
+export function settleTeardownSave<T>(
   saver: SettlingDebouncedSaver<T>,
   describe: (value: T) => TeardownSaveTarget | null,
   t: Translate,
@@ -130,9 +130,15 @@ export function useTeardownFlush<T>(
   t: Translate,
 ): void {
   const describeRef = useRef(describe);
-  describeRef.current = describe;
   const tRef = useRef(t);
-  tRef.current = t;
+  // Refreshed after commit, not during render: React runs the saver effect's
+  // cleanup below before this effect's next run, so a saver swapped out in
+  // place (StudioMode is not keyed by workspace) still sees its own last
+  // render's describe rather than its successor's workspace, or none.
+  useEffect(() => {
+    describeRef.current = describe;
+    tRef.current = t;
+  });
 
   useEffect(() => {
     if (!saver) return undefined;
@@ -142,7 +148,8 @@ export function useTeardownFlush<T>(
     teardownSaves.add(entry);
     return () => {
       teardownSaves.delete(entry);
-      void entry.settle();
+      // Pin them now: the flush settles only after the successor's commit.
+      void settleTeardownSave(saver, describeRef.current, tRef.current);
     };
   }, [saver]);
 }

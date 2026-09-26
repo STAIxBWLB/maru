@@ -123,12 +123,17 @@ export async function requestSkillEditorQuitCheck(): Promise<boolean> {
         }
         unlistenResponse = offResponse;
         unlistenAck = offAck;
-        ackTimer = setTimeout(() => {
-          if (!ackReceived) finish(true);
-        }, SKILL_EDITOR_QUIT_CHECK_ACK_TIMEOUT_MS);
-        void emitTo(SKILL_EDITOR_LABEL, SKILL_EDITOR_QUIT_CHECK_EVENT, undefined).catch(() =>
-          finish(false),
-        );
+        // Timed from the send, not before it: a missing ack means "no
+        // listener yet" only once the request has actually gone out, and a
+        // slow send must not auto-approve a dirty editor.
+        void emitTo(SKILL_EDITOR_LABEL, SKILL_EDITOR_QUIT_CHECK_EVENT, undefined)
+          .then(() => {
+            if (settled || ackReceived) return;
+            ackTimer = setTimeout(() => {
+              if (!ackReceived) finish(true);
+            }, SKILL_EDITOR_QUIT_CHECK_ACK_TIMEOUT_MS);
+          })
+          .catch(() => finish(false));
       })
       .catch(() => finish(false));
   });

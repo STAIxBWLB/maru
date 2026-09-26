@@ -1640,14 +1640,20 @@ pub fn write_recovery_copy(
     with_path_transactions(admission, |lease| {
         lease.ensure_workspace_registry()?;
         lease.before_effect()?;
-        ensure_maru_dir(&work)?;
+        // Not ensure_maru_dir: it refuses a workspace.json this build cannot
+        // read, and the recovery copy is the last resort for an edit whose
+        // save already failed. A symlinked `.maru` or `recovery` would send
+        // this write, and the retention prune below, outside the workspace.
         let dir = recovery_dir(&work);
-        if fs::symlink_metadata(&dir)
-            .map(|meta| meta.file_type().is_symlink())
-            .unwrap_or(false)
-        {
-            return Err("recovery_dir_is_symlink".to_string());
+        for candidate in [maru_path(&work), dir.clone()] {
+            if fs::symlink_metadata(&candidate)
+                .map(|meta| meta.file_type().is_symlink())
+                .unwrap_or(false)
+            {
+                return Err("recovery_dir_is_symlink".to_string());
+            }
         }
+        fs::create_dir_all(&dir).map_err(|err| format!("Cannot create .maru/recovery: {err}"))?;
         let name = recovery_file_name(&file_path, chrono::Local::now());
         let path = dir.join(&name);
         ensure_within(&dir, &path)?;
@@ -3429,6 +3435,53 @@ mod phase09_04 {
         ))
         .unwrap_err();
         assert!(err.contains("recovery_dir_is_symlink"), "{err}");
+    }
+
+    // PR #361 review: a symlinked `.maru` would send the write, and the
+    // retention prune after it, outside the workspace.
+    #[test]
+    fn phase09_04_symlinked_maru_dir_is_refused() {
+        let home = Home::new();
+        let work_path = work_fixture(&home, "maru-symlink");
+        let work = text(&work_path);
+        let outside = home.root.path().join("outside-maru");
+        fs::create_dir_all(&outside).unwrap();
+        std::os::unix::fs::symlink(&outside, work_path.join(MARU_DIR)).unwrap();
+
+        let err = run(ipc::write_recovery_copy(
+            work,
+            "draft.md".to_string(),
+            "x".to_string(),
+            "r".to_string(),
+        ))
+        .unwrap_err();
+        assert!(err.contains("recovery_dir_is_symlink"), "{err}");
+        assert!(!outside.join("recovery").exists());
+    }
+
+    // PR #361 review: the recovery copy is the last resort for an edit whose
+    // save already failed, so a workspace.json this build cannot read must
+    // not refuse it too.
+    #[test]
+    fn phase09_04_recovery_copy_survives_an_unreadable_workspace_json() {
+        let home = Home::new();
+        let work_path = work_fixture(&home, "bad-workspace-json");
+        let work = text(&work_path);
+        ensure_maru_dir(&work_path).unwrap();
+        fs::write(
+            work_path.join(MARU_DIR).join("workspace.json"),
+            "{ not json",
+        )
+        .unwrap();
+
+        let rel = run(ipc::write_recovery_copy(
+            work,
+            "draft.md".to_string(),
+            "kept".to_string(),
+            "r".to_string(),
+        ))
+        .unwrap();
+        assert_eq!(fs::read_to_string(work_path.join(&rel)).unwrap(), "kept");
     }
 
     #[test]

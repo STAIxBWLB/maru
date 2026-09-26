@@ -80,10 +80,17 @@ export function useDestructiveActionGuard({
   // skill editor alone. Cleared on any cancel so an aborted quit kills
   // nothing and a later plain close doesn't inherit the flag.
   const quitWholeAppRef = useRef(false);
+  // PR #361 review: a confirm sheet does not block the app menu, so a second
+  // Cmd+Q while the skill editor is still answering must not ask it again
+  // (a second sheet stacked on the first leaves both dead).
+  const quitCheckInFlightRef = useRef(false);
 
   const relaunchAfterSettingsFlush = useCallback(async () => {
     try {
       await settingsSaverRef.current?.flush();
+      // Relaunch is the other whole-app exit and takes the skill editor
+      // down with the process, so it gets the same ask as a quit.
+      if (!(await requestSkillEditorQuitCheck())) return;
       await relaunchApp();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -104,6 +111,13 @@ export function useDestructiveActionGuard({
       // only when this close is part of a whole-app quit, not a plain
       // per-window close.
       if (quitWholeAppRef.current) {
+        // Ask again: main's own dialogs are in-page, so the skill editor
+        // stayed editable while one was open and its first answer can be
+        // stale. An unchanged editor answers without a second dialog.
+        if (!(await requestSkillEditorQuitCheck())) {
+          closeConfirmedRef.current = false;
+          return;
+        }
         await closeSkillEditorForQuit();
       }
       const { getCurrentWindow } = await import("@tauri-apps/api/window");
@@ -173,7 +187,14 @@ export function useDestructiveActionGuard({
 
   const requestAppQuit = useCallback(async () => {
     if (!quitWholeAppRef.current) {
-      const proceed = await requestSkillEditorQuitCheck();
+      if (quitCheckInFlightRef.current) return;
+      quitCheckInFlightRef.current = true;
+      let proceed: boolean;
+      try {
+        proceed = await requestSkillEditorQuitCheck();
+      } finally {
+        quitCheckInFlightRef.current = false;
+      }
       if (!proceed) return;
       quitWholeAppRef.current = true;
     }

@@ -174,6 +174,43 @@ describe("useTeardownFlush", () => {
     errorSpy.mockRestore();
   });
 
+  // PR #361 review: an unkeyed surface (StudioMode) swaps its saver in place
+  // on a workspace switch. The outgoing saver settles after the successor's
+  // render, so it must be described by its own last render's closure, or its
+  // recovery copy lands in the new workspace (or nowhere, if there is none).
+  it.each([
+    ["a successor saver", "B"],
+    ["no successor saver", null],
+  ])("describes a swapped-out saver's failed settle with its own render, with %s", async (_, next) => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    mocks.writeRecoveryCopy.mockResolvedValue(".maru/recovery/x.json");
+    const failing = createDebouncedSaver<string>(() => {
+      throw new Error("revision conflict");
+    }, 250);
+    failing.schedule("studio state");
+    const describeFor = (workPath: string | null) => (value: string) =>
+      workPath ? { workPath, filePath: "studio/doc", content: value } : null;
+
+    await mount(failing, describeFor("A"));
+    await act(async () => {
+      root?.render(
+        createElement(Probe, {
+          saver: next ? createDebouncedSaver<string>(vi.fn(), 250) : null,
+          describeValue: describeFor(next),
+        }),
+      );
+    });
+
+    expect(mocks.writeRecoveryCopy).toHaveBeenCalledTimes(1);
+    expect(mocks.writeRecoveryCopy).toHaveBeenCalledWith(
+      "A",
+      "studio/doc",
+      "studio state",
+      "revision conflict",
+    );
+    errorSpy.mockRestore();
+  });
+
   it("writes nothing when describe returns null for a failed settle", async () => {
     const error = new Error("disk full");
     const saver = createDebouncedSaver<string>(() => {

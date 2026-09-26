@@ -28,7 +28,7 @@ export const ko: Record<string, string> = {
   "app.unsaved.confirm": "저장하지 않고 계속",
   "app.quit.saving": "종료하기 전에 변경 사항을 저장하는 중...",
   "app.quit.failedTitle": "변경 사항을 저장하지 못했습니다",
-  "app.quit.failedBody": "일부 변경 사항을 저장하지 못해 Maru를 종료하지 않았습니다. 각 항목의 알림에서 복구 사본을 확인할 수 있습니다.",
+  "app.quit.failedBody": "일부 변경 사항을 저장하지 못해 Maru를 종료하지 않았습니다. 각 항목의 알림을 확인하세요. 복구 사본을 보관한 경우 알림에서 열 수 있습니다.",
   "app.quit.timeoutBody": "저장이 3초 넘게 걸려 Maru를 종료하지 않았습니다.",
   "app.quit.retry": "다시 시도",
   "app.quit.quitAnyway": "그래도 종료",

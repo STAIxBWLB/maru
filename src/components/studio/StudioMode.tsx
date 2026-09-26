@@ -23,7 +23,7 @@ import { RichMarkdownEditor } from "../RichMarkdownEditor";
 import { MarkdownSourceEditor } from "./MarkdownSourceEditor";
 import { setError } from "../../lib/errorStore";
 import { createDebouncedSaver } from "../../lib/debouncedSave";
-import { useTeardownFlush } from "../../lib/teardownSave";
+import { settleTeardownSave, useTeardownFlush } from "../../lib/teardownSave";
 import { useTranslation } from "../../lib/i18n";
 import {
   defaultMaruDocType,
@@ -238,23 +238,20 @@ export function StudioMode({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on workspaceRoot only; enqueueStudioSave changes only when workspaceRoot does
     [workspaceRoot],
   );
-  useTeardownFlush(
-    saver,
-    (savedState) =>
-      workspaceRoot
-        ? {
-            workPath: workspaceRoot,
-            // Review finding #3: label from the saved state's own document
-            // path, not the currently active one — after a document switch,
-            // a failed save of the OLD document must not be named after the
-            // NEW one. source.documentPath is a schedule-time snapshot
-            // (createInitialStudioState), unlike the live activeDocument prop.
-            filePath: savedState.source.documentPath ?? `studio/${savedState.docId}`,
-            content: JSON.stringify(savedState, null, 2),
-          }
-        : null,
-    t,
-  );
+  const describeStudioSave = (savedState: StudioState) =>
+    workspaceRoot
+      ? {
+          workPath: workspaceRoot,
+          // Review finding #3: label from the saved state's own document
+          // path, not the currently active one — after a document switch,
+          // a failed save of the OLD document must not be named after the
+          // NEW one. source.documentPath is a schedule-time snapshot
+          // (createInitialStudioState), unlike the live activeDocument prop.
+          filePath: savedState.source.documentPath ?? `studio/${savedState.docId}`,
+          content: JSON.stringify(savedState, null, 2),
+        }
+      : null;
+  useTeardownFlush(saver, describeStudioSave, t);
 
   useEffect(() => {
     flowAdmissionRef.current = {
@@ -267,8 +264,10 @@ export function StudioMode({
       return;
     }
     // A document/root switch must not silently overwrite the previous
-    // document's pending debounced save (T-09-07-02) — flush it first.
-    void saver?.flush();
+    // document's pending debounced save (T-09-07-02) — flush it first, and
+    // keep a recovery copy if that fails: the next schedule() replaces the
+    // retained value, so a bare flush() would drop it behind a banner.
+    if (saver) void settleTeardownSave(saver, describeStudioSave, t);
     let cancelled = false;
     loadingRef.current = true;
     setLoading(true);

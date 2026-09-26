@@ -380,6 +380,9 @@ fn menu_command_target<'a>(
             };
         }
     }
+    // Only the macOS Quit route above reads these.
+    #[cfg(not(target_os = "macos"))]
+    let _ = (id, main_exists, any_window_label);
     // Every other menu command goes to the focused window only: a broadcast
     // made one Cmd+W act in every window at once (e.g. closing a background
     // PTY tab while the Settings window closed itself). Fall back to

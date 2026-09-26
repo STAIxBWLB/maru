@@ -117,6 +117,28 @@ describe("requestSkillEditorQuitCheck", () => {
     await expect(promise).resolves.toBe(false);
   });
 
+  // PR #361 review: a missing ack may only mean "no listener yet" once the
+  // request has actually been sent; a slow emitTo is not that.
+  it("starts the ack timeout only after emitTo has sent the request", async () => {
+    mocks.getByLabel.mockResolvedValue({});
+    let sent!: () => void;
+    mocks.emitTo.mockReturnValue(new Promise<void>((resolve) => (sent = resolve)));
+
+    const promise = requestSkillEditorQuitCheck();
+    let settled = false;
+    void promise.then(() => {
+      settled = true;
+    });
+    await vi.advanceTimersByTimeAsync(SKILL_EDITOR_QUIT_CHECK_ACK_TIMEOUT_MS * 2);
+    expect(settled).toBe(false);
+
+    sent();
+    await vi.advanceTimersByTimeAsync(SKILL_EDITOR_QUIT_CHECK_ACK_TIMEOUT_MS - 1);
+    expect(settled).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    await expect(promise).resolves.toBe(true);
+  });
+
   it("resolves per the response event when it arrives before the ack timeout", async () => {
     mocks.getByLabel.mockResolvedValue({});
 

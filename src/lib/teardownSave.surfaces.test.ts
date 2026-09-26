@@ -26,6 +26,10 @@ describe("teardownSave surface pin", () => {
     expect(file).toContain("useTeardownFlush(");
     expect(file).toContain("createDebouncedSaver");
     expect(file).not.toContain("saveTimerRef");
+    // PR #361 review: a document switch settles (and reports) the outgoing
+    // save rather than a bare flush() whose failure the next schedule drops.
+    expect(file).toContain("settleTeardownSave(saver, describeStudioSave, t)");
+    expect(file).not.toContain("saver?.flush()");
   });
 
   it("MeetingSourceWorkbench calls useTeardownFlush and createDebouncedSaver", () => {

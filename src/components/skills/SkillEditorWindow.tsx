@@ -165,6 +165,10 @@ export function SkillEditorWindow({ initialWorkPath, initialSkillId }: SkillEdit
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const dirtyRef = useRef(false);
+  // A quit the user already confirmed for this exact text. main asks again
+  // right before it destroys this window (its own dialogs are in-page, so
+  // this window stays editable meanwhile); only a newer edit re-prompts.
+  const quitApprovedRef = useRef(false);
   const skillIdRef = useRef<string | null>(initialSkillId);
   const workPathRef = useRef<string | null>(initialWorkPath);
 
@@ -177,6 +181,10 @@ export function SkillEditorWindow({ initialWorkPath, initialSkillId }: SkillEdit
   useEffect(() => {
     dirtyRef.current = dirty;
   }, [dirty]);
+
+  useEffect(() => {
+    quitApprovedRef.current = false;
+  }, [text]);
 
   useEffect(() => {
     skillIdRef.current = skillId;
@@ -307,8 +315,12 @@ export function SkillEditorWindow({ initialWorkPath, initialSkillId }: SkillEdit
             // but this only answers whether we're clear to quit — it never
             // closes/destroys the window itself. main only does that once
             // every open window's own guard has passed.
-            const proceed = !dirtyRef.current || (await confirmDestructive(t("skillEditor.closeConfirm")));
+            const proceed =
+              !dirtyRef.current ||
+              quitApprovedRef.current ||
+              (await confirmDestructive(t("skillEditor.closeConfirm")));
             if (disposed) return;
+            quitApprovedRef.current = proceed;
             const response: SkillEditorQuitCheckResponse = { proceed };
             void emit(SKILL_EDITOR_QUIT_CHECK_RESPONSE_EVENT, response);
           })();
