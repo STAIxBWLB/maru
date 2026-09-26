@@ -345,6 +345,44 @@ test("gives Scratchpad a resizable main navigator and editor", async ({ page }) 
     .toMatchObject({ scratchpadListWidth: 332, scratchpadTreeWidth: 252 });
 });
 
+// A right-docked terminal leaves Scratchpad 721-980px wide. The folder tree
+// used to turn into an absolute drawer there and cover the list for as long
+// as it stayed open.
+test("keeps the Scratchpad folder tree beside the list at a mid-width workbench", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1000, height: 800 });
+  await page.goto("/");
+  await page.getByRole("button", { name: "스크래치패드", exact: true }).click();
+
+  const workspace = page.locator(".scratchpad-workspace");
+  const tree = workspace.locator(".scratchpad-tree-pane");
+  const navigator = workspace.locator(".scratchpad-navigator");
+  const editor = workspace.locator(".scratchpad-editor-region");
+  await expect(tree).toBeVisible();
+
+  const [workspaceBox, treeBox, navigatorBox, editorBox] = await Promise.all([
+    workspace.boundingBox(),
+    tree.boundingBox(),
+    navigator.boundingBox(),
+    editor.boundingBox(),
+  ]);
+  expect(workspaceBox).not.toBeNull();
+  expect(treeBox).not.toBeNull();
+  expect(navigatorBox).not.toBeNull();
+  expect(editorBox).not.toBeNull();
+  if (!workspaceBox || !treeBox || !navigatorBox || !editorBox) return;
+  expect(workspaceBox.width).toBeGreaterThan(720);
+  expect(workspaceBox.width).toBeLessThanOrEqual(980);
+  expect(navigatorBox.x).toBeGreaterThanOrEqual(treeBox.x + treeBox.width);
+  expect(editorBox.x).toBeGreaterThanOrEqual(navigatorBox.x + navigatorBox.width);
+  expect(editorBox.x + editorBox.width).toBeLessThanOrEqual(
+    workspaceBox.x + workspaceBox.width + 1,
+  );
+  expect(navigatorBox.width).toBeGreaterThanOrEqual(220);
+  expect(editorBox.width).toBeGreaterThanOrEqual(280);
+});
+
 test("stacks the Scratchpad navigator above the editor in a compact workbench", async ({
   page,
 }) => {

@@ -8646,23 +8646,15 @@ button.git-badge:hover {
   }
 }
 
+/* Tree, list and editor stay side by side at this width instead of the tree
+   becoming a drawer over the list: a right-docked terminal makes this the
+   common Scratchpad width, and the drawer covered the list for as long as the
+   tree stayed open. The minimums (672px in all) still fit at 721px. */
 @container scratchpad (max-width: 980px) and (min-width: 721px) {
   .scratchpad-workspace.tree-open .scratchpad-workspace-body {
     grid-template-columns:
-      minmax(260px, var(--scratchpad-list-width, 320px)) 6px minmax(0, 1fr);
-    grid-template-areas: "navigator resize-wide editor";
-  }
-
-  .scratchpad-tree-resize {
-    display: none;
-  }
-
-  .scratchpad-tree-pane {
-    position: absolute;
-    z-index: 20;
-    inset: 0 auto 0 0;
-    width: min(var(--scratchpad-tree-width, 240px), 82cqw);
-    box-shadow: var(--shadow-lg);
+      minmax(160px, var(--scratchpad-tree-width, 200px)) 6px
+      minmax(220px, var(--scratchpad-list-width, 280px)) 6px minmax(280px, 1fr);
   }
 }
 
