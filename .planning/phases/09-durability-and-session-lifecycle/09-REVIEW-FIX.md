@@ -503,6 +503,25 @@ A delegated OCR review of the whole PR diff (Rust, save/quit path, autosave surf
 - Nits skipped: a DST fall-back could prune the just-written recovery file; Studio's recovery file
   keeps the document's `.md` name while holding JSON; the brain-dump toast shows a raw reason code.
 
+**Re-review of the fixes above (`e642b816..40ad6a68`), fixed:**
+
+- The confirmed-close flag was armed before main's re-ask, which can now wait on a real editor
+  dialog; any close event in that window consumed it and closed main alone. It is armed right
+  before `close()` now.
+- The editor's remembered approval outlived a cancelled quit, so a much later Cmd+Q discarded the
+  edit without asking. Approval is now tied to the quit attempt: main numbers each whole-app quit
+  and its re-ask reuses that number; a new quit always asks again.
+- Only `requestAppQuit` deduplicated its ask, so the re-ask and the relaunch ask could still stack
+  a second sheet, and an acked check whose editor went away would hang (with one check in flight,
+  every later Cmd+Q would share it). One check now runs at a time for every caller, it settles
+  when the editor window is destroyed, and the editor always sends its answer even if its listener
+  effect was re-run meanwhile.
+
+**Answered, not changed:** a wrapper tab (`sh -lc '... | codex exec -'`) whose payload catches
+SIGHUP now outlives tab close and the quit sweep, because the ladder judges the `sh` leader alone.
+That is the D-09 tradeoff chosen above (a caught SIGHUP looks the same as `nohup` from here) and
+matches the pre-PR behavior.
+
 ---
 
 ## Checkpoint

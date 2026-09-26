@@ -84,6 +84,10 @@ export function useDestructiveActionGuard({
   // Cmd+Q while the skill editor is still answering must not ask it again
   // (a second sheet stacked on the first leaves both dead).
   const quitCheckInFlightRef = useRef(false);
+  // Names the whole-app quit in progress, so the skill editor can answer
+  // main's re-ask for that same quit without a second dialog, while a later
+  // quit (after this one was cancelled) always asks again.
+  const quitAttemptRef = useRef(0);
 
   const relaunchAfterSettingsFlush = useCallback(async () => {
     try {
@@ -103,7 +107,6 @@ export function useDestructiveActionGuard({
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }
-    closeConfirmedRef.current = true;
     try {
       // Review finding #2: only once every guard on the way here has
       // passed (this function is the single choke point every close/quit
@@ -114,13 +117,13 @@ export function useDestructiveActionGuard({
         // Ask again: main's own dialogs are in-page, so the skill editor
         // stayed editable while one was open and its first answer can be
         // stale. An unchanged editor answers without a second dialog.
-        if (!(await requestSkillEditorQuitCheck())) {
-          closeConfirmedRef.current = false;
-          return;
-        }
+        if (!(await requestSkillEditorQuitCheck(quitAttemptRef.current))) return;
         await closeSkillEditorForQuit();
       }
       const { getCurrentWindow } = await import("@tauri-apps/api/window");
+      // Set only now, after the re-ask: a close event arriving while the
+      // editor's dialog is open must not consume it and close main alone.
+      closeConfirmedRef.current = true;
       await getCurrentWindow().close();
     } catch (err) {
       closeConfirmedRef.current = false;
@@ -189,9 +192,10 @@ export function useDestructiveActionGuard({
     if (!quitWholeAppRef.current) {
       if (quitCheckInFlightRef.current) return;
       quitCheckInFlightRef.current = true;
+      quitAttemptRef.current += 1;
       let proceed: boolean;
       try {
-        proceed = await requestSkillEditorQuitCheck();
+        proceed = await requestSkillEditorQuitCheck(quitAttemptRef.current);
       } finally {
         quitCheckInFlightRef.current = false;
       }

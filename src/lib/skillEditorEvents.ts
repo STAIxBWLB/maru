@@ -21,6 +21,14 @@ export interface SkillEditorOpenPayload {
   skillId: string;
 }
 
+// PR #361 review: names the quit attempt asking. main asks again right
+// before it destroys the editor, and the editor answers that repeat without
+// a second dialog only for the same attempt and unchanged text; a later
+// attempt (after the first quit was cancelled) always asks again.
+export interface SkillEditorQuitCheckRequest {
+  attempt: number | null;
+}
+
 export interface SkillEditorQuitCheckResponse {
   proceed: boolean;
 }

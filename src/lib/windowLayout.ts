@@ -5,6 +5,7 @@ import {
   SKILL_EDITOR_QUIT_CHECK_EVENT,
   SKILL_EDITOR_QUIT_CHECK_RESPONSE_EVENT,
   type SkillEditorOpenPayload,
+  type SkillEditorQuitCheckRequest,
   type SkillEditorQuitCheckResponse,
 } from "./skillEditorEvents";
 
@@ -79,8 +80,22 @@ export async function openSkillEditorWindow(
  * safe to treat as approved (see the constant's doc comment for why). Once
  * an ack lands, this function waits indefinitely for the real response —
  * the user may be looking at a genuine confirm dialog.
+ *
+ * PR #361 review: one check runs at a time. Every caller while one is open
+ * shares its answer (a second request would stack a second confirm sheet on
+ * the editor window), and the editor window closing settles it, so a check
+ * can never outlive the window it asks and leave Cmd+Q dead.
  */
-export async function requestSkillEditorQuitCheck(): Promise<boolean> {
+let quitCheckInFlight: Promise<boolean> | null = null;
+
+export function requestSkillEditorQuitCheck(attempt: number | null = null): Promise<boolean> {
+  quitCheckInFlight ??= askSkillEditorToQuit(attempt).finally(() => {
+    quitCheckInFlight = null;
+  });
+  return quitCheckInFlight;
+}
+
+async function askSkillEditorToQuit(attempt: number | null): Promise<boolean> {
   if (!tauriAvailable()) return true;
   const { WebviewWindow } = await import("@tauri-apps/api/webviewWindow");
   const editorWindow = await WebviewWindow.getByLabel(SKILL_EDITOR_LABEL);
@@ -91,6 +106,7 @@ export async function requestSkillEditorQuitCheck(): Promise<boolean> {
     let ackReceived = false;
     let unlistenResponse: (() => void) | null = null;
     let unlistenAck: (() => void) | null = null;
+    let unlistenDestroyed: (() => void) | null = null;
     let ackTimer: ReturnType<typeof setTimeout> | null = null;
     const clearAckTimer = () => {
       if (ackTimer) {
@@ -104,6 +120,7 @@ export async function requestSkillEditorQuitCheck(): Promise<boolean> {
       clearAckTimer();
       unlistenResponse?.();
       unlistenAck?.();
+      unlistenDestroyed?.();
       resolve(proceed);
     };
     void Promise.all([
@@ -114,19 +131,24 @@ export async function requestSkillEditorQuitCheck(): Promise<boolean> {
         ackReceived = true;
         clearAckTimer();
       }),
+      // Nothing left to protect once the editor is gone.
+      editorWindow.once("tauri://destroyed", () => finish(true)),
     ])
-      .then(([offResponse, offAck]) => {
+      .then(([offResponse, offAck, offDestroyed]) => {
         if (settled) {
           offResponse();
           offAck();
+          offDestroyed();
           return;
         }
         unlistenResponse = offResponse;
         unlistenAck = offAck;
+        unlistenDestroyed = offDestroyed;
         // Timed from the send, not before it: a missing ack means "no
         // listener yet" only once the request has actually gone out, and a
         // slow send must not auto-approve a dirty editor.
-        void emitTo(SKILL_EDITOR_LABEL, SKILL_EDITOR_QUIT_CHECK_EVENT, undefined)
+        const request: SkillEditorQuitCheckRequest = { attempt };
+        void emitTo(SKILL_EDITOR_LABEL, SKILL_EDITOR_QUIT_CHECK_EVENT, request)
           .then(() => {
             if (settled || ackReceived) return;
             ackTimer = setTimeout(() => {

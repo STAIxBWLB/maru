@@ -17,6 +17,7 @@ import {
   SKILL_EDITOR_QUIT_CHECK_RESPONSE_EVENT,
   SKILLS_UPDATED_EVENT,
   type SkillEditorOpenPayload,
+  type SkillEditorQuitCheckRequest,
   type SkillEditorQuitCheckResponse,
   type SkillsUpdatedPayload,
 } from "../../lib/skillEditorEvents";
@@ -165,10 +166,11 @@ export function SkillEditorWindow({ initialWorkPath, initialSkillId }: SkillEdit
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const dirtyRef = useRef(false);
-  // A quit the user already confirmed for this exact text. main asks again
-  // right before it destroys this window (its own dialogs are in-page, so
-  // this window stays editable meanwhile); only a newer edit re-prompts.
-  const quitApprovedRef = useRef(false);
+  // The quit attempt the user already confirmed for this exact text. main
+  // asks again right before it destroys this window (its own dialogs are
+  // in-page, so this window stays editable meanwhile); only a newer edit or
+  // a later quit attempt re-prompts.
+  const quitApprovedAttemptRef = useRef<number | null>(null);
   const skillIdRef = useRef<string | null>(initialSkillId);
   const workPathRef = useRef<string | null>(initialWorkPath);
 
@@ -183,7 +185,7 @@ export function SkillEditorWindow({ initialWorkPath, initialSkillId }: SkillEdit
   }, [dirty]);
 
   useEffect(() => {
-    quitApprovedRef.current = false;
+    quitApprovedAttemptRef.current = null;
   }, [text]);
 
   useEffect(() => {
@@ -301,8 +303,9 @@ export function SkillEditorWindow({ initialWorkPath, initialSkillId }: SkillEdit
     let unlisten: (() => void) | null = null;
     void loadEventModule()
       .then(({ listen, emit }) =>
-        listen(SKILL_EDITOR_QUIT_CHECK_EVENT, () => {
+        listen<SkillEditorQuitCheckRequest | undefined>(SKILL_EDITOR_QUIT_CHECK_EVENT, (event) => {
           if (disposed) return;
+          const attempt = event.payload?.attempt ?? null;
           // Ack immediately, before any dirty check or dialog: lets
           // requestSkillEditorQuitCheck (windowLayout.ts) tell "this
           // listener wasn't registered yet" (window still initializing —
@@ -317,10 +320,11 @@ export function SkillEditorWindow({ initialWorkPath, initialSkillId }: SkillEdit
             // every open window's own guard has passed.
             const proceed =
               !dirtyRef.current ||
-              quitApprovedRef.current ||
+              (attempt !== null && quitApprovedAttemptRef.current === attempt) ||
               (await confirmDestructive(t("skillEditor.closeConfirm")));
-            if (disposed) return;
-            quitApprovedRef.current = proceed;
+            quitApprovedAttemptRef.current = proceed ? attempt : null;
+            // Answer even if this effect was torn down meanwhile (a locale
+            // change re-registers it): main is waiting on this very answer.
             const response: SkillEditorQuitCheckResponse = { proceed };
             void emit(SKILL_EDITOR_QUIT_CHECK_RESPONSE_EVENT, response);
           })();

@@ -292,16 +292,16 @@ describe("SkillEditorWindow quit-check listener", () => {
   // own dialogs are in-page, so the editor stays editable meanwhile). An
   // unchanged, already-approved edit must not get a second dialog; a newer
   // edit must.
-  it("answers a repeat quit-check without a second dialog until the text changes", async () => {
+  it("answers a repeat quit-check for the same attempt without a second dialog, until the text or the attempt changes", async () => {
     await mount();
     act(() => {
       dirtyTextarea();
     });
     mocks.dialogConfirm.mockResolvedValue(true);
-    const fireQuitCheck = () =>
+    const fireQuitCheck = (attempt: number) =>
       act(async () => {
         handlersFor(SKILL_EDITOR_QUIT_CHECK_EVENT).forEach((handler) =>
-          handler({ payload: undefined }),
+          handler({ payload: { attempt } }),
         );
         await Promise.resolve();
         await Promise.resolve();
@@ -310,8 +310,8 @@ describe("SkillEditorWindow quit-check listener", () => {
     const responses = () =>
       mocks.emit.mock.calls.filter(([name]) => name === SKILL_EDITOR_QUIT_CHECK_RESPONSE_EVENT);
 
-    await fireQuitCheck();
-    await fireQuitCheck();
+    await fireQuitCheck(1);
+    await fireQuitCheck(1);
     expect(mocks.dialogConfirm).toHaveBeenCalledTimes(1);
     expect(responses()).toEqual([
       [SKILL_EDITOR_QUIT_CHECK_RESPONSE_EVENT, { proceed: true }],
@@ -321,8 +321,12 @@ describe("SkillEditorWindow quit-check listener", () => {
     act(() => {
       dirtyTextarea("edited again");
     });
-    await fireQuitCheck();
+    await fireQuitCheck(1);
     expect(mocks.dialogConfirm).toHaveBeenCalledTimes(2);
+
+    // A later quit attempt (the first one was cancelled in main) asks again.
+    await fireQuitCheck(2);
+    expect(mocks.dialogConfirm).toHaveBeenCalledTimes(3);
   });
 });
 

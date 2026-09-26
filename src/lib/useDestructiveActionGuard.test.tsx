@@ -643,6 +643,63 @@ describe("useDestructiveActionGuard requestAppQuit (review finding #2)", () => {
     expect(mocks.close).toHaveBeenCalledTimes(1); // only the initial ask
   });
 
+  // PR #361 review: the editor answers main's re-ask without a second dialog
+  // only for the same quit attempt; a quit started after a cancelled one is
+  // a new attempt and must ask again.
+  it("re-asks with the same attempt, and a later quit sends a new one", async () => {
+    dirty = true;
+    await mount();
+    await act(async () => {
+      await guard.requestAppQuit();
+    });
+    await act(async () => {
+      await capturedHandler()(makeEvent());
+    });
+    await act(async () => {
+      await guard.confirmDestructiveAction();
+    });
+    expect(mocks.requestSkillEditorQuitCheck.mock.calls).toEqual([[1], [1]]);
+
+    await act(async () => {
+      await guard.requestAppQuit();
+    });
+    expect(mocks.requestSkillEditorQuitCheck).toHaveBeenLastCalledWith(2);
+  });
+
+  // PR #361 review: the confirmed-close flag must not be armed while the
+  // editor is still being re-asked, or any close event in that window
+  // consumes it and closes main alone, orphaning the editor.
+  it("a close event while the skill editor is being re-asked does not close main", async () => {
+    dirty = true;
+    await mount();
+    await act(async () => {
+      await guard.requestAppQuit();
+    });
+    await act(async () => {
+      await capturedHandler()(makeEvent());
+    });
+
+    let answer!: (proceed: boolean) => void;
+    mocks.requestSkillEditorQuitCheck.mockImplementationOnce(
+      () => new Promise<boolean>((resolve) => (answer = resolve)),
+    );
+    let confirming!: Promise<void>;
+    await act(async () => {
+      confirming = guard.confirmDestructiveAction();
+    });
+    const event = makeEvent();
+    await act(async () => {
+      await capturedHandler()(event);
+    });
+    expect(event.preventDefault).toHaveBeenCalled();
+
+    await act(async () => {
+      answer(false);
+      await confirming;
+    });
+    expect(mocks.close).toHaveBeenCalledTimes(1); // only the initial ask
+  });
+
   // PR #361 review: a confirm sheet does not block the app menu, so a second
   // Cmd+Q while the editor is still asking must not stack another sheet.
   it("a second Cmd+Q while the skill editor is still asking does not ask it again", async () => {
