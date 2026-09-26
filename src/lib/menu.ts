@@ -46,6 +46,12 @@ export async function listenForMenuCommand(
   handler: (id: string) => void,
 ): Promise<() => void> {
   if (!menuAvailable()) return () => {};
-  const { listen } = await import("@tauri-apps/api/event");
-  return listen<string>(MENU_COMMAND_EVENT, (event) => handler(event.payload));
+  // Window-scoped, not the global listen(): that one registers target Any,
+  // which Tauri delivers every event to regardless of the label emit_to
+  // names, so app_menu.rs's per-window routing never held (Cmd+Q reached the
+  // skill editor's app.quit fallback while main was still alive).
+  const { getCurrentWebviewWindow } = await import("@tauri-apps/api/webviewWindow");
+  return getCurrentWebviewWindow().listen<string>(MENU_COMMAND_EVENT, (event) =>
+    handler(event.payload),
+  );
 }

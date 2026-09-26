@@ -26,6 +26,13 @@ export const en: Record<string, string> = {
   "app.unsaved.closeBody": "You have unsaved changes. Quit Maru without saving?",
   "app.unsaved.relaunchBody": "You have unsaved changes. Relaunch without saving?",
   "app.unsaved.confirm": "Continue without saving",
+  "app.quit.saving": "Saving changes before quitting...",
+  "app.quit.failedTitle": "Changes were not saved",
+  "app.quit.failedBody": "Some changes could not be saved, so Maru stayed open. Check each notification; it links a recovery copy when one could be kept.",
+  "app.quit.timeoutBody": "Saving took longer than 3 seconds, so Maru stayed open.",
+  "app.quit.retry": "Retry",
+  "app.quit.quitAnyway": "Quit anyway",
+  "app.quit.relaunchAnyway": "Relaunch anyway",
   "system.tab.secrets": "Secrets",
   "system.secrets.title": "Workspace Secrets",
   "system.secrets.subtitle": "Managed under .maru/secrets with .secrets kept as a compatibility symlink. Secret values stay hidden unless explicitly revealed.",
@@ -2590,6 +2597,11 @@ export const en: Record<string, string> = {
 
   "toast.discardedEdit": "Unsaved edits to {title} have been stashed.",
   "toast.restore": "Restore",
+
+  "save.teardown.failed": "Could not save {file}: {reason}. A recovery copy was kept.",
+  "save.teardown.failedNoCopy": "Could not save {file}: {reason}.",
+  "save.teardown.openCopy": "Open recovery copy",
+
   "updates.checking": "Checking for updates…",
   "updates.available": "Version {version} is available.",
   "updates.none": "No updates available.",

@@ -13,7 +13,10 @@ import {
   vaultGraphLayoutRead,
   vaultGraphLayoutSave,
   vaultGraphRead,
+  type GraphLayoutCache,
 } from "../../lib/api";
+import { createDebouncedSaver } from "../../lib/debouncedSave";
+import { useTeardownFlush } from "../../lib/teardownSave";
 import { diagramExportBlobToPath } from "../../lib/diagram";
 import "./graph.css";
 import {
@@ -392,7 +395,27 @@ export function GraphView({
   // Renderer lifecycle (layout-running indicator + a11y announcements).
   const [rendererState, setRendererState] = useState<GraphRendererState>("loading");
 
-  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // A new saver per workspacePath so a workspace switch settles the outgoing
+  // workspace's pending layout save via useTeardownFlush (T-09-07-01) instead
+  // of losing it.
+  const saver = useMemo(
+    () =>
+      workspacePath
+        ? createDebouncedSaver<GraphLayoutCache>(
+            (payload) => vaultGraphLayoutSave(workspacePath, payload),
+            SAVE_DEBOUNCE_MS,
+          )
+        : null,
+    [workspacePath],
+  );
+  useTeardownFlush(
+    saver,
+    (payload) =>
+      workspacePath
+        ? { workPath: workspacePath, filePath: ".maru/cache/graph-layout.json", content: JSON.stringify(payload) }
+        : null,
+    t,
+  );
   const searchRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
     if (!searchOpen) return;
@@ -594,30 +617,20 @@ export function GraphView({
   // --- disk layout cache: debounced save of current positions -------------
 
   useEffect(() => {
-    if (!workspacePath || !settled) return;
+    if (!workspacePath || !settled || !saver) return;
     // Skip while `settled` belongs to a different node set (identity, not just
     // cardinality — a same-cardinality swap would persist wrong coordinates).
     if (settledNodesRef.current !== model.nodes) return;
     // A single non-finite coordinate would poison the whole disk cache.
     if (!isFinitePositions(settled)) return;
-    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-    saveTimerRef.current = setTimeout(() => {
-      // `settled` is index-aligned with the full model, so this is the complete
-      // current node set — no seed spread (that would re-accrete deleted ids).
-      const map: Record<string, [number, number]> = {};
-      model.nodes.forEach((node, i) => {
-        map[node.id] = [settled[i * 2], settled[i * 2 + 1]];
-      });
-      void vaultGraphLayoutSave(workspacePath, {
-        version: 2,
-        positions: map,
-        pinnedIds,
-      });
-    }, SAVE_DEBOUNCE_MS);
-    return () => {
-      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-    };
-  }, [settled, model, workspacePath, pinnedIds]);
+    // `settled` is index-aligned with the full model, so this is the complete
+    // current node set — no seed spread (that would re-accrete deleted ids).
+    const map: Record<string, [number, number]> = {};
+    model.nodes.forEach((node, i) => {
+      map[node.id] = [settled[i * 2], settled[i * 2 + 1]];
+    });
+    saver.schedule({ version: 2, positions: map, pinnedIds });
+  }, [settled, model, workspacePath, pinnedIds, saver]);
 
   // --- interactions -------------------------------------------------------
 

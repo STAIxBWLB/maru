@@ -13,6 +13,7 @@
     "core:window:allow-available-monitors",
     "core:window:allow-close",
     "core:window:allow-create",
+    "core:window:allow-destroy",
     "core:window:allow-is-maximized",
     "core:window:allow-maximize",
     "core:window:allow-outer-position",

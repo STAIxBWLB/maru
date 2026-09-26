@@ -4,18 +4,18 @@ milestone: v1.1
 milestone_name: Felt Quality and Native Proof
 current_phase: 9
 current_phase_name: Durability and Session Lifecycle
-status: executing
-stopped_at: Phase 11 complete, ready to execute Phase 9
-last_updated: "2026-09-25T18:59:17.902Z"
+status: complete
+stopped_at: Phase 9 complete - all v1.1 phases complete, ready for milestone audit
+last_updated: "2026-09-26T05:35:29.362Z"
 last_activity: 2026-09-26
-last_activity_desc: Phase 11 complete, transitioned to Phase 9
-state_head: 59aee58927f165c0757b8fdf6f2758e3bf379952
+last_activity_desc: Phase 9 complete - milestone v1.1 phases 6-11 all complete
+state_head: 6c24c7bac34ba5e1976dea3dbe1f354b2cf863fe
 progress:
   total_phases: 6
-  completed_phases: 5
+  completed_phases: 6
   total_plans: 56
-  completed_plans: 48
-  percent: 83
+  completed_plans: 56
+  percent: 100
 ---
 
 # Project State
@@ -25,23 +25,23 @@ progress:
 See: .planning/PROJECT.md (updated 2026-09-26)
 
 **Core value:** The filesystem stays the source of truth, everything Maru shows is derived from real files the user owns, and nothing is lost if Maru is uninstalled.
-**Current focus:** Phase 9 - Durability and Session Lifecycle (planned, 8 plans)
+**Current focus:** Milestone v1.1 audit and closeout (all 6 phases complete)
 
 ## Current Position
 
-Phase: 9 - Durability and Session Lifecycle
-Plan: Not started (8 plans, planned)
-Status: Ready to execute
-Last Activity Description: Phase 11 complete, transitioned to Phase 9
-Last activity: 2026-09-26 - Phase 11 complete, transitioned to Phase 9
+Phase: 9 - Durability and Session Lifecycle (complete; last v1.1 phase)
+Plan: 8/8 complete
+Status: Milestone v1.1 phases complete - ready for milestone audit
+Last Activity Description: Phase 9 complete - milestone v1.1 phases 6-11 all complete
+Last activity: 2026-09-26 - Phase 9 complete (8/8 plans, REL-01..04 verified)
 
-Progress: [████████░░] 83% (5/6 phases; 48/56 plans)
+Progress: [██████████] 100% (6/6 phases; 56/56 plans)
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 80
+- Total plans completed: 88
 - Average duration: -
 - Total execution time: -
 
@@ -59,6 +59,7 @@ Progress: [████████░░] 83% (5/6 phases; 48/56 plans)
 | 08 | 29 | - | - |
 | 10 | 3 | - | - |
 | 11 | 6 | - | - |
+| 9 | 8 | - | - |
 
 **Recent Trend:**
 
@@ -290,6 +291,9 @@ None yet.
 - [Phase 8] Native responsiveness raw metric JSONs (`artifacts/native-responsiveness/*.json`) are untracked/local; `docs/performance/*.json` fixed-run and negative-control records are the committed evidence.
 - [Phase 8] Pre-existing `--plan 05` evidence drift reproduces on pristine HEAD; recommend a follow-up shard fix.
 - [Phase 10] `check-csp-blob --binary` reads the debug no-bundle build only: the release linker splits and deduplicates the directive and value literals, so a shipped binary fails closed ("no codegen CSP serialization"). D-04 proof (b) therefore measures the debug build; the shipped binary's embedded config copy reads `'self'`. Follow-up candidate.
+- [Phase 9] Dock-icon Quit and system logout still bypass the webview quit guard (no `applicationShouldTerminate:` hook in tao); the Scratchpad localStorage mirror is the safety net. Accepted in 09-03.
+- [Phase 9] `e2e-native/specs/quit.spec.ts` (clean quit must exit) was committed but never observed green locally: the native WebDriver harness would not start in the agent sandbox. Confirm on the CI native-e2e run.
+- [Phase 9] Agent worktrees must install with `pnpm install --frozen-lockfile --config.virtual-store-dir=node_modules/.pnpm`; the default global virtual store breaks `pnpm typecheck` in worktrees.
 - [Phase 11] Agent worktrees installed with pnpm's global virtual store fail `pnpm typecheck` (TS7006 in `GraphCanvas.tsx`) although main and CI are green; run typecheck-dependent gates in the main checkout or annotate those callbacks (11 deferred-items.md).
 - [Phase 10] `.empty-state` still has two entry-side homes in `styles.css` (:3608, :17879); the cascade is deterministic and the FOUC spec pins the winner, but no 10-02 disposition records it.
 
@@ -318,9 +322,9 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-09-25T19:00:13.000Z
-Stopped at: Phase 11 complete, ready to execute Phase 9
+Stopped at: Phase 9 complete - all v1.1 phases complete, ready for milestone audit
 Resume file: None
 
 ## Operator Next Steps
 
-- Execute Phase 9 (Durability and Session Lifecycle, 8 plans) with `/gsd-execute-phase 9`. It is the last v1.1 phase; register its spec issue first (development lifecycle: the issue is the spec).
+- Merge the Phase 9 PR (issue #353), then run `/gsd-secure-phase 9` if not yet done, and audit the milestone with `/gsd-audit-milestone` before `/gsd-complete-milestone`.

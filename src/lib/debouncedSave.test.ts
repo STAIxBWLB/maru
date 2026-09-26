@@ -265,3 +265,152 @@ describe("createDebouncedSaver", () => {
     expect(replacementSettled).toBe(true);
   });
 });
+
+describe("createDebouncedSaver settlement", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("flushSettled resolves clean on a fresh saver and calls save zero times", async () => {
+    const save = vi.fn();
+    const saver = createDebouncedSaver<string>(save, 250);
+
+    await expect(saver.flushSettled()).resolves.toEqual({ status: "clean" });
+    expect(save).not.toHaveBeenCalled();
+  });
+
+  it("flushSettled resolves saved after a resolving scheduled save", async () => {
+    vi.useFakeTimers();
+    const saver = createDebouncedSaver<string>(() => undefined, 250);
+
+    saver.schedule("a");
+    await expect(saver.flushSettled()).resolves.toEqual({ status: "saved" });
+  });
+
+  it("flushSettled resolves failed and retains the value for the next flush, without re-arming the timer", async () => {
+    vi.useFakeTimers();
+    const error = new Error("disk full");
+    const save = vi.fn(() => {
+      throw error;
+    });
+    const saver = createDebouncedSaver<string>(save, 250);
+
+    saver.schedule("a");
+    await expect(saver.flushSettled()).resolves.toEqual({ status: "failed", value: "a", error });
+    expect(save).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(save).toHaveBeenCalledTimes(1);
+
+    await saver.flush();
+    expect(save).toHaveBeenCalledTimes(2);
+    expect(save).toHaveBeenLastCalledWith("a");
+  });
+
+  it("keeps the newer value scheduled while a failing save is in flight, not the failed one", async () => {
+    vi.useFakeTimers();
+    const first = deferred<void>();
+    const calls: string[] = [];
+    const saver = createDebouncedSaver<string>((value) => {
+      calls.push(value);
+      return value === "a" ? first.promise : undefined;
+    }, 250);
+
+    saver.schedule("a");
+    const flushA = saver.flushSettled();
+    saver.schedule("b");
+    first.reject(new Error("boom"));
+
+    const settlementA = await flushA;
+    expect(settlementA.status).toBe("failed");
+
+    await saver.flush();
+    expect(calls).toEqual(["a", "b"]);
+  });
+
+  it("performs exactly one save for two back-to-back flushSettled calls with one pending value", async () => {
+    vi.useFakeTimers();
+    const save = vi.fn();
+    const saver = createDebouncedSaver<string>(save, 250);
+
+    saver.schedule("a");
+    const [first, second] = await Promise.all([saver.flushSettled(), saver.flushSettled()]);
+
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(first).toEqual({ status: "saved" });
+    expect(second).toEqual({ status: "saved" });
+  });
+
+  it("does not resurrect a failed save's stale value over an already-drained newer save on teardown flush (review finding #1)", async () => {
+    vi.useFakeTimers();
+    const first = deferred<void>();
+    let diskContent: string | null = null;
+    let attemptsForA = 0;
+    const saver = createDebouncedSaver<string>((value) => {
+      if (value === "A") {
+        attemptsForA += 1;
+        // The first attempt is the one this test fails; a retry (driven by
+        // the buggy resurrection this test targets) would succeed and must
+        // never be allowed to land, since a newer save (B) already did.
+        if (attemptsForA === 1) return first.promise;
+        diskContent = value;
+        return undefined;
+      }
+      diskContent = value;
+      return undefined;
+    }, 250);
+
+    // A is scheduled and its debounce timer drains it while its save is
+    // in flight (first.promise not yet settled).
+    saver.schedule("A");
+    await vi.advanceTimersByTimeAsync(250);
+    expect(attemptsForA).toBe(1);
+
+    // B is scheduled after A started saving; B's own debounce timer fires
+    // and drains it too, queuing it behind A in the shared save queue —
+    // B is no longer "pending" once this happens.
+    saver.schedule("B");
+    await vi.advanceTimersByTimeAsync(250);
+
+    // A's in-flight save now fails.
+    first.reject(new Error("disk full"));
+    await vi.advanceTimersByTimeAsync(0);
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // B's queued save landed once A settled.
+    expect(diskContent).toBe("B");
+
+    // A teardown/quit flush must not resurrect A's stale, already-failed
+    // value and overwrite B's already-saved content.
+    await saver.flushSettled();
+    expect(diskContent).toBe("B");
+  });
+
+  it("settles an in-flight save then a newly-pending one in order on unmount-driven settle", async () => {
+    vi.useFakeTimers();
+    const first = deferred<void>();
+    const second = deferred<void>();
+    const started: string[] = [];
+    const saver = createDebouncedSaver<string>((value) => {
+      started.push(value);
+      return value === "a" ? first.promise : second.promise;
+    }, 250);
+
+    saver.schedule("a");
+    const flushA = saver.flush();
+    await Promise.resolve();
+    expect(started).toEqual(["a"]);
+    saver.schedule("b");
+    const settle = saver.flushSettled();
+
+    first.resolve();
+    await flushA;
+    await Promise.resolve();
+    expect(started).toEqual(["a", "b"]);
+
+    second.resolve();
+    await expect(settle).resolves.toEqual({ status: "saved" });
+  });
+});
