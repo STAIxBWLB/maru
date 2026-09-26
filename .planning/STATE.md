@@ -291,6 +291,9 @@ None yet.
 - [Phase 8] Native responsiveness raw metric JSONs (`artifacts/native-responsiveness/*.json`) are untracked/local; `docs/performance/*.json` fixed-run and negative-control records are the committed evidence.
 - [Phase 8] Pre-existing `--plan 05` evidence drift reproduces on pristine HEAD; recommend a follow-up shard fix.
 - [Phase 10] `check-csp-blob --binary` reads the debug no-bundle build only: the release linker splits and deduplicates the directive and value literals, so a shipped binary fails closed ("no codegen CSP serialization"). D-04 proof (b) therefore measures the debug build; the shipped binary's embedded config copy reads `'self'`. Follow-up candidate.
+- [Phase 9] Dock-icon Quit and system logout still bypass the webview quit guard (no `applicationShouldTerminate:` hook in tao); the Scratchpad localStorage mirror is the safety net. Accepted in 09-03.
+- [Phase 9] `e2e-native/specs/quit.spec.ts` (clean quit must exit) was committed but never observed green locally: the native WebDriver harness would not start in the agent sandbox. Confirm on the CI native-e2e run.
+- [Phase 9] Agent worktrees must install with `pnpm install --frozen-lockfile --config.virtual-store-dir=node_modules/.pnpm`; the default global virtual store breaks `pnpm typecheck` in worktrees.
 - [Phase 11] Agent worktrees installed with pnpm's global virtual store fail `pnpm typecheck` (TS7006 in `GraphCanvas.tsx`) although main and CI are green; run typecheck-dependent gates in the main checkout or annotate those callbacks (11 deferred-items.md).
 - [Phase 10] `.empty-state` still has two entry-side homes in `styles.css` (:3608, :17879); the cascade is deterministic and the FOUC spec pins the winner, but no 10-02 disposition records it.
 

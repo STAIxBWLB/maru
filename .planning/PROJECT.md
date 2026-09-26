@@ -45,8 +45,17 @@ Phase 11 (Milestone Verification & Evidence) completed 2026-09-26: `make coverag
 and a push-to-main `coverage.yml` report TS and Rust coverage without gating
 (first run on `main` 36174321763), a fresh deliberate CI failure re-proved the
 narrowed Playwright trace (run 36146017939), v1.0 phases 01-03 VALIDATION.md are
-reconciled to `validated`, and v1.0 Phase 02 has its security report. Phase 9 is
-planned and ready to execute; it is the last v1.1 phase.
+reconciled to `validated`, and v1.0 Phase 02 has its security report.
+
+Phase 9 (Durability and Session Lifecycle) completed 2026-09-26, the last v1.1 phase:
+closing a terminal tab or quitting now kills a SIGHUP-trapping child through its
+process group and the PTY's foreground job group while disowned jobs survive;
+every autosave surface saves on unmount and quit through one shared saver; Cmd+Q
+and window close share one guard with a 3 s flush budget and a save-failed dialog;
+a failed teardown save keeps a `.maru/recovery/` copy and raises a toast. Real-app
+checks caught and fixed two latent bugs: the main window could never close
+(`core:window:allow-destroy` was missing) and foreground jobs escaped the quit
+sweep. All six v1.1 phases are complete; the milestone is ready for audit.
 
 ## Requirements
 
@@ -111,6 +120,11 @@ planned and ready to execute; it is the last v1.1 phase.
   a deliberate CI failure (GATE-08), v1.0 01-03 Nyquist metadata reconciled
   (VALID-01), and a retroactive v1.0 Phase 02 security report (SEC-03); UAT 1/1,
   verification 4/4, security 20/20 closed.
+- ✓ Phase 9 durability and session lifecycle - process-group kill ladder with
+  foreground-job targeting and a 3 s quit sweep (REL-01), autosaves flushed on
+  unmount and quit through one guard with a 3 s budget (REL-02), failed teardown
+  saves kept as recovery copies with a toast (REL-03), tilde-expansion verified
+  (REL-04); owner real-app checks passed after two fixes, verification 16/16.
 
 ### Active
 
@@ -290,6 +304,8 @@ ones this milestone can actually break are listed here.
 | Features stay out for a second consecutive milestone | HWPE-01..03, Semantica S1-S4, and HUB-01 all add surface area to panes whose responsiveness this milestone is trying to fix; shipping them first would move the target | Pending |
 | Mode CSS moves to lazy per-mode files; late overrides live at the end of the owning file | Lazy CSS always loads after the entry stylesheet, so an entry-side override of a mode selector silently loses; the split first shipped 24 such inversions | ✓ Phase 10 - SPLIT HOME guard in `check-mode-css-ownership` makes it build-enforced |
 | Coverage is reported, never gated, and runs on `main` pushes only (TEST-02, D-01/D-04) | A threshold turns a diagnostic into a merge blocker before anyone knows what the numbers mean; running it per PR would slow every PR by an instrumented build | ✓ Phase 11 - `make coverage` outside `verify`, `coverage.yml` push-to-main only, baseline recorded in 11-EVIDENCE.md |
+| One quit path: Cmd+Q is a Maru-owned menu item routed into the window-close guard (D-03) | The native Quit item called `NSApplication terminate:` and bypassed every JS guard; a Rust `ExitRequested` veto would race the webview | ✓ Phase 9 - Dock Quit and logout remain a known gap, covered by the Scratchpad localStorage mirror |
+| Terminal kill targets the leader group and the PTY's foreground group, never the whole session (D-09) | A job-control shell runs foreground jobs in their own group; signaling the whole session would kill deliberately disowned jobs | ✓ Phase 9 - found by the owner's real-app check, pinned by real-PTY tests |
 | Evidence is recorded in the repo, not left in CI artifacts (GATE-08, D-07) | The v1.0 trace proof became unverifiable when its 7-day artifact expired | ✓ Phase 11 - `unzip -l` listing and run metadata in 11-EVIDENCE.md |
 | Idle preload warms only the modes whose CSS was split (D-03 amended) | Vite resolves a lazy mode only after its CSS lands, so preload never prevented FOUC; warming every mode cost ~2.9 MB of evaluated JS per session | ✓ Phase 10 / #340 - six modes, one per idle callback |
 
@@ -311,4 +327,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-09-26 after Phase 11 (6/6 plans, TEST-02/GATE-08/VALID-01/SEC-03 verified); Phase 9 planned, ready to execute*
+*Last updated: 2026-09-26 after Phase 9 (8/8 plans, REL-01..04 verified); all v1.1 phases complete, ready for milestone audit*
