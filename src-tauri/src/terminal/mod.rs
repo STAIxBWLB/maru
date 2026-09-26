@@ -2771,6 +2771,34 @@ mod phase09_02 {
         }
     }
 
+    /// A genuinely interactive, job-control-enabled shell — the same shape
+    /// `kind: "shell"` with no command override spawns in production
+    /// (default_shell_program(), no args, tty-attached). `-i` makes job
+    /// control explicit rather than relying on isatty() auto-detection
+    /// inside the test harness; `--norc`/`--noprofile` keep the CI runner's
+    /// own dotfiles from adding output or side effects. Unlike `sh_args`'s
+    /// `/bin/sh -c script` (non-interactive: the whole script is one
+    /// process, so `while` loops never get a separate process group), a
+    /// foreground external command here (e.g. bare `sleep 600`, no `&`)
+    /// gets its OWN process group under job control, distinct from the
+    /// shell's own leader group — reproducing the real bug.
+    fn interactive_shell_args(session_id: String) -> TerminalSpawnArgs {
+        TerminalSpawnArgs {
+            session_id,
+            kind: "shell".to_string(),
+            cwd: None,
+            command: Some("/bin/bash".to_string()),
+            extra_args: Some(vec![
+                "--noprofile".to_string(),
+                "--norc".to_string(),
+                "-i".to_string(),
+            ]),
+            extra_env: None,
+            cols: Some(120),
+            rows: Some(10),
+        }
+    }
+
     fn current(session_id: String, generation: String) -> TerminalSessionHandle {
         TerminalSessionHandle {
             session_id,
@@ -2806,6 +2834,43 @@ mod phase09_02 {
         sessions
             .get(session_id)
             .and_then(|session| session.process_group)
+    }
+
+    /// Reads the pty's CURRENT foreground process group (tcgetpgrp) straight
+    /// from the live session — the same value the production kill paths
+    /// must capture before signaling. Must be called before the session is
+    /// killed and removed (same caveat as process_group_of).
+    fn foreground_pgid_of(app: &TestApp, session_id: &str) -> Option<u32> {
+        let state = app.state::<TerminalState>();
+        let sessions = state.sessions.lock().unwrap();
+        let session = sessions.get(session_id)?;
+        let master = session.master.lock().ok()?;
+        master
+            .process_group_leader()
+            .and_then(|pid| u32::try_from(pid).ok())
+    }
+
+    /// Polls until the pty's foreground process group differs from
+    /// `leader_pgid` (a foreground external command has taken over the
+    /// group from the idle shell) or the timeout passes.
+    fn wait_for_foreground_job(
+        app: &TestApp,
+        session_id: &str,
+        leader_pgid: u32,
+        timeout: Duration,
+    ) -> Option<u32> {
+        let deadline = Instant::now() + timeout;
+        loop {
+            if let Some(pgid) = foreground_pgid_of(app, session_id) {
+                if pgid != leader_pgid {
+                    return Some(pgid);
+                }
+            }
+            if Instant::now() >= deadline {
+                return None;
+            }
+            thread::sleep(Duration::from_millis(20));
+        }
     }
 
     fn wait_until_group_gone(pgid: u32, timeout: Duration) -> bool {
@@ -3176,5 +3241,246 @@ mod phase09_02 {
         let start = Instant::now();
         sweep_sessions(&state, Duration::from_millis(300));
         assert!(start.elapsed() < Duration::from_millis(50));
+    }
+
+    // Owner checkpoint regression (plan 09-08): a real terminal is an
+    // INTERACTIVE, job-control-enabled shell (kind: "shell", no command
+    // override — interactive_shell_args mirrors that exactly). Under job
+    // control, a foreground external command (typed at the prompt, no `-c`
+    // wrapper) gets its OWN process group, distinct from the shell's own
+    // leader group that REL-01 captures at spawn. `trap '' HUP; sleep 600`
+    // as a genuine foreground job reproduces this: the shell's leader group
+    // dies, but the sleep's own group — never targeted before this fix —
+    // survives untouched. The existing phase09_02 traps above all run via
+    // `/bin/sh -c script` (non-interactive, no job control), which is why
+    // they never caught this: the whole script is one process, so nothing
+    // ever forks a second process group to miss.
+    #[test]
+    fn phase09_02_tab_close_kills_the_interactive_foreground_job_group() {
+        let app = app();
+        let app = app.handle().clone();
+        let session_id = "phase09-02-fg-tab-close".to_string();
+        let generation = run(spawn_session(
+            app.clone(),
+            interactive_shell_args(session_id.clone()),
+        ))
+        .unwrap();
+        let handle = current(session_id.clone(), generation);
+
+        let leader_pgid =
+            process_group_of(&app, &session_id).expect("process group captured at spawn");
+        // The marker names the shell's own pid so it can only match the
+        // ACTUAL command output (substituted by bash), never the tty's local
+        // echo of the literal keystrokes we write below (which would show
+        // the unexpanded "$$" and never match a marker with real digits).
+        let marker = format!("READY-{leader_pgid}");
+        run(write_cmd(
+            app.clone(),
+            handle.clone(),
+            format!("trap '' HUP; echo {marker}; sleep 600\n"),
+        ))
+        .unwrap();
+        wait_for_marker(&app, &handle, &marker);
+
+        let foreground_pgid =
+            wait_for_foreground_job(&app, &session_id, leader_pgid, Duration::from_secs(3))
+                .expect(
+                    "precondition: an interactive shell running a foreground `sleep` must get \
+                     its own process group (job control) — if this fails the test fixture, not \
+                     the fix, is wrong",
+                );
+        assert_ne!(
+            foreground_pgid, leader_pgid,
+            "precondition: the foreground job's group must differ from the shell's own leader"
+        );
+
+        let start = Instant::now();
+        run(kill_session(app.clone(), handle)).unwrap();
+        assert!(
+            start.elapsed() < Duration::from_millis(500),
+            "terminal_kill must return immediately; escalation runs in the background"
+        );
+
+        assert!(
+            wait_until_group_gone(leader_pgid, Duration::from_secs(8)),
+            "the shell's own leader group must be gone after the tab-close ladder"
+        );
+        assert!(
+            wait_until_group_gone(foreground_pgid, Duration::from_secs(8)),
+            "the foreground `sleep 600` job's own process group {foreground_pgid} must be gone \
+             after the tab-close ladder, not just the shell's leader group {leader_pgid}"
+        );
+    }
+
+    #[test]
+    fn phase09_02_quit_sweep_kills_the_interactive_foreground_job_group_within_budget() {
+        let app = app();
+        let app = app.handle().clone();
+        let state = app.state::<TerminalState>().inner().clone();
+        let session_id = "phase09-02-fg-quit-sweep".to_string();
+        let generation = run(spawn_session(
+            app.clone(),
+            interactive_shell_args(session_id.clone()),
+        ))
+        .unwrap();
+        let handle = current(session_id.clone(), generation);
+
+        let leader_pgid =
+            process_group_of(&app, &session_id).expect("process group captured at spawn");
+        let marker = format!("READY-{leader_pgid}");
+        run(write_cmd(
+            app.clone(),
+            handle.clone(),
+            format!("trap '' HUP; echo {marker}; sleep 600\n"),
+        ))
+        .unwrap();
+        wait_for_marker(&app, &handle, &marker);
+
+        let foreground_pgid =
+            wait_for_foreground_job(&app, &session_id, leader_pgid, Duration::from_secs(3))
+                .expect(
+                    "precondition: an interactive shell running a foreground `sleep` must get \
+                     its own process group (job control) — if this fails the test fixture, not \
+                     the fix, is wrong",
+                );
+
+        // D-12: the whole quit sweep (every live session, whatever its
+        // shape) must finish inside the 3s quit budget.
+        let start = Instant::now();
+        shutdown_all_sessions(&state);
+        let elapsed = start.elapsed();
+        assert!(
+            elapsed < Duration::from_secs(3),
+            "the quit sweep must finish inside the 3s quit budget (D-12); took {elapsed:?}"
+        );
+
+        assert!(
+            wait_until_group_gone(leader_pgid, Duration::from_secs(2)),
+            "the shell's own leader group must be gone after the quit sweep"
+        );
+        assert!(
+            wait_until_group_gone(foreground_pgid, Duration::from_secs(2)),
+            "the foreground `sleep 600` job's own process group {foreground_pgid} must be gone \
+             after the quit sweep, not just the shell's leader group {leader_pgid}"
+        );
+    }
+
+    #[test]
+    fn phase09_02_disowned_job_survives_tab_close_even_with_foreground_targeting() {
+        let app = app();
+        let app = app.handle().clone();
+        let session_id = "phase09-02-disown-tab-close".to_string();
+        let tempdir = tempfile::tempdir().unwrap();
+        let pid_file = tempdir.path().join("bg.pid");
+        let generation = run(spawn_session(
+            app.clone(),
+            interactive_shell_args(session_id.clone()),
+        ))
+        .unwrap();
+        let handle = current(session_id.clone(), generation);
+
+        let leader_pgid =
+            process_group_of(&app, &session_id).expect("process group captured at spawn");
+        let marker = format!("READY-{leader_pgid}");
+        let script = format!(
+            "sleep 600 & echo $! > {pid}; disown; echo {marker}\n",
+            pid = pid_file.display(),
+        );
+        run(write_cmd(app.clone(), handle.clone(), script)).unwrap();
+        wait_for_marker(&app, &handle, &marker);
+
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let bg_pid: u32 = loop {
+            if let Ok(contents) = std::fs::read_to_string(&pid_file) {
+                if let Ok(pid) = contents.trim().parse::<u32>() {
+                    break pid;
+                }
+            }
+            assert!(
+                Instant::now() < deadline,
+                "background job pid file never appeared"
+            );
+            thread::sleep(Duration::from_millis(50));
+        };
+        let bg_pgid =
+            read_pgid(bg_pid).expect("disowned job's process group must be discoverable via ps");
+        assert_ne!(
+            bg_pgid, leader_pgid,
+            "precondition: the disowned background job must be in its own process group \
+             (job control) — if this fails the test fixture, not the fix, is wrong"
+        );
+
+        run(kill_session(app.clone(), handle)).unwrap();
+        assert!(
+            wait_until_group_gone(leader_pgid, Duration::from_secs(8)),
+            "the shell's own leader group must still die on tab close"
+        );
+        assert!(
+            process_group_alive(bg_pgid),
+            "a disowned background job must survive the tab's kill ladder even with foreground \
+             targeting added — it is never the pty's foreground group (REL-01/D-09)"
+        );
+
+        // Cleanup: a real detached `sleep 600` outside any Maru session.
+        let _ = signal_process_group(bg_pgid, SIGKILL);
+    }
+
+    #[test]
+    fn phase09_02_disowned_job_survives_quit_sweep() {
+        let app = app();
+        let app = app.handle().clone();
+        let state = app.state::<TerminalState>().inner().clone();
+        let session_id = "phase09-02-disown-quit-sweep".to_string();
+        let tempdir = tempfile::tempdir().unwrap();
+        let pid_file = tempdir.path().join("bg.pid");
+        let generation = run(spawn_session(
+            app.clone(),
+            interactive_shell_args(session_id.clone()),
+        ))
+        .unwrap();
+        let handle = current(session_id.clone(), generation);
+
+        let leader_pgid =
+            process_group_of(&app, &session_id).expect("process group captured at spawn");
+        let marker = format!("READY-{leader_pgid}");
+        let script = format!(
+            "sleep 600 & echo $! > {pid}; disown; echo {marker}\n",
+            pid = pid_file.display(),
+        );
+        run(write_cmd(app.clone(), handle.clone(), script)).unwrap();
+        wait_for_marker(&app, &handle, &marker);
+
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let bg_pid: u32 = loop {
+            if let Ok(contents) = std::fs::read_to_string(&pid_file) {
+                if let Ok(pid) = contents.trim().parse::<u32>() {
+                    break pid;
+                }
+            }
+            assert!(
+                Instant::now() < deadline,
+                "background job pid file never appeared"
+            );
+            thread::sleep(Duration::from_millis(50));
+        };
+        let bg_pgid =
+            read_pgid(bg_pid).expect("disowned job's process group must be discoverable via ps");
+        assert_ne!(
+            bg_pgid, leader_pgid,
+            "precondition: the disowned background job must be in its own process group"
+        );
+
+        shutdown_all_sessions(&state);
+
+        assert!(
+            wait_until_group_gone(leader_pgid, Duration::from_secs(2)),
+            "the shell's own leader group must still die on the quit sweep"
+        );
+        assert!(
+            process_group_alive(bg_pgid),
+            "a disowned background job must survive the quit sweep too (D-09/REL-01)"
+        );
+
+        let _ = signal_process_group(bg_pgid, SIGKILL);
     }
 }
