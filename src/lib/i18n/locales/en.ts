@@ -2590,6 +2590,11 @@ export const en: Record<string, string> = {
 
   "toast.discardedEdit": "Unsaved edits to {title} have been stashed.",
   "toast.restore": "Restore",
+
+  "save.teardown.failed": "Could not save {file}: {reason}. A recovery copy was kept.",
+  "save.teardown.failedNoCopy": "Could not save {file}: {reason}.",
+  "save.teardown.openCopy": "Open recovery copy",
+
   "updates.checking": "Checking for updates…",
   "updates.available": "Version {version} is available.",
   "updates.none": "No updates available.",

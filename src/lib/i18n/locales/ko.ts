@@ -2589,6 +2589,11 @@ export const ko: Record<string, string> = {
 
   "toast.discardedEdit": "{title} 의 저장하지 않은 변경 사항이 임시 보관되었습니다.",
   "toast.restore": "되돌리기",
+
+  "save.teardown.failed": "{file} 저장 실패: {reason}. 복구 사본을 보관했습니다.",
+  "save.teardown.failedNoCopy": "{file} 저장 실패: {reason}.",
+  "save.teardown.openCopy": "복구 사본 열기",
+
   "updates.checking": "업데이트 확인 중...",
   "updates.available": "새 버전 {version}이 있습니다.",
   "updates.none": "사용 가능한 업데이트가 없습니다.",

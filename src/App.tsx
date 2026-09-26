@@ -57,6 +57,7 @@ import { WritingGuidelineSidebar } from "./components/catalog/WritingGuidelineSi
 import { EvidenceBinderPane } from "./components/evidence/EvidenceBinderPane";
 import { MissionBadge } from "./components/MissionBadge";
 import { NewDocumentDialog } from "./components/NewDocumentDialog";
+import { OperationNoticeToast } from "./components/OperationNoticeToast";
 import { OutlinePane } from "./components/OutlinePane";
 import {
   createEditorPaneCommands,
@@ -360,7 +361,7 @@ import {
   useAgentMissionSlice,
   useAgentRegistrySlice,
 } from "./lib/agentRuntimeModeStore";
-import { dismissOperationNotice, setError, useError, useOperationNotice } from "./lib/errorStore";
+import { setError, useError, useOperationNotice } from "./lib/errorStore";
 import { setTelegramMessages, setTelegramPolling, useTelegramPolling } from "./lib/telegramEventsStore";
 import {
   communicationsModeController,
@@ -8656,13 +8657,7 @@ export function MainApp() {
 
         <div className="toast-stack">
           {operationNotice ? (
-            <div className={operationNotice.kind === "error" ? "toast" : "toast notice"} title={operationNotice.message} role="status" data-skill-operation={operationNotice.operationId}>
-              <AlertTriangle size={15} />
-              <span>{operationNotice.message}</span>
-              <button type="button" className="icon-button" onClick={() => dismissOperationNotice(operationNotice.operationId)} aria-label={t("app.errorClose")} title={t("app.errorClose")}>
-                <X size={14} />
-              </button>
-            </div>
+            <OperationNoticeToast notice={operationNotice} t={t} />
           ) : null}
           {error ? (
             <div

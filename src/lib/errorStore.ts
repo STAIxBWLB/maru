@@ -56,6 +56,10 @@ export interface OperationNotice {
   operationId: string;
   kind: "success" | "info" | "error";
   message: string;
+  /** Set when a failed teardown save kept a recovery copy under
+   * `.maru/recovery/`; the toast uses it to offer an "Open recovery copy"
+   * action (D-08). */
+  recovery?: { workPath: string; path: string };
 }
 
 const operationNoticeIds = new Set<string>();
