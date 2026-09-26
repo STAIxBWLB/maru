@@ -57,6 +57,15 @@ vi.mock("@tauri-apps/api/event", () => ({
   emit: mocks.emit,
 }));
 
+// listenForMenuCommand listens window-scoped; route it into the same
+// handler registry so the app.quit tests below can fire it.
+vi.mock("@tauri-apps/api/webviewWindow", () => ({
+  getCurrentWebviewWindow: () => ({
+    label: "skill-editor",
+    listen: (event: string, handler: unknown) => mocks.listen(event, handler),
+  }),
+}));
+
 vi.mock("@tauri-apps/plugin-dialog", () => ({
   confirm: mocks.dialogConfirm,
 }));

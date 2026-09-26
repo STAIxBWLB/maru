@@ -1,5 +1,16 @@
-import { describe, expect, it } from "vitest";
-import { clampMenuPosition } from "./menu";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+const mocks = vi.hoisted(() => ({
+  globalListen: vi.fn(),
+  windowListen: vi.fn(),
+}));
+
+vi.mock("@tauri-apps/api/event", () => ({ listen: mocks.globalListen }));
+vi.mock("@tauri-apps/api/webviewWindow", () => ({
+  getCurrentWebviewWindow: () => ({ label: "skill-editor", listen: mocks.windowListen }),
+}));
+
+import { clampMenuPosition, listenForMenuCommand, MENU_COMMAND_EVENT } from "./menu";
 
 describe("clampMenuPosition", () => {
   it("keeps an already visible menu position unchanged", () => {
@@ -30,5 +41,31 @@ describe("clampMenuPosition", () => {
         { width: 320, height: 240 },
       ),
     ).toEqual({ x: 8, y: 8 });
+  });
+});
+
+describe("listenForMenuCommand", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.clearAllMocks();
+  });
+
+  // Review finding #2, round 3 (owner-observed): a global listen() registers
+  // target Any, and Tauri delivers every event to an Any listener no matter
+  // which label emit_to named, so app.quit routed to "main" also reached the
+  // skill editor's main-is-gone fallback and stacked a second confirm sheet
+  // on the editor window. Only a window-scoped listener honors the routing.
+  it("listens on the current window only, so emit_to routing holds", async () => {
+    vi.stubGlobal("window", { __TAURI_INTERNALS__: {} });
+    const off = vi.fn();
+    mocks.windowListen.mockResolvedValue(off);
+    const handler = vi.fn();
+
+    await expect(listenForMenuCommand(handler)).resolves.toBe(off);
+
+    expect(mocks.globalListen).not.toHaveBeenCalled();
+    expect(mocks.windowListen).toHaveBeenCalledWith(MENU_COMMAND_EVENT, expect.any(Function));
+    mocks.windowListen.mock.calls[0][1]({ payload: "app.quit" });
+    expect(handler).toHaveBeenCalledWith("app.quit");
   });
 });

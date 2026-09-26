@@ -420,13 +420,53 @@ windows open and the document edit intact.
 
 ---
 
+## Round 3: owner checkpoint findings on round 2
+
+The owner's round-2 checkpoint passed (a), (c) and (e) and **failed (b) and (b2)**: the native
+unsaved-changes dialog appeared, but its buttons did nothing.
+
+### Root cause: one Cmd+Q stacked two confirm sheets on the editor window
+
+Reproduced on the dev build by driving the app through accessibility: with a dirty skill editor,
+Cmd+Q showed the sheet; Cancel closed it and an identical second sheet replaced it at once; after
+that, a sheet stayed on screen detached from its window (parent no longer dimmed) and ignored
+clicks. `sample` showed the main thread idle in its run loop, so this was not a deadlock but two
+`confirmDestructive()` calls racing on one window: main's quit-check (correct) and the skill
+editor's own `app.quit` fallback, which is meant to run only when `main` no longer exists.
+
+The fallback ran because `listenForMenuCommand` (`src/lib/menu.ts`) used the global `listen()` from
+`@tauri-apps/api/event`, which registers target `Any`, and Tauri delivers every event to `Any`
+listeners regardless of the label `emit_to` names (`match_any_or_filter`, tauri 2.10.3
+`src/event/listener.rs`). So `menu_command_target`'s per-window routing in `app_menu.rs` never
+reached the JS side: every window got every menu command. (b2) passed in isolation on this build;
+the owner's (b2) failure is consistent with the editor still holding the stuck sheet from (b).
+
+### Fix
+
+`listenForMenuCommand` now listens through `getCurrentWebviewWindow().listen()` (target
+`WebviewWindow { label }`), which `emit_to`'s label filter honors; `app.emit` broadcasts still reach
+every window. This also makes the focused-window routing for every other menu command real: before,
+Cmd+W with the skill editor focused also closed main's active tab.
+
+**Tests:** `src/lib/menu.test.ts` pins that the listener is window-scoped and never global (failed
+before the fix). `SkillEditorWindow.test.tsx` gained a `@tauri-apps/api/webviewWindow` mock that
+routes into its existing handler registry.
+
+**Verified on the dev build:** Cmd+Q with a dirty editor shows exactly one sheet; Cancel closes it,
+the editor stays Unsaved and the app keeps running; the red close button shows one sheet and Cancel
+keeps the window; Cmd+Q then OK exits the app within 1 s.
+
+---
+
 ## Checkpoint
 
 After round 1's fixes, the orchestrator/owner should run the real-app checkpoint described in the
 executor's task prompt (skill editor plus Cmd+Q scenarios a-e) before this pass is considered
 complete. This document intentionally stops short of declaring the phase "done" pending that
 approval, per the executor's instructions. Round 2 adds a fresh checkpoint covering the fixes above
-plus the exact explicit-save-draft steps for scenario (c).
+plus the exact explicit-save-draft steps for scenario (c). Round 3 re-checks (b) and (b2), repeats
+(a), (c) and (e) as regressions, and adds (f): with the skill editor focused, Cmd+W closes only the
+editor (through its unsaved-changes guard) and leaves main's active tab open.
 
 ---
 *Phase: 09-durability-and-session-lifecycle*
