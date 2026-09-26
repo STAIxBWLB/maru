@@ -2179,7 +2179,8 @@ export function MainApp() {
         return;
       }
       try {
-        const targets = ["claude", "agents"];
+        // Write AGENTS.md only; removal also clears legacy CLAUDE.md blocks.
+        const targets = remove ? ["claude", "agents"] : ["agents"];
         const paths = remove
           ? await removeAgentContextHint(workPath, targets)
           : await writeAgentContextHint(workPath, targets);

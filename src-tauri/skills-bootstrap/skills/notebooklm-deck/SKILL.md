@@ -137,4 +137,4 @@ Topic / Source: {사용자가 입력한 주제}
 - `meeting-notes` — 회의록 → NotebookLM 소스로 사용 시 사전 정리
 - `gaejosik` — 한국어 공식 보고서 톤이 필요한 경우 본문 톤 보정
 - `pptx-toolkit` — 결과 슬라이드를 .pptx로 받았을 때 후처리
-- `hwpx` — 발표 결과를 한국 공문서 양식으로 변환 시
+- `hwp` — 발표 결과를 한국 공문서 양식으로 변환 시 (released binary minimum `v1.0.0`)

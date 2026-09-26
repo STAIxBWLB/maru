@@ -2389,7 +2389,7 @@ export const en: Record<string, string> = {
   "cmdk.action.splitRight": "Split right",
   "cmdk.action.attachActiveItem": "Attach active item to terminal",
   "cmdk.action.toggleAgentHooks": "Toggle agent status hooks (Claude/Kimi)",
-  "cmdk.action.writeContextHint": "Write context hint to CLAUDE.md/AGENTS.md",
+  "cmdk.action.writeContextHint": "Write context hint to AGENTS.md",
   "cmdk.action.removeContextHint": "Remove CLAUDE.md/AGENTS.md context hint",
   "cmdk.action.dockTerminalRight": "Dock panel right",
   "cmdk.action.dockTerminalBottom": "Dock panel bottom",

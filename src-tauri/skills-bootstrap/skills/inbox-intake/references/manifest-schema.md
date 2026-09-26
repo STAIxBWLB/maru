@@ -45,6 +45,24 @@ metadata:
 such as `drop/mso/mail/` or `drop/kakao/files/`, use `metadata.source_kind`
 instead of creating fine-grained channel names.
 
+## Processing Hints
+
+`metadata.processing_hints` is a free-form map. It is optional, consumers ignore
+keys they do not know, and adding a key is not a schema change.
+
+| Hint | Values | Rule |
+|---|---|---|
+| `intake_mode` | `auto`, `manual` | How the item was staged. **Absence means `manual`**, and so does any unrecognized value, so nothing a person stages has to set it. Only automated producers write `auto`. |
+
+`auto` marks an item a robot staged (the mail digest today). Those items go
+through an unattended propose stage that writes `extracted_file`, `summary_file`
+and `route_file` into the item and moves nothing — see `inbox-process` §Proposal-Only
+Mode. `manual` items are staged and processed interactively.
+
+Producers may add their own keys next to it (the mail digest also writes
+`digest_category`, `digest_reason`, `ai_classified`). `inbox-process` writes
+`key=value` tokens from the user's invocation into the same map.
+
 ## Dedupe Keys
 
 Prefer source-native identifiers when available:

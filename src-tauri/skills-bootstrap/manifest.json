@@ -26,6 +26,26 @@
       ]
     },
     {
+      "name": "yunmun",
+      "path": "skills/yunmun",
+      "tier": "core",
+      "tags": [
+        "korean",
+        "english",
+        "writing"
+      ]
+    },
+    {
+      "name": "linkedin-manager",
+      "path": "skills/linkedin-manager",
+      "tier": "core",
+      "tags": [
+        "linkedin",
+        "social",
+        "writing"
+      ]
+    },
+    {
       "name": "business-unit-lifecycle",
       "path": "skills/business-unit-lifecycle",
       "tier": "core",
@@ -44,21 +64,21 @@
       ]
     },
     {
+      "name": "ship",
+      "path": "skills/ship",
+      "tier": "core",
+      "tags": [
+        "git",
+        "release"
+      ]
+    },
+    {
       "name": "gpt-images-deck",
       "path": "skills/gpt-images-deck",
       "tier": "core",
       "tags": [
         "slides",
         "image"
-      ]
-    },
-    {
-      "name": "hwpx",
-      "path": "skills/hwpx",
-      "tier": "core",
-      "tags": [
-        "document",
-        "hwp"
       ]
     },
     {
@@ -157,7 +177,6 @@
       "tier": "core",
       "tags": [
         "meeting",
-        "plaud",
         "review"
       ]
     },

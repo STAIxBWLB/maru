@@ -143,7 +143,7 @@ description: |
 
 ## 마크다운 작성 규칙 (기호 사다리·줄바꿈·들여쓰기)
 
-개조식 본문을 마크다운으로 쓸 때의 소스 규칙. 렌더(HTML)·docx·hwpx 어느 경로로 나가도 같은 모양이 나오게 하는 것이 목적. 작업공간에 별도 서식 SSOT가 있으면 그것이 우선.
+개조식 본문을 마크다운으로 쓸 때의 소스 규칙. 렌더(HTML)·docx·HWPX 어느 경로로 나가도 같은 모양이 나오게 하는 것이 목적. 작업공간에 별도 서식 SSOT가 있으면 그것이 우선.
 
 ### 기호 사다리 (본문 4단)
 
@@ -161,7 +161,7 @@ description: |
 
 ### 줄바꿈 규칙
 
-**왜 중요한가**: 마크다운 렌더러와 md2docx는 단일 줄바꿈을 공백으로 합쳐 한 단락으로 만들고, hwpx(hwp-cli)는 반대로 모든 줄을 개별 단락으로 쪼갬. 단일 줄바꿈에 의미를 실으면 어느 한 경로는 반드시 깨짐.
+**왜 중요한가**: 마크다운 렌더러와 md2docx는 단일 줄바꿈을 공백으로 합쳐 한 단락으로 만들고, released `hwp` 변환은 문단 구조를 보존해 처리함. 단일 줄바꿈에 의미를 실으면 어느 한 경로는 반드시 깨짐.
 
 - `□`·`○` 줄은 독립 단락: **앞뒤로 빈 줄 필수**.
 - `-` 줄은 진짜 마크다운 리스트 항목. 연속 항목 사이 빈 줄 불요. 바로 위 `○` 단락에 빈 줄 없이 이어 붙여도 됨(리스트는 단락을 중단할 수 있음).
@@ -202,17 +202,13 @@ description: |
 - `Ⅰ`은 전각 로마자(U+2160 계열). ASCII `I.` 금지.
 - 컨버터는 리터럴 번호가 있는 제목에 자동 번호를 덧붙이지 않음.
 
-### 컨버터 계약
+### HWPX 출력 계약
 
-| 소스 | 렌더(HTML) | md2docx `--gaejosik` | hwpx (hwp-cli) |
-|------|-----------|----------------------|----------------|
-| `□ 내용` 단락 | 개별 `<p>` | 글리프 유지 + 내어쓰기(1단) | 글리프 유지 + margin 0 |
-| `  ○ 내용` 단락 | 개별 `<p>` | 글리프 유지 + 들여쓰기 1단 | 1단 margin |
-| `- ` 리스트 L1 | `<li>` | 불릿 텍스트 `-` | BULLET `-` |
-| `  - ` 리스트 L2+ | 중첩 `<li>` | 불릿 텍스트 `·` | BULLET `·` |
-| 제목 리터럴 번호 | 그대로 | 그대로(자동 번호 없음) | 자동 번호 생략(이중 번호 가드) |
-
-hwp-cli 사다리는 **목표 계약**이며, 현재 릴리스는 모든 단에서 `•`를 출력함.
+HWPX 공문서 출력은 separate wrapper가 아니라 released `hwp` 스킬(minimum `v1.0.0`)로
+처리한다. 정확한 번호·프로필·제한 사항은 설치/export된 tree의
+[`skills/hwp/references/korean-official-format.md`](https://github.com/STAIxBWLB/hwp-cli/blob/v1.0.0/skills/hwp/references/korean-official-format.md)와
+[`skills/hwp/references/editing-recipes.md`](https://github.com/STAIxBWLB/hwp-cli/blob/v1.0.0/skills/hwp/references/editing-recipes.md)를 따른다.
+이 스킬은 마크다운 작성 규칙의 SSOT이며, 출력 엔진의 세부 결과를 별도로 약속하지 않는다.
 
 ## 적용 지침
 

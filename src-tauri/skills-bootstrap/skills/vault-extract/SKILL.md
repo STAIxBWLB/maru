@@ -20,7 +20,7 @@ Before writing ANY vault note, verify the source summary.md frontmatter has **al
 3. **`topics`** — array containing ≥1 `[[wiki-link]]` **AND every `[[target]]` must exist as a real note in `vault/notes/<target>.md`** (MOC enforcement — topics carry hub navigation only, not keyword tags)
    - Verify existence via `mcp__obsidian__get_notes_info(paths: [notes/<target>.md, ...])` for the full list of topic targets, or by listing `vault/notes/` and checking each
    - If any `[[target]]` is missing: **ABORT** (do NOT auto-create the MOC) — the caller (or user) must either fix the summary's topics or create the MOC note first
-   - Concept/keyword tags (e.g., `credit-recognition`, `partnership-mapping`) belong in body text, NOT in `topics`. Schema is "topics = MOC only" per `vault/CLAUDE.md §Schema`.
+   - Concept/keyword tags (e.g., `credit-recognition`, `partnership-mapping`) belong in body text, NOT in `topics`. Schema is "topics = MOC only" per `vault/AGENTS.md §Schema`.
 
 **Read the summary's frontmatter via `mcp__obsidian__get_frontmatter` (or equivalent YAML parse) BEFORE building the vault note body.**
 
@@ -57,7 +57,7 @@ If any check fails:
    - Filename: prose-as-title (lowercase, hyphens, .md)
    - YAML frontmatter with required fields (`description`, `type`, `domain`, `topics`)
    - **Copy source-derived fields verbatim**: `description`, `domain`, `topics` are copied directly from summary.md frontmatter (verified in preconditions above). See `~/.maru/skills/_builtin/lib/vault_adapter.md` for the summary-to-vault field policy.
-   - **type remapping**: summary `type` (regulation|report|plan|...) maps to vault `type` (insight|decision|observation|person|project|method|moc) based on semantic intent. Common mappings: report→observation, plan→decision, memo→insight, proposal→decision, regulation→observation.
+   - **type remapping**: summary `type` (regulation|report|plan|...) maps to vault `type` (insight|decision|observation|person|project|method|moc|reference) based on semantic intent. Common mappings: report→observation, plan→decision, memo→insight, proposal→decision, regulation→observation.
    - If registry matched in step 2, add `vault_note` wiki link to topics array
    - Set source field to the work/ relative path. If the source carries backref
      frontmatter (`source_doc`, `meetingSourcePath`, `relatedMeetings`,
@@ -68,17 +68,16 @@ If any check fails:
    - Relevant Notes section with wiki links
    - Topics section with MOC wiki links
 6. **Post-write verification** (MANDATORY): re-read the created note via `mcp__obsidian__get_frontmatter`. If `description`, `domain`, or `topics` is missing or empty in the written note, **delete the note** via `mcp__obsidian__delete_note`, log `— failed: post-write verification`, and return error. This catches edge cases where write succeeds but frontmatter gets stripped (Obsidian linter, encoding, etc.).
-7. Register the source in vault/inbox/ if not already there
-8. After creating notes, invoke /vault-connect with entities hint (from summary.md):
+7. After creating notes, invoke /vault-connect with entities hint (from summary.md):
    - Read `entities` field from source summary.md (if present — list of 인물/기관 names)
    - Pass entities list to `/vault-connect` as wiki-link candidate seeds (`entities_hint` parameter)
    - `/vault-connect` uses entities to prioritize wiki-link discovery in its first pass
    - **Note**: `keywords` field is NOT carried forward to vault notes — it exists only for route scoring reproducibility
-9. **Append EXTRACT event to vault/log** (ingest chain audit trail)
+8. **Append EXTRACT event to vault/log** (ingest chain audit trail)
 
 > **Registry fallback**: when project registry scoring < 3 → content-based domain analysis → if still ambiguous, prompt user. SSOT: `<workspace-root>/_meta/rules/project-registry-scoring.md`
 
-## Log Append (Step 9 — REQUIRED)
+## Log Append (Step 8 — REQUIRED)
 
 Every note created or updated by /vault-extract must produce one `log` line. `vault/log` is a plain logfile (no extension): append via direct fs write (`>>`), the sole exception to MCP-only vault writes.
 
@@ -91,7 +90,7 @@ YYYY-MM-DD HH:MM  EXTRACT  <project>  <source> → <vault/notes/x.md>  — <type
 - `<project>`: project id from registry (`project-registry.yaml`), or `-` if unclassified
 - `<source>`: work/ relative path of the source document
 - `<vault/notes/x.md>`: newly created note path (use `notes/x.md` form)
-- `<type>`: note type (`insight | decision | observation | person | project | method | moc`)
+- `<type>`: note type (`insight | decision | observation | person | project | method | moc | reference`)
 
 **Multiple notes from single source**: one log line per note created.
 

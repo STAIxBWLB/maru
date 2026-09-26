@@ -28,7 +28,7 @@ env/
 ├── Makefile                    # 빌드 명령
 ├── pyproject.toml              # Python 의존성 (uv)
 ├── setup.sh                    # 환경 초기 설정
-├── CLAUDE.md                   # AI 에이전트 지시서
+├── AGENTS.md                   # AI 에이전트 지시서
 └── REFERENCE.md                # HWP 포맷 참조
 ```
 
@@ -96,7 +96,7 @@ make sync
 
 ## 연관 도구
 
-- **hwp-cli**: `~/.cargo/bin/hwp` (Rust 단일 바이너리, 외부 의존성 0) — `.hwp`/`.hwpx` 읽기·변환·렌더·편집. `extract_all.py`가 1순위 추출 엔진으로 사용 (구 hwp-toolkit 대체)
-- **hwpx 스킬**: `~/.maru/skills/hwpx` — HWPX 작성·편집 + `.hwp` 읽기 자동 위임(hwp-cli) + `render-pdf`/`to-html`
+- **released hwp**: `hwp-cli`의 Rust 단일 바이너리 — `.hwp`/`.hwpx` 읽기·변환·렌더·편집. HWPX 작성에는 absolute released path와 minimum `v1.0.0`을 사용하고 `--version`으로 확인 (unversioned cargo/PATH binary는 release evidence 아님). `extract_all.py`가 1순위 추출 엔진으로 사용 (구 hwp-toolkit 대체)
+- **unified hwp skill**: released binary가 export하는 `hwp` tree — HWPX 작성·편집과 공식 문서 레시피를 제공. 정확한 output contract는 `hwp/references/editing-recipes.md`와 `hwp/references/korean-official-format.md` 참조
 - **md2docx 스킬**: `~/.maru/skills/md2docx` — markdown → 세련된 `.docx`(docx-js). 번들 `node/` 런타임 + `node_modules/docx` 사용 (pandoc 미사용)
 - **skills**: `~/.maru/skills/` (federation; inbox-process 등이 이 환경에 의존)

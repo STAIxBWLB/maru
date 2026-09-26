@@ -12,7 +12,7 @@ Restructure vault content for better organization. **Never auto-executes** — a
 
 - **split [note]**: Break a note into multiple atomic notes
 - **merge [note1] [note2]**: Combine related notes
-- **rename [note]**: Improve note title (prose-as-title)
+- **rename [note]**: → use `/vault-rename` (atomic rename + reference propagation); this skill only proposes the better title
 - **moc [domain]**: Reorganize a domain MOC
 - **promote [topic]**: Create topic MOC from tag cluster (20+ notes threshold)
 
@@ -23,8 +23,8 @@ Restructure vault content for better organization. **Never auto-executes** — a
 3. On explicit accept → execute
 4. Update all affected wiki links via `mcp__obsidian__patch_note` (bidirectional)
 5. Run `/vault-lint note=<path>` on each affected note
-6. Append `CONNECT` event to `log` for each wiki-link update batch
-7. Commit changes (via auto-commit hook or user `/commit`)
+6. Append `EXTRACT` event to `log` for each refactor batch (structure change — `ingest-chain.md` §비표준 TYPE 처리)
+7. Commit the vault submodule, then bump the parent pointer
 
 ## Approval Gate Format
 
@@ -69,10 +69,10 @@ Filesystem access (Read/Write/Edit/Bash) is forbidden on vault paths.
 
 ## Log Append
 
-For each refactor batch that modifies ≥1 note, append one `CONNECT` event to `log`:
+For each refactor batch that modifies ≥1 note, append one `EXTRACT` event to `log` (fs `>>`, plain logfile):
 
 ```
-YYYY-MM-DD HH:MM  CONNECT  -  refactor:<operation>  — <summary> (N notes, M links)
+YYYY-MM-DD HH:MM  EXTRACT  -  refactor:<operation>  — <summary> (N notes, M links)
 ```
 
 - `<operation>`: split | merge | rename | moc | promote
@@ -92,5 +92,5 @@ Each individual wiki-link update does not get its own log line — one line per 
 
 - Proposed changes with reasoning (approval gate block)
 - On accept: execution report (per-note status)
-- Verify results for all affected notes
+- `/vault-lint note=` results for all affected notes
 - log append confirmation
