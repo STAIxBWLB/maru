@@ -104,6 +104,15 @@ describe("studio helpers", () => {
     expect(nativeHwpTemplateSource("hwpx_skill", null)).toBe("hwpx_skill");
     expect(nativeHwpTemplateSource("hwpx_skill", "hwp-cli:plan")).toBe("hwpx_skill");
     expect(nativeHwpTemplateSource("hwpx_skill", "templates/우리기관_사업계획서.hwpx")).toBeNull();
+    // Pre-retirement state saved the resolved path of the retired bundled template tree
+    // (joined so the literal retired path stays out of the repo).
+    const retired = ["Users", "me", ".maru", "skills", "_builtin", "skills", "hwpx", "templates"];
+    expect(
+      nativeHwpTemplateSource("hwpx_skill", ["", ...retired, "사업계획서_기본.hwpx"].join("/")),
+    ).toBe("hwpx_skill");
+    expect(
+      nativeHwpTemplateSource("hwpx_skill", ["C:", ...retired, "회의록.hwpx"].join("\\")),
+    ).toBe("hwpx_skill");
     expect(nativeHwpTemplateSource("hwp_cli_skill", "templates/any.hwpx")).toBe("hwp_cli_skill");
     expect(nativeHwpTemplateSource("work_repo", null)).toBeNull();
     expect(nativeHwpTemplateSource(undefined, null)).toBeNull();

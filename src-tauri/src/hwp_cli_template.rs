@@ -149,12 +149,21 @@ fn hwp_cli_skill_aliases() -> &'static [(&'static str, &'static str)] {
     TEMPLATE_ALIASES
 }
 
+/// `사업계획서_기본.HWPX` -> `사업계획서_기본`; anything else is returned unchanged.
+fn without_hwpx_extension(key: &str) -> &str {
+    let cut = key.len().saturating_sub(".hwpx".len());
+    match key.get(cut..) {
+        Some(ext) if ext.eq_ignore_ascii_case(".hwpx") => &key[..cut],
+        _ => key,
+    }
+}
+
 fn canonical_template(source: &str, key: &str) -> Result<(&'static str, &'static str), String> {
     let alias = match source {
         HWP_CLI_SKILL_SOURCE => key,
         LEGACY_HWPX_SKILL_SOURCE => LEGACY_HWPX_TEMPLATE_KEYS
             .iter()
-            .find(|(legacy, _)| *legacy == key.strip_suffix(".hwpx").unwrap_or(key))
+            .find(|(legacy, _)| *legacy == without_hwpx_extension(key))
             .map(|(_, alias)| *alias)
             .ok_or_else(|| {
                 let known = LEGACY_HWPX_TEMPLATE_KEYS
@@ -733,6 +742,10 @@ esac
         // A key saved with its template file name resolves to the same alias.
         assert_eq!(
             canonical_template("hwpx_skill", "사업계획서_기본.hwpx").unwrap(),
+            ("사업계획서", "plan")
+        );
+        assert_eq!(
+            canonical_template("hwpx_skill", "business_plan_default.HWPX").unwrap(),
             ("사업계획서", "plan")
         );
         // A released alias is not a legacy key, and an unknown key names the supported ones.

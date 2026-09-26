@@ -457,6 +457,10 @@ export async function templateFillHwpx(
   );
 }
 
+// Studio state saved before the hwpx retirement holds the resolved path of the
+// retired bundled template tree; it is not a user-typed workspace path.
+const RETIRED_HWPX_TEMPLATE_PATH = /[\\/]skills[\\/]hwpx[\\/]templates[\\/]/;
+
 /**
  * The native hwp source that serves a Studio template's HWP scan/fill, or null
  * for the workspace-template path. hwp_cli_skill always uses its alias; a
@@ -467,7 +471,12 @@ export function nativeHwpTemplateSource(
   templatePath: string | null,
 ): HwpCliTemplateFieldsRequest["source"] | null {
   if (source === "hwp_cli_skill") return source;
-  if (source === "hwpx_skill" && (!templatePath || templatePath.startsWith("hwp-cli:"))) {
+  if (
+    source === "hwpx_skill" &&
+    (!templatePath ||
+      templatePath.startsWith("hwp-cli:") ||
+      RETIRED_HWPX_TEMPLATE_PATH.test(templatePath))
+  ) {
     return source;
   }
   return null;
