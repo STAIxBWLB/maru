@@ -23,7 +23,7 @@ operative rule is in README's Release Process section.
 - [x] **Phase 6: Native E2E Runner Foundation** - A native runner drives the real app against the real backend, and the CI-vs-local question is settled by a spike rather than assumed. (completed 2026-08-29)
 - [x] **Phase 7: Guardrails Before Churn** - Lock poisoning recovers, the watcher and the document index stop carrying trees they never serve, and a sanitizer guard lands before the milestone's own later work can trip it. (completed 2026-09-05)
 - [x] **Phase 8: Main-Thread Responsiveness** - The skills registry lock narrows and the main-thread-blocking commands move off it, proven by a concurrency load test rather than the absence of a visible freeze. (completed 2026-09-06)
-- [ ] **Phase 9: Durability and Session Lifecycle** - A SIGHUP-trapping terminal can still be killed, a pending edit is saved (or its failure surfaced) on unmount and app quit, and a scheduled job's own PATH resolves as written.
+- [x] **Phase 9: Durability and Session Lifecycle** - A SIGHUP-trapping terminal can still be killed, a pending edit is saved (or its failure surfaced) on unmount and app quit, and a scheduled job's own PATH resolves as written. (completed 2026-09-26)
 - [x] **Phase 10: Bundle and Build Hardening** - The packaged CSP drops an unused directive and per-mode CSS restores the budget headroom spent since v0.4.46. (completed 2026-09-25)
 - [x] **Phase 11: Milestone Verification & Evidence** - Coverage is measured, the narrowed CI trace configuration is proven, and v1.0's closeout evidence debt is retired. (completed 2026-09-26)
 
@@ -334,6 +334,6 @@ Phases execute in numeric order: 6 → 7 → 8 → 9 → 10 → 11
 | 6. Native E2E Runner Foundation | 5/5 | Complete    | 2026-08-29 |
 | 7. Guardrails Before Churn | 5/5 | Complete    | 2026-09-05 |
 | 8. Main-Thread Responsiveness | 29/29 | Complete    | 2026-09-06 |
-| 9. Durability and Session Lifecycle | 8/8 | In Progress|  |
+| 9. Durability and Session Lifecycle | 8/8 | Complete    | 2026-09-26 |
 | 10. Bundle and Build Hardening | 3/3 | Complete    | 2026-09-25 |
 | 11. Milestone Verification & Evidence | 6/6 | Complete    | 2026-09-26 |

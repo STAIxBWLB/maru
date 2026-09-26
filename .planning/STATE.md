@@ -4,18 +4,18 @@ milestone: v1.1
 milestone_name: Felt Quality and Native Proof
 current_phase: 9
 current_phase_name: Durability and Session Lifecycle
-status: executing
-stopped_at: Phase 11 complete, ready to execute Phase 9
-last_updated: "2026-09-25T22:09:13.149Z"
+status: complete
+stopped_at: Phase 9 complete - all v1.1 phases complete, ready for milestone audit
+last_updated: "2026-09-26T05:35:29.362Z"
 last_activity: 2026-09-26
-last_activity_desc: Phase 9 execution started
-state_head: f44beb2bd76cd9a404622c57cd20af0b6ede1ae0
+last_activity_desc: Phase 9 complete - milestone v1.1 phases 6-11 all complete
+state_head: 6c24c7bac34ba5e1976dea3dbe1f354b2cf863fe
 progress:
   total_phases: 6
-  completed_phases: 5
+  completed_phases: 6
   total_plans: 56
-  completed_plans: 48
-  percent: 83
+  completed_plans: 56
+  percent: 100
 ---
 
 # Project State
@@ -25,23 +25,23 @@ progress:
 See: .planning/PROJECT.md (updated 2026-09-26)
 
 **Core value:** The filesystem stays the source of truth, everything Maru shows is derived from real files the user owns, and nothing is lost if Maru is uninstalled.
-**Current focus:** Phase 9 — Durability and Session Lifecycle
+**Current focus:** Milestone v1.1 audit and closeout (all 6 phases complete)
 
 ## Current Position
 
-Phase: 9 (Durability and Session Lifecycle) — EXECUTING
-Plan: 1 of 8
-Status: Executing Phase 9
-Last Activity Description: Phase 9 execution started
-Last activity: 2026-09-26 — Phase 9 execution started
+Phase: 9 - Durability and Session Lifecycle (complete; last v1.1 phase)
+Plan: 8/8 complete
+Status: Milestone v1.1 phases complete - ready for milestone audit
+Last Activity Description: Phase 9 complete - milestone v1.1 phases 6-11 all complete
+Last activity: 2026-09-26 - Phase 9 complete (8/8 plans, REL-01..04 verified)
 
-Progress: [████████░░] 83% (5/6 phases; 48/56 plans)
+Progress: [██████████] 100% (6/6 phases; 56/56 plans)
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 80
+- Total plans completed: 88
 - Average duration: -
 - Total execution time: -
 
@@ -59,6 +59,7 @@ Progress: [████████░░] 83% (5/6 phases; 48/56 plans)
 | 08 | 29 | - | - |
 | 10 | 3 | - | - |
 | 11 | 6 | - | - |
+| 9 | 8 | - | - |
 
 **Recent Trend:**
 
@@ -318,9 +319,9 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-09-25T19:00:13.000Z
-Stopped at: Phase 11 complete, ready to execute Phase 9
+Stopped at: Phase 9 complete - all v1.1 phases complete, ready for milestone audit
 Resume file: None
 
 ## Operator Next Steps
 
-- Execute Phase 9 (Durability and Session Lifecycle, 8 plans) with `/gsd-execute-phase 9`. It is the last v1.1 phase; register its spec issue first (development lifecycle: the issue is the spec).
+- Merge the Phase 9 PR (issue #353), then run `/gsd-secure-phase 9` if not yet done, and audit the milestone with `/gsd-audit-milestone` before `/gsd-complete-milestone`.
