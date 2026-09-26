@@ -13,6 +13,8 @@ import {
   type ErrorValue,
 } from "./errorStore";
 import {
+  flushPendingSavesForQuit,
+  QUIT_FLUSH_BUDGET_MS,
   reportTeardownSaveFailure,
   useTeardownFlush,
   type TeardownSaveTarget,
@@ -298,5 +300,120 @@ describe("reportTeardownSaveFailure", () => {
 
     expect(await readError()).toBe("some other error");
     dismissOperationNotice(getOperationNotice()?.operationId as string);
+  });
+});
+
+describe("flushPendingSavesForQuit", () => {
+  let container: HTMLDivElement;
+  let root: Root | null;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.writeRecoveryCopy.mockRejectedValue(new Error("Recovery copies require the Tauri shell"));
+  });
+
+  afterEach(async () => {
+    if (root) await act(async () => root?.unmount());
+    container?.remove();
+    root = null;
+  });
+
+  async function mount(saver: Saver | null, describeValue: (value: string) => TeardownSaveTarget | null) {
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => {
+      root?.render(createElement(Probe, { saver, describeValue }));
+    });
+  }
+
+  it("resolves clean with no timer armed when nothing is registered", async () => {
+    vi.useFakeTimers();
+    try {
+      const outcome = await flushPendingSavesForQuit();
+      expect(outcome).toEqual({ kind: "clean" });
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("saves a pending mounted saver and resolves clean", async () => {
+    const save = vi.fn();
+    const saver = createDebouncedSaver<string>(save, 250);
+    saver.schedule("draft.md");
+    const describeValue = (value: string): TeardownSaveTarget => ({
+      workPath: value,
+      filePath: value,
+      content: "content",
+    });
+    await mount(saver, describeValue);
+
+    const outcome = await flushPendingSavesForQuit();
+
+    expect(outcome).toEqual({ kind: "clean" });
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(save).toHaveBeenCalledWith("draft.md");
+  });
+
+  it("resolves failed with count 1 and reports once for a failing saver", async () => {
+    const error = new Error("disk full");
+    const saver = createDebouncedSaver<string>(() => {
+      throw error;
+    }, 250);
+    saver.schedule("draft.md");
+    const describeValue = (value: string): TeardownSaveTarget => ({
+      workPath: value,
+      filePath: value,
+      content: "content",
+    });
+    await mount(saver, describeValue);
+
+    const outcome = await flushPendingSavesForQuit();
+
+    expect(outcome).toEqual({ kind: "failed", failures: 1 });
+    const notice = getOperationNotice();
+    expect(notice?.kind).toBe("error");
+    dismissOperationNotice(notice?.operationId as string);
+  });
+
+  it("resolves timeout when a save is slower than the budget, and its later rejection is still reported", async () => {
+    vi.useFakeTimers();
+    try {
+      const control: { settle: (() => void) | null } = { settle: null };
+      const saver = createDebouncedSaver<string>(
+        () =>
+          new Promise<void>((_resolve, reject) => {
+            control.settle = () => reject(new Error("disk full"));
+          }),
+        250,
+      );
+      saver.schedule("draft.md");
+      const describeValue = (value: string): TeardownSaveTarget => ({
+        workPath: value,
+        filePath: value,
+        content: "content",
+      });
+      await mount(saver, describeValue);
+
+      const outcomePromise = flushPendingSavesForQuit();
+      await vi.advanceTimersByTimeAsync(QUIT_FLUSH_BUDGET_MS);
+      const outcome = await outcomePromise;
+      expect(outcome).toEqual({ kind: "timeout" });
+      expect(getOperationNotice()).toBeNull();
+
+      control.settle?.();
+      // No timer is involved in the rejection settling — only microtasks —
+      // so a few plain awaits flush the chain through to the report.
+      for (let i = 0; i < 10; i++) {
+        await Promise.resolve();
+      }
+
+      const notice = getOperationNotice();
+      expect(notice?.kind).toBe("error");
+      dismissOperationNotice(notice?.operationId as string);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

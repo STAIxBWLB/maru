@@ -178,6 +178,27 @@ automation (same Accessibility-walled limit as items 1-3 above):
    stays open. Then, with nothing dirty, press Cmd+Q again. Expected: Maru
    quits normally with no dialog.
 
+**Quit flush of pending autosaves (plan 09-08, D-03/D-04/D-05/D-06).** Every
+mounted autosave surface is flushed before quit, bounded to 3 s, with a
+failure keeping Maru open rather than dropping the edit:
+
+8. Open a Scratchpad memo, type a word, and press Cmd+Q immediately. Expected:
+   Maru quits with no dialog, and reopening the memo shows the word saved.
+9. Run `chmod a-w` on the memo's folder, type a word, press Cmd+Q. Expected:
+   Maru does not quit; a dialog says changes were not saved with Retry
+   (primary), Quit anyway, and Cancel; a toast names the memo and the reason
+   and offers Open recovery copy. Click Quit anyway. Expected: Maru quits and
+   the recovery copy still exists. Restore permissions with `chmod u+w`
+   afterwards.
+10. Open a shell tab, run `trap '' HUP; sleep 600`, and press Cmd+Q. Expected:
+    Maru quits within about 3 s and `pgrep -f "sleep 600"` prints nothing
+    (09-02's terminal sweep runs only after a guard-approved close).
+11. Open a shell tab, run `trap '' HUP; while :; do sleep 1; done`, then close
+    the tab (not the whole app). Expected: within about 3 s
+    `pgrep -f "sleep 1"` shows none of its processes.
+12. Open the Documents list after steps 8-9. Expected: no `.maru/recovery`
+    file appears in it.
+
 ### Observations: 2026-08-29 (plan 06-05 ratification)
 
 Worked end to end on the current debug build under fixture isolation.

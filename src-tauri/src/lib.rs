@@ -177,6 +177,20 @@ use workspace::ipc::{
     detect_workspace, list_workspaces, read_workspace_config, register_workspace_roots,
 };
 
+// `tauri::generate_context!()` embeds a `#[no_mangle] static _EMBED_INFO_PLIST`
+// (embed_plist crate) — a linker-global symbol allowed exactly once per final
+// binary, at whichever single source location invokes the macro, regardless of
+// how many times the containing function runs. `cargo test --lib` compiles
+// this whole file (run() included, since it carries no test gate normally) INTO
+// the same test binary as any #[cfg(test)] module, so a second invocation
+// anywhere else in a unit test collides with this one ("symbol `_EMBED_INFO_PLIST`
+// is already defined"). Splitting run() itself behind #[cfg(not(test))], with a
+// stub standing in under #[cfg(test)], keeps the real body's invocation and
+// quit_acl_tests's own (its only other call site in the crate) mutually
+// exclusive: never both compiled into the same binary. main.rs's dependency
+// edge on this lib is unaffected — cargo compiles a library dependency without
+// --cfg test for its dependents, so real builds always get the body below.
+#[cfg(not(test))]
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Phase 08-27 saturation harness: install the two-worker test runtime
@@ -651,6 +665,91 @@ pub fn run() {
         });
 }
 
+/// Never invoked (main.rs is compiled without --cfg test, so it always links
+/// the real body above): exists only so a `cargo test --lib` build has
+/// exactly one `tauri::generate_context!()` call site, which is
+/// quit_acl_tests's own build_context() below — see the comment on the real
+/// run().
+#[cfg(test)]
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
+pub fn run() {
+    unreachable!("run() is not exercised under cfg(test) builds");
+}
+
 pub fn run_cli(args: Vec<String>) -> i32 {
     cli::run_cli(args)
+}
+
+#[cfg(test)]
+mod quit_acl_tests {
+    // Plan 09-08, D-03 ("one quit path"): a reviewer build regressed to
+    // never actually exiting on a clean quit (no dirty draft, no pending
+    // save) — no crash, no dialog, the window/app just stayed open. The
+    // native-e2e WebDriver harness (e2e-native/specs/quit.spec.ts's sibling
+    // approach) cannot observe this in the sandboxed environment this test
+    // was authored in (its embedded WebDriver server's loopback bind never
+    // completes there — confirmed pre-existing: an untouched, unrelated
+    // spec fails identically). This test instead drives the REAL IPC/ACL
+    // path Tauri itself uses, with tauri::test's MockRuntime standing in
+    // for the window server (no real window, no socket, no webview) but
+    // this crate's REAL `tauri.conf.json` + `capabilities/*.json`, loaded by
+    // this module's own `tauri::generate_context!()` call below — the only
+    // one active in a `cfg(test)` build (see the comment above the real
+    // run(), which carries the equivalent call for normal builds).
+    //
+    // Root cause: @tauri-apps/api's `onCloseRequested` wrapper
+    // (node_modules/@tauri-apps/api/window.js) calls `this.destroy()` —
+    // i.e. invokes `plugin:window|destroy` — whenever the JS handler does
+    // not call `event.preventDefault()`. Tauri's own default
+    // `on_window_event` (tauri-2.10.3/src/manager/window.rs) ALWAYS calls
+    // `api.prevent_close()` at the native level once any JS
+    // close-requested listener is registered (this app registers exactly
+    // one, in useDestructiveActionGuard.ts), so the only path to an actual
+    // close is that JS-side `destroy()` call succeeding. `destroy` was
+    // never granted in src-tauri/capabilities/default.json (only
+    // `core:window:allow-close` was), so the IPC call was silently denied
+    // and the window never closed.
+    use tauri::ipc::{CallbackFn, InvokeBody};
+    use tauri::test::{get_ipc_response, mock_builder, INVOKE_KEY};
+    use tauri::webview::InvokeRequest;
+    use tauri::WebviewWindowBuilder;
+
+    fn invoke_request(cmd: &str) -> InvokeRequest {
+        InvokeRequest {
+            cmd: cmd.into(),
+            callback: CallbackFn(0),
+            error: CallbackFn(1),
+            // macOS/Linux desktop's local-origin scheme (manager::tauri_protocol_url):
+            // "http://tauri.localhost" is only correct on Windows/Android.
+            url: "tauri://localhost".parse().unwrap(),
+            body: InvokeBody::default(),
+            headers: Default::default(),
+            invoke_key: INVOKE_KEY.to_string(),
+        }
+    }
+
+    #[test]
+    fn main_window_can_destroy_itself_through_the_real_capabilities() {
+        // generate_context!() with no path argument reads THIS crate's own
+        // tauri.conf.json + capabilities/*.json — the same files `run()`
+        // above builds from — not an empty/default test fixture.
+        let app = mock_builder()
+            .build(tauri::generate_context!())
+            .expect("failed to build the app with this crate's real context/capabilities");
+        let webview = WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .expect("failed to build the \"main\" webview window");
+
+        let response = get_ipc_response(&webview, invoke_request("plugin:window|destroy"));
+
+        assert!(
+            response.is_ok(),
+            "plugin:window|destroy was denied for the \"main\" window: {:?}. This is exactly \
+             the call @tauri-apps/api's onCloseRequested wrapper makes when the JS handler does \
+             not preventDefault() — without \"core:window:allow-destroy\" granted in \
+             src-tauri/capabilities/default.json, a confirmed clean quit (D-03) never actually \
+             closes the window (checkpoint items 2/5/6/8).",
+            response,
+        );
+    }
 }

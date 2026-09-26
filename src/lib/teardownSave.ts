@@ -12,12 +12,21 @@ export interface TeardownSaveTarget {
 }
 
 interface TeardownSaveEntry {
-  settle: () => Promise<void>;
+  settle: () => Promise<"failed" | "ok">;
 }
 
 // Module-private registry of mounted savers. A later quit-flush step walks
 // this set to settle every mounted autosave surface before the app exits.
 const teardownSaves = new Set<TeardownSaveEntry>();
+
+/** Budget for flushPendingSavesForQuit (D-04): the quit path waits this long
+ * for every mounted autosave surface to settle before giving up. */
+export const QUIT_FLUSH_BUDGET_MS = 3000;
+
+export type QuitFlushOutcome =
+  | { kind: "clean" }
+  | { kind: "failed"; failures: number }
+  | { kind: "timeout" };
 
 let saveFailureCounter = 0;
 
@@ -65,12 +74,47 @@ function settleTeardownSave<T>(
   saver: SettlingDebouncedSaver<T>,
   describe: (value: T) => TeardownSaveTarget | null,
   t: Translate,
-): Promise<void> {
+): Promise<"failed" | "ok"> {
   return saver.flushSettled().then((settlement) => {
-    if (settlement.status !== "failed") return;
+    if (settlement.status !== "failed") return "ok";
     const target = describe(settlement.value);
-    if (!target) return;
-    return reportTeardownSaveFailure(target, settlement.error, t);
+    if (!target) return "ok";
+    return reportTeardownSaveFailure(target, settlement.error, t).then(() => "failed" as const);
+  });
+}
+
+/**
+ * Flushes every mounted autosave surface for an app quit (D-03, D-04): with
+ * no registered surfaces resolves `clean` immediately with no timer armed;
+ * otherwise settles each one and races the settles against `budgetMs`. A
+ * failed settlement is reported (recovery copy + toast, via
+ * `reportTeardownSaveFailure` inside `settleTeardownSave`) whenever it lands,
+ * even after the budget already expired and this promise resolved `timeout`
+ * — that in-flight settle keeps running and still reports on its own.
+ */
+export function flushPendingSavesForQuit(
+  budgetMs: number = QUIT_FLUSH_BUDGET_MS,
+): Promise<QuitFlushOutcome> {
+  const entries = Array.from(teardownSaves);
+  if (entries.length === 0) {
+    return Promise.resolve({ kind: "clean" });
+  }
+
+  return new Promise<QuitFlushOutcome>((resolve) => {
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      resolve({ kind: "timeout" });
+    }, budgetMs);
+
+    void Promise.all(entries.map((entry) => entry.settle())).then((results) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      const failures = results.filter((result) => result === "failed").length;
+      resolve(failures > 0 ? { kind: "failed", failures } : { kind: "clean" });
+    });
   });
 }
 
