@@ -1298,6 +1298,41 @@ mod tests {
             original
         );
     }
+
+    #[test]
+    fn remove_hint_keeps_claude_md_with_user_content() {
+        let dir = tempfile::tempdir_in(std::env::temp_dir().canonicalize().unwrap()).unwrap();
+        let work = dir.path();
+        let block = agent_context_hint_block();
+        std::fs::write(work.join("CLAUDE.md"), format!("# Mine\n\n{block}")).unwrap();
+        let removed =
+            remove_agent_context_hint(work.to_string_lossy().into_owned(), vec!["claude".into()])
+                .unwrap();
+        assert_eq!(removed.len(), 1);
+        assert_eq!(
+            std::fs::read_to_string(work.join("CLAUDE.md")).unwrap(),
+            "# Mine\n"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn remove_hint_keeps_symlinked_claude_md_and_its_target() {
+        let dir = tempfile::tempdir_in(std::env::temp_dir().canonicalize().unwrap()).unwrap();
+        let work = dir.path();
+        let shared = work.join("shared.md");
+        std::fs::write(&shared, agent_context_hint_block()).unwrap();
+        std::os::unix::fs::symlink(&shared, work.join("CLAUDE.md")).unwrap();
+        let removed =
+            remove_agent_context_hint(work.to_string_lossy().into_owned(), vec!["claude".into()])
+                .unwrap();
+        assert_eq!(removed.len(), 1);
+        assert!(std::fs::symlink_metadata(work.join("CLAUDE.md"))
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        assert_eq!(std::fs::read_to_string(&shared).unwrap(), "");
+    }
 }
 
 #[cfg(test)]
