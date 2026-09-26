@@ -240,7 +240,7 @@ Plans:
   3. A save that fails on a teardown path produces a visible signal to the user (log, toast, or equivalent) instead of disappearing with no trace.
   4. A job whose `program.env.PATH` carries several tilde entries installs a launchd plist in which every one of them is absolute, so the child process resolves the same tools the job's shell guard found. A colon-bearing non-path value and a single-path value are byte-identical to today's output.
 
-**Plans**: 6/8 plans executed in 4 waves
+**Plans**: 7/8 plans executed in 4 waves
 
 Plans:
 **Wave 1**
@@ -257,7 +257,7 @@ Plans:
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
-- [ ] 09-06-PLAN.md - Failed teardown saves: recovery copy, toast naming file and reason, Open recovery copy (D-07, D-08)
+- [x] 09-06-PLAN.md - Failed teardown saves: recovery copy, toast naming file and reason, Open recovery copy (D-07, D-08)
 
 **Wave 4** *(blocked on Wave 3 completion)*
 
@@ -334,6 +334,6 @@ Phases execute in numeric order: 6 → 7 → 8 → 9 → 10 → 11
 | 6. Native E2E Runner Foundation | 5/5 | Complete    | 2026-08-29 |
 | 7. Guardrails Before Churn | 5/5 | Complete    | 2026-09-05 |
 | 8. Main-Thread Responsiveness | 29/29 | Complete    | 2026-09-06 |
-| 9. Durability and Session Lifecycle | 6/8 | In Progress|  |
+| 9. Durability and Session Lifecycle | 7/8 | In Progress|  |
 | 10. Bundle and Build Hardening | 3/3 | Complete    | 2026-09-25 |
 | 11. Milestone Verification & Evidence | 6/6 | Complete    | 2026-09-26 |
