@@ -34,7 +34,16 @@ vi.mock("../../lib/todayCapture", async (importOriginal) => {
   };
 });
 
+vi.mock("../../lib/maruDir", async (importOriginal) => {
+  const original = await importOriginal<typeof import("../../lib/maruDir")>();
+  return {
+    ...original,
+    writeRecoveryCopy: vi.fn(async () => "/recovery/copy.txt"),
+  };
+});
+
 import { scanTaskNotes } from "../../lib/api";
+import { writeRecoveryCopy } from "../../lib/maruDir";
 import { buildCaptureCandidates } from "../../lib/todayCapture";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -226,7 +235,8 @@ describe("TodayPrepare", () => {
     expect(mutate).toHaveBeenCalledWith({ type: "setBrainDump", brainDump: "닫기 직전 메모" });
   });
 
-  it("skips a scheduled autosave whose workspace changed before it drains, instead of reporting a false failure (review finding #5)", async () => {
+  it("keeps a scheduled autosave whose workspace changed before it drains as a recovery copy in the old workspace (review finding #5, #369)", async () => {
+    vi.mocked(writeRecoveryCopy).mockClear();
     const mutate = vi.fn<(mutation: TodayMutation) => Promise<TodaySnapshot | null>>(
       async () => ({ ...SNAPSHOT, revision: "rev-2" }),
     );
@@ -282,12 +292,15 @@ describe("TodayPrepare", () => {
         await sleep(0);
       });
 
-      // No false failure toast/log: a workspace-switch skip must never
-      // reach the teardown failure reporter.
-      const teardownFailureLogs = errorSpy.mock.calls.filter(
-        (call) => typeof call[0] === "string" && call[0].includes("teardown save failed"),
+      // The edit is not dropped either: it lands as one recovery copy in the
+      // workspace it was typed in, never in the new one.
+      expect(writeRecoveryCopy).toHaveBeenCalledTimes(1);
+      expect(writeRecoveryCopy).toHaveBeenCalledWith(
+        "/tmp/workspace-a",
+        `today-brain-dump-${SNAPSHOT.logicalDay}.txt`,
+        "workspace a 메모",
+        translate("ko", "today.prepare.braindump.workspaceChanged"),
       );
-      expect(teardownFailureLogs).toHaveLength(0);
     } finally {
       errorSpy.mockRestore();
     }
