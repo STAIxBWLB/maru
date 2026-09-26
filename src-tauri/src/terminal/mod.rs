@@ -935,16 +935,38 @@ fn wait_for_group_exit(pgid: u32, grace: Duration) -> bool {
 /// Polls for the group's death for up to `grace`, then sends SIGTERM and
 /// polls again for up to `grace`, then sends SIGKILL. Returns the stage the
 /// group was finally observed gone at (or `Kill` if SIGKILL was needed).
+/// A thin single-target wrapper around `escalate_process_groups`, kept as
+/// its own name for the direct-spawn test that already calls it this way.
 #[cfg(unix)]
 fn escalate_process_group(pgid: u32, grace: Duration) -> KillStage {
-    if wait_for_group_exit(pgid, grace) {
+    escalate_process_groups(&[pgid], grace)
+}
+
+/// Runs one shared SIGHUP -> SIGTERM -> SIGKILL ladder against every pgid in
+/// `pgids` together, assuming SIGHUP was already sent to each. A kill target
+/// is never just the terminal child's own leader group (REL-01): an
+/// interactive, job-control shell puts every foreground external command
+/// into its OWN process group, so a tab-close or quit-time kill must
+/// escalate the leader's group and the pty's current foreground group on
+/// the same clock, or the foreground job survives untouched (see
+/// kill_target_pgids). Returns the stage the whole batch was finally
+/// observed gone at (or `Kill` if any group needed SIGKILL).
+#[cfg(unix)]
+fn escalate_process_groups(pgids: &[u32], grace: Duration) -> KillStage {
+    let survivors = wait_for_all_groups_gone(pgids, grace);
+    if survivors.is_empty() {
         return KillStage::Hangup;
     }
-    let _ = signal_process_group(pgid, SIGTERM);
-    if wait_for_group_exit(pgid, grace) {
+    for &pgid in &survivors {
+        let _ = signal_process_group(pgid, SIGTERM);
+    }
+    let still_alive = wait_for_all_groups_gone(&survivors, grace);
+    if still_alive.is_empty() {
         return KillStage::Terminate;
     }
-    let _ = signal_process_group(pgid, SIGKILL);
+    for &pgid in &still_alive {
+        let _ = signal_process_group(pgid, SIGKILL);
+    }
     KillStage::Kill
 }
 
@@ -962,42 +984,117 @@ fn escalation_warn_line(pgid: u32, stage: KillStage) -> Option<String> {
     ))
 }
 
-/// Sends SIGHUP to `pgid`'s process group and, unless the group is already
-/// gone, spawns a detached thread to run the rest of the escalation ladder.
-/// Holds no session/registry/killer lock while that thread sleeps.
+/// D-11 for a tab-close ladder with more than one target (a foreground job
+/// alongside its shell's leader): names every pgid the ladder actually
+/// delivered SIGHUP to. A single-target ladder (the common case: an idle
+/// shell, nothing running in the foreground) still goes through
+/// `escalation_warn_line` above, unchanged, so its existing format and test
+/// coverage stay exactly as they were.
 #[cfg(unix)]
-fn begin_group_kill(state: &TerminalState, pgid: u32) -> Result<(), String> {
-    match signal_process_group(pgid, SIGHUP) {
-        Ok(true) => {
-            // D-03: `escalations` is a registry of process-group ids that
-            // `escalate_process_group` re-validates via `process_group_alive`
-            // before every signal it sends, so a poisoned guard cannot serve
-            // a tainted invariant -- worst case a dead pgid gets probed once
-            // more before this thread drops it from the set.
-            crate::lock_recovery::recover_guard(
-                state.escalations.lock(),
-                "terminal",
-                "TERMINAL_ESCALATIONS",
-            )
-            .insert(pgid);
-            let escalations = state.escalations.clone();
-            thread::spawn(move || {
-                let stage = escalate_process_group(pgid, KILL_ESCALATION_GRACE);
-                if let Some(line) = escalation_warn_line(pgid, stage) {
-                    eprintln!("{line}");
-                }
-                crate::lock_recovery::recover_guard(
-                    escalations.lock(),
-                    "terminal",
-                    "TERMINAL_ESCALATIONS",
-                )
-                .remove(&pgid);
-            });
-            Ok(())
+fn escalation_warn_line_for(pgids: &[u32], stage: KillStage) -> Option<String> {
+    match pgids {
+        [] => None,
+        [pgid] => escalation_warn_line(*pgid, stage),
+        many => {
+            let signal_name = match stage {
+                KillStage::Hangup => return None,
+                KillStage::Terminate => "SIGTERM",
+                KillStage::Kill => "SIGKILL",
+            };
+            let pgid_list = many
+                .iter()
+                .map(u32::to_string)
+                .collect::<Vec<_>>()
+                .join(", ");
+            Some(format!(
+                "[terminal] pgids {pgid_list} survived SIGHUP; escalated to {signal_name}"
+            ))
         }
-        Ok(false) => Ok(()),
-        Err(err) => Err(format!("terminal_kill_failed: {err}")),
     }
+}
+
+/// Every process group a kill (tab close or quit sweep) should target for
+/// this session: its own leader pgid (REL-01) plus, if different, the pty's
+/// CURRENT foreground process group (`tcgetpgrp` on the master).
+/// Job control assigns a fresh group to every foreground job; the leader's
+/// own group is the tty's foreground group only while the shell sits idle
+/// at its prompt. Captured up front, before any signal is sent to the
+/// leader — tcgetpgrp becomes meaningless once the leader dies. A
+/// background or disowned job is never the pty's foreground group, so it
+/// is never added here (REL-01/D-09: it must survive).
+#[cfg(unix)]
+fn kill_target_pgids(session: &TerminalSession, leader_pgid: u32) -> Vec<u32> {
+    let mut targets = vec![leader_pgid];
+    let foreground = session
+        .master
+        .lock()
+        .ok()
+        .and_then(|master| master.process_group_leader())
+        .and_then(|pid| u32::try_from(pid).ok());
+    if let Some(pgid) = foreground {
+        if pgid != leader_pgid {
+            targets.push(pgid);
+        }
+    }
+    targets
+}
+
+/// Sends SIGHUP to every pgid in `pgids` and, unless every group is already
+/// gone, spawns a detached thread to run the rest of the escalation ladder
+/// against whichever ones a signal actually reached. Holds no
+/// session/registry/killer lock while that thread sleeps.
+#[cfg(unix)]
+fn begin_group_kill(state: &TerminalState, pgids: Vec<u32>) -> Result<(), String> {
+    let mut delivered = Vec::with_capacity(pgids.len());
+    let mut first_hard_error: Option<std::io::Error> = None;
+    for &pgid in &pgids {
+        match signal_process_group(pgid, SIGHUP) {
+            Ok(true) => delivered.push(pgid),
+            Ok(false) => {}
+            Err(err) => {
+                if first_hard_error.is_none() {
+                    first_hard_error = Some(err);
+                }
+            }
+        }
+    }
+    if delivered.is_empty() {
+        return match first_hard_error {
+            Some(err) => Err(format!("terminal_kill_failed: {err}")),
+            None => Ok(()),
+        };
+    }
+    // D-03: `escalations` is a registry of process-group ids that
+    // `escalate_process_groups` re-validates via `process_group_alive`
+    // before every signal it sends, so a poisoned guard cannot serve a
+    // tainted invariant -- worst case a dead pgid gets probed once more
+    // before this thread drops it from the set.
+    {
+        let mut guard = crate::lock_recovery::recover_guard(
+            state.escalations.lock(),
+            "terminal",
+            "TERMINAL_ESCALATIONS",
+        );
+        for &pgid in &delivered {
+            guard.insert(pgid);
+        }
+    }
+    let escalations = state.escalations.clone();
+    thread::spawn(move || {
+        let stage = escalate_process_groups(&delivered, KILL_ESCALATION_GRACE);
+        if let Some(line) = escalation_warn_line_for(&delivered, stage) {
+            eprintln!("{line}");
+        }
+        let mut guard = crate::lock_recovery::recover_guard(
+            escalations.lock(),
+            "terminal",
+            "TERMINAL_ESCALATIONS",
+        );
+        for pgid in &delivered {
+            guard.remove(pgid);
+        }
+    });
+    Ok(())
 }
 
 /// Falls back to the session's stored `ChildKiller` (a bare, non-escalating
@@ -1030,7 +1127,7 @@ pub fn terminal_kill(state: &TerminalState, handle: TerminalSessionHandle) -> Re
 
     #[cfg(unix)]
     let kill_result = match session.process_group {
-        Some(pgid) => begin_group_kill(state, pgid),
+        Some(pgid) => begin_group_kill(state, kill_target_pgids(&session, pgid)),
         None => kill_via_signaller(&session),
     };
     #[cfg(not(unix))]
@@ -1056,9 +1153,15 @@ pub fn terminal_kill(state: &TerminalState, handle: TerminalSessionHandle) -> Re
     Ok(())
 }
 
-// D-12: each stage of the quit-time sweep gets this long before escalating;
-// two stages keep the whole sweep inside the 3s quit budget.
-const QUIT_SWEEP_STEP: Duration = Duration::from_millis(1500);
+// D-12: each stage of the quit-time sweep gets this long before escalating.
+// Shorter than the tab-close ladder's KILL_ESCALATION_GRACE (2s) on
+// purpose: two KILL_ESCALATION_GRACE-length stages measured ~4s end to end,
+// overrunning the 3s quit budget once signal-send and thread/reap overhead
+// are added on top of the raw poll windows. 1s + 1s leaves headroom for
+// that overhead while still giving a group two full chances to die before
+// SIGKILL. Tab close keeps its own 2s + 2s (D-09) — only the quit sweep is
+// time-boxed against a fixed external deadline.
+const QUIT_SWEEP_STEP: Duration = Duration::from_millis(1000);
 
 /// Polls every pgid in `pgids` together (not one at a time) for up to
 /// `step`, returning whichever ones are still alive when the deadline
@@ -1111,7 +1214,12 @@ pub(crate) fn sweep_sessions(state: &TerminalState, step: Duration) {
         #[cfg(unix)]
         match session.process_group {
             Some(pgid) => {
-                targets.insert(pgid);
+                // kill_target_pgids also adds the pty's current foreground
+                // group when a job-control shell has one running that
+                // differs from its own leader group (see its doc comment);
+                // a background/disowned job is never that foreground
+                // group, so it is never added.
+                targets.extend(kill_target_pgids(session, pgid));
             }
             None => {
                 let _ = kill_via_signaller(session);
@@ -1151,11 +1259,20 @@ pub(crate) fn sweep_sessions(state: &TerminalState, step: Duration) {
             let _ = signal_process_group(pgid, SIGTERM);
         }
         let still_alive = wait_for_all_groups_gone(&survivors, step);
-        for &pgid in &still_alive {
-            let _ = signal_process_group(pgid, SIGKILL);
-        }
+        // D-11: name the final signal, consistent with the per-tab-close
+        // line (escalation_warn_line/escalation_warn_line_for) — "escalated
+        // past SIGHUP" alone doesn't say whether TERM was enough or KILL
+        // was needed.
+        let final_signal = if still_alive.is_empty() {
+            "SIGTERM"
+        } else {
+            for &pgid in &still_alive {
+                let _ = signal_process_group(pgid, SIGKILL);
+            }
+            "SIGKILL"
+        };
         eprintln!(
-            "[terminal] quit sweep escalated {} process group(s) past SIGHUP",
+            "[terminal] quit sweep escalated {} process group(s) past SIGHUP; final signal {final_signal}",
             survivors.len()
         );
     }
@@ -3283,12 +3400,11 @@ mod phase09_02 {
         wait_for_marker(&app, &handle, &marker);
 
         let foreground_pgid =
-            wait_for_foreground_job(&app, &session_id, leader_pgid, Duration::from_secs(3))
-                .expect(
-                    "precondition: an interactive shell running a foreground `sleep` must get \
+            wait_for_foreground_job(&app, &session_id, leader_pgid, Duration::from_secs(3)).expect(
+                "precondition: an interactive shell running a foreground `sleep` must get \
                      its own process group (job control) — if this fails the test fixture, not \
                      the fix, is wrong",
-                );
+            );
         assert_ne!(
             foreground_pgid, leader_pgid,
             "precondition: the foreground job's group must differ from the shell's own leader"
@@ -3337,12 +3453,11 @@ mod phase09_02 {
         wait_for_marker(&app, &handle, &marker);
 
         let foreground_pgid =
-            wait_for_foreground_job(&app, &session_id, leader_pgid, Duration::from_secs(3))
-                .expect(
-                    "precondition: an interactive shell running a foreground `sleep` must get \
+            wait_for_foreground_job(&app, &session_id, leader_pgid, Duration::from_secs(3)).expect(
+                "precondition: an interactive shell running a foreground `sleep` must get \
                      its own process group (job control) — if this fails the test fixture, not \
                      the fix, is wrong",
-                );
+            );
 
         // D-12: the whole quit sweep (every live session, whatever its
         // shape) must finish inside the 3s quit budget.
