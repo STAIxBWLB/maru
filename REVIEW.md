@@ -56,9 +56,9 @@ Report at most 5 nits per review; summarize the rest as a count.
   tests, the frontend bundle budget, and the version check.
 - Missing DOM snapshots in a Playwright trace: they are disabled on purpose for CI cost.
 
-## Feedback into CLAUDE.md
+## Feedback into AGENTS.md
 
-When the same finding appears twice, the correction goes into `CLAUDE.md` in the same PR.
+When the same finding appears twice, the correction goes into `AGENTS.md` in the same PR.
 
 ---
 

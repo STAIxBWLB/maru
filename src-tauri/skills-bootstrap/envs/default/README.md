@@ -28,7 +28,7 @@ env/
 ├── Makefile                    # 빌드 명령
 ├── pyproject.toml              # Python 의존성 (uv)
 ├── setup.sh                    # 환경 초기 설정
-├── CLAUDE.md                   # AI 에이전트 지시서
+├── AGENTS.md                   # AI 에이전트 지시서
 └── REFERENCE.md                # HWP 포맷 참조
 ```
 
