@@ -105,7 +105,7 @@ Language: [언어].
 ### 6단계 — 후속 제안 (선택)
 
 - 같은 주제로 NotebookLM 버전도 만들지(`notebooklm-deck` 스킬 호출) 묻기
-- 결과 .pptx export → 본교 발표 시 hwpx 변환 필요하면 `hwpx` 스킬 안내
+- 결과 .pptx export → 본교 발표 시 HWPX 변환 필요하면 released `hwp` 스킬 안내 (minimum `v1.0.0`)
 
 ## 사용 예시
 

@@ -6,7 +6,7 @@ description: Refresh an outdated note with new context while preserving core ins
 
 # /vault-update [note]
 
-Update a note with new information while preserving original meaning.
+Update a note with new information while preserving original meaning. This is the single-note leaf; batch discovery of notes that need updating is `/vault-sync` (its "update" proposals run this procedure).
 
 ## Input
 - note: filename or path in `notes/`

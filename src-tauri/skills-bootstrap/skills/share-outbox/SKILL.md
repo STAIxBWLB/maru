@@ -63,7 +63,7 @@ The user selects the target format by naming just the extension (e.g. "hwpx로",
 | target | conversion |
 |--------|------------|
 | (none) / `docx` | `~/.maru/skills/md2docx/md2docx <src.md> -o <tmp>/<stem>.docx` |
-| `hwpx` | `~/.maru/skills/hwpx/hwpx styled --markdown <src.md> -o <tmp>/<stem>.hwpx` |
+| `hwpx` | Use the released unified `hwp` binary (minimum `v1.0.0`): `"$HWP_CLI" new --from <src.md> --preset report -o <tmp>/<stem>.hwpx`; if the source deliberately contains `{{slots}}`, follow with `"$HWP_CLI" fill <tmp>/<stem>.hwpx -o <tmp>/<stem>-filled.hwpx --set "name=value"`; always finish with `"$HWP_CLI" validate <output>.hwpx`. Set `HWP_CLI` to an absolute released binary path whose `--version` reports the supported tag, never a checkout or unversioned PATH fallback. See `hwp/references/editing-recipes.md`. |
 | `pdf` | `~/.maru/env/.venv/bin/python ~/.maru/skills/share-outbox/scripts/md_to_pdf_chrome.py <src.md> -o <tmp>/<stem>.pdf` (HTML print path; details in `references/pdf-print-path.md`) |
 | `md` | stage the original without conversion (explicit instruction only) |
 | other (e.g. `pptx`) | use the matching workspace conversion skill if one exists; otherwise tell the user the target is unsupported (never silently fall back) |
@@ -78,13 +78,15 @@ Rules:
   `--serif`, `--reference <form.hwpx>`, ...).
 - Report both the original source path and the staged output to the user; the
   receipt's `source` records the converted temp file.
-- Do not produce outgoing PDF via bare `hwpx to-pdf` (engine auto or hwp):
-  the hwp-cli renderer drops every table row after a page boundary (silent
-  data loss with exit 0, so the auto engine never falls back). Only
-  `hwpx to-pdf --engine soffice` is acceptable as an hwpx-side path. Bare
-  hwp-cli rendering is a last resort for table-free documents with explicit
-  user request, and pages must be visually verified before sending. See
-  `references/pdf-print-path.md`.
+- Do not produce outgoing PDF from HWPX with a bare native renderer: the
+  hwp-cli renderer drops every table row after a page boundary (silent data
+  loss with exit 0). The default is the Chrome HTML print path. Do not claim
+  a direct LibreOffice HWPX conversion path unless it has been smoke-tested
+  on the generated file; the verified no-Chrome fallback is
+  `md2docx <src.md>` followed by direct `soffice --headless --convert-to pdf`
+  on that DOCX. Native rendering remains a last resort for table-free
+  documents with explicit user request, and pages must be visually verified
+  before sending. See `references/pdf-print-path.md`.
 
 ## Script
 

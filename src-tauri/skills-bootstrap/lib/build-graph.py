@@ -177,22 +177,23 @@ def extract_wiki(target: Path) -> list[dict]:
 
     for f in md_files:
         text = f.read_text(encoding="utf-8", errors="replace")
-        fm = parse_frontmatter(text)
+        # YAML first (block sequences, folded scalars); naive parser as fallback.
+        fm = _safe_load_fm(text) or parse_frontmatter(text)
         body = extract_body(text)
         links = WIKILINK_RE.findall(body)
 
         node = {
             "id": f.stem,
             "label": f.stem.replace("-", " ").title(),
-            "type": fm.get("type", "unknown"),
-            "domain": fm.get("domain", "unknown"),
-            "description": fm.get("description", ""),
-            "confidence": fm.get("confidence", ""),
+            "type": str(fm.get("type") or "unknown"),
+            "domain": str(fm.get("domain") or "unknown"),
+            "description": str(fm.get("description") or ""),
+            "confidence": str(fm.get("confidence") or ""),
             "source_file": str(f.relative_to(target)),
         }
-        topics = fm.get("topics", [])
+        topics = fm.get("topics") or []
         if isinstance(topics, list):
-            topics = [t.replace("[[", "").replace("]]", "") for t in topics]
+            topics = [str(t).replace("[[", "").replace("]]", "") for t in topics]
             node["topics"] = ", ".join(topics)
         else:
             node["topics"] = str(topics)
@@ -581,9 +582,12 @@ def detect_communities(G: nx.Graph, exclude_hubs: bool = True) -> dict[int, list
     try:
         from graspologic.partition import leiden
         node_list = list(H.nodes)
-        partition = leiden(nx.to_numpy_array(H, nodelist=node_list), seed=42)
+        # graspologic takes `random_seed` (not `seed`) and, for an adjacency
+        # matrix, returns {node_index: community_id}. The old `seed=` kwarg
+        # raised TypeError and silently fell through to louvain every build.
+        partition = leiden(nx.to_numpy_array(H, nodelist=node_list), random_seed=42)
         comms: dict[int, list[str]] = {}
-        for idx, cid in enumerate(partition):
+        for idx, cid in sorted(partition.items()):
             comms.setdefault(int(cid), []).append(node_list[idx])
         G.graph["partitioner"] = "leiden"
         G.graph["partitioner_fallback"] = None
@@ -687,16 +691,21 @@ def find_surprising_connections(
 def compute_community_stats(G: nx.Graph, communities: dict[int, list[str]]) -> list[dict]:
     stats = []
     for cid, members in sorted(communities.items()):
+        members = sorted(members)  # set-derived order is per-process; keep stats deterministic
         sub = G.subgraph(members)
         types = {}
         for m in members:
             t = G.nodes[m].get("type", G.nodes[m].get("domain", "unknown"))
             types[t] = types.get(t, 0) + 1
-        primary = max(types, key=types.get) if types else "unknown"
+        primary = max(sorted(types), key=types.get) if types else "unknown"
+        # Community ids are build-local (re-assigned every run). The anchor —
+        # max-degree member, ties by id — is the stable label readers must cite.
+        by_degree = sorted(members, key=lambda m: (-G.degree(m), m))
         stats.append({
             "id": cid, "size": len(members), "edges": sub.number_of_edges(),
             "primary_type": primary, "type_mix": types,
-            "members_sample": members[:5],
+            "anchor": by_degree[0] if by_degree else None,
+            "members_sample": by_degree[:5],
         })
     return stats
 
@@ -743,7 +752,8 @@ def generate_report(
             continue
         sample = ", ".join(f"`{m}`" for m in cs["members_sample"])
         mix = ", ".join(f"{t}({c})" for t, c in sorted(cs["type_mix"].items(), key=lambda x: -x[1]))
-        lines.append(f"### Community {cs['id']} ({cs['size']} nodes, primary: {cs['primary_type']})")
+        lines.append(f"### `{cs['anchor']}` cluster ({cs['size']} nodes, primary: {cs['primary_type']})")
+        lines.append(f"- Build-local id: {cs['id']} (not stable across builds — do not cite)")
         lines.append(f"- Type mix: {mix}")
         lines.append(f"- Internal edges: {cs['edges']}")
         lines.append(f"- Sample: {sample}")
@@ -779,6 +789,43 @@ def export_graph_json(G: nx.Graph, out_path: Path):
 
 def export_report(report: str, out_path: Path):
     out_path.write_text(report, encoding="utf-8")
+
+
+_TREND_ROW_RE = re.compile(r"^\| \d{4}-\d{2}-\d{2} \|")
+_TREND_SEED = (
+    "---\ntype: report\nkind: graph-trend\n---\n\n# Graph Trend (vault layer)\n\n"
+    "빌드별 그래프 규모 추이 — 빌드마다 행 1개. 최신 `graph-report-YYMMDD.md` 전문은 1개만 보관한다. "
+    "Communities 수·번호는 빌드 간 비교 대상이 아니다.\n\n"
+    "| 빌드 | Nodes | Edges | Communities | Density | Top hub (degree 1위) |\n"
+    "|---|---|---|---|---|---|\n"
+)
+
+
+def prune_reports_and_append_trend(out_dir: Path, report_path: Path, G: nx.Graph,
+                                   communities: dict, god_nodes: list) -> None:
+    """Vault wiki builds keep the newest graph-report only; cross-build
+    comparison lives in graph-trend.md (one row per build, inserted after the
+    last table row — the table sits mid-file, so no EOF append)."""
+    for old in out_dir.glob("graph-report-*.md"):
+        if old != report_path:
+            old.unlink()
+    trend = out_dir / "graph-trend.md"
+    if not trend.exists():  # first build of a vault: seed the trend table before history is pruned
+        trend.write_text(_TREND_SEED, encoding="utf-8")
+    today = datetime.now().strftime("%Y-%m-%d")
+    top = f"`{god_nodes[0]['id']}`" if god_nodes else "-"
+    row = (f"| {today} | {G.number_of_nodes()} | {G.number_of_edges()} | "
+           f"{len(communities)} | {nx.density(G):.4f} | {top} |")
+    lines = [l for l in trend.read_text(encoding="utf-8").splitlines()
+             if not l.startswith(f"| {today} |")]
+    idx = [i for i, l in enumerate(lines) if _TREND_ROW_RE.match(l)]
+    if not idx:  # no rows yet: insert after the table header separator
+        idx = [i for i, l in enumerate(lines) if l.startswith("|---")]
+    if not idx:  # no table at all: append a fresh one
+        lines += ["", *_TREND_SEED.splitlines()[-2:]]
+        idx = [len(lines) - 1]
+    lines.insert(idx[-1] + 1, row)
+    trend.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 # ── Main ───────────────────────────────────────────────────────────────
@@ -878,6 +925,8 @@ def main():
     export_graph_json(G, graph_path)
     if report_path is not None:
         export_report(report, report_path)
+    if report_path is not None and mode == "wiki":
+        prune_reports_and_append_trend(out_dir, report_path, G, communities, gn)
 
     print(f"\nOutputs:")
     print(f"  Graph: {graph_path}")

@@ -26,6 +26,11 @@ GWS tasks tasks patch \
 
 ## Create Timed Calendar Event
 
+`CALENDAR_ID` always resolves from the workspace config key
+`task_management.google.calendar.default_calendar`. Calendars listed under
+`task_management.google.calendar.read_only` are never write destinations, so
+never substitute `primary` or a personal calendar address here.
+
 ```bash
 GWS calendar events insert \
   --params '{"calendarId":"CALENDAR_ID"}' \

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for build-graph.py reporting fixes (issue #326)."""
+"""Tests for build-graph.py reporting fixes (STAIxBWLB/maru#326, ported from maru#328)."""
 
 import importlib.util
 import sys
@@ -53,9 +53,11 @@ def test_leiden_exception_falls_back_to_louvain_with_reason(monkeypatch):
 
 
 def test_leiden_success_labels_partitioner(monkeypatch):
-    def leiden(matrix, seed=None):
-        assert seed == 42
-        return [0] * matrix.shape[0]
+    # Mirrors graspologic's adjacency-matrix contract: random_seed kwarg,
+    # {node_index: community_id} return.
+    def leiden(matrix, random_seed=None):
+        assert random_seed == 42
+        return {i: 0 for i in range(matrix.shape[0])}
     install_fake_leiden(monkeypatch, leiden)
 
     G = two_community_graph()
