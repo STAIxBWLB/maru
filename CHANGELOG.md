@@ -8,6 +8,50 @@ because releases cut frequently during active development. Versions before
 Dates are the release-tag dates. Only `feat`/`fix`-level changes are listed;
 `chore(release)` version bumps and merge commits are omitted.
 
+## v1.1.12 - 2026-09-27 - Durable Sessions
+
+- **Closing a terminal tab or quitting ends what it should, and only that
+  (#353, #361).** A tab close runs SIGHUP, then SIGTERM after 2 s, then
+  SIGKILL after 4 s: SIGHUP reaches the tab's process group and the pty's
+  foreground job, SIGTERM and SIGKILL reach the shell or agent itself and the
+  foreground job. A shell that traps SIGHUP, and a foreground job such as
+  `trap '' HUP; sleep 600`, no longer outlive the tab, while `disown`ed jobs
+  and `nohup`'d processes started from an agent tab keep running. Quitting
+  sweeps every terminal within the 3 s quit window.
+- **Edits are saved, not dropped, on unmount and quit (#353, #361).**
+  Scratchpad, meeting sources, Studio, graph layout, and the Today brain dump
+  save a pending edit when their view closes or the app quits, and all but the
+  brain dump also when the workspace switches (#369 tracks the brain dump).
+  Quit waits up to 3 s for those saves and shows "saving" after 300 ms.
+- **A save that fails on close or quit leaves a recovery copy and says so
+  (#353, #361).** The unsaved content is written under `.maru/recovery/`, a
+  notification names the file and the reason with "Open recovery copy", and a
+  failed or timed-out quit keeps Maru open with Retry, Quit anyway, and
+  Cancel.
+- **Cmd+Q and the close button share one guard, including the skill editor
+  (#353, #361).** Cmd+Q is now Maru's own menu item: it asks an open skill
+  editor about unsaved changes with one native dialog at a time, then applies
+  main's own guard, and quits from either window. The quit dialogs now show
+  above Settings, and the main window's close button now actually closes it in
+  shipped builds (a missing window permission had blocked it).
+- **The Scratchpad folder tree no longer covers the memo list (#365).** With a
+  terminal docked on the right, the tree, list, and editor stay side by side
+  instead of the tree opening as a drawer over the list.
+- **HWPX export, fields, fill, and PDF run on the released `hwp` (#359, #360,
+  #362, #363).** HWPX export and legacy `hwpx_skill` templates route to native
+  `hwp`, and workspace `.hwpx` field scans, fills, and PDF conversion use the
+  same released binary. Without it, export and fill fail closed with a named
+  reason, field scans fall back to the built-in scanner with a warning, and PDF
+  conversion falls back to pandoc.
+- **The context hint writes `AGENTS.md` only (#355, #356).** Writing the hint
+  no longer creates `CLAUDE.md`, and removing it deletes a `CLAUDE.md` it left
+  empty. The bundled skills environment's instruction file is `AGENTS.md` too
+  (#354).
+- **The bundled skills snapshot is refreshed (#357, #358).** Fresh and offline
+  installs get the current skills bundle: `yunmun`, `linkedin-manager`, and
+  `ship` are added, and the retired `hwpx` skill is removed in favor of the
+  released `hwp` (see the HWPX entry above). The bundle now carries 39 skills.
+
 ## v1.1.11 - 2026-09-25 - Lighter Start
 
 - **Startup warms only the modes that need it (#340, #341).** The idle-time
