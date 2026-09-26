@@ -139,3 +139,23 @@ def test_zero_cap_reproduces_precap_ordering():
     assert [r["score"] for r in rows] == [
         G.degree(e["source"]) + G.degree(e["target"]) for e in expected
     ]
+
+
+# ── graphifyy >= 0.9 cache placement ────────────────────────────────────
+
+def test_extract_code_pins_cache_root_to_target(monkeypatch, tmp_path):
+    calls = []
+    fake_pkg = types.ModuleType("graphify")
+    fake_extract = types.ModuleType("graphify.extract")
+    fake_extract.collect_files = lambda target, follow_symlinks: [target / "a.py"]
+
+    def extract(paths, cache_root=None, **kwargs):
+        calls.append(cache_root)
+        return {"nodes": [], "edges": []}
+    fake_extract.extract = extract
+    fake_pkg.extract = fake_extract
+    monkeypatch.setitem(sys.modules, "graphify", fake_pkg)
+    monkeypatch.setitem(sys.modules, "graphify.extract", fake_extract)
+
+    BG.extract_code(tmp_path)
+    assert calls == [tmp_path]

@@ -538,7 +538,9 @@ def extract_code(target: Path) -> list[dict]:
     if not files:
         return [{"nodes": [], "edges": []}]
 
-    result = extract(files)
+    # graphifyy >= 0.9 caches under the cwd unless told otherwise (#1774);
+    # keep the 0.7.0 placement under the scanned target so reruns reuse it.
+    result = extract(files, cache_root=target)
     nodes = result.get("nodes", [])
     edges = result.get("edges", [])
     print(f"  Extracted {len(nodes)} nodes, {len(edges)} edges")
