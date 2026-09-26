@@ -458,6 +458,53 @@ keeps the window; Cmd+Q then OK exits the app within 1 s.
 
 ---
 
+## PR review pass on the round-3 head
+
+A delegated OCR review of the whole PR diff (Rust, save/quit path, autosave surfaces) on
+`e642b816`. Every finding below was checked against the code before acting.
+
+**Fixed:**
+
+- **High: a saver swapped out in place settled with its successor's `describe`.**
+  `useTeardownFlush` refreshed `describe` during render, and the outgoing saver's cleanup only read
+  it after its flush settled, so StudioMode (not keyed by workspace) wrote a failed save's recovery
+  copy into the new workspace, or dropped it when there was none. The refs now refresh after
+  commit and the cleanup pins them. Test: `teardownSave.test.ts` (both cases).
+- **Studio document switch:** a failed flush on switch was dropped behind a banner (the next
+  `schedule` replaced the retained value); it now goes through `settleTeardownSave`, so the old
+  document keeps a recovery copy. Pinned in `teardownSave.surfaces.test.ts`.
+- **Recovery copy refused in a degraded workspace:** `write_recovery_copy` ran `ensure_maru_dir`,
+  which rejects a `workspace.json` this build cannot read; it now only creates `.maru/recovery`.
+- **Symlinked `.maru`:** only the `recovery` leaf was checked, so a `.maru` symlink sent the write
+  and the retention prune outside the workspace; both components are refused now.
+- **Stale skill-editor approval:** main's dialogs are in-page, so the editor stays editable while
+  one is open. Main now asks the editor again right before destroying it; the editor remembers a
+  confirmed quit until its text changes, so an unchanged edit gets no second dialog.
+- **Repeated Cmd+Q:** a second Cmd+Q while the editor was still answering sent a second
+  quit-check and stacked a second sheet (the round-3 symptom again). One check is in flight at a
+  time.
+- **Ack timeout started before the request was sent:** it now starts after `emitTo` resolves.
+- **Relaunch skipped the skill editor:** the update relaunch asks it like a quit.
+- **Copy:** the quit-failed dialog no longer promises a recovery copy for every failure.
+- **Agent-tab `nohup` jobs killed on tab close:** the ladder escalated SIGTERM/SIGKILL to the
+  leader's whole group, so children of a non-job-control leader (agent CLIs, `sh -c` tabs) died
+  even when `nohup`'d, against D-09. Escalation now targets the leader pid, and the full group
+  only for the PTY's foreground job group.
+
+**Answered, not changed here:**
+
+- TodayBrainDump drops keystrokes typed inside the 800 ms debounce when the workspace switches in
+  place. Not a regression (the old code lost them too), and round 1's finding 5 deliberately skips
+  that save; keeping a recovery copy in the old workspace is a follow-up.
+- With the skill editor focused, app-level menu commands no longer act on main. That is the routing
+  `app_menu.rs` always documented; one visible case is Cmd+S, which used to save main's active
+  document by mistake and now does nothing in the editor. Wiring it to the editor's Save is a
+  follow-up.
+- Nits skipped: a DST fall-back could prune the just-written recovery file; Studio's recovery file
+  keeps the document's `.md` name while holding JSON; the brain-dump toast shows a raw reason code.
+
+---
+
 ## Checkpoint
 
 After round 1's fixes, the orchestrator/owner should run the real-app checkpoint described in the

@@ -30,9 +30,10 @@ const FRAME_COALESCE_MS: u64 = 16;
 pub struct TerminalState {
     sessions: Arc<Mutex<HashMap<String, Arc<TerminalSession>>>>,
     reservations: Arc<Mutex<HashSet<String>>>,
-    // REL-01/D-09: process groups whose tab-close escalation ladder
+    // REL-01/D-09: kill targets whose tab-close escalation ladder
     // (SIGHUP -> SIGTERM -> SIGKILL) is still running in a detached thread.
-    escalations: Arc<Mutex<HashSet<u32>>>,
+    #[cfg(unix)]
+    escalations: Arc<Mutex<HashSet<KillTarget>>>,
 }
 
 struct TerminalSession {
@@ -885,6 +886,59 @@ enum KillStage {
     Kill,
 }
 
+/// One target of a kill ladder (D-09). Both kinds take the opening SIGHUP
+/// as a whole process group; they differ in how SIGTERM/SIGKILL escalate.
+#[cfg(unix)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+enum KillTarget {
+    /// The terminal child itself (its pid is its pgid). Without job control
+    /// (agent CLIs exec'd as the leader, `sh -c` wrappers) every child it
+    /// starts stays in this group, `nohup`'d ones included, so SIGTERM and
+    /// SIGKILL go to the leader pid only and the stage is judged by the
+    /// leader pid alone. The session waiter only watches the leader, so this
+    /// still ends a leader that traps SIGHUP (REL-01).
+    Leader(u32),
+    /// The pty's foreground job group under job control: the whole group
+    /// escalates.
+    Group(u32),
+}
+
+#[cfg(unix)]
+impl KillTarget {
+    /// The group the opening SIGHUP goes to.
+    fn pgid(self) -> u32 {
+        match self {
+            KillTarget::Leader(id) | KillTarget::Group(id) => id,
+        }
+    }
+
+    /// SIGTERM/SIGKILL: the leader pid only, or the whole foreground group.
+    fn signal(self, signal: i32) -> std::io::Result<bool> {
+        match self {
+            KillTarget::Leader(pid) => signal_pid(pid, signal),
+            KillTarget::Group(pgid) => signal_process_group(pgid, signal),
+        }
+    }
+
+    /// Same EPERM-means-alive rule as `process_group_alive`.
+    fn alive(self) -> bool {
+        match self {
+            KillTarget::Leader(pid) => signal_pid(pid, 0).unwrap_or(true),
+            KillTarget::Group(pgid) => process_group_alive(pgid),
+        }
+    }
+}
+
+#[cfg(unix)]
+impl std::fmt::Display for KillTarget {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            KillTarget::Leader(pid) => write!(f, "pid {pid}"),
+            KillTarget::Group(pgid) => write!(f, "pgid {pgid}"),
+        }
+    }
+}
+
 /// Sends `signal` to the process group led by `pgid` (i.e. `kill(-pgid,
 /// signal)`), reusing the raw FFI idiom already in
 /// `command_output.rs::terminate_unix_process_group`. Returns `Ok(true)`
@@ -892,18 +946,30 @@ enum KillStage {
 /// gone (ESRCH), and `Err` for any other failure.
 #[cfg(unix)]
 fn signal_process_group(pgid: u32, signal: i32) -> std::io::Result<bool> {
+    let group =
+        i32::try_from(pgid).map_err(|_| std::io::Error::other("process group id exceeds i32"))?;
+    send_signal(-group, signal)
+}
+
+/// `signal_process_group` for a single pid (`kill(pid, signal)`).
+#[cfg(unix)]
+fn signal_pid(pid: u32, signal: i32) -> std::io::Result<bool> {
+    let pid = i32::try_from(pid).map_err(|_| std::io::Error::other("pid exceeds i32"))?;
+    send_signal(pid, signal)
+}
+
+#[cfg(unix)]
+fn send_signal(target: i32, signal: i32) -> std::io::Result<bool> {
     extern "C" {
         fn kill(pid: i32, signal: i32) -> i32;
     }
-    let group =
-        i32::try_from(pgid).map_err(|_| std::io::Error::other("process group id exceeds i32"))?;
-    let result = unsafe { kill(-group, signal) };
+    let result = unsafe { kill(target, signal) };
     if result == 0 {
         return Ok(true);
     }
     let err = std::io::Error::last_os_error();
     if err.raw_os_error() == Some(3) {
-        // ESRCH: the group is already gone.
+        // ESRCH: the target is already gone.
         return Ok(false);
     }
     Err(err)
@@ -917,89 +983,73 @@ fn process_group_alive(pgid: u32) -> bool {
     signal_process_group(pgid, 0).unwrap_or(true)
 }
 
-/// Runs one shared SIGHUP -> SIGTERM -> SIGKILL ladder against every pgid in
-/// `pgids` together, assuming SIGHUP was already sent to each. A kill target
-/// is never just the terminal child's own leader group (REL-01): an
+/// Runs one shared SIGHUP -> SIGTERM -> SIGKILL ladder against every target
+/// together, assuming SIGHUP was already sent to each target's group. A
+/// kill is never just the terminal child's own leader (REL-01): an
 /// interactive, job-control shell puts every foreground external command
 /// into its OWN process group, so a tab-close or quit-time kill must
-/// escalate the leader's group and the pty's current foreground group on
-/// the same clock, or the foreground job survives untouched (see
-/// kill_target_pgids). Returns the stage the whole batch was finally
-/// observed gone at (or `Kill` if any group needed SIGKILL).
+/// escalate the leader and the pty's current foreground group on the same
+/// clock, or the foreground job survives untouched (see kill_target_pgids).
+/// Returns the stage the whole batch was finally observed gone at (or
+/// `Kill` if any target needed SIGKILL) and the targets that outlived
+/// SIGHUP, the only ones escalation touched.
 #[cfg(unix)]
-fn escalate_process_groups(pgids: &[u32], grace: Duration) -> KillStage {
-    let survivors = wait_for_all_groups_gone(pgids, grace);
+fn escalate_process_groups(
+    targets: &[KillTarget],
+    grace: Duration,
+) -> (KillStage, Vec<KillTarget>) {
+    let survivors = wait_for_all_groups_gone(targets, grace);
     if survivors.is_empty() {
-        return KillStage::Hangup;
+        return (KillStage::Hangup, survivors);
     }
-    for &pgid in &survivors {
-        let _ = signal_process_group(pgid, SIGTERM);
+    for &target in &survivors {
+        let _ = target.signal(SIGTERM);
     }
     let still_alive = wait_for_all_groups_gone(&survivors, grace);
     if still_alive.is_empty() {
-        return KillStage::Terminate;
+        return (KillStage::Terminate, survivors);
     }
-    for &pgid in &still_alive {
-        let _ = signal_process_group(pgid, SIGKILL);
+    for &target in &still_alive {
+        let _ = target.signal(SIGKILL);
     }
-    KillStage::Kill
+    (KillStage::Kill, survivors)
 }
 
-/// D-11: one warn-level line when escalation went past SIGHUP, `None` when
-/// SIGHUP alone was enough (the common case, not worth logging).
+/// D-11: one warn-level line naming the targets that outlived SIGHUP, `None`
+/// when SIGHUP alone was enough (the common case, not worth logging).
 #[cfg(unix)]
-fn escalation_warn_line(pgid: u32, stage: KillStage) -> Option<String> {
+fn escalation_warn_line(escalated: &[KillTarget], stage: KillStage) -> Option<String> {
     let signal_name = match stage {
         KillStage::Hangup => return None,
         KillStage::Terminate => "SIGTERM",
         KillStage::Kill => "SIGKILL",
     };
+    if escalated.is_empty() {
+        return None;
+    }
+    let names = escalated
+        .iter()
+        .map(KillTarget::to_string)
+        .collect::<Vec<_>>()
+        .join(", ");
     Some(format!(
-        "[terminal] pgid {pgid} survived SIGHUP; escalated to {signal_name}"
+        "[terminal] {names} survived SIGHUP; escalated to {signal_name}"
     ))
 }
 
-/// D-11 for a tab-close ladder with more than one target (a foreground job
-/// alongside its shell's leader): names every pgid the ladder actually
-/// delivered SIGHUP to. A single-target ladder (the common case: an idle
-/// shell, nothing running in the foreground) still goes through
-/// `escalation_warn_line` above, unchanged, so its existing format and test
-/// coverage stay exactly as they were.
-#[cfg(unix)]
-fn escalation_warn_line_for(pgids: &[u32], stage: KillStage) -> Option<String> {
-    match pgids {
-        [] => None,
-        [pgid] => escalation_warn_line(*pgid, stage),
-        many => {
-            let signal_name = match stage {
-                KillStage::Hangup => return None,
-                KillStage::Terminate => "SIGTERM",
-                KillStage::Kill => "SIGKILL",
-            };
-            let pgid_list = many
-                .iter()
-                .map(u32::to_string)
-                .collect::<Vec<_>>()
-                .join(", ");
-            Some(format!(
-                "[terminal] pgids {pgid_list} survived SIGHUP; escalated to {signal_name}"
-            ))
-        }
-    }
-}
-
-/// Every process group a kill (tab close or quit sweep) should target for
-/// this session: its own leader pgid (REL-01) plus, if different, the pty's
+/// Every target a kill (tab close or quit sweep) should hit for this
+/// session: its own leader (REL-01) plus, if its group differs, the pty's
 /// CURRENT foreground process group (`tcgetpgrp` on the master).
 /// Job control assigns a fresh group to every foreground job; the leader's
 /// own group is the tty's foreground group only while the shell sits idle
-/// at its prompt. Captured up front, before any signal is sent to the
-/// leader — tcgetpgrp becomes meaningless once the leader dies. A
-/// background or disowned job is never the pty's foreground group, so it
-/// is never added here (REL-01/D-09: it must survive).
+/// at its prompt or when there is no job control at all. Captured up front,
+/// before any signal is sent to the leader — tcgetpgrp becomes meaningless
+/// once the leader dies. A background or disowned job is never the pty's
+/// foreground group, so it is never added here (REL-01/D-09: it must
+/// survive).
 #[cfg(unix)]
-fn kill_target_pgids(session: &TerminalSession, leader_pgid: u32) -> Vec<u32> {
-    let mut targets = vec![leader_pgid];
+fn kill_target_pgids(session: &TerminalSession, leader_pgid: u32) -> Vec<KillTarget> {
+    let mut targets = vec![KillTarget::Leader(leader_pgid)];
     let foreground = session
         .master
         .lock()
@@ -1008,23 +1058,23 @@ fn kill_target_pgids(session: &TerminalSession, leader_pgid: u32) -> Vec<u32> {
         .and_then(|pid| u32::try_from(pid).ok());
     if let Some(pgid) = foreground {
         if pgid != leader_pgid {
-            targets.push(pgid);
+            targets.push(KillTarget::Group(pgid));
         }
     }
     targets
 }
 
-/// Sends SIGHUP to every pgid in `pgids` and, unless every group is already
+/// Sends SIGHUP to every target's group and, unless every target is already
 /// gone, spawns a detached thread to run the rest of the escalation ladder
 /// against whichever ones a signal actually reached. Holds no
 /// session/registry/killer lock while that thread sleeps.
 #[cfg(unix)]
-fn begin_group_kill(state: &TerminalState, pgids: Vec<u32>) -> Result<(), String> {
-    let mut delivered = Vec::with_capacity(pgids.len());
+fn begin_group_kill(state: &TerminalState, targets: Vec<KillTarget>) -> Result<(), String> {
+    let mut delivered = Vec::with_capacity(targets.len());
     let mut first_hard_error: Option<std::io::Error> = None;
-    for &pgid in &pgids {
-        match signal_process_group(pgid, SIGHUP) {
-            Ok(true) => delivered.push(pgid),
+    for &target in &targets {
+        match signal_process_group(target.pgid(), SIGHUP) {
+            Ok(true) => delivered.push(target),
             Ok(false) => {}
             Err(err) => {
                 if first_hard_error.is_none() {
@@ -1050,14 +1100,14 @@ fn begin_group_kill(state: &TerminalState, pgids: Vec<u32>) -> Result<(), String
             "terminal",
             "TERMINAL_ESCALATIONS",
         );
-        for &pgid in &delivered {
-            guard.insert(pgid);
+        for &target in &delivered {
+            guard.insert(target);
         }
     }
     let escalations = state.escalations.clone();
     thread::spawn(move || {
-        let stage = escalate_process_groups(&delivered, KILL_ESCALATION_GRACE);
-        if let Some(line) = escalation_warn_line_for(&delivered, stage) {
+        let (stage, escalated) = escalate_process_groups(&delivered, KILL_ESCALATION_GRACE);
+        if let Some(line) = escalation_warn_line(&escalated, stage) {
             eprintln!("{line}");
         }
         let mut guard = crate::lock_recovery::recover_guard(
@@ -1065,8 +1115,8 @@ fn begin_group_kill(state: &TerminalState, pgids: Vec<u32>) -> Result<(), String
             "terminal",
             "TERMINAL_ESCALATIONS",
         );
-        for pgid in &delivered {
-            guard.remove(pgid);
+        for target in &delivered {
+            guard.remove(target);
         }
     });
     Ok(())
@@ -1138,20 +1188,20 @@ pub fn terminal_kill(state: &TerminalState, handle: TerminalSessionHandle) -> Re
 // time-boxed against a fixed external deadline.
 const QUIT_SWEEP_STEP: Duration = Duration::from_millis(1000);
 
-/// Polls every pgid in `pgids` together (not one at a time) for up to
-/// `step`, returning whichever ones are still alive when the deadline
-/// passes (empty once all are gone). Used to run one shared ladder step
-/// across a whole batch of process groups instead of a per-group grace
-/// period, since the quit sweep must stay inside a fixed total budget
-/// regardless of how many sessions are live.
+/// Polls every target together (not one at a time) for up to `step`,
+/// returning whichever ones are still alive when the deadline passes (empty
+/// once all are gone). Used to run one shared ladder step across a whole
+/// batch of targets instead of a per-target grace period, since the quit
+/// sweep must stay inside a fixed total budget regardless of how many
+/// sessions are live.
 #[cfg(unix)]
-fn wait_for_all_groups_gone(pgids: &[u32], step: Duration) -> Vec<u32> {
+fn wait_for_all_groups_gone(targets: &[KillTarget], step: Duration) -> Vec<KillTarget> {
     let deadline = std::time::Instant::now() + step;
     loop {
-        let alive: Vec<u32> = pgids
+        let alive: Vec<KillTarget> = targets
             .iter()
             .copied()
-            .filter(|&pgid| process_group_alive(pgid))
+            .filter(|target| target.alive())
             .collect();
         if alive.is_empty() {
             return Vec::new();
@@ -1163,7 +1213,7 @@ fn wait_for_all_groups_gone(pgids: &[u32], step: Duration) -> Vec<u32> {
     }
 }
 
-/// D-12: drains every live session and every process group whose tab-close
+/// D-12: drains every live session and every kill target whose tab-close
 /// escalation ladder (from a prior `terminal_kill`) is still in flight, then
 /// runs one shared SIGHUP -> SIGTERM -> SIGKILL ladder against the whole
 /// batch, bounded by two `step` windows total. No lock is held while
@@ -1180,7 +1230,7 @@ pub(crate) fn sweep_sessions(state: &TerminalState, step: Duration) {
     };
 
     #[cfg(unix)]
-    let mut targets: HashSet<u32> = HashSet::new();
+    let mut targets: HashSet<KillTarget> = HashSet::new();
     for session in &drained {
         // A racing `terminal_kill` on this same session now finds it
         // already latched and, once it also fails to find the entry in
@@ -1208,7 +1258,7 @@ pub(crate) fn sweep_sessions(state: &TerminalState, step: Duration) {
 
     #[cfg(unix)]
     {
-        let escalating: Vec<u32> = {
+        let escalating: Vec<KillTarget> = {
             let mut guard = crate::lock_recovery::recover_guard(
                 state.escalations.lock(),
                 "terminal",
@@ -1222,33 +1272,23 @@ pub(crate) fn sweep_sessions(state: &TerminalState, step: Duration) {
             return;
         }
 
-        for &pgid in &targets {
-            let _ = signal_process_group(pgid, SIGHUP);
+        for &target in &targets {
+            let _ = signal_process_group(target.pgid(), SIGHUP);
         }
-        let target_vec: Vec<u32> = targets.into_iter().collect();
-        let survivors = wait_for_all_groups_gone(&target_vec, step);
-        if survivors.is_empty() {
-            return;
-        }
-        for &pgid in &survivors {
-            let _ = signal_process_group(pgid, SIGTERM);
-        }
-        let still_alive = wait_for_all_groups_gone(&survivors, step);
+        let target_vec: Vec<KillTarget> = targets.into_iter().collect();
+        // Same ladder and leader-pid-only rule as tab close, on `step`.
+        let (stage, escalated) = escalate_process_groups(&target_vec, step);
         // D-11: name the final signal, consistent with the per-tab-close
-        // line (escalation_warn_line/escalation_warn_line_for) — "escalated
-        // past SIGHUP" alone doesn't say whether TERM was enough or KILL
-        // was needed.
-        let final_signal = if still_alive.is_empty() {
-            "SIGTERM"
-        } else {
-            for &pgid in &still_alive {
-                let _ = signal_process_group(pgid, SIGKILL);
-            }
-            "SIGKILL"
+        // line (escalation_warn_line) — "escalated past SIGHUP" alone
+        // doesn't say whether TERM was enough or KILL was needed.
+        let final_signal = match stage {
+            KillStage::Hangup => return,
+            KillStage::Terminate => "SIGTERM",
+            KillStage::Kill => "SIGKILL",
         };
         eprintln!(
             "[terminal] quit sweep escalated {} process group(s) past SIGHUP; final signal {final_signal}",
-            survivors.len()
+            escalated.len()
         );
     }
 }
@@ -3182,7 +3222,8 @@ mod phase09_02 {
         }
 
         signal_process_group(pgid, SIGHUP).unwrap();
-        let stage = escalate_process_groups(&[pgid], Duration::from_millis(200));
+        let (stage, _) =
+            escalate_process_groups(&[KillTarget::Group(pgid)], Duration::from_millis(200));
         assert_eq!(
             stage,
             KillStage::Kill,
@@ -3199,15 +3240,58 @@ mod phase09_02 {
 
     #[test]
     fn phase09_02_escalation_warn_line_matches_d11_format() {
-        assert_eq!(escalation_warn_line(4242, KillStage::Hangup), None);
+        let group = [KillTarget::Group(4242)];
+        assert_eq!(escalation_warn_line(&group, KillStage::Hangup), None);
+        assert_eq!(escalation_warn_line(&[], KillStage::Kill), None);
         assert_eq!(
-            escalation_warn_line(4242, KillStage::Terminate),
+            escalation_warn_line(&group, KillStage::Terminate),
             Some("[terminal] pgid 4242 survived SIGHUP; escalated to SIGTERM".to_string())
         );
         assert_eq!(
-            escalation_warn_line(4242, KillStage::Kill),
+            escalation_warn_line(&group, KillStage::Kill),
             Some("[terminal] pgid 4242 survived SIGHUP; escalated to SIGKILL".to_string())
         );
+        assert_eq!(
+            escalation_warn_line(
+                &[KillTarget::Leader(4241), KillTarget::Group(4242)],
+                KillStage::Kill
+            ),
+            Some(
+                "[terminal] pid 4241, pgid 4242 survived SIGHUP; escalated to SIGKILL".to_string()
+            )
+        );
+    }
+
+    #[test]
+    fn phase09_02_ladder_reports_only_targets_that_outlived_sighup() {
+        let tempdir = tempfile::tempdir().unwrap();
+        let marker = tempdir.path().join("ready");
+        let trapping = spawn_direct_trapping(&format!(
+            "trap '' HUP; : > {marker}; while :; do sleep 1; done",
+            marker = marker.display()
+        ));
+        let plain = spawn_direct_trapping("while :; do sleep 1; done");
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !marker.exists() {
+            assert!(
+                Instant::now() < deadline,
+                "direct-spawn child never signaled readiness"
+            );
+            thread::sleep(Duration::from_millis(20));
+        }
+
+        let targets = [KillTarget::Group(plain), KillTarget::Leader(trapping)];
+        for target in targets {
+            signal_process_group(target.pgid(), SIGHUP).unwrap();
+        }
+        let (stage, escalated) = escalate_process_groups(&targets, Duration::from_millis(500));
+        assert_eq!(stage, KillStage::Terminate);
+        assert_eq!(
+            escalated,
+            vec![KillTarget::Leader(trapping)],
+            "only the SIGHUP-trapping target needed escalation; the plain one died at SIGHUP"
+        );
+        assert!(wait_until_group_gone(trapping, Duration::from_secs(3)));
     }
 
     #[test]
@@ -3572,5 +3656,186 @@ mod phase09_02 {
         );
 
         let _ = signal_process_group(bg_pgid, SIGKILL);
+    }
+
+    // PR #361 review: agent tabs exec the CLI directly as the leader and
+    // wrapper tabs run `sh -c`, so there is no job control and a `nohup cmd &`
+    // the leader starts stays in the leader's own process group. The ladder
+    // must escalate the leader pid only, never that whole group, or the
+    // nohup'd job dies at SIGTERM (D-09: nohup/disown jobs survive).
+
+    /// Live, non-zombie check for one pid, independent of the ladder's own
+    /// probes: `ps` prints nothing for a reaped pid and `Z...` for a zombie.
+    fn pid_alive(pid: u32) -> bool {
+        std::process::Command::new("ps")
+            .args(["-o", "stat=", "-p", &pid.to_string()])
+            .output()
+            .map(|output| {
+                let stat = String::from_utf8_lossy(&output.stdout);
+                let stat = stat.trim();
+                !stat.is_empty() && !stat.starts_with('Z')
+            })
+            .unwrap_or(false)
+    }
+
+    fn wait_until_pid_gone(pid: u32, timeout: Duration) -> bool {
+        let deadline = Instant::now() + timeout;
+        while pid_alive(pid) {
+            if Instant::now() >= deadline {
+                return false;
+            }
+            thread::sleep(Duration::from_millis(50));
+        }
+        true
+    }
+
+    /// Blocks until no tab-close ladder thread is still running.
+    fn wait_for_ladders_done(app: &TestApp) {
+        let state = app.state::<TerminalState>();
+        let deadline = Instant::now() + Duration::from_secs(8);
+        while !state.escalations.lock().unwrap().is_empty() {
+            assert!(Instant::now() < deadline, "tab-close ladder never finished");
+            thread::sleep(Duration::from_millis(50));
+        }
+    }
+
+    /// Spawns a `/bin/sh -c` leader (no job control) that starts
+    /// `nohup sleep 600 &` and then runs `tail`, which must print `marker`.
+    /// Returns (handle, leader pid, nohup'd child pid).
+    fn spawn_nohup_leader(
+        app: &TestApp,
+        session_id: &str,
+        tail: &str,
+        marker: &str,
+        pid_file: &Path,
+    ) -> (TerminalSessionHandle, u32, u32) {
+        let script = format!(
+            "nohup sleep 600 </dev/null >/dev/null 2>&1 & echo $! > {pid}; {tail}",
+            pid = pid_file.display()
+        );
+        let generation = run(spawn_session(
+            app.clone(),
+            sh_args(session_id.to_string(), &script),
+        ))
+        .unwrap();
+        let handle = current(session_id.to_string(), generation);
+        wait_for_marker(app, &handle, marker);
+        let leader = process_group_of(app, session_id).expect("process group captured at spawn");
+        let child = std::fs::read_to_string(pid_file)
+            .ok()
+            .and_then(|contents| contents.trim().parse::<u32>().ok())
+            .expect("the pid file is written before the marker is echoed");
+        assert_eq!(
+            read_pgid(child),
+            Some(leader),
+            "precondition: without job control the nohup'd child must share the leader's \
+             process group -- if this fails the test fixture, not the fix, is wrong"
+        );
+        (handle, leader, child)
+    }
+
+    fn kill_pid(pid: u32) {
+        let _ = std::process::Command::new("kill")
+            .args(["-9", &pid.to_string()])
+            .stderr(std::process::Stdio::null())
+            .status();
+    }
+
+    #[test]
+    fn phase09_02_nohup_child_of_non_job_control_leader_survives_tab_close() {
+        let app = app();
+        let app = app.handle().clone();
+        let tempdir = tempfile::tempdir().unwrap();
+        let (handle, leader, child) = spawn_nohup_leader(
+            &app,
+            "phase09-02-nohup-tab-close",
+            "echo NOHUP-READY; wait",
+            "NOHUP-READY",
+            &tempdir.path().join("nohup.pid"),
+        );
+
+        run(kill_session(app.clone(), handle)).unwrap();
+        assert!(
+            wait_until_pid_gone(leader, Duration::from_secs(8)),
+            "the leader {leader} must die on tab close"
+        );
+        wait_for_ladders_done(&app);
+
+        let survived = pid_alive(child);
+        kill_pid(child);
+        assert!(
+            survived,
+            "a nohup'd child {child} in the non-job-control leader's group must survive the \
+             whole tab-close ladder (D-09)"
+        );
+    }
+
+    #[test]
+    fn phase09_02_hup_trapping_non_job_control_leader_is_escalated_but_nohup_child_survives() {
+        let app = app();
+        let app = app.handle().clone();
+        let tempdir = tempfile::tempdir().unwrap();
+        let (handle, leader, child) = spawn_nohup_leader(
+            &app,
+            "phase09-02-nohup-trap-tab-close",
+            "trap '' HUP; echo TRAP-READY; while :; do sleep 1; done",
+            "TRAP-READY",
+            &tempdir.path().join("nohup.pid"),
+        );
+
+        run(kill_session(app.clone(), handle)).unwrap();
+        thread::sleep(Duration::from_secs(1));
+        assert!(
+            pid_alive(leader),
+            "a SIGHUP-trapping leader must still be alive ~1s later (the trap made escalation necessary)"
+        );
+        assert!(
+            wait_until_pid_gone(leader, Duration::from_secs(8)),
+            "the SIGHUP-trapping leader {leader} must be escalated and gone (REL-01)"
+        );
+        wait_for_ladders_done(&app);
+
+        let survived = pid_alive(child);
+        kill_pid(child);
+        assert!(
+            survived,
+            "escalating a SIGHUP-trapping leader must hit the leader pid only, not the nohup'd \
+             child {child} in its group (D-09)"
+        );
+    }
+
+    #[test]
+    fn phase09_02_nohup_child_of_non_job_control_leader_survives_quit_sweep() {
+        let app = app();
+        let app = app.handle().clone();
+        let state = app.state::<TerminalState>().inner().clone();
+        let tempdir = tempfile::tempdir().unwrap();
+        let (_handle, leader, child) = spawn_nohup_leader(
+            &app,
+            "phase09-02-nohup-quit-sweep",
+            "trap '' HUP; echo TRAP-READY; while :; do sleep 1; done",
+            "TRAP-READY",
+            &tempdir.path().join("nohup.pid"),
+        );
+
+        let start = Instant::now();
+        shutdown_all_sessions(&state);
+        let elapsed = start.elapsed();
+        assert!(
+            elapsed < Duration::from_secs(3),
+            "the quit sweep must finish inside the 3s quit budget (D-12); took {elapsed:?}"
+        );
+        assert!(
+            wait_until_pid_gone(leader, Duration::from_secs(2)),
+            "the SIGHUP-trapping leader {leader} must be gone after the quit sweep"
+        );
+
+        let survived = pid_alive(child);
+        kill_pid(child);
+        assert!(
+            survived,
+            "the quit sweep must escalate the leader pid only, not the nohup'd child {child} \
+             in its group (D-09)"
+        );
     }
 }
