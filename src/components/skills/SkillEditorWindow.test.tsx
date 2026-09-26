@@ -330,6 +330,58 @@ describe("SkillEditorWindow quit-check listener", () => {
   });
 });
 
+// PR #361 merge-gate review: a confirm sheet does not block the app menu, so
+// a Cmd+Q while the editor's own close sheet is up used to stack a quit-check
+// sheet on the same window, leaving both dead (the round-3 symptom) and main's
+// already-acked check waiting forever.
+describe("SkillEditorWindow confirm sheets", () => {
+  it("never opens a second sheet while one is up; a quit-check waits for it", async () => {
+    await mount();
+    act(() => {
+      dirtyTextarea();
+    });
+    const answers: Array<(value: boolean) => void> = [];
+    mocks.dialogConfirm.mockImplementation(
+      () => new Promise<boolean>((resolve) => answers.push(resolve)),
+    );
+
+    const event = makeEvent();
+    let closing!: Promise<void>;
+    await act(async () => {
+      closing = capturedCloseHandler()(event) as Promise<void>;
+      await Promise.resolve();
+    });
+    await act(async () => {
+      handlersFor(SKILL_EDITOR_QUIT_CHECK_EVENT).forEach((handler) =>
+        handler({ payload: { attempt: 1 } }),
+      );
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(mocks.dialogConfirm).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      answers[0](false);
+      await closing;
+    });
+    expect(event.preventDefault).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(mocks.dialogConfirm).toHaveBeenCalledTimes(2);
+
+    await act(async () => {
+      answers[1](false);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(mocks.emit).toHaveBeenCalledWith(SKILL_EDITOR_QUIT_CHECK_RESPONSE_EVENT, {
+      proceed: false,
+    });
+  });
+});
+
 describe("SkillEditorWindow app.quit menu fallback (review finding #2, round 2)", () => {
   it("exits the process when nothing is dirty", async () => {
     await mount();

@@ -216,8 +216,10 @@ failure keeping Maru open rather than dropping the edit:
     Maru quits within about 3 s and `pgrep -f "sleep 600"` prints nothing
     (09-02's terminal sweep runs only after a guard-approved close).
 11. Open a shell tab, run `trap '' HUP; while :; do sleep 1; done`, then close
-    the tab (not the whole app). Expected: within about 3 s
-    `pgrep -f "sleep 1"` shows none of its processes.
+    the tab (not the whole app). Expected: within about 5 s
+    `pgrep -f "sleep 1"` shows none of its processes. The trap makes the
+    interactive shell itself ignore SIGHUP, and bash ignores SIGTERM, so it
+    ends only at the ladder's SIGKILL step, about 4 s after the close.
 12. Open the Documents list after steps 8-9. Expected: no `.maru/recovery`
     file appears in it.
 

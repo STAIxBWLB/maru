@@ -139,6 +139,12 @@ export interface SkillEditorWindowProps {
   initialSkillId: string | null;
 }
 
+// One sheet at a time (PR #361 merge-gate review): each confirm is a sheet on
+// this window, a sheet does not block the app menu, and a second sheet stacked
+// on an open one leaves both dead — so a Cmd+Q while the close sheet is up
+// waits for it instead of opening its own on top.
+let confirmQueue: Promise<unknown> = Promise.resolve();
+
 /**
  * Asks the native confirm dialog plugin, not `window.confirm` (review
  * finding #2, round 2, owner-observed regression): in this app's WKWebView,
@@ -149,8 +155,12 @@ export interface SkillEditorWindowProps {
  * the canonical example).
  */
 async function confirmDestructive(message: string): Promise<boolean> {
-  const { confirm } = await loadDialogModule();
-  return confirm(message, { kind: "warning" });
+  const answer = confirmQueue.then(async () => {
+    const { confirm } = await loadDialogModule();
+    return confirm(message, { kind: "warning" });
+  });
+  confirmQueue = answer.catch(() => undefined);
+  return answer;
 }
 
 export function SkillEditorWindow({ initialWorkPath, initialSkillId }: SkillEditorWindowProps) {

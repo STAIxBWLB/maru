@@ -48,8 +48,9 @@ narrowed Playwright trace (run 36146017939), v1.0 phases 01-03 VALIDATION.md are
 reconciled to `validated`, and v1.0 Phase 02 has its security report.
 
 Phase 9 (Durability and Session Lifecycle) completed 2026-09-26, the last v1.1 phase:
-closing a terminal tab or quitting now kills a SIGHUP-trapping child through its
-process group and the PTY's foreground job group while disowned jobs survive;
+closing a terminal tab or quitting now kills a SIGHUP-trapping leader (SIGTERM/SIGKILL
+to its pid) and the PTY's foreground job group, while disowned jobs and `nohup`'d
+children of a leader without job control survive;
 every autosave surface saves on unmount and quit through one shared saver; Cmd+Q
 and window close share one guard with a 3 s flush budget and a save-failed dialog;
 a failed teardown save keeps a `.maru/recovery/` copy and raises a toast. Real-app

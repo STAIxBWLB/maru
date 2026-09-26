@@ -545,6 +545,27 @@ Two observations, both handled:
 
 ---
 
+## Merge-gate review (full head `9138b0e4`)
+
+A separate read-only reviewer covered all 63 changed files (31 through OCR, 32 read directly).
+
+- **Important, fixed:** the skill editor could still stack two confirm sheets. Only quit-checks
+  were deduplicated against each other, so a Cmd+Q while the editor's own close (or switch, or
+  Save As) sheet was up opened a quit-check sheet on top of it: both went dead, and main's
+  already-acked check waited forever. Every confirm in the editor now runs through one queue, so
+  a second one waits for the open sheet instead. Test: `SkillEditorWindow.test.tsx` "confirm
+  sheets". Checked on the dev build: with the close sheet up, Cmd+Q left one sheet; Cancel brought
+  up the queued quit-check sheet, whose Cancel kept both windows open; a fresh Cmd+Q then showed
+  one sheet and OK quit within 1 s, with `SKILL.md` untouched.
+- **Nits, fixed:** the `write_recovery_copy` evidence in `docs/performance/phase08-22.json` still
+  described `ensure_maru_dir` and 8 tests; `PROJECT.md` and `09-VERIFICATION.md` row 7 now state
+  the D-09 exception to "no orphans"; `docs/native-e2e.md` item 11 expects about 5 s, since a
+  shell that ignores SIGHUP and SIGTERM ends only at SIGKILL.
+- **Nit, accepted:** a Cmd+Q that joins an in-flight relaunch check (attempt `null`) can get one
+  extra prompt at main's re-ask. It only adds a prompt, never skips one.
+
+---
+
 ## Checkpoint
 
 After round 1's fixes, the orchestrator/owner should run the real-app checkpoint described in the
