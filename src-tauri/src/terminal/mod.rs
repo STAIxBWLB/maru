@@ -917,31 +917,6 @@ fn process_group_alive(pgid: u32) -> bool {
     signal_process_group(pgid, 0).unwrap_or(true)
 }
 
-#[cfg(unix)]
-fn wait_for_group_exit(pgid: u32, grace: Duration) -> bool {
-    let deadline = std::time::Instant::now() + grace;
-    loop {
-        if !process_group_alive(pgid) {
-            return true;
-        }
-        if std::time::Instant::now() >= deadline {
-            return false;
-        }
-        thread::sleep(ESCALATION_POLL);
-    }
-}
-
-/// Runs the escalation ladder assuming SIGHUP was already sent to `pgid`.
-/// Polls for the group's death for up to `grace`, then sends SIGTERM and
-/// polls again for up to `grace`, then sends SIGKILL. Returns the stage the
-/// group was finally observed gone at (or `Kill` if SIGKILL was needed).
-/// A thin single-target wrapper around `escalate_process_groups`, kept as
-/// its own name for the direct-spawn test that already calls it this way.
-#[cfg(unix)]
-fn escalate_process_group(pgid: u32, grace: Duration) -> KillStage {
-    escalate_process_groups(&[pgid], grace)
-}
-
 /// Runs one shared SIGHUP -> SIGTERM -> SIGKILL ladder against every pgid in
 /// `pgids` together, assuming SIGHUP was already sent to each. A kill target
 /// is never just the terminal child's own leader group (REL-01): an
@@ -3207,13 +3182,13 @@ mod phase09_02 {
         }
 
         signal_process_group(pgid, SIGHUP).unwrap();
-        let stage = escalate_process_group(pgid, Duration::from_millis(200));
+        let stage = escalate_process_groups(&[pgid], Duration::from_millis(200));
         assert_eq!(
             stage,
             KillStage::Kill,
             "a child trapping both HUP and TERM must only die at the SIGKILL stage"
         );
-        // escalate_process_group returns as soon as SIGKILL is sent, without
+        // escalate_process_groups returns as soon as SIGKILL is sent, without
         // polling for the kernel to finish tearing the process down (and the
         // waiter thread to reap it) -- give that a brief window here.
         assert!(
