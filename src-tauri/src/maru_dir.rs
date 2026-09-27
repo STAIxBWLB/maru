@@ -3389,7 +3389,7 @@ mod phase09_04 {
         for index in 0..105u32 {
             fs::write(dir.join(format!("20260101-{index:06}-fixture.txt")), "x").unwrap();
         }
-        prune_recovery_dir(&dir, RECOVERY_MAX_FILES, "20260101-000000-fixture.txt");
+        prune_recovery_dir(&dir, RECOVERY_MAX_FILES, "20260101-000104-fixture.txt");
         let remaining: Vec<String> = fs::read_dir(&dir)
             .unwrap()
             .filter_map(Result::ok)
@@ -3401,6 +3401,12 @@ mod phase09_04 {
             .filter(|name| is_recovery_file_name(name))
             .count();
         assert_eq!(pattern_count, RECOVERY_MAX_FILES);
+        // Newest first: the five oldest go, the newest (just written) stays.
+        for index in 0..5u32 {
+            assert!(!remaining.contains(&format!("20260101-{index:06}-fixture.txt")));
+        }
+        assert!(remaining.contains(&"20260101-000104-fixture.txt".to_string()));
+        assert!(remaining.contains(&"20260101-000005-fixture.txt".to_string()));
     }
 
     // #373: names carry local time, so after a DST fall-back the file just

@@ -90,7 +90,6 @@ export function TodayBrainDump({
 
   const save = useCallback(
     async (value: BrainDumpSaveValue) => {
-      if (!snapshot) return;
       // Review finding #5: TodayContext's mutate() resolves null for two
       // different reasons — a genuine failure, or a deliberate skip when
       // TodayPane's pane identity no longer matches (the workspace changed
@@ -98,16 +97,20 @@ export function TodayBrainDump({
       // against the new workspace for an edit that belongs to the old one.
       // #369: but do not drop it either — mutate can only write to the
       // current workspace, so keep it as a recovery copy in the workspace it
-      // belongs to, with the usual notice, and never in the new one.
+      // belongs to, with the usual notice, and never in the new one. This
+      // runs before the snapshot check: TodayPane clears the snapshot on a
+      // switch, and B may never load one (Today off, failed load). Awaited so
+      // a quit flush does not report clean before the copy is written.
       if (value.workPath !== workPath) {
         setStatus("idle");
-        void reportTeardownSaveFailure(
+        await reportTeardownSaveFailure(
           brainDumpRecoveryTarget(value),
           new Error(t("today.prepare.braindump.workspaceChanged")),
           t,
         );
         return;
       }
+      if (!snapshot) return;
       setStatus("saving");
       const next = await mutate({ type: "setBrainDump", brainDump: value.text });
       if (next) {

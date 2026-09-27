@@ -240,11 +240,13 @@ describe("TodayPrepare", () => {
     const mutate = vi.fn<(mutation: TodayMutation) => Promise<TodaySnapshot | null>>(
       async () => ({ ...SNAPSHOT, revision: "rev-2" }),
     );
+    // TodayPane clears the snapshot on every workPath change, so B has none
+    // until its own load resolves (and never, if Today is off there).
     const contextValueFor = (workPath: string): TodayContextValue => ({
       workPath,
       settings: { ...DEFAULT_MARU_SETTINGS.tasks.today, autoPlan: false },
       timezone: "Asia/Seoul",
-      snapshot: SNAPSHOT,
+      snapshot: workPath === "/tmp/workspace-a" ? SNAPSHOT : null,
       loading: false,
       mutate,
       reload: async () => SNAPSHOT,
