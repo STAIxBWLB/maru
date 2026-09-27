@@ -6,8 +6,18 @@ import { createRoot, type Root } from "react-dom/client";
 import { act } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+const mocks = vi.hoisted(() => ({
+  siteViewOpenExternal: vi.fn(async () => undefined),
+}));
+
 vi.mock("../lib/markdown", () => ({
-  renderMarkdown: () => '<p>reference <mark class="find-mark find-mark-current">match</mark></p>',
+  renderMarkdown: () =>
+    '<p>reference <mark class="find-mark find-mark-current">match</mark> ' +
+    '<a href="https://example.com/ref">external</a></p>',
+}));
+
+vi.mock("../lib/siteView", () => ({
+  siteViewOpenExternal: mocks.siteViewOpenExternal,
 }));
 
 import { EditorPane } from "./EditorPane";
@@ -69,6 +79,7 @@ describe("EditorPane preview identity contract", () => {
     container = document.createElement("div");
     document.body.appendChild(container);
     resetEditorPaneStoreForTests();
+    mocks.siteViewOpenExternal.mockClear();
   });
 
   afterEach(async () => {
@@ -94,6 +105,23 @@ describe("EditorPane preview identity contract", () => {
 
     expect(container.querySelector("mark.kg-ref-mark")).toBe(retainedMark);
     expect(container.querySelector("mark.find-mark.find-mark-current")).toBeInstanceOf(HTMLElement);
+  });
+
+  it("opens preview http(s) links externally instead of navigating the webview", async () => {
+    root = createRoot(container);
+    await act(async () => {
+      renderPane(root!);
+    });
+    const anchor = container.querySelector<HTMLAnchorElement>(
+      "article.preview-surface a[href^=\"https://\"]",
+    );
+    expect(anchor).toBeInstanceOf(HTMLAnchorElement);
+
+    const event = new MouseEvent("click", { bubbles: true, cancelable: true });
+    anchor!.dispatchEvent(event);
+
+    expect(event.defaultPrevented).toBe(true);
+    expect(mocks.siteViewOpenExternal).toHaveBeenCalledWith("https://example.com/ref");
   });
 
   it("keeps preview markup React-owned and memoized only on previewHtml", async () => {
