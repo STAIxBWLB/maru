@@ -81,6 +81,8 @@ pub struct StudioHwpFieldsState {
     #[serde(default)]
     pub values: BTreeMap<String, String>,
     #[serde(default)]
+    pub cleared_keys: Vec<String>,
+    #[serde(default)]
     pub last_output_path: Option<String>,
     #[serde(default)]
     pub form_filled_count: u32,
@@ -515,6 +517,7 @@ mod tests {
                 template_path: None,
                 fields: Vec::new(),
                 values: BTreeMap::new(),
+                cleared_keys: Vec::new(),
                 last_output_path: None,
                 form_filled_count: 0,
                 unmatched_fields: Vec::new(),
@@ -557,6 +560,48 @@ mod tests {
         assert!(studio_state_read(root, "doc-123".to_string())
             .unwrap()
             .is_none());
+    }
+
+    #[test]
+    fn hwp_fields_cleared_keys_survive_save_and_read() {
+        let dir = tempdir().unwrap();
+        let root = dir.path().to_string_lossy().to_string();
+        let mut state = sample_state("doc-cleared");
+        state.hwp_fields.cleared_keys = vec!["agency".to_string(), "period".to_string()];
+        studio_state_save(root.clone(), state).unwrap();
+
+        let read = studio_state_read(root, "doc-cleared".to_string())
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            read.hwp_fields.cleared_keys,
+            vec!["agency".to_string(), "period".to_string()]
+        );
+    }
+
+    #[test]
+    fn legacy_state_without_cleared_keys_still_loads() {
+        let dir = tempdir().unwrap();
+        let root = dir.path().to_string_lossy().to_string();
+        studio_state_save(root.clone(), sample_state("doc-legacy")).unwrap();
+        let path = dir
+            .path()
+            .join(".maru")
+            .join("studio")
+            .join("doc-legacy")
+            .join("state.json");
+        let body = fs::read_to_string(&path).unwrap();
+        let mut json: serde_json::Value = serde_json::from_str(&body).unwrap();
+        json["hwpFields"]
+            .as_object_mut()
+            .unwrap()
+            .remove("clearedKeys");
+        fs::write(&path, serde_json::to_string_pretty(&json).unwrap()).unwrap();
+
+        let read = studio_state_read(root, "doc-legacy".to_string())
+            .unwrap()
+            .unwrap();
+        assert!(read.hwp_fields.cleared_keys.is_empty());
     }
 
     #[test]
@@ -707,6 +752,7 @@ mod phase08_20 {
                 template_path: None,
                 fields: Vec::new(),
                 values: BTreeMap::new(),
+                cleared_keys: Vec::new(),
                 last_output_path: None,
                 form_filled_count: 0,
                 unmatched_fields: Vec::new(),

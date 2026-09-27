@@ -100,6 +100,27 @@ describe("studio helpers", () => {
     expect(state.template?.hwpxTemplateKey).toBe("보고서");
   });
 
+  it("keeps persisted cleared HWP field keys through normalization", () => {
+    const initial = createInitialStudioState(document());
+    const state = normalizeStudioState({
+      ...initial,
+      hwpFields: {
+        ...initial.hwpFields,
+        clearedKeys: ["agency", "period"],
+      },
+    });
+    expect(state.hwpFields.clearedKeys).toEqual(["agency", "period"]);
+  });
+
+  it("defaults clearedKeys for states saved before the field existed", () => {
+    const legacy = JSON.parse(JSON.stringify(createInitialStudioState(document()))) as ReturnType<
+      typeof createInitialStudioState
+    >;
+    delete (legacy.hwpFields as Partial<typeof legacy.hwpFields>).clearedKeys;
+    const state = normalizeStudioState(legacy);
+    expect(state.hwpFields.clearedKeys).toEqual([]);
+  });
+
   it("routes hwpx_skill natively only while no workspace template path is typed", () => {
     expect(nativeHwpTemplateSource("hwpx_skill", null)).toBe("hwpx_skill");
     expect(nativeHwpTemplateSource("hwpx_skill", "hwp-cli:plan")).toBe("hwpx_skill");

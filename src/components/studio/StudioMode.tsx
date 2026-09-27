@@ -55,6 +55,8 @@ import {
   studioStateSave,
   hwpCliTemplateFields,
   hwpCliTemplateFill,
+  hwpBlankRequiredLabels,
+  hwpFillValues,
   nativeHwpTemplateSource,
   templateFillHwpx,
   templateGetFields,
@@ -476,6 +478,7 @@ export function StudioMode({
           templatePath: null,
           fields: [],
           values: {},
+          clearedKeys: [],
           lastOutputPath: null,
           formFilledCount: 0,
           unmatchedFields: [],
@@ -686,9 +689,12 @@ export function StudioMode({
     const isCurrent = beginAdmittedFlow(workspace);
     setBusyAction("hwp-fill");
     try {
-      const values = Object.fromEntries(
-        state.hwpFields.fields.map((field) => [field.key, state.hwpFields.values[field.key] ?? ""]),
-      );
+      const values = hwpFillValues(state.hwpFields);
+      if (Object.keys(values).length === 0) {
+        setError(t("studio.hwp.error.noValues"));
+        return;
+      }
+      const blankRequired = hwpBlankRequiredLabels(state.hwpFields);
       let response: TemplateFillResponse;
       const templateSource = nativeHwpTemplateSource(state.template?.source, templatePath);
       if (templateSource) {
@@ -720,7 +726,9 @@ export function StudioMode({
           formFilledCount: response.formFilledCount,
           unmatchedFields: response.unmatchedFields,
           validationChecks: response.validationChecks,
-          warnings: response.warnings,
+          warnings: blankRequired.length
+            ? [...response.warnings, t("studio.hwp.blankRequired", { fields: blankRequired.join(", ") })]
+            : response.warnings,
         },
       }));
     } catch (err) {
@@ -1458,29 +1466,61 @@ function HwpStep({
 
       {fieldCount > 0 ? (
         <div className="studio-hwp-fields">
-          {state.hwpFields.fields.map((field) => (
-            <Field
-              key={field.key}
-              label={`${field.label} (${field.occurrences})`}
-              helper={fieldHelper(field, t)}
-            >
-              <TextArea
-                value={state.hwpFields.values[field.key] ?? ""}
-                onChange={(event) =>
-                  onPatch((prev) => ({
-                    ...prev,
-                    hwpFields: {
-                      ...prev.hwpFields,
-                      values: {
-                        ...prev.hwpFields.values,
-                        [field.key]: event.target.value,
-                      },
-                    },
-                  }))
+          {state.hwpFields.fields.map((field) => {
+            const cleared = state.hwpFields.clearedKeys.includes(field.key);
+            return (
+              <Field
+                key={field.key}
+                label={`${field.label} (${field.occurrences})`}
+                helper={
+                  cleared
+                    ? [fieldHelper(field, t), t("studio.hwp.field.cleared")].filter(Boolean).join(" · ")
+                    : fieldHelper(field, t)
                 }
-              />
-            </Field>
-          ))}
+              >
+                <div className="studio-hwp-field-row">
+                  <TextArea
+                    value={cleared ? "" : state.hwpFields.values[field.key] ?? ""}
+                    disabled={cleared}
+                    onChange={(event) =>
+                      onPatch((prev) => ({
+                        ...prev,
+                        hwpFields: {
+                          ...prev.hwpFields,
+                          values: {
+                            ...prev.hwpFields.values,
+                            [field.key]: event.target.value,
+                          },
+                        },
+                      }))
+                    }
+                  />
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    icon={cleared ? <RefreshCcw size={12} /> : <Trash2 size={12} />}
+                    aria-pressed={cleared}
+                    aria-label={t(cleared ? "studio.hwp.field.undoClear" : "studio.hwp.field.clear", {
+                      field: field.label,
+                    })}
+                    onClick={() =>
+                      onPatch((prev) => ({
+                        ...prev,
+                        hwpFields: {
+                          ...prev.hwpFields,
+                          clearedKeys: cleared
+                            ? prev.hwpFields.clearedKeys.filter((key) => key !== field.key)
+                            : [...prev.hwpFields.clearedKeys, field.key],
+                        },
+                      }))
+                    }
+                  >
+                    {t(cleared ? "studio.hwp.field.undoClearShort" : "studio.hwp.field.clearShort")}
+                  </Button>
+                </div>
+              </Field>
+            );
+          })}
         </div>
       ) : (
         <div className="studio-placeholder-block">
