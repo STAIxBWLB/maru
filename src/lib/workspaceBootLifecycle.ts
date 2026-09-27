@@ -45,6 +45,7 @@ interface WorkspaceBootLifecycleOptions {
   browserPasskeyBuildRef: MutableRefObject<boolean>;
   todayAutoOpenPathRef: MutableRefObject<string | null>;
   todayAutoOpenModeRef: MutableRefObject<MaruAppMode | null>;
+  userPickedAppModeRef: MutableRefObject<MaruAppMode | null>;
   lastOpenKey(workspacePath: string): string;
   loadWorkspace(workspacePath: string, visibility: WorkspaceVisibility, lastRelPath?: string | null): Promise<void>;
   setBooting(booting: boolean): void;
@@ -65,6 +66,7 @@ export function useWorkspaceBootLifecycle({
   browserPasskeyBuildRef,
   todayAutoOpenPathRef,
   todayAutoOpenModeRef,
+  userPickedAppModeRef,
   lastOpenKey,
   loadWorkspace,
   setBooting,
@@ -111,7 +113,9 @@ export function useWorkspaceBootLifecycle({
           try {
             bootSettings = await measureStartup("settings:startup-read", () => readMaruSettings(settingsPath));
             updateShellSettings(bootSettings);
-            if (todayAutoOpenPathRef.current === null) {
+            // A mode the user picked while boot was still reading the
+            // registry wins over the stored mode (#387).
+            if (todayAutoOpenPathRef.current === null && userPickedAppModeRef.current === null) {
               setAppMode(bootAppMode({
                 storedMode: bootSettings.ui.activeAppMode,
                 browserPasskeyBuild: browserPasskeyBuildRef.current,
@@ -154,7 +158,9 @@ export function useWorkspaceBootLifecycle({
                 dayState: snapshot.dayState,
                 explicitMode: false,
               });
-              if (decision) {
+              // An explicit pick made while the auto-open IO was in flight
+              // overrides the launch route (#387).
+              if (decision && userPickedAppModeRef.current === null) {
                 planningModeController.setTodayRoute(decision.route);
                 setAppMode(decision.mode);
                 todayAutoOpenPathRef.current = initialPath;

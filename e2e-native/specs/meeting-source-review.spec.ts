@@ -70,44 +70,24 @@ async function storedAppMode(): Promise<string | undefined> {
 }
 
 /**
- * Lands the app on Meetings deterministically (#368). A mode click that lands
- * while the app is still booting, before the workspace settings are writable,
- * lives only in memory: boot and settings hydration then re-apply the stored
- * mode and .meetings-pane never renders. Even a persisted click flickers back
- * to the stored mode until its own save echo arrives. So select Meetings until
- * the choice is on disk, then reload: the fresh boot reads "meetings" as the
- * stored mode and nothing is left to race.
+ * Lands the app on Meetings deterministically (#368). The click deliberately
+ * lands as early as possible — while the app may still be booting, before the
+ * workspace settings are writable — and #387 pins the app-side contract: the
+ * pick must survive boot, settings hydration, and the settings-save echo, and
+ * reach the stored settings without a second click.
  */
 async function openMeetings(): Promise<void> {
   const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
   await waitFor(MEETINGS_BUTTON);
-  let deadline = Date.now() + 30_000;
+  await click(MEETINGS_BUTTON);
+  await waitFor(".meetings-pane");
+  const deadline = Date.now() + 30_000;
   while ((await storedAppMode()) !== "meetings") {
-    assert.ok(Date.now() < deadline, "selecting Meetings never reached the stored settings");
-    await click(MEETINGS_BUTTON);
-    const settle = Date.now() + 3_000;
-    while (Date.now() < settle && (await storedAppMode()) !== "meetings") await sleep(250);
+    assert.ok(Date.now() < deadline, "the boot-time Meetings pick never reached the stored settings");
+    await sleep(250);
   }
-  // location.reload() returns before the old document unloads (the embedded
-  // driver's refresh is the same call, with no load wait), so tag the old
-  // document and poll until an untagged one shows the pane. Short sync
-  // scripts, not one executeAsync: a script can land mid-navigation.
-  await browser.execute(() => {
-    (window as { __meetingsReloadPending?: boolean }).__meetingsReloadPending = true;
-    window.location.reload();
-  });
-  deadline = Date.now() + 20_000;
-  for (;;) {
-    const landed = await browser
-      .execute(() => {
-        const pane = document.querySelector<HTMLElement>(".meetings-pane");
-        return !(window as { __meetingsReloadPending?: boolean }).__meetingsReloadPending && pane?.offsetParent != null;
-      })
-      .catch(() => false);
-    if (landed) return;
-    assert.ok(Date.now() < deadline, "the reloaded app never landed on Meetings");
-    await sleep(200);
-  }
+  // The stored mode caught up; the pane must still be showing the pick.
+  await waitFor(".meetings-pane");
 }
 
 async function stateFile(): Promise<string> {
