@@ -28,7 +28,10 @@ fn relevant_path(path: &Path, root: &Path) -> bool {
     if crate::paths::is_under_generated_dir(rel) {
         return false;
     }
-    if rel.starts_with(".maru/cache") || rel.starts_with(".maru/versions") {
+    if rel.starts_with(".maru/cache")
+        || rel.starts_with(".maru/versions")
+        || rel.starts_with(".maru/recovery")
+    {
         return false;
     }
     if rel == Path::new(".maruignore") {
@@ -364,6 +367,18 @@ mod tests {
         ));
         assert!(!relevant_path(
             Path::new("/work/node_modules/readme.md"),
+            root
+        ));
+    }
+
+    // A recovery copy keeps the document's extension (maru_dir.rs
+    // recovery_file_name) but is not a vault document: writing one during a
+    // failed quit save must not fire an index delta.
+    #[test]
+    fn ignores_recovery_copies() {
+        let root = Path::new("/work");
+        assert!(!relevant_path(
+            Path::new("/work/.maru/recovery/20260927-101500-notes-1a2b3c4d.md"),
             root
         ));
     }

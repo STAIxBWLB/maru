@@ -254,7 +254,7 @@
    "disposition": "ISOLATED",
    "helperChain": [
     "src-tauri/src/vault_watcher.rs::ipc::start_vault_watcher owns the workspace_path String, clones the managed VaultWatcherState and awaits tauri::async_runtime::spawn_blocking calling src-tauri/src/vault_watcher.rs::start_vault_watcher inside the worker; a JoinError becomes the display-only start_vault_watcher_task_failed String.",
-    "src-tauri/src/vault_watcher.rs::start_vault_watcher canonicalizes the workspace root, registers the recursive notify watcher, spawns the 120ms debounce drain thread that filters paths through src-tauri/src/vault_watcher.rs::relevant_path (shared generated-dir prune, .maru cache exclusion and document-extension gate) and publishes the watcher under the state lock, replacing any previous watcher."
+    "src-tauri/src/vault_watcher.rs::start_vault_watcher canonicalizes the workspace root, registers the recursive notify watcher, spawns the 120ms debounce drain thread that filters paths through src-tauri/src/vault_watcher.rs::relevant_path (shared generated-dir prune, .maru cache, versions and recovery exclusions, and document-extension gate) and publishes the watcher under the state lock, replacing any previous watcher."
    ],
    "workerBoundary": "src-tauri/src/vault_watcher.rs::ipc::start_vault_watcher awaits tauri::async_runtime::spawn_blocking before any canonicalization or notify registration runs; only a JoinError maps to the display-only start_vault_watcher_task_failed String while the unit payload and every domain error string pass through unchanged; the owned state clone crosses the await, never a borrowed State or guard.",
    "syncCallers": [
