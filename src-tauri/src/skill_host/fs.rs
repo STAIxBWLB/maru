@@ -63,7 +63,7 @@ pub fn codex_home() -> Result<PathBuf, String> {
         return Ok(home.join(".codex"));
     }
     let home = home_dir()?;
-    Ok(resolve_codex_home(
+    require_absolute(resolve_codex_home(
         &home,
         std::env::var_os("CODEX_HOME").map(PathBuf::from),
     ))
@@ -73,6 +73,37 @@ fn resolve_codex_home(home: &Path, configured: Option<PathBuf>) -> PathBuf {
     configured
         .filter(|path| !path.as_os_str().is_empty())
         .unwrap_or_else(|| home.join(".codex"))
+}
+
+/// Explicit runtime roots stay isolated under hermetic test homes.
+pub fn agent_config_home(variable: &str, fallback: &str) -> Result<PathBuf, String> {
+    let home = install_root_base()?;
+    if test_maru_home_override().is_some()
+        || crate::paths::native_e2e_dir_override(crate::paths::NATIVE_E2E_HOME_VAR)?.is_some()
+    {
+        return require_absolute(home.join(fallback));
+    }
+    require_absolute(
+        std::env::var_os(variable)
+            .filter(|value| !value.is_empty())
+            .map(PathBuf::from)
+            .unwrap_or_else(|| home.join(fallback)),
+    )
+}
+
+pub fn opencode_home() -> Result<PathBuf, String> {
+    let base = agent_config_home("OPENCODE_CONFIG_DIR", ".config/opencode")?;
+    if test_maru_home_override().is_none()
+        && crate::paths::native_e2e_dir_override(crate::paths::NATIVE_E2E_HOME_VAR)?.is_none()
+        && std::env::var_os("OPENCODE_CONFIG_DIR")
+            .filter(|value| !value.is_empty())
+            .is_none()
+    {
+        if let Some(root) = std::env::var_os("XDG_CONFIG_HOME").filter(|value| !value.is_empty()) {
+            return require_absolute(PathBuf::from(root).join("opencode"));
+        }
+    }
+    Ok(base)
 }
 
 pub fn expand_tilde(input: &str) -> PathBuf {

@@ -361,6 +361,51 @@ cargo run --manifest-path src-tauri/Cargo.toml -p maru-cli --bin maru-cli -- ski
 cargo run --manifest-path src-tauri/Cargo.toml -p maru-cli --bin maru-cli -- skills sync --check --tools claude,codex --json
 ```
 
+### Selected-agent skill federation
+
+Maru owns generic skill sources, registry records, and deployment. External
+orchestrators such as dotfiles query the native CLI before requesting a selected
+operation (Maru issue #396, dotfiles-v2 issue #150):
+
+```bash
+maru skills capabilities --json
+maru skills list --json
+maru skills sync --check --tools claude,kimi --skills meeting-notes --json
+maru skills sync --apply --tools claude,kimi --skills meeting-notes --json
+```
+
+The capability response has `schemaVersion: 1`, `targets` containing `claude`,
+`codex`, `kimi`, `qwen`, `grok`, and `opencode`, and `selectedSync: true`, `list: true`.
+`list` returns flat `SkillRecord` fields plus `installable: boolean` and an optional
+`reason` for unavailable entries. The picker must offer only installable entries.
+Eligibility uses the same target-independent checks as selected sync: Maru-owned
+source, valid metadata, and existing source/skill paths. Target conflicts and
+profile divergence remain sync-preview checks. These list-only fields are never
+stored in the registry. Listing proceeds without refreshing sources, persisting migrations
+or writing the registry, or materializing bundled skills. Missing capability
+support requires the orchestrator to defer; it must not copy files itself.
+
+`--skills` accepts comma-separated unique names or exact IDs. Empty selectors,
+ambiguous names, catalog duplicate-name conflicts (including selection by ID),
+missing sources, native-plugin skills, and external inventory
+skills are rejected. Explicit selections reconcile only those skills and targets,
+preserving unrelated installs. Omitting `--skills` retains the existing whole
+Maru-owned catalog sync behavior. Neither command updates upstream sources.
+Conflicting directories or foreign links are preserved and reported as errors.
+
+Default skill roots are `~/.claude/skills`, `$CODEX_HOME/skills` (default
+`~/.codex/skills`), `$KIMI_CODE_HOME/skills` (default `~/.kimi-code/skills`),
+`~/.qwen/skills`, `~/.grok/skills`, and `$OPENCODE_CONFIG_DIR/skills` (default
+`$XDG_CONFIG_HOME/opencode/skills`, then `~/.config/opencode/skills`). Overrides
+must be absolute paths. Recorded install roots remain sticky; a changed runtime
+home fails with an actionable error unless `--retarget` is explicitly supplied.
+Orchestrators must never add that flag automatically. A destination link proves
+file exposure, not that a particular agent release loaded the skill.
+
+Install/apply remains subject to per-repository resource admission and host-pressure
+checks. Global shared-tooling maintenance is serialized independently. An
+orchestrator must hold the applicable admission lease for the complete CLI call.
+
 ## Verification and CI
 
 `make verify` covers:
