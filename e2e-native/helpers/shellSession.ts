@@ -13,6 +13,20 @@
 // post-click poll can only match the launcher's own session — which is also
 // the app's focused terminal, so the app's focus-restore paths work for the
 // spec instead of against it.
+//
+// The wait is skipped when auto-launch cannot fire:
+// shouldAutoLaunchTerminal (src/lib/terminal.ts) returns null whenever the
+// store already holds tabs, and two tab sources matter here. Live sessions
+// from an earlier flow in the same app session mount their views even while
+// the panel is closed, so they are in beforeIds. Restored placeholder tabs
+// are hydrated from the persisted state (localStorage "maru:terminal:v1",
+// TERMINAL_STORAGE_KEY) of a PREVIOUS app session on a reused WebView
+// profile — per-spec app relaunches share one profile, and
+// resetFixtureWorkspace does not clear WebView localStorage — and they never
+// mount a view (hydrateTerminalStateFromPersisted gives them no live
+// sessionId). Both sources suppress auto-launch, so waiting for it would
+// time out; skipping it is safe because neither source can produce a NEW
+// mounted view that the post-click poll could latch.
 import assert from "node:assert/strict";
 import type {} from "webdriverio";
 
@@ -23,8 +37,10 @@ import { readTerminalText } from "./ptyAssertions";
 const POLL_TIMEOUT_MS = 20_000;
 
 /** Opens the tool panel's terminal surface, lets the auto-launched shell
- *  mount, then launches a real shell through the Shell launcher and returns
- *  the launcher-created session's id, with its textarea verified focused. */
+ *  mount when auto-launch fires (it does not when live or restored tabs
+ *  already hold the store), then launches a real shell through the Shell
+ *  launcher and returns the launcher-created session's id, with its
+ *  textarea verified focused. */
 export async function openShellSession(): Promise<string> {
   const beforeIds = (await browser.execute(() =>
     Array.from(document.querySelectorAll(".native-terminal-view[data-session-id]")).map((el) =>
@@ -56,41 +72,77 @@ export async function openShellSession(): Promise<string> {
     document.querySelector<HTMLButtonElement>(".terminal-title")?.click();
   });
 
-  // The auto-launched shell first (#388): it must be mounted and recorded
-  // before the launcher click, or the post-click poll can latch it and the
-  // launcher shell's later mount steals focus mid-typing.
-  const autoLaunchedId = await browser.executeAsync(
-    (
-      priorIds: Array<string | null>,
-      timeout: number,
-      done: (id: string | null) => void,
-    ) => {
-      const deadline = Date.now() + timeout;
-      const tick = () => {
-        const active = document.querySelector(
-          ".terminal-instance.active .native-terminal-view[data-session-id]",
-        );
-        const id = active?.getAttribute("data-session-id") ?? null;
-        if (id && !priorIds.includes(id)) {
-          done(id);
-          return;
-        }
-        if (Date.now() > deadline) {
-          done(null);
-          return;
-        }
-        setTimeout(tick, 250);
+  // The auto-launched shell first (#388): when auto-launch fires, it must
+  // be mounted and recorded before the launcher click, or the post-click
+  // poll can latch it and the launcher shell's later mount steals focus
+  // mid-typing. Auto-launch fires only with zero tabs in the store, so the
+  // wait is skipped — deterministically, mirroring
+  // hydrateTerminalStateFromPersisted's validation — when live sessions
+  // (beforeIds) or restored placeholder tabs (persisted state on a reused
+  // WebView profile) already hold the store. The key literal is
+  // TERMINAL_STORAGE_KEY from src/lib/terminal.ts; specs cannot import app
+  // code, so keep the two in sync.
+  const restoredTabsPresent = (await browser.execute(() => {
+    try {
+      const raw = window.localStorage.getItem("maru:terminal:v1");
+      if (!raw) return false;
+      const persisted = JSON.parse(raw) as {
+        tasks?: Array<{ id?: unknown }>;
+        sessions?: Array<{ taskId?: unknown; kind?: unknown }>;
       };
-      tick();
-    },
-    beforeIds,
-    POLL_TIMEOUT_MS,
-  );
-  assert.ok(
-    autoLaunchedId,
-    "the panel's auto-launched shell never mounted a native terminal view",
-  );
-  const settledIds = [...beforeIds, autoLaunchedId];
+      if (!Array.isArray(persisted.tasks) || !Array.isArray(persisted.sessions)) {
+        return false;
+      }
+      const taskIds = new Set(
+        persisted.tasks.map((task) => task.id).filter((id) => typeof id === "string"),
+      );
+      const kinds = new Set(["claude", "codex", "kimi", "kiro", "shell"]);
+      return persisted.sessions.some(
+        (session) =>
+          typeof session.taskId === "string" &&
+          taskIds.has(session.taskId) &&
+          typeof session.kind === "string" &&
+          kinds.has(session.kind),
+      );
+    } catch {
+      return false;
+    }
+  })) as boolean;
+  let settledIds = beforeIds;
+  if (beforeIds.length === 0 && !restoredTabsPresent) {
+    const autoLaunchedId = await browser.executeAsync(
+      (
+        priorIds: Array<string | null>,
+        timeout: number,
+        done: (id: string | null) => void,
+      ) => {
+        const deadline = Date.now() + timeout;
+        const tick = () => {
+          const active = document.querySelector(
+            ".terminal-instance.active .native-terminal-view[data-session-id]",
+          );
+          const id = active?.getAttribute("data-session-id") ?? null;
+          if (id && !priorIds.includes(id)) {
+            done(id);
+            return;
+          }
+          if (Date.now() > deadline) {
+            done(null);
+            return;
+          }
+          setTimeout(tick, 250);
+        };
+        tick();
+      },
+      beforeIds,
+      POLL_TIMEOUT_MS,
+    );
+    assert.ok(
+      autoLaunchedId,
+      "the panel's auto-launched shell never mounted a native terminal view",
+    );
+    settledIds = [...beforeIds, autoLaunchedId];
+  }
 
   // The shell launcher specifically, not the literal first enabled button:
   // the AI-CLI launchers ahead of it spawn an interactive TUI where the CLI
