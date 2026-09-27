@@ -41,50 +41,71 @@ impl ArtifactCheck {
 }
 
 pub fn validate_export_artifact(path: &Path, extension: &str) -> Vec<ArtifactCheck> {
+    validate_artifact(path, extension).0
+}
+
+/// The checks, and whether they are settled. A result is unsettled when
+/// `hwp` was unavailable or a call to it failed (spawn, timeout, an
+/// unreadable report); a caller that caches checks must not keep it.
+pub(crate) fn validate_artifact(path: &Path, extension: &str) -> (Vec<ArtifactCheck>, bool) {
     match extension {
         "hwpx" => hwpx_checks(hwp_cli_template::hwp_bin().as_deref(), path),
-        "docx" => vec![zip_member_check(
-            path,
-            "word/document.xml",
-            "docx-structure",
-        )],
-        "pdf" => vec![pdf_check(path)],
-        _ => vec![ArtifactCheck::with(
-            "format-structure",
-            "skipped",
-            Some("no structure check for this format".to_string()),
-        )],
+        "docx" => (
+            vec![zip_member_check(
+                path,
+                "word/document.xml",
+                "docx-structure",
+            )],
+            true,
+        ),
+        "pdf" => (vec![pdf_check(path)], true),
+        _ => (
+            vec![ArtifactCheck::with(
+                "format-structure",
+                "skipped",
+                Some("no structure check for this format".to_string()),
+            )],
+            true,
+        ),
     }
 }
 
-/// HWPX through `hwp`: `valid` gives `zip-safety` (hwp enforces its package
-/// limits before parsing) and `hwpx-sections` from `hwp info`; `valid: false`
-/// gives `hwpx-structure` with hwp's first error. Without a released `hwp`,
-/// `hwpx-structure` is the reduced offline check, never skipped.
-pub(crate) fn hwpx_checks(hwp: Result<&Path, &String>, path: &Path) -> Vec<ArtifactCheck> {
+/// HWPX through `hwp`: `valid` on an HWPX package gives `zip-safety` (hwp
+/// enforces its package limits before parsing) and `hwpx-sections` from
+/// `hwp info`; `valid: false`, or another format (an HWP5 file named .hwpx),
+/// gives `hwpx-structure` with the reason. Without a released `hwp`,
+/// `hwpx-structure` is the reduced offline check, never skipped. The bool is
+/// whether the result is settled (see [`validate_artifact`]).
+pub(crate) fn hwpx_checks(hwp: Result<&Path, &String>, path: &Path) -> (Vec<ArtifactCheck>, bool) {
     let bin = match hwp {
         Ok(bin) => bin,
-        Err(why) => return vec![reduced_hwpx_check(path, why)],
+        Err(why) => return (vec![reduced_hwpx_check(path, why)], false),
     };
-    match hwp_cli_template::validate_report(bin, path) {
-        Ok(report) if report.valid => vec![
-            ArtifactCheck::pass("zip-safety"),
-            match hwp_cli_template::info_sections(bin, path) {
-                Ok(sections) if sections >= 1 => ArtifactCheck::pass("hwpx-sections"),
-                Ok(_) => ArtifactCheck::fail("hwpx-sections", "HWPX section XML not found"),
-                Err(err) => ArtifactCheck::fail("hwpx-sections", err),
-            },
-        ],
-        Ok(report) => vec![ArtifactCheck::fail(
-            "hwpx-structure",
-            report
-                .errors
-                .into_iter()
-                .next()
-                .unwrap_or_else(|| "hwp validate reported an invalid package".to_string()),
-        )],
-        Err(err) => vec![ArtifactCheck::fail("hwpx-structure", err)],
+    let report = match hwp_cli_template::validate_report(bin, path) {
+        Ok(report) => report,
+        Err(err) => return (vec![ArtifactCheck::fail("hwpx-structure", err)], false),
+    };
+    if !report.valid {
+        let reason = report
+            .errors
+            .into_iter()
+            .next()
+            .unwrap_or_else(|| "hwp validate reported an invalid package".to_string());
+        return (vec![ArtifactCheck::fail("hwpx-structure", reason)], true);
     }
+    if report.format != "hwpx" {
+        let reason = format!("hwp validate read the file as {}, not HWPX", report.format);
+        return (vec![ArtifactCheck::fail("hwpx-structure", reason)], true);
+    }
+    let (sections, settled) = match hwp_cli_template::info_sections(bin, path) {
+        Ok(sections) if sections >= 1 => (ArtifactCheck::pass("hwpx-sections"), true),
+        Ok(_) => (
+            ArtifactCheck::fail("hwpx-sections", "HWPX section XML not found"),
+            true,
+        ),
+        Err(err) => (ArtifactCheck::fail("hwpx-sections", err), false),
+    };
+    (vec![ArtifactCheck::pass("zip-safety"), sections], settled)
 }
 
 /// Offline `hwpx-structure` when `hwp` is unavailable: the file opens as a
@@ -255,25 +276,31 @@ esac
         assert_eq!(check.reason.as_deref(), Some("missing word/document.xml"));
     }
 
+    const VALID_HWPX: &str = r#"{"valid":true,"format":"hwpx","errors":[]}"#;
+
     #[cfg(unix)]
     #[test]
     fn router_sends_hwpx_to_hwp_and_skips_unknown_formats() {
         let tmp = tempfile::tempdir().unwrap();
         let hwpx = tmp.path().join("doc.hwpx");
         std::fs::write(&hwpx, b"stub reads nothing").unwrap();
-        let valid = stub_hwp(tmp.path(), r#"{"valid":true,"errors":[]}"#, 0, 1);
+        let valid = stub_hwp(tmp.path(), VALID_HWPX, 0, 1);
+        let (checks, settled) = hwpx_checks(Ok(&valid), &hwpx);
         assert_eq!(
-            statuses(&hwpx_checks(Ok(&valid), &hwpx)),
+            statuses(&checks),
             [
                 ("zip-safety".to_string(), "pass".to_string()),
                 ("hwpx-sections".to_string(), "pass".to_string())
             ]
         );
-        let no_sections = stub_hwp(tmp.path(), r#"{"valid":true,"errors":[]}"#, 0, 0);
+        assert!(settled);
+        let no_sections = stub_hwp(tmp.path(), VALID_HWPX, 0, 0);
+        let (checks, settled) = hwpx_checks(Ok(&no_sections), &hwpx);
         assert_eq!(
-            statuses(&hwpx_checks(Ok(&no_sections), &hwpx))[1],
+            statuses(&checks)[1],
             ("hwpx-sections".to_string(), "fail".to_string())
         );
+        assert!(settled);
 
         let unknown = validate_export_artifact(&hwpx, "xyz");
         assert_eq!(
@@ -294,11 +321,11 @@ esac
         std::fs::write(&hwpx, b"not a real hwpx").unwrap();
         let invalid = stub_hwp(
             tmp.path(),
-            r#"{"errors":["포맷 감지 실패: 시그니처 불일치","second"],"valid":false,"warnings":[]}"#,
+            r#"{"errors":["포맷 감지 실패: 시그니처 불일치","second"],"format":"unknown","valid":false,"warnings":[]}"#,
             1,
             0,
         );
-        let checks = hwpx_checks(Ok(&invalid), &hwpx);
+        let (checks, settled) = hwpx_checks(Ok(&invalid), &hwpx);
         assert_eq!(
             statuses(&checks),
             [("hwpx-structure".to_string(), "fail".to_string())]
@@ -307,17 +334,62 @@ esac
             checks[0].reason.as_deref(),
             Some("포맷 감지 실패: 시그니처 불일치")
         );
+        assert!(settled, "an invalid-package verdict is hwp's answer");
 
+        // An unreadable report is not a verdict.
         let garbage = stub_hwp(tmp.path(), "not json", 1, 0);
-        let checks = hwpx_checks(Ok(&garbage), &hwpx);
+        let (checks, settled) = hwpx_checks(Ok(&garbage), &hwpx);
         assert_eq!(checks[0].status, "fail");
         assert!(checks[0]
             .reason
             .as_deref()
             .unwrap()
             .starts_with("hwp_validate_invalid_json"));
+        assert!(!settled);
     }
 
+    /// hwp validates an HWP5 (CFB) file as valid too, so a `.hwpx` that is
+    /// really HWP5 must not pass as an HWPX package.
+    #[cfg(unix)]
+    #[test]
+    fn hwp5_file_named_hwpx_fails_hwpx_structure() {
+        let tmp = tempfile::tempdir().unwrap();
+        let hwpx = tmp.path().join("really-hwp5.hwpx");
+        std::fs::write(&hwpx, [0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]).unwrap();
+        let hwp5 = stub_hwp(
+            tmp.path(),
+            r#"{"errors":[],"format":"hwp5","valid":true,"warnings":[]}"#,
+            0,
+            1,
+        );
+        let (checks, settled) = hwpx_checks(Ok(&hwp5), &hwpx);
+        assert_eq!(
+            statuses(&checks),
+            [("hwpx-structure".to_string(), "fail".to_string())]
+        );
+        assert_eq!(
+            checks[0].reason.as_deref(),
+            Some("hwp validate read the file as hwp5, not HWPX")
+        );
+        assert!(settled);
+    }
+
+    #[test]
+    fn reduced_offline_check_is_never_settled() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("ok.hwpx");
+        write_zip(
+            &path,
+            &[
+                ("mimetype", b"application/hwp+zip"),
+                ("Contents/section0.xml", b"<hs:sec/>"),
+            ],
+        );
+        let why = "hwp_version: hwp 1.1.9 is too old; Maru requires >= 1.2.0".to_string();
+        let (checks, settled) = hwpx_checks(Err(&why), &path);
+        assert_eq!(checks[0].status, "pass");
+        assert!(!settled, "hwp may be installed or upgraded later");
+    }
     #[test]
     fn reduced_offline_check_passes_a_package_and_fails_each_defect() {
         let tmp = tempfile::tempdir().unwrap();
@@ -328,7 +400,7 @@ esac
                 Some(entries) => write_zip(&path, entries),
                 None => std::fs::write(&path, b"not a zip").unwrap(),
             }
-            let checks = hwpx_checks(Err(&why), &path);
+            let (checks, _) = hwpx_checks(Err(&why), &path);
             assert_eq!(checks.len(), 1, "{name}");
             assert_eq!(checks[0].name, "hwpx-structure", "{name}");
             let reason = checks[0].reason.clone().unwrap();

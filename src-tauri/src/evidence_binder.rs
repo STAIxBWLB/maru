@@ -1284,36 +1284,49 @@ fn inspect_candidate_file(
 
     let detected_format =
         doc_format::detect_document_format(path).unwrap_or(DocumentFormat::Unknown);
-    let validation_checks = if path.is_file() {
-        artifact_checks::validate_export_artifact(path, extension)
+    // `settled` is false when hwp was unavailable or a call to it failed; such
+    // an inspection is not cached, so installing, upgrading or recovering hwp
+    // takes effect on the next listing of an unchanged file.
+    // ponytail: while hwp is unavailable every listing re-inspects its HWPX
+    // candidates (at most a bounded `hwp --version` probe per candidate); key
+    // the cache on the resolved hwp if that shows up in listing latency.
+    let (validation_checks, mut settled) = if path.is_file() {
+        artifact_checks::validate_artifact(path, extension)
     } else {
-        Vec::new()
+        (Vec::new(), true)
     };
     let validation_failed = validation_checks.iter().any(|check| check.status == "fail");
     // Without a released hwp the scan fails and the candidate has no fields.
-    let (hwp_field_count, hwp_field_labels) =
-        if detected_format == DocumentFormat::Hwpx && !validation_failed {
-            hwp_cli_template::hwp_bin()
-                .and_then(|hwp| hwp_cli_template::form_scan(&hwp, path))
-                .map(|scan| {
-                    let labels = scan
-                        .fields
-                        .iter()
-                        .take(8)
-                        .map(|field| field.label.clone())
-                        .collect::<Vec<_>>();
-                    (scan.fields.len() as u32, labels)
-                })
-                .unwrap_or_default()
-        } else {
-            (0, Vec::new())
-        };
+    let (hwp_field_count, hwp_field_labels) = if detected_format == DocumentFormat::Hwpx
+        && !validation_failed
+    {
+        match hwp_cli_template::hwp_bin().and_then(|hwp| hwp_cli_template::form_scan(&hwp, path)) {
+            Ok(scan) => {
+                let labels = scan
+                    .fields
+                    .iter()
+                    .take(8)
+                    .map(|field| field.label.clone())
+                    .collect::<Vec<_>>();
+                (scan.fields.len() as u32, labels)
+            }
+            Err(_) => {
+                settled = false;
+                (0, Vec::new())
+            }
+        }
+    } else {
+        (0, Vec::new())
+    };
     let inspection = CandidateInspection {
         detected_format,
         validation_checks,
         hwp_field_count,
         hwp_field_labels,
     };
+    if !settled {
+        return inspection;
+    }
 
     if let Ok(mut cache) = cache.lock() {
         if cache.len() >= MAX_INSPECTION_CACHE_ENTRIES {
@@ -2035,7 +2048,7 @@ files:
         fs::create_dir_all(&bin_dir).unwrap();
         let hwp = crate::artifact_checks::tests::stub_hwp(
             &bin_dir,
-            r#"{"valid":true,"errors":[]}"#,
+            r#"{"valid":true,"format":"hwpx","errors":[]}"#,
             0,
             1,
         );
@@ -2077,6 +2090,81 @@ files:
             (0..8)
                 .map(|index| format!("라벨{index}"))
                 .collect::<Vec<_>>()
+        );
+    }
+
+    /// hwp unavailable, or a call to it failing, is not a verdict on the
+    /// file: the next listing of the unchanged file inspects it again, while
+    /// hwp's own verdict stays cached.
+    #[cfg(unix)]
+    #[test]
+    fn transient_hwp_failures_are_not_cached_but_verdicts_are() {
+        use crate::artifact_checks::tests::stub_hwp;
+        let tmp = tempfile::tempdir().unwrap();
+        let stub = |name: &str, validate_json: &str, exit: i32| {
+            let dir = tmp.path().join(name);
+            fs::create_dir_all(&dir).unwrap();
+            fs::write(
+                dir.join("hwp.slots"),
+                r#"{"placeholders":[],"fields":[{"key":"성명","label":"성명","source":"formLabel","confidence":0.72,"occurrences":1,"required":false}]}"#,
+            )
+            .unwrap();
+            stub_hwp(&dir, validate_json, exit, 1)
+        };
+        let missing = tmp.path().join("not-hwp");
+        fs::write(&missing, "not a binary").unwrap();
+        let unreadable = stub("unreadable", "not json", 1);
+        let valid = stub("valid", r#"{"valid":true,"format":"hwpx","errors":[]}"#, 0);
+        let invalid = stub(
+            "invalid",
+            r#"{"valid":false,"format":"hwpx","errors":["section0.xml: XML 파싱 실패"]}"#,
+            1,
+        );
+        let inspect_with = |hwp: &Path, path: &Path| {
+            let _env = HwpBinGuard::set(hwp);
+            inspect_hwpx(path)
+        };
+        let first_check = |candidate: &EvidenceBinderCandidate| {
+            let check = &candidate.validation_checks[0];
+            (
+                check.name.clone(),
+                check.status.clone(),
+                check.reason.clone(),
+            )
+        };
+
+        // An HWPX package without `mimetype`: the reduced offline check fails
+        // it while hwp is missing.
+        let form = tmp.path().join("form.hwpx");
+        crate::artifact_checks::tests::write_zip(&form, &[("Contents/section0.xml", b"<hs:sec/>")]);
+        let without_hwp = inspect_with(&missing, &form);
+        let (name, status, reason) = first_check(&without_hwp);
+        assert_eq!((name.as_str(), status.as_str()), ("hwpx-structure", "fail"));
+        assert!(reason.unwrap().starts_with("reduced offline check"));
+        assert!(assert_candidate_can_be_verified(&without_hwp).is_err());
+
+        let unreadable_report = inspect_with(&unreadable, &form);
+        let (_, status, reason) = first_check(&unreadable_report);
+        assert_eq!(status, "fail");
+        assert!(reason.unwrap().starts_with("hwp_validate_invalid_json"));
+
+        let recovered = inspect_with(&valid, &form);
+        assert_eq!(
+            first_check(&recovered),
+            ("zip-safety".to_string(), "pass".to_string(), None)
+        );
+        assert_eq!(recovered.hwp_field_labels, ["성명"]);
+        assert!(assert_candidate_can_be_verified(&recovered).is_ok());
+
+        // hwp's verdict on an unchanged file is cached.
+        let broken = tmp.path().join("broken.hwpx");
+        fs::write(&broken, b"PK\x03\x04 broken").unwrap();
+        let verdict = inspect_with(&invalid, &broken);
+        let cached = inspect_with(&valid, &broken);
+        assert_eq!(first_check(&verdict), first_check(&cached));
+        assert_eq!(
+            first_check(&cached).2.as_deref(),
+            Some("section0.xml: XML 파싱 실패")
         );
     }
 

@@ -249,7 +249,7 @@ fn template_fill_hwpx_in_transaction(
     let replaced_count = slot_counts.iter().map(|(_, count)| **count).sum();
     let form_filled_count = form_counts.iter().map(|(_, count)| **count).sum();
 
-    let validation_checks = artifact_checks::hwpx_checks(Ok(hwp.as_path()), &staged);
+    let (validation_checks, _) = artifact_checks::hwpx_checks(Ok(hwp.as_path()), &staged);
     let validation_ok = validation_checks.iter().all(|check| check.status == "pass");
     let filled = fs::read(&staged).map_err(|err| format!("Cannot read staged fill: {err}"))?;
     write_atomic(&output_path, &filled).map_err(|err| format!("Cannot publish fill: {err}"))?;
@@ -595,7 +595,7 @@ case "$1" in
     printf '\n' >> "{log}"
     cp "$data" "$output"
     printf '%s\n' '{report}' ;;
-  validate) printf '%s\n' '{{"valid":true,"errors":[]}}' ;;
+  validate) printf '%s\n' '{{"valid":true,"format":"hwpx","errors":[]}}' ;;
   info) printf '%s\n' '{{"sections":1}}' ;;
   *) exit 2 ;;
 esac

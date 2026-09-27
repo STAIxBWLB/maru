@@ -113,18 +113,17 @@ struct SlotsResponse {
 }
 
 #[derive(Debug, Deserialize)]
-pub(crate) struct Slot {
-    pub(crate) name: String,
+struct Slot {
+    name: String,
     occurrences: u32,
 }
 
-/// `hwp slots --forms --json`: the `{{slot}}` list plus hwp's merged Korean
-/// form-field view. `fields` already holds every slot under its normalized
-/// key (source `placeholder`, `required`), so it is the one field list.
+/// `hwp slots --forms --json`, read for hwp's merged Korean form-field view.
+/// `fields` already holds every slot under its normalized key (source
+/// `placeholder`, `required`), so it is the one field list; the separate
+/// `placeholders` list is not read.
 #[derive(Debug, Deserialize)]
 pub(crate) struct FormScan {
-    #[serde(default)]
-    pub(crate) placeholders: Vec<Slot>,
     pub(crate) fields: Vec<FormField>,
 }
 
@@ -139,14 +138,13 @@ pub(crate) struct FormField {
 }
 
 impl FormScan {
-    /// A requested key hwp fills as a `{{slot}}`: a slot name as `slots`
-    /// reports it, or a field key hwp marks `required` (it is also a slot).
+    /// A requested key hwp fills as a `{{slot}}`: hwp marks every slot's
+    /// field `required`, and fill matches keys normalized like field keys.
     pub(crate) fn is_slot(&self, key: &str) -> bool {
-        self.placeholders.iter().any(|slot| slot.name == key)
-            || self
-                .fields
-                .iter()
-                .any(|field| field.required && field.key == key)
+        let key = normalize_key(key);
+        self.fields
+            .iter()
+            .any(|field| field.required && field.key == key)
     }
 }
 
@@ -166,6 +164,8 @@ pub(crate) struct FormsFillReport {
 #[derive(Debug, Deserialize)]
 pub(crate) struct ValidateReport {
     pub(crate) valid: bool,
+    /// `hwpx`, `hwp5` or `unknown`: hwp validates an HWP5 file as valid too.
+    pub(crate) format: String,
     #[serde(default)]
     pub(crate) errors: Vec<String>,
 }
@@ -304,6 +304,12 @@ fn run_hwp(bin: &Path, args: &[OsString]) -> Result<CliRun, String> {
             HWP_TIMEOUT.as_secs()
         )),
         CommandTermination::Aborted => Err(format!("hwp_aborted: hwp {subcommand}")),
+        // The runner keeps only the tail of an oversized stream, which no
+        // caller can parse (a JSON report, an HTML document).
+        CommandTermination::Exited if output.stdout_truncated => Err(format!(
+            "hwp_output_too_large: hwp {subcommand} printed more than {} MiB on stdout",
+            STDOUT_LIMIT / (1024 * 1024)
+        )),
         CommandTermination::Exited => Ok(CliRun {
             code: output.status.code().unwrap_or(1),
             stdout: output.stdout,
@@ -574,13 +580,15 @@ fn parse_forms_fill_report(
 
 /// hwp's form-key normalization: trimmed, then spaces, colons,
 /// parentheses and middle dots removed.
+fn normalize_key(key: &str) -> String {
+    key.trim().replace(
+        [':', '：', ' ', '\t', '\n', '\r', '(', ')', '（', '）', '·'],
+        "",
+    )
+}
+
 fn normalizes_to_nothing(key: &str) -> bool {
-    key.trim()
-        .replace(
-            [':', '：', ' ', '\t', '\n', '\r', '(', ')', '（', '）', '·'],
-            "",
-        )
-        .is_empty()
+    normalize_key(key).is_empty()
 }
 
 fn check_report_header(mode: &str, expected: &str, output: &str) -> Result<(), String> {
@@ -1022,7 +1030,7 @@ esac
     }
 
     #[test]
-    fn form_scan_marks_slots_by_name_or_required_field() {
+    fn form_scan_marks_slots_by_normalized_required_field_key() {
         let scan: FormScan = serde_json::from_str(
             r#"{"placeholders":[{"name":"성 명","occurrences":1}],"fields":[
                 {"key":"성명","label":"성 명","source":"placeholder","confidence":1.0,"occurrences":1,"required":true},
@@ -1031,8 +1039,37 @@ esac
         .unwrap();
         assert!(scan.is_slot("성 명"));
         assert!(scan.is_slot("성명"));
+        // hwp fill matches `성  명` and `성명:` to the same slot.
+        assert!(scan.is_slot(" 성  명: "));
         assert!(!scan.is_slot("주소"));
         assert!(serde_json::from_str::<FormScan>(r#"{"placeholders":[]}"#).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn oversized_hwp_stdout_fails_with_a_size_limit_error() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = tempfile::tempdir().unwrap();
+        let binary = tmp.path().join("hwp");
+        // A document just over the stdout limit: the runner keeps only its
+        // tail, so a parse would report a misleading error.
+        let script = format!(
+            "#!/bin/sh\nprintf '<html><body>'\nhead -c {} /dev/zero\nprintf '</body></html>'\n",
+            STDOUT_LIMIT
+        );
+        fs::write(&binary, script).unwrap();
+        fs::set_permissions(&binary, fs::Permissions::from_mode(0o755)).unwrap();
+
+        let error = convert_to_html(&binary, tmp.path()).unwrap_err();
+        assert_eq!(
+            error,
+            "hwp_output_too_large: hwp convert printed more than 32 MiB on stdout"
+        );
+        let error = validate_report(&binary, tmp.path()).unwrap_err();
+        assert!(
+            error.starts_with("hwp_output_too_large: hwp validate"),
+            "{error}"
+        );
     }
 
     #[cfg(unix)]
