@@ -63,7 +63,7 @@ The user selects the target format by naming just the extension (e.g. "hwpx로",
 | target | conversion |
 |--------|------------|
 | (none) / `docx` | `~/.maru/skills/md2docx/md2docx <src.md> -o <tmp>/<stem>.docx` |
-| `hwpx` | Use the released unified `hwp` binary (minimum `v1.0.0`): `"$HWP_CLI" new --from <src.md> --preset report -o <tmp>/<stem>.hwpx`; if the source deliberately contains `{{slots}}`, follow with `"$HWP_CLI" fill <tmp>/<stem>.hwpx -o <tmp>/<stem>-filled.hwpx --set "name=value"`; always finish with `"$HWP_CLI" validate <output>.hwpx`. Set `HWP_CLI` to an absolute released binary path whose `--version` reports the supported tag, never a checkout or unversioned PATH fallback. See `hwp/references/editing-recipes.md`. |
+| `hwpx` | Use the released unified `hwp` binary (minimum `v1.2.0`): `"$HWP_CLI" new --from <src.md> --preset report -o <tmp>/<stem>.hwpx`; if the source deliberately contains `{{slots}}`, follow with `"$HWP_CLI" fill <tmp>/<stem>.hwpx -o <tmp>/<stem>-filled.hwpx --set "name=value"`; always finish with `"$HWP_CLI" validate <output>.hwpx`. Set `HWP_CLI` to an absolute released binary path whose `--version` reports the supported tag, never a checkout or unversioned PATH fallback. See `hwp/references/editing-recipes.md`. |
 | `pdf` | `~/.maru/env/.venv/bin/python ~/.maru/skills/share-outbox/scripts/md_to_pdf_chrome.py <src.md> -o <tmp>/<stem>.pdf` (HTML print path; details in `references/pdf-print-path.md`) |
 | `md` | stage the original without conversion (explicit instruction only) |
 | other (e.g. `pptx`) | use the matching workspace conversion skill if one exists; otherwise tell the user the target is unsupported (never silently fall back) |

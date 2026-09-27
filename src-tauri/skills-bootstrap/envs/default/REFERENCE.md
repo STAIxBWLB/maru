@@ -31,7 +31,7 @@ Ignored runtime directories: `.venv/`, `node/`, `node_modules/`, `input/`,
 - HWP v5: `libhwp` first, then `hwp5txt`, then direct OLE parsing if needed.
 - HWPX: ZIP/XML parsing with `BeautifulSoup` and `lxml`.
 - PDF: `pymupdf` for fast text extraction, `pdfplumber` for tables, OCR tools for scanned PDFs.
-- HWPX writing: use the released native `hwp` binary and its unified exported `hwp` skill tree (minimum `v1.0.0`); verify the selected absolute binary's version before generation, fill, or validation. No bundled JRE.
+- HWPX writing: use the released native `hwp` binary and its unified exported `hwp` skill tree (minimum `v1.2.0`); verify the selected absolute binary's version before generation, fill, or validation. No bundled JRE.
 
 ## Verification
 

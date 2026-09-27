@@ -204,10 +204,10 @@ description: |
 
 ### HWPX 출력 계약
 
-HWPX 공문서 출력은 separate wrapper가 아니라 released `hwp` 스킬(minimum `v1.0.0`)로
+HWPX 공문서 출력은 separate wrapper가 아니라 released `hwp` 스킬(minimum `v1.2.0`)로
 처리한다. 정확한 번호·프로필·제한 사항은 설치/export된 tree의
-[`skills/hwp/references/korean-official-format.md`](https://github.com/STAIxBWLB/hwp-cli/blob/v1.0.0/skills/hwp/references/korean-official-format.md)와
-[`skills/hwp/references/editing-recipes.md`](https://github.com/STAIxBWLB/hwp-cli/blob/v1.0.0/skills/hwp/references/editing-recipes.md)를 따른다.
+[`skills/hwp/references/korean-official-format.md`](https://github.com/STAIxBWLB/hwp-cli/blob/v1.2.0/skills/hwp/references/korean-official-format.md)와
+[`skills/hwp/references/editing-recipes.md`](https://github.com/STAIxBWLB/hwp-cli/blob/v1.2.0/skills/hwp/references/editing-recipes.md)를 따른다.
 이 스킬은 마크다운 작성 규칙의 SSOT이며, 출력 엔진의 세부 결과를 별도로 약속하지 않는다.
 
 ## 적용 지침
