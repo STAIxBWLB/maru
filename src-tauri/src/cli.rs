@@ -5,6 +5,7 @@ use crate::secrets::{secrets_doctor, secrets_migrate, secrets_scan};
 use crate::skill_host::{
     skills_apply_bundle_update_headless, skills_check_bundle_update, skills_doctor,
     skills_import_external, skills_import_unmanage, skills_list_dirty, skills_reconcile_skill,
+    skills_sync_tools,
 };
 
 pub fn run_cli(args: Vec<String>) -> i32 {
@@ -568,13 +569,17 @@ fn run_skills_sync(args: &[String]) -> i32 {
         eprintln!("--tools required");
         return 2;
     };
-    match crate::skill_host::store::skills_sync_selected_tools(
-        current_work_path(),
-        tools,
-        skills,
-        apply,
-        retarget,
-    ) {
+    let result = match skills {
+        Some(selection) => crate::skill_host::store::skills_sync_selected_tools(
+            current_work_path(),
+            tools,
+            Some(selection),
+            apply,
+            retarget,
+        ),
+        None => skills_sync_tools(current_work_path(), tools, apply, retarget),
+    };
+    match result {
         Ok(report) => {
             if json {
                 println!(
