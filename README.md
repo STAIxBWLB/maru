@@ -13,12 +13,12 @@ identifier and on-disk migration to Maru.
 | Area | State | Evidence |
 |------|-------|----------|
 | Product release | v1.1.12 | Signed desktop bundles and standalone CLI for macOS, Windows, and Linux |
-| Planning milestone | v1.1 Felt Quality and Native Proof | Phases 6-11 complete (56 plans) |
+| Planning milestone | v1.1 Felt Quality and Native Proof, closed | Closed 2026-09-27: phases 6-11 (56 plans), audit `tech_debt` with the debt accepted |
 | Application shell | Complete | 18 lazy modes; `MainApp` held to 15 `useState` and 24 `useEffect` calls |
 | Verification | Passing | Typecheck, ESLint, unit tests, Rust fmt/clippy, E2E, build, and bundle budgets |
 | Typed IPC | ERR-06 closed | Every conflict-emitting command preserves `{ code, message }`; recursive source guard active |
-| Main-thread isolation | PERF-01/02 closed | All 381 production commands off the UI thread (372 ISOLATED + 9 UI); Phase 08 baseline native load proof keeps loaded p95 at 2ms with the negative control at 4789ms |
-| Active milestone | v1.1, all phases complete | Milestone audit is next; releases ship as 1.1.x while v1.1 is open |
+| Main-thread isolation | PERF-01/02 closed | All 383 production commands classified: 374 isolated off the UI thread, 9 kept on it for main-thread affinity; Phase 08 baseline native load proof keeps loaded p95 at 2ms with the negative control at 4789ms |
+| Active milestone | None, v1.2 being defined | v1.1 closed 2026-09-27; opening v1.2 moves releases to 1.2.0 |
 
 The milestone archive, audit, retrospective, and summary live under
 `.planning/milestones/`, `.planning/RETROSPECTIVE.md`, and
@@ -140,11 +140,11 @@ brew upgrade maru-cli
   boundaries. Nothing imports `src/App.tsx`.
 - Shared UI state follows keyed module-store plus `useSyncExternalStore`
   patterns. No additional global state library or provider tree is used.
-- Production commands never block the UI/shared async worker thread: 371
+- Production commands never block the UI/shared async worker thread: 374
   ISOLATED commands run on awaited `spawn_blocking` workers and 9
   native-window commands stay UI-bound, and every filesystem mutation passes
   shared path-transaction admission before taking domain locks. The
-  381-command inventory, worker-boundary, and admission evidence are gated by
+  383-command inventory, worker-boundary, and admission evidence are gated by
   `check-command-isolation` in `make verify`.
 
 ## Capability Highlights
@@ -331,8 +331,8 @@ make clippy
 # Complete hermetic verification
 make verify
 
-# Phase 08 evidence closure gate alone (381 production commands, PERF-01/PERF-02)
-node scripts/check-command-isolation.mjs --all --expected-count 381
+# Phase 08 evidence closure gate alone (383 production commands, PERF-01/PERF-02)
+node scripts/check-command-isolation.mjs --all --expected-count 383
 
 # Full verify plus release-only CLI and debug Tauri checks
 make release-checks
@@ -374,8 +374,8 @@ cargo run --manifest-path src-tauri/Cargo.toml -p maru-cli --bin maru-cli -- ski
   ship-isolation scan of the produced bundle (D-10)
 - the Phase 08 evidence closure gate (`check-command-isolation`): every
   registered production command carries final justified worker-boundary,
-  mutation-admission and processing-caller evidence against the 381-command
-  inventory (`node scripts/check-command-isolation.mjs --all --expected-count 381`)
+  mutation-admission and processing-caller evidence against the 383-command
+  inventory (`node scripts/check-command-isolation.mjs --all --expected-count 383`)
 
 Pull requests run a lightweight decision job first. Source changes fan out to
 `make verify` and Playwright E2E. Version-changing PRs run `make release-checks`
@@ -400,10 +400,10 @@ anything.
 ## Release Process
 
 The release version's major and minor come from the active GSD milestone in
-`.planning/STATE.md`; releases only increment the patch. Milestone v1.1 ships as
-1.1.x, and opening milestone v1.2 moves releases to 1.2.0. There is one tag
-namespace and it belongs to releases: milestone completion no longer creates a
-git tag.
+`.planning/STATE.md`; releases only increment the patch. Milestone v1.1 shipped
+as 1.1.x and closed on 2026-09-27. Opening milestone v1.2, whose scope is being
+defined, moves releases to 1.2.0. There is one tag namespace and it belongs to
+releases: milestone completion no longer creates a git tag.
 
 Version sources must remain synchronized:
 
@@ -505,11 +505,12 @@ an application release must carry a newer offline bootstrap.
 
 ## Roadmap
 
-The GSD v1.0 Structural Debt Paydown milestone is complete and archived. The
-active milestone is v1.1 Felt Quality and Native Proof, spanning phases 6-11.
-The long-range product plan remains in [ROADMAP.md](ROADMAP.md), but planned
-items there are not active commitments until a GSD milestone promotes them into
-requirements.
+The GSD v1.0 Structural Debt Paydown and v1.1 Felt Quality and Native Proof
+milestones are complete and archived. v1.1 (phases 6-11) closed on 2026-09-27
+with audit status `tech_debt`, and the debt was accepted. The next milestone,
+v1.2, is being defined and is not open yet. The long-range product plan remains
+in [ROADMAP.md](ROADMAP.md), but planned items there are not active commitments
+until a GSD milestone promotes them into requirements.
 
 Milestone v1.1 promoted part of the carried-over backlog into requirements. The
 remaining candidates are:

@@ -23,7 +23,7 @@
       "UI": 15
     },
     "unresolvedRows": 0,
-    "inventory": ".planning/phases/08-main-thread-responsiveness/08-COMMAND-INVENTORY.md",
+    "inventory": ".planning/milestones/v1.1-phases/08-main-thread-responsiveness/08-COMMAND-INVENTORY.md",
     "checker": "node scripts/check-command-isolation.mjs --all --expected-count 365"
   },
   "decisionSourceAudit": {

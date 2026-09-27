@@ -22,3 +22,4 @@ Out-of-scope discoveries logged during execution.
 - **Possible hardening (not scheduled):** annotate the two callback signatures in `GraphCanvas.tsx`
   explicitly so type checking does not depend on the install layout, or pin the pnpm virtual-store mode
   for agent worktrees.
+  status: acknowledged

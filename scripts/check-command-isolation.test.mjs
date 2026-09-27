@@ -8,7 +8,7 @@ import { spawnSync } from "node:child_process";
 import { maskRust, parseArgs } from "./check-command-isolation.mjs";
 
 const CHECKER = fileURLToPath(new URL("./check-command-isolation.mjs", import.meta.url));
-const PHASE = ".planning/phases/08-main-thread-responsiveness";
+const PHASE = ".planning/milestones/v1.1-phases/08-main-thread-responsiveness";
 const MOD = "src-tauri/src/model.rs";
 const integrationModules = ["skill_host/store", "skill_host/env", "skill_host/dispatch", "git", "dot_sync", "mission_state", "agent_host/event_store"];
 function fixture(t, specs = [{ name: "sample", plan: "06", module: MOD }]) {
