@@ -88,6 +88,7 @@ import {
   type WorkspaceFilesPaneFilters,
 } from "../lib/workspaceFileTree";
 import { setError } from "../lib/errorStore";
+import { confirmDialog } from "../lib/confirmDialog";
 import { useTranslation } from "../lib/i18n";
 import { clampMenuPosition } from "../lib/menu";
 import { useContextMenuKeyboard } from "../lib/useContextMenuKeyboard";
@@ -686,7 +687,7 @@ export const FilesWorkbench = memo(function FilesWorkbench(props: FilesWorkbench
     );
   };
 
-  const trashSelection = () => {
+  const trashSelection = async () => {
     if (!workspacePath || selectedEntries.length === 0 || !canDelete) return;
     const dirty = selectedEntries.filter((entry) =>
       Array.from(dirtySet).some(
@@ -708,12 +709,12 @@ export const FilesWorkbench = memo(function FilesWorkbench(props: FilesWorkbench
       );
     if (
       risky &&
-      !window.confirm(
+      !(await confirmDialog(
         t("files.operations.trashConfirm", {
           count: selectedEntries.length,
           name: selectedEntries[0]?.name ?? "",
         }),
-      )
+      ))
     ) {
       return;
     }
@@ -774,7 +775,7 @@ export const FilesWorkbench = memo(function FilesWorkbench(props: FilesWorkbench
       (event.key === "Backspace" && event.metaKey)
     ) {
       event.preventDefault();
-      trashSelection();
+      void trashSelection();
       return;
     }
     if (event.key === "Enter" && primaryEntry && !renamingPath) {

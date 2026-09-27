@@ -117,6 +117,8 @@ import {
 import { WorkspaceSwitcher } from "./components/WorkspaceSwitcher";
 import type { FavoriteTarget } from "./components/FavoritesSection";
 import { useApprovalGate } from "./approval/ApprovalDialog";
+import { useTextPrompt } from "./components/ui/TextPromptDialog";
+import { confirmDialog } from "./lib/confirmDialog";
 import { markStartup, measureStartup } from "./lib/startupProfile";
 import {
   ComposeDialog,
@@ -979,6 +981,7 @@ export function MainApp() {
   const localeValue = useLocaleState();
   const { t, locale, setLocale } = localeValue;
   const approvalGate = useApprovalGate();
+  const { askText, dialog: textPromptDialog } = useTextPrompt();
   const isMac = useMemo(() => isMacPlatform(currentPlatform()), []);
 
   useEffect(() => {
@@ -1098,7 +1101,7 @@ export function MainApp() {
   }, []);
   // Holds the discarded draft + entry when the user switches away from a
   // dirty document. Surfaces a "Restore" toast button — non-blocking
-  // alternative to window.confirm (which Tauri webview suppresses).
+  // alternative to a confirm dialog.
   const [discardedEdit, setDiscardedEdit] = useState<
     {
       workspacePath: string;
@@ -2965,22 +2968,22 @@ export function MainApp() {
   );
 
   const targetFolderForInboxItem = useCallback(
-    (id: string, forcedTargetFolder?: string | null) => {
+    async (id: string, forcedTargetFolder?: string | null) => {
       const forced = forcedTargetFolder?.trim();
       if (forced) return forced;
       const suggested = inboxCarry.get(id)?.classification?.suggestedFolder?.trim();
       if (suggested) return suggested;
-      const target = window.prompt(t("app.prompt.inboxTargetFolder"), "inbox/processed");
+      const target = await askText(t("app.prompt.inboxTargetFolder"), "inbox/processed");
       return target?.trim() || null;
     },
-    [inboxCarry, t],
+    [askText, inboxCarry, t],
   );
 
   const decideInboxItem = useCallback(
     async (id: string, decision: InboxDecision, forcedTargetFolder?: string | null) => {
       if (!inboxWorkspacePath || decision === "pending") return;
       const targetFolder =
-        decision === "accepted" ? targetFolderForInboxItem(id, forcedTargetFolder) : null;
+        decision === "accepted" ? await targetFolderForInboxItem(id, forcedTargetFolder) : null;
       if (decision === "accepted" && !targetFolder) return;
       const approvalId = await approvalGate.confirmApproval({
         kind: decision === "accepted" ? "inbox.file.accept" : "inbox.file.reject",
@@ -3037,7 +3040,7 @@ export function MainApp() {
           (id) => !inboxCarry.get(id)?.classification?.suggestedFolder?.trim(),
         );
         if (missing.length > 0) {
-          const target = window.prompt(
+          const target = await askText(
             t("app.prompt.inboxBulkTargetFolder", { count: missing.length }),
             "inbox/processed",
           );
@@ -3120,7 +3123,7 @@ export function MainApp() {
         setInboxActionBusy(false);
       }
     },
-    [approvalGate, beginProcessingAdmission, inboxCarry, inboxWorkspacePath, refreshInbox, updateInboxCarry, t],
+    [approvalGate, askText, beginProcessingAdmission, inboxCarry, inboxWorkspacePath, refreshInbox, updateInboxCarry, t],
   );
 
   const bulkAcceptInboxKeys = useCallback(
@@ -3134,13 +3137,13 @@ export function MainApp() {
   );
 
   const bulkMoveInboxFiles = useCallback(
-    (keys: string[]) => {
-      const target = window.prompt(t("app.prompt.inboxMoveSelectedFolder"), "inbox/processed");
+    async (keys: string[]) => {
+      const target = await askText(t("app.prompt.inboxMoveSelectedFolder"), "inbox/processed");
       const trimmed = target?.trim();
       if (!trimmed) return;
       void decideInboxKeys(keys.filter((key) => key.startsWith("file:")), "accepted", trimmed);
     },
-    [decideInboxKeys, t],
+    [askText, decideInboxKeys, t],
   );
 
   const trashInboxTargets = useCallback(
@@ -3150,7 +3153,7 @@ export function MainApp() {
         targets.length === 1
           ? targets[0].id
           : t("inbox.menu.selectionTitle", { count: targets.length });
-      if (!window.confirm(t("inbox.delete.confirm", { count: targets.length, name: title }))) {
+      if (!(await confirmDialog(t("inbox.delete.confirm", { count: targets.length, name: title })))) {
         return;
       }
       const approvalId = await approvalGate.confirmApproval({
@@ -3829,7 +3832,7 @@ export function MainApp() {
 
   const handleRemoveWorkspace = useCallback(
     async (path: string) => {
-      const confirmation = window.confirm(`${path}\n\n${t("workspace.remove.confirm")}`);
+      const confirmation = await confirmDialog(`${path}\n\n${t("workspace.remove.confirm")}`);
       if (!confirmation) return;
       const registry = await removeWorkspaceRoot(path);
       setWorkspaceRegistry(registry);
@@ -5619,8 +5622,9 @@ export function MainApp() {
       const EXT_RE = /\.(md|markdown|html|htm)$/i;
       const originalExt = fileName.match(EXT_RE)?.[0] ?? ".md";
       const currentStem = fileName.replace(EXT_RE, "");
-      const input = window.prompt(t("editor.tabs.rename.prompt"), currentStem);
-      if (input == null) return;
+      const input = await askText(t("editor.tabs.rename.prompt"), currentStem);
+      // The field waits on the user; bail if the tab closed meanwhile.
+      if (input == null || !getEditorTabsState().tabs.some((item) => item.id === tabId)) return;
       const nextStem = input.trim().replace(EXT_RE, "");
       if (!nextStem) return;
       if (/[\\/]/.test(nextStem)) {
@@ -5638,6 +5642,7 @@ export function MainApp() {
       }
     },
     [
+      askText,
       blockTabWrite,
       entryFromPayload,
       refreshAfterDocumentMutation,
@@ -5650,8 +5655,9 @@ export function MainApp() {
     async (tabId: string) => {
       const tab = getEditorTabsState().tabs.find((item) => item.id === tabId);
       if (!tab || blockTabWrite(tab, "renameMove")) return;
-      const input = window.prompt(t("editor.tabs.move.prompt"), tab.document.relPath);
+      const input = await askText(t("editor.tabs.move.prompt"), tab.document.relPath);
       if (input == null || !input.trim()) return;
+      if (!getEditorTabsState().tabs.some((item) => item.id === tabId)) return;
       try {
         const moved = await moveDocument(tab.workspacePath, tab.document.path, input);
         const fresh = await refreshAfterDocumentMutation(tab.workspacePath);
@@ -5662,6 +5668,7 @@ export function MainApp() {
       }
     },
     [
+      askText,
       blockTabWrite,
       entryFromPayload,
       refreshAfterDocumentMutation,
@@ -5707,11 +5714,11 @@ export function MainApp() {
       const tab = getEditorTabsState().tabs.find((item) => item.id === tabId);
       if (!tab || blockTabWrite(tab, "delete")) return;
       if (
-        !window.confirm(
+        !(await confirmDialog(
           t("editor.tabs.delete.confirm", {
             path: tab.document.relPath,
           }),
-        )
+        ))
       ) {
         return;
       }
@@ -6397,7 +6404,7 @@ export function MainApp() {
     setEditorError: setFilesEditorErrors,
     saveTab,
     refreshWorkspaceFiles,
-    confirmReload: () => window.confirm(t("files.editor.reloadConfirm")),
+    confirmReload: () => confirmDialog(t("files.editor.reloadConfirm")),
   });
 
   const openFilesPreviewInDocuments = useCallback(() => {
@@ -8005,11 +8012,7 @@ export function MainApp() {
         );
         return;
       }
-      if (
-        !window.confirm(
-          t("context.moveToTrash.confirm", { path: entry.relPath }),
-        )
-      ) {
+      if (!(await confirmDialog(t("context.moveToTrash.confirm", { path: entry.relPath })))) {
         return;
       }
       try {
@@ -8937,6 +8940,7 @@ export function MainApp() {
           onRegisterWorkspace={handleRegisterWorkspace}
         />
         {approvalGate.dialog}
+        {textPromptDialog}
         <ComposeDialog
           open={composeSeed !== null}
           skills={skills}

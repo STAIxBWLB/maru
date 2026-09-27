@@ -3,6 +3,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { Play, RefreshCcw, RotateCw, Square, Trash2 } from "lucide-react";
+import { confirmDialog } from "../../lib/confirmDialog";
 import { useTranslation } from "../../lib/i18n";
 import { SettingsSection } from "../settings/SettingsSection";
 import {
@@ -51,7 +52,7 @@ export function SystemJobsPanel() {
   };
 
   const removeCronEntry = async (index: number, entry: string) => {
-    if (!window.confirm(t("system.systemJobs.crontab.confirmRemove", { entry }))) return;
+    if (!(await confirmDialog(t("system.systemJobs.crontab.confirmRemove", { entry })))) return;
     setBusyCron(index);
     try {
       await systemCrontabRemove(index, entry);

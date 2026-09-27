@@ -41,6 +41,7 @@ import {
   type InboxItemState,
   type InboxTrashableRow,
 } from "../lib/inbox";
+import { messageDialog } from "../lib/confirmDialog";
 import { useTranslation } from "../lib/i18n";
 import { allSourceSelectValue } from "../lib/inboxSources";
 import { useContextMenuKeyboard } from "../lib/useContextMenuKeyboard";
@@ -377,7 +378,7 @@ export const InboxPane = memo(function InboxPane({
     if (keys.length === 0) return;
     const targets = inboxTrashTargetsForRows(trashableRows, keys);
     if (targets.length === 0) {
-      window.alert(t("inbox.delete.unsupported"));
+      await messageDialog(t("inbox.delete.unsupported"));
       return;
     }
     await onTrashItems(targets);
@@ -469,7 +470,7 @@ export const InboxPane = memo(function InboxPane({
     const targets = contextMenu?.targets ?? [];
     setContextMenu(null);
     if (targets.length === 0) {
-      window.alert(t("inbox.delete.unsupported"));
+      await messageDialog(t("inbox.delete.unsupported"));
       return;
     }
     await onTrashItems(targets);

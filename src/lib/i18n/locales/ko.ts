@@ -2246,6 +2246,7 @@ export const ko: Record<string, string> = {
   "commit.error.emptyMessage": "메시지를 입력해주세요.",
   "commit.error.emptySelection": "커밋할 파일을 하나 이상 선택해주세요.",
   "dialog.cancel": "취소",
+  "dialog.ok": "확인",
   "dialog.close": "닫기",
   "topbar.skill": "스킬",
 

@@ -17,6 +17,7 @@ import {
   scanSecrets,
   writeSecretText,
 } from "../../../lib/maruDir";
+import { confirmDialog } from "../../../lib/confirmDialog";
 import { useTranslation } from "../../../lib/i18n";
 import type {
   SecretInventoryItem,
@@ -199,12 +200,7 @@ export function SecretsTab({ workPath }: { workPath: string }) {
 
   const deleteEditorSecret = async () => {
     if (!editor || editor.mode !== "edit") return;
-    if (
-      typeof window !== "undefined" &&
-      !window.confirm(
-        t("system.secrets.delete.confirm", { path: editor.relPath }),
-      )
-    ) {
+    if (!(await confirmDialog(t("system.secrets.delete.confirm", { path: editor.relPath })))) {
       return;
     }
     setEditor({ ...editor, busy: true, error: null });

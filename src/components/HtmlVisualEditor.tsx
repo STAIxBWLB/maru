@@ -37,7 +37,9 @@ import {
   serializeVisualBody,
   type HtmlEnvelope,
 } from "../lib/htmlDocument";
+import { messageDialog } from "../lib/confirmDialog";
 import { useTranslation } from "../lib/i18n";
+import { useTextPrompt } from "./ui/TextPromptDialog";
 import { splitFrontmatter } from "../lib/wikilinks";
 
 export interface HtmlEditorFlushHandle {
@@ -130,6 +132,7 @@ export const HtmlVisualEditor = forwardRef<HtmlEditorFlushHandle, HtmlVisualEdit
     ref,
   ) {
     const { t } = useTranslation();
+    const { askText, dialog: textPromptDialog } = useTextPrompt();
     const iframeRef = useRef<HTMLIFrameElement | null>(null);
     const latestValueRef = useRef(value);
     const lastEmittedRef = useRef<string | null>(null);
@@ -319,15 +322,15 @@ export const HtmlVisualEditor = forwardRef<HtmlEditorFlushHandle, HtmlVisualEdit
       [readOnly, scheduleSerialize],
     );
 
-    const handleCreateLink = useCallback(() => {
-      const url = window.prompt(t("editor.html.link.prompt"));
+    const handleCreateLink = useCallback(async () => {
+      const url = await askText(t("editor.html.link.prompt"));
       if (url == null) return;
       if (!isAllowedLinkUrl(url)) {
-        window.alert(t("editor.html.link.invalid"));
+        await messageDialog(t("editor.html.link.invalid"), "warning");
         return;
       }
       exec("createLink", url.trim());
-    }, [exec, t]);
+    }, [askText, exec, t]);
 
     if (!assetsReady) {
       return (
@@ -459,7 +462,7 @@ export const HtmlVisualEditor = forwardRef<HtmlEditorFlushHandle, HtmlVisualEdit
             icon={<LinkIcon size={14} />}
             label={t("editor.html.toolbar.link")}
             disabled={readOnly || !supported.createLink}
-            onClick={handleCreateLink}
+            onClick={() => void handleCreateLink()}
           />
           <ToolbarButton
             icon={<Unlink size={14} />}
@@ -535,6 +538,7 @@ export const HtmlVisualEditor = forwardRef<HtmlEditorFlushHandle, HtmlVisualEdit
         {readOnly && readOnlyReason ? (
           <div className="html-editor-readonly-note">{readOnlyReason}</div>
         ) : null}
+        {textPromptDialog}
       </div>
     );
   },

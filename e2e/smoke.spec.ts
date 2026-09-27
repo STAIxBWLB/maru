@@ -1064,27 +1064,26 @@ test("shows supported document tab menu items and performs file operations", asy
   const copyTab = page.locator(".document-tab[title='references/maru-glossary-copy.md']");
   await expect(copyTab).toBeVisible();
 
-  page.once("dialog", async (dialog) => {
-    expect(dialog.type()).toBe("prompt");
-    await dialog.accept("maru-glossary-renamed");
-  });
   await copyTab.click({ button: "right" });
   await page
     .locator(".document-tab-context-menu")
     .getByRole("menuitem", { name: "이름 변경..." })
     .click();
+  // In-app text prompt (#377): the app webview shows no window.prompt.
+  const renamePrompt = page.getByRole("dialog", { name: "새 파일 이름" });
+  await renamePrompt.getByRole("textbox").fill("maru-glossary-renamed");
+  await renamePrompt.getByRole("button", { name: "확인" }).click();
   const renamedTab = page.locator(".document-tab[title='references/maru-glossary-renamed.md']");
   await expect(renamedTab).toBeVisible();
 
-  page.once("dialog", async (dialog) => {
-    expect(dialog.type()).toBe("prompt");
-    await dialog.accept("moved/maru-glossary-renamed.md");
-  });
   await renamedTab.click({ button: "right" });
   await page
     .locator(".document-tab-context-menu")
     .getByRole("menuitem", { name: "이동..." })
     .click();
+  const movePrompt = page.getByRole("dialog", { name: "이동할 workspace-relative .md 경로" });
+  await movePrompt.getByRole("textbox").fill("moved/maru-glossary-renamed.md");
+  await movePrompt.getByRole("button", { name: "확인" }).click();
   const movedTab = page.locator(".document-tab[title='moved/maru-glossary-renamed.md']");
   await expect(movedTab).toBeVisible();
   await expect(page.locator("textarea.source-editor")).toHaveValue(/# Maru 용어집/);
