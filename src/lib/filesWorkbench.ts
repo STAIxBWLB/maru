@@ -173,6 +173,26 @@ export function collapseNestedPaths(paths: string[]): string[] {
     );
 }
 
+export interface TrashConfirmMessage {
+  key: string;
+  vars: { name: string; count?: number };
+}
+
+/** Builds the trash-confirmation i18n key and vars for a selection. The
+ *  multi-item string names the first entry and counts only the REST
+ *  ("{name} 외 {count}개"), so a single item needs its own string — passing
+ *  the total count made one selected file read "{name} 외 1개". */
+export function trashConfirmMessage(names: readonly string[]): TrashConfirmMessage {
+  const name = names[0] ?? "";
+  if (names.length <= 1) {
+    return { key: "files.operations.trashConfirmSingle", vars: { name } };
+  }
+  return {
+    key: "files.operations.trashConfirm",
+    vars: { name, count: names.length - 1 },
+  };
+}
+
 function compareName(a: Pick<WorkspaceEntryNode, "name">, b: Pick<WorkspaceEntryNode, "name">) {
   return a.name.localeCompare(b.name, undefined, {
     numeric: true,
