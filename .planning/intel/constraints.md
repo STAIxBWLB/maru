@@ -707,10 +707,11 @@ All other SPECs carry default precedence.
   violations underline via CodeMirror decorations or a BlockNote `gaejosikLint` mark;
   dismissals persist under workspace-state `composer.lintDismissals` with a
   per-document Studio fallback) -> HWP fields (`template_get_fields` calls
-  `hwpx slots <template> --format json` and merges with `kordoc_lite` HWPX
-  label/inline-label detection, each field carrying source + confidence;
-  `template_fill_hwpx` writes to `.maru/studio/filled/`, preserves form-label fills,
-  and validates with `hwpx validate` plus structure checks) -> Export (wraps
+  `hwp slots --forms --json`, whose fields merge the `{{slot}}`s with Korean
+  label-cell and inline-label detection, each field carrying source + confidence;
+  `template_fill_hwpx` fills slots and form fields in one `hwp fill --forms` pass,
+  writes to `.maru/studio/filled/`, and validates with `hwp validate` / `hwp info`
+  structure checks) -> Export (wraps
   `export_plan` + the M4 dispatch pipeline) -> Package (`studio_apply_body` replaces
   only the markdown body and preserves the frontmatter bytes exactly).
 
@@ -728,8 +729,9 @@ All other SPECs carry default precedence.
 - type: protocol
 - content: `export/manifest.rs` writes `manifest.yaml` next to a
   `<source-stem>.exports/` bundle; the manifest is the SSOT for export state and the
-  only place output sha256s live. `export/validate.rs` runs format-specific structure
-  checks (docx / hwpx / pdf) plus `kordoc_lite` HWPX/form checks.
+  only place output sha256s live. `export/validate.rs` runs the format-specific
+  structure checks of `artifact_checks.rs` (hwpx through `hwp validate` / `hwp info`,
+  with a reduced offline check without `hwp`; docx / pdf locally).
   `export/dispatch.rs` drives `pending -> ready/failed` with deterministic local
   converters (`pandoc`, `hwpx`, LibreOffice-backed PDF fallback); missing converters,
   missing outputs, and source-hash drift surface as partial failures rather than silent

@@ -1,6 +1,6 @@
+use crate::artifact_checks::ArtifactCheck;
 use crate::atomic_file::{with_path_transactions, PathTransactionLease, PathTransactionRequest};
 use crate::document::{read_document, DocumentPayload};
-use crate::kordoc_lite::KordocLiteCheck;
 use crate::vault::{lexical_normalize, resolve_inside_vault};
 use crate::vault_list::{assert_maru_can_write, WorkspaceWriteAction};
 use chrono::Utc;
@@ -87,7 +87,7 @@ pub struct StudioHwpFieldsState {
     #[serde(default)]
     pub unmatched_fields: Vec<String>,
     #[serde(default)]
-    pub validation_checks: Vec<KordocLiteCheck>,
+    pub validation_checks: Vec<ArtifactCheck>,
     #[serde(default)]
     pub warnings: Vec<String>,
 }

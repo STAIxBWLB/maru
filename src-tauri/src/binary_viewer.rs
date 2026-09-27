@@ -1,4 +1,5 @@
-use crate::kordoc_lite::{extract_hwpx_text_html, DocumentFormat, HwpxPreview};
+use crate::doc_format::{detect_document_format, DocumentFormat};
+use crate::hwp_cli_template;
 use crate::vault::resolve_inside_vault;
 use crate::win_process::NoWindow;
 use encoding_rs::EUC_KR;
@@ -13,8 +14,6 @@ use zip::ZipArchive;
 
 const DEFAULT_TEXT_LIMIT_BYTES: u64 = 2 * 1024 * 1024; // 2 MiB
 const ARCHIVE_ENTRY_LIMIT: usize = 5000;
-const FORMAT_HEADER_BYTES: u64 = 8 * 1024;
-const FORMAT_ZIP_ENTRY_LIMIT: usize = 500;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -61,6 +60,14 @@ pub struct ArchiveEntry {
     pub is_dir: bool,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HwpxPreview {
+    pub html: String,
+    pub sections: usize,
+    pub warnings: Vec<String>,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ArchivePreview {
@@ -83,7 +90,7 @@ pub fn binary_viewer_classify(
     let mime = mime_guess::from_path(&target)
         .first()
         .map(|m| m.essence_str().to_string());
-    let detected_format = match detect_document_format_bounded(&target) {
+    let detected_format = match detect_document_format(&target) {
         Ok(format) => format_label(format).to_string(),
         Err(_) => "unknown".to_string(),
     };
@@ -168,13 +175,39 @@ pub fn binary_viewer_read_archive(
     })
 }
 
+/// `hwp convert <file> --to html -o -` reduced to the inner HTML of `<body>`
+/// (the document's `<head>` and `<style>` never reach the app), plus the
+/// section count from `hwp info --json`.
 pub fn binary_viewer_extract_hwpx(
     vault_path: String,
     target_path: String,
 ) -> Result<HwpxPreview, String> {
     let target = resolve_inside_vault(&vault_path, &target_path)?;
     require_existing_file(&target)?;
-    extract_hwpx_text_html(&target)
+    let hwp = hwp_cli_template::hwp_bin()?;
+    let document = hwp_cli_template::convert_to_html(&hwp, &target)?;
+    let html = body_inner_html(&document)?.to_string();
+    let sections = hwp_cli_template::info_sections(&hwp, &target)?;
+    let mut warnings = Vec::new();
+    if html.is_empty() {
+        warnings.push("HWPX has no renderable text content".to_string());
+    }
+    Ok(HwpxPreview {
+        html,
+        sections,
+        warnings,
+    })
+}
+
+fn body_inner_html(document: &str) -> Result<&str, String> {
+    let start = document
+        .find("<body")
+        .and_then(|at| document[at..].find('>').map(|end| at + end + 1));
+    let end = document.rfind("</body>");
+    match (start, end) {
+        (Some(start), Some(end)) if start <= end => Ok(document[start..end].trim()),
+        _ => Err("hwp_convert_invalid_html: hwp convert output has no <body>".to_string()),
+    }
 }
 
 pub fn binary_viewer_open_external(vault_path: String, target_path: String) -> Result<(), String> {
@@ -348,81 +381,6 @@ fn validate_archive_entry_name(name: &str) -> Result<(), String> {
         }
     }
     Ok(())
-}
-
-fn detect_document_format_bounded(path: &Path) -> Result<DocumentFormat, String> {
-    let mut file = fs::File::open(path).map_err(|err| format!("Cannot open target: {err}"))?;
-    let mut header = Vec::with_capacity(FORMAT_HEADER_BYTES as usize);
-    file.by_ref()
-        .take(FORMAT_HEADER_BYTES)
-        .read_to_end(&mut header)
-        .map_err(|err| format!("Cannot read target header: {err}"))?;
-
-    if header.starts_with(b"HWP Document File V3.00") {
-        return Ok(DocumentFormat::Hwp3);
-    }
-    if header.starts_with(b"%PDF") {
-        return Ok(DocumentFormat::Pdf);
-    }
-    if header.len() >= 4 && header.starts_with(&[0xd0, 0xcf, 0x11, 0xe0]) {
-        return Ok(DocumentFormat::Hwp);
-    }
-    if is_hwpml_header(&header) {
-        return Ok(DocumentFormat::Hwpml);
-    }
-    if is_zip_header(&header) {
-        return Ok(detect_zip_format_path(path));
-    }
-    Ok(DocumentFormat::Unknown)
-}
-
-fn is_zip_header(bytes: &[u8]) -> bool {
-    bytes.starts_with(b"PK\x03\x04")
-        || bytes.starts_with(b"PK\x05\x06")
-        || bytes.starts_with(b"PK\x07\x08")
-}
-
-fn is_hwpml_header(bytes: &[u8]) -> bool {
-    let head_len = bytes.len().min(512);
-    let head = String::from_utf8_lossy(&bytes[..head_len]);
-    head.trim_start_matches('\u{feff}')
-        .trim_start()
-        .starts_with("<?xml")
-        && head.contains("<HWPML")
-}
-
-fn detect_zip_format_path(path: &Path) -> DocumentFormat {
-    let Ok(file) = fs::File::open(path) else {
-        return DocumentFormat::Unknown;
-    };
-    let Ok(mut archive) = ZipArchive::new(file) else {
-        return DocumentFormat::Unknown;
-    };
-    let mut has_xlsx = false;
-    let mut has_docx = false;
-    let mut has_hwpx = false;
-    for index in 0..archive.len().min(FORMAT_ZIP_ENTRY_LIMIT) {
-        let Ok(file) = archive.by_index(index) else {
-            continue;
-        };
-        let name = file.name().to_ascii_lowercase();
-        match name.as_str() {
-            "xl/workbook.xml" => has_xlsx = true,
-            "word/document.xml" => has_docx = true,
-            "contents/content.hpf" | "mimetype" => has_hwpx = true,
-            _ if name.starts_with("contents/section") => has_hwpx = true,
-            _ => {}
-        }
-    }
-    if has_xlsx {
-        DocumentFormat::Xlsx
-    } else if has_docx {
-        DocumentFormat::Docx
-    } else if has_hwpx {
-        DocumentFormat::Hwpx
-    } else {
-        DocumentFormat::Unknown
-    }
 }
 
 fn classify(ext: Option<&str>, detected_format: &str) -> ViewerCategory {
@@ -993,10 +951,96 @@ mod phase08_10_tests {
         );
     }
 
+    /// Stub released hwp for the preview: `convert --to html -o -` prints a
+    /// full document with a `<style>` head, `info --json` reports 1 section.
+    #[cfg(unix)]
+    fn stub_hwp(dir: &Path) -> std::path::PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+        let binary = dir.join("hwp");
+        let script = r#"#!/bin/sh
+case "$1" in
+  --version) echo "hwp 1.2.0" ;;
+  convert)
+    [ -f "$2" ] && [ "$3" = "--to" ] && [ "$4" = "html" ] && [ "$5" = "-o" ] && [ "$6" = "-" ] || exit 2
+    printf '%s\n' '<!DOCTYPE html><html><head><title>t</title><style>body { color: red; }</style></head>' '<body>' '<p class="ps2">nonempty HWPX &amp; {{사업명}}</p>' '<table><tr><td>이름</td><td>홍길동</td></tr></table>' '</body></html>' ;;
+  info) printf '%s\n' '{"format":"hwpx","sections":1}' ;;
+  *) exit 2 ;;
+esac
+"#;
+        fs::write(&binary, script).unwrap();
+        fs::set_permissions(&binary, fs::Permissions::from_mode(0o755)).unwrap();
+        binary
+    }
+
+    struct HwpBinGuard(#[allow(dead_code)] std::sync::MutexGuard<'static, ()>);
+    impl HwpBinGuard {
+        fn set(value: &Path) -> Self {
+            let guard = crate::hwped::PHASE08_21_ENV_LOCK
+                .lock()
+                .unwrap_or_else(|poison| poison.into_inner());
+            std::env::set_var("MARU_HWP_BIN", value);
+            Self(guard)
+        }
+    }
+    impl Drop for HwpBinGuard {
+        fn drop(&mut self) {
+            std::env::remove_var("MARU_HWP_BIN");
+        }
+    }
+
+    #[test]
+    fn hwpx_preview_keeps_only_the_body_of_the_hwp_document() {
+        let document = "<!DOCTYPE html><html><head><style>p{}</style></head>\n<body class=\"x\">\n<p>제목</p><table><tr><td>a</td></tr></table>\n</body></html>";
+        assert_eq!(
+            body_inner_html(document).unwrap(),
+            "<p>제목</p><table><tr><td>a</td></tr></table>"
+        );
+        assert!(body_inner_html("<p>no body</p>")
+            .unwrap_err()
+            .starts_with("hwp_convert_invalid_html"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn hwpx_preview_uses_hwp_convert_and_fails_closed_without_hwp() {
+        let temp = tempfile::tempdir().unwrap();
+        let template = temp.path().join("plan.hwpx");
+        fs::copy(
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata/hwp-cli-plan-template.hwpx"),
+            &template,
+        )
+        .unwrap();
+        let root = text(temp.path());
+        let preview = {
+            let _env = HwpBinGuard::set(&stub_hwp(temp.path()));
+            binary_viewer_extract_hwpx(root.clone(), text(&template)).unwrap()
+        };
+        assert_eq!(preview.sections, 1);
+        assert!(
+            preview.html.starts_with("<p class=\"ps2\">"),
+            "{}",
+            preview.html
+        );
+        assert!(preview.html.contains("{{사업명}}"), "{}", preview.html);
+        assert!(preview.html.contains("<td>홍길동</td>"), "{}", preview.html);
+        assert!(!preview.html.contains("<style"), "{}", preview.html);
+        assert!(preview.warnings.is_empty());
+
+        let not_executable = temp.path().join("not-hwp");
+        fs::write(&not_executable, "not a binary").unwrap();
+        let err = {
+            let _env = HwpBinGuard::set(&not_executable);
+            binary_viewer_extract_hwpx(root, text(&template)).unwrap_err()
+        };
+        assert!(err.starts_with("cli_missing"), "{err}");
+    }
+
     #[test]
     fn phase08_10_actual_wrappers_return_nonempty_results_and_native_argv() {
         let _home = crate::atomic_file::phase08_06::Home::new();
         let temp = tempfile::tempdir_in(_home.root.path()).unwrap();
+        #[cfg(unix)]
+        let _hwp = HwpBinGuard::set(&stub_hwp(temp.path()));
         let root = text(temp.path());
         let note = temp.path().join("note.txt");
         fs::write(&note, "nonempty viewer bytes").unwrap();

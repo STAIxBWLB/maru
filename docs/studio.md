@@ -25,19 +25,21 @@ and M4 export subsystems. Shipped in Phase 4 W11–W12.
    with or without `.hwpx`) onto the matching alias. A workspace template path
    typed in the step overrides an `hwpx_skill` key and goes through
    `template_get_fields` / `template_fill_hwpx`, also on the released `hwp`:
-   fields merge `hwp slots --json` with the kordoc_lite scan (kordoc_lite
-   alone, with a warning, when `hwp` is missing). The fill is built in a
-   staging directory next to the output: `hwp fill --data … --json
-   --allow-partial` gets only the requested keys that are real `{{slot}}`s
-   (with no slot keys, or when `hwp fill` publishes nothing because it matched
-   no slot at all, the template is copied instead), then every value goes
-   through the kordoc_lite fill, which replaces `{{…}}` placeholders
-   (including padded `{{ name }}` ones that `hwp fill` does not match) and
-   form labels. A final `hwp slots --json` re-scan fails the fill closed if
-   any requested slot is still unfilled; otherwise `hwp validate --json`
-   checks it and the output is published atomically. The output may not be
-   the template itself, through a symlink or another spelling either. Without a released `hwp` the fill fails closed with
-   its `cli_missing:` / `hwp_version:` reason and writes nothing.
+   fields come from `hwp slots --forms --json`, whose `fields` list merges
+   every `{{slot}}` (under its normalized key) with the Korean form labels:
+   label cells (`formLabel`) and inline `라벨:` text (`inlineLabel`). The fill
+   is built in a staging directory next to the output in one pass: `hwp fill
+   --forms --data … --json --allow-partial` gets every requested value and
+   fills slots (padded `{{ name }}` too), the cell next to or below a label
+   cell, inline labels, `라벨(  )` blanks, `□옵션` checkboxes and `(라벨:  )`
+   blanks. A requested slot it cannot fill fails the fill closed; a form key it
+   cannot match stays in `unmatchedFields`. `replacedCount` counts the slot
+   keys and `formFilledCount` the form keys; `hwp validate --json` and `hwp
+   info --json` check the staged file, which is then published atomically. The
+   output may not be the template itself, through a symlink or another
+   spelling either. Without a released `hwp` (>= 1.2.0) the field scan and the
+   fill fail closed with their `cli_missing:` / `hwp_version:` reason and write
+   nothing.
 6. **Export** — wraps `export_plan` + the M4 dispatch pipeline (docx / hwpx / pdf
    with a sha256 manifest; see below).
 7. **Package** — applies the local body and freezes a version snapshot.
@@ -63,8 +65,12 @@ and the command palette (`src-tauri/src/export/`):
 - `export/manifest.rs` — `manifest.yaml` next to a `<source-stem>.exports/`
   bundle. The manifest is the SSOT for export state and the only place output
   sha256s live.
-- `export/validate.rs` — format-specific structure checks (docx / hwpx / pdf)
-  plus `kordoc_lite` HWPX/form checks.
+- `export/validate.rs` — per-output existence and sha256 checks plus the
+  format structure checks of `artifact_checks.rs`: HWPX through `hwp validate
+  --json` and `hwp info --json` (`zip-safety`, `hwpx-sections`, or
+  `hwpx-structure` with hwp's first error), with a reduced offline
+  `hwpx-structure` check (ZIP, `mimetype`, a `Contents/section*.xml`) when
+  `hwp` is unavailable; DOCX and PDF locally.
 - `export/dispatch.rs` — a single "Export bundle" command drives
   `pending → ready/failed` using deterministic local converters: `pandoc`
   (DOCX), the released `hwp` (`hwp new --from <md> --preset report` for HWPX,
@@ -85,6 +91,8 @@ and the command palette (`src-tauri/src/export/`):
 ## Tests
 
 Rust: `cargo test --lib` filters `template_fill`, `hwp_cli_template`,
-`kordoc_lite`, `validate` (and the Studio state module). HWPX text extraction
-is exercised against the committed `src-tauri/testdata/hwp-cli-plan-template.hwpx`
-(`hwp new --template 사업계획서`).
+`artifact_checks`, `doc_format`, `validate` (and the Studio state module). CI
+has no `hwp`, so these tests drive stub `hwp` scripts through `MARU_HWP_BIN`.
+The HWPX preview runs against the committed
+`src-tauri/testdata/hwp-cli-plan-template.hwpx` (`hwp new --template
+사업계획서`).
