@@ -37,7 +37,7 @@ and M4 export subsystems. Shipped in Phase 4 W11–W12.
    keys and `formFilledCount` the form keys; `hwp validate --json` and `hwp
    info --json` check the staged file, which is then published atomically. The
    output may not be the template itself, through a symlink or another
-   spelling either. Without a released `hwp` (>= 1.2.0) the field scan and the
+   spelling either. Without a released `hwp` (>= 1.3.0) the field scan and the
    fill fail closed with their `cli_missing:` / `hwp_version:` reason and write
    nothing.
 6. **Export** — wraps `export_plan` + the M4 dispatch pipeline (docx / hwpx / pdf

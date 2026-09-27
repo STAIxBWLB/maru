@@ -574,7 +574,7 @@ mod phase08_21 {
         let script = format!(
             r#"#!/bin/sh
 case "$1" in
-  --version) echo "hwp 1.2.0" ;;
+  --version) echo "hwp 1.3.0" ;;
   slots)
     [ "$3" = "--forms" ] && [ "$4" = "--json" ] || exit 2
     printf '%s\n' '{scan}' ;;

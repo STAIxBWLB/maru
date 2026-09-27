@@ -211,7 +211,7 @@ pub(crate) mod tests {
         let script = format!(
             r#"#!/bin/sh
 case "$1" in
-  --version) echo "hwp 1.2.0" ;;
+  --version) echo "hwp 1.3.0" ;;
   validate) printf '%s\n' '{validate_json}'; exit {validate_exit} ;;
   info) printf '%s\n' '{{"format":"hwpx","sections":{sections}}}' ;;
   slots) cat "$0.slots" || exit 2 ;;
@@ -385,7 +385,7 @@ esac
                 ("Contents/section0.xml", b"<hs:sec/>"),
             ],
         );
-        let why = "hwp_version: hwp 1.1.9 is too old; Maru requires >= 1.2.0".to_string();
+        let why = "hwp_version: hwp 1.2.0 is too old; Maru requires >= 1.3.0".to_string();
         let (checks, settled) = hwpx_checks(Err(&why), &path);
         assert_eq!(checks[0].status, "pass");
         assert!(!settled, "hwp may be installed or upgraded later");
@@ -393,7 +393,7 @@ esac
     #[test]
     fn reduced_offline_check_passes_a_package_and_fails_each_defect() {
         let tmp = tempfile::tempdir().unwrap();
-        let why = "cli_missing: released hwp >= 1.2.0 binary not found".to_string();
+        let why = "cli_missing: released hwp >= 1.3.0 binary not found".to_string();
         let check = |name: &str, entries: Option<&[(&str, &[u8])]>| {
             let path = tmp.path().join(name);
             match entries {

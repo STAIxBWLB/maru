@@ -168,7 +168,7 @@ brew upgrade maru-cli
 - Document Studio guides source selection, template and guideline choice,
   section editing, HWP fields, export, and package freeze.
 - HWP fields, form fill, the inline HWPX preview, and HWPX structure checks
-  run through released `hwp` 1.2.0 or newer. Native template publication
+  run through released `hwp` 1.3.0 or newer. Native template publication
   fails closed on malformed fill reports, unmatched fields, or validation
   failure.
 - The lower-level `hwped_*` engine bridge supports read, render, edit, compose,
