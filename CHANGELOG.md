@@ -8,6 +8,41 @@ because releases cut frequently during active development. Versions before
 Dates are the release-tag dates. Only `feat`/`fix`-level changes are listed;
 `chore(release)` version bumps and merge commits are omitted.
 
+## v1.1.13 - 2026-09-27 - Guarded State
+
+- **A failed Today brain-dump autosave is reported immediately, not silently
+  kept pending (#381, #393).** The text is written to a recovery copy in its
+  own workspace with the usual notice, so typing after a workspace switch can
+  no longer replace it; when the recovery copy itself cannot be written, the
+  value stays pending and the quit flush reports the failure instead of
+  clean.
+- **An app mode picked during boot stays picked (#387, #394).** A selection
+  made in the first second after launch is queued and persisted once settings
+  become writable, and boot, settings hydration, and the save-echo listener no
+  longer revert it to the stored mode.
+- **Preview links open in the system browser (#382, #395).** Clicking a link
+  inside the HWPX or Markdown preview no longer navigates Maru's own webview:
+  http(s) links open externally and other schemes are ignored. The Files
+  trash confirmation also names one selected file correctly and counts "and N
+  others" as N minus one (#389).
+- **Studio's HWPX fill keeps template text for blank fields (#380, #397).**
+  Only fields with an entered value are sent, so label cells and inline
+  `라벨: 값` text survive; an explicit per-field clear sends an empty value
+  on purpose, and the clear marks persist with the document's Studio state.
+- **Browser dialogs are gone (#377, #384).** `window.confirm`/`prompt` paths
+  now use native and in-app dialogs, so the confirmations above actually
+  appear in the shipped app, and the file watcher ignores recovery copies
+  under `.maru/recovery/` (#390).
+- **HWPX checks, preview, forms, and fill run on the released `hwp` (#364,
+  #379).** kordoc_lite is retired; Maru now requires `hwp` 1.3.0 or newer
+  (#399), and v1.3.1 fixes the inline-label fields that always reported
+  unmatched (hwp-cli#385).
+- **Skill editor saving works (#370, #371, #376).** Cmd+S and Save As apply
+  to the skill editor, and its confirm queue handles one dialog at a time.
+  Terminal tab close also ends SIGHUP-catching children without job control
+  (#372, #375), and switch-time brain-dump edits keep their recovery copy
+  tidy (#378).
+
 ## v1.1.12 - 2026-09-27 - Durable Sessions
 
 - **Closing a terminal tab or quitting ends what it should, and only that
