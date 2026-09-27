@@ -45,6 +45,7 @@ import assert from "node:assert/strict";
 import type {} from "webdriverio";
 
 import { readTerminalText } from "../helpers/ptyAssertions";
+import { openShellSession } from "../helpers/shellSession";
 
 /** In-page poll deadline; the embedded driver's default script timeout is
  *  30s, so every executeAsync loop below must resolve before that. */
@@ -59,127 +60,10 @@ function countOccurrences(text: string, needle: string): number {
   return text.split(needle).length - 1;
 }
 
-/** Opens the tool panel's terminal surface and launches a real shell — the
- *  same flow pty.spec.ts uses, kept verbatim so the two specs read the same
- *  way. Returns the new session's id. */
-async function openShellSession(): Promise<string> {
-  const beforeIds = (await browser.execute(() =>
-    Array.from(document.querySelectorAll(".native-terminal-view[data-session-id]")).map((el) =>
-      el.getAttribute("data-session-id"),
-    ),
-  )) as Array<string | null>;
-
-  const shellReady = await browser.executeAsync(
-    (timeout: number, done: (ready: boolean) => void) => {
-      const deadline = Date.now() + timeout;
-      const tick = () => {
-        if (document.querySelector(".terminal-title")) {
-          done(true);
-          return;
-        }
-        if (Date.now() > deadline) {
-          done(false);
-          return;
-        }
-        setTimeout(tick, 200);
-      };
-      tick();
-    },
-    POLL_TIMEOUT_MS,
-  );
-  assert.ok(shellReady, ".terminal-title never rendered");
-  await browser.execute(() => {
-    document.querySelector<HTMLButtonElement>(".terminal-title")?.click();
-  });
-
-  // The shell launcher specifically, for the same reason as pty.spec.ts: the
-  // AI-CLI launchers ahead of it spawn interactive TUIs, and only a real
-  // shell makes the screen-echo assertions below meaningful.
-  const launcherReady = await browser.executeAsync(
-    (timeout: number, done: (ready: boolean) => void) => {
-      const deadline = Date.now() + timeout;
-      const tick = () => {
-        const button = document.querySelector<HTMLButtonElement>(
-          '.terminal-launchers button[aria-label="Shell"]',
-        );
-        if (button && !button.disabled) {
-          done(true);
-          return;
-        }
-        if (Date.now() > deadline) {
-          done(false);
-          return;
-        }
-        setTimeout(tick, 200);
-      };
-      tick();
-    },
-    POLL_TIMEOUT_MS,
-  );
-  assert.ok(launcherReady, "the shell launcher never became enabled");
-  await browser.execute(() => {
-    document
-      .querySelector<HTMLButtonElement>('.terminal-launchers button[aria-label="Shell"]')
-      ?.click();
-  });
-
-  const sessionId = await browser.executeAsync(
-    (priorIds: Array<string | null>, timeout: number, done: (id: string | null) => void) => {
-      const deadline = Date.now() + timeout;
-      const tick = () => {
-        const active = document.querySelector(
-          ".terminal-instance.active .native-terminal-view[data-session-id]",
-        );
-        const id = active?.getAttribute("data-session-id") ?? null;
-        if (id && !priorIds.includes(id)) {
-          done(id);
-          return;
-        }
-        if (Date.now() > deadline) {
-          done(null);
-          return;
-        }
-        setTimeout(tick, 250);
-      };
-      tick();
-    },
-    beforeIds,
-    POLL_TIMEOUT_MS,
-  );
-  assert.ok(sessionId, "launching a shell never mounted a new active native terminal view");
-
-  // Wait for the shell to paint its prompt before typing into it.
-  const promptPainted = await browser.executeAsync(
-    (id: string, timeout: number, done: (ready: boolean) => void) => {
-      const deadline = Date.now() + timeout;
-      const tick = () => {
-        const text = window.__MARU_NATIVE_E2E__?.terminalText(id);
-        if (text && text.trim().length > 0) {
-          done(true);
-          return;
-        }
-        if (Date.now() > deadline) {
-          done(false);
-          return;
-        }
-        setTimeout(tick, 250);
-      };
-      tick();
-    },
-    sessionId,
-    POLL_TIMEOUT_MS,
-  );
-  assert.ok(promptPainted, "terminal text mirror stayed empty after the shell launched");
-
-  await browser.execute((id: string) => {
-    document
-      .querySelector<HTMLTextAreaElement>(
-        `.native-terminal-view[data-session-id="${id}"] .native-terminal-input`,
-      )
-      ?.focus();
-  }, sessionId);
-  return sessionId;
-}
+// The shell session comes from helpers/shellSession.ts — the same flow
+// pty.spec.ts uses, shared so the two specs cannot drift and so ime gets the
+// #388 launch-ordering fix (auto-launched shell settled before the launcher
+// click, focus verified before typing).
 
 describe("native IME sub-spike — terminal hidden textarea", () => {
   let sessionId: string | null = null;
