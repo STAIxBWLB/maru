@@ -815,7 +815,15 @@ mod tests {
             let thread = thread::spawn(move || {
                 while !server_stop.load(Ordering::Relaxed) {
                     match listener.accept() {
-                        Ok((mut stream, _)) => serve_fixture_request(&mut stream, &server_assets),
+                        Ok((mut stream, _)) => {
+                            // macOS (BSD) accepted sockets inherit the
+                            // listener's non-blocking flag, unlike Linux;
+                            // restore blocking I/O so a request read cannot
+                            // observe WouldBlock as end-of-stream and answer
+                            // a valid request with an empty 404.
+                            stream.set_nonblocking(false).unwrap();
+                            serve_fixture_request(&mut stream, &server_assets);
+                        }
                         Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
                             thread::sleep(Duration::from_millis(5));
                         }
@@ -867,11 +875,10 @@ mod tests {
         let mut request = Vec::new();
         let mut chunk = [0u8; 1024];
         while request.len() < 8192 && !request.ends_with(b"\r\n\r\n") {
-            let read = stream.read(&mut chunk).unwrap_or(0);
-            if read == 0 {
-                break;
+            match stream.read(&mut chunk) {
+                Ok(0) | Err(_) => break,
+                Ok(read) => request.extend_from_slice(&chunk[..read]),
             }
-            request.extend_from_slice(&chunk[..read]);
         }
         let path = std::str::from_utf8(&request)
             .ok()
@@ -884,13 +891,18 @@ mod tests {
             Some(body) => ("200 OK", body),
             None => ("404 Not Found", Vec::new()),
         };
-        write!(
+        // Writes are best-effort: the shutdown probe from FixtureChannel's
+        // Drop connects and closes without reading, and must not panic the
+        // server thread.
+        if write!(
             stream,
             "HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
             body.len()
         )
-        .unwrap();
-        stream.write_all(&body).unwrap();
+        .is_ok()
+        {
+            let _ = stream.write_all(&body);
+        }
     }
 
     fn signed_metadata(metadata: &str) -> String {
