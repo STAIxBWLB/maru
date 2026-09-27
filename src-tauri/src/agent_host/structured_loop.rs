@@ -36,6 +36,7 @@ pub fn agent_run_structured_loop<R: tauri::Runtime>(
     run_id: Option<String>,
     command_override: Option<String>,
     permission_mode: Option<String>,
+    metadata: Option<serde_json::Value>,
 ) -> Result<String, String> {
     if directive.trim().is_empty() {
         return Err("five_role_directive_required".to_string());
@@ -43,7 +44,50 @@ pub fn agent_run_structured_loop<R: tauri::Runtime>(
     if cwd.trim().is_empty() {
         return Err("agent_run_cwd_required".to_string());
     }
-    let provider_kind = CliProviderKind::parse(&provider)?;
+    let mut provider_kind = CliProviderKind::parse(&provider)?;
+    let probe_request = crate::agent_host::contracts::CompletionRequest {
+        schema_version: crate::agent_host::contracts::COMPLETION_REQUEST_SCHEMA_VERSION.into(),
+        provider: provider.clone(),
+        prompt: directive.clone(),
+        cwd: cwd.clone(),
+        mode: "background".into(),
+        metadata: metadata.clone(),
+    };
+    let mut metadata = metadata;
+    let resolution = super::runtime_policy::options(&probe_request)?
+        .as_ref()
+        .map(|options| super::runtime_policy::resolve(&probe_request, options))
+        .transpose()?;
+    if let Some(resolution) = &resolution {
+        provider_kind = super::runtime_policy::validate(resolution)?;
+        if command_override
+            .as_ref()
+            .is_some_and(|value| !value.trim().is_empty())
+        {
+            return Err("adaptive_policy_command_override_forbidden".into());
+        }
+        metadata
+            .get_or_insert_with(|| json!({}))
+            .as_object_mut()
+            .ok_or("adaptive_policy_metadata_invalid")?
+            .insert(
+                "adaptiveContinuation".into(),
+                serde_json::to_value(resolution.checkpoint(true)).map_err(|e| e.to_string())?,
+            );
+        // Freeze the complete configuration within the role loop; any drift stops before spawn.
+        let mut options =
+            super::runtime_policy::options(&probe_request)?.ok_or("adaptive_policy_missing")?;
+        options.agent = Some(resolution.agent.clone());
+        options.workload = resolution.workload.clone();
+        metadata
+            .get_or_insert_with(|| json!({}))
+            .as_object_mut()
+            .ok_or("adaptive_policy_metadata_invalid")?
+            .insert(
+                "adaptivePolicy".into(),
+                serde_json::to_value(options).map_err(|e| e.to_string())?,
+            );
+    }
     let run_id = match run_id {
         Some(id) => {
             validate_run_id(&id)?;
@@ -55,8 +99,13 @@ pub fn agent_run_structured_loop<R: tauri::Runtime>(
     let ambiguous = ambiguous.unwrap_or(false);
     let max_rework = max_rework.unwrap_or(1);
     let command_override = command_override.filter(|value| !value.trim().is_empty());
-    let permission_mode =
-        normalize_permission_mode(permission_mode.as_deref().unwrap_or("plan")).to_string();
+    let requested_permission =
+        normalize_permission_mode(permission_mode.as_deref().unwrap_or("plan"));
+    let permission_mode = if resolution.is_some() && requested_permission != "plan" {
+        "auto-review".to_string()
+    } else {
+        requested_permission.to_string()
+    };
 
     // Write `run.started` up-front so an invalid cwd fails fast (propagated to
     // the caller). The top-level `runtimeProvider` lets the redacted-summary
@@ -68,6 +117,7 @@ pub fn agent_run_structured_loop<R: tauri::Runtime>(
         "maru.structured_loop",
         json!({
             "runtimeProvider": provider_kind.id(),
+            "adaptivePolicyResolution": resolution,
             "directive": directive,
             "highRisk": high_risk,
             "ambiguous": ambiguous,
@@ -87,6 +137,7 @@ pub fn agent_run_structured_loop<R: tauri::Runtime>(
             // `runtime` + `workspacePath` mirror the skill-dispatch mission shape so
             // SkillRunsPanel labels the run and resolves the cwd for review/apply.
             "runtime": provider_kind.id(),
+            "adaptivePolicyResolution": resolution,
             "workspacePath": cwd.clone(),
             "skillName": "Structured run",
             "permissionMode": permission_mode,
@@ -108,7 +159,8 @@ pub fn agent_run_structured_loop<R: tauri::Runtime>(
     let cwd_thread = cwd;
     thread::spawn(move || {
         let mut adapter =
-            CliProviderAdapter::new(provider_kind, add_dirs, command_override, permission_mode);
+            CliProviderAdapter::new(provider_kind, add_dirs, command_override, permission_mode)
+                .with_metadata(metadata);
         match run_five_role_loop(&mut adapter, input) {
             Ok(result) => {
                 for role_output in &result.role_outputs {
@@ -198,6 +250,7 @@ pub mod ipc {
         run_id: Option<String>,
         command_override: Option<String>,
         permission_mode: Option<String>,
+        metadata: Option<serde_json::Value>,
     ) -> Result<String, String> {
         tauri::async_runtime::spawn_blocking(move || {
             #[cfg(test)]
@@ -216,6 +269,7 @@ pub mod ipc {
                 run_id,
                 command_override,
                 permission_mode,
+                metadata,
             )
         })
         .await
@@ -326,6 +380,7 @@ mod phase08_16 {
             None,
             Some(text(&cli)),
             Some("plan".into()),
+            None,
         ))
         .unwrap();
         assert!(run_id.starts_with("ai-"), "{run_id}");
@@ -370,6 +425,7 @@ mod phase08_16 {
                 None,
                 None,
                 None,
+                None
             ))
             .unwrap_err(),
             "five_role_directive_required"
@@ -386,6 +442,7 @@ mod phase08_16 {
                 None,
                 None,
                 None,
+                None
             ))
             .unwrap_err(),
             "agent_run_cwd_required"
@@ -401,6 +458,7 @@ mod phase08_16 {
             None,
             None,
             None,
+            None
         ))
         .unwrap_err()
         .starts_with("unsupported_provider"));
@@ -427,6 +485,7 @@ mod phase08_16 {
                 None,
                 Some(text(&cli)),
                 Some("plan".into()),
+                None,
             ),
         );
     }

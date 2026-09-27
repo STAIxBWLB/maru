@@ -63,7 +63,7 @@ export type TasksDefaultView = "list" | "month" | "week" | "day";
 export type WeekStartsOn = 0 | 1;
 export type AiRuntime = "claude" | "codex" | "kimi" | "kiro";
 export type AiClassifierRuntime = AiRuntime | "inherit";
-export type AiPermissionMode = "plan" | "acceptEdits" | "default" | "bypassPermissions";
+export type AiPermissionMode = "plan" | "acceptEdits" | "default" | "auto-review" | "bypassPermissions";
 
 export interface DocumentViewDefinition {
   id: string;
@@ -350,7 +350,17 @@ export interface ComposerSettings {
 /** Minimum importance for scheduled task-extraction candidates to become drafts. */
 export type AiTaskIngestMinImportance = "high" | "medium" | "low";
 
+export const ADAPTIVE_WORKLOADS = ["auto", "routine", "implementation", "deep-analysis", "independent-review", "documents-teaching", "visual-production"] as const;
+export type AdaptiveWorkload = typeof ADAPTIVE_WORKLOADS[number];
+export interface AdaptivePolicy {
+  enabled: boolean;
+  workload: AdaptiveWorkload;
+  agent?: AiRuntime;
+}
+
 export interface AiSettings {
+  /** Opt-in dot policy selection, resolved independently for each invocation. */
+  adaptivePolicy?: AdaptivePolicy;
   /** Agent runtime used by default for skill dispatch + structured runs. */
   defaultRuntime: AiRuntime;
   /** Runtime used for inbox classification; "inherit" resolves to defaultRuntime. */
@@ -604,6 +614,7 @@ export const DEFAULT_MARU_SETTINGS: MaruSettings = {
     classifierRuntime: "inherit",
     taskIngestMinImportance: "medium",
     permissionMode: "plan",
+    adaptivePolicy: { enabled: false, workload: "auto" },
     commandOverrides: { claude: null, codex: null, kimi: null, kiro: null },
     extra: {},
   },
@@ -2402,6 +2413,7 @@ const AI_PERMISSION_MODES: AiPermissionMode[] = [
   "plan",
   "acceptEdits",
   "default",
+  "auto-review",
   "bypassPermissions",
 ];
 const AI_KNOWN_KEYS = new Set([
@@ -2409,6 +2421,7 @@ const AI_KNOWN_KEYS = new Set([
   "classifierRuntime",
   "taskIngestMinImportance",
   "permissionMode",
+  "adaptivePolicy",
   "commandOverrides",
   "extra",
 ]);
@@ -2433,12 +2446,19 @@ function normalizeAi(value: unknown): AiSettings {
       extra: {},
     };
   }
+  const policy = isRecord(value.adaptivePolicy) ? value.adaptivePolicy : {};
+  const policyAgent = parseAiRuntime(policy.agent);
   const overrides = isRecord(value.commandOverrides) ? value.commandOverrides : {};
   const extra: Record<string, unknown> = isRecord(value.extra) ? { ...value.extra } : {};
   for (const [key, entry] of Object.entries(value)) {
     if (!AI_KNOWN_KEYS.has(key)) extra[key] = entry;
   }
   return {
+    adaptivePolicy: {
+      enabled: policy.enabled === true,
+      workload: ADAPTIVE_WORKLOADS.includes(policy.workload as AdaptiveWorkload) ? policy.workload as AdaptiveWorkload : "auto",
+      ...(policyAgent ? { agent: policyAgent } : {}),
+    },
     defaultRuntime: parseAiRuntime(value.defaultRuntime) ?? fallback.defaultRuntime,
     classifierRuntime:
       value.classifierRuntime === "inherit"

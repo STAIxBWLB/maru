@@ -37,6 +37,7 @@ import {
   agentRuntimeFallbackOrder,
   buildAgentBoard,
   inlineAgentRuntime,
+  classifierAdaptivePolicy,
   findSkill,
   missionsForAgent,
   MOCK_BUILTIN_AGENTS,
@@ -177,6 +178,29 @@ describe("runAgentDetailed", () => {
     expect(params.commandOverride).toBe("/opt/kimi");
     expect(params.permissionMode).toBe("plan");
     expect(params.cwd).toBe("/w");
+  });
+
+  it("preserves invocation policy overrides without rewriting global defaults or plan permission", async () => {
+    const policy = { enabled: true, workload: "implementation" as const };
+    const selectedAi = { ...ai, adaptivePolicy: policy };
+    await runAgentDetailed(agent(), {
+      skills, ai: selectedAi, workPath: "/w", prompt: "review",
+      metadata: { origin: "review-flow", adaptivePolicy: { enabled: true, workload: "independent-review" } },
+    });
+    const params = skillsDispatchBackground.mock.calls[0][0] as Record<string, unknown>;
+    expect(params.permissionMode).toBe("plan");
+    expect(params.metadata).toMatchObject({ origin: "review-flow", adaptivePolicy: { enabled: true, workload: "independent-review" } });
+    expect(selectedAi.adaptivePolicy).toEqual(policy);
+  });
+
+  it("lets policy resolve before CLI probing while preserving a manually selected agent", async () => {
+    await runAgentDetailed(agent({ runtime: "codex" }), {
+      skills, ai: { ...ai, adaptivePolicy: { enabled: true, workload: "auto" } }, workPath: "/w", prompt: "implement",
+    });
+    expect(skillsRuntimeStatus).not.toHaveBeenCalled();
+    expect(skillsDispatchBackground.mock.calls[0][0]).toMatchObject({ commandOverride: null,
+      metadata: { adaptivePolicy: { enabled: true, workload: "auto", agent: "codex" } },
+    });
   });
 
   it("always stamps agentId but never overwrites a caller's origin", async () => {
@@ -495,6 +519,15 @@ describe("buildAgentBoard", () => {
     );
     expect(rows[0].schedules).toEqual([]);
     expect(orphans.map((s) => s.id)).toEqual(["s-ghost"]);
+  });
+});
+
+describe("classifier policy intent", () => {
+  it("pins explicit classifier choices but leaves inherited defaults adaptive", () => {
+    const settings = { ...ai, adaptivePolicy: { enabled: true, workload: "auto" as const } };
+    expect(classifierAdaptivePolicy([], settings)).toEqual(settings.adaptivePolicy);
+    expect(classifierAdaptivePolicy([], { ...settings, classifierRuntime: "codex" })).toMatchObject({ agent: "codex" });
+    expect(classifierAdaptivePolicy([agent({ id: "inbox-classify", runtime: "kimi" })], { ...settings, classifierRuntime: "codex" })).toMatchObject({ agent: "kimi" });
   });
 });
 

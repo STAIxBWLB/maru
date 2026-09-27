@@ -1976,6 +1976,7 @@ export async function startAgentCliInvocation(
   extraEnv: Record<string, string> | null = null,
   commandOverride: string | null = null,
   permissionMode: string | null = null,
+  metadata: Record<string, unknown> | null = null,
 ): Promise<string> {
   if (!isTauri()) {
     // The browser dev shell has no ai:// event bus, so an e2e override's return
@@ -1988,6 +1989,7 @@ export async function startAgentCliInvocation(
       extraEnv,
       commandOverride,
       permissionMode,
+      metadata,
     });
     if (override) return override;
     throw new Error("Agent CLI invocation is only available inside the Tauri shell.");
@@ -2000,6 +2002,7 @@ export async function startAgentCliInvocation(
     extraEnv,
     commandOverride,
     permissionMode,
+    metadata,
   });
 }
 

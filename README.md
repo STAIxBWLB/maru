@@ -207,6 +207,33 @@ brew upgrade maru-cli
   themes and remembered layout.
 - Claude Code, Codex, Kimi, and Kiro are first-class runtimes. Each named agent
   binds a skill, runtime, permission mode, and optional schedule.
+- Adaptive runtime policy is opt-in under Settings > AI (`ai.adaptivePolicy`).
+  Each invocation asks `dot ai policy resolve --json` for an eligible runtime,
+  model, reasoning effort, and native automatic-review permission. Missing or
+  invalid policy fails visibly; it never falls back to permission bypass.
+  Claude and Codex with verified subscription authentication can execute this
+  policy; DGX execution is excluded until endpoint and auth binding is verified.
+  Kimi and Kiro remain available for
+  existing manually configured runs. Legacy schedules and the commit-message
+  API retain their selected runtime and do not inherit adaptive policy automatically. Explicit plan mode
+  retains native restrictions on task-file writes; it is not a blanket guarantee
+  that every remote MCP operation is read-only. The authorized memory/vault
+  lookup and record exceptions receive exact no-confirmation rules, subject to
+  higher-level native mode restrictions and explicit deny rules. No other remote
+  write permission is added.
+  Runtime decisions are reported in invocation metadata and chat diagnostics.
+  Structured roles freeze the complete initial configuration and stop on drift.
+  Chat permits at most two configuration changes per task, then stops on another
+  change; explicit selections freeze the recorded configuration. New turns resolve
+  again using capped transcript replay, not native session resume. Maru does
+  not automatically replay failed actions or change providers after a rejection.
+  Explicitly authorized claude-mem and Obsidian lookup/record tools receive
+  exact native approval rules from resolved `knowledge_approvals`; unknown
+  servers, tools, deletion, and move grants are rejected. Knowledge approval
+  scope is part of the frozen task fingerprint. A runtime switch must retain
+  every previously available memory/vault tool or stop before launch, even when
+  switch budget remains. Vault writes remain MCP-owned.
+  Native configuration remains owned by dotfiles; Maru only constructs argv.
 - Provider probes and real integrations have bounded output, timeout,
   cancellation, and stale-request handling. The real-binary integration smoke
   remains separate from hermetic `make verify`.

@@ -13,7 +13,7 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { invokeE2EOverride } from "./e2eInvoke";
-import type { AiPermissionMode, AiRuntime, AiSettings } from "./settings";
+import type { AdaptivePolicy, AiPermissionMode, AiRuntime, AiSettings } from "./settings";
 import {
   skillsDispatchBackground,
   skillsRuntimeStatus,
@@ -317,6 +317,18 @@ export interface RunAgentContext {
   metadata?: Record<string, unknown>;
 }
 
+/** An explicit named-agent runtime is a user choice, never a fallback hint. */
+export function invocationAdaptivePolicy(
+  agent: AgentRecord,
+  ai: AiSettings,
+  override?: AdaptivePolicy,
+): AdaptivePolicy | undefined {
+  const policy = override ?? ai.adaptivePolicy;
+  if (!policy?.enabled) return policy;
+  const selected = override?.agent ?? (agent.runtime === "inherit" ? policy.agent : agent.runtime);
+  return { ...policy, ...(selected ? { agent: selected } : {}) };
+}
+
 export interface AgentDispatch {
   invocationId: string;
   runtime: AiRuntime;
@@ -325,8 +337,8 @@ export interface AgentDispatch {
 
 /**
  * Resolve, probe and dispatch one agent run. Returns the invocation id, the
- * runtime actually used (which may differ from the preferred one after
- * fallback) and the resolved skill id.
+ * legacy runtime (provisional when adaptive policy is enabled) and skill id.
+ * Policy-resolved runtime is reported by the backend mission diagnostics.
  *
  * `metadata.origin` is defaulted to the agent id but never overwritten:
  * `isInboxProcessMission`, `isCompletedSchedulerSkillMission` and the tasks
@@ -352,7 +364,10 @@ export async function runAgentDetailed(
 
   const preferred = resolveAgentRuntime(agent, ctx.ai);
   const permissionMode = resolveAgentPermissionMode(agent, ctx.ai);
-  const { runtime, commandOverride } = await resolveAvailableRuntime(preferred, ctx.ai);
+  const adaptivePolicy = invocationAdaptivePolicy(agent, ctx.ai, ctx.metadata?.adaptivePolicy as AdaptivePolicy | undefined);
+  const { runtime, commandOverride } = adaptivePolicy?.enabled
+    ? { runtime: preferred, commandOverride: null }
+    : await resolveAvailableRuntime(preferred, ctx.ai);
 
   const context = ctx.context ?? [];
   const invocationId = await skillsDispatchBackground({
@@ -366,6 +381,7 @@ export async function runAgentDetailed(
     metadata: {
       origin: agent.id,
       ...ctx.metadata,
+      ...(adaptivePolicy ? { adaptivePolicy } : {}),
       agentId: agent.id,
       skillName: skill.name,
       runtime,
@@ -430,6 +446,13 @@ export interface InlineAgentRuntime {
 }
 
 /** The runtime an inline (non-mission) feature should use for this agent. */
+export function classifierAdaptivePolicy(agents: AgentRecord[], ai: AiSettings): AdaptivePolicy | undefined {
+  const record = findAgent(agents, "inbox-classify");
+  const policy = record ? invocationAdaptivePolicy(record, ai) : ai.adaptivePolicy;
+  if (!policy?.enabled || (record && record.runtime !== "inherit") || ai.classifierRuntime === "inherit") return policy;
+  return { ...policy, agent: ai.classifierRuntime };
+}
+
 export function inlineAgentRuntime(
   agents: AgentRecord[],
   id: string,

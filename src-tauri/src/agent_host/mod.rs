@@ -6,6 +6,7 @@ pub mod proposal;
 pub mod protected_write;
 pub mod provider;
 pub mod roles;
+pub mod runtime_policy;
 pub mod status;
 pub mod structured_loop;
 

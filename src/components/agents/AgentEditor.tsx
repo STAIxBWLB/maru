@@ -23,6 +23,7 @@ const PERMISSION_CHOICES: AgentPermissionChoice[] = [
   "plan",
   "acceptEdits",
   "default",
+  "auto-review",
   "bypassPermissions",
 ];
 
@@ -153,7 +154,7 @@ export function AgentEditor({
           >
             {PERMISSION_CHOICES.map((mode) => (
               <option key={mode} value={mode}>
-                {mode === "inherit" ? t("agents.permission.inherit") : mode}
+                {mode === "inherit" ? t("agents.permission.inherit") : t(`system.ai.permissionMode.${mode}`)}
               </option>
             ))}
           </CompactSelect>

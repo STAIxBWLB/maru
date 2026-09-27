@@ -112,6 +112,7 @@ impl CliProviderKind {
 /// Unknown/empty input falls back to the safe `plan` default.
 pub fn normalize_permission_mode(value: &str) -> &'static str {
     match value.trim() {
+        "auto-review" => "auto-review",
         "acceptEdits" => "acceptEdits",
         "bypassPermissions" => "bypassPermissions",
         "default" => "default",
@@ -121,6 +122,9 @@ pub fn normalize_permission_mode(value: &str) -> &'static str {
 
 fn apply_codex_permission_args(cmd: &mut Command, permission_mode: &str) {
     match normalize_permission_mode(permission_mode) {
+        "auto-review" => {
+            cmd.arg("--approve-for-me");
+        }
         "plan" => {
             cmd.arg("--sandbox").arg("read-only");
         }
@@ -178,7 +182,54 @@ pub fn build_cli_command(
     command_override: Option<&str>,
     permission_mode: &str,
 ) -> Result<(Command, Option<String>), String> {
+    build_cli_command_with_policy(
+        provider,
+        request,
+        add_dirs,
+        command_override,
+        permission_mode,
+    )
+    .map(|(cmd, stdin, _)| (cmd, stdin))
+}
+
+type PolicyCommand = (
+    Command,
+    Option<String>,
+    Option<super::runtime_policy::Resolution>,
+);
+
+pub fn build_cli_command_with_policy(
+    provider: CliProviderKind,
+    request: &CompletionRequest,
+    add_dirs: &[String],
+    command_override: Option<&str>,
+    permission_mode: &str,
+) -> Result<PolicyCommand, String> {
     request.validate()?;
+    let policy = super::runtime_policy::options(request)?;
+    let resolution = policy
+        .as_ref()
+        .map(|options| super::runtime_policy::resolve(request, options))
+        .transpose()?;
+    let provider = resolution
+        .as_ref()
+        .map(super::runtime_policy::validate)
+        .transpose()?
+        .unwrap_or(provider);
+    if resolution.is_some() && command_override.is_some() {
+        return Err("adaptive_policy_command_override_forbidden".into());
+    }
+    // Explicit plan restrictions (including source review and schedules) remain binding.
+    let permission_mode = if resolution.is_some() && permission_mode != "plan" {
+        "auto-review"
+    } else {
+        permission_mode
+    };
+    if permission_mode == "auto-review"
+        && !matches!(provider, CliProviderKind::Claude | CliProviderKind::Codex)
+    {
+        return Err("auto_review_unsupported_for_provider".into());
+    }
     let (mut cmd, stdin_payload) = match provider {
         CliProviderKind::Claude => {
             let bin = resolve_provider_binary(provider, command_override).ok_or_else(|| {
@@ -189,7 +240,11 @@ pub fn build_cli_command(
             cmd.arg("-p")
                 .arg(&request.prompt)
                 .arg("--permission-mode")
-                .arg(normalize_permission_mode(permission_mode))
+                .arg(if permission_mode == "auto-review" {
+                    "auto"
+                } else {
+                    normalize_permission_mode(permission_mode)
+                })
                 .stdin(Stdio::null());
             for dir in add_dirs {
                 cmd.arg("--add-dir").arg(dir);
@@ -239,8 +294,27 @@ pub fn build_cli_command(
             (cmd, None)
         }
     };
+    if let Some(resolution) = &resolution {
+        super::runtime_policy::validate_target(resolution, cmd.get_program())?;
+        cmd.args(super::runtime_policy::knowledge_args(resolution)?);
+        if !resolution.model.is_empty() {
+            cmd.arg("--model").arg(&resolution.model);
+        }
+        if !resolution.effort.is_empty() {
+            match provider {
+                CliProviderKind::Claude => {
+                    cmd.arg("--effort").arg(&resolution.effort);
+                }
+                CliProviderKind::Codex => {
+                    cmd.arg("-c")
+                        .arg(format!("model_reasoning_effort={:?}", resolution.effort));
+                }
+                _ => unreachable!(),
+            }
+        }
+    }
     crate::agent_runtime_env::apply_to_command(&mut cmd, Path::new(&request.cwd))?;
-    Ok((cmd, stdin_payload))
+    Ok((cmd, stdin_payload, resolution))
 }
 
 pub fn resolve_provider_binary(
@@ -264,6 +338,7 @@ pub struct CliProviderAdapter {
     add_dirs: Vec<String>,
     command_override: Option<String>,
     permission_mode: String,
+    metadata: Option<serde_json::Value>,
 }
 
 impl CliProviderAdapter {
@@ -278,7 +353,15 @@ impl CliProviderAdapter {
             add_dirs,
             command_override,
             permission_mode,
+            metadata: None,
         }
+    }
+}
+
+impl CliProviderAdapter {
+    pub fn with_metadata(mut self, metadata: Option<serde_json::Value>) -> Self {
+        self.metadata = metadata;
+        self
     }
 }
 
@@ -291,8 +374,11 @@ impl ProviderAdapter for CliProviderAdapter {
         self.provider.capabilities()
     }
 
-    fn complete(&mut self, request: CompletionRequest) -> Result<CompletionResponse, String> {
-        let (mut cmd, stdin_payload) = build_cli_command(
+    fn complete(&mut self, mut request: CompletionRequest) -> Result<CompletionResponse, String> {
+        if self.metadata.is_some() {
+            request.metadata = self.metadata.clone();
+        }
+        let (mut cmd, stdin_payload, resolution) = build_cli_command_with_policy(
             self.provider,
             &request,
             &self.add_dirs,
@@ -331,7 +417,10 @@ impl ProviderAdapter for CliProviderAdapter {
         }
         Ok(CompletionResponse {
             schema_version: COMPLETION_RESPONSE_SCHEMA_VERSION.to_string(),
-            provider: self.provider.id().to_string(),
+            provider: resolution
+                .as_ref()
+                .map(|r| r.agent.clone())
+                .unwrap_or_else(|| self.provider.id().to_string()),
             content: String::from_utf8_lossy(&output.stdout).into_owned(),
             stop_reason: Some("cli".to_string()),
             usage: None,
@@ -464,6 +553,18 @@ impl ProviderAdapter for MockProviderAdapter {
 mod tests {
     use super::*;
     use crate::agent_host::contracts::COMPLETION_REQUEST_SCHEMA_VERSION;
+
+    #[test]
+    fn auto_review_is_distinct_from_bypass() {
+        assert_eq!(normalize_permission_mode("auto-review"), "auto-review");
+        let mut command = Command::new("codex");
+        apply_codex_permission_args(&mut command, "auto-review");
+        let args: Vec<_> = command
+            .get_args()
+            .map(|value| value.to_string_lossy())
+            .collect();
+        assert_eq!(args, vec!["--approve-for-me"]);
+    }
 
     #[test]
     fn retry_etxtbsy_retries_only_the_transient_error() {

@@ -327,6 +327,7 @@ import { activeTrackedAgentMissions } from "./lib/skillRuns";
 import {
   agentErrorMessage,
   inlineAgentRuntime,
+  classifierAdaptivePolicy,
   requireAgent,
   runAgent,
   type AgentRecord,
@@ -3501,6 +3502,7 @@ export function MainApp() {
           commandOverride,
           maruSettings.ai.permissionMode,
           contextEnv,
+          classifierAdaptivePolicy(agents, maruSettings.ai),
         );
         updateInboxCarry(id, { classifying: false, classification });
       } catch (err) {
@@ -8965,6 +8967,7 @@ export function MainApp() {
           terminalRuntimeCommands={terminalRuntimeCommands}
           aiRuntimeCommands={aiRuntimeCommands}
           defaultRuntime={maruSettings.ai.defaultRuntime}
+          adaptivePolicy={maruSettings.ai.adaptivePolicy}
           permissionMode={maruSettings.ai.permissionMode}
           meetingsWorkspacePath={inboxWorkspacePath}
           onOpenMeetingsWorkbench={openMeetingsWorkbench}
