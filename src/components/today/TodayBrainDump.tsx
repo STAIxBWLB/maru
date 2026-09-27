@@ -123,7 +123,25 @@ export function TodayBrainDump({
       setStatus("idle");
       // mutate() logs the underlying error and resolves null, so the notice
       // can only say that Today did not take the edit (#373).
-      throw new Error(t("today.prepare.braindump.saveFailed"));
+      // #381: report the first failure right away — recovery copy in this
+      // workspace plus the usual notice — instead of rethrowing and leaving
+      // the value silently pending for the teardown reporter. A pending
+      // failed value is replaced by the next schedule() without a word, and
+      // after a workspace switch (this pane is not re-keyed) that meant the
+      // old workspace's text was lost with no copy anywhere. Returning
+      // instead of throwing also keeps teardown from reporting it twice.
+      const failure = new Error(t("today.prepare.braindump.saveFailed"));
+      const recovered = await reportTeardownSaveFailure(
+        brainDumpRecoveryTarget(value),
+        failure,
+        t,
+      );
+      // But only when the recovery file actually landed: if the copy itself
+      // failed (disk full, .maru/recovery unwritable), the saver's pending
+      // slot is the last copy of the text, so rethrow to keep the value
+      // pending — a later flush or the teardown settle retries, and the quit
+      // flush reports failed instead of clean over lost text.
+      if (!recovered) throw failure;
     },
     [snapshot, mutate, onSaved, workPath, t],
   );

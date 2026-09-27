@@ -37,12 +37,16 @@ let saveFailureCounter = 0;
  * succeeded), and logs one line. Never puts `target.content` into the
  * message or the log. Also clears the single-slot error toast a surface may
  * have raised for this same failure, so it is not shown twice.
+ *
+ * Resolves `true` when the recovery file was actually written, `false` when
+ * the copy itself failed — callers that would otherwise drop their only
+ * in-memory copy of the content can use this to keep it instead.
  */
 export async function reportTeardownSaveFailure(
   target: TeardownSaveTarget,
   error: unknown,
   t: Translate,
-): Promise<void> {
+): Promise<boolean> {
   const reason = error instanceof Error ? error.message : String(error);
   let recovery: { workPath: string; path: string } | undefined;
   let copyReason: string | undefined;
@@ -68,6 +72,7 @@ export async function reportTeardownSaveFailure(
   );
 
   setError((current) => (current === reason ? null : current));
+  return recovery !== undefined;
 }
 
 export function settleTeardownSave<T>(
