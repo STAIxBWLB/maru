@@ -95,6 +95,7 @@ describe("GraphView teardown flush (REL-02, D3)", () => {
   let root: Root | null;
 
   beforeEach(() => {
+    vi.useFakeTimers();
     vi.clearAllMocks();
     registerDictionaries({ ko, en });
     window.matchMedia = window.matchMedia ?? ((query: string) => ({
@@ -130,6 +131,7 @@ describe("GraphView teardown flush (REL-02, D3)", () => {
       await act(async () => root!.unmount());
     }
     host.remove();
+    vi.useRealTimers();
   });
 
   it("flushes a pending layout write made inside the 1500ms debounce window when GraphView unmounts", async () => {
@@ -169,7 +171,12 @@ describe("GraphView teardown flush (REL-02, D3)", () => {
     });
     await settle();
 
-    // Unmount well inside the 1500ms debounce window (GraphView's SAVE_DEBOUNCE_MS).
+    // Still inside GraphView's 1500ms SAVE_DEBOUNCE_MS window: nothing saved yet.
+    await act(async () => {
+      vi.advanceTimersByTime(1499);
+    });
+    expect(vaultGraphLayoutSave).not.toHaveBeenCalled();
+
     await act(async () => root!.unmount());
     root = null;
     await settle();
