@@ -6,15 +6,18 @@ import {
   readMaruTemplate,
   saveMaruTemplate,
 } from "../../../lib/maruDir";
+import { confirmDialog } from "../../../lib/confirmDialog";
 import { useTranslation } from "../../../lib/i18n";
 import type { TemplateEntry } from "../../../lib/types";
 import { Button } from "../../ui/Button";
 import { ModeHeader } from "../../ui/ModeChrome";
+import { useTextPrompt } from "../../ui/TextPromptDialog";
 
 // ============================ Templates ============================
 
 export function TemplatesTab({ workPath }: { workPath: string }) {
   const { t } = useTranslation();
+  const { askText, dialog: textPromptDialog } = useTextPrompt();
   const [entries, setEntries] = useState<TemplateEntry[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [content, setContent] = useState<string>("");
@@ -61,7 +64,7 @@ export function TemplatesTab({ workPath }: { workPath: string }) {
 
   const onDelete = useCallback(async () => {
     if (!selected) return;
-    if (!window.confirm(t("system.rules.delete.confirm"))) return;
+    if (!(await confirmDialog(t("system.rules.delete.confirm")))) return;
     try {
       await deleteMaruTemplate(workPath, selected);
       setSelected(null);
@@ -74,7 +77,7 @@ export function TemplatesTab({ workPath }: { workPath: string }) {
   }, [workPath, selected, t, refresh]);
 
   const onNew = useCallback(async () => {
-    const raw = window.prompt("Template name (lowercase-with-dashes):", "new-template");
+    const raw = await askText("Template name (lowercase-with-dashes):", "new-template");
     if (!raw) return;
     const name = raw.trim();
     if (!name) return;
@@ -86,7 +89,7 @@ export function TemplatesTab({ workPath }: { workPath: string }) {
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }
-  }, [workPath, refresh, onSelect]);
+  }, [askText, workPath, refresh, onSelect]);
 
   const dirty = content !== pristine;
 
@@ -167,6 +170,7 @@ export function TemplatesTab({ workPath }: { workPath: string }) {
           ) : null}
         </section>
       </div>
+      {textPromptDialog}
     </div>
   );
 }

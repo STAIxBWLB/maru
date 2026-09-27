@@ -2249,6 +2249,7 @@ export const en: Record<string, string> = {
   "commit.error.emptyMessage": "Message is required.",
   "commit.error.emptySelection": "Select at least one file to commit.",
   "dialog.cancel": "Cancel",
+  "dialog.ok": "OK",
   "dialog.close": "Close",
   "topbar.skill": "Skill",
 

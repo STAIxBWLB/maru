@@ -119,6 +119,7 @@ import {
   type RibbonTab,
   type TableCellAddress,
 } from "../../lib/diagram/types";
+import { confirmDialog } from "../../lib/confirmDialog";
 import { useTranslation } from "../../lib/i18n";
 import {
   DiagramStoreProvider,
@@ -1408,23 +1409,25 @@ function DiagramShell({
           // Detach prompt (Phase 2b): deleting a strict subset of a view's
           // generated members asks to detach them from the projection first.
           const analysis = analyzeViewDrag(state.doc, nodeIds);
-          if (analysis.subsets.length > 0) {
-            if (!window.confirm(t("diagram.detach.confirm"))) return;
-            for (const subset of analysis.subsets) {
-              store.setState(
-                withSnapshot(
-                  detachViewMembersSnippetAction(subset.viewId, subset.memberIds),
-                  coalescer,
-                ),
-              );
+          void (async () => {
+            if (analysis.subsets.length > 0) {
+              if (!(await confirmDialog(t("diagram.detach.confirm")))) return;
+              for (const subset of analysis.subsets) {
+                store.setState(
+                  withSnapshot(
+                    detachViewMembersSnippetAction(subset.viewId, subset.memberIds),
+                    coalescer,
+                  ),
+                );
+              }
             }
-          }
-          if (nodeIds.length > 0) {
-            store.setState(withSnapshot(removeNodes(nodeIds), coalescer));
-          }
-          if (edgeIds.length > 0) {
-            store.setState(withSnapshot(removeEdges(edgeIds), coalescer));
-          }
+            if (nodeIds.length > 0) {
+              store.setState(withSnapshot(removeNodes(nodeIds), coalescer));
+            }
+            if (edgeIds.length > 0) {
+              store.setState(withSnapshot(removeEdges(edgeIds), coalescer));
+            }
+          })();
         }
       }
     };

@@ -35,6 +35,7 @@ import {
 import { exportPdf, suggestedFileName } from "../../../lib/diagram/export";
 import type { MatrixDataset, ReportDataset } from "../../../lib/diagram/reportTypes";
 import type { DiagramDoc } from "../../../lib/diagram/types";
+import { confirmDialog } from "../../../lib/confirmDialog";
 import { useTranslation } from "../../../lib/i18n";
 
 export interface ImportExportDialogProps {
@@ -256,7 +257,7 @@ export function ImportExportDialog({
     }
   };
 
-  const handleImportConfirm = () => {
+  const handleImportConfirm = async () => {
     if (!importState) return;
     const { outcome } = importState;
     if (outcome.result.kind === "dataset") {
@@ -277,7 +278,7 @@ export function ImportExportDialog({
       }
       onImportDataset(dataset);
     } else {
-      if (dirty && !window.confirm(t("diagram.dialog.ie.confirmReplace"))) return;
+      if (dirty && !(await confirmDialog(t("diagram.dialog.ie.confirmReplace")))) return;
       onImportDoc(outcome.result.doc);
     }
     onClose();
@@ -526,7 +527,7 @@ export function ImportExportDialog({
               <button
                 type="button"
                 className="maru-diagram-toolbar-primary"
-                onClick={handleImportConfirm}
+                onClick={() => void handleImportConfirm()}
                 disabled={!importState}
                 data-testid="ie-import-confirm"
               >

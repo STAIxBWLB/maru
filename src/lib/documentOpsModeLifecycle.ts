@@ -91,7 +91,7 @@ interface FilesDocumentLifecycleOptions {
   setEditorError(update: (current: Record<string, string | null>) => Record<string, string | null>): void;
   saveTab(tabId: string, contentOverride?: string, onFailure?: (message: string) => void): Promise<boolean>;
   refreshWorkspaceFiles(path: string): Promise<void>;
-  confirmReload(): boolean;
+  confirmReload(): Promise<boolean>;
 }
 
 function tabIdForEntry(entry: VaultEntry): string {
@@ -174,7 +174,7 @@ export function useFilesDocumentLifecycle({
 
   const reloadDocument = useCallback(async () => {
     if (!previewTab) return;
-    if (previewTab.draftContent !== previewTab.document.content && !confirmReload()) return;
+    if (previewTab.draftContent !== previewTab.document.content && !(await confirmReload())) return;
     try {
       const loaded = await readDocument(previewTab.workspacePath, previewTab.entry.path);
       const payload = { ...loaded, path: previewTab.entry.path, relPath: previewTab.entry.relPath };

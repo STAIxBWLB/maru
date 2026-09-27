@@ -42,6 +42,7 @@ import {
   resolveDraftGraphRelationEntries,
   type DraftGraphFocusRequest,
 } from "../../lib/draftGraphRelations";
+import { confirmDialog } from "../../lib/confirmDialog";
 import { useTranslation } from "../../lib/i18n";
 import { renderMarkdown } from "../../lib/markdown";
 import {
@@ -66,6 +67,7 @@ import type {
 import { Button, IconButton } from "../ui/Button";
 import { CompactSelect, EmptyState, ModeHeader, StatusBanner } from "../ui/ModeChrome";
 import { PaneResizeHandle } from "../ui/PaneResizeHandle";
+import { useTextPrompt } from "../ui/TextPromptDialog";
 import { NewDraftDialog } from "./NewDraftDialog";
 import { PromoteDraftDialog } from "./PromoteDraftDialog";
 import { useIdeationDrafts } from "./useIdeationDrafts";
@@ -136,6 +138,7 @@ export function DraftsPane({
   onLayoutChange,
 }: DraftsPaneProps) {
   const { t, locale } = useTranslation();
+  const { askText, dialog: textPromptDialog } = useTextPrompt();
   const resolvedDraftsListWidth =
     layout?.draftsListWidth ?? DRAFTS_LIST_WIDTH.defaultValue;
   const [draftsListWidth, setDraftsListWidth] = useState(resolvedDraftsListWidth);
@@ -178,7 +181,7 @@ export function DraftsPane({
   }, [detail, editContent, editing, ideaDetail, ideaEditContent, ideaEditing]);
 
   const confirmDiscardEdits = useCallback(
-    () => !dirtyRef.current || window.confirm(t("drafts.discardEdits")),
+    async () => !dirtyRef.current || confirmDialog(t("drafts.discardEdits")),
     [t],
   );
 
@@ -263,7 +266,7 @@ export function DraftsPane({
 
   const openDraft = useCallback(
     async (draft: DraftEntry) => {
-      if (!workPath || !confirmDiscardEdits()) return;
+      if (!workPath || !(await confirmDiscardEdits())) return;
       const requestId = ++detailReadSequenceRef.current;
       onExitReferenceFocus?.();
       setSelectedId(draftItemId({ itemKind: "draft", draft }));
@@ -337,7 +340,7 @@ export function DraftsPane({
 
   const openIdea = useCallback(
     async (entry: ScratchpadEntry) => {
-      if (!workPath || !confirmDiscardEdits()) return;
+      if (!workPath || !(await confirmDiscardEdits())) return;
       const requestId = ++detailReadSequenceRef.current;
       const selectionId = draftItemId({ itemKind: "idea", entry });
       onExitReferenceFocus?.();
@@ -478,8 +481,8 @@ export function DraftsPane({
   const createIdea = async () => {
     if (!workPath || !beginIdeaMutation()) return;
     try {
-      if (!confirmDiscardEdits()) return;
-      const title = window.prompt(t("drafts.idea.prompt"))?.trim();
+      if (!(await confirmDiscardEdits())) return;
+      const title = (await askText(t("drafts.idea.prompt")))?.trim();
       if (!title) return;
       setLocalError(null);
       const created = await createScratchpadIdea(workPath, title);
@@ -522,7 +525,7 @@ export function DraftsPane({
 
   const discardSelected = async () => {
     if (!workPath || !detail) return;
-    if (!window.confirm(t("drafts.discard.confirm", { title: detail.title }))) return;
+    if (!(await confirmDialog(t("drafts.discard.confirm", { title: detail.title })))) return;
     setLocalError(null);
     try {
       await discardDraft(workPath, detail.id);
@@ -1149,6 +1152,7 @@ export function DraftsPane({
           void refresh();
         }}
       />
+      {textPromptDialog}
     </section>
   );
 }

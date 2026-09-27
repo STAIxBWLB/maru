@@ -23,6 +23,7 @@ import {
 import { useTranslation } from "../lib/i18n";
 import type { DocumentViewDefinition } from "../lib/settings";
 import type { VaultEntry } from "../lib/types";
+import { confirmDialog } from "../lib/confirmDialog";
 import { Button } from "./ui/Button";
 import { Field, TextInput } from "./ui/Field";
 
@@ -167,8 +168,8 @@ export const Sidebar = memo(function Sidebar({
     setViewDialogOpen(false);
   };
 
-  const deleteView = (view: DocumentViewDefinition) => {
-    if (!window.confirm(t("sidebar.view.deleteConfirm", { name: view.label }))) return;
+  const deleteView = async (view: DocumentViewDefinition) => {
+    if (!(await confirmDialog(t("sidebar.view.deleteConfirm", { name: view.label })))) return;
     const nextViews = documentViews.filter((item) => item.id !== view.id);
     onDocumentViewsChange(nextViews);
     if (activeFilterKey === `custom:${view.id}`) onDocumentFilter({ kind: "all" });
@@ -279,7 +280,7 @@ export const Sidebar = memo(function Sidebar({
                 <button
                   type="button"
                   className="type-filter-tool"
-                  onClick={() => deleteView(view)}
+                  onClick={() => void deleteView(view)}
                   title={t("sidebar.view.delete")}
                   aria-label={t("sidebar.view.delete")}
                 >

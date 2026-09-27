@@ -25,6 +25,7 @@ import {
   type DotSyncProfileStatus,
 } from "../../lib/api";
 import { deriveDotSyncBadge } from "../../lib/dotSync";
+import { confirmDialog } from "../../lib/confirmDialog";
 import { useTranslation } from "../../lib/i18n";
 import { SettingsSection } from "../settings/SettingsSection";
 
@@ -179,7 +180,7 @@ export function DotSyncPanel() {
 
   const execute = useCallback(
     async (request: DotSyncActionRequest, confirmation?: string) => {
-      if (confirmation && !window.confirm(confirmation)) return null;
+      if (confirmation && !(await confirmDialog(confirmation))) return null;
       setBusy(request.type);
       setError(null);
       try {

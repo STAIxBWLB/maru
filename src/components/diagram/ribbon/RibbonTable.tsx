@@ -34,6 +34,7 @@ import {
   normalizeRange,
 } from "../../../lib/diagram/tableEditing";
 import type { DiagramNode } from "../../../lib/diagram/types";
+import { confirmDialog } from "../../../lib/confirmDialog";
 import { useTranslation } from "../../../lib/i18n";
 import { useDiagram, useDiagramStore } from "../DiagramStoreContext";
 import { RibbonButton, RibbonGroup, RibbonSeparator } from "./ribbonPrimitives";
@@ -97,11 +98,11 @@ export function RibbonTable() {
     applyMatrixOp(insertRow(matrix, expanded ? expanded.r2 + 1 : matrix.rows.length));
   };
 
-  const onDeleteRow = () => {
+  const onDeleteRow = async () => {
     if (!matrix || !focusRowId) return;
     if (matrix.rows.length <= 1) return;
     const rowCells = Object.values(matrix.cells).filter((cell) => cell.rowId === focusRowId);
-    if (rowCells.some((cell) => cell.text.trim()) && !window.confirm(t("diagram.table.confirm.deleteRow"))) {
+    if (rowCells.some((cell) => cell.text.trim()) && !(await confirmDialog(t("diagram.table.confirm.deleteRow")))) {
       return;
     }
     setNotice(null);
@@ -122,11 +123,11 @@ export function RibbonTable() {
     applyMatrixOp(insertColumn(matrix, expanded ? expanded.c2 + 1 : matrix.columns.length));
   };
 
-  const onDeleteColumn = () => {
+  const onDeleteColumn = async () => {
     if (!matrix || !focusColId) return;
     if (matrix.columns.length <= 1) return;
     const colCells = Object.values(matrix.cells).filter((cell) => cell.colId === focusColId);
-    if (colCells.some((cell) => cell.text.trim()) && !window.confirm(t("diagram.table.confirm.deleteCol"))) {
+    if (colCells.some((cell) => cell.text.trim()) && !(await confirmDialog(t("diagram.table.confirm.deleteCol")))) {
       return;
     }
     setNotice(null);
@@ -137,10 +138,10 @@ export function RibbonTable() {
     }
   };
 
-  const onMerge = () => {
+  const onMerge = async () => {
     if (!matrix || rangeIds.length < 2) return;
     const nonEmpty = nonEmptyCellCount(matrix, rangeIds);
-    if (nonEmpty > 1 && !window.confirm(t("diagram.table.confirm.merge", { count: String(nonEmpty) }))) {
+    if (nonEmpty > 1 && !(await confirmDialog(t("diagram.table.confirm.merge", { count: String(nonEmpty) })))) {
       return;
     }
     setNotice(null);
@@ -258,7 +259,7 @@ export function RibbonTable() {
         <RibbonButton
           labelKey="diagram.table.rowRemove"
           disabled={disabled || !sel || !matrix || matrix.rows.length <= 1}
-          onClick={onDeleteRow}
+          onClick={() => void onDeleteRow()}
         />
         <RibbonButton
           labelKey="diagram.table.colAdd"
@@ -268,7 +269,7 @@ export function RibbonTable() {
         <RibbonButton
           labelKey="diagram.table.colRemove"
           disabled={disabled || !sel || !matrix || matrix.columns.length <= 1}
-          onClick={onDeleteColumn}
+          onClick={() => void onDeleteColumn()}
         />
       </RibbonGroup>
       <RibbonSeparator />
@@ -276,7 +277,7 @@ export function RibbonTable() {
         <RibbonButton
           labelKey="diagram.table.merge"
           disabled={cellOpsDisabled || rangeIds.length < 2}
-          onClick={onMerge}
+          onClick={() => void onMerge()}
         />
         <RibbonButton
           labelKey="diagram.table.split"

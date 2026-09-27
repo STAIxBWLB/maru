@@ -1,15 +1,18 @@
 import { AlertTriangle, Plus, RefreshCcw, Save, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { deleteMaruRule, listMaruRules, readMaruRule, saveMaruRule } from "../../../lib/maruDir";
+import { confirmDialog } from "../../../lib/confirmDialog";
 import { useTranslation } from "../../../lib/i18n";
 import type { RuleEntry } from "../../../lib/types";
 import { Button } from "../../ui/Button";
 import { ModeHeader } from "../../ui/ModeChrome";
+import { useTextPrompt } from "../../ui/TextPromptDialog";
 
 // =============================== Rules ===============================
 
 export function RulesTab({ workPath }: { workPath: string }) {
   const { t } = useTranslation();
+  const { askText, dialog: textPromptDialog } = useTextPrompt();
   const [entries, setEntries] = useState<RuleEntry[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [content, setContent] = useState<string>("");
@@ -67,7 +70,7 @@ export function RulesTab({ workPath }: { workPath: string }) {
 
   const onDelete = useCallback(async () => {
     if (!selected) return;
-    if (!window.confirm(t("system.rules.delete.confirm"))) return;
+    if (!(await confirmDialog(t("system.rules.delete.confirm")))) return;
     try {
       await deleteMaruRule(workPath, selected);
       setSelected(null);
@@ -80,7 +83,7 @@ export function RulesTab({ workPath }: { workPath: string }) {
   }, [workPath, selected, t, refresh]);
 
   const onNew = useCallback(async () => {
-    const raw = window.prompt("Rule name (lowercase-with-dashes):", "new-rule");
+    const raw = await askText("Rule name (lowercase-with-dashes):", "new-rule");
     if (!raw) return;
     const name = raw.trim();
     if (!name) return;
@@ -92,7 +95,7 @@ export function RulesTab({ workPath }: { workPath: string }) {
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }
-  }, [workPath, refresh, onSelect]);
+  }, [askText, workPath, refresh, onSelect]);
 
   const dirty = content !== pristine;
 
@@ -174,6 +177,7 @@ export function RulesTab({ workPath }: { workPath: string }) {
           ) : null}
         </section>
       </div>
+      {textPromptDialog}
     </div>
   );
 }

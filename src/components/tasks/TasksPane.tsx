@@ -33,6 +33,7 @@ import {
   type AgentRecord,
 } from "../../lib/agents";
 import { setError } from "../../lib/errorStore";
+import { confirmDialog } from "../../lib/confirmDialog";
 import { useTranslation } from "../../lib/i18n";
 import type { AiSettings, DocumentLabelMode, LayoutSettings, TasksSettings } from "../../lib/settings";
 import { TODAY_LAYOUT_LIMITS } from "../../lib/todayLayout";
@@ -406,10 +407,10 @@ export function TasksPane({
   };
 
   const selectTask = useCallback(
-    (relPath: string) => {
+    async (relPath: string) => {
       if (
         relPath !== selectedRelPath
-        && !canSwitchTaskDetails(detailDirty, () => window.confirm(t("tasks.detail.discardConfirm")))
+        && !(await canSwitchTaskDetails(detailDirty, () => confirmDialog(t("tasks.detail.discardConfirm"))))
       ) {
         return;
       }
@@ -677,7 +678,7 @@ export function TasksPane({
                 onQueryChange={setQuery}
                 onViewChange={(next) => setDisplayView(next)}
                 onViewDateChange={setViewDate}
-                onSelectEvent={(event) => selectTask(event.resource.relPath)}
+                onSelectEvent={(event) => void selectTask(event.resource.relPath)}
                 onSelectDate={(date) => {
                   if (displayView === "month") setDisplayView("day");
                   setViewDate(date);
@@ -849,10 +850,10 @@ function replaceTaskRow(rows: TaskNoteRow[], relPath: string, updated: TaskNoteR
   return replaced ? next : [updated, ...rows];
 }
 
-export function canSwitchTaskDetails(
+export async function canSwitchTaskDetails(
   dirty: boolean,
-  confirmDiscard: () => boolean,
-): boolean {
+  confirmDiscard: () => Promise<boolean>,
+): Promise<boolean> {
   return !dirty || confirmDiscard();
 }
 

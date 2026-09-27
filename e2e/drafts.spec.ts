@@ -469,8 +469,11 @@ test("edits and transitions an idea in the Ideation hub with optimistic revision
 
 test("creates a new idea from the Ideation hub", async ({ page }) => {
   const pane = await openDraftsMode(page);
-  page.once("dialog", (dialog) => void dialog.accept("New hub idea"));
   await pane.getByRole("button", { name: "새 아이디어", exact: true }).click();
+  // In-app text prompt (#377): the app webview shows no window.prompt.
+  const titlePrompt = page.getByRole("dialog", { name: "아이디어 제목을 입력하세요." });
+  await titlePrompt.getByRole("textbox").fill("New hub idea");
+  await titlePrompt.getByRole("button", { name: "확인" }).click();
 
   await expect
     .poll(() =>

@@ -52,6 +52,7 @@ import {
   type NodeId,
   type TableCellAddress,
 } from "../../../lib/diagram/types";
+import { confirmDialog } from "../../../lib/confirmDialog";
 import { useTranslation } from "../../../lib/i18n";
 import {
   useDiagram,
@@ -285,15 +286,20 @@ export function CanvasSurface({ onMemoOpen, onNodeDoubleClick, onBlankDoubleClic
       // whole-membership drag stays linked (bounds offset on drop).
       const analysis = analyzeViewDrag(state.doc, ids);
       if (analysis.subsets.length > 0) {
-        if (!window.confirm(t("diagram.detach.confirm"))) return;
-        for (const subset of analysis.subsets) {
-          store.setState(
-            withSnapshot(
-              detachViewMembersSnippetAction(subset.viewId, subset.memberIds),
-              defaultCoalescer(),
-            ),
-          );
-        }
+        // The press is over by the time the async dialog answers, so this
+        // press only detaches; the next drag moves the detached nodes (#377).
+        void confirmDialog(t("diagram.detach.confirm")).then((confirmed) => {
+          if (!confirmed) return;
+          for (const subset of analysis.subsets) {
+            store.setState(
+              withSnapshot(
+                detachViewMembersSnippetAction(subset.viewId, subset.memberIds),
+                defaultCoalescer(),
+              ),
+            );
+          }
+        });
+        return;
       }
       const origins = new Map<NodeId, { x: number; y: number; w: number; h: number }>();
       for (const id of ids) {

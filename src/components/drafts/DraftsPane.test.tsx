@@ -153,6 +153,23 @@ async function typeInEditor(host: HTMLElement, value: string) {
   });
 }
 
+// The idea title is asked in the in-app text prompt (useTextPrompt), which
+// portals into document.body.
+async function answerIdeaPrompt(value: string) {
+  const input = document.body.querySelector<HTMLInputElement>(
+    `input[aria-label="${translate("ko", "drafts.idea.prompt")}"]`,
+  );
+  if (!input?.form) throw new Error("idea title prompt not open");
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(input, value);
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  await act(async () => {
+    input.form!.requestSubmit();
+    await Promise.resolve();
+  });
+}
+
 beforeEach(() => {
   vi.mocked(listDrafts).mockResolvedValue([DRAFT, SECOND_DRAFT]);
   vi.mocked(listScratchpad).mockResolvedValue([]);
@@ -706,7 +723,6 @@ describe("DraftsPane Ideation hub", () => {
       resolveCreate = resolve;
     });
     vi.mocked(createScratchpadIdea).mockReturnValue(pendingCreate);
-    vi.stubGlobal("prompt", vi.fn().mockReturnValue("Duplicate click idea"));
     const host = await render();
 
     const create = host.querySelector<HTMLButtonElement>(
@@ -718,6 +734,7 @@ describe("DraftsPane Ideation hub", () => {
       create.click();
       await Promise.resolve();
     });
+    await answerIdeaPrompt("Duplicate click idea");
 
     expect(vi.mocked(createScratchpadIdea)).toHaveBeenCalledTimes(1);
     expect(create.disabled).toBe(true);
@@ -733,7 +750,6 @@ describe("DraftsPane Ideation hub", () => {
   it("creates a new idea from the Ideation header and refreshes the list", async () => {
     vi.mocked(listScratchpad).mockResolvedValue([]);
     vi.mocked(createScratchpadIdea).mockResolvedValue(IDEA_DOC);
-    vi.stubGlobal("prompt", vi.fn().mockReturnValue("New hub idea"));
     const host = await render();
 
     const create = host.querySelector<HTMLButtonElement>(
@@ -741,8 +757,31 @@ describe("DraftsPane Ideation hub", () => {
     );
     if (!create) throw new Error("idea create button not found");
     await act(async () => create.click());
+    await answerIdeaPrompt("New hub idea");
 
     expect(vi.mocked(createScratchpadIdea)).toHaveBeenCalledWith("/w", "New hub idea");
     expect(vi.mocked(listScratchpad).mock.calls.length).toBeGreaterThan(1);
+  });
+
+  it("creates nothing when the idea title prompt is cancelled", async () => {
+    vi.mocked(listScratchpad).mockResolvedValue([]);
+    const host = await render();
+    const create = host.querySelector<HTMLButtonElement>(
+      `[aria-label="${translate("ko", "drafts.idea.create")}"]`,
+    );
+    if (!create) throw new Error("idea create button not found");
+    await act(async () => create.click());
+
+    const cancel = [...document.body.querySelectorAll("form button")].find(
+      (button) => button.textContent === translate("ko", "dialog.cancel"),
+    );
+    if (!cancel) throw new Error("idea title prompt not open");
+    await act(async () => {
+      cancel.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await Promise.resolve();
+    });
+
+    expect(vi.mocked(createScratchpadIdea)).not.toHaveBeenCalled();
+    expect(create.disabled).toBe(false);
   });
 });

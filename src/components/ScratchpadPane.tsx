@@ -62,6 +62,7 @@ import {
   writeScratchpadDraft,
   type ScratchpadDraft,
 } from "../lib/scratchpad";
+import { confirmDialog } from "../lib/confirmDialog";
 import { setError } from "../lib/errorStore";
 import { createDebouncedSaver } from "../lib/debouncedSave";
 import { useTeardownFlush } from "../lib/teardownSave";
@@ -723,7 +724,10 @@ export function ScratchpadPane({
     const current = editorRef.current;
     if (!workPath || !current || !current.revision) return;
     if (!(await flushCurrent())) return;
-    if (!window.confirm(t("rightPane.scratchpad.trashConfirm", { name: current.name }))) return;
+    if (!(await confirmDialog(t("rightPane.scratchpad.trashConfirm", { name: current.name })))) return;
+    // The dialog waits on the user; trash only the memo it asked about.
+    const open = editorRef.current;
+    if (open?.collection !== current.collection || open.relativePath !== current.relativePath) return;
     try {
       await trashScratchpadDocument(
         workPath,
@@ -780,7 +784,7 @@ export function ScratchpadPane({
 
   const migrateMemos = async () => {
     if (!workPath || migrationBusy) return;
-    if (!window.confirm(t("rightPane.scratchpad.migrationConfirm"))) return;
+    if (!(await confirmDialog(t("rightPane.scratchpad.migrationConfirm")))) return;
     setMigrationBusy(true);
     setMigrationStatus(null);
     try {

@@ -38,6 +38,7 @@ import {
 import { formatRelativeDate } from "../../lib/document";
 import { formatScheduleTime } from "../../lib/drafts";
 import { setError } from "../../lib/errorStore";
+import { confirmDialog } from "../../lib/confirmDialog";
 import { useTranslation } from "../../lib/i18n";
 import type { AiSettings } from "../../lib/settings";
 import type { SkillDispatchRuntime, SkillRecord } from "../../lib/skills";
@@ -340,7 +341,7 @@ export function AgentsPane({
       if (!workPath) return;
       // schedules.json has no undo, and a skill-matched schedule may be one the
       // user built in the old UI with a prompt this agent never owned.
-      if (!window.confirm(t("drafts.automation.removeConfirm", { name: schedule.name }))) {
+      if (!(await confirmDialog(t("drafts.automation.removeConfirm", { name: schedule.name })))) {
         return;
       }
       setBusy(true);

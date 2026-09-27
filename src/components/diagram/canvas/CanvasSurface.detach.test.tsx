@@ -58,9 +58,10 @@ function renderCanvas(): { container: HTMLDivElement; root: Root } {
   return { container, root };
 }
 
-function pointerDownOn(nodeId: string): void {
+// Async act: the detach prompt is answered through confirmDialog.
+async function pointerDownOn(nodeId: string): Promise<void> {
   const el = document.body.querySelector(`[data-node-id="${nodeId}"]`)!;
-  act(() => {
+  await act(async () => {
     el.dispatchEvent(
       new MouseEvent("pointerdown", { bubbles: true, button: 0 } as MouseEventInit),
     );
@@ -89,11 +90,11 @@ describe("CanvasSurface detach prompt", () => {
     }
   });
 
-  it("cancel aborts the drag and keeps the view link", () => {
+  it("cancel aborts the drag and keeps the view link", async () => {
     confirmSpy.mockReturnValue(false);
     harness = renderCanvas();
     const target = memberIds()[0]!;
-    pointerDownOn(target);
+    await pointerDownOn(target);
     expect(confirmSpy).toHaveBeenCalledTimes(1);
     const state = probe!.getState();
     const node = state.doc.nodes.find((n) => n.id === target)!;
@@ -102,12 +103,12 @@ describe("CanvasSurface detach prompt", () => {
     expect(state.doc.views![0]!.nodeIds).toContain(target);
   });
 
-  it("confirm detaches the subset before the drag starts", () => {
+  it("confirm detaches the subset; the next press drags it", async () => {
     confirmSpy.mockReturnValue(true);
     harness = renderCanvas();
     const target = memberIds()[0]!;
     const viewId = probe!.getState().doc.views![0]!.id;
-    pointerDownOn(target);
+    await pointerDownOn(target);
     expect(confirmSpy).toHaveBeenCalledTimes(1);
     const state = probe!.getState();
     const node = state.doc.nodes.find((n) => n.id === target)!;
@@ -115,9 +116,12 @@ describe("CanvasSurface detach prompt", () => {
     expect(node.meta?.snippet).toBe(true);
     expect(state.doc.views![0]!.nodeIds).not.toContain(target);
     expect(state.doc.views![0]!.id).toBe(viewId);
+    // Detached, the node is no longer a view subset: pressing it again asks nothing.
+    await pointerDownOn(target);
+    expect(confirmSpy).toHaveBeenCalledTimes(1);
   });
 
-  it("a whole-membership drag stays linked (no prompt)", () => {
+  it("a whole-membership drag stays linked (no prompt)", async () => {
     harness = renderCanvas();
     // Select every member first: a marquee-free way is dispatching setSelection
     // through the store, then dragging one of them drags the whole selection.
@@ -131,7 +135,7 @@ describe("CanvasSurface detach prompt", () => {
         },
       }));
     });
-    pointerDownOn(ids[0]!);
+    await pointerDownOn(ids[0]!);
     expect(confirmSpy).not.toHaveBeenCalled();
   });
 });

@@ -1,5 +1,6 @@
 import { Check, FilePlus2, GitCompare, History, Plus, RotateCcw, Save, Sparkles, Trash2, Users } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type UIEvent } from "react";
+import { confirmDialog } from "../../lib/confirmDialog";
 import { useTranslation } from "../../lib/i18n";
 import { createDebouncedSaver } from "../../lib/debouncedSave";
 import { useTeardownFlush } from "../../lib/teardownSave";
@@ -143,7 +144,7 @@ export function MeetingSourceWorkbench(props: Props) {
     void createBlank();
   }, [createRequestNonce, onCreateRequestConsumed, createBlank]);
   const remove = async (session: SourceSession) => {
-    if (!workPath || !window.confirm(t("meetings.sourceReview.deleteConfirm"))) return;
+    if (!workPath || !(await confirmDialog(t("meetings.sourceReview.deleteConfirm")))) return;
     setBusy(true); setError("");
     try {
       await deleteMeetingSourceSession(workPath, session.id);

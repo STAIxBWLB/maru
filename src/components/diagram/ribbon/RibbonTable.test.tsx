@@ -142,13 +142,14 @@ function mountRibbon(opts: SeedOpts): Harness {
   return { container, root };
 }
 
-function clickButton(container: HTMLDivElement, label: string) {
+// Async act: the destructive ops await confirmDialog before they apply.
+async function clickButton(container: HTMLDivElement, label: string) {
   const button = [...container.querySelectorAll("button")].find(
     (b) => b.getAttribute("aria-label") === label,
   );
   if (!button) throw new Error(`button not found: ${label}`);
   expect((button as HTMLButtonElement).disabled).toBe(false);
-  act(() => {
+  await act(async () => {
     button.dispatchEvent(new MouseEvent("click", { bubbles: true }));
   });
 }
@@ -175,7 +176,7 @@ describe("RibbonTable — destructive-op confirmation gating", () => {
     _resetDiagramSharedStoreForTests();
   });
 
-  it("merge asks before joining non-empty cells; cancel keeps the matrix", () => {
+  it("merge asks before joining non-empty cells; cancel keeps the matrix", async () => {
     harness = mountRibbon({
       texts: [
         [0, 0, "A"],
@@ -185,12 +186,12 @@ describe("RibbonTable — destructive-op confirmation gating", () => {
       focus: [0, 1],
     });
     const before = currentMatrix();
-    clickButton(harness.container, "셀 병합");
+    await clickButton(harness.container, "셀 병합");
     expect(confirmSpy).toHaveBeenCalledTimes(1);
     expect(currentMatrix()).toBe(before); // untouched
   });
 
-  it("merge proceeds on confirm: texts join with newline in one undo step", () => {
+  it("merge proceeds on confirm: texts join with newline in one undo step", async () => {
     confirmSpy.mockReturnValue(true);
     harness = mountRibbon({
       texts: [
@@ -201,7 +202,7 @@ describe("RibbonTable — destructive-op confirmation gating", () => {
       focus: [0, 1],
     });
     const depthBefore = probe!.getState().ephemeral.history.past.length;
-    clickButton(harness.container, "셀 병합");
+    await clickButton(harness.container, "셀 병합");
     const matrix = currentMatrix();
     expect(Object.keys(matrix.cells)).toHaveLength(8);
     expect(cellAt(matrix, 0, 0).text).toBe("A\nB");
@@ -209,28 +210,28 @@ describe("RibbonTable — destructive-op confirmation gating", () => {
     expect(probe!.getState().ephemeral.history.past).toHaveLength(depthBefore + 1);
   });
 
-  it("merge of empty-only cells skips the confirmation", () => {
+  it("merge of empty-only cells skips the confirmation", async () => {
     harness = mountRibbon({ anchor: [0, 0], focus: [0, 1] });
-    clickButton(harness.container, "셀 병합");
+    await clickButton(harness.container, "셀 병합");
     expect(confirmSpy).not.toHaveBeenCalled();
     expect(Object.keys(currentMatrix().cells)).toHaveLength(8);
   });
 
-  it("row delete with content requires confirmation; cancel keeps the row", () => {
+  it("row delete with content requires confirmation; cancel keeps the row", async () => {
     harness = mountRibbon({ texts: [[1, 0, "data"]], anchor: [1, 0], focus: [1, 0] });
-    clickButton(harness.container, "행 삭제");
+    await clickButton(harness.container, "행 삭제");
     expect(confirmSpy).toHaveBeenCalledTimes(1);
     expect(currentMatrix().rows).toHaveLength(3);
   });
 
-  it("row delete proceeds on confirm", () => {
+  it("row delete proceeds on confirm", async () => {
     confirmSpy.mockReturnValue(true);
     harness = mountRibbon({ texts: [[1, 0, "data"]], anchor: [1, 0], focus: [1, 0] });
-    clickButton(harness.container, "행 삭제");
+    await clickButton(harness.container, "행 삭제");
     expect(currentMatrix().rows).toHaveLength(2);
   });
 
-  it("row delete blocked on a span anchor shows a localized notice", () => {
+  it("row delete blocked on a span anchor shows a localized notice", async () => {
     confirmSpy.mockReturnValue(true);
     harness = mountRibbon({
       texts: [[0, 0, "merged"]],
@@ -238,27 +239,27 @@ describe("RibbonTable — destructive-op confirmation gating", () => {
       anchor: [0, 0],
       focus: [0, 0],
     });
-    clickButton(harness.container, "행 삭제");
+    await clickButton(harness.container, "행 삭제");
     expect(currentMatrix().rows).toHaveLength(3); // unchanged
     expect(harness.container.textContent).toContain("병합된 셀의 시작 행은 삭제할 수 없습니다.");
   });
 
-  it("column delete with content requires confirmation", () => {
+  it("column delete with content requires confirmation", async () => {
     harness = mountRibbon({ texts: [[0, 2, "data"]], anchor: [0, 2], focus: [0, 2] });
-    clickButton(harness.container, "열 삭제");
+    await clickButton(harness.container, "열 삭제");
     expect(confirmSpy).toHaveBeenCalledTimes(1);
     expect(currentMatrix().columns).toHaveLength(3);
   });
 
-  it("header role toggle flips the focus row role", () => {
+  it("header role toggle flips the focus row role", async () => {
     harness = mountRibbon({ anchor: [1, 1], focus: [1, 1] });
-    clickButton(harness.container, "머리글");
+    await clickButton(harness.container, "머리글");
     expect(currentMatrix().rows[1]?.role).toBe("header");
-    clickButton(harness.container, "머리글");
+    await clickButton(harness.container, "머리글");
     expect(currentMatrix().rows[1]?.role).toBe("data");
   });
 
-  it("semantic tag dropdown assigns the focus column's tag", () => {
+  it("semantic tag dropdown assigns the focus column's tag", async () => {
     harness = mountRibbon({ anchor: [0, 2], focus: [0, 2] });
     const select = harness.container.querySelector("select")!;
     act(() => {

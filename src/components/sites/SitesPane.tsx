@@ -16,6 +16,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { readSites, saveSites } from "../../lib/maruDir";
 import { clipboardWriteText } from "../../lib/clipboard";
 import { setError } from "../../lib/errorStore";
+import { confirmDialog } from "../../lib/confirmDialog";
 import { useTranslation } from "../../lib/i18n";
 import {
   browserPasskeyRequestAuthorization,
@@ -445,8 +446,8 @@ export function SitesPane({
   }, [activeTab, addressDraft, loadInTab, openInNewTab, t, tauri]);
 
   const deleteSite = useCallback(
-    (site: SiteEntry) => {
-      if (!window.confirm(t("sites.delete.confirm"))) return;
+    async (site: SiteEntry) => {
+      if (!(await confirmDialog(t("sites.delete.confirm")))) return;
       persistSites(removeSite(sites, site.id));
       setTabs((current) =>
         current.map((tab) => (tab.siteId === site.id ? { ...tab, siteId: null } : tab)),
