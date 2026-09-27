@@ -351,6 +351,50 @@ describe("TodayPrepare", () => {
     }
   });
 
+  it("keeps the failed value pending when the recovery copy itself cannot be written, so teardown retries instead of reporting clean (#381 review)", async () => {
+    vi.mocked(writeRecoveryCopy).mockReset();
+    vi.mocked(writeRecoveryCopy).mockRejectedValue(new Error("disk full (copy)"));
+    const { container, mutate, root } = await renderPrepare();
+    mutate.mockResolvedValue(null);
+    const textarea = container.querySelector<HTMLTextAreaElement>(".today-braindump-textarea")!;
+    await act(async () => {
+      typeText(textarea, "복구 불가 메모");
+    });
+
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      await act(async () => {
+        await sleep(900);
+      });
+
+      // The failure is still reported immediately (notice + log + copy
+      // attempt), but with no recovery file on disk the saver's pending slot
+      // is the last copy of the text, so the value must not be cleared.
+      expect(mutate).toHaveBeenCalledTimes(1);
+      expect(writeRecoveryCopy).toHaveBeenCalledTimes(1);
+      const noCopyLogs = errorSpy.mock.calls.filter(
+        (call) => typeof call[0] === "string" && call[0].includes("recovery copy failed"),
+      );
+      expect(noCopyLogs.length).toBeGreaterThan(0);
+
+      await act(async () => {
+        root.unmount();
+        await sleep(0);
+      });
+
+      // The teardown settle found the value still pending and retried the
+      // save (mutate ×2, copy attempt ×2 inside save); when that settlement
+      // also failed, settleTeardownSave made its own report (copy attempt
+      // ×3). Nothing was silently discarded.
+      expect(mutate).toHaveBeenCalledTimes(2);
+      expect(writeRecoveryCopy).toHaveBeenCalledTimes(3);
+    } finally {
+      errorSpy.mockRestore();
+      vi.mocked(writeRecoveryCopy).mockReset();
+      vi.mocked(writeRecoveryCopy).mockResolvedValue("/recovery/copy.txt");
+    }
+  });
+
   it("keeps a failed save's text as a recovery copy in its own workspace when a switch and new typing follow (#381)", async () => {
     vi.mocked(writeRecoveryCopy).mockClear();
     const mutate = vi.fn<(mutation: TodayMutation) => Promise<TodaySnapshot | null>>(

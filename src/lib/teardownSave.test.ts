@@ -245,8 +245,9 @@ describe("reportTeardownSaveFailure", () => {
       content: "top secret body",
     };
 
-    await reportTeardownSaveFailure(target, new Error("disk full"), t);
+    const recovered = await reportTeardownSaveFailure(target, new Error("disk full"), t);
 
+    expect(recovered).toBe(false);
     const notice = getOperationNotice();
     expect(notice?.kind).toBe("error");
     expect(notice?.message).toBe("save.teardown.failedNoCopy");
@@ -270,8 +271,9 @@ describe("reportTeardownSaveFailure", () => {
       content: "top secret body",
     };
 
-    await reportTeardownSaveFailure(target, new Error("disk full"), t);
+    const recovered = await reportTeardownSaveFailure(target, new Error("disk full"), t);
 
+    expect(recovered).toBe(true);
     const notice = getOperationNotice();
     expect(notice?.message).toBe("save.teardown.failed");
     expect(notice?.recovery).toEqual({
