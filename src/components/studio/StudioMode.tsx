@@ -247,7 +247,9 @@ export function StudioMode({
           // a failed save of the OLD document must not be named after the
           // NEW one. source.documentPath is a schedule-time snapshot
           // (createInitialStudioState), unlike the live activeDocument prop.
-          filePath: savedState.source.documentPath ?? `studio/${savedState.docId}`,
+          // The copy holds Studio's JSON state, not the document, so it gets
+          // a .json name that opens as JSON (#373).
+          filePath: `${savedState.source.documentPath ?? `studio/${savedState.docId}`}.studio.json`,
           content: JSON.stringify(savedState, null, 2),
         }
       : null;

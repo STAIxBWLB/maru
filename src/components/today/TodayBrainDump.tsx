@@ -5,7 +5,7 @@
 import { Info, RotateCcw, Sparkles } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createDebouncedSaver } from "../../lib/debouncedSave";
-import { useTeardownFlush } from "../../lib/teardownSave";
+import { reportTeardownSaveFailure, useTeardownFlush } from "../../lib/teardownSave";
 import { useTranslation } from "../../lib/i18n";
 import { useToday } from "./todayContext";
 
@@ -21,6 +21,17 @@ type SaveStatus = "idle" | "saving" | "saved" | "planning" | "planned";
 interface BrainDumpSaveValue {
   text: string;
   workPath: string;
+  /** The logical day at schedule time, for the recovery file name; the live
+   *  snapshot can belong to another workspace by the time this drains. */
+  logicalDay: string;
+}
+
+function brainDumpRecoveryTarget(value: BrainDumpSaveValue) {
+  return {
+    workPath: value.workPath,
+    filePath: `today-brain-dump-${value.logicalDay}.txt`,
+    content: value.text,
+  };
 }
 
 interface TodayBrainDumpProps {
@@ -78,34 +89,43 @@ export function TodayBrainDump({
   }, [planning]);
 
   const save = useCallback(
-    async ({ text: value, workPath: scheduledWorkPath }: BrainDumpSaveValue) => {
-      if (!snapshot) return;
+    async (value: BrainDumpSaveValue) => {
       // Review finding #5: TodayContext's mutate() resolves null for two
       // different reasons — a genuine failure, or a deliberate skip when
       // TodayPane's pane identity no longer matches (the workspace changed
-      // between scheduling this edit and draining it), in which case mutate
-      // never even attempts anything. A workspace switch under an in-flight
-      // autosave is not a failure: skip quietly (no throw, so no false
-      // failure toast, and no recovery copy written into the new
-      // workspace) instead of calling mutate against the new workspace at
-      // all.
-      if (scheduledWorkPath !== workPath) {
+      // between scheduling this edit and draining it). Never call mutate
+      // against the new workspace for an edit that belongs to the old one.
+      // #369: but do not drop it either — mutate can only write to the
+      // current workspace, so keep it as a recovery copy in the workspace it
+      // belongs to, with the usual notice, and never in the new one. This
+      // runs before the snapshot check: TodayPane clears the snapshot on a
+      // switch, and B may never load one (Today off, failed load). Awaited so
+      // a quit flush does not report clean before the copy is written.
+      if (value.workPath !== workPath) {
         setStatus("idle");
+        await reportTeardownSaveFailure(
+          brainDumpRecoveryTarget(value),
+          new Error(t("today.prepare.braindump.workspaceChanged")),
+          t,
+        );
         return;
       }
+      if (!snapshot) return;
       setStatus("saving");
-      const next = await mutate({ type: "setBrainDump", brainDump: value });
+      const next = await mutate({ type: "setBrainDump", brainDump: value.text });
       if (next) {
-        lastSavedRef.current = value;
+        lastSavedRef.current = value.text;
         setStatus("saved");
         setUndoAvailable(true);
         onSaved();
         return;
       }
       setStatus("idle");
-      throw new Error("today_brain_dump_save_failed");
+      // mutate() logs the underlying error and resolves null, so the notice
+      // can only say that Today did not take the edit (#373).
+      throw new Error(t("today.prepare.braindump.saveFailed"));
     },
-    [snapshot, mutate, onSaved, workPath],
+    [snapshot, mutate, onSaved, workPath, t],
   );
 
   // ref-indirection so the saver's stable save callback always calls the
@@ -123,15 +143,7 @@ export function TodayBrainDump({
   const [saver] = useState(() =>
     createDebouncedSaver<BrainDumpSaveValue>((value) => saveRef.current(value), AUTOSAVE_DEBOUNCE_MS),
   );
-  useTeardownFlush(
-    saver,
-    (value) => ({
-      workPath: value.workPath,
-      filePath: `today-brain-dump-${snapshot?.logicalDay ?? "unknown"}.txt`,
-      content: value.text,
-    }),
-    t,
-  );
+  useTeardownFlush(saver, brainDumpRecoveryTarget, t);
 
   const handleChange = (value: string) => {
     // Code-point cap: String.slice counts UTF-16 units and can split a
@@ -142,7 +154,9 @@ export function TodayBrainDump({
         : value;
     setText(capped);
     setStatus("idle");
-    if (workPath) saver.schedule({ text: capped, workPath });
+    if (workPath) {
+      saver.schedule({ text: capped, workPath, logicalDay: snapshot?.logicalDay ?? "unknown" });
+    }
   };
 
   useEffect(() => onRegisterFlush?.(() => saver.flush()), [onRegisterFlush, saver]);
