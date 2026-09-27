@@ -959,7 +959,7 @@ mod phase08_10_tests {
         let binary = dir.join("hwp");
         let script = r#"#!/bin/sh
 case "$1" in
-  --version) echo "hwp 1.2.0" ;;
+  --version) echo "hwp 1.3.0" ;;
   convert)
     [ -f "$2" ] && [ "$3" = "--to" ] && [ "$4" = "html" ] && [ "$5" = "-o" ] && [ "$6" = "-" ] || exit 2
     printf '%s\n' '<!DOCTYPE html><html><head><title>t</title><style>body { color: red; }</style></head>' '<body>' '<p class="ps2">nonempty HWPX &amp; {{사업명}}</p>' '<table><tr><td>이름</td><td>홍길동</td></tr></table>' '</body></html>' ;;

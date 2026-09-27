@@ -32,9 +32,10 @@ use std::time::Duration;
 
 const HWP_CLI_SKILL_SOURCE: &str = "hwp_cli_skill";
 const LEGACY_HWPX_SKILL_SOURCE: &str = "hwpx_skill";
-/// hwp 1.2.0 ships `hwp slots --forms` and `hwp fill --forms`, which own
-/// every HWPX form scan and fill Maru runs.
-const MIN_HWP_VERSION: (u64, u64, u64) = (1, 2, 0);
+/// hwp 1.3.0 ships `hwp slots --forms` and `hwp fill --forms`, which own
+/// every HWPX form scan and fill Maru runs, with the corrupt `.hwp`
+/// merge/fill output fixed.
+const MIN_HWP_VERSION: (u64, u64, u64) = (1, 3, 0);
 const HWP_TIMEOUT: Duration = Duration::from_secs(60);
 const STDOUT_LIMIT: usize = 32 * 1024 * 1024;
 const STDERR_LIMIT: usize = 1024 * 1024;
@@ -972,9 +973,9 @@ esac
 
     #[test]
     fn version_parser_requires_the_released_floor() {
-        assert_eq!(parse_version(b"hwp 1.1.9"), Some((1, 1, 9)));
         assert_eq!(parse_version(b"hwp 1.2.0"), Some((1, 2, 0)));
-        assert_eq!(parse_version(b"hwp v1.2.0 (abc)"), Some((1, 2, 0)));
+        assert_eq!(parse_version(b"hwp 1.3.0"), Some((1, 3, 0)));
+        assert_eq!(parse_version(b"hwp v1.3.0 (abc)"), Some((1, 3, 0)));
         assert_eq!(parse_version(b"broken"), None);
     }
 
@@ -1074,22 +1075,22 @@ esac
 
     #[cfg(unix)]
     #[test]
-    fn released_version_floor_rejects_1_1_9_and_accepts_1_2_0() {
+    fn released_version_floor_rejects_1_2_0_and_accepts_1_3_0() {
         let too_old = tempfile::tempdir().unwrap();
         let too_old_binary = fake_hwp(
             too_old.path(),
-            "1.1.9",
+            "1.2.0",
             false,
             r#"{"output":"filled.hwpx","mode":"placeholders","replaced":1,"counts":{"기관명":1},"warnings":[]}"#,
         );
         let error = ensure_released_version(&too_old_binary).unwrap_err();
-        assert!(error.contains("hwp 1.1.9 is too old"));
-        assert!(error.contains("requires >= 1.2.0"));
+        assert!(error.contains("hwp 1.2.0 is too old"));
+        assert!(error.contains("requires >= 1.3.0"));
 
         let released = tempfile::tempdir().unwrap();
         let released_binary = fake_hwp(
             released.path(),
-            "1.2.0",
+            "1.3.0",
             false,
             r#"{"output":"filled.hwpx","mode":"placeholders","replaced":1,"counts":{"기관명":1},"warnings":[]}"#,
         );
@@ -1112,7 +1113,7 @@ esac
         );
         let managed_binary = fake_hwp(
             &managed_dir,
-            "1.2.0",
+            "1.3.0",
             false,
             r#"{"output":"filled.hwpx","mode":"placeholders","replaced":1,"counts":{"기관명":1},"warnings":[]}"#,
         );
@@ -1133,20 +1134,20 @@ esac
         fs::create_dir_all(&released_dir).unwrap();
         let old_override = fake_hwp(
             &old_dir,
-            "1.1.9",
+            "1.2.0",
             false,
             r#"{"output":"filled.hwpx","mode":"placeholders","replaced":1,"counts":{"기관명":1},"warnings":[]}"#,
         );
         let released_override = fake_hwp(
             &released_dir,
-            "1.2.0",
+            "1.3.0",
             false,
             r#"{"output":"filled.hwpx","mode":"placeholders","replaced":1,"counts":{"기관명":1},"warnings":[]}"#,
         );
 
         let error =
             select_hwp_bin(Some(old_override), vec![released_override.clone()]).unwrap_err();
-        assert!(error.contains("hwp 1.1.9 is too old"));
+        assert!(error.contains("hwp 1.2.0 is too old"));
         assert_eq!(
             select_hwp_bin(Some(released_override.clone()), Vec::new()).unwrap(),
             released_override
@@ -1172,7 +1173,7 @@ esac
         let tmp = tempfile::tempdir().unwrap();
         let binary = fake_hwp(
             tmp.path(),
-            "1.2.0",
+            "1.3.0",
             false,
             r#"{"output":"filled.hwpx","mode":"placeholders","replaced":1,"counts":{"기관명":1},"warnings":[]}"#,
         );
@@ -1212,7 +1213,7 @@ esac
         let tmp = tempfile::tempdir().unwrap();
         let binary = fake_hwp(
             tmp.path(),
-            "1.2.0",
+            "1.3.0",
             true,
             r#"{"output":"filled.hwpx","mode":"placeholders","replaced":1,"counts":{"기관명":1},"warnings":[]}"#,
         );
@@ -1234,7 +1235,7 @@ esac
         let tmp = tempfile::tempdir().unwrap();
         let binary = fake_hwp(
             tmp.path(),
-            "1.2.0",
+            "1.3.0",
             false,
             r#"{"output":"filled.hwpx","mode":"placeholders","replaced":1,"counts":{"기관명":1},"warnings":[]}"#,
         );
@@ -1262,7 +1263,7 @@ esac
         let tmp = tempfile::tempdir().unwrap();
         let binary = fake_hwp(
             tmp.path(),
-            "1.2.0",
+            "1.3.0",
             false,
             r#"{"output":"filled.hwpx","mode":"placeholders","replaced":2,"counts":{"기관명":2},"warnings":["native warning"]}"#,
         );
@@ -1295,7 +1296,7 @@ esac
 
         let unmatched_binary = fake_hwp(
             tmp.path(),
-            "1.2.0",
+            "1.3.0",
             false,
             r#"{"output":"filled.hwpx","mode":"placeholders","replaced":1,"counts":{"기관명":1,"없는필드":0},"warnings":["native unmatched"]}"#,
         );
@@ -1311,7 +1312,7 @@ esac
         assert!(unmatched.contains("hwp_fill_unmatched_required: 없는필드"));
         assert_eq!(fs::read_to_string(&output).unwrap(), "old output");
 
-        let malformed_binary = fake_hwp(tmp.path(), "1.2.0", false, "not json");
+        let malformed_binary = fake_hwp(tmp.path(), "1.3.0", false, "not json");
         let malformed = fill_with_test_bin(
             &malformed_binary,
             tmp.path().to_str().unwrap(),
@@ -1378,7 +1379,7 @@ mod phase08_21 {
         let binary = dir.join("hwp");
         let script = r#"#!/bin/sh
 case "$1" in
-  --version) echo "hwp 1.2.0" ;;
+  --version) echo "hwp 1.3.0" ;;
   new)
     shift
     while [ "$#" -gt 0 ]; do

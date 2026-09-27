@@ -40,8 +40,9 @@ records and workspace `.hwpx` templates), Markdown → HWPX export, PDF from
 the exported HWPX, the inline HWPX preview (`hwp convert --to html -o -`) and
 the HWPX structure checks of export validation and the evidence binder resolve
 the released `hwp` through `hwp_cli_template::hwp_bin()`, which also enforces
-its minimum version (1.2.0, the release with `hwp slots --forms` and `hwp fill
---forms`). No code path runs the retired `hwpx` binary, and Maru keeps no HWPX
+its minimum version (1.3.0, the release with `hwp slots --forms` and `hwp fill
+--forms`, plus the corrupt `.hwp` merge/fill output fix). No code path runs
+the retired `hwpx` binary, and Maru keeps no HWPX
 parser of its own.
 
 ## Frontend
