@@ -37,11 +37,7 @@ export default tseslint.config(
     // answer Cancel at once (#377). Use src/lib/confirmDialog.ts or
     // useTextPrompt (src/components/ui/TextPromptDialog.tsx) instead.
     files: ["src/**/*.{ts,tsx}"],
-    ignores: [
-      "src/**/*.test.{ts,tsx}",
-      // Its last prompt() goes in PR #376; drop this line once that merges.
-      "src/components/skills/SkillEditorWindow.tsx",
-    ],
+    ignores: ["src/**/*.test.{ts,tsx}"],
     rules: { "no-alert": "error" },
   },
   {
