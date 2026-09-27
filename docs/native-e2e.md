@@ -124,7 +124,10 @@ Consequences:
   uploads failure evidence (run log plus a screencapture of the runner's
   screen). Per-PR execution was rejected on macOS runner cost and
   early-flakiness grounds; release-tag-only was rejected because it finds
-  regressions at the worst possible moment (D-16).
+  regressions at the worst possible moment (D-16). Documentation-only pushes
+  to `main` skip the suite (same `paths-ignore` list as ci.yml and
+  coverage.yml); tags always run it, since GitHub does not evaluate path
+  filters for tag pushes.
 - **A human must run:** `make release-preflight`, which blocks on
   `make test-e2e-native` on every machine regardless of the verdict (D-03),
   and the checklist below.
