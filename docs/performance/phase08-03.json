@@ -1549,7 +1549,7 @@
   "verification": {
     "ownedCommands": 24,
     "convertedAuditRows": 3,
-    "sourceInventory": "Immutable .planning/phases/08-main-thread-responsiveness/08-COMMAND-INVENTORY.md",
+    "sourceInventory": "Immutable .planning/milestones/v1.1-phases/08-main-thread-responsiveness/08-COMMAND-INVENTORY.md",
     "networkSeams": "Signed discovery/download and run_env_repair_blocking are production function arguments. Local fixture closures exercise transaction races and real archive extraction/swap; existing bundle_update tests separately verify signatures, capped HTTP, traversal/hash rejection and swap recovery.",
     "crossProcessScope": "Process-local source generations and reservations plus fresh disk comparison. Cross-process locking/identical offline ABA and phase-wide native saturation are not claimed.",
     "nativeHandoff": "Existing native tracer remains in 08-01/02. Phase-wide saturation/latency and production artifact closure remain 08-27/28.",

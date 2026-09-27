@@ -2,7 +2,7 @@
  "plan": "08-26",
  "generated": "2026-09-06",
  "phase": "08-main-thread-responsiveness",
- "sourceInventory": ".planning/phases/08-main-thread-responsiveness/08-COMMAND-INVENTORY.md",
+ "sourceInventory": ".planning/milestones/v1.1-phases/08-main-thread-responsiveness/08-COMMAND-INVENTORY.md",
  "commandCount": 365,
  "unresolvedRows": 0,
  "scopeNote": "Caller/notice audit for PERF-01/PERF-02. owned-wrapper rows carry the Plan-25 runProcessingOperation ownership contract; skill-operation rows carry the startSkillOperation ownership contract (D-01/D-05); mission-event rows are module-level owners with event-based settlement (D-04). Dormant rows record checked symbol references instead of inventing UI. FilesWorkbench.tsx and SharedOutboxPane.tsx duplicate-publisher fixes are included as scope corrections (their runMutation/handleApply error branches duplicated the wrapped mutation's terminal notice).",

@@ -2,7 +2,7 @@
 
 ## v1.1 Felt Quality and Native Proof (Shipped: 2026-09-27)
 
-**Delivered:** Maru stops freezing, stops losing terminal sessions and unsaved text, and proves it with a native e2e suite that drives the real app on hosted macOS instead of a human at the keyboard.
+**Delivered:** Maru stops freezing, ends terminal sessions cleanly on close and quit, flushes pending saves on teardown and keeps a recovery copy when a save fails (one known gap remains: #381), and proves it with a native e2e suite that drives the real app on hosted macOS instead of a human at the keyboard.
 
 **Phases completed:** 6-11 (56 plans, 64 tasks)
 
