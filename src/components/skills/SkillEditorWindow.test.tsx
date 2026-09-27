@@ -16,6 +16,7 @@ import { ko } from "../../lib/i18n/locales/ko";
 import { MENU_COMMAND_EVENT } from "../../lib/menu";
 import type { SkillDocument } from "../../lib/skills";
 import {
+  SKILL_EDITOR_OPEN_EVENT,
   SKILL_EDITOR_QUIT_CHECK_ACK_EVENT,
   SKILL_EDITOR_QUIT_CHECK_EVENT,
   SKILL_EDITOR_QUIT_CHECK_RESPONSE_EVENT,
@@ -428,5 +429,254 @@ describe("SkillEditorWindow app.quit menu fallback (review finding #2, round 2)"
     });
 
     expect(mocks.processExit).toHaveBeenCalledWith(0);
+  });
+});
+
+async function settle(ticks = 6): Promise<void> {
+  await act(async () => {
+    for (let tick = 0; tick < ticks; tick += 1) {
+      await Promise.resolve();
+    }
+  });
+}
+
+// #370: menu listeners are window-scoped since #361, so Cmd+S with the
+// editor focused reaches only the editor, which must save the skill.
+describe("SkillEditorWindow save shortcuts (#370)", () => {
+  it("Cmd+S saves a dirty skill and does nothing for a clean one", async () => {
+    mocks.skillsSaveSkillFile.mockResolvedValue(skillDocument().skill);
+    await mount();
+
+    await act(async () => {
+      handlersFor(MENU_COMMAND_EVENT).forEach((handler) => handler({ payload: "file.save" }));
+    });
+    await settle();
+    expect(mocks.skillsSaveSkillFile).not.toHaveBeenCalled();
+
+    act(() => {
+      dirtyTextarea();
+    });
+    await act(async () => {
+      handlersFor(MENU_COMMAND_EVENT).forEach((handler) => handler({ payload: "file.save" }));
+    });
+    await settle();
+    expect(mocks.skillsSaveSkillFile).toHaveBeenCalledWith("skill-1", "SKILL.md", "edited content");
+  });
+
+  it("Cmd+S while a save is still running does not start a second save", async () => {
+    let finishSave: (record: ReturnType<typeof skillDocument>["skill"]) => void = () => {};
+    mocks.skillsSaveSkillFile.mockImplementation(
+      () => new Promise((resolve) => { finishSave = resolve; }),
+    );
+    await mount();
+    act(() => {
+      dirtyTextarea();
+    });
+
+    // Two presses in the same task: the second must not wait on the first
+    // one's file lock and then fail with skill_changed.
+    await act(async () => {
+      handlersFor(MENU_COMMAND_EVENT).forEach((handler) => handler({ payload: "file.save" }));
+      handlersFor(MENU_COMMAND_EVENT).forEach((handler) => handler({ payload: "file.save" }));
+    });
+    await settle();
+    expect(mocks.skillsSaveSkillFile).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      finishSave(skillDocument().skill);
+    });
+    await settle();
+  });
+
+  // wry implements no JavaScript prompt panel on macOS, so window.prompt()
+  // returns null there and Save As never got past its name prompt.
+  it("Save As asks for the name inside the window, never through window.prompt", async () => {
+    const promptSpy = vi.spyOn(window, "prompt").mockReturnValue(null);
+    mocks.dialogConfirm.mockResolvedValue(true);
+    mocks.skillsSaveSkillAs.mockResolvedValue({ ...skillDocument().skill, id: "skill-2", name: "copy-name" });
+    await mount();
+
+    const saveAsButton = [...host.querySelectorAll("button")].find(
+      (button) => button.textContent === translate("ko", "system.skills.saveAs"),
+    )!;
+    await act(async () => {
+      saveAsButton.click();
+    });
+    const input = host.querySelector<HTMLInputElement>(".skill-editor-save-as input")!;
+    expect(input).not.toBeNull();
+    expect(input.value).toBe("example-copy");
+
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
+    await act(async () => {
+      setter.call(input, "copy-name");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => {
+      host.querySelector<HTMLFormElement>(".skill-editor-save-as")!.requestSubmit();
+    });
+    await settle(10);
+
+    expect(promptSpy).not.toHaveBeenCalled();
+    expect(mocks.dialogConfirm).toHaveBeenCalledWith(
+      translate("ko", "system.skills.saveAsConfirm", { name: "copy-name" }),
+      { kind: "warning" },
+    );
+    expect(mocks.skillsSaveSkillAs).toHaveBeenCalledWith("skill-1", "copy-name", "original content");
+    expect(host.querySelector(".skill-editor-save-as")).toBeNull();
+    promptSpy.mockRestore();
+  });
+});
+
+function otherSkillDocument(): SkillDocument {
+  const doc = skillDocument();
+  return { skill: { ...doc.skill, id: "skill-2", name: "other" }, content: "other content" };
+}
+
+async function openFromMain(skillId: string): Promise<void> {
+  await act(async () => {
+    handlersFor(SKILL_EDITOR_OPEN_EVENT).forEach((handler) =>
+      handler({ payload: { workPath: "/work", skillId } }),
+    );
+  });
+  await settle();
+}
+
+describe("SkillEditorWindow busy guards (#376 review)", () => {
+  it("Cmd+S while a switch is loading does not save", async () => {
+    await mount();
+    act(() => {
+      dirtyTextarea();
+    });
+    mocks.dialogConfirm.mockResolvedValue(true);
+    let finishLoad: (doc: SkillDocument) => void = () => {};
+    mocks.skillsReadSkill.mockImplementation(
+      () => new Promise((resolve) => { finishLoad = resolve; }),
+    );
+    await openFromMain("skill-2");
+
+    await act(async () => {
+      handlersFor(MENU_COMMAND_EVENT).forEach((handler) => handler({ payload: "file.save" }));
+    });
+    await settle();
+    expect(mocks.skillsSaveSkillFile).not.toHaveBeenCalled();
+
+    await act(async () => {
+      finishLoad(otherSkillDocument());
+    });
+    await settle();
+  });
+
+  it("drops a Save As confirmed after another skill was opened", async () => {
+    await mount();
+    let answerConfirm: (ok: boolean) => void = () => {};
+    mocks.dialogConfirm.mockImplementation(
+      () => new Promise<boolean>((resolve) => { answerConfirm = resolve; }),
+    );
+    const saveAsButton = [...host.querySelectorAll("button")].find(
+      (button) => button.textContent === translate("ko", "system.skills.saveAs"),
+    )!;
+    await act(async () => {
+      saveAsButton.click();
+    });
+    await act(async () => {
+      host.querySelector<HTMLFormElement>(".skill-editor-save-as")!.requestSubmit();
+    });
+    await settle();
+
+    mocks.skillsReadSkill.mockResolvedValue(otherSkillDocument());
+    await openFromMain("skill-2");
+    await act(async () => {
+      answerConfirm(true);
+    });
+    await settle(10);
+
+    expect(mocks.skillsSaveSkillAs).not.toHaveBeenCalled();
+    expect(host.querySelector(".skill-editor-save-as")).toBeNull();
+    expect(host.querySelector<HTMLTextAreaElement>("textarea")!.value).toBe("other content");
+  });
+});
+
+// #371: edge cases in the editor's close and quit guards.
+describe("SkillEditorWindow guard edge cases (#371)", () => {
+  it("answers a quit-check with proceed:false when the confirm itself fails", async () => {
+    await mount();
+    act(() => {
+      dirtyTextarea();
+    });
+    mocks.dialogConfirm.mockRejectedValue(new Error("dialog ipc failed"));
+
+    await act(async () => {
+      handlersFor(SKILL_EDITOR_QUIT_CHECK_EVENT).forEach((handler) =>
+        handler({ payload: { attempt: 1 } }),
+      );
+    });
+    await settle(10);
+
+    expect(mocks.emit).toHaveBeenCalledWith(SKILL_EDITOR_QUIT_CHECK_RESPONSE_EVENT, {
+      proceed: false,
+    });
+  });
+
+  it("still blocks the close on Cancel after the close handler's effect was torn down", async () => {
+    await mount();
+    act(() => {
+      dirtyTextarea();
+    });
+    let answer!: (value: boolean) => void;
+    mocks.dialogConfirm.mockReturnValue(new Promise<boolean>((resolve) => (answer = resolve)));
+
+    const event = makeEvent();
+    let closing!: Promise<void>;
+    await act(async () => {
+      closing = capturedCloseHandler()(event) as Promise<void>;
+      await Promise.resolve();
+    });
+    await act(async () => root.unmount());
+    host.remove();
+    host = document.createElement("div");
+    document.body.appendChild(host);
+    root = createRoot(host);
+
+    await act(async () => {
+      answer(false);
+      await closing;
+    });
+    expect(event.preventDefault).toHaveBeenCalledTimes(1);
+  });
+
+  it("skips a queued quit-check prompt when the editor became clean while it waited", async () => {
+    await mount();
+    act(() => {
+      dirtyTextarea();
+    });
+    const answers: Array<(value: boolean) => void> = [];
+    mocks.dialogConfirm.mockImplementation(
+      () => new Promise<boolean>((resolve) => answers.push(resolve)),
+    );
+
+    const event = makeEvent();
+    let closing!: Promise<void>;
+    await act(async () => {
+      closing = capturedCloseHandler()(event) as Promise<void>;
+      await Promise.resolve();
+    });
+    await act(async () => {
+      handlersFor(SKILL_EDITOR_QUIT_CHECK_EVENT).forEach((handler) =>
+        handler({ payload: { attempt: 1 } }),
+      );
+    });
+    act(() => {
+      dirtyTextarea("original content");
+    });
+    await act(async () => {
+      answers[0](false);
+      await closing;
+    });
+    await settle(10);
+
+    expect(mocks.dialogConfirm).toHaveBeenCalledTimes(1);
+    expect(mocks.emit).toHaveBeenCalledWith(SKILL_EDITOR_QUIT_CHECK_RESPONSE_EVENT, {
+      proceed: true,
+    });
   });
 });

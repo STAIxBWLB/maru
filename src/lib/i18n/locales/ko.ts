@@ -2051,6 +2051,8 @@ export const ko: Record<string, string> = {
   "today.prepare.braindump.undoUnavailable": "되돌릴 작업이 없습니다",
   "today.prepare.braindump.saving": "저장 중...",
   "today.prepare.braindump.saved": "저장됨",
+  "today.prepare.braindump.workspaceChanged": "저장하기 전에 작업공간이 바뀌었습니다",
+  "today.prepare.braindump.saveFailed": "Today가 변경을 받아들이지 않았습니다(자세한 내용은 로그 참고)",
   "today.prepare.braindump.planning": "계획을 만들고 있습니다...",
   "today.prepare.braindump.planned": "계획이 반영되었습니다",
   "today.capture.subtitle": "메시지·메일·회의에서 중요한 일 가능성을 발견했습니다.",

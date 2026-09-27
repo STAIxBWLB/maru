@@ -2051,6 +2051,8 @@ export const en: Record<string, string> = {
   "today.prepare.braindump.undoUnavailable": "Nothing to undo",
   "today.prepare.braindump.saving": "Saving...",
   "today.prepare.braindump.saved": "Saved",
+  "today.prepare.braindump.workspaceChanged": "the workspace changed before it was saved",
+  "today.prepare.braindump.saveFailed": "Today did not accept the change (details are in the log)",
   "today.prepare.braindump.planning": "Building your plan...",
   "today.prepare.braindump.planned": "Plan updated",
   "today.capture.subtitle": "Found likely action items across messages, email, and meetings.",
