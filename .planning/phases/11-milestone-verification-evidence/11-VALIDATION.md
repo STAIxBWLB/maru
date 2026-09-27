@@ -47,8 +47,8 @@ created: "2026-09-25"
 | 11-02 T2 | 11-02 | 2 | TEST-02 | - | N/A | doc assertion | `grep -q 'make coverage' README.md && grep -q coverage-report README.md` | ✅ | ✅ green |
 | 11-03 T1 | 11-03 | 1 | GATE-08 | - | N/A | manual, CI-only | one-time probe run 36146017939, listing in 11-EVIDENCE.md; config pinned by `pnpm exec vitest run scripts/playwright-trace-config.test.ts` | ✅ | ✅ green |
 | 11-03 T2 | 11-03 | 1 | GATE-08 | - | No trace binary committed | doc assertion | `grep -q '## GATE-08' .planning/phases/11-milestone-verification-evidence/11-EVIDENCE.md`; no tracked `trace.zip` | ✅ | ✅ green |
-| 11-04 T1-T3 | 11-04 | 1 | VALID-01 | - | N/A | automated via validate-phase | per-requirement commands in 01/02/03-VALIDATION.md (e.g. `cargo test --offline --lib paths::`, `pnpm exec vitest run src/lib/ipcError.test.ts src/lib/types.test.ts`); frontmatter `status: validated`, `nyquist_compliant: true` in all three | ✅ | ✅ green |
-| 11-05 T1-T2 | 11-05 | 1 | SEC-03 | T-02-01..08 | Phase 02 mitigations present at HEAD | automated via secure-phase | `cargo test --offline --lib` selectors `paths::`, `content_search::`, `evidence_binder::`, `vault::`, `inbox::`, `secrets::`, `skill_host::fs`; `02-SECURITY.md` has `threats_open: 0` and 8 `T-02-0N` rows | ✅ | ✅ green |
+| 11-04 T1-T3 | 11-04 | 1 | VALID-01 | - | N/A | automated via validate-phase | per-requirement commands in 01/02/03-VALIDATION.md (e.g. `cargo test --offline --manifest-path src-tauri/Cargo.toml --lib paths::`, `pnpm exec vitest run src/lib/ipcError.test.ts src/lib/types.test.ts`); frontmatter `status: validated`, `nyquist_compliant: true` in all three | ✅ | ✅ green |
+| 11-05 T1-T2 | 11-05 | 1 | SEC-03 | T-02-01..08 | Phase 02 mitigations present at HEAD | automated via secure-phase | `cargo test --offline --manifest-path src-tauri/Cargo.toml --lib` selectors `paths::`, `content_search::`, `evidence_binder::`, `vault::`, `inbox::`, `secrets::`, `skill_host::fs`; `02-SECURITY.md` has `threats_open: 0` and 8 `T-02-0N` rows | ✅ | ✅ green |
 | 11-06 T1-T3 | 11-06 | 2 | TEST-02, GATE-08, VALID-01, SEC-03 | - | N/A | doc assertion + gate | the four requirement rows read `Phase 11 \| Complete` in `.planning/REQUIREMENTS.md`; `make verify` on CI | ✅ | ✅ green |
 
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
@@ -59,7 +59,7 @@ created: "2026-09-25"
 
 - [x] `Makefile` `coverage` target
 - [x] `@vitest/coverage-v8` devDependency (human-verify checkpoint before install)
-- [x] `.github/workflows/ci.yml` main-push coverage job
+- [x] `.github/workflows/coverage.yml` main-push coverage job (a separate workflow, so `ci.yml` stays unchanged)
 
 ---
 

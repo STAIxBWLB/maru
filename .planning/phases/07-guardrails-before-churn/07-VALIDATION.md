@@ -33,7 +33,7 @@ created: 2026-09-05
 
 - **After every task commit:** Run the task's `<automated>` verify command — scoped to the touched module/suite so feedback lands in seconds (Nyquist per-task guideline: < 30s; no task verify runs the full `pnpm test` or full `cargo test --lib` except where the touched surface *is* the crate-wide Rust suite, e.g. 07-02 Task 3 and 07-03 Task 3, whose final verify is the smallest suite that proves no process-global static was poisoned)
 - **After every plan wave:** Run `make verify`
-- **Before `/gsd-verify-work`:** Full suite must be green, plus the phase-gate e2e run: `pnpm exec playwright test e2e/inbox*.spec.ts` (the Inbox-pane regression watch for ROADMAP criterion 4, recorded in the 07-04 and 07-05 plan-level `<verification>` blocks)
+- **Before `/gsd-verify-work`:** Full suite must be green, plus the phase-gate e2e run, the Inbox-pane regression watch for ROADMAP criterion 4 recorded in the 07-04 and 07-05 plan-level `<verification>` blocks. Run the eight existing checks named in 07-UAT.md (the plans' `e2e/inbox*.spec.ts` glob matches no file): `pnpm exec playwright test e2e/smoke.spec.ts e2e/workbench-layout.spec.ts e2e/dashboard.spec.ts --grep 'restores the previous app state|every primary workbench|every right workbench|widget actions deep-link|inbox card splits'`
 - **Max feedback latency:** 120 seconds (phase gate); task-level verifies are module-scoped
 
 ---
