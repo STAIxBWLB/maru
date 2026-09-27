@@ -894,13 +894,21 @@ enum KillTarget {
     /// The terminal child itself (its pid is its pgid). Without job control
     /// (agent CLIs exec'd as the leader, `sh -c` wrappers) every child it
     /// starts stays in this group, `nohup`'d ones included, so SIGTERM and
-    /// SIGKILL go to the leader pid only and the stage is judged by the
-    /// leader pid alone. The session waiter only watches the leader, so this
-    /// still ends a leader that traps SIGHUP (REL-01).
+    /// SIGKILL go to the leader pid only (plus each `Member`) and the stage
+    /// is judged by the leader pid alone. The session waiter only watches
+    /// the leader, so this still ends a leader that traps SIGHUP (REL-01).
     Leader(u32),
     /// The pty's foreground job group under job control: the whole group
     /// escalates.
     Group(u32),
+    /// A process in a `Leader`'s group, other than the leader, that caught
+    /// SIGHUP with a handler when the ladder began, so it may keep running
+    /// after the opening SIGHUP (#372), e.g. a wrapper tab's payload.
+    /// Escalates by pid. It stays alive while it is a live member of the
+    /// same group that does not ignore SIGHUP, even after dropping its
+    /// handler (`process.once`, SA_RESETHAND); a SIG_IGN (`nohup`'d) process
+    /// never becomes one and one that switches to SIG_IGN is spared (D-09).
+    Member { pid: u32, pgid: u32 },
 }
 
 #[cfg(unix)]
@@ -908,23 +916,33 @@ impl KillTarget {
     /// The group the opening SIGHUP goes to.
     fn pgid(self) -> u32 {
         match self {
-            KillTarget::Leader(id) | KillTarget::Group(id) => id,
+            KillTarget::Leader(id)
+            | KillTarget::Group(id)
+            | KillTarget::Member { pgid: id, .. } => id,
         }
     }
 
-    /// SIGTERM/SIGKILL: the leader pid only, or the whole foreground group.
+    /// SIGTERM/SIGKILL: a leader or member pid only, or the whole
+    /// foreground group.
     fn signal(self, signal: i32) -> std::io::Result<bool> {
         match self {
-            KillTarget::Leader(pid) => signal_pid(pid, signal),
+            KillTarget::Leader(pid) | KillTarget::Member { pid, .. } => signal_pid(pid, signal),
             KillTarget::Group(pgid) => signal_process_group(pgid, signal),
         }
     }
 
-    /// Same EPERM-means-alive rule as `process_group_alive`.
-    fn alive(self) -> bool {
+    /// Same EPERM-means-alive rule as `process_group_alive`. A member is
+    /// judged against `groups`, one `group_members` scan per group per poll,
+    /// so a large group costs one scan rather than one per member.
+    fn alive(self, groups: &mut HashMap<u32, Vec<GroupMember>>) -> bool {
         match self {
             KillTarget::Leader(pid) => signal_pid(pid, 0).unwrap_or(true),
             KillTarget::Group(pgid) => process_group_alive(pgid),
+            KillTarget::Member { pid, pgid } => groups
+                .entry(pgid)
+                .or_insert_with(|| group_members(pgid))
+                .iter()
+                .any(|member| member.pid == pid && !member.ignores_hup),
         }
     }
 }
@@ -933,10 +951,179 @@ impl KillTarget {
 impl std::fmt::Display for KillTarget {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            KillTarget::Leader(pid) => write!(f, "pid {pid}"),
+            KillTarget::Leader(pid) | KillTarget::Member { pid, .. } => write!(f, "pid {pid}"),
             KillTarget::Group(pgid) => write!(f, "pgid {pgid}"),
         }
     }
+}
+
+/// Mask bit for SIGHUP in a kernel signal set (`1 << (SIGHUP - 1)`).
+#[cfg(unix)]
+const SIGHUP_MASK: u64 = 1 << (SIGHUP - 1);
+
+/// One live (non-zombie) process of a scanned group and its SIGHUP
+/// disposition.
+#[cfg(unix)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct GroupMember {
+    pid: u32,
+    catches_hup: bool,
+    ignores_hup: bool,
+}
+
+/// Live (non-zombie) processes in process group `pgid` with their SIGHUP
+/// disposition. A process that exits mid-scan is left out; a failed scan
+/// returns nothing, so nothing is escalated. Dispositions are all it sees:
+/// SIGHUP taken through signalfd or kqueue does not count as caught, and a
+/// `nohup`'d program that re-installs a handler does.
+#[cfg(target_os = "linux")]
+fn group_members(pgid: u32) -> Vec<GroupMember> {
+    let Ok(entries) = std::fs::read_dir("/proc") else {
+        return Vec::new();
+    };
+    entries
+        .filter_map(|entry| entry.ok()?.file_name().to_str()?.parse::<u32>().ok())
+        .filter_map(|pid| {
+            // Either read fails (ENOENT/ESRCH) once the process is gone.
+            let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+            if !proc_stat_live_in_group(&stat, pgid) {
+                return None;
+            }
+            let status = std::fs::read_to_string(format!("/proc/{pid}/status")).ok()?;
+            Some(GroupMember {
+                pid,
+                catches_hup: proc_status_has_sighup(&status, "SigCgt:"),
+                ignores_hup: proc_status_has_sighup(&status, "SigIgn:"),
+            })
+        })
+        .collect()
+}
+
+/// `/proc/<pid>/stat`: after the parenthesised comm (which may itself hold
+/// spaces or parens) come state, ppid and pgrp.
+#[cfg(all(unix, any(target_os = "linux", test)))]
+fn proc_stat_live_in_group(stat: &str, pgid: u32) -> bool {
+    let Some((_, rest)) = stat.rsplit_once(')') else {
+        return false;
+    };
+    let mut fields = rest.split_whitespace();
+    let live = fields
+        .next()
+        .is_some_and(|state| state != "Z" && state != "X");
+    live && fields.nth(1).and_then(|pgrp| pgrp.parse::<u32>().ok()) == Some(pgid)
+}
+
+/// `/proc/<pid>/status`: `SigCgt`/`SigIgn` are hex masks of caught and
+/// ignored signals.
+#[cfg(all(unix, any(target_os = "linux", test)))]
+fn proc_status_has_sighup(status: &str, field: &str) -> bool {
+    status
+        .lines()
+        .find_map(|line| line.strip_prefix(field))
+        .and_then(|mask| u64::from_str_radix(mask.trim(), 16).ok())
+        .is_some_and(|mask| mask & SIGHUP_MASK != 0)
+}
+
+/// macOS `ps` has no caught/ignored keywords, so this reads the group's
+/// `kinfo_proc` records from `sysctl(KERN_PROC_PGRP)` directly.
+#[cfg(target_os = "macos")]
+fn group_members(pgid: u32) -> Vec<GroupMember> {
+    extern "C" {
+        fn sysctl(
+            name: *mut i32,
+            namelen: u32,
+            oldp: *mut std::ffi::c_void,
+            oldlenp: *mut usize,
+            newp: *mut std::ffi::c_void,
+            newlen: usize,
+        ) -> i32;
+    }
+    let Ok(group) = i32::try_from(pgid) else {
+        return Vec::new();
+    };
+    // CTL_KERN, KERN_PROC, KERN_PROC_PGRP.
+    let mut mib = [1, 14, 2, group];
+    // The group can grow between sizing the buffer and filling it (ENOMEM),
+    // so leave room and retry.
+    for _ in 0..3 {
+        let mut len = 0;
+        let sized = unsafe {
+            sysctl(
+                mib.as_mut_ptr(),
+                4,
+                std::ptr::null_mut(),
+                &mut len,
+                std::ptr::null_mut(),
+                0,
+            )
+        };
+        if sized != 0 {
+            return Vec::new();
+        }
+        len += 8 * KINFO_PROC_SIZE;
+        let mut buf = vec![0u8; len];
+        let filled = unsafe {
+            sysctl(
+                mib.as_mut_ptr(),
+                4,
+                buf.as_mut_ptr().cast(),
+                &mut len,
+                std::ptr::null_mut(),
+                0,
+            )
+        };
+        if filled == 0 {
+            return parse_kinfo_procs(&buf[..len.min(buf.len())], pgid);
+        }
+    }
+    Vec::new()
+}
+
+// <sys/sysctl.h> `struct kinfo_proc` is a fixed 648-byte ABI on 64-bit
+// macOS; byte offsets into `kp_proc` (`struct extern_proc`) and `kp_eproc`.
+#[cfg(all(unix, any(target_os = "macos", test)))]
+const KINFO_PROC_SIZE: usize = 648;
+#[cfg(all(unix, any(target_os = "macos", test)))]
+const KP_P_STAT: usize = 36;
+#[cfg(all(unix, any(target_os = "macos", test)))]
+const KP_P_PID: usize = 40;
+#[cfg(all(unix, any(target_os = "macos", test)))]
+const KP_P_SIGIGNORE: usize = 232;
+#[cfg(all(unix, any(target_os = "macos", test)))]
+const KP_P_SIGCATCH: usize = 236;
+#[cfg(all(unix, any(target_os = "macos", test)))]
+const KP_E_PGID: usize = 564;
+
+/// Parses `sysctl(KERN_PROC_PGRP)` output and fails safe: a length that is
+/// not a whole number of records yields nothing, and a record whose pid is
+/// not positive or whose `e_pgid` is not `pgid` is skipped (`kill(0, ..)`
+/// would signal Maru's own process group). Zombies (`SZOMB`) are skipped.
+#[cfg(all(unix, any(target_os = "macos", test)))]
+fn parse_kinfo_procs(buf: &[u8], pgid: u32) -> Vec<GroupMember> {
+    const SZOMB: u8 = 5;
+    if buf.len() % KINFO_PROC_SIZE != 0 {
+        return Vec::new();
+    }
+    let word = |entry: &[u8], at: usize| {
+        u32::from_ne_bytes([entry[at], entry[at + 1], entry[at + 2], entry[at + 3]])
+    };
+    buf.chunks_exact(KINFO_PROC_SIZE)
+        .filter(|entry| entry[KP_P_STAT] != SZOMB && word(entry, KP_E_PGID) == pgid)
+        .filter_map(|entry| {
+            let pid = word(entry, KP_P_PID);
+            i32::try_from(pid).ok().filter(|&pid| pid > 0)?;
+            Some(GroupMember {
+                pid,
+                catches_hup: u64::from(word(entry, KP_P_SIGCATCH)) & SIGHUP_MASK != 0,
+                ignores_hup: u64::from(word(entry, KP_P_SIGIGNORE)) & SIGHUP_MASK != 0,
+            })
+        })
+        .collect()
+}
+
+#[cfg(all(unix, not(any(target_os = "linux", target_os = "macos"))))]
+fn group_members(_pgid: u32) -> Vec<GroupMember> {
+    Vec::new()
 }
 
 /// Sends `signal` to the process group led by `pgid` (i.e. `kill(-pgid,
@@ -990,15 +1177,31 @@ fn process_group_alive(pgid: u32) -> bool {
 /// into its OWN process group, so a tab-close or quit-time kill must
 /// escalate the leader and the pty's current foreground group on the same
 /// clock, or the foreground job survives untouched (see kill_target_pgids).
-/// Returns the stage the whole batch was finally observed gone at (or
-/// `Kill` if any target needed SIGKILL) and the targets that outlived
-/// SIGHUP, the only ones escalation touched.
+/// Each `Leader` group's members that catch SIGHUP when the ladder begins
+/// join it on the same clock (#372); its SIGHUP-ignoring (`nohup`'d)
+/// members are never escalated (D-09). Returns the stage the whole batch was finally observed
+/// gone at (or `Kill` if any target needed SIGKILL) and the targets that
+/// outlived SIGHUP, the only ones escalation touched.
 #[cfg(unix)]
 fn escalate_process_groups(
     targets: &[KillTarget],
     grace: Duration,
 ) -> (KillStage, Vec<KillTarget>) {
-    let survivors = wait_for_all_groups_gone(targets, grace);
+    let mut all = targets.to_vec();
+    for &target in targets {
+        if let KillTarget::Leader(pgid) = target {
+            all.extend(
+                group_members(pgid)
+                    .into_iter()
+                    .filter(|member| member.catches_hup && member.pid != pgid)
+                    .map(|member| KillTarget::Member {
+                        pid: member.pid,
+                        pgid,
+                    }),
+            );
+        }
+    }
+    let survivors = wait_for_all_groups_gone(&all, grace);
     if survivors.is_empty() {
         return (KillStage::Hangup, survivors);
     }
@@ -1198,10 +1401,11 @@ const QUIT_SWEEP_STEP: Duration = Duration::from_millis(1000);
 fn wait_for_all_groups_gone(targets: &[KillTarget], step: Duration) -> Vec<KillTarget> {
     let deadline = std::time::Instant::now() + step;
     loop {
+        let mut groups = HashMap::new();
         let alive: Vec<KillTarget> = targets
             .iter()
             .copied()
-            .filter(|target| target.alive())
+            .filter(|target| target.alive(&mut groups))
             .collect();
         if alive.is_empty() {
             return Vec::new();
@@ -1287,7 +1491,7 @@ pub(crate) fn sweep_sessions(state: &TerminalState, step: Duration) {
             KillStage::Kill => "SIGKILL",
         };
         eprintln!(
-            "[terminal] quit sweep escalated {} process group(s) past SIGHUP; final signal {final_signal}",
+            "[terminal] quit sweep escalated {} kill target(s) past SIGHUP; final signal {final_signal}",
             escalated.len()
         );
     }
@@ -3858,6 +4062,250 @@ mod phase09_02 {
             survived,
             "the quit sweep must escalate the leader pid only, not the nohup'd child {child} \
              in its group (D-09)"
+        );
+    }
+
+    // #372: a wrapper tab's payload that CATCHES SIGHUP (a handler, like a
+    // Node `process.on("SIGHUP")`) keeps running after the opening SIGHUP,
+    // so the ladder must still end it, while a nohup'd (SIG_IGN) sibling in
+    // the same leader group survives.
+
+    /// `spawn_nohup_leader` plus a background `sh` in the leader's group that
+    /// traps HUP with the handler `trap_action` and then runs `main`. The
+    /// leader itself dies at SIGHUP, like a `sh -lc '... | codex exec -'`
+    /// wrapper. Returns (handle, leader, nohup'd child, HUP-catching child).
+    fn spawn_nohup_and_hup_catching_children(
+        app: &TestApp,
+        session_id: &str,
+        dir: &Path,
+        trap_action: &str,
+        main: &str,
+    ) -> (TerminalSessionHandle, u32, u32, u32) {
+        let caught_file = dir.join("caught.pid");
+        let tail = format!(
+            "sh -c 'trap \"{trap_action}\" HUP; echo $$ > {caught}; {main}' & \
+             echo CATCH-READY; wait",
+            caught = caught_file.display()
+        );
+        let (handle, leader, nohup) = spawn_nohup_leader(
+            app,
+            session_id,
+            &tail,
+            "CATCH-READY",
+            &dir.join("nohup.pid"),
+        );
+        // The pid file is written only after `trap` installed the handler; a
+        // kill before that would end the child at SIGHUP and prove nothing.
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let caught = loop {
+            let pid = std::fs::read_to_string(&caught_file)
+                .ok()
+                .and_then(|contents| contents.trim().parse::<u32>().ok());
+            if let Some(pid) = pid {
+                break pid;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "the HUP-catching child never installed its trap"
+            );
+            thread::sleep(Duration::from_millis(20));
+        };
+        assert_eq!(
+            read_pgid(caught),
+            Some(leader),
+            "precondition: without job control the HUP-catching child must share the leader's \
+             process group -- if this fails the test fixture, not the fix, is wrong"
+        );
+        (handle, leader, nohup, caught)
+    }
+
+    /// The Linux `/proc` parsers behind `group_members`, checked on every
+    /// unix host.
+    #[test]
+    fn phase09_02_proc_parsers_read_group_liveness_and_caught_sighup() {
+        let stat = "4242 (a) b (c) S 1 4200 4200 0 -1 4194560";
+        assert!(proc_stat_live_in_group(stat, 4200));
+        assert!(!proc_stat_live_in_group(stat, 4242));
+        assert!(!proc_stat_live_in_group("4242 (sh) Z 1 4200 4200", 4200));
+        let status = |ignored: &str, caught: &str| {
+            format!("Name:\tsh\nSigIgn:\t{ignored}\nSigCgt:\t{caught}\n")
+        };
+        let catcher = status("0000000000000000", "0000000000010003");
+        assert!(proc_status_has_sighup(&catcher, "SigCgt:"));
+        assert!(!proc_status_has_sighup(&catcher, "SigIgn:"));
+        let nohup = status("0000000000000001", "0000000000010002");
+        assert!(!proc_status_has_sighup(&nohup, "SigCgt:"));
+        assert!(proc_status_has_sighup(&nohup, "SigIgn:"));
+    }
+
+    /// The macOS `kinfo_proc` parser behind `group_members` fails safe on
+    /// synthetic records, checked on every unix host.
+    #[test]
+    fn phase09_02_kinfo_proc_parser_skips_bad_records_and_bad_lengths() {
+        let record = |pid: i32, pgid: u32, stat: u8, ignored: u32, caught: u32| {
+            let mut entry = vec![0u8; KINFO_PROC_SIZE];
+            entry[KP_P_STAT] = stat;
+            entry[KP_P_PID..KP_P_PID + 4].copy_from_slice(&pid.to_ne_bytes());
+            entry[KP_P_SIGIGNORE..KP_P_SIGIGNORE + 4].copy_from_slice(&ignored.to_ne_bytes());
+            entry[KP_P_SIGCATCH..KP_P_SIGCATCH + 4].copy_from_slice(&caught.to_ne_bytes());
+            entry[KP_E_PGID..KP_E_PGID + 4].copy_from_slice(&pgid.to_ne_bytes());
+            entry
+        };
+        let catcher = record(4243, 4200, 2, 0, 1);
+        let buf = [
+            catcher.clone(),
+            record(4244, 4200, 3, 1, 0),
+            record(0, 4200, 2, 0, 1),
+            record(-1, 4200, 2, 0, 1),
+            record(4245, 4201, 2, 0, 1),
+            record(4246, 4200, 5, 0, 1),
+        ]
+        .concat();
+        assert_eq!(
+            parse_kinfo_procs(&buf, 4200),
+            vec![
+                GroupMember {
+                    pid: 4243,
+                    catches_hup: true,
+                    ignores_hup: false,
+                },
+                GroupMember {
+                    pid: 4244,
+                    catches_hup: false,
+                    ignores_hup: true,
+                },
+            ],
+            "pid 0, a negative pid, another group and a zombie must all be skipped"
+        );
+        assert!(parse_kinfo_procs(&catcher[..KINFO_PROC_SIZE - 1], 4200).is_empty());
+        assert!(parse_kinfo_procs(&[catcher.as_slice(), &[0u8; 8]].concat(), 4200).is_empty());
+    }
+
+    #[test]
+    fn phase09_02_hup_catching_child_of_non_job_control_leader_ends_on_tab_close() {
+        let app = app();
+        let app = app.handle().clone();
+        let tempdir = tempfile::tempdir().unwrap();
+        let (handle, leader, nohup, caught) = spawn_nohup_and_hup_catching_children(
+            &app,
+            "phase09-02-caught-tab-close",
+            tempdir.path(),
+            "echo caught",
+            "while :; do sleep 1; done",
+        );
+
+        run(kill_session(app.clone(), handle)).unwrap();
+        let leader_gone = wait_until_pid_gone(leader, Duration::from_secs(8));
+        let caught_gone = wait_until_pid_gone(caught, Duration::from_secs(8));
+        wait_for_ladders_done(&app);
+        let survived = pid_alive(nohup);
+        kill_pid(caught);
+        kill_pid(nohup);
+        assert!(leader_gone, "the leader {leader} must die on tab close");
+        assert!(
+            caught_gone,
+            "a child {caught} that catches SIGHUP in the leader's group must be escalated and \
+             gone after tab close (#372)"
+        );
+        assert!(
+            survived,
+            "the nohup'd child {nohup} must still survive tab close (D-09)"
+        );
+    }
+
+    #[test]
+    fn phase09_02_hup_catching_child_of_non_job_control_leader_ends_on_quit_sweep() {
+        let app = app();
+        let app = app.handle().clone();
+        let state = app.state::<TerminalState>().inner().clone();
+        let tempdir = tempfile::tempdir().unwrap();
+        let (_handle, leader, nohup, caught) = spawn_nohup_and_hup_catching_children(
+            &app,
+            "phase09-02-caught-quit-sweep",
+            tempdir.path(),
+            "echo caught",
+            "while :; do sleep 1; done",
+        );
+
+        let start = Instant::now();
+        shutdown_all_sessions(&state);
+        let elapsed = start.elapsed();
+        let leader_gone = wait_until_pid_gone(leader, Duration::from_secs(2));
+        let caught_gone = wait_until_pid_gone(caught, Duration::from_secs(2));
+        let survived = pid_alive(nohup);
+        kill_pid(caught);
+        kill_pid(nohup);
+        assert!(
+            elapsed < Duration::from_secs(3),
+            "the quit sweep must finish inside the 3s quit budget (D-12); took {elapsed:?}"
+        );
+        assert!(
+            leader_gone,
+            "the leader {leader} must be gone after the quit sweep"
+        );
+        assert!(
+            caught_gone,
+            "a child {caught} that catches SIGHUP in the leader's group must be gone after the \
+             quit sweep (#372)"
+        );
+        assert!(
+            survived,
+            "the nohup'd child {nohup} must still survive the quit sweep (D-09)"
+        );
+    }
+
+    /// Review of #375: a payload whose handler runs once and then restores
+    /// SIG_DFL (Node `process.once("SIGHUP")`, SA_RESETHAND, Go
+    /// `signal.Reset`) keeps running after the opening SIGHUP and must still
+    /// be escalated. The catcher restores SIG_DFL from its main flow, not
+    /// inside the trap (bash re-raises a SIGHUP that arrived during the trap
+    /// once the trap is gone), only after a HUP-proof 1s delay and after the
+    /// leader is reaped. So the ladder has admitted it first, and the
+    /// kernel's own SIGHUP on the session leader's exit is already handled.
+    #[test]
+    fn phase09_02_child_that_drops_its_sighup_handler_still_ends_on_tab_close() {
+        let app = app();
+        let app = app.handle().clone();
+        let tempdir = tempfile::tempdir().unwrap();
+        let hupped = tempdir.path().join("hupped");
+        let reset = tempdir.path().join("reset");
+        let main = format!(
+            "while [ ! -e {hupped} ]; do sleep 1; done; \
+             nohup sleep 1 >/dev/null 2>&1; \
+             while kill -0 $PPID 2>/dev/null; do sleep 0.1; done; \
+             trap - HUP; : > {reset}; while :; do sleep 1; done",
+            hupped = hupped.display(),
+            reset = reset.display()
+        );
+        let (handle, leader, nohup, caught) = spawn_nohup_and_hup_catching_children(
+            &app,
+            "phase09-02-caught-once-tab-close",
+            tempdir.path(),
+            &format!(": > {}", hupped.display()),
+            &main,
+        );
+
+        run(kill_session(app.clone(), handle)).unwrap();
+        let leader_gone = wait_until_pid_gone(leader, Duration::from_secs(8));
+        let caught_gone = wait_until_pid_gone(caught, Duration::from_secs(8));
+        wait_for_ladders_done(&app);
+        let survived = pid_alive(nohup);
+        kill_pid(caught);
+        kill_pid(nohup);
+        assert!(leader_gone, "the leader {leader} must die on tab close");
+        assert!(
+            reset.exists(),
+            "precondition: the catcher {caught} must have restored SIG_DFL before escalation \
+             -- if this fails the test fixture, not the fix, is wrong"
+        );
+        assert!(
+            caught_gone,
+            "a child {caught} that caught SIGHUP once and then dropped its handler must still \
+             be escalated and gone after tab close (#375 review)"
+        );
+        assert!(
+            survived,
+            "the nohup'd child {nohup} must still survive tab close (D-09)"
         );
     }
 }
