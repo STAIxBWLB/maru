@@ -1142,8 +1142,9 @@ export function MainApp() {
   // Mode the user picked before the workspace settings became writable.
   // Boot, settings hydration, and the settings-save echo each re-apply the
   // stored mode; while a pick is pending they must leave it alone, and it is
-  // persisted once settings saves are possible (#387). Cleared when the
-  // stored settings catch up with the pick, or on a workspace switch.
+  // persisted once settings saves are possible (#387). The mode is a global
+  // setting, so the pick survives settings-path changes and is cleared only
+  // when the stored settings catch up with it.
   const userPickedAppModeRef = useRef<AppMode | null>(null);
   // Fixed for the process lifetime; see bootAppMode for why the provisioned
   // browser-passkey build must land on Sites at launch.
@@ -2018,8 +2019,9 @@ export function MainApp() {
   );
 
   // Boot-time app-mode pick lifecycle (#387): persist a pick made before the
-  // settings were writable, restore it when hydration/echoes revert the
-  // in-memory settings, drop it on a workspace switch.
+  // settings were writable, and restore it when hydration/echoes revert the
+  // in-memory settings. The pick is kept across settings-path changes until
+  // the persisted settings echo it back.
   useAppModePickLifecycle({
     settingsWorkPath,
     settingsWritable,
