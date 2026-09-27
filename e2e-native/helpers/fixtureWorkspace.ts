@@ -145,6 +145,11 @@ export function fixtureRootDir(): string {
   return requireFixtureRoot();
 }
 
+/** The app's global settings file under the fixture home (holds ui.activeAppMode). */
+export function fixtureGlobalSettingsFile(): string {
+  return path.join(fixturePaths(requireFixtureRoot()).homeDir, ".maru", "settings.json");
+}
+
 /** Paths the saturation spec passes to the app through the debug bridge. */
 export function saturationFixturePaths(): { repoA: string; repoB: string; tree: string } {
   const root = requireFixtureRoot();

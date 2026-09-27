@@ -71,8 +71,12 @@ jobs:
       - name: Install frontend dependencies
         run: pnpm install --frozen-lockfile
 
+      # An explicit `shell: bash` runs with `-o pipefail`; the implicit default
+      # (`bash -e`) does not, so the step took tee's exit status and stayed
+      # green while spec files failed (#368).
       - name: Run the native e2e suite
         id: suite
+        shell: bash
         run: make test-e2e-native 2>&1 | tee /tmp/native-e2e-run.log
 
       # Evidence on failure: the wdio/make log and a screencapture of the
