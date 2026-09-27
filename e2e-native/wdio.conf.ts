@@ -25,33 +25,29 @@ const APP_BINARY = "./src-tauri/target/debug/maru";
  * how the session ended.
  */
 function killSurvivingAppProcesses(): void {
-  for (const pid of appPids()) {
-    try {
-      process.kill(Number(pid), "SIGKILL");
-    } catch {
-      // Already exited between pgrep and kill - nothing left to clean up.
-    }
-  }
-}
-
-function appPids(): string[] {
   // pgrep -f treats the pattern as an unanchored ERE: the literal dots in
   // APP_BINARY are regex wildcards, so the bare pattern matches ANY command
   // line containing "<any char>/src-tauri/target/debug/maru" — including a
   // developer's own `tauri dev` or debug instance launched by absolute path
-  // from this or any other checkout, which the teardown backstop would then
-  // SIGKILL. Escape every metacharacter and anchor the match to the exact
-  // relative argv the tauri-service spawns, so only a process started the
-  // same way this run starts its app is ever matched.
+  // from this or any other checkout, which this backstop would then SIGKILL.
+  // Escape every metacharacter and anchor the match to the exact relative
+  // argv the tauri-service spawns, so teardown can only reach a process
+  // started the same way this run starts its app.
   const escaped = APP_BINARY.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   try {
-    return execFileSync("pgrep", ["-f", `^${escaped}$`], { encoding: "utf8" })
+    const pids = execFileSync("pgrep", ["-f", `^${escaped}$`], { encoding: "utf8" })
       .split("\n")
       .map((line) => line.trim())
       .filter(Boolean);
+    for (const pid of pids) {
+      try {
+        process.kill(Number(pid), "SIGKILL");
+      } catch {
+        // Already exited between pgrep and kill - nothing left to clean up.
+      }
+    }
   } catch {
     // pgrep exits non-zero when it finds nothing; that is the common case.
-    return [];
   }
 }
 
@@ -69,8 +65,12 @@ function appPids(): string[] {
  * with an installed Maru.app.
  */
 function activateAppWindow(): boolean {
+  const escaped = APP_BINARY.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   try {
-    const pids = appPids();
+    const pids = execFileSync("pgrep", ["-f", `^${escaped}$`], { encoding: "utf8" })
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean);
     const pid = pids[pids.length - 1];
     if (!pid) return false;
     execFileSync("osascript", [
@@ -151,24 +151,6 @@ export const config = {
       if (activateAppWindow()) break;
       await new Promise((resolve) => setTimeout(resolve, 1000));
     }
-  },
-  before: () => {
-    // The embedded WebDriver server lives inside the app process, so once the
-    // app is gone (quit.spec quits it on purpose; a crash does the same) the
-    // runner's end-of-session DELETE /session can only hit ECONNREFUSED. That
-    // rejection escapes @wdio/runner's endSession before it reports results,
-    // so the spec file shows "Failed launching test session" and no test
-    // output at all (#367). Skip the DELETE only when no app process is
-    // left; a live app still gets a normal teardown. deleteSession is a
-    // protocol command: overwritable at runtime, but outside the typed name
-    // union overwriteCommand accepts.
-    const overwrite = browser.overwriteCommand as unknown as (
-      name: "deleteSession",
-      fn: (deleteSession: (...args: unknown[]) => Promise<unknown>, ...args: unknown[]) => Promise<unknown>,
-    ) => void;
-    overwrite.call(browser, "deleteSession", async (deleteSession, ...args) =>
-      appPids().length > 0 ? deleteSession(...args) : null,
-    );
   },
   beforeTest: async () => {
     await resetFixtureWorkspace();
