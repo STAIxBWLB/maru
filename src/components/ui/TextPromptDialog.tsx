@@ -42,6 +42,12 @@ export function useTextPrompt() {
   return { askText, dialog };
 }
 
+// WebKit can clear isComposing before the key that ends the composition, so
+// keyCode 229 (the IME's process key) counts too.
+function isComposingKey(event: KeyboardEvent): boolean {
+  return event.isComposing || event.keyCode === 229;
+}
+
 function TextPromptDialog({
   prompt,
   onChange,
@@ -66,7 +72,7 @@ function TextPromptDialog({
           aria-describedby={undefined}
           onEscapeKeyDown={(event) => {
             // An Escape that ends an IME composition must not close the field.
-            if (event.isComposing) event.preventDefault();
+            if (isComposingKey(event)) event.preventDefault();
           }}
         >
           <form
@@ -84,6 +90,11 @@ function TextPromptDialog({
               value={prompt?.value ?? ""}
               autoFocus
               onFocus={(event) => event.currentTarget.select()}
+              onKeyDown={(event) => {
+                // The Enter that commits a Korean composition must not also
+                // submit the field.
+                if (event.key === "Enter" && isComposingKey(event.nativeEvent)) event.preventDefault();
+              }}
               onChange={(event) => {
                 if (prompt) onChange({ ...prompt, value: event.target.value });
               }}

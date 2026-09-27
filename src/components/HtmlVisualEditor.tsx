@@ -323,11 +323,24 @@ export const HtmlVisualEditor = forwardRef<HtmlEditorFlushHandle, HtmlVisualEdit
     );
 
     const handleCreateLink = useCallback(async () => {
+      // The in-app prompt takes focus, and WKWebView then drops the iframe's
+      // selection: keep the range and put it back before linking.
+      const doc = iframeRef.current?.contentDocument;
+      const selection = doc?.getSelection();
+      const range = selection && selection.rangeCount > 0 ? selection.getRangeAt(0).cloneRange() : null;
       const url = await askText(t("editor.html.link.prompt"));
       if (url == null) return;
       if (!isAllowedLinkUrl(url)) {
         await messageDialog(t("editor.html.link.invalid"), "warning");
         return;
+      }
+      const frame = iframeRef.current;
+      if (!doc || frame?.contentDocument !== doc) return;
+      if (range) {
+        frame.contentWindow?.focus();
+        const current = doc.getSelection();
+        current?.removeAllRanges();
+        current?.addRange(range);
       }
       exec("createLink", url.trim());
     }, [askText, exec, t]);

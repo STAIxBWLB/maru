@@ -326,6 +326,48 @@ describe("HtmlVisualEditor toolbar", () => {
     expect(editable.execCommand).toHaveBeenCalledWith("bold", false, undefined);
   });
 
+  it("links the text that was selected before the URL prompt took focus", async () => {
+    const { container } = await renderEditor({ value: FULL_DOC });
+    const iframe = getIframe(container);
+    const doc = iframe.contentDocument;
+    if (!doc) throw new Error("iframe document unavailable");
+    const editable = stubEditingApis(doc);
+    let selectedAtLink = "";
+    vi.mocked(editable.execCommand).mockImplementation((command) => {
+      if (command === "createLink") selectedAtLink = doc.getSelection()?.toString() ?? "";
+      return true;
+    });
+    await dispatchLoad(iframe);
+    doc.body.innerHTML = "<p>Hello world</p>";
+    const text = doc.body.querySelector("p")!.firstChild!;
+    const range = doc.createRange();
+    range.setStart(text, 0);
+    range.setEnd(text, 5);
+    doc.getSelection()!.removeAllRanges();
+    doc.getSelection()!.addRange(range);
+
+    await act(async () => {
+      toolbarButton(container, "editor.html.toolbar.link").click();
+    });
+    // The in-app prompt takes focus; WKWebView drops the iframe selection.
+    doc.getSelection()!.removeAllRanges();
+    const input = document.querySelector<HTMLInputElement>(".dialog-content input")!;
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
+    await act(async () => {
+      setter.call(input, "https://example.com");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => {
+      input.form!.requestSubmit();
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(editable.execCommand).toHaveBeenCalledWith("createLink", false, "https://example.com");
+    expect(selectedAtLink).toBe("Hello");
+  });
+
   it("disables the toolbar and the editing surface when readOnly", async () => {
     const { container } = await renderEditor({
       value: FULL_DOC,
