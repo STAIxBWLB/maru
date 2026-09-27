@@ -693,6 +693,7 @@ export const ko: Record<string, string> = {
   "files.operations.trash": "휴지통으로 이동",
   "files.operations.dirtyBlocked": "저장하지 않은 문서 {count}개가 포함되어 작업을 중단했습니다.",
   "files.operations.trashConfirm": "{name} 외 {count}개 항목을 시스템 휴지통으로 이동할까요?",
+  "files.operations.trashConfirmOneOther": "{name} 외 1개 항목을 시스템 휴지통으로 이동할까요?",
   "files.operations.trashConfirmSingle": "{name}을(를) 시스템 휴지통으로 이동할까요?",
   "files.operations.cutReady": "{count}개 항목 잘라내기 대기",
   "files.operations.copyReady": "{count}개 항목 복사 대기",

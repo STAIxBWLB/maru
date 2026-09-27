@@ -740,6 +740,7 @@ export const en: Record<string, string> = {
   "files.operations.trash": "Move to Trash",
   "files.operations.dirtyBlocked": "The operation was stopped because it includes {count} unsaved documents.",
   "files.operations.trashConfirm": "Move {name} and {count} other items to the system Trash?",
+  "files.operations.trashConfirmOneOther": "Move {name} and 1 other item to the system Trash?",
   "files.operations.trashConfirmSingle": "Move {name} to the system Trash?",
   "files.operations.cutReady": "{count} items ready to move",
   "files.operations.copyReady": "{count} items ready to copy",

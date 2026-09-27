@@ -181,11 +181,16 @@ export interface TrashConfirmMessage {
 /** Builds the trash-confirmation i18n key and vars for a selection. The
  *  multi-item string names the first entry and counts only the REST
  *  ("{name} 외 {count}개"), so a single item needs its own string — passing
- *  the total count made one selected file read "{name} 외 1개". */
+ *  the total count made one selected file read "{name} 외 1개". English also
+ *  needs a singular form for exactly one remaining item ("and 1 other
+ *  item"), while Korean uses the same wording for any count. */
 export function trashConfirmMessage(names: readonly string[]): TrashConfirmMessage {
   const name = names[0] ?? "";
   if (names.length <= 1) {
     return { key: "files.operations.trashConfirmSingle", vars: { name } };
+  }
+  if (names.length === 2) {
+    return { key: "files.operations.trashConfirmOneOther", vars: { name } };
   }
   return {
     key: "files.operations.trashConfirm",

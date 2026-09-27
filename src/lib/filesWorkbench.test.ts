@@ -133,6 +133,13 @@ describe("Files workbench navigation", () => {
     });
   });
 
+  it("uses the singular remaining-item string when two entries are selected", () => {
+    expect(trashConfirmMessage(["a.md", "b.md"])).toEqual({
+      key: "files.operations.trashConfirmOneOther",
+      vars: { name: "a.md" },
+    });
+  });
+
   it("counts only the remaining items in a multi-item trash confirmation", () => {
     expect(trashConfirmMessage(["a.md", "b.md", "c.md"])).toEqual({
       key: "files.operations.trashConfirm",
