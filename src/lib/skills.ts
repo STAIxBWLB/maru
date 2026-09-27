@@ -721,6 +721,7 @@ export async function agentRunStructuredLoop(params: {
   maxRework?: number | null;
   commandOverride?: string | null;
   permissionMode?: string | null;
+  metadata?: Record<string, unknown> | null;
 }): Promise<string> {
   if (!isTauri()) return `mock-structured-loop-${params.provider}`;
   return invoke<string>("agent_run_structured_loop", {
@@ -732,6 +733,7 @@ export async function agentRunStructuredLoop(params: {
     maxRework: params.maxRework ?? null,
     commandOverride: params.commandOverride ?? null,
     permissionMode: params.permissionMode ?? null,
+    metadata: params.metadata ?? null,
   });
 }
 

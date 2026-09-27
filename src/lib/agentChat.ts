@@ -6,8 +6,9 @@
 // primitive the inbox classifier uses, so no new Rust command exists for it.
 
 import { startAgentCliInvocation, stopAiMission } from "./api";
-import type { AiDoneEvent, AiErrorEvent, AiOutputEvent } from "./aiInvoke";
+import type { AiDoneEvent, AiErrorEvent, AiOutputEvent, AiRuntimeEvent } from "./aiInvoke";
 import {
+  invocationAdaptivePolicy,
   resolveAgentPermissionMode,
   resolveAgentRuntime,
   resolveAvailableRuntime,
@@ -31,6 +32,13 @@ export interface ChatTurn {
   /** Assistant turns only — what actually ran, after runtime fallback. */
   runtime?: AiRuntime;
   permissionMode?: string;
+  model?: string | null;
+  effort?: string | null;
+  policyRevision?: string | null;
+  targetId?: string | null;
+  homeMode?: string | null;
+  knowledgeScope?: string | null;
+  policySwitchCount?: number;
   exitCode?: number | null;
   elapsedMs?: number;
   /** Persisted guard against applying the same append-capable proposal twice. */
@@ -233,7 +241,8 @@ export function clearStoredChatTurns(
   try {
     const key = storageKey(workPath, agentId);
     window.localStorage.removeItem(key);
-    if (window.localStorage.getItem(key) === null) return;
+    window.localStorage.removeItem(policyStorageKey(workPath, agentId));
+    if (window.localStorage.getItem(key) === null && window.localStorage.getItem(policyStorageKey(workPath, agentId)) === null) return;
   } catch {
     // Fall through to the explicit persistence failure below.
   }
@@ -311,7 +320,44 @@ export interface ChatSendResult {
   text: string;
   runtime: AiRuntime;
   permissionMode: string;
+  model?: string | null;
+  effort?: string | null;
+  policyRevision?: string | null;
+  targetId?: string | null;
+  homeMode?: string | null;
+  knowledgeScope?: string | null;
+  policySwitchCount?: number;
   exitCode: number | null;
+}
+
+export interface AdaptiveContinuation {
+  previous: { agent: AiRuntime; model: string; effort: string; targetId: string; homeMode: string; knowledgeScope: string; policyRevision: string };
+  switchCount: number;
+  freeze?: boolean;
+}
+
+const policyStorageKey = (workPath: string | null, agentId: string) => `${storageKey(workPath, agentId)}:policy`;
+
+export function loadChatPolicyCheckpoint(workPath: string | null, agentId: string): AdaptiveContinuation | undefined {
+  const raw = window.localStorage.getItem(policyStorageKey(workPath, agentId));
+  if (!raw) return undefined;
+  const value = JSON.parse(raw) as AdaptiveContinuation;
+  if (!value.previous || !Number.isInteger(value.switchCount) || value.switchCount < 0 || !value.previous.homeMode) {
+    throw new Error("agent_chat_policy_checkpoint_invalid");
+  }
+  return value;
+}
+
+export function saveChatPolicyCheckpoint(workPath: string | null, agentId: string, value: AdaptiveContinuation): void {
+  const key = policyStorageKey(workPath, agentId);
+  const raw = JSON.stringify(value);
+  window.localStorage.setItem(key, raw);
+  if (window.localStorage.getItem(key) !== raw) throw new Error("agent_chat_policy_checkpoint_persist_failed");
+}
+
+export function chatPolicyCheckpoint(turn: Pick<ChatTurn, "runtime" | "model" | "effort" | "targetId" | "homeMode" | "knowledgeScope" | "policyRevision" | "policySwitchCount">): AdaptiveContinuation | undefined {
+  if (!turn.runtime || turn.model == null || turn.effort == null || !turn.targetId || !turn.homeMode || !turn.policyRevision) return undefined;
+  return { previous: { agent: turn.runtime, model: turn.model, effort: turn.effort, targetId: turn.targetId, homeMode: turn.homeMode, knowledgeScope: turn.knowledgeScope ?? "", policyRevision: turn.policyRevision }, switchCount: turn.policySwitchCount ?? 0 };
 }
 
 export interface SendAgentChatTurnParams {
@@ -322,10 +368,15 @@ export interface SendAgentChatTurnParams {
   message: string;
   /** The selection displayed by the pane; dispatch must use the same backend. */
   runtimeSelection?: AgentRuntimeSelection;
+  /** A task-specific override; never persisted into global AI defaults. */
+  adaptivePolicy?: AiSettings["adaptivePolicy"];
   /** Unmounting a foreground chat aborts its subprocess and stale callbacks. */
   signal?: AbortSignal;
   /** Fires as soon as the subprocess is registered, so the UI can offer Stop. */
   onInvocation?: (invocationId: string) => void;
+  /** Effective runtime, including failed invocations, for caller diagnostics. */
+  onRuntime?: (runtime: AiRuntimeEvent) => void;
+  adaptiveContinuation?: AdaptiveContinuation;
   /** Live stdout tail while the turn runs. */
   onChunk?: (line: string) => void;
 }
@@ -336,6 +387,7 @@ export interface AgentRuntimeSelection {
 }
 
 type BufferedChatEvent =
+  | { type: "runtime"; payload: AiRuntimeEvent }
   | { type: "output"; payload: AiOutputEvent }
   | { type: "done"; payload: AiDoneEvent }
   | { type: "error"; payload: AiErrorEvent };
@@ -350,8 +402,15 @@ export async function sendAgentChatTurn(
   if (!agent.enabled) throw new Error(`agent_disabled: ${agent.id}`);
   if (!message.trim()) throw new Error("agent_prompt_required");
 
-  const { runtime, commandOverride } = params.runtimeSelection
-    ?? await resolveAvailableRuntime(resolveAgentRuntime(agent, ai), ai);
+  const adaptivePolicy = invocationAdaptivePolicy(agent, ai, params.adaptivePolicy);
+  const previous = [...turns].reverse().find((turn) => turn.role === "assistant" && chatPolicyCheckpoint(turn));
+  const checkpoint = params.adaptiveContinuation ?? (adaptivePolicy?.enabled ? loadChatPolicyCheckpoint(workPath, agent.id) : undefined) ?? (previous ? chatPolicyCheckpoint(previous) : undefined);
+  const adaptiveContinuation = adaptivePolicy?.enabled && checkpoint
+    ? { ...checkpoint, freeze: checkpoint.freeze === true || Boolean(adaptivePolicy.agent) }
+    : undefined;
+  const { runtime, commandOverride } = adaptivePolicy?.enabled
+    ? { runtime: resolveAgentRuntime(agent, ai), commandOverride: null }
+    : params.runtimeSelection ?? await resolveAvailableRuntime(resolveAgentRuntime(agent, ai), ai);
   const permissionMode = resolveAgentPermissionMode(agent, ai);
   const { prompt } = buildChatPrompt(agent, turns, message);
 
@@ -368,6 +427,7 @@ export async function sendAgentChatTurn(
       null,
       commandOverride,
       permissionMode,
+      { origin: "agent-chat", agentId: agent.id, adaptivePolicy: adaptivePolicy ?? { enabled: false, workload: "auto" }, ...(adaptiveContinuation ? { adaptiveContinuation } : {}) },
     );
     const invocationId = await new Promise<string>((resolve, reject) => {
       let aborted = false;
@@ -398,14 +458,18 @@ export async function sendAgentChatTurn(
   const { listen } = await import("@tauri-apps/api/event");
   return await new Promise<ChatSendResult>((resolve, reject) => {
     let invocationId: string | null = null;
+    let effective: AiRuntimeEvent | null = null;
     let stdout = "";
     const stderr: string[] = [];
     let settled = false;
+    let startPending = false;
+    let releaseRuntimeListener: (() => void) | undefined;
     const unlisteners: Array<() => void> = [];
     const bufferedEvents: BufferedChatEvent[] = [];
 
     const cleanup = () => {
       settled = true;
+      if (!startPending) { releaseRuntimeListener?.(); releaseRuntimeListener = undefined; }
       for (const off of unlisteners) {
         try {
           off();
@@ -453,6 +517,23 @@ export async function sendAgentChatTurn(
         params.onChunk?.(event.payload.line);
         return;
       }
+      if (event.type === "runtime") {
+        effective = event.payload;
+        const checkpoint = chatPolicyCheckpoint(event.payload);
+        if (checkpoint) {
+          try {
+            // Freeze before completion: crashes, cancellations and denials must
+            // preserve the actual invocation, independently of transcript replay.
+            saveChatPolicyCheckpoint(workPath, agent.id, { ...checkpoint, freeze: true });
+          } catch (error) {
+            void stopAiMission(event.payload.invocationId).catch(() => {});
+            safeReject(error instanceof Error ? error : new Error(String(error)));
+            return;
+          }
+        }
+        params.onRuntime?.(event.payload);
+        return;
+      }
       if (event.type === "error") {
         safeReject(new Error(`${event.payload.kind}: ${event.payload.message}`));
         return;
@@ -468,11 +549,22 @@ export async function sendAgentChatTurn(
         );
         return;
       }
+      if (effective) {
+        const checkpoint = chatPolicyCheckpoint(effective);
+        if (checkpoint) {
+          try { saveChatPolicyCheckpoint(workPath, agent.id, { ...checkpoint, freeze: adaptiveContinuation?.freeze === true || Boolean(adaptivePolicy?.agent) }); }
+          catch (error) { safeReject(error instanceof Error ? error : new Error(String(error))); return; }
+        }
+      }
       cleanup();
       resolve({
         text: stdout.trim(),
-        runtime,
-        permissionMode,
+        runtime: effective?.runtime ?? runtime,
+        permissionMode: effective?.permissionMode ?? permissionMode,
+        ...(effective ? {
+          model: effective.model, effort: effective.effort, policyRevision: effective.policyRevision,
+          targetId: effective.targetId, homeMode: effective.homeMode, knowledgeScope: effective.knowledgeScope, policySwitchCount: effective.policySwitchCount,
+        } : {}),
         exitCode: event.payload.exitCode,
       });
     };
@@ -486,7 +578,8 @@ export async function sendAgentChatTurn(
         off();
         return false;
       }
-      unlisteners.push(off);
+      if (eventName === "ai://runtime") releaseRuntimeListener = off;
+      else unlisteners.push(off);
       return true;
     };
 
@@ -495,6 +588,8 @@ export async function sendAgentChatTurn(
         // Registration must finish before Rust starts the subprocess. Tauri
         // events are not replayed, and immediate auth/argv failures can finish
         // before the invoke response otherwise.
+        if (!(await register<AiRuntimeEvent>("ai://runtime", (evt) =>
+          handleEvent({ type: "runtime", payload: evt.payload })))) return;
         if (!(await register<AiOutputEvent>("ai://output", (evt) =>
           handleEvent({ type: "output", payload: evt.payload })))) return;
         if (!(await register<AiDoneEvent>("ai://done", (evt) =>
@@ -503,6 +598,7 @@ export async function sendAgentChatTurn(
           handleEvent({ type: "error", payload: evt.payload })))) return;
         if (settled) return;
 
+        startPending = true;
         const startedInvocationId = await startAgentCliInvocation(
           runtime,
           prompt,
@@ -511,16 +607,31 @@ export async function sendAgentChatTurn(
           null,
           commandOverride,
           permissionMode,
+          { origin: "agent-chat", agentId: agent.id, adaptivePolicy: adaptivePolicy ?? { enabled: false, workload: "auto" }, ...(adaptiveContinuation ? { adaptiveContinuation } : {}) },
         );
         invocationId = startedInvocationId;
+        startPending = false;
         if (settled || params.signal?.aborted) {
-          await stopAiMission(startedInvocationId).catch(() => {});
+          try {
+            // Abort may precede invoke's ID response. Only now can buffered
+            // diagnostics be attributed safely; persist without UI callbacks.
+            for (const event of bufferedEvents) {
+              if (event.type !== "runtime" || event.payload.invocationId !== startedInvocationId) continue;
+              const checkpoint = chatPolicyCheckpoint(event.payload);
+              if (checkpoint) saveChatPolicyCheckpoint(workPath, agent.id, { ...checkpoint, freeze: true });
+            }
+          } finally {
+            releaseRuntimeListener?.(); releaseRuntimeListener = undefined;
+            await stopAiMission(startedInvocationId).catch(() => {});
+          }
           return;
         }
         params.onInvocation?.(invocationId);
         const pending = bufferedEvents.splice(0);
         for (const event of pending) handleEvent(event);
       } catch (error) {
+        startPending = false;
+        releaseRuntimeListener?.(); releaseRuntimeListener = undefined;
         safeReject(error instanceof Error ? error : new Error(String(error)));
       }
     })();

@@ -19,6 +19,7 @@ import {
   startAgentCliInvocation,
   type AgentProvider,
 } from "./api";
+import type { AdaptivePolicy } from "./settings";
 import type { InboxClassification, InboxDropItem } from "./types";
 
 declare global {
@@ -33,6 +34,20 @@ export interface AiOutputEvent {
   invocationId: string;
   stream: string;
   line: string;
+}
+
+export interface AiRuntimeEvent {
+  invocationId: string;
+  runtime: AgentProvider;
+  permissionMode: string;
+  model?: string | null;
+  effort?: string | null;
+  policyRevision?: string | null;
+  targetId?: string | null;
+  homeMode?: string | null;
+  knowledgeScope?: string | null;
+  policySwitchCount?: number;
+  continuity?: "transcript-replay";
 }
 
 export interface AiDoneEvent {
@@ -56,6 +71,7 @@ export async function classifyInboxItem(
   commandOverride: string | null = null,
   permissionMode: string | null = null,
   extraEnv: Record<string, string> | null = null,
+  adaptivePolicy?: AdaptivePolicy,
 ): Promise<InboxClassification> {
   const prompt = await buildInboxClassificationPrompt(item);
 
@@ -76,8 +92,9 @@ export async function classifyInboxItem(
     cwd,
     null,
     extraEnv,
-    commandOverride,
+    adaptivePolicy?.enabled ? null : commandOverride,
     permissionMode,
+    { origin: "inbox-classification", ...(adaptivePolicy ? { adaptivePolicy } : {}) },
   );
 
   return await new Promise<InboxClassification>((resolve, reject) => {

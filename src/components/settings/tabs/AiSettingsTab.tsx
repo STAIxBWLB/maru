@@ -3,13 +3,15 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "../../../lib/i18n";
 import type {
+  AdaptiveWorkload,
   AiClassifierRuntime,
   AiPermissionMode,
   AiRuntime,
   MaruSettings,
 } from "../../../lib/settings";
-import { normalizeMaruSettings } from "../../../lib/settings";
+import { ADAPTIVE_WORKLOADS, normalizeMaruSettings } from "../../../lib/settings";
 import { CompactSelect, ModeHeader } from "../../ui/ModeChrome";
+import { Toggle } from "../../ui/Toggle";
 import { SettingsSection } from "../SettingsSection";
 import { SettingsRow } from "../SettingsRow";
 
@@ -53,6 +55,7 @@ export function AiSettingsTab({
     "plan",
     "acceptEdits",
     "default",
+    "auto-review",
     "bypassPermissions",
   ];
 
@@ -114,6 +117,21 @@ export function AiSettingsTab({
             </CompactSelect>
           }
         />
+        <SettingsRow
+          label={t("system.ai.adaptivePolicy")}
+          description={t("system.ai.adaptivePolicy.help")}
+          control={<Toggle aria-label={t("system.ai.adaptivePolicy")}
+            checked={ai.adaptivePolicy?.enabled ?? false}
+            onChange={(enabled) => commitAi({ adaptivePolicy: { workload: "auto", ...ai.adaptivePolicy, enabled } })} />}
+        />
+        {ai.adaptivePolicy?.enabled ? <SettingsRow
+          label={t("system.ai.workload")}
+          htmlFor="ai-policy-workload"
+          control={<CompactSelect id="ai-policy-workload" value={ai.adaptivePolicy.workload}
+            onChange={(event) => commitAi({ adaptivePolicy: { enabled: true, ...ai.adaptivePolicy, workload: event.target.value as AdaptiveWorkload } })}>
+            {ADAPTIVE_WORKLOADS.map((workload) => <option key={workload} value={workload}>{t(`system.ai.workload.${workload}`)}</option>)}
+          </CompactSelect>}
+        /> : null}
         <SettingsRow
           label={t("system.ai.commandClaude")}
           description={t("system.ai.commandOverride.help")}

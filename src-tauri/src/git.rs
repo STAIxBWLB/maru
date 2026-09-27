@@ -335,6 +335,11 @@ fn git_diff_for_path(path: &Path, file_path: &str) -> Result<String, String> {
 const MAX_COMMIT_PROMPT_BYTES: usize = 18 * 1024;
 const MAX_COMMIT_DIFF_BYTES_PER_FILE: usize = 4 * 1024;
 
+fn commit_message_metadata() -> serde_json::Value {
+    // This legacy API carries an explicit runtime but no adaptive task opt-in.
+    json!({ "origin": "gitGenerateCommitMessage", "adaptivePolicy": { "enabled": false, "workload": "auto" } })
+}
+
 pub fn git_generate_commit_message(
     vault_path: String,
     paths: Vec<String>,
@@ -357,7 +362,7 @@ pub fn git_generate_commit_message(
         prompt,
         cwd: path.to_string_lossy().into_owned(),
         mode: "commit-message".to_string(),
-        metadata: Some(json!({ "origin": "gitGenerateCommitMessage" })),
+        metadata: Some(commit_message_metadata()),
     };
     let add_dirs = vec![request.cwd.clone()];
     let (mut cmd, stdin_payload) = build_cli_command(
@@ -1230,6 +1235,17 @@ mod tests {
     use super::*;
     use std::fs;
     use tempfile::TempDir;
+
+    #[test]
+    fn commit_policy_preserves_explicit_runtime_over_global_adaptation() {
+        let metadata = commit_message_metadata();
+        let options =
+            crate::agent_host::runtime_policy::options_with_fallback(Some(&metadata), || {
+                Some(json!({ "enabled": true, "workload": "implementation", "agent": "codex" }))
+            })
+            .unwrap();
+        assert!(options.is_none());
+    }
 
     #[test]
     fn non_directory_path_errors() {

@@ -22,6 +22,11 @@ Maru must not write:
 - `~/.claude/hooks/**`
 - non-skill global tool settings owned by `dotfiles-v2`
 
+Maru may read `dot ai policy resolve --json` and apply its typed decision to
+one invocation. The opt-in lives in Maru settings; native model, permission,
+and profile configuration remains owned by dotfiles. Policy resolution never
+accepts an arbitrary executable or unvalidated launch arguments.
+
 ## dotfiles-v2 Owns
 
 - AGENTS fan-out and global instruction targets

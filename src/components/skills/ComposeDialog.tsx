@@ -11,6 +11,7 @@ import {
   Workflow,
   X,
 } from "lucide-react";
+import type { AdaptivePolicy } from "../../lib/settings";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type {
   DispatchComposition,
@@ -40,6 +41,10 @@ import {
   DialogSurfaceClose,
   DialogSurfaceTitle,
 } from "../ui/DialogSurface";
+
+export function composeInvocationPolicy(policy: AdaptivePolicy | undefined, runtime: SkillDispatchRuntime, manual: boolean): AdaptivePolicy | undefined {
+  return policy?.enabled && manual ? { ...policy, agent: runtime } : policy;
+}
 
 type ComposeMode = "terminal" | "background" | "structured";
 const EMPTY_RUNTIME_COMMANDS: Partial<Record<SkillDispatchRuntime, string | null>> = {};
@@ -83,6 +88,7 @@ interface ComposeDialogProps {
   terminalRuntimeCommands?: Partial<Record<SkillDispatchRuntime, string | null>>;
   aiRuntimeCommands?: Partial<Record<SkillDispatchRuntime, string | null>>;
   defaultRuntime?: SkillDispatchRuntime;
+  adaptivePolicy?: AdaptivePolicy;
   permissionMode?: string;
   /**
    * Workspace root the Meetings pane reads run events from. Meeting-notes runs
@@ -103,6 +109,7 @@ export function ComposeDialog({
   terminalRuntimeCommands = EMPTY_RUNTIME_COMMANDS,
   aiRuntimeCommands = EMPTY_RUNTIME_COMMANDS,
   defaultRuntime,
+  adaptivePolicy,
   permissionMode,
   meetingsWorkspacePath,
   onOpenMeetingsWorkbench,
@@ -115,6 +122,7 @@ export function ComposeDialog({
   const sourceFileInput = useRef<HTMLInputElement>(null);
   const [skillQuery, setSkillQuery] = useState("");
   const [runtime, setRuntime] = useState<SkillDispatchRuntime>(defaultRuntime ?? "claude");
+  const [manualRuntime, setManualRuntime] = useState(false);
   const [mode, setMode] = useState<ComposeMode>("background");
   const [preview, setPreview] = useState<DispatchComposition | null>(null);
   const [busy, setBusy] = useState(false);
@@ -131,6 +139,7 @@ export function ComposeDialog({
     setSourceText("");
     setSourceFiles([]);
     setSkillQuery("");
+    setManualRuntime(false);
     setRuntime(readLastSkillRuntime() ?? defaultRuntime ?? "claude");
     setMode("background");
     setPreview(null);
@@ -156,7 +165,7 @@ export function ComposeDialog({
         >;
         setRuntimeStatuses(next);
         setRuntime((current) => {
-          if (next[current]?.available) return current;
+          if (adaptivePolicy?.enabled || next[current]?.available) return current;
           return (
             COMPOSE_SKILL_RUNTIMES.find((candidate) => next[candidate]?.available) ??
             current
@@ -172,7 +181,7 @@ export function ComposeDialog({
     return () => {
       cancelled = true;
     };
-  }, [open, runtimeStatusCommands]);
+  }, [open, runtimeStatusCommands, adaptivePolicy?.enabled]);
 
   const selectedSkill = useMemo(
     () => skills.find((skill) => skill.id === skillId) ?? null,
@@ -205,7 +214,9 @@ export function ComposeDialog({
   const selectedSourceCount = effectiveContext.length + sourceFiles.length;
   const skillValid = selectedSkill?.valid ?? true;
   const selectedRuntimeStatus = runtimeStatuses[runtime] ?? null;
-  const runtimeReady = selectedRuntimeStatus?.available === true;
+  const policyActive = adaptivePolicy?.enabled === true && mode !== "terminal";
+  const invocationPolicy = composeInvocationPolicy(adaptivePolicy, runtime, manualRuntime);
+  const runtimeReady = policyActive || selectedRuntimeStatus?.available === true;
   const canRun = Boolean(selectedSkill && skillValid && (isMeetingNotes
     ? onOpenMeetingsWorkbench && (meetingsWorkspacePath ?? seed?.cwd)
     : effectivePrompt.trim() && runtimeReady));
@@ -274,9 +285,10 @@ export function ComposeDialog({
         });
         const runId = await agentRunStructuredLoop({
           provider: runtime,
+          metadata: { origin: "skillCompose", ...(invocationPolicy ? { adaptivePolicy: invocationPolicy } : {}) },
           directive: composition.prompt,
           cwd: seed.cwd,
-          commandOverride: aiRuntimeCommands[runtime] ?? null,
+          commandOverride: policyActive ? null : aiRuntimeCommands[runtime] ?? null,
           permissionMode: permissionMode ?? null,
         });
         onBackgroundDispatch?.(runId);
@@ -311,10 +323,11 @@ export function ComposeDialog({
           prompt: effectivePrompt,
           cwd: backgroundCwd,
           context: effectiveContext,
-          commandOverride: aiRuntimeCommands[runtime] ?? null,
+          commandOverride: policyActive ? null : aiRuntimeCommands[runtime] ?? null,
           permissionMode: permissionMode ?? null,
           metadata: isMeetingNotes
             ? {
+                ...(invocationPolicy ? { adaptivePolicy: invocationPolicy } : {}),
                 origin: "meetingNotesFromTranscript",
                 skillName: selectedSkill.name,
                 runtime,
@@ -324,6 +337,7 @@ export function ComposeDialog({
                 inputPaths: effectiveContext.map((item) => item.path),
               }
             : {
+                ...(invocationPolicy ? { adaptivePolicy: invocationPolicy } : {}),
                 origin: "skillCompose",
                 skillName: selectedSkill.name,
                 runtime,
@@ -426,15 +440,16 @@ export function ComposeDialog({
                   role="group"
                   aria-label={t("skills.compose.runTarget")}
                 >
+                  {policyActive ? <button type="button" className={!manualRuntime ? "active" : ""} onClick={() => setManualRuntime(false)}>{t("system.ai.workload.auto")}</button> : null}
                   {COMPOSE_SKILL_RUNTIMES.map((candidate) => {
                     const RuntimeIcon = candidate === "codex" ? Code2 : SquareTerminal;
                     return (
                       <button
                         key={candidate}
                         type="button"
-                        className={runtime === candidate ? "active" : ""}
-                        onClick={() => setRuntime(candidate)}
-                        disabled={runtimeStatuses[candidate]?.available === false}
+                        className={runtime === candidate && (!policyActive || manualRuntime) ? "active" : ""}
+                        onClick={() => { setRuntime(candidate); setManualRuntime(true); }}
+                        disabled={!policyActive && runtimeStatuses[candidate]?.available === false}
                       >
                         <RuntimeIcon size={13} />
                         <span>{runtimeLabel(candidate)}</span>
@@ -446,7 +461,7 @@ export function ComposeDialog({
                   className="compose-runtime-status"
                   data-state={runtimeStatusState(selectedRuntimeStatus, runtimeStatusLoading)}
                 >
-                  {runtimeStatusLoading && !selectedRuntimeStatus ? (
+                  {policyActive ? <span>{t("agents.chat.policySelection")}</span> : runtimeStatusLoading && !selectedRuntimeStatus ? (
                     <>
                       <Loader2 size={12} className="spin" />
                       <span>{t("skills.runtime.checking")}</span>

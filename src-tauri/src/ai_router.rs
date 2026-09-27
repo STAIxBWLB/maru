@@ -20,7 +20,9 @@ use tauri::{AppHandle, Emitter};
 use uuid::Uuid;
 
 use crate::agent_host::contracts::{CompletionRequest, COMPLETION_REQUEST_SCHEMA_VERSION};
-use crate::agent_host::provider::{build_cli_command, normalize_permission_mode, CliProviderKind};
+use crate::agent_host::provider::{
+    build_cli_command_with_policy, normalize_permission_mode, CliProviderKind,
+};
 use crate::cli_path::{augmented_path, merge_path_env};
 use crate::mission_state;
 use crate::win_process::NoWindow;
@@ -64,21 +66,53 @@ pub fn start_agent_cli_invocation<R: tauri::Runtime>(
     extra_env: Option<HashMap<String, String>>,
     command_override: Option<String>,
     permission_mode: Option<String>,
+    metadata: Option<JsonValue>,
 ) -> Result<String, String> {
     let command_override = command_override.filter(|value| !value.trim().is_empty());
     let permission_mode =
         normalize_permission_mode(permission_mode.as_deref().unwrap_or("plan")).to_string();
-    let (provider_kind, resolved_cwd, mut cmd, stdin_payload) = build_agent_command(
+    let (provider_kind, resolved_cwd, mut cmd, stdin_payload, resolution) = build_agent_command(
         &provider,
         &prompt,
         cwd.as_deref(),
         command_override.as_deref(),
         &permission_mode,
+        metadata,
     )?;
+    if resolution.is_some() && extra_args.as_ref().is_some_and(|args| !args.is_empty()) {
+        return Err("adaptive_policy_launch_overrides_forbidden".into());
+    }
+    let extra_env = if resolution.is_some() {
+        Some(prepare_policy_env(
+            &resolved_cwd,
+            extra_env.unwrap_or_default(),
+        )?)
+    } else {
+        extra_env
+    };
     if let Some(args) = extra_args {
         cmd.args(args);
     }
+    let permission_mode = if resolution.is_some() && permission_mode != "plan" {
+        "auto-review".to_string()
+    } else {
+        permission_mode
+    };
     let invocation_id = format!("ai-{}", Uuid::new_v4());
+    if let Some(resolution) = &resolution {
+        let _ = app.emit(
+            "ai://runtime",
+            json!({
+                "invocationId": invocation_id, "runtime": resolution.agent,
+                "model": resolution.model, "effort": resolution.effort,
+                "permissionMode": if permission_mode == "plan" { "plan" } else { "auto-review" },
+                "policyRevision": resolution.policy_revision,
+                "targetId": resolution.target_id, "homeMode": resolution.home_mode, "policySwitchCount": resolution.switch_count,
+                "knowledgeScope": resolution.knowledge_scope(),
+                "continuity": "transcript-replay"
+            }),
+        );
+    }
     let mission_cwd = resolved_cwd.clone();
     let mission_metadata = json!({
         "origin": "agentCliInvocation",
@@ -87,6 +121,7 @@ pub fn start_agent_cli_invocation<R: tauri::Runtime>(
         "workspacePath": mission_cwd,
         "permissionMode": permission_mode,
         "commandOverride": command_override,
+        "adaptivePolicyResolution": resolution,
     });
     spawn_streaming_invocation(
         app,
@@ -123,20 +158,30 @@ pub fn start_claude_cli_invocation<R: tauri::Runtime>(
         extra_env,
         None,
         None,
+        None,
     )
 }
 
 /// Resolve provider + cwd and build the provider command via the shared
-/// `build_cli_command`. Pure (no spawn) so it is unit-testable without an
+/// `build_cli_command`. Policy opt-in invokes the read-only resolver. No agent is spawned without an
 /// `AppHandle`. Returns the resolved cwd so the caller can set the process
 /// working dir (the builder does not).
+type AgentCommand = (
+    CliProviderKind,
+    String,
+    Command,
+    Option<String>,
+    Option<crate::agent_host::runtime_policy::Resolution>,
+);
+
 fn build_agent_command(
     provider: &str,
     prompt: &str,
     cwd: Option<&str>,
     command_override: Option<&str>,
     permission_mode: &str,
-) -> Result<(CliProviderKind, String, Command, Option<String>), String> {
+    metadata: Option<JsonValue>,
+) -> Result<AgentCommand, String> {
     if prompt.trim().is_empty() {
         return Err("completion_prompt_required".to_string());
     }
@@ -158,17 +203,27 @@ fn build_agent_command(
         prompt: prompt.to_string(),
         cwd: resolved_cwd.clone(),
         mode: "background".to_string(),
-        metadata: None,
+        metadata,
     };
     let add_dirs = vec![request.cwd.clone()];
-    let (cmd, stdin_payload) = build_cli_command(
+    let (cmd, stdin_payload, resolution) = build_cli_command_with_policy(
         provider_kind,
         &request,
         &add_dirs,
         command_override,
         permission_mode,
     )?;
-    Ok((provider_kind, resolved_cwd, cmd, stdin_payload))
+    Ok((
+        resolution
+            .as_ref()
+            .map(|r| CliProviderKind::parse(&r.agent))
+            .transpose()?
+            .unwrap_or(provider_kind),
+        resolved_cwd,
+        cmd,
+        stdin_payload,
+        resolution,
+    ))
 }
 
 /// The mission this invocation registers itself under: what
@@ -304,6 +359,79 @@ fn spawn_streaming_invocation<R: tauri::Runtime>(
     Ok(invocation_id)
 }
 
+fn prepare_policy_env(
+    cwd: &str,
+    mut env: HashMap<String, String>,
+) -> Result<HashMap<String, String>, String> {
+    if env.keys().any(|key| {
+        !matches!(
+            key.as_str(),
+            "MARU_APP_MODE"
+                | "MARU_WORKSPACE"
+                | "MARU_SCRATCHPAD"
+                | "MARU_DRAFTS"
+                | "MARU_TEMP"
+                | "CLAUDE_CODE_TMPDIR"
+                | "MARU_WORKSPACE_VISIBILITY"
+                | "MARU_ACTIVE_DOC"
+                | "MARU_ACTIVE_DOC_REL"
+                | "MARU_ACTIVE_DOC_TITLE"
+                | "MARU_ACTIVE_DOC_TYPE"
+        )
+    }) {
+        return Err("adaptive_policy_launch_overrides_forbidden".into());
+    }
+    let workspace = std::fs::canonicalize(cwd)
+        .map_err(|e| format!("adaptive_policy_workspace_invalid: {e}"))?;
+    if env.contains_key("MARU_WORKSPACE") {
+        env.insert(
+            "MARU_WORKSPACE".into(),
+            workspace.to_string_lossy().into_owned(),
+        );
+    }
+    let mut outside_workspace = false;
+    for key in ["MARU_ACTIVE_DOC", "MARU_ACTIVE_DOC_REL"] {
+        if let Some(value) = env.get(key) {
+            let path = std::path::Path::new(value);
+            if path
+                .components()
+                .any(|part| matches!(part, std::path::Component::ParentDir))
+                || (key == "MARU_ACTIVE_DOC_REL" && path.is_absolute())
+            {
+                outside_workspace = true;
+                break;
+            }
+            let candidate = if path.is_absolute() {
+                path.to_path_buf()
+            } else {
+                workspace.join(path)
+            };
+            let canonical = candidate
+                .ancestors()
+                .find(|path| std::fs::symlink_metadata(path).is_ok())
+                .and_then(|path| std::fs::canonicalize(path).ok());
+            if !canonical.is_some_and(|path| path.starts_with(&workspace)) {
+                outside_workspace = true;
+                break;
+            }
+        }
+    }
+    // Configured external inbox roots remain valid tasks. Omit optional document
+    // context rather than passing an outside-workspace path as trusted app context.
+    if outside_workspace {
+        for key in [
+            "MARU_ACTIVE_DOC",
+            "MARU_ACTIVE_DOC_REL",
+            "MARU_ACTIVE_DOC_TITLE",
+            "MARU_ACTIVE_DOC_TYPE",
+        ] {
+            env.remove(key);
+        }
+    }
+    // Caller-provided reserved paths are overwritten from the app workspace configuration.
+    prepare_invocation_env(Some(cwd), env)
+}
+
 fn prepare_invocation_env(
     cwd: Option<&str>,
     mut extra_env: HashMap<String, String>,
@@ -374,6 +502,7 @@ pub mod ipc {
         extra_env: Option<HashMap<String, String>>,
         command_override: Option<String>,
         permission_mode: Option<String>,
+        metadata: Option<JsonValue>,
     ) -> Result<String, String> {
         tauri::async_runtime::spawn_blocking(move || {
             #[cfg(test)]
@@ -392,6 +521,7 @@ pub mod ipc {
                 extra_env,
                 command_override,
                 permission_mode,
+                metadata,
             )
         })
         .await
@@ -437,14 +567,15 @@ mod tests {
 
     #[test]
     fn build_agent_command_rejects_empty_prompt() {
-        let err =
-            build_agent_command("claude", "   \n\t  ", Some("/tmp"), None, "plan").unwrap_err();
+        let err = build_agent_command("claude", "   \n\t  ", Some("/tmp"), None, "plan", None)
+            .unwrap_err();
         assert_eq!(err, "completion_prompt_required");
     }
 
     #[test]
     fn build_agent_command_rejects_unsupported_provider() {
-        let err = build_agent_command("openai", "hello", Some("/tmp"), None, "plan").unwrap_err();
+        let err =
+            build_agent_command("openai", "hello", Some("/tmp"), None, "plan", None).unwrap_err();
         assert!(err.starts_with("unsupported_provider"), "{err}");
     }
 
@@ -453,12 +584,13 @@ mod tests {
     fn build_agent_command_builds_claude_with_plan_mode_and_no_stdin() {
         let dir = tempfile::tempdir().unwrap();
         let cli = write_fake_cli(dir.path().join("fake-claude"));
-        let (kind, cwd, cmd, stdin_payload) = build_agent_command(
+        let (kind, cwd, cmd, stdin_payload, _) = build_agent_command(
             "claude",
             "classify this",
             Some(dir.path().to_str().unwrap()),
             Some(cli.to_str().unwrap()),
             "plan",
+            None,
         )
         .unwrap();
         assert_eq!(kind, CliProviderKind::Claude);
@@ -479,12 +611,13 @@ mod tests {
     fn build_agent_command_builds_codex_with_stdin_payload() {
         let dir = tempfile::tempdir().unwrap();
         let cli = write_fake_cli(dir.path().join("fake-codex"));
-        let (kind, _cwd, cmd, stdin_payload) = build_agent_command(
+        let (kind, _cwd, cmd, stdin_payload, _) = build_agent_command(
             "codex",
             "classify this",
             Some(dir.path().to_str().unwrap()),
             Some(cli.to_str().unwrap()),
             "plan",
+            None,
         )
         .unwrap();
         assert_eq!(kind, CliProviderKind::Codex);
@@ -499,7 +632,54 @@ mod tests {
     }
 
     #[test]
-    fn invocation_env_reserves_scratchpad_values() {
+    fn policy_env_rejects_auth_and_profile_overrides() {
+        for key in [
+            "HOME",
+            "PATH",
+            "CODEX_HOME",
+            "CLAUDE_CONFIG_DIR",
+            "OPENAI_API_KEY",
+            "ANTHROPIC_AUTH_TOKEN",
+        ] {
+            let env = HashMap::from([(key.to_string(), "override".to_string())]);
+            assert_eq!(
+                prepare_policy_env("/tmp", env).unwrap_err(),
+                "adaptive_policy_launch_overrides_forbidden"
+            );
+        }
+    }
+
+    #[test]
+    fn policy_env_accepts_real_background_context_and_strips_external_document_context() {
+        let work = tempfile::tempdir().unwrap();
+        let cwd = work.path().to_string_lossy();
+        let mut env = HashMap::from([
+            ("MARU_WORKSPACE_VISIBILITY".into(), "private".into()),
+            ("MARU_ACTIVE_DOC_REL".into(), "inbox/new.txt".into()),
+            ("MARU_ACTIVE_DOC_TITLE".into(), "검토 문서".into()),
+            ("MARU_ACTIVE_DOC_TYPE".into(), "text".into()),
+        ]);
+        assert!(prepare_policy_env(&cwd, env.clone()).is_ok());
+        env.insert("MARU_ACTIVE_DOC_REL".into(), "../outside.txt".into());
+        let safe = prepare_policy_env(&cwd, env).unwrap();
+        assert!(!safe.contains_key("MARU_ACTIVE_DOC_REL"));
+        assert!(!safe.contains_key("MARU_ACTIVE_DOC_TITLE"));
+        let external = tempfile::tempdir().unwrap();
+        let env = HashMap::from([(
+            "MARU_ACTIVE_DOC_REL".into(),
+            external
+                .path()
+                .join("inbox.txt")
+                .to_string_lossy()
+                .into_owned(),
+        )]);
+        assert!(!prepare_policy_env(&cwd, env)
+            .unwrap()
+            .contains_key("MARU_ACTIVE_DOC_REL"));
+    }
+
+    #[test]
+    fn policy_env_reserves_scratchpad_values() {
         let work = tempfile::tempdir().unwrap();
         let scratchpad = crate::scratchpad::resolve_scratchpad_root(work.path()).unwrap();
         std::fs::write(
@@ -513,6 +693,10 @@ mod tests {
         .unwrap();
         let drafts = crate::scratchpad::resolve_scratchpad_drafts_root(work.path()).unwrap();
         let caller_env = HashMap::from([
+            (
+                "MARU_WORKSPACE".to_string(),
+                "/tmp/other-workspace".to_string(),
+            ),
             ("MARU_SCRATCHPAD".to_string(), "/tmp/override".to_string()),
             (
                 "MARU_DRAFTS".to_string(),
@@ -525,9 +709,19 @@ mod tests {
             ),
         ]);
 
-        let env = prepare_invocation_env(Some(work.path().to_string_lossy().as_ref()), caller_env)
-            .unwrap();
+        let env = prepare_policy_env(work.path().to_string_lossy().as_ref(), caller_env).unwrap();
 
+        assert_eq!(
+            env.get("MARU_WORKSPACE"),
+            Some(
+                &work
+                    .path()
+                    .canonicalize()
+                    .unwrap()
+                    .to_string_lossy()
+                    .into_owned()
+            )
+        );
         assert_eq!(
             env.get("MARU_SCRATCHPAD"),
             Some(&scratchpad.to_string_lossy().into_owned())
@@ -687,6 +881,7 @@ mod phase08_16 {
             None,
             Some(cli_text.clone()),
             Some("plan".into()),
+            None,
         ))
         .unwrap();
         assert!(id.starts_with("ai-"), "{id}");
@@ -709,6 +904,7 @@ mod phase08_16 {
             None,
             Some(text(&codex_cli)),
             Some("plan".into()),
+            None,
         ))
         .unwrap();
         assert!(codex_id.starts_with("ai-"), "{codex_id}");
@@ -756,6 +952,7 @@ mod phase08_16 {
                 None,
                 Some(cli_text),
                 Some("plan".into()),
+                None
             ))
             .unwrap_err(),
             "completion_prompt_required"
@@ -769,6 +966,7 @@ mod phase08_16 {
             None,
             None,
             None,
+            None
         ))
         .unwrap_err()
         .starts_with("unsupported_provider"));
@@ -793,6 +991,7 @@ mod phase08_16 {
                 None,
                 Some(text(&cli)),
                 Some("plan".into()),
+                None,
             ),
         );
         boundary(

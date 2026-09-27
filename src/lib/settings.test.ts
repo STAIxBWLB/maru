@@ -333,6 +333,7 @@ describe("normalizeMaruSettings", () => {
     expect(settings.terminal.launchers.claude.enabled).toBe(true);
     expect(settings.terminal.launchers.shell.enabled).toBe(true);
     expect(settings.ai).toEqual({
+      adaptivePolicy: { enabled: false, workload: "auto" },
       defaultRuntime: "claude",
       classifierRuntime: "inherit",
       taskIngestMinImportance: "medium",
@@ -1451,6 +1452,19 @@ describe("normalizeMaruSettings", () => {
     // unmodeled keys are preserved round-trip-safe under extra
     expect(settings.ai.extra.providers).toEqual({ custom: 1 });
     expect(resolveClassifierRuntime(settings.ai)).toBe("claude");
+  });
+
+  it("keeps adaptive policy opt-in and normalizes its workload independently of permissions", () => {
+    expect(normalizeMaruSettings({}).ai.adaptivePolicy?.enabled).toBe(false);
+    const settings = normalizeMaruSettings({ ai: {
+      permissionMode: "auto-review",
+      adaptivePolicy: { enabled: true, workload: "independent-review", agent: "codex" },
+    } });
+    expect(settings.ai.permissionMode).toBe("auto-review");
+    expect(settings.ai.adaptivePolicy).toEqual({ enabled: true, workload: "independent-review", agent: "codex" });
+    expect(normalizeMaruSettings(serializeMaruSettings(settings)).ai).toEqual(settings.ai);
+    expect(normalizeMaruSettings({ ai: { adaptivePolicy: { enabled: "true", workload: "unknown", agent: "unknown" } } }).ai.adaptivePolicy)
+      .toEqual({ enabled: false, workload: "auto" });
   });
 
   it("falls back to AI defaults on invalid values", () => {

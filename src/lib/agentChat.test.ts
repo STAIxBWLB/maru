@@ -50,6 +50,8 @@ import {
   isChatProposalApplied,
   isChatProposalApplying,
   loadChatTurns,
+  loadChatPolicyCheckpoint,
+  saveChatPolicyCheckpoint,
   markChatProposalApplied,
   persistChatProposalApplied,
   removeChatUserTurn,
@@ -450,6 +452,73 @@ describe("sendAgentChatTurn", () => {
     expect(args[5]).toBe("/opt/codex");
   });
 
+  it("threads task-specific policy and origin without changing AI defaults", async () => {
+    await sendAgentChatTurn({ agent: agent(), ai, workPath: "/w", turns: [], message: "review",
+      adaptivePolicy: { enabled: true, workload: "independent-review", agent: "codex" },
+    });
+    expect(startAgentCliInvocation.mock.calls[0][7]).toMatchObject({
+      origin: "agent-chat", adaptivePolicy: { enabled: true, workload: "independent-review", agent: "codex" },
+    });
+    expect(ai.adaptivePolicy).toBeUndefined();
+  });
+
+  it("skips legacy availability probes and command overrides for policy invocations", async () => {
+    await sendAgentChatTurn({ agent: agent({ runtime: "codex" }), ai: { ...ai, adaptivePolicy: { enabled: true, workload: "auto" } },
+      workPath: "/w", turns: [], message: "implement",
+      runtimeSelection: { runtime: "kimi", commandOverride: "/legacy/kimi" },
+    });
+    expect(skillsRuntimeStatus).not.toHaveBeenCalled();
+    expect(startAgentCliInvocation.mock.calls[0][5]).toBeNull();
+    expect(startAgentCliInvocation.mock.calls[0][7]).toMatchObject({ adaptivePolicy: { agent: "codex" } });
+  });
+
+  it("sends the full cumulative checkpoint after transcript truncation and reload", async () => {
+    const checkpoint: ChatTurn = { role: "assistant", text: "done", at: "last", runtime: "claude",
+      model: "selected-model", effort: "high", targetId: "native", homeMode: "native-default", knowledgeScope: "", policyRevision: "rev-2", policySwitchCount: 2 };
+    const history = appendChatTurn(Array.from({ length: CHAT_HISTORY_CAP + 10 }, (_, index) => ({ role: "user" as const, text: "old", at: String(index) })), checkpoint);
+    saveChatTurns("/w", "policy-test", history);
+    await sendAgentChatTurn({ agent: agent({ runtime: "inherit" }), ai: { ...ai, adaptivePolicy: { enabled: true, workload: "auto" } },
+      workPath: "/w", message: "continue", turns: loadChatTurns("/w", "policy-test"),
+    });
+    expect(startAgentCliInvocation.mock.calls[0][7]).toMatchObject({ adaptiveContinuation: {
+      previous: { agent: "claude", model: "selected-model", effort: "high", targetId: "native", homeMode: "native-default", knowledgeScope: "", policyRevision: "rev-2" }, switchCount: 2, freeze: false,
+    } });
+  });
+
+  it("freezes a manually selected configuration using the complete previous checkpoint", async () => {
+    await sendAgentChatTurn({ agent: agent({ runtime: "codex" }), ai: { ...ai, adaptivePolicy: { enabled: true, workload: "auto" } },
+      workPath: "/w", message: "continue", turns: [{ role: "assistant", text: "done", at: "last", runtime: "codex", model: "model-a", effort: "medium", targetId: "native", homeMode: "native-default", knowledgeScope: "", policyRevision: "rev", policySwitchCount: 1 }],
+    });
+    expect(startAgentCliInvocation.mock.calls[0][7]).toMatchObject({ adaptiveContinuation: {
+      previous: { agent: "codex", model: "model-a", effort: "medium", targetId: "native", homeMode: "native-default", knowledgeScope: "", policyRevision: "rev" }, switchCount: 1, freeze: true,
+    } });
+  });
+
+  it("persists a failed invocation checkpoint for a reopened chat without replaying its prompt", async () => {
+    setWindow(false, true);
+    startAgentCliInvocation.mockImplementationOnce(async () => {
+      eventHandlers.get("ai://runtime")?.({ payload: { invocationId: "ai-chat-1", runtime: "codex", permissionMode: "auto-review", model: "model-a", effort: "high", targetId: "native", homeMode: "native-default", knowledgeScope: "", policyRevision: "rev", policySwitchCount: 2 } as never });
+      eventHandlers.get("ai://error")?.({ payload: { invocationId: "ai-chat-1", kind: "denied", message: "rejected" } as never });
+      return "ai-chat-1";
+    });
+    const params = { agent: agent({ id: "failed-policy", runtime: "inherit" }), ai: { ...ai, adaptivePolicy: { enabled: true, workload: "auto" as const } }, workPath: "/w", turns: [], message: "failed instruction" };
+    await expect(sendAgentChatTurn(params)).rejects.toThrow("denied");
+    expect(loadChatTurns("/w", "failed-policy")).toEqual([]);
+    delete window.__TAURI_INTERNALS__;
+    await sendAgentChatTurn({ ...params, message: "new instruction" });
+    expect(startAgentCliInvocation.mock.calls[1][7]).toMatchObject({ adaptiveContinuation: { switchCount: 2, freeze: true, previous: { model: "model-a", agent: "codex" } } });
+    expect(String(startAgentCliInvocation.mock.calls[1][1])).not.toContain("failed instruction");
+  });
+
+  it("retains failed policy checkpoints outside replay until explicit clear", async () => {
+    saveChatPolicyCheckpoint("/w", "policy-test", { previous: { agent: "codex", model: "model-a", effort: "high", targetId: "native", homeMode: "native-default", knowledgeScope: "", policyRevision: "rev" }, switchCount: 2, freeze: true });
+    expect(loadChatTurns("/w", "policy-test")).toEqual([]);
+    await sendAgentChatTurn({ agent: agent({ id: "policy-test", runtime: "inherit" }), ai: { ...ai, adaptivePolicy: { enabled: true, workload: "auto" } }, workPath: "/w", turns: [], message: "continue" });
+    expect(startAgentCliInvocation.mock.calls[0][7]).toMatchObject({ adaptiveContinuation: { switchCount: 2, freeze: true, previous: { agent: "codex", model: "model-a" } } });
+    clearStoredChatTurns("/w", "policy-test");
+    expect(loadChatPolicyCheckpoint("/w", "policy-test")).toBeUndefined();
+  });
+
   it("reports the invocation id so the caller can offer Stop", async () => {
     const onInvocation = vi.fn();
     await sendAgentChatTurn({
@@ -467,6 +536,10 @@ describe("sendAgentChatTurn", () => {
     setWindow(false, true);
     const onChunk = vi.fn();
     startAgentCliInvocation.mockImplementationOnce(async () => {
+      eventHandlers.get("ai://runtime")?.({ payload: {
+        invocationId: "ai-chat-1", runtime: "codex", permissionMode: "auto-review",
+        model: "model-selected", effort: "high", policyRevision: "revision-1", targetId: "native", homeMode: "native-default", knowledgeScope: "", policySwitchCount: 2,
+      } as never });
       eventHandlers.get("ai://output")?.({
         payload: {
           invocationId: "ai-chat-1",
@@ -494,12 +567,13 @@ describe("sendAgentChatTurn", () => {
     });
 
     expect(result.text).toBe("fast answer");
+    expect(result).toMatchObject({ runtime: "codex", permissionMode: "auto-review", model: "model-selected", effort: "high", policyRevision: "revision-1", targetId: "native", homeMode: "native-default", knowledgeScope: "", policySwitchCount: 2 });
     expect(onChunk).toHaveBeenCalledWith("fast answer");
-    expect(listen).toHaveBeenCalledTimes(3);
+    expect(listen).toHaveBeenCalledTimes(4);
     expect(Math.max(...listen.mock.invocationCallOrder)).toBeLessThan(
       startAgentCliInvocation.mock.invocationCallOrder[0],
     );
-    expect(unlisten).toHaveBeenCalledTimes(3);
+    expect(unlisten).toHaveBeenCalledTimes(4);
   });
 
   it("rejects an immediate error emitted before the invoke response", async () => {
@@ -524,33 +598,34 @@ describe("sendAgentChatTurn", () => {
         message: "안녕",
       }),
     ).rejects.toThrow("spawn_failed: bad argv");
-    expect(unlisten).toHaveBeenCalledTimes(3);
+    expect(unlisten).toHaveBeenCalledTimes(4);
   });
 
-  it("stops a late-starting invocation when the chat is aborted during invoke", async () => {
+  it.each(["before", "after"])("persists matching runtime diagnostics arriving %s abort during delayed invoke", async (timing) => {
     setWindow(false, true);
     let resolveStart: ((id: string) => void) | null = null;
-    startAgentCliInvocation.mockImplementationOnce(
-      () => new Promise<string>((resolve) => {
-        resolveStart = resolve;
-      }),
-    );
+    startAgentCliInvocation.mockImplementationOnce(() => new Promise<string>((resolve) => { resolveStart = resolve; }));
     const controller = new AbortController();
-    const pending = sendAgentChatTurn({
-      agent: agent(),
-      ai,
-      workPath: "/w",
-      turns: [],
-      message: "안녕",
-      signal: controller.signal,
-    });
+    const onRuntime = vi.fn();
+    const pending = sendAgentChatTurn({ agent: agent(), ai, workPath: "/w", turns: [], message: "안녕", signal: controller.signal, onRuntime });
     await vi.waitFor(() => expect(startAgentCliInvocation).toHaveBeenCalledTimes(1));
-
+    const emit = () => {
+      const payload = { invocationId: "ai-chat-1", runtime: "codex", permissionMode: "auto-review", model: "new-model", effort: "high", targetId: "native", homeMode: "native-default", knowledgeScope: "", policyRevision: "rev", policySwitchCount: 2 };
+      eventHandlers.get("ai://runtime")?.({ payload: payload as never });
+      eventHandlers.get("ai://runtime")?.({ payload: { ...payload, invocationId: "unrelated", model: "wrong-model" } as never });
+    };
+    if (timing === "before") emit();
     controller.abort();
     await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+    // The runtime listener must survive abort until the matching ID arrives.
+    expect(unlisten).toHaveBeenCalledTimes(3);
+    if (timing === "after") emit();
     expect(resolveStart).not.toBeNull();
     resolveStart!("ai-chat-1");
     await vi.waitFor(() => expect(stopAiMission).toHaveBeenCalledWith("ai-chat-1"));
+    expect(loadChatPolicyCheckpoint("/w", agent().id)).toMatchObject({ previous: { model: "new-model", agent: "codex" }, switchCount: 2, freeze: true });
+    expect(onRuntime).not.toHaveBeenCalled();
+    expect(unlisten).toHaveBeenCalledTimes(4);
   });
 
   it("refuses a disabled agent without spawning anything", async () => {

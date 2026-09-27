@@ -8,7 +8,7 @@ vi.mock("@tauri-apps/api/core", () => ({
 
 import { IpcError } from "./ipcError";
 
-import { skillsInstallSkill, skillsListSkills, skillsSyncAllSources, skillsSyncSource } from "./skills";
+import { agentRunStructuredLoop, skillsInstallSkill, skillsListSkills, skillsSyncAllSources, skillsSyncSource } from "./skills";
 
 function enterTauri() {
   (globalThis as { window?: unknown }).window = { __TAURI_INTERNALS__: {} };
@@ -21,6 +21,12 @@ describe("skills invoke wrappers", () => {
   });
   afterEach(() => {
     delete (globalThis as { window?: unknown }).window;
+  });
+
+  it("passes explicit adaptive provider selection through structured invocation metadata", async () => {
+    enterTauri();
+    await agentRunStructuredLoop({ provider: "codex", directive: "review", cwd: "/w", metadata: { origin: "skillCompose", adaptivePolicy: { enabled: true, workload: "auto", agent: "codex" } } });
+    expect(invoke).toHaveBeenCalledWith("agent_run_structured_loop", expect.objectContaining({ provider: "codex", metadata: { origin: "skillCompose", adaptivePolicy: { enabled: true, workload: "auto", agent: "codex" } } }));
   });
 
   it.each(["source_busy: tracer is already syncing", "source_changed: tracer; sync again manually", "local network failed"])(

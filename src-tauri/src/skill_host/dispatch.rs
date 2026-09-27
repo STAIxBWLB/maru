@@ -16,7 +16,8 @@ use crate::agent_host::contracts::{
 use crate::agent_host::event_store::{append_run_event_payload_in_transaction, run_events_path};
 use crate::agent_host::proposal::parse_skill_proposal;
 use crate::agent_host::provider::{
-    build_cli_command, normalize_permission_mode, resolve_provider_binary, CliProviderKind,
+    build_cli_command_with_policy, normalize_permission_mode, resolve_provider_binary,
+    CliProviderKind,
 };
 use crate::ai_router::{AiDoneEvent, AiErrorEvent, AiOutputEvent};
 use crate::atomic_file::{
@@ -288,7 +289,7 @@ pub(crate) fn skills_dispatch_background_with_parents<R: tauri::Runtime>(
         prompt: append_background_contract(&composition.prompt, approved_execution, source_review),
         ..composition
     };
-    let run_request =
+    let mut run_request =
         build_agent_run_request(&composition, &runtime, "background", metadata.clone())?;
     let completion_request = CompletionRequest {
         schema_version: COMPLETION_REQUEST_SCHEMA_VERSION.to_string(),
@@ -299,13 +300,48 @@ pub(crate) fn skills_dispatch_background_with_parents<R: tauri::Runtime>(
         metadata: metadata.clone(),
     };
     let provider = CliProviderKind::parse(&runtime)?;
-    let (cmd, stdin_payload) = build_cli_command(
+    let (cmd, stdin_payload, resolution) = build_cli_command_with_policy(
         provider,
         &completion_request,
         &add_dirs,
         command_override.as_deref(),
         &permission_mode,
     )?;
+    if let Some(resolution) = &resolution {
+        if ["HOME", "CODEX_HOME", "CLAUDE_CONFIG_DIR"]
+            .iter()
+            .any(|key| env.contains_key(*key))
+        {
+            return Err("adaptive_policy_environment_override_forbidden".into());
+        }
+        run_request.runtime_provider = resolution.agent.clone();
+        let effective_permission = if permission_mode == "plan" {
+            "plan"
+        } else {
+            "auto-review"
+        };
+        let object = metadata.get_or_insert_with(|| serde_json::json!({}));
+        if let Some(object) = object.as_object_mut() {
+            object.insert(
+                "adaptivePolicyResolution".into(),
+                serde_json::to_value(resolution).map_err(|e| e.to_string())?,
+            );
+            object.insert("runtime".into(), serde_json::json!(resolution.agent));
+            object.insert(
+                "permissionMode".into(),
+                serde_json::json!(effective_permission),
+            );
+        }
+        let _ = app.emit("ai://runtime", serde_json::json!({
+            "invocationId": invocation_id, "runtime": resolution.agent,
+            "model": resolution.model, "effort": resolution.effort,
+            "permissionMode": effective_permission, "policyRevision": resolution.policy_revision,
+                "targetId": resolution.target_id, "homeMode": resolution.home_mode, "policySwitchCount": resolution.switch_count,
+                "knowledgeScope": resolution.knowledge_scope(),
+            "continuity": "transcript-replay"
+        }));
+    }
+    run_request.metadata = metadata.clone();
     let retry_payload = serde_json::json!({
         "skillId": original_skill_id,
         "runtime": runtime,

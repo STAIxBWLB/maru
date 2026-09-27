@@ -521,6 +521,8 @@ fn dispatch_metadata(
 ) -> serde_json::Value {
     serde_json::json!({
         "scheduler": true,
+        // Legacy schedules keep their captured runtime; no task-level policy opt-in exists yet.
+        "adaptivePolicy": { "enabled": false, "workload": "auto" },
         "scheduleId": schedule.id,
         "scheduleName": schedule.name,
         "agentId": plan.agent_id,
@@ -1390,6 +1392,20 @@ mod tests {
         explicit.permission_mode = "acceptEdits".to_string();
         let plan = resolve_dispatch(&with_agent, Some(&explicit), &ai_settings()).unwrap();
         assert_eq!(plan.permission_mode.as_deref(), Some("acceptEdits"));
+    }
+
+    #[test]
+    fn scheduled_policy_never_replaces_explicit_runtime_with_global_policy() {
+        let temp = TempDir::new().unwrap();
+        let schedule = sample_schedule(None, true);
+        let plan = resolve_dispatch(&schedule, None, &ai_settings()).unwrap();
+        let metadata = dispatch_metadata(&schedule, &plan, "maru-builtin::vault-sync", temp.path());
+        assert_eq!(plan.runtime, "claude");
+        assert_eq!(metadata["adaptivePolicy"]["enabled"], false);
+        let options = crate::agent_host::runtime_policy::options_with_fallback(Some(&metadata), || {
+            Some(serde_json::json!({"enabled": true, "workload": "implementation", "agent": "codex"}))
+        }).unwrap();
+        assert!(options.is_none());
     }
 
     #[test]

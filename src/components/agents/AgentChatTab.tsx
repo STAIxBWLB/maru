@@ -28,6 +28,8 @@ import {
   saveChatTurns,
   sendAgentChatTurn,
   stopAgentChatTurn,
+  chatPolicyCheckpoint,
+  type AdaptiveContinuation,
   type AgentRuntimeSelection,
   type ChatProposalAppliedDetail,
   type ChatProposalApplyStateDetail,
@@ -99,8 +101,10 @@ export function AgentChatTab({
   const sendAbortRef = useRef<AbortController | null>(null);
   const invocationIdRef = useRef<string | null>(null);
   const stopRequestedRef = useRef<AbortController | null>(null);
+  const failedPolicyCheckpointRef = useRef<AdaptiveContinuation | null>(null);
 
   useEffect(() => {
+    failedPolicyCheckpointRef.current = null;
     setTurns(loadChatTurns(workPath, agent.id));
     setInput("");
     setTail([]);
@@ -142,6 +146,7 @@ export function AgentChatTab({
     let cancelled = false;
     setRuntime(null);
     setRuntimeSelection(null);
+    if (ai.adaptivePolicy?.enabled) return;
     void resolveAvailableRuntime(resolvedRuntime, ai)
       .then((selection) => {
         if (cancelled) return;
@@ -216,7 +221,7 @@ export function AgentChatTab({
 
   const send = useCallback(async () => {
     const message = input.trim();
-    if (!message || busy || !workPath || !runtimeSelection) return;
+    if (!message || busy || !workPath || (!ai.adaptivePolicy?.enabled && !runtimeSelection)) return;
     setBusy(true);
     setTail([]);
     setNotice(null);
@@ -228,6 +233,7 @@ export function AgentChatTab({
     const userTurnAt = new Date().toISOString();
     appendTurn({ role: "user", text: message, at: userTurnAt });
     setInput("");
+    const effectiveCheckpoint: { current?: AdaptiveContinuation } = {};
     try {
       const result = await sendAgentChatTurn({
         agent,
@@ -235,7 +241,9 @@ export function AgentChatTab({
         workPath,
         turns,
         message,
-        runtimeSelection,
+        runtimeSelection: runtimeSelection ?? undefined,
+        adaptiveContinuation: failedPolicyCheckpointRef.current ?? undefined,
+        onRuntime: (value) => { effectiveCheckpoint.current = chatPolicyCheckpoint(value); },
         signal: abortController.signal,
         onInvocation: (id) => {
           invocationIdRef.current = id;
@@ -248,10 +256,20 @@ export function AgentChatTab({
         at: new Date().toISOString(),
         runtime: result.runtime,
         permissionMode: result.permissionMode,
+        model: result.model,
+        effort: result.effort,
+        policyRevision: result.policyRevision,
+        targetId: result.targetId,
+        homeMode: result.homeMode,
+        knowledgeScope: result.knowledgeScope,
+        policySwitchCount: result.policySwitchCount,
         exitCode: result.exitCode,
         elapsedMs: Date.now() - startedAt,
       });
     } catch (error) {
+      if (ai.adaptivePolicy?.enabled && effectiveCheckpoint.current) {
+        failedPolicyCheckpointRef.current = { ...effectiveCheckpoint.current, freeze: true };
+      }
       const discardError = discardUserTurn(userTurnAt);
       const expectedStop = stopRequestedRef.current === abortController;
       if (discardError) {
@@ -308,6 +326,7 @@ export function AgentChatTab({
   const clear = useCallback(() => {
     try {
       clearStoredChatTurns(workPath, agent.id);
+      failedPolicyCheckpointRef.current = null;
       setTurns([]);
       setNotice(null);
     } catch (error) {
@@ -403,10 +422,10 @@ export function AgentChatTab({
   return (
     <div className="agents-chat">
       <div className="agents-chat-runtime">
-        <span className="agents-chat-runtime-name">{activeRuntime}</span>
+        <span className="agents-chat-runtime-name">{ai.adaptivePolicy?.enabled ? t("agents.chat.policySelection") : activeRuntime}</span>
         <span>·</span>
         <span>{permissionMode}</span>
-        {runtime === null ? (
+        {ai.adaptivePolicy?.enabled ? null : runtime === null ? (
           <span>{t("skills.runtime.checking")}</span>
         ) : (
           <>
@@ -503,7 +522,7 @@ export function AgentChatTab({
         <textarea
           value={input}
           rows={3}
-          disabled={busy || !agent.enabled || runtimeSelection === null}
+          disabled={busy || !agent.enabled || (!ai.adaptivePolicy?.enabled && runtimeSelection === null)}
           placeholder={t("agents.chat.placeholder")}
           aria-label={t("agents.chat.placeholder")}
           onChange={(event) => setInput(event.target.value)}
@@ -523,7 +542,7 @@ export function AgentChatTab({
           <Button
             variant="primary"
             size="sm"
-            disabled={!input.trim() || !agent.enabled || runtimeSelection === null}
+            disabled={!input.trim() || !agent.enabled || (!ai.adaptivePolicy?.enabled && runtimeSelection === null)}
             onClick={() => void send()}
           >
             <Send size={13} />
@@ -583,6 +602,8 @@ function ChatBubble({
               mode: turn.permissionMode ?? "?",
               elapsed: turn.elapsedMs ? `${Math.round(turn.elapsedMs / 1000)}s` : "?",
             })}
+            {turn.model ? ` · ${turn.model}` : ""}
+            {turn.effort ? ` · ${turn.effort}` : ""}
           </span>
           <Button variant="ghost" size="sm" onClick={onTask}>
             <ListTodo size={13} />

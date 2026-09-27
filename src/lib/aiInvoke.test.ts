@@ -64,6 +64,7 @@ describe("classifyInboxItem runtime routing", () => {
       extraEnv,
       "/opt/bin/codex",
       "acceptEdits",
+      { origin: "inbox-classification" },
     );
 
     // Drive the run to completion so the promise settles cleanly.
@@ -88,6 +89,7 @@ describe("classifyInboxItem runtime routing", () => {
       null,
       null,
       null,
+      { origin: "inbox-classification" },
     );
     handlers.get("ai://done")?.({
       payload: { invocationId: "inv-1", success: true, exitCode: 0 },

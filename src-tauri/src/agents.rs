@@ -50,6 +50,7 @@ const PERMISSION_MODES: &[&str] = &[
     "acceptEdits",
     "default",
     "bypassPermissions",
+    "auto-review",
 ];
 const KINDS: &[&str] = &["background", "inline"];
 
@@ -696,7 +697,7 @@ pub fn global_ai_settings() -> GlobalAiSettings {
         .unwrap_or_default()
 }
 
-fn read_global_ai_block() -> Option<JsonValue> {
+pub(crate) fn read_global_ai_block() -> Option<JsonValue> {
     let path = maru_home().ok()?.join("settings.json");
     let raw = fs::read_to_string(path).ok()?;
     let value: JsonValue = serde_json::from_str(&raw).ok()?;
