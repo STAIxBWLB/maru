@@ -236,4 +236,17 @@ mod tests {
         let err = resolve_native_e2e_dir("MARU_NATIVE_E2E_CONFIG_DIR", Some(value)).unwrap_err();
         assert!(err.contains("MARU_NATIVE_E2E_CONFIG_DIR"));
     }
+
+    // T-06-03/D-10: with the `native-e2e` feature off, the override must stay
+    // inert even when its env var is set, so a shipped build can never be
+    // redirected. A test-unique var name keeps the env mutation race-free.
+    #[cfg(not(feature = "native-e2e"))]
+    #[test]
+    fn native_e2e_dir_override_is_inert_without_the_feature() {
+        let unique_var = "MARU_NATIVE_E2E_TEST_INERT_PROBE_6f3c9a";
+        std::env::set_var(unique_var, "/tmp/should-never-be-read");
+        let result = native_e2e_dir_override(unique_var);
+        std::env::remove_var(unique_var);
+        assert_eq!(result, Ok(None));
+    }
 }
