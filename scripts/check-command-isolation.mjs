@@ -6,7 +6,7 @@ import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { resolve, relative, isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const PHASE = ".planning/phases/08-main-thread-responsiveness";
+const PHASE = ".planning/milestones/v1.1-phases/08-main-thread-responsiveness";
 const LIB = "src-tauri/src/lib.rs";
 const EARLY = new Set(["08-01", "08-02", "08-03", "08-04", "08-05"]);
 const INTEGRATIONS = new Map([

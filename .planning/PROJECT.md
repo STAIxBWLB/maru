@@ -6,7 +6,7 @@ Local-first Maru Workspace and AI editing desktop app. A Tauri 2 desktop shell -
 React 19 + TypeScript frontend over a Rust core - where a folder on disk is the
 workspace: notes, documents, terminals, a knowledge graph, diagrams, skills, and
 AI agent runs all operate on real files the user owns. Shipped as signed bundles
-for macOS, Windows, and Linux; currently v1.1.0.
+for macOS, Windows, and Linux; currently v1.1.12.
 
 ## Core Value
 
@@ -15,48 +15,33 @@ real files the user owns, and nothing is lost if Maru is uninstalled.
 
 ## Current State
 
-Milestone v1.0 Structural Debt Paydown shipped on 2026-08-28. All five phases,
-32 plans, and 24 v1 requirements are complete. The milestone archive and audit
-live under `.planning/milestones/`. Product release v0.5.0 commemorates the
-milestone and includes the post-close ERR-06 hardening.
+Milestone v1.1 Felt Quality and Native Proof closed on 2026-09-27. All six
+phases (6-11), 56 plans, and 17 requirements are complete. The audit status is
+`tech_debt` and the owner accepted the debt; the archive, audit, and phase
+directories live under `.planning/milestones/`. Product releases v1.1.0
+through v1.1.12 shipped during the milestone, and no milestone tag was created.
 
-Milestone v1.1 Felt Quality and Native Proof is active as of 2026-08-28 and
-continues phase numbering at Phase 6. Phase 6 (Native E2E Runner Foundation)
-completed 2026-08-29: the native WebDriver runner drives the real app's
-WKWebView DOM, PTY output, synthetic IME composition, and menu commands; the
-CI verdict is ci-viable (hosted macOS evidence in docs/native-e2e.md), the
-suite runs from `release-preflight`, and ship isolation is guard-enforced.
+What v1.1 made true:
 
-Phase 7 (Guardrails Before Churn) completed 2026-09-05: lock poisoning
-recovery, generated-directory watcher pruning, the sanitizer build guard and
-three-path Inbox index exclusion are verified. Direct UAT passed 5/5 and
-existing Inbox E2E passed 8/8. Phase 8 is ready to plan. The pre-existing
-Inbox/right-panel overlap is recorded in 07-UAT.md as an unresolved layout
-limitation outside this removal regression.
+- A native WebDriver runner drives the real app's WKWebView DOM, PTY output,
+  synthetic IME composition, and menu commands. The CI verdict is ci-viable
+  (hosted macOS evidence in docs/native-e2e.md): the suite runs unattended on
+  `main` and release tags and gates `release-preflight`.
+- Six named locks recover from poisoning, recursive watchers prune generated
+  trees, a sanitizer guard gates `make verify`, and the inbox is out of the
+  document index on all three index paths.
+- `skills_sync_source` no longer holds `REGISTRY_LOCK` across the network, and
+  all 383 production commands carry isolation evidence gated in `make verify`.
+- A SIGHUP-trapping terminal can always be killed, every autosave surface saves
+  on unmount and quit through one guard, and a failed teardown save keeps a
+  `.maru/recovery/` copy and raises a toast.
+- The shipped CSP `script-src` is `'self'`, per-mode CSS rides lazy chunks, and
+  TS and Rust coverage is reported without gating.
 
-Phase 10 (Bundle and Build Hardening) completed 2026-09-25: `script-src blob:`
-is gone from the shipped CSP, per-mode CSS is split into lazy chunks with the
-pre-split cascade restored (a SPLIT HOME guard keeps each selector property in
-one file), and idle preload warms only the six split modes (D-03 as amended in
-#340). An adversarial review after the first verification fixed 24 cascade
-inversions and hardened both build guards before release.
+Milestone v1.0 Structural Debt Paydown shipped on 2026-08-28 (five phases, 32
+plans, 24 requirements). Product release v0.5.0 commemorates it.
 
-Phase 11 (Milestone Verification & Evidence) completed 2026-09-26: `make coverage`
-and a push-to-main `coverage.yml` report TS and Rust coverage without gating
-(first run on `main` 36174321763), a fresh deliberate CI failure re-proved the
-narrowed Playwright trace (run 36146017939), v1.0 phases 01-03 VALIDATION.md are
-reconciled to `validated`, and v1.0 Phase 02 has its security report.
-
-Phase 9 (Durability and Session Lifecycle) completed 2026-09-26, the last v1.1 phase:
-closing a terminal tab or quitting now kills a SIGHUP-trapping leader (SIGTERM/SIGKILL
-to its pid) and the PTY's foreground job group, while disowned jobs and `nohup`'d
-children of a leader without job control survive;
-every autosave surface saves on unmount and quit through one shared saver; Cmd+Q
-and window close share one guard with a 3 s flush budget and a save-failed dialog;
-a failed teardown save keeps a `.maru/recovery/` copy and raises a toast. Real-app
-checks caught and fixed two latent bugs: the main window could never close
-(`core:window:allow-destroy` was missing) and foreground jobs escaped the quit
-sweep. All six v1.1 phases are complete; the milestone is ready for audit.
+The next milestone, v1.2, is being defined and is not open yet.
 
 ## Requirements
 
@@ -108,9 +93,18 @@ sweep. All six v1.1 phases are complete; the milestone is ready for audit.
   registry adapters, `MainApp` is 15 `useState` / 24 `useEffect`, D-20 native
   UAT 5/5, verification 8/8)
 
+- ✓ Phase 6 native e2e runner - WebDriver drives the real app's WKWebView DOM,
+  a real PTY, synthetic IME composition, and menu commands against the real Rust
+  backend; the spike verdict is ci-viable and the suite gates
+  `release-preflight` (TEST-01) - v1.1
 - ✓ Phase 7 guardrails - scoped poison recovery (PERF-03), watcher pruning
   (PERF-04), sanitizer provenance gate (SEC-02), and independent Inbox/index
   behavior (PERF-06); UAT 5/5, existing security register 15/15 closed.
+- ✓ Phase 8 main-thread responsiveness - `skills_sync_source` releases
+  `REGISTRY_LOCK` across the network and reloads fresh (PERF-02); every
+  production command carries isolation evidence (383 today: 374 ISOLATED, 9 UI)
+  gated by `check-command-isolation`, and the native load test keeps loaded p95
+  at 2 ms against a 4,789 ms negative control (PERF-01) - v1.1
 - ✓ Phase 10 bundle and build hardening - shipped CSP `script-src` is `'self'`
   (SEC-01; config, AST dist scan and debug-binary codegen scan enforce it) and
   every mode's pane CSS rides its lazy chunk with the entry CSS at 45 KiB gzip
@@ -129,29 +123,23 @@ sweep. All six v1.1 phases are complete; the milestone is ready for audit.
 
 ### Active
 
-Milestone v1.1 promotes the deferred reliability, performance, security, and
-native-verification backlog into committed requirements. REQ-IDs are assigned in
-`.planning/REQUIREMENTS.md` and the scope is summarised under Current Milestone
-below. Candidates deliberately left unpromoted - HWPE-01..03 registration,
-Semantica S1-S4, HUB-01, and ERR-05 - stay in the archived v1.0 requirements.
+None. All 17 v1.1 requirements moved to Validated and are archived in
+`.planning/milestones/v1.1-REQUIREMENTS.md`. Active requirements return when
+v1.2 is scoped (see Next Milestone Goals).
 
 ### Out of Scope
 
-- **New product features of any kind** - this milestone preserves behavior; a
-  feature landing mid-refactor makes every regression ambiguous. One recorded
-  exception: the `hwped_*` hwp-editor bridge, written by a parallel track and
-  adopted here rather than built (STATE.md "Scope Exceptions")
+- **New product features in milestone scope** - v1.0 excluded them because a
+  feature landing mid-refactor makes every regression ambiguous (one recorded
+  exception: the `hwped_*` hwp-editor bridge, adopted from a parallel track),
+  and v1.1 excluded them because it changed how existing surfaces behave under
+  load. Whether v1.2 keeps this exclusion is decided when it is scoped
 - **Converting every `Result<T, String>` signature** - CONCERNS.md rejects
   it explicitly; only the errors the frontend actually branches on move
 - **Retrofitting all ~20 existing path-traversal validators** - the existing
   checks are individually sound; promoting the canonical helper is the goal
 - **Changing `.maruignore` defaults** (`src-tauri/src/maru_dir.rs:79`) - that is a
   user-facing file format, not a scanner constant
-- **New user-facing product features** - v1.1 changes how the existing surfaces
-  behave under load, not what they do. Note the difference from v1.0: this
-  milestone deliberately alters observable behavior (a pane that froze must stop
-  freezing), so "the e2e suite still passes" is necessary but no longer
-  sufficient evidence
 - **A full lint style campaign** (formatting rules, import ordering, `console`
   cleanup) - only the correctness rules that guard the decomposition
 - **ERR-05's closed-enum contract** - the typed IPC guard checks declarations
@@ -161,44 +149,20 @@ Semantica S1-S4, HUB-01, and ERR-05 - stay in the archived v1.0 requirements.
 - **Hub graph-metadata sync** - the one explicit deferral in the ingested doc
   set (`docs/graph.md`); held until a Hub consumer exists
 
-## Current Milestone: v1.1 Felt Quality and Native Proof
+## Next Milestone Goals
 
-**Goal:** Maru stops freezing, stops losing terminal sessions and unsaved text,
-and proves it in the runtime users actually run rather than through a human
-driving the app by hand.
+v1.2 is being defined by the owner and is not open yet. Opening it moves
+releases to 1.2.0 (README Release Process). v1.1's goal, target features, and
+per-phase detail are archived in `.planning/milestones/v1.1-ROADMAP.md`.
 
-**Target features:**
+Candidates on record, none promoted yet:
 
-- Heavy-IO IPC commands leave the main thread - the 37 sync commands that reach
-  `WalkDir`, `read_dir`, a subprocess, or the network within their first 80
-  lines move to `async fn` or to the invocation-id + event-streaming pattern
-  (PERF-01)
-- `skills_sync_source` stops holding `REGISTRY_LOCK` across a network round-trip,
-  so a slow remote no longer freezes both the UI thread and every other skills
-  operation (PERF-02)
-- The six process-global locks recover from poisoning instead of bricking their
-  feature until app restart (PERF-03)
-- Recursive filesystem watchers prune through the shared `GENERATED_DIRS` list
-  (PERF-04)
-- A PTY child that traps SIGHUP can still be killed, via process-group
-  escalation (REL-01)
-- Scratchpad flushes its debounced save on unmount instead of only clearing the
-  timer, closing the 700 ms window where localStorage is the sole durable path
-- CSP drops `script-src blob:` if the Vite build no longer requires it (SEC-01),
-  and `verify` asserts every `dangerouslySetInnerHTML` value traces to a
-  DOMPurify-backed helper (SEC-02)
-- A native E2E runner exercises WKWebView, a real PTY, IME input, and the macOS
-  menu - the four surfaces CI has never touched (TEST-01)
-- `src/styles.css` splits per mode into the lazy chunks those modes already have,
-  restoring the CSS budget headroom spent since v0.4.46
-- Coverage is measured rather than inferred from file presence, as a non-gating
-  report (TEST-02)
-- The v1.0 closeout evidence debt is settled: GATE-04 trace reproduction, Phase
-  01-03 Nyquist reconciliation, and the Phase 02 security report
-
-**Out of scope:** HWPE-01..03 requirement registration, Semantica S1-S4, HUB-01
-Hub graph-metadata sync, and ERR-05's closed-enum contract. All four remain
-candidates for the milestone after this one.
+- HWPE-01..03 registration of the adopted `hwped_*` bridge, Semantica S1-S4,
+  HUB-01 Hub graph-metadata sync, and ERR-05's closed-enum contract
+- TEST-03 (remaining large untested components) and TEST-04 (`app_menu.rs`
+  smoke test)
+- The accepted v1.1 tech debt in `.planning/milestones/v1.1-MILESTONE-AUDIT.md`,
+  including open issues #380, #381, #382, #386, #387, #388 and #389
 
 ## Context
 
@@ -234,8 +198,16 @@ de0b0f70). The earlier four-tier divergence is resolved.
 **The refactor boundary is now guarded.** Real-`MainApp` render-isolation tests,
 pane facade contracts, preview DOM-identity tests, terminal generation tests,
 mode-registry tests, and the production extensibility drill cover the extracted
-shell boundaries. Native-only behavior remains a manual macOS gate because CI
-still runs Chromium with mocked IPC.
+shell boundaries. Since v1.1 the native e2e suite covers WKWebView, the PTY,
+IME composition, and menu commands on hosted macOS runners for `main` and
+release tags; pull-request e2e still runs Chromium with mocked IPC, so a
+macOS-affecting change still needs a real-app check before merge.
+
+**v1.1 closed with known, accepted debt.** About 355k tracked lines across
+TypeScript, TSX, Rust, and `.mjs` scripts. The debt register is the
+`tech_debt` frontmatter of `.planning/milestones/v1.1-MILESTONE-AUDIT.md`; the
+user-visible items are open issues #380, #381, #382, #387 and #389, and the
+hosted-runner native e2e flakes are #388.
 
 ## Constraints
 
@@ -299,10 +271,12 @@ ones this milestone can actually break are listed here.
 | Promote `ensure_within`, do not retrofit all ~20 callers | Existing checks are individually sound; the problem is that a new author has no canonical example | ✓ Phase 2 — promoted to `crate::paths`, doc + tests as the example, zero retrofits |
 | Phases 4-5 get no `UI hint` annotation | They refactor UI state plumbing with pixel-identical output as the success criterion; a UI design spec would be the wrong downstream suggestion | ✓ Completed with behavior-preserving UAT and no visible redesign |
 | 64 SPEC constraints recorded as invariants, not decisions | 0 ADRs in the set - nothing is decision-locked, so a future ADR can override any of them | ✓ Preserved as the milestone verification baseline |
-| Milestone numbers own the release major.minor | Two numbering systems sharing the `v*` tag namespace put `v1.0` above every real release in version sort, breaking the Homebrew tap audit four releases running; aligning the bands removes the ambiguity instead of patching each consumer | Adopted 2026-08-30 in v1.1.0 - operative rule in README's Release Process; milestone tags no longer created |
-| Milestone v1.1 = felt quality, synthesised from the carried-over backlog | The deferred items are not equal in weight: a 40s main-thread block measured on a 64k-file workspace is a product defect, while Nyquist metadata drift is a bookkeeping one. Grouping them by what a user experiences gives the milestone one goal instead of nine chores | Pending |
-| The native E2E runner lands early, not as closeout | v1.1's success condition is that observable behavior changed for the better; the mocked-IPC Chromium suite cannot see that, and v1.0's retrospective already ruled that a human approval marker is not reusable evidence | Pending |
-| Features stay out for a second consecutive milestone | HWPE-01..03, Semantica S1-S4, and HUB-01 all add surface area to panes whose responsiveness this milestone is trying to fix; shipping them first would move the target | Pending |
+| Milestone numbers own the release major.minor | Two numbering systems sharing the `v*` tag namespace put `v1.0` above every real release in version sort, breaking the Homebrew tap audit four releases running; aligning the bands removes the ambiguity instead of patching each consumer | ✓ Adopted 2026-08-30 in v1.1.0 - operative rule in README's Release Process; v1.1 closed on 2026-09-27 with no milestone tag |
+| Milestone v1.1 = felt quality, synthesised from the carried-over backlog | The deferred items are not equal in weight: a 40s main-thread block measured on a 64k-file workspace is a product defect, while Nyquist metadata drift is a bookkeeping one. Grouping them by what a user experiences gives the milestone one goal instead of nine chores | ✓ v1.1 closed 2026-09-27 - 17/17 requirements, audit `tech_debt` with the debt accepted |
+| The native E2E runner lands early, not as closeout | v1.1's success condition is that observable behavior changed for the better; the mocked-IPC Chromium suite cannot see that, and v1.0's retrospective already ruled that a human approval marker is not reusable evidence | ✓ Phase 6 - verdict `ci-viable`; Phases 8 and 9 verified against it (responsiveness and quit specs). Hosted-runner flakes tracked in #388 |
+| Features stay out for a second consecutive milestone | HWPE-01..03, Semantica S1-S4, and HUB-01 all add surface area to panes whose responsiveness this milestone is trying to fix; shipping them first would move the target | ✓ Held for the milestone - all three stay unpromoted candidates. Unrelated product work (#297, #315, #319) shipped in parallel 1.1.x releases outside milestone scope |
+| Poison recovery only for the six named locks, each with its own justification (PERF-03) | Blanket `into_inner()` recovery converts a loud panic into silent corruption on invariant-bearing state | ✓ Phase 7 - shared `recover_guard`, per-lock justification, no raw poison producers on the six locks |
+| Main-thread isolation is proven by per-command evidence and a native load test, not by the absence of a freeze (PERF-01) | Moving a blocking call onto Tauri's shared async pool looks like a fix from the UI and has no passive warning sign | ✓ Phase 8 - `check-command-isolation` gates every production command in `make verify`; loaded p95 2 ms against a 4,789 ms negative control |
 | Mode CSS moves to lazy per-mode files; late overrides live at the end of the owning file | Lazy CSS always loads after the entry stylesheet, so an entry-side override of a mode selector silently loses; the split first shipped 24 such inversions | ✓ Phase 10 - SPLIT HOME guard in `check-mode-css-ownership` makes it build-enforced |
 | Coverage is reported, never gated, and runs on `main` pushes only (TEST-02, D-01/D-04) | A threshold turns a diagnostic into a merge blocker before anyone knows what the numbers mean; running it per PR would slow every PR by an instrumented build | ✓ Phase 11 - `make coverage` outside `verify`, `coverage.yml` push-to-main only, baseline recorded in 11-EVIDENCE.md |
 | One quit path: Cmd+Q is a Maru-owned menu item routed into the window-close guard (D-03) | The native Quit item called `NSApplication terminate:` and bypassed every JS guard; a Rust `ExitRequested` veto would race the webview | ✓ Phase 9 - Dock Quit and logout remain a known gap, covered by the Scratchpad localStorage mirror |
@@ -328,4 +302,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-09-26 after Phase 9 (8/8 plans, REL-01..04 verified); all v1.1 phases complete, ready for milestone audit*
+*Last updated: 2026-09-27 after v1.1 milestone*
