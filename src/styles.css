@@ -1053,6 +1053,18 @@ a {
   min-height: 82px;
   resize: vertical;
 }
+.studio-hwp-field-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+.studio-hwp-field-row textarea {
+  flex: 1;
+}
+.studio-hwp-field-row .button {
+  flex-shrink: 0;
+  margin-top: 2px;
+}
 .studio-hwp-status {
   width: fit-content;
   max-width: 100%;

@@ -72,6 +72,7 @@ export interface StudioHwpFieldsState {
   templatePath: string | null;
   fields: StudioHwpTemplateFieldState[];
   values: Record<string, string>;
+  clearedKeys: string[];
   lastOutputPath: string | null;
   formFilledCount: number;
   unmatchedFields: string[];
@@ -265,6 +266,7 @@ export function createInitialStudioState(document: DocumentPayload | null): Stud
       templatePath: null,
       fields: [],
       values: {},
+      clearedKeys: [],
       lastOutputPath: null,
       formFilledCount: 0,
       unmatchedFields: [],
@@ -303,6 +305,7 @@ export function normalizeStudioState(state: StudioState): StudioState {
       templatePath: state.hwpFields?.templatePath ?? null,
       fields: state.hwpFields?.fields ?? [],
       values: state.hwpFields?.values ?? {},
+      clearedKeys: state.hwpFields?.clearedKeys ?? [],
       lastOutputPath: state.hwpFields?.lastOutputPath ?? null,
       formFilledCount: state.hwpFields?.formFilledCount ?? 0,
       unmatchedFields: state.hwpFields?.unmatchedFields ?? [],
@@ -480,6 +483,40 @@ export function nativeHwpTemplateSource(
     return source;
   }
   return null;
+}
+
+/**
+ * The fill request for the scanned HWP fields: only values the user actually
+ * typed are sent, so a blank field keeps the template's existing text (hwp
+ * fill --forms treats a missing key as "leave untouched" and "" as a
+ * replacement). A field the user explicitly marked for clearing is sent as
+ * "" on purpose.
+ */
+export function hwpFillValues(hwpFields: StudioHwpFieldsState): Record<string, string> {
+  const cleared = new Set(hwpFields.clearedKeys);
+  const entries: Array<[string, string]> = [];
+  for (const field of hwpFields.fields) {
+    if (cleared.has(field.key)) {
+      entries.push([field.key, ""]);
+      continue;
+    }
+    const value = hwpFields.values[field.key] ?? "";
+    if (value.trim() !== "") entries.push([field.key, value]);
+  }
+  return Object.fromEntries(entries);
+}
+
+/** Required fields that a fill leaves untouched because they are blank. */
+export function hwpBlankRequiredLabels(hwpFields: StudioHwpFieldsState): string[] {
+  const cleared = new Set(hwpFields.clearedKeys);
+  return hwpFields.fields
+    .filter(
+      (field) =>
+        field.required &&
+        !cleared.has(field.key) &&
+        (hwpFields.values[field.key] ?? "").trim() === "",
+    )
+    .map((field) => field.label);
 }
 
 export async function hwpCliTemplateFields(
