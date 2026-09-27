@@ -328,6 +328,30 @@ fn run_skills(args: &[String]) -> i32 {
         return 2;
     };
     match subcommand {
+        "capabilities" | "list" => {
+            if args[1..] != ["--json"] {
+                eprintln!("--json required");
+                return 2;
+            }
+            if subcommand == "capabilities" {
+                println!(
+                    "{}",
+                    serde_json::json!({"schemaVersion": 1, "targets": crate::skill_host::store::INSTALL_TARGETS, "selectedSync": true, "list": true})
+                );
+                0
+            } else {
+                match crate::skill_host::store::skills_list_readonly() {
+                    Ok(skills) => {
+                        println!("{}", serde_json::to_string(&skills).unwrap_or_default());
+                        0
+                    }
+                    Err(error) => {
+                        eprintln!("{error}");
+                        1
+                    }
+                }
+            }
+        }
         "sync" => run_skills_sync(&args[1..]),
         "update" => run_skills_update(&args[1..]),
         "dirty" => run_skills_dirty(&args[1..]),
@@ -479,6 +503,7 @@ fn run_skills_update(args: &[String]) -> i32 {
 fn run_skills_sync(args: &[String]) -> i32 {
     let mut apply: Option<bool> = None;
     let mut tools: Option<Vec<String>> = None;
+    let mut skills: Option<Vec<String>> = None;
     let mut retarget = false;
     let mut json = false;
     let mut index = 0;
@@ -499,29 +524,33 @@ fn run_skills_sync(args: &[String]) -> i32 {
                 apply = Some(true);
             }
             "--retarget" => retarget = true,
-            "--tools" => {
+            "--tools" | "--skills" => {
+                let option = args[index].clone();
                 index += 1;
                 let Some(value) = args.get(index) else {
-                    eprintln!("--tools requires a comma-separated value");
+                    eprintln!("{option} requires a comma-separated value");
                     return 2;
                 };
                 let parsed: Vec<String> = value
                     .split(',')
                     .map(str::trim)
-                    .filter(|value| !value.is_empty())
                     .map(ToString::to_string)
                     .collect();
-                if parsed.is_empty() {
-                    eprintln!("--tools requires at least one tool");
+                if parsed.is_empty() || parsed.iter().any(String::is_empty) {
+                    eprintln!("{option} requires nonempty comma-separated selectors");
                     return 2;
                 }
-                tools = Some(parsed);
+                if option == "--skills" {
+                    skills = Some(parsed);
+                } else {
+                    tools = Some(parsed);
+                }
             }
             "--json" => json = true,
             other => {
                 eprintln!("unknown option: {other}");
                 eprintln!(
-                    "usage: maru skills sync --check|--apply --tools claude,codex [--retarget] [--json]"
+                    "usage: maru skills sync --check|--apply --tools <csv> [--skills <names-or-ids>] [--retarget] [--json]"
                 );
                 return 2;
             }
@@ -540,7 +569,17 @@ fn run_skills_sync(args: &[String]) -> i32 {
         eprintln!("--tools required");
         return 2;
     };
-    match skills_sync_tools(current_work_path(), tools, apply, retarget) {
+    let result = match skills {
+        Some(selection) => crate::skill_host::store::skills_sync_selected_tools(
+            current_work_path(),
+            tools,
+            Some(selection),
+            apply,
+            retarget,
+        ),
+        None => skills_sync_tools(current_work_path(), tools, apply, retarget),
+    };
+    match result {
         Ok(report) => {
             if json {
                 println!(
@@ -954,7 +993,7 @@ fn yes_no(value: bool) -> &'static str {
 }
 
 fn skills_usage() -> &'static str {
-    "usage: maru skills sync|update|dirty|reconcile|import|import-unmanage"
+    "usage: maru skills capabilities|list|sync|update|dirty|reconcile|import|import-unmanage"
 }
 
 fn jobs_usage() -> &'static str {
@@ -966,7 +1005,7 @@ fn secrets_usage() -> &'static str {
 }
 
 fn usage() -> &'static str {
-    "usage: maru [--version] [--help] <command>\n\ncommands:\n  doctor [--json] [--quiet]\n  secrets scan [--json]\n  secrets doctor [--json] [--quiet]\n  secrets migrate --dry-run|--apply [--select <relpath>] [--json]\n  skills sync --check|--apply --tools claude,codex [--json]\n  skills update --check|--apply [--repair-env] [--json]\n  skills dirty [--json]\n  skills reconcile <name-or-id> (--accept|--discard) [--message <m>] [--dry-run]\n  skills import <source-path> [--name <name>] [--copy|--link]\n  skills import-unmanage <name> [--delete-files]\n  jobs list|status [<id>] [--json]\n  jobs install|uninstall|start|stop|run [<id>] [--json]\n  calendar-sync [--work <path>] [--destination <key-or-id>] [--gws <path>] [--dry-run] [--json]"
+    "usage: maru [--version] [--help] <command>\n\ncommands:\n  doctor [--json] [--quiet]\n  secrets scan [--json]\n  secrets doctor [--json] [--quiet]\n  secrets migrate --dry-run|--apply [--select <relpath>] [--json]\n  skills capabilities|list --json\n  skills sync --check|--apply --tools <csv> [--skills <names-or-ids>] [--json]\n  skills update --check|--apply [--repair-env] [--json]\n  skills dirty [--json]\n  skills reconcile <name-or-id> (--accept|--discard) [--message <m>] [--dry-run]\n  skills import <source-path> [--name <name>] [--copy|--link]\n  skills import-unmanage <name> [--delete-files]\n  jobs list|status [<id>] [--json]\n  jobs install|uninstall|start|stop|run [<id>] [--json]\n  calendar-sync [--work <path>] [--destination <key-or-id>] [--gws <path>] [--dry-run] [--json]"
 }
 
 #[cfg(test)]
@@ -1056,6 +1095,32 @@ mod tests {
                 "--link".to_string(),
             ]),
             2
+        );
+    }
+
+    #[test]
+    fn selected_skills_require_nonempty_selectors() {
+        for value in ["", "one,", ",one"] {
+            assert_eq!(
+                run_cli(vec![
+                    "skills".into(),
+                    "sync".into(),
+                    "--check".into(),
+                    "--tools".into(),
+                    "claude".into(),
+                    "--skills".into(),
+                    value.into()
+                ]),
+                2
+            );
+        }
+        assert_eq!(
+            run_cli(vec![
+                "skills".into(),
+                "capabilities".into(),
+                "--json".into()
+            ]),
+            0
         );
     }
 

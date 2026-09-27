@@ -54,7 +54,8 @@ import { ModeHeader } from "../../ui/ModeChrome";
 
 // =============================== Skills ===============================
 
-type SkillBulkTarget = SkillInstallTarget | "both";
+// Desktop bulk controls currently expose Claude/Codex; headless federation supports all six.
+type SkillBulkTarget = "claude" | "codex" | "both";
 
 interface SkillOperationState {
   active: boolean;
@@ -84,14 +85,16 @@ const EMPTY_SKILL_OPERATION: SkillOperationState = {
 };
 
 function skillTargetLabel(
-  target: SkillBulkTarget,
+  target: SkillInstallTarget | "both",
   t: (key: string, vars?: Record<string, string | number>) => string,
 ): string {
   if (target === "both") return t("system.skills.targetBoth");
-  return target === "claude" ? t("system.skills.targetClaude") : t("system.skills.targetCodex");
+  if (target === "claude") return t("system.skills.targetClaude");
+  if (target === "codex") return t("system.skills.targetCodex");
+  return { kimi: "Kimi", qwen: "Qwen", grok: "Grok", opencode: "OpenCode" }[target];
 }
 
-function skillTargetsFor(target: SkillBulkTarget): SkillInstallTarget[] {
+function skillTargetsFor(target: SkillBulkTarget): ("claude" | "codex")[] {
   return target === "both" ? ["claude", "codex"] : [target];
 }
 
@@ -835,7 +838,7 @@ export function SkillsTab({ workPath }: { workPath: string }) {
   );
 
   const install = useCallback(
-    async (skill: SkillRecord, target: SkillInstallTarget) => {
+    async (skill: SkillRecord, target: "claude" | "codex") => {
       await installSkills([skill], target);
     },
     [installSkills],

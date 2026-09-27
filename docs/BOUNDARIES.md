@@ -11,8 +11,11 @@ tool settings. This file mirrors the workspace policy in
 - `~/.maru/skills/_builtin`, `_sources`, `_managed`
 - `~/.maru/env`
 - `~/.maru/skills/<name>` runtime symlinks
-- `~/.claude/skills/<name>` and `~/.codex/skills/<name>` skill symlinks created
-  through Maru install actions
+- Generic skill symlinks created through Maru install actions in Claude,
+  Codex, Kimi, Qwen, Grok, and OpenCode skill roots; runtime environment overrides
+  and recorded root ownership are respected (see README selected-agent federation)
+- Existing external/native plugin skill directories remain owned by their
+  installers and are never replaced by federation
 
 Maru must not write:
 
@@ -27,10 +30,18 @@ Maru must not write:
 - AGENTS fan-out and global instruction targets
 - Claude/Codex/Antigravity settings and status line integration
 - shell setup and package/environment bootstrap
-- read-only skill inventory reports
+- Read-only skill inventory reports and agent/tool/skill selection UI
+- Orchestration of selected generic skill deployment through Maru's versioned
+  CLI capability contract; Maru retains the actual write operations
+- Agent CLI installation and updates, instructions, and native add-on installers;
+  their native skill packages are separate from Maru-owned generic federation
 
-`dotfiles-v2` must not write `~/.claude/skills/**`; that directory is the
-Maru skill federation surface.
+`dotfiles-v2` must not directly copy or rewrite generic skill trees in any agent
+root. It calls `maru skills capabilities --json` and selected `skills sync`;
+unsupported Maru releases are reported as pending. Native installers may manage
+their own plugin packages, but neither side may overwrite the other's entries.
+Global instructions, authentication, trust, hooks and unrelated runtime settings
+remain outside Maru federation.
 
 ## Conflict Rule
 

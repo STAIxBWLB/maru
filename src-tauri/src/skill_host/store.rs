@@ -828,7 +828,9 @@ fn bundle_mutation_paths() -> Result<Vec<PathBuf>, String> {
 }
 
 fn install_mutation_paths(registry: &SkillsRegistry) -> Result<Vec<PathBuf>, String> {
-    let mut paths = vec![install_root("claude")?, install_root("codex")?];
+    // Ambient roots belong only to explicitly requested targets. Existing
+    // installs keep their recorded paths, independent of current profiles.
+    let mut paths = Vec::new();
     for install in &registry.installs {
         paths.push(PathBuf::from(&install.target_path));
         paths.push(PathBuf::from(&install.entrypoint_path));
@@ -1749,8 +1751,9 @@ pub fn skills_install_skill(
     installed_as: Option<String>,
     mode: Option<String>,
 ) -> Result<InstallOutcome, String> {
+    let target = normalize_install_target(&target)?;
     let admission = SkillMutationAdmission::acquire(&skill_id, {
-        let mut paths = Vec::new();
+        let mut paths = vec![install_root(&target)?];
         let registered = get_skill(&skill_id)?;
         paths.push(host_fs::skills_root()?.join(host_fs::safe_entry_name(
             installed_as.as_deref().unwrap_or(&registered.name),
@@ -2230,6 +2233,85 @@ pub fn skills_sync_tools(
     apply: bool,
     retarget: bool,
 ) -> Result<SkillToolSyncReport, String> {
+    skills_sync_selected_tools(work_path, tools, None, apply, retarget)
+}
+
+pub const INSTALL_TARGETS: &[&str] = &["claude", "codex", "kimi", "qwen", "grok", "opencode"];
+
+/// CLI-only projection: never stored in the registry.
+#[derive(Debug, Clone, Serialize)]
+pub struct SkillListEntry {
+    #[serde(flatten)]
+    pub record: SkillRecord,
+    pub installable: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
+/// Read the registry without persisting migrations, refreshing sources, or installing bundles.
+pub fn skills_list_readonly() -> Result<Vec<SkillListEntry>, String> {
+    let _guard = registry_guard()?;
+    let registry = load_registry_readonly_unlocked()?;
+    Ok(registry
+        .skills
+        .iter()
+        .map(|skill| {
+            let reason = selected_skill_unavailable_reason(&registry, skill);
+            SkillListEntry {
+                record: skill.clone(),
+                installable: reason.is_none(),
+                reason,
+            }
+        })
+        .collect())
+}
+
+/// Target-independent eligibility, shared by the CLI picker and explicit sync.
+/// A target collision or profile divergence is still checked during sync preview.
+fn selected_skill_unavailable_reason(
+    registry: &SkillsRegistry,
+    skill: &SkillRecord,
+) -> Option<String> {
+    let Some(source) = registry
+        .sources
+        .iter()
+        .find(|source| source.id == skill.source_id)
+    else {
+        return Some(format!("unknown_source: {}", skill.source_id));
+    };
+    if !source_is_maru_owned(source) {
+        return Some(format!("source_not_maru_installable: {}", source.id));
+    }
+    if !skill.valid {
+        return Some(format!(
+            "skill_invalid: {}: {}",
+            skill.name,
+            skill.validation_errors.join("; ")
+        ));
+    }
+    match source_path(source) {
+        Ok(path) if path.is_dir() => {}
+        _ => return Some(format!("source_path_missing: {}", source.id)),
+    }
+    if !Path::new(&skill.abs_path).join("SKILL.md").is_file() {
+        return Some(format!("skill_path_missing: {}", skill.id));
+    }
+    None
+}
+
+/// An explicit selection is additive: unrelated installs are never removed.
+pub fn skills_sync_selected_tools(
+    work_path: Option<String>,
+    tools: Vec<String>,
+    selection: Option<Vec<String>>,
+    apply: bool,
+    retarget: bool,
+) -> Result<SkillToolSyncReport, String> {
+    if selection.as_ref().is_some_and(|values| {
+        values.is_empty() || values.iter().any(|value| value.trim().is_empty())
+    }) {
+        return Err("sync_skills_required".into());
+    }
     let tools = normalize_sync_tools(tools)?;
     let mut source_reservations = Vec::new();
     let mut source_paths = Vec::new();
@@ -2237,16 +2319,41 @@ pub fn skills_sync_tools(
         let preview = {
             let _guard = registry_guard()?;
             let mut preview = load_registry_readonly_unlocked()?;
-            add_default_sources_readonly(&mut preview, work_path.as_deref())?;
-            add_embedded_builtin_readonly(&mut preview)?;
+            if selection.is_none() {
+                add_default_sources_readonly(&mut preview, work_path.as_deref())?;
+                add_embedded_builtin_readonly(&mut preview)?;
+            }
+            let selected_sources = selected_source_ids(&preview, selection.as_deref());
             for id in source_ids(&preview) {
+                if selected_sources
+                    .as_ref()
+                    .is_some_and(|sources| !sources.contains(&id))
+                {
+                    continue;
+                }
                 let _ = rescan_source_in_registry(&mut preview, &id);
             }
             preview
         };
-        let mut paths = default_mutation_paths()?;
+        let mut paths = if selection.is_none() {
+            default_mutation_paths()?
+        } else {
+            registry_mutation_paths()?
+        };
         paths.extend(install_mutation_paths(&preview)?);
-        for source in preview.sources.iter().filter(|s| source_is_maru_owned(s)) {
+        paths.extend(
+            tools
+                .iter()
+                .map(|target| install_root(target))
+                .collect::<Result<Vec<_>, _>>()?,
+        );
+        let selected_sources = selected_source_ids(&preview, selection.as_deref());
+        for source in preview.sources.iter().filter(|s| {
+            source_is_maru_owned(s)
+                && selected_sources
+                    .as_ref()
+                    .map_or(true, |sources| sources.contains(&s.id))
+        }) {
             if let Ok(path) = source_path(source) {
                 let (_, checkout) = SourceOperationLease::identity(&path)?;
                 if !source_reservations
@@ -2273,9 +2380,13 @@ pub fn skills_sync_tools(
         for (source, paths) in &source_paths {
             revalidate_source_mutation_paths(source, paths)?;
         }
-        validate_defaults(admission)?;
+        if selection.is_none() {
+            validate_defaults(admission)?;
+        }
     }
-    let mut registry = if apply {
+    let mut registry = if selection.is_some() {
+        load_registry_readonly_unlocked()?
+    } else if apply {
         let mut registry = load_registry_unlocked()?;
         ensure_default_sources(&mut registry, work_path.as_deref())?;
         registry
@@ -2286,7 +2397,14 @@ pub fn skills_sync_tools(
         registry
     };
 
+    let selected_sources = selected_source_ids(&registry, selection.as_deref());
     for source_id in source_ids(&registry) {
+        if selected_sources
+            .as_ref()
+            .is_some_and(|sources| !sources.contains(&source_id))
+        {
+            continue;
+        }
         if !apply
             && source_id == BUILTIN_SOURCE_ID
             && !builtin_materialized_root()?.join("manifest.json").is_file()
@@ -2314,6 +2432,9 @@ pub fn skills_sync_tools(
         .filter(|skill| managed_source_ids.contains(&skill.source_id))
         .cloned()
         .collect();
+    if let Some(selection) = &selection {
+        filter_selected_skills(&mut desired, selection)?;
+    }
     desired.sort_by(|a, b| a.name.cmp(&b.name));
     if let Some(skill) = desired.iter().find(|skill| !skill.valid) {
         return Err(format!(
@@ -2323,7 +2444,15 @@ pub fn skills_sync_tools(
         ));
     }
 
-    let mut actions = plan_tool_sync(&registry, &desired, &tools, retarget)?;
+    if selection.is_some() {
+        for skill in &desired {
+            if let Some(reason) = selected_skill_unavailable_reason(&registry, skill) {
+                return Err(reason);
+            }
+        }
+        preflight_tool_sync(&registry, &desired, &tools, retarget)?;
+    }
+    let mut actions = plan_tool_sync(&registry, &desired, &tools, retarget, selection.is_none())?;
     if apply {
         admission
             .as_ref()
@@ -2343,7 +2472,8 @@ pub fn skills_sync_tools(
             .installs
             .iter()
             .filter(|install| {
-                install.managed_by == "maru"
+                selection.is_none()
+                    && install.managed_by == "maru"
                     && selected_tools.contains(&install.target)
                     && !desired_keys
                         .contains(&(install.target.clone(), install.installed_as.clone()))
@@ -2359,7 +2489,8 @@ pub fn skills_sync_tools(
             .collect();
         remove_exact_stale_install_links(&registry, &stale_installs, &desired_keys)?;
         registry.installs.retain(|install| {
-            install.managed_by != "maru"
+            selection.is_some()
+                || install.managed_by != "maru"
                 || !selected_tools.contains(&install.target)
                 || desired_keys.contains(&(install.target.clone(), install.installed_as.clone()))
                 || retained_stale_copy_keys
@@ -2444,6 +2575,50 @@ pub fn skills_sync_tools(
     })
 }
 
+fn selected_source_ids(
+    registry: &SkillsRegistry,
+    selection: Option<&[String]>,
+) -> Option<BTreeSet<String>> {
+    selection.map(|selectors| {
+        registry
+            .skills
+            .iter()
+            .filter(|skill| {
+                selectors
+                    .iter()
+                    .any(|value| skill.id == *value || skill.name == *value)
+            })
+            .map(|skill| skill.source_id.clone())
+            .collect()
+    })
+}
+
+fn filter_selected_skills(
+    desired: &mut Vec<SkillRecord>,
+    selection: &[String],
+) -> Result<(), String> {
+    let mut selected_ids = BTreeSet::new();
+    for selector in selection {
+        let matches: Vec<_> = desired
+            .iter()
+            .filter(|skill| skill.id == *selector || skill.name == *selector)
+            .collect();
+        match matches.as_slice() {
+            [skill] => {
+                selected_ids.insert(skill.id.clone());
+            }
+            [] => return Err(format!("unknown_or_unmanaged_skill: {selector}")),
+            _ => {
+                return Err(format!(
+                    "ambiguous_skill: {selector}; resolve duplicate catalog names"
+                ))
+            }
+        }
+    }
+    desired.retain(|skill| selected_ids.contains(&skill.id));
+    Ok(())
+}
+
 fn normalize_sync_tools(tools: Vec<String>) -> Result<Vec<String>, String> {
     let mut normalized = BTreeSet::new();
     for tool in tools {
@@ -2468,15 +2643,15 @@ fn preflight_tool_sync(
     tools: &[String],
     retarget: bool,
 ) -> Result<(), String> {
-    // Recorded installs pin the codex root. Applying against a different
+    // Recorded installs pin every target root. Applying against a different
     // ambient root would silently re-adopt under it and strand the recorded
     // root's links, so refuse unless the caller asked for the move.
-    if !retarget && tools.iter().any(|target| target == "codex") {
-        let recorded = recorded_install_roots(registry, "codex");
-        let ambient = install_root("codex")?;
+    for target in tools.iter().filter(|_| !retarget) {
+        let recorded = recorded_install_roots(registry, target);
+        let ambient = install_root(target)?;
         if !recorded.is_empty() && !recorded.contains(&ambient) {
             return Err(format!(
-                "codex_install_root_diverged: recorded root(s) {}, ambient root {}; re-run with --retarget to move the installs",
+                "{target}_install_root_diverged: recorded root(s) {}, ambient root {}; re-run with --retarget to move the installs",
                 recorded
                     .iter()
                     .map(|root| host_fs::display_path(root))
@@ -2652,6 +2827,7 @@ fn plan_tool_sync(
     desired: &[SkillRecord],
     tools: &[String],
     retarget: bool,
+    remove_stale: bool,
 ) -> Result<Vec<SkillToolSyncAction>, String> {
     let mut actions = Vec::new();
     let desired_keys: BTreeSet<(String, String)> = desired
@@ -2706,7 +2882,8 @@ fn plan_tool_sync(
         }
     }
     for install in registry.installs.iter().filter(|install| {
-        install.managed_by == "maru"
+        remove_stale
+            && install.managed_by == "maru"
             && tools.contains(&install.target)
             && !desired_keys.contains(&(install.target.clone(), install.installed_as.clone()))
     }) {
@@ -6449,6 +6626,10 @@ fn install_root(target: &str) -> Result<PathBuf, String> {
     match target {
         "claude" => Ok(host_fs::install_root_base()?.join(".claude").join("skills")),
         "codex" => Ok(host_fs::codex_home()?.join("skills")),
+        "kimi" => Ok(host_fs::agent_config_home("KIMI_CODE_HOME", ".kimi-code")?.join("skills")),
+        "qwen" => Ok(host_fs::install_root_base()?.join(".qwen/skills")),
+        "grok" => Ok(host_fs::install_root_base()?.join(".grok/skills")),
+        "opencode" => Ok(host_fs::opencode_home()?.join("skills")),
         other => Err(format!("unsupported_install_target: {other}")),
     }
 }
@@ -6500,7 +6681,7 @@ fn effective_install_target(
 fn normalize_install_target(target: &str) -> Result<String, String> {
     let target = target.trim().to_lowercase();
     match target.as_str() {
-        "claude" | "codex" => Ok(target),
+        "claude" | "codex" | "kimi" | "qwen" | "grok" | "opencode" => Ok(target),
         _ => Err(format!("unsupported_install_target: {target}")),
     }
 }
@@ -10280,6 +10461,309 @@ mod tests {
         assert_eq!(checked.desired_skills, 48);
         assert_eq!(checked.desired_installs, 96);
         assert_eq!(fs::read(&registry_path).unwrap(), before);
+    }
+
+    #[test]
+    fn six_target_roots_are_isolated_and_normalized() {
+        let home = test_home();
+        for (target, suffix) in [
+            ("claude", ".claude/skills"),
+            ("codex", ".codex/skills"),
+            ("kimi", ".kimi-code/skills"),
+            ("qwen", ".qwen/skills"),
+            ("grok", ".grok/skills"),
+            ("opencode", ".config/opencode/skills"),
+        ] {
+            assert_eq!(
+                normalize_install_target(&format!(" {target} ")).unwrap(),
+                target
+            );
+            assert_eq!(install_root(target).unwrap(), home._dir.path().join(suffix));
+        }
+        assert!(normalize_install_target("unknown").is_err());
+    }
+
+    #[test]
+    fn selected_sync_preserves_other_installs_and_only_exposes_requested_skill() {
+        let _home = test_home();
+        skills_sync_tools(None, vec!["claude".into()], true, false).unwrap();
+        let before = load_registry().unwrap();
+        let skill = before
+            .skills
+            .iter()
+            .find(|skill| {
+                skill.valid
+                    && before
+                        .installs
+                        .iter()
+                        .any(|install| install.skill_id == skill.id)
+            })
+            .unwrap();
+        let selection = Some(vec![skill.id.clone()]);
+        let tools = vec![
+            "claude".into(),
+            "kimi".into(),
+            "qwen".into(),
+            "grok".into(),
+            "opencode".into(),
+        ];
+        let checked =
+            skills_sync_selected_tools(None, tools.clone(), selection.clone(), false, false)
+                .unwrap();
+        assert_eq!(checked.desired_skills, 1);
+        assert!(!checked
+            .actions
+            .iter()
+            .any(|action| action.action.starts_with("remove")));
+        skills_sync_selected_tools(None, tools.clone(), selection.clone(), true, false).unwrap();
+        let after = load_registry().unwrap();
+        assert_eq!(after.installs.len(), before.installs.len() + 4);
+        assert!(after
+            .installs
+            .iter()
+            .filter(|install| install.target != "claude")
+            .all(|install| install.skill_id == skill.id));
+        assert!(
+            skills_sync_selected_tools(None, tools, selection, false, false)
+                .unwrap()
+                .actions
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn selected_sync_ambiguous_names_require_exact_ids() {
+        let _home = test_home();
+        skills_sync_tools(None, vec!["claude".into()], true, false).unwrap();
+        let registry = load_registry().unwrap();
+        let first = registry.skills[0].clone();
+        let mut other = first.clone();
+        other.id = "other::duplicate".into();
+        let mut candidates = vec![first.clone(), other];
+        assert!(
+            filter_selected_skills(&mut candidates, &[first.name.clone()])
+                .unwrap_err()
+                .starts_with("ambiguous_skill")
+        );
+        filter_selected_skills(&mut candidates, &[first.id.clone()]).unwrap();
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].id, first.id);
+    }
+
+    #[test]
+    fn selected_sync_does_not_reserve_unrelated_sources() {
+        let _home = test_home();
+        skills_sync_tools(None, vec!["claude".into()], true, false).unwrap();
+        let registry = load_registry().unwrap();
+        let skill = registry
+            .skills
+            .iter()
+            .find(|skill| skill.source_id == BUILTIN_SOURCE_ID && skill.valid)
+            .unwrap();
+        let unrelated = registry
+            .sources
+            .iter()
+            .find(|source| source.id == MANAGED_SOURCE_ID)
+            .unwrap();
+        let _busy = SourceOperationLease::reserve(
+            registry_path().unwrap(),
+            &unrelated.id,
+            &source_path(unrelated).unwrap(),
+        )
+        .unwrap();
+        skills_sync_selected_tools(
+            None,
+            vec!["grok".into()],
+            Some(vec![skill.id.clone()]),
+            true,
+            false,
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn selected_sync_exact_id_does_not_override_duplicate_catalog_conflict() {
+        let _home = test_home();
+        skills_sync_tools(None, vec!["claude".into()], true, false).unwrap();
+        let mut registry = load_registry().unwrap();
+        let skill = registry
+            .skills
+            .iter()
+            .find(|skill| skill.source_id == BUILTIN_SOURCE_ID && skill.valid)
+            .unwrap()
+            .clone();
+        let root = host_fs::skills_root().unwrap().join("_managed");
+        let duplicate = root.join(&skill.name);
+        fs::create_dir_all(&duplicate).unwrap();
+        fs::write(
+            duplicate.join("SKILL.md"),
+            format!(
+                "---\nname: {}\ndescription: test\ntier: managed\n---\n",
+                skill.name
+            ),
+        )
+        .unwrap();
+        rescan_source_in_registry(&mut registry, MANAGED_SOURCE_ID).unwrap();
+        save_registry_unlocked(&registry).unwrap();
+        let before = fs::read(registry_path().unwrap()).unwrap();
+        let error = skills_sync_selected_tools(
+            None,
+            vec!["grok".into()],
+            Some(vec![skill.id]),
+            true,
+            false,
+        )
+        .unwrap_err();
+        assert!(error.contains("duplicate_source"));
+        assert_eq!(fs::read(registry_path().unwrap()).unwrap(), before);
+    }
+
+    #[test]
+    fn selected_list_eligibility_is_flat_and_never_persisted() {
+        let _home = test_home();
+        skills_sync_tools(None, vec!["claude".into()], true, false).unwrap();
+        let mut registry = load_registry().unwrap();
+        let owned = registry
+            .skills
+            .iter()
+            .find(|skill| skill.valid)
+            .unwrap()
+            .clone();
+        let mut missing = owned.clone();
+        missing.id = "missing-source::entry".into();
+        missing.name = "missing-source-entry".into();
+        missing.source_id = "missing-source".into();
+        registry.skills.push(missing.clone());
+        save_registry_unlocked(&registry).unwrap();
+        let before = fs::read(registry_path().unwrap()).unwrap();
+        let entries = skills_list_readonly().unwrap();
+        let eligible = entries
+            .iter()
+            .find(|entry| entry.record.id == owned.id)
+            .unwrap();
+        assert!(eligible.installable);
+        let json = serde_json::to_value(eligible).unwrap();
+        assert_eq!(json["id"], owned.id);
+        assert_eq!(json["installable"], true);
+        assert!(json.get("record").is_none());
+        assert!(json.get("reason").is_none());
+        let unavailable = entries
+            .iter()
+            .find(|entry| entry.record.id == missing.id)
+            .unwrap();
+        assert!(!unavailable.installable);
+        assert!(unavailable
+            .reason
+            .as_deref()
+            .unwrap()
+            .starts_with("unknown_source"));
+        assert_eq!(fs::read(registry_path().unwrap()).unwrap(), before);
+        assert!(!String::from_utf8(before).unwrap().contains("installable"));
+    }
+
+    #[test]
+    fn selected_sync_preview_and_list_do_not_change_registry_or_files() {
+        let home = test_home();
+        skills_sync_tools(None, vec!["claude".into()], true, false).unwrap();
+        let before = fs::read(registry_path().unwrap()).unwrap();
+        let skills = skills_list_readonly().unwrap();
+        let skill = &skills
+            .iter()
+            .find(|skill| skill.installable)
+            .unwrap()
+            .record;
+        let entries = WalkDir::new(home._dir.path())
+            .into_iter()
+            .filter_map(Result::ok)
+            .map(|entry| entry.path().to_path_buf())
+            .collect::<BTreeSet<_>>();
+        skills_sync_selected_tools(
+            None,
+            vec!["grok".into()],
+            Some(vec![skill.id.clone()]),
+            false,
+            false,
+        )
+        .unwrap();
+        assert_eq!(fs::read(registry_path().unwrap()).unwrap(), before);
+        assert_eq!(
+            WalkDir::new(home._dir.path())
+                .into_iter()
+                .filter_map(Result::ok)
+                .map(|entry| entry.path().to_path_buf())
+                .collect::<BTreeSet<_>>(),
+            entries
+        );
+    }
+
+    #[test]
+    fn selected_sync_rejects_missing_and_empty_without_registry_writes() {
+        let _home = test_home();
+        for selection in [vec![], vec!["".into()], vec!["missing".into()]] {
+            assert!(skills_sync_selected_tools(
+                None,
+                vec!["grok".into()],
+                Some(selection),
+                true,
+                false
+            )
+            .is_err());
+            assert!(!registry_path().unwrap().exists());
+            assert!(!install_root("grok").unwrap().exists());
+        }
+        assert!(skills_list_readonly().unwrap().is_empty());
+        assert!(!registry_path().unwrap().exists());
+    }
+
+    #[test]
+    fn selected_sync_conflict_and_root_drift_preserve_installs() {
+        let home = test_home();
+        skills_sync_tools(None, vec!["claude".into()], true, false).unwrap();
+        let mut registry = load_registry().unwrap();
+        let skill = registry
+            .skills
+            .iter()
+            .find(|skill| {
+                registry
+                    .installs
+                    .iter()
+                    .any(|install| install.skill_id == skill.id)
+            })
+            .unwrap()
+            .clone();
+        let occupied = install_target_path("kimi", &skill.name).unwrap();
+        fs::create_dir_all(&occupied).unwrap();
+        fs::write(occupied.join("user.txt"), "preserve").unwrap();
+        let before = fs::read(registry_path().unwrap()).unwrap();
+        let error = skills_sync_selected_tools(
+            None,
+            vec!["kimi".into()],
+            Some(vec![skill.id.clone()]),
+            true,
+            false,
+        )
+        .unwrap_err();
+        assert!(error.contains("install_target_exists"));
+        assert_eq!(fs::read(registry_path().unwrap()).unwrap(), before);
+        assert_eq!(
+            fs::read_to_string(occupied.join("user.txt")).unwrap(),
+            "preserve"
+        );
+        let mut recorded = registry.installs[0].clone();
+        recorded.target = "kimi".into();
+        recorded.target_path = path_string(
+            &home
+                ._dir
+                .path()
+                .join("previous-profile/skills")
+                .join(&recorded.installed_as),
+        );
+        registry.installs.push(recorded);
+        assert!(
+            preflight_tool_sync(&registry, &[skill], &["kimi".into()], false)
+                .unwrap_err()
+                .contains("kimi_install_root_diverged")
+        );
     }
 
     #[test]
