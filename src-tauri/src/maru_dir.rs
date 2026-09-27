@@ -1586,12 +1586,14 @@ fn is_recovery_file_name(name: &str) -> bool {
         && bytes[15] == b'-'
 }
 
-/// Keep only the newest `keep` recovery-pattern regular files in `dir`.
+/// Keep only the newest `keep` recovery-pattern regular files in `dir`,
+/// always counting `just_written` among them: names carry local time, so
+/// after a DST fall-back the new file can sort older than the rest (#373).
 /// `DirEntry::file_type` does not follow symlinks, so a symlinked entry is
 /// never treated as a regular file here. Read/remove errors are ignored —
 /// retention is best-effort and must never turn a successful recovery write
 /// into a failure.
-fn prune_recovery_dir(dir: &Path, keep: usize) {
+fn prune_recovery_dir(dir: &Path, keep: usize, just_written: &str) {
     let Ok(read_dir) = fs::read_dir(dir) else {
         return;
     };
@@ -1599,13 +1601,14 @@ fn prune_recovery_dir(dir: &Path, keep: usize) {
         .filter_map(Result::ok)
         .filter(|entry| entry.file_type().map(|ft| ft.is_file()).unwrap_or(false))
         .filter_map(|entry| entry.file_name().into_string().ok())
-        .filter(|name| is_recovery_file_name(name))
+        .filter(|name| is_recovery_file_name(name) && name != just_written)
         .collect();
-    if names.len() <= keep {
+    let keep_others = keep.saturating_sub(1);
+    if names.len() <= keep_others {
         return;
     }
     names.sort_unstable_by(|a, b| b.cmp(a));
-    for stale in names.into_iter().skip(keep) {
+    for stale in names.into_iter().skip(keep_others) {
         let _ = fs::remove_file(dir.join(stale));
     }
 }
@@ -1659,7 +1662,7 @@ pub fn write_recovery_copy(
         ensure_within(&dir, &path)?;
         lease.ensure_covered([path.clone()])?;
         write_atomic_create(&path, content.as_bytes())?;
-        prune_recovery_dir(&dir, RECOVERY_MAX_FILES);
+        prune_recovery_dir(&dir, RECOVERY_MAX_FILES, &name);
         let rel = format!(".maru/recovery/{name}");
         eprintln!(
             "[recovery] save failed for {}: {}; kept {rel}",
@@ -3386,7 +3389,7 @@ mod phase09_04 {
         for index in 0..105u32 {
             fs::write(dir.join(format!("20260101-{index:06}-fixture.txt")), "x").unwrap();
         }
-        prune_recovery_dir(&dir, RECOVERY_MAX_FILES);
+        prune_recovery_dir(&dir, RECOVERY_MAX_FILES, "20260101-000104-fixture.txt");
         let remaining: Vec<String> = fs::read_dir(&dir)
             .unwrap()
             .filter_map(Result::ok)
@@ -3398,6 +3401,35 @@ mod phase09_04 {
             .filter(|name| is_recovery_file_name(name))
             .count();
         assert_eq!(pattern_count, RECOVERY_MAX_FILES);
+        // Newest first: the five oldest go, the newest (just written) stays.
+        for index in 0..5u32 {
+            assert!(!remaining.contains(&format!("20260101-{index:06}-fixture.txt")));
+        }
+        assert!(remaining.contains(&"20260101-000104-fixture.txt".to_string()));
+        assert!(remaining.contains(&"20260101-000005-fixture.txt".to_string()));
+    }
+
+    // #373: names carry local time, so after a DST fall-back the file just
+    // written can sort older than the 100 kept ones; it must survive anyway.
+    #[test]
+    fn phase09_04_retention_never_prunes_the_file_just_written() {
+        let home = Home::new();
+        let work_path = work_fixture(&home, "retention-new");
+        let dir = recovery_dir(&work_path);
+        fs::create_dir_all(&dir).unwrap();
+        for index in 0..RECOVERY_MAX_FILES as u32 {
+            fs::write(dir.join(format!("20260101-{index:06}-fixture.txt")), "x").unwrap();
+        }
+        let just_written = "20251231-235959-fixture.txt";
+        fs::write(dir.join(just_written), "new").unwrap();
+        prune_recovery_dir(&dir, RECOVERY_MAX_FILES, just_written);
+        assert!(dir.join(just_written).exists());
+        let count = fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|entry| is_recovery_file_name(&entry.file_name().to_string_lossy()))
+            .count();
+        assert_eq!(count, RECOVERY_MAX_FILES);
     }
 
     #[test]
