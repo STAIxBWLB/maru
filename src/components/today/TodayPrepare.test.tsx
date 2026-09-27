@@ -308,11 +308,9 @@ describe("TodayPrepare", () => {
     }
   });
 
-  it("still reports a genuine same-workspace save failure through the teardown reporter", async () => {
+  it("reports a genuine same-workspace save failure immediately, and not again at teardown (#381)", async () => {
+    vi.mocked(writeRecoveryCopy).mockClear();
     const { container, mutate, root } = await renderPrepare();
-    // Persistently null (not once): useTeardownFlush's unmount settle is
-    // itself an explicit retry (D-05), so a one-shot null would let that
-    // retry quietly succeed and mask the failure this test targets.
     mutate.mockResolvedValue(null);
     const textarea = container.querySelector<HTMLTextAreaElement>(".today-braindump-textarea")!;
     await act(async () => {
@@ -326,15 +324,112 @@ describe("TodayPrepare", () => {
       });
       expect(mutate).toHaveBeenCalledWith({ type: "setBrainDump", brainDump: "저장 실패 메모" });
 
+      // The failure surfaces as soon as the debounced save drains: one
+      // recovery copy in the same workspace, with the usual notice and log.
+      expect(writeRecoveryCopy).toHaveBeenCalledTimes(1);
+      expect(writeRecoveryCopy).toHaveBeenCalledWith(
+        "/tmp/work",
+        `today-brain-dump-${SNAPSHOT.logicalDay}.txt`,
+        "저장 실패 메모",
+        translate("ko", "today.prepare.braindump.saveFailed"),
+      );
+      const teardownFailureLogs = errorSpy.mock.calls.filter(
+        (call) => typeof call[0] === "string" && call[0].includes("teardown save failed"),
+      );
+      expect(teardownFailureLogs.length).toBeGreaterThan(0);
+
       await act(async () => {
         root.unmount();
         await sleep(0);
       });
 
-      const teardownFailureLogs = errorSpy.mock.calls.filter(
-        (call) => typeof call[0] === "string" && call[0].includes("teardown save failed"),
+      // The value was settled by the immediate report, so the teardown settle
+      // finds nothing pending and must not report a second copy.
+      expect(writeRecoveryCopy).toHaveBeenCalledTimes(1);
+    } finally {
+      errorSpy.mockRestore();
+    }
+  });
+
+  it("keeps a failed save's text as a recovery copy in its own workspace when a switch and new typing follow (#381)", async () => {
+    vi.mocked(writeRecoveryCopy).mockClear();
+    const mutate = vi.fn<(mutation: TodayMutation) => Promise<TodaySnapshot | null>>(
+      async () => null,
+    );
+    // TodayPane clears the snapshot on every workPath change, so B has none
+    // until its own load resolves (and never, if Today is off there).
+    const contextValueFor = (workPath: string): TodayContextValue => ({
+      workPath,
+      settings: { ...DEFAULT_MARU_SETTINGS.tasks.today, autoPlan: false },
+      timezone: "Asia/Seoul",
+      snapshot: workPath === "/tmp/workspace-a" ? SNAPSHOT : null,
+      loading: false,
+      mutate,
+      reload: async () => SNAPSHOT,
+      finalizeSetup: vi.fn(async () => ({ snapshot: SNAPSHOT, materialized: [], replayed: false })),
+    });
+    const onNavigate = vi.fn();
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    const renderWithWorkPath = (workPath: string) =>
+      act(async () => {
+        root.render(
+          <LocaleContext.Provider
+            value={{ locale: "ko", setLocale: () => {}, t: (key, vars) => translate("ko", key, vars) }}
+          >
+            <TodayContext.Provider value={contextValueFor(workPath)}>
+              <TodayPrepare onNavigate={onNavigate} />
+            </TodayContext.Provider>
+          </LocaleContext.Provider>,
+        );
+      });
+
+    await renderWithWorkPath("/tmp/workspace-a");
+    const textarea = container.querySelector<HTMLTextAreaElement>(".today-braindump-textarea")!;
+    await act(async () => {
+      typeText(textarea, "workspace a 메모");
+    });
+
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      // The autosave in A drains and fails; the failure is reported at once.
+      await act(async () => {
+        await sleep(900);
+      });
+      expect(mutate).toHaveBeenCalledTimes(1);
+      expect(writeRecoveryCopy).toHaveBeenCalledTimes(1);
+      expect(writeRecoveryCopy).toHaveBeenCalledWith(
+        "/tmp/workspace-a",
+        `today-brain-dump-${SNAPSHOT.logicalDay}.txt`,
+        "workspace a 메모",
+        translate("ko", "today.prepare.braindump.saveFailed"),
       );
-      expect(teardownFailureLogs.length).toBeGreaterThan(0);
+
+      // The workspace switches — same TodayPrepare instance, matching
+      // TodayPane.tsx's real non-remount behavior — and the user types in B.
+      // Before the fix, this schedule() silently replaced the still-pending
+      // failed value from A and its text was lost with no copy anywhere.
+      await renderWithWorkPath("/tmp/workspace-b");
+      await act(async () => {
+        typeText(textarea, "workspace b 메모");
+      });
+      await act(async () => {
+        await sleep(900);
+      });
+
+      await act(async () => {
+        root.unmount();
+        await sleep(0);
+      });
+
+      // A's text survives as exactly one recovery copy in A; B's typing never
+      // reaches mutate (B has no snapshot) and triggers no further report.
+      expect(writeRecoveryCopy).toHaveBeenCalledTimes(1);
+      expect(mutate).toHaveBeenCalledTimes(1);
+      expect(mutate).not.toHaveBeenCalledWith(
+        expect.objectContaining({ brainDump: expect.stringContaining("workspace b") }),
+      );
     } finally {
       errorSpy.mockRestore();
     }
