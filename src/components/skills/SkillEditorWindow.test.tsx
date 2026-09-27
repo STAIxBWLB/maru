@@ -16,6 +16,7 @@ import { ko } from "../../lib/i18n/locales/ko";
 import { MENU_COMMAND_EVENT } from "../../lib/menu";
 import type { SkillDocument } from "../../lib/skills";
 import {
+  SKILL_EDITOR_OPEN_EVENT,
   SKILL_EDITOR_QUIT_CHECK_ACK_EVENT,
   SKILL_EDITOR_QUIT_CHECK_EVENT,
   SKILL_EDITOR_QUIT_CHECK_RESPONSE_EVENT,
@@ -523,6 +524,75 @@ describe("SkillEditorWindow save shortcuts (#370)", () => {
     expect(mocks.skillsSaveSkillAs).toHaveBeenCalledWith("skill-1", "copy-name", "original content");
     expect(host.querySelector(".skill-editor-save-as")).toBeNull();
     promptSpy.mockRestore();
+  });
+});
+
+function otherSkillDocument(): SkillDocument {
+  const doc = skillDocument();
+  return { skill: { ...doc.skill, id: "skill-2", name: "other" }, content: "other content" };
+}
+
+async function openFromMain(skillId: string): Promise<void> {
+  await act(async () => {
+    handlersFor(SKILL_EDITOR_OPEN_EVENT).forEach((handler) =>
+      handler({ payload: { workPath: "/work", skillId } }),
+    );
+  });
+  await settle();
+}
+
+describe("SkillEditorWindow busy guards (#376 review)", () => {
+  it("Cmd+S while a switch is loading does not save", async () => {
+    await mount();
+    act(() => {
+      dirtyTextarea();
+    });
+    mocks.dialogConfirm.mockResolvedValue(true);
+    let finishLoad: (doc: SkillDocument) => void = () => {};
+    mocks.skillsReadSkill.mockImplementation(
+      () => new Promise((resolve) => { finishLoad = resolve; }),
+    );
+    await openFromMain("skill-2");
+
+    await act(async () => {
+      handlersFor(MENU_COMMAND_EVENT).forEach((handler) => handler({ payload: "file.save" }));
+    });
+    await settle();
+    expect(mocks.skillsSaveSkillFile).not.toHaveBeenCalled();
+
+    await act(async () => {
+      finishLoad(otherSkillDocument());
+    });
+    await settle();
+  });
+
+  it("drops a Save As confirmed after another skill was opened", async () => {
+    await mount();
+    let answerConfirm: (ok: boolean) => void = () => {};
+    mocks.dialogConfirm.mockImplementation(
+      () => new Promise<boolean>((resolve) => { answerConfirm = resolve; }),
+    );
+    const saveAsButton = [...host.querySelectorAll("button")].find(
+      (button) => button.textContent === translate("ko", "system.skills.saveAs"),
+    )!;
+    await act(async () => {
+      saveAsButton.click();
+    });
+    await act(async () => {
+      host.querySelector<HTMLFormElement>(".skill-editor-save-as")!.requestSubmit();
+    });
+    await settle();
+
+    mocks.skillsReadSkill.mockResolvedValue(otherSkillDocument());
+    await openFromMain("skill-2");
+    await act(async () => {
+      answerConfirm(true);
+    });
+    await settle(10);
+
+    expect(mocks.skillsSaveSkillAs).not.toHaveBeenCalled();
+    expect(host.querySelector(".skill-editor-save-as")).toBeNull();
+    expect(host.querySelector<HTMLTextAreaElement>("textarea")!.value).toBe("other content");
   });
 });
 

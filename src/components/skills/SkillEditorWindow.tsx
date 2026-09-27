@@ -245,6 +245,7 @@ export function SkillEditorWindow({ initialWorkPath, initialSkillId }: SkillEdit
         setSources(nextSources);
         setText(doc.content);
         setBase(doc.content);
+        setSaveAsName(null);
       } catch (err) {
         setError(t("skillEditor.loadFailed", {
           message: err instanceof Error ? err.message : String(err),
@@ -462,7 +463,9 @@ export function SkillEditorWindow({ initialWorkPath, initialSkillId }: SkillEdit
     const name = rawName.trim();
     if (!name) return;
     if (!(await confirmDestructive(t("system.skills.saveAsConfirm", { name })))) return;
-    if (busyRef.current > 0) return;
+    // Another skill may have been opened from main while the sheet was up;
+    // `skill` and `text` still belong to the one this copy was asked for.
+    if (busyRef.current > 0 || skillIdRef.current !== skill.id) return;
     busyRef.current += 1;
     setSaving(true);
     setError(null);
@@ -536,8 +539,10 @@ export function SkillEditorWindow({ initialWorkPath, initialSkillId }: SkillEdit
                 disabled={saving}
                 onChange={(event) => setSaveAsName(event.target.value)}
                 onKeyDown={(event) => {
-                  // An Escape that ends an IME composition must not close the field.
-                  if (event.key === "Escape" && !event.nativeEvent.isComposing) setSaveAsName(null);
+                  // An Escape that ends an IME composition must not close the
+                  // field; WebKit can clear isComposing first, hence keyCode 229.
+                  const composing = event.nativeEvent.isComposing || event.keyCode === 229;
+                  if (event.key === "Escape" && !composing) setSaveAsName(null);
                 }}
               />
               <Button
