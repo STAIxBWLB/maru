@@ -101,6 +101,23 @@ describe("native clean quit actually exits the app (09-08, D-03 one quit path)",
       const pid = findAppPid();
       assert.ok(pid, "could not find the running app's PID via pgrep before quitting");
 
+      // The embedded WebDriver server lives inside the process this test
+      // quits, so the runner's end-of-session DELETE /session can only hit
+      // ECONNREFUSED. That rejection escapes @wdio/runner's endSession before
+      // results are reported: the file showed "Failed launching test session"
+      // and no test output even though this test passed (#367). Skip the
+      // DELETE only once this quit pid is gone, so the bypass stays scoped to
+      // the intentional exit here; a crash anywhere else still fails teardown.
+      // deleteSession is a protocol command: overwritable at runtime, but
+      // outside the typed name union overwriteCommand accepts.
+      const overwrite = browser.overwriteCommand as unknown as (
+        name: "deleteSession",
+        fn: (deleteSession: (...args: unknown[]) => Promise<unknown>, ...args: unknown[]) => Promise<unknown>,
+      ) => void;
+      overwrite.call(browser, "deleteSession", async (deleteSession, ...args) =>
+        isPidAlive(pid) ? deleteSession(...args) : null,
+      );
+
       await dispatchMenuCommand("app.quit");
 
       // D-04's 3s flush budget plus the close-requested/destroy IPC round

@@ -4,7 +4,7 @@ import path from "node:path";
 import { createHash } from "node:crypto";
 import type {} from "webdriverio";
 
-import { fixtureRootDir } from "../helpers/fixtureWorkspace";
+import { fixtureGlobalSettingsFile, fixtureRootDir } from "../helpers/fixtureWorkspace";
 
 const pastedNote = [
   "# 제품 전략 회의",
@@ -15,7 +15,10 @@ const pastedNote = [
 ].join("\n");
 const correction = "추가 확인: 비용안 담당자는 다음 회의에서 확정한다.";
 
-async function waitFor(selector: string, timeout = 30_000): Promise<void> {
+// Stays under the embedded driver's 30s script timeout: at 30s the in-page
+// deadline raced the driver, so a miss surfaced as an opaque "Script execution
+// timed out" (plus one retry) instead of this file's assertion (#368).
+async function waitFor(selector: string, timeout = 20_000): Promise<void> {
   const ready = await browser.executeAsync(
     (target: string, limit: number, done: (value: boolean) => void) => {
       const deadline = Date.now() + limit;
@@ -53,6 +56,60 @@ async function fill(selector: string, value: string): Promise<void> {
   await element.setValue(value);
 }
 
+const MEETINGS_BUTTON = '.activity-rail button[aria-label="회의록"]';
+
+async function storedAppMode(): Promise<string | undefined> {
+  try {
+    const settings = JSON.parse(await fs.readFile(fixtureGlobalSettingsFile(), "utf8")) as {
+      ui?: { activeAppMode?: string };
+    };
+    return settings.ui?.activeAppMode;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Lands the app on Meetings deterministically (#368). A mode click that lands
+ * while the app is still booting, before the workspace settings are writable,
+ * lives only in memory: boot and settings hydration then re-apply the stored
+ * mode and .meetings-pane never renders. Even a persisted click flickers back
+ * to the stored mode until its own save echo arrives. So select Meetings until
+ * the choice is on disk, then reload: the fresh boot reads "meetings" as the
+ * stored mode and nothing is left to race.
+ */
+async function openMeetings(): Promise<void> {
+  const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+  await waitFor(MEETINGS_BUTTON);
+  let deadline = Date.now() + 30_000;
+  while ((await storedAppMode()) !== "meetings") {
+    assert.ok(Date.now() < deadline, "selecting Meetings never reached the stored settings");
+    await click(MEETINGS_BUTTON);
+    const settle = Date.now() + 3_000;
+    while (Date.now() < settle && (await storedAppMode()) !== "meetings") await sleep(250);
+  }
+  // location.reload() returns before the old document unloads (the embedded
+  // driver's refresh is the same call, with no load wait), so tag the old
+  // document and poll until an untagged one shows the pane. Short sync
+  // scripts, not one executeAsync: a script can land mid-navigation.
+  await browser.execute(() => {
+    (window as { __meetingsReloadPending?: boolean }).__meetingsReloadPending = true;
+    window.location.reload();
+  });
+  deadline = Date.now() + 20_000;
+  for (;;) {
+    const landed = await browser
+      .execute(() => {
+        const pane = document.querySelector<HTMLElement>(".meetings-pane");
+        return !(window as { __meetingsReloadPending?: boolean }).__meetingsReloadPending && pane?.offsetParent != null;
+      })
+      .catch(() => false);
+    if (landed) return;
+    assert.ok(Date.now() < deadline, "the reloaded app never landed on Meetings");
+    await sleep(200);
+  }
+}
+
 async function stateFile(): Promise<string> {
   const root = path.join(fixtureRootDir(), "workspace", ".maru", "meetings", "source-reviews");
   const entries = await fs.readdir(root);
@@ -82,9 +139,7 @@ async function waitForState(
 
 describe("native external meeting-note source review", () => {
   it("persists the original, corrected version, participant context, and confirmation", async () => {
-    await waitFor(".activity-rail");
-    await click('.activity-rail button[aria-label="회의록"]');
-    await waitFor(".meetings-pane");
+    await openMeetings();
     // The external item is first in the create group. Use its text-bearing
     // button directly so this remains valid for both Korean and English UI.
     await browser.execute(() => {
