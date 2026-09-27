@@ -34,10 +34,11 @@ describe("coverage is non-gating (TEST-02, D-01/D-02/D-04)", () => {
     const onBlock = coverageYml.match(/^on:[\s\S]*?(?=\npermissions:)/m);
     expect(onBlock, "coverage.yml has no `on:` trigger block").not.toBeNull();
     const on = onBlock![0];
-    expect(on).toContain("push:");
+    // The full set of trigger keys, so a schedule, workflow_call or any other
+    // added trigger fails too, not just the two named ones.
+    const triggers = [...on.matchAll(/^ {2}([A-Za-z_]+):/gm)].map((match) => match[1]);
+    expect(triggers).toEqual(["push"]);
     expect(on).toMatch(/branches:\s*\n\s*-\s*main/);
-    expect(on).not.toContain("pull_request");
-    expect(on).not.toContain("workflow_dispatch");
   });
 
   it("coverage.yml references no secrets and runs make coverage", () => {
