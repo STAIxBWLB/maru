@@ -3,7 +3,7 @@ phase: 7
 slug: guardrails-before-churn
 # status lifecycle: draft (seeded by plan-phase) → validated (set by validate-phase §6)
 # audit-milestone §5.5 distinguishes NOT-VALIDATED (draft) from PARTIAL (validated + nyquist_compliant: false) (#2117)
-status: draft
+status: validated
 nyquist_compliant: true
 wave_0_complete: true
 created: 2026-09-05
@@ -42,26 +42,28 @@ created: 2026-09-05
 
 | Task ID | Plan | Wave | Requirement | Threat Ref | Secure Behavior | Test Type | Automated Command | File Exists | Status |
 |---------|------|------|-------------|------------|-----------------|-----------|-------------------|-------------|--------|
-| 07-01 T1 | 07-01 | 1 | SEC-02 | T-7-01 / T-7-02 | Guard exits 0 on the six existing sinks, fail-closed (exit 1) on an untraced sink; HwpxViewer sanitizes through registered `sanitizeHwpxPreviewHtml` | unit + shell | `node scripts/check-dom-sanitizer.mjs`; `pnpm typecheck`; `pnpm lint` | ❌ created in-task | ⬜ pending |
-| 07-01 T2 | 07-01 | 1 | SEC-02 | T-7-03 | Guard wired into `make verify` exactly once, adjacent to `check-select-chrome`; red-then-green drill proven before acceptance | integration (make) | `make check-dom-sanitizer`; `test "$(make -n verify \| grep -c check-dom-sanitizer)" = 1` | ❌ created in-task | ⬜ pending |
-| 07-01 T3 | 07-01 | 1 | SEC-02 | T-7-03 | Tracing policy pinned (module allowlist, registered pairs, fail-closed, no AST) by a source-assertion vitest | unit (TS) | `pnpm test -- check-dom-sanitizer` | ❌ created in-task | ⬜ pending |
-| 07-02 T1 | 07-02 | 1 | PERF-03 | T-7-04 / T-7-05 | `recover_guard` returns the guard on Ok and Err(poisoned); exactly one warn line; mutual exclusion preserved; REGISTRY_LOCK pattern slice | unit (Rust) | `cargo test --lib lock_recovery`; `cargo test --lib skill_host`; `cargo clippy --lib -- -D warnings` | ❌ created in-task | ⬜ pending |
-| 07-02 T2 | 07-02 | 1 | PERF-03 | T-7-04 / T-7-05 | JOBS_LOCK / DOT_ACTION_LOCK / BINDER_WRITE_LOCK recover with lock-specific D-03 justifications; INSPECTION_CACHE untouched | unit (Rust) | `cargo test --lib jobs`; `cargo test --lib dot_sync`; `cargo test --lib evidence_binder`; `cargo clippy --lib -- -D warnings` | ❌ created in-task | ⬜ pending |
-| 07-02 T3 | 07-02 | 1 | PERF-03 | T-7-04 / T-7-06 | All five terminal acquisition sites recover (killer keeps `closing` latched per D-02); six retired poison strings exist only as inert test assertions | unit (Rust) | `cargo test --lib terminal`; `cargo test --lib`; `cargo clippy --lib -- -D warnings && cargo fmt --check`; `pnpm test -- ipcError` | ⚠️ existing suites | ⬜ pending |
-| 07-03 T1 | 07-03 | 1 | PERF-04 | T-7-07 / T-7-08 | `is_under_generated_dir` exact-component semantics (prefix sibling not pruned, empty/root safe); vault_watcher mixed batch emits only legitimate paths | unit (Rust) | `cargo test --lib paths`; `cargo test --lib vault_watcher`; `cargo clippy --lib -- -D warnings` | ❌ created in-task | ⬜ pending |
-| 07-03 T2 | 07-03 | 1 | PERF-04 | T-7-07 / T-7-08 | inbox_watcher and scratchpad_watcher prune per path at dispatch time; non-generated siblings in the same event still emit | unit (Rust) | `cargo test --lib inbox_watcher`; `cargo test --lib scratchpad_watcher`; `cargo clippy --lib -- -D warnings` | ⚠️ existing suites extended | ⬜ pending |
-| 07-03 T3 | 07-03 | 1 | PERF-04 | T-7-07 / T-7-09 | ops_catalog and terminal_hooks prune; all five watchers reference the SSOT predicate; no local name lists introduced | unit (Rust) | `cargo test --lib ops_catalog`; `cargo test --lib terminal_hooks`; `cargo test --lib`; `cargo clippy --lib -- -D warnings && cargo fmt --check` | ⚠️ existing suites | ⬜ pending |
-| 07-04 T1 | 07-04 | 1 | PERF-06 | T-7-10 / T-7-11 | Zero inbox rows via full scan and cache read (stale cache self-heals); fail-open resolution; empty-rel guard; `inbox-backup` prefix sibling still indexed | unit (Rust) | `cargo test --lib vault`; `cargo clippy --lib -- -D warnings` | ❌ created in-task | ⬜ pending |
-| 07-04 T2 | 07-04 | 1 | PERF-06 | T-7-10 / T-7-12 | `scan_vault_paths` containment excludes the resolved inbox root (rescan cannot re-inject pruned rows); Inbox pane / Files browser / content search regression watch green | unit (Rust) | `cargo test --lib vault`; `cargo test --lib inbox`; `cargo test --lib workspace_files`; `cargo test --lib content_search`; `cargo test --lib && cargo clippy --lib -- -D warnings && cargo fmt --check` | ⚠️ existing suites | ⬜ pending |
-| 07-05 T1 | 07-05 | 1 | PERF-06 | T-7-13 / T-7-15 | Switcher narrowed to All / Drafts / Archive / Recently Updated; counts map and union agree; zero remaining references to the removed view | unit (TS) | `pnpm typecheck`; `pnpm test -- documentIndex`; `pnpm lint` | ⚠️ existing suites updated | ⬜ pending |
-| 07-05 T2 | 07-05 | 1 | PERF-06 | T-7-13 / T-7-14 | Persisted `view: "inbox"` filter reset silently to `{ kind: "all" }` per visibility; i18n key parity (en + ko same commit) | unit (TS) | `pnpm test -- workspaceStore`; `pnpm test -- outlinePaneStore`; `pnpm lint:i18n`; `pnpm test -- documentIndex`; `pnpm typecheck && pnpm lint` | ❌ created in-task | ⬜ pending |
+| 07-01 T1 | 07-01 | 1 | SEC-02 | T-7-01 / T-7-02 | Guard exits 0 on the six existing sinks, fail-closed (exit 1) on an untraced sink; HwpxViewer sanitizes through registered `sanitizeHwpxPreviewHtml` | unit + shell | `node scripts/check-dom-sanitizer.mjs`; `pnpm typecheck`; `pnpm lint` | ✅ | ✅ green |
+| 07-01 T2 | 07-01 | 1 | SEC-02 | T-7-03 | Guard wired into `make verify` exactly once, adjacent to `check-select-chrome`; red-then-green drill proven before acceptance | integration (make) | `make check-dom-sanitizer`; `test "$(make -n verify \| grep -c check-dom-sanitizer)" = 1` | ✅ | ✅ green |
+| 07-01 T3 | 07-01 | 1 | SEC-02 | T-7-03 | Tracing policy pinned (module allowlist, registered pairs, fail-closed, no AST) by a source-assertion vitest | unit (TS) | `pnpm test -- check-dom-sanitizer` | ✅ | ✅ green |
+| 07-02 T1 | 07-02 | 1 | PERF-03 | T-7-04 / T-7-05 | `recover_guard` returns the guard on Ok and Err(poisoned); exactly one warn line; mutual exclusion preserved; REGISTRY_LOCK pattern slice | unit (Rust) | `cargo test --lib lock_recovery`; `cargo test --lib skill_host`; `cargo clippy --lib -- -D warnings` | ✅ | ✅ green |
+| 07-02 T2 | 07-02 | 1 | PERF-03 | T-7-04 / T-7-05 | JOBS_LOCK / DOT_ACTION_LOCK / BINDER_WRITE_LOCK recover with lock-specific D-03 justifications; INSPECTION_CACHE untouched | unit (Rust) | `cargo test --lib jobs`; `cargo test --lib dot_sync`; `cargo test --lib evidence_binder`; `cargo clippy --lib -- -D warnings` | ✅ | ✅ green |
+| 07-02 T3 | 07-02 | 1 | PERF-03 | T-7-04 / T-7-06 | All five terminal acquisition sites recover (killer keeps `closing` latched per D-02); six retired poison strings exist only as inert test assertions | unit (Rust) | `cargo test --lib terminal`; `cargo test --lib`; `cargo clippy --lib -- -D warnings && cargo fmt --check`; `pnpm test -- ipcError` | ✅ | ✅ green |
+| 07-03 T1 | 07-03 | 1 | PERF-04 | T-7-07 / T-7-08 | `is_under_generated_dir` exact-component semantics (prefix sibling not pruned, empty/root safe); vault_watcher mixed batch emits only legitimate paths | unit (Rust) | `cargo test --lib paths`; `cargo test --lib vault_watcher`; `cargo clippy --lib -- -D warnings` | ✅ | ✅ green |
+| 07-03 T2 | 07-03 | 1 | PERF-04 | T-7-07 / T-7-08 | inbox_watcher and scratchpad_watcher prune per path at dispatch time; non-generated siblings in the same event still emit | unit (Rust) | `cargo test --lib inbox_watcher`; `cargo test --lib scratchpad_watcher`; `cargo clippy --lib -- -D warnings` | ✅ | ✅ green |
+| 07-03 T3 | 07-03 | 1 | PERF-04 | T-7-07 / T-7-09 | ops_catalog and terminal_hooks prune; all five watchers reference the SSOT predicate; no local name lists introduced | unit (Rust) | `cargo test --lib ops_catalog`; `cargo test --lib terminal_hooks`; `cargo test --lib`; `cargo clippy --lib -- -D warnings && cargo fmt --check` | ✅ | ✅ green |
+| 07-04 T1 | 07-04 | 1 | PERF-06 | T-7-10 / T-7-11 | Zero inbox rows via full scan and cache read (stale cache self-heals); fail-open resolution; empty-rel guard; `inbox-backup` prefix sibling still indexed | unit (Rust) | `cargo test --lib vault`; `cargo clippy --lib -- -D warnings` | ✅ | ✅ green |
+| 07-04 T2 | 07-04 | 1 | PERF-06 | T-7-10 / T-7-12 | `scan_vault_paths` containment excludes the resolved inbox root (rescan cannot re-inject pruned rows); Inbox pane / Files browser / content search regression watch green | unit (Rust) | `cargo test --lib vault`; `cargo test --lib inbox`; `cargo test --lib workspace_files`; `cargo test --lib content_search`; `cargo test --lib && cargo clippy --lib -- -D warnings && cargo fmt --check` | ✅ | ✅ green |
+| 07-05 T1 | 07-05 | 1 | PERF-06 | T-7-13 / T-7-15 | Switcher narrowed to All / Drafts / Archive / Recently Updated; counts map and union agree; zero remaining references to the removed view | unit (TS) | `pnpm typecheck`; `pnpm test -- documentIndex`; `pnpm lint` | ✅ | ✅ green |
+| 07-05 T2 | 07-05 | 1 | PERF-06 | T-7-13 / T-7-14 | Persisted `view: "inbox"` filter reset silently to `{ kind: "all" }` per visibility; i18n key parity (en + ko same commit) | unit (TS) | `pnpm test -- workspaceStore`; `pnpm test -- outlinePaneStore`; `pnpm lint:i18n`; `pnpm test -- documentIndex`; `pnpm typecheck && pnpm lint` | ✅ | ✅ green |
 
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
 
-The phase-gate e2e run (`pnpm exec playwright test e2e/inbox*.spec.ts`, the Inbox-pane
-regression watch named in 07-RESEARCH.md's Phase Requirements → Test Map) is not a
-task verify: it is recorded as an explicit phase-gate run in the plan-level
-`<verification>` blocks of 07-04 and 07-05 and executes at `/gsd-verify-work` time.
+The phase-gate e2e run is not a task verify. The `e2e/inbox*.spec.ts` glob named in
+07-RESEARCH.md matches no file; 07-UAT.md replaced it with the eight existing Inbox-pane
+checks: `MARU_E2E_PORT=5319 pnpm exec playwright test e2e/smoke.spec.ts
+e2e/workbench-layout.spec.ts e2e/dashboard.spec.ts --grep 'restores the previous app
+state|every primary workbench|every right workbench|widget actions deep-link|inbox card
+splits'`.
 
 ---
 
@@ -102,4 +104,21 @@ run" rather than "a Wave 0 ran and passed".
 - [x] Feedback latency < 120s — task verifies are module-scoped (largest: `cargo test --lib`, which the Pitfall 5 poison-safety check requires); full `pnpm test` and the e2e inbox spec are plan/phase-gate runs, not task verifies
 - [x] `nyquist_compliant: true` set in frontmatter
 
-**Approval:** pending
+**Approval:** validated 2026-09-27
+
+## Validation Audit 2026-09-27
+
+| Metric | Count |
+|--------|-------|
+| Gaps found | 0 |
+| Resolved | 0 |
+| Escalated | 0 |
+
+Every row maps to a test that exists and ran green on this branch (base 7c10b229):
+
+- SEC-02: `node scripts/check-dom-sanitizer.mjs` exit 0 (6 sinks); `make -n verify | grep -c check-dom-sanitizer` = 1, adjacent to `check-select-chrome`; `check-dom-sanitizer.test.ts` and `.behavior.test.ts` green.
+- PERF-03, PERF-04, PERF-06 (backend): full `cargo test --offline --lib` 1861 passed, 1 failed, 3 ignored. The one failure, `template_fill::phase08_21::phase08_21_template_fields_map_the_hwp_form_scan_and_need_hwp`, is a Phase 8 fixture that hit its runtime timeout while other agents loaded the host; `cargo test --offline --lib template_fill::` passed 15/15 on rerun. The Phase 7 selectors (`lock_recovery`, `jobs`, `dot_sync`, `evidence_binder`, `terminal`, `skill_host`, `paths`, `vault_watcher`, `inbox_watcher`, `scratchpad_watcher`, `ops_catalog`, `terminal_hooks`, `vault`, `inbox`, `workspace_files`, `content_search`) all passed in that run.
+- PERF-06 (frontend): `documentIndex`, `workspaceStore`, `outlinePaneStore`, `ipcError` vitest files 61/61; `pnpm lint:i18n` 3810 keys in parity. A re-added Inbox row in the switcher fails `pnpm typecheck`, because `viewCounts` is `Record<BuiltInDocumentView, number>` and the union no longer carries `inbox`.
+- Phase-gate regression watch: the eight Inbox-pane Playwright checks above passed 8/8 on port 5319; the Inbox unit suites (`inboxKeyboard`, `inbox`, `inboxReview`, `inboxSources`, `contentSearch`) passed 58/58.
+
+The Manual-Only row (live-process poison injection) stays manual.
