@@ -47,6 +47,7 @@ import {
   findMatches,
 } from "../lib/findInDocument";
 import { isHtmlFileKind } from "../lib/htmlDocument";
+import { interceptPreviewLinkClick } from "../lib/previewLinks";
 import {
   mapSpansToRenderedText,
   refMapToCharSpans,
@@ -595,10 +596,13 @@ export const EditorPane = memo(forwardRef<HTMLDivElement, EditorPaneProps>(funct
       const node = (event.target as HTMLElement).closest(
         "[data-wikilink]",
       ) as HTMLElement | null;
-      if (!node) return;
-      event.preventDefault();
-      const target = node.getAttribute("data-wikilink");
-      if (target) onWikilinkClick(target);
+      if (node) {
+        event.preventDefault();
+        const target = node.getAttribute("data-wikilink");
+        if (target) onWikilinkClick(target);
+        return;
+      }
+      interceptPreviewLinkClick(event);
     },
     [onWikilinkClick, onKgRefNodeClick],
   );

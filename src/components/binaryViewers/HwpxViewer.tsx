@@ -3,6 +3,7 @@ import DOMPurify from "dompurify";
 import { binaryViewerExtractHwpx, type BinaryViewerHwpxPreview } from "../../lib/api";
 import { INLINE_HWPX_MAX_BYTES } from "../../lib/binaryViewer";
 import { useTranslation } from "../../lib/i18n";
+import { interceptPreviewLinkClick } from "../../lib/previewLinks";
 import type { WorkspaceFileEntry } from "../../lib/types";
 import { SystemPreviewViewer } from "./SystemPreviewViewer";
 
@@ -99,6 +100,7 @@ export function HwpxViewer({
       </div>
       <div
         className="binary-viewer-canvas binary-viewer-canvas--hwpx markdown-body"
+        onClick={interceptPreviewLinkClick}
         dangerouslySetInnerHTML={{ __html: sanitizedHtml }}
       />
     </div>

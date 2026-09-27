@@ -64,6 +64,7 @@ import {
   listFilesDirectoryContents,
   normalizeRelPath,
   parentFolderRelPath,
+  trashConfirmMessage,
   workspaceNodeToFileEntry,
   type FilesDirectoryTreeNode,
 } from "../lib/filesWorkbench";
@@ -707,16 +708,11 @@ export const FilesWorkbench = memo(function FilesWorkbench(props: FilesWorkbench
             (path) => path === entry.path || path.startsWith(`${entry.path}/`),
           ),
       );
-    if (
-      risky &&
-      !(await confirmDialog(
-        t("files.operations.trashConfirm", {
-          count: selectedEntries.length,
-          name: selectedEntries[0]?.name ?? "",
-        }),
-      ))
-    ) {
-      return;
+    if (risky) {
+      const message = trashConfirmMessage(selectedEntries.map((entry) => entry.name));
+      if (!(await confirmDialog(t(message.key, message.vars)))) {
+        return;
+      }
     }
     void runMutation(
       () =>
