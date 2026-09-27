@@ -1,8 +1,8 @@
+use crate::artifact_checks::{self, ArtifactCheck};
 use crate::atomic_file::{
     with_path_transactions, write_atomic, PathTransactionLease, PathTransactionRequest,
 };
 use crate::hwp_cli_template;
-use crate::kordoc_lite::{self, KordocLiteCheck, LiteField};
 use crate::vault::resolve_inside_vault;
 use crate::vault_list::{assert_maru_can_write, WorkspaceWriteAction};
 use serde::{Deserialize, Serialize};
@@ -78,7 +78,7 @@ pub struct TemplateFillResponse {
     #[serde(default)]
     pub unmatched_fields: Vec<String>,
     #[serde(default)]
-    pub validation_checks: Vec<KordocLiteCheck>,
+    pub validation_checks: Vec<ArtifactCheck>,
     #[serde(default)]
     pub warnings: Vec<String>,
 }
@@ -93,50 +93,32 @@ pub fn template_get_fields(
         return Err("Template field extraction requires a .hwpx template".to_string());
     }
 
-    let mut fields: BTreeMap<String, TemplateField> = BTreeMap::new();
+    // hwp's `fields` already merges every {{slot}} (under its normalized key)
+    // with the label cells and inline labels, one entry per key.
+    let hwp = hwp_cli_template::hwp_bin()?;
+    let scan = hwp_cli_template::form_scan(&hwp, &template_path)?;
     let mut warnings = Vec::new();
-
-    match hwp_cli_template::hwp_bin() {
-        Ok(hwp) => match hwp_cli_template::slots_for(&hwp, &template_path) {
-            Ok(slots) => {
-                for field in slots {
-                    merge_template_field(&mut fields, field);
-                }
-            }
-            Err(err) => warnings.push(format!("hwp slots unavailable: {err}")),
-        },
-        Err(err) => warnings.push(format!("{err}; using kordoc_lite scan only")),
+    if scan.fields.is_empty() {
+        warnings.push("hwp found no placeholders or form labels".to_string());
     }
-
-    match kordoc_lite::scan_hwpx_fields(&template_path) {
-        Ok(scan) => {
-            for field in scan.fields {
-                merge_template_field(&mut fields, template_field_from_lite(field));
-            }
-            warnings.extend(scan.warnings);
-            warnings.extend(
-                scan.validation_checks
-                    .into_iter()
-                    .filter(|check| check.status != "pass")
-                    .filter_map(|check| {
-                        check
-                            .reason
-                            .map(|reason| format!("{}: {reason}", check.name))
-                    }),
-            );
-        }
-        Err(err) => {
-            if fields.is_empty() {
-                return Err(format!("Cannot scan HWPX template fields: {err}"));
-            }
-            warnings.push(format!("kordoc_lite scan skipped: {err}"));
-        }
-    }
+    let fields = scan
+        .fields
+        .into_iter()
+        .map(|field| TemplateField {
+            key: field.key,
+            label: field.label,
+            required: field.required,
+            occurrences: field.occurrences,
+            source: Some(field.source),
+            confidence: Some(field.confidence),
+            matched_key: None,
+        })
+        .collect();
 
     Ok(TemplateFieldResponse {
         template_path: template_path.to_string_lossy().to_string(),
         source,
-        fields: fields.into_values().collect(),
+        fields,
         warnings,
     })
 }
@@ -239,190 +221,61 @@ fn template_fill_hwpx_in_transaction(
         .map_err(|err| format!("Cannot stage template fill: {err}"))?;
     let staged = stage.path().join("filled.hwpx");
 
-    // Requested keys that are real {{slot}}s go to `hwp fill --allow-partial`.
-    // hwp's slot scan trims names but its fill matches `{{name}}` exactly, so a
-    // padded `{{ name }}` is left to the kordoc_lite fill below, which also
-    // replaces placeholders; the final re-scan decides.
-    let slots = hwp_cli_template::slots_for(&hwp, &template_path)?;
-    let slot_values: BTreeMap<String, String> = request
-        .values
+    // One `hwp fill --forms` pass fills the slots and the form fields. A
+    // requested slot it cannot fill is an error; a form key it cannot match
+    // stays in `unmatched_fields`.
+    let scan = hwp_cli_template::form_scan(&hwp, &template_path)?;
+    let data_file = write_temp_values(&request.values)?;
+    let report = hwp_cli_template::fill_forms(
+        &hwp,
+        &template_path,
+        data_file.path(),
+        &staged,
+        &request.values,
+    )?;
+    let (slot_counts, form_counts): (Vec<_>, Vec<_>) =
+        report.counts.iter().partition(|(key, _)| scan.is_slot(key));
+    let unfilled = slot_counts
         .iter()
-        .filter(|(key, _)| slots.iter().any(|slot| &slot.key == *key))
-        .map(|(key, value)| (key.clone(), value.clone()))
-        .collect();
-
-    let mut warnings = Vec::new();
-    let stage_template = || -> Result<(), String> {
-        let template =
-            fs::read(&template_path).map_err(|err| format!("Cannot read template: {err}"))?;
-        fs::write(&staged, template).map_err(|err| format!("Cannot stage template: {err}"))
-    };
-    let copy_command = |why: &str| {
-        format!(
-            "copy {} {} ({why})",
-            template_path.display(),
-            output_path.display()
-        )
-    };
-    // Why `hwp fill` published nothing; kept as context for the re-scan error.
-    let mut hwp_fill_error = None;
-    let (replaced_count, command) = if slot_values.is_empty() {
-        stage_template()?;
-        (0, copy_command("no requested slot keys"))
-    } else {
-        let data_file = write_temp_values(&slot_values)?;
-        // Its "unreplaced placeholder" warnings are superseded by the re-scan.
-        match hwp_cli_template::fill_slots(
-            &hwp,
-            &template_path,
-            data_file.path(),
-            &staged,
-            &slot_values,
-            true,
-        ) {
-            Ok(report) => {
-                let command = command_label(
-                    &hwp,
-                    &[
-                        OsString::from("fill"),
-                        template_path.as_os_str().to_os_string(),
-                        OsString::from("--data"),
-                        OsString::from("<values.json>"),
-                        OsString::from("-o"),
-                        output_path.as_os_str().to_os_string(),
-                        OsString::from("--json"),
-                        OsString::from("--allow-partial"),
-                    ],
-                );
-                (report.replaced, command)
-            }
-            // hwp publishes nothing when it matched no slot at all, even with
-            // --allow-partial (e.g. every requested slot is padded); kordoc_lite
-            // and the re-scan below decide instead.
-            Err(err) => {
-                stage_template()?;
-                hwp_fill_error = Some(err);
-                (0, copy_command("hwp fill published nothing"))
-            }
-        }
-    };
-
-    let mut form_filled_count = 0;
-    let mut unmatched_fields = Vec::new();
-    let mut validation_checks = Vec::new();
-
-    match kordoc_lite::fill_hwpx_form_fields(&staged, &staged, &request.values) {
-        Ok(outcome) => {
-            form_filled_count = outcome.filled_count;
-            unmatched_fields = outcome.unmatched_fields;
-            validation_checks = outcome.validation_checks;
-            warnings.extend(outcome.warnings);
-        }
-        Err(err) => {
-            validation_checks.push(KordocLiteCheck {
-                name: "kordoc-lite-fill".to_string(),
-                status: "fail".to_string(),
-                reason: Some(err.clone()),
-            });
-            warnings.push(format!("kordoc_lite form fill skipped: {err}"));
-        }
-    }
-    let unfilled = hwp_cli_template::slots_for(&hwp, &staged)?
-        .into_iter()
-        .filter(|slot| slot_values.contains_key(&slot.key))
-        .map(|slot| slot.key)
+        .filter(|(_, count)| **count == 0)
+        .map(|(key, _)| key.as_str())
         .collect::<Vec<_>>();
     if !unfilled.is_empty() {
-        let context = hwp_fill_error
-            .map(|err| format!(" (hwp fill: {err})"))
-            .unwrap_or_default();
         return Err(format!(
-            "template_fill_unfilled_slots: {}{context}",
+            "template_fill_unfilled_slots: {}",
             unfilled.join(", ")
         ));
     }
-    // Every requested slot is filled now, so only keys that are neither a slot
-    // nor a kordoc_lite match stay unmatched.
-    unmatched_fields.retain(|key| !slot_values.contains_key(key));
+    let replaced_count = slot_counts.iter().map(|(_, count)| **count).sum();
+    let form_filled_count = form_counts.iter().map(|(_, count)| **count).sum();
 
-    let hwp_validation_ok = hwp_cli_template::validate_template(&hwp, &staged).is_ok();
+    let validation_checks = artifact_checks::hwpx_checks(Ok(hwp.as_path()), &staged);
+    let validation_ok = validation_checks.iter().all(|check| check.status == "pass");
     let filled = fs::read(&staged).map_err(|err| format!("Cannot read staged fill: {err}"))?;
     write_atomic(&output_path, &filled).map_err(|err| format!("Cannot publish fill: {err}"))?;
-    let kordoc_validation_ok = validation_checks.iter().all(|check| check.status == "pass");
-    let validation_ok = hwp_validation_ok && kordoc_validation_ok;
+    let mut warnings = report.warnings;
+    if !validation_ok {
+        warnings.push("Filled HWPX was written but hwp validation did not pass".to_string());
+    }
 
     Ok(TemplateFillResponse {
         output_path: output_path.to_string_lossy().to_string(),
         replaced_count,
         validation_ok,
-        command,
+        command: command_label(
+            &hwp,
+            &hwp_cli_template::fill_args(
+                &template_path,
+                Path::new("<values.json>"),
+                &output_path,
+                &["--forms", "--allow-partial"],
+            ),
+        ),
         form_filled_count,
-        unmatched_fields,
+        unmatched_fields: report.unmatched,
         validation_checks,
-        warnings: {
-            if !hwp_validation_ok {
-                warnings
-                    .push("Filled HWPX was written but hwp validation did not pass".to_string());
-            }
-            if !kordoc_validation_ok {
-                warnings.push(
-                    "Filled HWPX was written but kordoc_lite validation did not pass".to_string(),
-                );
-            }
-            warnings
-        },
+        warnings,
     })
-}
-
-fn merge_template_field(fields: &mut BTreeMap<String, TemplateField>, field: TemplateField) {
-    fields
-        .entry(field.key.clone())
-        .and_modify(|existing| {
-            existing.occurrences += field.occurrences;
-            existing.required = existing.required || field.required;
-            if should_replace_template_field_metadata(existing, &field) {
-                existing.label = field.label.clone();
-                existing.source = field.source.clone();
-                existing.confidence = field.confidence;
-                existing.matched_key = field.matched_key.clone();
-            } else if existing.matched_key.is_none() && field.matched_key.is_some() {
-                existing.matched_key = field.matched_key.clone();
-            }
-        })
-        .or_insert(field);
-}
-
-fn should_replace_template_field_metadata(
-    existing: &TemplateField,
-    incoming: &TemplateField,
-) -> bool {
-    let existing_rank = template_field_source_rank(existing.source.as_deref());
-    let incoming_rank = template_field_source_rank(incoming.source.as_deref());
-    incoming_rank > existing_rank
-        || (incoming_rank == existing_rank
-            && incoming.confidence.unwrap_or(0.0) > existing.confidence.unwrap_or(0.0))
-}
-
-fn template_field_source_rank(source: Option<&str>) -> u8 {
-    match source {
-        Some("formLabel") => 3,
-        Some("inlineLabel") => 2,
-        Some("placeholder") => 1,
-        Some(_) => 2,
-        None => 0,
-    }
-}
-
-fn template_field_from_lite(field: LiteField) -> TemplateField {
-    TemplateField {
-        key: field.key,
-        label: field.label,
-        required: field.required,
-        occurrences: field.occurrences,
-        source: Some(field.source),
-        confidence: Some(field.confidence),
-        matched_key: field.matched_key,
-    }
 }
 
 fn resolve_template_path(
@@ -631,65 +484,16 @@ mod tests {
         assert!(has_extension(Path::new("Template.HwPx"), "hwpx"));
         assert!(!has_extension(Path::new("Template.hwp"), "hwpx"));
     }
-
-    #[test]
-    fn merge_template_field_prefers_form_metadata_over_placeholder() {
-        let mut fields = BTreeMap::new();
-        merge_template_field(
-            &mut fields,
-            TemplateField {
-                key: "성명".to_string(),
-                label: "성명".to_string(),
-                required: false,
-                occurrences: 1,
-                source: Some("placeholder".to_string()),
-                confidence: Some(1.0),
-                matched_key: None,
-            },
-        );
-        merge_template_field(
-            &mut fields,
-            TemplateField {
-                key: "성명".to_string(),
-                label: "성명 라벨".to_string(),
-                required: true,
-                occurrences: 1,
-                source: Some("formLabel".to_string()),
-                confidence: Some(0.72),
-                matched_key: Some("성명".to_string()),
-            },
-        );
-        merge_template_field(
-            &mut fields,
-            TemplateField {
-                key: "성명".to_string(),
-                label: "성명".to_string(),
-                required: false,
-                occurrences: 1,
-                source: Some("placeholder".to_string()),
-                confidence: Some(1.0),
-                matched_key: None,
-            },
-        );
-
-        let field = fields.get("성명").unwrap();
-        assert_eq!(field.occurrences, 3);
-        assert_eq!(field.label, "성명 라벨");
-        assert_eq!(field.source.as_deref(), Some("formLabel"));
-        assert_eq!(field.matched_key.as_deref(), Some("성명"));
-        assert!(field.required);
-    }
 }
 
 #[cfg(test)]
 mod phase08_21 {
     use super::*;
     use crate::atomic_file::phase08_06::{boundary, run, Held, Home};
-    use std::io::{Read, Write};
+    use serde_json::json;
     use std::path::Path;
     use std::sync::MutexGuard;
     use std::time::Duration;
-    use zip::write::SimpleFileOptions;
 
     struct EnvGuard {
         _lock: MutexGuard<'static, ()>,
@@ -713,92 +517,89 @@ mod phase08_21 {
         path.to_string_lossy().into_owned()
     }
 
-    fn write_hwpx_fixture(path: &Path, section_xml: &str) {
-        let file = std::fs::File::create(path).unwrap();
-        let mut zip = zip::ZipWriter::new(file);
-        let options =
-            SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
-        zip.start_file("mimetype", options).unwrap();
-        zip.write_all(b"application/hwp+zip").unwrap();
-        zip.start_file("Contents/content.hpf", options).unwrap();
-        zip.write_all(b"<package />").unwrap();
-        zip.start_file("Contents/section0.xml", options).unwrap();
-        zip.write_all(section_xml.as_bytes()).unwrap();
-        zip.finish().unwrap();
+    /// The stub hwp reads nothing from the template, so its bytes are opaque.
+    fn write_template(root: &Path) {
+        std::fs::create_dir_all(root.join("templates")).unwrap();
+        std::fs::write(root.join("templates/form.hwpx"), "template bytes").unwrap();
     }
 
-    fn read_section(path: &Path) -> String {
-        let file = std::fs::File::open(path).unwrap();
-        let mut archive = zip::ZipArchive::new(file).unwrap();
-        let mut entry = archive.by_name("Contents/section0.xml").unwrap();
-        let mut xml = String::new();
-        entry.read_to_string(&mut xml).unwrap();
-        xml
-    }
-
-    /// Fake released hwp. `slots` reports the slot names for the template and
-    /// `remaining` for the staged fill (the final re-scan); `fill` requires
-    /// `--allow-partial`, appends the values JSON it received to fill.log, and
-    /// reports each slot's replacement count. Like hwp 1.1.0, it publishes
-    /// nothing and exits 1 when no slot matched at all; otherwise it copies the
-    /// template to the output, so kordoc_lite then fills the copy and the last
-    /// admitted writer is visible in the output bytes.
-    #[cfg(unix)]
-    fn fake_hwp(dir: &Path, slots: &[(&str, u32)], remaining: &[&str]) -> PathBuf {
-        use std::os::unix::fs::PermissionsExt;
-
-        let binary = dir.join("hwp");
-        let placeholders = |names: &[&str]| {
-            serde_json::json!({
-                "placeholders": names
-                    .iter()
-                    .map(|name| serde_json::json!({ "name": name, "occurrences": 1 }))
-                    .collect::<Vec<_>>(),
+    /// `hwp slots --forms --json` output: `slots` as placeholders (each also a
+    /// required `placeholder` field) plus the given form fields.
+    fn scan(slots: &[&str], forms: &[(&str, &str, &str)]) -> serde_json::Value {
+        let mut fields = slots
+            .iter()
+            .map(|name| {
+                json!({"key": name, "label": name, "source": "placeholder",
+                       "confidence": 1.0, "occurrences": 1, "required": true})
             })
-        };
-        let names = slots.iter().map(|(name, _)| *name).collect::<Vec<_>>();
-        let replaced: u32 = slots.iter().map(|(_, count)| count).sum();
-        let report = serde_json::json!({
+            .collect::<Vec<_>>();
+        fields.extend(forms.iter().map(|(key, label, source)| {
+            let confidence = if *source == "formLabel" { 0.72 } else { 0.64 };
+            json!({"key": key, "label": label, "source": source,
+                   "confidence": confidence, "occurrences": 1, "required": false})
+        }));
+        json!({
+            "placeholders": slots
+                .iter()
+                .map(|name| json!({"name": name, "occurrences": 1}))
+                .collect::<Vec<_>>(),
+            "fields": fields,
+        })
+    }
+
+    /// A well-formed `hwp fill --forms --json` report for `counts`.
+    fn report(counts: &[(&str, u32)], unmatched: &[&str]) -> serde_json::Value {
+        json!({
             "output": "filled.hwpx",
-            "mode": "placeholders",
-            "replaced": replaced,
-            "counts": slots
+            "mode": "forms",
+            "replaced": counts.iter().map(|(_, count)| count).sum::<u32>(),
+            "counts": counts
                 .iter()
                 .map(|(name, count)| (name.to_string(), *count))
                 .collect::<BTreeMap<_, _>>(),
-            "warnings": [],
-        });
+            "unmatched": unmatched,
+            "warnings": ["hwp warning"],
+        })
+    }
+
+    /// Stub released hwp. `slots` prints `scan`; `fill` requires `--forms`,
+    /// `--allow-partial` and `--json`, appends the values JSON it received to
+    /// fill.log, publishes that JSON as the output (so the last admitted
+    /// writer is visible in the published bytes) and prints `report`.
+    #[cfg(unix)]
+    fn fake_hwp(dir: &Path, scan: &serde_json::Value, report: &serde_json::Value) -> PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+
+        let binary = dir.join("hwp");
         let script = format!(
             r#"#!/bin/sh
 case "$1" in
-  --version) echo "hwp 1.1.0" ;;
+  --version) echo "hwp 1.2.0" ;;
   slots)
-    case "$2" in
-      *.maru-template-fill-*) printf '%s\n' '{remaining}' ;;
-      *) printf '%s\n' '{template}' ;;
-    esac ;;
+    [ "$3" = "--forms" ] && [ "$4" = "--json" ] || exit 2
+    printf '%s\n' '{scan}' ;;
   fill)
-    template="$2"; output=""; data=""; partial=false
+    template="$2"; output=""; data=""; forms=false; partial=false; json=false
     while [ "$#" -gt 0 ]; do
-      if [ "$1" = "-o" ]; then shift; output="$1"; fi
-      if [ "$1" = "--data" ]; then shift; data="$1"; fi
-      if [ "$1" = "--allow-partial" ]; then partial=true; fi
+      case "$1" in
+        -o) shift; output="$1" ;;
+        --data) shift; data="$1" ;;
+        --forms) forms=true ;;
+        --allow-partial) partial=true ;;
+        --json) json=true ;;
+      esac
       shift
     done
-    [ -n "$output" ] && [ -f "$template" ] && [ -f "$data" ] && [ "$partial" = true ] || exit 2
+    [ -n "$output" ] && [ -f "$template" ] && [ -f "$data" ] && [ "$forms" = true ] && [ "$partial" = true ] && [ "$json" = true ] || exit 2
     cat "$data" >> "{log}"
-    if [ {replaced} -eq 0 ]; then
-      echo "Error: 요청한 자리표시자를 하나도 찾지 못해 출력을 게시하지 않습니다" >&2
-      exit 1
-    fi
-    cp "$template" "$output"
+    printf '\n' >> "{log}"
+    cp "$data" "$output"
     printf '%s\n' '{report}' ;;
-  validate) exit 0 ;;
+  validate) printf '%s\n' '{{"valid":true,"errors":[]}}' ;;
+  info) printf '%s\n' '{{"sections":1}}' ;;
   *) exit 2 ;;
 esac
 "#,
-            template = placeholders(&names),
-            remaining = placeholders(remaining),
             log = dir.join("fill.log").display()
         );
         std::fs::write(&binary, script).unwrap();
@@ -806,6 +607,14 @@ esac
         permissions.set_mode(0o755);
         std::fs::set_permissions(&binary, permissions).unwrap();
         binary
+    }
+
+    fn fill_log(dir: &Path) -> Vec<String> {
+        std::fs::read_to_string(dir.join("fill.log"))
+            .unwrap()
+            .lines()
+            .map(str::to_string)
+            .collect()
     }
 
     fn fill_request(
@@ -822,6 +631,10 @@ esac
 
     fn values(marker: &str) -> BTreeMap<String, String> {
         BTreeMap::from([("제목".to_string(), marker.to_string())])
+    }
+
+    fn published(path: &Path) -> String {
+        std::fs::read_to_string(path).unwrap()
     }
 
     #[test]
@@ -857,14 +670,14 @@ esac
     fn phase08_21_template_real_fixture_results_and_legacy_rejections() {
         let home = Home::new();
         let root = home.root.path().join("work");
-        std::fs::create_dir_all(root.join("templates")).unwrap();
-        write_hwpx_fixture(
-            &root.join("templates/form.hwpx"),
-            "<hp:sec><hp:p><hp:t>{{제목}}</hp:t></hp:p></hp:sec>",
-        );
+        write_template(&root);
         let bin_dir = home.root.path().join("bin");
         std::fs::create_dir_all(&bin_dir).unwrap();
-        let _env = EnvGuard::set_hwp(&fake_hwp(&bin_dir, &[("제목", 1)], &[]));
+        let _env = EnvGuard::set_hwp(&fake_hwp(
+            &bin_dir,
+            &scan(&["제목"], &[]),
+            &report(&[("제목", 1)], &[]),
+        ));
         let work = text(&root);
 
         let fields = run(ipc::template_get_fields(
@@ -894,7 +707,7 @@ esac
         assert!(filled.validation_ok);
         assert!(filled.unmatched_fields.is_empty());
         assert!(
-            read_section(&root.join("out/filled.hwpx")).contains("제목값"),
+            published(&root.join("out/filled.hwpx")).contains("제목값"),
             "marker value should be substituted into the filled hwpx"
         );
 
@@ -942,14 +755,14 @@ esac
         let home = Home::new();
         let bin_dir = home.root.path().join("bin-orders");
         std::fs::create_dir_all(&bin_dir).unwrap();
-        let _env = EnvGuard::set_hwp(&fake_hwp(&bin_dir, &[("제목", 1)], &[]));
+        let _env = EnvGuard::set_hwp(&fake_hwp(
+            &bin_dir,
+            &scan(&["제목"], &[]),
+            &report(&[("제목", 1)], &[]),
+        ));
         for swap in [false, true] {
             let root = home.root.path().join(format!("fill-{swap}"));
-            std::fs::create_dir_all(root.join("templates")).unwrap();
-            write_hwpx_fixture(
-                &root.join("templates/form.hwpx"),
-                "<hp:sec><hp:p><hp:t>{{제목}}</hp:t></hp:p></hp:sec>",
-            );
+            write_template(&root);
             let work = text(&root);
             let target = root.join("out/filled.hwpx");
             let first_marker = if swap { "second" } else { "first" };
@@ -973,7 +786,7 @@ esac
             let written = done(second).unwrap();
             assert_eq!(written.replaced_count, 1);
             assert!(
-                read_section(&target).contains(second_marker),
+                published(&target).contains(second_marker),
                 "second admitted writer must own the final bytes"
             );
         }
@@ -984,14 +797,14 @@ esac
     fn phase08_21_template_denied_and_error_release_admission() {
         let home = Home::new();
         let root = home.root.path().join("policy");
-        std::fs::create_dir_all(root.join("templates")).unwrap();
-        write_hwpx_fixture(
-            &root.join("templates/form.hwpx"),
-            "<hp:sec><hp:p><hp:t>{{제목}}</hp:t></hp:p></hp:sec>",
-        );
+        write_template(&root);
         let bin_dir = home.root.path().join("bin-policy");
         std::fs::create_dir_all(&bin_dir).unwrap();
-        let _env = EnvGuard::set_hwp(&fake_hwp(&bin_dir, &[("제목", 1)], &[]));
+        let _env = EnvGuard::set_hwp(&fake_hwp(
+            &bin_dir,
+            &scan(&["제목"], &[]),
+            &report(&[("제목", 1)], &[]),
+        ));
         let work = text(&root);
         crate::scratchpad::phase08_08::registry(&root, "readOnly");
         let err = run(ipc::template_fill_hwpx(
@@ -1025,82 +838,199 @@ esac
         ))
         .unwrap();
         assert!(
-            read_section(&root.join("blocked/published.hwpx")).contains("recovered"),
+            published(&root.join("blocked/published.hwpx")).contains("recovered"),
             "retry after admission error must publish the recovered fill"
         );
     }
 
-    const SLOT_AND_FORM_LABEL: &str = "<hp:sec><hp:p><hp:t>{{제목}}</hp:t></hp:p><hp:tbl><hp:tr><hp:tc><hp:p><hp:t>성명</hp:t></hp:p></hp:tc><hp:tc><hp:p><hp:t></hp:t></hp:p></hp:tc></hp:tr></hp:tbl></hp:sec>";
-    const FORM_LABEL_ONLY: &str = "<hp:sec><hp:tbl><hp:tr><hp:tc><hp:p><hp:t>성명</hp:t></hp:p></hp:tc><hp:tc><hp:p><hp:t></hp:t></hp:p></hp:tc></hp:tr></hp:tbl></hp:sec>";
-
+    /// A slot, a label cell and an inline label fill from one `hwp fill
+    /// --forms` call, and the counts split into slots and form fields.
     #[cfg(unix)]
     #[test]
-    fn phase08_21_template_fill_sends_only_slots_to_hwp_and_form_labels_to_kordoc() {
+    fn phase08_21_template_fill_one_forms_pass_splits_slot_and_form_counts() {
         let home = Home::new();
         let root = home.root.path().join("mixed");
-        std::fs::create_dir_all(root.join("templates")).unwrap();
-        write_hwpx_fixture(&root.join("templates/form.hwpx"), SLOT_AND_FORM_LABEL);
+        write_template(&root);
         let bin_dir = home.root.path().join("bin-mixed");
         std::fs::create_dir_all(&bin_dir).unwrap();
-        let _env = EnvGuard::set_hwp(&fake_hwp(&bin_dir, &[("제목", 1)], &[]));
+        let _env = EnvGuard::set_hwp(&fake_hwp(
+            &bin_dir,
+            &scan(
+                &["제목"],
+                &[
+                    ("성명", "성명", "formLabel"),
+                    ("담당자", "담당자", "inlineLabel"),
+                ],
+            ),
+            &report(&[("담당자", 1), ("성명", 2), ("제목", 1)], &[]),
+        ));
+        let values = BTreeMap::from([
+            ("제목".to_string(), "사업계획".to_string()),
+            ("성명".to_string(), "홍길동".to_string()),
+            ("담당자".to_string(), "이영준".to_string()),
+        ]);
+
+        let filled = run(ipc::template_fill_hwpx(
+            text(&root),
+            fill_request(values.clone(), Some("out/mixed.hwpx".to_string())),
+        ))
+        .unwrap();
+        assert_eq!(
+            fill_log(&bin_dir),
+            vec![serde_json::to_string(&values).unwrap()],
+            "one hwp fill receives every requested value"
+        );
+        assert_eq!(filled.replaced_count, 1);
+        assert_eq!(filled.form_filled_count, 3);
+        assert!(filled.command.contains(" fill "), "{}", filled.command);
+        assert!(filled.command.contains("--forms"), "{}", filled.command);
+        assert!(filled.unmatched_fields.is_empty());
+        assert!(filled.validation_ok, "{:?}", filled.warnings);
+        assert_eq!(filled.warnings, vec!["hwp warning"]);
+        assert_eq!(
+            filled
+                .validation_checks
+                .iter()
+                .map(|check| (check.name.as_str(), check.status.as_str()))
+                .collect::<Vec<_>>(),
+            [("zip-safety", "pass"), ("hwpx-sections", "pass")]
+        );
+        let output = published(&root.join("out/mixed.hwpx"));
+        assert!(
+            output.contains("사업계획") && output.contains("홍길동"),
+            "{output}"
+        );
+    }
+
+    /// #363: a padded `{{ 제목 }}`, even in an all-padded template, fills in the
+    /// one pass; hwp reports slot names trimmed and fills them padded.
+    #[cfg(unix)]
+    #[test]
+    fn phase08_21_template_fill_all_padded_slots_fill_in_one_pass() {
+        let home = Home::new();
+        let root = home.root.path().join("all-padded");
+        write_template(&root);
+        let bin_dir = home.root.path().join("bin-all-padded");
+        std::fs::create_dir_all(&bin_dir).unwrap();
+        let _env = EnvGuard::set_hwp(&fake_hwp(
+            &bin_dir,
+            &scan(&["기관", "제목"], &[]),
+            &report(&[("기관", 1), ("제목", 1)], &[]),
+        ));
 
         let filled = run(ipc::template_fill_hwpx(
             text(&root),
             fill_request(
                 BTreeMap::from([
-                    ("제목".to_string(), "사업계획".to_string()),
-                    ("성명".to_string(), "홍길동".to_string()),
+                    ("제목".to_string(), "패딩값".to_string()),
+                    ("기관".to_string(), "기관값".to_string()),
                 ]),
-                Some("out/mixed.hwpx".to_string()),
+                Some("out/all-padded.hwpx".to_string()),
             ),
         ))
         .unwrap();
-        // hwp fill received only the slot; the form label went to kordoc_lite.
-        assert_eq!(
-            std::fs::read_to_string(bin_dir.join("fill.log")).unwrap(),
-            r#"{"제목":"사업계획"}"#
-        );
-        assert_eq!(filled.replaced_count, 1);
-        assert!(filled.command.contains(" fill "), "{}", filled.command);
+        assert_eq!(fill_log(&bin_dir).len(), 1, "no second pass or fallback");
+        assert_eq!(filled.replaced_count, 2);
+        assert_eq!(filled.form_filled_count, 0);
+        assert!(filled.unmatched_fields.is_empty());
+        let output = published(&root.join("out/all-padded.hwpx"));
         assert!(
-            filled.unmatched_fields.is_empty(),
-            "{:?}",
-            filled.unmatched_fields
+            output.contains("패딩값") && output.contains("기관값"),
+            "{output}"
         );
-        assert!(filled.validation_ok, "{:?}", filled.warnings);
-        let section = read_section(&root.join("out/mixed.hwpx"));
-        assert!(section.contains("사업계획"), "{section}");
-        assert!(section.contains("홍길동"), "{section}");
     }
 
+    /// A form key hwp cannot match stays in `unmatched_fields`, and a zero
+    /// count outside `unmatched` (a checkbox left unchecked) is matched.
     #[cfg(unix)]
     #[test]
-    fn phase08_21_template_fill_without_slot_keys_copies_the_template_for_kordoc() {
+    fn phase08_21_template_fill_keeps_unmatched_form_keys_as_warnings() {
         let home = Home::new();
         let root = home.root.path().join("labels");
-        std::fs::create_dir_all(root.join("templates")).unwrap();
-        write_hwpx_fixture(&root.join("templates/form.hwpx"), FORM_LABEL_ONLY);
+        write_template(&root);
         let bin_dir = home.root.path().join("bin-labels");
         std::fs::create_dir_all(&bin_dir).unwrap();
-        let _env = EnvGuard::set_hwp(&fake_hwp(&bin_dir, &[], &[]));
+        let _env = EnvGuard::set_hwp(&fake_hwp(
+            &bin_dir,
+            &scan(&[], &[("성명", "성명", "formLabel")]),
+            &report(&[("동의", 0), ("성명", 1), ("없는키", 0)], &["없는키"]),
+        ));
 
         let filled = run(ipc::template_fill_hwpx(
             text(&root),
             fill_request(
-                BTreeMap::from([("성명".to_string(), "홍길동".to_string())]),
+                BTreeMap::from([
+                    ("성명".to_string(), "홍길동".to_string()),
+                    ("동의".to_string(), "false".to_string()),
+                    ("없는키".to_string(), "x".to_string()),
+                ]),
                 Some("out/labels.hwpx".to_string()),
             ),
         ))
         .unwrap();
-        assert!(!bin_dir.join("fill.log").exists(), "hwp fill must not run");
         assert_eq!(filled.replaced_count, 0);
-        assert!(filled.command.starts_with("copy "), "{}", filled.command);
-        assert!(
-            filled.unmatched_fields.is_empty(),
-            "{:?}",
-            filled.unmatched_fields
-        );
-        assert!(read_section(&root.join("out/labels.hwpx")).contains("홍길동"));
+        assert_eq!(filled.form_filled_count, 1);
+        assert_eq!(filled.unmatched_fields, vec!["없는키"]);
+        assert!(published(&root.join("out/labels.hwpx")).contains("홍길동"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn phase08_21_template_fill_fails_closed_on_a_slot_nothing_filled() {
+        let home = Home::new();
+        let root = home.root.path().join("unfillable");
+        write_template(&root);
+        let bin_dir = home.root.path().join("bin-unfillable");
+        std::fs::create_dir_all(&bin_dir).unwrap();
+        let _env = EnvGuard::set_hwp(&fake_hwp(
+            &bin_dir,
+            &scan(&["제목"], &[("성명", "성명", "formLabel")]),
+            &report(&[("성명", 1), ("제목", 0)], &["제목"]),
+        ));
+
+        let err = run(ipc::template_fill_hwpx(
+            text(&root),
+            fill_request(
+                BTreeMap::from([
+                    ("제목".to_string(), "x".to_string()),
+                    ("성명".to_string(), "홍길동".to_string()),
+                ]),
+                Some("out/unfillable.hwpx".to_string()),
+            ),
+        ))
+        .unwrap_err();
+        assert_eq!(err, "template_fill_unfilled_slots: 제목");
+        assert!(!root.join("out/unfillable.hwpx").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn phase08_21_template_fill_rejects_a_malformed_forms_report() {
+        let home = Home::new();
+        let root = home.root.path().join("malformed");
+        write_template(&root);
+        let bin_dir = home.root.path().join("bin-malformed");
+        std::fs::create_dir_all(&bin_dir).unwrap();
+        let mut total_disagrees = report(&[("제목", 1)], &[]);
+        total_disagrees["replaced"] = json!(2);
+        for (bad, expected) in [
+            (report(&[], &[]), "omitted counts for 제목"),
+            (total_disagrees, "replaced 2 does not match counts total 1"),
+            (
+                report(&[("제목", 1)], &["제목"]),
+                "unmatched 제목 without a zero count",
+            ),
+        ] {
+            let _env = EnvGuard::set_hwp(&fake_hwp(&bin_dir, &scan(&["제목"], &[]), &bad));
+            let err = run(ipc::template_fill_hwpx(
+                text(&root),
+                fill_request(values("x"), Some("out/malformed.hwpx".to_string())),
+            ))
+            .unwrap_err();
+            assert!(err.starts_with("hwp_fill_invalid_report"), "{err}");
+            assert!(err.contains(expected), "{err}");
+            assert!(!root.join("out/malformed.hwpx").exists());
+        }
     }
 
     #[cfg(unix)]
@@ -1108,11 +1038,7 @@ esac
     fn phase08_21_template_fill_fails_closed_without_a_released_hwp() {
         let home = Home::new();
         let root = home.root.path().join("no-hwp");
-        std::fs::create_dir_all(root.join("templates")).unwrap();
-        write_hwpx_fixture(
-            &root.join("templates/form.hwpx"),
-            "<hp:sec><hp:p><hp:t>{{제목}}</hp:t></hp:p></hp:sec>",
-        );
+        write_template(&root);
         let not_executable = home.root.path().join("hwp");
         std::fs::write(&not_executable, "not a binary").unwrap();
         let _env = EnvGuard::set_hwp(&not_executable);
@@ -1129,120 +1055,11 @@ esac
         );
     }
 
-    #[cfg(unix)]
-    #[test]
-    fn phase08_21_template_fill_fills_a_padded_slot_next_to_a_matched_one() {
-        let home = Home::new();
-        let root = home.root.path().join("padded");
-        std::fs::create_dir_all(root.join("templates")).unwrap();
-        write_hwpx_fixture(
-            &root.join("templates/form.hwpx"),
-            "<hp:sec><hp:p><hp:t>{{ 제목 }}</hp:t></hp:p><hp:p><hp:t>{{기관}}</hp:t></hp:p></hp:sec>",
-        );
-        let bin_dir = home.root.path().join("bin-padded");
-        std::fs::create_dir_all(&bin_dir).unwrap();
-        // hwp slots trims `{{ 제목 }}` to 제목 but hwp fill matches it 0 times.
-        let _env = EnvGuard::set_hwp(&fake_hwp(&bin_dir, &[("제목", 0), ("기관", 1)], &[]));
-
-        let filled = run(ipc::template_fill_hwpx(
-            text(&root),
-            fill_request(
-                BTreeMap::from([
-                    ("제목".to_string(), "패딩값".to_string()),
-                    ("기관".to_string(), "기관값".to_string()),
-                ]),
-                Some("out/padded.hwpx".to_string()),
-            ),
-        ))
-        .unwrap();
-        assert_eq!(filled.replaced_count, 1);
-        assert!(filled.command.contains(" fill "), "{}", filled.command);
-        assert!(
-            filled.unmatched_fields.is_empty(),
-            "{:?}",
-            filled.unmatched_fields
-        );
-        let section = read_section(&root.join("out/padded.hwpx"));
-        assert!(section.contains("패딩값"), "{section}");
-        assert!(section.contains("기관값"), "{section}");
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn phase08_21_template_fill_all_padded_slots_fall_back_to_kordoc() {
-        let home = Home::new();
-        let root = home.root.path().join("all-padded");
-        std::fs::create_dir_all(root.join("templates")).unwrap();
-        write_hwpx_fixture(
-            &root.join("templates/form.hwpx"),
-            "<hp:sec><hp:p><hp:t>{{ 제목 }}</hp:t></hp:p><hp:p><hp:t>{{ 기관 }}</hp:t></hp:p></hp:sec>",
-        );
-        let bin_dir = home.root.path().join("bin-all-padded");
-        std::fs::create_dir_all(&bin_dir).unwrap();
-        // hwp fill matches nothing, so like hwp 1.1.0 it publishes nothing.
-        let _env = EnvGuard::set_hwp(&fake_hwp(&bin_dir, &[("제목", 0), ("기관", 0)], &[]));
-
-        let filled = run(ipc::template_fill_hwpx(
-            text(&root),
-            fill_request(
-                BTreeMap::from([
-                    ("제목".to_string(), "패딩값".to_string()),
-                    ("기관".to_string(), "기관값".to_string()),
-                ]),
-                Some("out/all-padded.hwpx".to_string()),
-            ),
-        ))
-        .unwrap();
-        assert_eq!(filled.replaced_count, 0);
-        assert!(filled.command.starts_with("copy "), "{}", filled.command);
-        assert!(filled.form_filled_count >= 2);
-        assert!(
-            filled.unmatched_fields.is_empty(),
-            "{:?}",
-            filled.unmatched_fields
-        );
-        let section = read_section(&root.join("out/all-padded.hwpx"));
-        assert!(section.contains("패딩값"), "{section}");
-        assert!(section.contains("기관값"), "{section}");
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn phase08_21_template_fill_fails_closed_on_a_slot_nothing_filled() {
-        let home = Home::new();
-        let root = home.root.path().join("unfillable");
-        std::fs::create_dir_all(root.join("templates")).unwrap();
-        write_hwpx_fixture(
-            &root.join("templates/form.hwpx"),
-            "<hp:sec><hp:p><hp:t>{{제목}}</hp:t></hp:p></hp:sec>",
-        );
-        let bin_dir = home.root.path().join("bin-unfillable");
-        std::fs::create_dir_all(&bin_dir).unwrap();
-        // The final re-scan still reports the requested slot.
-        let _env = EnvGuard::set_hwp(&fake_hwp(&bin_dir, &[("제목", 0)], &["제목"]));
-
-        let err = run(ipc::template_fill_hwpx(
-            text(&root),
-            fill_request(values("x"), Some("out/unfillable.hwpx".to_string())),
-        ))
-        .unwrap_err();
-        assert!(
-            err.starts_with("template_fill_unfilled_slots: 제목 (hwp fill: "),
-            "{err}"
-        );
-        assert!(err.contains("하나도 찾지 못해"), "{err}");
-        assert!(!root.join("out/unfillable.hwpx").exists());
-    }
-
     #[test]
     fn phase08_21_template_fill_refuses_to_overwrite_its_template() {
         let home = Home::new();
         let root = home.root.path().join("same-path");
-        std::fs::create_dir_all(root.join("templates")).unwrap();
-        write_hwpx_fixture(
-            &root.join("templates/form.hwpx"),
-            "<hp:sec><hp:p><hp:t>{{제목}}</hp:t></hp:p></hp:sec>",
-        );
+        write_template(&root);
         let before = std::fs::read(root.join("templates/form.hwpx")).unwrap();
         let err = run(ipc::template_fill_hwpx(
             text(&root),
@@ -1268,65 +1085,65 @@ esac
         );
     }
 
+    /// hwp's form scan maps onto placeholder, formLabel and inlineLabel fields
+    /// as it reports them.
     #[cfg(unix)]
     #[test]
-    fn phase08_21_template_fields_scan_workspace_slots_with_and_without_hwp() {
+    fn phase08_21_template_fields_map_the_hwp_form_scan_and_need_hwp() {
         let home = Home::new();
         let root = home.root.path().join("fields");
-        std::fs::create_dir_all(root.join("templates")).unwrap();
-        std::fs::copy(
-            Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata/hwp-cli-plan-template.hwpx"),
-            root.join("templates/plan.hwpx"),
-        )
-        .unwrap();
+        write_template(&root);
         let request = || TemplateFieldRequest {
             template_key: None,
-            template_path: Some("templates/plan.hwpx".to_string()),
+            template_path: Some("templates/form.hwpx".to_string()),
         };
         let bin_dir = home.root.path().join("bin-fields");
         std::fs::create_dir_all(&bin_dir).unwrap();
 
         let fields = {
-            let _env = EnvGuard::set_hwp(&fake_hwp(
-                &bin_dir,
-                &[("사업명", 1), ("hwp_only_slot", 1)],
-                &[],
-            ));
+            let mut scan = scan(
+                &["제목"],
+                &[
+                    ("담당자", "담당자", "inlineLabel"),
+                    ("한문", "(한문:   )", "formLabel"),
+                ],
+            );
+            // One key seen as a slot and as a label cell: hwp merges it.
+            scan["fields"].as_array_mut().unwrap().push(json!({
+                "key": "성명", "label": "성명", "source": "formLabel",
+                "confidence": 0.72, "occurrences": 2, "required": true
+            }));
+            let _env = EnvGuard::set_hwp(&fake_hwp(&bin_dir, &scan, &report(&[], &[])));
             run(ipc::template_get_fields(text(&root), request())).unwrap()
         };
-        // hwp_only_slot is reported only by `hwp slots`, so its presence proves
-        // the hwp result was merged with the kordoc_lite scan.
-        assert!(fields
-            .warnings
-            .iter()
-            .all(|w| !w.contains("kordoc_lite scan only")));
-        let hwp_only = fields
-            .fields
-            .iter()
-            .find(|field| field.key == "hwp_only_slot")
-            .unwrap();
-        assert_eq!(hwp_only.source.as_deref(), Some("placeholder"));
-        assert!(fields.fields.iter().any(|field| field.key == "사업명"));
+        let by_key = |key: &str| {
+            fields
+                .fields
+                .iter()
+                .find(|field| field.key == key)
+                .unwrap_or_else(|| panic!("{key} in {:?}", fields.fields))
+        };
+        assert_eq!(fields.fields.len(), 4);
+        assert!(fields.warnings.is_empty(), "{:?}", fields.warnings);
+        let title = by_key("제목");
+        assert_eq!(title.source.as_deref(), Some("placeholder"));
+        assert_eq!(title.confidence, Some(1.0));
+        assert!(title.required);
+        let name = by_key("성명");
+        assert_eq!(name.source.as_deref(), Some("formLabel"));
+        assert_eq!(name.occurrences, 2);
+        assert!(name.required);
+        assert!(name.matched_key.is_none());
+        assert_eq!(by_key("담당자").source.as_deref(), Some("inlineLabel"));
+        assert_eq!(by_key("한문").label, "(한문:   )");
 
         let not_executable = home.root.path().join("hwp");
         std::fs::write(&not_executable, "not a binary").unwrap();
-        let degraded = {
+        let err = {
             let _env = EnvGuard::set_hwp(&not_executable);
-            run(ipc::template_get_fields(text(&root), request())).unwrap()
+            run(ipc::template_get_fields(text(&root), request())).unwrap_err()
         };
-        assert!(
-            degraded
-                .warnings
-                .iter()
-                .any(|w| w.contains("cli_missing") && w.contains("kordoc_lite scan only")),
-            "{:?}",
-            degraded.warnings
-        );
-        assert!(degraded.fields.iter().any(|field| field.key == "사업명"));
-        assert!(!degraded
-            .fields
-            .iter()
-            .any(|field| field.key == "hwp_only_slot"));
+        assert!(err.contains("cli_missing"), "{err}");
     }
 
     fn start<F, T>(future: F) -> std::sync::mpsc::Receiver<T>

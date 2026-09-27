@@ -10,6 +10,7 @@
 //! unchanged. Outputs are built and validated in a sibling staging directory
 //! and only then atomically published into the workspace.
 
+use crate::artifact_checks::ArtifactCheck;
 use crate::atomic_file::{
     with_path_transactions, write_atomic, PathTransactionLease, PathTransactionRequest,
 };
@@ -31,7 +32,9 @@ use std::time::Duration;
 
 const HWP_CLI_SKILL_SOURCE: &str = "hwp_cli_skill";
 const LEGACY_HWPX_SKILL_SOURCE: &str = "hwpx_skill";
-const MIN_HWP_VERSION: (u64, u64, u64) = (0, 12, 1);
+/// hwp 1.2.0 ships `hwp slots --forms` and `hwp fill --forms`, which own
+/// every HWPX form scan and fill Maru runs.
+const MIN_HWP_VERSION: (u64, u64, u64) = (1, 2, 0);
 const HWP_TIMEOUT: Duration = Duration::from_secs(60);
 const STDOUT_LIMIT: usize = 32 * 1024 * 1024;
 const STDERR_LIMIT: usize = 1024 * 1024;
@@ -99,16 +102,8 @@ pub struct HwpCliTemplateFillResponse {
     pub command: String,
     pub form_filled_count: u32,
     pub unmatched_fields: Vec<String>,
-    pub validation_checks: Vec<TemplateValidationCheck>,
+    pub validation_checks: Vec<ArtifactCheck>,
     pub warnings: Vec<String>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct TemplateValidationCheck {
-    pub name: String,
-    pub status: String,
-    pub reason: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -118,9 +113,61 @@ struct SlotsResponse {
 }
 
 #[derive(Debug, Deserialize)]
-struct Slot {
-    name: String,
+pub(crate) struct Slot {
+    pub(crate) name: String,
     occurrences: u32,
+}
+
+/// `hwp slots --forms --json`: the `{{slot}}` list plus hwp's merged Korean
+/// form-field view. `fields` already holds every slot under its normalized
+/// key (source `placeholder`, `required`), so it is the one field list.
+#[derive(Debug, Deserialize)]
+pub(crate) struct FormScan {
+    #[serde(default)]
+    pub(crate) placeholders: Vec<Slot>,
+    pub(crate) fields: Vec<FormField>,
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct FormField {
+    pub(crate) key: String,
+    pub(crate) label: String,
+    pub(crate) source: String,
+    pub(crate) confidence: f32,
+    pub(crate) occurrences: u32,
+    pub(crate) required: bool,
+}
+
+impl FormScan {
+    /// A requested key hwp fills as a `{{slot}}`: a slot name as `slots`
+    /// reports it, or a field key hwp marks `required` (it is also a slot).
+    pub(crate) fn is_slot(&self, key: &str) -> bool {
+        self.placeholders.iter().any(|slot| slot.name == key)
+            || self
+                .fields
+                .iter()
+                .any(|field| field.required && field.key == key)
+    }
+}
+
+/// The closed JSON contract of `hwp fill --forms --json`.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct FormsFillReport {
+    output: String,
+    mode: String,
+    replaced: u32,
+    pub(crate) counts: BTreeMap<String, u32>,
+    pub(crate) unmatched: Vec<String>,
+    pub(crate) warnings: Vec<String>,
+}
+
+/// The part of `hwp validate --json` Maru reads.
+#[derive(Debug, Deserialize)]
+pub(crate) struct ValidateReport {
+    pub(crate) valid: bool,
+    #[serde(default)]
+    pub(crate) errors: Vec<String>,
 }
 
 /// The closed JSON contract emitted by `hwp fill --json` for placeholder fills.
@@ -211,7 +258,8 @@ fn select_compatible_hwp(candidates: impl IntoIterator<Item = PathBuf>) -> Resul
         }
     }
     Err(version_errors.into_iter().next().unwrap_or_else(|| {
-        "cli_missing: released hwp >= 0.12.1 binary not found; install/export the unified hwp skill or set MARU_HWP_BIN".to_string()
+        let (major, minor, patch) = MIN_HWP_VERSION;
+        format!("cli_missing: released hwp >= {major}.{minor}.{patch} binary not found; install/export the unified hwp skill or set MARU_HWP_BIN")
     }))
 }
 
@@ -371,6 +419,73 @@ pub(crate) fn slots_for(bin: &Path, document: &Path) -> Result<Vec<TemplateField
         .collect())
 }
 
+pub(crate) fn form_scan(bin: &Path, document: &Path) -> Result<FormScan, String> {
+    let output = run_hwp_ok(
+        bin,
+        &[
+            OsString::from("slots"),
+            document.as_os_str().to_os_string(),
+            OsString::from("--forms"),
+            OsString::from("--json"),
+        ],
+    )?;
+    serde_json::from_slice(&output).map_err(|err| format!("hwp_slots_invalid_json: {err}"))
+}
+
+/// `hwp validate --json`. hwp prints its report on stdout and exits 1 for an
+/// invalid package, so the report is read by schema, not by exit code.
+pub(crate) fn validate_report(bin: &Path, document: &Path) -> Result<ValidateReport, String> {
+    let run = run_hwp(
+        bin,
+        &[
+            OsString::from("validate"),
+            document.as_os_str().to_os_string(),
+            OsString::from("--json"),
+        ],
+    )?;
+    serde_json::from_slice(&run.stdout).map_err(|err| {
+        format!(
+            "hwp_validate_invalid_json: {err} (exit {}): {}",
+            run.code, run.stderr
+        )
+    })
+}
+
+/// `sections` of `hwp info --json`.
+pub(crate) fn info_sections(bin: &Path, document: &Path) -> Result<usize, String> {
+    #[derive(Deserialize)]
+    struct Info {
+        sections: usize,
+    }
+    let output = run_hwp_ok(
+        bin,
+        &[
+            OsString::from("info"),
+            document.as_os_str().to_os_string(),
+            OsString::from("--json"),
+        ],
+    )?;
+    serde_json::from_slice::<Info>(&output)
+        .map(|info| info.sections)
+        .map_err(|err| format!("hwp_info_invalid_json: {err}"))
+}
+
+/// `hwp convert <document> --to html -o -`: a complete HTML document.
+pub(crate) fn convert_to_html(bin: &Path, document: &Path) -> Result<String, String> {
+    let output = run_hwp_ok(
+        bin,
+        &[
+            OsString::from("convert"),
+            document.as_os_str().to_os_string(),
+            OsString::from("--to"),
+            OsString::from("html"),
+            OsString::from("-o"),
+            OsString::from("-"),
+        ],
+    )?;
+    String::from_utf8(output).map_err(|err| format!("hwp_convert_invalid_utf8: {err}"))
+}
+
 fn fields_with_bin(
     bin: &Path,
     source: &str,
@@ -407,23 +522,87 @@ fn output_path(work_path: &str, alias: &str, requested: Option<String>) -> Resul
 fn parse_native_fill_report(
     stdout: &[u8],
     values: &BTreeMap<String, String>,
-    allow_partial: bool,
 ) -> Result<NativeFillReport, String> {
     let report: NativeFillReport =
         serde_json::from_slice(stdout).map_err(|err| format!("hwp_fill_invalid_json: {err}"))?;
-    if report.mode != "placeholders" {
+    check_report_header(&report.mode, "placeholders", &report.output)?;
+    check_report_counts(&report.counts, values, |_| false)?;
+    let unmatched = report
+        .counts
+        .iter()
+        .filter(|(_, count)| **count == 0)
+        .map(|(name, _)| name.clone())
+        .collect::<Vec<_>>();
+    if !unmatched.is_empty() {
         return Err(format!(
-            "hwp_fill_invalid_report: expected placeholders mode, got {}",
-            report.mode
+            "hwp_fill_unmatched_required: {}",
+            unmatched.join(", ")
         ));
     }
-    if report.output.trim().is_empty() {
+    check_report_total(&report.counts, report.replaced)?;
+    Ok(report)
+}
+
+/// The `--forms` report must account for every requested key: `counts` holds
+/// exactly the requested keys (hwp drops, with a warning, a key that
+/// normalizes to nothing), every `unmatched` key has a zero count, and
+/// `replaced` is the counts total. A zero count outside `unmatched` is a
+/// checkbox a falsy value left unchecked, which hwp counts as matched.
+fn parse_forms_fill_report(
+    stdout: &[u8],
+    values: &BTreeMap<String, String>,
+) -> Result<FormsFillReport, String> {
+    let report: FormsFillReport =
+        serde_json::from_slice(stdout).map_err(|err| format!("hwp_fill_invalid_json: {err}"))?;
+    check_report_header(&report.mode, "forms", &report.output)?;
+    check_report_counts(&report.counts, values, normalizes_to_nothing)?;
+    let disagreeing = report
+        .unmatched
+        .iter()
+        .filter(|name| report.counts.get(*name) != Some(&0))
+        .cloned()
+        .collect::<Vec<_>>();
+    if !disagreeing.is_empty() {
+        return Err(format!(
+            "hwp_fill_invalid_report: unmatched {} without a zero count",
+            disagreeing.join(", ")
+        ));
+    }
+    check_report_total(&report.counts, report.replaced)?;
+    Ok(report)
+}
+
+/// hwp's form-key normalization: trimmed, then spaces, colons,
+/// parentheses and middle dots removed.
+fn normalizes_to_nothing(key: &str) -> bool {
+    key.trim()
+        .replace(
+            [':', '：', ' ', '\t', '\n', '\r', '(', ')', '（', '）', '·'],
+            "",
+        )
+        .is_empty()
+}
+
+fn check_report_header(mode: &str, expected: &str, output: &str) -> Result<(), String> {
+    if mode != expected {
+        return Err(format!(
+            "hwp_fill_invalid_report: expected {expected} mode, got {mode}"
+        ));
+    }
+    if output.trim().is_empty() {
         return Err("hwp_fill_invalid_report: native fill report omitted output".to_string());
     }
+    Ok(())
+}
 
+fn check_report_counts(
+    counts: &BTreeMap<String, u32>,
+    values: &BTreeMap<String, String>,
+    may_omit: impl Fn(&str) -> bool,
+) -> Result<(), String> {
     let missing_counts = values
         .keys()
-        .filter(|name| !report.counts.contains_key(*name))
+        .filter(|name| !counts.contains_key(*name) && !may_omit(name))
         .cloned()
         .collect::<Vec<_>>();
     if !missing_counts.is_empty() {
@@ -432,8 +611,7 @@ fn parse_native_fill_report(
             missing_counts.join(", ")
         ));
     }
-    let unexpected_counts = report
-        .counts
+    let unexpected_counts = counts
         .keys()
         .filter(|name| !values.contains_key(*name))
         .cloned()
@@ -444,47 +622,66 @@ fn parse_native_fill_report(
             unexpected_counts.join(", ")
         ));
     }
+    Ok(())
+}
 
-    let unmatched = report
-        .counts
-        .iter()
-        .filter(|(_, count)| **count == 0)
-        .map(|(name, _)| name.clone())
-        .collect::<Vec<_>>();
-    if !allow_partial && !unmatched.is_empty() {
-        return Err(format!(
-            "hwp_fill_unmatched_required: {}",
-            unmatched.join(", ")
-        ));
-    }
-
-    let counted_replacements = report.counts.values().try_fold(0u32, |total, count| {
+fn check_report_total(counts: &BTreeMap<String, u32>, replaced: u32) -> Result<(), String> {
+    let counted_replacements = counts.values().try_fold(0u32, |total, count| {
         total
             .checked_add(*count)
             .ok_or_else(|| "hwp_fill_invalid_report: replacement count overflow".to_string())
     })?;
-    if report.replaced != counted_replacements {
+    if replaced != counted_replacements {
         return Err(format!(
-            "hwp_fill_invalid_report: replaced {} does not match counts total {}",
-            report.replaced, counted_replacements
+            "hwp_fill_invalid_report: replaced {replaced} does not match counts total {counted_replacements}"
         ));
     }
-    Ok(report)
+    Ok(())
 }
 
 /// `hwp fill <template> --data <values.json> -o <output> --json` for exactly
-/// `values`, and the report must account for every value. Without
-/// `allow_partial`, hwp fails closed on an unreplaced request; with it
-/// (`--allow-partial`) hwp publishes the matched values and reports the rest
-/// with a zero count, so the caller owns the final completeness check.
-pub(crate) fn fill_slots(
+/// `values`; hwp fails closed on an unreplaced request, and the report must
+/// account for every value.
+fn fill_slots(
     bin: &Path,
     template: &Path,
     values_path: &Path,
     output: &Path,
     values: &BTreeMap<String, String>,
-    allow_partial: bool,
 ) -> Result<NativeFillReport, String> {
+    let stdout = run_hwp_ok(bin, &fill_args(template, values_path, output, &[]))?;
+    parse_native_fill_report(&stdout, values)
+}
+
+/// `hwp fill <template> --forms --data <values.json> -o <output> --json
+/// --allow-partial`: slots and Korean form fields from `values` in one pass.
+/// hwp publishes whatever matched (the input unchanged when nothing did) and
+/// reports the rest, so the caller decides which misses are errors.
+pub(crate) fn fill_forms(
+    bin: &Path,
+    template: &Path,
+    values_path: &Path,
+    output: &Path,
+    values: &BTreeMap<String, String>,
+) -> Result<FormsFillReport, String> {
+    let stdout = run_hwp_ok(
+        bin,
+        &fill_args(
+            template,
+            values_path,
+            output,
+            &["--forms", "--allow-partial"],
+        ),
+    )?;
+    parse_forms_fill_report(&stdout, values)
+}
+
+pub(crate) fn fill_args(
+    template: &Path,
+    values_path: &Path,
+    output: &Path,
+    flags: &[&str],
+) -> Vec<OsString> {
     let mut args = vec![
         OsString::from("fill"),
         template.as_os_str().to_os_string(),
@@ -494,11 +691,8 @@ pub(crate) fn fill_slots(
         output.as_os_str().to_os_string(),
         OsString::from("--json"),
     ];
-    if allow_partial {
-        args.push(OsString::from("--allow-partial"));
-    }
-    let stdout = run_hwp_ok(bin, &args)?;
-    parse_native_fill_report(&stdout, values, allow_partial)
+    args.extend(flags.iter().map(OsString::from));
+    args
 }
 
 pub fn hwp_cli_template_fields(
@@ -591,7 +785,7 @@ fn fill_with_bin(
     .map_err(|err| format!("hwp_stage_failed: {err}"))?;
     create_template(bin, alias, &template)?;
     validate_template(bin, &template)?;
-    let native_report = fill_slots(bin, &template, &values_path, &staged_output, values, false)?;
+    let native_report = fill_slots(bin, &template, &values_path, &staged_output, values)?;
     validate_template(bin, &staged_output)?;
     let staged_bytes = fs::read(&staged_output)
         .map_err(|err| format!("hwp_publish_failed: cannot read staged output: {err}"))?;
@@ -607,11 +801,7 @@ fn fill_with_bin(
                 .to_string(),
         form_filled_count: native_report.replaced,
         unmatched_fields: Vec::new(),
-        validation_checks: vec![TemplateValidationCheck {
-            name: "hwp-validate".to_string(),
-            status: "pass".to_string(),
-            reason: None,
-        }],
+        validation_checks: vec![ArtifactCheck::pass("hwp-validate")],
         warnings: native_report.warnings,
     })
 }
@@ -774,30 +964,95 @@ esac
 
     #[test]
     fn version_parser_requires_the_released_floor() {
-        assert_eq!(parse_version(b"hwp 0.12.0"), Some((0, 12, 0)));
-        assert_eq!(parse_version(b"hwp 0.12.1"), Some((0, 12, 1)));
-        assert_eq!(parse_version(b"hwp 0.11.9"), Some((0, 11, 9)));
+        assert_eq!(parse_version(b"hwp 1.1.9"), Some((1, 1, 9)));
+        assert_eq!(parse_version(b"hwp 1.2.0"), Some((1, 2, 0)));
+        assert_eq!(parse_version(b"hwp v1.2.0 (abc)"), Some((1, 2, 0)));
         assert_eq!(parse_version(b"broken"), None);
+    }
+
+    #[test]
+    fn forms_fill_report_follows_the_closed_contract() {
+        let values = BTreeMap::from([
+            ("제목".to_string(), "a".to_string()),
+            ("동의".to_string(), "false".to_string()),
+            ("없는키".to_string(), "b".to_string()),
+            (" : ".to_string(), "dropped".to_string()),
+        ]);
+        let parse = |json: &str| parse_forms_fill_report(json.as_bytes(), &values);
+        // A falsy checkbox counts 0 but matched; a key that normalizes to
+        // nothing is dropped by hwp.
+        let report = parse(
+            r#"{"output":"o.hwpx","mode":"forms","replaced":1,"counts":{"동의":0,"없는키":0,"제목":1},"unmatched":["없는키"],"warnings":["w"]}"#,
+        )
+        .unwrap();
+        assert_eq!(report.unmatched, ["없는키"]);
+        assert_eq!(report.warnings, ["w"]);
+
+        for (json, expected) in [
+            (
+                r#"{"output":"o.hwpx","mode":"placeholders","replaced":1,"counts":{"동의":0,"없는키":0,"제목":1},"unmatched":[],"warnings":[]}"#,
+                "expected forms mode",
+            ),
+            (
+                r#"{"output":"o.hwpx","mode":"forms","replaced":1,"counts":{"제목":1},"unmatched":[],"warnings":[]}"#,
+                "omitted counts for 동의, 없는키",
+            ),
+            (
+                r#"{"output":"o.hwpx","mode":"forms","replaced":1,"counts":{"동의":0,"없는키":0,"제목":1,"기타":0},"unmatched":[],"warnings":[]}"#,
+                "unexpected counts for 기타",
+            ),
+            (
+                r#"{"output":"o.hwpx","mode":"forms","replaced":2,"counts":{"동의":0,"없는키":0,"제목":1},"unmatched":[],"warnings":[]}"#,
+                "replaced 2 does not match counts total 1",
+            ),
+            (
+                r#"{"output":"o.hwpx","mode":"forms","replaced":1,"counts":{"동의":0,"없는키":0,"제목":1},"unmatched":["제목"],"warnings":[]}"#,
+                "unmatched 제목 without a zero count",
+            ),
+            (
+                r#"{"output":"o.hwpx","mode":"forms","replaced":1,"counts":{"동의":0,"없는키":0,"제목":1},"warnings":[]}"#,
+                "hwp_fill_invalid_json",
+            ),
+        ] {
+            let error = parse(json).unwrap_err();
+            assert!(error.contains(expected), "{expected}: {error}");
+        }
+        assert!(normalizes_to_nothing(" （）：· "));
+        assert!(!normalizes_to_nothing("[]"));
+    }
+
+    #[test]
+    fn form_scan_marks_slots_by_name_or_required_field() {
+        let scan: FormScan = serde_json::from_str(
+            r#"{"placeholders":[{"name":"성 명","occurrences":1}],"fields":[
+                {"key":"성명","label":"성 명","source":"placeholder","confidence":1.0,"occurrences":1,"required":true},
+                {"key":"주소","label":"주소","source":"formLabel","confidence":0.72,"occurrences":1,"required":false}]}"#,
+        )
+        .unwrap();
+        assert!(scan.is_slot("성 명"));
+        assert!(scan.is_slot("성명"));
+        assert!(!scan.is_slot("주소"));
+        assert!(serde_json::from_str::<FormScan>(r#"{"placeholders":[]}"#).is_err());
     }
 
     #[cfg(unix)]
     #[test]
-    fn released_version_floor_rejects_0120_and_accepts_0121() {
+    fn released_version_floor_rejects_1_1_9_and_accepts_1_2_0() {
         let too_old = tempfile::tempdir().unwrap();
         let too_old_binary = fake_hwp(
             too_old.path(),
-            "0.12.0",
+            "1.1.9",
             false,
             r#"{"output":"filled.hwpx","mode":"placeholders","replaced":1,"counts":{"기관명":1},"warnings":[]}"#,
         );
         let error = ensure_released_version(&too_old_binary).unwrap_err();
-        assert!(error.contains("hwp 0.12.0 is too old"));
-        assert!(error.contains("requires >= 0.12.1"));
+        assert!(error.contains("hwp 1.1.9 is too old"));
+        assert!(error.contains("requires >= 1.2.0"));
 
         let released = tempfile::tempdir().unwrap();
         let released_binary = fake_hwp(
             released.path(),
-            "0.12.1",
+            "1.2.0",
             false,
             r#"{"output":"filled.hwpx","mode":"placeholders","replaced":1,"counts":{"기관명":1},"warnings":[]}"#,
         );
@@ -814,13 +1069,13 @@ esac
         fs::create_dir_all(&managed_dir).unwrap();
         let old_path_binary = fake_hwp(
             &path_dir,
-            "0.12.0",
+            "1.1.9",
             false,
             r#"{"output":"filled.hwpx","mode":"placeholders","replaced":1,"counts":{"기관명":1},"warnings":[]}"#,
         );
         let managed_binary = fake_hwp(
             &managed_dir,
-            "0.12.1",
+            "1.2.0",
             false,
             r#"{"output":"filled.hwpx","mode":"placeholders","replaced":1,"counts":{"기관명":1},"warnings":[]}"#,
         );
@@ -841,20 +1096,20 @@ esac
         fs::create_dir_all(&released_dir).unwrap();
         let old_override = fake_hwp(
             &old_dir,
-            "0.12.0",
+            "1.1.9",
             false,
             r#"{"output":"filled.hwpx","mode":"placeholders","replaced":1,"counts":{"기관명":1},"warnings":[]}"#,
         );
         let released_override = fake_hwp(
             &released_dir,
-            "0.12.1",
+            "1.2.0",
             false,
             r#"{"output":"filled.hwpx","mode":"placeholders","replaced":1,"counts":{"기관명":1},"warnings":[]}"#,
         );
 
         let error =
             select_hwp_bin(Some(old_override), vec![released_override.clone()]).unwrap_err();
-        assert!(error.contains("hwp 0.12.0 is too old"));
+        assert!(error.contains("hwp 1.1.9 is too old"));
         assert_eq!(
             select_hwp_bin(Some(released_override.clone()), Vec::new()).unwrap(),
             released_override
@@ -880,7 +1135,7 @@ esac
         let tmp = tempfile::tempdir().unwrap();
         let binary = fake_hwp(
             tmp.path(),
-            "0.12.1",
+            "1.2.0",
             false,
             r#"{"output":"filled.hwpx","mode":"placeholders","replaced":1,"counts":{"기관명":1},"warnings":[]}"#,
         );
@@ -920,7 +1175,7 @@ esac
         let tmp = tempfile::tempdir().unwrap();
         let binary = fake_hwp(
             tmp.path(),
-            "0.12.1",
+            "1.2.0",
             true,
             r#"{"output":"filled.hwpx","mode":"placeholders","replaced":1,"counts":{"기관명":1},"warnings":[]}"#,
         );
@@ -942,7 +1197,7 @@ esac
         let tmp = tempfile::tempdir().unwrap();
         let binary = fake_hwp(
             tmp.path(),
-            "0.12.1",
+            "1.2.0",
             false,
             r#"{"output":"filled.hwpx","mode":"placeholders","replaced":1,"counts":{"기관명":1},"warnings":[]}"#,
         );
@@ -970,7 +1225,7 @@ esac
         let tmp = tempfile::tempdir().unwrap();
         let binary = fake_hwp(
             tmp.path(),
-            "0.12.1",
+            "1.2.0",
             false,
             r#"{"output":"filled.hwpx","mode":"placeholders","replaced":2,"counts":{"기관명":2},"warnings":["native warning"]}"#,
         );
@@ -1003,7 +1258,7 @@ esac
 
         let unmatched_binary = fake_hwp(
             tmp.path(),
-            "0.12.1",
+            "1.2.0",
             false,
             r#"{"output":"filled.hwpx","mode":"placeholders","replaced":1,"counts":{"기관명":1,"없는필드":0},"warnings":["native unmatched"]}"#,
         );
@@ -1019,7 +1274,7 @@ esac
         assert!(unmatched.contains("hwp_fill_unmatched_required: 없는필드"));
         assert_eq!(fs::read_to_string(&output).unwrap(), "old output");
 
-        let malformed_binary = fake_hwp(tmp.path(), "0.12.1", false, "not json");
+        let malformed_binary = fake_hwp(tmp.path(), "1.2.0", false, "not json");
         let malformed = fill_with_test_bin(
             &malformed_binary,
             tmp.path().to_str().unwrap(),
@@ -1086,7 +1341,7 @@ mod phase08_21 {
         let binary = dir.join("hwp");
         let script = r#"#!/bin/sh
 case "$1" in
-  --version) echo "hwp 0.12.1" ;;
+  --version) echo "hwp 1.2.0" ;;
   new)
     shift
     while [ "$#" -gt 0 ]; do

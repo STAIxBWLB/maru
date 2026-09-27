@@ -143,7 +143,7 @@ One adapter per mode: `TodayModeAdapter.tsx`, `TasksModeAdapter.tsx`, `DiagramMo
 - **Skills / Agents:** `skill_host/` (`store.rs`, `dispatch.rs`, `bundle_update.rs`, `env.rs`, `fs.rs`), `agents.rs`, `agent_host/` (`mod.rs`, `provider.rs`, `structured_loop.rs`, `proposal.rs`, `event_store.rs`, `roles.rs`, `status.rs`, `contracts.rs`, `protected_write.rs`, `marketplace.rs`, `cloud_dashboard.rs`), `agent_runtime_env.rs`, `mission_state.rs`, `scheduler.rs`.
 - **Terminal:** `terminal/` (`mod.rs`, `model.rs`, `input.rs`, `snapshot.rs`), `terminal_hooks.rs`, `command_output.rs`.
 - **Diagram / Graph:** `diagram/mod.rs`, `graph_authoring.rs`, `vault_graph.rs`.
-- **Export / Studio:** `export/`, `studio/`, `html_editor.rs`, `template_fill.rs`, `hwped.rs`, `hwp_cli_template.rs`, `kordoc_lite.rs`, `linter/`.
+- **Export / Studio:** `export/`, `studio/`, `html_editor.rs`, `template_fill.rs`, `hwped.rs`, `hwp_cli_template.rs`, `artifact_checks.rs`, `doc_format.rs`, `linter/`.
 - **Hub / Sites:** `hub_client/`, `sites.rs`, `site_view.rs`, `browser_passkeys.rs`, `web_actions.rs`.
 - **Ops / Catalog:** `ops_catalog/` (`mod.rs`, `index.rs`, `scan.rs`, `watcher.rs`), `project_activity.rs`, `jobs.rs`, `dot_sync.rs`.
 - **Utils:** `korean_date.rs`, `calendar_search.rs`, `content_search.rs`, `evidence_binder.rs`, `git.rs`, `kg_refs.rs`, `meetings.rs`, `ipc_error.rs`, `secrets.rs`.

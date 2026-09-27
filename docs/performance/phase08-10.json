@@ -1427,7 +1427,7 @@
         "readOnly": true,
         "lexicalPaths": [],
         "aliasPaths": [],
-        "reason": "No filesystem mutation. Classify and text/archive/HWPX preview inspect bytes in memory; prepare_asset only extends the existing Tauri asset scope. External open/preview dispatches an OS app and does not promise exclusion after launch; no Maru-owned cache/extraction directory is created."
+        "reason": "No filesystem mutation. Classify and text/archive preview inspect bytes in memory, and the HWPX preview reads the bounded hwp convert/info stdout (hwp convert -o -) without writing a file; prepare_asset only extends the existing Tauri asset scope. External open/preview dispatches an OS app and does not promise exclusion after launch; no Maru-owned cache/extraction directory is created."
       },
       "evidence": {
         "behaviorCases": [
@@ -1485,7 +1485,7 @@
         "readOnly": true,
         "lexicalPaths": [],
         "aliasPaths": [],
-        "reason": "No filesystem mutation. Classify and text/archive/HWPX preview inspect bytes in memory; prepare_asset only extends the existing Tauri asset scope. External open/preview dispatches an OS app and does not promise exclusion after launch; no Maru-owned cache/extraction directory is created."
+        "reason": "No filesystem mutation. Classify and text/archive preview inspect bytes in memory, and the HWPX preview reads the bounded hwp convert/info stdout (hwp convert -o -) without writing a file; prepare_asset only extends the existing Tauri asset scope. External open/preview dispatches an OS app and does not promise exclusion after launch; no Maru-owned cache/extraction directory is created."
       },
       "evidence": {
         "behaviorCases": [
@@ -1543,7 +1543,7 @@
         "readOnly": true,
         "lexicalPaths": [],
         "aliasPaths": [],
-        "reason": "No filesystem mutation. Classify and text/archive/HWPX preview inspect bytes in memory; prepare_asset only extends the existing Tauri asset scope. External open/preview dispatches an OS app and does not promise exclusion after launch; no Maru-owned cache/extraction directory is created."
+        "reason": "No filesystem mutation. Classify and text/archive preview inspect bytes in memory, and the HWPX preview reads the bounded hwp convert/info stdout (hwp convert -o -) without writing a file; prepare_asset only extends the existing Tauri asset scope. External open/preview dispatches an OS app and does not promise exclusion after launch; no Maru-owned cache/extraction directory is created."
       },
       "evidence": {
         "behaviorCases": [
@@ -1601,7 +1601,7 @@
         "readOnly": true,
         "lexicalPaths": [],
         "aliasPaths": [],
-        "reason": "No filesystem mutation. Classify and text/archive/HWPX preview inspect bytes in memory; prepare_asset only extends the existing Tauri asset scope. External open/preview dispatches an OS app and does not promise exclusion after launch; no Maru-owned cache/extraction directory is created."
+        "reason": "No filesystem mutation. Classify and text/archive preview inspect bytes in memory, and the HWPX preview reads the bounded hwp convert/info stdout (hwp convert -o -) without writing a file; prepare_asset only extends the existing Tauri asset scope. External open/preview dispatches an OS app and does not promise exclusion after launch; no Maru-owned cache/extraction directory is created."
       },
       "evidence": {
         "behaviorCases": [
@@ -1659,7 +1659,7 @@
         "readOnly": true,
         "lexicalPaths": [],
         "aliasPaths": [],
-        "reason": "No filesystem mutation. Classify and text/archive/HWPX preview inspect bytes in memory; prepare_asset only extends the existing Tauri asset scope. External open/preview dispatches an OS app and does not promise exclusion after launch; no Maru-owned cache/extraction directory is created."
+        "reason": "No filesystem mutation. Classify and text/archive preview inspect bytes in memory, and the HWPX preview reads the bounded hwp convert/info stdout (hwp convert -o -) without writing a file; prepare_asset only extends the existing Tauri asset scope. External open/preview dispatches an OS app and does not promise exclusion after launch; no Maru-owned cache/extraction directory is created."
       },
       "evidence": {
         "behaviorCases": [
@@ -1717,7 +1717,7 @@
         "readOnly": true,
         "lexicalPaths": [],
         "aliasPaths": [],
-        "reason": "No filesystem mutation. Classify and text/archive/HWPX preview inspect bytes in memory; prepare_asset only extends the existing Tauri asset scope. External open/preview dispatches an OS app and does not promise exclusion after launch; no Maru-owned cache/extraction directory is created."
+        "reason": "No filesystem mutation. Classify and text/archive preview inspect bytes in memory, and the HWPX preview reads the bounded hwp convert/info stdout (hwp convert -o -) without writing a file; prepare_asset only extends the existing Tauri asset scope. External open/preview dispatches an OS app and does not promise exclusion after launch; no Maru-owned cache/extraction directory is created."
       },
       "evidence": {
         "behaviorCases": [
@@ -1775,7 +1775,7 @@
         "readOnly": true,
         "lexicalPaths": [],
         "aliasPaths": [],
-        "reason": "No filesystem mutation. Classify and text/archive/HWPX preview inspect bytes in memory; prepare_asset only extends the existing Tauri asset scope. External open/preview dispatches an OS app and does not promise exclusion after launch; no Maru-owned cache/extraction directory is created."
+        "reason": "No filesystem mutation. Classify and text/archive preview inspect bytes in memory, and the HWPX preview reads the bounded hwp convert/info stdout (hwp convert -o -) without writing a file; prepare_asset only extends the existing Tauri asset scope. External open/preview dispatches an OS app and does not promise exclusion after launch; no Maru-owned cache/extraction directory is created."
       },
       "evidence": {
         "behaviorCases": [

@@ -640,7 +640,7 @@ mod phase08_21 {
         let script = format!(
             r#"#!/bin/sh
 case "$1" in
-  --version) echo "hwp 1.1.0" ;;
+  --version) echo "hwp 1.2.0" ;;
   new)
     echo "$@" >> "{log}"
     {new_ok} || exit 3

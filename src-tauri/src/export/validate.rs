@@ -5,7 +5,7 @@
 // W9+ adds the format-specific checks (hwpx-validate, OOXML schema,
 // font-embed for PDFs).
 
-use crate::kordoc_lite::{self, KordocLiteCheck};
+use crate::artifact_checks::{self, ArtifactCheck};
 use serde::{Deserialize, Serialize};
 use std::io;
 use std::path::{Path, PathBuf};
@@ -33,7 +33,7 @@ pub struct ValidationEntry {
     #[serde(default)]
     pub reason: Option<String>,
     #[serde(default)]
-    pub checks: Vec<KordocLiteCheck>,
+    pub checks: Vec<ArtifactCheck>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -96,7 +96,7 @@ pub fn validate_manifest(manifest_path: &Path) -> io::Result<ValidationReport> {
             }
         };
         let checks = if status == ValidationStatus::Pass && abs.exists() {
-            kordoc_lite::validate_export_artifact(&abs, out.format.extension())
+            artifact_checks::validate_export_artifact(&abs, out.format.extension())
         } else {
             Vec::new()
         };
