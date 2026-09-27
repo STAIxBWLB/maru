@@ -110,4 +110,4 @@ bash ~/.maru/skills/_builtin/envs/default/setup.sh --target ~/.maru/env
 
 - 변환기 구현: `scripts/md2docx.mjs` (self-contained, `docx`만 의존)
 - 런타임 해소 규약: `skills/envs/default/REFERENCE.md` (Python/JRE/Node 해소 순서)
-- 공문서(.hwpx)는 released `hwp` 스킬의 `references/editing-recipes.md` (minimum `v1.0.0`), 스프레드시트는 `xlsx-toolkit`, 슬라이드는 `pptx-toolkit`.
+- 공문서(.hwpx)는 released `hwp` 스킬의 `references/editing-recipes.md` (minimum `v1.2.0`), 스프레드시트는 `xlsx-toolkit`, 슬라이드는 `pptx-toolkit`.
