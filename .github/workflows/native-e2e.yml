@@ -6,7 +6,10 @@
 # menu-command path (docs/native-e2e.md).
 #
 # Trigger scope is deliberate (D-16): pushes to `main` and release tags, plus
-# manual dispatch. Pull requests get only the compile-and-typecheck job in
+# manual dispatch. Documentation-only pushes to `main` skip the suite (the
+# paths-ignore list ci.yml and coverage.yml already use); tags always run it,
+# since GitHub does not evaluate path filters for tag pushes. Pull requests
+# get only the compile-and-typecheck job in
 # ci.yml (`native-e2e-compile`) - running the full suite per PR was rejected on
 # macOS runner cost and early-flakiness grounds, and release-tag-only was
 # rejected because it finds regressions at the worst possible moment.
@@ -26,6 +29,12 @@ on:
       - main
     tags:
       - 'v*'
+    paths-ignore:
+      - README.md
+      - CHANGELOG.md
+      - docs/**
+      - .planning/**
+      - .github/**/*.md
   workflow_dispatch:
 
 permissions:
