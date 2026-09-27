@@ -97,20 +97,39 @@ describe("native macOS menu command path", () => {
       await dispatchMenuCommand("terminal.shell");
 
       // The menu command opens the tool panel's terminal surface and launches
-      // a shell; wait for its view before splitting.
+      // a shell — and the panel's auto-launch (settings.terminal.autoLaunch
+      // defaults to "shell") launches one too, so two sessions mount back to
+      // back and the active view flips as they land. Latching the first
+      // active view and dispatching the split while the second launch is
+      // still in flight is the menu-side half of the #388 race, so wait for
+      // the session set to stop changing before reading the active session.
       const firstSession = await browser.executeAsync(
         (timeout: number, done: (id: string | null) => void) => {
           const deadline = Date.now() + timeout;
+          let lastKey = "";
+          let stableSince = 0;
           const tick = () => {
-            const active = document.querySelector(
-              ".terminal-instance.active .native-terminal-view[data-session-id]",
-            );
-            const id = active?.getAttribute("data-session-id") ?? null;
-            if (id) {
-              done(id);
-              return;
+            const now = Date.now();
+            const ids = Array.from(
+              document.querySelectorAll(".native-terminal-view[data-session-id]"),
+            )
+              .map((el) => el.getAttribute("data-session-id") ?? "")
+              .sort();
+            const key = ids.join("|");
+            if (ids.length === 0 || key !== lastKey) {
+              lastKey = key;
+              stableSince = now;
+            } else if (now - stableSince >= 750) {
+              const active = document.querySelector(
+                ".terminal-instance.active .native-terminal-view[data-session-id]",
+              );
+              const id = active?.getAttribute("data-session-id") ?? null;
+              if (id) {
+                done(id);
+                return;
+              }
             }
-            if (Date.now() > deadline) {
+            if (now > deadline) {
               done(null);
               return;
             }
