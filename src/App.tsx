@@ -312,7 +312,8 @@ import {
 } from "./lib/settingsEvents";
 import { useKeyboardShortcuts } from "./lib/useKeyboardShortcuts";
 import { browserPasskeyBuildOnce } from "./lib/browserPasskeys";
-import { bootAppMode } from "./lib/startupAppMode";
+import { applyStoredAppMode, bootAppMode } from "./lib/startupAppMode";
+import { useAppModePickLifecycle, withActiveAppMode } from "./lib/appModePickLifecycle";
 import { requestSiteViewCloseActive } from "./lib/siteView";
 import { useScopedSelectAll } from "./lib/useScopedSelectAll";
 import type { TerminalKind } from "./lib/terminal";
@@ -1138,6 +1139,12 @@ export function MainApp() {
   // Mode the boot auto-open landed on (from resolveLaunchRoute) — the
   // settings-load effect re-applies this instead of the persisted mode.
   const todayAutoOpenModeRef = useRef<AppMode | null>(null);
+  // Mode the user picked before the workspace settings became writable.
+  // Boot, settings hydration, and the settings-save echo each re-apply the
+  // stored mode; while a pick is pending they must leave it alone, and it is
+  // persisted once settings saves are possible (#387). Cleared when the
+  // stored settings catch up with the pick, or on a workspace switch.
+  const userPickedAppModeRef = useRef<AppMode | null>(null);
   // Fixed for the process lifetime; see bootAppMode for why the provisioned
   // browser-passkey build must land on Sites at launch.
   const browserPasskeyBuildRef = useRef(false);
@@ -1838,7 +1845,7 @@ export function MainApp() {
       bootAppMode({
         storedMode: preserveAutoOpen
           ? (todayAutoOpenModeRef.current ?? "today")
-          : settings.ui.activeAppMode,
+          : applyStoredAppMode(userPickedAppModeRef, settings.ui.activeAppMode),
         browserPasskeyBuild: browserPasskeyBuildRef.current,
       }),
     [],
@@ -1870,7 +1877,7 @@ export function MainApp() {
         if (!keepAutoOpenMode()) {
           setAppMode(
             bootAppMode({
-              storedMode: next.ui.activeAppMode,
+              storedMode: applyStoredAppMode(userPickedAppModeRef, next.ui.activeAppMode),
               browserPasskeyBuild: browserPasskeyBuildRef.current,
             }),
           );
@@ -1884,7 +1891,7 @@ export function MainApp() {
             if (!keepAutoOpenMode()) {
               setAppMode(
                 bootAppMode({
-                  storedMode: next.ui.activeAppMode,
+                  storedMode: applyStoredAppMode(userPickedAppModeRef, next.ui.activeAppMode),
                   browserPasskeyBuild: browserPasskeyBuildRef.current,
                 }),
               );
@@ -2009,6 +2016,17 @@ export function MainApp() {
     },
     [settingsWorkPath, settingsWritable, setMaruSettings],
   );
+
+  // Boot-time app-mode pick lifecycle (#387): persist a pick made before the
+  // settings were writable, restore it when hydration/echoes revert the
+  // in-memory settings, drop it on a workspace switch.
+  useAppModePickLifecycle({
+    settingsWorkPath,
+    settingsWritable,
+    storedAppMode: maruSettings.ui.activeAppMode,
+    userPickRef: userPickedAppModeRef,
+    updateSettings,
+  });
 
   const editorSurfacePersistence = useMemo(
     () =>
@@ -2214,20 +2232,9 @@ export function MainApp() {
     (activeAppMode: AppMode) => {
       todayAutoOpenPathRef.current = null; // explicit user choice from here on
       todayAutoOpenModeRef.current = null;
+      userPickedAppModeRef.current = activeAppMode;
       setAppMode(activeAppMode);
-      updateSettings((current) => ({
-        ...current,
-        ui: {
-          ...current.ui,
-          activeAppMode,
-          explorerPaneMode:
-            activeAppMode === "files"
-              ? "files"
-              : activeAppMode === "pkm"
-                ? "documents"
-                : current.ui.explorerPaneMode,
-        },
-      }));
+      updateSettings((current) => withActiveAppMode(current, activeAppMode));
     },
     [updateSettings],
   );
@@ -2247,6 +2254,7 @@ export function MainApp() {
       visualModeController.setGraphFocusTarget(target ?? null);
       todayAutoOpenPathRef.current = null;
       todayAutoOpenModeRef.current = null;
+      userPickedAppModeRef.current = "graph";
       setAppMode("graph");
       updateSettings((current) => ({
         ...current,
@@ -3778,6 +3786,7 @@ export function MainApp() {
     browserPasskeyBuildRef,
     todayAutoOpenPathRef,
     todayAutoOpenModeRef,
+    userPickedAppModeRef,
     lastOpenKey: lastOpenKeyForWorkspace,
     loadWorkspace,
     setBooting,

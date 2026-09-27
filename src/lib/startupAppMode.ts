@@ -17,3 +17,22 @@ export function bootAppMode(input: {
 }): MaruAppMode {
   return input.browserPasskeyBuild ? "sites" : input.storedMode;
 }
+
+/**
+ * A mode the user picked can race the boot-time stored-mode applications
+ * (boot, settings hydration, settings-save echo): before the workspace
+ * settings are writable the pick lives only in memory, and every stored-mode
+ * application would revert it (#387). While a pick is pending in the ref it
+ * wins over the stored mode; once the stored settings catch up — the pick
+ * reached the disk and echoed back — the guard lifts by clearing the ref.
+ */
+export function applyStoredAppMode(
+  userPickRef: { current: MaruAppMode | null },
+  storedMode: MaruAppMode,
+): MaruAppMode {
+  if (userPickRef.current === storedMode) {
+    userPickRef.current = null;
+    return storedMode;
+  }
+  return userPickRef.current ?? storedMode;
+}
