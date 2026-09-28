@@ -5,52 +5,130 @@
     "title": "Maru Desktop Workspace",
     "output": "maru-rendered.html",
     "quality_profile": "showcase",
-    "views": [
-      { "id": "main-path", "label": "Primary user path", "focus": ["user", "frontend", "ipc", "rust-core", "fs"], "note": "Follow the user request from the React shell through typed IPC to the filesystem." },
-      { "id": "agent-path", "label": "Agent and skills", "focus": ["ai-router", "agent-host", "skill-host", "ota-bundles"], "note": "See how AI invocations and OTA skill dispatch sit beside the core." },
-      { "id": "sync-path", "label": "Hub and MCP", "focus": ["hub-client", "hub-server", "maru-mcp", "agents-cli"], "note": "Trace the Hub mirror connector and the MCP sidecar for external agents." }
-    ]
+    "repository": {
+      "url": "https://github.com/STAIxBWLB/maru",
+      "provider": "github",
+      "revision": "6aa17880805916ef4336b734ba8ac9400149ba4d"
+    }
   },
   "components": [
-    { "id": "user", "type": "external", "label": "User", "sublabel": "desktop app", "pos": [40, 330], "size": [120, 60] },
-    { "id": "frontend", "type": "frontend", "label": "React 19 Shell", "sublabel": "src/ — 18 lazy modes", "pos": [250, 330], "size": [150, 64], "tag": "TypeScript + Vite" },
-    { "id": "ipc", "type": "messagebus", "label": "Tauri IPC", "sublabel": "381 typed commands", "pos": [480, 330], "size": [140, 60], "tag": "ERR-06 contract" },
-    { "id": "rust-core", "type": "backend", "label": "Tauri 2 Rust Core", "sublabel": "src-tauri/ — 92 modules", "pos": [700, 330], "size": [160, 64], "tag": "fail-closed mutation" },
-    { "id": "fs", "type": "database", "label": "Filesystem", "sublabel": "workspace SSOT", "pos": [960, 330], "size": [140, 60], "tag": "byte-stable writes" },
+    { "id": "user", "type": "external", "label": "User", "sublabel": "Maru window", "pos": [30, 410], "size": [140, 60],
+      "sources": [{ "path": "src-tauri/tauri.conf.json", "line": 13, "end_line": 31, "label": "main window" }] },
+    { "id": "frontend", "type": "frontend", "label": "React 19 Shell", "sublabel": "src/, 18 lazy modes", "tag": "TypeScript + Vite", "pos": [290, 410], "size": [150, 60],
+      "sources": [
+        { "path": "src/main.tsx", "line": 14, "end_line": 21, "label": "webview entry" },
+        { "path": "src/lib/modeRegistry.tsx", "line": 191, "end_line": 208, "label": "lazy modes" },
+        { "path": "package.json", "line": 66, "label": "react 19" }
+      ] },
+    { "id": "ipc", "type": "messagebus", "label": "Tauri IPC", "sublabel": "383 commands", "tag": "structured errors", "pos": [520, 410], "size": [150, 60],
+      "sources": [
+        { "path": "src-tauri/src/lib.rs", "line": 245, "end_line": 651, "label": "generate_handler" },
+        { "path": "src/lib/api.ts", "line": 1183, "end_line": 1190, "label": "invoke + normalize" },
+        { "path": "src-tauri/src/ipc_error.rs", "line": 35, "end_line": 39, "label": "IpcError" }
+      ] },
+    { "id": "rust-core", "type": "backend", "label": "Tauri 2 Rust Core", "sublabel": "document, vault, files", "tag": "fail-closed mutation", "pos": [760, 410], "size": [150, 60],
+      "sources": [
+        { "path": "src-tauri/src/document.rs", "line": 138, "end_line": 228, "label": "save_document" },
+        { "path": "src-tauri/src/vault_guard.rs", "line": 225, "end_line": 252, "label": "managed-write gate" },
+        { "path": "src-tauri/src/frontmatter/ops.rs", "line": 1, "end_line": 4, "label": "frontmatter editor" }
+      ] },
+    { "id": "fs", "type": "database", "label": "Workspace Folder", "sublabel": "files are the SSOT", "tag": "atomic replace", "pos": [1010, 410], "size": [150, 60],
+      "sources": [
+        { "path": "src-tauri/src/atomic_file.rs", "line": 747, "end_line": 752, "label": "write_atomic" },
+        { "path": "src-tauri/src/vault.rs", "line": 680, "end_line": 697, "label": "path containment" },
+        { "path": "README.md", "line": 28, "end_line": 29, "label": "filesystem authoritative" }
+      ] },
 
-    { "id": "ai-router", "type": "backend", "label": "AI Router", "sublabel": "ai_router.rs", "pos": [480, 110], "size": [140, 60], "tag": "subprocess bridge" },
-    { "id": "agent-host", "type": "backend", "label": "Agent Host", "sublabel": "agent_host/", "pos": [700, 110], "size": [150, 60], "tag": "structured loop" },
-    { "id": "agents-cli", "type": "external", "label": "CLI Agents", "sublabel": "claude / codex", "pos": [960, 110], "size": [140, 60] },
-    { "id": "skill-host", "type": "backend", "label": "Skill Host", "sublabel": "skill_host/", "pos": [250, 110], "size": [150, 60], "tag": "dispatch + store" },
-    { "id": "ota-bundles", "type": "cloud", "label": "OTA Skill Bundles", "sublabel": "skills-channel release", "pos": [40, 110], "size": [150, 60], "tag": "minisign signed" },
+    { "id": "ota-bundles", "type": "cloud", "label": "OTA Skill Bundles", "sublabel": "skills-channel release", "tag": "minisign signed", "pos": [30, 230], "size": [140, 60],
+      "sources": [
+        { "path": "src-tauri/src/skill_host/store.rs", "line": 4599, "end_line": 4601, "label": "channel defaults" },
+        { "path": "src-tauri/src/skill_host/bundle_update.rs", "line": 357, "end_line": 372, "label": "release discovery" },
+        { "path": "src-tauri/src/skill_host/bundle_update.rs", "line": 280, "end_line": 302, "label": "signature check" }
+      ] },
+    { "id": "skill-host", "type": "backend", "label": "Skill Host", "sublabel": "skill_host/", "tag": "background + terminal", "pos": [290, 230], "size": [150, 60],
+      "sources": [
+        { "path": "src-tauri/src/skill_host/dispatch.rs", "line": 295, "end_line": 310, "label": "background argv via agent_host" },
+        { "path": "src-tauri/src/skill_host/dispatch.rs", "line": 700, "end_line": 710, "label": "background spawn" },
+        { "path": "src-tauri/src/skill_host/dispatch.rs", "line": 93, "end_line": 160, "label": "terminal launch spec" }
+      ] },
+    { "id": "ai-router", "type": "backend", "label": "AI Router", "sublabel": "ai_router.rs", "tag": "streams ai:// events", "pos": [520, 230], "size": [150, 60],
+      "sources": [
+        { "path": "src-tauri/src/ai_router.rs", "line": 1, "end_line": 10, "label": "bridge contract" },
+        { "path": "src-tauri/src/ai_router.rs", "line": 57, "end_line": 138, "label": "start_agent_cli_invocation" },
+        { "path": "src-tauri/src/ai_router.rs", "line": 238, "end_line": 282, "label": "spawn + stream" }
+      ] },
+    { "id": "agent-host", "type": "backend", "label": "Agent Host", "sublabel": "agent_host/", "tag": "argv + five-role loop", "pos": [760, 230], "size": [150, 60],
+      "sources": [
+        { "path": "src-tauri/src/agent_host/provider.rs", "line": 201, "end_line": 318, "label": "build_cli_command_with_policy" },
+        { "path": "src-tauri/src/agent_host/structured_loop.rs", "line": 155, "end_line": 165, "label": "loop on CliProviderAdapter" },
+        { "path": "src-tauri/src/agent_host/runtime_policy.rs", "line": 264, "end_line": 306, "label": "opt-in dot policy" }
+      ] },
+    { "id": "agents-cli", "type": "external", "label": "CLI Agents", "sublabel": "claude, codex, kimi, kiro", "pos": [520, 50], "size": [150, 60],
+      "sources": [
+        { "path": "src-tauri/src/agent_host/provider.rs", "line": 42, "end_line": 76, "label": "CliProviderKind" },
+        { "path": "src-tauri/src/agent_host/provider.rs", "line": 329, "end_line": 400, "label": "loop spawn" }
+      ] },
 
-    { "id": "maru-mcp", "type": "backend", "label": "maru-mcp Sidecar", "sublabel": "Node sidecar", "pos": [700, 500], "size": [150, 60] },
-    { "id": "hub-client", "type": "backend", "label": "Hub Client", "sublabel": "hub_client/", "pos": [480, 500], "size": [140, 60], "tag": "read-mirror" },
-    { "id": "hub-server", "type": "cloud", "label": "Maru Hub", "sublabel": "cloud mirror", "pos": [250, 500], "size": [140, 60] }
+    { "id": "hub-server", "type": "cloud", "label": "Maru Hub", "sublabel": "configured endpoint", "pos": [30, 570], "size": [140, 60],
+      "sources": [
+        { "path": "src-tauri/src/hub_client/mod.rs", "line": 532, "end_line": 549, "label": "hub.endpoint config" },
+        { "path": "src-tauri/src/hub_client/http.rs", "line": 131, "end_line": 158, "label": "resource URLs" }
+      ] },
+    { "id": "hub-client", "type": "backend", "label": "Hub Client", "sublabel": "hub_client/", "tag": "opt-in, safety-checked", "pos": [520, 570], "size": [150, 60],
+      "sources": [
+        { "path": "src-tauri/src/hub_client/mod.rs", "line": 112, "end_line": 131, "label": "catalog fetch + cache" },
+        { "path": "src-tauri/src/hub_client/mod.rs", "line": 258, "end_line": 294, "label": "submit gate + queue" },
+        { "path": "src-tauri/src/hub_client/safety.rs", "line": 6, "end_line": 30, "label": "safety check" }
+      ] },
+    { "id": "maru-mcp", "type": "backend", "label": "maru-mcp Sidecar", "sublabel": "Node, stdio JSON-RPC", "tag": "read-first", "pos": [1010, 570], "size": [150, 60],
+      "sources": [
+        { "path": "sidecars/maru-mcp/index.mjs", "line": 8, "end_line": 9, "label": "workspace root" },
+        { "path": "sidecars/maru-mcp/index.mjs", "line": 91, "end_line": 130, "label": "stdio dispatch" },
+        { "path": "sidecars/maru-mcp/index.mjs", "line": 210, "end_line": 226, "label": "append proposal event" }
+      ] }
   ],
   "boundaries": [
-    { "kind": "region", "label": "Tauri App Process", "wraps": ["frontend", "ipc", "rust-core", "ai-router", "agent-host", "skill-host", "hub-client"] },
-    { "kind": "security-group", "label": "fail-closed write policy", "wraps": ["rust-core", "fs"] }
+    { "kind": "region", "label": "Maru desktop app (Tauri 2)", "wraps": ["frontend", "ipc", "rust-core", "skill-host", "ai-router", "agent-host", "hub-client"] }
   ],
   "connections": [
     { "id": "user-to-frontend", "from": "user", "to": "frontend", "label": "interact" },
     { "id": "frontend-to-ipc", "from": "frontend", "to": "ipc", "label": "invoke()" },
-    { "id": "ipc-to-core", "from": "ipc", "to": "rust-core", "label": "typed command" },
-    { "id": "core-to-fs", "from": "rust-core", "to": "fs", "label": "atomic read/write" },
+    { "id": "ipc-to-core", "from": "ipc", "to": "rust-core", "label": "command" },
+    { "id": "core-to-fs", "from": "rust-core", "to": "fs", "label": "atomic write" },
 
-    { "id": "frontend-to-skill-host", "from": "frontend", "to": "skill-host", "label": "skill invoke", "fromSide": "top", "toSide": "bottom", "labelDx": -34, "labelDy": -22 },
-    { "id": "ota-to-skill-host", "from": "ota-bundles", "to": "skill-host", "label": "signed bundle", "labelAt": [206, 184] },
-    { "id": "frontend-to-ai-router", "from": "frontend", "to": "ai-router", "label": "start invocation", "fromSide": "top", "toSide": "bottom", "labelDx": 56 },
-    { "id": "ai-router-to-agent-host", "from": "ai-router", "to": "agent-host", "label": "provider resolve", "labelAt": [660, 184] },
-    { "id": "agent-host-to-cli", "from": "agent-host", "to": "agents-cli", "label": "spawn CLI" },
+    { "id": "ipc-to-ai-router", "from": "ipc", "to": "ai-router", "label": "start invocation" },
+    { "id": "ipc-to-skill-host", "from": "ipc", "to": "skill-host", "label": "skill dispatch", "fromSide": "top", "toSide": "bottom" },
+    { "id": "ota-to-skill-host", "from": "ota-bundles", "to": "skill-host", "label": "signed bundle" },
+    { "id": "ipc-to-agent-host", "from": "ipc", "to": "agent-host", "label": "run loop", "fromSide": "top", "toSide": "bottom" },
+    { "id": "ai-router-to-cli", "from": "ai-router", "to": "agents-cli", "label": "spawn, stream stdout" },
+    { "id": "skill-host-to-cli", "from": "skill-host", "to": "agents-cli", "label": "background spawn" },
+    { "id": "agent-host-to-cli", "from": "agent-host", "to": "agents-cli", "label": "loop spawn" },
 
-    { "id": "core-to-mcp", "from": "rust-core", "to": "maru-mcp", "label": "spawn sidecar", "fromSide": "bottom", "toSide": "top", "labelDy": 40, "labelDx": -70 },
-    { "id": "core-to-hub", "from": "rust-core", "to": "hub-client", "label": "sync events", "fromSide": "bottom", "toSide": "top" },
-    { "id": "hub-to-server", "from": "hub-client", "to": "hub-server", "label": "HTTPS mirror", "variant": "dashed" }
+    { "id": "ipc-to-hub-client", "from": "ipc", "to": "hub-client", "label": "hub commands" },
+    { "id": "hub-client-to-server", "from": "hub-client", "to": "hub-server", "label": "HTTP when enabled", "variant": "dashed" },
+    { "id": "mcp-to-fs", "from": "maru-mcp", "to": "fs", "label": "read, append events" }
   ],
   "cards": [
-    { "dot": "cyan", "title": "Core", "items": ["Filesystem is authoritative — caches are disposable", "381 typed IPC commands, every mutation re-validated in Rust", "Byte-stable frontmatter edits preserve unrelated keys"] },
-    { "dot": "violet", "title": "AI and Skills", "items": ["CLI agents (claude/codex) spawned headless via ai_router", "Agent host runs structured loops with protected-write approval", "Skill host applies minisign-verified OTA bundles (skills-channel)"] },
-    { "dot": "emerald", "title": "Integration", "items": ["Hub client mirrors read-only state to Maru Hub (no PII, no binaries)", "maru-mcp Node sidecar exposes workspace to external MCP agents", "Korean document fidelity: HWPX, DOCX, PDF, IME"] }
+    { "dot": "cyan", "title": "Core", "items": [
+      "Filesystem is authoritative; caches are disposable",
+      "383 production commands registered in lib.rs; conflicts cross as IpcError { code, message }",
+      "save_document: path-transaction admission, write policy, managed-vault check, revision check, managed-root snapshot, then atomic replace",
+      "Frontmatter edits go through frontmatter/ops.rs, preserving key order and comments"
+    ] },
+    { "dot": "violet", "title": "AI and Skills", "items": [
+      "ai_router, background skill dispatch and the five-role loop build argv with agent_host::provider; each spawns its own CLI process",
+      "Terminal dispatch returns its own launch spec for the embedded PTY; Codex runs via /bin/zsh -lc with shell-quoted args and the prompt in MARU_SKILL_PROMPT",
+      "Output returns to the webview as ai://output, ai://done and ai://error events",
+      "Adaptive policy is off unless ai.adaptivePolicy is enabled; then agent_host runs dot ai policy resolve --json, and a missing dot or failed resolve stops the launch instead of bypassing permissions",
+      "The 60s scheduler ticker dispatches due schedules through the skill host",
+      "Bundles from the STAIxBWLB/skills skills-channel release are verified with the updater minisign key"
+    ] },
+    { "dot": "emerald", "title": "Integration", "items": [
+      "While hub.enabled is false the Hub client still serves the cached catalog and queues submit gates; only HTTP to the Hub is off. Online catalog reads revalidate with ETags",
+      "Submit gates pass a safety check (no body, content or binary keys) and queue offline under .maru/queue/hub",
+      "maru-mcp is started by an external MCP client over stdio (MARU_MCP_WORKSPACE); the desktop app does not spawn it",
+      "The sidecar reads workspace files and only appends proposal events under .maru/runs/skills",
+      "The Rust core also runs inbox connectors (gws for Gmail, m365 for Outlook, a configured Python script for Telegram, a KakaoTalk relay folder), the signed Tauri updater, and portable-pty terminal sessions"
+    ] }
   ]
 }
