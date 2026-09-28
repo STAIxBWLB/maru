@@ -6,7 +6,7 @@
   "status": "pass",
   "visualReview": "pending",
   "provenance": "current",
-  "deliveryReceiptId": "594bf60e-6d72-4aa7-aed8-b36528c6f29b",
+  "deliveryReceiptId": "ff0cf365-7c42-4b01-8a56-795f7559e4ae",
   "artifact": {
     "path": "docs/architecture/maru-rendered.html",
     "sha256": "1f81a8c67353ad3b06fdd1eb274f8025b63e57648b752ed2ae2e7625456191c8",
@@ -942,18 +942,18 @@
         "file": "maru-rendered.visual-check.1440x900.light.png"
       },
       {
-        "sha256": "154e2795b1ef4bd7e377e0be5323cbab60137ce8f2b58b3f0b02b71e569994fd",
+        "sha256": "d9f02e7129def46be9666fcabb41912d961c9a1dac3acc1e71ead478d524c79b",
         "bytes": 132413,
         "file": "maru-rendered.visual-check.1440x900.dark.png"
       },
       {
-        "sha256": "b8299de573a1e1ab367892be850ae6f04ad00ecae96276fffb21e28dd86aa5ec",
-        "bytes": 187672,
+        "sha256": "9007f6045cb6d4a41c31544f740fe1b75fd177e2c1e46205b163a174ef2adb0a",
+        "bytes": 187673,
         "file": "maru-rendered.visual-check.2048x1320.light.png"
       },
       {
-        "sha256": "0259a27a9979f48b92a588d82fbaec7773ff772efea3e64c341b2c17e886c60f",
-        "bytes": 205792,
+        "sha256": "47efdc4b5e257f320aa367c5103072f45837748ba4ce5d10aad4778836615010",
+        "bytes": 205793,
         "file": "maru-rendered.visual-check.2048x1320.dark.png"
       }
     ]

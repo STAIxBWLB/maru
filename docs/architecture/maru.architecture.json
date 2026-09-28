@@ -9,12 +9,7 @@
       "url": "https://github.com/STAIxBWLB/maru",
       "provider": "github",
       "revision": "6aa17880805916ef4336b734ba8ac9400149ba4d"
-    },
-    "views": [
-      { "id": "main-path", "label": "Primary user path", "focus": ["user", "frontend", "ipc", "rust-core", "fs"], "note": "A React mode invokes a typed Tauri command; Rust rechecks policy and revision before an atomic write." },
-      { "id": "agent-path", "label": "Agents and skills", "focus": ["ipc", "ai-router", "skill-host", "agent-host", "agents-cli", "ota-bundles"], "note": "AI invocations and skill dispatch both get provider argv from the agent host before a CLI runtime starts." },
-      { "id": "sync-path", "label": "Hub and MCP", "focus": ["ipc", "hub-client", "hub-server", "maru-mcp", "fs"], "note": "The opt-in Hub client exchanges catalog and gate data over HTTP; the stdio MCP sidecar reads the workspace for external agents." }
-    ]
+    }
   },
   "components": [
     { "id": "user", "type": "external", "label": "User", "sublabel": "Maru window", "pos": [30, 410], "size": [140, 60],
