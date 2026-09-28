@@ -6,11 +6,11 @@
   "status": "pass",
   "visualReview": "pending",
   "provenance": "current",
-  "deliveryReceiptId": "ff0cf365-7c42-4b01-8a56-795f7559e4ae",
+  "deliveryReceiptId": "c8b32f2c-865a-4f27-a294-8c8e1ebb1478",
   "artifact": {
     "path": "docs/architecture/maru-rendered.html",
-    "sha256": "1f81a8c67353ad3b06fdd1eb274f8025b63e57648b752ed2ae2e7625456191c8",
-    "bytes": 782363
+    "sha256": "4e1192e07a75c2d7d8c05c1d5ef24671ebcf14cf142e8ba3b595d6a0a3acad6b",
+    "bytes": 784189
   },
   "state": {
     "detail": "read",
@@ -937,23 +937,23 @@
         "file": "maru-rendered.visual-check.html"
       },
       {
-        "sha256": "9ce1bac3dd2ae2480d0a7465b1c3d9906a51b4206bd4c3fcae80c5744d98bee9",
-        "bytes": 121494,
+        "sha256": "93d3de2c4bb26f31d3d8f1215c0016dfcc44f7f4aab447a975cc9232e249ac76",
+        "bytes": 121165,
         "file": "maru-rendered.visual-check.1440x900.light.png"
       },
       {
-        "sha256": "d9f02e7129def46be9666fcabb41912d961c9a1dac3acc1e71ead478d524c79b",
-        "bytes": 132413,
+        "sha256": "3e8a4e80feccfb6b5ee9fb4bcfb790fec7a427ceba47ead1183a83c9f9a493ec",
+        "bytes": 132642,
         "file": "maru-rendered.visual-check.1440x900.dark.png"
       },
       {
-        "sha256": "9007f6045cb6d4a41c31544f740fe1b75fd177e2c1e46205b163a174ef2adb0a",
-        "bytes": 187673,
+        "sha256": "b7e19fff8cb09dc0c8143e244a1e430c2e8f0dbed4d1ed56d832f43abe1f7dc1",
+        "bytes": 187929,
         "file": "maru-rendered.visual-check.2048x1320.light.png"
       },
       {
-        "sha256": "47efdc4b5e257f320aa367c5103072f45837748ba4ce5d10aad4778836615010",
-        "bytes": 205793,
+        "sha256": "47bfca9c7dd385d473e503bbc3235573abdab255a91e391ba096ddbc1abd8b50",
+        "bytes": 206951,
         "file": "maru-rendered.visual-check.2048x1320.dark.png"
       }
     ]
