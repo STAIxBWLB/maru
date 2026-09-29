@@ -2432,6 +2432,7 @@ export const en: Record<string, string> = {
   "architecture.noWorkspace": "Open a workspace to see its blueprints.",
   "architecture.select": "Select a blueprint.",
   "architecture.error": "Could not load blueprints: {message}",
+  "architecture.openError": "Could not open the blueprint: {message}",
   "architecture.refresh": "Refresh blueprints",
   "architecture.openInBrowser": "Open in browser",
   "architecture.frameTitle": "{title} blueprint",

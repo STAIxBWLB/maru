@@ -55,6 +55,8 @@ async function waitForProbe(count: number): Promise<Probe> {
 }
 
 describe("native 설계도 mode", () => {
+  // Seeded once for this file's single test: wdio's beforeTest reset wipes
+  // the workspace from the second test on, so a new test must seed again.
   before(async () => {
     const source = path.join(fixtureRootDir(), "blueprint-src");
     await fs.mkdir(path.join(source, "docs", "architecture"), { recursive: true });

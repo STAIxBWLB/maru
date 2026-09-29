@@ -43,6 +43,10 @@ struct Found {
 /// outside the workspace are skipped.
 fn scan_blueprints(root: &Path) -> Result<Vec<Found>, String> {
     let mut found = Vec::new();
+    // A plain-folder workspace has no submodules, not a failed listing.
+    if !root.ancestors().any(|dir| dir.join(".git").exists()) {
+        return Ok(found);
+    }
     for repo_path in list_workspace_submodules(root.to_string_lossy().into_owned())? {
         let Some(group) = GROUPS.into_iter().find(|group| {
             repo_path
@@ -305,6 +309,17 @@ mod tests {
             root.join("dev/alpha/docs/architecture/alpha-rendered.html")
         );
         assert!(alpha.modified_at.is_some_and(|ms| ms > 0));
+    }
+
+    #[test]
+    fn architecture_lists_nothing_for_a_plain_folder_workspace() {
+        let tmp = TempDir::new().unwrap();
+        fs::create_dir_all(tmp.path().join("dev/alpha/docs")).unwrap();
+        fs::write(tmp.path().join("dev/alpha/docs/alpha-rendered.html"), "x").unwrap();
+
+        let listed = list_architecture_blueprints(root_arg(tmp.path())).unwrap();
+
+        assert!(listed.is_empty());
     }
 
     #[test]

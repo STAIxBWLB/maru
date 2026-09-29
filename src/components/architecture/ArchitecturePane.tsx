@@ -54,6 +54,7 @@ export function ArchitecturePane({ workspacePath, onRevealInFiles }: Architectur
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [grantedPath, setGrantedPath] = useState<string | null>(null);
   const [prepareError, setPrepareError] = useState<string | null>(null);
+  const [openError, setOpenError] = useState<string | null>(null);
   const listRequest = useRef(0);
 
   const refresh = useCallback(async () => {
@@ -70,11 +71,11 @@ export function ArchitecturePane({ workspacePath, onRevealInFiles }: Architectur
         current && listed.some((item) => item.htmlPath === current) ? current : listed[0]?.htmlPath ?? null,
       );
     } catch (err) {
-      if (request === listRequest.current) setError(t("architecture.error", { message: String(err) }));
+      if (request === listRequest.current) setError(String(err));
     } finally {
       if (request === listRequest.current) setLoading(false);
     }
-  }, [t, workspacePath]);
+  }, [workspacePath]);
 
   useEffect(() => {
     setBlueprints([]);
@@ -85,6 +86,7 @@ export function ArchitecturePane({ workspacePath, onRevealInFiles }: Architectur
   useEffect(() => {
     setGrantedPath(null);
     setPrepareError(null);
+    setOpenError(null);
     if (!workspacePath || !selectedPath) return;
     let cancelled = false;
     prepareArchitectureBlueprint(workspacePath, selectedPath).then(
@@ -92,13 +94,13 @@ export function ArchitecturePane({ workspacePath, onRevealInFiles }: Architectur
         if (!cancelled) setGrantedPath(path);
       },
       (err) => {
-        if (!cancelled) setPrepareError(t("architecture.error", { message: String(err) }));
+        if (!cancelled) setPrepareError(String(err));
       },
     );
     return () => {
       cancelled = true;
     };
-  }, [selectedPath, t, workspacePath]);
+  }, [selectedPath, workspacePath]);
 
   const visible = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -136,7 +138,7 @@ export function ArchitecturePane({ workspacePath, onRevealInFiles }: Architectur
         </div>
         {error ? (
           <StatusBanner tone="danger">
-            <span>{error}</span>
+            <span>{t("architecture.error", { message: error })}</span>
           </StatusBanner>
         ) : null}
         <div className="architecture-list" aria-busy={loading}>
@@ -192,14 +194,18 @@ export function ArchitecturePane({ workspacePath, onRevealInFiles }: Architectur
                 label={t("architecture.openInBrowser")}
                 size="sm"
                 onClick={() => {
-                  openInFileManager(workspacePath, selected.htmlPath).catch((err) =>
-                    setError(t("architecture.error", { message: String(err) })),
-                  );
+                  setOpenError(null);
+                  openInFileManager(workspacePath, selected.htmlPath).catch((err) => setOpenError(String(err)));
                 }}
               >
                 <ExternalLink size={14} />
               </IconButton>
             </div>
+            {openError ? (
+              <StatusBanner tone="danger">
+                <span>{t("architecture.openError", { message: openError })}</span>
+              </StatusBanner>
+            ) : null}
             {grantedPath === selected.htmlPath ? (
               <iframe
                 key={`${grantedPath}:${selected.modifiedAt ?? ""}`}
@@ -212,7 +218,7 @@ export function ArchitecturePane({ workspacePath, onRevealInFiles }: Architectur
               />
             ) : prepareError ? (
               <StatusBanner tone="danger">
-                <span>{prepareError}</span>
+                <span>{t("architecture.error", { message: prepareError })}</span>
               </StatusBanner>
             ) : (
               <p className="architecture-list-note" role="status">{t("architecture.loading")}</p>

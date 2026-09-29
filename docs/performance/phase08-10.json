@@ -2196,7 +2196,7 @@
       "tests": [
         {
           "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib architecture",
-          "passed": 5,
+          "passed": 6,
           "failed": 0,
           "ignored": 0,
           "exitCode": 0
@@ -2224,6 +2224,7 @@
       "evidence": {
         "behaviorCases": [
           "architecture_lists_submodule_viewers_with_titles_and_groups",
+          "architecture_lists_nothing_for_a_plain_folder_workspace",
           "architecture_accepts_a_listed_viewer_by_absolute_or_relative_path",
           "architecture_rejects_outside_traversal_stray_and_bad_names",
           "architecture_skips_symlinks_escaping_the_submodule",
@@ -2251,7 +2252,7 @@
       "tests": [
         {
           "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib architecture",
-          "passed": 5,
+          "passed": 6,
           "failed": 0,
           "ignored": 0,
           "exitCode": 0
@@ -2279,6 +2280,7 @@
       "evidence": {
         "behaviorCases": [
           "architecture_lists_submodule_viewers_with_titles_and_groups",
+          "architecture_lists_nothing_for_a_plain_folder_workspace",
           "architecture_accepts_a_listed_viewer_by_absolute_or_relative_path",
           "architecture_rejects_outside_traversal_stray_and_bad_names",
           "architecture_skips_symlinks_escaping_the_submodule",

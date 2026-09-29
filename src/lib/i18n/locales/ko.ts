@@ -2431,6 +2431,7 @@ export const ko: Record<string, string> = {
   "architecture.noWorkspace": "워크스페이스를 열면 설계도를 볼 수 있습니다.",
   "architecture.select": "설계도를 선택하세요.",
   "architecture.error": "설계도를 불러오지 못했습니다: {message}",
+  "architecture.openError": "설계도를 열지 못했습니다: {message}",
   "architecture.refresh": "설계도 새로고침",
   "architecture.openInBrowser": "브라우저에서 열기",
   "architecture.frameTitle": "{title} 설계도",
