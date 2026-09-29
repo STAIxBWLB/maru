@@ -487,6 +487,35 @@ fn open_in_system_browser(url: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Main-webview guard: a remote http(s) navigation, a link in the sandboxed
+/// blueprint iframe (#410) or a preview link past its click handler (#382),
+/// opens in the system browser instead of replacing app or frame content.
+/// Sites embeds are separate webviews and keep their own handlers.
+pub(crate) fn external_link_plugin<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
+    tauri::plugin::Builder::new("maru-external-links")
+        .on_navigation(|webview, url| {
+            if webview.label() != MAIN_WINDOW_LABEL || !is_remote_http(url) {
+                return true;
+            }
+            let target = url.to_string();
+            // Leave the platform navigation delegate before spawning `open`.
+            std::thread::spawn(move || {
+                if let Err(err) = open_in_system_browser(&target) {
+                    eprintln!("[site-view] {err}");
+                }
+            });
+            false
+        })
+        .build()
+}
+
+fn is_remote_http(url: &Url) -> bool {
+    matches!(url.scheme(), "http" | "https")
+        && !url.host_str().is_some_and(|host| {
+            host == "localhost" || host == "127.0.0.1" || host.ends_with(".localhost")
+        })
+}
+
 #[cfg(test)]
 fn worker_hook_key(command: &str) -> std::path::PathBuf {
     std::path::PathBuf::from(format!("/maru/phase08_24/site_view/{command}"))
@@ -588,6 +617,25 @@ mod tests {
                 "http://localhost:3000/path?q=1".to_string(),
             ]
         );
+    }
+
+    #[test]
+    fn external_link_guard_passes_app_asset_and_dev_origins() {
+        for local in [
+            "tauri://localhost/index.html",
+            "asset://localhost/%2Fwork%2Fdocs%2Fa-rendered.html",
+            "http://asset.localhost/work/docs/a-rendered.html",
+            "http://tauri.localhost/",
+            "http://127.0.0.1:5307/",
+            "http://localhost:5307/",
+            "about:blank",
+            "blob:tauri://localhost/1",
+        ] {
+            assert!(!is_remote_http(&url(local)), "{local}");
+        }
+        for remote in ["https://github.com/entelecheia/maru", "http://example.com/"] {
+            assert!(is_remote_http(&url(remote)), "{remote}");
+        }
     }
 
     #[test]

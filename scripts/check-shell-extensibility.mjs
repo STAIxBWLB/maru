@@ -66,8 +66,8 @@ async function runAddModeDrill() {
     let registry = await readFile(registryPath, "utf8");
     registry = replaceOnce(
       registry,
-      '  "catalog", "studio", "e2e", "diagram", "sites", "graph", "drafts", "gap", "agents",\n] as const',
-      '  "catalog", "studio", "e2e", "diagram", "sites", "graph", "drafts", "gap", "agents", "phase5-drill",\n] as const',
+      '  "catalog", "studio", "e2e", "diagram", "architecture", "sites", "graph", "drafts", "gap", "agents",\n] as const',
+      '  "catalog", "studio", "e2e", "diagram", "architecture", "sites", "graph", "drafts", "gap", "agents", "phase5-drill",\n] as const',
       "registered mode insertion",
     );
     registry = replaceOnce(
@@ -86,8 +86,8 @@ async function runAddModeDrill() {
     const registryTest = await readFile(registryTestPath, "utf8");
     await writeFile(registryTestPath, replaceOnce(
       registryTest,
-      '      "catalog", "studio", "e2e", "diagram", "sites", "graph", "drafts", "gap", "agents",\n    ]);',
-      '      "catalog", "studio", "e2e", "diagram", "sites", "graph", "drafts", "gap", "agents", "phase5-drill",\n    ]);',
+      '      "catalog", "studio", "e2e", "diagram", "architecture", "sites", "graph", "drafts", "gap", "agents",\n    ]);',
+      '      "catalog", "studio", "e2e", "diagram", "architecture", "sites", "graph", "drafts", "gap", "agents", "phase5-drill",\n    ]);',
       "registry expectation insertion",
     ));
     await writeFile(

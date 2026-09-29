@@ -19,6 +19,7 @@ import {
   Clock3,
   Command,
   Diff,
+  DraftingCompass,
   FileText,
   FolderOpen,
   Globe,
@@ -785,6 +786,7 @@ const ActivityRail = memo(function ActivityRail({
         ["catalog", LayoutGrid],
         ["studio", Workflow],
         ["sites", Globe],
+        ["architecture", DraftingCompass],
       ] as const).map(([mode, Icon]) => (
         <ActivityModeButton
           key={mode}
@@ -8525,6 +8527,7 @@ export function MainApp() {
               revealPath: (path) => {
                 if (inboxWorkspacePath) void revealInFileManager(inboxWorkspacePath, path);
               },
+              revealInFiles: revealPathInFiles,
               saveDocument: (path, content, expectedRevision) => {
                 const root = inboxWorkspacePath ?? settingsWorkPath;
                 if (!root) return Promise.reject(new Error("workspace required"));

@@ -4,6 +4,7 @@ mod agents;
 mod ai_router;
 mod app_menu;
 mod approval;
+mod architecture;
 mod artifact_checks;
 mod atomic_file;
 mod binary_viewer;
@@ -204,7 +205,8 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_process::init())
-        .plugin(tauri_plugin_updater::Builder::new().build());
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(site_view::external_link_plugin());
     // Behind the default-off `native-e2e` feature so this plugin, and the
     // in-app WebDriver server it starts, never compile into a build a
     // user can install (D-10, T-06-01). Placed after tauri_plugin_updater
@@ -280,6 +282,8 @@ pub fn run() {
             git::ipc::git_changes,
             git::ipc::git_diff,
             git::ipc::list_workspace_submodules,
+            architecture::ipc::list_architecture_blueprints,
+            architecture::ipc::prepare_architecture_blueprint,
             file_manager::ipc::open_in_file_manager,
             file_manager::ipc::reveal_in_file_manager,
             inbox::ipc::scan_inbox_drop,

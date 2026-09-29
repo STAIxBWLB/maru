@@ -37,6 +37,15 @@ describe("modeRegistry", () => {
     expect(typeof descriptor?.load).toBe("function");
   });
 
+  it("registers Architecture as a read-only gallery in both workbench placements", () => {
+    expect(getModeDescriptor("architecture")).toMatchObject({
+      id: "architecture",
+      placements: ["primary", "right"],
+      fallback: "mode-loading",
+    });
+    expect(typeof getModeDescriptor("architecture")?.load).toBe("function");
+  });
+
   it("registers Graph and Sites as separate lazy surfaces in their required placements", () => {
     expect(getModeDescriptor("graph")).toMatchObject({
       id: "graph",
@@ -103,7 +112,7 @@ describe("modeRegistry", () => {
   it("covers every Maru app mode exactly once with a dedicated lazy descriptor", () => {
     expect(getRegisteredModeIds()).toEqual([
       "pkm", "scratchpad", "files", "inbox", "comms", "meetings", "today", "tasks", "dashboard",
-      "catalog", "studio", "e2e", "diagram", "sites", "graph", "drafts", "gap", "agents",
+      "catalog", "studio", "e2e", "diagram", "architecture", "sites", "graph", "drafts", "gap", "agents",
     ]);
   });
 });

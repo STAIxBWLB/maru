@@ -2,7 +2,7 @@ import { lazy, Suspense, type ComponentType, type ReactNode } from "react";
 
 import type { DocumentBrowserScope } from "./documentBrowserStore";
 import type { DocumentOpsModeHost } from "./documentOpsModeStore";
-import type { ScanOptions } from "./types";
+import type { ScanOptions, WorkspaceVisibility } from "./types";
 import { isDiagramEnabled } from "./diagramFlag";
 import { isE2EFlowEnabled } from "./e2eFlow";
 import type { FavoriteTarget } from "../components/FavoritesSection";
@@ -13,7 +13,7 @@ export type RegisteredModeId = MaruAppMode;
 
 const registeredModeIds = [
   "pkm", "scratchpad", "files", "inbox", "comms", "meetings", "today", "tasks", "dashboard",
-  "catalog", "studio", "e2e", "diagram", "sites", "graph", "drafts", "gap", "agents",
+  "catalog", "studio", "e2e", "diagram", "architecture", "sites", "graph", "drafts", "gap", "agents",
 ] as const satisfies readonly RegisteredModeId[];
 
 /** Identifiers only: adapters subscribe to their own data instead of receiving shell snapshots. */
@@ -26,6 +26,7 @@ export interface ModeHostScope {
 export interface ModeHostCommands {
   renderPrimarySurface(): ReactNode;
   revealPath?(path: string): void;
+  revealInFiles?(workspacePath: string, visibility: WorkspaceVisibility, targetPath: string): void;
   saveDocument?(path: string, content: string, expectedRevision: string | null): Promise<unknown>;
   openGraphEntry?(entry: unknown): void;
   createGraphNote?(target: string): void;
@@ -78,6 +79,13 @@ const modeRegistry: Record<RegisteredModeId, ModeDescriptor> = {
     load: () => import("./modeAdapters/DiagramModeAdapter").then((module) => ({ default: module.DiagramModeAdapter })),
     placements: ["primary", "right"],
     isAvailable: isDiagramEnabled,
+    fallback: "mode-loading",
+  },
+  architecture: {
+    id: "architecture",
+    load: () => import("./modeAdapters/ArchitectureModeAdapter").then((module) => ({ default: module.ArchitectureModeAdapter })),
+    placements: ["primary", "right"],
+    isAvailable: () => true,
     fallback: "mode-loading",
   },
   graph: {
@@ -191,6 +199,7 @@ const lazyAdapters: Record<RegisteredModeId, ReturnType<typeof lazy<ComponentTyp
   pkm: lazy(modeRegistry.pkm.load),
   e2e: lazy(modeRegistry.e2e.load),
   diagram: lazy(modeRegistry.diagram.load),
+  architecture: lazy(modeRegistry.architecture.load),
   graph: lazy(modeRegistry.graph.load),
   sites: lazy(modeRegistry.sites.load),
   agents: lazy(modeRegistry.agents.load),
