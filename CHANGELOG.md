@@ -13,21 +13,21 @@ Dates are the release-tag dates. Only `feat`/`fix`-level changes are listed;
 - **An Architecture mode (설계도) gathers archify blueprints (#410, #411).**
   Every `<slug>-rendered.html` viewer that a dev/ or sites/ submodule keeps
   in `docs/architecture/`, `docs/` or `architecture/` is listed by repo group
-  with its spec title and search, read straight from the working tree. The
-  selected viewer runs in a sandboxed iframe over a single-file asset grant,
-  follows the app theme live, and offers reveal in Files and open in the
-  default browser. Stray clones, symlinks leaving a submodule, and
-  plain-folder workspaces list nothing.
-- **Remote links in the main window always leave the app (#411).** A
-  navigation to a remote http(s) page inside the main webview, such as a
-  viewer or preview link, opens in the system browser (at most once per
-  second) instead of replacing app or frame content. On Windows, viewer
-  links stay inert.
-- **Skill federation reaches six agents (#396, #401).** Claude, Codex, Kimi,
-  Qwen, Grok and OpenCode can each receive an explicit skill selection through
-  `maru skills sync --tools <csv> --skills <csv>`, discoverable with
-  `maru skills capabilities --json`; native, plugin and system skills keep
-  their own installers.
+  with its spec title (or slug) and search, read straight from the working
+  tree. The selected viewer runs in a sandboxed iframe over a single-file
+  asset grant, follows the app theme live, and offers reveal in Files and
+  opening the file outside the app. Stray clones, symlinks leaving a
+  submodule, and plain-folder workspaces list nothing.
+- **Remote links no longer replace app content in the main webview (#411).**
+  A navigation to a remote http(s) page inside the main webview, such as a
+  viewer or preview link, is cancelled and handed to the system browser,
+  at most one per second. On Windows, viewer links stay inert; Sites
+  browsing is unchanged.
+- **Skill federation reaches six agents (#401).** Claude, Codex, Kimi, Qwen,
+  Grok and OpenCode can each receive an explicit skill selection through
+  `maru skills sync --check|--apply --tools <csv> --skills <csv>`,
+  discoverable with `maru skills capabilities --json`; native, plugin and
+  system skills keep their own installers.
 - **Adaptive agent runtime policy (#404, #405).** An opt-in policy picks the
   runtime, model, effort and permissions per task before provider argv is
   built, native Claude/Codex flags derive from typed policy, and exact
