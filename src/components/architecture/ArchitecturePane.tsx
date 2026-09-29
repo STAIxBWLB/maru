@@ -1,7 +1,7 @@
 import "./architecture.css";
 
 import { DraftingCompass, ExternalLink, FolderSearch, RefreshCcw } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   listArchitectureBlueprints,
@@ -53,21 +53,26 @@ export function ArchitecturePane({ workspacePath, onRevealInFiles }: Architectur
   const [query, setQuery] = useState("");
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [grantedPath, setGrantedPath] = useState<string | null>(null);
+  const [prepareError, setPrepareError] = useState<string | null>(null);
+  const listRequest = useRef(0);
 
   const refresh = useCallback(async () => {
     if (!workspacePath) return;
+    // A slower listing for a previous workspace must not overwrite this one.
+    const request = ++listRequest.current;
     setLoading(true);
     setError(null);
     try {
       const listed = await listArchitectureBlueprints(workspacePath);
+      if (request !== listRequest.current) return;
       setBlueprints(listed);
       setSelectedPath((current) =>
         current && listed.some((item) => item.htmlPath === current) ? current : listed[0]?.htmlPath ?? null,
       );
     } catch (err) {
-      setError(t("architecture.error", { message: String(err) }));
+      if (request === listRequest.current) setError(t("architecture.error", { message: String(err) }));
     } finally {
-      setLoading(false);
+      if (request === listRequest.current) setLoading(false);
     }
   }, [t, workspacePath]);
 
@@ -79,6 +84,7 @@ export function ArchitecturePane({ workspacePath, onRevealInFiles }: Architectur
 
   useEffect(() => {
     setGrantedPath(null);
+    setPrepareError(null);
     if (!workspacePath || !selectedPath) return;
     let cancelled = false;
     prepareArchitectureBlueprint(workspacePath, selectedPath).then(
@@ -86,7 +92,7 @@ export function ArchitecturePane({ workspacePath, onRevealInFiles }: Architectur
         if (!cancelled) setGrantedPath(path);
       },
       (err) => {
-        if (!cancelled) setError(t("architecture.error", { message: String(err) }));
+        if (!cancelled) setPrepareError(t("architecture.error", { message: String(err) }));
       },
     );
     return () => {
@@ -196,6 +202,7 @@ export function ArchitecturePane({ workspacePath, onRevealInFiles }: Architectur
             </div>
             {grantedPath === selected.htmlPath ? (
               <iframe
+                key={`${grantedPath}:${selected.modifiedAt ?? ""}`}
                 className="architecture-frame"
                 data-testid="architecture-frame"
                 title={t("architecture.frameTitle", { title: selected.title })}
@@ -203,6 +210,10 @@ export function ArchitecturePane({ workspacePath, onRevealInFiles }: Architectur
                 referrerPolicy="no-referrer"
                 src={`${assetUrlForPath(grantedPath)}?theme=${theme}`}
               />
+            ) : prepareError ? (
+              <StatusBanner tone="danger">
+                <span>{prepareError}</span>
+              </StatusBanner>
             ) : (
               <p className="architecture-list-note" role="status">{t("architecture.loading")}</p>
             )}

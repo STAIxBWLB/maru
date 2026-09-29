@@ -22,6 +22,7 @@ use serde::Serialize;
 use std::collections::VecDeque;
 use std::process::Command;
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 use tauri::webview::{NewWindowResponse, PageLoadEvent, WebviewBuilder};
 use tauri::{
     AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, Position, Rect, Size, Url, Webview,
@@ -489,7 +490,9 @@ fn open_in_system_browser(url: &str) -> Result<(), String> {
 
 /// Main-webview guard: a remote http(s) navigation, a link in the sandboxed
 /// blueprint iframe (#410) or a preview link past its click handler (#382),
-/// opens in the system browser instead of replacing app or frame content.
+/// never replaces app or frame content and opens in the system browser.
+/// WKWebView reports subframe and new-window navigations here; WebView2 only
+/// reports the main frame, so on Windows such viewer links stay inert.
 /// Sites embeds are separate webviews and keep their own handlers.
 pub(crate) fn external_link_plugin<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
     tauri::plugin::Builder::new("maru-external-links")
@@ -497,16 +500,36 @@ pub(crate) fn external_link_plugin<R: tauri::Runtime>() -> tauri::plugin::TauriP
             if webview.label() != MAIN_WINDOW_LABEL || !is_remote_http(url) {
                 return true;
             }
-            let target = url.to_string();
-            // Leave the platform navigation delegate before spawning `open`.
-            std::thread::spawn(move || {
-                if let Err(err) = open_in_system_browser(&target) {
-                    eprintln!("[site-view] {err}");
-                }
-            });
+            let admitted = LAST_EXTERNAL_OPEN
+                .lock()
+                .map(|mut last| admit_external_open(&mut last, Instant::now()))
+                .unwrap_or(false);
+            if admitted {
+                let target = url.to_string();
+                // Leave the platform navigation delegate before spawning `open`.
+                std::thread::spawn(move || {
+                    if let Err(err) = open_in_system_browser(&target) {
+                        eprintln!("[site-view] {err}");
+                    }
+                });
+            }
             false
         })
         .build()
+}
+
+// ponytail: one global slot, so a script looping on navigations inside a
+// viewer opens at most one browser tab per interval; per-frame limits need a
+// frame identity the navigation callback does not carry.
+static LAST_EXTERNAL_OPEN: Mutex<Option<Instant>> = Mutex::new(None);
+const EXTERNAL_OPEN_INTERVAL: Duration = Duration::from_secs(1);
+
+fn admit_external_open(last: &mut Option<Instant>, now: Instant) -> bool {
+    if last.is_some_and(|at| now.duration_since(at) < EXTERNAL_OPEN_INTERVAL) {
+        return false;
+    }
+    *last = Some(now);
+    true
 }
 
 fn is_remote_http(url: &Url) -> bool {
@@ -636,6 +659,21 @@ mod tests {
         for remote in ["https://github.com/entelecheia/maru", "http://example.com/"] {
             assert!(is_remote_http(&url(remote)), "{remote}");
         }
+    }
+
+    #[test]
+    fn external_link_guard_opens_at_most_once_per_interval() {
+        let start = Instant::now();
+        let mut last = None;
+        assert!(admit_external_open(&mut last, start));
+        assert!(!admit_external_open(
+            &mut last,
+            start + Duration::from_millis(300)
+        ));
+        assert!(admit_external_open(
+            &mut last,
+            start + EXTERNAL_OPEN_INTERVAL
+        ));
     }
 
     #[test]

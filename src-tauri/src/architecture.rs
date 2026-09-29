@@ -51,8 +51,14 @@ fn scan_blueprints(root: &Path) -> Result<Vec<Found>, String> {
         }) else {
             continue;
         };
+        let Ok(repo_root) = root.join(&repo_path).canonicalize() else {
+            continue;
+        };
+        if !repo_root.starts_with(root) {
+            continue;
+        }
         for dir in BLUEPRINT_DIRS {
-            let Ok(entries) = fs::read_dir(root.join(&repo_path).join(dir)) else {
+            let Ok(entries) = fs::read_dir(repo_root.join(dir)) else {
                 continue;
             };
             for entry in entries.flatten() {
@@ -64,11 +70,12 @@ fn scan_blueprints(root: &Path) -> Result<Vec<Found>, String> {
                 let Some(slug) = name.strip_suffix(VIEWER_SUFFIX).filter(|s| !s.is_empty()) else {
                     continue;
                 };
-                // A symlinked docs/ directory can still point outside.
+                // A symlinked docs/ directory can still point out of its
+                // submodule, into a stray clone or outside the workspace.
                 let Ok(path) = entry.path().canonicalize() else {
                     continue;
                 };
-                if !path.starts_with(root) {
+                if !path.starts_with(&repo_root) {
                     continue;
                 }
                 found.push(Found {
@@ -116,6 +123,8 @@ pub fn list_architecture_blueprints(
 
 /// Only a file the listing itself returns passes: the canonical form resolves
 /// `..` and symlinks before the comparison.
+// ponytail: rescans (git submodule foreach, ~0.6 s on the real workspace) per
+// selection; cache the listing per workspace if that latency starts to show.
 fn resolve_listed_blueprint(workspace_path: &str, html_path: &str) -> Result<PathBuf, String> {
     let root = normalize_existing_dir(workspace_path)?;
     let target = root
@@ -338,7 +347,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn architecture_skips_symlinks_escaping_the_workspace() {
+    fn architecture_skips_symlinks_escaping_the_submodule() {
         let (tmp, root) = workspace();
         let outside_dir = tmp.path().join("outside-docs");
         fs::create_dir_all(&outside_dir).unwrap();
@@ -350,12 +359,20 @@ mod tests {
         )
         .unwrap();
         std::os::unix::fs::symlink(&outside_dir, root.join("sites/gamma/docs")).unwrap();
+        // A submodule directory linked into the stray clone stays in the workspace.
+        std::os::unix::fs::symlink(
+            root.join("dev/stray/docs/architecture"),
+            root.join("dev/alpha/architecture"),
+        )
+        .unwrap();
 
         let listed = list_architecture_blueprints(root_arg(&root)).unwrap();
         assert_eq!(listed.len(), 3);
         for path in [
             "sites/gamma/architecture/evil-rendered.html",
             "sites/gamma/docs/linked-rendered.html",
+            "dev/alpha/architecture/stray-rendered.html",
+            "dev/stray/docs/architecture/stray-rendered.html",
         ] {
             assert!(
                 resolve_listed_blueprint(&root_arg(&root), path).is_err(),

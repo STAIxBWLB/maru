@@ -88,6 +88,21 @@ describe("ArchitecturePane", () => {
     expect(frame()!.getAttribute("src")).toMatch(/\?theme=dark$/);
   });
 
+  it("shows a failed grant in the viewer and clears it on the next selection", async () => {
+    mocks.prepareArchitectureBlueprint.mockRejectedValueOnce(new Error("Not a listed architecture blueprint"));
+    await render();
+
+    expect(frame()).toBeNull();
+    expect(container.querySelector(".architecture-viewer-col [role=alert]")?.textContent).toBe("architecture.error");
+    expect(container.querySelector(".architecture-list-col [role=alert]")).toBeNull();
+
+    await act(async () => {
+      container.querySelectorAll<HTMLButtonElement>(".architecture-item")[1].click();
+    });
+    expect(container.querySelector("[role=alert]")).toBeNull();
+    expect(frame()!.getAttribute("src")).toMatch(/beta-rendered\.html\?theme=light$/);
+  });
+
   it("filters by title or repo and grants the clicked blueprint", async () => {
     await render();
 
