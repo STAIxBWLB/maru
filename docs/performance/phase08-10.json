@@ -2177,6 +2177,118 @@
         "workerProof": "Actual registered wrapper futures are polled on the same async task, yield while a distinct blocking worker is held, and surface contextual worker failures. Meaningful synthetic outcomes separately verify successful behavior.",
         "platformScope": "Executed on macOS using disposable roots and scoped Home/config. Secrets contain dummy fixture values only. Native launch fixture selects current test executable before invocation; no installed opener, provider, real Trash or external send. No Windows/native saturation proof claimed."
       }
+    },
+    {
+      "name": "list_architecture_blueprints",
+      "module": "src-tauri/src/architecture.rs",
+      "registrationPath": "src-tauri/src/lib.rs::architecture::ipc::list_architecture_blueprints",
+      "originalDisposition": "ISOLATED",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/architecture.rs::ipc::list_architecture_blueprints awaits spawn_blocking before the listing.",
+        "src-tauri/src/architecture.rs::list_architecture_blueprints normalizes the workspace root and maps scan results to titles via spec_title and modified_millis.",
+        "src-tauri/src/architecture.rs::scan_blueprints calls git::list_workspace_submodules and reads docs/architecture, docs and architecture flat, skipping symlinked files and paths resolving outside their submodule."
+      ],
+      "workerBoundary": "src-tauri/src/architecture.rs::ipc::list_architecture_blueprints owns its wire Strings (and AppHandle<R> for the grant), awaits tauri::async_runtime::spawn_blocking around the whole body, and adds list_architecture_blueprints_task_failed context to a JoinError. The git submodule listing, directory scans, spec reads and canonicalization never run on the caller thread.",
+      "syncCallers": [
+        "src-tauri/src/architecture.rs::list_architecture_blueprints remains the synchronous domain API used by the wrapper and its tests."
+      ],
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib architecture",
+          "passed": 6,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/components/architecture/ArchitecturePane.tsx",
+          "src/lib/modeAdapters/ArchitectureModeAdapter.tsx"
+        ],
+        "payload": "ArchitecturePane owns the workspace path, refresh and search; the adapter resolves the private work root.",
+        "terminalNoticeOwner": "ArchitecturePane owns loading, the inline error banner and the selected blueprint; it is the only caller.",
+        "classifier": "n/a: read-only listing and a single-file asset grant, not a file-processing batch",
+        "successRetention": "blueprint list and granted viewer path retained in ArchitecturePane state",
+        "failureReasons": "call-site catch error message rendered in the pane error banner (single publisher)",
+        "singleTerminalNoticeOwner": true
+      },
+      "mutationKey": {
+        "readOnly": true,
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "reason": "No filesystem mutation: read-only git submodule listing, flat directory reads, spec JSON reads and metadata."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "architecture_lists_submodule_viewers_with_titles_and_groups",
+          "architecture_lists_nothing_for_a_plain_folder_workspace",
+          "architecture_accepts_a_listed_viewer_by_absolute_or_relative_path",
+          "architecture_rejects_outside_traversal_stray_and_bad_names",
+          "architecture_skips_symlinks_escaping_the_submodule",
+          "architecture_ipc_wrappers_list_and_grant_through_the_worker"
+        ],
+        "workerProof": "The registered wrapper futures are awaited on the async runtime and return the listing and the grant through the blocking worker; a stray-clone path is rejected through the same wrapper.",
+        "platformScope": "Executed on macOS against disposable git repositories with real dev/ and sites/ submodules, a stray clone and symlinks escaping the workspace. No Windows run claimed."
+      }
+    },
+    {
+      "name": "prepare_architecture_blueprint",
+      "module": "src-tauri/src/architecture.rs",
+      "registrationPath": "src-tauri/src/lib.rs::architecture::ipc::prepare_architecture_blueprint",
+      "originalDisposition": "ISOLATED",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/architecture.rs::ipc::prepare_architecture_blueprint awaits spawn_blocking before validation and the grant.",
+        "src-tauri/src/architecture.rs::prepare_architecture_blueprint grants one file through the asset protocol scope after resolve_listed_blueprint.",
+        "src-tauri/src/architecture.rs::resolve_listed_blueprint canonicalizes the requested path and accepts it only when scan_blueprints lists the same canonical file."
+      ],
+      "workerBoundary": "src-tauri/src/architecture.rs::ipc::prepare_architecture_blueprint owns its wire Strings (and AppHandle<R> for the grant), awaits tauri::async_runtime::spawn_blocking around the whole body, and adds prepare_architecture_blueprint_task_failed context to a JoinError. The git submodule listing, directory scans, spec reads and canonicalization never run on the caller thread.",
+      "syncCallers": [
+        "src-tauri/src/architecture.rs::prepare_architecture_blueprint remains the synchronous domain API used by the wrapper and its tests."
+      ],
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib architecture",
+          "passed": 6,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/components/architecture/ArchitecturePane.tsx",
+          "src/lib/modeAdapters/ArchitectureModeAdapter.tsx"
+        ],
+        "payload": "ArchitecturePane owns the selected blueprint and a cancellation flag per selection; the granted path becomes the sandboxed iframe src.",
+        "terminalNoticeOwner": "ArchitecturePane owns loading, the inline error banner and the selected blueprint; it is the only caller.",
+        "classifier": "n/a: read-only listing and a single-file asset grant, not a file-processing batch",
+        "successRetention": "blueprint list and granted viewer path retained in ArchitecturePane state",
+        "failureReasons": "call-site catch error message rendered in the pane error banner (single publisher)",
+        "singleTerminalNoticeOwner": true
+      },
+      "mutationKey": {
+        "readOnly": true,
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "reason": "No filesystem mutation: canonicalization, a read-only rescan and one Tauri asset-scope file grant; no directory or workspace-root grant is added."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "architecture_lists_submodule_viewers_with_titles_and_groups",
+          "architecture_lists_nothing_for_a_plain_folder_workspace",
+          "architecture_accepts_a_listed_viewer_by_absolute_or_relative_path",
+          "architecture_rejects_outside_traversal_stray_and_bad_names",
+          "architecture_skips_symlinks_escaping_the_submodule",
+          "architecture_ipc_wrappers_list_and_grant_through_the_worker"
+        ],
+        "workerProof": "The registered wrapper futures are awaited on the async runtime and return the listing and the grant through the blocking worker; a stray-clone path is rejected through the same wrapper.",
+        "platformScope": "Executed on macOS against disposable git repositories with real dev/ and sites/ submodules, a stray clone and symlinks escaping the workspace. No Windows run claimed."
+      }
     }
   ]
 }

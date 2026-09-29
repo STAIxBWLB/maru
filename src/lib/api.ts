@@ -338,6 +338,27 @@ export async function listWorkspaceSubmodules(workspacePath: string): Promise<st
   return invoke<string[]>("list_workspace_submodules", { workspacePath });
 }
 
+/** An archify `<slug>-rendered.html` viewer inside a dev/ or sites/ submodule. */
+export interface ArchitectureBlueprint {
+  slug: string;
+  title: string;
+  group: "dev" | "sites";
+  repoPath: string;
+  htmlPath: string;
+  modifiedAt: number | null;
+}
+
+export async function listArchitectureBlueprints(workspacePath: string): Promise<ArchitectureBlueprint[]> {
+  if (!isTauri()) return [];
+  return invoke<ArchitectureBlueprint[]>("list_architecture_blueprints", { workspacePath });
+}
+
+/** Grants exactly this listed viewer file to the asset protocol and returns its canonical path. */
+export async function prepareArchitectureBlueprint(workspacePath: string, htmlPath: string): Promise<string> {
+  if (!isTauri()) return htmlPath;
+  return invoke<string>("prepare_architecture_blueprint", { workspacePath, htmlPath });
+}
+
 export async function startVaultWatcher(workspacePath: string): Promise<void> {
   if (!isTauri()) return;
   await invoke("start_vault_watcher", { workspacePath });

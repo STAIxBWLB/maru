@@ -20,6 +20,7 @@ export const RIGHT_WORKBENCH_MODES: readonly RightWorkbenchMode[] = [
   "studio",
   "e2e",
   "diagram",
+  "architecture",
   "sites",
   "graph",
   "drafts",

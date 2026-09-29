@@ -112,6 +112,7 @@ Early shards 01/02/03/04/05 record `integrationRequired: "08-29"` and final modu
 | 08-10 | `src-tauri/src/inbox_classifier.rs` | `build_inbox_classification_prompt`, `parse_inbox_classification` |
 | 08-10 | `src-tauri/src/share_outbox.rs` | `read_share_outbox_config`, `save_share_outbox_root`, `ensure_share_outbox_root`, `scan_share_outbox`, `prepare_share_outbox_files` |
 | 08-10 | `src-tauri/src/binary_viewer.rs` | `binary_viewer_classify`, `binary_viewer_prepare_asset`, `binary_viewer_read_text`, `binary_viewer_read_archive`, `binary_viewer_extract_hwpx`, `binary_viewer_open_external`, `binary_viewer_preview_external` |
+| 08-10 | `src-tauri/src/architecture.rs` | `list_architecture_blueprints`, `prepare_architecture_blueprint` |
 | 08-10 | `src-tauri/src/secrets.rs` | `secrets_scan`, `secrets_doctor`, `secrets_migrate`, `secrets_read_text`, `secrets_write_text`, `secrets_delete_text` |
 | 08-11 | `src-tauri/src/today_store.rs` | `today_open`, `today_mutate`, `today_finalize_setup`, `today_rollover`, `read_task_events` |
 | 08-11 | `src-tauri/src/today.rs` | `today_logical_day` |

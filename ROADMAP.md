@@ -93,7 +93,7 @@ than a best-effort developer habit:
 
 - Outline, Editor, Documents, and Terminal use small, least-authority facades.
 - Shared state follows keyed module stores and `useSyncExternalStore`.
-- All 18 modes route through typed lazy adapters.
+- Every mode routes through a typed lazy adapter.
 - Terminal commands retain generation-bearing session handles.
 - Preview DOM identity and unrelated-pane render isolation are regression-tested.
 

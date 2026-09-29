@@ -79,7 +79,7 @@ describe("shell decomposition architecture", () => {
     const modeUnion = settingsSource.match(/export type MaruAppMode =([\s\S]*?);/)?.[1] ?? "";
     const sourceModeIds = [...modeUnion.matchAll(/"([\w-]+)"/g)].map((match) => match[1]);
     expect([...ids].sort()).toEqual([...sourceModeIds].sort());
-    expect(ids).toHaveLength(process.env.PHASE5_EXTENSIBILITY_DRILL === "1" ? 19 : 18);
+    expect(ids).toHaveLength(process.env.PHASE5_EXTENSIBILITY_DRILL === "1" ? 20 : 19);
     expect(new Set(ids).size).toBe(ids.length);
     for (const id of ids) {
       const entry = registrySource.match(new RegExp(`\\n  "?${id}"?: \\{([\\s\\S]*?)\\n  \\},`))?.[1] ?? "";

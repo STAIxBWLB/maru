@@ -14,10 +14,10 @@ identifier and on-disk migration to Maru.
 |------|-------|----------|
 | Product release | v1.1.13 | Signed desktop bundles and standalone CLI for macOS, Windows, and Linux |
 | Planning milestone | v1.1 Felt Quality and Native Proof, closed | Closed 2026-09-27: phases 6-11 (56 plans), audit `tech_debt` with the debt accepted |
-| Application shell | Complete | 18 lazy modes; `MainApp` held to 15 `useState` and 24 `useEffect` calls |
+| Application shell | Complete | 19 lazy modes; `MainApp` held to 15 `useState` and 24 `useEffect` calls |
 | Verification | Passing | Typecheck, ESLint, unit tests, Rust fmt/clippy, E2E, build, and bundle budgets |
 | Typed IPC | ERR-06 closed | Every conflict-emitting command preserves `{ code, message }`; recursive source guard active |
-| Main-thread isolation | PERF-01/02 closed | All 383 production commands classified: 374 isolated off the UI thread, 9 kept on it for main-thread affinity; Phase 08 baseline native load proof keeps loaded p95 at 2ms with the negative control at 4789ms |
+| Main-thread isolation | PERF-01/02 closed | All 385 production commands classified: 376 isolated off the UI thread, 9 kept on it for main-thread affinity; Phase 08 baseline native load proof keeps loaded p95 at 2ms with the negative control at 4789ms |
 | Active milestone | None, v1.2 being defined | v1.1 closed 2026-09-27; opening v1.2 moves releases to 1.2.0 |
 
 The milestone archive, audit, retrospective, and summary live under
@@ -71,6 +71,7 @@ Graph are enabled by default; E2E Flow is flag-gated.
 | `catalog` | 카탈로그 | Operations catalog for deadlines, approvals, evidence, and inbox signals |
 | `studio` | 스튜디오 | Seven-step document authoring, template, guideline, HWP field, export, and package flow |
 | `diagram` | 다이어그램 | Concept maps, report patterns, templates, history, and managed report assets |
+| `architecture` | 설계도 | Read-only gallery of archify blueprints (`*-rendered.html`) from the working trees of dev/ and sites/ submodules |
 | `graph` | 그래프 | WebGL vault/workspace graph, neighborhoods, saved views, and reviewed relationship writes |
 | `sites` | 사이트 | Site switcher and embedded native browser surface |
 | `e2e` | E2E 플로우 | Hidden end-to-end flow console for development and verification |
@@ -106,7 +107,7 @@ brew upgrade maru-cli
 +---------------------------------------------------------------+
 | Tauri WebView: React 19 + TypeScript                          |
 |                                                               |
-| 18 typed lazy mode adapters                                   |
+| 19 typed lazy mode adapters                                   |
 | BlockNote / CodeMirror / DOMPurify / Radix UI                 |
 | Sigma WebGL / Graphology / diagram canvas / terminal canvas   |
 +-------------------------------+-------------------------------+
@@ -140,11 +141,11 @@ brew upgrade maru-cli
   boundaries. Nothing imports `src/App.tsx`.
 - Shared UI state follows keyed module-store plus `useSyncExternalStore`
   patterns. No additional global state library or provider tree is used.
-- Production commands never block the UI/shared async worker thread: 374
+- Production commands never block the UI/shared async worker thread: 376
   ISOLATED commands run on awaited `spawn_blocking` workers and 9
   native-window commands stay UI-bound, and every filesystem mutation passes
   shared path-transaction admission before taking domain locks. The
-  383-command inventory, worker-boundary, and admission evidence are gated by
+  385-command inventory, worker-boundary, and admission evidence are gated by
   `check-command-isolation` in `make verify`.
 
 ## Capability Highlights
@@ -358,8 +359,8 @@ make clippy
 # Complete hermetic verification
 make verify
 
-# Phase 08 evidence closure gate alone (383 production commands, PERF-01/PERF-02)
-node scripts/check-command-isolation.mjs --all --expected-count 383
+# Phase 08 evidence closure gate alone (385 production commands, PERF-01/PERF-02)
+node scripts/check-command-isolation.mjs --all --expected-count 385
 
 # Full verify plus release-only CLI and debug Tauri checks
 make release-checks
@@ -446,8 +447,8 @@ orchestrator must hold the applicable admission lease for the complete CLI call.
   ship-isolation scan of the produced bundle (D-10)
 - the Phase 08 evidence closure gate (`check-command-isolation`): every
   registered production command carries final justified worker-boundary,
-  mutation-admission and processing-caller evidence against the 383-command
-  inventory (`node scripts/check-command-isolation.mjs --all --expected-count 383`)
+  mutation-admission and processing-caller evidence against the 385-command
+  inventory (`node scripts/check-command-isolation.mjs --all --expected-count 385`)
 
 Pull requests run a lightweight decision job first. Source changes fan out to
 `make verify` and Playwright E2E. Version-changing PRs run `make release-checks`
