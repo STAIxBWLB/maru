@@ -79,7 +79,9 @@ fn scan_blueprints(root: &Path) -> Result<Vec<Found>, String> {
                 let Ok(path) = entry.path().canonicalize() else {
                     continue;
                 };
-                if !path.starts_with(&repo_root) {
+                // An in-repo link (docs/architecture -> ../architecture)
+                // reaches the same file twice.
+                if !path.starts_with(&repo_root) || found.iter().any(|f: &Found| f.path == path) {
                     continue;
                 }
                 found.push(Found {
@@ -374,6 +376,12 @@ mod tests {
         )
         .unwrap();
         std::os::unix::fs::symlink(&outside_dir, root.join("sites/gamma/docs")).unwrap();
+        // An in-repo directory link must not list beta twice.
+        std::os::unix::fs::symlink(
+            root.join("sites/beta/docs"),
+            root.join("sites/beta/architecture"),
+        )
+        .unwrap();
         // A submodule directory linked into the stray clone stays in the workspace.
         std::os::unix::fs::symlink(
             root.join("dev/stray/docs/architecture"),
@@ -413,6 +421,16 @@ mod tests {
             .await
             .unwrap();
             assert_eq!(granted, listed[0].html_path);
+            // Exactly that file: no sibling, directory or workspace-root grant.
+            let scope = app.asset_protocol_scope();
+            assert!(scope.is_allowed(&granted));
+            for other in [
+                root.join("dev/alpha/docs/architecture/notes.html"),
+                root.join("dev/alpha/docs/architecture/alpha.architecture.json"),
+                root.join("README.md"),
+            ] {
+                assert!(!scope.is_allowed(&other), "{}", other.display());
+            }
             assert!(ipc::prepare_architecture_blueprint(
                 app.handle().clone(),
                 root_arg(&root),

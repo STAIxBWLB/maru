@@ -48,7 +48,7 @@ export function ArchitecturePane({ workspacePath, onRevealInFiles }: Architectur
   const { t } = useTranslation();
   const theme = useAppTheme();
   const [blueprints, setBlueprints] = useState<ArchitectureBlueprint[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(Boolean(workspacePath));
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
