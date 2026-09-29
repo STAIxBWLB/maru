@@ -57,6 +57,7 @@ import {
   sha256File,
   WINDOW_SAMPLES,
   writeArtifact,
+  type HarnessBridge,
   type RoundResult,
   type SaturationOpsConfig,
 } from "../helpers/responsivenessSamples";
@@ -202,6 +203,21 @@ describe("native saturation and source-race harness", () => {
     // timeout kills long rounds mid-window and every later test then reads a
     // wedged session. Raise the script timeout below the 120s mocha backstop.
     await browser.setTimeout({ script: 110_000 });
+    // App.tsx's mount effect installs the bridge; the session can open before
+    // React mounts, and the samplers check the bridge only once.
+    await browser.waitUntil(
+      () =>
+        browser.execute(
+          () => typeof (window as unknown as { __MARU_NATIVE_E2E__?: HarnessBridge }).__MARU_NATIVE_E2E__?.asyncProbe === "function",
+        ),
+      {
+        timeout: 60_000,
+        interval: 250,
+        timeoutMsg:
+          "responsiveness bridge never installed — the app is serving a frontend built without VITE_NATIVE_E2E=1, " +
+          "or App.tsx's installNativeE2eHarness effect did not run",
+      },
+    );
   });
 
   after(async () => {
