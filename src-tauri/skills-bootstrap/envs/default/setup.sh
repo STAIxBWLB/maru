@@ -137,7 +137,10 @@ if command -v apt-get &>/dev/null; then
         poppler-utils tesseract-ocr tesseract-ocr-kor \
         ghostscript libxml2-dev libxslt1-dev
 elif command -v brew &>/dev/null; then
-    brew install poppler tesseract ghostscript
+    # 앱의 env repair 안에서 돌므로 자동 업데이트·업그레이드 없이, 실패해도 진행한다.
+    HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_INSTALL_UPGRADE=1 \
+        brew install poppler tesseract ghostscript || \
+        echo "⚠️  brew install 실패 — PDF/OCR 도구 일부 비활성 (brew install poppler tesseract ghostscript)" >&2
 fi
 
 # 2. uv로 가상환경 생성 및 패키지 설치
