@@ -122,10 +122,12 @@ if $DRY_RUN; then
 fi
 
 # 0. uv 설치 확인
+# GUI 앱이 넘기는 PATH에는 사용자 bin이 없을 수 있다. 설치기 위치(~/.local/bin,
+# 구버전 ~/.cargo/bin)를 뒤에 붙여 호출자 우선순위는 유지하고 기존 uv를 찾는다.
+export PATH="$PATH:$HOME/.local/bin:$HOME/.cargo/bin"
 if ! command -v uv &>/dev/null; then
     echo "uv 설치 중..."
-    curl -LsSf https://astral.sh/uv/install.sh | sh
-    export PATH="$HOME/.cargo/bin:$PATH"
+    curl -LsSf https://astral.sh/uv/install.sh | env UV_NO_MODIFY_PATH=1 UV_INSTALL_DIR="$HOME/.local/bin" sh
 fi
 
 # 1. 시스템 패키지 설치
