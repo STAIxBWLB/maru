@@ -8,6 +8,19 @@ because releases cut frequently during active development. Versions before
 Dates are the release-tag dates. Only `feat`/`fix`-level changes are listed;
 `chore(release)` version bumps and merge commits are omitted.
 
+## v1.1.15 - 2026-10-01 - Clear Path
+
+- **Skills bundle updates no longer fail with `uv: command not found` when
+  Maru is opened from Finder or the Dock (#414, #415).** The skills
+  environment setup now gets the same augmented PATH as Maru's other tool
+  calls, so it finds uv, Homebrew and pnpm in `~/.local/bin` or
+  `/opt/homebrew/bin`. The bundled setup script reuses an existing uv
+  instead of reinstalling it, no longer edits shell profiles, and runs the
+  Homebrew step without auto-update or upgrades, warning instead of failing.
+- **The native responsiveness e2e waits for the app to boot (#413).** It
+  polls for the harness bridge before sampling, like the other native specs,
+  instead of failing about 300 ms after launch on a slow start.
+
 ## v1.1.14 - 2026-09-30 - Blueprint Gallery
 
 - **An Architecture mode (설계도) gathers archify blueprints (#410, #411).**
