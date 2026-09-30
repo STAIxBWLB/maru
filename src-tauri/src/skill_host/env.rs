@@ -84,7 +84,10 @@ pub(crate) fn env_mutation_paths(root: &Path, setup: Option<&Path>) -> Vec<PathB
 pub(crate) fn configure_env_command(command: &mut Command, root: &Path) {
     #[cfg(test)]
     command.env_remove("BASH_ENV").env_remove("ENV");
+    // A Finder-launched app inherits launchd's bare PATH, where setup.sh cannot
+    // see uv, brew, or pnpm (#414).
     command
+        .env("PATH", crate::cli_path::augmented_path())
         .env("TMPDIR", root.join("temp"))
         .env("UV_CACHE_DIR", root.join(".cache/uv"))
         .env("UV_PYTHON_INSTALL_DIR", root.join(".cache/python"))
@@ -348,6 +351,21 @@ mod tests {
         let json = serde_json::to_string(&status).unwrap();
         assert!(json.contains("venvExists"));
         assert!(json.contains("statusPath"));
+    }
+
+    #[test]
+    fn env_command_path_reaches_user_tool_dirs() {
+        let mut command = Command::new("bash");
+        configure_env_command(&mut command, Path::new("/tmp/env"));
+        let path = command
+            .get_envs()
+            .find(|(key, _)| *key == "PATH")
+            .and_then(|(_, value)| value)
+            .expect("env command sets PATH");
+        let dirs: Vec<PathBuf> = std::env::split_paths(path).collect();
+        for dir in crate::cli_path::extra_path_dirs() {
+            assert!(dirs.contains(&dir), "{} missing from PATH", dir.display());
+        }
     }
 }
 
