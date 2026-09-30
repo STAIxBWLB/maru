@@ -122,10 +122,12 @@ if $DRY_RUN; then
 fi
 
 # 0. uv 설치 확인
+# GUI 앱이 넘기는 PATH에는 사용자 bin이 없을 수 있다. 설치기 위치(~/.local/bin,
+# 구버전 ~/.cargo/bin)를 뒤에 붙여 호출자 우선순위는 유지하고 기존 uv를 찾는다.
+export PATH="$PATH:$HOME/.local/bin:$HOME/.cargo/bin"
 if ! command -v uv &>/dev/null; then
     echo "uv 설치 중..."
-    curl -LsSf https://astral.sh/uv/install.sh | sh
-    export PATH="$HOME/.cargo/bin:$PATH"
+    curl -LsSf https://astral.sh/uv/install.sh | env UV_NO_MODIFY_PATH=1 UV_INSTALL_DIR="$HOME/.local/bin" sh
 fi
 
 # 1. 시스템 패키지 설치
@@ -135,7 +137,10 @@ if command -v apt-get &>/dev/null; then
         poppler-utils tesseract-ocr tesseract-ocr-kor \
         ghostscript libxml2-dev libxslt1-dev
 elif command -v brew &>/dev/null; then
-    brew install poppler tesseract ghostscript
+    # 앱의 env repair 안에서 돌므로 자동 업데이트·업그레이드 없이, 실패해도 진행한다.
+    HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_INSTALL_UPGRADE=1 \
+        brew install poppler tesseract ghostscript || \
+        echo "⚠️  brew install 실패 — PDF/OCR 도구 일부 비활성 (brew install poppler tesseract ghostscript)" >&2
 fi
 
 # 2. uv로 가상환경 생성 및 패키지 설치
