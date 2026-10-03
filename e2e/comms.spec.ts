@@ -276,3 +276,42 @@ test("filters processed results on the backend and refreshes without clearing th
     ),
   ).toHaveLength(1);
 });
+
+test("embeds the kakao relay console with the resolved theme param", async ({ page }) => {
+  await page.goto("/");
+
+  const rail = page.locator(".activity-rail");
+  await rail.getByRole("button", { name: "메시지", exact: true }).click();
+
+  const pane = page.locator(".comms-pane");
+  await expect(pane).toBeVisible();
+  await pane
+    .locator(".comms-source-selector")
+    .getByRole("button", { name: /카카오톡/ })
+    .click();
+
+  const panel = pane.locator(".kakao-relay-panel");
+  await expect(panel).toBeVisible();
+
+  // The console section leads the panel; its header button toggles the embed.
+  const consoleToggle = panel
+    .locator(".kakao-relay-section")
+    .first()
+    .locator(".kakao-relay-section-header")
+    .getByRole("button");
+  await consoleToggle.click();
+
+  const console_ = panel.locator(".kakao-relay-console");
+  await expect(console_).toBeVisible();
+  // The configured (default) URL is echoed in the toolbar.
+  await expect(console_.locator(".kakao-relay-console-url")).toHaveText(
+    "http://127.0.0.1:8787",
+  );
+  const frame = console_.locator("iframe");
+  await expect(frame).toHaveAttribute("src", /^http:\/\/127\.0\.0\.1:8787\//);
+  await expect(frame).toHaveAttribute("src", /theme=(light|dark)/);
+
+  // Toggle closed again.
+  await consoleToggle.click();
+  await expect(panel.locator(".kakao-relay-console")).toHaveCount(0);
+});

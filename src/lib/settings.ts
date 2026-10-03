@@ -3,6 +3,10 @@ import {
   normalizeTerminalShortcuts,
   type TerminalShortcutMap,
 } from "./terminalShortcuts";
+import {
+  DEFAULT_KAKAO_RELAY_UI_URL,
+  normalizeKakaoRelayUiUrl,
+} from "./kakaoRelay";
 import { clampTodayLayoutWidth, TODAY_LAYOUT_LIMITS } from "./todayLayout";
 
 export type DocumentBrowserMode = "list" | "tree";
@@ -282,6 +286,10 @@ export interface CommsSettings {
     sessionFile: string | null;
     monitorConfigPath: string | null;
     legacyAutoDrop: boolean;
+  };
+  kakao: {
+    /** Base URL of the relay operator console (the daemon's `ui.bind`). */
+    relayUiUrl: string;
   };
 }
 
@@ -636,6 +644,9 @@ export const DEFAULT_MARU_SETTINGS: MaruSettings = {
       monitorConfigPath: null,
       legacyAutoDrop: false,
     },
+    kakao: {
+      relayUiUrl: DEFAULT_KAKAO_RELAY_UI_URL,
+    },
   },
   meetings: {
     enabled: true,
@@ -957,6 +968,16 @@ export function applyWorkspaceCommsOverrides(
         settings.telegram.legacyAutoDrop,
       ),
     },
+    kakao: {
+      ...settings.kakao,
+      relayUiUrl: normalizeKakaoRelayUiUrl(
+        readOptionalString(
+          providerConfig(providers, "kakao"),
+          ["relayUiUrl", "relay_ui_url"],
+          settings.kakao.relayUiUrl,
+        ),
+      ),
+    },
   };
 }
 
@@ -1166,6 +1187,7 @@ function cloneDefaultSettings(): MaruSettings {
     comms: {
       outlook: { ...DEFAULT_MARU_SETTINGS.comms.outlook },
       telegram: { ...DEFAULT_MARU_SETTINGS.comms.telegram },
+      kakao: { ...DEFAULT_MARU_SETTINGS.comms.kakao },
     },
     meetings: {
       ...DEFAULT_MARU_SETTINGS.meetings,
@@ -1627,6 +1649,7 @@ function normalizeCommsSettings(value: unknown): CommsSettings {
   const comms = isRecord(value) ? value : {};
   const outlook = isRecord(comms.outlook) ? comms.outlook : {};
   const telegram = isRecord(comms.telegram) ? comms.telegram : {};
+  const kakao = isRecord(comms.kakao) ? comms.kakao : {};
   return {
     outlook: {
       enabled: typeof outlook.enabled === "boolean"
@@ -1666,6 +1689,9 @@ function normalizeCommsSettings(value: unknown): CommsSettings {
       legacyAutoDrop: typeof telegram.legacyAutoDrop === "boolean"
         ? telegram.legacyAutoDrop
         : DEFAULT_MARU_SETTINGS.comms.telegram.legacyAutoDrop,
+    },
+    kakao: {
+      relayUiUrl: normalizeKakaoRelayUiUrl(kakao.relayUiUrl),
     },
   };
 }

@@ -6,6 +6,7 @@ import { useTranslation } from "../lib/i18n";
 import { enumerateSourceChannels, sourceRunByChannel } from "../lib/inboxSources";
 import type { KakaoRelayStatus } from "../lib/kakaoRelay";
 import { latestActivityLine, type MissionProgress } from "../lib/missionProgress";
+import type { ThemeMode } from "../lib/settings";
 import type {
   InboxProcessedItem,
   InboxProcessedItemDetail,
@@ -47,6 +48,8 @@ interface CommsPaneProps {
   telegramPollingStatus: TelegramPollingStatus;
   authStatuses: Record<string, ProviderAuthStatus | null>;
   kakaoRelayStatus: KakaoRelayStatus | null;
+  kakaoRelayUiUrl: string;
+  themeMode: ThemeMode;
   workPath: string | null;
   onConfirmApproval: (input: ApprovalInput) => Promise<string | null>;
   refreshing: boolean;
@@ -92,6 +95,8 @@ export const CommsPane = memo(function CommsPane({
   telegramPollingStatus,
   authStatuses,
   kakaoRelayStatus,
+  kakaoRelayUiUrl,
+  themeMode,
   workPath,
   onConfirmApproval,
   refreshing,
@@ -269,6 +274,8 @@ export const CommsPane = memo(function CommsPane({
               <KakaoRelayPanel
                 status={kakaoRelayStatus}
                 workPath={workPath}
+                relayUiUrl={kakaoRelayUiUrl}
+                themeMode={themeMode}
                 onConfirmApproval={onConfirmApproval}
               />
             ) : null}

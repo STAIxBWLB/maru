@@ -90,6 +90,56 @@ export type KakaoRelayLiveness =
   | "unconfigured"
   | "unknown";
 
+// --- Relay operator console (web UI) ----------------------------------------
+// The relay daemon serves a plain operator console on its own bind (default
+// http://127.0.0.1:8787), independent of the Dropbox sync bus above. Maru
+// embeds that console in an iframe and keeps its theme in sync through the
+// contract from STAIxBWLB/maru-kakao-relay#68: a `?theme=` query param on
+// load plus live `maru-theme` postMessages afterwards.
+
+export const DEFAULT_KAKAO_RELAY_UI_URL = "http://127.0.0.1:8787";
+
+/** Theme names the relay console understands (`?theme=` and postMessage). */
+export type KakaoRelayTheme = "light" | "dark" | "system";
+
+export const MARU_THEME_MESSAGE_TYPE = "maru-theme";
+
+export interface MaruThemeMessage {
+  type: typeof MARU_THEME_MESSAGE_TYPE;
+  theme: KakaoRelayTheme;
+}
+
+/** Trim + fall back to the default bind when the stored value is blank. */
+export function normalizeKakaoRelayUiUrl(value: unknown): string {
+  if (typeof value !== "string") return DEFAULT_KAKAO_RELAY_UI_URL;
+  const trimmed = value.trim();
+  return trimmed || DEFAULT_KAKAO_RELAY_UI_URL;
+}
+
+/** Console URL with the resolved theme appended, or null when the configured
+ *  value is not a valid http(s) URL (the UI shows the empty state then). */
+export function kakaoRelayUiSrc(
+  baseUrl: string,
+  theme: KakaoRelayTheme,
+): string | null {
+  const trimmed = baseUrl.trim();
+  if (!trimmed) return null;
+  let url: URL;
+  try {
+    url = new URL(trimmed);
+  } catch {
+    return null;
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+  url.searchParams.set("theme", theme);
+  return url.toString();
+}
+
+/** Live theme-switch message posted to the embedded console (relay contract). */
+export function buildMaruThemeMessage(theme: KakaoRelayTheme): MaruThemeMessage {
+  return { type: MARU_THEME_MESSAGE_TYPE, theme };
+}
+
 /** Collapse the raw relay status into one liveness bucket for the UI. */
 export function relayLiveness(status: KakaoRelayStatus | null | undefined): KakaoRelayLiveness {
   if (!status || !status.configured) return "unconfigured";
