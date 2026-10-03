@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   buildMaruThemeMessage,
   DEFAULT_KAKAO_RELAY_UI_URL,
@@ -8,6 +8,9 @@ import {
   kakaoRelayUiSrc,
   MARU_THEME_MESSAGE_TYPE,
   normalizeKakaoRelayUiUrl,
+  probeKakaoRelayUi,
+  probeKakaoRelayUiFetch,
+  publishKakaoRelayUiUrl,
   relayLiveness,
   type KakaoRelayEnvelope,
   type KakaoRelayStatus,
@@ -186,5 +189,35 @@ describe("buildMaruThemeMessage", () => {
       type: "maru-theme",
       theme: "system",
     });
+  });
+});
+
+describe("probeKakaoRelayUiFetch", () => {
+  it("resolves true on any HTTP response and false on transport failure", async () => {
+    const up = vi.fn<typeof fetch>().mockResolvedValue(new Response(null));
+    await expect(probeKakaoRelayUiFetch("http://relay.local:8787", up)).resolves.toBe(true);
+    expect(up).toHaveBeenCalledWith(
+      "http://relay.local:8787",
+      expect.objectContaining({ mode: "no-cors", cache: "no-store" }),
+    );
+
+    const down = vi.fn<typeof fetch>().mockRejectedValue(new TypeError("fetch failed"));
+    await expect(probeKakaoRelayUiFetch("http://relay.local:8787", down)).resolves.toBe(false);
+  });
+});
+
+describe("publishKakaoRelayUiUrl / probeKakaoRelayUi outside Tauri", () => {
+  it("publish is a no-op without the Tauri runtime", async () => {
+    await expect(publishKakaoRelayUiUrl("http://127.0.0.1:8787")).resolves.toBeUndefined();
+  });
+
+  it("probe falls back to the no-cors fetch without the Tauri runtime", async () => {
+    const original = globalThis.fetch;
+    globalThis.fetch = vi.fn<typeof fetch>().mockRejectedValue(new TypeError("refused"));
+    try {
+      await expect(probeKakaoRelayUi("http://127.0.0.1:8787")).resolves.toBe(false);
+    } finally {
+      globalThis.fetch = original;
+    }
   });
 });

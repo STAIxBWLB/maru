@@ -140,6 +140,102 @@ export function buildMaruThemeMessage(theme: KakaoRelayTheme): MaruThemeMessage 
   return { type: MARU_THEME_MESSAGE_TYPE, theme };
 }
 
+// --- Native origin channel + reachability probe ------------------------------
+// Two event round-trips keep the native app working without a new Tauri
+// command (command isolation stays at its recorded count) and without
+// widening the webview CSP (`connect-src` forbids the frontend from
+// fetching the console origin directly):
+// - KAKAO_RELAY_UI_ORIGIN_EVENT publishes the effective console URL so the
+//   external-link navigation guard can exempt exactly its origin (#418).
+// - KAKAO_RELAY_UI_PROBE_EVENT / _RESULT_EVENT probe daemon reachability.
+
+export const KAKAO_RELAY_UI_ORIGIN_EVENT = "maru:kakao-relay-ui-origin";
+export const KAKAO_RELAY_UI_PROBE_RESULT_EVENT = "maru:kakao-relay-ui-probe-result";
+const KAKAO_RELAY_UI_PROBE_EVENT = "maru:kakao-relay-ui-probe";
+
+const isTauriRuntime = (): boolean =>
+  typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+
+/** Publish the effective console URL for the native navigation guard.
+ *  Best effort and a no-op outside Tauri (the guard only exists there). */
+export async function publishKakaoRelayUiUrl(url: string): Promise<void> {
+  if (!isTauriRuntime()) return;
+  try {
+    const { emit } = await import("@tauri-apps/api/event");
+    await emit(KAKAO_RELAY_UI_ORIGIN_EVENT, url);
+  } catch {
+    // The localhost default keeps working even if the publish fails.
+  }
+}
+
+/**
+ * no-cors fetch probe: resolves on ANY HTTP response, so a resolved promise
+ * means the daemon is listening (whatever the status); a rejection means a
+ * transport failure (daemon down, host unreachable). Used in the browser
+ * dev shell; the native app probes through Rust (see probeKakaoRelayUi).
+ */
+export async function probeKakaoRelayUiFetch(
+  url: string,
+  fetchImpl: typeof fetch = fetch,
+  timeoutMs = 4000,
+): Promise<boolean> {
+  try {
+    await fetchImpl(url, {
+      mode: "no-cors",
+      cache: "no-store",
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export interface KakaoRelayUiProbeResult {
+  url: string;
+  ok: boolean;
+}
+
+/** Probe the console bind. Native: round-trip through the Rust listener
+ *  (the webview CSP blocks a direct fetch). Browser: no-cors fetch. */
+export async function probeKakaoRelayUi(url: string, timeoutMs = 4000): Promise<boolean> {
+  if (!isTauriRuntime()) return probeKakaoRelayUiFetch(url, fetch, timeoutMs);
+  try {
+    const { emit, listen } = await import("@tauri-apps/api/event");
+    return await new Promise<boolean>((resolve) => {
+      let settled = false;
+      let unlisten: (() => void) | null = null;
+      const finish = (ok: boolean) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        unlisten?.();
+        resolve(ok);
+      };
+      const timer = setTimeout(() => finish(false), timeoutMs);
+      void listen<KakaoRelayUiProbeResult>(
+        KAKAO_RELAY_UI_PROBE_RESULT_EVENT,
+        (event) => {
+          if (event.payload.url === url) finish(event.payload.ok);
+        },
+      )
+        .then((off) => {
+          if (settled) {
+            off();
+            return;
+          }
+          unlisten = off;
+          // Emit only after the listener is registered so a fast loopback
+          // result cannot race ahead of it.
+          void emit(KAKAO_RELAY_UI_PROBE_EVENT, url).catch(() => finish(false));
+        })
+        .catch(() => finish(false));
+    });
+  } catch {
+    return false;
+  }
+}
+
 /** Collapse the raw relay status into one liveness bucket for the UI. */
 export function relayLiveness(status: KakaoRelayStatus | null | undefined): KakaoRelayLiveness {
   if (!status || !status.configured) return "unconfigured";

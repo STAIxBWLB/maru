@@ -25,8 +25,8 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tauri::webview::{NewWindowResponse, PageLoadEvent, WebviewBuilder};
 use tauri::{
-    AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, Position, Rect, Size, Url, Webview,
-    WebviewUrl,
+    AppHandle, Emitter, Listener, LogicalPosition, LogicalSize, Manager, Position, Rect, Size, Url,
+    Webview, WebviewUrl,
 };
 
 pub const SITES_EMBED_PREFIX: &str = "sites-embed-";
@@ -494,10 +494,29 @@ fn open_in_system_browser(url: &str) -> Result<(), String> {
 /// WKWebView reports subframe and new-window navigations here; WebView2 only
 /// reports the main frame, so on Windows such viewer links stay inert.
 /// Sites embeds are separate webviews and keep their own handlers.
+///
+/// One exemption: the configured kakao relay operator console (#418). The
+/// frontend publishes the effective `comms.kakao.relayUiUrl` over
+/// KAKAO_RELAY_UI_ORIGIN_EVENT and this guard admits navigations to exactly
+/// that origin, so the console iframe keeps loading when the relay daemon
+/// lives on another Mac (e.g. relay-mac.local). The callback carries no
+/// frame identity, so a subframe-only exemption is impossible; pinning the
+/// exemption to the user-configured origin keeps every other remote
+/// navigation on the external-open path.
 pub(crate) fn external_link_plugin<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
     tauri::plugin::Builder::new("maru-external-links")
+        .setup(|app, _| {
+            app.listen_any(KAKAO_RELAY_UI_ORIGIN_EVENT, |event| {
+                let url = serde_json::from_str::<String>(event.payload()).unwrap_or_default();
+                set_kakao_relay_ui_origin(&url);
+            });
+            Ok(())
+        })
         .on_navigation(|webview, url| {
-            if webview.label() != MAIN_WINDOW_LABEL || !is_remote_http(url) {
+            if webview.label() != MAIN_WINDOW_LABEL
+                || !is_remote_http(url)
+                || is_kakao_relay_ui_frame(url)
+            {
                 return true;
             }
             let admitted = LAST_EXTERNAL_OPEN
@@ -537,6 +556,34 @@ fn is_remote_http(url: &Url) -> bool {
         && !url.host_str().is_some_and(|host| {
             host == "localhost" || host == "127.0.0.1" || host.ends_with(".localhost")
         })
+}
+
+/// Event the main webview publishes with the effective
+/// `comms.kakao.relayUiUrl` whenever it changes (#418). Not a command, so
+/// command isolation is unaffected.
+pub(crate) const KAKAO_RELAY_UI_ORIGIN_EVENT: &str = "maru:kakao-relay-ui-origin";
+
+static KAKAO_RELAY_UI_ORIGIN: Mutex<Option<String>> = Mutex::new(None);
+
+/// Record the relay console origin from the frontend-published URL.
+/// Anything unparseable or non-http(s) clears the exemption: a corrupt
+/// setting must fail closed, never widen the guard.
+pub(crate) fn set_kakao_relay_ui_origin(raw: &str) {
+    let origin = Url::parse(raw.trim())
+        .ok()
+        .filter(|url| matches!(url.scheme(), "http" | "https"))
+        .map(|url| url.origin().ascii_serialization());
+    if let Ok(mut slot) = KAKAO_RELAY_UI_ORIGIN.lock() {
+        *slot = origin;
+    }
+}
+
+fn is_kakao_relay_ui_frame(url: &Url) -> bool {
+    KAKAO_RELAY_UI_ORIGIN
+        .lock()
+        .ok()
+        .and_then(|slot| slot.clone())
+        .is_some_and(|origin| url.origin().ascii_serialization() == origin)
 }
 
 #[cfg(test)]
@@ -659,6 +706,38 @@ mod tests {
         for remote in ["https://github.com/entelecheia/maru", "http://example.com/"] {
             assert!(is_remote_http(&url(remote)), "{remote}");
         }
+    }
+
+    #[test]
+    fn kakao_relay_ui_origin_exemption_matches_the_exact_origin_only() {
+        set_kakao_relay_ui_origin("http://relay-mac.local:8787");
+        assert!(is_kakao_relay_ui_frame(&url(
+            "http://relay-mac.local:8787/"
+        )));
+        assert!(is_kakao_relay_ui_frame(&url(
+            "http://relay-mac.local:8787/?theme=dark"
+        )));
+        // Port, host, and scheme all pin the exemption.
+        assert!(!is_kakao_relay_ui_frame(&url(
+            "http://relay-mac.local:8788/"
+        )));
+        assert!(!is_kakao_relay_ui_frame(&url("http://other.local:8787/")));
+        assert!(!is_kakao_relay_ui_frame(&url(
+            "https://relay-mac.local:8787/"
+        )));
+        // Unparseable or non-http(s) input clears the exemption (fail closed).
+        set_kakao_relay_ui_origin("not a url");
+        assert!(!is_kakao_relay_ui_frame(&url(
+            "http://relay-mac.local:8787/"
+        )));
+        set_kakao_relay_ui_origin("file:///etc/passwd");
+        assert!(!is_kakao_relay_ui_frame(&url(
+            "http://relay-mac.local:8787/"
+        )));
+        set_kakao_relay_ui_origin("");
+        assert!(!is_kakao_relay_ui_frame(&url(
+            "http://relay-mac.local:8787/"
+        )));
     }
 
     #[test]
