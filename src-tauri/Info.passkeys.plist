@@ -16,5 +16,13 @@
       </array>
     </dict>
   </array>
+  <!-- Same ATS exception as src-tauri/Info.plist: the passkeys overlay
+       points bundle.macOS.infoPlist here, so the local-networking exception
+       must be declared in this file too (see #418). -->
+  <key>NSAppTransportSecurity</key>
+  <dict>
+    <key>NSAllowsLocalNetworking</key>
+    <true/>
+  </dict>
 </dict>
 </plist>

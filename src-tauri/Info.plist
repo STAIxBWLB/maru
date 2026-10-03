@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- Merged into the app bundle's Info.plist by tauri-bundler (it picks up
+       Info.plist next to tauri.conf.json automatically; the passkeys overlay
+       merges Info.passkeys.plist instead, which carries the same dict).
+       NSAllowsLocalNetworking admits cleartext HTTP to local-network
+       destinations — .local mDNS hostnames and RFC 1918 IPs — so the
+       embedded maru-kakao-relay console (#418, #419) can load when the
+       daemon lives on another Mac (e.g. http://relay-mac.local:8787).
+       Everything else keeps default ATS; NSAllowsArbitraryLoads stays off. -->
+  <key>NSAppTransportSecurity</key>
+  <dict>
+    <key>NSAllowsLocalNetworking</key>
+    <true/>
+  </dict>
+</dict>
+</plist>
