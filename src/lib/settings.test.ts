@@ -379,6 +379,32 @@ describe("normalizeMaruSettings", () => {
     expect(settings.comms.telegram.legacyAutoDrop).toBe(true);
   });
 
+  it("normalizes the kakao relay console URL with a default bind fallback", () => {
+    const defaults = normalizeMaruSettings({});
+    expect(defaults.comms.kakao.relayUiUrl).toBe("http://127.0.0.1:8787");
+
+    const settings = normalizeMaruSettings({
+      comms: {
+        kakao: { relayUiUrl: " http://relay.local:9000 " },
+      },
+    });
+    expect(settings.comms.kakao.relayUiUrl).toBe("http://relay.local:9000");
+
+    const blank = normalizeMaruSettings({
+      comms: {
+        kakao: { relayUiUrl: "   " },
+      },
+    });
+    expect(blank.comms.kakao.relayUiUrl).toBe("http://127.0.0.1:8787");
+
+    const junk = normalizeMaruSettings({
+      comms: {
+        kakao: { relayUiUrl: 42 },
+      },
+    });
+    expect(junk.comms.kakao.relayUiUrl).toBe("http://127.0.0.1:8787");
+  });
+
   it("parses meetings mode and normalizes meetings settings", () => {
     const settings = normalizeMaruSettings({
       ui: {
@@ -973,6 +999,9 @@ describe("normalizeMaruSettings", () => {
             },
             legacy_auto_drop: true,
           },
+          kakao: {
+            relay_ui_url: " http://relay-mac.local:8787 ",
+          },
         },
       },
     });
@@ -987,6 +1016,12 @@ describe("normalizeMaruSettings", () => {
     expect(effective.telegram.sessionFile).toBe("/tmp/telegram.session");
     expect(effective.telegram.monitorConfigPath).toBe("/tmp/telegram-monitor.yaml");
     expect(effective.telegram.legacyAutoDrop).toBe(true);
+    expect(effective.kakao.relayUiUrl).toBe("http://relay-mac.local:8787");
+
+    const blankOverride = applyWorkspaceCommsOverrides(base, {
+      io: { providers: { kakao: { relay_ui_url: "  " } } },
+    });
+    expect(blankOverride.kakao.relayUiUrl).toBe(base.kakao.relayUiUrl);
   });
 
   it("reads workspace M365 auth IDs from snake case and camel case provider config", () => {

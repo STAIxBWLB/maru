@@ -35,7 +35,7 @@
         "script-src": "'self'",
         "worker-src": "'self' blob:",
         "connect-src": "'self' ipc: http://ipc.localhost asset: http://asset.localhost blob: data:",
-        "frame-src": "'self' asset: http://asset.localhost",
+        "frame-src": "'self' asset: http://asset.localhost http: https:",
         "img-src": "'self' data: blob: asset: http://asset.localhost",
         "media-src": "'self' data: blob: asset: http://asset.localhost",
         "style-src": "'self' 'unsafe-inline' asset: http://asset.localhost",

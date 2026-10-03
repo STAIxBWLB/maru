@@ -21,7 +21,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value as JsonValue};
-use tauri::Manager;
+use tauri::{Emitter, Listener, Manager};
 
 use crate::atomic_file::{
     with_path_transactions, write_atomic, PathTransactionLease, PathTransactionRequest,
@@ -982,6 +982,61 @@ pub async fn read_kakao_send_results(
     .map_err(|err| format!("kakao_relay_task_failed: {err}"))?
 }
 
+// --- Operator console reachability probe (#418) -----------------------------
+// The webview CSP (`connect-src`) deliberately forbids the frontend from
+// fetching the relay console origin, so the embedded console probes the
+// daemon through this event round-trip instead — no new command (command
+// isolation stays put), no CSP widening. Any HTTP status, even 4xx/5xx,
+// means the daemon is listening; only a transport error marks it down.
+
+pub(crate) const KAKAO_RELAY_UI_PROBE_EVENT: &str = "maru:kakao-relay-ui-probe";
+pub(crate) const KAKAO_RELAY_UI_PROBE_RESULT_EVENT: &str = "maru:kakao-relay-ui-probe-result";
+
+const RELAY_UI_PROBE_TIMEOUT: Duration = Duration::from_secs(3);
+
+#[derive(Clone, Serialize)]
+struct KakaoRelayUiProbeResult {
+    url: String,
+    ok: bool,
+}
+
+fn probe_relay_ui_url(url: &tauri::Url) -> bool {
+    let Ok(client) = reqwest::blocking::Client::builder()
+        .timeout(RELAY_UI_PROBE_TIMEOUT)
+        .redirect(reqwest::redirect::Policy::limited(3))
+        .build()
+    else {
+        return false;
+    };
+    client.get(url.as_str()).send().is_ok()
+}
+
+/// Subscribe to frontend probe requests. Anything but a valid http(s) URL is
+/// ignored: the console only ever probes its own configured bind, and the
+/// probe must not become an indirect SSRF oracle for arbitrary schemes.
+pub(crate) fn listen_relay_ui_probes<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    let handle = app.clone();
+    app.listen_any(KAKAO_RELAY_UI_PROBE_EVENT, move |event| {
+        let Ok(raw) = serde_json::from_str::<String>(event.payload()) else {
+            return;
+        };
+        let Ok(url) = tauri::Url::parse(raw.trim()) else {
+            return;
+        };
+        if !matches!(url.scheme(), "http" | "https") {
+            return;
+        }
+        let handle = handle.clone();
+        std::thread::spawn(move || {
+            let ok = probe_relay_ui_url(&url);
+            let _ = handle.emit(
+                KAKAO_RELAY_UI_PROBE_RESULT_EVENT,
+                KakaoRelayUiProbeResult { url: raw, ok },
+            );
+        });
+    });
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1016,6 +1071,33 @@ mod tests {
             serde_json::to_vec_pretty(&payload).unwrap(),
         )
         .unwrap();
+    }
+
+    #[test]
+    fn probe_relay_ui_reports_transport_failures_only() {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut buf = [0u8; 1024];
+            let _ = stream.read(&mut buf);
+            stream
+                .write_all(b"HTTP/1.1 404 Not Found\r\ncontent-length: 0\r\n\r\n")
+                .unwrap();
+        });
+        let up = tauri::Url::parse(&format!("http://{addr}/")).unwrap();
+        assert!(
+            probe_relay_ui_url(&up),
+            "any HTTP status means the daemon is listening"
+        );
+        server.join().unwrap();
+        let down = tauri::Url::parse("http://127.0.0.1:1/").unwrap();
+        assert!(
+            !probe_relay_ui_url(&down),
+            "connection refused means unreachable"
+        );
     }
 
     fn fixture(drop_path: &str) -> Fixture {

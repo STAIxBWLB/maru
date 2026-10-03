@@ -15,6 +15,7 @@ import {
 import { isTelegramMonitorConfigOutsideMaru } from "../../lib/telegram";
 import type { TelegramPollingStatus } from "../../lib/types";
 import { useTranslation } from "../../lib/i18n";
+import { DEFAULT_KAKAO_RELAY_UI_URL } from "../../lib/kakaoRelay";
 import { SettingsSection } from "../settings/SettingsSection";
 import { SettingsRow } from "../settings/SettingsRow";
 import { Toggle } from "../ui/Toggle";
@@ -79,6 +80,8 @@ export function CommsSettingsTab({
     onSettingsChange({ ...settings, outlook: { ...settings.outlook, ...patch } });
   const updateTelegram = (patch: Partial<CommsSettings["telegram"]>) =>
     onSettingsChange({ ...settings, telegram: { ...settings.telegram, ...patch } });
+  const updateKakao = (patch: Partial<CommsSettings["kakao"]>) =>
+    onSettingsChange({ ...settings, kakao: { ...settings.kakao, ...patch } });
   const gwsValue = gmailSettings.gws_path ?? "";
   const effectiveM365Path = effectiveSettings?.outlook.m365Path ?? null;
   const effectiveTelegramMonitorConfigPath =
@@ -308,6 +311,29 @@ export function CommsSettingsTab({
                   ),
                 })
               }
+            />
+          }
+        />
+      </SettingsSection>
+
+      <SettingsSection
+        title={t("comms.kakao.title")}
+        description={t("comms.kakao.settings.description")}
+      >
+        <SettingsRow
+          label={t("comms.kakao.relayUiUrl")}
+          description={t("comms.kakao.relayUiUrlHelp")}
+          htmlFor="comms-kakao-relay-ui-url"
+          wide
+          control={
+            <input
+              id="comms-kakao-relay-ui-url"
+              className="path-input"
+              value={settings.kakao.relayUiUrl}
+              onChange={(event) => updateKakao({ relayUiUrl: event.target.value })}
+              placeholder={DEFAULT_KAKAO_RELAY_UI_URL}
+              title={settings.kakao.relayUiUrl || DEFAULT_KAKAO_RELAY_UI_URL}
+              spellCheck={false}
             />
           }
         />

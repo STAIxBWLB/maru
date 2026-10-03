@@ -46,6 +46,7 @@ import {
 import { AddWorkspaceDialog } from "./components/AddWorkspaceDialog";
 import maruSealMicroUrl from "./assets/brand/maru-seal-micro.svg";
 import { CommandPalette } from "./components/CommandPalette";
+import { KakaoRelayUiOriginPublisher } from "./components/comms/KakaoRelayConsole";
 import { CommitDialog } from "./components/CommitDialog";
 import { DocumentList } from "./components/DocumentList";
 import { EditorPaneFacade } from "./components/EditorPaneFacade";
@@ -192,7 +193,10 @@ import {
   type LegacyLaunchdService,
 } from "./lib/api";
 import { inboxRootPath, sourceFolderPath } from "./lib/inboxSources";
-import { kakaoRelayAuthStatus, type KakaoRelayStatus } from "./lib/kakaoRelay";
+import {
+  kakaoRelayAuthStatus,
+  type KakaoRelayStatus,
+} from "./lib/kakaoRelay";
 import {
   exportDispatch,
   exportPlan,
@@ -7527,6 +7531,8 @@ export function MainApp() {
       telegramPollingStatus: telegramPolling,
       authStatuses: commsAuthStatuses,
       kakaoRelayStatus,
+      kakaoRelayUiUrl: effectiveCommsSettings.kakao.relayUiUrl,
+      themeMode: maruSettings.ui.themeMode,
       workPath: inboxWorkspacePath,
       onConfirmApproval: approvalGate.confirmApproval,
       refreshing: commsRefreshing,
@@ -7558,6 +7564,7 @@ export function MainApp() {
       commsAuthStatuses,
       commsRefreshing,
       commsSourceFilter,
+      effectiveCommsSettings.kakao.relayUiUrl,
       handleDeepProcessComms,
       handleProcessCommsNow,
       handleRefreshProcessed,
@@ -7571,6 +7578,7 @@ export function MainApp() {
       inboxWorkspaceConfigReady,
       inboxWorkspacePath,
       kakaoRelayStatus,
+      maruSettings.ui.themeMode,
       migrationBusy,
       migrationServices,
       openCommsSettings,
@@ -8327,6 +8335,7 @@ export function MainApp() {
       <ModeHostPublisher controller={communicationsModeController} host={communicationsModeHost} />
       <ModeHostPublisher controller={planningModeController} host={planningModeHost} />
       <ModeHostPublisher controller={documentOpsModeController} host={documentOpsModeHost} />
+      <KakaoRelayUiOriginPublisher relayUiUrl={effectiveCommsSettings.kakao.relayUiUrl} />
       <div className={shellClass} style={shellStyle} ref={appShellRef}>
         <header
           className="topbar"

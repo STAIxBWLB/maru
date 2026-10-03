@@ -242,6 +242,10 @@ pub fn run() {
             // Start the skill-mission scheduler ticker (60s cadence; first
             // tick doubles as the launch catch-up pass).
             scheduler::start_scheduler_ticker(app.handle().clone());
+            // Relay console reachability probes round-trip over events (not
+            // a command) so the webview CSP needs no connect-src widening
+            // and command isolation stays at its recorded count (#418).
+            kakao_relay::listen_relay_ui_probes(app.handle());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

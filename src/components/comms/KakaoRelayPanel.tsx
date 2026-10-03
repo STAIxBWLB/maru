@@ -1,4 +1,4 @@
-import { RefreshCcw, Send } from "lucide-react";
+import { RefreshCcw, Send, SquareArrowOutUpRight, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ApprovalInput } from "../../approval/ApprovalDialog";
 import {
@@ -12,6 +12,8 @@ import {
   type KakaoRelayEnvelope,
   type KakaoRelayStatus,
 } from "../../lib/kakaoRelay";
+import type { ThemeMode } from "../../lib/settings";
+import { KakaoRelayConsole } from "./KakaoRelayConsole";
 
 const MESSAGE_LIMIT = 50;
 // The relay cycle defaults to 300s plus Dropbox sync latency, so poll with
@@ -24,6 +26,8 @@ const SEND_POLL_DELAYS_MS: number[] = [
 interface KakaoRelayPanelProps {
   status: KakaoRelayStatus | null;
   workPath: string | null;
+  relayUiUrl: string;
+  themeMode: ThemeMode;
   onConfirmApproval: (input: ApprovalInput) => Promise<string | null>;
 }
 
@@ -32,9 +36,12 @@ type SendState = "idle" | "sending" | "queued" | "sent" | "failed" | "pending";
 export function KakaoRelayPanel({
   status,
   workPath,
+  relayUiUrl,
+  themeMode,
   onConfirmApproval,
 }: KakaoRelayPanelProps) {
   const { t } = useTranslation();
+  const [consoleOpen, setConsoleOpen] = useState(false);
   const rooms = useMemo(
     () => status?.rooms.filter((room) => room.managed) ?? [],
     [status],
@@ -172,9 +179,35 @@ export function KakaoRelayPanel({
     workPath,
   ]);
 
+  // The operator console is reachable even when the sync-bus side is not
+  // configured yet — the relay daemon serves it independently.
+  const consoleSection = (
+    <div className="kakao-relay-section">
+      <div className="kakao-relay-section-header">
+        <h3 className="comms-results-title">{t("comms.kakao.console.title")}</h3>
+        <button
+          type="button"
+          className="secondary-button"
+          onClick={() => setConsoleOpen((open) => !open)}
+        >
+          {consoleOpen ? <X size={14} /> : <SquareArrowOutUpRight size={14} />}
+          <span>
+            {consoleOpen
+              ? t("comms.kakao.console.close")
+              : t("comms.kakao.console.open")}
+          </span>
+        </button>
+      </div>
+      {consoleOpen ? (
+        <KakaoRelayConsole relayUiUrl={relayUiUrl} themeMode={themeMode} />
+      ) : null}
+    </div>
+  );
+
   if (!status || !status.configured) {
     return (
       <section className="kakao-relay-panel">
+        {consoleSection}
         <p className="kakao-relay-hint">{t("comms.kakao.viewer.unconfigured")}</p>
       </section>
     );
@@ -182,6 +215,7 @@ export function KakaoRelayPanel({
 
   return (
     <section className="kakao-relay-panel">
+      {consoleSection}
       <div className="kakao-relay-section">
         <div className="kakao-relay-section-header">
           <h3 className="comms-results-title">{t("comms.kakao.viewer.title")}</h3>

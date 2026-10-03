@@ -1,8 +1,16 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
+  buildMaruThemeMessage,
+  DEFAULT_KAKAO_RELAY_UI_URL,
   envelopePreview,
   formatHeartbeatAge,
   kakaoRelayAuthStatus,
+  kakaoRelayUiSrc,
+  MARU_THEME_MESSAGE_TYPE,
+  normalizeKakaoRelayUiUrl,
+  probeKakaoRelayUi,
+  probeKakaoRelayUiFetch,
+  publishKakaoRelayUiUrl,
   relayLiveness,
   type KakaoRelayEnvelope,
   type KakaoRelayStatus,
@@ -128,5 +136,88 @@ describe("kakaoRelayAuthStatus", () => {
 
     const healthy = kakaoRelayAuthStatus(status({ heartbeatAgeSeconds: 300 }));
     expect(healthy.detail).toBe("5m ago");
+  });
+});
+
+describe("normalizeKakaoRelayUiUrl", () => {
+  it("trims and falls back to the default bind on blank or non-string input", () => {
+    expect(normalizeKakaoRelayUiUrl(" http://relay.local:8787 ")).toBe(
+      "http://relay.local:8787",
+    );
+    expect(normalizeKakaoRelayUiUrl("")).toBe(DEFAULT_KAKAO_RELAY_UI_URL);
+    expect(normalizeKakaoRelayUiUrl("   ")).toBe(DEFAULT_KAKAO_RELAY_UI_URL);
+    expect(normalizeKakaoRelayUiUrl(null)).toBe(DEFAULT_KAKAO_RELAY_UI_URL);
+    expect(normalizeKakaoRelayUiUrl(undefined)).toBe(DEFAULT_KAKAO_RELAY_UI_URL);
+    expect(normalizeKakaoRelayUiUrl(42)).toBe(DEFAULT_KAKAO_RELAY_UI_URL);
+    expect(DEFAULT_KAKAO_RELAY_UI_URL).toBe("http://127.0.0.1:8787");
+  });
+});
+
+describe("kakaoRelayUiSrc", () => {
+  it("appends the theme query param to a valid http(s) URL", () => {
+    expect(kakaoRelayUiSrc("http://127.0.0.1:8787", "dark")).toBe(
+      "http://127.0.0.1:8787/?theme=dark",
+    );
+    expect(kakaoRelayUiSrc("https://relay.example/ui", "light")).toBe(
+      "https://relay.example/ui?theme=light",
+    );
+  });
+
+  it("replaces an existing theme param and preserves other params", () => {
+    expect(kakaoRelayUiSrc("http://relay.local:8787/?theme=light&token=abc", "dark")).toBe(
+      "http://relay.local:8787/?theme=dark&token=abc",
+    );
+  });
+
+  it("returns null for blank, unparseable, or non-http(s) values", () => {
+    expect(kakaoRelayUiSrc("", "dark")).toBeNull();
+    expect(kakaoRelayUiSrc("   ", "dark")).toBeNull();
+    expect(kakaoRelayUiSrc("not a url", "dark")).toBeNull();
+    expect(kakaoRelayUiSrc("file:///etc/passwd", "dark")).toBeNull();
+    expect(kakaoRelayUiSrc("ftp://relay.local", "dark")).toBeNull();
+  });
+});
+
+describe("buildMaruThemeMessage", () => {
+  it("builds the relay theme-sync postMessage payload", () => {
+    expect(buildMaruThemeMessage("dark")).toEqual({
+      type: MARU_THEME_MESSAGE_TYPE,
+      theme: "dark",
+    });
+    expect(MARU_THEME_MESSAGE_TYPE).toBe("maru-theme");
+    expect(buildMaruThemeMessage("system")).toEqual({
+      type: "maru-theme",
+      theme: "system",
+    });
+  });
+});
+
+describe("probeKakaoRelayUiFetch", () => {
+  it("resolves true on any HTTP response and false on transport failure", async () => {
+    const up = vi.fn<typeof fetch>().mockResolvedValue(new Response(null));
+    await expect(probeKakaoRelayUiFetch("http://relay.local:8787", up)).resolves.toBe(true);
+    expect(up).toHaveBeenCalledWith(
+      "http://relay.local:8787",
+      expect.objectContaining({ mode: "no-cors", cache: "no-store" }),
+    );
+
+    const down = vi.fn<typeof fetch>().mockRejectedValue(new TypeError("fetch failed"));
+    await expect(probeKakaoRelayUiFetch("http://relay.local:8787", down)).resolves.toBe(false);
+  });
+});
+
+describe("publishKakaoRelayUiUrl / probeKakaoRelayUi outside Tauri", () => {
+  it("publish is a no-op without the Tauri runtime", async () => {
+    await expect(publishKakaoRelayUiUrl("http://127.0.0.1:8787")).resolves.toBeUndefined();
+  });
+
+  it("probe falls back to the no-cors fetch without the Tauri runtime", async () => {
+    const original = globalThis.fetch;
+    globalThis.fetch = vi.fn<typeof fetch>().mockRejectedValue(new TypeError("refused"));
+    try {
+      await expect(probeKakaoRelayUi("http://127.0.0.1:8787")).resolves.toBe(false);
+    } finally {
+      globalThis.fetch = original;
+    }
   });
 });

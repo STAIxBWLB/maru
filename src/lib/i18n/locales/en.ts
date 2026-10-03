@@ -1507,6 +1507,21 @@ export const en: Record<string, string> = {
   "comms.auth.status.unknown": "Status unknown",
   "comms.auth.status.paused": "Paused",
   "comms.auth.status.stale": "Stale heartbeat",
+  "comms.kakao.title": "KakaoTalk relay",
+  "comms.kakao.settings.description":
+    "Connection settings for the operator console served by the maru-kakao-relay daemon.",
+  "comms.kakao.relayUiUrl": "Relay console URL",
+  "comms.kakao.relayUiUrlHelp":
+    "Base URL of the relay operator console (the daemon's ui.bind). Blank restores the default.",
+  "comms.kakao.console.title": "Relay console",
+  "comms.kakao.console.open": "Open relay console",
+  "comms.kakao.console.close": "Close console",
+  "comms.kakao.console.reload": "Reload console",
+  "comms.kakao.console.openExternal": "Open in browser",
+  "comms.kakao.console.invalidUrl":
+    "Set a valid relay console URL in the comms settings to embed the console.",
+  "comms.kakao.console.loadFailed":
+    "Could not load the relay console at {url}. Check that the relay UI is running.",
   "comms.kakao.viewer.title": "Relay messages",
   "comms.kakao.viewer.room": "Room",
   "comms.kakao.viewer.loading": "Loading messages...",
