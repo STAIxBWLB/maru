@@ -24,5 +24,7 @@
     <key>NSAllowsLocalNetworking</key>
     <true/>
   </dict>
+  <key>NSLocalNetworkUsageDescription</key>
+  <string>같은 로컬 네트워크의 다른 Mac에서 카카오톡 릴레이 콘솔을 불러오기 위해 로컬 네트워크 접근이 필요합니다. (Maru loads the configured KakaoTalk relay console from another Mac on your local network.)</string>
 </dict>
 </plist>
