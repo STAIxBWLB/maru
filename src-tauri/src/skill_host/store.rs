@@ -2469,6 +2469,7 @@ pub fn skills_sync_selected_tools(
         }
         preflight_tool_sync(&registry, &desired, &tools, retarget)?;
     }
+    let profiles = tool_sync_profiles(&registry, &desired, &tools, retarget)?;
     let mut actions = plan_tool_sync(&registry, &desired, &tools, retarget, selection.is_none())?;
     if apply {
         admission
@@ -2586,15 +2587,7 @@ pub fn skills_sync_selected_tools(
     Ok(SkillToolSyncReport {
         applied: apply,
         tools: tools.clone(),
-        profiles: tools
-            .iter()
-            .map(|target| {
-                Ok(SkillToolSyncProfile {
-                    target: target.clone(),
-                    root: host_fs::display_path(&install_root(target)?),
-                })
-            })
-            .collect::<Result<Vec<_>, String>>()?,
+        profiles,
         desired_skills: desired.len(),
         desired_installs: desired.len() * tools.len(),
         actions,
@@ -2661,6 +2654,51 @@ fn source_is_maru_owned(source: &SkillSource) -> bool {
         source.ownership_class.as_str(),
         "bundled" | "owned-catalog" | "imported"
     )
+}
+
+/// A report describes one effective profile per target. Selected retargets
+/// can leave other installs at the previous root, so reject subsequent syncs
+/// that would span roots instead of reporting the ambient profile incorrectly.
+fn tool_sync_profiles(
+    registry: &SkillsRegistry,
+    desired: &[SkillRecord],
+    tools: &[String],
+    retarget: bool,
+) -> Result<Vec<SkillToolSyncProfile>, String> {
+    tools
+        .iter()
+        .map(|target| {
+            let mut roots = if retarget {
+                BTreeSet::new()
+            } else {
+                recorded_install_roots(registry, target)
+            };
+            for skill in desired {
+                let destination = effective_install_target(registry, target, &skill.name, retarget)?;
+                if let Some(root) = destination.parent() {
+                    roots.insert(root.to_path_buf());
+                }
+            }
+            if roots.len() > 1 {
+                return Err(format!(
+                    "{target}_install_root_diverged: effective roots {} span multiple profiles; reconcile with an explicit unfiltered --retarget before syncing",
+                    roots
+                        .iter()
+                        .map(|root| host_fs::display_path(root))
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                ));
+            }
+            let root = match roots.into_iter().next() {
+                Some(root) => root,
+                None => install_root(target)?,
+            };
+            Ok(SkillToolSyncProfile {
+                target: target.clone(),
+                root: host_fs::display_path(&root),
+            })
+        })
+        .collect()
 }
 
 fn preflight_tool_sync(
@@ -11049,13 +11087,73 @@ mod tests {
         let foreign = TempDir::new().unwrap();
         move_codex_installs_to_foreign_root(foreign.path());
 
-        let checked = skills_sync_tools(None, tools, false, false).unwrap();
+        let checked = skills_sync_tools(None, tools.clone(), false, false).unwrap();
 
+        assert_eq!(checked.profiles[0].root, path_string(foreign.path()));
         assert!(
             checked.actions.is_empty(),
             "recorded foreign roots should plan no actions, got {:?}",
             checked.actions
         );
+
+        // A new install resolves against ambient home while existing installs
+        // remain sticky. That mixed plan cannot describe one effective profile.
+        write_skill(&imported_root, "new-ambient");
+        let error = skills_sync_tools(None, tools, false, false).unwrap_err();
+        assert!(error.contains("codex_install_root_diverged"), "{error}");
+        assert!(error.contains("unfiltered --retarget"), "{error}");
+        assert!(!path_occupied(
+            &install_target_path("codex", "new-ambient").unwrap()
+        ));
+    }
+
+    #[test]
+    fn selected_retarget_rejects_split_profiles_until_unfiltered_retarget() {
+        let _home = test_home();
+        let imported_root = host_fs::skills_root().unwrap().join("_imported");
+        write_skill(&imported_root, "move-selected");
+        write_skill(&imported_root, "keep-unselected");
+        let tools = vec!["codex".to_string()];
+        skills_sync_tools(None, tools.clone(), true, false).unwrap();
+        let foreign = TempDir::new().unwrap();
+        move_codex_installs_to_foreign_root(foreign.path());
+
+        let moved = skills_sync_selected_tools(
+            None,
+            tools.clone(),
+            Some(vec!["move-selected".into()]),
+            true,
+            true,
+        )
+        .unwrap();
+        let ambient = install_root("codex").unwrap();
+        assert_eq!(moved.profiles[0].root, path_string(&ambient));
+        assert!(is_symlink_path(&ambient.join("move-selected")));
+        assert!(is_symlink_path(&foreign.path().join("keep-unselected")));
+        let before = fs::read(registry_path().unwrap()).unwrap();
+        for selection in [None, Some(vec!["keep-unselected".into()])] {
+            for apply in [false, true] {
+                let error = skills_sync_selected_tools(
+                    None,
+                    tools.clone(),
+                    selection.clone(),
+                    apply,
+                    false,
+                )
+                .unwrap_err();
+                assert!(error.contains("codex_install_root_diverged"), "{error}");
+                assert!(error.contains("unfiltered --retarget"), "{error}");
+                assert_eq!(fs::read(registry_path().unwrap()).unwrap(), before);
+                assert!(is_symlink_path(&foreign.path().join("keep-unselected")));
+            }
+        }
+
+        skills_sync_tools(None, tools.clone(), true, true).unwrap();
+        let checked = skills_sync_tools(None, tools, false, false).unwrap();
+        assert_eq!(checked.profiles[0].root, path_string(&ambient));
+        assert!(checked.actions.is_empty());
+        assert!(!path_occupied(&foreign.path().join("keep-unselected")));
+        assert!(is_symlink_path(&ambient.join("keep-unselected")));
     }
 
     #[test]
