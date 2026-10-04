@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::ffi::OsStr;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -63,9 +64,10 @@ pub struct JobProgram {
 /// `Repeat` (default): plain `StartInterval` on the job's own plist — the job
 /// re-runs every N seconds regardless of whether the calendar fire happened.
 /// `MissedFire`: the calendar cadence is preserved; a separate guard agent
-/// (`com.maru.job.<id>-guard.*`, `StartInterval` + `RunAtLoad`) re-invokes the
-/// job only when the last recorded success predates the most recent scheduled
-/// fire — i.e. a fire missed while the Mac was asleep or powered off.
+/// (`com.maru.job.guard.<id>.*`, `StartInterval` + `RunAtLoad`) re-invokes the
+/// job only when neither a success nor the first-install baseline covers the
+/// most recent scheduled fire — i.e. a fire missed while the Mac was asleep or
+/// powered off.
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum RecoveryMode {
@@ -209,11 +211,14 @@ pub fn label_for(job_id: &str, work_path: &Path) -> Result<String, String> {
 /// Label of the missed-fire guard agent paired with a job. Only rendered and
 /// installed when the job opts into `RecoveryMode::MissedFire`.
 fn guard_label_for(job_id: &str, work_path: &Path) -> Result<String, String> {
-    let label = label_for(job_id, work_path)?;
-    Ok(label.replace(
-        &format!("{JOB_LABEL_PREFIX}{job_id}."),
-        &format!("{JOB_LABEL_PREFIX}{job_id}-guard."),
-    ))
+    validate_job_id(job_id)?;
+    let canonical = canonical_work_path(work_path)?;
+    let digest = Sha256::digest(canonical.to_string_lossy().as_bytes());
+    let hex: String = digest[..4]
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    Ok(format!("{JOB_LABEL_PREFIX}guard.{job_id}.{hex}"))
 }
 
 /// argv the plist invokes for a missed-fire job: the current binary drives the
@@ -221,12 +226,10 @@ fn guard_label_for(job_id: &str, work_path: &Path) -> Result<String, String> {
 /// `--maru-cli` selects CLI dispatch in the desktop binary and is skipped by
 /// the standalone CLI's `run_cli`.
 fn exec_wrapper_arguments(job: &JobRecord, if_missed: bool) -> Result<Vec<String>, String> {
-    let exe = std::env::current_exe()
-        .map_err(|err| format!("current_exe_failed: {err}"))?
-        .to_string_lossy()
-        .to_string();
+    let exe = std::env::current_exe().map_err(|err| format!("current_exe_failed: {err}"))?;
+    let exe = stable_invoked_executable(&exe, std::env::args_os().next().as_deref());
     let mut argv = vec![
-        exe,
+        exe.to_string_lossy().to_string(),
         "--maru-cli".to_string(),
         "jobs".to_string(),
         "exec".to_string(),
@@ -236,6 +239,19 @@ fn exec_wrapper_arguments(job: &JobRecord, if_missed: bool) -> Result<Vec<String
     }
     argv.push(job.id.clone());
     Ok(argv)
+}
+
+/// Preserve a stable caller-facing path (for example `/opt/homebrew/bin/maru`)
+/// when it resolves to this process, while refusing ambient PATH lookup or an
+/// unrelated executable that happens to be argv[0].
+fn stable_invoked_executable(current_exe: &Path, argv0: Option<&OsStr>) -> PathBuf {
+    let Some(candidate) = argv0.map(PathBuf::from).filter(|path| path.is_absolute()) else {
+        return current_exe.to_path_buf();
+    };
+    match (fs::canonicalize(current_exe), fs::canonicalize(&candidate)) {
+        (Ok(actual), Ok(invoked)) if actual == invoked => candidate,
+        _ => current_exe.to_path_buf(),
+    }
 }
 
 fn canonical_work_path(work_path: &Path) -> Result<PathBuf, String> {
@@ -480,12 +496,20 @@ fn job_state_path(work_path: &Path, job_id: &str) -> PathBuf {
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct JobRunState {
+    /// First install boundary, separate from a successful execution.
+    #[serde(default)]
+    pub install_baseline_at: Option<u64>,
     #[serde(default)]
     pub last_run_at: Option<u64>,
     #[serde(default)]
     pub last_exit_code: Option<i64>,
+    /// Completion time, for status and diagnostics.
     #[serde(default)]
     pub last_success_at: Option<u64>,
+    /// Scheduled daily fire handled by that success; prevents a long run from
+    /// accidentally covering the next day's fire.
+    #[serde(default)]
+    pub last_success_fire_at: Option<u64>,
 }
 
 fn read_job_state(path: &Path) -> JobRunState {
@@ -502,42 +526,73 @@ fn now_epoch_seconds() -> u64 {
         .unwrap_or(0)
 }
 
-/// Most recent scheduled fire at or before `now`, in local time: today's
-/// `hour:minute` once it has passed, otherwise yesterday's.
+/// Fire for the latest local date whose daily `hour:minute` has occurred.
+/// An ambiguous fall-back time uses its first occurrence so both folds share
+/// one logical daily fire. A nonexistent wall time is skipped for that date.
+fn latest_fire_on_date<Tz: chrono::TimeZone>(
+    timezone: &Tz,
+    now: &chrono::DateTime<Tz>,
+    date: chrono::NaiveDate,
+    time: chrono::NaiveTime,
+) -> Option<chrono::DateTime<Tz>> {
+    use chrono::LocalResult;
+    match timezone.from_local_datetime(&date.and_time(time)) {
+        LocalResult::Single(value) => (value.timestamp() <= now.timestamp()).then_some(value),
+        LocalResult::Ambiguous(first, second) => {
+            let first = first.min(second);
+            (first.timestamp() <= now.timestamp()).then_some(first)
+        }
+        // A nonexistent wall time has no launchd fire on that date.
+        LocalResult::None => None,
+    }
+}
+
+fn last_scheduled_fire<Tz: chrono::TimeZone>(
+    timezone: &Tz,
+    now: chrono::DateTime<Tz>,
+    hour: u32,
+    minute: u32,
+) -> Option<chrono::DateTime<Tz>> {
+    use chrono::NaiveTime;
+    let time = NaiveTime::from_hms_opt(hour, minute, 0)?;
+    let mut date = now.date_naive();
+    // DST gaps can remove a scheduled wall time for one date. Look back up to
+    // three local dates; if none resolves, the caller fails closed and skips.
+    for _ in 0..3 {
+        if let Some(fire) = latest_fire_on_date(timezone, &now, date, time) {
+            return Some(fire);
+        }
+        date = date.pred_opt()?;
+    }
+    None
+}
+
 fn last_scheduled_fire_epoch(
     now: chrono::DateTime<chrono::Local>,
     hour: u32,
     minute: u32,
 ) -> Option<i64> {
-    use chrono::{Duration, NaiveTime, TimeZone};
-    let time = NaiveTime::from_hms_opt(hour, minute, 0)?;
-    let today_fire = chrono::Local
-        .from_local_datetime(&now.date_naive().and_time(time))
-        .earliest()?;
-    let fire = if now >= today_fire {
-        today_fire
-    } else {
-        today_fire - Duration::days(1)
-    };
-    Some(fire.timestamp())
+    last_scheduled_fire(&chrono::Local, now, hour, minute).map(|fire| fire.timestamp())
 }
 
-/// A fire needs no recovery when a success was recorded at or after the most
-/// recent scheduled fire. A missing state file or missing success means the
-/// job never ran through the wrapper, so it counts as due.
+/// A fire needs no recovery when it is covered by a success or first-install
+/// baseline. With neither timestamp, the fire counts as due.
 fn last_success_covers_fire(
     state: &JobRunState,
     now: chrono::DateTime<chrono::Local>,
     hour: u32,
     minute: u32,
 ) -> bool {
-    let (Some(success), Some(fire)) = (
-        state.last_success_at,
-        last_scheduled_fire_epoch(now, hour, minute),
-    ) else {
+    let Some(fire) = last_scheduled_fire_epoch(now, hour, minute) else {
+        // If the local calendar cannot produce a scheduled fire, fail closed
+        // rather than starting the job on every guard interval.
+        return true;
+    };
+    let covered_at = state.last_success_fire_at.max(state.install_baseline_at);
+    let Some(covered_at) = covered_at else {
         return false;
     };
-    success as i64 >= fire
+    covered_at as i64 >= fire
 }
 
 /// Entry point behind the plist wrapper for missed-fire jobs. The plist's
@@ -547,7 +602,7 @@ fn last_success_covers_fire(
 /// `if_missed` (the guard agent), exits 0 without running when the recorded
 /// success already covers the most recent scheduled fire.
 pub fn jobs_exec_in(work_path: &Path, job_id: &str, if_missed: bool) -> i32 {
-    match jobs_exec_result(work_path, job_id, if_missed) {
+    match jobs_exec_result(work_path, job_id, if_missed, false) {
         Ok(code) => code,
         Err(err) => {
             eprintln!("jobs_exec_failed: {err}");
@@ -556,14 +611,20 @@ pub fn jobs_exec_in(work_path: &Path, job_id: &str, if_missed: bool) -> i32 {
     }
 }
 
-fn jobs_exec_result(work_path: &Path, job_id: &str, if_missed: bool) -> Result<i32, String> {
+fn jobs_exec_result(
+    work_path: &Path,
+    job_id: &str,
+    if_missed: bool,
+    force: bool,
+) -> Result<i32, String> {
     let jobs = load_jobs(work_path)?;
     let job = find_job(&jobs, job_id)?;
     if !job.enabled {
         return Ok(0);
     }
     let state_path = job_state_path(work_path, job_id);
-    if if_missed
+    if !force
+        && (if_missed || job.schedule.recovery_mode == RecoveryMode::MissedFire)
         && last_success_covers_fire(
             &read_job_state(&state_path),
             chrono::Local::now(),
@@ -601,7 +662,8 @@ fn jobs_exec_result(work_path: &Path, job_id: &str, if_missed: bool) -> Result<i
     }
     // Re-check under the lock: a calendar run may have recorded its success
     // while the guard was acquiring it.
-    if if_missed
+    if !force
+        && (if_missed || job.schedule.recovery_mode == RecoveryMode::MissedFire)
         && last_success_covers_fire(
             &read_job_state(&state_path),
             chrono::Local::now(),
@@ -628,6 +690,12 @@ fn jobs_exec_result(work_path: &Path, job_id: &str, if_missed: bool) -> Result<i
         .append(true)
         .open(&stderr_path)
         .map_err(|err| format!("job_log_open_failed: {stderr_path}: {err}"))?;
+    let home = crate::skill_host::fs::install_root_base()?;
+    let workspace_config = work_path.join("workspace.config.yaml");
+    let started_at = now_epoch_seconds();
+    let scheduled_fire_at =
+        last_scheduled_fire_epoch(chrono::Local::now(), job.schedule.hour, job.schedule.minute)
+            .map(|timestamp| timestamp.max(0) as u64);
     let mut child = Command::new(&command)
         .args(
             job.program
@@ -635,13 +703,20 @@ fn jobs_exec_result(work_path: &Path, job_id: &str, if_missed: bool) -> Result<i
                 .iter()
                 .map(|arg| resolve_job_arg(work_path, arg)),
         )
+        .env("HOME", home)
+        .envs(
+            job.program
+                .env
+                .iter()
+                .map(|(key, value)| (key, expand_tilde_segments(value))),
+        )
+        .env("WORKSPACE_CONFIG", workspace_config)
         .current_dir(work_path)
         .stdout(Stdio::from(stdout))
         .stderr(Stdio::from(stderr))
         .no_window()
         .spawn()
         .map_err(|err| format!("job_spawn_failed: {command}: {err}"))?;
-    let started_at = now_epoch_seconds();
     let status = child
         .wait()
         .map_err(|err| format!("job_wait_failed: {command}: {err}"))?;
@@ -652,6 +727,7 @@ fn jobs_exec_result(work_path: &Path, job_id: &str, if_missed: bool) -> Result<i
     state.last_exit_code = Some(i64::from(code));
     if code == 0 {
         state.last_success_at = Some(now_epoch_seconds());
+        state.last_success_fire_at = scheduled_fire_at;
     }
     let serialized = serde_json::to_string_pretty(&state).unwrap_or_default();
     crate::atomic_file::write_atomic(&state_path, serialized.as_bytes())?;
@@ -865,10 +941,16 @@ fn status_for(job: &JobRecord, work_path: &Path) -> Result<JobStatus, String> {
     } else {
         (false, false, None)
     };
-    let last_run_at = read_job_state(&job_state_path(work_path, &job.id))
+    let run_state = read_job_state(&job_state_path(work_path, &job.id));
+    let last_run_at = run_state
         .last_run_at
         .and_then(|secs| chrono::DateTime::from_timestamp(secs as i64, 0))
         .map(|stamp| stamp.to_rfc3339());
+    let reported_exit_code = if job.schedule.recovery_mode == RecoveryMode::MissedFire {
+        run_state.last_exit_code
+    } else {
+        last_exit_code
+    };
     Ok(JobStatus {
         id: job.id.clone(),
         title: job.title.clone(),
@@ -879,7 +961,7 @@ fn status_for(job: &JobRecord, work_path: &Path) -> Result<JobStatus, String> {
         plist_path: plist.to_string_lossy().to_string(),
         label,
         schedule: job.schedule.clone(),
-        last_exit_code,
+        last_exit_code: reported_exit_code,
         last_run_at,
     })
 }
@@ -986,23 +1068,30 @@ fn sync_guard_agent(job: &JobRecord, work_path: &Path, uid: &str) -> Result<(), 
     } else {
         run_launchctl(&["disable", &target])?;
     }
-    // Seed the success signal on first install: recovery covers fires missed
-    // after the install, not the job's whole past. An existing record is
-    // preserved across reinstalls so a same-day success still gates the guard.
-    let state_path = job_state_path(work_path, &job.id);
-    if !state_path.exists() {
-        let state_dir = jobs_state_dir(work_path);
-        fs::create_dir_all(&state_dir).map_err(|err| {
-            format!(
-                "job_state_dir_failed: {}: {err}",
-                state_dir.to_string_lossy()
-            )
-        })?;
-        let state = JobRunState {
-            last_run_at: None,
-            last_exit_code: None,
-            last_success_at: Some(now_epoch_seconds()),
-        };
+    Ok(())
+}
+
+/// Record the first-install boundary before either launchd plist can run. This
+/// is distinct from a successful run: fires before installation are outside
+/// this agent's recovery promise, and RunAtLoad must never race this baseline.
+fn seed_install_baseline(work_path: &Path, job_id: &str) -> Result<(), String> {
+    let state_dir = jobs_state_dir(work_path);
+    fs::create_dir_all(&state_dir).map_err(|err| {
+        format!(
+            "job_state_dir_failed: {}: {err}",
+            state_dir.to_string_lossy()
+        )
+    })?;
+    let state_path = job_state_path(work_path, job_id);
+    let lock_path = state_dir.join(format!("{job_id}.lock"));
+    let lock_file = fs::File::create(&lock_path)
+        .map_err(|err| format!("job_lock_failed: {}: {err}", lock_path.to_string_lossy()))?;
+    lock_file
+        .lock()
+        .map_err(|err| format!("job_lock_failed: {err}"))?;
+    let mut state = read_job_state(&state_path);
+    if state.install_baseline_at.is_none() {
+        state.install_baseline_at = Some(now_epoch_seconds());
         let serialized = serde_json::to_string_pretty(&state).unwrap_or_default();
         crate::atomic_file::write_atomic(&state_path, serialized.as_bytes())?;
     }
@@ -1025,6 +1114,9 @@ fn jobs_install_in_transaction(
     let plist = guarded_plist_path(&label)?;
     let uid = current_uid()?;
 
+    if job.schedule.recovery_mode == RecoveryMode::MissedFire {
+        seed_install_baseline(work_path, &job.id)?;
+    }
     let xml = plist_for(job, work_path)?;
     let logs_dir = resolve_job_path(work_path, &job.logs.dir);
     fs::create_dir_all(&logs_dir)
@@ -1174,6 +1266,15 @@ fn jobs_run_now_in_transaction(
     let job = find_job(&jobs, job_id)?;
     lease.ensure_covered(jobs_transaction_paths(work_path, job)?)?;
     lease.before_effect()?;
+    if job.schedule.recovery_mode == RecoveryMode::MissedFire {
+        // A deliberate user action remains unconditional; only launchd's
+        // calendar and recovery paths are deduplicated against the fire.
+        let code = jobs_exec_result(work_path, job_id, false, true)?;
+        if code != 0 {
+            return Err(format!("job_run_failed: {job_id}: exit code {code}"));
+        }
+        return status_for(job, work_path);
+    }
     let label = label_for(&job.id, work_path)?;
     let _plist = guarded_plist_path(&label)?;
     let uid = current_uid()?;
@@ -1379,6 +1480,11 @@ mod tests {
         assert_ne!(first, other);
         assert!(first.starts_with("com.maru.job.mail-digest."));
         assert_eq!(first.len(), "com.maru.job.mail-digest.".len() + 8);
+
+        let other_job = label_for("mail-digest-guard", &work_a).unwrap();
+        let guard = guard_label_for("mail-digest", &work_a).unwrap();
+        assert_ne!(other_job, guard, "guard labels use a separate namespace");
+        assert!(guard.starts_with("com.maru.job.guard.mail-digest."));
     }
 
     #[test]
@@ -1389,6 +1495,32 @@ mod tests {
         assert!(label_for("bad id", dir.path()).is_err());
         assert!(label_for("", dir.path()).is_err());
         assert!(label_for("mail-digest-2", dir.path()).is_ok());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn wrapper_keeps_stable_invoked_symlink_only_when_it_targets_current_exe() {
+        use std::os::unix::fs::symlink;
+
+        let dir = tempfile::tempdir().unwrap();
+        let versioned = dir.path().join("Cellar/maru/1.1.16/bin/maru");
+        let stable = dir.path().join("bin/maru");
+        let unrelated = dir.path().join("bin/other-maru");
+        fs::create_dir_all(versioned.parent().unwrap()).unwrap();
+        fs::create_dir_all(stable.parent().unwrap()).unwrap();
+        fs::write(&versioned, b"binary").unwrap();
+        fs::write(&unrelated, b"other").unwrap();
+        symlink(&versioned, &stable).unwrap();
+
+        assert_eq!(
+            stable_invoked_executable(&versioned, Some(stable.as_os_str())),
+            stable
+        );
+        assert_eq!(
+            stable_invoked_executable(&versioned, Some(unrelated.as_os_str())),
+            versioned
+        );
+        assert_eq!(stable_invoked_executable(&versioned, None), versioned);
     }
 
     #[test]
@@ -1603,6 +1735,50 @@ mod tests {
     }
 
     #[test]
+    fn daily_fire_handles_dst_gap_and_uses_one_fall_back_fold() {
+        use chrono::TimeZone;
+        let timezone = chrono_tz::America::New_York;
+
+        // The spring-forward date has no 02:30. The next morning, before
+        // today's fire, the latest resolvable daily fire is March 7.
+        let spring_morning = timezone
+            .with_ymd_and_hms(2026, 3, 9, 1, 0, 0)
+            .single()
+            .unwrap();
+        let prior_fire = timezone
+            .with_ymd_and_hms(2026, 3, 7, 2, 30, 0)
+            .single()
+            .unwrap();
+        assert_eq!(
+            last_scheduled_fire(&timezone, spring_morning, 2, 30),
+            Some(prior_fire)
+        );
+
+        // The fall-back date has two 01:30 wall times. Both folds map to the
+        // first occurrence, so one logical daily fire cannot run twice.
+        let first_fold = timezone
+            .with_ymd_and_hms(2026, 11, 1, 1, 45, 0)
+            .earliest()
+            .unwrap();
+        let second_fold = timezone
+            .with_ymd_and_hms(2026, 11, 1, 1, 45, 0)
+            .latest()
+            .unwrap();
+        let expected = timezone
+            .with_ymd_and_hms(2026, 11, 1, 1, 30, 0)
+            .earliest()
+            .unwrap();
+        assert_eq!(
+            last_scheduled_fire(&timezone, first_fold, 1, 30),
+            Some(expected)
+        );
+        assert_eq!(
+            last_scheduled_fire(&timezone, second_fold, 1, 30),
+            Some(expected)
+        );
+    }
+
+    #[test]
     fn success_covers_fire_only_when_recorded_at_or_after_it() {
         use chrono::TimeZone;
         let now = chrono::Local
@@ -1616,9 +1792,11 @@ mod tests {
             .timestamp();
 
         let fresh = JobRunState {
+            install_baseline_at: None,
             last_run_at: None,
             last_exit_code: None,
             last_success_at: Some((fire + 60) as u64),
+            last_success_fire_at: Some(fire as u64),
         };
         assert!(last_success_covers_fire(&fresh, now, 4, 30));
 
@@ -1635,6 +1813,31 @@ mod tests {
             4,
             30
         ));
+    }
+
+    #[test]
+    fn long_run_completion_does_not_cover_a_later_daily_fire() {
+        use chrono::TimeZone;
+        let prior_fire = chrono::Local
+            .with_ymd_and_hms(2026, 10, 3, 4, 30, 0)
+            .single()
+            .unwrap()
+            .timestamp();
+        let next_fire = chrono::Local
+            .with_ymd_and_hms(2026, 10, 4, 4, 30, 0)
+            .single()
+            .unwrap()
+            .timestamp();
+        let after_long_run = chrono::Local
+            .with_ymd_and_hms(2026, 10, 4, 10, 0, 0)
+            .single()
+            .unwrap();
+        let state = JobRunState {
+            last_success_at: Some((next_fire + 3600) as u64),
+            last_success_fire_at: Some(prior_fire as u64),
+            ..JobRunState::default()
+        };
+        assert!(!last_success_covers_fire(&state, after_long_run, 4, 30));
     }
 
     fn exec_test_job(id: &str, shell_line: &str) -> JobRecord {
@@ -1676,7 +1879,7 @@ mod tests {
     }
 
     #[test]
-    fn exec_runs_program_records_success_and_guard_skips_same_fire() {
+    fn recovered_fire_prevents_later_coalesced_calendar_run_but_manual_run_forces() {
         let _home = Home::new();
         let dir = tempfile::tempdir().unwrap();
         let work = dir.path().join("work");
@@ -1684,8 +1887,8 @@ mod tests {
         let job = exec_test_job("ok-job", "echo ran >> exec-marker.txt");
         write_exec_test_workspace(&work, &job);
 
-        // Calendar/main path: runs unconditionally.
-        assert_eq!(jobs_exec_in(&work, "ok-job", false), 0);
+        // Recovery runs because there is no installed/success baseline.
+        assert_eq!(jobs_exec_in(&work, "ok-job", true), 0);
         let marker = work.join("exec-marker.txt");
         assert_eq!(fs::read_to_string(&marker).unwrap().lines().count(), 1);
 
@@ -1693,10 +1896,14 @@ mod tests {
         assert!(state.last_success_at.is_some());
         assert_eq!(state.last_exit_code, Some(0));
 
-        // Guard path: the recorded success covers today's 00:00 fire, so the
-        // recovery fire does not duplicate the run.
-        assert_eq!(jobs_exec_in(&work, "ok-job", true), 0);
+        // A later calendar invocation coalesced by launchd also skips the
+        // already recovered fire.
+        assert_eq!(jobs_exec_in(&work, "ok-job", false), 0);
         assert_eq!(fs::read_to_string(&marker).unwrap().lines().count(), 1);
+
+        // Explicit "Run now" remains unconditional for opted-in jobs.
+        assert_eq!(jobs_exec_result(&work, "ok-job", false, true).unwrap(), 0);
+        assert_eq!(fs::read_to_string(&marker).unwrap().lines().count(), 2);
 
         // Child output lands in the job's log files, as a direct plist would.
         let stdout_log = work.join(".maru/exec-test-logs/stdout.log");
@@ -1719,6 +1926,24 @@ mod tests {
         assert!(read_job_state(&job_state_path(&work, "stale-job"))
             .last_success_at
             .is_some());
+    }
+
+    #[test]
+    fn install_baseline_is_not_a_fake_success_and_is_seeded_once() {
+        let _home = Home::new();
+        let dir = tempfile::tempdir().unwrap();
+        let work = dir.path().join("work");
+        fs::create_dir_all(&work).unwrap();
+
+        seed_install_baseline(&work, "baseline-job").unwrap();
+        let initial = read_job_state(&job_state_path(&work, "baseline-job"));
+        assert!(initial.install_baseline_at.is_some());
+        assert_eq!(initial.last_success_at, None);
+
+        seed_install_baseline(&work, "baseline-job").unwrap();
+        let repeated = read_job_state(&job_state_path(&work, "baseline-job"));
+        assert_eq!(repeated.install_baseline_at, initial.install_baseline_at);
+        assert_eq!(repeated.last_success_at, None);
     }
 
     #[test]

@@ -249,6 +249,19 @@ brew upgrade maru-cli
 - Settings > Jobs manages the external `dot` workspace sync service through its
   versioned JSON API. Maru uses fixed arguments, serializes mutations, and
   confirms destructive or secret-expanding actions.
+- Workspace calendar jobs default to their local-time daily calendar fire.
+  `recoveryMode: "repeat"` keeps the legacy `StartInterval` behavior;
+  `recoveryMode: "missedFire"` keeps the calendar cadence and adds an interval
+  guard that runs only when neither a successful run nor the install baseline
+  covers the latest daily fire. The baseline is stored before launchd loads the
+  jobs, and run state is kept under `.maru/jobs-state/`. The ledger attributes
+  each success to the daily fire that was current when the run started, so a
+  long run crossing tomorrow's fire cannot suppress tomorrow's work. Calendar
+  and recovery invocations share a lock and success ledger, so a recovered
+  fire is not run again if launchd later coalesces its calendar event. An
+  explicit Jobs > Run now action still runs the job unconditionally. This
+  schedule model supports daily times; it does not express weekday or weekly
+  calendars.
 
 ## Storage and Configuration
 
