@@ -9,6 +9,14 @@ use crate::skill_host::{
 };
 
 pub fn run_cli(args: Vec<String>) -> i32 {
+    // The standalone CLI receives argv verbatim; plists invoke both binaries
+    // with a leading `--maru-cli`, which the desktop binary consumes before
+    // dispatch and the CLI must skip here.
+    let args = if args.first().map(String::as_str) == Some("--maru-cli") {
+        args[1..].to_vec()
+    } else {
+        args
+    };
     let Some(command) = args.first().map(String::as_str) else {
         eprintln!("{}", usage());
         return 2;
@@ -829,11 +837,49 @@ fn run_jobs(args: &[String]) -> i32 {
         "start" => run_jobs_action("start", &args[1..]),
         "stop" => run_jobs_action("stop", &args[1..]),
         "run" => run_jobs_action("run", &args[1..]),
+        "exec" => run_jobs_exec(&args[1..]),
         _ => {
             eprintln!("{}", jobs_usage());
             2
         }
     }
+}
+
+/// `maru jobs exec [--if-missed] <id>`: the launchd wrapper entry point for
+/// missed-fire jobs. Runs the job program and records the run in
+/// `.maru/jobs-state/`; `--if-missed` (the guard agent) skips the run when the
+/// recorded success already covers the most recent scheduled fire. The exit
+/// code is the job's own.
+fn run_jobs_exec(args: &[String]) -> i32 {
+    let mut id: Option<String> = None;
+    let mut if_missed = false;
+    for arg in args {
+        match arg.as_str() {
+            "--if-missed" => if_missed = true,
+            other if other.starts_with('-') => {
+                eprintln!("unknown option: {other}");
+                eprintln!("usage: maru jobs exec [--if-missed] <id>");
+                return 2;
+            }
+            other => {
+                if id.is_some() {
+                    eprintln!("unexpected argument: {other}");
+                    eprintln!("usage: maru jobs exec [--if-missed] <id>");
+                    return 2;
+                }
+                id = Some(other.to_string());
+            }
+        }
+    }
+    let Some(id) = id else {
+        eprintln!("usage: maru jobs exec [--if-missed] <id>");
+        return 2;
+    };
+    let Some(work) = current_work_path() else {
+        eprintln!("cannot resolve current directory");
+        return 1;
+    };
+    crate::jobs::jobs_exec_in(std::path::Path::new(&work), &id, if_missed)
 }
 
 /// Parse `[<id>] [--json]` following the run_skills manual-parsing pattern.
@@ -1005,7 +1051,7 @@ fn skills_capabilities_json() -> serde_json::Value {
 }
 
 fn jobs_usage() -> &'static str {
-    "usage: maru jobs list|status [<id>] [--json]\n       maru jobs install|uninstall|start|stop|run [<id>] [--json]\n\nThe workspace is the current directory (jobs are read from <cwd>/.maru/jobs.json).\nAction verbs require <id> unless exactly one job is declared."
+    "usage: maru jobs list|status [<id>] [--json]\n       maru jobs install|uninstall|start|stop|run [<id>] [--json]\n       maru jobs exec [--if-missed] <id>\n\nThe workspace is the current directory (jobs are read from <cwd>/.maru/jobs.json).\nAction verbs require <id> unless exactly one job is declared.\nexec is the launchd wrapper entry point for missed-fire recovery jobs."
 }
 
 fn secrets_usage() -> &'static str {
@@ -1013,7 +1059,7 @@ fn secrets_usage() -> &'static str {
 }
 
 fn usage() -> &'static str {
-    "usage: maru [--version] [--help] <command>\n\ncommands:\n  doctor [--json] [--quiet]\n  secrets scan [--json]\n  secrets doctor [--json] [--quiet]\n  secrets migrate --dry-run|--apply [--select <relpath>] [--json]\n  skills capabilities|list --json\n  skills sync --check|--apply --tools <csv> [--skills <names-or-ids>] [--json]\n  skills update --check|--apply [--repair-env] [--json]\n  skills dirty [--json]\n  skills reconcile <name-or-id> (--accept|--discard) [--message <m>] [--dry-run]\n  skills import <source-path> [--name <name>] [--copy|--link]\n  skills import-unmanage <name> [--delete-files]\n  jobs list|status [<id>] [--json]\n  jobs install|uninstall|start|stop|run [<id>] [--json]\n  calendar-sync [--work <path>] [--destination <key-or-id>] [--gws <path>] [--dry-run] [--json]"
+    "usage: maru [--version] [--help] <command>\n\ncommands:\n  doctor [--json] [--quiet]\n  secrets scan [--json]\n  secrets doctor [--json] [--quiet]\n  secrets migrate --dry-run|--apply [--select <relpath>] [--json]\n  skills capabilities|list --json\n  skills sync --check|--apply --tools <csv> [--skills <names-or-ids>] [--json]\n  skills update --check|--apply [--repair-env] [--json]\n  skills dirty [--json]\n  skills reconcile <name-or-id> (--accept|--discard) [--message <m>] [--dry-run]\n  skills import <source-path> [--name <name>] [--copy|--link]\n  skills import-unmanage <name> [--delete-files]\n  jobs list|status [<id>] [--json]\n  jobs install|uninstall|start|stop|run [<id>] [--json]\n  jobs exec [--if-missed] <id>\n  calendar-sync [--work <path>] [--destination <key-or-id>] [--gws <path>] [--dry-run] [--json]"
 }
 
 #[cfg(test)]
@@ -1039,6 +1085,21 @@ mod tests {
     #[test]
     fn version_command_returns_success() {
         assert_eq!(run_cli(vec!["--version".to_string()]), 0);
+    }
+
+    #[test]
+    fn leading_maru_cli_flag_is_skipped() {
+        // Plists invoke both binaries as `<exe> --maru-cli jobs exec ...`; the
+        // desktop binary consumes the flag, the standalone CLI skips it here.
+        assert_eq!(
+            run_cli(vec!["--maru-cli".to_string(), "--version".to_string()]),
+            0
+        );
+    }
+
+    #[test]
+    fn jobs_exec_requires_an_id() {
+        assert_eq!(run_cli(vec!["jobs".to_string(), "exec".to_string()]), 2);
     }
 
     #[test]

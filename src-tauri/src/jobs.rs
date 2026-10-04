@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::sync::{Mutex, MutexGuard, OnceLock};
 
 use serde::{Deserialize, Serialize};
@@ -58,6 +58,22 @@ pub struct JobProgram {
     pub env: BTreeMap<String, String>,
 }
 
+/// How `recovery_interval_seconds` is applied.
+///
+/// `Repeat` (default): plain `StartInterval` on the job's own plist — the job
+/// re-runs every N seconds regardless of whether the calendar fire happened.
+/// `MissedFire`: the calendar cadence is preserved; a separate guard agent
+/// (`com.maru.job.<id>-guard.*`, `StartInterval` + `RunAtLoad`) re-invokes the
+/// job only when the last recorded success predates the most recent scheduled
+/// fire — i.e. a fire missed while the Mac was asleep or powered off.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum RecoveryMode {
+    #[default]
+    Repeat,
+    MissedFire,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct JobSchedule {
@@ -65,6 +81,8 @@ pub struct JobSchedule {
     pub minute: u32,
     #[serde(default)]
     pub recovery_interval_seconds: u64,
+    #[serde(default)]
+    pub recovery_mode: RecoveryMode,
     #[serde(default)]
     pub run_at_load: bool,
 }
@@ -144,6 +162,14 @@ pub fn load_jobs(work_path: &Path) -> Result<JobsFile, String> {
                 job.id, job.schedule.hour, job.schedule.minute
             ));
         }
+        if job.schedule.recovery_mode == RecoveryMode::MissedFire
+            && job.schedule.recovery_interval_seconds == 0
+        {
+            return Err(format!(
+                "job_schedule_invalid: {}: missedFire recovery needs recoveryIntervalSeconds > 0",
+                job.id
+            ));
+        }
     }
     Ok(file)
 }
@@ -178,6 +204,38 @@ pub fn label_for(job_id: &str, work_path: &Path) -> Result<String, String> {
         .map(|byte| format!("{byte:02x}"))
         .collect();
     Ok(format!("{JOB_LABEL_PREFIX}{job_id}.{hex}"))
+}
+
+/// Label of the missed-fire guard agent paired with a job. Only rendered and
+/// installed when the job opts into `RecoveryMode::MissedFire`.
+fn guard_label_for(job_id: &str, work_path: &Path) -> Result<String, String> {
+    let label = label_for(job_id, work_path)?;
+    Ok(label.replace(
+        &format!("{JOB_LABEL_PREFIX}{job_id}."),
+        &format!("{JOB_LABEL_PREFIX}{job_id}-guard."),
+    ))
+}
+
+/// argv the plist invokes for a missed-fire job: the current binary drives the
+/// run so the engine can record successes and gate recovery fires. The leading
+/// `--maru-cli` selects CLI dispatch in the desktop binary and is skipped by
+/// the standalone CLI's `run_cli`.
+fn exec_wrapper_arguments(job: &JobRecord, if_missed: bool) -> Result<Vec<String>, String> {
+    let exe = std::env::current_exe()
+        .map_err(|err| format!("current_exe_failed: {err}"))?
+        .to_string_lossy()
+        .to_string();
+    let mut argv = vec![
+        exe,
+        "--maru-cli".to_string(),
+        "jobs".to_string(),
+        "exec".to_string(),
+    ];
+    if if_missed {
+        argv.push("--if-missed".to_string());
+    }
+    argv.push(job.id.clone());
+    Ok(argv)
 }
 
 fn canonical_work_path(work_path: &Path) -> Result<PathBuf, String> {
@@ -254,13 +312,71 @@ fn xml_escape(value: &str) -> String {
 /// shape is small and fixed, and no plist crate is currently a dependency.
 pub fn plist_for(job: &JobRecord, work_path: &Path) -> Result<String, String> {
     let label = label_for(&job.id, work_path)?;
-    let command = resolve_job_path(work_path, &job.program.command);
-    let args: Vec<String> = job
-        .program
-        .args
-        .iter()
-        .map(|arg| resolve_job_arg(work_path, arg))
-        .collect();
+    let argv = if job.schedule.recovery_mode == RecoveryMode::MissedFire {
+        // The engine wrapper runs the program and records the success signal
+        // the guard agent gates on; the calendar cadence is unchanged.
+        exec_wrapper_arguments(job, false)?
+    } else {
+        let mut argv = vec![resolve_job_path(work_path, &job.program.command)];
+        argv.extend(
+            job.program
+                .args
+                .iter()
+                .map(|arg| resolve_job_arg(work_path, arg)),
+        );
+        argv
+    };
+    render_plist(
+        job,
+        work_path,
+        &label,
+        &argv,
+        job.schedule.run_at_load,
+        Some((job.schedule.hour, job.schedule.minute)),
+        // A MissedFire job's interval lives on the guard agent only: rendering
+        // it here too would re-run the job every interval regardless of the
+        // calendar fire. For Repeat, launchd rejects StartInterval <= 0, so
+        // the key is omitted when the job declares no recovery interval (the
+        // serde default is 0).
+        if job.schedule.recovery_mode == RecoveryMode::MissedFire {
+            None
+        } else if job.schedule.recovery_interval_seconds > 0 {
+            Some(job.schedule.recovery_interval_seconds)
+        } else {
+            None
+        },
+    )
+}
+
+/// Plist of the missed-fire guard agent: interval-only (no calendar entry),
+/// `RunAtLoad` so a boot or login through a missed fire recovers immediately.
+/// The guard is cheap — it exits without invoking the job when the last
+/// recorded success covers the most recent scheduled fire — so firing it at
+/// every load is safe.
+fn guard_plist_for(job: &JobRecord, work_path: &Path) -> Result<String, String> {
+    let label = guard_label_for(&job.id, work_path)?;
+    let argv = exec_wrapper_arguments(job, true)?;
+    render_plist(
+        job,
+        work_path,
+        &label,
+        &argv,
+        true,
+        None,
+        Some(job.schedule.recovery_interval_seconds),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn render_plist(
+    job: &JobRecord,
+    work_path: &Path,
+    label: &str,
+    argv: &[String],
+    run_at_load: bool,
+    calendar: Option<(u32, u32)>,
+    start_interval_seconds: Option<u64>,
+) -> Result<String, String> {
     let logs_dir = resolve_job_path(work_path, &job.logs.dir);
     let stdout_path = format!("{logs_dir}/stdout.log");
     let stderr_path = format!("{logs_dir}/stderr.log");
@@ -274,8 +390,7 @@ pub fn plist_for(job: &JobRecord, work_path: &Path) -> Result<String, String> {
         .to_string();
 
     let mut program_arguments = String::new();
-    program_arguments.push_str(&format!("    <string>{}</string>\n", xml_escape(&command)));
-    for arg in &args {
+    for arg in argv {
         program_arguments.push_str(&format!("    <string>{}</string>\n", xml_escape(arg)));
     }
 
@@ -296,6 +411,17 @@ pub fn plist_for(job: &JobRecord, work_path: &Path) -> Result<String, String> {
         xml_escape(&workspace_config)
     ));
 
+    let calendar_interval = match calendar {
+        Some((hour, minute)) => format!(
+            "  <key>StartCalendarInterval</key>\n  <dict>\n    <key>Hour</key>\n    <integer>{hour}</integer>\n    <key>Minute</key>\n    <integer>{minute}</integer>\n  </dict>\n"
+        ),
+        None => String::new(),
+    };
+    let start_interval = match start_interval_seconds {
+        Some(seconds) => format!("  <key>StartInterval</key>\n  <integer>{seconds}</integer>\n"),
+        None => String::new(),
+    };
+
     Ok(format!(
         r#"<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -310,14 +436,7 @@ pub fn plist_for(job: &JobRecord, work_path: &Path) -> Result<String, String> {
   <string>{work_dir}</string>
   <key>RunAtLoad</key>
   <{run_at_load}/>
-  <key>StartCalendarInterval</key>
-  <dict>
-    <key>Hour</key>
-    <integer>{hour}</integer>
-    <key>Minute</key>
-    <integer>{minute}</integer>
-  </dict>
-{start_interval}  <key>ProcessType</key>
+{calendar_interval}{start_interval}  <key>ProcessType</key>
   <string>Background</string>
   <key>Nice</key>
   <integer>10</integer>
@@ -333,30 +452,210 @@ pub fn plist_for(job: &JobRecord, work_path: &Path) -> Result<String, String> {
 </dict>
 </plist>
 "#,
-        label = xml_escape(&label),
+        label = xml_escape(label),
         program_arguments = program_arguments,
         work_dir = xml_escape(&work_dir),
-        run_at_load = if job.schedule.run_at_load {
-            "true"
-        } else {
-            "false"
-        },
-        hour = job.schedule.hour,
-        minute = job.schedule.minute,
-        // launchd rejects StartInterval <= 0; omit the key when the job
-        // declares no recovery interval (the serde default is 0).
-        start_interval = if job.schedule.recovery_interval_seconds > 0 {
-            format!(
-                "  <key>StartInterval</key>\n  <integer>{}</integer>\n",
-                job.schedule.recovery_interval_seconds
-            )
-        } else {
-            String::new()
-        },
+        run_at_load = if run_at_load { "true" } else { "false" },
+        calendar_interval = calendar_interval,
+        start_interval = start_interval,
         stdout_path = xml_escape(&stdout_path),
         stderr_path = xml_escape(&stderr_path),
         environment = environment,
     ))
+}
+
+// === Missed-fire recovery: exec wrapper, success signal, staleness ===
+
+fn jobs_state_dir(work_path: &Path) -> PathBuf {
+    work_path.join(".maru").join("jobs-state")
+}
+
+fn job_state_path(work_path: &Path, job_id: &str) -> PathBuf {
+    jobs_state_dir(work_path).join(format!("{job_id}.json"))
+}
+
+/// Engine-recorded run history for a missed-fire job. The wrapper rewrites it
+/// after every run; the guard agent reads it to decide whether the most recent
+/// scheduled fire still needs recovering.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct JobRunState {
+    #[serde(default)]
+    pub last_run_at: Option<u64>,
+    #[serde(default)]
+    pub last_exit_code: Option<i64>,
+    #[serde(default)]
+    pub last_success_at: Option<u64>,
+}
+
+fn read_job_state(path: &Path) -> JobRunState {
+    fs::read_to_string(path)
+        .ok()
+        .and_then(|content| serde_json::from_str(&content).ok())
+        .unwrap_or_default()
+}
+
+fn now_epoch_seconds() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .unwrap_or(0)
+}
+
+/// Most recent scheduled fire at or before `now`, in local time: today's
+/// `hour:minute` once it has passed, otherwise yesterday's.
+fn last_scheduled_fire_epoch(
+    now: chrono::DateTime<chrono::Local>,
+    hour: u32,
+    minute: u32,
+) -> Option<i64> {
+    use chrono::{Duration, NaiveTime, TimeZone};
+    let time = NaiveTime::from_hms_opt(hour, minute, 0)?;
+    let today_fire = chrono::Local
+        .from_local_datetime(&now.date_naive().and_time(time))
+        .earliest()?;
+    let fire = if now >= today_fire {
+        today_fire
+    } else {
+        today_fire - Duration::days(1)
+    };
+    Some(fire.timestamp())
+}
+
+/// A fire needs no recovery when a success was recorded at or after the most
+/// recent scheduled fire. A missing state file or missing success means the
+/// job never ran through the wrapper, so it counts as due.
+fn last_success_covers_fire(
+    state: &JobRunState,
+    now: chrono::DateTime<chrono::Local>,
+    hour: u32,
+    minute: u32,
+) -> bool {
+    let (Some(success), Some(fire)) = (
+        state.last_success_at,
+        last_scheduled_fire_epoch(now, hour, minute),
+    ) else {
+        return false;
+    };
+    success as i64 >= fire
+}
+
+/// Entry point behind the plist wrapper for missed-fire jobs. The plist's
+/// EnvironmentVariables land on this process and are inherited by the child,
+/// so the run sees exactly what a direct launchd invocation would see; child
+/// output appends to the same log files a direct plist would write. With
+/// `if_missed` (the guard agent), exits 0 without running when the recorded
+/// success already covers the most recent scheduled fire.
+pub fn jobs_exec_in(work_path: &Path, job_id: &str, if_missed: bool) -> i32 {
+    match jobs_exec_result(work_path, job_id, if_missed) {
+        Ok(code) => code,
+        Err(err) => {
+            eprintln!("jobs_exec_failed: {err}");
+            1
+        }
+    }
+}
+
+fn jobs_exec_result(work_path: &Path, job_id: &str, if_missed: bool) -> Result<i32, String> {
+    let jobs = load_jobs(work_path)?;
+    let job = find_job(&jobs, job_id)?;
+    if !job.enabled {
+        return Ok(0);
+    }
+    let state_path = job_state_path(work_path, job_id);
+    if if_missed
+        && last_success_covers_fire(
+            &read_job_state(&state_path),
+            chrono::Local::now(),
+            job.schedule.hour,
+            job.schedule.minute,
+        )
+    {
+        return Ok(0);
+    }
+    // Serialize wrapper-driven runs across the calendar and guard agents; the
+    // guard yields to a run already in progress instead of doubling it. The
+    // lock is advisory and releases automatically if a holder dies.
+    let state_dir = jobs_state_dir(work_path);
+    fs::create_dir_all(&state_dir).map_err(|err| {
+        format!(
+            "job_state_dir_failed: {}: {err}",
+            state_dir.to_string_lossy()
+        )
+    })?;
+    let lock_path = state_dir.join(format!("{job_id}.lock"));
+    let lock_file = fs::File::create(&lock_path)
+        .map_err(|err| format!("job_lock_failed: {}: {err}", lock_path.to_string_lossy()))?;
+    if if_missed {
+        match lock_file.try_lock() {
+            Ok(()) => {}
+            // A run is already in progress; it records the success this fire
+            // would have produced.
+            Err(std::fs::TryLockError::WouldBlock) => return Ok(0),
+            Err(err) => return Err(format!("job_lock_failed: {err}")),
+        }
+    } else {
+        lock_file
+            .lock()
+            .map_err(|err| format!("job_lock_failed: {err}"))?;
+    }
+    // Re-check under the lock: a calendar run may have recorded its success
+    // while the guard was acquiring it.
+    if if_missed
+        && last_success_covers_fire(
+            &read_job_state(&state_path),
+            chrono::Local::now(),
+            job.schedule.hour,
+            job.schedule.minute,
+        )
+    {
+        return Ok(0);
+    }
+
+    let command = resolve_job_path(work_path, &job.program.command);
+    let logs_dir = resolve_job_path(work_path, &job.logs.dir);
+    fs::create_dir_all(&logs_dir)
+        .map_err(|err| format!("job_logs_dir_failed: {logs_dir}: {err}"))?;
+    let stdout_path = format!("{logs_dir}/stdout.log");
+    let stderr_path = format!("{logs_dir}/stderr.log");
+    let stdout = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&stdout_path)
+        .map_err(|err| format!("job_log_open_failed: {stdout_path}: {err}"))?;
+    let stderr = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&stderr_path)
+        .map_err(|err| format!("job_log_open_failed: {stderr_path}: {err}"))?;
+    let mut child = Command::new(&command)
+        .args(
+            job.program
+                .args
+                .iter()
+                .map(|arg| resolve_job_arg(work_path, arg)),
+        )
+        .current_dir(work_path)
+        .stdout(Stdio::from(stdout))
+        .stderr(Stdio::from(stderr))
+        .no_window()
+        .spawn()
+        .map_err(|err| format!("job_spawn_failed: {command}: {err}"))?;
+    let started_at = now_epoch_seconds();
+    let status = child
+        .wait()
+        .map_err(|err| format!("job_wait_failed: {command}: {err}"))?;
+    let code = status.code().unwrap_or(-1);
+
+    let mut state = read_job_state(&state_path);
+    state.last_run_at = Some(started_at);
+    state.last_exit_code = Some(i64::from(code));
+    if code == 0 {
+        state.last_success_at = Some(now_epoch_seconds());
+    }
+    let serialized = serde_json::to_string_pretty(&state).unwrap_or_default();
+    crate::atomic_file::write_atomic(&state_path, serialized.as_bytes())?;
+    Ok(code)
 }
 
 fn launch_agents_dir() -> Result<PathBuf, String> {
@@ -566,6 +865,10 @@ fn status_for(job: &JobRecord, work_path: &Path) -> Result<JobStatus, String> {
     } else {
         (false, false, None)
     };
+    let last_run_at = read_job_state(&job_state_path(work_path, &job.id))
+        .last_run_at
+        .and_then(|secs| chrono::DateTime::from_timestamp(secs as i64, 0))
+        .map(|stamp| stamp.to_rfc3339());
     Ok(JobStatus {
         id: job.id.clone(),
         title: job.title.clone(),
@@ -577,7 +880,7 @@ fn status_for(job: &JobRecord, work_path: &Path) -> Result<JobStatus, String> {
         label,
         schedule: job.schedule.clone(),
         last_exit_code,
-        last_run_at: None,
+        last_run_at,
     })
 }
 
@@ -593,10 +896,14 @@ fn jobs_transaction_paths(work_path: &Path, job: &JobRecord) -> Result<Vec<PathB
         // write_atomic allocates a random sibling before replacing the plist.
         launch_agents_dir()?,
         launch_agents_dir()?.join(format!("{}.plist", label_for(&job.id, work_path)?)),
+        launch_agents_dir()?.join(format!("{}.plist", guard_label_for(&job.id, work_path)?)),
         PathBuf::from(resolve_job_path(work_path, &job.logs.dir)),
         PathBuf::from(resolve_job_path(work_path, &job.logs.dir)).join("stdout.log"),
         PathBuf::from(resolve_job_path(work_path, &job.logs.dir)).join("stderr.log"),
         PathBuf::from(resolve_job_path(work_path, &job.program.command)),
+        jobs_state_dir(work_path),
+        job_state_path(work_path, &job.id),
+        jobs_state_dir(work_path).join(format!("{}.lock", job.id)),
     ];
     for arg in &job.program.args {
         if !arg.starts_with('-')
@@ -640,6 +947,68 @@ pub(crate) fn jobs_install_in(work_path: &Path, job_id: &str) -> Result<JobStatu
     })
 }
 
+/// Boot out and delete the missed-fire guard agent if it exists. Tolerates a
+/// guard that was never loaded, but refuses to delete a plist whose service is
+/// still loaded (same contract as the job's own uninstall).
+fn remove_guard_agent(job: &JobRecord, work_path: &Path, uid: &str) -> Result<(), String> {
+    let label = guard_label_for(&job.id, work_path)?;
+    let plist = guarded_plist_path(&label)?;
+    let bootout = run_launchctl(&["bootout", &format!("gui/{uid}/{label}")]);
+    if let Err(err) = bootout {
+        if print_launchd_state(uid, &label).loaded {
+            return Err(format!("job_bootout_failed: {label}: {err}"));
+        }
+    }
+    if plist.exists() {
+        fs::remove_file(&plist)
+            .map_err(|err| format!("plist_remove_failed: {}: {err}", plist.to_string_lossy()))?;
+    }
+    Ok(())
+}
+
+/// Install or refresh the missed-fire guard agent for a MissedFire job, and
+/// remove a stale guard when the job no longer opts in — recovery must not
+/// keep firing after the mode is dropped from jobs.json.
+fn sync_guard_agent(job: &JobRecord, work_path: &Path, uid: &str) -> Result<(), String> {
+    if job.schedule.recovery_mode != RecoveryMode::MissedFire {
+        return remove_guard_agent(job, work_path, uid);
+    }
+    let label = guard_label_for(&job.id, work_path)?;
+    let plist = guarded_plist_path(&label)?;
+    let target = format!("gui/{uid}/{label}");
+    let xml = guard_plist_for(job, work_path)?;
+    crate::atomic_file::write_atomic(&plist, xml.as_bytes())?;
+    // Bootout first (ignore failure) so reinstall is idempotent.
+    let _ = run_launchctl(&["bootout", &target]);
+    if job.enabled {
+        run_launchctl(&["enable", &target])?;
+        run_launchctl(&["bootstrap", &format!("gui/{uid}"), &plist.to_string_lossy()])?;
+    } else {
+        run_launchctl(&["disable", &target])?;
+    }
+    // Seed the success signal on first install: recovery covers fires missed
+    // after the install, not the job's whole past. An existing record is
+    // preserved across reinstalls so a same-day success still gates the guard.
+    let state_path = job_state_path(work_path, &job.id);
+    if !state_path.exists() {
+        let state_dir = jobs_state_dir(work_path);
+        fs::create_dir_all(&state_dir).map_err(|err| {
+            format!(
+                "job_state_dir_failed: {}: {err}",
+                state_dir.to_string_lossy()
+            )
+        })?;
+        let state = JobRunState {
+            last_run_at: None,
+            last_exit_code: None,
+            last_success_at: Some(now_epoch_seconds()),
+        };
+        let serialized = serde_json::to_string_pretty(&state).unwrap_or_default();
+        crate::atomic_file::write_atomic(&state_path, serialized.as_bytes())?;
+    }
+    Ok(())
+}
+
 fn jobs_install_in_transaction(
     work_path: &Path,
     job_id: &str,
@@ -675,6 +1044,7 @@ fn jobs_install_in_transaction(
         // disabling would leave the schedule live (disable never unloads).
         run_launchctl(&["disable", &target])?;
     }
+    sync_guard_agent(job, work_path, &uid)?;
     status_for(job, work_path)
 }
 
@@ -713,6 +1083,7 @@ fn jobs_uninstall_in_transaction(
         fs::remove_file(&plist)
             .map_err(|err| format!("plist_remove_failed: {}: {err}", plist.to_string_lossy()))?;
     }
+    remove_guard_agent(job, work_path, &uid)?;
     status_for(job, work_path)
 }
 
@@ -756,11 +1127,31 @@ fn jobs_start_in_transaction(
         // schedule. Bootout first so a half-loaded state is idempotent.
         let _ = run_launchctl(&["bootout", &target]);
         run_launchctl(&["bootstrap", &format!("gui/{uid}"), &plist.to_string_lossy()])?;
+        if job.schedule.recovery_mode == RecoveryMode::MissedFire {
+            let guard_label = guard_label_for(&job.id, work_path)?;
+            let guard_plist = guarded_plist_path(&guard_label)?;
+            if guard_plist.exists() {
+                let guard_target = format!("gui/{uid}/{guard_label}");
+                run_launchctl(&["enable", &guard_target])?;
+                let _ = run_launchctl(&["bootout", &guard_target]);
+                run_launchctl(&[
+                    "bootstrap",
+                    &format!("gui/{uid}"),
+                    &guard_plist.to_string_lossy(),
+                ])?;
+            }
+        }
     } else {
         run_launchctl(&["disable", &target])?;
         // disable only gates future loads: an already-loaded service keeps its
         // calendar timer and would still fire. Bootout stops it now.
         let _ = run_launchctl(&["bootout", &target]);
+        if job.schedule.recovery_mode == RecoveryMode::MissedFire {
+            let guard_label = guard_label_for(&job.id, work_path)?;
+            let guard_target = format!("gui/{uid}/{guard_label}");
+            run_launchctl(&["disable", &guard_target])?;
+            let _ = run_launchctl(&["bootout", &guard_target]);
+        }
     }
     status_for(job, work_path)
 }
@@ -962,6 +1353,7 @@ mod tests {
                 hour: 3,
                 minute: 30,
                 recovery_interval_seconds: 900,
+                recovery_mode: RecoveryMode::Repeat,
                 run_at_load: false,
             },
             logs: JobLogs {
@@ -1061,6 +1453,306 @@ mod tests {
         assert!(xml.contains("<key>Minute</key>\n    <integer>30</integer>"));
         assert!(xml.contains("<key>StartInterval</key>\n  <integer>900</integer>"));
         assert!(xml.contains("<key>RunAtLoad</key>\n  <false/>"));
+    }
+
+    fn missed_fire_job() -> JobRecord {
+        let mut job = sample_job();
+        job.schedule.recovery_interval_seconds = 21600;
+        job.schedule.recovery_mode = RecoveryMode::MissedFire;
+        job
+    }
+
+    #[test]
+    fn missed_fire_main_plist_wraps_program_and_keeps_cadence() {
+        let _home = Home::new();
+        let dir = tempfile::tempdir().unwrap();
+        let work = dir.path().join("work");
+        fs::create_dir_all(&work).unwrap();
+        let job = missed_fire_job();
+
+        let xml = plist_for(&job, &work).unwrap();
+
+        // The engine wrapper drives the run so successes are recorded.
+        assert!(xml.contains("<string>--maru-cli</string>"), "{xml}");
+        assert!(xml.contains("<string>jobs</string>"), "{xml}");
+        assert!(xml.contains("<string>exec</string>"), "{xml}");
+        assert!(xml.contains("<string>mail-digest</string>"), "{xml}");
+        assert!(
+            !xml.contains("--if-missed"),
+            "main plist runs unconditionally: {xml}"
+        );
+        assert!(
+            !xml.contains("daily_mail_digest.py"),
+            "wrapper replaces the direct program: {xml}"
+        );
+        // Cadence unchanged: calendar entry intact, RunAtLoad stays false,
+        // and the recovery interval lives on the guard agent, not here.
+        assert!(xml.contains("<key>StartCalendarInterval</key>"), "{xml}");
+        assert!(xml.contains("<key>Hour</key>\n    <integer>3</integer>"));
+        assert!(xml.contains("<key>Minute</key>\n    <integer>30</integer>"));
+        assert!(xml.contains("<key>RunAtLoad</key>\n  <false/>"));
+        assert!(
+            !xml.contains("StartInterval"),
+            "main missed-fire plist must not repeat on the interval: {xml}"
+        );
+    }
+
+    #[test]
+    fn missed_fire_guard_plist_is_interval_only_and_runs_at_load() {
+        let _home = Home::new();
+        let dir = tempfile::tempdir().unwrap();
+        let work = dir.path().join("work");
+        fs::create_dir_all(&work).unwrap();
+        let job = missed_fire_job();
+
+        let xml = guard_plist_for(&job, &work).unwrap();
+        let label = guard_label_for(&job.id, &work).unwrap();
+
+        assert!(label.starts_with("com.maru.job.mail-digest-guard."));
+        assert!(xml.contains(&format!("<string>{label}</string>")));
+        assert!(xml.contains("<string>--if-missed</string>"), "{xml}");
+        // Interval + RunAtLoad recover a fire missed through sleep or reboot;
+        // no calendar entry of its own.
+        assert!(xml.contains("<key>RunAtLoad</key>\n  <true/>"));
+        assert!(xml.contains("<key>StartInterval</key>\n  <integer>21600</integer>"));
+        assert!(
+            !xml.contains("StartCalendarInterval"),
+            "guard is interval-only: {xml}"
+        );
+    }
+
+    #[test]
+    fn repeat_mode_plist_runs_program_directly() {
+        let _home = Home::new();
+        let dir = tempfile::tempdir().unwrap();
+        let work = dir.path().join("work");
+        fs::create_dir_all(&work).unwrap();
+        // sample_job is Repeat with a 900s interval: no wrapper, StartInterval
+        // on the job's own plist (pre-existing behavior).
+        let xml = plist_for(&sample_job(), &work).unwrap();
+        assert!(!xml.contains("--maru-cli"), "{xml}");
+        assert!(xml.contains("daily_mail_digest.py"), "{xml}");
+        assert!(xml.contains("<key>StartInterval</key>\n  <integer>900</integer>"));
+    }
+
+    #[test]
+    fn load_jobs_defaults_recovery_mode_to_repeat_and_parses_missed_fire() {
+        let _home = Home::new();
+        let dir = tempfile::tempdir().unwrap();
+        let maru_dir = dir.path().join(".maru");
+        fs::create_dir_all(&maru_dir).unwrap();
+        fs::write(
+            maru_dir.join("jobs.json"),
+            r#"{"schema":1,"jobs":[
+              {"id":"plain","title":"t","program":{"command":"x"},"schedule":{"hour":1,"minute":0,"recoveryIntervalSeconds":900},"logs":{"dir":"logs"}},
+              {"id":"guarded","title":"t","program":{"command":"x"},"schedule":{"hour":1,"minute":0,"recoveryIntervalSeconds":21600,"recoveryMode":"missedFire"},"logs":{"dir":"logs"}}
+            ]}"#,
+        )
+        .unwrap();
+        let jobs = load_jobs(dir.path()).unwrap();
+        assert_eq!(jobs.jobs[0].schedule.recovery_mode, RecoveryMode::Repeat);
+        assert_eq!(
+            jobs.jobs[1].schedule.recovery_mode,
+            RecoveryMode::MissedFire
+        );
+    }
+
+    #[test]
+    fn load_jobs_rejects_missed_fire_without_interval() {
+        let _home = Home::new();
+        let dir = tempfile::tempdir().unwrap();
+        let maru_dir = dir.path().join(".maru");
+        fs::create_dir_all(&maru_dir).unwrap();
+        fs::write(
+            maru_dir.join("jobs.json"),
+            r#"{"schema":1,"jobs":[{"id":"guarded","title":"t","program":{"command":"x"},"schedule":{"hour":1,"minute":0,"recoveryMode":"missedFire"},"logs":{"dir":"logs"}}]}"#,
+        )
+        .unwrap();
+        assert!(load_jobs(dir.path())
+            .unwrap_err()
+            .starts_with("job_schedule_invalid"));
+    }
+
+    #[test]
+    fn last_scheduled_fire_rolls_back_before_the_fire_time() {
+        use chrono::TimeZone;
+        let after = chrono::Local
+            .with_ymd_and_hms(2026, 10, 4, 10, 0, 0)
+            .single()
+            .unwrap();
+        let fire = chrono::Local
+            .with_ymd_and_hms(2026, 10, 4, 4, 30, 0)
+            .single()
+            .unwrap()
+            .timestamp();
+        assert_eq!(last_scheduled_fire_epoch(after, 4, 30), Some(fire));
+
+        let before = chrono::Local
+            .with_ymd_and_hms(2026, 10, 4, 3, 0, 0)
+            .single()
+            .unwrap();
+        let yesterday_fire = chrono::Local
+            .with_ymd_and_hms(2026, 10, 3, 4, 30, 0)
+            .single()
+            .unwrap()
+            .timestamp();
+        assert_eq!(
+            last_scheduled_fire_epoch(before, 4, 30),
+            Some(yesterday_fire)
+        );
+    }
+
+    #[test]
+    fn success_covers_fire_only_when_recorded_at_or_after_it() {
+        use chrono::TimeZone;
+        let now = chrono::Local
+            .with_ymd_and_hms(2026, 10, 4, 10, 0, 0)
+            .single()
+            .unwrap();
+        let fire = chrono::Local
+            .with_ymd_and_hms(2026, 10, 4, 4, 30, 0)
+            .single()
+            .unwrap()
+            .timestamp();
+
+        let fresh = JobRunState {
+            last_run_at: None,
+            last_exit_code: None,
+            last_success_at: Some((fire + 60) as u64),
+        };
+        assert!(last_success_covers_fire(&fresh, now, 4, 30));
+
+        let stale = JobRunState {
+            last_success_at: Some((fire - 60) as u64),
+            ..fresh.clone()
+        };
+        assert!(!last_success_covers_fire(&stale, now, 4, 30));
+
+        // Never ran through the wrapper -> due.
+        assert!(!last_success_covers_fire(
+            &JobRunState::default(),
+            now,
+            4,
+            30
+        ));
+    }
+
+    fn exec_test_job(id: &str, shell_line: &str) -> JobRecord {
+        JobRecord {
+            id: id.to_string(),
+            title: id.to_string(),
+            description: String::new(),
+            enabled: true,
+            program: JobProgram {
+                command: "/bin/sh".to_string(),
+                args: vec!["-c".to_string(), shell_line.to_string()],
+                env: BTreeMap::new(),
+            },
+            schedule: JobSchedule {
+                hour: 0,
+                minute: 0,
+                recovery_interval_seconds: 21600,
+                recovery_mode: RecoveryMode::MissedFire,
+                run_at_load: false,
+            },
+            logs: JobLogs {
+                dir: ".maru/exec-test-logs".to_string(),
+            },
+        }
+    }
+
+    fn write_exec_test_workspace(work: &Path, job: &JobRecord) {
+        let file = JobsFile {
+            schema: JOBS_SCHEMA,
+            jobs: vec![job.clone()],
+        };
+        let maru_dir = work.join(".maru");
+        fs::create_dir_all(&maru_dir).unwrap();
+        fs::write(
+            maru_dir.join("jobs.json"),
+            serde_json::to_string_pretty(&file).unwrap(),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn exec_runs_program_records_success_and_guard_skips_same_fire() {
+        let _home = Home::new();
+        let dir = tempfile::tempdir().unwrap();
+        let work = dir.path().join("work");
+        fs::create_dir_all(&work).unwrap();
+        let job = exec_test_job("ok-job", "echo ran >> exec-marker.txt");
+        write_exec_test_workspace(&work, &job);
+
+        // Calendar/main path: runs unconditionally.
+        assert_eq!(jobs_exec_in(&work, "ok-job", false), 0);
+        let marker = work.join("exec-marker.txt");
+        assert_eq!(fs::read_to_string(&marker).unwrap().lines().count(), 1);
+
+        let state = read_job_state(&job_state_path(&work, "ok-job"));
+        assert!(state.last_success_at.is_some());
+        assert_eq!(state.last_exit_code, Some(0));
+
+        // Guard path: the recorded success covers today's 00:00 fire, so the
+        // recovery fire does not duplicate the run.
+        assert_eq!(jobs_exec_in(&work, "ok-job", true), 0);
+        assert_eq!(fs::read_to_string(&marker).unwrap().lines().count(), 1);
+
+        // Child output lands in the job's log files, as a direct plist would.
+        let stdout_log = work.join(".maru/exec-test-logs/stdout.log");
+        assert!(stdout_log.exists());
+    }
+
+    #[test]
+    fn exec_guard_runs_when_no_success_recorded() {
+        let _home = Home::new();
+        let dir = tempfile::tempdir().unwrap();
+        let work = dir.path().join("work");
+        fs::create_dir_all(&work).unwrap();
+        let job = exec_test_job("stale-job", "echo ran >> exec-marker.txt");
+        write_exec_test_workspace(&work, &job);
+
+        // No state file: the fire counts as missed and the guard recovers it.
+        assert_eq!(jobs_exec_in(&work, "stale-job", true), 0);
+        let marker = work.join("exec-marker.txt");
+        assert_eq!(fs::read_to_string(&marker).unwrap().lines().count(), 1);
+        assert!(read_job_state(&job_state_path(&work, "stale-job"))
+            .last_success_at
+            .is_some());
+    }
+
+    #[test]
+    fn exec_propagates_failure_without_marking_success() {
+        let _home = Home::new();
+        let dir = tempfile::tempdir().unwrap();
+        let work = dir.path().join("work");
+        fs::create_dir_all(&work).unwrap();
+        let job = exec_test_job("fail-job", "exit 3");
+        write_exec_test_workspace(&work, &job);
+
+        assert_eq!(jobs_exec_in(&work, "fail-job", false), 3);
+        let state = read_job_state(&job_state_path(&work, "fail-job"));
+        assert_eq!(state.last_exit_code, Some(3));
+        assert!(state.last_success_at.is_none());
+
+        // A failed calendar run stays due: the guard retries it.
+        assert_eq!(jobs_exec_in(&work, "fail-job", true), 3);
+        let state = read_job_state(&job_state_path(&work, "fail-job"));
+        assert!(state.last_success_at.is_none());
+    }
+
+    #[test]
+    fn exec_disabled_job_is_a_noop() {
+        let _home = Home::new();
+        let dir = tempfile::tempdir().unwrap();
+        let work = dir.path().join("work");
+        fs::create_dir_all(&work).unwrap();
+        let mut job = exec_test_job("off-job", "echo ran >> exec-marker.txt");
+        job.enabled = false;
+        write_exec_test_workspace(&work, &job);
+
+        assert_eq!(jobs_exec_in(&work, "off-job", false), 0);
+        assert!(!work.join("exec-marker.txt").exists());
     }
 
     #[test]
