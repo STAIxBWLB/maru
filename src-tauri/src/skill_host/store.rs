@@ -438,8 +438,23 @@ pub struct SkillToolSyncAction {
     pub skill_name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub target: Option<String>,
+    /// What the planned link points at: the canonical skill directory for the
+    /// Maru entrypoint, the Maru entrypoint for tool links, or the recorded
+    /// entrypoint for stale-registry actions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
     pub path: String,
     pub reason: String,
+}
+
+/// Resolved machine-local destination for one requested target. Callers scope
+/// subprocesses to the profile environment this resolution used (alternate
+/// HOME, `CODEX_HOME`, `KIMI_CODE_HOME`, OpenCode config roots).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillToolSyncProfile {
+    pub target: String,
+    pub root: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -447,6 +462,8 @@ pub struct SkillToolSyncAction {
 pub struct SkillToolSyncReport {
     pub applied: bool,
     pub tools: Vec<String>,
+    #[serde(default)]
+    pub profiles: Vec<SkillToolSyncProfile>,
     pub desired_skills: usize,
     pub desired_installs: usize,
     pub actions: Vec<SkillToolSyncAction>,
@@ -2452,6 +2469,7 @@ pub fn skills_sync_selected_tools(
         }
         preflight_tool_sync(&registry, &desired, &tools, retarget)?;
     }
+    let profiles = tool_sync_profiles(&registry, &desired, &tools, retarget)?;
     let mut actions = plan_tool_sync(&registry, &desired, &tools, retarget, selection.is_none())?;
     if apply {
         admission
@@ -2569,6 +2587,7 @@ pub fn skills_sync_selected_tools(
     Ok(SkillToolSyncReport {
         applied: apply,
         tools: tools.clone(),
+        profiles,
         desired_skills: desired.len(),
         desired_installs: desired.len() * tools.len(),
         actions,
@@ -2635,6 +2654,51 @@ fn source_is_maru_owned(source: &SkillSource) -> bool {
         source.ownership_class.as_str(),
         "bundled" | "owned-catalog" | "imported"
     )
+}
+
+/// A report describes one effective profile per target. Selected retargets
+/// can leave other installs at the previous root, so reject subsequent syncs
+/// that would span roots instead of reporting the ambient profile incorrectly.
+fn tool_sync_profiles(
+    registry: &SkillsRegistry,
+    desired: &[SkillRecord],
+    tools: &[String],
+    retarget: bool,
+) -> Result<Vec<SkillToolSyncProfile>, String> {
+    tools
+        .iter()
+        .map(|target| {
+            let mut roots = if retarget {
+                BTreeSet::new()
+            } else {
+                recorded_install_roots(registry, target)
+            };
+            for skill in desired {
+                let destination = effective_install_target(registry, target, &skill.name, retarget)?;
+                if let Some(root) = destination.parent() {
+                    roots.insert(root.to_path_buf());
+                }
+            }
+            if roots.len() > 1 {
+                return Err(format!(
+                    "{target}_install_root_diverged: effective roots {} span multiple profiles; reconcile with an explicit unfiltered --retarget before syncing",
+                    roots
+                        .iter()
+                        .map(|root| host_fs::display_path(root))
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                ));
+            }
+            let root = match roots.into_iter().next() {
+                Some(root) => root,
+                None => install_root(target)?,
+            };
+            Ok(SkillToolSyncProfile {
+                target: target.clone(),
+                root: host_fs::display_path(&root),
+            })
+        })
+        .collect()
 }
 
 fn preflight_tool_sync(
@@ -2846,6 +2910,7 @@ fn plan_tool_sync(
                 action: "link-canonical".to_string(),
                 skill_name: skill.name.clone(),
                 target: None,
+                source: Some(host_fs::display_path(&skill_path)),
                 path: host_fs::display_path(&maru_entry),
                 reason: "canonical entrypoint is missing or stale".to_string(),
             });
@@ -2857,6 +2922,7 @@ fn plan_tool_sync(
                     action: "link-tool".to_string(),
                     skill_name: skill.name.clone(),
                     target: Some(target.clone()),
+                    source: Some(host_fs::display_path(&maru_entry)),
                     path: host_fs::display_path(&tool_target),
                     reason: "tool entrypoint does not point to the canonical Maru link".to_string(),
                 });
@@ -2875,6 +2941,7 @@ fn plan_tool_sync(
                     action: "record-install".to_string(),
                     skill_name: skill.name.clone(),
                     target: Some(target.clone()),
+                    source: Some(host_fs::display_path(&maru_entry)),
                     path: host_fs::display_path(&tool_target),
                     reason: "registry install record is missing or stale".to_string(),
                 });
@@ -2901,6 +2968,7 @@ fn plan_tool_sync(
             .to_string(),
             skill_name: install.installed_as.clone(),
             target: Some(install.target.clone()),
+            source: Some(install.entrypoint_path.clone()),
             path: install.target_path.clone(),
             reason: if exact_owned {
                 "exact Maru-owned install is outside the current catalog".to_string()
@@ -10767,6 +10835,139 @@ mod tests {
     }
 
     #[test]
+    fn selected_sync_deploys_one_skill_to_all_six_roots_and_reports_profiles() {
+        let home = test_home();
+        skills_sync_tools(None, vec!["claude".into()], true, false).unwrap();
+        let registry = load_registry().unwrap();
+        let skill = registry
+            .skills
+            .iter()
+            .find(|skill| {
+                registry
+                    .installs
+                    .iter()
+                    .any(|install| install.skill_id == skill.id)
+            })
+            .unwrap()
+            .clone();
+        let tools: Vec<String> = INSTALL_TARGETS
+            .iter()
+            .map(|target| target.to_string())
+            .collect();
+        let report = skills_sync_selected_tools(
+            None,
+            tools.clone(),
+            Some(vec![skill.id.clone()]),
+            true,
+            false,
+        )
+        .unwrap();
+        assert_eq!(report.desired_skills, 1);
+        assert_eq!(report.desired_installs, INSTALL_TARGETS.len());
+        assert_eq!(report.profiles.len(), INSTALL_TARGETS.len());
+        assert!(
+            report.actions.iter().all(|action| action.source.is_some()),
+            "every planned action reports its link source"
+        );
+        let suffixes = [
+            ("claude", ".claude/skills"),
+            ("codex", ".codex/skills"),
+            ("kimi", ".kimi-code/skills"),
+            ("qwen", ".qwen/skills"),
+            ("grok", ".grok/skills"),
+            ("opencode", ".config/opencode/skills"),
+        ];
+        for (target, suffix) in suffixes {
+            let root = home._dir.path().join(suffix);
+            let link = root.join(&skill.name);
+            assert!(
+                host_fs::read_link_target(&link).is_some(),
+                "{target} install link missing"
+            );
+            let profile = report
+                .profiles
+                .iter()
+                .find(|profile| profile.target == target)
+                .unwrap();
+            assert_eq!(profile.root, path_string(&root));
+        }
+        let registry = load_registry().unwrap();
+        assert_eq!(
+            registry
+                .installs
+                .iter()
+                .filter(|install| install.skill_id == skill.id)
+                .count(),
+            INSTALL_TARGETS.len()
+        );
+        // Repeatable: an immediate re-check plans nothing.
+        let checked =
+            skills_sync_selected_tools(None, tools, Some(vec![skill.id.clone()]), false, false)
+                .unwrap();
+        assert!(checked.actions.is_empty());
+    }
+
+    #[test]
+    fn selected_sync_dedups_targets_sharing_a_physical_root() {
+        let home = test_home();
+        skills_sync_tools(None, vec!["claude".into()], true, false).unwrap();
+        let registry = load_registry().unwrap();
+        let skill = registry
+            .skills
+            .iter()
+            .find(|skill| {
+                registry
+                    .installs
+                    .iter()
+                    .any(|install| install.skill_id == skill.id)
+            })
+            .unwrap()
+            .clone();
+        // Two profiles can alias one physical root (here ~/.grok -> ~/.qwen):
+        // the physical link is written once while each profile keeps its own
+        // lexical ownership record.
+        let qwen_dir = home._dir.path().join(".qwen");
+        fs::create_dir_all(&qwen_dir).unwrap();
+        let grok_dir = home._dir.path().join(".grok");
+        host_fs::create_symlink_no_clobber(&grok_dir, &qwen_dir).unwrap();
+        let tools = vec!["qwen".to_string(), "grok".to_string()];
+        skills_sync_selected_tools(
+            None,
+            tools.clone(),
+            Some(vec![skill.id.clone()]),
+            true,
+            false,
+        )
+        .unwrap();
+        let physical = qwen_dir.join("skills").join(&skill.name);
+        let linked = host_fs::read_link_target(&physical).expect("physical install link");
+        let grok_link = grok_dir.join("skills").join(&skill.name);
+        assert_eq!(
+            host_fs::read_link_target(&grok_link).as_deref(),
+            Some(linked.as_path())
+        );
+        let registry = load_registry().unwrap();
+        let mut records: Vec<_> = registry
+            .installs
+            .iter()
+            .filter(|install| {
+                install.skill_id == skill.id && matches!(install.target.as_str(), "qwen" | "grok")
+            })
+            .collect();
+        assert_eq!(records.len(), 2);
+        records.sort_by(|a, b| a.target.cmp(&b.target));
+        assert_ne!(records[0].target_path, records[1].target_path);
+        assert!(records[0].target_path.contains(".grok"));
+        assert!(records[1].target_path.contains(".qwen"));
+        // Idempotent: the shared physical destination is planned once per
+        // profile and a re-check finds nothing to do.
+        let checked =
+            skills_sync_selected_tools(None, tools, Some(vec![skill.id.clone()]), false, false)
+                .unwrap();
+        assert!(checked.actions.is_empty());
+    }
+
+    #[test]
     fn tool_install_path_rejects_registry_traversal_names() {
         let _home = test_home();
         assert!(install_target_path("claude", "../../escape").is_err());
@@ -10886,13 +11087,73 @@ mod tests {
         let foreign = TempDir::new().unwrap();
         move_codex_installs_to_foreign_root(foreign.path());
 
-        let checked = skills_sync_tools(None, tools, false, false).unwrap();
+        let checked = skills_sync_tools(None, tools.clone(), false, false).unwrap();
 
+        assert_eq!(checked.profiles[0].root, path_string(foreign.path()));
         assert!(
             checked.actions.is_empty(),
             "recorded foreign roots should plan no actions, got {:?}",
             checked.actions
         );
+
+        // A new install resolves against ambient home while existing installs
+        // remain sticky. That mixed plan cannot describe one effective profile.
+        write_skill(&imported_root, "new-ambient");
+        let error = skills_sync_tools(None, tools, false, false).unwrap_err();
+        assert!(error.contains("codex_install_root_diverged"), "{error}");
+        assert!(error.contains("unfiltered --retarget"), "{error}");
+        assert!(!path_occupied(
+            &install_target_path("codex", "new-ambient").unwrap()
+        ));
+    }
+
+    #[test]
+    fn selected_retarget_rejects_split_profiles_until_unfiltered_retarget() {
+        let _home = test_home();
+        let imported_root = host_fs::skills_root().unwrap().join("_imported");
+        write_skill(&imported_root, "move-selected");
+        write_skill(&imported_root, "keep-unselected");
+        let tools = vec!["codex".to_string()];
+        skills_sync_tools(None, tools.clone(), true, false).unwrap();
+        let foreign = TempDir::new().unwrap();
+        move_codex_installs_to_foreign_root(foreign.path());
+
+        let moved = skills_sync_selected_tools(
+            None,
+            tools.clone(),
+            Some(vec!["move-selected".into()]),
+            true,
+            true,
+        )
+        .unwrap();
+        let ambient = install_root("codex").unwrap();
+        assert_eq!(moved.profiles[0].root, path_string(&ambient));
+        assert!(is_symlink_path(&ambient.join("move-selected")));
+        assert!(is_symlink_path(&foreign.path().join("keep-unselected")));
+        let before = fs::read(registry_path().unwrap()).unwrap();
+        for selection in [None, Some(vec!["keep-unselected".into()])] {
+            for apply in [false, true] {
+                let error = skills_sync_selected_tools(
+                    None,
+                    tools.clone(),
+                    selection.clone(),
+                    apply,
+                    false,
+                )
+                .unwrap_err();
+                assert!(error.contains("codex_install_root_diverged"), "{error}");
+                assert!(error.contains("unfiltered --retarget"), "{error}");
+                assert_eq!(fs::read(registry_path().unwrap()).unwrap(), before);
+                assert!(is_symlink_path(&foreign.path().join("keep-unselected")));
+            }
+        }
+
+        skills_sync_tools(None, tools.clone(), true, true).unwrap();
+        let checked = skills_sync_tools(None, tools, false, false).unwrap();
+        assert_eq!(checked.profiles[0].root, path_string(&ambient));
+        assert!(checked.actions.is_empty());
+        assert!(!path_occupied(&foreign.path().join("keep-unselected")));
+        assert!(is_symlink_path(&ambient.join("keep-unselected")));
     }
 
     #[test]

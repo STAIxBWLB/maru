@@ -334,10 +334,7 @@ fn run_skills(args: &[String]) -> i32 {
                 return 2;
             }
             if subcommand == "capabilities" {
-                println!(
-                    "{}",
-                    serde_json::json!({"schemaVersion": 1, "targets": crate::skill_host::store::INSTALL_TARGETS, "selectedSync": true, "list": true})
-                );
+                println!("{}", skills_capabilities_json());
                 0
             } else {
                 match crate::skill_host::store::skills_list_readonly() {
@@ -996,6 +993,17 @@ fn skills_usage() -> &'static str {
     "usage: maru skills capabilities|list|sync|update|dirty|reconcile|import|import-unmanage"
 }
 
+/// The additive federation contract dotfiles discovers first (issue #396).
+/// Keys and target order are contractual; extend only additively.
+fn skills_capabilities_json() -> serde_json::Value {
+    serde_json::json!({
+        "schemaVersion": 1,
+        "targets": crate::skill_host::store::INSTALL_TARGETS,
+        "selectedSync": true,
+        "list": true,
+    })
+}
+
 fn jobs_usage() -> &'static str {
     "usage: maru jobs list|status [<id>] [--json]\n       maru jobs install|uninstall|start|stop|run [<id>] [--json]\n\nThe workspace is the current directory (jobs are read from <cwd>/.maru/jobs.json).\nAction verbs require <id> unless exactly one job is declared."
 }
@@ -1010,7 +1018,23 @@ fn usage() -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use super::run_cli;
+    use super::{run_cli, skills_capabilities_json};
+
+    #[test]
+    fn capabilities_json_matches_the_federation_contract_exactly() {
+        let value = skills_capabilities_json();
+        let object = value.as_object().unwrap();
+        let mut keys: Vec<&str> = object.keys().map(String::as_str).collect();
+        keys.sort_unstable();
+        assert_eq!(keys, ["list", "schemaVersion", "selectedSync", "targets"]);
+        assert_eq!(value["schemaVersion"], 1);
+        assert_eq!(value["selectedSync"], true);
+        assert_eq!(value["list"], true);
+        assert_eq!(
+            value["targets"],
+            serde_json::json!(["claude", "codex", "kimi", "qwen", "grok", "opencode"])
+        );
+    }
 
     #[test]
     fn version_command_returns_success() {

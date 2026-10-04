@@ -420,13 +420,21 @@ skills are rejected. Explicit selections reconcile only those skills and targets
 preserving unrelated installs. Omitting `--skills` retains the existing whole
 Maru-owned catalog sync behavior. Neither command updates upstream sources.
 Conflicting directories or foreign links are preserved and reported as errors.
+The sync JSON report adds `profiles` (the resolved destination root per
+requested target, so the orchestrator can scope subprocesses to the same
+profile environment) and a `source` on every planned action (what the link
+points at) alongside the destination `path`. `--check` writes nothing.
 
 Default skill roots are `~/.claude/skills`, `$CODEX_HOME/skills` (default
 `~/.codex/skills`), `$KIMI_CODE_HOME/skills` (default `~/.kimi-code/skills`),
 `~/.qwen/skills`, `~/.grok/skills`, and `$OPENCODE_CONFIG_DIR/skills` (default
 `$XDG_CONFIG_HOME/opencode/skills`, then `~/.config/opencode/skills`). Overrides
-must be absolute paths. Recorded install roots remain sticky; a changed runtime
-home fails with an actionable error unless `--retarget` is explicitly supplied.
+must be absolute paths. Recorded install roots remain sticky; apply and selected
+sync fail when the runtime home changes unless `--retarget` is explicitly supplied.
+A selected retarget can leave unrelated installs pinned to an earlier root.
+Sync rejects targets spanning multiple effective roots until an explicit
+unfiltered `--retarget` reconciles them. Read-only whole-catalog previews of a
+single sticky root report that root, including when the runtime home differs.
 Orchestrators must never add that flag automatically. A destination link proves
 file exposure, not that a particular agent release loaded the skill.
 

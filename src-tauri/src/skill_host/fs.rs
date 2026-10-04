@@ -380,4 +380,79 @@ mod tests {
             PathBuf::from("/users/tester/.codex")
         );
     }
+
+    /// Env-mutating resolution tests must run outside the MARU_TEST_HOME
+    /// sandbox (the override intentionally ignores profile env vars) while
+    /// still holding the shared home lock so sandboxed tests never observe
+    /// the mutation. Restores every variable on all paths.
+    struct ProfileEnv {
+        _guard: MutexGuard<'static, ()>,
+        saved: Vec<(&'static str, Option<std::ffi::OsString>)>,
+    }
+
+    impl ProfileEnv {
+        fn enter(names: &[&'static str]) -> Self {
+            let guard = test_maru_home_lock();
+            let saved = names
+                .iter()
+                .map(|name| (*name, std::env::var_os(name)))
+                .collect();
+            ProfileEnv {
+                _guard: guard,
+                saved,
+            }
+        }
+    }
+
+    impl Drop for ProfileEnv {
+        fn drop(&mut self) {
+            for (name, value) in &self.saved {
+                if let Some(value) = value {
+                    std::env::set_var(name, value);
+                } else {
+                    std::env::remove_var(name);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn agent_config_home_honors_absolute_profile_override_and_rejects_relative() {
+        let env = ProfileEnv::enter(&["MARU_TEST_HOME", "KIMI_CODE_HOME"]);
+        std::env::remove_var("MARU_TEST_HOME");
+        let profile = TempDir::new().unwrap();
+        std::env::set_var("KIMI_CODE_HOME", profile.path());
+        assert_eq!(
+            agent_config_home("KIMI_CODE_HOME", ".kimi-code").unwrap(),
+            profile.path()
+        );
+        std::env::remove_var("KIMI_CODE_HOME");
+        assert_eq!(
+            agent_config_home("KIMI_CODE_HOME", ".kimi-code").unwrap(),
+            dirs::home_dir().unwrap().join(".kimi-code")
+        );
+        std::env::set_var("KIMI_CODE_HOME", "relative-kimi-home");
+        assert!(agent_config_home("KIMI_CODE_HOME", ".kimi-code").is_err());
+        drop(env);
+        assert!(!Path::new("relative-kimi-home").exists());
+    }
+
+    #[test]
+    fn opencode_home_prefers_explicit_dir_then_xdg_then_default_config() {
+        let env = ProfileEnv::enter(&["MARU_TEST_HOME", "OPENCODE_CONFIG_DIR", "XDG_CONFIG_HOME"]);
+        std::env::remove_var("MARU_TEST_HOME");
+        let explicit = TempDir::new().unwrap();
+        let xdg = TempDir::new().unwrap();
+        std::env::set_var("OPENCODE_CONFIG_DIR", explicit.path());
+        std::env::set_var("XDG_CONFIG_HOME", xdg.path());
+        assert_eq!(opencode_home().unwrap(), explicit.path());
+        std::env::remove_var("OPENCODE_CONFIG_DIR");
+        assert_eq!(opencode_home().unwrap(), xdg.path().join("opencode"));
+        std::env::remove_var("XDG_CONFIG_HOME");
+        assert_eq!(
+            opencode_home().unwrap(),
+            dirs::home_dir().unwrap().join(".config/opencode")
+        );
+        drop(env);
+    }
 }
