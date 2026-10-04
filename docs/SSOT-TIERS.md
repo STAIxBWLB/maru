@@ -10,16 +10,19 @@ Maru treats skills as a federated catalog with one owner per skill name.
 | Owned catalog | `linked` or `cloned` / public, private, managed | Catalog repository or local Maru owner | Installable |
 | Imported | `imported` / `maru-imported` | Explicit local import | Installable |
 | External managed | `external-managed` | `~/.agents` or another manager | Inventory only, never copied or installed |
-| Tool native | `tool-native` | Claude/Codex plugin or built-in runtime | Inventory only, never copied or installed |
+| Tool native | `tool-native` | Agent-tool plugin or built-in runtime | Inventory only, never copied or installed |
 
-The default owned catalog is 43 skills: 34 bundled, 5 public, and 4 private.
-Synchronizing it to Claude and Codex produces 86 Maru install records. Tool
+The default owned catalog is 48 skills: 39 bundled, 5 public, and 4 private.
+A full unfiltered sync records 48 Maru installs per requested target (96 for
+the historical `claude,codex` pair, up to 288 for all six). Tool
 native/plugin skills remain owned by their tool and are excluded from that
 count. Maru nevertheless inventories `~/.agents/skills` as `external-managed`
 and `$CODEX_HOME/skills/.system` as `tool-native` when `CODEX_HOME` is set,
 falling back to `~/.codex/skills/.system`. These inventory-only skill counts
-appear in the registry and doctor output, but never increase the 43 managed
-skills or 86 installs.
+appear in the registry and doctor output, but never increase the 48 managed
+skills or the install count. Only Maru-owned (bundled, owned-catalog,
+imported) entries are deployable; `maru skills list --json` marks everything
+else `installable: false` with a reason.
 
 | Tier | Location | Identity | Change Path |
 |------|----------|----------|-------------|
@@ -64,8 +67,10 @@ never downgrade an applied bundle; refresh it with
 maru doctor --quiet
 maru skills update --check
 maru skills update --apply [--repair-env]
+maru skills capabilities --json
+maru skills list --json
 maru skills sync --check --tools claude,codex
-maru skills sync --apply --tools claude,codex
+maru skills sync --apply --tools claude,kimi --skills meeting-notes --json
 maru skills dirty --json
 maru skills reconcile <name-or-id> --accept --message "maru: reconcile <name>"
 maru skills reconcile <name-or-id> --discard
@@ -73,6 +78,30 @@ maru skills import /path/to/skill --copy
 maru skills import-unmanage <name> --delete-files
 ```
 
-Codex installs follow `$CODEX_HOME/skills` when the runtime exports
-`CODEX_HOME` (including isolated Orca account profiles); otherwise they use
-`~/.codex/skills`.
+## Federation targets
+
+`maru skills sync` deploys to six explicit targets: `claude`, `codex`, `kimi`,
+`qwen`, `grok`, and `opencode`. Destination roots resolve machine-locally:
+
+| Target | Root | Profile override |
+|--------|------|------------------|
+| `claude` | `~/.claude/skills` | alternate `HOME` |
+| `codex` | `~/.codex/skills` | `$CODEX_HOME` (including isolated Orca account profiles) |
+| `kimi` | `~/.kimi-code/skills` | `$KIMI_CODE_HOME` |
+| `qwen` | `~/.qwen/skills` | alternate `HOME` |
+| `grok` | `~/.grok/skills` | alternate `HOME` |
+| `opencode` | `~/.config/opencode/skills` | `$OPENCODE_CONFIG_DIR`, else `$XDG_CONFIG_HOME/opencode` |
+
+Overrides must be absolute. Recorded install roots are sticky: a changed
+runtime home fails with an actionable error unless `--retarget` is explicitly
+supplied, and orchestrators must never add that flag automatically.
+
+Selected sync (`--skills <names-or-ids>`) is additive: the complete selection
+is validated before any write, unknown/ambiguous/empty selectors are rejected,
+unrelated installs are preserved, and deselecting a skill stops future writes
+without removing existing links or data. Targets that alias one physical root
+share a single physical link while each profile keeps its own ownership
+record. Collisions and foreign links are reported, never overwritten. Skill
+visibility in a shared global root is file exposure, not a promise of
+isolation from unselected agents, and not proof that a particular agent
+release loaded the skill.
