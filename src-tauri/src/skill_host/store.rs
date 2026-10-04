@@ -2369,7 +2369,7 @@ pub fn skills_sync_selected_tools(
             source_is_maru_owned(s)
                 && selected_sources
                     .as_ref()
-                    .map_or(true, |sources| sources.contains(&s.id))
+                    .is_none_or(|sources| sources.contains(&s.id))
         }) {
             if let Ok(path) = source_path(source) {
                 let (_, checkout) = SourceOperationLease::identity(&path)?;

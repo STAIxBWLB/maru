@@ -47,12 +47,12 @@ impl CatalogIndex {
             .filter(|e| {
                 q.business_unit
                     .as_ref()
-                    .map_or(true, |bu| e.business_unit.as_deref() == Some(bu.as_str()))
+                    .is_none_or(|bu| e.business_unit.as_deref() == Some(bu.as_str()))
             })
             .filter(|e| {
                 q.category
                     .as_ref()
-                    .map_or(true, |c| e.category.as_ref() == Some(c))
+                    .is_none_or(|c| e.category.as_ref() == Some(c))
             })
             .filter(|e| q.kinds.is_empty() || q.kinds.contains(&e.kind))
             .collect();

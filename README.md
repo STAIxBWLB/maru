@@ -249,6 +249,24 @@ brew upgrade maru-cli
 - Settings > Jobs manages the external `dot` workspace sync service through its
   versioned JSON API. Maru uses fixed arguments, serializes mutations, and
   confirms destructive or secret-expanding actions.
+- Workspace calendar jobs default to their local-time daily calendar fire.
+  `recoveryMode: "repeat"` keeps the legacy `StartInterval` behavior;
+  `recoveryMode: "missedFire"` keeps the calendar cadence and adds an interval
+  guard that runs only when neither a successful run nor the install baseline
+  covers the latest daily fire. The baseline is stored before launchd loads the
+  jobs, and run state (including the effective Jobs > Start/Stop state) is kept
+  under `.maru/jobs-state/`. Install sets the initial enabled state and Start
+  or Stop changes it under a short state lock, separate from the lock held
+  across a running child. Run now queues a one-shot request and returns after
+  launchd kickstart; launchd retains control of stopping the child. Run now
+  requires the installed service to be loaded and enabled, and bypasses daily
+  fire dedup for that one request. The ledger attributes each success to the
+  daily fire that was current when the run started, so a long run crossing
+  tomorrow's fire cannot suppress tomorrow's work. Calendar and recovery
+  invocations share a run lock and success ledger, so a recovered fire is not
+  run again if launchd later coalesces its calendar event. This
+  schedule model supports daily times; it does not express weekday or weekly
+  calendars.
 
 ## Storage and Configuration
 
@@ -328,7 +346,7 @@ Requirements:
 
 - Node.js 22 or newer
 - pnpm 9.15 or newer
-- Rust MSRV 1.77.2; `rust-toolchain.toml` pins the repository verification
+- Rust MSRV 1.89.0; `rust-toolchain.toml` pins the repository verification
   toolchain
 - Platform libraries required by Tauri 2
 

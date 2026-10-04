@@ -236,9 +236,10 @@ export function JobsTab({ workPath }: JobsTabProps) {
 function scheduleSummary(job: JobStatus): string {
   const pad = (value: number) => String(value).padStart(2, "0");
   const time = `${pad(job.schedule.hour)}:${pad(job.schedule.minute)}`;
-  const every =
-    job.schedule.recoveryIntervalSeconds > 0
-      ? ` + every ${job.schedule.recoveryIntervalSeconds}s`
-      : "";
-  return `${time}${every}`;
+  if (job.schedule.recoveryIntervalSeconds <= 0) {
+    return time;
+  }
+  return job.schedule.recoveryMode === "missedFire"
+    ? `${time} + missed-fire check every ${job.schedule.recoveryIntervalSeconds}s`
+    : `${time} + every ${job.schedule.recoveryIntervalSeconds}s`;
 }

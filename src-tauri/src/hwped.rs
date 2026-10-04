@@ -519,7 +519,8 @@ fn edit_now(
     // opsArgv arrives as JS-side opsToArgv output: flag/value pairs. The
     // sanity check catches malformed calls; argv injection is impossible
     // because spawning never goes through a shell.
-    if ops_argv.len() % 2 != 0 || ops_argv.iter().step_by(2).any(|a| !a.starts_with("--")) {
+    if !ops_argv.len().is_multiple_of(2) || ops_argv.iter().step_by(2).any(|a| !a.starts_with("--"))
+    {
         return Err(
             "hwped_bad_request: opsArgv must be --flag value pairs (opsToArgv output)".to_string(),
         );

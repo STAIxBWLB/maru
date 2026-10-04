@@ -596,7 +596,7 @@ fn stage_kakao_relay_new_in_transaction(
                     if entry
                         .last_file
                         .as_deref()
-                        .map_or(true, |last| newest.as_str() > last)
+                        .is_none_or(|last| newest.as_str() > last)
                     {
                         entry.last_file = Some(newest);
                     }

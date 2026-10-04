@@ -1311,7 +1311,7 @@ pub(crate) fn task_integrations_retry_in_transaction(
         matches!(
             record.status,
             OutboxStatus::RetryNeeded | OutboxStatus::AuthBlocked
-        ) && ids.as_ref().map_or(true, |ids| ids.contains(&record.id))
+        ) && ids.as_ref().is_none_or(|ids| ids.contains(&record.id))
             && record.op.creates_remote()
             && record.google_task_id.is_empty()
             && record

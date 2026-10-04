@@ -546,7 +546,7 @@ fn agents_upsert_in_transaction(
     if next
         .label
         .as_ref()
-        .map_or(true, |label| label.trim().is_empty())
+        .is_none_or(|label| label.trim().is_empty())
     {
         return Err("agent_label_required".to_string());
     }

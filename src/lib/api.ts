@@ -2875,6 +2875,7 @@ export interface JobSchedule {
   hour: number;
   minute: number;
   recoveryIntervalSeconds: number;
+  recoveryMode: "repeat" | "missedFire";
   runAtLoad: boolean;
 }
 
@@ -2907,7 +2908,13 @@ function mockJobStatus(workPath: string): JobStatus {
     enabled: false,
     plistPath: `${workPath}/.maru/jobs.json`,
     label: "com.maru.job.mail-digest.00000000",
-    schedule: { hour: 3, minute: 30, recoveryIntervalSeconds: 900, runAtLoad: false },
+    schedule: {
+      hour: 3,
+      minute: 30,
+      recoveryIntervalSeconds: 900,
+      recoveryMode: "repeat",
+      runAtLoad: false,
+    },
     lastExitCode: null,
     lastRunAt: null,
   };

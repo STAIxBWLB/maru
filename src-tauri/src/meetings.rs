@@ -250,11 +250,7 @@ pub fn read_meetings_log(
                 Some(parse_meetings_log_line(trimmed))
             }
         })
-        .filter(|entry| {
-            filter
-                .as_ref()
-                .map_or(true, |set| set.contains(&entry.event))
-        })
+        .filter(|entry| filter.as_ref().is_none_or(|set| set.contains(&entry.event)))
         .take(cap)
         .collect();
     entries.shrink_to_fit();
