@@ -940,11 +940,7 @@ pub fn read_tasks_log(
         .rev()
         .filter(|line| !line.trim().is_empty())
         .map(parse_tasks_log_line)
-        .filter(|entry| {
-            filter
-                .as_ref()
-                .map_or(true, |set| set.contains(&entry.event))
-        })
+        .filter(|entry| filter.as_ref().is_none_or(|set| set.contains(&entry.event)))
         .take(cap)
         .collect())
 }

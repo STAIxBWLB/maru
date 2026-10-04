@@ -5,7 +5,7 @@ description = "Local-first Maru Workspace and AI editing desktop app"
 authors = ["Maru Contributors"]
 license = "UNLICENSED"
 edition = "2021"
-rust-version = "1.77.2"
+rust-version = "1.89.0"
 default-run = "maru"
 
 [lib]

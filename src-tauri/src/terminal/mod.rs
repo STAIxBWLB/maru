@@ -1101,7 +1101,7 @@ const KP_E_PGID: usize = 564;
 #[cfg(all(unix, any(target_os = "macos", test)))]
 fn parse_kinfo_procs(buf: &[u8], pgid: u32) -> Vec<GroupMember> {
     const SZOMB: u8 = 5;
-    if buf.len() % KINFO_PROC_SIZE != 0 {
+    if !buf.len().is_multiple_of(KINFO_PROC_SIZE) {
         return Vec::new();
     }
     let word = |entry: &[u8], at: usize| {

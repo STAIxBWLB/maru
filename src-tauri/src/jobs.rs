@@ -836,21 +836,20 @@ fn jobs_exec_result(work_path: &Path, job_id: &str, if_missed: bool) -> Result<i
     // Multiple Run now requests arriving during one long run remain distinct.
     // Drain them in this launchd-supervised process instead of leaving a
     // request for an event launchd may have coalesced while the service ran.
-    while manual_requests_enabled {
-        let Some(request_id) = peek_manual_run_request(work_path, job_id)? else {
-            break;
-        };
-        if !read_job_state(&state_path)
-            .agent_enabled
-            .unwrap_or(job.enabled)
-        {
-            break;
-        }
-        let result = run_job_program(work_path, job, &state_path);
-        remove_manual_run_request(work_path, job_id, &request_id)?;
-        match result {
-            Ok(code) => exit_code = code,
-            Err(err) => last_error = Some(err),
+    if manual_requests_enabled {
+        while let Some(request_id) = peek_manual_run_request(work_path, job_id)? {
+            if !read_job_state(&state_path)
+                .agent_enabled
+                .unwrap_or(job.enabled)
+            {
+                break;
+            }
+            let result = run_job_program(work_path, job, &state_path);
+            remove_manual_run_request(work_path, job_id, &request_id)?;
+            match result {
+                Ok(code) => exit_code = code,
+                Err(err) => last_error = Some(err),
+            }
         }
     }
     match last_error {

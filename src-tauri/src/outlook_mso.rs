@@ -393,7 +393,7 @@ fn is_m365_logged_out_status(raw: &str) -> bool {
 
 fn workspace_identity_matches(config: &WorkspaceMsoConfig, identity: &M365StatusIdentity) -> bool {
     let matches = |expected: &Option<String>, actual: &Option<String>| {
-        expected.as_ref().map_or(true, |expected| {
+        expected.as_ref().is_none_or(|expected| {
             actual
                 .as_ref()
                 .is_some_and(|actual| expected.trim().eq_ignore_ascii_case(actual.trim()))
