@@ -8,6 +8,22 @@ because releases cut frequently during active development. Versions before
 Dates are the release-tag dates. Only `feat`/`fix`-level changes are listed;
 `chore(release)` version bumps and merge commits are omitted.
 
+## v1.1.16 - 2026-10-04 - Recovered Rhythm
+
+- **Calendar jobs can recover missed daily fires (#420).** An opt-in
+  `missedFire` schedule uses a lightweight interval guard and durable run
+  state, preserving the calendar cadence and retrying unsuccessful runs.
+- **Six-agent skill sync reports effective profiles and link sources
+  (#396, #422).** Mixed sticky roots fail with an explicit retarget remedy;
+  selected sync keeps unrelated installs intact.
+- **The Kakao relay operator console is available in Comms (#419, #421).**
+  It follows the app theme and supports local-network relay connections.
+- **Source builds now require Rust 1.89 or newer.** The application and CLI
+  declare the same MSRV, while the verification toolchain remains pinned.
+- **The offline skill bootstrap includes the corrected summary-schema
+  example (#417, skills#73).** The snapshot was refreshed from the signed
+  OTA channel.
+
 ## v1.1.15 - 2026-10-01 - Clear Path
 
 - **Skills bundle updates no longer fail with `uv: command not found` when

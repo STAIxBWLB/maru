@@ -10,7 +10,7 @@ description: <one sentence, 200 chars max>
 source: <work-relative source or inbox item id>
 received: YYYY-MM-DD
 type: regulation|report|plan|proposal|memo|guide|form|presentation|letter|data|transcript|message
-project: <project id or ->
+project: <project id or "-">
 domain: research|projects|teaching|operations|people|ai-practice
 topics: ["[[operations]]"]
 keywords: [keyword]
