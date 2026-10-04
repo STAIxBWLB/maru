@@ -254,7 +254,9 @@ brew upgrade maru-cli
   `recoveryMode: "missedFire"` keeps the calendar cadence and adds an interval
   guard that runs only when neither a successful run nor the install baseline
   covers the latest daily fire. The baseline is stored before launchd loads the
-  jobs, and run state is kept under `.maru/jobs-state/`. The ledger attributes
+  jobs, and run state (including the effective Jobs > Start/Stop state) is kept
+  under `.maru/jobs-state/`. Install sets the initial enabled state and Start
+  or Stop changes it under the same lock used by job runs. The ledger attributes
   each success to the daily fire that was current when the run started, so a
   long run crossing tomorrow's fire cannot suppress tomorrow's work. Calendar
   and recovery invocations share a lock and success ledger, so a recovered

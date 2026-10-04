@@ -499,6 +499,9 @@ pub struct JobRunState {
     /// First install boundary, separate from a successful execution.
     #[serde(default)]
     pub install_baseline_at: Option<u64>,
+    /// Current Start/Stop state. Missing means use the manifest install value.
+    #[serde(default)]
+    pub agent_enabled: Option<bool>,
     #[serde(default)]
     pub last_run_at: Option<u64>,
     #[serde(default)]
@@ -619,10 +622,15 @@ fn jobs_exec_result(
 ) -> Result<i32, String> {
     let jobs = load_jobs(work_path)?;
     let job = find_job(&jobs, job_id)?;
-    if !job.enabled {
+    let state_path = job_state_path(work_path, job_id);
+    if !force
+        && job.schedule.recovery_mode == RecoveryMode::MissedFire
+        && !read_job_state(&state_path)
+            .agent_enabled
+            .unwrap_or(job.enabled)
+    {
         return Ok(0);
     }
-    let state_path = job_state_path(work_path, job_id);
     if !force
         && (if_missed || job.schedule.recovery_mode == RecoveryMode::MissedFire)
         && last_success_covers_fire(
@@ -659,6 +667,14 @@ fn jobs_exec_result(
         lock_file
             .lock()
             .map_err(|err| format!("job_lock_failed: {err}"))?;
+    }
+    if !force
+        && job.schedule.recovery_mode == RecoveryMode::MissedFire
+        && !read_job_state(&state_path)
+            .agent_enabled
+            .unwrap_or(job.enabled)
+    {
+        return Ok(0);
     }
     // Re-check under the lock: a calendar run may have recorded its success
     // while the guard was acquiring it.
@@ -1048,12 +1064,17 @@ fn remove_guard_agent(job: &JobRecord, work_path: &Path, uid: &str) -> Result<()
     Ok(())
 }
 
-/// Install or refresh the missed-fire guard agent for a MissedFire job, and
-/// remove a stale guard when the job no longer opts in — recovery must not
-/// keep firing after the mode is dropped from jobs.json.
-fn sync_guard_agent(job: &JobRecord, work_path: &Path, uid: &str) -> Result<(), String> {
+/// Write and unload the missed-fire guard before the install baseline is
+/// recorded. The caller loads either plist only after both old services are
+/// unloaded and the baseline is durable.
+fn prepare_guard_agent(
+    job: &JobRecord,
+    work_path: &Path,
+    uid: &str,
+) -> Result<Option<(String, PathBuf)>, String> {
     if job.schedule.recovery_mode != RecoveryMode::MissedFire {
-        return remove_guard_agent(job, work_path, uid);
+        remove_guard_agent(job, work_path, uid)?;
+        return Ok(None);
     }
     let label = guard_label_for(&job.id, work_path)?;
     let plist = guarded_plist_path(&label)?;
@@ -1062,19 +1083,35 @@ fn sync_guard_agent(job: &JobRecord, work_path: &Path, uid: &str) -> Result<(), 
     crate::atomic_file::write_atomic(&plist, xml.as_bytes())?;
     // Bootout first (ignore failure) so reinstall is idempotent.
     let _ = run_launchctl(&["bootout", &target]);
-    if job.enabled {
-        run_launchctl(&["enable", &target])?;
-        run_launchctl(&["bootstrap", &format!("gui/{uid}"), &plist.to_string_lossy()])?;
-    } else {
-        run_launchctl(&["disable", &target])?;
-    }
-    Ok(())
+    Ok(Some((target, plist)))
 }
 
 /// Record the first-install boundary before either launchd plist can run. This
 /// is distinct from a successful run: fires before installation are outside
 /// this agent's recovery promise, and RunAtLoad must never race this baseline.
-fn seed_install_baseline(work_path: &Path, job_id: &str) -> Result<(), String> {
+fn set_job_agent_enabled(work_path: &Path, job_id: &str, enabled: bool) -> Result<(), String> {
+    let state_dir = jobs_state_dir(work_path);
+    fs::create_dir_all(&state_dir).map_err(|err| {
+        format!(
+            "job_state_dir_failed: {}: {err}",
+            state_dir.to_string_lossy()
+        )
+    })?;
+    let state_path = job_state_path(work_path, job_id);
+    let lock_path = state_dir.join(format!("{job_id}.lock"));
+    let lock_file = fs::File::create(&lock_path)
+        .map_err(|err| format!("job_lock_failed: {}: {err}", lock_path.to_string_lossy()))?;
+    lock_file
+        .lock()
+        .map_err(|err| format!("job_lock_failed: {err}"))?;
+    let mut state = read_job_state(&state_path);
+    state.agent_enabled = Some(enabled);
+    let serialized = serde_json::to_string_pretty(&state).unwrap_or_default();
+    crate::atomic_file::write_atomic(&state_path, serialized.as_bytes())?;
+    Ok(())
+}
+
+fn seed_install_baseline(work_path: &Path, job_id: &str, enabled: bool) -> Result<(), String> {
     let state_dir = jobs_state_dir(work_path);
     fs::create_dir_all(&state_dir).map_err(|err| {
         format!(
@@ -1092,9 +1129,10 @@ fn seed_install_baseline(work_path: &Path, job_id: &str) -> Result<(), String> {
     let mut state = read_job_state(&state_path);
     if state.install_baseline_at.is_none() {
         state.install_baseline_at = Some(now_epoch_seconds());
-        let serialized = serde_json::to_string_pretty(&state).unwrap_or_default();
-        crate::atomic_file::write_atomic(&state_path, serialized.as_bytes())?;
     }
+    state.agent_enabled = Some(enabled);
+    let serialized = serde_json::to_string_pretty(&state).unwrap_or_default();
+    crate::atomic_file::write_atomic(&state_path, serialized.as_bytes())?;
     Ok(())
 }
 
@@ -1114,9 +1152,6 @@ fn jobs_install_in_transaction(
     let plist = guarded_plist_path(&label)?;
     let uid = current_uid()?;
 
-    if job.schedule.recovery_mode == RecoveryMode::MissedFire {
-        seed_install_baseline(work_path, &job.id)?;
-    }
     let xml = plist_for(job, work_path)?;
     let logs_dir = resolve_job_path(work_path, &job.logs.dir);
     fs::create_dir_all(&logs_dir)
@@ -1126,17 +1161,33 @@ fn jobs_install_in_transaction(
     // Bootout first (ignore failure) so reinstall is idempotent.
     let target = format!("gui/{uid}/{label}");
     let _ = run_launchctl(&["bootout", &target]);
+    let guard = prepare_guard_agent(job, work_path, &uid)?;
+    if job.schedule.recovery_mode == RecoveryMode::MissedFire {
+        seed_install_baseline(work_path, &job.id, job.enabled)?;
+    }
     if job.enabled {
         // Enable before bootstrap: launchd refuses to bootstrap a service
         // whose label is in the disabled registry (e.g. after a prior Stop).
         run_launchctl(&["enable", &target])?;
+        if let Some((guard_target, _)) = &guard {
+            run_launchctl(&["enable", guard_target])?;
+        }
         run_launchctl(&["bootstrap", &format!("gui/{uid}"), &plist.to_string_lossy()])?;
+        if let Some((_, guard_plist)) = &guard {
+            run_launchctl(&[
+                "bootstrap",
+                &format!("gui/{uid}"),
+                &guard_plist.to_string_lossy(),
+            ])?;
+        }
     } else {
         // A disabled service cannot be loaded, and bootstrapping before
         // disabling would leave the schedule live (disable never unloads).
         run_launchctl(&["disable", &target])?;
+        if let Some((guard_target, _)) = &guard {
+            run_launchctl(&["disable", guard_target])?;
+        }
     }
-    sync_guard_agent(job, work_path, &uid)?;
     status_for(job, work_path)
 }
 
@@ -1218,20 +1269,30 @@ fn jobs_start_in_transaction(
         // enable only clears the disabled flag; bootstrap actually loads the
         // schedule. Bootout first so a half-loaded state is idempotent.
         let _ = run_launchctl(&["bootout", &target]);
-        run_launchctl(&["bootstrap", &format!("gui/{uid}"), &plist.to_string_lossy()])?;
-        if job.schedule.recovery_mode == RecoveryMode::MissedFire {
+        let guard = if job.schedule.recovery_mode == RecoveryMode::MissedFire {
             let guard_label = guard_label_for(&job.id, work_path)?;
             let guard_plist = guarded_plist_path(&guard_label)?;
+            let guard_target = format!("gui/{uid}/{guard_label}");
             if guard_plist.exists() {
-                let guard_target = format!("gui/{uid}/{guard_label}");
                 run_launchctl(&["enable", &guard_target])?;
                 let _ = run_launchctl(&["bootout", &guard_target]);
-                run_launchctl(&[
-                    "bootstrap",
-                    &format!("gui/{uid}"),
-                    &guard_plist.to_string_lossy(),
-                ])?;
+                Some((guard_target, guard_plist))
+            } else {
+                None
             }
+        } else {
+            None
+        };
+        if job.schedule.recovery_mode == RecoveryMode::MissedFire {
+            set_job_agent_enabled(work_path, &job.id, true)?;
+        }
+        run_launchctl(&["bootstrap", &format!("gui/{uid}"), &plist.to_string_lossy()])?;
+        if let Some((_, guard_plist)) = guard {
+            run_launchctl(&[
+                "bootstrap",
+                &format!("gui/{uid}"),
+                &guard_plist.to_string_lossy(),
+            ])?;
         }
     } else {
         run_launchctl(&["disable", &target])?;
@@ -1243,6 +1304,9 @@ fn jobs_start_in_transaction(
             let guard_target = format!("gui/{uid}/{guard_label}");
             run_launchctl(&["disable", &guard_target])?;
             let _ = run_launchctl(&["bootout", &guard_target]);
+        }
+        if job.schedule.recovery_mode == RecoveryMode::MissedFire {
+            set_job_agent_enabled(work_path, &job.id, false)?;
         }
     }
     status_for(job, work_path)
@@ -1266,6 +1330,11 @@ fn jobs_run_now_in_transaction(
     let job = find_job(&jobs, job_id)?;
     lease.ensure_covered(jobs_transaction_paths(work_path, job)?)?;
     lease.before_effect()?;
+    let label = label_for(&job.id, work_path)?;
+    let plist = guarded_plist_path(&label)?;
+    if !plist.exists() {
+        return Err(format!("job_not_installed: {job_id}"));
+    }
     if job.schedule.recovery_mode == RecoveryMode::MissedFire {
         // A deliberate user action remains unconditional; only launchd's
         // calendar and recovery paths are deduplicated against the fire.
@@ -1275,8 +1344,6 @@ fn jobs_run_now_in_transaction(
         }
         return status_for(job, work_path);
     }
-    let label = label_for(&job.id, work_path)?;
-    let _plist = guarded_plist_path(&label)?;
     let uid = current_uid()?;
     run_launchctl(&["kickstart", "-k", &format!("gui/{uid}/{label}")])?;
     status_for(job, work_path)
@@ -1793,6 +1860,7 @@ mod tests {
 
         let fresh = JobRunState {
             install_baseline_at: None,
+            agent_enabled: None,
             last_run_at: None,
             last_exit_code: None,
             last_success_at: Some((fire + 60) as u64),
@@ -1935,14 +2003,16 @@ mod tests {
         let work = dir.path().join("work");
         fs::create_dir_all(&work).unwrap();
 
-        seed_install_baseline(&work, "baseline-job").unwrap();
+        seed_install_baseline(&work, "baseline-job", true).unwrap();
         let initial = read_job_state(&job_state_path(&work, "baseline-job"));
         assert!(initial.install_baseline_at.is_some());
+        assert_eq!(initial.agent_enabled, Some(true));
         assert_eq!(initial.last_success_at, None);
 
-        seed_install_baseline(&work, "baseline-job").unwrap();
+        seed_install_baseline(&work, "baseline-job", false).unwrap();
         let repeated = read_job_state(&job_state_path(&work, "baseline-job"));
         assert_eq!(repeated.install_baseline_at, initial.install_baseline_at);
+        assert_eq!(repeated.agent_enabled, Some(false));
         assert_eq!(repeated.last_success_at, None);
     }
 
@@ -2210,8 +2280,14 @@ mod tests {
         fs::create_dir_all(work.join(".maru")).unwrap();
         fs::create_dir_all(work.join("logs")).unwrap();
         fs::write(work.join("note.md"), "# original\nbody\n").unwrap();
-        fs::write(work.join("script.sh"), "#!/bin/sh\nexit 0\n").unwrap();
+        fs::write(
+            work.join("script.sh"),
+            "#!/bin/sh\necho 'fixture child completed'\necho ran >> run-marker.txt\n",
+        )
+        .unwrap();
         let mut job = sample_job();
+        job.schedule.recovery_interval_seconds = 21600;
+        job.schedule.recovery_mode = RecoveryMode::MissedFire;
         job.program.command = "script.sh".into();
         job.program.args = vec![];
         job.program.env.clear();
@@ -2324,10 +2400,47 @@ esac
         );
         let installed = run(phase08_15_action("install", s.clone())).unwrap();
         assert!(installed.installed && installed.loaded && installed.enabled);
-        assert_eq!(installed.last_exit_code, Some(0));
+        assert_eq!(installed.last_exit_code, None);
         assert!(!run(phase08_15_action("stop", s.clone())).unwrap().loaded);
+        assert_eq!(
+            read_job_state(&job_state_path(&work, "mail-digest")).agent_enabled,
+            Some(false)
+        );
+        assert_eq!(jobs_exec_in(&work, "mail-digest", true), 0);
+        assert!(!work.join("run-marker.txt").exists());
         assert!(run(phase08_15_action("start", s.clone())).unwrap().loaded);
-        assert!(run(phase08_15_action("run", s.clone())).unwrap().loaded);
+        let state_path = job_state_path(&work, "mail-digest");
+        let mut state = read_job_state(&state_path);
+        assert_eq!(state.agent_enabled, Some(true));
+        let fire = last_scheduled_fire_epoch(
+            chrono::Local::now(),
+            sample_job().schedule.hour,
+            sample_job().schedule.minute,
+        )
+        .unwrap();
+        state.install_baseline_at = Some((fire - 60) as u64);
+        fs::write(&state_path, serde_json::to_vec(&state).unwrap()).unwrap();
+        assert_eq!(jobs_exec_in(&work, "mail-digest", false), 0);
+        assert_eq!(
+            fs::read_to_string(work.join("run-marker.txt"))
+                .unwrap()
+                .lines()
+                .count(),
+            1
+        );
+        assert_eq!(
+            run(phase08_15_action("run", s.clone()))
+                .unwrap()
+                .last_exit_code,
+            Some(0)
+        );
+        assert_eq!(
+            fs::read_to_string(work.join("run-marker.txt"))
+                .unwrap()
+                .lines()
+                .count(),
+            2
+        );
         let tail = run(ipc::jobs_read_log(s.clone(), "mail-digest".into())).unwrap();
         assert!(tail.stdout.contains("fixture child completed"));
         assert_eq!(tail.stderr, "fixture stderr");
