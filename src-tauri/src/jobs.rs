@@ -490,6 +490,151 @@ fn job_state_path(work_path: &Path, job_id: &str) -> PathBuf {
     jobs_state_dir(work_path).join(format!("{job_id}.json"))
 }
 
+fn job_run_lock_path(work_path: &Path, job_id: &str) -> PathBuf {
+    jobs_state_dir(work_path).join(format!("{job_id}.run.lock"))
+}
+
+fn job_state_lock_path(work_path: &Path, job_id: &str) -> PathBuf {
+    jobs_state_dir(work_path).join(format!("{job_id}.state.lock"))
+}
+
+fn lock_job_state(work_path: &Path, job_id: &str) -> Result<fs::File, String> {
+    let state_dir = jobs_state_dir(work_path);
+    fs::create_dir_all(&state_dir).map_err(|err| {
+        format!(
+            "job_state_dir_failed: {}: {err}",
+            state_dir.to_string_lossy()
+        )
+    })?;
+    let lock_path = job_state_lock_path(work_path, job_id);
+    let file = fs::File::create(&lock_path)
+        .map_err(|err| format!("job_state_lock_failed: {}: {err}", lock_path.display()))?;
+    file.lock()
+        .map_err(|err| format!("job_state_lock_failed: {err}"))?;
+    Ok(file)
+}
+
+fn manual_requests_dir(work_path: &Path, job_id: &str) -> PathBuf {
+    jobs_state_dir(work_path).join(format!("{job_id}.manual-requests"))
+}
+
+fn manual_requests_lock_path(work_path: &Path, job_id: &str) -> PathBuf {
+    jobs_state_dir(work_path).join(format!("{job_id}.manual-requests.lock"))
+}
+
+fn lock_manual_requests(work_path: &Path, job_id: &str) -> Result<fs::File, String> {
+    let state_dir = jobs_state_dir(work_path);
+    fs::create_dir_all(&state_dir).map_err(|err| {
+        format!(
+            "job_state_dir_failed: {}: {err}",
+            state_dir.to_string_lossy()
+        )
+    })?;
+    let lock_path = manual_requests_lock_path(work_path, job_id);
+    let file = fs::File::create(&lock_path)
+        .map_err(|err| format!("manual_request_lock_failed: {}: {err}", lock_path.display()))?;
+    file.lock()
+        .map_err(|err| format!("manual_request_lock_failed: {err}"))?;
+    Ok(file)
+}
+
+fn manual_request_ids_unlocked(work_path: &Path, job_id: &str) -> Result<Vec<String>, String> {
+    let dir = manual_requests_dir(work_path, job_id);
+    let entries = match fs::read_dir(&dir) {
+        Ok(entries) => entries,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(err) => {
+            return Err(format!(
+                "manual_requests_read_failed: {}: {err}",
+                dir.display()
+            ))
+        }
+    };
+    let mut ids = Vec::new();
+    for entry in entries {
+        let entry = entry.map_err(|err| format!("manual_requests_read_failed: {err}"))?;
+        if !entry
+            .file_type()
+            .map_err(|err| format!("manual_request_metadata_failed: {err}"))?
+            .is_file()
+        {
+            continue;
+        }
+        let path = entry.path();
+        if path.extension().and_then(OsStr::to_str) != Some("json") {
+            continue;
+        }
+        let Some(stem) = path.file_stem().and_then(OsStr::to_str) else {
+            continue;
+        };
+        if uuid::Uuid::parse_str(stem).is_ok() {
+            ids.push(stem.to_string());
+        }
+    }
+    ids.sort();
+    Ok(ids)
+}
+
+/// Publish a unique one-shot manual request without taking the job-run lock.
+/// Distinct files ensure concurrent Run now calls cannot overwrite each other.
+fn enqueue_manual_run_request(
+    work_path: &Path,
+    job_id: &str,
+    manifest_enabled: bool,
+) -> Result<String, String> {
+    let _lock = lock_manual_requests(work_path, job_id)?;
+    let _state_lock = lock_job_state(work_path, job_id)?;
+    let state = read_job_state(&job_state_path(work_path, job_id));
+    if !state.agent_enabled.unwrap_or(manifest_enabled) {
+        return Err(format!("job_not_enabled: {job_id}"));
+    }
+    let request_id = uuid::Uuid::new_v4().simple().to_string();
+    let path = manual_requests_dir(work_path, job_id).join(format!("{request_id}.json"));
+    let request = serde_json::json!({ "nonce": request_id });
+    let payload = serde_json::to_vec(&request)
+        .map_err(|err| format!("manual_request_serialize_failed: {err}"))?;
+    crate::atomic_file::write_atomic_create(&path, &payload)?;
+    Ok(request_id)
+}
+
+fn peek_manual_run_request(work_path: &Path, job_id: &str) -> Result<Option<String>, String> {
+    let _lock = lock_manual_requests(work_path, job_id)?;
+    Ok(manual_request_ids_unlocked(work_path, job_id)?
+        .into_iter()
+        .next())
+}
+
+fn remove_manual_run_request(
+    work_path: &Path,
+    job_id: &str,
+    request_id: &str,
+) -> Result<(), String> {
+    if uuid::Uuid::parse_str(request_id).is_err() {
+        return Err("manual_request_id_invalid".to_string());
+    }
+    let _lock = lock_manual_requests(work_path, job_id)?;
+    let path = manual_requests_dir(work_path, job_id).join(format!("{request_id}.json"));
+    match fs::remove_file(&path) {
+        Ok(()) => Ok(()),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(err) => Err(format!(
+            "manual_request_remove_failed: {}: {err}",
+            path.display()
+        )),
+    }
+}
+
+fn clear_manual_run_requests(work_path: &Path, job_id: &str) -> Result<(), String> {
+    let _lock = lock_manual_requests(work_path, job_id)?;
+    let dir = manual_requests_dir(work_path, job_id);
+    for request_id in manual_request_ids_unlocked(work_path, job_id)? {
+        let path = dir.join(format!("{request_id}.json"));
+        fs::remove_file(&path)
+            .map_err(|err| format!("manual_request_remove_failed: {}: {err}", path.display()))?;
+    }
+    Ok(())
+}
+
 /// Engine-recorded run history for a missed-fire job. The wrapper rewrites it
 /// after every run; the guard agent reads it to decide whether the most recent
 /// scheduled fire still needs recovering.
@@ -591,11 +736,17 @@ fn last_success_covers_fire(
         // rather than starting the job on every guard interval.
         return true;
     };
-    let covered_at = state.last_success_fire_at.max(state.install_baseline_at);
-    let Some(covered_at) = covered_at else {
-        return false;
+    let baseline_covers = state
+        .install_baseline_at
+        .map(|baseline| baseline as i64 >= fire)
+        .unwrap_or(false);
+    let success_covers = match (state.last_success_at, state.last_success_fire_at) {
+        (Some(completed_at), Some(success_fire)) => {
+            completed_at >= success_fire && success_fire as i64 >= fire
+        }
+        _ => false,
     };
-    covered_at as i64 >= fire
+    baseline_covers || success_covers
 }
 
 /// Entry point behind the plist wrapper for missed-fire jobs. The plist's
@@ -605,7 +756,7 @@ fn last_success_covers_fire(
 /// `if_missed` (the guard agent), exits 0 without running when the recorded
 /// success already covers the most recent scheduled fire.
 pub fn jobs_exec_in(work_path: &Path, job_id: &str, if_missed: bool) -> i32 {
-    match jobs_exec_result(work_path, job_id, if_missed, false) {
+    match jobs_exec_result(work_path, job_id, if_missed) {
         Ok(code) => code,
         Err(err) => {
             eprintln!("jobs_exec_failed: {err}");
@@ -614,37 +765,12 @@ pub fn jobs_exec_in(work_path: &Path, job_id: &str, if_missed: bool) -> i32 {
     }
 }
 
-fn jobs_exec_result(
-    work_path: &Path,
-    job_id: &str,
-    if_missed: bool,
-    force: bool,
-) -> Result<i32, String> {
+fn jobs_exec_result(work_path: &Path, job_id: &str, if_missed: bool) -> Result<i32, String> {
     let jobs = load_jobs(work_path)?;
     let job = find_job(&jobs, job_id)?;
+    // From here on, derive state paths only from the manifest-validated id.
+    let job_id = job.id.as_str();
     let state_path = job_state_path(work_path, job_id);
-    if !force
-        && job.schedule.recovery_mode == RecoveryMode::MissedFire
-        && !read_job_state(&state_path)
-            .agent_enabled
-            .unwrap_or(job.enabled)
-    {
-        return Ok(0);
-    }
-    if !force
-        && (if_missed || job.schedule.recovery_mode == RecoveryMode::MissedFire)
-        && last_success_covers_fire(
-            &read_job_state(&state_path),
-            chrono::Local::now(),
-            job.schedule.hour,
-            job.schedule.minute,
-        )
-    {
-        return Ok(0);
-    }
-    // Serialize wrapper-driven runs across the calendar and guard agents; the
-    // guard yields to a run already in progress instead of doubling it. The
-    // lock is advisory and releases automatically if a holder dies.
     let state_dir = jobs_state_dir(work_path);
     fs::create_dir_all(&state_dir).map_err(|err| {
         format!(
@@ -652,7 +778,9 @@ fn jobs_exec_result(
             state_dir.to_string_lossy()
         )
     })?;
-    let lock_path = state_dir.join(format!("{job_id}.lock"));
+    // This lock spans the child run. State writers use a separate short lock,
+    // so Stop can disable a job without waiting for a long-running child.
+    let lock_path = job_run_lock_path(work_path, job_id);
     let lock_file = fs::File::create(&lock_path)
         .map_err(|err| format!("job_lock_failed: {}: {err}", lock_path.to_string_lossy()))?;
     if if_missed {
@@ -668,20 +796,24 @@ fn jobs_exec_result(
             .lock()
             .map_err(|err| format!("job_lock_failed: {err}"))?;
     }
-    if !force
-        && job.schedule.recovery_mode == RecoveryMode::MissedFire
-        && !read_job_state(&state_path)
-            .agent_enabled
-            .unwrap_or(job.enabled)
+    let manual_requests_enabled =
+        !if_missed && job.schedule.recovery_mode == RecoveryMode::MissedFire;
+    let mut manual_request = if manual_requests_enabled {
+        peek_manual_run_request(work_path, job_id)?
+    } else {
+        None
+    };
+    let explicit_force = manual_request.is_some();
+    let state = read_job_state(&state_path);
+    if job.schedule.recovery_mode == RecoveryMode::MissedFire
+        && !state.agent_enabled.unwrap_or(job.enabled)
     {
         return Ok(0);
     }
-    // Re-check under the lock: a calendar run may have recorded its success
-    // while the guard was acquiring it.
-    if !force
+    if !explicit_force
         && (if_missed || job.schedule.recovery_mode == RecoveryMode::MissedFire)
         && last_success_covers_fire(
-            &read_job_state(&state_path),
+            &state,
             chrono::Local::now(),
             job.schedule.hour,
             job.schedule.minute,
@@ -690,64 +822,106 @@ fn jobs_exec_result(
         return Ok(0);
     }
 
-    let command = resolve_job_path(work_path, &job.program.command);
-    let logs_dir = resolve_job_path(work_path, &job.logs.dir);
-    fs::create_dir_all(&logs_dir)
-        .map_err(|err| format!("job_logs_dir_failed: {logs_dir}: {err}"))?;
-    let stdout_path = format!("{logs_dir}/stdout.log");
-    let stderr_path = format!("{logs_dir}/stderr.log");
-    let stdout = fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&stdout_path)
-        .map_err(|err| format!("job_log_open_failed: {stdout_path}: {err}"))?;
-    let stderr = fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&stderr_path)
-        .map_err(|err| format!("job_log_open_failed: {stderr_path}: {err}"))?;
-    let home = crate::skill_host::fs::install_root_base()?;
-    let workspace_config = work_path.join("workspace.config.yaml");
+    let first_result = run_job_program(work_path, job, &state_path);
+    if let Some(request_id) = manual_request.take() {
+        remove_manual_run_request(work_path, job_id, &request_id)?;
+    }
+    let mut exit_code = 1;
+    let mut last_error = None;
+    match first_result {
+        Ok(code) => exit_code = code,
+        Err(err) => last_error = Some(err),
+    }
+
+    // Multiple Run now requests arriving during one long run remain distinct.
+    // Drain them in this launchd-supervised process instead of leaving a
+    // request for an event launchd may have coalesced while the service ran.
+    while manual_requests_enabled {
+        let Some(request_id) = peek_manual_run_request(work_path, job_id)? else {
+            break;
+        };
+        if !read_job_state(&state_path)
+            .agent_enabled
+            .unwrap_or(job.enabled)
+        {
+            break;
+        }
+        let result = run_job_program(work_path, job, &state_path);
+        remove_manual_run_request(work_path, job_id, &request_id)?;
+        match result {
+            Ok(code) => exit_code = code,
+            Err(err) => last_error = Some(err),
+        }
+    }
+    match last_error {
+        Some(err) => Err(err),
+        None => Ok(exit_code),
+    }
+}
+
+fn run_job_program(work_path: &Path, job: &JobRecord, state_path: &Path) -> Result<i32, String> {
     let started_at = now_epoch_seconds();
     let scheduled_fire_at =
         last_scheduled_fire_epoch(chrono::Local::now(), job.schedule.hour, job.schedule.minute)
             .map(|timestamp| timestamp.max(0) as u64);
-    let mut child = Command::new(&command)
-        .args(
-            job.program
-                .args
-                .iter()
-                .map(|arg| resolve_job_arg(work_path, arg)),
-        )
-        .env("HOME", home)
-        .envs(
-            job.program
-                .env
-                .iter()
-                .map(|(key, value)| (key, expand_tilde_segments(value))),
-        )
-        .env("WORKSPACE_CONFIG", workspace_config)
-        .current_dir(work_path)
-        .stdout(Stdio::from(stdout))
-        .stderr(Stdio::from(stderr))
-        .no_window()
-        .spawn()
-        .map_err(|err| format!("job_spawn_failed: {command}: {err}"))?;
-    let status = child
-        .wait()
-        .map_err(|err| format!("job_wait_failed: {command}: {err}"))?;
-    let code = status.code().unwrap_or(-1);
+    let command = resolve_job_path(work_path, &job.program.command);
+    let attempt = (|| {
+        let logs_dir = resolve_job_path(work_path, &job.logs.dir);
+        fs::create_dir_all(&logs_dir)
+            .map_err(|err| format!("job_logs_dir_failed: {logs_dir}: {err}"))?;
+        let stdout_path = format!("{logs_dir}/stdout.log");
+        let stderr_path = format!("{logs_dir}/stderr.log");
+        let stdout = fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&stdout_path)
+            .map_err(|err| format!("job_log_open_failed: {stdout_path}: {err}"))?;
+        let stderr = fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&stderr_path)
+            .map_err(|err| format!("job_log_open_failed: {stderr_path}: {err}"))?;
+        let home = crate::skill_host::fs::install_root_base()?;
+        let workspace_config = work_path.join("workspace.config.yaml");
+        let mut child = Command::new(&command)
+            .args(
+                job.program
+                    .args
+                    .iter()
+                    .map(|arg| resolve_job_arg(work_path, arg)),
+            )
+            .env("HOME", home)
+            .envs(
+                job.program
+                    .env
+                    .iter()
+                    .map(|(key, value)| (key, expand_tilde_segments(value))),
+            )
+            .env("WORKSPACE_CONFIG", workspace_config)
+            .current_dir(work_path)
+            .stdout(Stdio::from(stdout))
+            .stderr(Stdio::from(stderr))
+            .no_window()
+            .spawn()
+            .map_err(|err| format!("job_spawn_failed: {command}: {err}"))?;
+        let status = child
+            .wait()
+            .map_err(|err| format!("job_wait_failed: {command}: {err}"))?;
+        Ok::<i32, String>(status.code().unwrap_or(-1))
+    })();
 
-    let mut state = read_job_state(&state_path);
+    let result_code = attempt.as_ref().copied().unwrap_or(-1);
+    let _state_lock = lock_job_state(work_path, &job.id)?;
+    let mut state = read_job_state(state_path);
     state.last_run_at = Some(started_at);
-    state.last_exit_code = Some(i64::from(code));
-    if code == 0 {
+    state.last_exit_code = Some(i64::from(result_code));
+    if result_code == 0 {
         state.last_success_at = Some(now_epoch_seconds());
         state.last_success_fire_at = scheduled_fire_at;
     }
     let serialized = serde_json::to_string_pretty(&state).unwrap_or_default();
-    crate::atomic_file::write_atomic(&state_path, serialized.as_bytes())?;
-    Ok(code)
+    crate::atomic_file::write_atomic(state_path, serialized.as_bytes())?;
+    attempt
 }
 
 fn launch_agents_dir() -> Result<PathBuf, String> {
@@ -1002,6 +1176,10 @@ fn jobs_transaction_paths(work_path: &Path, job: &JobRecord) -> Result<Vec<PathB
         jobs_state_dir(work_path),
         job_state_path(work_path, &job.id),
         jobs_state_dir(work_path).join(format!("{}.lock", job.id)),
+        job_run_lock_path(work_path, &job.id),
+        job_state_lock_path(work_path, &job.id),
+        manual_requests_dir(work_path, &job.id),
+        manual_requests_lock_path(work_path, &job.id),
     ];
     for arg in &job.program.args {
         if !arg.starts_with('-')
@@ -1090,20 +1268,8 @@ fn prepare_guard_agent(
 /// is distinct from a successful run: fires before installation are outside
 /// this agent's recovery promise, and RunAtLoad must never race this baseline.
 fn set_job_agent_enabled(work_path: &Path, job_id: &str, enabled: bool) -> Result<(), String> {
-    let state_dir = jobs_state_dir(work_path);
-    fs::create_dir_all(&state_dir).map_err(|err| {
-        format!(
-            "job_state_dir_failed: {}: {err}",
-            state_dir.to_string_lossy()
-        )
-    })?;
+    let _state_lock = lock_job_state(work_path, job_id)?;
     let state_path = job_state_path(work_path, job_id);
-    let lock_path = state_dir.join(format!("{job_id}.lock"));
-    let lock_file = fs::File::create(&lock_path)
-        .map_err(|err| format!("job_lock_failed: {}: {err}", lock_path.to_string_lossy()))?;
-    lock_file
-        .lock()
-        .map_err(|err| format!("job_lock_failed: {err}"))?;
     let mut state = read_job_state(&state_path);
     state.agent_enabled = Some(enabled);
     let serialized = serde_json::to_string_pretty(&state).unwrap_or_default();
@@ -1112,20 +1278,8 @@ fn set_job_agent_enabled(work_path: &Path, job_id: &str, enabled: bool) -> Resul
 }
 
 fn seed_install_baseline(work_path: &Path, job_id: &str, enabled: bool) -> Result<(), String> {
-    let state_dir = jobs_state_dir(work_path);
-    fs::create_dir_all(&state_dir).map_err(|err| {
-        format!(
-            "job_state_dir_failed: {}: {err}",
-            state_dir.to_string_lossy()
-        )
-    })?;
+    let _state_lock = lock_job_state(work_path, job_id)?;
     let state_path = job_state_path(work_path, job_id);
-    let lock_path = state_dir.join(format!("{job_id}.lock"));
-    let lock_file = fs::File::create(&lock_path)
-        .map_err(|err| format!("job_lock_failed: {}: {err}", lock_path.to_string_lossy()))?;
-    lock_file
-        .lock()
-        .map_err(|err| format!("job_lock_failed: {err}"))?;
     let mut state = read_job_state(&state_path);
     if state.install_baseline_at.is_none() {
         state.install_baseline_at = Some(now_epoch_seconds());
@@ -1213,20 +1367,37 @@ fn jobs_uninstall_in_transaction(
     let plist = guarded_plist_path(&label)?;
     let uid = current_uid()?;
 
+    let mut errors = Vec::new();
+    if job.schedule.recovery_mode == RecoveryMode::MissedFire {
+        if let Err(err) = set_job_agent_enabled(work_path, &job.id, false) {
+            errors.push(err);
+        }
+    }
     // Tolerate not-loaded on bootout, but never delete the plist while the
     // service is still loaded: launchd would keep running the cached job with
     // nothing on disk left to manage it.
     let bootout = run_launchctl(&["bootout", &format!("gui/{uid}/{label}")]);
     if let Err(err) = bootout {
         if print_launchd_state(&uid, &label).loaded {
-            return Err(format!("job_bootout_failed: {label}: {err}"));
+            errors.push(format!("job_bootout_failed: {label}: {err}"));
         }
     }
-    if plist.exists() {
-        fs::remove_file(&plist)
-            .map_err(|err| format!("plist_remove_failed: {}: {err}", plist.to_string_lossy()))?;
+    if plist.exists() && !print_launchd_state(&uid, &label).loaded {
+        if let Err(err) = fs::remove_file(&plist) {
+            errors.push(format!("plist_remove_failed: {}: {err}", plist.display()));
+        }
     }
-    remove_guard_agent(job, work_path, &uid)?;
+    if let Err(err) = remove_guard_agent(job, work_path, &uid) {
+        errors.push(err);
+    }
+    if job.schedule.recovery_mode == RecoveryMode::MissedFire {
+        if let Err(err) = clear_manual_run_requests(work_path, &job.id) {
+            errors.push(err);
+        }
+    }
+    if !errors.is_empty() {
+        return Err(format!("job_uninstall_failed: {}", errors.join("; ")));
+    }
     status_for(job, work_path)
 }
 
@@ -1266,8 +1437,8 @@ fn jobs_start_in_transaction(
             return Err(format!("job_not_installed: {job_id}"));
         }
         run_launchctl(&["enable", &target])?;
-        // enable only clears the disabled flag; bootstrap actually loads the
-        // schedule. Bootout first so a half-loaded state is idempotent.
+        // Unload both old services before enabling the runner state. Neither
+        // service can start while stale work or manual requests are cleared.
         let _ = run_launchctl(&["bootout", &target]);
         let guard = if job.schedule.recovery_mode == RecoveryMode::MissedFire {
             let guard_label = guard_label_for(&job.id, work_path)?;
@@ -1284,6 +1455,7 @@ fn jobs_start_in_transaction(
             None
         };
         if job.schedule.recovery_mode == RecoveryMode::MissedFire {
+            clear_manual_run_requests(work_path, &job.id)?;
             set_job_agent_enabled(work_path, &job.id, true)?;
         }
         run_launchctl(&["bootstrap", &format!("gui/{uid}"), &plist.to_string_lossy()])?;
@@ -1295,21 +1467,41 @@ fn jobs_start_in_transaction(
             ])?;
         }
     } else {
-        run_launchctl(&["disable", &target])?;
-        // disable only gates future loads: an already-loaded service keeps its
-        // calendar timer and would still fire. Bootout stops it now.
-        let _ = run_launchctl(&["bootout", &target]);
         if job.schedule.recovery_mode == RecoveryMode::MissedFire {
+            let mut errors = Vec::new();
+            if let Err(err) = set_job_agent_enabled(work_path, &job.id, false) {
+                errors.push(err);
+            }
+            // Persist disabled state first. Then attempt both agents even if
+            // one launchctl operation fails, so the guard cannot survive Stop.
+            stop_launch_agent(&uid, &label, &mut errors);
             let guard_label = guard_label_for(&job.id, work_path)?;
-            let guard_target = format!("gui/{uid}/{guard_label}");
-            run_launchctl(&["disable", &guard_target])?;
-            let _ = run_launchctl(&["bootout", &guard_target]);
-        }
-        if job.schedule.recovery_mode == RecoveryMode::MissedFire {
-            set_job_agent_enabled(work_path, &job.id, false)?;
+            stop_launch_agent(&uid, &guard_label, &mut errors);
+            if let Err(err) = clear_manual_run_requests(work_path, &job.id) {
+                errors.push(err);
+            }
+            if !errors.is_empty() {
+                return Err(format!("job_stop_failed: {}", errors.join("; ")));
+            }
+        } else {
+            run_launchctl(&["disable", &target])?;
+            // disable leaves an already-loaded calendar timer live.
+            let _ = run_launchctl(&["bootout", &target]);
         }
     }
     status_for(job, work_path)
+}
+
+fn stop_launch_agent(uid: &str, label: &str, errors: &mut Vec<String>) {
+    let target = format!("gui/{uid}/{label}");
+    if let Err(err) = run_launchctl(&["disable", &target]) {
+        errors.push(err);
+    }
+    if let Err(err) = run_launchctl(&["bootout", &target]) {
+        if print_launchd_state(uid, label).loaded {
+            errors.push(format!("job_bootout_failed: {label}: {err}"));
+        }
+    }
 }
 
 pub(crate) fn jobs_run_now_in(work_path: &Path, job_id: &str) -> Result<JobStatus, String> {
@@ -1336,11 +1528,18 @@ fn jobs_run_now_in_transaction(
         return Err(format!("job_not_installed: {job_id}"));
     }
     if job.schedule.recovery_mode == RecoveryMode::MissedFire {
-        // A deliberate user action remains unconditional; only launchd's
-        // calendar and recovery paths are deduplicated against the fire.
-        let code = jobs_exec_result(work_path, job_id, false, true)?;
-        if code != 0 {
-            return Err(format!("job_run_failed: {job_id}: exit code {code}"));
+        let uid = current_uid()?;
+        if !print_launchd_state(&uid, &label).loaded {
+            return Err(format!("job_not_loaded: {job_id}"));
+        }
+        // Publish the force request first, then let launchd supervise the
+        // child. The wrapper consumes this nonce only on the main agent path;
+        // a guard fire can never consume it.
+        let request_id = enqueue_manual_run_request(work_path, job_id, job.enabled)?;
+        let target = format!("gui/{uid}/{label}");
+        if let Err(err) = run_launchctl(&["kickstart", "-k", &target]) {
+            remove_manual_run_request(work_path, job_id, &request_id)?;
+            return Err(err);
         }
         return status_for(job, work_path);
     }
@@ -1707,7 +1906,7 @@ mod tests {
         let xml = guard_plist_for(&job, &work).unwrap();
         let label = guard_label_for(&job.id, &work).unwrap();
 
-        assert!(label.starts_with("com.maru.job.mail-digest-guard."));
+        assert!(label.starts_with("com.maru.job.guard.mail-digest."));
         assert!(xml.contains(&format!("<string>{label}</string>")));
         assert!(xml.contains("<string>--if-missed</string>"), "{xml}");
         // Interval + RunAtLoad recover a fire missed through sleep or reboot;
@@ -1969,9 +2168,17 @@ mod tests {
         assert_eq!(jobs_exec_in(&work, "ok-job", false), 0);
         assert_eq!(fs::read_to_string(&marker).unwrap().lines().count(), 1);
 
-        // Explicit "Run now" remains unconditional for opted-in jobs.
-        assert_eq!(jobs_exec_result(&work, "ok-job", false, true).unwrap(), 0);
+        // A guard cannot consume a pending explicit request. The main agent
+        // consumes it once and bypasses same-fire dedup.
+        let request = enqueue_manual_run_request(&work, "ok-job", true).unwrap();
+        assert_eq!(jobs_exec_in(&work, "ok-job", true), 0);
+        assert_eq!(
+            peek_manual_run_request(&work, "ok-job").unwrap(),
+            Some(request)
+        );
+        assert_eq!(jobs_exec_in(&work, "ok-job", false), 0);
         assert_eq!(fs::read_to_string(&marker).unwrap().lines().count(), 2);
+        assert_eq!(peek_manual_run_request(&work, "ok-job").unwrap(), None);
 
         // Child output lands in the job's log files, as a direct plist would.
         let stdout_log = work.join(".maru/exec-test-logs/stdout.log");
@@ -2014,6 +2221,77 @@ mod tests {
         assert_eq!(repeated.install_baseline_at, initial.install_baseline_at);
         assert_eq!(repeated.agent_enabled, Some(false));
         assert_eq!(repeated.last_success_at, None);
+    }
+
+    #[test]
+    fn stop_state_update_does_not_wait_for_a_running_job_lock() {
+        let _home = Home::new();
+        let dir = tempfile::tempdir().unwrap();
+        let work = dir.path().join("work");
+        fs::create_dir_all(&work).unwrap();
+        let state_dir = jobs_state_dir(&work);
+        fs::create_dir_all(&state_dir).unwrap();
+        let run_lock = fs::File::create(job_run_lock_path(&work, "long-job")).unwrap();
+        run_lock.lock().unwrap();
+
+        let work_for_thread = work.clone();
+        let (sender, receiver) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = sender.send(set_job_agent_enabled(&work_for_thread, "long-job", false));
+        });
+        assert!(receiver
+            .recv_timeout(std::time::Duration::from_secs(1))
+            .expect("Stop state write is independent of the child-run lock")
+            .is_ok());
+        assert_eq!(
+            read_job_state(&job_state_path(&work, "long-job")).agent_enabled,
+            Some(false)
+        );
+    }
+
+    #[test]
+    fn concurrent_manual_requests_are_distinct_and_removable_individually() {
+        let _home = Home::new();
+        let dir = tempfile::tempdir().unwrap();
+        let work = dir.path().join("work");
+        fs::create_dir_all(&work).unwrap();
+        let job = exec_test_job("queue-job", "exit 0");
+        write_exec_test_workspace(&work, &job);
+
+        let first = enqueue_manual_run_request(&work, "queue-job", true).unwrap();
+        let second = enqueue_manual_run_request(&work, "queue-job", true).unwrap();
+        assert_ne!(first, second);
+        assert_eq!(
+            manual_request_ids_unlocked(&work, "queue-job")
+                .unwrap()
+                .len(),
+            2
+        );
+
+        remove_manual_run_request(&work, "queue-job", &first).unwrap();
+        assert_eq!(
+            peek_manual_run_request(&work, "queue-job").unwrap(),
+            Some(second)
+        );
+        clear_manual_run_requests(&work, "queue-job").unwrap();
+        assert_eq!(peek_manual_run_request(&work, "queue-job").unwrap(), None);
+    }
+
+    #[test]
+    fn pre_spawn_failure_replaces_stale_success_status() {
+        let _home = Home::new();
+        let dir = tempfile::tempdir().unwrap();
+        let work = dir.path().join("work");
+        fs::create_dir_all(&work).unwrap();
+        let mut job = exec_test_job("spawn-fail-job", "exit 0");
+        job.program.command = work.join("missing-program").to_string_lossy().to_string();
+        write_exec_test_workspace(&work, &job);
+
+        assert_eq!(jobs_exec_in(&work, "spawn-fail-job", false), 1);
+        let state = read_job_state(&job_state_path(&work, "spawn-fail-job"));
+        assert!(state.last_run_at.is_some());
+        assert_eq!(state.last_exit_code, Some(-1));
+        assert_eq!(state.last_success_at, None);
     }
 
     #[test]
@@ -2285,6 +2563,7 @@ mod tests {
             "#!/bin/sh\necho 'fixture child completed'\necho ran >> run-marker.txt\n",
         )
         .unwrap();
+        fs::set_permissions(work.join("script.sh"), fs::Permissions::from_mode(0o700)).unwrap();
         let mut job = sample_job();
         job.schedule.recovery_interval_seconds = 21600;
         job.schedule.recovery_mode = RecoveryMode::MissedFire;
@@ -2331,7 +2610,10 @@ case "$op" in
     else label="${1##*/}"; fi
     case "$op" in
       enable) /bin/rm -f "$state/$label.disabled" ;;
-      disable) : > "$state/$label.disabled" ;;
+      disable)
+        [ ! -e "$state/fail-disable-$label" ] || exit 76
+        : > "$state/$label.disabled"
+        ;;
       bootstrap) [ ! -e "$state/$label.disabled" ]; : > "$state/$label.loaded" ;;
       bootout)
         [ ! -e "$state/fail-bootout" ] || exit 72
@@ -2339,6 +2621,7 @@ case "$op" in
         ;;
       print) [ -e "$state/$label.loaded" ]; echo 'last exit code = 0' ;;
       kickstart)
+        [ ! -e "$state/fail-kickstart" ] || exit 77
         [ -e "$state/$label.loaded" ] || exit 73
         : > "$state/entered"
         n=0
@@ -2390,6 +2673,7 @@ esac
         let home = Home::new();
         let work = home.root.path().join("work");
         phase08_15_fixture(home.root.path(), &work);
+        let main_label = label_for("mail-digest", &work).unwrap();
         let s = work.to_string_lossy().to_string();
         let list = run(ipc::jobs_list(s.clone())).unwrap();
         assert_eq!(list.len(), 1);
@@ -2408,6 +2692,13 @@ esac
         );
         assert_eq!(jobs_exec_in(&work, "mail-digest", true), 0);
         assert!(!work.join("run-marker.txt").exists());
+        assert_eq!(
+            run(phase08_15_action("run", s.clone())).unwrap_err(),
+            "job_not_loaded: mail-digest"
+        );
+        assert!(manual_request_ids_unlocked(&work, "mail-digest")
+            .unwrap()
+            .is_empty());
         assert!(run(phase08_15_action("start", s.clone())).unwrap().loaded);
         let state_path = job_state_path(&work, "mail-digest");
         let mut state = read_job_state(&state_path);
@@ -2428,12 +2719,30 @@ esac
                 .count(),
             1
         );
+        fs::write(home.root.path().join(".maru/fail-kickstart"), "fail").unwrap();
+        assert!(run(phase08_15_action("run", s.clone()))
+            .unwrap_err()
+            .starts_with("launchctl_failed: kickstart"));
+        assert!(manual_request_ids_unlocked(&work, "mail-digest")
+            .unwrap()
+            .is_empty());
+        fs::remove_file(home.root.path().join(".maru/fail-kickstart")).unwrap();
         assert_eq!(
             run(phase08_15_action("run", s.clone()))
                 .unwrap()
                 .last_exit_code,
             Some(0)
         );
+        assert_eq!(
+            manual_request_ids_unlocked(&work, "mail-digest")
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(jobs_exec_in(&work, "mail-digest", false), 0);
+        assert!(manual_request_ids_unlocked(&work, "mail-digest")
+            .unwrap()
+            .is_empty());
         assert_eq!(
             fs::read_to_string(work.join("run-marker.txt"))
                 .unwrap()
@@ -2444,10 +2753,45 @@ esac
         let tail = run(ipc::jobs_read_log(s.clone(), "mail-digest".into())).unwrap();
         assert!(tail.stdout.contains("fixture child completed"));
         assert_eq!(tail.stderr, "fixture stderr");
-        fs::write(home.root.path().join(".maru/fail-bootout"), "fail").unwrap();
-        assert!(run(phase08_15_action("uninstall", s.clone()))
+        let guard_label = guard_label_for("mail-digest", &work).unwrap();
+        fs::write(
+            home.root
+                .path()
+                .join(format!(".maru/fail-disable-{guard_label}")),
+            "fail",
+        )
+        .unwrap();
+        assert!(run(phase08_15_action("stop", s.clone()))
             .unwrap_err()
-            .starts_with("job_bootout_failed:"));
+            .starts_with("job_stop_failed:"));
+        assert_eq!(
+            read_job_state(&job_state_path(&work, "mail-digest")).agent_enabled,
+            Some(false)
+        );
+        assert!(!home
+            .root
+            .path()
+            .join(format!(".maru/{main_label}.loaded"))
+            .exists());
+        assert!(!home
+            .root
+            .path()
+            .join(format!(".maru/{guard_label}.loaded"))
+            .exists());
+        assert!(manual_request_ids_unlocked(&work, "mail-digest")
+            .unwrap()
+            .is_empty());
+        fs::remove_file(
+            home.root
+                .path()
+                .join(format!(".maru/fail-disable-{guard_label}")),
+        )
+        .unwrap();
+        assert!(run(phase08_15_action("start", s.clone())).unwrap().loaded);
+        fs::write(home.root.path().join(".maru/fail-bootout"), "fail").unwrap();
+        let uninstall_error = run(phase08_15_action("uninstall", s.clone())).unwrap_err();
+        assert!(uninstall_error.starts_with("job_uninstall_failed:"));
+        assert!(uninstall_error.contains("job_bootout_failed:"));
         assert!(Path::new(&installed.plist_path).is_file());
         fs::remove_file(home.root.path().join(".maru/fail-bootout")).unwrap();
         assert!(
