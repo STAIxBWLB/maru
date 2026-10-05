@@ -10,7 +10,7 @@ import { readTerminalText } from "./ptyAssertions";
 const POLL_TIMEOUT_MS = 20_000;
 
 export interface NativeShellProbeRequest {
-  phase: "open" | "launch" | "select" | "prompt" | "focus";
+  phase: "open" | "launch" | "select" | "prompt" | "focus" | "split";
   splitExpected?: boolean;
   requireAutoSession?: boolean;
   priorIds?: string[];
@@ -25,8 +25,9 @@ export interface NativeShellProbeResult {
     phase: string;
     split: boolean;
     bridgePresent: boolean;
+    bodies: Array<{ className: string; split: boolean; visible: boolean; rect: number[] }>;
     activeElement: { tag: string; className: string; sessionId: string | null } | null;
-    views: Array<{ id: string; className: string; visible: boolean; focused: boolean; rect: number[]; display: string; visibility: string }>;
+    views: Array<{ id: string; className: string; visible: boolean; focused: boolean; promptReady: boolean; rect: number[]; display: string; visibility: string }>;
   };
 }
 
@@ -96,6 +97,19 @@ export function pollNativeShell(
         launcher!.click();
         target = null;
       }
+    } else if (request.phase === "split") {
+      const bodies = Array.from(document.querySelectorAll<HTMLElement>(".terminal-body.split")).filter(visible);
+      if (bodies.length === 1) {
+        const active = views.filter((view) => view.closest(".terminal-body") === bodies[0]
+          && Boolean(view.closest(".terminal-instance.active")) && visible(view));
+        const left = active.filter((view) => Boolean(view.closest(".pane-left")));
+        const right = active.filter((view) => Boolean(view.closest(".pane-right")));
+        target = left[0] ?? null;
+        ready = active.length === 2 && left.length === 1 && right.length === 1
+          && Boolean(request.sessionId) && left[0].dataset.sessionId === request.sessionId
+          && Boolean(right[0].dataset.sessionId) && right[0].dataset.sessionId !== left[0].dataset.sessionId
+          && textReady(left[0]) && textReady(right[0]);
+      }
     } else if (target && request.phase === "select") {
       ready = true;
     } else if (target && request.phase === "prompt") {
@@ -120,6 +134,11 @@ export function pollNativeShell(
         phase: request.phase,
         split: Boolean(document.querySelector(".terminal-body.split")),
         bridgePresent: typeof window.__MARU_NATIVE_E2E__?.terminalText === "function",
+        bodies: Array.from(document.querySelectorAll<HTMLElement>(".terminal-body")).map((body) => {
+          const rect = body.getBoundingClientRect();
+          return { className: body.className, split: body.classList.contains("split"), visible: visible(body),
+            rect: [rect.x, rect.y, rect.width, rect.height] };
+        }),
         activeElement: element instanceof HTMLElement ? {
           tag: element.tagName, className: element.className,
           sessionId: element.closest<HTMLElement>(".native-terminal-view")?.dataset.sessionId ?? null,
@@ -129,7 +148,7 @@ export function pollNativeShell(
           const rect = view.getBoundingClientRect();
           const style = window.getComputedStyle(view);
           return { id: view.dataset.sessionId!, className: instance?.className ?? "", visible: visible(view),
-            focused: Boolean(instance?.classList.contains("focused")), rect: [rect.x, rect.y, rect.width, rect.height],
+            focused: Boolean(instance?.classList.contains("focused")), promptReady: textReady(view), rect: [rect.x, rect.y, rect.width, rect.height],
             display: style.display, visibility: style.visibility };
         }),
       },
@@ -140,14 +159,43 @@ export function pollNativeShell(
   tick();
 }
 
+async function fixtureLayoutDiagnostics(): Promise<Record<string, boolean | string | null>> {
+  try {
+    const settings = JSON.parse(await fs.readFile(fixtureGlobalSettingsFile(), "utf8")) as {
+      ui?: { layout?: { terminalOpen?: unknown; terminalSplitOpen?: unknown; terminalMaximized?: unknown; terminalDock?: unknown; toolPanelSurface?: unknown } };
+    };
+    const layout = settings.ui?.layout;
+    return {
+      terminalOpen: typeof layout?.terminalOpen === "boolean" ? layout.terminalOpen : null,
+      terminalSplitOpen: typeof layout?.terminalSplitOpen === "boolean" ? layout.terminalSplitOpen : null,
+      terminalMaximized: typeof layout?.terminalMaximized === "boolean" ? layout.terminalMaximized : null,
+      terminalDock: layout?.terminalDock === "bottom" || layout?.terminalDock === "right" ? layout.terminalDock : null,
+      toolPanelSurface: layout?.toolPanelSurface === "terminal" || layout?.toolPanelSurface === "graph" ? layout.toolPanelSurface : null,
+    };
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    return { errorCode: error instanceof SyntaxError ? "invalid_json"
+      : typeof code === "string" && ["ENOENT", "EACCES", "EPERM", "EIO"].includes(code) ? code : "read_failed" };
+  }
+}
+
 async function probe(request: NativeShellProbeRequest, message: string): Promise<NativeShellProbeResult> {
   const result = await browser.executeAsync(pollNativeShell, request, POLL_TIMEOUT_MS) as NativeShellProbeResult;
-  if (!result.ready) console.error("native_shell_readiness_failure", JSON.stringify(result.diagnostics));
+  if (!result.ready) console.error("native_shell_readiness_failure", JSON.stringify({
+    ...result.diagnostics, fixtureLayout: await fixtureLayoutDiagnostics(),
+  }));
   if (!result.ready && result.sessionIds.length > 0 && !result.diagnostics.bridgePresent) {
     throw new Error("native terminal text bridge is absent; run pnpm build:frontend:native-e2e before the native suite");
   }
   assert.ok(result.ready, message);
   return result;
+}
+
+/** Requires the original left PTY and one distinct right PTY, both physically
+ * visible and painted. A command is never replayed by this readiness wait. */
+export async function waitForShellSplitReady(firstId: string): Promise<boolean> {
+  const result = await probe({ phase: "split", sessionId: firstId }, "both real split PTYs must be ready before restart");
+  return result.ready;
 }
 
 export async function openShellSession(): Promise<string> {

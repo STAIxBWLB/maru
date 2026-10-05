@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import type {} from "webdriverio";
 
-import { openShellSession } from "../helpers/shellSession";
+import { openShellSession, waitForShellSplitReady } from "../helpers/shellSession";
 import { verifyNativeProfileIsolation } from "../rootHooks";
 
 const POLL_TIMEOUT_MS = 20_000;
@@ -9,18 +9,10 @@ const POLL_TIMEOUT_MS = 20_000;
 describe("native restored terminal topology", () => {
   it("retains one spec profile across restart and binds the explicit shell after restored split autolaunch", async () => {
     await verifyNativeProfileIsolation("retained");
-    await openShellSession();
-    await browser.execute(() => window.__MARU_NATIVE_E2E__?.menuCommand("terminal.split"));
-    const splitReady = await browser.executeAsync((timeout: number, done: (ready: boolean) => void) => {
-      const end = Date.now() + timeout;
-      const tick = () => {
-        const views = Array.from(document.querySelectorAll<HTMLElement>(".terminal-body.split .terminal-instance.active .native-terminal-view[data-session-id]"));
-        if (views.length === 2 && views.every((view) => window.__MARU_NATIVE_E2E__?.terminalText(view.dataset.sessionId!)?.trim())) { done(true); return; }
-        if (Date.now() >= end) { done(false); return; }
-        setTimeout(tick, 100);
-      };
-      tick();
-    }, POLL_TIMEOUT_MS);
+    const firstId = await openShellSession();
+    const splitDispatched = await browser.execute(() => window.__MARU_NATIVE_E2E__?.menuCommand("terminal.split"));
+    assert.equal(splitDispatched, true, "the split command must be dispatched exactly once to the registered handler");
+    const splitReady = await waitForShellSplitReady(firstId);
     assert.ok(splitReady, "both real split PTYs must be ready before restart");
     const saved = await browser.execute(() => window.localStorage.getItem("maru:terminal:v1"));
     assert.ok(saved, "terminal metadata must be persisted for the restored-state regression");

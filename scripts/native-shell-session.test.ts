@@ -12,8 +12,8 @@ const declaration = ast.statements.find((node) => ts.isFunctionDeclaration(node)
 const code = ts.transpileModule(declaration.getText(ast), { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } }).outputText;
 const exported: Record<string, unknown> = {};
 new Function("exports", code)(exported);
-type Request = { phase: "open" | "launch" | "select" | "prompt" | "focus"; splitExpected?: boolean; requireAutoSession?: boolean; priorIds?: string[]; sessionId?: string };
-type Result = { ready: boolean; sessionId: string | null; sessionIds: string[]; restoredTabsPresent: boolean; diagnostics: { views: Array<{ id: string; visible: boolean; focused: boolean }>; activeElement: unknown } };
+type Request = { phase: "open" | "launch" | "select" | "prompt" | "focus" | "split"; splitExpected?: boolean; requireAutoSession?: boolean; priorIds?: string[]; sessionId?: string };
+type Result = { ready: boolean; sessionId: string | null; sessionIds: string[]; restoredTabsPresent: boolean; diagnostics: { views: Array<{ id: string; visible: boolean; focused: boolean; promptReady: boolean }>; bodies: Array<{ split: boolean; visible: boolean }>; activeElement: unknown } };
 const poll = exported.pollNativeShell as (request: Request, timeout: number, done: (result: Result) => void) => void;
 let text: Map<string, string>;
 let launch = vi.fn<() => void>();
@@ -166,4 +166,59 @@ describe("native explicit shell attribution", () => {
     expect(pending.mock.calls[0][0].sessionIds).toEqual(["ordinary-automatic"]);
     expect(launch).toHaveBeenCalledOnce();
   });
+
+  it("requires one visible split body with distinct painted left/right IDs and preserves the selected left", () => {
+    document.querySelector(".terminal-body")!.classList.add("split");
+    view("original-left", "left", false); view("right", "right", true);
+    text.set("original-left", "$ "); text.set("right", "$ ");
+    const ready = probe({ phase: "split", sessionId: "original-left" });
+    expect(ready.mock.calls[0][0].ready).toBe(true);
+    expect(ready.mock.calls[0][0].diagnostics.bodies).toEqual([expect.objectContaining({ split: true, visible: true })]);
+    expect(ready.mock.calls[0][0].diagnostics.views.every((item) => item.promptReady)).toBe(true);
+  });
+
+  it("excludes hidden ACTIVE keep-alive views, but never excludes a visible unpainted pane to make the count pass", () => {
+    document.querySelector(".terminal-body")!.classList.add("split");
+    view("left", "left", false); const right = view("right", "right", true);
+    const hidden = view("hidden-old-right", "right", false); hidden.style.visibility = "hidden";
+    text.set("left", "$ "); text.set("right", "$ ");
+    expect(probe({ phase: "split", sessionId: "left" }).mock.calls[0][0].ready).toBe(true);
+    const unpainted = view("visible-unpainted", "right", false);
+    const tooMany = probe({ phase: "split", sessionId: "left" }); vi.advanceTimersByTime(20_000);
+    expect(tooMany.mock.calls[0][0].ready).toBe(false);
+    expect(tooMany.mock.calls[0][0].diagnostics.views.find((item) => item.id === "visible-unpainted"))
+      .toMatchObject({ visible: true, promptReady: false });
+    hide(unpainted); text.set("right", "");
+    const noPrompt = probe({ phase: "split", sessionId: "left" }); vi.advanceTimersByTime(20_000);
+    expect(noPrompt.mock.calls[0][0].ready).toBe(false);
+    expect(right.classList.contains("active")).toBe(true);
+  });
+
+  it("reports a split rollback without retrying any command", () => {
+    view("left", "left", true); text.set("left", "$ ");
+    const rolledBack = probe({ phase: "split", sessionId: "left" }); vi.advanceTimersByTime(20_000);
+    expect(rolledBack.mock.calls[0][0].ready).toBe(false);
+    expect(rolledBack.mock.calls[0][0].diagnostics.bodies).toEqual([expect.objectContaining({ split: false, visible: true })]);
+    expect(launch).not.toHaveBeenCalled();
+  });
+
+  it("refuses a replacement left ID and identical IDs even when both panes have real prompts", () => {
+    document.querySelector(".terminal-body")!.classList.add("split");
+    view("replacement-left", "left", false); const right = view("right", "right", true);
+    text.set("replacement-left", "$ "); text.set("right", "$ ");
+    const replaced = probe({ phase: "split", sessionId: "original-left" }); vi.advanceTimersByTime(20_000);
+    expect(replaced.mock.calls[0][0].ready).toBe(false);
+    right.querySelector<HTMLElement>(".native-terminal-view")!.dataset.sessionId = "replacement-left";
+    const duplicate = probe({ phase: "split", sessionId: "replacement-left" }); vi.advanceTimersByTime(20_000);
+    expect(duplicate.mock.calls[0][0].ready).toBe(false);
+  });
+
+  it("rejects multiple visible split bodies rather than choosing one arbitrarily", () => {
+    document.querySelector(".terminal-body")!.classList.add("split");
+    view("left", "left", false); view("right", "right", true); text.set("left", "$ "); text.set("right", "$ ");
+    const other = document.createElement("div"); other.className = "terminal-body split"; document.querySelector(".terminal-workspace")!.append(other);
+    const ambiguous = probe({ phase: "split", sessionId: "left" }); vi.advanceTimersByTime(20_000);
+    expect(ambiguous.mock.calls[0][0].ready).toBe(false);
+  });
+
 });

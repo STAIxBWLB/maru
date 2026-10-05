@@ -54,6 +54,10 @@ before an explicit Shell launch, including restored split panes. They bind only
 one new physically visible, active and focused session and retain that identity
 through prompt/focus assertions. Failure diagnostics include pane/session IDs,
 rectangles, visibility and activeElement, without input or terminal contents.
+The restoration case requires one visible split body, one left/right pane with
+distinct IDs and nonempty real prompts, and the original left session identity.
+Split failures also report body visibility, prompt-readiness booleans and only
+the fixture's terminal layout flags; they do not replay the menu command.
 Readiness conditions replace session-set quiet-period guesses; existing timeout
 and text/paint assertions remain intact. Issue #388 requires five consecutive
 hosted native runs at the accepted fix, not retry-to-green closure.
