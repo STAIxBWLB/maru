@@ -58,7 +58,6 @@ export interface ArchitecturePaneProps {
  *  name the write would reject. */
 function sanitizeDiagramName(raw: string): string {
   const cleaned = raw
-    // eslint-disable-next-line no-control-regex
     .replace(/[\\/:*?"<>|\u0000-\u001f]/g, " ")
     .replace(/\s+/g, " ")
     .trim()
