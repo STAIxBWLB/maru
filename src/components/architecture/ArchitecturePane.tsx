@@ -131,6 +131,8 @@ export function ArchitecturePane({ workspacePath, copyWorkspacePath, onRevealInF
     };
   }, [selectedPath, workspacePath]);
 
+  const canOpenDiagram = Boolean(onOpenDiagram);
+
   // Issue #433 handoff probe: a sibling typed spec enables "copy to Diagram".
   // The guarded backend read re-proves listing membership and applies its own
   // containment/symlink/size/schema checks, so a missing or unsupported spec
@@ -138,7 +140,7 @@ export function ArchitecturePane({ workspacePath, copyWorkspacePath, onRevealInF
   useEffect(() => {
     setSiblingSpec(null);
     setCopyState(null);
-    if (!workspacePath || !selectedPath || !onOpenDiagram) return;
+    if (!workspacePath || !selectedPath || !canOpenDiagram) return;
     let cancelled = false;
     architectureReadSiblingSpec(workspacePath, selectedPath).then(
       (spec) => {
@@ -151,7 +153,7 @@ export function ArchitecturePane({ workspacePath, copyWorkspacePath, onRevealInF
     return () => {
       cancelled = true;
     };
-  }, [selectedPath, workspacePath, onOpenDiagram]);
+  }, [selectedPath, workspacePath, canOpenDiagram]);
 
   const destinationWorkspace = copyWorkspacePath === undefined ? workspacePath : copyWorkspacePath;
   const handleCopyToDiagram = useCallback(async () => {

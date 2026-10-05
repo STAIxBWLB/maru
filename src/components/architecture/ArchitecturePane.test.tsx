@@ -227,6 +227,21 @@ describe("ArchitecturePane copy-to-Diagram handoff (issue #433)", () => {
     expect(opened).toEqual(["Alpha Service-3"]);
   });
 
+  it("keeps copy errors when the shell supplies a new equivalent callback", async () => {
+    mocks.writeDiagram.mockRejectedValueOnce(new Error("copy write failed"));
+    await render(() => {});
+    const readsBefore = mocks.architectureReadSiblingSpec.mock.calls.length;
+    await act(async () => container.querySelector<HTMLButtonElement>('[data-testid="architecture-copy-to-diagram"]')!.click());
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain("copy write failed");
+    await act(async () => root!.render(
+      <LocaleContext.Provider value={{ locale: "en", setLocale: () => {}, t }}>
+        <ArchitecturePane workspacePath="/work" onOpenDiagram={() => {}} />
+      </LocaleContext.Provider>,
+    ));
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain("copy write failed");
+    expect(mocks.architectureReadSiblingSpec.mock.calls.length).toBe(readsBefore);
+  });
+
   it("hides the action when the sibling spec is missing or unsupported", async () => {
     mocks.architectureReadSiblingSpec.mockRejectedValue(new Error("Sibling spec not found"));
     const opened: string[] = [];

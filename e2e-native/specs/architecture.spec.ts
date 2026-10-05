@@ -54,6 +54,33 @@ async function waitForProbe(count: number): Promise<Probe> {
   return (await probes())[count - 1];
 }
 
+async function logHandoffDiagnostics(stage: string): Promise<void> {
+  const dom = await browser.execute(() => {
+    const copy = document.querySelector<HTMLButtonElement>('[data-testid="architecture-copy-to-diagram"]');
+    return {
+      diagramFlag: window.localStorage.getItem("maru:diagram:enabled"),
+      mode: {
+        diagram: Boolean(document.querySelector(".diagram-mode")),
+        architecture: Boolean(document.querySelector(".architecture-pane")),
+        mainClass: document.querySelector("main")?.className ?? null,
+      },
+      rail: Array.from(document.querySelectorAll(".activity-rail .activity-button"))
+        .map((button) => ({ label: button.getAttribute("aria-label"), selected: button.classList.contains("active") })),
+      copyButton: copy ? { disabled: copy.disabled, outerHTML: copy.outerHTML.slice(0, 1000) } : null,
+      iframeSrc: document.querySelector<HTMLIFrameElement>(".architecture-frame")?.src ?? null,
+      documentPathLabels: Array.from(document.querySelectorAll('[data-tree-target-path], .doc-tab[title], [role="tab"][title]'))
+        .slice(0, 5).map((item) => item.getAttribute("data-tree-target-path") ?? item.getAttribute("title")),
+      nodeCount: document.querySelectorAll(".maru-diagram-node").length,
+      alerts: Array.from(document.querySelectorAll('[role="alert"]'))
+        .slice(0, 5).map((alert) => (alert.textContent ?? "").slice(0, 400)),
+      bodyText: (document.body.textContent ?? "").slice(0, 1600),
+    };
+  }).catch((diagnosticError: unknown) => ({ diagnosticError: String(diagnosticError) }));
+  const files = await fs.readdir(path.join(workspace(), "diagrams"))
+    .catch((diagnosticError: unknown) => ({ diagnosticError: String(diagnosticError) }));
+  console.error("native_architecture_handoff_diagnostics", JSON.stringify({ stage, dom, files }));
+}
+
 describe("native 설계도 mode", () => {
   // Seeded once for this file's single test: wdio's beforeTest reset wipes
   // the workspace from the second test on, so a new test must seed again.
@@ -130,27 +157,13 @@ describe("native 설계도 mode", () => {
     const copy = await browser.$('[data-testid="architecture-copy-to-diagram"]');
     await copy.waitForDisplayed({ timeout: 30_000 });
     await copy.click();
+    await logHandoffDiagnostics("immediate");
     try {
       await browser.waitUntil(async () => (await browser.$$(".maru-diagram-node").length) === 1, {
         timeout: 30_000, timeoutMsg: "cold gallery handoff must open the saved copy",
       });
     } catch (error) {
-      const dom = await browser.execute(() => ({
-        mode: {
-          diagram: Boolean(document.querySelector(".diagram-mode")),
-          architecture: Boolean(document.querySelector(".architecture-pane")),
-          mainClass: document.querySelector("main")?.className ?? null,
-        },
-        selectedRail: Array.from(document.querySelectorAll(".activity-rail .activity-button.active"))
-          .map((button) => button.getAttribute("aria-label")),
-        nodeCount: document.querySelectorAll(".maru-diagram-node").length,
-        alerts: Array.from(document.querySelectorAll('[role="alert"]'))
-          .map((alert) => (alert.textContent ?? "").slice(0, 400)),
-        bodyText: (document.body.textContent ?? "").slice(0, 1200),
-      })).catch((diagnosticError: unknown) => ({ diagnosticError: String(diagnosticError) }));
-      const files = await fs.readdir(path.join(workspace(), "diagrams"))
-        .catch((diagnosticError: unknown) => ({ diagnosticError: String(diagnosticError) }));
-      console.error("native_architecture_handoff_diagnostics", JSON.stringify({ dom, files }));
+      await logHandoffDiagnostics("wait-failed");
       throw error;
     }
     assert.match(await (await browser.$(".maru-diagram-node")).getText(), /한글 서버/);
