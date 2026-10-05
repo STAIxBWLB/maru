@@ -1,3 +1,4 @@
+import { validatePortablePath } from "../../../sidecars/archify/renderers/shared/portable-path.mjs";
 /**
  * Strict validation for AI-generated diagram candidates (issue #433 P1).
  *
@@ -325,10 +326,11 @@ export function validateArchifySpecPreCheck(
     });
     return { ok: false, diagnostics };
   }
-  if (serialized.length > SEMANTIC_SPEC_MAX_BYTES) {
+  const bytes = new TextEncoder().encode(serialized).length;
+  if (bytes > SEMANTIC_SPEC_MAX_BYTES) {
     diagnostics.push({
       key: "diagram.validation.specBudget",
-      params: { bytes: serialized.length, maxBytes: SEMANTIC_SPEC_MAX_BYTES },
+      params: { bytes, maxBytes: SEMANTIC_SPEC_MAX_BYTES },
     });
   }
 
@@ -346,12 +348,15 @@ export function validateArchifySpecPreCheck(
     });
   }
   const output = isRecord(meta) ? meta.output : undefined;
-  if (
-    typeof output !== "string" ||
-    !output.endsWith(".html") ||
-    /[/\\:]/.test(output) ||
-    output.includes("..")
-  ) {
+  let outputOk = typeof output === "string" && /[.]html$/i.test(output);
+  if (outputOk) {
+    try {
+      validatePortablePath(output as string, { profile: "output" });
+    } catch {
+      outputOk = false;
+    }
+  }
+  if (!outputOk) {
     diagnostics.push({
       key: "diagram.validation.specMeta",
       params: { field: "meta.output" },

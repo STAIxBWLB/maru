@@ -177,3 +177,14 @@ Viewport culling (`visibleSubset`) + a position-keyed edge-route Map cache
   pattern presets, report assets.
 - e2e: `e2e/diagram.spec.ts` (flag visibility, ko/en labels, save/reload,
   templates, Mermaid, export dialog, no `localhost:5500` / Google Fonts requests).
+
+## Archify engine pin
+
+The renderer is vendored under `sidecars/archify/`; `PIN.json` records the
+upstream revision and SHA-256 manifest. Run `make check-archify-pin` to verify
+integrity. To refresh, fetch an explicitly reviewed upstream tag, replace only
+the vendored paths listed by the manifest, retain the MIT license and third-party
+notices, and regenerate the manifest from those exact upstream bytes. Update
+`ARCHIFY_ENGINE` in `src/lib/diagram/archifyCodec.ts` to the same version and
+review the upstream diff before running the full verification gate. Never
+refresh from a mutable installed skill directory.

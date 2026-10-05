@@ -58,12 +58,10 @@ function storedPayload(body: string): string {
   return body.endsWith("\n") ? body : `${body}\n`;
 }
 
-/** Revision of a diagram body as the backend computes it: sha256 hex of the
- *  stored payload (the Rust save appends a trailing newline before writing),
- *  matching `document::revision_for` over the file bytes. Pass the loaded or
- *  last-saved body, not the normalized form. */
-export async function diagramRevision(body: string): Promise<string> {
-  return sha256Hex(storedPayload(body));
+/** Revision of the exact loaded file bytes. Set `afterWrite` only for a
+ * payload just saved, since Rust appends a trailing newline before writing. */
+export async function diagramRevision(body: string, afterWrite = false): Promise<string> {
+  return sha256Hex(afterWrite ? storedPayload(body) : body);
 }
 
 export async function diagramSaveDocument(
@@ -80,7 +78,7 @@ export async function diagramSaveDocument(
       const raw = storage.getItem(key);
       const parsed = raw ? (JSON.parse(raw) as { body?: unknown }) : null;
       const current = typeof parsed?.body === "string" ? parsed.body : null;
-      const actual = current === null ? null : await sha256Hex(storedPayload(current));
+      const actual = current === null ? null : await sha256Hex(current);
       if (actual !== expectedRevision) {
         throw new IpcError({
           code: "document_conflict",
@@ -91,7 +89,7 @@ export async function diagramSaveDocument(
         });
       }
     }
-    storage.setItem(key, JSON.stringify({ body, modifiedAt: Date.now() }));
+    storage.setItem(key, JSON.stringify({ body: storedPayload(body), modifiedAt: Date.now() }));
     return;
   }
   try {

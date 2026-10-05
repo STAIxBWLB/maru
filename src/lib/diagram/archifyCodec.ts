@@ -1,3 +1,4 @@
+import { architecture, workflow } from "../../../sidecars/archify/renderers/shared/generated-validators.mjs";
 /**
  * Archify interchange codec (issue #433).
  *
@@ -223,6 +224,16 @@ export function parseArchifySpec(
     raw,
     opts,
   );
+  const validator = diagramType === "architecture" ? architecture : workflow;
+  if (!validator(dataset.spec)) {
+    return {
+      ok: false,
+      diagnostics: (validator.errors ?? []).map((error) => ({
+        key: "diagram.validation.specMeta",
+        params: { field: error.instancePath || "spec" },
+      })),
+    };
+  }
   return { ok: true, result: { dataset, diagnostics } };
 }
 

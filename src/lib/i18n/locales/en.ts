@@ -3367,7 +3367,7 @@ export const en: Record<string, string> = {
   "diagram.error.save": "Save failed: {message}",
   "diagram.error.saveConflict": "The file changed on disk, so the save was aborted. Your edits are still here — save under a new name or reload the file.",
   "diagram.error.load": "Load failed: {message}",
-  "diagram.error.backup": "v7 backup failed — save aborted to protect the original. Try again: {message}",
+  "diagram.error.backup": "Legacy diagram backup failed — save aborted to protect the original. Try again: {message}",
   "diagram.error.unsupportedVersion": "Unsupported diagram version (v{version}; this build supports up to v{supported})",
 
   "diagram.ribbon.tab.file": "File",

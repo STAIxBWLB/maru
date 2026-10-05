@@ -83,6 +83,17 @@ describe("parseArchifySpec", () => {
     expect(outcome.result.diagnostics).toEqual([]);
   });
 
+  it("rejects unsupported schema versions and missing or malformed components", () => {
+    for (const spec of [
+      { ...ARCH_SPEC, schema_version: 2 },
+      { ...ARCH_SPEC, components: undefined },
+      { ...ARCH_SPEC, components: [{ id: "web" }] },
+    ]) expect(parseArchifySpec(JSON.stringify(spec)).ok).toBe(false);
+    expect(parseArchifySpec(JSON.stringify({
+      ...ARCH_SPEC, meta: { title: "Shop", output: "docs/SHOP.HTML" },
+    })).ok).toBe(true);
+  });
+
   it("refuses unknown diagram types, broken meta, and invalid JSON", () => {
     const badType = parseArchifySpec(JSON.stringify({ ...ARCH_SPEC, diagram_type: "sequence" }));
     expect(badType.ok).toBe(false);

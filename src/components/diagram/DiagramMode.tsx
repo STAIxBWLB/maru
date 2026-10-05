@@ -1047,7 +1047,7 @@ function DiagramShell({
         setDiagramSession({
           migratedFromLegacy: false,
           legacySourceVersion: null,
-          fileRevision: await diagramRevision(writtenBody),
+          fileRevision: await diagramRevision(writtenBody, true),
         }, sessionKey);
         // A successful manual save satisfies the pending auto-snapshot.
         snapshotSchedRef.current?.markClean();

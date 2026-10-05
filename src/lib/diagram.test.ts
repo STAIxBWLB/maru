@@ -142,7 +142,7 @@ describe("diagram api wrappers", () => {
     const body = "{\"docTitle\":\"Demo\"}";
     await diagramSaveDocument("/w", "demo", body);
     // A matching revision saves.
-    await diagramSaveDocument("/w", "demo", "{\"docTitle\":\"Next\"}", await diagramRevision(body));
+    await diagramSaveDocument("/w", "demo", "{\"docTitle\":\"Next\"}", await diagramRevision(body, true));
     expect(await diagramLoadDocument("/w", "demo")).toContain("Next");
     // A stale revision conflicts and preserves the stored body.
     await expect(
