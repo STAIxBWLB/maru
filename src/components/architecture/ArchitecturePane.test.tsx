@@ -21,7 +21,8 @@ vi.mock("../../lib/diagram/persistence", () => ({
 
 import { IpcError } from "../../lib/ipcError";
 import { ArchitecturePane } from "./ArchitecturePane";
-import { LocaleContext } from "../../lib/i18n";
+import { LocaleContext, t as translate } from "../../lib/i18n";
+import "../../lib/i18n/testing";
 
 const t = (key: string) => key;
 const blueprint = (group: "dev" | "sites", repo: string, slug: string, title: string) => ({
@@ -169,11 +170,15 @@ describe("ArchitecturePane copy-to-Diagram handoff (issue #433)", () => {
     container.remove();
   });
 
-  async function render(onOpenDiagram?: (name: string) => void, copyWorkspacePath?: string): Promise<void> {
+  async function render(
+    onOpenDiagram?: (name: string) => void,
+    copyWorkspacePath?: string,
+    translator: (key: string, vars?: Record<string, string | number>) => string = t,
+  ): Promise<void> {
     root = createRoot(container);
     await act(async () => {
       root!.render(
-        <LocaleContext.Provider value={{ locale: "en", setLocale: () => {}, t }}>
+        <LocaleContext.Provider value={{ locale: "en", setLocale: () => {}, t: translator }}>
           <ArchitecturePane workspacePath="/work" copyWorkspacePath={copyWorkspacePath} onOpenDiagram={onOpenDiagram} />
         </LocaleContext.Provider>,
       );
@@ -229,12 +234,13 @@ describe("ArchitecturePane copy-to-Diagram handoff (issue #433)", () => {
 
   it("keeps copy errors when the shell supplies a new equivalent callback", async () => {
     mocks.writeDiagram.mockRejectedValueOnce(new Error("copy write failed"));
-    await render(() => {});
+    const english = (key: string, vars?: Record<string, string | number>) => translate("en", key, vars);
+    await render(() => {}, undefined, english);
     const readsBefore = mocks.architectureReadSiblingSpec.mock.calls.length;
     await act(async () => container.querySelector<HTMLButtonElement>('[data-testid="architecture-copy-to-diagram"]')!.click());
     expect(container.querySelector('[role="alert"]')?.textContent).toContain("copy write failed");
     await act(async () => root!.render(
-      <LocaleContext.Provider value={{ locale: "en", setLocale: () => {}, t }}>
+      <LocaleContext.Provider value={{ locale: "en", setLocale: () => {}, t: english }}>
         <ArchitecturePane workspacePath="/work" onOpenDiagram={() => {}} />
       </LocaleContext.Provider>,
     ));
