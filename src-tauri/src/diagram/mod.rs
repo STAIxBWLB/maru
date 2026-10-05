@@ -358,17 +358,24 @@ fn diagram_export_blob_to_path_in_transaction(
 }
 
 // ---------------------------------------------------------------------------
-// One-time v7 backup (Report Pattern Studio schema v8)
+// One-time legacy-schema backup
 // ---------------------------------------------------------------------------
 
 const BACKUP_DIR: &str = ".maru/diagrams/backups";
 
 /// Copy `<workspace>/diagrams/<name>.cmd.json` to
-/// `<workspace>/.maru/diagrams/backups/<name>-v7-<unix-ts>.cmd.json` before the
-/// first v8 save overwrites a v7 document. The copy goes through a temp file +
-/// rename so a crash mid-copy cannot leave a truncated backup.
-pub fn diagram_backup_document(workspace: String, name: String) -> Result<String, String> {
+/// `<workspace>/.maru/diagrams/backups/<name>-v<source_version>-<unix-ts>.cmd.json`
+/// before the first save at the current schema overwrites a legacy document.
+/// `source_version` labels the backup and defaults to 7, the first legacy
+/// schema this path protected. The copy goes through a temp file + rename so
+/// a crash mid-copy cannot leave a truncated backup.
+pub fn diagram_backup_document(
+    workspace: String,
+    name: String,
+    source_version: Option<u32>,
+) -> Result<String, String> {
     let trimmed = validate_name(&name)?;
+    let label = source_version.unwrap_or(7);
     let src = diagram_file_path(&workspace, trimmed)?;
     if !src.is_file() {
         return Err(format!("Diagram not found: {trimmed}"));
@@ -378,16 +385,16 @@ pub fn diagram_backup_document(workspace: String, name: String) -> Result<String
         .duration_since(UNIX_EPOCH)
         .map_err(|err| format!("System clock error: {err}"))?
         .as_millis();
-    let dest = root.join(format!("{trimmed}-v7-{ts}{DIAGRAM_EXT}"));
+    let dest = root.join(format!("{trimmed}-v{label}-{ts}{DIAGRAM_EXT}"));
     ensure_within(&root, &dest)?;
-    let tmp = root.join(format!(".{trimmed}-v7-{ts}.tmp"));
+    let tmp = root.join(format!(".{trimmed}-v{label}-{ts}.tmp"));
     ensure_within(&root, &tmp)?;
     let workspace_root = resolve_inside_vault(&workspace, ".")?;
     let request = PathTransactionRequest::new(vec![src.clone(), dest.clone(), tmp.clone()])?
         .require_parent(&workspace_root)?
         .with_workspace_registry()?;
     with_path_transactions(request, |lease| {
-        diagram_backup_document_in_transaction(workspace, name, ts, lease)
+        diagram_backup_document_in_transaction(workspace, name, ts, label, lease)
     })
 }
 
@@ -395,6 +402,7 @@ fn diagram_backup_document_in_transaction(
     workspace: String,
     name: String,
     ts: u128,
+    label: u32,
     lease: &PathTransactionLease,
 ) -> Result<String, String> {
     lease.ensure_workspace_registry()?;
@@ -406,9 +414,9 @@ fn diagram_backup_document_in_transaction(
     lease.ensure_covered(vec![src.clone()])?;
     assert_maru_can_write(&workspace, WorkspaceWriteAction::Create)?;
     let root = resolve_inside_vault(&workspace, BACKUP_DIR)?;
-    let dest = root.join(format!("{trimmed}-v7-{ts}{DIAGRAM_EXT}"));
+    let dest = root.join(format!("{trimmed}-v{label}-{ts}{DIAGRAM_EXT}"));
     ensure_within(&root, &dest)?;
-    let tmp = root.join(format!(".{trimmed}-v7-{ts}.tmp"));
+    let tmp = root.join(format!(".{trimmed}-v{label}-{ts}.tmp"));
     ensure_within(&root, &tmp)?;
     lease.ensure_covered(vec![dest.clone(), tmp.clone()])?;
     lease.before_effect()?;
@@ -895,6 +903,7 @@ pub mod ipc {
     pub async fn diagram_backup_document(
         workspace: String,
         name: String,
+        source_version: Option<u32>,
     ) -> Result<String, String> {
         tauri::async_runtime::spawn_blocking(move || {
             #[cfg(test)]
@@ -902,7 +911,7 @@ pub mod ipc {
                 &[PathBuf::from(&workspace)],
                 "worker:diagram_backup_document",
             );
-            super::diagram_backup_document(workspace, name)
+            super::diagram_backup_document(workspace, name, source_version)
         })
         .await
         .map_err(|err| format!("diagram_backup_document_task_failed: {err}"))?
@@ -1242,7 +1251,7 @@ mod tests {
         let (_tmp, work) = setup_workspace();
         let body = r#"{"v":7,"docTitle":"legacy","nodes":[],"edges":[],"layers":[]}"#;
         diagram_save_document(work.clone(), "legacy".into(), body.into()).unwrap();
-        let backup = diagram_backup_document(work.clone(), "legacy".into()).unwrap();
+        let backup = diagram_backup_document(work.clone(), "legacy".into(), None).unwrap();
         assert!(
             backup.contains(".maru/diagrams/backups/")
                 || backup.contains(".maru\\diagrams\\backups\\")
@@ -1257,15 +1266,25 @@ mod tests {
     }
 
     #[test]
+    fn backup_labels_source_version() {
+        let (_tmp, work) = setup_workspace();
+        let body = r#"{"v":8,"docTitle":"legacy8","nodes":[],"edges":[],"layers":[]}"#;
+        diagram_save_document(work.clone(), "legacy8".into(), body.into()).unwrap();
+        let backup = diagram_backup_document(work.clone(), "legacy8".into(), Some(8)).unwrap();
+        assert!(backup.contains("legacy8-v8-"));
+        assert!(fs::read_to_string(&backup).unwrap().contains("\"v\":8"));
+    }
+
+    #[test]
     fn backup_rejects_traversal_name() {
         let (_tmp, work) = setup_workspace();
-        assert!(diagram_backup_document(work, "../escape".into()).is_err());
+        assert!(diagram_backup_document(work, "../escape".into(), None).is_err());
     }
 
     #[test]
     fn backup_errors_when_source_missing() {
         let (_tmp, work) = setup_workspace();
-        let err = diagram_backup_document(work, "ghost".into()).unwrap_err();
+        let err = diagram_backup_document(work, "ghost".into(), None).unwrap_err();
         assert!(err.contains("Diagram not found"));
     }
 
@@ -1515,7 +1534,7 @@ mod phase08_20 {
         );
         boundary(work.clone().into(), "diagram_backup_document", {
             let work = work.clone();
-            ipc::diagram_backup_document(work, "demo".into())
+            ipc::diagram_backup_document(work, "demo".into(), None)
         });
         boundary(work.clone().into(), "diagram_save_snapshot", {
             let work = work.clone();
@@ -1607,7 +1626,7 @@ mod phase08_20 {
         .unwrap();
         assert_eq!(restored, "{\"v\":8}\n");
 
-        let backup = run(ipc::diagram_backup_document(work.clone(), "demo".into())).unwrap();
+        let backup = run(ipc::diagram_backup_document(work.clone(), "demo".into(), None)).unwrap();
         assert!(backup.contains("demo-v7-"));
         assert!(backup.ends_with(DIAGRAM_EXT));
         assert!(fs::read_to_string(&backup).unwrap().contains("\"v\":8"));

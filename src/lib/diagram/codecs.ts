@@ -19,7 +19,7 @@
  */
 
 import { rasterise } from "./export";
-import { docToMermaid, mermaidToDoc } from "./mermaid";
+import { docToMermaid, mermaidToDoc, mermaidToDocDetailed } from "./mermaid";
 import { mkNode } from "./nodeKinds";
 import { deserializeDoc, serializeDoc } from "./persistence";
 import { renderDocToSvg } from "./renderSvg";
@@ -828,10 +828,11 @@ const mermaidCodec: DiagramCodec = {
   dataKind: "doc",
   exportKind: "mmd",
   parse(bytes) {
+    const { doc, diagnostics } = mermaidToDocDetailed(toText(bytes));
     return {
-      result: { kind: "doc", doc: mermaidToDoc(toText(bytes)) },
+      result: { kind: "doc", doc },
       fidelity: "structural",
-      warnings: [{ key: "diagram.codec.warn.mermaidImport" }],
+      warnings: [{ key: "diagram.codec.warn.mermaidImport" }, ...diagnostics],
       ignoredFields: ["positions", "styles"],
     };
   },

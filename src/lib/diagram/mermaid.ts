@@ -11,7 +11,10 @@
  *     `A[(...)]`, `A>...]`
  *   - Edges: `-->`, `-.->`, `---`, `==>`, optional `|label|`
  *   - Inline `Id[Label]` and standalone `Id` references.
- * Subgraphs, classDef, click handlers, and style overrides are ignored.
+ * Subgraphs, classDef, click handlers, linkStyle/style overrides, and
+ * non-flowchart diagram types are not supported — and since issue #433 they
+ * are no longer dropped silently: `mermaidToDocDetailed` reports each as a
+ * structured diagnostic the import dialog surfaces.
  */
 
 import { defaultEdge } from "./edgeRouting";
@@ -23,6 +26,13 @@ import {
   type DiagramNode,
   type NodeKind,
 } from "./types";
+
+/** Structured import diagnostic; shape-compatible with `CodecWarning`. */
+export interface MermaidDiagnostic {
+  /** i18n key under `diagram.mermaid.*`. */
+  key: string;
+  params?: Record<string, string | number>;
+}
 
 // ---------------------------------------------------------------------------
 // Export
@@ -181,13 +191,95 @@ function parseEdgeArrow(text: string): {
 }
 
 export function mermaidToDoc(text: string, now: () => number = Date.now): DiagramDoc {
+  return mermaidToDocDetailed(text, now).doc;
+}
+
+/**
+ * Diagram-type headers the flowchart subset does not support. Detected on the
+ * first meaningful line and diagnosed; the parse then continues best-effort
+ * so any flowchart-shaped lines still import.
+ */
+const UNSUPPORTED_DIAGRAM_HEADERS = [
+  "sequenceDiagram",
+  "stateDiagram-v2",
+  "stateDiagram",
+  "classDiagram",
+  "erDiagram",
+  "gantt",
+  "pie",
+  "journey",
+  "gitGraph",
+  "mindmap",
+  "timeline",
+  "quadrantChart",
+  "xychart-beta",
+  "sankey-beta",
+  "block-beta",
+  "packet-beta",
+  "architecture-beta",
+  "C4Context",
+  "C4Container",
+  "C4Component",
+  "C4Deployment",
+  "requirementDiagram",
+];
+
+/** Line-level constructs skipped by the parser, now reported (issue #433). */
+const UNSUPPORTED_CONSTRUCTS: Array<{ match: (line: string) => boolean; name: string }> = [
+  { match: (line) => line.startsWith("subgraph"), name: "subgraph" },
+  { match: (line) => line === "end", name: "end" },
+  { match: (line) => line.startsWith("classDef"), name: "classDef" },
+  { match: (line) => line.startsWith("class "), name: "class" },
+  { match: (line) => line.startsWith("click "), name: "click" },
+  { match: (line) => line.startsWith("style "), name: "style" },
+  { match: (line) => line.startsWith("linkStyle"), name: "linkStyle" },
+];
+
+const HEADER_DIRECTION = /^(?:flowchart|graph)\s+(TD|TB|BT|LR|RL)\b/;
+
+export function mermaidToDocDetailed(
+  text: string,
+  now: () => number = Date.now,
+): { doc: DiagramDoc; diagnostics: MermaidDiagnostic[] } {
   const nodes = new Map<string, ImportedNode>();
   const edges: Array<{ from: string; to: string; arrowEnd: DiagramEdge["arrowEnd"]; dash: DiagramEdge["dash"]; label?: string }> = [];
+  const diagnostics: MermaidDiagnostic[] = [];
+  const reported = new Set<string>();
+  const report = (diagnostic: MermaidDiagnostic) => {
+    const dedupe = `${diagnostic.key}:${JSON.stringify(diagnostic.params ?? {})}`;
+    if (reported.has(dedupe)) return;
+    reported.add(dedupe);
+    diagnostics.push(diagnostic);
+  };
 
+  let headerSeen = false;
   for (let raw of text.split(/\r?\n/)) {
     let line = raw.trim();
-    if (!line || line.startsWith("%%") || line.startsWith("flowchart") || line.startsWith("graph")) continue;
-    if (line.startsWith("subgraph") || line === "end" || line.startsWith("classDef") || line.startsWith("class ") || line.startsWith("click ") || line.startsWith("style ")) continue;
+    if (!line || line.startsWith("%%")) continue;
+    if (!headerSeen) {
+      headerSeen = true;
+      const unsupported = UNSUPPORTED_DIAGRAM_HEADERS.find(
+        (header) => line === header || line.startsWith(`${header} `),
+      );
+      if (unsupported) {
+        report({ key: "diagram.mermaid.unsupportedDiagramType", params: { type: unsupported } });
+        continue;
+      }
+    }
+    const direction = line.match(HEADER_DIRECTION);
+    if (direction) {
+      const dir = direction[1]!;
+      if (dir !== "TD" && dir !== "TB") {
+        report({ key: "diagram.mermaid.directionIgnored", params: { direction: dir } });
+      }
+      continue;
+    }
+    if (line.startsWith("flowchart") || line.startsWith("graph")) continue;
+    const construct = UNSUPPORTED_CONSTRUCTS.find((entry) => entry.match(line));
+    if (construct) {
+      report({ key: "diagram.mermaid.unsupportedConstruct", params: { construct: construct.name } });
+      continue;
+    }
 
     // Walk the line, consuming a node, optional arrow, optional next node.
     const first = consumeNode(line);
@@ -284,7 +376,7 @@ export function mermaidToDoc(text: string, now: () => number = Date.now): Diagra
     .filter((e): e is DiagramEdge => e !== null);
 
   const ts = now();
-  return {
+  const doc: DiagramDoc = {
     v: DIAGRAM_SCHEMA_VERSION,
     id: typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `doc-${ts}`,
     docTitle: "",
@@ -294,4 +386,5 @@ export function mermaidToDoc(text: string, now: () => number = Date.now): Diagra
     edges: docEdges,
     layers: [{ id: "default", name: "default", visible: true, locked: false, order: 0 }],
   };
+  return { doc, diagnostics };
 }

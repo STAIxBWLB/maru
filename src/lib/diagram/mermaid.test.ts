@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { docToMermaid, mermaidToDoc } from "./mermaid";
+import { docToMermaid, mermaidToDoc, mermaidToDocDetailed } from "./mermaid";
 import { DIAGRAM_SCHEMA_VERSION, createEmptyDoc } from "./types";
 
 describe("docToMermaid", () => {
@@ -87,5 +87,54 @@ describe("mermaidToDoc", () => {
     const second = mermaidToDoc(reEmitted);
     expect(second.nodes.length).toBe(first.nodes.length);
     expect(second.edges.length).toBe(first.edges.length);
+  });
+});
+
+describe("mermaidToDocDetailed diagnostics (issue #433)", () => {
+  it("reports non-flowchart diagram types instead of silently mis-parsing", () => {
+    const { diagnostics } = mermaidToDocDetailed("sequenceDiagram\n  Alice->>Bob: hi");
+    expect(diagnostics).toContainEqual({
+      key: "diagram.mermaid.unsupportedDiagramType",
+      params: { type: "sequenceDiagram" },
+    });
+  });
+
+  it("reports skipped constructs once per construct kind", () => {
+    const text = `flowchart TD
+      subgraph one
+        A[In] --> B[Out]
+      end
+      subgraph two
+        C[X]
+      end
+      classDef hot fill:#f00
+      class A hot
+      click A "https://example.com"
+      style B fill:#0f0
+      linkStyle 0 stroke:red`;
+    const { doc, diagnostics } = mermaidToDocDetailed(text);
+    const constructs = diagnostics
+      .filter((d) => d.key === "diagram.mermaid.unsupportedConstruct")
+      .map((d) => d.params?.construct);
+    expect(constructs).toEqual(
+      expect.arrayContaining(["subgraph", "end", "classDef", "class", "click", "style", "linkStyle"]),
+    );
+    // dedupe: "subgraph" appears twice in the source, once in diagnostics
+    expect(constructs.filter((c) => c === "subgraph")).toHaveLength(1);
+    // supported lines still import
+    expect(doc.nodes.length).toBeGreaterThan(0);
+  });
+
+  it("reports ignored non-TD directions and stays silent for TD", () => {
+    expect(mermaidToDocDetailed("flowchart LR\n  A --> B").diagnostics).toContainEqual({
+      key: "diagram.mermaid.directionIgnored",
+      params: { direction: "LR" },
+    });
+    expect(mermaidToDocDetailed("flowchart TD\n  A --> B").diagnostics).toEqual([]);
+  });
+
+  it("plain supported flowcharts produce no diagnostics", () => {
+    const { diagnostics } = mermaidToDocDetailed("flowchart TD\n  a[Start] --> b((Done))");
+    expect(diagnostics).toEqual([]);
   });
 });

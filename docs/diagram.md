@@ -6,28 +6,32 @@ first-class Maru mode (Phase 0–7, hardened 2026-05-27). It ships **default-on*
 opt out via Settings → Preferences → "Diagram mode", `VITE_MARU_DIAGRAM=0`, or
 `?maru-diagram=0`. The **Report Pattern Studio** track (schema v8) adds typed
 report datasets, pattern views, table editing, a codec registry, and managed
-"Insert/Update in report" links into Markdown documents.
+"Insert/Update in report" links into Markdown documents. Schema v9 (issue #433)
+adds typed semantic datasets for Archify-based generation and editing.
 
 ## Documents
 
-Diagrams live at `<workspace>/diagrams/<name>.cmd.json` — a `v:8` envelope
-(report datasets + pattern views; the version numbering continues the source
-HTML's past its broken `localhost:5500` autosave boundary). The last-opened
-document is restored from `diagram.lastDocument`; unsaved state is
-workspace-keyed.
+Diagrams live at `<workspace>/diagrams/<name>.cmd.json` — a `v:9` envelope
+(report datasets + pattern views + typed semantic datasets; the version
+numbering continues the source HTML's past its broken `localhost:5500`
+autosave boundary). The last-opened document is restored from
+`diagram.lastDocument`; unsaved state is workspace-keyed.
 
-**v8 migration.** Legacy `v:7` documents migrate in memory on load. The first
-v8 save over a migrated document triggers a one-time backup to
-`<workspace>/.maru/diagrams/backups/<name>-v7-<ts>.cmd.json` (temp-file +
-rename, so a crash cannot leave a truncated backup). A backup failure warns
-but never blocks the save, and is not retried within the session.
+**Legacy migration.** `v:7`/`v:8` documents migrate in memory on load (v8→v9
+is a version bump only). The first save at the current schema over a migrated
+document triggers a one-time backup to
+`<workspace>/.maru/diagrams/backups/<name>-v<source>-<ts>.cmd.json` (temp-file +
+rename, so a crash cannot leave a truncated backup). A backup failure **aborts
+the save** — overwriting the only legacy copy without a backup would be
+unrecoverable — and the next save attempt retries the backup. Save-As to a
+different name leaves the legacy file untouched, so no backup runs.
 
 Storage paths:
 
 - `diagrams/<name>.cmd.json` — diagram documents.
 - `.maru/diagram-patterns/<name>.pattern.json` — workspace pattern presets.
 - `.maru/diagrams/history/<docId>/` — auto-snapshot ring (cap 20).
-- `.maru/diagrams/backups/` — one-time v7 backups.
+- `.maru/diagrams/backups/` — one-time legacy-schema backups.
 - `attachments/diagrams/<docId>/` — rendered report assets (SVG/PNG), the
   only write target outside the diagram stores.
 
@@ -35,7 +39,7 @@ Backend commands (`src-tauri/src/diagram/mod.rs`): `diagram_save_document`,
 `diagram_load_document`, `diagram_list_documents`, `diagram_delete_document`,
 `diagram_export_blob` / `diagram_export_blob_to_path`, snapshot commands
 `diagram_save_snapshot` / `diagram_list_snapshots` / `diagram_restore_snapshot`,
-`diagram_backup_document` (one-time v7 backup), pattern presets
+`diagram_backup_document` (one-time legacy backup), pattern presets
 `diagram_pattern_save` / `diagram_pattern_list` / `diagram_pattern_delete`,
 and `diagram_write_report_asset` (report assets; extension-whitelisted to
 svg/png/json, traversal-safe, atomic, write-guard checked).
@@ -169,7 +173,7 @@ Viewport culling (`visibleSubset`) + a position-keyed edge-route Map cache
   colocated `*.test.ts`.
 - `src/components/diagram/` — `DiagramMode`, store context, `canvas/`, `modals/`,
   `panels/`, `ribbon/`.
-- `src-tauri/src/diagram/mod.rs` — persistence, export, snapshots, v7 backup,
+- `src-tauri/src/diagram/mod.rs` — persistence, export, snapshots, legacy backup,
   pattern presets, report assets.
 - e2e: `e2e/diagram.spec.ts` (flag visibility, ko/en labels, save/reload,
   templates, Mermaid, export dialog, no `localhost:5500` / Google Fonts requests).

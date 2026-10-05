@@ -1,5 +1,7 @@
 /**
- * Report Pattern Studio — typed report datasets and pattern views (schema v8).
+ * Report Pattern Studio — typed report datasets and pattern views (schema v8),
+ * plus typed semantic datasets for Archify-based generation (schema v9,
+ * issue #433).
  *
  * A `ReportDataset` holds structured report data (the important variant is the
  * `matrix` — a span-aware table model). A `PatternView` binds a dataset to a
@@ -199,13 +201,68 @@ export interface ScorecardDataset {
   entries: ScorecardEntry[];
 }
 
+// ---------------------------------------------------------------------------
+// Typed semantic datasets (schema v9, issue #433)
+// ---------------------------------------------------------------------------
+
+/**
+ * Diagram types whose semantics a semantic dataset can own. Sequence,
+ * dataflow and lifecycle join when their editing phases land (issue #433
+ * P2); only architecture and workflow are generatable/editable in P1.
+ */
+export type SemanticDiagramType = "architecture" | "workflow";
+
+export const SEMANTIC_DIAGRAM_TYPES: readonly SemanticDiagramType[] = ["architecture", "workflow"];
+
+/** The pinned engine a semantic spec round-trips through. */
+export interface SemanticEngineRef {
+  name: "archify";
+  /** Pinned engine version (see `sidecars/archify/PIN.json`). */
+  version: string;
+}
+
+/** Where the semantic content came from. */
+export interface SemanticProvenance {
+  origin: "generated" | "imported" | "gallery-copy";
+  /** Workspace-relative source path for imports and gallery copies. */
+  sourcePath?: string;
+  repository?: string;
+  revision?: string;
+  capturedAt?: number;
+}
+
+/**
+ * A typed semantic dataset: the canonical, editable meaning of a generated
+ * diagram. `spec` is the Archify typed JSON (interchange/renderer input);
+ * canvas members are a projection owned by the bound pattern view, never a
+ * second semantic source. `idMap` is the reversible Archify-safe-id → Maru-id
+ * mapping the codec owns (Archify ids forbid `:` and leading digits; Maru
+ * member ids like `ds:m0` do not). Fields the pinned engine cannot represent
+ * are kept verbatim in `preservedExtensions` and reported as fidelity
+ * diagnostics — they are never silently stripped, and never re-emitted into
+ * the spec as if the engine supported them.
+ */
+export interface SemanticSpecDataset {
+  id: string;
+  kind: "semanticSpec";
+  name: string;
+  diagramType: SemanticDiagramType;
+  spec: Record<string, unknown>;
+  /** Archify-safe id → Maru id. Values must be unique. */
+  idMap: Record<string, string>;
+  engine: SemanticEngineRef;
+  preservedExtensions?: Record<string, unknown>;
+  provenance?: SemanticProvenance;
+}
+
 export type ReportDataset =
   | MatrixDataset
   | HierarchyDataset
   | TimelineDataset
   | FlowDataset
   | NetworkDataset
-  | ScorecardDataset;
+  | ScorecardDataset
+  | SemanticSpecDataset;
 
 export type ReportDatasetKind = ReportDataset["kind"];
 
@@ -522,6 +579,65 @@ export function validateMatrix(matrix: MatrixDataset): MatrixValidationResult {
     }
   }
 
+  return { ok: errors.length === 0, errors };
+}
+
+// ---------------------------------------------------------------------------
+// Semantic spec validation (schema v9)
+// ---------------------------------------------------------------------------
+
+/** Payload budgets for a semantic dataset (defense against hostile input). */
+export const SEMANTIC_SPEC_MAX_BYTES = 512 * 1024;
+export const SEMANTIC_SPEC_MAX_ID_MAP_ENTRIES = 10_000;
+
+export function isSemanticSpecDataset(dataset: ReportDataset): dataset is SemanticSpecDataset {
+  return dataset.kind === "semanticSpec";
+}
+
+/**
+ * Structural validation of a semantic dataset: known diagram type, object
+ * spec, engine identity, unique id-map values, and payload budgets. The
+ * authoritative schema check of `spec` itself is the pinned engine's — this
+ * is the always-available structural floor.
+ */
+export function validateSemanticSpec(dataset: SemanticSpecDataset): MatrixValidationResult {
+  const errors: string[] = [];
+  if (!SEMANTIC_DIAGRAM_TYPES.includes(dataset.diagramType)) {
+    errors.push(`unknown diagramType: ${String(dataset.diagramType)}`);
+  }
+  if (!dataset.spec || typeof dataset.spec !== "object" || Array.isArray(dataset.spec)) {
+    errors.push("spec must be an object");
+  }
+  if (dataset.engine?.name !== "archify") {
+    errors.push(`unknown engine: ${String(dataset.engine?.name)}`);
+  } else if (typeof dataset.engine.version !== "string" || dataset.engine.version.length === 0) {
+    errors.push("engine.version missing");
+  }
+  if (!dataset.idMap || typeof dataset.idMap !== "object" || Array.isArray(dataset.idMap)) {
+    errors.push("idMap must be an object");
+  } else {
+    const entries = Object.entries(dataset.idMap);
+    if (entries.length > SEMANTIC_SPEC_MAX_ID_MAP_ENTRIES) {
+      errors.push(`idMap too large: ${entries.length} > ${SEMANTIC_SPEC_MAX_ID_MAP_ENTRIES}`);
+    }
+    const seen = new Set<string>();
+    for (const [key, value] of entries) {
+      if (typeof value !== "string" || value.length === 0) {
+        errors.push(`idMap[${key}]: Maru id must be a non-empty string`);
+      } else if (seen.has(value)) {
+        errors.push(`idMap[${key}]: duplicate Maru id ${value} (mapping must be reversible)`);
+      }
+      seen.add(value);
+    }
+  }
+  try {
+    const bytes = JSON.stringify(dataset.spec).length;
+    if (bytes > SEMANTIC_SPEC_MAX_BYTES) {
+      errors.push(`spec too large: ${bytes} > ${SEMANTIC_SPEC_MAX_BYTES} bytes`);
+    }
+  } catch {
+    errors.push("spec is not JSON-serializable");
+  }
   return { ok: errors.length === 0, errors };
 }
 
