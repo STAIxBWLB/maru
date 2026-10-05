@@ -369,7 +369,8 @@ try {
     Ok(())
 }
 
-pub fn archify_validate_candidate(
+#[cfg(test)]
+fn archify_validate_candidate(
     workspace: String,
     diagram_type: String,
     candidate_json: String,
@@ -404,7 +405,7 @@ fn validate_candidate_with_engine(
     result
 }
 
-/// Owned IPC boundary; the synchronous entry point remains available to Rust callers.
+/// Owned production IPC boundary; tests use a synchronous source-engine adapter.
 pub mod ipc {
     use super::{ArchifyValidationReceipt, IpcError};
 

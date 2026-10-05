@@ -225,7 +225,8 @@ fn submodule_head_sha(repo_root: &Path) -> Option<String> {
 /// gets its own checks: canonicalize, stay inside the same submodule (a
 /// symlink escaping the submodule root is refused), size cap, and a parse
 /// requiring the complete pinned architecture schema.
-pub fn architecture_read_sibling_spec(
+#[cfg(test)]
+fn architecture_read_sibling_spec(
     workspace_path: String,
     html_path: String,
 ) -> Result<SiblingSpec, String> {
