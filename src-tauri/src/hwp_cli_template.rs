@@ -862,8 +862,6 @@ mod tests {
         fail_filled_validation: bool,
         fill_stdout: &str,
     ) -> PathBuf {
-        use std::os::unix::fs::PermissionsExt;
-
         let binary = dir.join("hwp");
         let validate_exit = if fail_filled_validation {
             "exit 1"
@@ -900,10 +898,7 @@ case "$1" in
 esac
 "#
         );
-        fs::write(&binary, script).unwrap();
-        let mut permissions = fs::metadata(&binary).unwrap().permissions();
-        permissions.set_mode(0o755);
-        fs::set_permissions(&binary, permissions).unwrap();
+        crate::test_support::write_executable_fixture(&binary, script, 0o755).unwrap();
         binary
     }
 
@@ -1049,7 +1044,6 @@ esac
     #[cfg(unix)]
     #[test]
     fn oversized_hwp_stdout_fails_with_a_size_limit_error() {
-        use std::os::unix::fs::PermissionsExt;
         let tmp = tempfile::tempdir().unwrap();
         let binary = tmp.path().join("hwp");
         // A document just over the stdout limit: the runner keeps only its
@@ -1058,8 +1052,7 @@ esac
             "#!/bin/sh\nprintf '<html><body>'\nhead -c {} /dev/zero\nprintf '</body></html>'\n",
             STDOUT_LIMIT
         );
-        fs::write(&binary, script).unwrap();
-        fs::set_permissions(&binary, fs::Permissions::from_mode(0o755)).unwrap();
+        crate::test_support::write_executable_fixture(&binary, script, 0o755).unwrap();
 
         let error = convert_to_html(&binary, tmp.path()).unwrap_err();
         assert_eq!(
@@ -1374,8 +1367,6 @@ mod phase08_21 {
     /// the last admitted writer is visible in the published bytes.
     #[cfg(unix)]
     fn fake_hwp_publishing_values(dir: &Path) -> PathBuf {
-        use std::os::unix::fs::PermissionsExt;
-
         let binary = dir.join("hwp");
         let script = r#"#!/bin/sh
 case "$1" in
@@ -1403,10 +1394,7 @@ case "$1" in
   *) exit 2 ;;
 esac
 "#;
-        std::fs::write(&binary, script).unwrap();
-        let mut permissions = std::fs::metadata(&binary).unwrap().permissions();
-        permissions.set_mode(0o755);
-        std::fs::set_permissions(&binary, permissions).unwrap();
+        crate::test_support::write_executable_fixture(&binary, script, 0o755).unwrap();
         binary
     }
 

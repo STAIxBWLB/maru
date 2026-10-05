@@ -396,11 +396,13 @@ mod phase08_07_tests {
         let invalid_program = temp.path().join("native-program-with-missing-interpreter");
         #[cfg(unix)]
         {
-            use std::os::unix::fs::PermissionsExt;
             let interpreter = temp.path().join("absent-fixture-interpreter");
-            std::fs::write(&invalid_program, format!("#!{}\n", interpreter.display())).unwrap();
-            std::fs::set_permissions(&invalid_program, std::fs::Permissions::from_mode(0o700))
-                .unwrap();
+            crate::test_support::write_executable_fixture(
+                &invalid_program,
+                format!("#!{}\n", interpreter.display()),
+                0o700,
+            )
+            .unwrap();
         }
         #[cfg(not(unix))]
         std::fs::write(&invalid_program, "invalid fixture executable").unwrap();

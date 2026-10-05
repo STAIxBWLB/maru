@@ -2551,18 +2551,17 @@ mod tests {
     }
     #[cfg(unix)]
     fn phase08_15_fixture(home: &Path, work: &Path) {
-        use std::os::unix::fs::PermissionsExt;
         fs::create_dir_all(home.join(".maru")).unwrap();
         fs::create_dir_all(home.join("Library/LaunchAgents")).unwrap();
         fs::create_dir_all(work.join(".maru")).unwrap();
         fs::create_dir_all(work.join("logs")).unwrap();
         fs::write(work.join("note.md"), "# original\nbody\n").unwrap();
-        fs::write(
+        crate::test_support::write_executable_fixture(
             work.join("script.sh"),
             "#!/bin/sh\necho 'fixture child completed'\necho ran >> run-marker.txt\n",
+            0o700,
         )
         .unwrap();
-        fs::set_permissions(work.join("script.sh"), fs::Permissions::from_mode(0o700)).unwrap();
         let mut job = sample_job();
         job.schedule.recovery_interval_seconds = 21600;
         job.schedule.recovery_mode = RecoveryMode::MissedFire;
@@ -2584,7 +2583,7 @@ mod tests {
         let executable = home.join(".maru/test-jobs-command");
         // Fixed local emulator. Every subprocess below is a local utility; the
         // job script is never submitted to launchd or another service manager.
-        fs::write(&executable, r#"#!/bin/sh
+        crate::test_support::write_executable_fixture(&executable, r#"#!/bin/sh
 set -eu
 state="$MARU_JOBS_FIXTURE_HOME/.maru"
 if [ "$1" = id ]; then echo 501; exit 0; fi
@@ -2636,8 +2635,7 @@ case "$op" in
     esac
     ;;
 esac
-"#).unwrap();
-        fs::set_permissions(executable, fs::Permissions::from_mode(0o700)).unwrap();
+"#, 0o700).unwrap();
     }
 
     fn phase08_15_start<F>(future: F) -> std::sync::mpsc::Receiver<F::Output>

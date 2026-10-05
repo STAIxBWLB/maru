@@ -496,6 +496,15 @@ retention, and the per-language and per-crate totals table appears in the
 run's Job Summary. There is no threshold, so a lower number never fails
 anything.
 
+Generated Rust executable test fixtures use
+`src-tauri/src/test_support.rs::write_executable_fixture`, including rewrites,
+with the existing script bytes and permission mode. On Unix the helper waits
+for all inherited writable file descriptors to close before direct execution.
+Linux can otherwise return `ETXTBSY` even after `fs::write` closes its own file:
+a concurrent fork can retain a writable descriptor until exec. The test-only
+lock handoff addresses fixture publication without changing production spawn
+behavior or test assertions.
+
 ## Release Process
 
 The release version's major and minor come from the active GSD milestone in

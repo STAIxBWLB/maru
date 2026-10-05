@@ -1337,7 +1337,6 @@ mod phase08_14 {
     use super::*;
     use crate::atomic_file::phase08_06::{boundary, run, Held, Home};
     use crate::scratchpad::phase08_08::{registry, PrimaryWorkspaceAccessFixture};
-    use std::os::unix::fs::PermissionsExt;
 
     type TestApp = AppHandle<tauri::test::MockRuntime>;
 
@@ -1357,8 +1356,7 @@ mod phase08_14 {
         )
         .unwrap();
         let python = home.root.path().join("fixture-python");
-        fs::write(&python, "#!/bin/sh\nprintf '%s\\n' '{\"messages\":[{\"id\":\"fixture-1\",\"chatId\":\"42\",\"chatTitle\":\"Fixture\",\"sender\":\"Synthetic\",\"text\":\"hello\",\"date\":\"2026-01-01\",\"permalink\":null}]}'\n").unwrap();
-        fs::set_permissions(&python, fs::Permissions::from_mode(0o700)).unwrap();
+        crate::test_support::write_executable_fixture(&python, "#!/bin/sh\nprintf '%s\\n' '{\"messages\":[{\"id\":\"fixture-1\",\"chatId\":\"42\",\"chatTitle\":\"Fixture\",\"sender\":\"Synthetic\",\"text\":\"hello\",\"date\":\"2026-01-01\",\"permalink\":null}]}'\n", 0o700).unwrap();
         let script = home.root.path().join("fixture-monitor.py");
         fs::write(&script, "synthetic fixture, never interpreted").unwrap();
         let config = home.root.path().join("fixture-config.yaml");
@@ -1892,12 +1890,13 @@ done
 printf 'synthetic SQLite' > "$session"
 printf 'synthetic WAL' > "$session-wal"
 "#;
-                    fs::write(
+                    crate::test_support::write_executable_fixture(
                         &python,
                         format!(
                             "{writer_script}{}",
                             original.strip_prefix("#!/bin/sh\n").unwrap()
                         ),
+                        0o700,
                     )
                     .unwrap();
                     assert!(python.is_file() && is_executable(&python));
@@ -2046,13 +2045,14 @@ printf 'synthetic WAL' > "$session-wal"
                 let marker = home.root.path().join("provider-invoked");
                 let python = PathBuf::from(options.python_path.as_ref().unwrap());
                 let original = fs::read_to_string(&python).unwrap();
-                fs::write(
+                crate::test_support::write_executable_fixture(
                     &python,
                     format!(
                         "#!/bin/sh\nprintf invoked > '{}'\n{}",
                         marker.display(),
                         original.strip_prefix("#!/bin/sh\n").unwrap()
                     ),
+                    0o700,
                 )
                 .unwrap();
                 assert!(python.is_file() && is_executable(&python));
@@ -2108,7 +2108,7 @@ printf 'synthetic WAL' > "$session-wal"
                 let argv = home.root.path().join("legacy-argv");
                 let target = selected.join("inbox/drop/telegram");
                 let python = PathBuf::from(options.python_path.as_ref().unwrap());
-                fs::write(&python, format!("#!/bin/sh\nprintf '%s\n' \"$@\" > '{}'\nmkdir -p '{}'\nprintf 'synthetic legacy drop' > '{}/legacy.txt'\n", argv.display(), target.display(), target.display())).unwrap();
+                crate::test_support::write_executable_fixture(&python, format!("#!/bin/sh\nprintf '%s\n' \"$@\" > '{}'\nmkdir -p '{}'\nprintf 'synthetic legacy drop' > '{}/legacy.txt'\n", argv.display(), target.display(), target.display()), 0o700).unwrap();
                 assert!(python.is_file() && is_executable(&python));
                 assert_eq!(
                     resolve_telegram_command_config(&options)

@@ -768,19 +768,15 @@ mod tests {
     fn fake_gws(dir: &Path, name: &str, event_id: &str) -> (PathBuf, PathBuf) {
         let log = dir.join(format!("{name}.log"));
         let bin = dir.join(name);
-        fs::write(
+        crate::test_support::write_executable_fixture(
             &bin,
             format!(
                 "#!/bin/sh\necho \"$@\" >> {}\necho '{{\"id\":\"{event_id}\"}}'\nexit 0\n",
                 log.display()
             ),
+            0o755,
         )
         .unwrap();
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            fs::set_permissions(&bin, fs::Permissions::from_mode(0o755)).unwrap();
-        }
         (bin, log)
     }
 
@@ -1051,16 +1047,12 @@ mod tests {
         let tmp = fixture();
         write(&tmp.path().join("tasks/active/focus.md"), FOCUS);
         let denied = tmp.path().join("gws-denied");
-        fs::write(
+        crate::test_support::write_executable_fixture(
             &denied,
             "#!/bin/sh\necho 'Error: token expired, please login again' >&2\nexit 1\n",
+            0o755,
         )
         .unwrap();
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            fs::set_permissions(&denied, fs::Permissions::from_mode(0o755)).unwrap();
-        }
         let outcome = run(&tmp, &denied, NOW);
         assert_eq!(
             (outcome.inserts, outcome.blocked, outcome.drained),
