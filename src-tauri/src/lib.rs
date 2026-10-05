@@ -198,6 +198,27 @@ use workspace::ipc::{
 #[cfg(not(test))]
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // This single codegen context is shared by headless artifact inspection and
+    // desktop startup; another macro invocation duplicates the macOS plist symbol.
+    let context = tauri::generate_context!();
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.first().map(String::as_str) == Some("--print-compiled-csp") {
+        if args.len() != 1 {
+            eprintln!("--print-compiled-csp takes no arguments");
+            std::process::exit(2);
+        }
+        let security = &context.config().app.security;
+        let csp = if tauri::is_dev() {
+            security.dev_csp.as_ref().or(security.csp.as_ref())
+        } else {
+            security.csp.as_ref()
+        };
+        println!(
+            "{}",
+            serde_json::json!({ "kind": "maru.compiled-csp.v1", "csp": csp })
+        );
+        return;
+    }
     // Phase 08-27 saturation harness: install the two-worker test runtime
     // before any Tauri runtime initialization (default builds never call
     // this and keep Tauri's lazily initialized runtime).
@@ -662,7 +683,7 @@ pub fn run() {
             #[cfg(feature = "native-e2e")]
             native_e2e::native_e2e_load_control,
         ])
-        .build(tauri::generate_context!())
+        .build(context)
         .expect("error while building Maru")
         .run(|app_handle, event| match event {
             #[cfg(target_os = "macos")]

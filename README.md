@@ -4,7 +4,7 @@ Maru is a local-first desktop workspace for Korean knowledge and document
 operations. It combines a React 19 and TypeScript interface with a Tauri 2 Rust
 core, and treats the filesystem as the source of truth.
 
-The current product release is **v1.1.17, Structured Canvas**. Releases
+The current product release is **v1.1.18, Bound Intent**. Releases
 before v0.3.0 shipped under the name Anchor; v0.3.0 completed the application
 identifier and on-disk migration to Maru.
 
@@ -12,7 +12,7 @@ identifier and on-disk migration to Maru.
 
 | Area | State | Evidence |
 |------|-------|----------|
-| Product release | v1.1.17 | Signed desktop bundles and standalone CLI for macOS, Windows, and Linux |
+| Product release | v1.1.18 | Signed desktop bundles and standalone CLI for macOS, Windows, and Linux |
 | Planning milestone | v1.1 Felt Quality and Native Proof, closed | Closed 2026-09-27: phases 6-11 (56 plans), audit `tech_debt` with the debt accepted |
 | Application shell | Complete | 19 lazy modes; `MainApp` held to 15 `useState` and 24 `useEffect` calls |
 | Verification | Passing | Typecheck, ESLint, unit tests, Rust fmt/clippy, E2E, build, and bundle budgets |
@@ -515,6 +515,14 @@ check. Both HTML reports upload as the `coverage-report` artifact with 30-day
 retention, and the per-language and per-crate totals table appears in the
 run's Job Summary. There is no threshold, so a lower number never fails
 anything.
+
+The compiled CSP gate invokes the built host-native desktop binary with
+`--print-compiled-csp`. This headless diagnostic reports the runtime-effective
+CSP from the same generated Tauri Context used by startup (including `devCsp`
+fallback when applicable), before plugins, services, or windows initialize.
+The guard rejects absent or malformed policies, unsafe script directive
+fallbacks, execution failures, and timeouts. Binary string layout and embedded
+source JSON are not evidence of the effective policy.
 
 Generated Rust executable test fixtures use
 `src-tauri/src/test_support.rs::write_executable_fixture`, including rewrites,
