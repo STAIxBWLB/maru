@@ -8,9 +8,16 @@ const mocks = vi.hoisted(() => ({
   listArchitectureBlueprints: vi.fn(),
   prepareArchitectureBlueprint: vi.fn(async (_root: string, path: string) => path),
   openInFileManager: vi.fn(async () => undefined),
+  architectureReadSiblingSpec: vi.fn(),
+  listDiagrams: vi.fn(async () => [] as { name: string }[]),
+  writeDiagram: vi.fn(async (_root: string, _name: string, doc: unknown) => doc),
 }));
 
 vi.mock("../../lib/api", () => mocks);
+vi.mock("../../lib/diagram/persistence", () => ({
+  listDiagrams: mocks.listDiagrams,
+  writeDiagram: mocks.writeDiagram,
+}));
 
 import { ArchitecturePane } from "./ArchitecturePane";
 import { LocaleContext } from "../../lib/i18n";
@@ -121,5 +128,95 @@ describe("ArchitecturePane", () => {
       "/work/sites/gamma/docs/gamma-rendered.html",
     );
     expect(frame()!.getAttribute("src")).toMatch(/gamma-rendered\.html\?theme=light$/);
+  });
+});
+
+describe("ArchitecturePane copy-to-Diagram handoff (issue #433)", () => {
+  let container: HTMLDivElement;
+  let root: Root | null = null;
+  const specJson = JSON.stringify({
+    schema_version: 1,
+    diagram_type: "architecture",
+    meta: { title: "Alpha Service", output: "alpha.html" },
+    components: [
+      { id: "web", type: "frontend", label: "Web" },
+      { id: "api", type: "backend", label: "API" },
+    ],
+    connections: [{ from: "web", to: "api", label: "HTTPS" }],
+  });
+
+  beforeEach(() => {
+    (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    document.documentElement.dataset.theme = "light";
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    mocks.listArchitectureBlueprints.mockResolvedValue([blueprint("dev", "alpha", "alpha", "Alpha Service")]);
+    mocks.architectureReadSiblingSpec.mockResolvedValue({
+      specJson,
+      title: "Alpha Service",
+      submodule: "dev/alpha",
+      commit: "abc123",
+    });
+    mocks.listDiagrams.mockResolvedValue([{ name: "Alpha Service" }]);
+    mocks.writeDiagram.mockClear();
+  });
+
+  afterEach(async () => {
+    await act(async () => root?.unmount());
+    root = null;
+    container.remove();
+  });
+
+  async function render(onOpenDiagram?: (name: string) => void): Promise<void> {
+    root = createRoot(container);
+    await act(async () => {
+      root!.render(
+        <LocaleContext.Provider value={{ locale: "en", setLocale: () => {}, t }}>
+          <ArchitecturePane workspacePath="/work" onOpenDiagram={onOpenDiagram} />
+        </LocaleContext.Provider>,
+      );
+    });
+  }
+
+  it("writes a new workspace diagram with provenance and opens it", async () => {
+    const opened: string[] = [];
+    await render((name) => opened.push(name));
+
+    const button = container.querySelector<HTMLButtonElement>('[data-testid="architecture-copy-to-diagram"]');
+    expect(button).not.toBeNull();
+    await act(async () => {
+      button!.click();
+    });
+
+    // "Alpha Service" exists already, so the copy takes a suffixed name.
+    expect(mocks.writeDiagram).toHaveBeenCalledTimes(1);
+    const [root_, name, doc] = mocks.writeDiagram.mock.calls[0] as [string, string, {
+      docTitle: string;
+      datasets?: { kind: string; provenance?: { origin?: string; repository?: string } }[];
+      nodes: unknown[];
+      edges: unknown[];
+    }];
+    expect(root_).toBe("/work");
+    expect(name).toBe("Alpha Service-2");
+    expect(doc.docTitle).toBe("Alpha Service");
+    expect(doc.datasets?.[0]?.kind).toBe("semanticSpec");
+    expect(doc.datasets?.[0]?.provenance?.origin).toBe("gallery-copy");
+    expect(doc.datasets?.[0]?.provenance?.repository).toBe("dev/alpha");
+    expect(doc.nodes.length).toBe(2);
+    expect(doc.edges.length).toBe(1);
+    expect(opened).toEqual(["Alpha Service-2"]);
+  });
+
+  it("hides the action when the sibling spec is missing or unsupported", async () => {
+    mocks.architectureReadSiblingSpec.mockRejectedValue(new Error("Sibling spec not found"));
+    const opened: string[] = [];
+    await render((name) => opened.push(name));
+    expect(container.querySelector('[data-testid="architecture-copy-to-diagram"]')).toBeNull();
+    expect(opened).toEqual([]);
+  });
+
+  it("does not offer the action without a handoff channel", async () => {
+    await render();
+    expect(container.querySelector('[data-testid="architecture-copy-to-diagram"]')).toBeNull();
   });
 });

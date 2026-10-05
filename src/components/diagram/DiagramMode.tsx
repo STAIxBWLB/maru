@@ -1127,6 +1127,17 @@ function DiagramShell({
     [persistLastDocument, reportError, sessionKey, setActiveName, setLastSavedBody, store, t, workPath],
   );
 
+  // Cross-mode handoff (issue #433): another surface (e.g. the architecture
+  // gallery's "copy to Diagram") asks us to open a saved workspace diagram.
+  useEffect(() => {
+    const onOpenDocument = (event: Event) => {
+      const name = (event as CustomEvent<{ name?: unknown }>).detail?.name;
+      if (typeof name === "string" && name.length > 0) void handleOpen(name);
+    };
+    window.addEventListener("maru:diagram:open-document", onOpenDocument);
+    return () => window.removeEventListener("maru:diagram:open-document", onOpenDocument);
+  }, [handleOpen]);
+
   const handleDeleteFile = useCallback(
     async (name: string) => {
       if (!workPath) return;

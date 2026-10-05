@@ -8546,6 +8546,15 @@ export function MainApp() {
                 setPersistedAppMode("pkm");
                 void selectEntry(entry as VaultEntry, "left");
               },
+              openDiagramDocument: (documentName) => {
+                if (!diagramEnabled) return;
+                setPersistedAppMode("diagram");
+                window.setTimeout(() => {
+                  window.dispatchEvent(
+                    new CustomEvent("maru:diagram:open-document", { detail: { name: documentName } }),
+                  );
+                }, 0);
+              },
               createGraphNote: handleWikilinkClick,
               isGraphFavorite: isFavorite,
               toggleGraphFavorite: toggleFavorite,

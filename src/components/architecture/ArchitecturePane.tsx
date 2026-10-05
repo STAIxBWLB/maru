@@ -1,15 +1,22 @@
 import "./architecture.css";
 
-import { DraftingCompass, ExternalLink, FolderSearch, RefreshCcw } from "lucide-react";
+import { DraftingCompass, ExternalLink, FolderSearch, RefreshCcw, SquarePen } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
+  architectureReadSiblingSpec,
   listArchitectureBlueprints,
   openInFileManager,
   prepareArchitectureBlueprint,
   type ArchitectureBlueprint,
+  type ArchitectureSiblingSpec,
 } from "../../lib/api";
 import { assetUrlForPath } from "../../lib/binaryViewer";
+import { parseArchifySpec } from "../../lib/diagram/archifyCodec";
+import { layoutDoc } from "../../lib/diagram/layout";
+import { listDiagrams, writeDiagram } from "../../lib/diagram/persistence";
+import { projectSemanticCandidate } from "../../lib/diagram/proposal";
+import { createDiagramId, createEmptyDoc } from "../../lib/diagram/types";
 import { useTranslation } from "../../lib/i18n";
 import { IconButton } from "../ui/Button";
 import { EmptyState, StatusBanner } from "../ui/ModeChrome";
@@ -42,9 +49,25 @@ function useAppTheme(): "light" | "dark" {
 export interface ArchitecturePaneProps {
   workspacePath: string | null;
   onRevealInFiles?(targetPath: string): void;
+  /** Issue #433 handoff: open a saved workspace diagram in Diagram mode. */
+  onOpenDiagram?(documentName: string): void;
 }
 
-export function ArchitecturePane({ workspacePath, onRevealInFiles }: ArchitecturePaneProps) {
+/** Diagram file names are validated by the backend: no traversal, no leading
+ *  dots, no control chars. Mirror that here so the handoff never proposes a
+ *  name the write would reject. */
+function sanitizeDiagramName(raw: string): string {
+  const cleaned = raw
+    // eslint-disable-next-line no-control-regex
+    .replace(/[\\/:*?"<>|\u0000-\u001f]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/^\.+/, "")
+    .slice(0, 120);
+  return cleaned.length > 0 ? cleaned : "architecture-copy";
+}
+
+export function ArchitecturePane({ workspacePath, onRevealInFiles, onOpenDiagram }: ArchitecturePaneProps) {
   const { t } = useTranslation();
   const theme = useAppTheme();
   const [blueprints, setBlueprints] = useState<ArchitectureBlueprint[]>([]);
@@ -55,7 +78,11 @@ export function ArchitecturePane({ workspacePath, onRevealInFiles }: Architectur
   const [grantedPath, setGrantedPath] = useState<string | null>(null);
   const [prepareError, setPrepareError] = useState<string | null>(null);
   const [openError, setOpenError] = useState<string | null>(null);
+  const [siblingSpec, setSiblingSpec] = useState<ArchitectureSiblingSpec | null>(null);
+  const [copyState, setCopyState] = useState<{ kind: "busy" } | { kind: "error"; message: string } | null>(null);
   const listRequest = useRef(0);
+
+  const selected = blueprints.find((item) => item.htmlPath === selectedPath) ?? null;
 
   const refresh = useCallback(async () => {
     if (!workspacePath) return;
@@ -102,6 +129,71 @@ export function ArchitecturePane({ workspacePath, onRevealInFiles }: Architectur
     };
   }, [selectedPath, workspacePath]);
 
+  // Issue #433 handoff probe: a sibling typed spec enables "copy to Diagram".
+  // The guarded backend read re-proves listing membership and applies its own
+  // containment/symlink/size/schema checks, so a missing or unsupported spec
+  // simply leaves the action unavailable (the diagnostic surfaces on click).
+  useEffect(() => {
+    setSiblingSpec(null);
+    setCopyState(null);
+    if (!workspacePath || !selectedPath || !onOpenDiagram) return;
+    let cancelled = false;
+    architectureReadSiblingSpec(workspacePath, selectedPath).then(
+      (spec) => {
+        if (!cancelled) setSiblingSpec(spec);
+      },
+      () => {
+        if (!cancelled) setSiblingSpec(null);
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedPath, workspacePath, onOpenDiagram]);
+
+  const handleCopyToDiagram = useCallback(async () => {
+    if (!workspacePath || !selectedPath || !onOpenDiagram || !siblingSpec) return;
+    setCopyState({ kind: "busy" });
+    try {
+      const outcome = parseArchifySpec(siblingSpec.specJson, {
+        provenance: {
+          origin: "gallery-copy",
+          sourcePath: selected?.repoPath ?? selectedPath,
+          repository: siblingSpec.submodule,
+          revision: siblingSpec.commit ?? undefined,
+          capturedAt: Date.now(),
+        },
+      });
+      if (!outcome.ok) {
+        const first = outcome.diagnostics[0];
+        throw new Error(first ? t(first.key, first.params) : t("architecture.copyToDiagram.invalid"));
+      }
+      const { dataset } = outcome.result;
+      const projected = projectSemanticCandidate(dataset);
+      const doc = createEmptyDoc(createDiagramId());
+      doc.docTitle = dataset.name;
+      doc.datasets = [dataset];
+      const laidOut = layoutDoc({ ...doc, nodes: projected.nodes, edges: projected.edges });
+      doc.nodes = laidOut.doc.nodes;
+      doc.edges = laidOut.doc.edges;
+
+      // Never overwrite: pick a name no existing diagram uses.
+      const existing = new Set((await listDiagrams(workspacePath)).map((file) => file.name));
+      const base = sanitizeDiagramName(dataset.name);
+      let name = base;
+      let suffix = 2;
+      while (existing.has(name)) {
+        name = `${base}-${suffix}`;
+        suffix += 1;
+      }
+      await writeDiagram(workspacePath, name, doc);
+      setCopyState(null);
+      onOpenDiagram(name);
+    } catch (err) {
+      setCopyState({ kind: "error", message: (err as Error).message ?? String(err) });
+    }
+  }, [workspacePath, selectedPath, onOpenDiagram, siblingSpec, selected?.repoPath, t]);
+
   const visible = useMemo(() => {
     const needle = query.trim().toLowerCase();
     if (!needle) return blueprints;
@@ -109,8 +201,6 @@ export function ArchitecturePane({ workspacePath, onRevealInFiles }: Architectur
       `${item.title} ${item.repoPath} ${item.slug}`.toLowerCase().includes(needle),
     );
   }, [blueprints, query]);
-
-  const selected = blueprints.find((item) => item.htmlPath === selectedPath) ?? null;
 
   if (!workspacePath) {
     return (
@@ -185,6 +275,17 @@ export function ArchitecturePane({ workspacePath, onRevealInFiles }: Architectur
                 <strong>{selected.title}</strong>
                 <code>{selected.repoPath}</code>
               </span>
+              {onOpenDiagram && siblingSpec ? (
+                <IconButton
+                  label={t("architecture.copyToDiagram")}
+                  size="sm"
+                  onClick={() => void handleCopyToDiagram()}
+                  disabled={copyState?.kind === "busy"}
+                  data-testid="architecture-copy-to-diagram"
+                >
+                  <SquarePen size={14} />
+                </IconButton>
+              ) : null}
               {onRevealInFiles ? (
                 <IconButton label={t("context.revealInFiles")} size="sm" onClick={() => onRevealInFiles(selected.htmlPath)}>
                   <FolderSearch size={14} />
@@ -204,6 +305,11 @@ export function ArchitecturePane({ workspacePath, onRevealInFiles }: Architectur
             {openError ? (
               <StatusBanner tone="danger">
                 <span>{t("architecture.openError", { message: openError })}</span>
+              </StatusBanner>
+            ) : null}
+            {copyState?.kind === "error" ? (
+              <StatusBanner tone="danger">
+                <span>{t("architecture.copyToDiagram.error", { message: copyState.message })}</span>
               </StatusBanner>
             ) : null}
             {grantedPath === selected.htmlPath ? (

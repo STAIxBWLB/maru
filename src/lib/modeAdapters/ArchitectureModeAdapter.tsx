@@ -16,6 +16,7 @@ export function ArchitectureModeAdapter({ commands }: ModeAdapterProps) {
       onRevealInFiles={
         workPath && revealInFiles ? (target) => revealInFiles(workPath, "private", target) : undefined
       }
+      onOpenDiagram={commands.openDiagramDocument}
     />
   );
 }

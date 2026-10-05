@@ -28,6 +28,8 @@ export interface ModeHostCommands {
   revealPath?(path: string): void;
   revealInFiles?(workspacePath: string, visibility: WorkspaceVisibility, targetPath: string): void;
   saveDocument?(path: string, content: string, expectedRevision: string | null): Promise<unknown>;
+  /** Switch to Diagram mode and open a saved workspace diagram by name. */
+  openDiagramDocument?(documentName: string): void;
   openGraphEntry?(entry: unknown): void;
   createGraphNote?(target: string): void;
   isGraphFavorite?(kind: FavoriteKind, relPath: string): boolean;
