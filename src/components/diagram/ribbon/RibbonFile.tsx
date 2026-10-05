@@ -9,6 +9,7 @@ import {
   LayoutTemplate,
   Save,
   Share,
+  Sparkles,
   Table2,
 } from "lucide-react";
 
@@ -20,6 +21,7 @@ export interface RibbonFileProps {
   onSave: () => void;
   onExport: () => void;
   onTemplates: () => void;
+  onGenerate: () => void;
   onHistory: () => void;
   onImport: () => void;
   onCopyPng: () => void;
@@ -41,6 +43,7 @@ export function RibbonFile({
   onSave,
   onExport,
   onTemplates,
+  onGenerate,
   onHistory,
   onImport,
   onCopyPng,
@@ -80,6 +83,11 @@ export function RibbonFile({
           labelKey="diagram.ribbon.templates"
           onClick={onTemplates}
           icon={<LayoutTemplate size={14} />}
+        />
+        <RibbonButton
+          labelKey="diagram.ribbon.generate"
+          onClick={onGenerate}
+          icon={<Sparkles size={14} />}
         />
       </RibbonGroup>
       <RibbonGroup labelKey="diagram.ribbon.export">

@@ -137,6 +137,7 @@ import { LeftPanel } from "./panels/LeftPanel";
 import { RightPanel } from "./panels/RightPanel";
 import { Ribbon } from "./ribbon/Ribbon";
 import { ImportExportDialog } from "./modals/ImportExportDialog";
+import { GenerateDiagramDialog } from "./modals/GenerateDiagramDialog";
 import { MappingPreviewDialog } from "./modals/MappingPreviewDialog";
 import { MemoDialog } from "./modals/MemoDialog";
 import {
@@ -313,6 +314,7 @@ function DiagramShell({
     targetPatternId: string;
   } | null>(null);
   const [ioDialog, setIoDialog] = useState<"import" | "export" | null>(null);
+  const [generateOpen, setGenerateOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [memoOpen, setMemoOpen] = useState<string | null>(null);
   const [findOpen, setFindOpen] = useState(false);
@@ -1618,6 +1620,7 @@ function DiagramShell({
           onSave: handleSave,
           onExport: () => setIoDialog("export"),
           onTemplates: () => openGallery("apply"),
+          onGenerate: () => setGenerateOpen(true),
           onHistory: () => setHistoryOpen(true),
           onImport: () => setIoDialog("import"),
           onCopyPng: () => void handleCopyPng(),
@@ -1819,6 +1822,13 @@ function DiagramShell({
         onImportDoc={handleImportDoc}
         onImportDataset={handleImportDataset}
         onClose={() => setIoDialog(null)}
+      />
+      <GenerateDiagramDialog
+        open={generateOpen}
+        selectionNodeIds={[...selection.nodes]}
+        workPath={workPath}
+        onImportDoc={handleImportDoc}
+        onClose={() => setGenerateOpen(false)}
       />
       <VersionHistoryDialog
         open={historyOpen}
