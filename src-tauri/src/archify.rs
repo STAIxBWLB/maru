@@ -584,16 +584,7 @@ mod tests {
         let _timeout = EnvRestore::set(TIMEOUT_ENV, "300");
         let tmp = TempDir::new().unwrap();
         let fake = tmp.path().join("fake-node");
-        fs::write(
-            &fake,
-            "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo v0.0.0-fake; exit 0; fi\nsleep 30\n",
-        )
-        .unwrap();
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            fs::set_permissions(&fake, fs::Permissions::from_mode(0o755)).unwrap();
-        }
+        crate::test_support::write_executable_fixture(&fake, "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo v0.0.0-fake; exit 0; fi\nsleep 30\n", 0o755).unwrap();
         let _node = EnvRestore::set(NODE_ENV, fake.to_str().unwrap());
         let (_work_tmp, work) = setup_workspace();
         let started = Instant::now();

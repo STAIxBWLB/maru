@@ -170,14 +170,9 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn resolves_executable_from_supplied_path() {
-        use std::os::unix::fs::PermissionsExt;
-
         let dir = tempfile::tempdir().unwrap();
         let bin = dir.path().join("sample-cli");
-        std::fs::write(&bin, "#!/bin/sh\nexit 0\n").unwrap();
-        let mut perms = std::fs::metadata(&bin).unwrap().permissions();
-        perms.set_mode(0o755);
-        std::fs::set_permissions(&bin, perms).unwrap();
+        crate::test_support::write_executable_fixture(&bin, "#!/bin/sh\nexit 0\n", 0o755).unwrap();
 
         let path_env = std::env::join_paths([dir.path()]).unwrap();
         assert_eq!(which_in_path("sample-cli", Some(&path_env)).unwrap(), bin);

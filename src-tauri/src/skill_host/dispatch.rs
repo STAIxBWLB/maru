@@ -1289,8 +1289,6 @@ mod tests {
     #[cfg(unix)]
     use std::fs;
     #[cfg(unix)]
-    use std::os::unix::fs::PermissionsExt;
-    #[cfg(unix)]
     use std::path::PathBuf;
 
     #[test]
@@ -1448,10 +1446,7 @@ exit 1
 
     #[cfg(unix)]
     pub(super) fn write_fake_cli(path: PathBuf, script: &str) -> PathBuf {
-        fs::write(&path, script).unwrap();
-        let mut perms = fs::metadata(&path).unwrap().permissions();
-        perms.set_mode(0o755);
-        fs::set_permissions(&path, perms).unwrap();
+        crate::test_support::write_executable_fixture(&path, script, 0o755).unwrap();
         assert_eq!(
             crate::cli_path::resolve_program(&path.to_string_lossy()),
             Some(path.clone()),
@@ -1661,12 +1656,12 @@ mod phase08_04 {
         let root = tempfile::tempdir().unwrap();
         let marker = root.path().join("launched");
         let cli = root.path().join("provider");
-        std::fs::write(&cli, format!("#!/bin/sh\ntouch '{}'\n", marker.display())).unwrap();
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&cli, std::fs::Permissions::from_mode(0o755)).unwrap();
-        }
+        crate::test_support::write_executable_fixture(
+            &cli,
+            format!("#!/bin/sh\ntouch '{}'\n", marker.display()),
+            0o755,
+        )
+        .unwrap();
         let result = tauri::async_runtime::block_on(ipc::skills_dispatch_background(
             app.handle().clone(),
             denied_args(Some(cli.to_string_lossy().into())),

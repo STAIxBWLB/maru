@@ -955,7 +955,6 @@ mod phase08_10_tests {
     /// full document with a `<style>` head, `info --json` reports 1 section.
     #[cfg(unix)]
     fn stub_hwp(dir: &Path) -> std::path::PathBuf {
-        use std::os::unix::fs::PermissionsExt;
         let binary = dir.join("hwp");
         let script = r#"#!/bin/sh
 case "$1" in
@@ -967,8 +966,7 @@ case "$1" in
   *) exit 2 ;;
 esac
 "#;
-        fs::write(&binary, script).unwrap();
-        fs::set_permissions(&binary, fs::Permissions::from_mode(0o755)).unwrap();
+        crate::test_support::write_executable_fixture(&binary, script, 0o755).unwrap();
         binary
     }
 

@@ -206,7 +206,6 @@ pub(crate) mod tests {
         validate_exit: i32,
         sections: u32,
     ) -> PathBuf {
-        use std::os::unix::fs::PermissionsExt;
         let binary = dir.join("hwp");
         let script = format!(
             r#"#!/bin/sh
@@ -219,8 +218,7 @@ case "$1" in
 esac
 "#
         );
-        std::fs::write(&binary, script).unwrap();
-        std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o755)).unwrap();
+        crate::test_support::write_executable_fixture(&binary, script, 0o755).unwrap();
         binary
     }
 

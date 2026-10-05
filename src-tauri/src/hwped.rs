@@ -911,8 +911,6 @@ mod phase08_21 {
     /// wrappers spawn, with fixed argv parsing (no shell interpolation).
     #[cfg(unix)]
     fn fake_hwp(dir: &Path) -> PathBuf {
-        use std::os::unix::fs::PermissionsExt;
-
         let binary = dir.join("hwp");
         let script = r#"#!/bin/sh
 case "$1" in
@@ -949,10 +947,7 @@ case "$1" in
   *) exit 2 ;;
 esac
 "#;
-        std::fs::write(&binary, script).unwrap();
-        let mut permissions = std::fs::metadata(&binary).unwrap().permissions();
-        permissions.set_mode(0o755);
-        std::fs::set_permissions(&binary, permissions).unwrap();
+        crate::test_support::write_executable_fixture(&binary, script, 0o755).unwrap();
         binary
     }
 

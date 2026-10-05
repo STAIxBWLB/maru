@@ -1224,10 +1224,7 @@ mod tests {
 
     #[cfg(unix)]
     fn write_executable(path: &Path, contents: &str) {
-        use std::os::unix::fs::PermissionsExt;
-
-        std::fs::write(path, contents).unwrap();
-        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        crate::test_support::write_executable_fixture(path, contents, 0o755).unwrap();
     }
 
     #[cfg(unix)]
@@ -2297,10 +2294,9 @@ mod phase08_14 {
     }
 
     fn fixture(home: &Home) -> (tempfile::TempDir, PathBuf) {
-        use std::os::unix::fs::PermissionsExt;
         let root = tempfile::tempdir_in(home.root.path()).unwrap();
         let script = home.root.path().join("fixture-m365");
-        fs::write(&script, r#"#!/bin/sh
+        crate::test_support::write_executable_fixture(&script, r#"#!/bin/sh
 if [ "$1" = status ]; then
   printf '%s' '{"connectedAs":"synthetic@example.invalid"}'
   exit 0
@@ -2317,8 +2313,7 @@ if [ "$method" = patch ]; then
 else
   printf '%s' '{"categories":["Existing"],"value":[{"id":"fixture-message","subject":"Fixture","isRead":false}]}'
 fi
-"#).unwrap();
-        fs::set_permissions(&script, fs::Permissions::from_mode(0o700)).unwrap();
+"#, 0o700).unwrap();
         // An existing exact executable is selected before any provider invocation.
         assert_eq!(
             resolve_m365_path(Some(&text(&script))),

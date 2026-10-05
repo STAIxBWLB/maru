@@ -2197,12 +2197,10 @@ mod phase08_05 {
     #[cfg(unix)]
     #[test]
     fn fake_commit_provider_preserves_readonly_argv_stdin_and_exit_error() {
-        use std::os::unix::fs::PermissionsExt;
         let root = repo();
         std::fs::write(root.path().join("note.md"), "provider fixture\n").unwrap();
         let script = root.path().join("fixture-provider");
-        std::fs::write(&script, "#!/bin/sh\nprintf '%s\\n' \"$@\" > provider-args\ncat > provider-input\nprintf '%s\\n' 'feat(fixture): generated subject'\n").unwrap();
-        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700)).unwrap();
+        crate::test_support::write_executable_fixture(&script, "#!/bin/sh\nprintf '%s\\n' \"$@\" > provider-args\ncat > provider-input\nprintf '%s\\n' 'feat(fixture): generated subject'\n", 0o700).unwrap();
         let assert_fixture_selected = || {
             assert_eq!(
                 crate::agent_host::provider::resolve_provider_binary(
@@ -2229,9 +2227,10 @@ mod phase08_05 {
         assert!(std::fs::read_to_string(root.path().join("provider-input"))
             .unwrap()
             .contains("+provider fixture"));
-        std::fs::write(
+        crate::test_support::write_executable_fixture(
             &script,
             "#!/bin/sh\ncat >/dev/null\necho fixture failure >&2\nexit 7\n",
+            0o700,
         )
         .unwrap();
         assert_fixture_selected();

@@ -568,8 +568,6 @@ mod phase08_21 {
     /// writer is visible in the published bytes) and prints `report`.
     #[cfg(unix)]
     fn fake_hwp(dir: &Path, scan: &serde_json::Value, report: &serde_json::Value) -> PathBuf {
-        use std::os::unix::fs::PermissionsExt;
-
         let binary = dir.join("hwp");
         let script = format!(
             r#"#!/bin/sh
@@ -602,10 +600,7 @@ esac
 "#,
             log = dir.join("fill.log").display()
         );
-        std::fs::write(&binary, script).unwrap();
-        let mut permissions = std::fs::metadata(&binary).unwrap().permissions();
-        permissions.set_mode(0o755);
-        std::fs::set_permissions(&binary, permissions).unwrap();
+        crate::test_support::write_executable_fixture(&binary, script, 0o755).unwrap();
         binary
     }
 

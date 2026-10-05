@@ -76,6 +76,8 @@ mod telegram_io;
 mod template_fill;
 mod terminal;
 mod terminal_hooks;
+#[cfg(test)]
+mod test_support;
 pub mod today;
 pub mod today_ai;
 pub mod today_calendar;

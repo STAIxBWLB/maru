@@ -48,6 +48,8 @@ make test-e2e      # Playwright (chromium, own web server on 5307)
 
 ## Things the agent gets wrong
 
+- **Executable Rust test fixtures (2026-10-05)**: before adding or changing a generated
+  executable fixture, read `README.md` §Verification and CI for the canonical readiness helper.
 - **Stale native-e2e binary**: cargo does not track `dist/` as an input, so `make test-e2e-native`
   touches `src-tauri/build.rs` first. A webview stuck on `about:blank` is this.
 - **`VITE_NATIVE_E2E=1` output is not shippable**: re-run `pnpm build:frontend` before inspecting a

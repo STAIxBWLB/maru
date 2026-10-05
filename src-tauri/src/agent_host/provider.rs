@@ -637,11 +637,7 @@ mod tests {
 
     #[cfg(unix)]
     fn write_fake_cli(path: std::path::PathBuf, script: &str) -> std::path::PathBuf {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::write(&path, script).unwrap();
-        let mut perms = std::fs::metadata(&path).unwrap().permissions();
-        perms.set_mode(0o755);
-        std::fs::set_permissions(&path, perms).unwrap();
+        crate::test_support::write_executable_fixture(&path, script, 0o755).unwrap();
         path
     }
 
