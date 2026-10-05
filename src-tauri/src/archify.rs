@@ -8,6 +8,7 @@
 //! Node runtime is a typed ENGINE_UNAVAILABLE error — never a faked success.
 
 use crate::atomic_file::{with_path_transactions, write_atomic, PathTransactionRequest};
+use crate::cli_path::{augmented_path, resolve_program};
 use crate::ipc_error::IpcError;
 use crate::vault::resolve_inside_vault;
 use crate::vault_list::{assert_maru_can_write, WorkspaceWriteAction};
@@ -123,11 +124,20 @@ fn resolve_engine_path() -> Result<PathBuf, IpcError> {
     )))
 }
 
-/// `MARU_NODE_PATH` wins; otherwise `node` on PATH. The candidate is proven
+/// `MARU_NODE_PATH` wins; otherwise reuse the shared GUI-safe CLI resolver. The candidate is proven
 /// with a `--version` probe so a stale override fails before any staging.
 fn resolve_node() -> Result<PathBuf, IpcError> {
-    let candidate = std::env::var_os(NODE_ENV).map_or_else(|| PathBuf::from("node"), PathBuf::from);
-    match Command::new(&candidate).arg("--version").output() {
+    let candidate = match std::env::var_os(NODE_ENV) {
+        Some(path) => PathBuf::from(path),
+        None => resolve_program("node").ok_or_else(|| {
+            engine_unavailable(format!("Node runtime not found (set {NODE_ENV})"))
+        })?,
+    };
+    match Command::new(&candidate)
+        .env("PATH", augmented_path())
+        .arg("--version")
+        .output()
+    {
         Ok(output) if output.status.success() => Ok(candidate),
         Ok(_) => Err(engine_unavailable(format!(
             "Node runtime probe failed: {}",
@@ -228,6 +238,7 @@ fn run_engine(
     timeout: Duration,
 ) -> Result<ArchifyValidationReceipt, IpcError> {
     let child = Command::new(node)
+        .env("PATH", augmented_path())
         .arg(engine)
         .arg("validate")
         .arg(diagram_type)
@@ -329,6 +340,7 @@ try {
   process.exitCode = 1;
 }"#;
     let mut child = Command::new(resolve_node()?)
+        .env("PATH", augmented_path())
         .args(["--input-type=module", "--eval", script])
         .arg(validator)
         .stdin(Stdio::piped())
