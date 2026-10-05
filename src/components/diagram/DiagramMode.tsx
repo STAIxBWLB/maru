@@ -283,6 +283,9 @@ function DiagramShell({
   const gestureCoalescers = useDiagramGestureCoalescers();
   const sessionKey = workPath ?? "__no-workspace__";
   const handoffOpening = useRef<string | null>(null);
+  useEffect(() => {
+    handoffOpening.current = null;
+  }, [workPath]);
   const doc = useDiagram((s) => s.doc);
   const nodes = doc.nodes;
   const edges = doc.edges;
