@@ -3,6 +3,7 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { unmountReactRoot } from "../../../lib/testing/unmountReactRoot";
 
 import { matrixFromRowsCols, type MatrixCell, type MatrixDataset } from "../../../lib/diagram/reportTypes";
 import { createEmptyDoc, type DiagramDoc } from "../../../lib/diagram/types";
@@ -94,9 +95,9 @@ describe("ImportExportDialog (export)", () => {
     (URL as unknown as { revokeObjectURL: unknown }).revokeObjectURL = vi.fn();
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     if (harness) {
-      act(() => harness!.root.unmount());
+      await unmountReactRoot(harness.root);
       harness.container.remove();
       harness = null;
     }
@@ -155,9 +156,9 @@ describe("ImportExportDialog (import)", () => {
     document.body.innerHTML = "";
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     if (harness) {
-      act(() => harness!.root.unmount());
+      await unmountReactRoot(harness.root);
       harness.container.remove();
       harness = null;
     }

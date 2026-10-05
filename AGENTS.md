@@ -48,6 +48,8 @@ make test-e2e      # Playwright (chromium, own web server on 5307)
 
 ## Things the agent gets wrong
 
+- **Radix dialog fixtures (2026-10-05)**: before adding or changing a dialog test,
+  read `README.md` §Verification and CI for the canonical unmount helper.
 - **Executable Rust test fixtures (2026-10-05)**: before adding or changing a generated
   executable fixture, read `README.md` §Verification and CI for the canonical readiness helper.
 - **Stale native-e2e binary**: cargo does not track `dist/` as an input, so `make test-e2e-native`

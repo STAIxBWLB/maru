@@ -3,6 +3,7 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { unmountReactRoot } from "../../../lib/testing/unmountReactRoot";
 
 import { confirmDialog } from "../../../lib/confirmDialog";
 import { withSnapshot } from "../../../lib/diagram/actions";
@@ -162,9 +163,9 @@ describe("GenerateDiagramDialog", () => {
     withSnapshotSpy.mockClear();
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     if (harness) {
-      act(() => harness!.root.unmount());
+      await unmountReactRoot(harness.root);
       harness.container.remove();
       harness = null;
     }

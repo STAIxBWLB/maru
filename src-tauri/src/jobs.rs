@@ -13,6 +13,9 @@ use crate::atomic_file::{
 };
 use crate::win_process::NoWindow;
 
+#[path = "job_receipts.rs"]
+mod receipts;
+
 pub const JOBS_SCHEMA: u32 = 1;
 pub const JOB_LABEL_PREFIX: &str = "com.maru.job.";
 const LOG_TAIL_LINES: usize = 200;
@@ -110,6 +113,7 @@ pub struct JobStatus {
     pub schedule: JobSchedule,
     pub last_exit_code: Option<i64>,
     pub last_run_at: Option<String>,
+    pub receipts: Vec<receipts::JobRunReceipt>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -328,20 +332,7 @@ fn xml_escape(value: &str) -> String {
 /// shape is small and fixed, and no plist crate is currently a dependency.
 pub fn plist_for(job: &JobRecord, work_path: &Path) -> Result<String, String> {
     let label = label_for(&job.id, work_path)?;
-    let argv = if job.schedule.recovery_mode == RecoveryMode::MissedFire {
-        // The engine wrapper runs the program and records the success signal
-        // the guard agent gates on; the calendar cadence is unchanged.
-        exec_wrapper_arguments(job, false)?
-    } else {
-        let mut argv = vec![resolve_job_path(work_path, &job.program.command)];
-        argv.extend(
-            job.program
-                .args
-                .iter()
-                .map(|arg| resolve_job_arg(work_path, arg)),
-        );
-        argv
-    };
+    let argv = exec_wrapper_arguments(job, false)?;
     render_plist(
         job,
         work_path,
@@ -647,6 +638,11 @@ pub struct JobRunState {
     /// Current Start/Stop state. Missing means use the manifest install value.
     #[serde(default)]
     pub agent_enabled: Option<bool>,
+    /// Local install provenance for cross-launcher Run now; not a signed attestation.
+    #[serde(default)]
+    pub wrapper_executable: Option<String>,
+    #[serde(default)]
+    pub wrapper_sha256: Option<String>,
     #[serde(default)]
     pub last_run_at: Option<u64>,
     #[serde(default)]
@@ -766,6 +762,10 @@ pub fn jobs_exec_in(work_path: &Path, job_id: &str, if_missed: bool) -> i32 {
 }
 
 fn jobs_exec_result(work_path: &Path, job_id: &str, if_missed: bool) -> Result<i32, String> {
+    crate::vault_list::assert_maru_can_write(
+        &work_path.to_string_lossy(),
+        crate::vault_list::WorkspaceWriteAction::Modify,
+    )?;
     let jobs = load_jobs(work_path)?;
     let job = find_job(&jobs, job_id)?;
     // From here on, derive state paths only from the manifest-validated id.
@@ -788,7 +788,10 @@ fn jobs_exec_result(work_path: &Path, job_id: &str, if_missed: bool) -> Result<i
             Ok(()) => {}
             // A run is already in progress; it records the success this fire
             // would have produced.
-            Err(std::fs::TryLockError::WouldBlock) => return Ok(0),
+            Err(std::fs::TryLockError::WouldBlock) => {
+                record_skipped(work_path, job, "recovery", "skipped_active", None)?;
+                return Ok(0);
+            }
             Err(err) => return Err(format!("job_lock_failed: {err}")),
         }
     } else {
@@ -796,18 +799,38 @@ fn jobs_exec_result(work_path: &Path, job_id: &str, if_missed: bool) -> Result<i
             .lock()
             .map_err(|err| format!("job_lock_failed: {err}"))?;
     }
-    let manual_requests_enabled =
-        !if_missed && job.schedule.recovery_mode == RecoveryMode::MissedFire;
+    let manual_requests_enabled = !if_missed;
     let mut manual_request = if manual_requests_enabled {
         peek_manual_run_request(work_path, job_id)?
     } else {
         None
     };
     let explicit_force = manual_request.is_some();
+    // Reconcile the exit-before-ledger crash boundary without launching providers.
+    for mut receipt in receipts::history(work_path, job_id)?.into_iter().rev() {
+        if receipt.process_outcome == "exited" && !receipt.ledger_recorded {
+            let _state_lock = lock_job_state(work_path, job_id)?;
+            let mut state = read_job_state(&state_path);
+            if state.last_run_at.unwrap_or(0) <= receipt.admitted_at {
+                apply_receipt_to_state(&mut state, &receipt);
+                crate::atomic_file::write_atomic(
+                    &state_path,
+                    &serde_json::to_vec(&state).map_err(|e| e.to_string())?,
+                )?;
+            }
+            receipt.ledger_recorded = true;
+            receipts::save(work_path, job_id, &receipt)?;
+        }
+    }
     let state = read_job_state(&state_path);
-    if job.schedule.recovery_mode == RecoveryMode::MissedFire
-        && !state.agent_enabled.unwrap_or(job.enabled)
-    {
+    if !state.agent_enabled.unwrap_or(job.enabled) {
+        record_skipped(
+            work_path,
+            job,
+            if if_missed { "recovery" } else { "calendar" },
+            "disabled",
+            manual_request.as_deref(),
+        )?;
         return Ok(0);
     }
     if !explicit_force
@@ -819,10 +842,47 @@ fn jobs_exec_result(work_path: &Path, job_id: &str, if_missed: bool) -> Result<i
             job.schedule.minute,
         )
     {
+        record_skipped(
+            work_path,
+            job,
+            if if_missed { "recovery" } else { "calendar" },
+            "deduplicated",
+            None,
+        )?;
         return Ok(0);
     }
 
-    let first_result = run_job_program(work_path, job, &state_path);
+    if !explicit_force {
+        let fire =
+            last_scheduled_fire_epoch(chrono::Local::now(), job.schedule.hour, job.schedule.minute)
+                .map(|v| v.max(0) as u64);
+        if receipts::history(work_path, job_id)?
+            .iter()
+            .any(|r| r.process_outcome == "interrupted" && r.scheduled_fire_at == fire)
+        {
+            record_skipped(
+                work_path,
+                job,
+                if if_missed { "recovery" } else { "calendar" },
+                "interrupted",
+                None,
+            )?;
+            return Err("job_interrupted_requires_manual_request".into());
+        }
+    }
+    let first_result = run_job_program(
+        work_path,
+        job,
+        &state_path,
+        if manual_request.is_some() {
+            "manual"
+        } else if if_missed {
+            "recovery"
+        } else {
+            "calendar"
+        },
+        manual_request.as_deref(),
+    );
     if let Some(request_id) = manual_request.take() {
         remove_manual_run_request(work_path, job_id, &request_id)?;
     }
@@ -844,7 +904,7 @@ fn jobs_exec_result(work_path: &Path, job_id: &str, if_missed: bool) -> Result<i
             {
                 break;
             }
-            let result = run_job_program(work_path, job, &state_path);
+            let result = run_job_program(work_path, job, &state_path, "manual", Some(&request_id));
             remove_manual_run_request(work_path, job_id, &request_id)?;
             match result {
                 Ok(code) => exit_code = code,
@@ -858,11 +918,83 @@ fn jobs_exec_result(work_path: &Path, job_id: &str, if_missed: bool) -> Result<i
     }
 }
 
-fn run_job_program(work_path: &Path, job: &JobRecord, state_path: &Path) -> Result<i32, String> {
-    let started_at = now_epoch_seconds();
-    let scheduled_fire_at =
-        last_scheduled_fire_epoch(chrono::Local::now(), job.schedule.hour, job.schedule.minute)
-            .map(|timestamp| timestamp.max(0) as u64);
+fn apply_receipt_to_state(state: &mut JobRunState, receipt: &receipts::JobRunReceipt) {
+    state.last_run_at = Some(receipt.admitted_at);
+    state.last_exit_code = Some(i64::from(receipt.exit_code.unwrap_or(-1)));
+    if receipt.exit_code == Some(0) {
+        state.last_success_at = receipt.finished_at;
+        state.last_success_fire_at = receipt.scheduled_fire_at;
+    }
+}
+fn new_receipt(job: &JobRecord, source: &str, request_id: Option<&str>) -> receipts::JobRunReceipt {
+    new_receipt_at(job, source, request_id, chrono::Local::now())
+}
+fn new_receipt_at(
+    job: &JobRecord,
+    source: &str,
+    request_id: Option<&str>,
+    admitted: chrono::DateTime<chrono::Local>,
+) -> receipts::JobRunReceipt {
+    let run_id = uuid::Uuid::new_v4().to_string();
+    receipts::JobRunReceipt {
+        request_id: request_id.unwrap_or(&run_id).to_string(),
+        run_id,
+        source: source.into(),
+        job_revision: format!(
+            "{:x}",
+            Sha256::digest(serde_json::to_vec(job).expect("job serialization"))
+        ),
+        // One timestamp freezes logical run-start and its daily fire before admission publication.
+        scheduled_fire_at: last_scheduled_fire_epoch(
+            admitted,
+            job.schedule.hour,
+            job.schedule.minute,
+        )
+        .map(|v| v.max(0) as u64),
+        admitted_at: admitted.timestamp().max(0) as u64,
+        started_at: None,
+        finished_at: None,
+        process_outcome: "admitted".into(),
+        exit_code: None,
+        verification_outcome: "notRequested".into(),
+        ledger_recorded: false,
+        coalesced_into: None,
+        owner: receipts::identity(std::process::id()),
+        child: None,
+    }
+}
+fn record_skipped(
+    work: &Path,
+    job: &JobRecord,
+    source: &str,
+    outcome: &str,
+    request_id: Option<&str>,
+) -> Result<(), String> {
+    let mut receipt = new_receipt(job, source, request_id);
+    receipt.process_outcome = outcome.into();
+    receipt.finished_at = Some(now_epoch_seconds());
+    if outcome == "skipped_active" {
+        receipt.coalesced_into = receipts::uncertain_active(work, &job.id)?;
+    }
+    receipts::save(work, &job.id, &receipt)
+}
+fn run_job_program(
+    work_path: &Path,
+    job: &JobRecord,
+    state_path: &Path,
+    source: &str,
+    request_id: Option<&str>,
+) -> Result<i32, String> {
+    if let Some(active) = receipts::uncertain_active(work_path, &job.id)? {
+        record_skipped(work_path, job, source, "skipped_active", request_id)?;
+        return Err(format!("job_process_ownership_uncertain: {active}"));
+    }
+    let mut receipt = new_receipt(job, source, request_id);
+    if receipt.owner.is_none() {
+        return Err("job_native_owner_identity_unavailable".into());
+    }
+    receipts::save(work_path, &job.id, &receipt)?; // Must precede every spawn.
+
     let command = resolve_job_path(work_path, &job.program.command);
     let attempt = (|| {
         let logs_dir = resolve_job_path(work_path, &job.logs.dir);
@@ -903,23 +1035,32 @@ fn run_job_program(work_path: &Path, job: &JobRecord, state_path: &Path) -> Resu
             .no_window()
             .spawn()
             .map_err(|err| format!("job_spawn_failed: {command}: {err}"))?;
+        receipt.started_at = Some(now_epoch_seconds());
+        receipt.child = receipts::identity(child.id());
+        receipt.process_outcome = "running".into();
+        if let Err(err) = receipts::save(work_path, &job.id, &receipt) {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(err);
+        }
         let status = child
             .wait()
             .map_err(|err| format!("job_wait_failed: {command}: {err}"))?;
         Ok::<i32, String>(status.code().unwrap_or(-1))
     })();
 
-    let result_code = attempt.as_ref().copied().unwrap_or(-1);
+    receipt.finished_at = Some(now_epoch_seconds());
+    receipt.exit_code = attempt.as_ref().ok().copied();
+    receipt.process_outcome = if attempt.is_ok() { "exited" } else { "failed" }.into();
+    receipts::save(work_path, &job.id, &receipt)?; // Exit recorded before success-fire ledger.
+
     let _state_lock = lock_job_state(work_path, &job.id)?;
     let mut state = read_job_state(state_path);
-    state.last_run_at = Some(started_at);
-    state.last_exit_code = Some(i64::from(result_code));
-    if result_code == 0 {
-        state.last_success_at = Some(now_epoch_seconds());
-        state.last_success_fire_at = scheduled_fire_at;
-    }
+    apply_receipt_to_state(&mut state, &receipt);
     let serialized = serde_json::to_string_pretty(&state).unwrap_or_default();
     crate::atomic_file::write_atomic(state_path, serialized.as_bytes())?;
+    receipt.ledger_recorded = true;
+    receipts::save(work_path, &job.id, &receipt)?;
     attempt
 }
 
@@ -1152,6 +1293,7 @@ fn status_for(job: &JobRecord, work_path: &Path) -> Result<JobStatus, String> {
         schedule: job.schedule.clone(),
         last_exit_code: reported_exit_code,
         last_run_at,
+        receipts: receipts::readback(work_path, &job.id)?,
     })
 }
 
@@ -1177,6 +1319,8 @@ fn jobs_transaction_paths(work_path: &Path, job: &JobRecord) -> Result<Vec<PathB
         jobs_state_dir(work_path).join(format!("{}.lock", job.id)),
         job_run_lock_path(work_path, &job.id),
         job_state_lock_path(work_path, &job.id),
+        jobs_state_dir(work_path).join(format!("{}.receipts.json", job.id)),
+        jobs_state_dir(work_path).join(format!("{}.receipts.lock", job.id)),
         manual_requests_dir(work_path, &job.id),
         manual_requests_lock_path(work_path, &job.id),
     ];
@@ -1289,6 +1433,36 @@ fn seed_install_baseline(work_path: &Path, job_id: &str, enabled: bool) -> Resul
     Ok(())
 }
 
+fn wrapper_executable_sha256(path: &Path) -> Result<String, String> {
+    use std::io::Read;
+    let mut file = fs::File::open(path).map_err(|e| format!("job_wrapper_hash_failed: {e}"))?;
+    let mut hash = Sha256::new();
+    let mut buffer = [0u8; 32768];
+    loop {
+        let count = file
+            .read(&mut buffer)
+            .map_err(|e| format!("job_wrapper_hash_failed: {e}"))?;
+        if count == 0 {
+            break;
+        }
+        hash.update(&buffer[..count]);
+    }
+    Ok(format!("{:x}", hash.finalize()))
+}
+fn record_wrapper_provenance(work: &Path, job: &JobRecord) -> Result<(), String> {
+    let argv = exec_wrapper_arguments(job, false)?;
+    let hash = wrapper_executable_sha256(Path::new(&argv[0]))?;
+    let _state_lock = lock_job_state(work, &job.id)?;
+    let path = job_state_path(work, &job.id);
+    let mut state = read_job_state(&path);
+    state.wrapper_executable = Some(argv[0].clone());
+    state.wrapper_sha256 = Some(hash);
+    crate::atomic_file::write_atomic(
+        &path,
+        &serde_json::to_vec(&state).map_err(|e| e.to_string())?,
+    )
+}
+
 fn jobs_install_in_transaction(
     work_path: &Path,
     job_id: &str,
@@ -1317,7 +1491,11 @@ fn jobs_install_in_transaction(
     let guard = prepare_guard_agent(job, work_path, &uid)?;
     if job.schedule.recovery_mode == RecoveryMode::MissedFire {
         seed_install_baseline(work_path, &job.id, job.enabled)?;
+    } else {
+        set_job_agent_enabled(work_path, &job.id, job.enabled)?;
     }
+    // Bind the generated launcher before any service can consume a queued request.
+    record_wrapper_provenance(work_path, job)?;
     if job.enabled {
         // Enable before bootstrap: launchd refuses to bootstrap a service
         // whose label is in the disabled registry (e.g. after a prior Stop).
@@ -1367,10 +1545,8 @@ fn jobs_uninstall_in_transaction(
     let uid = current_uid()?;
 
     let mut errors = Vec::new();
-    if job.schedule.recovery_mode == RecoveryMode::MissedFire {
-        if let Err(err) = set_job_agent_enabled(work_path, &job.id, false) {
-            errors.push(err);
-        }
+    if let Err(err) = set_job_agent_enabled(work_path, &job.id, false) {
+        errors.push(err);
     }
     // Tolerate not-loaded on bootout, but never delete the plist while the
     // service is still loaded: launchd would keep running the cached job with
@@ -1389,10 +1565,8 @@ fn jobs_uninstall_in_transaction(
     if let Err(err) = remove_guard_agent(job, work_path, &uid) {
         errors.push(err);
     }
-    if job.schedule.recovery_mode == RecoveryMode::MissedFire {
-        if let Err(err) = clear_manual_run_requests(work_path, &job.id) {
-            errors.push(err);
-        }
+    if let Err(err) = clear_manual_run_requests(work_path, &job.id) {
+        errors.push(err);
     }
     if !errors.is_empty() {
         return Err(format!("job_uninstall_failed: {}", errors.join("; ")));
@@ -1453,10 +1627,8 @@ fn jobs_start_in_transaction(
         } else {
             None
         };
-        if job.schedule.recovery_mode == RecoveryMode::MissedFire {
-            clear_manual_run_requests(work_path, &job.id)?;
-            set_job_agent_enabled(work_path, &job.id, true)?;
-        }
+        clear_manual_run_requests(work_path, &job.id)?;
+        set_job_agent_enabled(work_path, &job.id, true)?;
         run_launchctl(&["bootstrap", &format!("gui/{uid}"), &plist.to_string_lossy()])?;
         if let Some((_, guard_plist)) = guard {
             run_launchctl(&[
@@ -1483,6 +1655,8 @@ fn jobs_start_in_transaction(
                 return Err(format!("job_stop_failed: {}", errors.join("; ")));
             }
         } else {
+            set_job_agent_enabled(work_path, &job.id, false)?;
+            clear_manual_run_requests(work_path, &job.id)?;
             run_launchctl(&["disable", &target])?;
             // disable leaves an already-loaded calendar timer live.
             let _ = run_launchctl(&["bootout", &target]);
@@ -1509,6 +1683,109 @@ pub(crate) fn jobs_run_now_in(work_path: &Path, job_id: &str) -> Result<JobStatu
     })
 }
 
+/// Only the canonical generated main wrapper may consume durable Run now nonces.
+/// Compare the entire generated plist shape, allowing an executable path alias
+/// when it resolves to this Maru executable or matches the install-time path/hash.
+/// This trusts local untampered install state, not a signed binary attestation.
+fn installed_receipt_wrapper_matches(
+    installed: &str,
+    expected: &str,
+    expected_args: &[String],
+    state: &JobRunState,
+) -> bool {
+    let Some((prefix, body)) = installed.split_once("<array>") else {
+        return false;
+    };
+    let Some((expected_prefix, expected_body)) = expected.split_once("<array>") else {
+        return false;
+    };
+    let Some((arguments, suffix)) = body.split_once("</array>") else {
+        return false;
+    };
+    let Some((_, expected_suffix)) = expected_body.split_once("</array>") else {
+        return false;
+    };
+    if prefix != expected_prefix || suffix != expected_suffix {
+        return false;
+    }
+    let mut remaining = arguments.trim();
+    let mut argv = Vec::new();
+    while !remaining.is_empty() {
+        let Some(value) = remaining.strip_prefix("<string>") else {
+            return false;
+        };
+        let Some((value, tail)) = value.split_once("</string>") else {
+            return false;
+        };
+        let decoded = value
+            .replace("&lt;", "<")
+            .replace("&gt;", ">")
+            .replace("&quot;", "\"")
+            .replace("&amp;", "&");
+        if xml_escape(&decoded) != value {
+            return false;
+        }
+        argv.push(decoded);
+        remaining = tail.trim();
+    }
+    if argv.len() != expected_args.len() || argv.get(1..) != expected_args.get(1..) {
+        return false;
+    }
+    let Some(executable) = argv.first().filter(|value| Path::new(value).is_absolute()) else {
+        return false;
+    };
+    let Ok(installed) = fs::canonicalize(executable) else {
+        return false;
+    };
+    if expected_args
+        .first()
+        .and_then(|value| fs::canonicalize(value).ok())
+        .is_some_and(|expected| installed == expected)
+    {
+        return true;
+    }
+    let Some(recorded) = state
+        .wrapper_executable
+        .as_deref()
+        .filter(|value| Path::new(value).is_absolute())
+    else {
+        return false;
+    };
+    let Some(hash) = state.wrapper_sha256.as_deref() else {
+        return false;
+    };
+    fs::canonicalize(recorded)
+        .ok()
+        .is_some_and(|recorded| recorded == installed)
+        && wrapper_executable_sha256(Path::new(executable))
+            .ok()
+            .is_some_and(|actual| actual == hash)
+}
+fn ensure_installed_receipt_wrapper(
+    plist: &Path,
+    job: &JobRecord,
+    work_path: &Path,
+) -> Result<(), String> {
+    use std::io::Read;
+    let file = fs::File::open(plist).map_err(|e| format!("job_plist_read_failed: {e}"))?;
+    let mut bytes = Vec::new();
+    file.take(2 * 1024 * 1024 + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|e| format!("job_plist_read_failed: {e}"))?;
+    let installed = std::str::from_utf8(&bytes)
+        .ok()
+        .filter(|_| bytes.len() <= 2 * 1024 * 1024);
+    let expected = plist_for(job, work_path)?;
+    let argv = exec_wrapper_arguments(job, false)?;
+    let state = read_job_state(&job_state_path(work_path, &job.id));
+    if !installed
+        .is_some_and(|xml| installed_receipt_wrapper_matches(xml, &expected, &argv, &state))
+    {
+        return Err(format!("job_receipt_wrapper_reinstall_required: {}: Reinstall this job through the current Maru launcher before Run now.", job.id));
+    }
+    Ok(())
+}
+
 fn jobs_run_now_in_transaction(
     work_path: &Path,
     job_id: &str,
@@ -1526,11 +1803,14 @@ fn jobs_run_now_in_transaction(
     if !plist.exists() {
         return Err(format!("job_not_installed: {job_id}"));
     }
-    if job.schedule.recovery_mode == RecoveryMode::MissedFire {
+    {
         let uid = current_uid()?;
         if !print_launchd_state(&uid, &label).loaded {
             return Err(format!("job_not_loaded: {job_id}"));
         }
+        // Legacy Repeat plists run providers directly and cannot consume queued nonces.
+        // Refuse before queue/kickstart so later reinstall cannot replay completed work.
+        ensure_installed_receipt_wrapper(&plist, job, work_path)?;
         // Publish the force request first, then let launchd supervise the
         // child. The wrapper consumes this nonce only on the main agent path;
         // a guard fire can never consume it.
@@ -1540,11 +1820,8 @@ fn jobs_run_now_in_transaction(
             remove_manual_run_request(work_path, job_id, &request_id)?;
             return Err(err);
         }
-        return status_for(job, work_path);
+        status_for(job, work_path)
     }
-    let uid = current_uid()?;
-    run_launchctl(&["kickstart", "-k", &format!("gui/{uid}/{label}")])?;
-    status_for(job, work_path)
 }
 
 pub(crate) fn jobs_read_log_in(work_path: &Path, job_id: &str) -> Result<JobLogsTail, String> {
@@ -1817,18 +2094,21 @@ mod tests {
             .to_string();
 
         assert!(!xml.contains("<string>~/"), "no literal ~ in values: {xml}");
-        assert!(xml.contains(&format!(
-            "<string>{home}/.maru/env/.venv/bin/python3</string>"
-        )));
+        assert_eq!(
+            resolve_job_path(&work, &job.program.command),
+            format!("{home}/.maru/env/.venv/bin/python3")
+        );
+        assert!(xml.contains("--maru-cli"));
         assert!(xml.contains(&format!(
             "<string>{home}/.local/share/fnm/aliases/default/bin:/usr/bin:/bin</string>"
         )));
-        assert!(xml.contains(&format!(
-            "<string>{}/_meta/scripts/daily_mail_digest.py</string>",
-            work.to_string_lossy()
-        )));
+        assert_eq!(
+            resolve_job_arg(&work, &job.program.args[0]),
+            work.join("_meta/scripts/daily_mail_digest.py")
+                .to_string_lossy()
+        );
         // Bare subcommand tokens pass through; they are not workspace-relative paths.
-        assert!(xml.contains("<string>run</string>"));
+        assert_eq!(resolve_job_arg(&work, "run"), "run");
         assert!(
             !xml.contains(&format!("<string>{}/run</string>", work.to_string_lossy())),
             "bare arg must not be path-resolved: {xml}"
@@ -1919,16 +2199,16 @@ mod tests {
     }
 
     #[test]
-    fn repeat_mode_plist_runs_program_directly() {
+    fn repeat_mode_plist_records_receipts_without_changing_cadence() {
         let _home = Home::new();
         let dir = tempfile::tempdir().unwrap();
         let work = dir.path().join("work");
         fs::create_dir_all(&work).unwrap();
-        // sample_job is Repeat with a 900s interval: no wrapper, StartInterval
-        // on the job's own plist (pre-existing behavior).
+        // Repeat uses the admission wrapper, retaining its own interval cadence.
         let xml = plist_for(&sample_job(), &work).unwrap();
-        assert!(!xml.contains("--maru-cli"), "{xml}");
-        assert!(xml.contains("daily_mail_digest.py"), "{xml}");
+        assert!(xml.contains("--maru-cli"), "{xml}");
+        assert!(xml.contains("<string>exec</string>"), "{xml}");
+        assert!(!xml.contains("--if-missed"), "{xml}");
         assert!(xml.contains("<key>StartInterval</key>\n  <integer>900</integer>"));
     }
 
@@ -2059,6 +2339,8 @@ mod tests {
         let fresh = JobRunState {
             install_baseline_at: None,
             agent_enabled: None,
+            wrapper_executable: None,
+            wrapper_sha256: None,
             last_run_at: None,
             last_exit_code: None,
             last_success_at: Some((fire + 60) as u64),
@@ -3186,5 +3468,445 @@ esac
                 }
             }
         }
+    }
+    #[test]
+    fn receipt_admission_failure_never_spawns_a_child() {
+        let _home = Home::new();
+        let work = tempfile::tempdir().unwrap();
+        let job = exec_test_job("admission", "echo ran > marker");
+        write_exec_test_workspace(work.path(), &job);
+        fs::create_dir_all(jobs_state_dir(work.path()).join("admission.receipts.json")).unwrap();
+        assert!(jobs_exec_result(work.path(), "admission", false).is_err());
+        assert!(!work.path().join("marker").exists());
+    }
+    #[test]
+    fn receipts_distinguish_recovery_calendar_dedup_and_manual_force() {
+        let _home = Home::new();
+        let work = tempfile::tempdir().unwrap();
+        let job = exec_test_job("receipt", "true");
+        write_exec_test_workspace(work.path(), &job);
+        assert_eq!(jobs_exec_result(work.path(), "receipt", true).unwrap(), 0);
+        assert_eq!(jobs_exec_result(work.path(), "receipt", false).unwrap(), 0);
+        let id = enqueue_manual_run_request(work.path(), "receipt", true).unwrap();
+        assert_eq!(jobs_exec_result(work.path(), "receipt", false).unwrap(), 0);
+        let rows = receipts::history(work.path(), "receipt").unwrap();
+        assert_eq!(rows[0].source, "manual");
+        assert_eq!(rows[0].request_id, id);
+        assert_eq!(rows[0].verification_outcome, "notRequested");
+        assert_eq!(rows[0].process_outcome, "exited");
+        assert_eq!(rows[0].exit_code, Some(0));
+        assert_eq!(rows[1].source, "calendar");
+        assert_eq!(rows[1].process_outcome, "deduplicated");
+        assert_eq!(rows[1].exit_code, None);
+        assert_eq!(rows[2].source, "recovery");
+    }
+    #[test]
+    fn recovery_lock_collision_has_a_skipped_receipt_without_executed_exit() {
+        let _home = Home::new();
+        let work = tempfile::tempdir().unwrap();
+        let job = exec_test_job("collision", "echo ran > marker");
+        write_exec_test_workspace(work.path(), &job);
+        fs::create_dir_all(jobs_state_dir(work.path())).unwrap();
+        let lock = fs::File::create(job_run_lock_path(work.path(), "collision")).unwrap();
+        lock.lock().unwrap();
+        assert_eq!(jobs_exec_result(work.path(), "collision", true).unwrap(), 0);
+        let rows = receipts::history(work.path(), "collision").unwrap();
+        assert_eq!(rows[0].process_outcome, "skipped_active");
+        assert_eq!(rows[0].exit_code, None);
+        assert!(!work.path().join("marker").exists());
+    }
+    #[test]
+    fn repeat_manual_requests_remain_distinct_without_daily_dedup() {
+        let _home = Home::new();
+        let work = tempfile::tempdir().unwrap();
+        let mut job = exec_test_job("repeat", "echo ran >> marker");
+        job.schedule.recovery_mode = RecoveryMode::Repeat;
+        write_exec_test_workspace(work.path(), &job);
+        let first = enqueue_manual_run_request(work.path(), "repeat", true).unwrap();
+        let second = enqueue_manual_run_request(work.path(), "repeat", true).unwrap();
+        assert_eq!(jobs_exec_result(work.path(), "repeat", false).unwrap(), 0);
+        let rows = receipts::history(work.path(), "repeat").unwrap();
+        assert_eq!(rows.len(), 2);
+        let requests: std::collections::HashSet<_> =
+            rows.iter().map(|row| row.request_id.clone()).collect();
+        assert_eq!(requests, std::collections::HashSet::from([first, second]));
+        assert!(rows
+            .iter()
+            .all(|row| row.source == "manual" && row.process_outcome == "exited"));
+        assert_eq!(
+            fs::read_to_string(work.path().join("marker"))
+                .unwrap()
+                .lines()
+                .count(),
+            2
+        );
+    }
+    #[test]
+    fn exit_before_ledger_crash_is_reconciled_without_provider_replay() {
+        let _home = Home::new();
+        let work = tempfile::tempdir().unwrap();
+        let job = exec_test_job("ledger", "echo ran > marker");
+        write_exec_test_workspace(work.path(), &job);
+        let mut row = new_receipt(&job, "recovery", None);
+        row.process_outcome = "exited".into();
+        row.finished_at = Some(now_epoch_seconds());
+        row.exit_code = Some(0);
+        receipts::save(work.path(), &job.id, &row).unwrap();
+        assert_eq!(jobs_exec_result(work.path(), "ledger", true).unwrap(), 0);
+        assert!(!work.path().join("marker").exists());
+        assert!(receipts::history(work.path(), &job.id)
+            .unwrap()
+            .iter()
+            .any(|r| r.run_id == row.run_id && r.ledger_recorded));
+        assert_eq!(
+            read_job_state(&job_state_path(work.path(), &job.id)).last_success_fire_at,
+            row.scheduled_fire_at
+        );
+    }
+    #[test]
+    fn terminal_receipt_failure_does_not_publish_success_fire() {
+        let _home = Home::new();
+        let work = tempfile::tempdir().unwrap();
+        // Preserve the admitted/running evidence, then make the terminal destination unwritable.
+        let job = exec_test_job(
+            "terminal",
+            r#"count=0; until grep -q '"processOutcome":"running"' .maru/jobs-state/terminal.receipts.json; do count=$((count + 1)); test "$count" -lt 100 || exit 3; sleep 0.01; done; mv .maru/jobs-state/terminal.receipts.json .maru/jobs-state/terminal.before-failure.json; mkdir .maru/jobs-state/terminal.receipts.json"#,
+        );
+        write_exec_test_workspace(work.path(), &job);
+        assert!(jobs_exec_result(work.path(), &job.id, false).is_err());
+        let state = read_job_state(&job_state_path(work.path(), &job.id));
+        assert_eq!(state.last_success_fire_at, None);
+        let preserved: Vec<receipts::JobRunReceipt> = serde_json::from_slice(
+            &fs::read(jobs_state_dir(work.path()).join("terminal.before-failure.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(preserved[0].verification_outcome, "notRequested");
+        assert_eq!(preserved[0].process_outcome, "running");
+    }
+    #[test]
+    fn read_only_workspace_rejects_admission_before_provider_spawn() {
+        let _home = Home::new();
+        let work = tempfile::tempdir().unwrap();
+        let job = exec_test_job("readonly", "echo ran > marker");
+        write_exec_test_workspace(work.path(), &job);
+        let registry = crate::vault_list::workspace_registry_path().unwrap();
+        fs::create_dir_all(registry.parent().unwrap()).unwrap();
+        fs::write(registry, serde_json::to_vec(&serde_json::json!({"workspaces": [{"label": "Read only", "path": work.path(), "visibility": "private", "provider": "local", "writePolicy": "readOnly"}]})).unwrap()).unwrap();
+        assert!(jobs_exec_result(work.path(), &job.id, false).is_err());
+        assert!(!work.path().join("marker").exists());
+        assert!(!jobs_state_dir(work.path()).exists());
+    }
+    #[test]
+    fn ownership_blocked_manual_receipt_keeps_exact_request_id() {
+        let _home = Home::new();
+        let work = tempfile::tempdir().unwrap();
+        let job = exec_test_job("blocked", "echo ran > marker");
+        write_exec_test_workspace(work.path(), &job);
+        let mut orphan = new_receipt(&job, "calendar", None);
+        orphan.owner = None;
+        orphan.child = receipts::identity(std::process::id());
+        receipts::save(work.path(), &job.id, &orphan).unwrap();
+        let request = enqueue_manual_run_request(work.path(), &job.id, true).unwrap();
+        assert!(jobs_exec_result(work.path(), &job.id, false).is_err());
+        let row = receipts::history(work.path(), &job.id)
+            .unwrap()
+            .into_iter()
+            .find(|r| r.request_id == request)
+            .unwrap();
+        assert_eq!(row.source, "manual");
+        assert_eq!(row.process_outcome, "skipped_active");
+        assert_eq!(row.coalesced_into, Some(orphan.run_id));
+        assert_eq!(row.exit_code, None);
+        assert!(!work.path().join("marker").exists());
+    }
+    #[test]
+    fn repeat_start_stop_effective_state_controls_manual_admission() {
+        let _home = Home::new();
+        let work = tempfile::tempdir().unwrap();
+        let mut job = exec_test_job("repeat-state", "echo ran > marker");
+        job.schedule.recovery_mode = RecoveryMode::Repeat;
+        job.enabled = false;
+        write_exec_test_workspace(work.path(), &job);
+        set_job_agent_enabled(work.path(), &job.id, true).unwrap();
+        let id = enqueue_manual_run_request(work.path(), &job.id, false).unwrap();
+        assert_eq!(jobs_exec_result(work.path(), &job.id, false).unwrap(), 0);
+        assert_eq!(
+            receipts::history(work.path(), &job.id).unwrap()[0].request_id,
+            id
+        );
+        set_job_agent_enabled(work.path(), &job.id, false).unwrap();
+        assert!(enqueue_manual_run_request(work.path(), &job.id, false).is_err());
+        assert_eq!(jobs_exec_result(work.path(), &job.id, false).unwrap(), 0);
+        assert_eq!(
+            receipts::history(work.path(), &job.id).unwrap()[0].process_outcome,
+            "disabled"
+        );
+    }
+    #[test]
+    fn oversized_receipt_history_prevents_provider_spawn() {
+        let _home = Home::new();
+        let work = tempfile::tempdir().unwrap();
+        let job = exec_test_job("large-history", "echo ran > marker");
+        write_exec_test_workspace(work.path(), &job);
+        fs::create_dir_all(jobs_state_dir(work.path())).unwrap();
+        let path = jobs_state_dir(work.path()).join("large-history.receipts.json");
+        fs::File::create(path)
+            .unwrap()
+            .set_len(2 * 1024 * 1024 + 1)
+            .unwrap();
+        assert_eq!(
+            jobs_exec_result(work.path(), &job.id, false).unwrap_err(),
+            "job_receipt_history_too_large"
+        );
+        assert!(!work.path().join("marker").exists());
+    }
+    #[test]
+    fn legacy_repeat_run_now_cannot_leave_a_nonce_for_later_replay() {
+        let home = Home::new();
+        let work = home.root.path().join("legacy-repeat");
+        phase08_15_fixture(home.root.path(), &work);
+        let mut manifest = load_jobs(&work).unwrap();
+        manifest.jobs[0].schedule.recovery_mode = RecoveryMode::Repeat;
+        fs::write(
+            jobs_file_path(&work),
+            serde_json::to_vec(&manifest).unwrap(),
+        )
+        .unwrap();
+        let installed = jobs_install_in(&work, "mail-digest").unwrap();
+        let job = manifest.jobs.remove(0);
+        assert_eq!(job.schedule.recovery_mode, RecoveryMode::Repeat);
+        let legacy = render_plist(
+            &job,
+            &work,
+            &installed.label,
+            &[resolve_job_path(&work, &job.program.command)],
+            job.schedule.run_at_load,
+            Some((job.schedule.hour, job.schedule.minute)),
+            Some(job.schedule.recovery_interval_seconds),
+        )
+        .unwrap();
+        fs::write(&installed.plist_path, legacy).unwrap();
+        let before_calls = fs::read_to_string(home.root.path().join(".maru/calls")).unwrap();
+        assert!(jobs_run_now_in(&work, &job.id)
+            .unwrap_err()
+            .starts_with("job_receipt_wrapper_reinstall_required:"));
+        assert!(manual_request_ids_unlocked(&work, &job.id)
+            .unwrap()
+            .is_empty());
+        let after_calls = fs::read_to_string(home.root.path().join(".maru/calls")).unwrap();
+        assert_eq!(
+            before_calls.lines().filter(|op| *op == "kickstart").count(),
+            after_calls.lines().filter(|op| *op == "kickstart").count()
+        );
+        assert!(!work.join("run-marker.txt").exists());
+        jobs_install_in(&work, &job.id).unwrap();
+        jobs_run_now_in(&work, &job.id).unwrap();
+        assert_eq!(
+            manual_request_ids_unlocked(&work, &job.id).unwrap().len(),
+            1
+        );
+        assert_eq!(jobs_exec_result(&work, &job.id, false).unwrap(), 0);
+        assert!(manual_request_ids_unlocked(&work, &job.id)
+            .unwrap()
+            .is_empty());
+        assert_eq!(
+            fs::read_to_string(work.join("run-marker.txt"))
+                .unwrap()
+                .lines()
+                .count(),
+            1
+        );
+        assert_eq!(receipts::history(&work, &job.id).unwrap().len(), 1);
+    }
+    #[test]
+    fn receipt_wrapper_recognition_rejects_legacy_malformed_and_stray_markers() {
+        let _home = Home::new();
+        let work = tempfile::tempdir().unwrap();
+        let job = sample_job();
+        let expected = plist_for(&job, work.path()).unwrap();
+        let argv = exec_wrapper_arguments(&job, false).unwrap();
+        assert!(installed_receipt_wrapper_matches(
+            &expected,
+            &expected,
+            &argv,
+            &JobRunState::default()
+        ));
+        let wrong_exe = expected.replace(
+            &format!("<string>{}</string>", xml_escape(&argv[0])),
+            "<string>/bin/sh</string>",
+        );
+        assert!(!installed_receipt_wrapper_matches(
+            &wrong_exe,
+            &expected,
+            &argv,
+            &JobRunState::default()
+        ));
+        let guard = guard_plist_for(&job, work.path()).unwrap();
+        assert!(!installed_receipt_wrapper_matches(
+            &guard,
+            &expected,
+            &argv,
+            &JobRunState::default()
+        ));
+        let wrong_job = expected.replace(
+            "<string>mail-digest</string>",
+            "<string>another-job</string>",
+        );
+        assert!(!installed_receipt_wrapper_matches(
+            &wrong_job,
+            &expected,
+            &argv,
+            &JobRunState::default()
+        ));
+        let comment = expected.replace("<array>", "<!-- <array>");
+        assert!(!installed_receipt_wrapper_matches(
+            &comment,
+            &expected,
+            &argv,
+            &JobRunState::default()
+        ));
+        let trailing = expected.replace("</array>", "<string>extra</string></array>");
+        assert!(!installed_receipt_wrapper_matches(
+            &trailing,
+            &expected,
+            &argv,
+            &JobRunState::default()
+        ));
+        let env_marker = expected
+            .replace(
+                "<string>--maru-cli</string>",
+                "<string>provider-flag</string>",
+            )
+            .replace(
+                "</dict>",
+                "<key>marker</key><string>--maru-cli jobs exec mail-digest</string></dict>",
+            );
+        assert!(!installed_receipt_wrapper_matches(
+            &env_marker,
+            &expected,
+            &argv,
+            &JobRunState::default()
+        ));
+    }
+    #[cfg(unix)]
+    #[test]
+    fn receipt_wrapper_accepts_stable_alias_of_the_current_launcher() {
+        let _home = Home::new();
+        let work = tempfile::tempdir().unwrap();
+        let job = sample_job();
+        let expected = plist_for(&job, work.path()).unwrap();
+        let argv = exec_wrapper_arguments(&job, false).unwrap();
+        let alias = work.path().join("maru-alias");
+        std::os::unix::fs::symlink(&argv[0], &alias).unwrap();
+        let installed = expected.replace(
+            &format!("<string>{}</string>", xml_escape(&argv[0])),
+            &format!("<string>{}</string>", xml_escape(&alias.to_string_lossy())),
+        );
+        assert!(installed_receipt_wrapper_matches(
+            &installed,
+            &expected,
+            &argv,
+            &JobRunState::default()
+        ));
+    }
+    #[test]
+    fn installed_launcher_provenance_preserves_cross_launcher_calls_without_probing() {
+        let _home = Home::new();
+        let work = tempfile::tempdir().unwrap();
+        let job = sample_job();
+        let expected = plist_for(&job, work.path()).unwrap();
+        let argv = exec_wrapper_arguments(&job, false).unwrap();
+        let alternate = work.path().join("maru-cli-from-other-launcher");
+        fs::write(
+            &alternate,
+            "distinct private fixture binary bytes, never executed",
+        )
+        .unwrap();
+        let installed = expected.replace(
+            &format!("<string>{}</string>", xml_escape(&argv[0])),
+            &format!(
+                "<string>{}</string>",
+                xml_escape(&alternate.to_string_lossy())
+            ),
+        );
+        assert!(!installed_receipt_wrapper_matches(
+            &installed,
+            &expected,
+            &argv,
+            &JobRunState::default()
+        ));
+        let state = JobRunState {
+            wrapper_executable: Some(alternate.to_string_lossy().to_string()),
+            wrapper_sha256: Some(wrapper_executable_sha256(&alternate).unwrap()),
+            ..JobRunState::default()
+        };
+        assert!(installed_receipt_wrapper_matches(
+            &installed, &expected, &argv, &state
+        ));
+        #[cfg(unix)]
+        {
+            let alias = work.path().join("stable-alternate");
+            std::os::unix::fs::symlink(&alternate, &alias).unwrap();
+            let aliased = installed.replace(
+                &xml_escape(&alternate.to_string_lossy()),
+                &xml_escape(&alias.to_string_lossy()),
+            );
+            assert!(installed_receipt_wrapper_matches(
+                &aliased, &expected, &argv, &state
+            ));
+        }
+        fs::write(&alternate, "changed private fixture bytes").unwrap();
+        assert!(!installed_receipt_wrapper_matches(
+            &installed, &expected, &argv, &state
+        ));
+        assert!(installed_receipt_wrapper_matches(
+            &expected,
+            &expected,
+            &argv,
+            &JobRunState::default()
+        ));
+    }
+    #[test]
+    fn admission_crossing_daily_fire_keeps_normal_and_crash_ledger_attribution_identical() {
+        use chrono::TimeZone;
+        let _home = Home::new();
+        let work = tempfile::tempdir().unwrap();
+        let job = exec_test_job("admission-fire", "true");
+        let admitted = chrono::Local
+            .with_ymd_and_hms(2026, 10, 4, 23, 59, 59)
+            .single()
+            .unwrap();
+        let launched = chrono::Local
+            .with_ymd_and_hms(2026, 10, 5, 0, 0, 1)
+            .single()
+            .unwrap();
+        let completed = chrono::Local
+            .with_ymd_and_hms(2026, 10, 5, 0, 0, 2)
+            .single()
+            .unwrap();
+        let mut receipt = new_receipt_at(&job, "calendar", None, admitted);
+        let frozen_fire = receipt.scheduled_fire_at;
+        receipts::save(work.path(), &job.id, &receipt).unwrap();
+        // Model slow durable admission crossing midnight without changing any host clock.
+        receipt.started_at = Some(launched.timestamp() as u64);
+        receipt.finished_at = Some(completed.timestamp() as u64);
+        receipt.process_outcome = "exited".into();
+        receipt.exit_code = Some(0);
+        receipts::save(work.path(), &job.id, &receipt).unwrap();
+        let mut normal = JobRunState::default();
+        apply_receipt_to_state(&mut normal, &receipt);
+        let terminal = receipts::history(work.path(), &job.id).unwrap().remove(0);
+        let mut reconciled = JobRunState::default();
+        apply_receipt_to_state(&mut reconciled, &terminal);
+        assert_eq!(normal, reconciled);
+        assert_eq!(normal.last_run_at, Some(admitted.timestamp() as u64));
+        assert_eq!(normal.last_success_fire_at, frozen_fire);
+        assert_eq!(normal.last_success_at, Some(completed.timestamp() as u64));
+        assert!(last_success_covers_fire(&normal, admitted, 0, 0));
+        assert!(!last_success_covers_fire(&normal, launched, 0, 0));
+        assert_ne!(
+            frozen_fire,
+            last_scheduled_fire_epoch(launched, 0, 0).map(|v| v as u64)
+        );
     }
 }

@@ -241,6 +241,15 @@ brew upgrade maru-cli
 
 ### Skills and Workspace Sync
 
+- Proposal apply approvals bind the canonical workspace target, proposal payload,
+  source run, file revisions, and workspace policy revision. Rust recomputes the
+  binding inside the write transaction; drift needs a new approval. Bound grants
+  are single-use, terminal decisions are immutable, and remembered grants match
+  the complete binding. Request, decision, consume, and effect outcome records
+  live under `.maru/approvals/`; restarting restores readable history without
+  restoring authority. Failed durable consume blocks writes. An outcome audit
+  failure after an effect reports uncertainty and must not cause automatic retry.
+
 - The skill host owns five tiers: core, public, private, imported, and managed.
   One name maps to one tier; doctor, dirty, reconcile, import, and tool-sync
   operations are available through the CLI.
@@ -261,12 +270,20 @@ brew upgrade maru-cli
   launchd kickstart; launchd retains control of stopping the child. Run now
   requires the installed service to be loaded and enabled, and bypasses daily
   fire dedup for that one request. The ledger attributes each success to the
-  daily fire that was current when the run started, so a long run crossing
+  daily fire frozen at logical run admission, so a long run crossing
   tomorrow's fire cannot suppress tomorrow's work. Calendar and recovery
   invocations share a run lock and success ledger, so a recovered fire is not
   run again if launchd later coalesces its calendar event. This
   schedule model supports daily times; it does not express weekday or weekly
   calendars.
+- Every installed job runs through the CLI wrapper, including Repeat jobs, with
+  its existing schedule preserved. The wrapper durably records admission before
+  spawning and records native owner/child creation identities and process exit
+  separately from the success-fire ledger. Jobs shows the latest 100 receipts;
+  recovery skips, deduplicated fires, and manual requests remain distinguishable.
+  No verifier is configured by this feature, so verification is `notRequested`,
+  including for exit 0. Interrupted runs with uncertain child ownership block
+  another effect attempt; history reconciliation never replays a provider.
 
 ## Storage and Configuration
 
@@ -504,6 +521,12 @@ Linux can otherwise return `ETXTBSY` even after `fs::write` closes its own file:
 a concurrent fork can retain a writable descriptor until exec. The test-only
 lock handoff addresses fixture publication without changing production spawn
 behavior or test assertions.
+
+React dialog fixtures use `src/lib/testing/unmountReactRoot.ts` before removing
+their fixture containers. Radix FocusScope defers disposal to a timer; awaiting
+it inside the fixture's React act keeps CustomEvent construction in the same
+jsdom realm. Closing that realm first can leak an invalid Event into the next
+test file even when all assertions passed.
 
 ## Release Process
 

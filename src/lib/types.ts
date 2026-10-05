@@ -642,7 +642,17 @@ export interface GmailDecisionOutcome {
   error: string | null;
 }
 
+export interface ApprovalBinding {
+  logicalTarget: string;
+  payloadHash: string;
+  sourceRunId: string | null;
+  sourceRevision: string;
+  baseRevision: string;
+  policyRevision: string;
+}
+
 export interface ApprovalRequest {
+  binding?: ApprovalBinding | null;
   id: string;
   kind: string;
   summary: string;

@@ -10,11 +10,17 @@ export interface ShortcutMap {
  *  too. Returns nothing — registers a single document keydown listener. */
 export function useKeyboardShortcuts(shortcuts: ShortcutMap, deps: unknown[] = []): void {
   useEffect(() => {
-    function handler(event: KeyboardEvent) {
+    function handler(event: KeyboardEvent, capture = false) {
       const isMac = navigator.platform.toLowerCase().includes("mac");
       const mod = isMac ? event.metaKey : event.ctrlKey;
+      const workspaceReload = isMac && event.metaKey && !event.ctrlKey &&
+        !event.shiftKey && !event.altKey &&
+        (event.code === "KeyR" || event.key.toLowerCase() === "r");
+      // Cmd+R belongs to the workspace, including with a Korean input source
+      // or a focused control that would consume the bubbling key event.
+      if (workspaceReload !== capture) return;
       const target = event.target as HTMLElement | null;
-      const tag = target?.tagName.toLowerCase();
+      const tag = target?.tagName?.toLowerCase();
       const editable =
         tag === "input" || tag === "textarea" || target?.isContentEditable;
 
@@ -22,7 +28,7 @@ export function useKeyboardShortcuts(shortcuts: ShortcutMap, deps: unknown[] = [
       if (mod) parts.push("mod");
       if (event.shiftKey) parts.push("shift");
       if (event.altKey) parts.push("alt");
-      const key = event.key.toLowerCase();
+      const key = workspaceReload ? "r" : event.key.toLowerCase();
       parts.push(key);
       const combo = parts.join("+");
 
@@ -33,10 +39,16 @@ export function useKeyboardShortcuts(shortcuts: ShortcutMap, deps: unknown[] = [
       // Bare-key shortcuts (escape, etc.) are blocked while editing.
       if (!mod && editable) return;
       event.preventDefault();
+      if (capture) event.stopPropagation();
       fn();
     }
+    const captureReload = (event: KeyboardEvent) => handler(event, true);
+    document.addEventListener("keydown", captureReload, true);
     document.addEventListener("keydown", handler);
-    return () => document.removeEventListener("keydown", handler);
+    return () => {
+      document.removeEventListener("keydown", captureReload, true);
+      document.removeEventListener("keydown", handler);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, deps);
 }

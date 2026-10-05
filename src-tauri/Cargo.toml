@@ -88,3 +88,8 @@ windows-sys = { version = "0.59", features = [
 
 [dev-dependencies]
 tauri = { version = "2.10.0", features = ["test"] }
+
+# Install provenance hashes the native executable; keep debug/test SHA-256
+# compression within the same lifecycle deadlines as release builds.
+[profile.dev.package.sha2]
+opt-level = 3
