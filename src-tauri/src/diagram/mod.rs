@@ -1206,7 +1206,7 @@ mod tests {
         // produce a revision false-positive: the loaded bytes are hashed exactly,
         // so the first in-place save proceeds and normalizes the file.
         let (_tmp, work) = setup_workspace();
-        let diagrams = work.join("diagrams");
+        let diagrams = Path::new(&work).join("diagrams");
         fs::create_dir_all(&diagrams).unwrap();
         let body = r#"{"v":8,"docTitle":"foreign","nodes":[],"edges":[],"layers":[]}"#;
         fs::write(diagrams.join("foreign.cmd.json"), body).unwrap();
