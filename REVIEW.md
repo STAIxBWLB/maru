@@ -49,6 +49,9 @@ Report at most 5 nits per review; summarize the rest as a count.
 
 - Generated or tool-managed paths: `src-tauri/icons/`, `src-tauri/gen/schemas/`, `dist/`,
   `pnpm-lock.yaml`, `src-tauri/Cargo.lock`.
+- Vendored, hash-pinned third-party trees: `sidecars/archify/` (upstream code reviewed by its
+  own project; drift and integrity are owned by `scripts/check-archify-pin.mjs` and the pin
+  metadata, which ARE reviewable).
 - The frozen `src-tauri/skills-bootstrap/` snapshot and `docs/performance/*.json` evidence files,
   unless the change forges gate input.
 - Anything `make verify` or CI already enforces: typecheck, ESLint, i18n parity, icon freshness,
