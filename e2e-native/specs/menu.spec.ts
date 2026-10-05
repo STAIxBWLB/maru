@@ -30,7 +30,7 @@ async function dispatchMenuCommand(id: string): Promise<void> {
     (timeout: number, done: (ready: boolean) => void) => {
       const deadline = Date.now() + timeout;
       const tick = () => {
-        if (window.__MARU_NATIVE_E2E__?.menuCommand) {
+        if (window.__MARU_NATIVE_E2E__?.menuCommandReady()) {
           done(true);
           return;
         }
@@ -46,13 +46,14 @@ async function dispatchMenuCommand(id: string): Promise<void> {
   );
   assert.ok(
     bridgeReady,
-    "window.__MARU_NATIVE_E2E__.menuCommand never registered — the app is " +
+    "the native menu dispatcher never registered — the app is " +
       "serving a frontend built without the runner flag, or App.tsx's " +
       "dispatcher registration effect did not run",
   );
-  await browser.execute((commandId: string) => {
-    window.__MARU_NATIVE_E2E__?.menuCommand(commandId);
+  const dispatched = await browser.execute((commandId: string) => {
+    return window.__MARU_NATIVE_E2E__?.menuCommand(commandId) ?? false;
   }, id);
+  assert.equal(dispatched, true, `native menu dispatcher did not receive "${id}"`);
 }
 
 describe("native macOS menu command path", () => {
@@ -64,17 +65,25 @@ describe("native macOS menu command path", () => {
       // relies on the same fact).
       await dispatchMenuCommand("view.documents");
 
-      const listReady = await browser.executeAsync(
-        (docName: string, timeout: number, done: (ready: boolean) => void) => {
+      const listState = await browser.executeAsync(
+        (docName: string, timeout: number, done: (state: {
+          ready: boolean; listPresent: boolean; listText: string; activeModes: string[];
+        }) => void) => {
           const deadline = Date.now() + timeout;
           const tick = () => {
             const list = document.querySelector(".document-list");
             if (list && list.textContent?.includes(docName)) {
-              done(true);
+              done({ ready: true, listPresent: true, listText: "", activeModes: [] });
               return;
             }
             if (Date.now() > deadline) {
-              done(false);
+              done({
+                ready: false,
+                listPresent: Boolean(list),
+                listText: list?.textContent?.slice(0, 1000) ?? "",
+                activeModes: Array.from(document.querySelectorAll(".activity-rail .activity-button.active"))
+                  .map((button) => button.getAttribute("aria-label") ?? ""),
+              });
               return;
             }
             setTimeout(tick, 200);
@@ -85,8 +94,8 @@ describe("native macOS menu command path", () => {
         POLL_TIMEOUT_MS,
       );
       assert.ok(
-        listReady,
-        `menuCommand("view.documents") never opened the document list showing "${FIXTURE_DOC_NAME}"`,
+        listState.ready,
+        `menuCommand("view.documents") never opened the document list showing "${FIXTURE_DOC_NAME}": ${JSON.stringify(listState)}`,
       );
     },
   ).timeout(120_000);

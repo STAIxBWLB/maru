@@ -26,7 +26,8 @@ export const INK_MIN_RATIO = 0.002;
  *  src/lib/nativeE2eBridge.ts is not visible here. */
 interface MaruNativeE2eBridge {
   terminalText(sessionId: string): string | null;
-  menuCommand(id: string): void;
+  menuCommandReady(): boolean;
+  menuCommand(id: string): boolean;
 }
 
 declare global {

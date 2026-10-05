@@ -24,13 +24,16 @@ export function bootAppMode(input: {
  * settings are writable the pick lives only in memory, and every stored-mode
  * application would revert it (#387). While a pick is pending in the ref it
  * wins over the stored mode; once the stored settings catch up — the pick
- * reached the disk and echoed back — the guard lifts by clearing the ref.
+ * reached the disk and echoed back — the guard lifts after boot by clearing
+ * the ref. During boot even a matching hydration/save echo must retain the
+ * explicit pick, because the pending Today route has not settled yet.
  */
 export function applyStoredAppMode(
   userPickRef: { current: MaruAppMode | null },
   storedMode: MaruAppMode,
+  booting = false,
 ): MaruAppMode {
-  if (userPickRef.current === storedMode) {
+  if (!booting && userPickRef.current === storedMode) {
     userPickRef.current = null;
     return storedMode;
   }

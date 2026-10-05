@@ -25,9 +25,12 @@ export interface MaruNativeE2eBridge {
    *  session id was never registered (a spec racing a session teardown gets
    *  a clean answer, not a throw). */
   terminalText(sessionId: string): string | null;
-  /** Dispatch a macOS menu command by id (consumed by plan 06-03's menu
-   *  surface). */
-  menuCommand(id: string): void;
+  /** Read-only MainApp dispatcher readiness; namespace installation alone
+   *  does not mean menu commands can be dispatched. */
+  menuCommandReady(): boolean;
+  /** Dispatch one menu command by id. False when no dispatcher is registered,
+   *  true after invoking the current callback exactly once; never queued. */
+  menuCommand(id: string): boolean;
   /** Plan 08-27: same-runtime one-yield async probe. */
   asyncProbe(): Promise<NativeE2eProbeResult>;
   /** Plan 08-27: feature-only saturation/source-race load control. The
@@ -120,18 +123,22 @@ export function nativeE2eEnabled(): boolean {
 }
 
 const terminalTextReaders = new Map<string, () => string>();
-let menuCommandDispatcher: ((id: string) => void) | null = null;
+let menuCommandRegistration: { dispatch: (id: string) => void } | null = null;
 
-/** Lazily installs the single namespace object on first registration, so an
- *  app with no terminal open installs nothing. The plan 08-27 responsiveness
+/** Installs the single namespace on the first reader, dispatcher or harness
+ *  registration. Menu readiness follows the dispatcher alone. The plan 08-27 responsiveness
  *  methods are fixed allowlisted production-command calls through imported
  *  invoke; there is deliberately no arbitrary command/path member. */
 function bridgeNamespace(): MaruNativeE2eBridge {
   if (!window.__MARU_NATIVE_E2E__) {
     window.__MARU_NATIVE_E2E__ = {
       terminalText: (sessionId) => terminalTextReaders.get(sessionId)?.() ?? null,
+      menuCommandReady: () => menuCommandRegistration !== null,
       menuCommand: (id) => {
-        menuCommandDispatcher?.(id);
+        const registration = menuCommandRegistration;
+        if (!registration) return false;
+        registration.dispatch(id);
+        return true;
       },
       asyncProbe: () => invoke<NativeE2eProbeResult>("native_e2e_async_probe"),
       loadControl: (request) =>
@@ -181,9 +188,10 @@ export function registerMenuCommandDispatcher(dispatch: (id: string) => void): (
   // nativeE2eEnabled() call.
   if (import.meta.env.VITE_NATIVE_E2E !== "1") return () => {};
   bridgeNamespace();
-  menuCommandDispatcher = dispatch;
+  const registration = { dispatch };
+  menuCommandRegistration = registration;
   return () => {
-    if (menuCommandDispatcher === dispatch) menuCommandDispatcher = null;
+    if (menuCommandRegistration === registration) menuCommandRegistration = null;
   };
 }
 

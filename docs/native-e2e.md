@@ -58,6 +58,13 @@ Readiness conditions replace session-set quiet-period guesses; existing timeout
 and text/paint assertions remain intact. Issue #388 requires five consecutive
 hosted native runs at the accepted fix, not retry-to-green closure.
 
+Menu tests wait for a registered dispatcher and require a receipt from their
+single command invocation; bridge-object presence alone is insufficient. A
+failed document-mode assertion reports active rail modes and list state, while
+keeping its original deadline. The startup pick guard stays pending throughout
+boot, even when the picked mode matches stored settings, so an in-flight Today
+launch cannot override that explicit choice.
+
 The `dist/` the run leaves behind is deliberately **not shippable** — it
 carries the debug bridge. Re-run `pnpm build:frontend` before inspecting a
 production artifact; the ship-isolation guard inside `make verify` fails the

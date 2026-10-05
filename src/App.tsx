@@ -1854,10 +1854,10 @@ export function MainApp() {
       bootAppMode({
         storedMode: preserveAutoOpen
           ? (todayAutoOpenModeRef.current ?? "today")
-          : applyStoredAppMode(userPickedAppModeRef, settings.ui.activeAppMode),
+          : applyStoredAppMode(userPickedAppModeRef, settings.ui.activeAppMode, booting),
         browserPasskeyBuild: browserPasskeyBuildRef.current,
       }),
-    [],
+    [booting],
   );
   useShellSettingsHydration({
     settingsWorkPath,
@@ -1886,7 +1886,7 @@ export function MainApp() {
         if (!keepAutoOpenMode()) {
           setAppMode(
             bootAppMode({
-              storedMode: applyStoredAppMode(userPickedAppModeRef, next.ui.activeAppMode),
+              storedMode: applyStoredAppMode(userPickedAppModeRef, next.ui.activeAppMode, booting),
               browserPasskeyBuild: browserPasskeyBuildRef.current,
             }),
           );
@@ -1900,7 +1900,7 @@ export function MainApp() {
             if (!keepAutoOpenMode()) {
               setAppMode(
                 bootAppMode({
-                  storedMode: applyStoredAppMode(userPickedAppModeRef, next.ui.activeAppMode),
+                  storedMode: applyStoredAppMode(userPickedAppModeRef, next.ui.activeAppMode, booting),
                   browserPasskeyBuild: browserPasskeyBuildRef.current,
                 }),
               );
@@ -1914,7 +1914,7 @@ export function MainApp() {
       dispose = off;
     });
     return () => dispose?.();
-  }, [settingsWorkPath, setMaruSettings]);
+  }, [booting, settingsWorkPath, setMaruSettings]);
 
   useEffect(() => {
     const apply = () => {
