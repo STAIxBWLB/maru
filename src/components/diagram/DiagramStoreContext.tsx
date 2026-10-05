@@ -68,6 +68,7 @@ function getWorkspaceContext(key?: string | null): WorkspaceDiagramContext {
         lastSavedBody: null,
         migratedFromLegacy: false,
         legacySourceVersion: null,
+        fileRevision: null,
         legacyBackupAttempted: false,
       },
     };
@@ -155,6 +156,13 @@ export interface DiagramSession {
   migratedFromLegacy: boolean;
   /** Schema version found on disk, used to label the one-time backup. */
   legacySourceVersion: number | null;
+  /**
+   * Revision (sha256 of the stored bytes) of the file this session loaded or
+   * last wrote. Revision-conditional saves use this — NOT a hash of
+   * lastSavedBody, which is the normalized form and diverges from the disk
+   * bytes whenever a legacy/migrated body is reserialized.
+   */
+  fileRevision: string | null;
   /** True once the legacy backup has been attempted for the active document. */
   legacyBackupAttempted: boolean;
 }
@@ -172,6 +180,7 @@ export function setDiagramSession(
   if (patch.lastSavedBody !== undefined) session.lastSavedBody = patch.lastSavedBody;
   if (patch.migratedFromLegacy !== undefined) session.migratedFromLegacy = patch.migratedFromLegacy;
   if (patch.legacySourceVersion !== undefined) session.legacySourceVersion = patch.legacySourceVersion;
+  if (patch.fileRevision !== undefined) session.fileRevision = patch.fileRevision;
   if (patch.legacyBackupAttempted !== undefined) session.legacyBackupAttempted = patch.legacyBackupAttempted;
 }
 
@@ -181,6 +190,7 @@ export function _resetDiagramSessionForTests(): void {
     ctx.session.lastSavedBody = null;
     ctx.session.migratedFromLegacy = false;
     ctx.session.legacySourceVersion = null;
+    ctx.session.fileRevision = null;
     ctx.session.legacyBackupAttempted = false;
   }
 }

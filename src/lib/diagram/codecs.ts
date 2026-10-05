@@ -19,7 +19,7 @@
  */
 
 import { rasterise } from "./export";
-import { docToMermaid, mermaidToDoc, mermaidToDocDetailed } from "./mermaid";
+import { docToMermaid, mermaidToDocDetailed } from "./mermaid";
 import { datasetToArchifySpec, parseArchifySpec } from "./archifyCodec";
 import { mkNode } from "./nodeKinds";
 import { deserializeDoc, serializeDoc } from "./persistence";

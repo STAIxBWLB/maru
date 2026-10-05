@@ -185,14 +185,14 @@ fn diagram_save_document_in_transaction(
         WorkspaceWriteAction::Create
     };
     assert_maru_can_write(&workspace, action)?;
-    if path.is_file() {
-        if expected_revision.is_some() {
-            let current = fs::read_to_string(&path)
-                .map_err(|err| format!("Cannot read diagram: {err}"))?;
-            assert_expected_revision(&current, expected_revision.as_deref())?;
+    if let Some(expected) = expected_revision.as_deref() {
+        if path.is_file() {
+            let current =
+                fs::read_to_string(&path).map_err(|err| format!("Cannot read diagram: {err}"))?;
+            assert_expected_revision(&current, Some(expected))?;
+        } else {
+            return Err(revision_conflict_missing(Some(expected)));
         }
-    } else if expected_revision.is_some() {
-        return Err(revision_conflict_missing(expected_revision.as_deref()));
     }
     lease.before_effect()?;
     // Re-assert the revision right before the write: a revision-conditional
@@ -202,8 +202,8 @@ fn diagram_save_document_in_transaction(
     // `document::save_document_in_transaction` closes.
     if expected_revision.is_some() {
         if path.is_file() {
-            let current = fs::read_to_string(&path)
-                .map_err(|err| format!("Cannot read diagram: {err}"))?;
+            let current =
+                fs::read_to_string(&path).map_err(|err| format!("Cannot read diagram: {err}"))?;
             assert_expected_revision(&current, expected_revision.as_deref())?;
         } else {
             return Err(revision_conflict_missing(expected_revision.as_deref()));
@@ -1769,7 +1769,12 @@ mod phase08_20 {
         .unwrap();
         assert_eq!(restored, "{\"v\":8}\n");
 
-        let backup = run(ipc::diagram_backup_document(work.clone(), "demo".into(), None)).unwrap();
+        let backup = run(ipc::diagram_backup_document(
+            work.clone(),
+            "demo".into(),
+            None,
+        ))
+        .unwrap();
         assert!(backup.contains("demo-v7-"));
         assert!(backup.ends_with(DIAGRAM_EXT));
         assert!(fs::read_to_string(&backup).unwrap().contains("\"v\":8"));

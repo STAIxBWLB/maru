@@ -13,6 +13,7 @@
 
 import {
   diagramLoadDocument,
+  diagramRevision,
   diagramSaveDocument,
   type DiagramFile,
 } from "../diagram";
@@ -343,6 +344,11 @@ export interface ReadDiagramResult {
    * the new schema triggers a one-time backup of the legacy body).
    */
   migratedFromLegacy: boolean;
+  /**
+   * Revision of the raw on-disk bytes (NOT the normalized doc), for
+   * revision-conditional saves.
+   */
+  fileRevision: string;
 }
 
 export async function readDiagramDetailed(
@@ -362,6 +368,7 @@ export async function readDiagramDetailed(
     doc,
     sourceVersion,
     migratedFromLegacy: sourceVersion !== null && sourceVersion < DIAGRAM_SCHEMA_VERSION,
+    fileRevision: await diagramRevision(body),
   };
 }
 
